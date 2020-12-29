@@ -1,0 +1,1478 @@
+set enable_global_stats = true;
+set time zone 'PRC';
+--
+-- HDFS Partition table testing [2]
+-- Verify supported data types workable in basic scenarios
+--   Evaluation point:
+--       1. Partitioned HDFS table can be created
+--		 2. Partitioned HDFS table can be populated with cstore_insert_mode = delta
+--		 3. Partitioned HDFS table can be populated with cstore_insert_mode = main
+--		 4. Partitioned HDFS table can be queried with data both in HDFS/Delta
+--		 5. Partitioned HDFS table can be deleted from delta/main
+--		 6. Partitioned HDFS table can be dropped
+--
+drop schema if exists value_partitionkey_testing;
+NOTICE:  schema "value_partitionkey_testing" does not exist, skipping
+create schema value_partitionkey_testing;
+set search_path = value_partitionkey_testing;
+--- test partition column on TINYINT
+drop table if exists t_tinyint;
+NOTICE:  table "t_tinyint" does not exist, skipping
+create table t_tinyint (
+        c1_type tinyint,
+        c2_type tinyint,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_tinyint values (tinyint '1', tinyint '1', 'row1 in delta');
+insert into t_tinyint values (2, 2, 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_tinyint values (tinyint '3', tinyint '3', 'row3 in hdfs');
+insert into t_tinyint values (4, 4, 'row4 in hdfs');
+select * from only t_tinyint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 1       | 1       | row1 in delta
+ 2       | 2       | row2 in delta
+ 3       | 3       | row3 in hdfs
+ 4       | 4       | row4 in hdfs
+(4 rows)
+
+select * from t_tinyint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 1       | 1       | row1 in delta
+ 2       | 2       | row2 in delta
+ 3       | 3       | row3 in hdfs
+ 4       | 4       | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_tinyint set c2_type = c2_type * 10 where c1_type = 1 and c2_type = 1;
+set cstore_insert_mode = main;
+update t_tinyint set c2_type = c2_type * 10 where c1_type = 3 and c2_type = 3;
+select * from only t_tinyint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 1       | 10      | row1 in delta
+ 2       | 2       | row2 in delta
+ 3       | 30      | row3 in hdfs
+ 4       | 4       | row4 in hdfs
+(4 rows)
+
+select * from t_tinyint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 1       | 10      | row1 in delta
+ 2       | 2       | row2 in delta
+ 3       | 30      | row3 in hdfs
+ 4       | 4       | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_tinyint where c1_type = 1;
+delete from t_tinyint where c1_type = 3;
+select * from only t_tinyint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 2       | 2       | row2 in delta
+ 4       | 4       | row4 in hdfs
+(2 rows)
+
+select * from t_tinyint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 2       | 2       | row2 in delta
+ 4       | 4       | row4 in hdfs
+(2 rows)
+
+drop table t_tinyint;
+--- test partition column on SMALLINT
+drop table if exists t_smallint;
+NOTICE:  table "t_smallint" does not exist, skipping
+create table t_smallint (
+        c1_type smallint,
+        c2_type smallint,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_smallint values (smallint '1', smallint '1', 'row1 in delta');
+insert into t_smallint values (2, 2, 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_smallint values (smallint '3', smallint '3', 'row3 in hdfs');
+insert into t_smallint values (4, 4, 'row4 in hdfs');
+select * from only t_smallint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       1 |       1 | row1 in delta
+       2 |       2 | row2 in delta
+       3 |       3 | row3 in hdfs
+       4 |       4 | row4 in hdfs
+(4 rows)
+
+select * from t_smallint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       1 |       1 | row1 in delta
+       2 |       2 | row2 in delta
+       3 |       3 | row3 in hdfs
+       4 |       4 | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_smallint set c2_type = c2_type * 10 where c1_type = 1 and c2_type = 1;
+set cstore_insert_mode = main;
+update t_smallint set c2_type = c2_type * 10 where c1_type = 3 and c2_type = 3;
+select * from only t_smallint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       1 |      10 | row1 in delta
+       2 |       2 | row2 in delta
+       3 |      30 | row3 in hdfs
+       4 |       4 | row4 in hdfs
+(4 rows)
+
+select * from t_smallint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       1 |      10 | row1 in delta
+       2 |       2 | row2 in delta
+       3 |      30 | row3 in hdfs
+       4 |       4 | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_smallint where c1_type = 1;
+delete from t_smallint where c1_type = 3;
+select * from only t_smallint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       2 |       2 | row2 in delta
+       4 |       4 | row4 in hdfs
+(2 rows)
+
+select * from t_smallint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       2 |       2 | row2 in delta
+       4 |       4 | row4 in hdfs
+(2 rows)
+
+drop table t_smallint;
+--- test partition column on integer
+drop table if exists t_integer;
+NOTICE:  table "t_integer" does not exist, skipping
+create table t_integer (
+        c1_type integer,
+        c2_type integer,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_integer values (integer '1', integer '1', 'row1 in delta');
+insert into t_integer values (2, 2, 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_integer values (integer '3', integer '3', 'row3 in hdfs');
+insert into t_integer values (4, 4, 'row4 in hdfs');
+select * from only t_integer order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       1 |       1 | row1 in delta
+       2 |       2 | row2 in delta
+       3 |       3 | row3 in hdfs
+       4 |       4 | row4 in hdfs
+(4 rows)
+
+select * from t_integer order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       1 |       1 | row1 in delta
+       2 |       2 | row2 in delta
+       3 |       3 | row3 in hdfs
+       4 |       4 | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_integer set c2_type = c2_type * 10 where c1_type = 1 and c2_type = 1;
+set cstore_insert_mode = main;
+update t_integer set c2_type = c2_type * 10 where c1_type = 3 and c2_type = 3;
+select * from only t_integer order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       1 |      10 | row1 in delta
+       2 |       2 | row2 in delta
+       3 |      30 | row3 in hdfs
+       4 |       4 | row4 in hdfs
+(4 rows)
+
+select * from t_integer order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       1 |      10 | row1 in delta
+       2 |       2 | row2 in delta
+       3 |      30 | row3 in hdfs
+       4 |       4 | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_integer where c1_type = 1;
+delete from t_integer where c1_type = 3;
+select * from only t_integer order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       2 |       2 | row2 in delta
+       4 |       4 | row4 in hdfs
+(2 rows)
+
+select * from t_integer order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       2 |       2 | row2 in delta
+       4 |       4 | row4 in hdfs
+(2 rows)
+
+drop table t_integer;
+--- test partition column on bigint
+drop table if exists t_bigint;
+NOTICE:  table "t_bigint" does not exist, skipping
+create table t_bigint (
+        c1_type bigint,
+        c2_type bigint,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_bigint values (bigint '1', bigint '1', 'row1 in delta');
+insert into t_bigint values (2, 2, 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_bigint values (bigint '3', bigint '3', 'row3 in hdfs');
+insert into t_bigint values (4, 4, 'row4 in hdfs');
+select * from only t_bigint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       1 |       1 | row1 in delta
+       2 |       2 | row2 in delta
+       3 |       3 | row3 in hdfs
+       4 |       4 | row4 in hdfs
+(4 rows)
+
+select * from t_bigint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       1 |       1 | row1 in delta
+       2 |       2 | row2 in delta
+       3 |       3 | row3 in hdfs
+       4 |       4 | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_bigint set c2_type = c2_type * 10 where c1_type = 1 and c2_type = 1;
+set cstore_insert_mode = main;
+update t_bigint set c2_type = c2_type * 10 where c1_type = 3 and c2_type = 3;
+select * from only t_bigint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       1 |      10 | row1 in delta
+       2 |       2 | row2 in delta
+       3 |      30 | row3 in hdfs
+       4 |       4 | row4 in hdfs
+(4 rows)
+
+select * from t_bigint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       1 |      10 | row1 in delta
+       2 |       2 | row2 in delta
+       3 |      30 | row3 in hdfs
+       4 |       4 | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_bigint where c1_type = 1;
+delete from t_bigint where c1_type = 3;
+select * from only t_bigint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       2 |       2 | row2 in delta
+       4 |       4 | row4 in hdfs
+(2 rows)
+
+select * from t_bigint order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+       2 |       2 | row2 in delta
+       4 |       4 | row4 in hdfs
+(2 rows)
+
+drop table t_bigint;
+--- test partition column on numeric
+drop table if exists t_numeric;
+NOTICE:  table "t_numeric" does not exist, skipping
+create table t_numeric (
+        c1_type numeric,
+        c2_type numeric,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_numeric values (numeric '1.1', numeric '1.1', 'row1 in delta');
+insert into t_numeric values (2.22, 2.22, 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_numeric values (numeric '3.333', numeric '3.333', 'row3 in hdfs');
+insert into t_numeric values (4.4444, 4.4444, 'row4 in hdfs');
+select * from only t_numeric order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+     1.1 |     1.1 | row1 in delta
+    2.22 |    2.22 | row2 in delta
+   3.333 |   3.333 | row3 in hdfs
+  4.4444 |  4.4444 | row4 in hdfs
+(4 rows)
+
+select * from t_numeric order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+     1.1 |     1.1 | row1 in delta
+    2.22 |    2.22 | row2 in delta
+   3.333 |   3.333 | row3 in hdfs
+  4.4444 |  4.4444 | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_numeric set c2_type = c2_type * 10 where c1_type = 1 and c2_type = 1;
+set cstore_insert_mode = main;
+update t_numeric set c2_type = c2_type * 10 where c1_type = 3 and c2_type = 3;
+select * from only t_numeric order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+     1.1 |     1.1 | row1 in delta
+    2.22 |    2.22 | row2 in delta
+   3.333 |   3.333 | row3 in hdfs
+  4.4444 |  4.4444 | row4 in hdfs
+(4 rows)
+
+select * from t_numeric order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+     1.1 |     1.1 | row1 in delta
+    2.22 |    2.22 | row2 in delta
+   3.333 |   3.333 | row3 in hdfs
+  4.4444 |  4.4444 | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_numeric where c1_type = 1.1;
+delete from t_numeric where c1_type = 3.333;
+select * from only t_numeric order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+    2.22 |    2.22 | row2 in delta
+  4.4444 |  4.4444 | row4 in hdfs
+(2 rows)
+
+select * from t_numeric order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+    2.22 |    2.22 | row2 in delta
+  4.4444 |  4.4444 | row4 in hdfs
+(2 rows)
+
+drop table t_numeric;
+--- test partition column on decimal
+drop table if exists t_decimal;
+NOTICE:  table "t_decimal" does not exist, skipping
+create table t_decimal (
+        c1_type decimal(20,8),
+        c2_type decimal(20,8),
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_decimal values (decimal '1.1', decimal '1.1', 'row1 in delta');
+insert into t_decimal values (2.22, 2.22, 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_decimal values (decimal '3.333', decimal '3.333', 'row3 in hdfs');
+insert into t_decimal values (4.4444, 4.4444, 'row4 in hdfs');
+select * from only t_decimal order by 1;
+  c1_type   |  c2_type   |  c_comments   
+------------+------------+---------------
+ 1.10000000 | 1.10000000 | row1 in delta
+ 2.22000000 | 2.22000000 | row2 in delta
+ 3.33300000 | 3.33300000 | row3 in hdfs
+ 4.44440000 | 4.44440000 | row4 in hdfs
+(4 rows)
+
+select * from t_decimal order by 1;
+  c1_type   |  c2_type   |  c_comments   
+------------+------------+---------------
+ 1.10000000 | 1.10000000 | row1 in delta
+ 2.22000000 | 2.22000000 | row2 in delta
+ 3.33300000 | 3.33300000 | row3 in hdfs
+ 4.44440000 | 4.44440000 | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_decimal set c2_type = c2_type * 10 where c1_type = 1 and c2_type = 1;
+set cstore_insert_mode = main;
+update t_decimal set c2_type = c2_type * 10 where c1_type = 3 and c2_type = 3;
+select * from only t_decimal order by 1;
+  c1_type   |  c2_type   |  c_comments   
+------------+------------+---------------
+ 1.10000000 | 1.10000000 | row1 in delta
+ 2.22000000 | 2.22000000 | row2 in delta
+ 3.33300000 | 3.33300000 | row3 in hdfs
+ 4.44440000 | 4.44440000 | row4 in hdfs
+(4 rows)
+
+select * from t_decimal order by 1;
+  c1_type   |  c2_type   |  c_comments   
+------------+------------+---------------
+ 1.10000000 | 1.10000000 | row1 in delta
+ 2.22000000 | 2.22000000 | row2 in delta
+ 3.33300000 | 3.33300000 | row3 in hdfs
+ 4.44440000 | 4.44440000 | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_decimal where c1_type = 1.1;
+delete from t_decimal where c1_type = 3.333;
+select * from only t_decimal order by 1;
+  c1_type   |  c2_type   |  c_comments   
+------------+------------+---------------
+ 2.22000000 | 2.22000000 | row2 in delta
+ 4.44440000 | 4.44440000 | row4 in hdfs
+(2 rows)
+
+select * from t_decimal order by 1;
+  c1_type   |  c2_type   |  c_comments   
+------------+------------+---------------
+ 2.22000000 | 2.22000000 | row2 in delta
+ 4.44440000 | 4.44440000 | row4 in hdfs
+(2 rows)
+
+drop table t_decimal;
+--- test partition column on char
+drop table if exists t_char;
+NOTICE:  table "t_char" does not exist, skipping
+create table t_char (
+        c1_type char(20),
+        c2_type char(20),
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_char values (char'1.1', char'1.1', 'row1 in delta');
+insert into t_char values (char'2.22',char'2.22', 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_char values (char'3.333', char'3.333', 'row3 in hdfs');
+insert into t_char values (char'4.4444',char'4.4444', 'row4 in hdfs');
+select * from only t_char order by 1;
+       c1_type        |       c2_type        |  c_comments   
+----------------------+----------------------+---------------
+ 1.1                  | 1.1                  | row1 in delta
+ 2.22                 | 2.22                 | row2 in delta
+ 3.333                | 3.333                | row3 in hdfs
+ 4.4444               | 4.4444               | row4 in hdfs
+(4 rows)
+
+select * from t_char order by 1;
+       c1_type        |       c2_type        |  c_comments   
+----------------------+----------------------+---------------
+ 1.1                  | 1.1                  | row1 in delta
+ 2.22                 | 2.22                 | row2 in delta
+ 3.333                | 3.333                | row3 in hdfs
+ 4.4444               | 4.4444               | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_char set c2_type = repeat(c2_type, 3) where c1_type = '1.1' and c2_type = '1.1';
+set cstore_insert_mode = main;
+update t_char set c2_type = repeat(c2_type, 3) where c1_type = '3.333' and c2_type = '3.333';
+select * from only t_char order by 1;
+       c1_type        |       c2_type        |  c_comments   
+----------------------+----------------------+---------------
+ 1.1                  | 1.11.11.1            | row1 in delta
+ 2.22                 | 2.22                 | row2 in delta
+ 3.333                | 3.3333.3333.333      | row3 in hdfs
+ 4.4444               | 4.4444               | row4 in hdfs
+(4 rows)
+
+select * from t_char order by 1;
+       c1_type        |       c2_type        |  c_comments   
+----------------------+----------------------+---------------
+ 1.1                  | 1.11.11.1            | row1 in delta
+ 2.22                 | 2.22                 | row2 in delta
+ 3.333                | 3.3333.3333.333      | row3 in hdfs
+ 4.4444               | 4.4444               | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_char where c1_type = '1.1';
+delete from t_char where c1_type = '3.333';
+select * from only t_char order by 1;
+       c1_type        |       c2_type        |  c_comments   
+----------------------+----------------------+---------------
+ 2.22                 | 2.22                 | row2 in delta
+ 4.4444               | 4.4444               | row4 in hdfs
+(2 rows)
+
+select * from t_char order by 1;
+       c1_type        |       c2_type        |  c_comments   
+----------------------+----------------------+---------------
+ 2.22                 | 2.22                 | row2 in delta
+ 4.4444               | 4.4444               | row4 in hdfs
+(2 rows)
+
+drop table t_char;
+--- test partition column on bpchar
+drop table if exists t_bpchar;
+NOTICE:  table "t_bpchar" does not exist, skipping
+create table t_bpchar (
+        c1_type bpchar(20),
+        c2_type bpchar(20),
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_bpchar values (bpchar'1.1', bpchar'1.1', 'row1 in delta');
+insert into t_bpchar values (bpchar'2.22',bpchar'2.22', 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_bpchar values (bpchar'3.333', bpchar'3.333', 'row3 in hdfs');
+insert into t_bpchar values (bpchar'4.4444',bpchar'4.4444', 'row4 in hdfs');
+select * from only t_bpchar order by 1;
+       c1_type        |       c2_type        |  c_comments   
+----------------------+----------------------+---------------
+ 1.1                  | 1.1                  | row1 in delta
+ 2.22                 | 2.22                 | row2 in delta
+ 3.333                | 3.333                | row3 in hdfs
+ 4.4444               | 4.4444               | row4 in hdfs
+(4 rows)
+
+select * from t_bpchar order by 1;
+       c1_type        |       c2_type        |  c_comments   
+----------------------+----------------------+---------------
+ 1.1                  | 1.1                  | row1 in delta
+ 2.22                 | 2.22                 | row2 in delta
+ 3.333                | 3.333                | row3 in hdfs
+ 4.4444               | 4.4444               | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_bpchar set c2_type = repeat(c2_type, 3) where c1_type = '1.1' and c2_type = '1.1';
+set cstore_insert_mode = main;
+update t_bpchar set c2_type = repeat(c2_type, 3) where c1_type = '3.333' and c2_type = '3.333';
+select * from only t_bpchar order by 1;
+       c1_type        |       c2_type        |  c_comments   
+----------------------+----------------------+---------------
+ 1.1                  | 1.11.11.1            | row1 in delta
+ 2.22                 | 2.22                 | row2 in delta
+ 3.333                | 3.3333.3333.333      | row3 in hdfs
+ 4.4444               | 4.4444               | row4 in hdfs
+(4 rows)
+
+select * from t_bpchar order by 1;
+       c1_type        |       c2_type        |  c_comments   
+----------------------+----------------------+---------------
+ 1.1                  | 1.11.11.1            | row1 in delta
+ 2.22                 | 2.22                 | row2 in delta
+ 3.333                | 3.3333.3333.333      | row3 in hdfs
+ 4.4444               | 4.4444               | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_bpchar where c1_type = '1.1';
+delete from t_bpchar where c1_type = '3.333';
+select * from only t_bpchar order by 1;
+       c1_type        |       c2_type        |  c_comments   
+----------------------+----------------------+---------------
+ 2.22                 | 2.22                 | row2 in delta
+ 4.4444               | 4.4444               | row4 in hdfs
+(2 rows)
+
+select * from t_bpchar order by 1;
+       c1_type        |       c2_type        |  c_comments   
+----------------------+----------------------+---------------
+ 2.22                 | 2.22                 | row2 in delta
+ 4.4444               | 4.4444               | row4 in hdfs
+(2 rows)
+
+drop table t_bpchar;
+--- test partition column on varchar
+drop table if exists t_varchar;
+NOTICE:  table "t_varchar" does not exist, skipping
+create table t_varchar (
+        c1_type varchar(20),
+        c2_type varchar(20),
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_varchar values (varchar'1.1', varchar'1.1', 'row1 in delta');
+insert into t_varchar values (varchar'2.22',varchar'2.22', 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_varchar values (varchar'3.333', varchar'3.333', 'row3 in hdfs');
+insert into t_varchar values (varchar'4.4444',varchar'4.4444', 'row4 in hdfs');
+select * from only t_varchar order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 1.1     | 1.1     | row1 in delta
+ 2.22    | 2.22    | row2 in delta
+ 3.333   | 3.333   | row3 in hdfs
+ 4.4444  | 4.4444  | row4 in hdfs
+(4 rows)
+
+select * from t_varchar order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 1.1     | 1.1     | row1 in delta
+ 2.22    | 2.22    | row2 in delta
+ 3.333   | 3.333   | row3 in hdfs
+ 4.4444  | 4.4444  | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_varchar set c2_type = repeat(c2_type, 3) where c1_type = '1.1' and c2_type = '1.1';
+set cstore_insert_mode = main;
+update t_varchar set c2_type = repeat(c2_type, 3) where c1_type = '3.333' and c2_type = '3.333';
+select * from only t_varchar order by 1;
+ c1_type |     c2_type     |  c_comments   
+---------+-----------------+---------------
+ 1.1     | 1.11.11.1       | row1 in delta
+ 2.22    | 2.22            | row2 in delta
+ 3.333   | 3.3333.3333.333 | row3 in hdfs
+ 4.4444  | 4.4444          | row4 in hdfs
+(4 rows)
+
+select * from t_varchar order by 1;
+ c1_type |     c2_type     |  c_comments   
+---------+-----------------+---------------
+ 1.1     | 1.11.11.1       | row1 in delta
+ 2.22    | 2.22            | row2 in delta
+ 3.333   | 3.3333.3333.333 | row3 in hdfs
+ 4.4444  | 4.4444          | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_varchar where c1_type = '1.1';
+delete from t_varchar where c1_type = '3.333';
+select * from only t_varchar order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 2.22    | 2.22    | row2 in delta
+ 4.4444  | 4.4444  | row4 in hdfs
+(2 rows)
+
+select * from t_varchar order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 2.22    | 2.22    | row2 in delta
+ 4.4444  | 4.4444  | row4 in hdfs
+(2 rows)
+
+drop table t_varchar;
+--- test partition column on nvarchar2
+drop table if exists t_nvarchar2;
+NOTICE:  table "t_nvarchar2" does not exist, skipping
+create table t_nvarchar2 (
+        c1_type nvarchar2,
+        c2_type nvarchar2,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_nvarchar2 values (nvarchar2'1.1', nvarchar2'1.1', 'row1 in delta');
+insert into t_nvarchar2 values (nvarchar2'2.22',nvarchar2'2.22', 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_nvarchar2 values (nvarchar2'3.333', nvarchar2'3.333', 'row3 in hdfs');
+insert into t_nvarchar2 values (nvarchar2'4.4444',nvarchar2'4.4444', 'row4 in hdfs');
+select * from only t_nvarchar2 order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 1.1     | 1.1     | row1 in delta
+ 2.22    | 2.22    | row2 in delta
+ 3.333   | 3.333   | row3 in hdfs
+ 4.4444  | 4.4444  | row4 in hdfs
+(4 rows)
+
+select * from t_nvarchar2 order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 1.1     | 1.1     | row1 in delta
+ 2.22    | 2.22    | row2 in delta
+ 3.333   | 3.333   | row3 in hdfs
+ 4.4444  | 4.4444  | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_nvarchar2 set c2_type = repeat(c2_type, 3) where c1_type = '1.1' and c2_type = '1.1';
+set cstore_insert_mode = main;
+update t_nvarchar2 set c2_type = repeat(c2_type, 3) where c1_type = '3.333' and c2_type = '3.333';
+select * from only t_nvarchar2 order by 1;
+ c1_type |     c2_type     |  c_comments   
+---------+-----------------+---------------
+ 1.1     | 1.11.11.1       | row1 in delta
+ 2.22    | 2.22            | row2 in delta
+ 3.333   | 3.3333.3333.333 | row3 in hdfs
+ 4.4444  | 4.4444          | row4 in hdfs
+(4 rows)
+
+select * from t_nvarchar2 order by 1;
+ c1_type |     c2_type     |  c_comments   
+---------+-----------------+---------------
+ 1.1     | 1.11.11.1       | row1 in delta
+ 2.22    | 2.22            | row2 in delta
+ 3.333   | 3.3333.3333.333 | row3 in hdfs
+ 4.4444  | 4.4444          | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_nvarchar2 where c1_type = '1.1';
+delete from t_nvarchar2 where c1_type = '3.333';
+select * from only t_nvarchar2 order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 2.22    | 2.22    | row2 in delta
+ 4.4444  | 4.4444  | row4 in hdfs
+(2 rows)
+
+select * from t_nvarchar2 order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 2.22    | 2.22    | row2 in delta
+ 4.4444  | 4.4444  | row4 in hdfs
+(2 rows)
+
+drop table t_nvarchar2;
+--- test partition column on text
+drop table if exists t_text;
+NOTICE:  table "t_text" does not exist, skipping
+create table t_text (
+        c1_type text,
+        c2_type text,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_text values (text'1.1', text'1.1', 'row1 in delta');
+insert into t_text values (text'2.22',text'2.22', 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_text values (text'3.333', text'3.333', 'row3 in hdfs');
+insert into t_text values (text'4.4444',text'4.4444', 'row4 in hdfs');
+select * from only t_text order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 1.1     | 1.1     | row1 in delta
+ 2.22    | 2.22    | row2 in delta
+ 3.333   | 3.333   | row3 in hdfs
+ 4.4444  | 4.4444  | row4 in hdfs
+(4 rows)
+
+select * from t_text order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 1.1     | 1.1     | row1 in delta
+ 2.22    | 2.22    | row2 in delta
+ 3.333   | 3.333   | row3 in hdfs
+ 4.4444  | 4.4444  | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_text set c2_type = repeat(c2_type, 30) where c1_type = '1.1' and c2_type = '1.1';
+set cstore_insert_mode = main;
+update t_text set c2_type = repeat(c2_type, 30) where c1_type = '3.333' and c2_type = '3.333';
+select * from only t_text order by 1;
+ c1_type |                                                                        c2_type                                                                         |  c_comments   
+---------+--------------------------------------------------------------------------------------------------------------------------------------------------------+---------------
+ 1.1     | 1.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.1                                                             | row1 in delta
+ 2.22    | 2.22                                                                                                                                                   | row2 in delta
+ 3.333   | 3.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.333 | row3 in hdfs
+ 4.4444  | 4.4444                                                                                                                                                 | row4 in hdfs
+(4 rows)
+
+select * from t_text order by 1;
+ c1_type |                                                                        c2_type                                                                         |  c_comments   
+---------+--------------------------------------------------------------------------------------------------------------------------------------------------------+---------------
+ 1.1     | 1.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.11.1                                                             | row1 in delta
+ 2.22    | 2.22                                                                                                                                                   | row2 in delta
+ 3.333   | 3.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.3333.333 | row3 in hdfs
+ 4.4444  | 4.4444                                                                                                                                                 | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_text where c1_type = '1.1';
+delete from t_text where c1_type = '3.333';
+select * from only t_text order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 2.22    | 2.22    | row2 in delta
+ 4.4444  | 4.4444  | row4 in hdfs
+(2 rows)
+
+select * from t_text order by 1;
+ c1_type | c2_type |  c_comments   
+---------+---------+---------------
+ 2.22    | 2.22    | row2 in delta
+ 4.4444  | 4.4444  | row4 in hdfs
+(2 rows)
+
+drop table t_text;
+--- test partition column on time
+drop table if exists t_time;
+NOTICE:  table "t_time" does not exist, skipping
+create table t_time (
+        c1_type time,
+        c2_type time,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_time values (time'01:00:00', time'01:00:00', 'row1 in delta');
+insert into t_time values (time'02:00:00',time'02:00:00', 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_time values (time'03:00:00', time'03:00:00', 'row3 in hdfs');
+insert into t_time values (time'04:00:00',time'04:00:00', 'row4 in hdfs');
+select * from only t_time order by 1;
+ c1_type  | c2_type  |  c_comments   
+----------+----------+---------------
+ 01:00:00 | 01:00:00 | row1 in delta
+ 02:00:00 | 02:00:00 | row2 in delta
+ 03:00:00 | 03:00:00 | row3 in hdfs
+ 04:00:00 | 04:00:00 | row4 in hdfs
+(4 rows)
+
+select * from t_time order by 1;
+ c1_type  | c2_type  |  c_comments   
+----------+----------+---------------
+ 01:00:00 | 01:00:00 | row1 in delta
+ 02:00:00 | 02:00:00 | row2 in delta
+ 03:00:00 | 03:00:00 | row3 in hdfs
+ 04:00:00 | 04:00:00 | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_time set c2_type = time'01:59:59' where c1_type = '01:00:00' and c2_type = '01:00:00';
+set cstore_insert_mode = main;
+update t_time set c2_type = time'03:59:59' where c1_type = '03:00:00' and c2_type = '03:00:00';
+select * from only t_time order by 1;
+ c1_type  | c2_type  |  c_comments   
+----------+----------+---------------
+ 01:00:00 | 01:59:59 | row1 in delta
+ 02:00:00 | 02:00:00 | row2 in delta
+ 03:00:00 | 03:59:59 | row3 in hdfs
+ 04:00:00 | 04:00:00 | row4 in hdfs
+(4 rows)
+
+select * from t_time order by 1;
+ c1_type  | c2_type  |  c_comments   
+----------+----------+---------------
+ 01:00:00 | 01:59:59 | row1 in delta
+ 02:00:00 | 02:00:00 | row2 in delta
+ 03:00:00 | 03:59:59 | row3 in hdfs
+ 04:00:00 | 04:00:00 | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_time where c1_type = '01:00:00';
+delete from t_time where c1_type = '03:00:00';
+select * from only t_time order by 1;
+ c1_type  | c2_type  |  c_comments   
+----------+----------+---------------
+ 02:00:00 | 02:00:00 | row2 in delta
+ 04:00:00 | 04:00:00 | row4 in hdfs
+(2 rows)
+
+select * from t_time order by 1;
+ c1_type  | c2_type  |  c_comments   
+----------+----------+---------------
+ 02:00:00 | 02:00:00 | row2 in delta
+ 04:00:00 | 04:00:00 | row4 in hdfs
+(2 rows)
+
+drop table t_time;
+--- test partition column on time with timezone
+drop table if exists t_timetz;
+NOTICE:  table "t_timetz" does not exist, skipping
+create table t_timetz (
+        c1_type time with time zone,
+        c2_type time with time zone,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_timetz values (time'01:00:00', time'01:00:00', 'row1 in delta');
+insert into t_timetz values (time'02:00:00',time'02:00:00', 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_timetz values (time'03:00:00', time'03:00:00', 'row3 in hdfs');
+insert into t_timetz values (time'04:00:00',time'04:00:00', 'row4 in hdfs');
+select * from only t_timetz order by 1;
+   c1_type   |   c2_type   |  c_comments   
+-------------+-------------+---------------
+ 01:00:00+08 | 01:00:00+08 | row1 in delta
+ 02:00:00+08 | 02:00:00+08 | row2 in delta
+ 03:00:00+08 | 03:00:00+08 | row3 in hdfs
+ 04:00:00+08 | 04:00:00+08 | row4 in hdfs
+(4 rows)
+
+select * from t_timetz order by 1;
+   c1_type   |   c2_type   |  c_comments   
+-------------+-------------+---------------
+ 01:00:00+08 | 01:00:00+08 | row1 in delta
+ 02:00:00+08 | 02:00:00+08 | row2 in delta
+ 03:00:00+08 | 03:00:00+08 | row3 in hdfs
+ 04:00:00+08 | 04:00:00+08 | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_timetz set c2_type = time'01:59:59' where c1_type = '01:00:00' and c2_type = '01:00:00';
+set cstore_insert_mode = main;
+update t_timetz set c2_type = time'03:59:59' where c1_type = '03:00:00' and c2_type = '03:00:00';
+select * from only t_timetz order by 1;
+   c1_type   |   c2_type   |  c_comments   
+-------------+-------------+---------------
+ 01:00:00+08 | 01:59:59+08 | row1 in delta
+ 02:00:00+08 | 02:00:00+08 | row2 in delta
+ 03:00:00+08 | 03:59:59+08 | row3 in hdfs
+ 04:00:00+08 | 04:00:00+08 | row4 in hdfs
+(4 rows)
+
+select * from t_timetz order by 1;
+   c1_type   |   c2_type   |  c_comments   
+-------------+-------------+---------------
+ 01:00:00+08 | 01:59:59+08 | row1 in delta
+ 02:00:00+08 | 02:00:00+08 | row2 in delta
+ 03:00:00+08 | 03:59:59+08 | row3 in hdfs
+ 04:00:00+08 | 04:00:00+08 | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_timetz where c1_type = '01:00:00';
+delete from t_timetz where c1_type = '03:00:00';
+select * from only t_timetz order by 1;
+   c1_type   |   c2_type   |  c_comments   
+-------------+-------------+---------------
+ 02:00:00+08 | 02:00:00+08 | row2 in delta
+ 04:00:00+08 | 04:00:00+08 | row4 in hdfs
+(2 rows)
+
+select * from t_timetz order by 1;
+   c1_type   |   c2_type   |  c_comments   
+-------------+-------------+---------------
+ 02:00:00+08 | 02:00:00+08 | row2 in delta
+ 04:00:00+08 | 04:00:00+08 | row4 in hdfs
+(2 rows)
+
+drop table t_timetz;
+--- test partition column on time
+drop table if exists t_timestamp;
+NOTICE:  table "t_timestamp" does not exist, skipping
+create table t_timestamp (
+        c1_type timestamp,
+        c2_type timestamp,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_timestamp values (timestamp'2015-01-01 01:00:00', timestamp'2015-01-01 01:00:00', 'row1 in delta');
+insert into t_timestamp values (timestamp'2015-01-01 02:00:00',timestamp'2015-01-01 02:00:00', 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_timestamp values (timestamp'2015-01-01 03:00:00', timestamp'2015-01-01 03:00:00', 'row3 in hdfs');
+insert into t_timestamp values (timestamp'2015-01-01 04:00:00',timestamp'2015-01-01 04:00:00', 'row4 in hdfs');
+select * from only t_timestamp order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 01:00:00 2015 | Thu Jan 01 01:00:00 2015 | row1 in delta
+ Thu Jan 01 02:00:00 2015 | Thu Jan 01 02:00:00 2015 | row2 in delta
+ Thu Jan 01 03:00:00 2015 | Thu Jan 01 03:00:00 2015 | row3 in hdfs
+ Thu Jan 01 04:00:00 2015 | Thu Jan 01 04:00:00 2015 | row4 in hdfs
+(4 rows)
+
+select * from t_timestamp order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 01:00:00 2015 | Thu Jan 01 01:00:00 2015 | row1 in delta
+ Thu Jan 01 02:00:00 2015 | Thu Jan 01 02:00:00 2015 | row2 in delta
+ Thu Jan 01 03:00:00 2015 | Thu Jan 01 03:00:00 2015 | row3 in hdfs
+ Thu Jan 01 04:00:00 2015 | Thu Jan 01 04:00:00 2015 | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_timestamp set c2_type = timestamp'2015-01-01 01:59:59' where c1_type = '2015-01-01 01:00:00' and c2_type = timestamp'2015-01-01 01:00:00';
+set cstore_insert_mode = main;
+update t_timestamp set c2_type = timestamp'2015-01-01 03:59:59' where c1_type = '2015-01-01 03:00:00' and c2_type = timestamp'2015-01-01 03:00:00';
+select * from only t_timestamp order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 01:00:00 2015 | Thu Jan 01 01:59:59 2015 | row1 in delta
+ Thu Jan 01 02:00:00 2015 | Thu Jan 01 02:00:00 2015 | row2 in delta
+ Thu Jan 01 03:00:00 2015 | Thu Jan 01 03:59:59 2015 | row3 in hdfs
+ Thu Jan 01 04:00:00 2015 | Thu Jan 01 04:00:00 2015 | row4 in hdfs
+(4 rows)
+
+select * from t_timestamp order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 01:00:00 2015 | Thu Jan 01 01:59:59 2015 | row1 in delta
+ Thu Jan 01 02:00:00 2015 | Thu Jan 01 02:00:00 2015 | row2 in delta
+ Thu Jan 01 03:00:00 2015 | Thu Jan 01 03:59:59 2015 | row3 in hdfs
+ Thu Jan 01 04:00:00 2015 | Thu Jan 01 04:00:00 2015 | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_timestamp where c1_type = timestamp'2015-01-01 01:00:00';
+delete from t_timestamp where c1_type = timestamp'2015-01-01 03:00:00';
+select * from only t_timestamp order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 02:00:00 2015 | Thu Jan 01 02:00:00 2015 | row2 in delta
+ Thu Jan 01 04:00:00 2015 | Thu Jan 01 04:00:00 2015 | row4 in hdfs
+(2 rows)
+
+select * from t_timestamp order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 02:00:00 2015 | Thu Jan 01 02:00:00 2015 | row2 in delta
+ Thu Jan 01 04:00:00 2015 | Thu Jan 01 04:00:00 2015 | row4 in hdfs
+(2 rows)
+
+drop table t_timestamp;
+--- test partition column on time
+drop table if exists t_timestamptz;
+NOTICE:  table "t_timestamptz" does not exist, skipping
+create table t_timestamptz (
+        c1_type timestamp with time zone,
+        c2_type timestamp with time zone,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_timestamptz values (timestamp'2015-01-01 01:00:00', timestamp'2015-01-01 01:00:00', 'row1 in delta');
+insert into t_timestamptz values (timestamp'2015-01-01 02:00:00',timestamp'2015-01-01 02:00:00', 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_timestamptz values (timestamp'2015-01-01 03:00:00', timestamp'2015-01-01 03:00:00', 'row3 in hdfs');
+insert into t_timestamptz values (timestamp'2015-01-01 04:00:00',timestamp'2015-01-01 04:00:00', 'row4 in hdfs');
+select * from only t_timestamptz order by 1;
+           c1_type            |           c2_type            |  c_comments   
+------------------------------+------------------------------+---------------
+ Thu Jan 01 01:00:00 2015 CST | Thu Jan 01 01:00:00 2015 CST | row1 in delta
+ Thu Jan 01 02:00:00 2015 CST | Thu Jan 01 02:00:00 2015 CST | row2 in delta
+ Thu Jan 01 17:00:00 2015 CST | Thu Jan 01 17:00:00 2015 CST | row3 in hdfs
+ Thu Jan 01 18:00:00 2015 CST | Thu Jan 01 18:00:00 2015 CST | row4 in hdfs
+(4 rows)
+
+select * from t_timestamptz order by 1;
+           c1_type            |           c2_type            |  c_comments   
+------------------------------+------------------------------+---------------
+ Thu Jan 01 01:00:00 2015 CST | Thu Jan 01 01:00:00 2015 CST | row1 in delta
+ Thu Jan 01 02:00:00 2015 CST | Thu Jan 01 02:00:00 2015 CST | row2 in delta
+ Thu Jan 01 17:00:00 2015 CST | Thu Jan 01 17:00:00 2015 CST | row3 in hdfs
+ Thu Jan 01 18:00:00 2015 CST | Thu Jan 01 18:00:00 2015 CST | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_timestamptz set c2_type = timestamp'2015-01-01 01:59:59' where c1_type = '2015-01-01 01:00:00' and c2_type = timestamp'2015-01-01 01:00:00';
+set cstore_insert_mode = main;
+update t_timestamptz set c2_type = timestamp'2015-01-01 03:59:59' where c1_type = '2015-01-01 03:00:00' and c2_type = timestamp'2015-01-01 03:00:00';
+select * from only t_timestamptz order by 1;
+           c1_type            |           c2_type            |  c_comments   
+------------------------------+------------------------------+---------------
+ Thu Jan 01 01:00:00 2015 CST | Thu Jan 01 01:59:59 2015 CST | row1 in delta
+ Thu Jan 01 02:00:00 2015 CST | Thu Jan 01 02:00:00 2015 CST | row2 in delta
+ Thu Jan 01 17:00:00 2015 CST | Thu Jan 01 17:00:00 2015 CST | row3 in hdfs
+ Thu Jan 01 18:00:00 2015 CST | Thu Jan 01 18:00:00 2015 CST | row4 in hdfs
+(4 rows)
+
+select * from t_timestamptz order by 1;
+           c1_type            |           c2_type            |  c_comments   
+------------------------------+------------------------------+---------------
+ Thu Jan 01 01:00:00 2015 CST | Thu Jan 01 01:59:59 2015 CST | row1 in delta
+ Thu Jan 01 02:00:00 2015 CST | Thu Jan 01 02:00:00 2015 CST | row2 in delta
+ Thu Jan 01 17:00:00 2015 CST | Thu Jan 01 17:00:00 2015 CST | row3 in hdfs
+ Thu Jan 01 18:00:00 2015 CST | Thu Jan 01 18:00:00 2015 CST | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_timestamptz where c1_type = timestamp'2015-01-01 01:00:00';
+delete from t_timestamptz where c1_type = timestamp'2015-01-01 03:00:00';
+select * from only t_timestamptz order by 1;
+           c1_type            |           c2_type            |  c_comments   
+------------------------------+------------------------------+---------------
+ Thu Jan 01 02:00:00 2015 CST | Thu Jan 01 02:00:00 2015 CST | row2 in delta
+ Thu Jan 01 17:00:00 2015 CST | Thu Jan 01 17:00:00 2015 CST | row3 in hdfs
+ Thu Jan 01 18:00:00 2015 CST | Thu Jan 01 18:00:00 2015 CST | row4 in hdfs
+(3 rows)
+
+select * from t_timestamptz order by 1;
+           c1_type            |           c2_type            |  c_comments   
+------------------------------+------------------------------+---------------
+ Thu Jan 01 02:00:00 2015 CST | Thu Jan 01 02:00:00 2015 CST | row2 in delta
+ Thu Jan 01 17:00:00 2015 CST | Thu Jan 01 17:00:00 2015 CST | row3 in hdfs
+ Thu Jan 01 18:00:00 2015 CST | Thu Jan 01 18:00:00 2015 CST | row4 in hdfs
+(3 rows)
+
+drop table t_timestamptz;
+--- test partition column on date
+drop table if exists t_date;
+NOTICE:  table "t_date" does not exist, skipping
+create table t_date (
+        c1_type date,
+        c2_type date,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_date values (date'2015-01-01', date'2015-01-01', 'row1 in delta');
+insert into t_date values (date'2016-01-01', date'2016-01-01', 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_date values (date'2017-01-01', date'2017-01-01', 'row3 in hdfs');
+insert into t_date values (date'2018-01-01', date'2018-01-01', 'row4 in hdfs');
+select * from only t_date order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 00:00:00 2015 | Thu Jan 01 00:00:00 2015 | row1 in delta
+ Fri Jan 01 00:00:00 2016 | Fri Jan 01 00:00:00 2016 | row2 in delta
+ Sun Jan 01 00:00:00 2017 | Sun Jan 01 00:00:00 2017 | row3 in hdfs
+ Mon Jan 01 00:00:00 2018 | Mon Jan 01 00:00:00 2018 | row4 in hdfs
+(4 rows)
+
+select * from t_date order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 00:00:00 2015 | Thu Jan 01 00:00:00 2015 | row1 in delta
+ Fri Jan 01 00:00:00 2016 | Fri Jan 01 00:00:00 2016 | row2 in delta
+ Sun Jan 01 00:00:00 2017 | Sun Jan 01 00:00:00 2017 | row3 in hdfs
+ Mon Jan 01 00:00:00 2018 | Mon Jan 01 00:00:00 2018 | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_date set c2_type = date'2015-12-31' where c1_type = '2015-01-01' and c2_type = date'2015-01-01';
+set cstore_insert_mode = main;
+update t_date set c2_type = date'2015-12-31' where c1_type = '2017-01-01' and c2_type = date'2017-01-01';
+select * from only t_date order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 00:00:00 2015 | Thu Dec 31 00:00:00 2015 | row1 in delta
+ Fri Jan 01 00:00:00 2016 | Fri Jan 01 00:00:00 2016 | row2 in delta
+ Sun Jan 01 00:00:00 2017 | Thu Dec 31 00:00:00 2015 | row3 in hdfs
+ Mon Jan 01 00:00:00 2018 | Mon Jan 01 00:00:00 2018 | row4 in hdfs
+(4 rows)
+
+select * from t_date order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 00:00:00 2015 | Thu Dec 31 00:00:00 2015 | row1 in delta
+ Fri Jan 01 00:00:00 2016 | Fri Jan 01 00:00:00 2016 | row2 in delta
+ Sun Jan 01 00:00:00 2017 | Thu Dec 31 00:00:00 2015 | row3 in hdfs
+ Mon Jan 01 00:00:00 2018 | Mon Jan 01 00:00:00 2018 | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_date where c1_type = date'2015-01-01';
+delete from t_date where c1_type = date'2017-01-01';
+select * from only t_date order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Fri Jan 01 00:00:00 2016 | Fri Jan 01 00:00:00 2016 | row2 in delta
+ Mon Jan 01 00:00:00 2018 | Mon Jan 01 00:00:00 2018 | row4 in hdfs
+(2 rows)
+
+select * from t_date order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Fri Jan 01 00:00:00 2016 | Fri Jan 01 00:00:00 2016 | row2 in delta
+ Mon Jan 01 00:00:00 2018 | Mon Jan 01 00:00:00 2018 | row4 in hdfs
+(2 rows)
+
+drop table t_date;
+--- test partition column on smalldatetime
+drop table if exists t_smalldatetime;
+NOTICE:  table "t_smalldatetime" does not exist, skipping
+create table t_smalldatetime (
+        c1_type smalldatetime,
+        c2_type smalldatetime,
+        c_comments text
+)
+tablespace hdfs_ts distribute by hash (c1_type)
+partition by values (c1_type, c2_type);
+set cstore_insert_mode = delta;
+insert into t_smalldatetime values (smalldatetime'2015-01-01 01:00:00', smalldatetime'2015-01-01 01:00:00', 'row1 in delta');
+insert into t_smalldatetime values (smalldatetime'2015-01-01 02:00:00',smalldatetime'2015-01-01 02:00:00', 'row2 in delta');
+set cstore_insert_mode = main;
+insert into t_smalldatetime values (smalldatetime'2015-01-01 03:00:00', smalldatetime'2015-01-01 03:00:00', 'row3 in hdfs');
+insert into t_smalldatetime values (smalldatetime'2015-01-01 04:00:00',smalldatetime'2015-01-01 04:00:00', 'row4 in hdfs');
+select * from only t_smalldatetime order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 01:00:00 2015 | Thu Jan 01 01:00:00 2015 | row1 in delta
+ Thu Jan 01 02:00:00 2015 | Thu Jan 01 02:00:00 2015 | row2 in delta
+ Thu Jan 01 03:00:00 2015 | Thu Jan 01 03:00:00 2015 | row3 in hdfs
+ Thu Jan 01 04:00:00 2015 | Thu Jan 01 04:00:00 2015 | row4 in hdfs
+(4 rows)
+
+select * from t_smalldatetime order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 01:00:00 2015 | Thu Jan 01 01:00:00 2015 | row1 in delta
+ Thu Jan 01 02:00:00 2015 | Thu Jan 01 02:00:00 2015 | row2 in delta
+ Thu Jan 01 03:00:00 2015 | Thu Jan 01 03:00:00 2015 | row3 in hdfs
+ Thu Jan 01 04:00:00 2015 | Thu Jan 01 04:00:00 2015 | row4 in hdfs
+(4 rows)
+
+-- update one row from delta table
+set cstore_insert_mode = delta;
+update t_smalldatetime set c2_type = smalldatetime'2015-01-01 01:59:59' where c1_type = '2015-01-01 01:00:00' and c2_type = smalldatetime'2015-01-01 01:00:00';
+set cstore_insert_mode = main;
+update t_smalldatetime set c2_type = smalldatetime'2015-01-01 03:59:59' where c1_type = '2015-01-01 03:00:00' and c2_type = smalldatetime'2015-01-01 03:00:00';
+select * from only t_smalldatetime order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 01:00:00 2015 | Thu Jan 01 02:00:00 2015 | row1 in delta
+ Thu Jan 01 02:00:00 2015 | Thu Jan 01 02:00:00 2015 | row2 in delta
+ Thu Jan 01 03:00:00 2015 | Thu Jan 01 04:00:00 2015 | row3 in hdfs
+ Thu Jan 01 04:00:00 2015 | Thu Jan 01 04:00:00 2015 | row4 in hdfs
+(4 rows)
+
+select * from t_smalldatetime order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 01:00:00 2015 | Thu Jan 01 02:00:00 2015 | row1 in delta
+ Thu Jan 01 02:00:00 2015 | Thu Jan 01 02:00:00 2015 | row2 in delta
+ Thu Jan 01 03:00:00 2015 | Thu Jan 01 04:00:00 2015 | row3 in hdfs
+ Thu Jan 01 04:00:00 2015 | Thu Jan 01 04:00:00 2015 | row4 in hdfs
+(4 rows)
+
+-- delete one row from hdfs table
+set cstore_insert_mode = auto;
+delete from t_smalldatetime where c1_type = smalldatetime'2015-01-01 01:00:00';
+delete from t_smalldatetime where c1_type = smalldatetime'2015-01-01 03:00:00';
+select * from only t_smalldatetime order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 02:00:00 2015 | Thu Jan 01 02:00:00 2015 | row2 in delta
+ Thu Jan 01 04:00:00 2015 | Thu Jan 01 04:00:00 2015 | row4 in hdfs
+(2 rows)
+
+select * from t_smalldatetime order by 1;
+         c1_type          |         c2_type          |  c_comments   
+--------------------------+--------------------------+---------------
+ Thu Jan 01 02:00:00 2015 | Thu Jan 01 02:00:00 2015 | row2 in delta
+ Thu Jan 01 04:00:00 2015 | Thu Jan 01 04:00:00 2015 | row4 in hdfs
+(2 rows)
+
+drop table t_smalldatetime;
+-- test numeric type overflow case
+set cstore_insert_mode=main;
+create table t1(dkey int, c1 tinyint) tablespace hdfs_ts partition by values(c1);
+insert into t1 values(1,255);
+insert into t1 values(1,256);
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: c1
+insert into t1 values(1,0);
+insert into t1 values(1,-128);
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: c1
+select * from t1 order by 1,2;
+ dkey | c1  
+------+-----
+    1 | 0
+    1 | 255
+(2 rows)
+
+drop table t1;
+create table t1(dkey int, c1 smallint) tablespace hdfs_ts partition by values(c1);
+insert into t1 values(1,32767);
+insert into t1 values(1,32768);
+ERROR:  smallint out of range
+CONTEXT:  referenced column: c1
+insert into t1 values(1,-32768);
+insert into t1 values(1,-32769);
+ERROR:  smallint out of range
+CONTEXT:  referenced column: c1
+select * from t1 order by 1,2;
+ dkey |   c1   
+------+--------
+    1 | -32768
+    1 |  32767
+(2 rows)
+
+drop table t1;
+create table t1(dkey int, c1 integer) tablespace hdfs_ts partition by values(c1);
+insert into t1 values(1,2147483647);
+insert into t1 values(1,2147483648);
+ERROR:  integer out of range
+CONTEXT:  referenced column: c1
+insert into t1 values(1,-2147483648);
+insert into t1 values(1,-2147483649);
+ERROR:  integer out of range
+CONTEXT:  referenced column: c1
+select * from t1 order by 1,2;
+ dkey |     c1      
+------+-------------
+    1 | -2147483648
+    1 |  2147483647
+(2 rows)
+
+drop table t1;
+create table t1(dkey int, c1 bigint) tablespace hdfs_ts partition by values(c1);
+insert into t1 values(1,9223372036854775807);
+insert into t1 values(1,9223372036854775808);
+ERROR:  bigint out of range
+CONTEXT:  referenced column: c1
+insert into t1 values(1,-9223372036854775808);
+insert into t1 values(1,-9223372036854775809);
+ERROR:  bigint out of range
+CONTEXT:  referenced column: c1
+select * from t1 order by 1,2;
+ dkey |          c1          
+------+----------------------
+    1 | -9223372036854775808
+    1 |  9223372036854775807
+(2 rows)
+
+drop table t1;
+create table t1(dkey int, c1 time) tablespace hdfs_ts partition by values(c1);
+insert into t1 values(1,time'23:59:59');
+insert into t1 values(1,time'24:59:59');
+ERROR:  date/time field value out of range: "24:59:59"
+LINE 1: insert into t1 values(1,time'24:59:59');
+                                    ^
+select * from t1 order by 1,2;
+ dkey |    c1    
+------+----------
+    1 | 23:59:59
+(1 row)
+
+drop table t1;
+create table t1(dkey int, c1 date) tablespace hdfs_ts partition by values(c1);
+insert into t1 values(1,date'4714-01-01 bc');
+ERROR:  timestamp out of range: "4714-01-01 bc"
+LINE 1: insert into t1 values(1,date'4714-01-01 bc');
+                                    ^
+insert into t1 values(1,date'4713-01-01 bc');
+insert into t1 values(1,date'294278-01-01');
+ERROR:  timestamp out of range: "294278-01-01"
+LINE 1: insert into t1 values(1,date'294278-01-01');
+                                    ^
+select * from t1 order by 1,2;
+ dkey |             c1              
+------+-----------------------------
+    1 | Thu Jan 01 00:00:00 4713 BC
+(1 row)
+
+drop table t1;
+create table t1(dkey int, c1 timestamp) tablespace hdfs_ts partition by values(c1);
+insert into t1 values(1,timestamp'4714-01-01 00:00:00 bc');
+ERROR:  timestamp out of range: "4714-01-01 00:00:00 bc"
+LINE 1: insert into t1 values(1,timestamp'4714-01-01 00:00:00 bc');
+                                         ^
+insert into t1 values(1,timestamp'4713-01-01 00:00:00 bc');
+insert into t1 values(1,timestamp'294278-01-01 00:00:00');
+ERROR:  timestamp out of range: "294278-01-01 00:00:00"
+LINE 1: insert into t1 values(1,timestamp'294278-01-01 00:00:00');
+                                         ^
+select * from t1 order by 1,2;
+ dkey |             c1              
+------+-----------------------------
+    1 | Thu Jan 01 00:00:00 4713 BC
+(1 row)
+
+drop table t1;
+create table t1(dkey int, c1 timestamp with time zone) tablespace hdfs_ts partition by values(c1);
+insert into t1 values(1,timestamp'4714-01-01 00:00:00+08 bc');
+ERROR:  timestamp out of range: "4714-01-01 00:00:00+08 bc"
+LINE 1: insert into t1 values(1,timestamp'4714-01-01 00:00:00+08 bc'...
+                                         ^
+insert into t1 values(1,timestamp'4713-01-01 00:00:00+08 bc');
+insert into t1 values(1,timestamp'294278-01-01 00:00:00+08');
+ERROR:  timestamp out of range: "294278-01-01 00:00:00+08"
+LINE 1: insert into t1 values(1,timestamp'294278-01-01 00:00:00+08')...
+                                         ^
+select * from t1 order by 1,2;
+ERROR:  invalid input syntax for type timestamp with time zone: "Thu Jan 01 00:00:00 4713 LMT BC"
+drop table t1;
+create table t1(dkey int, c1 smalldatetime) tablespace hdfs_ts partition by values(c1);
+insert into t1 values(1,smalldatetime'4714-01-01 00:00:00 bc');
+ERROR:  smalldatetime out of range: "4714-01-01 00:00:00 bc"
+LINE 1: insert into t1 values(1,smalldatetime'4714-01-01 00:00:00 bc...
+                                             ^
+insert into t1 values(1,smalldatetime'4713-01-01 00:00:00 bc');
+insert into t1 values(1,smalldatetime'294278-01-01 00:00:00');
+ERROR:  smalldatetime out of range: "294278-01-01 00:00:00"
+LINE 1: insert into t1 values(1,smalldatetime'294278-01-01 00:00:00'...
+                                             ^
+select * from t1 order by 1,2;
+ dkey |             c1              
+------+-----------------------------
+    1 | Thu Jan 01 00:00:00 4713 BC
+(1 row)
+
+drop table t1;
+create table t1(dkey int, c1 interval) tablespace hdfs_ts partition by values(c1);
+insert into t1 values(1,interval'178000000 year');
+insert into t1 values(1,interval'-178000000 year');
+insert into t1 values(1,interval'17800000000 year');
+ERROR:  interval field value out of range: "17800000000 year"
+LINE 1: insert into t1 values(1,interval'17800000000 year');
+                                        ^
+insert into t1 values(1,interval'-17800000000 year');
+ERROR:  interval field value out of range: "-17800000000 year"
+LINE 1: insert into t1 values(1,interval'-17800000000 year');
+                                        ^
+select * from t1 order by 1,2;
+ dkey |          c1           
+------+-----------------------
+    1 | @ 178000000 years ago
+    1 | @ 178000000 years
+(2 rows)
+
+drop table t1;
+drop schema value_partitionkey_testing;

@@ -25,13 +25,6 @@
 #ifndef REL_GS_H
 #define REL_GS_H
 
-#include "catalog/pg_partition.h"
-#include "catalog/pg_hashbucket.h"
-#include "catalog/catalog.h"
-#include "catalog/pg_namespace.h"
-#include "utils/partitionmap_gs.h"
-#include "rel.h"
-
 /*
  * Relation Compression Type
  * REL_CMPRS_NOT_SUPPORT:
@@ -53,6 +46,14 @@ typedef enum {
     REL_CMPRS_FIELDS_EXTRACT,
     REL_CMPRS_MAX_TYPE
 } RelCompressType;
+
+#ifndef FRONTEND_PARSER
+#include "catalog/pg_partition.h"
+#include "catalog/pg_hashbucket.h"
+#include "catalog/catalog.h"
+#include "catalog/pg_namespace.h"
+#include "utils/partitionmap_gs.h"
+#include "rel.h"
 
 #define CHECK_CMPRS_VALID(compress) ((compress) > REL_CMPRS_NOT_SUPPORT && (compress) < REL_CMPRS_MAX_TYPE)
 #define CHECK_CMPRS_NOT_SUPPORT(compress) (REL_CMPRS_NOT_SUPPORT == (compress))
@@ -148,11 +149,14 @@ typedef struct RelationMetaData {
 #define ORIENTATION_ORC "orc"
 #define ORIENTATION_TIMESERIES "timeseries"
 
+#define TIME_ONE_HOUR "1 HOUR"
 #define TIME_ONE_DAY "1 DAY"
 #define TIME_ONE_WEEK "1 WEEK"
 #define TIME_ONE_MONTH "1 MONTH"
 #define TIME_ONE_YEAR "1 YEAR"
 #define TIME_UNDEFINED "UNDEFINED"
+
+#define COLUMN_UNDEFINED "UNDEFINED"
 
 #define ORC_VERSION_011 "0.11"
 #define ORC_VERSION_012 "0.12"
@@ -166,10 +170,17 @@ typedef struct RelationMetaData {
 #define COMPRESSION_SNAPPY "snappy"
 #define COMPRESSION_LZ4 "lz4"
 
+/*
+ * values for different table access method types.
+ */
+#define TABLE_ACCESS_METHOD_HEAP "HEAP"
+#define TABLE_ACCESS_METHOD_USTORE "USTORE"
+
 #define FILESYSTEM_GENERAL "general"
 #define FILESYSTEM_HDFS "hdfs"
 
 #define OptIgnoreEnableHadoopEnv "ignore_enable_hadoop_env"
+#define TS_PSEUDO_DIST_COLUMN "ts_pseudo_distcol"
 
 #define OptEnabledWaitCleanGpi "y"
 #define OptDisabledWaitCleanGpi "n"
@@ -187,6 +198,60 @@ typedef struct RelationMetaData {
             ? (((char*)(_basePtr) + *(int*)&(((StdRdOptions*)(_basePtr))->_memberName))) \
             : (_defaultVal))
 
+/*
+ * ReltionGetTableAccessMethoType
+ * 	Returns the relations TableAmType
+ */
+#define RelationGetTableAccessMethodType(_reloptions) \
+    StdRdOptionsGetStringData(_reloptions, table_access_method, TABLE_ACCESS_METHOD_HEAP)
+
+#define RelationIsTableAccessMethodHeapType(_reloptions) \
+    pg_strcasecmp(RelationGetTableAccessMethodType(_reloptions), TABLE_ACCESS_METHOD_HEAP) == 0
+
+#define RelationIsTableAccessMethodUStoreType(_reloptions) \
+    pg_strcasecmp(RelationGetTableAccessMethodType(_reloptions), TABLE_ACCESS_METHOD_USTORE) == 0
+
+
+/*
+ * @Description: get TableAmType type from Relation's reloptions data.
+ * @IN reloptions: Table's reloptions.
+ * @Return: return TableAmType type for this relation.
+ */
+static inline TableAmType get_tableam_from_reloptions(bytea* reloptions, char relkind)
+{
+    if (relkind == RELKIND_RELATION)
+    {
+        if (reloptions!= NULL)
+        {
+            if (RelationIsTableAccessMethodHeapType(reloptions))
+            {
+                return TAM_HEAP;
+            }
+            else if (RelationIsTableAccessMethodUStoreType(reloptions))
+            {
+                 return TAM_USTORE;
+            }
+
+            return TAM_HEAP;
+        }
+        else //For System Tables reloptions can be NULL.
+        {
+            return TAM_HEAP;
+        }
+    }
+    else if (relkind == RELKIND_INDEX ||
+            relkind == RELKIND_TOASTVALUE ||
+            relkind == RELKIND_SEQUENCE ||
+            relkind == RELKIND_COMPOSITE_TYPE ||
+            relkind == RELKIND_VIEW ||
+            relkind == RELKIND_FOREIGN_TABLE)
+    {
+        return TAM_HEAP;
+    }
+
+    return TAM_HEAP;
+}
+
 /* RelationGetOrientation
  *    Return the relations' orientation
  */
@@ -198,7 +263,7 @@ typedef struct RelationMetaData {
     StdRdOptionsGetStringData((relation)->rd_options, filesystem, FILESYSTEM_GENERAL)
 
 #define RelationIsCUFormat(relation)                    \
-    ((RELKIND_RELATION == relation->rd_rel->relkind || RELKIND_MATVIEW == relation->rd_rel->relkind) && \
+    ((RELKIND_RELATION == relation->rd_rel->relkind) && \
         pg_strcasecmp(RelationGetOrientation(relation), ORIENTATION_COLUMN) == 0)
 
 #define RelationIsRowFormat(relation)                   \
@@ -243,6 +308,8 @@ static inline int RelationGetInternalMask(Relation rel)
 
 #define RelationIsRelation(relation) (RELKIND_RELATION == (relation)->rd_rel->relkind)
 
+#define RelationIsMatview(relation) (RELKIND_MATVIEW == (relation)->rd_rel->relkind)
+
 /*
  *	Mgr for Redistribute
  */
@@ -262,21 +329,25 @@ static inline RedisHtlAction RelationGetAppendMode(Relation rel)
  * Return the relations' orientation. Pax format includes ORC format.
  */
 #define RelationIsPAXFormat(relation)                   \
-    ((RELKIND_RELATION == relation->rd_rel->relkind || RELKIND_MATVIEW == relation->rd_rel->relkind) && \
+    ((RELKIND_RELATION == relation->rd_rel->relkind) && \
         pg_strcasecmp(RelationGetOrientation(relation), ORIENTATION_ORC) == 0)
 
 /* RelationIsColStore
  * 	  Return relation whether is column store, which includes CU format and PAX format.
  */
 #define RelationIsColStore(relation) \
-    ((RELKIND_RELATION == relation->rd_rel->relkind || RELKIND_MATVIEW == relation->rd_rel->relkind) && \
-        (RelationIsCUFormat(relation) || RelationIsPAXFormat(relation)))
+    ((RELKIND_RELATION == relation->rd_rel->relkind) && (RelationIsCUFormat(relation) || RelationIsPAXFormat(relation)))
 
 #define RelationOptionIsDfsStore(optionValue) (optionValue && 0 == pg_strncasecmp(optionValue, HDFS, strlen(HDFS)))
 
 #define RelationIsTsStore(relation) \
     ((RELKIND_RELATION == relation->rd_rel->relkind) && \
         pg_strcasecmp(RelationGetOrientation(relation), ORIENTATION_TIMESERIES) == 0)
+
+#define TsRelWithImplDistColumn(attribute, pos)     \
+    (((attribute)[pos]->attkvtype == ATT_KV_HIDE) &&  \
+        namestrcmp(&((attribute)[pos]->attname), TS_PSEUDO_DIST_COLUMN) == 0)
+
 // Helper Macro Defination
 //
 #define StdRelOptGetOrientation(__stdRelOpt) StdRdOptionsGetStringData((__stdRelOpt), orientation, ORIENTATION_ROW)
@@ -284,6 +355,10 @@ static inline RedisHtlAction RelationGetAppendMode(Relation rel)
 #define StdRelOptIsColStore(__stdRelOpt) (0 == pg_strcasecmp(ORIENTATION_COLUMN, StdRelOptGetOrientation(__stdRelOpt)))
 
 #define StdRelOptIsRowStore(__stdRelOpt) (0 == pg_strcasecmp(ORIENTATION_ROW, StdRelOptGetOrientation(__stdRelOpt)))
+
+#define StdRelOptIsTsStore(__stdRelOpt) (0 == pg_strcasecmp(ORIENTATION_TIMESERIES,  \
+                                                        StdRelOptGetOrientation(__stdRelOpt)))
+
 
 /* get internal_mask option from reloption */
 #define StdRelOptGetInternalMask(__stdRelOpt) StdRdOptionsGetStringData((__stdRelOpt), internalMask, 0)
@@ -356,11 +431,6 @@ static inline bool RelationCreateInCurrXact(Relation rel)
             smgrsetowner(&((partition)->pd_smgr), smgropen((partition)->pd_node, InvalidBackendId)); \
     } while (0)
 
-#define BucketOpenSmgr(bucket) \
-    do { \
-        if ((bucket)->bd_smgr == NULL) \
-            smgrsetowner(&((bucket)->bd_smgr), smgropen((bucket)->bd_node, InvalidBackendId)); \
-    } while (0)
 
 /*
  * PartionCloseSmgr
@@ -372,7 +442,7 @@ static inline bool RelationCreateInCurrXact(Relation rel)
     do {                                          \
         if ((partition)->pd_smgr != NULL) {       \
             smgrclose((partition)->pd_smgr);      \
-            Assert((partition)->pd_smgr == NULL); \
+            Assert(PartitionIsBucket(partition) || (partition)->pd_smgr == NULL); \
         }                                         \
     } while (0)
 
@@ -421,7 +491,7 @@ static inline bool RelationCreateInCurrXact(Relation rel)
 
 #define InvalidBktId   (-1)
 #define RelationIsBucket(relation) \
-    ((relation)->rd_node.bucketNode != InvalidBktId)
+    ((relation)->rd_node.bucketNode > InvalidBktId)
 
 /*
  * PartitionHasReferenceCountZero
@@ -464,7 +534,11 @@ extern void PartitionDecrementReferenceCount(Partition part);
 
 #define RelationIsView(relation) (RELKIND_VIEW == (relation)->rd_rel->relkind)
 
+#define RelationIsContquery(relation) (RELKIND_CONTQUERY == (relation)->rd_rel->relkind)
+
 #define RelationIsForeignTable(relation) (RELKIND_FOREIGN_TABLE == (relation)->rd_rel->relkind)
+
+#define RelationIsStream(relation) (RELKIND_STREAM == (relation)->rd_rel->relkind)
 
 #define RelationIsUnCataloged(relation) (RELKIND_UNCATALOGED == (relation)->rd_rel->relkind)
 
@@ -555,7 +629,8 @@ static inline bool IsCompressedByCmprsInPgclass(const RelCompressType cmprInPgcl
         IsCompressedByCmprsInPgclass((RelCompressType)relation->rd_rel->relcmprs))
 
 #define RelIsSpecifiedFTbl(rte, SepcifiedType) \
-    (rte->relkind == RELKIND_FOREIGN_TABLE && isSpecifiedSrvTypeFromRelId(rte->relid, SepcifiedType))
+    ((rte->relkind == RELKIND_FOREIGN_TABLE || rte->relkind == RELKIND_STREAM) \
+     && isSpecifiedSrvTypeFromRelId(rte->relid, SepcifiedType))
 
 #define RelationGetStartCtidInternal(relation) \
     StdRdOptionsGetStringData((relation)->rd_options, start_ctid_internal, NULL)
@@ -608,16 +683,19 @@ static inline bool RelationEnableWaitCleanGpi(Relation relation)
 /* routines in utils/cache/relcache.c */
 extern bool RelationIsDfsStore(Relation relatioin);
 extern bool RelationIsPaxFormatByOid(Oid relid);
+#ifdef ENABLE_MOT
 extern bool RelationIsMOTTableByOid(Oid relid);
+#endif
 extern bool RelationIsCUFormatByOid(Oid relid);
 
 #define IS_FOREIGNTABLE(rel) ((rel)->rd_rel->relkind == RELKIND_FOREIGN_TABLE)
+#define IS_STREAM_TABLE(rel) ((rel)->rd_rel->relkind == RELKIND_STREAM)
 extern bool have_useft_privilege(void);
 
 extern RelationMetaData* make_relmeta(Relation rel);
 extern Relation get_rel_from_meta(RelationMetaData* frel);
-extern bool rel_is_pax_format(HeapTuple tuple, TupleDesc tupdesc);
-extern bool rel_is_CU_format(HeapTuple tuple, TupleDesc tupdesc);
+extern bool CheckRelOrientationByPgClassTuple(HeapTuple tuple, TupleDesc tupdesc, const char* orientation);
 
+#endif // !FRONTEND_PARSER
 #endif /* REL_GS_H */
 

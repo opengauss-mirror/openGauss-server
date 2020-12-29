@@ -63,8 +63,8 @@ j boolean
 ) with(orientation = column) ;
 
 \parallel on 4
-copy VEC_HASHJOIN_TABLE_01_NUM from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_sonic_hashjoin_number_1.data' delimiter as '|';
-copy VEC_HASHJOIN_TABLE_02_NUM from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_sonic_hashjoin_number_2.data' delimiter as '|';
+copy VEC_HASHJOIN_TABLE_01_NUM from '@abs_srcdir@/data/vec_sonic_hashjoin_number_1.data' delimiter as '|';
+copy VEC_HASHJOIN_TABLE_02_NUM from '@abs_srcdir@/data/vec_sonic_hashjoin_number_2.data' delimiter as '|';
 INSERT INTO VEC_HASHJOIN_TABLE_03_NUM values(1);
 INSERT INTO VEC_HASHJOIN_TABLE_04_NUM values(generate_series(2,4),1,1,1,1,1,1,1,1,1,1,1,'t');
 \parallel off

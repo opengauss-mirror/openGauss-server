@@ -1,0 +1,211 @@
+create foreign table  ERROR_LOADING_TABLE_011
+(
+C_CHAR_3 CHAR(102400),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT TINYINT,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
+)
+SERVER gsmpp_server
+OPTIONS(location 'gsobs://@obshostname@/@obsbucket@/obscheck/ERROR_LOADING_TABLE_011',
+format 'text',
+delimiter ',',
+reject_limit '1',
+access_key '@ak@',
+secret_access_key '@sk@'
+) with error_loading_table_011_0123456789_0123456789_0123456789_0123456789;
+
+
+create table  LOADING_TABLE_011
+(
+C_CHAR_3 CHAR(512),
+C_VARCHAR_3 VARCHAR(512),
+C_INT TINYINT,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
+);
+
+insert into LOADING_TABLE_011 select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT from         ERROR_LOADING_TABLE_011;
+
+select rownum, rawrecord, detail from error_loading_table_011_0123456789_0123456789_0123456789_0123456789;
+
+CREATE FOREIGN TABLE error_data_1
+(
+c varchar(2),
+id int,
+num float,
+time timestamp without time zone,
+memo text
+)
+SERVER gsmpp_server
+OPTIONS(location 'gsobs://@obshostname@/@obsbucket@/obscheck/error_data_1.txt',
+format 'text',
+delimiter ',',
+reject_limit '100',
+access_key '@ak@',
+secret_access_key '@sk@'
+) WITH error_table_1;
+
+CREATE FOREIGN TABLE error_data_1_1
+(
+c varchar(2),
+id int,
+num float,
+time timestamp without time zone,
+memo text
+)
+SERVER gsmpp_server
+OPTIONS(location 'gsobs://@obshostname@/@obsbucket@/obscheck/error_data_1.txt',
+format 'text',
+delimiter ',',
+reject_limit '1',
+access_key '@ak@',
+secret_access_key '@sk@'
+) WITH error_table_1_1;
+
+create table  data_1_1
+(
+c varchar(2),
+id int,
+num float,
+time timestamp without time zone,
+memo text
+);
+
+SELECT filename, rownum, rawrecord, detail FROM error_table_1_1;
+SET explain_perf_mode=normal;
+explain (costs off, nodes off) insert into data_1_1 select * from error_data_1 limit 1;
+
+--complex statement to foreign table
+---
+create table data_1_2 (c1 int);
+insert into data_1_2(c1) select (select id from error_data_1);
+insert into data_1_2(c1) select (select id from error_data_1) limit 1;
+
+--statment contains ORDER BY
+create table  LOADING_TABLE_000(C_CHAR_3 CHAR(10),C_VARCHAR_3 VARCHAR(10),C_INT int,C_NUMERIC numeric(10,5),C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE);
+insert into LOADING_TABLE_000 select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT from ERROR_LOADING_TABLE_011 order by c_int;
+select * from LOADING_TABLE_000 order by c_int;
+
+--alter error table
+---
+alter table error_table_1_1 add column c1 int;
+alter table error_table_1_1 rename nodeid to node_id;
+
+--insert into error table
+---
+insert into error_table_1_1 values(11);
+
+--update error table
+---
+update error_table_1_1 set nodeid = 0;
+
+---
+--Log error to remote
+--OBS table should fail with remote log
+---
+create foreign table ft_remote_log(c1 int, c2 varchar)
+server gsmpp_server options(location 'gsobs://@obshostname@/@obsbucket@/obscheck/error_data_2.data',
+delimiter '|',
+access_key '@ak@',
+secret_access_key '@sk@'
+)
+remote log 'ft_remote_log' per node reject limit '100';
+
+
+---
+--Log error to remote and local
+--OBS table should fail with remote log and local
+---
+create foreign table ft_log_both(c1 int, c2 varchar)
+server gsmpp_server options(location 'gsobs://@obshostname@/@obsbucket@/obscheck/error_data_2.data',
+delimiter '|',
+access_key '@ak@',
+secret_access_key '@sk@'
+)
+log into err_ft_remote_log remote log 'err_ft_remote_log' per node reject limit '100';
+
+DROP FOREIGN TABLE ERROR_LOADING_TABLE_011;
+DROP FOREIGN TABLE error_data_1;
+DROP FOREIGN TABLE error_data_1_1;
+DROP TABLE LOADING_TABLE_000;
+DROP TABLE data_1_2;
+DROP TABLE data_1_1;
+DROP TABLE LOADING_TABLE_011;
+\! chmod +x ./s3bin/s3
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/output1/ address=@obshostname@ ak=@ak@ sk=@sk@
+create table test_1(col1 int,col2 int)
+distribute by hash(col1);
+insert into test_1 values(1,2);
+insert into test_1 values(1,2);
+--test default format
+create foreign table obs_test_1
+(col1 int,col2 int)
+SERVER gsmpp_server
+options(
+location 'gsobs://@obshostname@/@obsbucket@/obscheck/output1/'
+,delimiter ',',
+access_key '@ak@',
+secret_access_key '@sk@',
+encrypt 'off')
+write only;
+insert into obs_test_1 select * from test_1;
+--will failed insert twice
+insert into obs_test_1 select * from test_1;
+create foreign table obs_test_1read
+(col1 int,col2 int)
+SERVER gsmpp_server
+options(
+location 'gsobs://@obshostname@/@obsbucket@/obscheck/output1/',
+delimiter ',',
+format 'text',
+access_key '@ak@',
+secret_access_key '@sk@',
+encrypt 'off');
+create table test_2(col1 int,col2 int)
+distribute by hash(col1);
+insert into test_2 select * from obs_test_1read;
+select count(*) from (select * from test_1 minus all select * from test_2);
+-- csv format
+create table test_2csv(col1 int,col2 int)
+distribute by hash(col1);
+create foreign table obs_test_2read
+(col1 int,col2 int)
+SERVER gsmpp_server
+options(
+location 'gsobs://@obshostname@/@obsbucket@/obscheck/output1/',
+delimiter ',',
+format 'csv',
+access_key '@ak@',
+secret_access_key '@sk@',
+encrypt 'off');
+insert into test_2csv select * from obs_test_2read;
+select count(*) from (select * from test_2csv minus all select * from test_1);
+-- fix format
+create foreign table obs_test_4read
+(col1 int,col2 int)
+SERVER gsmpp_server
+options(
+location 'gsobs://@obshostname@/@obsbucket@/obscheck/output1/',
+delimiter ',',
+format 'fixed',
+access_key '@ak@',
+secret_access_key '@sk@',
+encrypt 'off');
+-- unkown format
+create foreign table obs_test_3read
+(col1 int,col2 int)
+SERVER gsmpp_server
+options(
+location 'gsobs://@obshostname@/@obsbucket@/obscheck/output1/',
+delimiter ',',
+format 'xxx',
+access_key '@ak@',
+secret_access_key '@sk@',
+encrypt 'off');
+drop table test_2;
+drop table test_2csv;
+drop foreign table obs_test_2read;
+drop foreign table obs_test_1read;
+drop table test_1;
+drop foreign table obs_test_1;

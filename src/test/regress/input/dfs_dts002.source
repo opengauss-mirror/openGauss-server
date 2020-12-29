@@ -1,0 +1,917 @@
+set enable_global_stats = true;
+--SQLONHADOOP-23
+--test rumtime predicate for dfs
+create schema dfs;
+set current_schema = dfs;
+drop table if exists sales;
+create   table sales(s_id int, b int1, c int2, d int8, e float4, f float8, option1 varchar(10), option2 clob, option3 bpchar(10), time2 timestamp,  customer_name text,expense int,item text) tablespace hdfs_ts;
+set cstore_insert_mode = main;
+insert into sales values(1, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','zhangsan', 20 , 'book'     );
+insert into sales values(2, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54','ngyi', 100, 'photo'    );
+insert into sales values(3, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'lun', 43 , 'sigurates');
+insert into sales values(4, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'ojian', 25 , 'food'     );
+
+drop table if exists customer;
+create   table customer(id int, b int1, c int2, d int8, e float4, f float8, option1 varchar(10), option2 clob, option3 bpchar(10), time2 timestamp, customer_name text,age int,job text) tablespace hdfs_ts;
+insert into customer values(1, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'zhangsan', 20, 'teacher');
+insert into customer values(2, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'sangyi', 32, 'manong' )  ;
+insert into customer values(3, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'ailun', 15, 'police' )   ;
+insert into customer values(4, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'haojian', 57, 'chef'   ) ;
+insert into customer values(6, 2, 3, 4, 5, 6, 'option1', 'option2', 'options3', '2004-10-19 10:23:54', 'haojian', 57, 'chef'   ) ;
+
+explain (verbose on, costs off, nodes off) select * from sales where customer_name =(select customer_name from customer where job='teacher');
+select * from sales where customer_name =(select customer_name from customer where job='teacher');
+explain (verbose on, costs off, nodes off) select * from sales where s_id =(select id from customer where id=1);
+select * from sales where s_id =(select id from customer where id=1);
+
+--add llt
+select * from sales where b =(select b from customer where job='teacher') order by 1, 2, 3 limit 1;
+select * from sales where c =(select c from customer where job='teacher') order by 1, 2, 3 limit 1;
+select * from sales where d =(select d from customer where job='teacher') order by 1, 2, 3 limit 1;
+select * from sales where e =(select e from customer where job='teacher') order by 1, 2, 3 limit 1;
+select * from sales where f =(select f from customer where job='teacher') order by 1, 2, 3 limit 1;
+select * from sales where option1 =(select option1 from customer where job='teacher') order by 1, 2, 3 limit 1;
+select * from sales where option2 =(select option2 from customer where job='teacher') order by 1, 2, 3 limit 1;
+select * from sales where option3 =(select option3 from customer where job='teacher') order by 1, 2, 3 limit 1;
+select * from sales where time2 =(select time2 from customer where job='teacher') order by 1, 2, 3 limit 1;
+create   table test_delta_table(id int) tablespace hdfs_ts;
+CREATE OR REPLACE FUNCTION delta_table()
+RETURNS TABLE (rowcount bigint) AS
+$$
+declare tblname text;
+BEGIN
+select 'select count(*) from cstore.pg_dfsdesc_'||a.oid into tblname from pg_class a where a.relname='test_delta_table';
+
+RETURN QUERY execute tblname;
+END;
+$$ LANGUAGE plpgsql;
+select delta_table();
+drop table test_delta_table;
+
+--test rumtime predicate on hdfs foreign table
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create schema hdfs;
+set current_schema=hdfs;
+create foreign table sales(s_id int, b int1, c int2, d int8, e float4, f float8, option1 varchar(10), option2 clob, option3 bpchar(10), time2 timestamp,customer_name text,expense int,item text)server hdfs_server options(format 'orc',foldername '/@hdfsstoreplus@/dfs_init_004/tablespace_secondary/regression/dfs.sales')distribute by roundrobin;
+create foreign table customer(id int, b int1, c int2, d int8, e float4, f float8, option1 varchar(10), option2 clob, option3 bpchar(10), time2 timestamp,customer_name text,age int,job text)server hdfs_server options(format 'orc',foldername '/@hdfsstoreplus@/dfs_init_004/tablespace_secondary/regression/dfs.customer')distribute by roundrobin;
+analyze sales;
+analyze customer;
+
+explain (verbose on, costs off, nodes off) select * from sales where customer_name =(select customer_name from customer where job='teacher');
+select * from sales where customer_name =(select customer_name from customer where job='teacher');
+explain (verbose on, costs off, nodes off) select * from sales where s_id =(select id from customer where id=1);
+select * from sales where s_id =(select id from customer where id=1);
+
+drop foreign table if exists sales;
+drop foreign table if exists customer;
+
+set current_schema = dfs;
+
+drop table col_subplan;
+create table col_subplan(a int, b char(2)) with(orientation=column) distribute by replication;
+insert into col_subplan values(1,'12');
+insert into col_subplan values(2,NULL);
+create table dfs_subplan(a int, b char(2)) tablespace hdfs_ts;
+set cstore_insert_mode='main';
+insert into dfs_subplan values(3,NULL);
+insert into dfs_subplan values(3,'45');
+insert into dfs_subplan values(3,'12');
+select * from dfs_subplan where b = (select b from col_subplan where a = 1);
+select * from dfs_subplan where b = (select b from col_subplan where a = 2);
+drop table dfs_subplan;
+drop table col_subplan;
+reset cstore_insert_mode;
+
+drop table if exists dts_002_warehouse;
+create table dts_002_warehouse ( w_warehouse_sk integer not null, w_warehouse_id char(16) not null, w_warehouse_name varchar(20) , w_warehouse_sq_ft integer , w_street_number char(10) , w_street_name varchar(60) , w_street_type char(15) , w_suite_number char(10) , w_city varchar(60) , w_county varchar(30) , w_state char(2) , w_zip char(10) , w_country varchar(20) , w_gmt_offset decimal(5,2) )tablespace hdfs_ts;
+explain (verbose on, costs off, nodes off) select  max(abs((select w_gmt_offset  from dts_002_warehouse where w_warehouse_name = 'cc')))  from dts_002_warehouse order by (select w_gmt_offset  from dts_002_warehouse where w_warehouse_name = 'cc');
+set cstore_insert_mode = main;
+insert into dts_002_warehouse values(1, 'bb', 'cc', 4, '55', '66', '77', '88', '99', '1010', '11', '12', '13', 14.1);
+select  max(abs((select w_gmt_offset  from dts_002_warehouse where w_warehouse_name = 'cc')))  from dts_002_warehouse order by (select w_gmt_offset  from dts_002_warehouse where w_warehouse_name = 'cc');
+insert into dts_002_warehouse values(1, 'bb', 'cc', 4, '55', '66', '77', '88', '99', '1010', '11', '12', '13', 14.1);
+-- throw error
+select  max(abs((select w_gmt_offset  from dts_002_warehouse where w_warehouse_name = 'cc')))  from dts_002_warehouse order by (select w_gmt_offset  from dts_002_warehouse where w_warehouse_name = 'cc');
+
+delete from dts_002_warehouse;
+insert into dts_002_warehouse values(1, 'bb', 'cc', 4, '55', '66', '77', '88', '99', '1010', '11', '12', '13', 14.1);
+select  max(abs((select w_gmt_offset  from dts_002_warehouse where w_warehouse_name = 'cc')))  from dts_002_warehouse order by (select w_gmt_offset  from dts_002_warehouse where w_warehouse_name = 'cc');
+set cstore_insert_mode = delta;
+insert into dts_002_warehouse values(1, 'bb', 'cc', 4, '55', '66', '77', '88', '99', '1010', '11', '12', '13', 14.1);
+select  max(abs((select w_gmt_offset  from dts_002_warehouse where w_warehouse_name = 'cc')))  from dts_002_warehouse order by (select w_gmt_offset  from dts_002_warehouse where w_warehouse_name = 'cc');
+explain (verbose on, costs off, nodes off) select max(abs(5.00)) from dts_002_warehouse;
+select max(abs(5.00)) from dts_002_warehouse;
+drop table dts_002_warehouse;
+drop table if exists dfs_3;
+drop table if exists dfs_4;
+create table dfs_3( a int, b decimal(7,2)) tablespace hdfs_ts;
+create table dfs_4( a int, b decimal(7,2)) tablespace hdfs_ts;
+
+set cstore_insert_mode=main;
+insert into dfs_3 values(12, 3.4);
+insert into dfs_4 values(12, 3.4);
+
+explain (verbose on, costs off, nodes off) select * from (select 
+cast(0 as decimal(7,2)) as return_amt
+from dfs_3
+union all
+select 
+b as return_amt
+from dfs_3) order by 1 limit 5;
+
+select * from (select 
+cast(0 as decimal(7,2)) as return_amt
+from dfs_3
+union all
+select 
+b as return_amt
+from dfs_3) order by 1 limit 5;
+drop table if exists dfs_3;
+drop table if exists dfs_4;
+create table dfs_dts002_dfs_001(a int, b int) tablespace hdfs_ts;
+\dt+ dfs_dts002_dfs_001
+insert into dfs_dts002_dfs_001 values(12, 13);
+\dt+ dfs_dts002_dfs_001
+set cstore_insert_mode=main;
+insert into dfs_dts002_dfs_001 values(generate_series(1,100), generate_series(1,100));
+\dt+ dfs_dts002_dfs_001
+\! @abs_bindir@/gsql -d regression -p @dn1port@ -c '\dt+ dfs.dfs_dts002_dfs_001'
+drop table dfs_dts002_dfs_001;
+drop table if exists sales;
+drop table if exists customer;
+\! rm -rf @abs_srcdir@/tmp_check/dfs_init_004/hdfs_ts_test_size
+drop tablespace if exists hdfs_ts_test_size;
+create  tablespace hdfs_ts_test_size location '@abs_srcdir@/tmp_check/dfs_init_004/hdfs_ts_test_size' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/hdfs_ts_test_size');
+  
+create database test_size_db1;
+\c test_size_db1
+SELECT PG_SIZE_pretty(pg_database_size('test_size_db1'));
+SELECT PG_SIZE_pretty(pg_tablespace_size('hdfs_ts_test_size'));
+drop table if exists row_001;
+create table row_001(a int, b int);
+insert into row_001 values (generate_series(0, 1000), generate_series(0, 1000));
+insert into row_001 select * from row_001;
+insert into row_001 select * from row_001;
+insert into row_001 select * from row_001;
+insert into row_001 select * from row_001;
+insert into row_001 select * from row_001;
+insert into row_001 select * from row_001;
+insert into row_001 select * from row_001;
+insert into row_001 select * from row_001;
+insert into row_001 select * from row_001;
+\dt+ row_001
+
+SELECT PG_SIZE_pretty(pg_database_size('test_size_db1'));
+SELECT PG_SIZE_pretty(pg_tablespace_size('hdfs_ts_test_size'));	
+ set cstore_insert_mode=main;
+ drop table if exists dfs_test_size;
+ create table dfs_test_size(a int, b int) tablespace hdfs_ts_test_size;
+ insert into dfs_test_size select * from row_001;
+ insert into dfs_test_size select * from dfs_test_size;
+ insert into dfs_test_size select * from dfs_test_size;
+ insert into dfs_test_size select * from dfs_test_size;
+ \dt+ dfs_test_size
+SELECT PG_SIZE_pretty(pg_database_size('test_size_db1'));
+SELECT PG_SIZE_pretty(pg_tablespace_size('hdfs_ts_test_size'));	
+alter tablespace hdfs_ts_test_size resize maxsize '1M';
+insert into dfs_test_size select * from dfs_test_size;
+set cstore_insert_mode = delta;
+insert into dfs_test_size select * from row_001;
+
+\c regression
+drop database test_size_db1;
+drop tablespace hdfs_ts_test_size;
+
+--test partition DFS table
+\! rm -rf @abs_srcdir@/tmp_check/hdfs_ts_part
+drop tablespace if exists hdfs_ts_part;
+create  tablespace hdfs_ts_part location '@abs_srcdir@/tmp_check/hdfs_ts_part' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/hdfs_ts_part');
+
+create table dfs_dts_001_p( a int, b int) tablespace hdfs_ts_part partition by values(b);
+
+set cstore_insert_mode=main;
+insert into dfs_dts_001_p values(12,12);
+drop table dfs_dts_001_p;
+
+drop table if exists demographics cascade;
+create table demographics
+(
+    zipcode char(5) not null ,
+    populationsf3 double precision null 
+)tablespace hdfs_ts_part distribute by hash(zipcode);
+
+set cstore_insert_mode=main;
+
+insert into demographics values ('c', null);
+insert into demographics values ('d', 3.2 );
+
+select (select dem_1.populationsf3  
+from demographics dem_1  
+order by dem_1.populationsf3 
+desc limit 1) col1,dem.populationsf3  
+from demographics dem 
+where dem.populationsf3>col1;
+drop table if exists demographics cascade;
+
+--
+drop table HDFS_ADD_DROP_COLUMN_TABLE_022;
+CREATE TABLE HDFS_ADD_DROP_COLUMN_TABLE_022
+(
+sn int,
+c_tinyint tinyint,
+c_smallint smallint,
+c_int integer,
+c_bigint bigint,
+c_numeric numeric,
+c_decimal decimal,
+c_real real,
+c_float4 float4,
+c_float8 float8,
+c_double1 double precision,
+c_double2 binary_double,
+c_char1 char(100),
+c_char2 character(100),
+c_char3 nchar(100),
+c_char4 varchar(100),
+c_char5 character varying(100),
+c_char6 nvarchar2(100),
+c_char7 varchar2(100),
+c_clob clob,
+c_text text,
+c_date date,
+c_time1 time with time zone,
+c_time2 time without time zone,
+c_timestamp1 timestamp with time zone,
+c_timestamp2 timestamp without time zone,
+c_smalldatetime smalldatetime,
+c_interval interval,
+c_boolean boolean,
+c_oid oid,
+c_money money
+)
+WITH(orientation = 'orc',version = 0.12) TABLESPACE hdfs_ts DISTRIBUTE BY HASH(sn);
+CREATE INDEX index_drop_022 ON HDFS_ADD_DROP_COLUMN_TABLE_022(sn,c_tinyint);
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_tinyint;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_smallint;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_int;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_bigint;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_numeric;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_decimal;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_real;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_float4;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_float8;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_double1;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_double2;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_char1;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_char2;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_char3;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_char4;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_char5;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_char6;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_char7;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_clob;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_text;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_date;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_time1;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_time2;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_timestamp1;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_timestamp2;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_smalldatetime;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_interval;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_boolean;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_oid;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 DROP COLUMN c_money;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 ADD COLUMN c_char1 char(100) null;
+ALTER TABLE HDFS_ADD_DROP_COLUMN_TABLE_022 ADD COLUMN c_date date null;
+SET cstore_insert_mode=auto;
+COPY HDFS_ADD_DROP_COLUMN_TABLE_022 FROM '@abs_srcdir@/data/HDFS_ADD_DROP_COLUMN_TABLE_022.txt' DELIMITER '|';
+drop table HDFS_ADD_DROP_COLUMN_TABLE_022;
+--
+drop table if exists dfs_vacuum;
+create table dfs_vacuum ( a int, b int, c int) tablespace hdfs_ts;
+set cstore_insert_mode=main;
+insert into dfs_vacuum values(1, 2, 3);
+set cstore_insert_mode=delta;
+insert into dfs_vacuum values(1, 2, 3);
+alter table dfs_vacuum drop column b;
+vacuum full dfs_vacuum;
+vacuum deltamerge dfs_vacuum;
+select * from dfs_vacuum;
+drop table dfs_vacuum;
+
+drop table if exists dfs_partial_tbl cascade;
+create table dfs_partial_tbl( a int, b  int, c int ) tablespace hdfs_ts; 
+alter table dfs_partial_tbl add partial cluster key ( c, b);
+\d+ dfs_partial_tbl
+alter table dfs_partial_tbl drop column b;
+\d+ dfs_partial_tbl
+alter table dfs_partial_tbl add partial cluster key ( a );
+\d+ dfs_partial_tbl
+
+drop table if exists dfs_partial_tbl cascade;
+
+show server_encoding;
+show client_encoding;
+drop table if exists customer_demographics_dts;
+create table customer_demographics_dts
+(
+    cd_demo_sk                integer               not null,
+    cd_gender                 char(1)           default 'a'  ,
+    cd_marital_status         char(1)                       ,
+    cd_education_status       char(20) default 'ajdosd' ,
+    cd_purchase_estimate      integer                       ,
+    cd_credit_rating          char(10)                      ,
+    cd_dep_count              integer                       ,
+    cd_dep_employed_count     integer          default '' ,
+    cd_dep_college_count      integer                      
+)  with(compression='no',orientation=orc,version=0.12) tablespace hdfs_ts
+distribute by hash(cd_demo_sk);
+
+set cstore_insert_mode=main;
+--insert into customer_demographics_dts values(1,'M','M','Primary',500,'Good',0,0,0);
+copy customer_demographics_dts from '@abs_srcdir@/data/customer_demographics_2.txt' DELIMITER as ',' NULL as '' ; 
+select distinct cd_gender from customer_demographics_dts where  cd_gender ='M';
+
+select distinct cd_gender from customer_demographics_dts where  cd_gender <'M' order by 1;
+drop table if exists customer_demographics_dts;
+
+drop table if exists dfs_001;
+create table dfs_001( a int, b int, c int) tablespace hdfs_ts partition by values(b, c);
+set cstore_insert_mode=main;
+insert into dfs_001 values(1, 2);
+insert into dfs_001 values(1, 3);  
+  
+drop foreign table if exists f_001;
+create foreign table f_001( a int, b int, c int)
+server hdfs_server
+OPTIONS (format 'orc', foldername '/@hdfsstoreplus@/dfs_init_004/tablespace_secondary/regression/public.dfs_001')
+distribute by replication
+partition by (b, c) AUTOMAPPED;
+
+explain (verbose, costs off, nodes off) select * from f_001 where a=2;
+explain (verbose, costs off, nodes off) select * from f_001 where b=2;
+explain (verbose, costs off, nodes off) select * from f_001 where b!=4;
+explain (verbose, costs off, nodes off) select * from f_001 where b=2 and c=1;
+explain (verbose, costs off, nodes off) select * from f_001 where b!=4 and c=1;
+select (a+b),b::bigint as cc from f_001 union all select (b-a),a::bigint as dd from f_001 order by 1,2;
+
+drop table dfs_001;
+drop foreign table f_001;
+
+--encoding check
+create table hanzi1(a int, b text) tablespace hdfs_ts;
+set cstore_insert_mode='main';
+insert into hanzi1 values(1, '中国\0\x\5\45');
+create foreign table hanzi2( a int, b text)
+server hdfs_server
+OPTIONS (format 'orc', foldername '/@hdfsstoreplus@/dfs_init_004/tablespace_secondary/regression/public.hanzi1', encoding 'GBK')
+distribute by roundrobin;
+select * from hanzi2;
+create foreign table hanzi3( a int, b text)
+server hdfs_server
+OPTIONS (format 'orc', foldername '/@hdfsstoreplus@/dfs_init_004/tablespace_secondary/regression/public.hanzi1', encoding 'GBK', checkencoding 'high')
+distribute by roundrobin;
+select * from hanzi3;
+drop table hanzi1;
+drop foreign table hanzi2;
+drop foreign table hanzi3;
+
+set cstore_insert_mode=main;
+drop table if exists associate_benefit_expense cascade;
+create table associate_benefit_expense
+(
+    period_end_dt date not null ,
+    associate_expns_type_cd varchar(50) not null ,
+    benefit_hours_qty decimal(38,11)
+) tablespace hdfs_ts distribute by hash(period_end_dt,benefit_hours_qty)
+partition by values (associate_expns_type_cd );
+
+INSERT INTO ASSOCIATE_BENEFIT_EXPENSE VALUES (DATE '1973-01-01', 'B', NULL);
+INSERT INTO ASSOCIATE_BENEFIT_EXPENSE VALUES (DATE '1976-01-01', 'C', 2.0 );
+INSERT INTO ASSOCIATE_BENEFIT_EXPENSE VALUES (DATE '1979-01-01', 'D', 3.0 );
+INSERT INTO ASSOCIATE_BENEFIT_EXPENSE VALUES (DATE '1982-01-01', 'E', 4.0 );
+INSERT INTO ASSOCIATE_BENEFIT_EXPENSE VALUES (DATE '1985-01-01', 'F', 5.0 );
+INSERT INTO ASSOCIATE_BENEFIT_EXPENSE VALUES (DATE '1988-01-01', 'F', NULL);
+INSERT INTO ASSOCIATE_BENEFIT_EXPENSE VALUES (DATE '1983-01-03', 'I', 4.0 );
+
+SELECT abe.associate_expns_type_cd,abe.benefit_hours_qty
+FROM associate_benefit_expense abe
+WHERE abe.benefit_hours_qty >= 2.0
+AND abe.benefit_hours_qty <= 6.0
+order by 1,2;
+
+create index i_associate_benefit_expense on associate_benefit_expense(period_end_dt,benefit_hours_qty);
+set enable_seqscan=off;
+
+SELECT abe.associate_expns_type_cd,abe.benefit_hours_qty
+FROM associate_benefit_expense abe
+WHERE abe.benefit_hours_qty >= 2.0
+AND abe.benefit_hours_qty <= 6.0
+order by 1,2;
+drop table if exists associate_benefit_expense cascade;
+
+--enable_hadoop_env = on
+set enable_hadoop_env = on;
+set max_query_retry_times = 0;
+drop table if exists row_001;
+create table row_001( a int, b int);
+
+drop table if exists col_001;
+create table col_001( a int, b int);
+
+
+drop table if exists row_001;
+create temp table row_001( a int, b int);
+
+drop table if exists col_001;
+create temp table col_001( a int, b int);
+
+
+drop table if exists row_001;
+create unlogged table row_001( a int, b int);
+
+drop table if exists col_001;
+create unlogged table col_001( a int, b int);
+
+create index col_001_index on col_001(a) tablespace hdfs_ts;
+drop table if exists col_001;
+drop table if exists row_001;
+set enable_hadoop_env = off;
+drop table web_returns_less;
+
+drop table if exists t1;
+
+create table web_returns_less
+(
+        
+        wr_fee                  decimal(39,29) ,
+        wr_refunded_cash        decimal(19,18) 
+ ) tablespace hdfs_ts distribute by hash (wr_refunded_cash,wr_fee);
+
+create table t1 as select * from web_returns_less;
+
+analyze web_returns_less;
+
+
+alter table web_returns_less     add column d_current_week1 numeric(18,2);
+
+analyze web_returns_less;
+
+alter table web_returns_less     drop  column d_current_week1 ;
+
+analyze web_returns_less;
+
+explain (verbose, costs off, nodes off) insert into  web_returns_less    select t1.wr_fee, t1.wr_refunded_cash from t1;
+insert into  web_returns_less    select t1.wr_fee, t1.wr_refunded_cash from t1;
+
+drop table web_returns_less;
+
+drop table if exists t1;
+
+create table empty_part_table(a int) tablespace hdfs_ts_part partition by values(a);
+set cstore_insert_mode='main';
+insert into empty_part_table values(1);
+analyze empty_part_table;
+set enable_global_stats=off;
+analyze empty_part_table;
+drop table empty_part_table;
+reset cstore_insert_mode;
+
+create schema DTS2017052409444;
+set current_schema=DTS2017052409444;
+set cstore_insert_mode = main;
+create table household_demographics_h
+(
+hd_demo_sk                integer               not null,
+hd_income_band_sk         integer                       ,
+hd_dep_count              integer
+)
+with (compression='no',orientation='orc',version=0.12)
+tablespace hdfs_ts_part;
+insert into household_demographics_h values (5, 6, 7);
+create table call_center_h
+(
+cc_call_center_id         integer               not null,
+cc_mkt_id                 integer
+)with (compression='no',orientation='orc',version=0.12) 
+tablespace hdfs_ts_part
+distribute by hash (cc_call_center_id);
+insert into call_center_h values (1, 2);
+create foreign table household_demographics_f
+(
+hd_demo_sk                integer               not null,
+hd_income_band_sk         integer                       ,
+hd_dep_count              integer
+)
+server hdfs_server
+OPTIONS (format 'orc', foldername '/@hdfsstoreplus@/hdfs_ts_part/tablespace_secondary/regression/dts2017052409444.household_demographics_h')
+distribute by roundrobin;
+create foreign table call_center_f
+(
+cc_call_center_id         integer               not null,
+cc_mkt_id                 integer
+)
+server hdfs_server
+OPTIONS (format 'orc', foldername '/@hdfsstoreplus@/hdfs_ts_part/tablespace_secondary/regression/dts2017052409444.call_center_h')
+distribute by roundrobin;
+CREATE OR REPLACE PROCEDURE test( id OUT numeric) 
+AS
+BEGIN 
+SELECT count(hd_dep_count) FROM household_demographics_f
+GROUP BY hd_income_band_sk >= SOME (SELECT cc_mkt_id FROM call_center_f) limit 1
+INTO id;
+END;
+/
+call test(1);
+drop foreign table household_demographics_f;
+drop foreign table call_center_f;
+drop table household_demographics_h cascade;
+drop table call_center_h cascade;
+drop procedure test;
+drop schema DTS2017052409444 cascade;
+set current_schema = dfs;
+
+create schema DTS2017072002456;
+set current_schema=DTS2017072002456;
+set cstore_insert_mode = main;
+create table item_inventory_hdfs
+(
+location_id number(15,0),
+item_inv_dt date,
+item_id number(38,5)
+)
+with (compression='no',orientation='orc',version=0.12)
+tablespace hdfs_ts_part
+distribute by hash(location_id);
+insert into item_inventory_hdfs values ( 8, date '1970-01-01',  20.12);
+insert into item_inventory_hdfs values ( 1, date '1973-01-01',  1.3);
+insert into item_inventory_hdfs values ( 2, date '1976-01-01',  2.23);
+insert into item_inventory_hdfs values ( 3, date '1979-01-01',  3.33);
+insert into item_inventory_hdfs values ( 4, date '1982-01-01',  4.98);
+insert into item_inventory_hdfs values ( 5, date '1985-01-01',  5.01);
+insert into item_inventory_hdfs values(null);
+create foreign table item_inventory
+(
+location_id number(15,0),
+item_inv_dt date,
+item_id number(38,5)
+)
+SERVER hdfs_server
+OPTIONS
+(
+FORMAT 'orc',
+FOLDERNAME '/@hdfsstoreplus@/hdfs_ts_part/tablespace_secondary/regression/dts2017072002456.item_inventory_hdfs'
+)
+DISTRIBUTE BY roundrobin;
+-- test NIL distribute key
+select tt.location_id, sum(cc)
+from (select location_id b, count(*) as cc
+          from item_inventory
+         group by b
+        union all
+        select location_id b, item_id::bigint as cc
+          from item_inventory) s1,
+       item_inventory as tt
+ where s1.b = tt.location_id
+ group by tt.location_id
+ order by 1, 2;
+
+drop schema DTS2017072002456 cascade;
+set current_schema = dfs;
+
+drop tablespace hdfs_ts_part;
+\! rm -rf @abs_srcdir@/tmp_check/hdfs_ts_part
+
+\! rm -rf @abs_srcdir@/tmp_check/hdfs_ts_vacuum_test
+drop tablespace if exists hdfs_ts_vacuum_test;
+create tablespace hdfs_ts_vacuum_test location '@abs_srcdir@/tmp_check//hdfs_ts_vacuum_test///' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@//',storepath='/@hdfsstoreplus@///hdfs_ts_vacuum_test//');
+
+create table test_rollback_vacuum(a int,b int) tablespace hdfs_ts_vacuum_test distribute by hash(a);
+START TRANSACTION;
+set cstore_insert_mode to main;
+insert into test_rollback_vacuum values(1,2);
+ROLLBACK;
+vacuum full test_rollback_vacuum;
+
+create table test_rollback_vacuum_part(a int,b int) tablespace hdfs_ts_vacuum_test distribute by hash(a)
+PARTITION BY VALUES (b);
+START TRANSACTION;
+set cstore_insert_mode to main;
+insert into test_rollback_vacuum_part values(1,2);
+insert into test_rollback_vacuum_part values(1,0);
+insert into test_rollback_vacuum_part values(1,1);
+ROLLBACK;
+vacuum full test_rollback_vacuum_part;
+
+drop table test_rollback_vacuum;
+drop table test_rollback_vacuum_part;
+drop tablespace if exists hdfs_ts_vacuum_test;
+\! rm -rf @abs_srcdir@/tmp_check/hdfs_ts_vacuum_test
+
+create table multiDropColumn1(c1 int, c2 int, c3 int, c4 int, c5 int, c6 int, c7 int, c8 int, c9 int, c10 int, c11 int, c12 int, c13 int, c14 int, c15 int, c16 int, c17 int, c18 int) tablespace hdfs_ts;
+set cstore_insert_mode='main';
+insert into multiDropColumn1 values(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18);
+alter table multiDropColumn1 drop column c8;
+alter table multiDropColumn1 drop column c9;
+alter table multiDropColumn1 drop column c10;
+alter table multiDropColumn1 drop column c11;
+alter table multiDropColumn1 drop column c12;
+alter table multiDropColumn1 drop column c13;
+alter table multiDropColumn1 drop column c14;
+alter table multiDropColumn1 drop column c15;
+alter table multiDropColumn1 drop column c16;
+alter table multiDropColumn1 drop column c17;
+insert into multiDropColumn1 values(11,12,13,14,15,16,17,18);
+select * from multiDropColumn1 order by 1;
+drop table multiDropColumn1;
+reset cstore_insert_mode;
+
+-- DTS exception
+create table exception_test1(a int, b varchar) tablespace hdfs_ts;
+set cstore_insert_mode='main';
+create table exception_row1(a int, b varchar);
+insert into exception_row1 values(1,'123');
+insert into exception_row1 values(1,'345');
+insert into exception_row1 values(1,'456');
+insert into exception_test1 select * from exception_row1;
+CREATE OR REPLACE FUNCTION get_bir(p_a character varying)
+RETURNS numeric
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$ DECLARE  i_date date;
+begin
+select 1/0;
+exception
+when others then
+return 1;
+end $$;
+select get_bir(b) from exception_test1;
+drop function get_bir;
+drop table exception_row1;
+drop table exception_test1;
+
+create table hdfs_pro_exp_setup_001(
+c_smallint smallint not null,
+c_double_precision double precision,
+c_time_without_time_zone time without time zone null,
+c_time_with_time_zone time with time zone,
+c_integer integer default 23423,
+c_bigint bigint default 923423432,
+c_decimal decimal(19) default 923423423,
+c_real real,
+c_numeric numeric(18,12) null,
+c_varchar varchar(19),
+c_char char(57) null,
+c_timestamp_with_timezone timestamp with time zone,
+c_char2 char default '0',
+c_text text null,
+c_varchar2 varchar2(20),
+c_timestamp_without_timezone timestamp without time zone,
+c_date date,
+c_varchar22 varchar2(11621),
+c_numeric2 numeric null,
+c_bpchar bpchar(10) not null default 'zzzzzzzzzz',
+c_tinyint tinyint not null default 127,
+c_interval interval,
+c_smalldatetime smalldatetime,
+c_tsvector text)
+with(orientation='orc',version = 0.12)
+tablespace hdfs_ts
+distribute by hash(c_smallint,c_integer,c_char);
+
+create or replace procedure hdfs_pro_exp_004(out count_num int) as
+begin
+  delete from hdfs_pro_exp_setup_001;
+  insert into hdfs_pro_exp_setup_001 values(3000,3321.123,'2003-10-10 00:00:00','09:52:04.954925+08',default,default,default,NULL,32.125,'NULL','NULL','2015-10-    10',default,'fafdsafasf','fsdfsassss','2012-2-28','2012-2-28','2012-2-28',32.1545,default,default,'9 days','2012-6-6','fdsfsa ffff rrrr bfgf@fd');
+  update hdfs_pro_exp_setup_001 set c_tinyint=null where c_smallint = 3000;
+exception
+  when INVALID_COLUMN_REFERENCE then
+    select count(*) from hdfs_pro_exp_setup_001 into count_num where c_smallint=3;
+    return count_num;
+  when NOT_NULL_VIOLATION then
+    raise WARNING 'column "c_tinyint" violates not-null constraint';
+    delete from hdfs_pro_exp_setup_001;
+    insert into hdfs_pro_exp_setup_001 values(3000,3321.123,'2003-10-10 00:00:00','09:52:04.954925+08',default,default,default,NULL,32.125,'NULL','NULL','2015-1    0-10',default,'fafdsafasf','fsdfsassss','2012-2-28','2012-2-28','2012-2-28',32.1545,default,default,'9 days','2012-6-6','fdsfsa ffff rrrr bfgf@fd');
+    update hdfs_pro_exp_setup_001 set c_tinyint=88 where c_smallint = 3000;
+    select count(*) from hdfs_pro_exp_setup_001 into count_num where c_tinyint=88;
+end;
+/
+create or replace procedure hdfs_proexp_call_proexp_7() as
+declare
+count_num int;
+begin
+  insert into hdfs_pro_exp_setup_001 values(3000,3321.123,'2003-10-10 00:00:00','09:52:04.954925+08',default,default,default,NULL,32.125,'NULL','NULL','2015-10-10',default,'fafdsafasf',    'fsdfsassss','2012-2-28','2012-2-28','2012-2-28',32.1545,default,default,'9 days','2012-6-6','fdsfsa ffff rrrr bfgf@fd');
+  update hdfs_pro_exp_setup_001 set c_tinyint=null where c_smallint = 3000;
+  hdfs_pro_exp_004(count_num);
+exception
+  when OTHERS then
+    raise EXCEPTION 'Error Occurs!';
+end;
+/
+
+call hdfs_proexp_call_proexp_7();
+
+drop procedure hdfs_proexp_call_proexp_7;
+drop procedure hdfs_pro_exp_004;
+drop table hdfs_pro_exp_setup_001;
+reset cstore_insert_mode;
+
+create table compact1(a int, b int) tablespace hdfs_ts;
+set cstore_insert_mode='main';
+insert into compact1 values(1,1);
+insert into compact1 values(2,2);
+vacuum full compact compact1;
+insert into compact1 values(3,3);
+delete from compact1 where a=2;
+vacuum full compact compact1;
+insert into compact1 values(4,4);
+select * from compact1 order by 1,2;
+drop table compact1;
+reset cstore_insert_mode;
+
+-- llt add
+set cstore_insert_mode=main;
+set enable_seqscan=off;
+create table index_llt_1(a int, b text,c int) with(orientation=column);
+create index on index_llt_1 using btree(a,b);
+insert into index_llt_1 values(1,'123', 2);
+select a,b from index_llt_1;
+create table col_replica_1(a int) with(orientation=column) distribute by replication;
+insert into col_replica_1 values(1);
+set enable_nestloop=true;
+set enable_mergejoin=false;
+set enable_hashjoin=false;
+analyze col_replica_1;
+explain (costs off, nodes off) 
+select count(*) from col_replica_1,index_llt_1 where index_llt_1.a = col_replica_1.a;
+select count(*) from col_replica_1,index_llt_1 where index_llt_1.a = col_replica_1.a;
+explain (costs off, nodes off) 
+select index_llt_1.c from col_replica_1,index_llt_1 where index_llt_1.a = col_replica_1.a;
+select index_llt_1.c from col_replica_1,index_llt_1 where index_llt_1.a = col_replica_1.a;
+drop table index_llt_1;
+drop table col_replica_1;
+reset enable_nestloop;
+reset enable_mergejoin;
+reset enable_hashjoin;
+
+create table index_llt_2(a int, b int) with(orientation=column) partition by range(b)(partition p1 values less than(5), partition p2 values less than(10));
+create index on index_llt_2 using btree(b) local;
+insert into index_llt_2 values(1,1);
+insert into index_llt_2 values(1,7);
+insert into index_llt_2 values(1,1);
+insert into index_llt_2 values(1,7);
+explain (costs off, nodes off) select * from index_llt_2 where b = (select a from index_llt_2 limit 1);
+select * from index_llt_2 where b = (select a from index_llt_2 limit 1) order by 1,2;
+explain (costs off, nodes off) select b from index_llt_2 where b = (select a from index_llt_2 limit 1);
+select b from index_llt_2 where b = (select a from index_llt_2 limit 1) order by 1;
+drop table index_llt_2;
+
+create table index_llt_3(a int, b int) with(orientation=column);
+create index on index_llt_3 using btree(b);
+insert into index_llt_3 values(1,1);
+insert into index_llt_3 values(1,7);
+insert into index_llt_3 values(1,1);
+insert into index_llt_3 values(1,7);
+explain (costs off, nodes off) select * from index_llt_3 where b = (select a from index_llt_3 limit 1);
+select * from index_llt_3 where b = (select a from index_llt_3 limit 1) order by 1,2;
+explain (costs off, nodes off) select b from index_llt_3 where b = (select a from index_llt_3 limit 1);
+select b from index_llt_3 where b = (select a from index_llt_3 limit 1) order by 1;
+drop table index_llt_3;
+
+create table index_llt_4(a int, b int) tablespace hdfs_ts;
+create index on index_llt_4 using btree(b);
+insert into index_llt_4 values(1,1);
+insert into index_llt_4 values(1,7);
+insert into index_llt_4 values(1,1);
+insert into index_llt_4 values(1,7);
+explain (costs off, nodes off) select * from index_llt_4 where b = (select a from index_llt_4 limit 1);
+select * from index_llt_4 where b = (select a from index_llt_4 limit 1) order by 1,2;
+explain (costs off, nodes off) select b from index_llt_4 where b = (select a from index_llt_4 limit 1);
+select b from index_llt_4 where b = (select a from index_llt_4 limit 1) order by 1;
+drop table index_llt_4;
+
+create table index_llt_5(a int, b int) tablespace hdfs_ts;
+create table index_llt_5_row(a int, b int);
+insert into index_llt_5_row values(10,1),(10,2);
+insert into index_llt_5 select * from index_llt_5_row;
+insert into index_llt_5 values(8,3);
+create index on index_llt_5 using btree(b);
+explain (costs off, nodes off) select * from index_llt_5 where a < 10 and b < 3 order by 1,2;
+select * from index_llt_5 where a < 10 and b < 3 order by 1,2;
+drop table index_llt_5_row;
+drop table index_llt_5;
+
+reset enable_seqscan;
+
+create table bf_llt_1(a int, b int) tablespace hdfs_ts partition by values(b);
+insert into bf_llt_1 values(1, generate_series(1,100));
+create table col_replication_1(a int, b int) with(orientation=column) distribute by replication;
+insert into col_replication_1 values(1,1);
+analyze col_replication_1;
+set enable_nestloop=off;
+set enable_mergejoin=off;
+analyze col_replication_1;
+analyze bf_llt_1;
+explain (costs off, nodes off) select * from bf_llt_1,col_replication_1 where bf_llt_1.b = col_replication_1.b;
+select * from bf_llt_1,col_replication_1 where bf_llt_1.b = col_replication_1.b order by 1,2;
+drop table bf_llt_1;
+drop table col_replication_1;
+reset enable_nestloop;
+reset enable_mergejoin;
+
+--weici xiatui
+create table timestamp2(a int, b timestamp) tablespace hdfs_ts;
+set cstore_insert_mode='main';
+set time zone 'PRC';
+insert into timestamp2 values(1, '20150327');
+insert into timestamp2 values(1, '20150327 00:00:00');
+insert into timestamp2 values(1, '20150327 15:00:00');
+insert into timestamp2 values(1, '20150327 00:00:00+09');
+select * from timestamp2 where b='20150327';
+select * from timestamp2 where b='20150327'::timestamptz;
+select * from timestamp2 where b='20150327 00:00:00'::timestamptz;
+select * from timestamp2 where b='20150327 00:00:00+08'::timestamptz;
+select * from timestamp2 where b='20150327 00:00:00+09'::timestamptz;
+select * from timestamp2 where b='20150327'::date;
+select * from timestamp2 where b='20150327 00:00:00'::date;
+select * from timestamp2 where b='20150327 00:00:00+08'::date;
+select * from timestamp2 where b='20150327 00:00:00+09'::date;
+select * from timestamp2 where b='20150327'::smalldatetime;
+select * from timestamp2 where b='20150327 00:00:00'::smalldatetime;
+select * from timestamp2 where b='20150327 00:00:00+08'::smalldatetime;
+select * from timestamp2 where b='20150327 00:00:00+09'::smalldatetime;
+set enable_hdfs_predicate_pushdown=off;
+select * from timestamp2 where b='20150327';
+select * from timestamp2 where b='20150327'::timestamptz;
+select * from timestamp2 where b='20150327 00:00:00'::timestamptz;
+select * from timestamp2 where b='20150327 00:00:00+08'::timestamptz;
+select * from timestamp2 where b='20150327 00:00:00+09'::timestamptz;
+select * from timestamp2 where b='20150327'::date;
+select * from timestamp2 where b='20150327 00:00:00'::date;
+select * from timestamp2 where b='20150327 00:00:00+08'::date;
+select * from timestamp2 where b='20150327 00:00:00+09'::date;
+select * from timestamp2 where b='20150327'::smalldatetime;
+select * from timestamp2 where b='20150327 00:00:00'::smalldatetime;
+select * from timestamp2 where b='20150327 00:00:00+08'::smalldatetime;
+select * from timestamp2 where b='20150327 00:00:00+09'::smalldatetime;
+reset enable_hdfs_predicate_pushdown;
+drop table timestamp2;
+reset time zone;
+reset cstore_insert_mode;
+
+create table test_hdfs_delta_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (a int, b int) tablespace hdfs_ts;
+insert into test_hdfs_delta_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb values(1,generate_series(1,100));
+analyze test_hdfs_delta_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb;
+analyze test_hdfs_delta_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb;
+analyze;
+analyze;
+drop table test_hdfs_delta_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb;
+
+-- llt add
+reset current_schema;
+create table llt_addition_1(a int, b int) tablespace hdfs_ts;
+set cstore_insert_mode=main;
+set schedule_splits_threshold = 1;
+insert into llt_addition_1 values(1,1);
+insert into llt_addition_1 values(2,2);
+insert into llt_addition_1 values(3,3);
+create foreign table llt_addition_1f( a int, b int)
+server hdfs_server
+OPTIONS (format 'orc', foldername '/@hdfsstoreplus@/dfs_init_004/tablespace_secondary/regression/public.llt_addition_1')
+distribute by roundrobin;
+select * from llt_addition_1f order by 1;
+explain (costs off, nodes off) select * from llt_addition_1f order by 1;
+explain analyze select * from llt_addition_1f order by 1;
+set query_dop=0;
+explain (costs off, nodes off) select * from llt_addition_1f;
+reset schedule_splits_threshold;
+reset cstore_insert_mode;
+reset query_dop;
+drop foreign table llt_addition_1f;
+drop table llt_addition_1;
+
+-- index only scan llt
+create table llt_addition_2(a int, b int, c int) tablespace hdfs_ts;
+create table row_addition_2(a int, b int, c int);
+insert into row_addition_2 values(1, 5, generate_series(1,10001));
+insert into row_addition_2 select * from row_addition_2;
+insert into row_addition_2 select * from row_addition_2;
+insert into row_addition_2 select * from row_addition_2;
+set cstore_insert_mode=main;
+insert into llt_addition_2 select * from row_addition_2;
+analyze llt_addition_2;
+set enable_seqscan=off;
+create index llt_addition_idx1 on llt_addition_2(b);
+explain (costs off, nodes off) select count(*) from llt_addition_2 where b = 5;
+select count(*) from llt_addition_2 where b = 5;
+drop index llt_addition_idx1;
+create index llt_addition_idx2 on llt_addition_2 using btree(b);
+explain (costs off, nodes off) select count(*) from llt_addition_2 where b = 5;
+select count(*) from llt_addition_2 where b = 5;
+drop index llt_addition_idx2;
+drop table row_addition_2;
+drop table llt_addition_2;
+reset enable_seqscan;
+reset cstore_insert_mode;
+drop server hdfs_server cascade;
+
+select * from gs_fault_inject(2,2,0,0,0,0);

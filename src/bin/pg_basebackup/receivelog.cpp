@@ -71,6 +71,41 @@ typedef enum { DO_WAL_DATA_WRITE_DONE, DO_WAL_DATA_WRITE_STOP, DO_WAL_DATA_WRITE
 static TimestampTz localGetCurrentTimestamp(void);
 static bool sendReplyToSender(PGconn* conn, TimestampTz nowtime, bool replyRequested);
 static bool checkForReceiveTimeout(PGconn* conn);
+static long CalculateCopyStreamSleeptime(TimestampTz now, int standby_message_timeout_local,
+                                         TimestampTz last_status);
+/*
+ * Calculate how long send/receive loops should sleep
+ */
+static long
+CalculateCopyStreamSleeptime(TimestampTz now, int standby_message_timeout_local,
+                             TimestampTz last_status)
+{
+    TimestampTz status_targettime = 0;
+
+    if (standby_message_timeout_local)
+        status_targettime = last_status +
+            (standby_message_timeout_local - 1) * (USECS_PER_SEC);
+
+    if (status_targettime > 0)
+    {
+        long        secs;
+        long        usecs;
+
+        feTimestampDifference(now,
+                              status_targettime,
+                              &secs,
+                              &usecs);
+        /* Always sleep at least 1 sec */
+        if (secs <= 0)
+        {
+            secs = 1;
+            usecs = 0;
+        }
+        return secs;
+    } else {
+        return (-1);
+    }
+}
 
 /*
  * Open a new WAL file in the specified directory. Store the name
@@ -517,7 +552,7 @@ static int DoWALWrite(const char* wal_buf, int len, XLogRecPtr& block_pos, const
  * Note: The log position *must* be at a log segment start!
  */
 bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const char* sysidentifier,
-    const char* basedir, stream_stop_callback stream_stop, int standby_message_timeout, bool rename_partial)
+    const char* basedir, stream_stop_callback stream_stop, int standby_message_timeout_local, bool rename_partial)
 {
     char query[MAXPGPATH];
     char slotcmd[MAXPGPATH];
@@ -669,8 +704,14 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
 
             FD_ZERO(&input_mask);
             FD_SET(PQsocket(conn), &input_mask);
-            if (standby_message_timeout) {
-                timeout.tv_sec = last_status + standby_message_timeout - local_now - 1;
+            if (standby_message_timeout_local) {
+#ifdef HAVE_INT64_TIMESTAMP
+            timeout.tv_sec = CalculateCopyStreamSleeptime(local_now,
+                                                          standby_message_timeout_local,
+                                                          last_status);
+#else
+            timeout.tv_sec = last_status + standby_message_timeout_local - local_now - 1;
+#endif
                 if (timeout.tv_sec <= 0)
                     timeout.tv_sec = 1; /* Always sleep at least 1 sec */
                 timeout.tv_usec = 0;

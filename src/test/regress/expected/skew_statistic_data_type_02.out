@@ -1,0 +1,207 @@
+/*
+################################################################################
+# TESTCASE NAME : skew_statistic_data_type_01.py 
+# COMPONENT(S)  : 测试各种类型使用单列统计信息
+# PREREQUISITE  : skew_hint_setup.py
+# PLATFORM      : all
+# DESCRIPTION   : skew type
+# TAG           : type
+# TC LEVEL      : Level 1
+################################################################################
+*/
+--I1.设置guc参数
+set current_schema to skew_join;
+--S1.skew_option=normal
+set skew_option=normal;
+--S2.设置计划格式
+set explain_perf_mode=normal;
+--S3.设置计划生成参数
+set enable_broadcast = off;
+--S4.设置计划生成参数
+set enable_mergejoin = off;
+--S5.设置计划生成参数
+set enable_nestloop = off;
+set query_dop = 1002;
+--I2.倾斜值为date
+--S1.执行计划
+explain (costs off) select count(*) from skew_type, unskew_type where st_date = ut_date;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (skew_type.st_date = unskew_type.ut_date)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_type
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on unskew_type
+(12 rows)
+
+--S2.执行查询
+select count(*) from skew_type, unskew_type where st_date = ut_date;
+ count 
+-------
+   100
+(1 row)
+
+--I3.倾斜值为time
+--S1.执行计划
+explain (costs off) select count(*) from skew_type, unskew_type where st_time = ut_time;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (skew_type.st_time = unskew_type.ut_time)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_type
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on unskew_type
+(12 rows)
+
+--S2.执行查询
+select count(*) from skew_type, unskew_type where st_time = ut_time;
+ count 
+-------
+   100
+(1 row)
+
+--I4.倾斜值为time with time zone
+--S1.执行计划
+explain (costs off) select count(*) from skew_type, unskew_type where st_timez = ut_timez;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (skew_type.st_timez = unskew_type.ut_timez)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_type
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on unskew_type
+(12 rows)
+
+--S2.执行查询
+select count(*) from skew_type, unskew_type where st_timez = ut_timez;
+ count 
+-------
+   100
+(1 row)
+
+--I5.倾斜值为timestamp
+--S1.执行计划
+explain (costs off) select count(*) from skew_type, unskew_type where st_timestamp = ut_timestamp;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (skew_type.st_timestamp = unskew_type.ut_timestamp)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_type
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on unskew_type
+(12 rows)
+
+--S2.执行查询
+select count(*) from skew_type, unskew_type where st_timestamp = ut_timestamp;
+ count 
+-------
+   100
+(1 row)
+
+--I6.倾斜值为timestamp with time zone
+--S1.执行计划
+explain (costs off) select count(*) from skew_type, unskew_type where st_timestampz = ut_timestampz;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (skew_type.st_timestampz = unskew_type.ut_timestampz)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_type
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on unskew_type
+(12 rows)
+
+--S2.执行查询
+select count(*) from skew_type, unskew_type where st_timestampz = ut_timestampz;
+ count 
+-------
+   100
+(1 row)
+
+--I7.倾斜值为smalldatetime
+--S1.执行计划
+explain (costs off) select count(*) from skew_type, unskew_type where st_smalldatetime = ut_smalldatetime;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (skew_type.st_smalldatetime = unskew_type.ut_smalldatetime)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_type
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on unskew_type
+(12 rows)
+
+--S2.执行查询
+select count(*) from skew_type, unskew_type where st_smalldatetime = ut_smalldatetime;
+ count 
+-------
+   100
+(1 row)
+
+--I8.倾斜值为interval
+--S1.执行计划
+explain (costs off) select count(*) from skew_type, unskew_type where st_interval = ut_interval;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (skew_type.st_interval = unskew_type.ut_interval)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_type
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on unskew_type
+(12 rows)
+
+--S2.执行查询
+select count(*) from skew_type, unskew_type where st_interval = ut_interval;
+ count 
+-------
+   100
+(1 row)
+
+set query_dop = 2002;

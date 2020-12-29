@@ -28,7 +28,7 @@ static void DiscardAll(bool isTopLevel);
 /*
  * DISCARD { ALL | TEMP | PLANS }
  */
-void DiscardCommand(const DiscardStmt* stmt, bool isTopLevel)
+void DiscardCommand(DiscardStmt* stmt, bool isTopLevel)
 {
     switch (stmt->target) {
         case DISCARD_ALL:

@@ -1,0 +1,1075 @@
+/*
+###############################################################################
+# TESTCASE NAME : postgis_operators.sql
+# COMPONENT(S)  : test function operators
+# PREREQUISITE  : 
+# PLATFORM      : SUSE11.3
+# DESCRIPTION   : 验证postgis的操作符
+# TAG           : &&,&&&,&<,&<|,&>,<<,<<|,=,>>,|>>,@,~,~=,|&>,<->,<#>
+# TC LEVEL      : Level 1
+################################################################################
+*/
+set current_schema=postgis;
+--S1.验证操作符&&
+SELECT geom_point.the_geom && geom_line.the_geom AS result FROM geom_point, geom_line order by geom_point.name,geom_line.name limit 10;
+ result 
+--------
+ t
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+(10 rows)
+
+SELECT geom_multipoint.the_geom && geom_multilinestring.the_geom AS result FROM geom_multipoint, geom_multilinestring order by geom_multipoint.name,geom_multilinestring.name limit 10;
+ result 
+--------
+ t
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+(10 rows)
+
+--S2.验证操作符&&&
+SELECT geom_multipoint.the_geom &&& geom_multipolygon.the_geom AS overlaps_3d from geom_multipoint, geom_multipolygon order by geom_multipoint.name,geom_multipolygon.id limit 10; 
+ overlaps_3d 
+-------------
+ t
+ t
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+(10 rows)
+
+SELECT geom_multipoint.the_geom &&& geom_point.the_geom AS overlaps_3d from geom_multipoint, geom_point order by geom_point.name,geom_multipoint.name limit 10; 
+ overlaps_3d 
+-------------
+ t
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+(10 rows)
+
+--S3.验证操作符&<
+SELECT geom_polygon.the_geom &< geom_multilinestring.the_geom AS result FROM geom_polygon, geom_multilinestring order by geom_polygon.name, geom_multilinestring.id limit 10;
+ result 
+--------
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+(10 rows)
+
+--S4.验证操作符&<|
+SELECT geom_multipolygon.the_geom &< geom_multilinestring.the_geom AS result FROM geom_multipolygon, geom_multilinestring order by geom_multipolygon.id,geom_multilinestring.name limit 10;
+ result 
+--------
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+(10 rows)
+
+--S5.验证操作符&>
+SELECT geom_polygon.the_geom &> geom_multilinestring.the_geom AS result FROM geom_polygon, geom_multilinestring order by geom_polygon.name, geom_multilinestring.id limit 10;
+ result 
+--------
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+(10 rows)
+
+--S6.验证操作符<<
+SELECT geom_line.the_geom << geom_multilinestring.the_geom AS result from geom_line, geom_multilinestring order by geom_line.id, geom_multilinestring.id limit 10; 
+ result 
+--------
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+(10 rows)
+
+--S8.验证操作符=
+SELECT 'LINESTRING(0 0, 0 1, 1 0)'::geometry = 'LINESTRING(1 1, 0 0)'::geometry;
+ ?column? 
+----------
+ f
+(1 row)
+
+--S9.验证操作符>>
+SELECT geom_line.the_geom >> geom_multilinestring.the_geom AS result from geom_line, geom_multilinestring order by geom_line.id,geom_multipolygon.id  limit 10; 
+ERROR:  missing FROM-clause entry for table "geom_multipolygon"
+LINE 1: ..._line, geom_multilinestring order by geom_line.id,geom_multi...
+                                                             ^
+--S10.验证操作iii符@
+SELECT geom_point.the_geom @ geom_multipolygon.the_geom AS result from geom_point,  geom_multipolygon order by geom_point.id,geom_multipolygon.id limit 10; 
+ result 
+--------
+ t
+ t
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+(10 rows)
+
+--S11.验证操作符|&>
+SELECT geom_point.the_geom |&> geom_multipolygon.the_geom AS result from geom_point,  geom_multipolygon order by geom_point.id,geom_multipolygon.id limit 10; 
+ result 
+--------
+ t
+ t
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+(10 rows)
+
+--S12.验证操作符|>>
+SELECT geom_point.the_geom |>> geom_multipolygon.the_geom AS result from geom_point, geom_multipolygon order by geom_point.id,geom_multipolygon.id limit 10; 
+ result 
+--------
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+(10 rows)
+
+--S13.验证操作符~
+SELECT geom_point.the_geom ~ geom_multipolygon.the_geom AS result from geom_point, geom_multipolygon order by geom_point.id,geom_multipolygon.id limit 10; 
+ result 
+--------
+ t
+ t
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+(10 rows)
+
+--S14.验证操作符~=
+SELECT geom_point.the_geom ~= geom_multipolygon.the_geom AS result from geom_point, geom_multipolygon order by geom_point.id,geom_multipolygon.id limit 10; 
+ result 
+--------
+ t
+ t
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+ f
+(10 rows)
+
+--S15.验证操作符<->
+SELECT geom_point.the_geom <-> geom_multipolygon.the_geom AS result from geom_point, geom_multipolygon order by geom_point.id,geom_multipolygon.id limit 10; 
+ result 
+--------
+      0
+      0
+      2
+      2
+      4
+      4
+      6
+      6
+      8
+      8
+(10 rows)
+
+--S16.验证操作符<#>
+SELECT '<#>',geom_point.id, geom_point.the_geom <#> geom_multipolygon.the_geom AS result from geom_point, geom_multipolygon order by geom_point.id,geom_multipolygon.id limit 10; 
+ ?column? | id | result 
+----------+----+--------
+ <#>      |  0 |      0
+ <#>      |  0 |      0
+ <#>      |  0 |      2
+ <#>      |  0 |      2
+ <#>      |  0 |      4
+ <#>      |  0 |      4
+ <#>      |  0 |      6
+ <#>      |  0 |      6
+ <#>      |  0 |      8
+ <#>      |  0 |      8
+(10 rows)
+
+SELECT ST_AsText(ST_Union(ST_GeomFromText('POINT(1 2)'),
+ST_GeomFromText('POINT(-2 3)') ) );
+      st_astext       
+----------------------
+ MULTIPOINT(1 2,-2 3)
+(1 row)
+
+SELECT ST_AsText(ST_Union(ST_GeomFromText('POINT(1 2)'),
+ST_GeomFromText('POINT(1 2)') ) );
+ st_astext  
+------------
+ POINT(1 2)
+(1 row)
+
+SELECT ST_AsEWKT(st_union(the_geom))
+FROM
+(SELECT ST_GeomFromEWKT('POLYGON((-7 4.2,-7.1 4.2,-7.1 4.3,
+-7 4.2))') as the_geom
+UNION ALL
+SELECT ST_GeomFromEWKT('POINT(5 5 5)') as the_geom
+UNION ALL
+SELECT ST_GeomFromEWKT('POINT(-2 3 1)') as the_geom
+UNION ALL
+SELECT ST_GeomFromEWKT('LINESTRING(5 5 5, 10 10 10)') as the_geom ) as foo;
+                                            st_asewkt                                             
+--------------------------------------------------------------------------------------------------
+ GEOMETRYCOLLECTION(POINT(-2 3),LINESTRING(5 5,10 10),POLYGON((-7 4.2,-7.1 4.2,-7.1 4.3,-7 4.2)))
+(1 row)
+
+SELECT ST_AsText(ST_Union(ARRAY[ST_GeomFromText('LINESTRING(1 2, 3 4)'),
+ST_GeomFromText('LINESTRING(3 4, 4 5)')])) As wktunion;
+               wktunion               
+--------------------------------------
+ MULTILINESTRING((1 2,3 4),(3 4,4 5))
+(1 row)
+
+SELECT ST_AsText(ST_CollectionExtract(ST_GeomFromText('GEOMETRYCOLLECTION( 
+GEOMETRYCOLLECTION(POINT(0 0)))'),1));
+    st_astext    
+-----------------
+ MULTIPOINT(0 0)
+(1 row)
+
+SELECT ST_AsText(ST_CollectionExtract(ST_GeomFromText('GEOMETRYCOLLECTION( 
+GEOMETRYCOLLECTION(LINESTRING(0 0, 1 1)),LINESTRING(2 2, 3 3))'),2));
+              st_astext               
+--------------------------------------
+ MULTILINESTRING((0 0,1 1),(2 2,3 3))
+(1 row)
+
+SELECT ST_AsEWKT(ST_PatchN(geom, 2)) As geomewkt
+FROM (
+VALUES (ST_GeomFromEWKT('POLYHEDRALSURFACE( ((0 0 0, 0 0 1, 0 1 1, 0 1 0, 0 0 0)),
+((0 0 0, 0 1 0, 1 1 0, 1 0 0, 0 0 0)), ((0 0 0, 1 0 0, 1 0 1, 0 0 1, 0 0 0)),
+((1 1 0, 1 1 1, 1 0 1, 1 0 0, 1 1 0)),
+((0 1 0, 0 1 1, 1 1 1, 1 1 0, 0 1 0)), ((0 0 1, 1 0 1, 1 1 1, 0 1 1, 0 0 1)) )')) ) As 
+foo(geom);
+                 geomewkt                 
+------------------------------------------
+ POLYGON((0 0 0,0 1 0,1 1 0,1 0 0,0 0 0))
+(1 row)
+
+SELECT
+ST_AsText(
+ST_PointFromWKB(
+ST_AsEWKB('POINT(2 5)'::geometry)
+)
+);
+ st_astext  
+------------
+ POINT(2 5)
+(1 row)
+
+SELECT ST_3DMakeBox(ST_MakePoint(-989502.1875, 528439.5625, 10),
+ST_MakePoint(-987121.375 ,529933.1875, 10)) As abb3d;
+                             abb3d                             
+---------------------------------------------------------------
+ BOX3D(-989502.1875 528439.5625 10,-987121.375 529933.1875 10)
+(1 row)
+
+SELECT ST_AsEWKT(ST_Force2D(ST_GeomFromEWKT('CIRCULARSTRING(1 1 2, 2 3 2, 4 5 2, 6 7 2, 5 6 
+2)')));
+              st_asewkt              
+-------------------------------------
+ CIRCULARSTRING(1 1,2 3,4 5,6 7,5 6)
+(1 row)
+
+SELECT ST_AsEWKT(ST_Force2D('POLYGON((0 0 2,0 5 2,5 0 2,0 0 2),(1 1 2,3 1 2,1 3 2,1 1 2)) 
+'));
+                  st_asewkt                   
+----------------------------------------------
+ POLYGON((0 0,0 5,5 0,0 0),(1 1,3 1,1 3,1 1))
+(1 row)
+
+SELECT tbl1.column1, tbl2.column1, tbl1.column2 ~ tbl2.column2 AS contains
+FROM
+( VALUES
+(1, 'LINESTRING (0 0, 3 3)'::geometry)) AS tbl1,
+( VALUES
+(2, 'LINESTRING (0 0, 4 4)'::geometry),
+(3, 'LINESTRING (1 1, 2 2)'::geometry),
+(4, 'LINESTRING (0 0, 3 3)'::geometry)) AS tbl2;
+ column1 | column1 | contains 
+---------+---------+----------
+       1 |       2 | f
+       1 |       3 | t
+       1 |       4 | t
+(3 rows)
+
+SELECT ST_AsGML(ST_GeomFromText('POLYGON((0 0,0 1,1 1,1 0,0 0))',4326));
+                                                                                     st_asgml                                                                                      
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ <gml:Polygon srsName="EPSG:4326"><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,0 0,1 1,1 1,0 0,0</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon>
+(1 row)
+
+SELECT ST_AsGML(3, ST_GeomFromText('POINT(5.234234233242 6.34534534534)',4326), 5, 17);
+                                                    st_asgml                                                     
+-----------------------------------------------------------------------------------------------------------------
+ <gml:Point srsName="urn:ogc:def:crs:EPSG::4326"><gml:pos srsDimension="2">6.34535 5.23423</gml:pos></gml:Point>
+(1 row)
+
+SELECT ST_AsGML(3, ST_GeomFromText('LINESTRING(1 2, 3 4, 10 20)',4326), 5, 32);
+                                                                     st_asgml                                                                     
+--------------------------------------------------------------------------------------------------------------------------------------------------
+ <gml:Envelope srsName="EPSG:4326" srsDimension="2"><gml:lowerCorner>1 2</gml:lowerCorner><gml:upperCorner>10 20</gml:upperCorner></gml:Envelope>
+(1 row)
+
+SELECT ST_AsGML(3, ST_GeomFromText('LINESTRING(1 2, 3 4, 10 20)',4326), 5, 49);
+                                                                             st_asgml                                                                              
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ <gml:Envelope srsName="urn:ogc:def:crs:EPSG::4326" srsDimension="2"><gml:lowerCorner>2 1</gml:lowerCorner><gml:upperCorner>20 10</gml:upperCorner></gml:Envelope>
+(1 row)
+
+SELECT ST_AsText(
+ST_LongestLine('POINT(100 100)':: 
+geometry,
+'LINESTRING (20 80, 98 
+190, 110 180, 50 75 )'::geometry)
+) As lline;
+           lline            
+----------------------------
+ LINESTRING(100 100,98 190)
+(1 row)
+
+SELECT ST_AsText(
+ST_LongestLine(
+ST_GeomFromText('POLYGON 
+((175 150, 20 40,
+50 60, 125 100, 
+175 150))'),
+ST_Buffer(ST_GeomFromText 
+('POINT(110 170)'), 20)
+)
+) As llinewkt;
+                      llinewkt                       
+-----------------------------------------------------
+ LINESTRING(20 40,121.111404660392 186.629392246051)
+(1 row)
+
+SELECT ST_AsText(ST_LongestLine(c.the_geom, c.the_geom)) As llinewkt,
+ST_MaxDistance(c.the_geom,c.the_geom) As max_dist,
+ST_Length(ST_LongestLine(c.the_geom, c.the_geom)) As lenll
+FROM (SELECT ST_BuildArea(ST_Collect(the_geom)) As the_geom
+FROM (SELECT ST_Translate(ST_SnapToGrid(ST_Buffer(ST_Point(50 ,generate_series 
+(50,190, 50)
+),40, 'quad_segs=2'),1), x, 0) As the_geom
+FROM generate_series(1,100,50) As x) AS foo
+) As c;
+         llinewkt          |     max_dist     |      lenll       
+---------------------------+------------------+------------------
+ LINESTRING(23 22,129 178) | 188.605408193933 | 188.605408193933
+(1 row)
+
+SELECT ST_AsEWKT(ST_LocateBetweenElevations(
+ST_GeomFromEWKT('LINESTRING(1 2 3, 4 5 6)'),2,4)) As ewelev;
+             ewelev             
+--------------------------------
+ MULTILINESTRING((1 2 3,2 3 4))
+(1 row)
+
+SELECT ST_AsEWKT(ST_LocateBetweenElevations(
+ST_GeomFromEWKT('LINESTRING(1 2 6, 4 5 -1, 7 8 9)'),6,9)) As ewelev;
+                            ewelev                            
+--------------------------------------------------------------
+ GEOMETRYCOLLECTION(POINT(1 2 6),LINESTRING(6.1 7.1 6,7 8 9))
+(1 row)
+
+SELECT ST_AsEWKT((ST_Dump(the_geom)).geom)
+FROM
+(SELECT ST_LocateBetweenElevations(
+ST_GeomFromEWKT('LINESTRING(1 2 6, 4 5 -1, 7 8 9)'),6,9) As the_geom) As foo;
+          st_asewkt          
+-----------------------------
+ POINT(1 2 6)
+ LINESTRING(6.1 7.1 6,7 8 9)
+(2 rows)
+
+SELECT ST_LineFromText('LINESTRING(1 2, 3 4)') AS aline, ST_LineFromText('POINT(1 2)') AS 
+null_return;
+                                       aline                                        | null_return 
+------------------------------------------------------------------------------------+-------------
+ 010200000002000000000000000000F03F000000000000004000000000000008400000000000001040 | 
+(1 row)
+
+SELECT ST_astext(ST_GeomFromEWKB(E'\\001\\002\\000\\000 \\255\\020\\000\\000\\003\\000\\000\\000\\344J=\\013B\\312Q\\300n\\303(\\010\\036!E@''\\277E''K\\312Q\\300\\366{b\\235*!E@\\225|\\354.P\\312Q\\300p\\231\\323e1!E@'));
+                                 st_astext                                 
+---------------------------------------------------------------------------
+ LINESTRING(-71.160281 42.258729,-71.160837 42.259113,-71.161144 42.25932)
+(1 row)
+
+SELECT Box3D(ST_GeomFromEWKT('LINESTRING(1 2 3, 3 4 5, 5 6 5)'));
+       box3d        
+--------------------
+ BOX3D(1 2 3,5 6 5)
+(1 row)
+
+SELECT Box3D(ST_GeomFromEWKT('CIRCULARSTRING(220268 150415 1,220227 150505 1,220227 
+150406 1)'));
+                                box3d                                 
+----------------------------------------------------------------------
+ BOX3D(220186.995121892 150406 1,220288.248780547 150506.126829327 1)
+(1 row)
+
+SELECT tbl1.column1, tbl2.column1, tbl1.column2 &> tbl2.column2 AS overright
+FROM
+( VALUES
+(1, 'LINESTRING(1 2, 4 6)'::geometry)) AS tbl1,
+( VALUES
+(2, 'LINESTRING(0 0, 3 3)'::geometry),
+(3, 'LINESTRING(0 1, 0 5)'::geometry),
+(4, 'LINESTRING(6 0, 6 1)'::geometry)) AS tbl2;
+ column1 | column1 | overright 
+---------+---------+-----------
+       1 |       2 | t
+       1 |       3 | t
+       1 |       4 | f
+(3 rows)
+
+SELECT ST_AsEWKT(ST_LineFromMultiPoint(ST_GeomFromEWKT('MULTIPOINT(1 2 3, 4 5 6, 7 8 9)')));
+           st_asewkt           
+-------------------------------
+ LINESTRING(1 2 3,4 5 6,7 8 9)
+(1 row)
+
+SELECT ST_AsText(ST_GeomFromGeoHash('9qqj7nmxncgyy4d0dbxqz0'));
+                                                        st_astext                                                         
+--------------------------------------------------------------------------------------------------------------------------
+ POLYGON((-115.172816 36.114646,-115.172816 36.114646,-115.172816 36.114646,-115.172816 36.114646,-115.172816 36.114646))
+(1 row)
+
+SELECT ST_AsText(ST_GeomFromGeoHash('9qqj7nmxncgyy4d0dbxqz0', 4));
+                                                          st_astext                                                           
+------------------------------------------------------------------------------------------------------------------------------
+ POLYGON((-115.3125 36.03515625,-115.3125 36.2109375,-114.9609375 36.2109375,-114.9609375 36.03515625,-115.3125 36.03515625))
+(1 row)
+
+SELECT ST_AsText(ST_GeomFromGeoHash('9qqj7nmxncgyy4d0dbxqz0', 10));
+                                                                                       st_astext                                                                                        
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ POLYGON((-115.17282128334 36.1146408319473,-115.17282128334 36.1146461963654,-115.172810554504 36.1146461963654,-115.172810554504 36.1146408319473,-115.17282128334 36.1146408319473))
+(1 row)
+
+SELECT ST_AsEWKT(ST_RotateX(ST_GeomFromEWKT('LINESTRING(1 2 3, 1 1 1)'), pi()/2));
+         st_asewkt         
+---------------------------
+ LINESTRING(1 -3 2,1 -1 1)
+(1 row)
+
+SELECT ST_AsEWKT(ST_Shift_Longitude(ST_GeomFromEWKT('SRID=4326;POINT(-118.58 38.38 10)'))) 
+As geomA,
+ST_AsEWKT(ST_Shift_Longitude(ST_GeomFromEWKT('SRID=4326;POINT(241.42 38.38 10)'))) As 
+geomb;
+              geoma               |               geomb               
+----------------------------------+-----------------------------------
+ SRID=4326;POINT(241.42 38.38 10) | SRID=4326;POINT(-118.58 38.38 10)
+(1 row)
+
+SELECT ST_AsText(ST_Shift_Longitude(ST_GeomFromText('LINESTRING(-118.58 38.38, -118.20 
+38.45)')));
+              st_astext               
+--------------------------------------
+ LINESTRING(241.42 38.38,241.8 38.45)
+(1 row)
+
+SELECT ST_Within(smallc,smallc) As smallinsmall,
+ST_Within(smallc, bigc) As smallinbig,
+ST_Within(bigc,smallc) As biginsmall,
+ST_Within(ST_Union(smallc, bigc), bigc) as unioninbig,
+ST_Within(bigc, ST_Union(smallc, bigc)) as biginunion,
+ST_Equals(bigc, ST_Union(smallc, bigc)) as bigisunion
+FROM
+(
+SELECT ST_Buffer(ST_GeomFromText('POINT(50 50)'), 20) As smallc,
+ST_Buffer(ST_GeomFromText('POINT(50 50)'), 40) As bigc) As foo;
+ smallinsmall | smallinbig | biginsmall | unioninbig | biginunion | bigisunion 
+--------------+------------+------------+------------+------------+------------
+ t            | t          | f          | t          | t          | t
+(1 row)
+
+SELECT ST_MPolyFromText('MULTIPOLYGON(((0 0 1,20 0 1,20 20 1,0 20 1,0 0 1),(5 5 3,5 7 3,7 7 
+3,7 5 3,5 5 3)))');
+                                                                                                                                                                                                                                                                   st_mpolyfromtext                                                                                                                                                                                                                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 0106000080010000000103000080020000000500000000000000000000000000000000000000000000000000F03F00000000000034400000000000000000000000000000F03F00000000000034400000000000003440000000000000F03F00000000000000000000000000003440000000000000F03F00000000000000000000000000000000000000000000F03F0500000000000000000014400000000000001440000000000000084000000000000014400000000000001C4000000000000008400000000000001C400000000000001C4000000000000008400000000000001C4000000000000014400000000000000840000000000000144000000000000014400000000000000840
+(1 row)
+
+--I2.processing join测试
+--S1.验证函数ST_BuildArea join功能
+SELECT geom_line.id,ST_AsText(ST_BuildArea(ST_Collect(geom_line.the_geom,geom_polygon.the_geom))) from geom_line inner join geom_polygon on geom_line.id=geom_polygon.id order by id limit 20;
+ id  |                st_astext                 
+-----+------------------------------------------
+   0 | POLYGON((0 0,0 5,5 5,5 0,0 0))
+   1 | POLYGON((0 10,0 25,5 20,5 5,0 10))
+   2 | POLYGON((0 20,0 45,5 35,5 10,0 20))
+   3 | POLYGON((0 30,0 65,5 50,5 15,0 30))
+   4 | POLYGON((0 40,0 85,5 65,5 20,0 40))
+   5 | POLYGON((0 50,0 105,5 80,5 25,0 50))
+   6 | POLYGON((0 60,0 125,5 95,5 30,0 60))
+   7 | POLYGON((0 70,0 145,5 110,5 35,0 70))
+   8 | POLYGON((0 80,0 165,5 125,5 40,0 80))
+   9 | POLYGON((0 90,0 185,5 140,5 45,0 90))
+  10 | POLYGON((0 100,0 205,5 155,5 50,0 100))
+ 100 | POLYGON((5 0,15 5,25 5,15 0,5 0))
+ 101 | POLYGON((5 10,15 25,25 20,15 5,5 10))
+ 102 | POLYGON((5 20,15 45,25 35,15 10,5 20))
+ 103 | POLYGON((5 30,15 65,25 50,15 15,5 30))
+ 104 | POLYGON((5 40,15 85,25 65,15 20,5 40))
+ 105 | POLYGON((5 50,15 105,25 80,15 25,5 50))
+ 106 | POLYGON((5 60,15 125,25 95,15 30,5 60))
+ 107 | POLYGON((5 70,15 145,25 110,15 35,5 70))
+ 108 | POLYGON((5 80,15 165,25 125,15 40,5 80))
+(20 rows)
+
+--S2.验证函数ST_collect join功能
+SELECT geom_point.id, ST_AsText(geom_point.the_geom), ST_AsText(geom_line.the_geom),ST_Astext(ST_Collect(ST_setsrid(geom_point.the_geom,4326), st_setsrid(geom_line.the_geom,4326))) from geom_point inner join geom_line on geom_point.id=geom_line.id order by id limit 10;
+ id |  st_astext  |       st_astext       |                       st_astext                       
+----+-------------+-----------------------+-------------------------------------------------------
+  0 | POINT(0 0)  | LINESTRING(0 0,5 5)   | GEOMETRYCOLLECTION(POINT(0 0),LINESTRING(0 0,5 5))
+  1 | POINT(0 10) | LINESTRING(0 10,5 15) | GEOMETRYCOLLECTION(POINT(0 10),LINESTRING(0 10,5 15))
+  2 | POINT(0 20) | LINESTRING(0 20,5 25) | GEOMETRYCOLLECTION(POINT(0 20),LINESTRING(0 20,5 25))
+  3 | POINT(0 30) | LINESTRING(0 30,5 35) | GEOMETRYCOLLECTION(POINT(0 30),LINESTRING(0 30,5 35))
+  4 | POINT(0 40) | LINESTRING(0 40,5 45) | GEOMETRYCOLLECTION(POINT(0 40),LINESTRING(0 40,5 45))
+  5 | POINT(0 50) | LINESTRING(0 50,5 55) | GEOMETRYCOLLECTION(POINT(0 50),LINESTRING(0 50,5 55))
+  6 | POINT(0 60) | LINESTRING(0 60,5 65) | GEOMETRYCOLLECTION(POINT(0 60),LINESTRING(0 60,5 65))
+  7 | POINT(0 70) | LINESTRING(0 70,5 75) | GEOMETRYCOLLECTION(POINT(0 70),LINESTRING(0 70,5 75))
+  8 | POINT(0 80) | LINESTRING(0 80,5 85) | GEOMETRYCOLLECTION(POINT(0 80),LINESTRING(0 80,5 85))
+  9 | POINT(0 90) | LINESTRING(0 90,5 95) | GEOMETRYCOLLECTION(POINT(0 90),LINESTRING(0 90,5 95))
+(10 rows)
+
+--S5.验证函数ST_Intersection返回两个几何的共享部分
+SELECT geom_point.id, ST_AsText(ST_Intersection(ST_setsrid(geom_point.the_geom,4326), st_setsrid(geom_line.the_geom,4326))) from geom_point join geom_line on geom_point.id=geom_line.id order by id limit 10;
+ id |  st_astext  
+----+-------------
+  0 | POINT(0 0)
+  1 | POINT(0 10)
+  2 | POINT(0 20)
+  3 | POINT(0 30)
+  4 | POINT(0 40)
+  5 | POINT(0 50)
+  6 | POINT(0 60)
+  7 | POINT(0 70)
+  8 | POINT(0 80)
+  9 | POINT(0 90)
+(10 rows)
+
+--S6.验证函数ST_SharedPaths返回包含由两个输入线或多边形的路径的集合
+SELECT ST_AsText(
+ST_SharedPaths(
+ST_GeomFromText('LINESTRING(76 175,90 161,126 125,126 156.25,151 100)'),
+ST_GeomFromText('MULTILINESTRING((26 125,26 200,126 200,126 125,26 125),
+(51 150,101 150,76 175,51 150))')
+)) As wkt;
+                                                       wkt                                                        
+------------------------------------------------------------------------------------------------------------------
+ GEOMETRYCOLLECTION(MULTILINESTRING EMPTY,MULTILINESTRING((76 175,90 161),(90 161,101 150),(126 125,126 156.25)))
+(1 row)
+
+SELECT ST_AsEWKT(ST_GeometryN(p_geom,3)) As geom_ewkt
+FROM (SELECT ST_GeomFromEWKT('POLYHEDRALSURFACE(
+((0 0 0, 0 0 1, 0 1 1, 0 1 0, 0 0 0)),
+((0 0 0, 0 1 0, 1 1 0, 1 0 0, 0 0 0)),
+((0 0 0, 1 0 0, 1 0 1, 0 0 1, 0 0 0)),
+((1 1 0, 1 1 1, 1 0 1, 1 0 0, 1 1 0)),
+((0 1 0, 0 1 1, 1 1 1, 1 1 0, 0 1 0)),
+((0 0 1, 1 0 1, 1 1 1, 0 1 1, 0 0 1))
+)') AS p_geom ) AS a;
+                geom_ewkt                 
+------------------------------------------
+ POLYGON((0 0 0,1 0 0,1 0 1,0 0 1,0 0 0))
+(1 row)
+
+SELECT ST_GeoHash(ST_SetSRID(ST_MakePoint(-126,48),4326));
+      st_geohash      
+----------------------
+ c0w3hf1s70w3hf1s70w3
+(1 row)
+
+SELECT ST_GeoHash(ST_SetSRID(ST_MakePoint(-126,48),4326),5);
+ st_geohash 
+------------
+ c0w3h
+(1 row)
+
+SELECT ST_Relate(ST_GeometryFromText('POINT(1 2)'), ST_Buffer(ST_GeometryFromText('POINT(1 
+2)'),2));
+ st_relate 
+-----------
+ 0FFFFF212
+(1 row)
+
+SELECT ST_Relate(ST_GeometryFromText('LINESTRING(1 2, 3 4)'), ST_GeometryFromText(' 
+LINESTRING(5 6, 7 8)'));
+ st_relate 
+-----------
+ FF1FF0102
+(1 row)
+
+SELECT ST_Relate(ST_GeometryFromText('POINT(1 2)'), ST_Buffer(ST_GeometryFromText('POINT(1 
+2)'),2), '0FFFFF212');
+ st_relate 
+-----------
+ t
+(1 row)
+
+SELECT ST_Relate(ST_GeometryFromText('POINT(1 2)'), ST_Buffer(ST_GeometryFromText('POINT(1 
+2)'),2), '*FF*FF212');
+ st_relate 
+-----------
+ t
+(1 row)
+
+SELECT ST_InterpolatePoint('LINESTRING M (0 0 0, 10 0 20)', 'POINT(5 5)');
+ st_interpolatepoint 
+---------------------
+                  10
+(1 row)
+
+SELECT ST_Extent(foo.the_geom) As b3extent
+FROM (SELECT ST_Translate(ST_Force_2D(ST_LineToCurve(ST_Buffer(ST_MakePoint(x,y),1))),0,0) As the_geom
+FROM generate_series(1,3) As x
+CROSS JOIN generate_series(1,2) As y
+) As foo;
+WARNING:  ST_Force_2d signature was deprecated in 2.1.0. Please use ST_Force2D
+CONTEXT:  referenced column: _postgis_deprecate
+SQL function "st_force_2d" during startup
+             b3extent             
+----------------------------------
+ BOX(0 -1.55431223447522e-15,4 3)
+(1 row)
+
+SELECT ST_Extent(foo.the_geom) As b3extent
+FROM (SELECT ST_MakePoint(x,y) As the_geom
+FROM generate_series(1,3) As x
+CROSS JOIN generate_series(1,2) As y
+) As foo;
+   b3extent   
+--------------
+ BOX(1 1,3 2)
+(1 row)
+
+SELECT ST_LineCrossingDirection(foo.line1  
+, foo.line2) As l1_cross_l2 ,
+ST_LineCrossingDirection(foo.  
+line2, foo.line1) As l2_cross_l1
+FROM (
+SELECT
+ST_GeomFromText('LINESTRING(25 169,89  
+114,40 70,86 43)') As line1,
+ST_GeomFromText('LINESTRING(171 154,20  
+140,71 74,161 53)') As line2
+) As foo;
+ l1_cross_l2 | l2_cross_l1 
+-------------+-------------
+          -3 |          -3
+(1 row)
+
+SELECT ST_LineCrossingDirection(foo.line1  
+, foo.line2) As l1_cross_l2 ,
+ST_LineCrossingDirection(foo.  
+line2, foo.line1) As l2_cross_l1
+FROM (
+SELECT
+ST_GeomFromText('LINESTRING(25 169,89  
+114,40 70,86 43)') As line1,
+ST_GeomFromText('LINESTRING (171 154,  
+20 140, 71 74, 2.99 90.16)') As line2
+) As foo;
+ l1_cross_l2 | l2_cross_l1 
+-------------+-------------
+           2 |          -2
+(1 row)
+
+SELECT
+ST_LineCrossingDirection(foo.  
+line1, foo.line2) As l1_cross_l2 ,
+ST_LineCrossingDirection(foo.  
+line2, foo.line1) As l2_cross_l1
+FROM (
+SELECT
+ST_GeomFromText('LINESTRING(25 169,89  
+114,40 70,86 43)') As line1,
+ST_GeomFromText('LINESTRING (20 140, 71  
+74, 161 53)') As line2
+) As foo;
+ l1_cross_l2 | l2_cross_l1 
+-------------+-------------
+          -1 |           1
+(1 row)
+
+SELECT ST_LineCrossingDirection(foo.line1  
+, foo.line2) As l1_cross_l2 ,
+ST_LineCrossingDirection(foo.  
+line2, foo.line1) As l2_cross_l1
+FROM (SELECT
+ST_GeomFromText('LINESTRING(25  
+169,89 114,40 70,86 43)') As line1,
+ST_GeomFromText('LINESTRING(2.99  
+90.16,71 74,20 140,171 154)') As line2
+) As foo;
+ l1_cross_l2 | l2_cross_l1 
+-------------+-------------
+          -2 |           2
+(1 row)
+
+SELECT ST_GMLToSQL('
+<gml:LineString srsName="EPSG:4269">
+<gml:coordinates>
+-71.16028,42.258729 -71.160837,42.259112 -71.161143,42.25932
+</gml:coordinates>
+</gml:LineString>');
+                                                        st_gmltosql                                                         
+----------------------------------------------------------------------------------------------------------------------------
+ 0102000020AD10000003000000FC8C0B0742CA51C06EC328081E21454027BF45274BCA51C02600FF942A214540ADBEBA2A50CA51C07099D36531214540
+(1 row)
+
+SELECT
+ST_ConcaveHull(
+ST_Union(ST_GeomFromText  
+('POLYGON((175 150, 20 40,
+50 60, 125 100,  
+175 150))'),
+ST_Buffer(ST_GeomFromText  
+('POINT(110 170)'), 20)
+), 1)
+As convexhull;
+                                                                                                                                                                                                                                         convexhull                                                                                                                                                                                                                                         
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?
+(1 row)
+
+SELECT
+ST_ConcaveHull(
+ST_Union(ST_GeomFromText  
+('POLYGON((175 150, 20 40,
+50 60, 125 100,  
+175 150))'),
+ST_Buffer(ST_GeomFromText  
+('POINT(110 170)'), 20)
+), 0.9)
+As target_90;
+--?
+--?
+--?
+(1 row)
+
+SELECT ST_ConcaveHull(ST_Collect(geom),  
+0.99)
+FROM (SELECT (ST_DumpPoints(ST_GeomFromText(
+'MULTIPOINT(14 14,34 14,54 14,74 14,94  
+14,114 14,134 14,
+150 14,154 14,154 6,134 6,114 6,94 6,74  
+6,54 6,34 6,
+14 6,10 6,8 6,7 7,6 8,6 10,6 30,6 50,6  
+70,6 90,6 110,6 130,
+6 150,6 170,6 190,6 194,14 194,14 174,14  
+154,14 134,14 114,
+14 94,14 74,14 54,14 34,14 14)'))).geom ) foo;
+                                                                                                                                                                                                                                                                                                                       st_concavehull                                                                                                                                                                                                                                                                                                                       
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 01030000000100000013000000000000000000204000000000000018400000000000001840000000000000204000000000000018400000000000004940000000000000184000000000008056400000000000001840000000000040604000000000000018400000000000406540000000000000184000000000004068400000000000002C4000000000004068400000000000002C4000000000004063400000000000002C400000000000C060400000000000002C4000000000008057400000000000805C400000000000002C400000000000C060400000000000002C4000000000004063400000000000002C40000000000040634000000000000018400000000000805C400000000000001840000000000080524000000000000018400000000000004140000000000000184000000000000020400000000000001840
+(1 row)
+
+SELECT ST_AsEWKT('0103000020E61000000100000005000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F000000000000F03F000000000000000000000000000000000000000000000000'::geometry);
+                st_asewkt                 
+------------------------------------------
+ SRID=4326;POLYGON((0 0,0 1,1 1,1 0,0 0))
+(1 row)
+
+SELECT ST_AsEWKT('0108000080030000000000000060 E30A4100000000785C0241000000000000F03F0000000018E20A4100000000485F024100000000000000400000000018E20A4100000000305C02410000000000000840');
+ERROR:  Invalid hex string, length (163) has to be a multiple of two!
+CONTEXT:  referenced column: st_asewkt
+SQL function "st_asewkt" statement 1
+referenced column: st_asewkt
+SELECT ST_AsText(ST_LineToCurve(foo.the_geom)) As curvedastext,ST_AsText(foo.the_geom) As 
+non_curvedastext
+FROM (SELECT ST_Buffer('POINT(1 3)'::geometry, 3) As the_geom) As foo;
+                       curvedastext                        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 non_curvedastext                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
+-----------------------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?
+(1 row)
+
+SELECT ST_AsEWKT(ST_LineToCurve(ST_GeomFromEWKT('LINESTRING(1 2 3, 3 4 8, 5 6 4, 7 8 4, 9 
+10 4)')));
+                 st_asewkt                  
+--------------------------------------------
+ LINESTRING(1 2 3,3 4 8,5 6 4,7 8 4,9 10 4)
+(1 row)
+
+SELECT ST_BuildArea(ST_Collect(smallc,bigc))
+FROM (SELECT
+ST_Buffer(
+ST_GeomFromText('POINT(100 90)'), 25) As smallc,
+ST_Buffer(ST_GeomFromText('POINT(100 90)'), 50) As bigc) As foo;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            st_buildarea                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?
+(1 row)
+
+SELECT ST_BuildArea(ST_Collect(line,circle))
+FROM (SELECT
+ST_Buffer(
+ST_MakeLine(ST_MakePoint(10, 10),ST_MakePoint(190, 190)),
+5) As line,
+ST_Buffer(ST_GeomFromText('POINT(100 90)'), 50) As circle) As foo;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        st_buildarea                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?
+(1 row)
+
+SELECT ST_BuildArea(
+ST_Collect(ST_ExteriorRing(line),ST_ExteriorRing(circle))
+)
+FROM (SELECT ST_Buffer(
+ST_MakeLine(ST_MakePoint(10, 10),ST_MakePoint(190, 190))
+,5) As line,
+ST_Buffer(ST_GeomFromText('POINT(100 90)'), 50) As circle) As foo;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        st_buildarea                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?
+(1 row)
+
+SELECT ST_AsText(ST_MinimumBoundingCircle(
+ST_Collect(
+ST_GeomFromEWKT('LINESTRING(55 75,125 150)'),
+ST_Point(20, 80)), 8
+)) As wktmbc;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   wktmbc                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ POLYGON((72.5 178.402447434669,84.8692038866403 177.184187185463,96.7630662046465 173.576223496014,107.724512495292 167.717208387537,117.332300524878 159.832300524878,125.217208387537 150.224512495292,131.076223496014 139.263066204646,134.684187185463 127.36920388664,135.902447434669 115,134.684187185463 102.63079611336,131.076223496014 90.7369337953535,125.217208387537 79.7754875047077,117.332300524878 70.1676994751216,107.724512495292 62.2827916124629,96.7630662046465 56.4237765039862,84.8692038866403 52.8158128145367,72.5 51.5975525653306,60.1307961133597 52.8158128145367,48.2369337953535 56.4237765039862,37.2754875047076 62.2827916124629,27.6676994751216 70.1676994751216,19.7827916124629 79.7754875047076,13.9237765039862 90.7369337953535,10.3158128145367 102.63079611336,9.09755256533059 115,10.3158128145367 127.36920388664,13.9237765039862 139.263066204646,19.7827916124629 150.224512495292,27.6676994751216 159.832300524878,37.2754875047076 167.717208387537,48.2369337953535 173.576223496014,60.1307961133597 177.184187185463,72.5 178.402447434669))
+(1 row)
+
+SELECT ST_AsEWKT(
+ST_ExteriorRing(
+ST_GeomFromEWKT('POLYGON((0 0 1, 1 1 1, 1 2 1, 1 1 1, 0 0 1))')
+)
+);
+                 st_asewkt                 
+-------------------------------------------
+ LINESTRING(0 0 1,1 1 1,1 2 1,1 1 1,0 0 1)
+(1 row)
+
+SELECT tbl1.column1, tbl2.column1, tbl1.column2 <<| tbl2.column2 AS below
+FROM
+( VALUES
+(1, 'LINESTRING (0 0, 4 3)'::geometry)) AS tbl1,
+( VALUES
+(2, 'LINESTRING (1 4, 1 7)'::geometry),
+(3, 'LINESTRING (6 1, 6 5)'::geometry),
+(4, 'LINESTRING (2 3, 5 6)'::geometry)) AS tbl2;
+ column1 | column1 | below 
+---------+---------+-------
+       1 |       2 | t
+       1 |       3 | f
+       1 |       4 | f
+(3 rows)
+
+SELECT ST_IsValidReason('LINESTRING(220227 150406,2220227 150407,222020 150410)');
+ st_isvalidreason 
+------------------
+ Valid Geometry
+(1 row)
+
+SELECT ST_AsEWKT(a.geom), ST_HasArc(a.geom)
+FROM ( SELECT (ST_Dump(p_geom)).geom AS geom
+FROM (SELECT ST_GeomFromEWKT('COMPOUNDCURVE(CIRCULARSTRING(0 0, 1 1, 1 0),(1 0, 0 
+1))') AS p_geom) AS b
+) AS a;
+          st_asewkt          | st_hasarc 
+-----------------------------+-----------
+ CIRCULARSTRING(0 0,1 1,1 0) | t
+ LINESTRING(1 0,0 1)         | f
+(2 rows)
+
+SELECT (a.p_geom).path[1] As path, ST_AsEWKT((a.p_geom).geom) As geom_ewkt
+FROM (SELECT ST_Dump(ST_GeomFromEWKT('POLYHEDRALSURFACE(
+((0 0 0, 0 0 1, 0 1 1, 0 1 0, 0 0 0)),
+((0 0 0, 0 1 0, 1 1 0, 1 0 0, 0 0 0)), ((0 0 0, 1 0 0, 1 0 1, 0 0 1, 0 0 0)), ((1 1 0, 1 1 
+1, 1 0 1, 1 0 0, 1 1 0)),
+((0 1 0, 0 1 1, 1 1 1, 1 1 0, 0 1 0)), ((0 0 1, 1 0 1, 1 1 1, 0 1 1, 0 0 1)))') ) AS p_geom ) AS a;
+ path |                geom_ewkt                 
+------+------------------------------------------
+    1 | POLYGON((0 0 0,0 0 1,0 1 1,0 1 0,0 0 0))
+    2 | POLYGON((0 0 0,0 1 0,1 1 0,1 0 0,0 0 0))
+    3 | POLYGON((0 0 0,1 0 0,1 0 1,0 0 1,0 0 0))
+    4 | POLYGON((1 1 0,1 1 1,1 0 1,1 0 0,1 1 0))
+    5 | POLYGON((0 1 0,0 1 1,1 1 1,1 1 0,0 1 0))
+    6 | POLYGON((0 0 1,1 0 1,1 1 1,0 1 1,0 0 1))
+(6 rows)
+
+SELECT (g.gdump).path, ST_AsEWKT((g.gdump).geom) as wkt
+FROM
+(SELECT
+ST_Dump( ST_GeomFromEWKT('TIN (((
+0 0 0,
+0 0 1,
+0 1 0,
+0 0 0
+)), ((
+0 0 0,
+0 1 0,
+1 1 0,
+0 0 0
+))
+)') ) AS gdump
+) AS g;
+ path |                 wkt                 
+------+-------------------------------------
+ {1}  | TRIANGLE((0 0 0,0 0 1,0 1 0,0 0 0))
+ {2}  | TRIANGLE((0 0 0,0 1 0,1 1 0,0 0 0))
+(2 rows)
+
+SELECT ST_Polygon(ST_GeomFromText('LINESTRING(75.15 29.53,77 29,77.6 29.5, 75.15 29.53)'), 
+4326);
+                                                                             st_polygon                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 0103000020E610000001000000040000009A99999999C9524048E17A14AE873D4000000000004053400000000000003D4066666666666653400000000000803D409A99999999C9524048E17A14AE873D40
+(1 row)
+
+SELECT ST_AsEWKT(ST_Polygon(ST_GeomFromEWKT('LINESTRING(75.15 29.53 1,77 29 1,77.6 29.5 1, 
+75.15 29.53 1)'), 4326));
+                              st_asewkt                               
+----------------------------------------------------------------------
+ SRID=4326;POLYGON((75.15 29.53 1,77 29 1,77.6 29.5 1,75.15 29.53 1))
+(1 row)
+
+SELECT ST_3DDWithin(
+ST_Transform(ST_GeomFromEWKT('SRID=4326;POINT(-72.1235 42.3521 4)'),2163),
+ST_Transform(ST_GeomFromEWKT('SRID=4326;LINESTRING(-72.1260 42.45 15, -72.123 42.1546 
+20)'),2163),
+126.8
+) As within_dist_3d,
+ST_DWithin(
+ST_Transform(ST_GeomFromEWKT('SRID=4326;POINT(-72.1235 42.3521 4)'),2163),
+ST_Transform(ST_GeomFromEWKT('SRID=4326;LINESTRING(-72.1260 42.45 15, -72.123 42.1546 
+20)'),2163),
+126.8
+) As within_dist_2d;
+ within_dist_3d | within_dist_2d 
+----------------+----------------
+ f              | t
+(1 row)
+
+SELECT round(CAST(ST_Distance_Sphere(ST_Centroid(the_geom), ST_GeomFromText('POINT(-118 38)',4326)) As numeric),2) As dist_meters,
+round(CAST(ST_Distance(ST_Transform(ST_Centroid(the_geom),32611),
+ST_Transform(ST_GeomFromText('POINT(-118 38)', 4326),32611)) As numeric),2) As 
+dist_utm11_meters,
+round(CAST(ST_Distance(ST_Centroid(the_geom), ST_GeomFromText('POINT(-118 38)', 4326)) As 
+numeric),5) As dist_degrees,
+round(CAST(ST_Distance(ST_Transform(the_geom,32611),
+ST_Transform(ST_GeomFromText('POINT(-118 38)', 4326),32611)) As numeric),2) As 
+min_dist_line_point_meters
+FROM
+(SELECT ST_GeomFromText('LINESTRING(-118.584 38.374,-118.583 38.5)', 4326) As the_geom) 
+as foo;
+ dist_meters | dist_utm11_meters | dist_degrees | min_dist_line_point_meters 
+-------------+-------------------+--------------+----------------------------
+    70424.71 |          70438.00 |       .72900 |                   65871.18
+(1 row)
+
+SELECT ST_AsEWKT(ST_RotateZ(ST_GeomFromEWKT('LINESTRING(1 2 3, 1 1 1)'), pi()/2));
+         st_asewkt         
+---------------------------
+ LINESTRING(-2 1 3,-1 1 1)
+(1 row)
+
+SELECT ST_AsEWKT(ST_RotateZ(the_geom, pi()/2))
+FROM (SELECT ST_LineToCurve(ST_Buffer(ST_GeomFromText('POINT(234 567)'), 3)) As the_geom) 
+As foo;
+                        st_asewkt                         
+----------------------------------------------------------
+ CURVEPOLYGON(CIRCULARSTRING(-567 237,-567 231,-567 237))
+(1 row)
+
+SELECT ST_NumPoints(ST_GeomFromText('LINESTRING(77.29 29.07,77.42 29.26,77.27 29.31,77.29 
+29.07)'));
+ st_numpoints 
+--------------
+            4
+(1 row)
+
+SELECT ST_ContainsProperly(smallc, bigc) As smallcontainspropbig,
+ST_ContainsProperly(bigc,smallc) As bigcontainspropsmall,
+ST_ContainsProperly(bigc, ST_Union(smallc, bigc)) as bigcontainspropunion,
+ST_Equals(bigc, ST_Union(smallc, bigc)) as bigisunion,
+ST_Covers(bigc, ST_ExteriorRing(bigc)) As bigcoversexterior,
+ST_ContainsProperly(bigc, ST_ExteriorRing(bigc)) As bigcontainsexterior
+FROM (SELECT ST_Buffer(ST_GeomFromText('POINT(1 2)'), 10) As smallc,
+ST_Buffer(ST_GeomFromText('POINT(1 2)'), 20) As bigc) As foo;
+ smallcontainspropbig | bigcontainspropsmall | bigcontainspropunion | bigisunion | bigcoversexterior | bigcontainsexterior 
+----------------------+----------------------+----------------------+------------+-------------------+---------------------
+ f                    | t                    | f                    | t          | t                 | f
+(1 row)
+

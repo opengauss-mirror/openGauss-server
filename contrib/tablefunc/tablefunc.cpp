@@ -102,10 +102,10 @@ typedef struct crosstab_cat_desc {
 #define crosstab_HashTableLookup(HASHTAB, CATNAME, CATDESC)                     \
     do {                                                                        \
         crosstab_HashEnt* hentry;                                               \
-        char key[MAX_CATNAME_LEN];                                              \
-                                                                                \
-        MemSet(key, 0, MAX_CATNAME_LEN);                                        \
-        snprintf(key, MAX_CATNAME_LEN - 1, "%s", CATNAME);                      \
+        char key[MAX_CATNAME_LEN] = {0};                                        \
+        int rc = snprintf_s(key, MAX_CATNAME_LEN,                               \
+                            MAX_CATNAME_LEN - 1, "%s", CATNAME);                \
+        securec_check_ss(rc, "", "");                                           \        
         hentry = (crosstab_HashEnt*)hash_search(HASHTAB, key, HASH_FIND, NULL); \
         if (hentry)                                                             \
             CATDESC = hentry->catdesc;                                          \
@@ -117,10 +117,10 @@ typedef struct crosstab_cat_desc {
     do {                                                                                            \
         crosstab_HashEnt* hentry;                                                                   \
         bool found;                                                                                 \
-        char key[MAX_CATNAME_LEN];                                                                  \
-                                                                                                    \
-        MemSet(key, 0, MAX_CATNAME_LEN);                                                            \
-        snprintf(key, MAX_CATNAME_LEN - 1, "%s", CATDESC->catname);                                 \
+        char key[MAX_CATNAME_LEN] = {0};                                                            \
+        int rc = snprintf_s(key, MAX_CATNAME_LEN,                                                   \
+                            MAX_CATNAME_LEN - 1, "%s", CATDESC->catname);                           \
+        securec_check_ss(rc, "", "");                                           \        
         hentry = (crosstab_HashEnt*)hash_search(HASHTAB, key, HASH_ENTER, &found);                  \
         if (found)                                                                                  \
             ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("duplicate category name"))); \
@@ -182,7 +182,7 @@ Datum normal_rand(PG_FUNCTION_ARGS)
 
         funcctx->user_fctx = fctx;
 
-        (void)MemoryContextSwitchTo(oldcontext);
+        MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
@@ -411,7 +411,7 @@ Datum crosstab(PG_FUNCTION_ARGS)
     tupstore =
         tuplestore_begin_heap(rsinfo->allowedModes & SFRM_Materialize_Random, false, u_sess->attr.attr_memory.work_mem);
 
-    (void)MemoryContextSwitchTo(oldcontext);
+    MemoryContextSwitchTo(oldcontext);
 
     /*
      * Generate attribute metadata needed later to produce tuples from raw C
@@ -631,7 +631,7 @@ Datum crosstab_hash(PG_FUNCTION_ARGS)
      * expecting.
      */
     rsinfo->setDesc = tupdesc;
-    (void)MemoryContextSwitchTo(oldcontext);
+    MemoryContextSwitchTo(oldcontext);
 
     return (Datum)0;
 }
@@ -704,7 +704,7 @@ static HTAB* load_categories_hash(char* cats_sql, MemoryContext per_query_ctx)
             /* Add the proc description block to the hashtable */
             crosstab_HashTableInsert(crosstab_hash, catdesc);
 
-            (void)MemoryContextSwitchTo(SPIcontext);
+            MemoryContextSwitchTo(SPIcontext);
         }
     }
 
@@ -967,7 +967,7 @@ Datum connectby_text(PG_FUNCTION_ARGS)
         attinmeta);
     rsinfo->setDesc = tupdesc;
 
-    (void)MemoryContextSwitchTo(oldcontext);
+    MemoryContextSwitchTo(oldcontext);
 
     /*
      * SFRM_Materialize mode expects us to return a NULL Datum. The actual
@@ -999,12 +999,10 @@ Datum connectby_text_serial(PG_FUNCTION_ARGS)
 
     /* check to see if caller supports us returning a tuplestore */
     if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("set-valued function called in context that cannot accept a set")));
     if (!(rsinfo->allowedModes & SFRM_Materialize) || rsinfo->expectedDesc == NULL)
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("materialize mode required, but it is not "
                        "allowed in this context")));
 
@@ -1043,7 +1041,7 @@ Datum connectby_text_serial(PG_FUNCTION_ARGS)
         attinmeta);
     rsinfo->setDesc = tupdesc;
 
-    (void)MemoryContextSwitchTo(oldcontext);
+    MemoryContextSwitchTo(oldcontext);
 
     /*
      * SFRM_Materialize mode expects us to return a NULL Datum. The actual
@@ -1079,7 +1077,7 @@ static Tuplestorestate* connectby(char* relname, char* key_fld, char* parent_key
     /* initialize our tuplestore */
     tupstore = tuplestore_begin_heap(randomAccess, false, u_sess->attr.attr_memory.work_mem);
 
-    (void)MemoryContextSwitchTo(oldcontext);
+    MemoryContextSwitchTo(oldcontext);
 
     /* now go get the whole tree */
     tupstore = build_tuplestore_recursively(key_fld,
@@ -1120,6 +1118,7 @@ static Tuplestorestate* build_tuplestore_recursively(char* key_fld, char* parent
     char serial_str[INT32_STRLEN];
     char* current_branch = NULL;
     HeapTuple tuple;
+    int rc = 0;
 
     if (max_depth > 0 && level > max_depth)
         return tupstore;
@@ -1168,7 +1167,8 @@ static Tuplestorestate* build_tuplestore_recursively(char* key_fld, char* parent
         values[1] = NULL;
 
         /* root level is 0 */
-        sprintf(current_level, "%d", level);
+        rc = sprintf_s(current_level, INT32_STRLEN, "%d", level);
+        secure_check_ss(rc, "", "");
         values[2] = current_level;
 
         /* root branch is just starting root value */
@@ -1177,7 +1177,8 @@ static Tuplestorestate* build_tuplestore_recursively(char* key_fld, char* parent
 
         /* root starts the serial with 1 */
         if (show_serial) {
-            sprintf(serial_str, "%d", (*serial)++);
+            rc = sprintf_s(serial_str, INT32_STRLEN, "%d", (*serial)++);
+            secure_check_ss(rc, "", "");
             if (show_branch)
                 values[4] = serial_str;
             else
@@ -1242,7 +1243,8 @@ static Tuplestorestate* build_tuplestore_recursively(char* key_fld, char* parent
             current_key_parent = pstrdup(SPI_getvalue(spi_tuple, spi_tupdesc, 2));
 
             /* get the current level */
-            sprintf(current_level, "%d", level);
+            rc = sprintf_s(current_level, INT32_STRLEN, "%d", level);
+            secure_check_ss(rc, "", "");
 
             /* check to see if this key is also an ancestor */
             if (strstr(chk_branchstr.data, chk_current_key.data))
@@ -1259,7 +1261,8 @@ static Tuplestorestate* build_tuplestore_recursively(char* key_fld, char* parent
             if (show_branch)
                 values[3] = current_branch;
             if (show_serial) {
-                sprintf(serial_str, "%d", (*serial)++);
+                rc = sprintf_s(serial_str, INT32_STRLEN, "%d", (*serial)++);
+                secure_check_ss(rc, "", "");
                 if (show_branch)
                     values[4] = serial_str;
                 else

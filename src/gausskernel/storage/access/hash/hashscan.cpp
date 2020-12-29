@@ -36,10 +36,10 @@
 typedef struct HashScanListData {
     IndexScanDesc hashsl_scan;
     ResourceOwner hashsl_owner;
-    struct HashScanListData* hashsl_next;
+    struct HashScanListData *hashsl_next;
 } HashScanListData;
 
-typedef HashScanListData* HashScanList;
+typedef HashScanListData *HashScanList;
 
 /*
  * ReleaseResources_hash() --- clean up hash subsystem resources.
@@ -86,7 +86,8 @@ void _hash_regscan(IndexScanDesc scan)
 {
     HashScanList new_el;
 
-    new_el = (HashScanList)MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(HashScanListData));
+    new_el = (HashScanList)MemoryContextAlloc(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(HashScanListData));
     new_el->hashsl_scan = scan;
     new_el->hashsl_owner = t_thrd.utils_cxt.CurrentResourceOwner;
     new_el->hashsl_next = u_sess->exec_cxt.HashScans;
@@ -106,8 +107,7 @@ void _hash_dropscan(IndexScanDesc scan)
         last = chk;
 
     if (chk == NULL)
-        ereport(
-            ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("hash scan list trashed; cannot find 0x%p", (void*)scan)));
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("hash scan list trashed")));
 
     if (last == NULL)
         u_sess->exec_cxt.HashScans = chk->hashsl_next;

@@ -18,11 +18,13 @@
 #include "nodes/execnodes.h"
 #include "tcop/dest.h"
 
+#ifdef ENABLE_MOT
 // forward declaration
 namespace JitExec
 {
     struct JitContext;
 }
+#endif
 
 /* ----------------
  *		query descriptor:
@@ -55,13 +57,20 @@ typedef struct QueryDesc {
     /* This is always set NULL by the core system, but plugins can change it */
     struct Instrumentation* totaltime; /* total time spent in ExecutorRun */
     bool executed;                     /* if the query already executed */
+#ifdef ENABLE_MOT
     JitExec::JitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
+#endif
 } QueryDesc;
 
 /* in pquery.c */
+#ifdef ENABLE_MOT
 extern QueryDesc* CreateQueryDesc(PlannedStmt* plannedstmt, const char* sourceText, Snapshot snapshot,
     Snapshot crosscheck_snapshot, DestReceiver* dest, ParamListInfo params, int instrument_options,
-    JitExec::JitContext* mot_jit_context = NULL);
+    JitExec::JitContext* mot_jit_context = nullptr);
+#else
+extern QueryDesc* CreateQueryDesc(PlannedStmt* plannedstmt, const char* sourceText, Snapshot snapshot,
+    Snapshot crosscheck_snapshot, DestReceiver* dest, ParamListInfo params, int instrument_options);
+#endif
 
 extern QueryDesc* CreateUtilityQueryDesc(
     Node* utilitystmt, const char* sourceText, Snapshot snapshot, DestReceiver* dest, ParamListInfo params);

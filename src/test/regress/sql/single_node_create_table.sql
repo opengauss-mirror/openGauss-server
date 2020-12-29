@@ -295,7 +295,7 @@ CREATE TABLE hw_create_as_test1(C_CHAR CHAR(102400));
 CREATE TABLE hw_create_as_test2(C_CHAR) as SELECT C_CHAR FROM hw_create_as_test1;
 CREATE TABLE hw_create_as_test3 (C_CHAR CHAR(102400));
 ALTER TABLE hw_create_as_test3 INHERIT hw_create_as_test2;
-
+execute direct on (datanode1) 'select a.attname, a.atttypmod from  pg_attribute as a, pg_class as c where attrelid=c.oid and c.relname= ''hw_create_as_test2'' order by attname';
 DROP TABLE hw_create_as_test2;
 DROP TABLE hw_create_as_test3;
 DROP TABLE hw_create_as_test1;
@@ -304,7 +304,7 @@ CREATE TABLE hw_create_as_test1(C_INT int);
 CREATE TABLE hw_create_as_test2(C_INT) as SELECT C_INT FROM hw_create_as_test1;
 CREATE TABLE hw_create_as_test3 (C_INT int);
 ALTER TABLE hw_create_as_test3 INHERIT hw_create_as_test2;
-
+execute direct on (datanode1) 'select a.attname, a.atttypmod from  pg_attribute as a, pg_class as c where attrelid=c.oid and c.relname= ''hw_create_as_test2'' order by attname';
 DROP TABLE hw_create_as_test3;
 DROP TABLE hw_create_as_test2;
 DROP TABLE hw_create_as_test1;
@@ -313,7 +313,7 @@ CREATE TABLE hw_create_as_test1(COL1 numeric(10,2));
 CREATE TABLE hw_create_as_test2(COL1) as SELECT COL1 FROM hw_create_as_test1;
 CREATE TABLE hw_create_as_test3 (COL1 numeric(10,2));
 ALTER TABLE hw_create_as_test3 INHERIT hw_create_as_test2;
-
+execute direct on (datanode1) 'select a.attname, a.atttypmod from  pg_attribute as a, pg_class as c where attrelid=c.oid and c.relname= ''hw_create_as_test2'' order by attname';
 DROP TABLE hw_create_as_test3;
 DROP TABLE hw_create_as_test2;
 DROP TABLE hw_create_as_test1;
@@ -322,7 +322,7 @@ CREATE TABLE hw_create_as_test1(COL1 timestamp(1));
 CREATE TABLE hw_create_as_test2(COL1) as SELECT COL1 FROM hw_create_as_test1;
 CREATE TABLE hw_create_as_test3 (COL1 timestamp(1));
 ALTER TABLE hw_create_as_test3 INHERIT hw_create_as_test2;
-
+execute direct on (datanode1) 'select a.attname, a.atttypmod from  pg_attribute as a, pg_class as c where attrelid=c.oid and c.relname= ''hw_create_as_test2'' order by attname';
 DROP TABLE hw_create_as_test3;
 DROP TABLE hw_create_as_test2;
 DROP TABLE hw_create_as_test1;
@@ -331,7 +331,7 @@ CREATE TABLE hw_create_as_test1(COL1 int[2][2]);
 CREATE TABLE hw_create_as_test2(COL1) as SELECT COL1 FROM hw_create_as_test1;
 CREATE TABLE hw_create_as_test3 (COL1 int[2][2]);
 ALTER TABLE hw_create_as_test3 INHERIT hw_create_as_test2;
-
+execute direct on (datanode1) 'select a.attname, a.atttypmod from  pg_attribute as a, pg_class as c where attrelid=c.oid and c.relname= ''hw_create_as_test2'' order by attname';
 DROP TABLE hw_create_as_test3;
 DROP TABLE hw_create_as_test2;
 DROP TABLE hw_create_as_test1;
@@ -351,7 +351,7 @@ insert into hw_create_as_test1 values(1);
 insert into hw_create_as_test1 values(2);
 CREATE TABLE hw_create_as_test2 as SELECT '001' col1, COL1 col2 FROM hw_create_as_test1;
 select * from hw_create_as_test2 order by 1, 2;
-
+execute direct on (datanode1) 'select a.attname, a.attnum, a.atttypid, a.atttypmod from  pg_attribute as a, pg_class as c where attrelid=c.oid and c.relname= ''hw_create_as_test2'' order by 2 ';
 DROP TABLE hw_create_as_test2;
 DROP TABLE hw_create_as_test1;
 
@@ -431,10 +431,10 @@ create table test_info(a int, b int);
 insert into test_info values(1,2),(2,3),(3,4),(4,5);
 \d+ test_info
 \d+ sql_features
-explain (verbose on, costs off, nodes off) select count(*) from sql_features;
+explain (verbose on, costs off) select count(*) from sql_features;
 select count(*) from sql_features;
 
-explain (verbose on, costs off, nodes off) select * from test_info;
+explain (verbose on, costs off) select * from test_info;
 select count(*) from test_info;
 drop table test_info;
 reset current_schema;

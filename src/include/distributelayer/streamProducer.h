@@ -14,11 +14,10 @@
  * ---------------------------------------------------------------------------------------
  * 
  * streamProducer.h
- * 
- * 
- * 
+ *     Support methods for class streamProducer.
+ *  
  * IDENTIFICATION
- *        src/include/distributelayer/streamProducer.h
+ *     src/include/distributelayer/streamProducer.h
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -40,13 +39,13 @@ public:
     StreamProducer(StreamKey key, PlannedStmt* pstmt, Stream* streamNode, MemoryContext context, int socketNum,
         StreamTransType type);
 
-    virtual ~StreamProducer();
+    ~StreamProducer();
 
     /* Init the stream producer. */
     void init(TupleDesc desc, StreamTxnContext txnCxt, ParamListInfo params, int parentPlanNodeId);
 
-    /* Init stream key for SCTP */
-    void initSctpKey();
+    /* Init stream key */
+    void initStreamKey();
 
     /* Init dataskew info. */
     void initSkewState();
@@ -54,7 +53,7 @@ public:
     typedef void (StreamProducer::*criticalSectionFunc)(void);
 
     /* Connect consumer. */
-    void connectConsumer(sctpaddrinfo** consumerAddr, int& count, int totalNum);
+    void connectConsumer(libcomm_addrinfo** consumerAddr, int& count, int totalNum);
 
     /* Enter critical section for net protect purpose. */
     void enterCriticalSection(criticalSectionFunc func);
@@ -68,9 +67,6 @@ public:
     /* Init the net port. */
     void netPortInit();
 
-    /* Release socket with linger. */
-    void releaseSocketWithLinger();
-
     /* Release net port with protect. */
     void releaseUninitializeResourceWithProtect();
 
@@ -82,6 +78,8 @@ public:
 
     /* Register producer thread into thread node group, it should be call in the stream thread. */
     void registerGroup();
+
+    void SetDest(bool is_vec_plan);
 
     /* Switch the send direction to the nth channel. */
     bool netSwitchDest(int nthChannel);
@@ -129,7 +127,7 @@ public:
     /* Mark the data type of each column of a batch. */
     void serializeStreamTypeInit();
 
-    /* Serialize the given row of the batch into the buffer */
+    /*Serialize the given row of the batch into the buffer */
     void serializeStream(VectorBatch* batch, int index);
 
     /* Local redistribute the batch through memory. */
@@ -181,6 +179,7 @@ public:
     /* Wait thread ID ready. */
     void waitThreadIdReady();
 
+public:
     /* All get function. */
 
     /* Get database name. */
@@ -243,7 +242,7 @@ public:
         return m_threadInit;
     }
 
-    uint64 getUnqiueSQLId();
+    void getUniqueSQLKey(uint64* unique_id, Oid* user_id, uint32* cn_id);
 
     /* All set function. */
 
@@ -271,7 +270,7 @@ public:
         m_threadInit = flag;
     }
 
-    void setUnqiueSQLId(uint64 unique_sql_id);
+    void setUniqueSQLKey(uint64 unique_sql_id, Oid unique_user_id, uint32 unique_cn_id);
 
     /* The plan the producer thread will run. */
     PlannedStmt* m_plan;
@@ -323,13 +322,9 @@ public:
      */
     List* m_originProducerExecNodeList;
 
+    StreamSyncParam m_syncParam;
+
 private:
-    /* Connect consumer with TCP. */
-    void connectConsumerTCP();
-
-    /* Connect consumer with SCTP. */
-    void connectConsumerSCTP(sctpaddrinfo** consumerAddr, int& count, int totalNum);
-
     /* Set distribute Idx. */
     void setDistributeIdx();
 
@@ -348,18 +343,18 @@ private:
     /* Choose which thread to send by hash value. */
     inline int ThreadLocalizer(ScalarValue hashValue, int dop);
 
-    template <int keyNum, int distrType>
+    template<int keyNum, int distrType>
     void redistributeBatchChannel(VectorBatch* batch);
 
-    template <int keyNum, int distrType>
+    template<int keyNum, int distrType>
     void redistributeTupleChannel(TupleTableSlot* tuple);
 
     /* Choose which channel to send by hash value. */
-    template <int distrType>
-    inline int ChannelLocalizer(ScalarValue hashValue, bool allIsNULL, int Dop, int nodeSize);
+    template<int distrType>
+    inline int ChannelLocalizer(ScalarValue hashValue, int Dop, int nodeSize);
 
     /* Building binding function. */
-    template <bool vectorized>
+    template<bool vectorized>
     void BindingRedisFunction();
 
     /* Dispatch batch sending function. */
@@ -369,11 +364,11 @@ private:
     void DispatchRowRedistrFunction(int len);
 
     /* Dispatch batch sending function by redistribute type. */
-    template <int len>
+    template<int len>
     void DispatchBatchRedistrFunctionByRedisType();
 
     /* Dispatch tuple sending function by redistribute type. */
-    template <int len>
+    template<int len>
     void DispatchRowRedistrFunctionByRedisType();
 
     typedef Datum (*hashFun)(Datum value);
@@ -382,6 +377,24 @@ private:
 
     int findLocalChannel();
 
+    inline uint2 NodeLocalizerForSlice(Const **distValues);
+
+    inline int ThreadLocalizerForSlice(ScalarValue hashValue, int dop) const;
+
+    template<int distrType>
+    int ChannelLocalizerForSlice(ScalarValue hashValue, Const **distValues, int dop);
+
+    template<int distrType>
+    void redistributeTupleChannelForSlice(TupleTableSlot *tuple);
+
+    void DispatchRowRedistrFunctionForSlice();
+
+    template<int distrType>
+    void redistributeBatchChannelForSlice(VectorBatch* batch);
+
+    void DispatchBatchRedistrFunctionForSlice();
+
+private:
     /* Hash function for redistribute. */
     hashFun* m_hashFun;
 
@@ -424,7 +437,7 @@ private:
     /* Parent session ID. */
     uint64 m_parentSessionid;
 
-    /* Parent planNode ID */
+    /* Parent planNode ID*/
     int m_parentPlanNodeId;
 
     /* The tuple description for the output data. */
@@ -441,6 +454,9 @@ private:
 
     /* The bucket map for redistribute. */
     uint2* m_bucketMap;
+
+    /* boundary extracted from ExecNodes if redistribute by range/list */
+    ExecBoundary* m_sliceBoundary;
 
     /* A quick node index for distribute. */
     uint2** m_disQuickLocator;
@@ -477,14 +493,15 @@ private:
 
     int m_skewMatch[BatchMaxSize];
 
-    /* If thread already inited */
+    /* If thread already inited*/
     bool m_threadInit;
 
     /* instrumentation: */
     uint64 m_uniqueSQLId;
+    Oid m_uniqueSQLUserId;
+    uint32 m_uniqueSQLCNId;
 };
 
 extern THR_LOCAL StreamProducer* streamProducer;
 
 #endif /* SRC_INCLUDE_DISTRIBUTELAYER_STREAMPRODUCER_H_ */
-

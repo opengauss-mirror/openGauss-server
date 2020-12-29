@@ -260,7 +260,7 @@ Batchsortstate* batchsort_begin_merge(TupleDesc tupDesc, int nkeys, AttrNumber* 
 #endif
 
     state->m_nKeys = nkeys;
-    TRACE_POSTGRESQL_SORT_START(MERGE_SORT, false, nkeys, workMem, false, PARALLEL_SORT(state));
+    TRACE_POSTGRESQL_SORT_START(MERGE_SORT, false, nkeys, workMem, false);
 
     state->m_nKeys = nkeys;
     state->m_colNum = tupDesc->natts;
@@ -661,7 +661,11 @@ void batchsort_restorepos(Batchsortstate* state)
             } else
                 state->m_eofReached = false;
 
-            LogicalTapeSeek(state->m_tapeset, state->m_resultTape, state->m_markposBlock, state->m_markposOffset);
+            if (!LogicalTapeSeek(state->m_tapeset, state->m_resultTape, state->m_markposBlock, state->m_markposOffset))
+                ereport(ERROR,
+                    (errmodule(MOD_EXECUTOR),
+                        errcode(ERRCODE_INVALID_OPERATION),
+                        errmsg("batchsort_restorepos failed")));
             break;
         default:
             ereport(ERROR,
@@ -863,7 +867,7 @@ void Batchsortstate::GetBatchDisk(bool forward, VectorBatch* batch)
          * Note: READTUP expects we are positioned after the initial
          * length word of the tuple, so back up to that point.
          */
-        if (LogicalTapeBackspace(m_tapeset, m_resultTape, tuplen) != tuplen)
+        if (!LogicalTapeBackspace(m_tapeset, m_resultTape, tuplen))
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),
                     errcode(ERRCODE_FILE_READ_FAILED),
@@ -1270,7 +1274,7 @@ void Batchsortstate::MergeRuns()
     if (m_curRun == 1) {
         m_resultTape = m_tpNum[m_destTape];
         /* must freeze and rewind the finished output tape */
-        LogicalTapeFreeze(m_tapeset, m_resultTape, NULL);
+        LogicalTapeFreeze(m_tapeset, m_resultTape);
         m_status = BS_SORTEDONTAPE;
         return;
     }
@@ -1377,7 +1381,7 @@ void Batchsortstate::MergeRuns()
      * a waste of cycles anyway...
      */
     m_resultTape = m_tpNum[m_tapeRange];
-    LogicalTapeFreeze(m_tapeset, m_resultTape, NULL);
+    LogicalTapeFreeze(m_tapeset, m_resultTape);
     m_status = BS_SORTEDONTAPE;
 }
 
@@ -1429,7 +1433,7 @@ void Batchsortstate::InitTapes()
     /*
      * Create the tape set and allocate the per-tape data arrays.
      */
-    m_tapeset = LogicalTapeSetCreate(maxTapes, NULL, NULL, 0);
+    m_tapeset = LogicalTapeSetCreate(maxTapes);
     m_lastFileBlocks = 0L;
 
     m_mergeActive = (bool*)palloc0(maxTapes * sizeof(bool));
@@ -2125,6 +2129,9 @@ static unsigned int GetBatchFromDatanode(Batchsortstate* state, int tapenum, Vec
                             (errcode(error_code),
                                 errmsg("Failed to read response from Datanodes Detail: %s\n", error_msg)));
                     } else {
+                        ereport(LOG,
+                            (errmsg("%s:%d recv fail", __FUNCTION__, __LINE__)));
+
                         combiner->need_error_check = false;
                         pgxc_node_report_error(combiner);
                     }
@@ -2196,7 +2203,7 @@ static unsigned int StreamGetBatchFromDatanode(Batchsortstate* state, int tapenu
                 Assert(node->need_fresh_data == true);
                 if (node->need_fresh_data) {
                     if (datanode_receive_from_logic_conn(1, &node->connections[tapenum], &node->netctl, -1)) {
-                        int error_code = getSctpSocketError(gs_comm_strerror());
+                        int error_code = getStreamSocketError(gs_comm_strerror());
                         ereport(ERROR,
                             (errcode(error_code),
                                 errmsg("Failed to read response from Datanodes. Detail: %s\n", gs_comm_strerror())));

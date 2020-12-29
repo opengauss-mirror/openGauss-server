@@ -38,8 +38,6 @@
 
 #include <signal.h>
 #include <sys/time.h>
-#include <time.h>
-#include <unistd.h>
 
 #include "access/xlog_internal.h"
 #include "access/double_write.h"
@@ -47,9 +45,10 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "postmaster/bgwriter.h"
-#include "storage/bufmgr.h"
+#include "postmaster/pagewriter.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
 #include "storage/smgr.h"
@@ -98,12 +97,12 @@ extern void write_term_log(uint32 term);
 const int MAX_THREAD_NAME_LEN = 128;
 const int MILLISECOND_TO_MICROSECOND = 1000;
 #define FULL_CKPT g_instance.ckpt_cxt_ctl->flush_all_dirty_page
+
 static void candidate_buf_push(int buf_id, int thread_id);
 static int64 get_thread_candidate_nums(int thread_id);
 static uint32 get_curr_candidate_nums(void);
-static uint32 get_candidate_buf(CkptSortItem *dirty_buf_list, int thread_id, bool *contain_hashbucket);
-static uint32 get_buf_form_dirty_queue(CkptSortItem *dirty_buf_list, bool *contain_hashbucket);
-static int get_bgwriter_sleep_time();
+static uint32 get_candidate_buf(bool *contain_hashbucket);
+static uint32 get_buf_form_dirty_queue(bool *contain_hashbucket);
 
 static void setup_bgwriter_signalhook(void)
 {
@@ -208,7 +207,7 @@ void BackgroundWriterMain(void)
     WritebackContext wb_context;
 
     t_thrd.role = BGWRITER;
-    knl_thread_set_name("BgWriter");
+
     ereport(LOG, (errmsg("bgwriter started")));
 
     setup_bgwriter_signalhook();
@@ -223,7 +222,7 @@ void BackgroundWriterMain(void)
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Background Writer");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Background Writer", MEMORY_CONTEXT_STORAGE);
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -362,7 +361,9 @@ void BackgroundWriterMain(void)
             }
 
             if (now >= timeout) {
-                write_term_log(g_instance.comm_cxt.localinfo_cxt.term);
+                uint32 term_cur = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file,
+				    g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
+				write_term_log(term_cur);
                 g_instance.comm_cxt.localinfo_cxt.set_term = true;
             }
         }
@@ -555,6 +556,7 @@ uint32 incre_ckpt_bgwriter_flush_dirty_page(WritebackContext wb_context, int thr
     uint32 candidates = 0;
     int buf_id_start = g_instance.bgwriter_cxt.bgwriter_procs[thread_id].buf_id_start;
     int buf_id_end = buf_id_start + g_instance.bgwriter_cxt.bgwriter_procs[thread_id].cand_list_size;
+
     for (int i = start; i < start + batch_num; i++) {
         uint32 buf_state;
         uint32 sync_state;
@@ -603,10 +605,12 @@ uint32 incre_ckpt_bgwriter_flush_dirty_page(WritebackContext wb_context, int thr
     return num_actual_flush;
 }
 
-void incre_ckpt_bgwriter_flush_page_batch(WritebackContext wb_context, int thread_id,
-    CkptSortItem *dirty_buf_list, uint32 need_flush_num, bool contain_hashbucket)
+void incre_ckpt_bgwriter_flush_page_batch(WritebackContext wb_context, uint32 need_flush_num,
+    bool contain_hashbucket)
 {
+    int thread_id = t_thrd.bgwriter_cxt.thread_id;
     BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
+    CkptSortItem *dirty_buf_list = bgwriter->dirty_buf_list;
     int dw_batch_page_max = GET_DW_DIRTY_PAGE_MAX(contain_hashbucket);
     int runs = (need_flush_num + dw_batch_page_max - 1) / dw_batch_page_max;
     int num_actual_flush = 0;
@@ -623,7 +627,7 @@ void incre_ckpt_bgwriter_flush_page_batch(WritebackContext wb_context, int threa
 
         bgwriter->thrd_dw_cxt.contain_hashbucket = contain_hashbucket;
         bgwriter->thrd_dw_cxt.dw_page_idx = -1;
-        dw_perform(batch_num, dirty_buf_list + offset, &bgwriter->thrd_dw_cxt);
+        dw_perform_batch_flush(batch_num, dirty_buf_list + offset, &bgwriter->thrd_dw_cxt);
         flush_num = incre_ckpt_bgwriter_flush_dirty_page(wb_context, thread_id, dirty_buf_list, offset, batch_num);
         bgwriter->thrd_dw_cxt.dw_page_idx = -1;
         num_actual_flush += flush_num;
@@ -657,8 +661,9 @@ void candidate_buf_init(void)
         rc = memset_s(g_instance.bgwriter_cxt.candidate_free_map, buffer_num * sizeof(bool),
             false, buffer_num * sizeof(bool));
         securec_check(rc, "", "");
+        
         if (g_instance.bgwriter_cxt.bgwriter_procs != NULL) {
-            int thread_num = g_instance.attr.attr_storage.bgwriter_thread_num;
+            int thread_num = g_instance.bgwriter_cxt.bgwriter_num;
             int avg_num = g_instance.attr.attr_storage.NBuffers / thread_num;
             for (int i = 0; i < thread_num; i++) {
                 int start = avg_num * i;
@@ -677,16 +682,17 @@ void candidate_buf_init(void)
     }
 }
 
-const int MAX_DIRTY_PAGE_BATCH = 1000;
+const int MAX_BGWRITER_FLUSH_NUM = 1000 * DW_DIRTY_PAGE_MAX_FOR_NOHBK; 
 void incre_ckpt_bgwriter_cxt_init()
 {
     MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
     int thread_num = g_instance.attr.attr_storage.bgwriter_thread_num;
 
+    thread_num = thread_num > 0 ? thread_num : 1;
     g_instance.bgwriter_cxt.bgwriter_num = thread_num;
     g_instance.bgwriter_cxt.bgwriter_procs = (BgWriterProc *)palloc0(sizeof(BgWriterProc) * thread_num);
 
-    uint32 dirty_list_size = DW_DIRTY_PAGE_MAX_FOR_NOHBK * MAX_DIRTY_PAGE_BATCH;
+    uint32 dirty_list_size = MAX_BGWRITER_FLUSH_NUM / thread_num;
     int avg_num = g_instance.attr.attr_storage.NBuffers / thread_num;
     for (int i = 0; i < thread_num; i++) {
         int start = avg_num * i;
@@ -713,7 +719,7 @@ void incre_ckpt_bgwriter_cxt_init()
 static void incre_ckpt_bgwriter_kill(int code, Datum arg)
 {
     int id = t_thrd.bgwriter_cxt.thread_id;
-    Assert(id >= 0 && id < g_instance.attr.attr_storage.bgwriter_thread_num);
+    Assert(id >= 0 && id < g_instance.bgwriter_cxt.bgwriter_num);
 
     /* Making sure that we mark our exit status */
     g_instance.bgwriter_cxt.bgwriter_procs[id].thrd_dw_cxt.dw_page_idx = -1;
@@ -722,6 +728,36 @@ static void incre_ckpt_bgwriter_kill(int code, Datum arg)
     (void)pg_atomic_fetch_sub_u32(&g_instance.bgwriter_cxt.curr_bgwriter_num, 1);
     g_instance.bgwriter_cxt.bgwriter_procs[id].proc = NULL;
     return;
+}
+
+static int64 get_bgwriter_sleep_time()
+{
+    pg_time_t now;
+    int64 time_diff;
+    int thread_id = t_thrd.bgwriter_cxt.thread_id;
+    BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
+
+    /* If primary instance do full checkpoint and not the first bgwriter thread, can scan the dirty
+     * page queue, help the pagewriter thread finish the dirty page flush.
+     */
+    if (FULL_CKPT && !RecoveryInProgress() && thread_id > 0) {
+        return 0;
+    }
+
+    now = (pg_time_t) time(NULL);
+    if (t_thrd.bgwriter_cxt.next_flush_time > now) {
+        time_diff = t_thrd.bgwriter_cxt.next_flush_time - now;
+    } else {
+        time_diff = 0;
+        if (now - t_thrd.bgwriter_cxt.next_flush_time > u_sess->attr.attr_storage.BgWriterDelay * 3) {
+            ereport(WARNING, (errmodule(MOD_INCRE_BG),
+                errmsg("bgwriter took %ld ms to flush %d pages, please check the max_io_capacity and bgwriter_delay",
+                u_sess->attr.attr_storage.BgWriterDelay + now - t_thrd.bgwriter_cxt.next_flush_time,
+                bgwriter->thread_last_flush)));
+        }
+    }
+
+    return time_diff;
 }
 
 /**
@@ -733,14 +769,11 @@ void incre_ckpt_background_writer_main(void)
     MemoryContext bgwriter_context;
     char name[MAX_THREAD_NAME_LEN] = {0};
     WritebackContext wb_context;
-    CkptSortItem *dirty_buf_list = NULL;
     int thread_id = t_thrd.bgwriter_cxt.thread_id;
     BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
 
     t_thrd.role = BGWRITER;
-    
-    knl_thread_set_name("BgWriter");
-    
+
     setup_bgwriter_signalhook();
     ereport(LOG, (errmodule(MOD_INCRE_BG), errmsg("bgwriter started, thread id is %d", thread_id)));
 
@@ -751,7 +784,7 @@ void incre_ckpt_background_writer_main(void)
     /*
      * Create a resource owner to keep track of our resources (currently only buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, name);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, name, MEMORY_CONTEXT_STORAGE);
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -788,16 +821,15 @@ void incre_ckpt_background_writer_main(void)
         t_thrd.xlog_cxt.ThisTimeLineID = GetRecoveryTargetTLI();
     }
 
-    dirty_buf_list = g_instance.bgwriter_cxt.bgwriter_procs[thread_id].dirty_buf_list;
-
-    pgstat_report_appname("IncrBgWriter");
-    pgstat_report_activity(STATE_IDLE, NULL);
+    pg_time_t now = (pg_time_t) time(NULL);
+    t_thrd.bgwriter_cxt.next_flush_time = now + u_sess->attr.attr_storage.BgWriterDelay;
 
 	/* Loop forever */
     for (;;) {
         int rc;
         bool contain_hashbucket = false;
         uint32 need_flush_num = 0;
+        int64 sleep_time = 0;
 
         if (t_thrd.bgwriter_cxt.got_SIGHUP) {
             t_thrd.bgwriter_cxt.got_SIGHUP = false;
@@ -826,9 +858,8 @@ void incre_ckpt_background_writer_main(void)
             }
         }
 
-        pgstat_report_activity(STATE_IDLE, NULL);
-        rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
-            get_bgwriter_sleep_time());
+        sleep_time = get_bgwriter_sleep_time();
+        rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, sleep_time);
         if (rc & WL_POSTMASTER_DEATH) {
             gs_thread_exit(1);
         }
@@ -836,7 +867,9 @@ void incre_ckpt_background_writer_main(void)
         /* Clear any already-pending wakeups */
         ResetLatch(&t_thrd.proc->procLatch);
 
-        pgstat_report_activity(STATE_RUNNING, NULL);
+        now = (pg_time_t) time(NULL);
+        t_thrd.bgwriter_cxt.next_flush_time = now + u_sess->attr.attr_storage.BgWriterDelay;
+        
         /*
          * When the primary instance do full checkpoint, the first thread remain scan the
          * buffer pool to maintain the candidate buffer list, other threads scan the dirty
@@ -845,16 +878,16 @@ void incre_ckpt_background_writer_main(void)
          * bgwirter thread only scan the buffer pool to maintain the candidate buffer list.
          */
         if (FULL_CKPT && !RecoveryInProgress() && thread_id > 0) {
-            need_flush_num = get_buf_form_dirty_queue(dirty_buf_list, &contain_hashbucket);
+            need_flush_num = get_buf_form_dirty_queue(&contain_hashbucket);
         } else {
-            need_flush_num = get_candidate_buf(dirty_buf_list, thread_id, &contain_hashbucket);
+            need_flush_num = get_candidate_buf(&contain_hashbucket);
         }
 
         if (need_flush_num == 0) {
             continue;
         }
 
-        incre_ckpt_bgwriter_flush_page_batch(wb_context, thread_id, dirty_buf_list, need_flush_num, contain_hashbucket);
+        incre_ckpt_bgwriter_flush_page_batch(wb_context, need_flush_num, contain_hashbucket);
 	}
 }
 
@@ -874,9 +907,10 @@ int get_bgwriter_thread_id(void)
         t_thrd.bgwriter_cxt.thread_id = id;
     } else {
         for (int i = 0; i < g_instance.bgwriter_cxt.bgwriter_num; i++) {
+            void *expected = NULL;
             if (pg_atomic_compare_exchange_uintptr(
                 (uintptr_t *)&g_instance.bgwriter_cxt.bgwriter_procs[i].proc,
-                (uintptr_t *)&t_thrd.proc, (uintptr_t)NULL)) {
+                (uintptr_t *)&expected, (uintptr_t)t_thrd.proc)) {
                 t_thrd.bgwriter_cxt.thread_id = i;
                 break;
             }
@@ -893,67 +927,35 @@ static uint32 get_bgwriter_flush_num()
     int buffer_num = g_instance.attr.attr_storage.NBuffers;
     double percent_target = u_sess->attr.attr_storage.candidate_buf_percent_target;
     int thread_id = t_thrd.bgwriter_cxt.thread_id;
+    uint32 dirty_list_size = g_instance.bgwriter_cxt.bgwriter_procs[thread_id].dirty_list_size;
     uint32 cur_candidate_num;
     uint32 total_target;
-    uint32 thread_target;
     uint32 high_water_mark;
     uint32 flush_num = 0;
+    uint32 min_io = DW_DIRTY_PAGE_MAX_FOR_NOHBK;
+    uint32 max_io = calculate_thread_max_flush_num(false);
 
     total_target = buffer_num * percent_target;
     high_water_mark = buffer_num * (percent_target + GAP_PERCENT);
-    thread_target = high_water_mark / g_instance.bgwriter_cxt.bgwriter_num;
     cur_candidate_num = get_curr_candidate_nums();
 
+    /* max_io need greater than one batch flush num, and need less than the dirty list size */
+    max_io = MAX(max_io / g_instance.bgwriter_cxt.bgwriter_num, DW_DIRTY_PAGE_MAX_FOR_NOHBK);
+    max_io = MIN(max_io, dirty_list_size);
+
     if (cur_candidate_num >= high_water_mark) {
-        flush_num = DW_BATCH_DATA_PAGE_MAX_FOR_NOHBK; /* only flush one batch dirty page */
+        flush_num = min_io; /* only flush one batch dirty page */
     } else if (cur_candidate_num >= total_target) {
-        if ((uint32)get_thread_candidate_nums(thread_id) >= thread_target) {
-            flush_num = DW_BATCH_DATA_PAGE_MAX_FOR_NOHBK;
-        }
-        flush_num = DW_BATCH_DATA_PAGE_MAX_FOR_NOHBK + (float)(high_water_mark - cur_candidate_num) /
-		    (float)(high_water_mark - total_target) * DW_BATCH_DATA_PAGE_MAX_FOR_NOHBK * (MAX_DIRTY_PAGE_BATCH - 1);
+        flush_num = min_io + (float)(high_water_mark - cur_candidate_num) /
+            (float)(high_water_mark - total_target) * (max_io - min_io);
     } else {
-        flush_num = DW_BATCH_DATA_PAGE_MAX_FOR_NOHBK * MAX_DIRTY_PAGE_BATCH;
+        /* every time only flush max_io dirty pages */
+        flush_num = max_io;
     }
 
     ereport(DEBUG1, (errmodule(MOD_INCRE_BG),
         errmsg("bgwriter flush_num num is %u, now candidate buf is %u", flush_num, cur_candidate_num)));
     return flush_num;
-}
-
-const float MIN_SLEEP_PERCENT = 0.1;
-static int get_bgwriter_sleep_time()
-{
-    int buffer_num = g_instance.attr.attr_storage.NBuffers;
-    double percent_target = u_sess->attr.attr_storage.candidate_buf_percent_target;
-    uint32 cur_candidate_num;
-    uint32 total_target;
-    uint32 high_water_mark;
-    int sleep = 0;
-
-    if (FULL_CKPT && !RecoveryInProgress()) {
-        return 0;
-    }
-    if (RecoveryInProgress()) {
-        percent_target = percent_target * u_sess->attr.attr_storage.shared_buffers_fraction;
-    }
-
-    total_target = buffer_num * percent_target;
-    high_water_mark = buffer_num * (percent_target + GAP_PERCENT);
-    cur_candidate_num = get_curr_candidate_nums();
-
-    if (cur_candidate_num >= high_water_mark) {
-        sleep = u_sess->attr.attr_storage.BgWriterDelay;
-    } else if (cur_candidate_num >= total_target) {
-        sleep = u_sess->attr.attr_storage.BgWriterDelay - (double)(high_water_mark - cur_candidate_num) /
-            (double)(high_water_mark - total_target) *
-            u_sess->attr.attr_storage.BgWriterDelay * (1 - MIN_SLEEP_PERCENT);
-    } else {
-        sleep = u_sess->attr.attr_storage.BgWriterDelay * MIN_SLEEP_PERCENT;
-    }
-    ereport(DEBUG1, (errmodule(MOD_INCRE_BG),
-        errmsg("bgwriter sleep time is %d, now candidate buf is %u", sleep, cur_candidate_num)));
-    return sleep;
 }
 
 const int MAX_SCAN_BATCH_NUM = 131072 * 10; /* 10GB buffers */
@@ -964,7 +966,7 @@ const int MAX_SCAN_BATCH_NUM = 131072 * 10; /* 10GB buffers */
  * @in: bgwriter thread id
  * @out: Return the number of dirty buffers and dirty buffer list and this batch buffer whether hashbucket is included.
  */
-static uint32 get_candidate_buf(CkptSortItem *dirty_buf_list, int thread_id, bool *contain_hashbucket)
+static uint32 get_candidate_buf(bool *contain_hashbucket)
 {
     uint32 need_flush_num = 0;
     uint32 candidates = 0;
@@ -972,7 +974,9 @@ static uint32 get_candidate_buf(CkptSortItem *dirty_buf_list, int thread_id, boo
     uint32 local_buf_state;
     CkptSortItem* item = NULL;
     uint32 max_flush_num = get_bgwriter_flush_num();
+    int thread_id = t_thrd.bgwriter_cxt.thread_id;
     BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
+    CkptSortItem *dirty_buf_list = bgwriter->dirty_buf_list;
     int batch_scan_num = MIN(bgwriter->cand_list_size, MAX_SCAN_BATCH_NUM);
     int start = MAX(bgwriter->buf_id_start, bgwriter->next_scan_loc);
     int end = bgwriter->buf_id_start + bgwriter->cand_list_size;
@@ -1010,7 +1014,7 @@ static uint32 get_candidate_buf(CkptSortItem *dirty_buf_list, int thread_id, boo
             goto UNLOCK;
         }
 
-        if (XLogNeedsFlush(BufferGetLSN(buf_desc)) ||
+        if ((!RecoveryInProgress() && XLogNeedsFlush(BufferGetLSN(buf_desc))) ||
             need_flush_num >= max_flush_num) {
             goto UNLOCK;
         }
@@ -1044,12 +1048,15 @@ UNLOCK:
     return need_flush_num;
 }
 
-static uint32 get_buf_form_dirty_queue(CkptSortItem *dirty_buf_list, bool *contain_hashbucket)
+static uint32 get_buf_form_dirty_queue(bool *contain_hashbucket)
 {
     uint32 need_flush_num = 0;
     BufferDesc *buf_desc = NULL;
     uint32 local_buf_state;
     CkptSortItem* item = NULL;
+    int thread_id = t_thrd.bgwriter_cxt.thread_id;
+    BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
+    CkptSortItem *dirty_buf_list = bgwriter->dirty_buf_list;
     XLogRecPtr redo = g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr;
     uint64 dirty_queue_head = pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_head);
 
@@ -1160,6 +1167,7 @@ static int64 get_thread_candidate_nums(int thread_id)
     Assert(curr_cand_num >= 0);
     return curr_cand_num;
 }
+
 /**
  * @Description: Return a rough estimate of the current number of buffers in the candidate list.
  */
@@ -1177,6 +1185,9 @@ static uint32 get_curr_candidate_nums(void)
 
 void ckpt_shutdown_bgwriter()
 {
+    if (!g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+        return;
+    }
     /* Wait for all buffer writer threads to exit. */
     while (pg_atomic_read_u32(&g_instance.bgwriter_cxt.curr_bgwriter_num) != 0) {
         pg_usleep(MILLISECOND_TO_MICROSECOND);

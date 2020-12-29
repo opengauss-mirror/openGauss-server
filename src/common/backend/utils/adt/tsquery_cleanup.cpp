@@ -36,9 +36,8 @@ static NODE* maketree(QueryItem* in)
     node->right = node->left = NULL;
     if (in->type == QI_OPR) {
         node->right = maketree(in + 1);
-        if (in->qoperator.oper != OP_NOT) {
+        if (in->qoperator.oper != OP_NOT)
             node->left = maketree(in + in->qoperator.left);
-        }
     }
     return node;
 }
@@ -60,13 +59,13 @@ static void plainnode(PLAINTREE* state, NODE* node)
 
     if (state->cur == state->len) {
         state->len *= 2;
-        state->ptr = (QueryItem*)repalloc((void*)state->ptr, (uint32)(state->len) * sizeof(QueryItem));
+        state->ptr = (QueryItem*)repalloc((void*)state->ptr, state->len * sizeof(QueryItem));
     }
     rc = memcpy_s((void*)&(state->ptr[state->cur]), sizeof(QueryItem), (void*)node->valnode, sizeof(QueryItem));
     securec_check(rc, "\0", "\0");
-    if (node->valnode->type == QI_VAL) {
+    if (node->valnode->type == QI_VAL)
         state->cur++;
-    } else if (node->valnode->qoperator.oper == OP_NOT) {
+    else if (node->valnode->qoperator.oper == OP_NOT) {
         state->ptr[state->cur].qoperator.left = 1;
         state->cur++;
         plainnode(state, node->right);
@@ -75,7 +74,7 @@ static void plainnode(PLAINTREE* state, NODE* node)
 
         state->cur++;
         plainnode(state, node->right);
-        state->ptr[cur].qoperator.left = (uint32)(state->cur - cur);
+        state->ptr[cur].qoperator.left = state->cur - cur;
         plainnode(state, node->left);
     }
     pfree_ext(node);
@@ -91,11 +90,10 @@ static QueryItem* plaintree(NODE* root, int* len)
     pl.cur = 0;
     pl.len = 16;
     if (root && (root->valnode->type == QI_VAL || root->valnode->type == QI_OPR)) {
-        pl.ptr = (QueryItem*)palloc((uint32)(pl.len) * sizeof(QueryItem));
+        pl.ptr = (QueryItem*)palloc(pl.len * sizeof(QueryItem));
         plainnode(&pl, root);
-    } else {
+    } else
         pl.ptr = NULL;
-    }
     *len = pl.cur;
     return pl.ptr;
 }
@@ -105,15 +103,12 @@ static void freetree(NODE* node)
     /* since this function recurses, it could be driven to stack overflow. */
     check_stack_depth();
 
-    if (node == NULL) {
+    if (node == NULL)
         return;
-    }
-    if (node->left != NULL) {
+    if (node->left != NULL)
         freetree(node->left);
-    }
-    if (node->right != NULL) {
+    if (node->right != NULL)
         freetree(node->right);
-    }
     pfree_ext(node);
 }
 
@@ -128,9 +123,8 @@ static NODE* clean_NOT_intree(NODE* node)
     /* since this function recurses, it could be driven to stack overflow. */
     check_stack_depth();
 
-    if (node->valnode->type == QI_VAL) {
+    if (node->valnode->type == QI_VAL)
         return node;
-    }
 
     if (node->valnode->qoperator.oper == OP_NOT) {
         freetree(node);
@@ -183,10 +177,16 @@ QueryItem* clean_NOT(QueryItem* ptr, int* len)
 /*
  * output values for result output parameter of clean_fakeval_intree
  */
-#define V_UNKNOWN 0   /* the expression can't be evaluated statically */
-#define V_TRUE    1   /* the expression is always true (not implemented) */
-#define V_FALSE   2   /* the expression is always false (not implemented) */
-#define V_STOP    3 /* the expression is a stop word */
+#define V_UNKNOWN                          \
+    0 /* the expression can't be evaluated \
+       * statically */
+#define V_TRUE                              \
+    1 /* the expression is always true (not \
+       * implemented) */
+#define V_FALSE                                         \
+    2            /* the expression is always false (not \
+                  * implemented) */
+#define V_STOP 3 /* the expression is a stop word */
 
 /*
  * Clean query tree from values which is always in
@@ -199,9 +199,9 @@ static NODE* clean_fakeval_intree(NODE* node, char* result)
     /* since this function recurses, it could be driven to stack overflow. */
     check_stack_depth();
 
-    if (node->valnode->type == QI_VAL) {
+    if (node->valnode->type == QI_VAL)
         return node;
-    } else if (node->valnode->type == QI_VALSTOP) {
+    else if (node->valnode->type == QI_VALSTOP) {
         pfree_ext(node);
         *result = V_STOP;
         return NULL;
@@ -253,4 +253,3 @@ QueryItem* clean_fakeval(QueryItem* ptr, int* len)
 
     return plaintree(resroot, len);
 }
-

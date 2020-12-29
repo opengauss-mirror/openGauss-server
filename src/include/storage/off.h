@@ -14,7 +14,7 @@
 #ifndef OFF_H
 #define OFF_H
 
-#include "storage/itemid.h"
+#include "storage/item/itemid.h"
 /*
  * OffsetNumber:
  *
@@ -53,4 +53,3 @@ typedef uint16 OffsetNumber;
 #define OffsetNumberPrev(offsetNumber) ((OffsetNumber)(-1 + (offsetNumber)))
 
 #endif /* OFF_H */
-

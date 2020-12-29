@@ -9,7 +9,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *			src/gausskernel/storage/access/gin/gininsert.cpp
+ *    src/gausskernel/storage/access/gin/gininsert.cpp
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
@@ -21,15 +21,16 @@
 #include "access/cstore_am.h"
 #include "access/dfs/dfs_am.h"
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "catalog/index.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/indexfsm.h"
 #include "storage/smgr.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "executor/executor.h"
 #include "optimizer/var.h"
 
@@ -49,17 +50,17 @@ typedef struct {
  * GinFormTuple().  Returns a new, modified index tuple.
  * items[] must be in sorted order with no duplicates.
  */
-static IndexTuple addItemPointersToLeafTuple(
-    GinState* ginstate, IndexTuple old, ItemPointerData* items, uint32 nitem, GinStatsData* buildStats)
+static IndexTuple addItemPointersToLeafTuple(GinState *ginstate, IndexTuple old, ItemPointerData *items, uint32 nitem,
+                                             GinStatsData *buildStats)
 {
     OffsetNumber attnum;
     Datum key;
     GinNullCategory category;
     IndexTuple res;
-    ItemPointerData* newItems = NULL;
-    ItemPointerData* oldItems = NULL;
+    ItemPointerData *newItems = NULL;
+    ItemPointerData *oldItems = NULL;
     int oldNPosting, newNPosting;
-    GinPostingList* compressedList = NULL;
+    GinPostingList *compressedList = NULL;
     bool isColStore = (ginstate->index->rd_rel->relam == CGIN_AM_OID) ? true : false;
 
     Assert(!GinIsPostingTree(old));
@@ -78,14 +79,8 @@ static IndexTuple addItemPointersToLeafTuple(
     pfree(newItems);
     newItems = NULL;
     if (compressedList != NULL) {
-        res = GinFormTuple(ginstate,
-            attnum,
-            key,
-            category,
-            (char*)compressedList,
-            SizeOfGinPostingList(compressedList),
-            newNPosting,
-            false);
+        res = GinFormTuple(ginstate, attnum, key, category, (char *)compressedList,
+                           SizeOfGinPostingList(compressedList), newNPosting, false);
         pfree(compressedList);
         compressedList = NULL;
     }
@@ -121,18 +116,18 @@ static IndexTuple addItemPointersToLeafTuple(
  * This is basically the same logic as in addItemPointersToLeafTuple,
  * but working from slightly different input.
  */
-static IndexTuple buildFreshLeafTuple(GinState* ginstate, OffsetNumber attnum, Datum key, GinNullCategory category,
-    ItemPointerData* items, uint32 nitem, GinStatsData* buildStats)
+static IndexTuple buildFreshLeafTuple(GinState *ginstate, OffsetNumber attnum, Datum key, GinNullCategory category,
+                                      ItemPointerData *items, uint32 nitem, GinStatsData *buildStats)
 {
     IndexTuple res = NULL;
-    GinPostingList* compressedList = NULL;
+    GinPostingList *compressedList = NULL;
     bool isColStore = (ginstate->index->rd_rel->relam == CGIN_AM_OID) ? true : false;
 
     /* try to build a posting list tuple with all the items */
     compressedList = ginCompressPostingList(items, nitem, GinMaxItemSize, NULL, isColStore);
     if (compressedList != NULL) {
-        res = GinFormTuple(
-            ginstate, attnum, key, category, (char*)compressedList, SizeOfGinPostingList(compressedList), nitem, false);
+        res = GinFormTuple(ginstate, attnum, key, category, (char *)compressedList,
+                           SizeOfGinPostingList(compressedList), nitem, false);
         pfree(compressedList);
         compressedList = NULL;
     }
@@ -165,12 +160,12 @@ static IndexTuple buildFreshLeafTuple(GinState* ginstate, OffsetNumber attnum, D
  * During an index build, buildStats is non-null and the counters
  * it contains should be incremented as needed.
  */
-void ginEntryInsert(GinState* ginstate, OffsetNumber attnum, Datum key, GinNullCategory category,
-    ItemPointerData* items, uint32 nitem, GinStatsData* buildStats)
+void ginEntryInsert(GinState *ginstate, OffsetNumber attnum, Datum key, GinNullCategory category,
+                    ItemPointerData *items, uint32 nitem, GinStatsData *buildStats)
 {
     GinBtreeData btree;
     GinBtreeEntryInsertData insertdata;
-    GinBtreeStack* stack = NULL;
+    GinBtreeStack *stack = NULL;
     IndexTuple itup;
     Page page;
 
@@ -223,11 +218,11 @@ void ginEntryInsert(GinState* ginstate, OffsetNumber attnum, Datum key, GinNullC
  *
  * This function is used only during initial index creation.
  */
-static void ginHeapTupleBulkInsert(
-    GinBuildState* buildstate, OffsetNumber attnum, Datum value, bool isNull, ItemPointer heapptr)
+static void ginHeapTupleBulkInsert(GinBuildState *buildstate, OffsetNumber attnum, Datum value, bool isNull,
+                                   ItemPointer heapptr)
 {
-    Datum* entries = NULL;
-    GinNullCategory* categories = NULL;
+    Datum *entries = NULL;
+    GinNullCategory *categories = NULL;
     int32 nentries;
     MemoryContext oldCtx;
 
@@ -242,11 +237,11 @@ static void ginHeapTupleBulkInsert(
     MemoryContextReset(buildstate->funcCtx);
 }
 
-static void dumpToIndex(GinBuildState* buildstate)
+static void dumpToIndex(GinBuildState *buildstate)
 {
     /* If we've maxed out our available memory, dump everything to the index */
     if (buildstate->accum.allocatedMemory >= (uint)u_sess->attr.attr_memory.maintenance_work_mem * 1024UL) {
-        ItemPointerData* list = NULL;
+        ItemPointerData *list = NULL;
         Datum key;
         GinNullCategory category;
         uint32 nlist;
@@ -264,10 +259,10 @@ static void dumpToIndex(GinBuildState* buildstate)
     }
 }
 
-static void ginBuildCallback(
-    Relation index, HeapTuple htup, Datum* values, const bool* isnull, bool tupleIsAlive, void* state)
+static void ginBuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
+                             void *state)
 {
-    GinBuildState* buildstate = (GinBuildState*)state;
+    GinBuildState *buildstate = (GinBuildState *)state;
     MemoryContext oldCtx;
     int i;
 
@@ -282,9 +277,9 @@ static void ginBuildCallback(
     MemoryContextSwitchTo(oldCtx);
 }
 
-static void cginBuildCallback(Relation index, ItemPointer tid, Datum* values, const bool* isnull, void* state)
+static void cginBuildCallback(Relation index, ItemPointer tid, Datum *values, const bool *isnull, void *state)
 {
-    GinBuildState* buildstate = (GinBuildState*)state;
+    GinBuildState *buildstate = (GinBuildState *)state;
     MemoryContext oldCtx;
     int i;
 
@@ -299,16 +294,15 @@ static void cginBuildCallback(Relation index, ItemPointer tid, Datum* values, co
     MemoryContextSwitchTo(oldCtx);
 }
 
-static void buildInitialize(Relation index, GinBuildState* buildstate)
+static void buildInitialize(Relation index, GinBuildState *buildstate)
 {
     Buffer RootBuffer;
     Buffer MetaBuffer;
     errno_t ret = EOK;
 
     if (RelationGetNumberOfBlocks(index) != 0)
-        ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("index \"%s\" already contains data", RelationGetRelationName(index))));
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("index \"%s\" already contains data", RelationGetRelationName(index))));
 
     initGinState(&buildstate->ginstate, index);
     buildstate->indtuples = 0;
@@ -355,21 +349,17 @@ static void buildInitialize(Relation index, GinBuildState* buildstate)
      * create a temporary memory context that is used to hold data not yet
      * dumped out to the index
      */
-    buildstate->tmpCtx = AllocSetContextCreate(CurrentMemoryContext,
-        "Gin build temporary context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    buildstate->tmpCtx = AllocSetContextCreate(CurrentMemoryContext, "Gin build temporary context",
+                                               ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+                                               ALLOCSET_DEFAULT_MAXSIZE);
 
     /*
      * create a temporary memory context that is used for calling
      * ginExtractEntries(), and can be reset after each tuple
      */
-    buildstate->funcCtx = AllocSetContextCreate(CurrentMemoryContext,
-        "Gin build temporary context for user-defined function",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    buildstate->funcCtx =
+        AllocSetContextCreate(CurrentMemoryContext, "Gin build temporary context for user-defined function",
+                              ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
     buildstate->accum.ginstate = &buildstate->ginstate;
 
@@ -380,15 +370,15 @@ Datum ginbuild(PG_FUNCTION_ARGS)
 {
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
-    IndexInfo* indexInfo = (IndexInfo*)PG_GETARG_POINTER(2);
+    IndexInfo *indexInfo = (IndexInfo *)PG_GETARG_POINTER(2);
 
     if (heap == NULL || index == NULL || indexInfo == NULL)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function ginbuild")));
 
-    IndexBuildResult* result = NULL;
+    IndexBuildResult *result = NULL;
     double reltuples;
     GinBuildState buildstate;
-    ItemPointerData* list = NULL;
+    ItemPointerData *list = NULL;
     Datum key;
     GinNullCategory category;
     uint32 nlist;
@@ -401,7 +391,7 @@ Datum ginbuild(PG_FUNCTION_ARGS)
      * Do the heap scan.  We disallow sync scan here because dataPlaceToPage
      * prefers to receive tuples in TID order.
      */
-    reltuples = IndexBuildHeapScan(heap, index, indexInfo, false, ginBuildCallback, (void*)&buildstate, NULL);
+    reltuples = tableam_index_build_scan(heap, index, indexInfo, false, ginBuildCallback, (void*)&buildstate);
 
     /* dump remaining entries to the index */
     oldCtx = MemoryContextSwitchTo(buildstate.tmpCtx);
@@ -425,7 +415,7 @@ Datum ginbuild(PG_FUNCTION_ARGS)
     /*
      * Return statistics
      */
-    result = (IndexBuildResult*)palloc(sizeof(IndexBuildResult));
+    result = (IndexBuildResult *)palloc(sizeof(IndexBuildResult));
 
     result->heap_tuples = reltuples;
     result->index_tuples = buildstate.indtuples;
@@ -437,15 +427,15 @@ Datum cginbuild(PG_FUNCTION_ARGS)
 {
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
-    IndexInfo* indexInfo = (IndexInfo*)PG_GETARG_POINTER(2);
+    IndexInfo *indexInfo = (IndexInfo *)PG_GETARG_POINTER(2);
 
     if (heap == NULL || index == NULL || indexInfo == NULL)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function cginbuild")));
 
-    IndexBuildResult* result = NULL;
+    IndexBuildResult *result = NULL;
     double reltuples;
     GinBuildState buildstate;
-    ItemPointerData* list = NULL;
+    ItemPointerData *list = NULL;
     Datum key;
     GinNullCategory category;
     uint32 nlist;
@@ -455,7 +445,7 @@ Datum cginbuild(PG_FUNCTION_ARGS)
     ScalarToDatum transferFuncs[INDEX_MAX_KEYS];
     Snapshot snapshot;
     CStoreScanDesc scanstate = NULL;
-    VectorBatch* vecScanBatch = NULL;
+    VectorBatch *vecScanBatch = NULL;
 
     buildInitialize(index, &buildstate);
 
@@ -464,26 +454,25 @@ Datum cginbuild(PG_FUNCTION_ARGS)
 
     /* add index columns for cstore scan */
     int heapScanNumIndexAttrs = indexInfo->ii_NumIndexAttrs + 1;
-    AttrNumber* heapScanAttrNumbers = (AttrNumber*)palloc(sizeof(AttrNumber) * heapScanNumIndexAttrs);
+    AttrNumber *heapScanAttrNumbers = (AttrNumber *)palloc(sizeof(AttrNumber) * heapScanNumIndexAttrs);
 
-    ListCell* indexpr_item = list_head(indexInfo->ii_Expressions);
+    ListCell *indexpr_item = list_head(indexInfo->ii_Expressions);
     for (int i = 0; i < indexInfo->ii_NumIndexAttrs; i++) {
         int keycol = indexInfo->ii_KeyAttrNumbers[i];
         if (keycol == 0) {
-            Node* indexkey = (Node*)lfirst(indexpr_item);
-            List* vars = pull_var_clause(indexkey, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
-            List* varsOrigin = vars;  // store the original pointer of vars in order to free memory
+            Node *indexkey = (Node *)lfirst(indexpr_item);
+            List *vars = pull_var_clause(indexkey, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
+            List *varsOrigin = vars;  // store the original pointer of vars in order to free memory
             vars = list_union(NIL, vars);
             if (vars != NIL) {
                 if (vars->length > 1)
                     ereport(ERROR,
-                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("access method \"cgin\" does not support multi column index with operator ||")));
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                             errmsg("access method \"cgin\" does not support multi column index with operator ||")));
             } else
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("access method \"cgin\" does not support null column index")));
-            Var* var = (Var*)lfirst(list_head(vars));
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("access method \"cgin\" does not support null column index")));
+            Var *var = (Var *)lfirst(list_head(vars));
             keycol = (int)var->varattno;
             indexpr_item = lnext(indexpr_item);
             list_free(vars);
@@ -501,14 +490,8 @@ Datum cginbuild(PG_FUNCTION_ARGS)
 
     do {
         vecScanBatch = CStoreGetNextBatch(scanstate);
-        reltuples += IndexBuildVectorBatchScan(heap,
-            index,
-            indexInfo,
-            vecScanBatch,
-            snapshot,
-            cginBuildCallback,
-            (void*)&buildstate,
-            (void*)transferFuncs);
+        reltuples += IndexBuildVectorBatchScan(heap, index, indexInfo, vecScanBatch, snapshot, cginBuildCallback,
+                                               (void *)&buildstate, (void *)transferFuncs);
     } while (!CStoreIsEndScan(scanstate));
 
     CStoreEndScan(scanstate);
@@ -535,7 +518,7 @@ Datum cginbuild(PG_FUNCTION_ARGS)
     /*
      * Return statistics
      */
-    result = (IndexBuildResult*)palloc(sizeof(IndexBuildResult));
+    result = (IndexBuildResult *)palloc(sizeof(IndexBuildResult));
 
     result->heap_tuples = reltuples;
     result->index_tuples = buildstate.indtuples;
@@ -550,8 +533,8 @@ Datum ginbuildempty(PG_FUNCTION_ARGS)
 {
     Relation index = (Relation)PG_GETARG_POINTER(0);
     if (index == NULL)
-        ereport(
-            ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function ginbuildempty")));
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function ginbuildempty")));
 
     Buffer RootBuffer, MetaBuffer;
 
@@ -582,10 +565,10 @@ Datum ginbuildempty(PG_FUNCTION_ARGS)
  * Insert index entries for a single indexable item during "normal"
  * (non-fast-update) insertion
  */
-static void ginHeapTupleInsert(GinState* ginstate, OffsetNumber attnum, Datum value, bool isNull, ItemPointer item)
+static void ginHeapTupleInsert(GinState *ginstate, OffsetNumber attnum, Datum value, bool isNull, ItemPointer item)
 {
-    Datum* entries = NULL;
-    GinNullCategory* categories = NULL;
+    Datum *entries = NULL;
+    GinNullCategory *categories = NULL;
     int32 i, nentries;
 
     entries = ginExtractEntries(ginstate, attnum, value, isNull, &nentries, &categories);
@@ -597,8 +580,8 @@ static void ginHeapTupleInsert(GinState* ginstate, OffsetNumber attnum, Datum va
 Datum gininsert(PG_FUNCTION_ARGS)
 {
     Relation index = (Relation)PG_GETARG_POINTER(0);
-    Datum* values = (Datum*)PG_GETARG_POINTER(1);
-    bool* isnull = (bool*)PG_GETARG_POINTER(2);
+    Datum *values = (Datum *)PG_GETARG_POINTER(1);
+    bool *isnull = (bool *)PG_GETARG_POINTER(2);
     ItemPointer ht_ctid = (ItemPointer)PG_GETARG_POINTER(3);
     if (index == NULL || values == NULL || isnull == NULL || ht_ctid == NULL)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function gininsert")));
@@ -612,11 +595,9 @@ Datum gininsert(PG_FUNCTION_ARGS)
 
     /* initialize ginInsertCtx */
     if (unlikely(t_thrd.index_cxt.ginInsertCtx == NULL))
-        t_thrd.index_cxt.ginInsertCtx = AllocSetContextCreate(t_thrd.top_mem_cxt,
-            "Gin insert temporary context",
-            ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE);
+        t_thrd.index_cxt.ginInsertCtx = AllocSetContextCreate(t_thrd.top_mem_cxt, "Gin insert temporary context",
+                                                              ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+                                                              ALLOCSET_DEFAULT_MAXSIZE);
     oldCtx = MemoryContextSwitchTo(t_thrd.index_cxt.ginInsertCtx);
 
     initGinState(&ginstate, index);
@@ -647,7 +628,7 @@ Datum gininsert(PG_FUNCTION_ARGS)
 
 Datum ginmerge(PG_FUNCTION_ARGS)
 {
-    IndexBuildResult* result = NULL;
+    IndexBuildResult *result = NULL;
 
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("ginmerge: unimplemented")));
 

@@ -63,7 +63,7 @@ function tear_down()
 stop_standby
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test1;"
 
-gs_ctl build -D $data_dir/datanode1_standby
+gs_ctl build -Z single_node -D $data_dir/datanode1_standby
 
 sleep 3
 }

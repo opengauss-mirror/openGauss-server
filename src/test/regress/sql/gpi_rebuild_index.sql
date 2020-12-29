@@ -39,7 +39,7 @@ create index partition_reindex_table_ind1 on partition_reindex_table(c1) local;
 insert into partition_reindex_table values (generate_series(1,40000), generate_series(1,40000), generate_series(1,40000));
 --succeed
 
-explain (costs off, nodes off) select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
+explain (costs off) select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
 
 select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
 
@@ -62,7 +62,7 @@ create index partition_reindex_table_ind2 on partition_reindex_table(c2) local (
 
 create unique index global_partition_reindex_table_ind1 on partition_reindex_table(c1) global;
 
-explain (costs off, nodes off) select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
+explain (costs off) select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
 
 select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
 
@@ -73,7 +73,7 @@ select class.relname, class.reltuples, class.parttype from pg_class class, pg_in
 reindex index global_partition_reindex_table_ind1;
 --succeed
 
-explain (costs off, nodes off) select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
+explain (costs off) select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
 --the plan before reindex and after reindex should be same
 
 select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
@@ -85,7 +85,7 @@ select class.relname, class.reltuples, class.parttype from pg_class class, pg_in
 alter index global_partition_reindex_table_ind1 rebuild;
 --succeed
 
-explain (costs off, nodes off) select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
+explain (costs off) select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
 --the plan before reindex and after reindex should be same
 
 select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
@@ -97,7 +97,7 @@ select class.relname, class.reltuples, class.parttype from pg_class class, pg_in
 reindex table partition_reindex_table;
 --succeed
 
-explain (costs off, nodes off) select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
+explain (costs off) select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;
 --the plan before reindex and after reindex should be same
 
 select * from partition_reindex_table where c1 >= 19998 and c1 <= 20002 order by 1;

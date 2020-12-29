@@ -23,21 +23,21 @@
 #endif
 #include "storage/relfilenode.h"
 
-static void desc_recompress_leaf(StringInfo buf, ginxlogRecompressDataLeaf* insertData)
+static void desc_recompress_leaf(StringInfo buf, ginxlogRecompressDataLeaf *insertData)
 {
     int i;
-    char* walbuf = ((char*)insertData) + sizeof(ginxlogRecompressDataLeaf);
+    char *walbuf = ((char *)insertData) + sizeof(ginxlogRecompressDataLeaf);
 
     appendStringInfo(buf, " %d segments:", (int)insertData->nactions);
 
     for (i = 0; i < insertData->nactions; i++) {
-        uint8 a_segno = *((uint8*)(walbuf++));
-        uint8 a_action = *((uint8*)(walbuf++));
+        uint8 a_segno = *((uint8 *)(walbuf++));
+        uint8 a_action = *((uint8 *)(walbuf++));
         uint16 nitems = 0;
         uint newsegsize = 0;
 
         if (a_action == GIN_SEGMENT_INSERT || a_action == GIN_SEGMENT_REPLACE) {
-            newsegsize = SizeOfGinPostingList((GinPostingList*)walbuf);
+            newsegsize = SizeOfGinPostingList((GinPostingList *)walbuf);
             walbuf += SHORTALIGN(newsegsize);
         }
 
@@ -69,9 +69,9 @@ static void desc_recompress_leaf(StringInfo buf, ginxlogRecompressDataLeaf* inse
     }
 }
 
-void gin_desc(StringInfo buf, XLogReaderState* record)
+void gin_desc(StringInfo buf, XLogReaderState *record)
 {
-    char* rec = XLogRecGetData(record);
+    char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
 
     switch (info) {
@@ -84,15 +84,13 @@ void gin_desc(StringInfo buf, XLogReaderState* record)
             /* no further information */
             break;
         case XLOG_GIN_INSERT: {
-            ginxlogInsert* xlrec = (ginxlogInsert*)rec;
+            ginxlogInsert *xlrec = (ginxlogInsert *)rec;
 
             appendStringInfoString(buf, "Insert item, ");
-            appendStringInfo(buf,
-                "isdata: %c isleaf: %c",
-                (xlrec->flags & GIN_INSERT_ISDATA) ? 'T' : 'F',
-                (xlrec->flags & GIN_INSERT_ISLEAF) ? 'T' : 'F');
+            appendStringInfo(buf, "isdata: %c isleaf: %c", (xlrec->flags & GIN_INSERT_ISDATA) ? 'T' : 'F',
+                             (xlrec->flags & GIN_INSERT_ISLEAF) ? 'T' : 'F');
             if (!(xlrec->flags & GIN_INSERT_ISLEAF)) {
-                char* payload = rec + sizeof(ginxlogInsert);
+                char *payload = rec + sizeof(ginxlogInsert);
                 BlockNumber leftChildBlkno;
                 BlockNumber rightChildBlkno;
 
@@ -105,32 +103,28 @@ void gin_desc(StringInfo buf, XLogReaderState* record)
             if (XLogRecHasBlockImage(record, 0))
                 appendStringInfoString(buf, " (full page image)");
             else {
-                char* payload = XLogRecGetBlockData(record, 0, NULL);
+                char *payload = XLogRecGetBlockData(record, 0, NULL);
 
                 if (!(xlrec->flags & GIN_INSERT_ISDATA))
-                    appendStringInfo(buf, " isdelete: %c", (((ginxlogInsertEntry*)payload)->isDelete) ? 'T' : 'F');
+                    appendStringInfo(buf, " isdelete: %c", (((ginxlogInsertEntry *)payload)->isDelete) ? 'T' : 'F');
                 else if (xlrec->flags & GIN_INSERT_ISLEAF)
-                    desc_recompress_leaf(buf, (ginxlogRecompressDataLeaf*)payload);
+                    desc_recompress_leaf(buf, (ginxlogRecompressDataLeaf *)payload);
                 else {
-                    ginxlogInsertDataInternal* insertData = (ginxlogInsertDataInternal*)payload;
+                    ginxlogInsertDataInternal *insertData = (ginxlogInsertDataInternal *)payload;
 
-                    appendStringInfo(buf,
-                        " pitem: %u-%u/%hu",
-                        PostingItemGetBlockNumber(&insertData->newitem),
-                        ItemPointerGetBlockNumber(&insertData->newitem.key),
-                        ItemPointerGetOffsetNumber(&insertData->newitem.key));
+                    appendStringInfo(buf, " pitem: %u-%u/%hu", PostingItemGetBlockNumber(&insertData->newitem),
+                                     ItemPointerGetBlockNumber(&insertData->newitem.key),
+                                     ItemPointerGetOffsetNumber(&insertData->newitem.key));
                 }
             }
         } break;
         case XLOG_GIN_SPLIT: {
-            ginxlogSplit* xlrec = (ginxlogSplit*)rec;
+            ginxlogSplit *xlrec = (ginxlogSplit *)rec;
 
             appendStringInfoString(buf, "Page split, ");
-            appendStringInfo(buf, "isrootsplit: %c", (((ginxlogSplit*)rec)->flags & GIN_SPLIT_ROOT) ? 'T' : 'F');
-            appendStringInfo(buf,
-                " isdata: %c isleaf: %c",
-                (xlrec->flags & GIN_INSERT_ISDATA) ? 'T' : 'F',
-                (xlrec->flags & GIN_INSERT_ISLEAF) ? 'T' : 'F');
+            appendStringInfo(buf, "isrootsplit: %c", (((ginxlogSplit *)rec)->flags & GIN_SPLIT_ROOT) ? 'T' : 'F');
+            appendStringInfo(buf, " isdata: %c isleaf: %c", (xlrec->flags & GIN_INSERT_ISDATA) ? 'T' : 'F',
+                             (xlrec->flags & GIN_INSERT_ISLEAF) ? 'T' : 'F');
         } break;
         case XLOG_GIN_VACUUM_PAGE:
             appendStringInfoString(buf, "Vacuum page");
@@ -141,7 +135,7 @@ void gin_desc(StringInfo buf, XLogReaderState* record)
             if (XLogRecHasBlockImage(record, 0))
                 appendStringInfoString(buf, " (full page image)");
             else {
-                ginxlogVacuumDataLeafPage* xlrec = (ginxlogVacuumDataLeafPage*)XLogRecGetBlockData(record, 0, NULL);
+                ginxlogVacuumDataLeafPage *xlrec = (ginxlogVacuumDataLeafPage *)XLogRecGetBlockData(record, 0, NULL);
 
                 desc_recompress_leaf(buf, &xlrec->data);
             }
@@ -156,11 +150,10 @@ void gin_desc(StringInfo buf, XLogReaderState* record)
             appendStringInfoString(buf, "Insert new list page");
             break;
         case XLOG_GIN_DELETE_LISTPAGE:
-            appendStringInfo(buf, "Delete list pages, ndeleted: %d", ((ginxlogDeleteListPages*)rec)->ndeleted);
+            appendStringInfo(buf, "Delete list pages, ndeleted: %d", ((ginxlogDeleteListPages *)rec)->ndeleted);
             break;
         default:
             appendStringInfo(buf, "unknown gin op code %hhu", info);
             break;
     }
 }
-

@@ -56,7 +56,7 @@
 #ifndef SPIN_H
 #define SPIN_H
 
-#include "storage/s_lock.h"
+#include "storage/lock/s_lock.h"
 
 #define SpinLockInit(lock) S_INIT_LOCK(lock)
 

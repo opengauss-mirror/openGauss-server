@@ -17,7 +17,7 @@
 #include "access/xlog.h"
 #include "access/xlogreader.h"
 #include "lib/stringinfo.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "storage/procsignal.h"
 #include "storage/relfilenode.h"
 
@@ -59,7 +59,6 @@ extern bool standbyWillTouchStandbyLocks(XLogReaderState* record);
 #define XLOG_STANDBY_CSN_ABORTED 0x50
 #endif
 
-
 typedef struct xl_standby_locks {
     int nlocks;                                   /* number of entries in locks array */
     xl_standby_lock locks[FLEXIBLE_ARRAY_MEMBER]; /* VARIABLE LENGTH ARRAY */
@@ -87,12 +86,11 @@ typedef struct xl_running_xacts {
 extern void standby_redo(XLogReaderState* record);
 extern void standby_desc(StringInfo buf, XLogReaderState* record);
 #ifndef ENABLE_MULTIPLE_NODES
-extern void standby_xlog_startup(void);
-extern void standby_xlog_cleanup(void);
-extern bool standby_safe_restartpoint(void);
-extern bool remove_committed_csn_info(TransactionId xid);
+extern void StandbyXlogStartup(void);
+extern void StandbyXlogCleanup(void);
+extern bool StandbySafeRestartpoint(void);
+extern bool RemoveCommittedCsnInfo(TransactionId xid);
 #endif
-
 typedef struct xl_running_xacts_old {
     int xcnt;                                       /* # of xact ids in xids[] */
     bool subxid_overflow;                           /* snapshot overflowed, subxids missing */
@@ -112,6 +110,7 @@ typedef struct xl_running_xacts_old {
  * checkpoint. That means that wherever we start a standby from we will
  * almost immediately see the data we need to begin executing queries.
  */
+
 typedef struct RunningTransactionsData {
     int xcnt;                         /* # of xact ids in xids[] */
     int subxcnt;                      /* # of subxact ids in xids[] */
@@ -121,6 +120,7 @@ typedef struct RunningTransactionsData {
     TransactionId globalXmin;         /* running xacts's snapshot xmin */
     TransactionId latestCompletedXid; /* copy of ShmemVariableCache-> latestCompletedXid*/
     TransactionId* xids;              /* array of (sub)xids still running */
+
 } RunningTransactionsData;
 
 typedef RunningTransactionsData* RunningTransactions;
@@ -131,4 +131,3 @@ extern void LogReleaseAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relO
 
 extern XLogRecPtr LogStandbySnapshot(void);
 #endif /* STANDBY_H */
-

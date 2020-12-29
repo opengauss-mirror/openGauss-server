@@ -14,7 +14,7 @@
 #define OBJECTADDRESS_H
 
 #include "nodes/parsenodes.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "utils/relcache.h"
 
 /*

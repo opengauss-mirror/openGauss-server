@@ -14,7 +14,6 @@
 #ifndef PATHNODE_H
 #define PATHNODE_H
 
-#include "nodes/bitmapset.h"
 #include "nodes/relation.h"
 #include "optimizer/streamplan.h"
 
@@ -48,40 +47,38 @@ extern void set_cheapest(RelOptInfo* parent_rel, PlannerInfo* root = NULL);
 extern Path* get_cheapest_path(PlannerInfo* root, RelOptInfo* rel, const double* agg_groups, bool has_groupby);
 extern Path* find_hinted_path(Path* current_path);
 extern void add_path(PlannerInfo* root, RelOptInfo* parent_rel, Path* new_path);
-extern void add_partial_path(RelOptInfo* parent_rel, Path* new_path);
-extern bool add_partial_path_precheck(RelOptInfo* parent_rel, Cost total_cost, List* pathkeys);
 extern bool add_path_precheck(
     RelOptInfo* parent_rel, Cost startup_cost, Cost total_cost, List* pathkeys, Relids required_outer);
 
-extern Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer,
-    int dop = 1, int parallel_workers = 0);
+extern Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer, int dop = 1);
 extern Path* create_cstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop = 1);
-extern Path *create_tsstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop = 1);
+#ifdef ENABLE_MULTIPLE_NODES
+extern Path *create_tsstorescan_path(PlannerInfo * root,RelOptInfo * rel, int dop = 1);
+#endif   /* ENABLE_MULTIPLE_NODES */
 extern IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* indexclauses, List* indexclausecols,
     List* indexorderbys, List* indexorderbycols, List* pathkeys, ScanDirection indexscandir, bool indexonly,
-    Relids required_outer, double loop_count, bool partial_path);
+    Relids required_outer, Bitmapset *upper_params, double loop_count);
 extern Path* build_seqScanPath_by_indexScanPath(PlannerInfo* root, Path* index_path);
 extern bool CheckBitmapQualIsGlobalIndex(Path* bitmapqual);
 extern bool CheckBitmapHeapPathContainGlobalOrLocal(Path* bitmapqual);
 extern bool check_bitmap_heap_path_index_unusable(Path* bitmapqual, RelOptInfo* baserel);
 extern bool is_partitionIndex_Subpath(Path* subpath);
 extern bool is_pwj_path(Path* pwjpath);
-extern BitmapHeapPath *create_bitmap_heap_path(PlannerInfo *root, RelOptInfo *rel, Path *bitmapqual,
-    Relids required_outer, double loop_count, int parallel_degree);
+extern BitmapHeapPath* create_bitmap_heap_path(PlannerInfo* root, RelOptInfo* rel, Path* bitmapqual,
+            Relids required_outer, Bitmapset* required_upper, double loop_count);
 extern BitmapAndPath* create_bitmap_and_path(PlannerInfo* root, RelOptInfo* rel, List* bitmapquals);
 extern BitmapOrPath* create_bitmap_or_path(PlannerInfo* root, RelOptInfo* rel, List* bitmapquals);
 extern TidPath* create_tidscan_path(PlannerInfo* root, RelOptInfo* rel, List* tidquals);
-extern AppendPath* create_append_path(PlannerInfo* root, RelOptInfo* rel, List* subpaths, List* partial_subpaths,
-    Relids required_outer, int parallel_workers, bool parallel_aware, double rows);
+extern AppendPath* create_append_path(PlannerInfo* root, RelOptInfo* rel, List* subpaths, Relids required_outer);
 extern MergeAppendPath* create_merge_append_path(
     PlannerInfo* root, RelOptInfo* rel, List* subpaths, List* pathkeys, Relids required_outer);
-extern ResultPath* create_result_path(RelOptInfo* rel, List* quals, Path* subpath = NULL);
+extern ResultPath* create_result_path(PlannerInfo *root, RelOptInfo *rel, List* quals, Path* subpath = NULL, Bitmapset *upper_params = NULL);
 extern MaterialPath* create_material_path(Path* subpath, bool materialize_all = false);
 extern UniquePath* create_unique_path(PlannerInfo* root, RelOptInfo* rel, Path* subpath, SpecialJoinInfo* sjinfo);
-extern GatherPath* create_gather_path(PlannerInfo* root, RelOptInfo* rel, Path* subpath, Relids required_outer);
-extern Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkeys, Relids required_outer);
-extern Path* create_functionscan_path(PlannerInfo* root, RelOptInfo* rel);
-extern Path* create_valuesscan_path(PlannerInfo* root, RelOptInfo* rel);
+extern Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkeys, Relids required_outer, List *subplan_params);
+extern Path* create_subqueryscan_path_reparam(PlannerInfo* root, RelOptInfo* rel, List* pathkeys, Relids required_outer, List *subplan_params);
+extern Path* create_functionscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer);
+extern Path* create_valuesscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer);
 extern Path* create_ctescan_path(PlannerInfo* root, RelOptInfo* rel);
 extern Path* create_worktablescan_path(PlannerInfo* root, RelOptInfo* rel);
 extern ForeignPath* create_foreignscan_path(PlannerInfo* root, RelOptInfo* rel, Cost startup_cost, Cost total_cost,
@@ -99,8 +96,7 @@ extern MergePath* create_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, 
 
 extern HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype,
     JoinCostWorkspace* workspace, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path,
-    Path* inner_path, bool parallel_hash, List* restrict_clauses, Relids required_outer, List* hashclauses,
-    int dop = 1);
+    Path* inner_path, List* restrict_clauses, Relids required_outer, List* hashclauses, int dop = 1);
 
 extern Path* reparameterize_path(PlannerInfo* root, Path* path, Relids required_outer, double loop_count);
 
@@ -111,16 +107,15 @@ extern void setup_simple_rel_arrays(PlannerInfo* root);
 extern RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind);
 extern RelOptInfo* find_base_rel(PlannerInfo* root, int relid);
 extern RelOptInfo* find_join_rel(PlannerInfo* root, Relids relids);
+extern void remove_join_rel(PlannerInfo *root, RelOptInfo *rel);
 extern RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* outer_rel, RelOptInfo* inner_rel,
     SpecialJoinInfo* sjinfo, List** restrictlist_ptr);
-extern Relids min_join_parameterization(
-    PlannerInfo* root, Relids joinrelids, RelOptInfo* outer_rel, RelOptInfo* inner_rel);
-extern RelOptInfo* build_empty_join_rel(PlannerInfo* root);
 extern AppendRelInfo* find_childrel_appendrelinfo(PlannerInfo* root, RelOptInfo* rel);
-extern ParamPathInfo* get_baserel_parampathinfo(PlannerInfo* root, RelOptInfo* baserel, Relids required_outer);
+extern ParamPathInfo* get_baserel_parampathinfo(PlannerInfo* root, RelOptInfo* baserel, Relids required_outer, Bitmapset *upper_params = NULL);
+extern ParamPathInfo* get_subquery_parampathinfo(PlannerInfo* root, RelOptInfo* baserel, Relids required_outer, Bitmapset *upper_params = NULL);
 extern ParamPathInfo* get_joinrel_parampathinfo(PlannerInfo* root, RelOptInfo* joinrel, Path* outer_path,
     Path* inner_path, SpecialJoinInfo* sjinfo, Relids required_outer, List** restrict_clauses);
-extern ParamPathInfo* get_appendrel_parampathinfo(RelOptInfo* appendrel, Relids required_outer);
+extern ParamPathInfo* get_appendrel_parampathinfo(RelOptInfo* appendrel, Relids required_outer, Bitmapset* upper_params);
 extern void get_distribute_keys(PlannerInfo* root, List* joinclauses, Path* outer_path, Path* inner_path,
     double* skew_outer, double* skew_inner, List** distribute_keys_outer, List** distribute_keys_inner,
     List* desired_keys, bool exact_match);
@@ -176,7 +171,7 @@ extern Path* stream_side_path(PlannerInfo* root, Path* path, JoinType jointype, 
     StreamType stream_type, List* distribute_key, List* pathkeys, bool is_inner, double skew,
     Distribution* target_distribution, ParallelDesc* smpDesc = NULL);
 extern double get_node_mcf(PlannerInfo* root, Node* v, double rows);
-extern bool needs_agg_stream(PlannerInfo* root, List* tlist, List* distribute_targetlist);
+extern bool needs_agg_stream(PlannerInfo* root, List* tlist, List* distribute_targetlist, Distribution* distribution = NULL);
 extern bool is_replicated_path(Path* path);
 extern void adjust_rows_according_to_hint(HintState* hstate, RelOptInfo* rel, Relids subrelids = NULL);
 

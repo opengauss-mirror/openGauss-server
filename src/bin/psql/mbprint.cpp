@@ -86,7 +86,7 @@ static int utf_charcheck(const unsigned char* c)
         if (((c[1] & 0xc0) == 0x80) && (((c[0] & 0x0f) != 0x00) || ((c[1] & 0x20) == 0x20)) &&
             ((c[2] & 0xc0) == 0x80)) {
             int z = c[0] & 0x0f;
-            int yx = ((c[1] & 0x3f) << 6) | (c[0] & 0x3f);
+            unsigned int yx = ((c[1] & 0x3f) << 6) | (c[0] & 0x3f);
             int lx = yx & 0x7f;
 
             /* check 0xfffe/0xffff, 0xfdd0..0xfedf range, surrogates */

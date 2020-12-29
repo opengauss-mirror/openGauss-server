@@ -34,17 +34,17 @@ select distinct A.col_int1 + B.col_int2 from VECTOR_UNIQUE_TABLE_01 A, VECTOR_UN
 ----
 --- case 3: Count(distinct)
 ----
-explain (costs off, nodes off) select col_int0, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int0;
+explain (costs off) select col_int0, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int0;
 select col_int0, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int0 order by 1;
-explain (costs off, nodes off) select col_int1, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int1;
+explain (costs off) select col_int1, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int1;
 select col_int1, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int1 order by 1;
-explain (costs off, nodes off) select count(distinct col_time) from VECTOR_UNIQUE_TABLE_01;
+explain (costs off) select count(distinct col_time) from VECTOR_UNIQUE_TABLE_01;
 select count(distinct col_time) from VECTOR_UNIQUE_TABLE_01;
-explain (costs off, nodes off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int0);
+explain (costs off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int0);
 select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int0) order by 1;
-explain (costs off, nodes off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int1);
+explain (costs off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int1);
 select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int1) order by 1;
-explain (costs off, nodes off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01);
+explain (costs off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01);
 select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01);
 
 ----

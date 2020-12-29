@@ -85,15 +85,15 @@ typedef struct StackBlockData {
  * AllocSetMethodDefinition
  *      Define the method functions based on the templated value
  */
-template <bool enable_memoryprotect, bool is_tracked>
+template <bool is_tracked>
 void StackMemoryAllocator::AllocSetMethodDefinition(MemoryContextMethods* method)
 {
-    method->alloc = &StackMemoryAllocator::AllocSetAlloc<enable_memoryprotect, is_tracked>;
+    method->alloc = &StackMemoryAllocator::AllocSetAlloc<is_tracked>;
     method->free_p = &StackMemoryAllocator::AllocSetFree;
     method->realloc = &StackMemoryAllocator::AllocSetRealloc;
     method->init = &StackMemoryAllocator::AllocSetInit;
-    method->reset = &StackMemoryAllocator::AllocSetReset<enable_memoryprotect, is_tracked>;
-    method->delete_context = &StackMemoryAllocator::AllocSetDelete<enable_memoryprotect, is_tracked>;
+    method->reset = &StackMemoryAllocator::AllocSetReset<is_tracked>;
+    method->delete_context = &StackMemoryAllocator::AllocSetDelete<is_tracked>;
     method->get_chunk_space = &StackMemoryAllocator::AllocSetGetChunkSpace;
     method->is_empty = &StackMemoryAllocator::AllocSetIsEmpty;
     method->stats = &StackMemoryAllocator::AllocSetStats;
@@ -108,20 +108,11 @@ void StackMemoryAllocator::AllocSetMethodDefinition(MemoryContextMethods* method
  */
 void StackMemoryAllocator::AllocSetContextSetMethods(unsigned long value, MemoryContextMethods* method)
 {
-    bool isProt = (value & IS_PROTECT) ? true : false;
     bool isTracked = (value & IS_TRACKED) ? true : false;
-
-    if (isProt) {
-        if (isTracked)
-            AllocSetMethodDefinition<true, true>(method);
-        else
-            AllocSetMethodDefinition<true, false>(method);
-    } else {
-        if (isTracked)
-            AllocSetMethodDefinition<false, true>(method);
-        else
-            AllocSetMethodDefinition<false, false>(method);
-    }
+    if (isTracked)
+        AllocSetMethodDefinition<true>(method);
+    else
+        AllocSetMethodDefinition<false>(method);
 }
 
 /*
@@ -139,7 +130,7 @@ MemoryContext StackMemoryAllocator::AllocSetContextCreate(MemoryContext parent, 
 {
     StackSet context = NULL;
     bool isTracked = false;
-    unsigned long value = t_thrd.utils_cxt.gs_mp_inited ? IS_PROTECT : 0;
+    unsigned long value = 0;
     MemoryProtectFuncDef* func = NULL;
 
     if (!isSession && (parent == NULL || parent->session_id == 0))
@@ -202,8 +193,8 @@ MemoryContext StackMemoryAllocator::AllocSetContextCreate(MemoryContext parent, 
         Size blksize = MAXALIGN(minContextSize);
         StackBlock block;
 
-        if (t_thrd.utils_cxt.gs_mp_inited)
-            block = (StackBlock)(*func->malloc)(blksize);
+        if (GS_MP_INITED)
+            block = (StackBlock)(*func->malloc)(blksize, true);
         else
             gs_malloc(blksize, block, StackBlock);
 
@@ -241,7 +232,7 @@ MemoryContext StackMemoryAllocator::AllocSetContextCreate(MemoryContext parent, 
  *		Returns pointer to allocated memory of given size; memory is added
  *		to the set.
  */
-template <bool enable_memoryprotect, bool is_tracked>
+template <bool is_tracked>
 void* StackMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Size size, const char* file, int line)
 {
     StackBlock block;
@@ -270,8 +261,8 @@ void* StackMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Siz
     if (size > set->allocChunkLimit) {
         blksize = STACK_BLOCKHDRSZ + MAXALIGN(size);
 
-        if (enable_memoryprotect)
-            block = (StackBlock)(*func->malloc)(blksize);
+        if (GS_MP_INITED)
+            block = (StackBlock)(*func->malloc)(blksize, true);
         else
             gs_malloc(blksize, block, StackBlock);
 
@@ -331,8 +322,8 @@ void* StackMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Siz
             blksize <<= 1;
 
         /* Try to allocate it */
-        if (enable_memoryprotect)
-            block = (StackBlock)(*func->malloc)(blksize);
+        if (GS_MP_INITED)
+            block = (StackBlock)(*func->malloc)(blksize, true);
         else
             gs_malloc(blksize, block, StackBlock);
 
@@ -412,7 +403,7 @@ void StackMemoryAllocator::AllocSetInit(MemoryContext context)
  * AllocSetReset
  *		Frees all memory which is allocated in the given set.
  */
-template <bool enable_memoryprotect, bool is_tracked>
+template <bool is_tracked>
 void StackMemoryAllocator::AllocSetReset(MemoryContext context)
 {
     StackSet set = (StackSet)context;
@@ -447,7 +438,7 @@ void StackMemoryAllocator::AllocSetReset(MemoryContext context)
             if (is_tracked)
                 MemoryTrackingFreeInfo(context, tempSize);
 
-            if (enable_memoryprotect)
+            if (GS_MP_INITED)
                 (*func->free)(block, tempSize);
             else
                 gs_free(block, tempSize);
@@ -474,7 +465,7 @@ void StackMemoryAllocator::AllocSetReset(MemoryContext context)
  *		Frees all memory which is allocated in the given set,
  *		in preparation for deletion of the set.
  */
-template <bool enable_memoryprotect, bool is_tracked>
+template <bool is_tracked>
 void StackMemoryAllocator::AllocSetDelete(MemoryContext context)
 {
     StackSet set = (StackSet)context;
@@ -505,7 +496,7 @@ void StackMemoryAllocator::AllocSetDelete(MemoryContext context)
         if (is_tracked)
             MemoryTrackingFreeInfo(context, tempSize);
 
-        if (enable_memoryprotect)
+        if (GS_MP_INITED)
             (*func->free)(block, tempSize);
         else
             gs_free(block, tempSize);

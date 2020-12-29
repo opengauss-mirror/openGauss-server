@@ -27,7 +27,7 @@
 #define SERIES_COMPRESS_H
 
 #include "c.h"
-#include "storage/cstore_compress.h"
+#include "storage/cstore/cstore_compress.h"
 
 const int DELTA2_RANGE = 8;
 const int MAX_COMPRESSLEVEL = 3;
@@ -81,8 +81,7 @@ public:
     {}
 
     int lz4_compress(
-        const int8 compression, const int8 compress_level, Size bound_size, BufferHelper* tmpOutBuf,
-        _out_ CompressionArg2& out);
+        int8 compression, int8 compress_level, Size bound_size, BufferHelper* tmpOutBuf, _out_ CompressionArg2& out);
     int zlib_compress(
         int8 compression, int8 compress_level, Size bound_size, BufferHelper* tmpOutBuf, _out_ CompressionArg2& out);
     int compress(_in_ const CompressionArg1& in, _out_ CompressionArg2& out);

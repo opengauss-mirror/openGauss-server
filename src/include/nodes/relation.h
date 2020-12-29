@@ -18,7 +18,7 @@
 #include "lib/stringinfo.h"
 #include "nodes/params.h"
 #include "nodes/parsenodes.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "utils/partitionmap.h"
 #include "utils/partitionmap_gs.h"
 
@@ -157,10 +157,6 @@ typedef struct PlannerGlobal {
 
     bool dependsOnRole; /* is plan specific to current role? */
 
-    bool parallelModeOK; /* parallel mode potentially OK? */
-
-    bool parallelModeNeeded; /* parallel mode actually required? */
-
     /* Added post-release, will be in a saner place in 9.3: */
     int nParamExec;       /* number of PARAM_EXEC Params used */
     bool insideRecursion; /* For sql on hdfs, internal flag. */
@@ -176,10 +172,28 @@ typedef struct PlannerGlobal {
     List* hint_warning; /* hint warning list */
 
     PlannerContext* plannerContext;
+
+    /* There is a counter attempt to get name for sublinks */
+    int sublink_counter;
 } PlannerGlobal;
 
 /* macro for fetching the Plan associated with a SubPlan node */
 #define planner_subplan_get_plan(root, subplan) ((Plan*)list_nth((root)->glob->subplans, (subplan)->plan_id - 1))
+
+/* we have to distinguish the different type of subquery */
+#define SUBQUERY_NORMAL  0x1
+#define SUBQUERY_PARAM   0x2
+#define SUBQUERY_RESULT  0x3
+#define SUBQUERY_TYPE_BITMAP 0x3
+#define SUBQUERY_SUBLINK 0x4
+
+#define SUBQUERY_IS_NORMAL(pr) (((pr->subquery_type & SUBQUERY_TYPE_BITMAP) == SUBQUERY_NORMAL))
+#define SUBQUERY_IS_PARAM(pr) (((pr->subquery_type & SUBQUERY_TYPE_BITMAP) == SUBQUERY_PARAM))
+#define SUBQUERY_IS_RESULT(pr) (((pr->subquery_type & SUBQUERY_TYPE_BITMAP) == SUBQUERY_RESULT))
+
+#define SUBQUERY_IS_SUBLINK(pr) (((pr->subquery_type & SUBQUERY_SUBLINK) == SUBQUERY_SUBLINK))
+
+#define SUBQUERY_PREDPUSH(pr) ((SUBQUERY_IS_RESULT(pr)) || (SUBQUERY_IS_PARAM(pr)))
 
 /* ----------
  * PlannerInfo
@@ -281,6 +295,8 @@ typedef struct PlannerInfo {
 
     List* join_info_list; /* list of SpecialJoinInfos */
 
+    List* lateral_info_list;  /* list of LateralJoinInfos */
+
     List* append_rel_list; /* list of AppendRelInfos */
 
     List* rowMarks; /* list of PlanRowMarks */
@@ -309,6 +325,7 @@ typedef struct PlannerInfo {
     bool hasInheritedTarget;     /* true if parse->resultRelation is an
                                   * inheritance child rel */
     bool hasJoinRTEs;            /* true if any RTEs are RTE_JOIN kind */
+    bool hasLateralRTEs;         /* true if any RTEs are marked LATERAL */
     bool hasHavingQual;          /* true if havingQual was non-null */
     bool hasPseudoConstantQuals; /* true if any RestrictInfo has
                                   * pseudoconstant = true */
@@ -382,7 +399,10 @@ typedef struct PlannerInfo {
     bool is_under_recursive_tree;
     bool has_recursive_correlated_rte; /* true if any RTE correlated with recursive cte */
 
-    bool hasRownumQual;
+    int subquery_type;
+    Bitmapset *param_upper;
+	
+	bool hasRownumQual;
 } PlannerInfo;
 
 /*
@@ -552,12 +572,9 @@ typedef struct RelOptInfo {
     int encodedwidth;      /* estimated avg width of encoded columns in result tuples */
     AttrNumber encodednum; /* number of encoded column */
 
-    bool consider_parallel; /* consider parallel paths? */
-
     /* materialization information */
     List* reltargetlist;   /* Vars to be output by scan of relation */
     List* distribute_keys; /* distribute key */
-    List* partial_pathlist; /* partial Paths */
     List* pathlist;        /* Path structures */
     List* ppilist;         /* ParamPathInfos used in pathlist */
     struct Path* cheapest_startup_path;
@@ -573,6 +590,8 @@ typedef struct RelOptInfo {
     AttrNumber max_attr; /* largest attrno of rel */
     Relids* attr_needed; /* array indexed [min_attr .. max_attr] */
     int32* attr_widths;  /* array indexed [min_attr .. max_attr] */
+    List* lateral_vars;  /* LATERAL Vars and PHVs referenced by rel */
+    Relids lateral_relids; /* minimum parameterization of rel */
     List* indexlist;     /* list of IndexOptInfo */
     RelPageType pages;   /* local size estimates derived from pg_class */
     double tuples;       /* global size estimates derived from pg_class */
@@ -593,7 +612,7 @@ typedef struct RelOptInfo {
     /* use "struct Plan" to avoid including plannodes.h here */
     struct Plan* subplan; /* if subquery */
     PlannerInfo* subroot; /* if subquery */
-    int rel_parallel_workers; /* wanted number of parallel workers */
+    List *subplan_params; /* if subquery */
     /* use "struct FdwRoutine" to avoid including fdwapi.h here */
     struct FdwRoutine* fdwroutine; /* if foreign table */
     void* fdw_private;             /* if foreign table */
@@ -610,6 +629,7 @@ typedef struct RelOptInfo {
     RelOrientation orientation;      /* the store type of base rel */
     RelstoreType relStoreLocation;   /* the relation store location. */
     char locator_type;               /* the location type of base rel */
+    Oid rangelistOid;                /* oid of list/range distributed table, InvalidOid if not list/range table */
     List* subplanrestrictinfo;       /* table filter with correlated column involved */
     ItstDisKey rel_dis_keys;         /* interesting key info for current relation */
     List* varratio;                  /* rel tuples ratio after join to different relation */
@@ -629,6 +649,8 @@ typedef struct RelOptInfo {
      * origin rel.
      */
     RelOptInfo* base_rel;
+
+    unsigned int num_data_nodes = 0; //number of distributing data nodes
 } RelOptInfo;
 
 /*
@@ -701,7 +723,6 @@ typedef struct IndexOptInfo {
     bool amsearchnulls;  /* can AM search for NULL/NOT NULL entries? */
     bool amhasgettuple;  /* does AM have amgettuple interface? */
     bool amhasgetbitmap; /* does AM have amgetbitmap interface? */
-    bool amcanparallel;  /* does AM support parallel scan? */
 } IndexOptInfo;
 
 /*
@@ -853,6 +874,7 @@ typedef struct ParamPathInfo {
     Relids ppi_req_outer; /* rels supplying parameters used by path */
     double ppi_rows;      /* estimated global number of result tuples */
     List* ppi_clauses;    /* join clauses available from outer rels */
+    Bitmapset* ppi_req_upper; /* param IDs*/
 } ParamPathInfo;
 
 /*
@@ -887,10 +909,6 @@ typedef struct Path {
     RelOptInfo* parent;        /* the relation this path can build */
     ParamPathInfo* param_info; /* parameterization info, or NULL if none */
 
-    bool parallel_aware; /* engage parallel-aware logic? */
-    bool parallel_safe;  /* OK to use as part of parallel plan? */
-    int parallel_workers; /* desired parallel workers; 0 = not parallel */
-
     /* estimated size/costs for path (see costsize.c for more info) */
     double rows; /* estimated number of global result tuples */
     double multiple;
@@ -901,6 +919,7 @@ typedef struct Path {
     List* pathkeys;        /* sort ordering of path's output */
     List* distribute_keys; /* distribute key, Var list */
     char locator_type;
+    Oid rangelistOid;
     int dop; /* degree of parallelism */
     /* pathkeys is a List of PathKey nodes; see above */
     Distribution distribution;
@@ -911,6 +930,7 @@ typedef struct Path {
 
 /* Macro for extracting a path's parameterization relids; beware double eval */
 #define PATH_REQ_OUTER(path) ((path)->param_info ? (path)->param_info->ppi_req_outer : (Relids)NULL)
+#define PATH_REQ_UPPER(path) ((path)->param_info ? (path)->param_info->ppi_req_upper : (Relids)NULL)
 
 /* ----------
  * IndexPath represents an index scan over a single index.
@@ -1049,6 +1069,23 @@ typedef struct TidPath {
 } TidPath;
 
 /*
+ * SubqueryScanPath represents a scan of an unflattened subquery-in-FROM
+ *
+ * Note that the subpath comes from a different planning domain; for example
+ * RTE indexes within it mean something different from those known to the
+ * SubqueryScanPath.  path.parent->subroot is the planning context needed to
+ * interpret the subpath.
+ * NOTE: GaussDB keep an subplan other than the sub-path
+ */
+typedef struct SubqueryScanPath
+{
+    Path        path;
+    List        *subplan_params;
+    PlannerInfo *subroot;
+    struct Plan *subplan;        /* path representing subquery execution */
+} SubqueryScanPath;
+
+/*
  * ForeignPath represents a potential scan of a foreign table
  *
  * fdw_private stores FDW private data about the scan.	While fdw_private is
@@ -1110,9 +1147,6 @@ typedef struct ExtensiblePath {
 typedef struct AppendPath {
     Path path;
     List* subpaths; /* list of component Paths */
-
-    /* Index of first partial path in subpaths */
-    int first_partial_path;
 } AppendPath;
 
 #define IS_DUMMY_PATH(p) (IsA((p), AppendPath) && ((AppendPath*)(p))->subpaths == NIL)
@@ -1190,17 +1224,6 @@ typedef struct UniquePath {
 } UniquePath;
 
 /*
- * GatherPath runs several copies of a plan in parallel and collects the
- * results.  The parallel leader may also execute the plan, unless the
- * single_copy flag is set.
- */
-typedef struct GatherPath {
-    Path path;
-    Path *subpath;    /* path for each worker */
-    bool single_copy; /* don't execute path more than once */
-} GatherPath;
-
-/*
  * All join-type paths share these fields.
  */
 typedef struct JoinPath {
@@ -1274,10 +1297,9 @@ typedef struct MergePath {
  */
 typedef struct HashPath {
     JoinPath jpath;
-    List* path_hashclauses;  /* join clauses used for hashing */
-    int num_batches;         /* number of batches expected */
-    double inner_rows_total; /* total inner rows expected */
-    OpMemInfo mem_info; /* Mem info for hash table */
+    List* path_hashclauses; /* join clauses used for hashing */
+    int num_batches;        /* number of batches expected */
+    OpMemInfo mem_info;     /* Mem info for hash table */
 } HashPath;
 
 #ifdef PGXC
@@ -1661,6 +1683,35 @@ typedef struct SpecialJoinInfo {
 } SpecialJoinInfo;
 
 /*
+ * "Lateral join" info.
+ *
+ * Lateral references in subqueries constrain the join order in a way that's
+ * somewhat like outer joins, though different in detail.  We construct one or
+ * more LateralJoinInfos for each RTE with lateral references, and add them to
+ * the PlannerInfo node's lateral_info_list.
+ *
+ * lateral_rhs is the relid of a baserel with lateral references, and
+ * lateral_lhs is a set of relids of baserels it references, all of which
+ * must be present on the LHS to compute a parameter needed by the RHS.
+ * Typically, lateral_lhs is a singleton, but it can include multiple rels
+ * if the RHS references a PlaceHolderVar with a multi-rel ph_eval_at level.
+ * We disallow joining to only part of the LHS in such cases, since that would
+ * result in a join tree with no convenient place to compute the PHV.
+ *
+ * When an appendrel contains lateral references (eg "LATERAL (SELECT x.col1
+ * UNION ALL SELECT y.col2)"), the LateralJoinInfos reference the parent
+ * baserel not the member otherrels, since it is the parent relid that is
+ * considered for joining purposes.
+ */
+typedef struct LateralJoinInfo
+{
+   NodeTag     type;
+   Index       lateral_rhs;    /* a baserel containing lateral refs */
+   Relids      lateral_lhs;    /* some base relids it references */
+} LateralJoinInfo;
+
+
+/*
  * Append-relation info.
  *
  * When we expand an inheritable table or a UNION-ALL subselect into an
@@ -1777,7 +1828,6 @@ typedef struct PlaceHolderInfo {
     PlaceHolderVar* ph_var; /* copy of PlaceHolderVar tree */
     Relids ph_eval_at;      /* lowest level we can evaluate value at */
     Relids ph_needed;       /* highest level the value is needed at */
-    Relids ph_may_need;     /* highest level it might be needed at */
     int32 ph_width;         /* estimated attribute width */
 } PlaceHolderInfo;
 
@@ -1877,25 +1927,6 @@ typedef struct SemiAntiJoinFactors {
 } SemiAntiJoinFactors;
 
 /*
- * Struct for extra information passed to subroutines of add_paths_to_joinrel
- *
- * restrictlist contains all of the RestrictInfo nodes for restriction
- *		clauses that apply to this join
- * mergeclause_list is a list of RestrictInfo nodes for available
- *		mergejoin clauses in this join
- * sjinfo is extra info about special joins for selectivity estimation
- * semifactors is as shown above (only valid for SEMI or ANTI joins)
- * param_source_rels are OK targets for parameterization of result paths
- */
-typedef struct JoinPathExtraData {
-    List* restrictlist;
-    List* mergeclause_list;
-    SpecialJoinInfo* sjinfo;
-    SemiAntiJoinFactors semifactors;
-    Relids param_source_rels;
-} JoinPathExtraData;
-
-/*
  * For speed reasons, cost estimation for join paths is performed in two
  * phases: the first phase tries to quickly derive a lower bound for the
  * join cost, and then we check if that's sufficient to reject the path.
@@ -1930,7 +1961,6 @@ typedef struct JoinCostWorkspace {
     /* private for cost_hashjoin code */
     int numbuckets;
     int numbatches;
-    double inner_rows_total;
 
     /* Meminfo for joins */
     OpMemInfo outer_mem_info;

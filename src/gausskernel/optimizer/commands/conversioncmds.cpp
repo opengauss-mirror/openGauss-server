@@ -17,6 +17,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_conversion.h"
@@ -59,7 +60,7 @@ void CreateConversionCommand(CreateConversionStmt* stmt)
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
 
     /* Check the encoding names */
     from_encoding = pg_char_to_encoding(from_encoding_name);
@@ -135,7 +136,7 @@ void RenameConversion(List* name, const char* newname)
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_OBJECT),
                 errmsg(
-                    "conversion \"%s\" already exists in schema \"%s\"", newname, get_namespace_name(namespaceOid, true))));
+                    "conversion \"%s\" already exists in schema \"%s\"", newname, get_namespace_name(namespaceOid))));
 
     /* must be owner */
     if (!pg_conversion_ownercheck(conversionOid, GetUserId()))
@@ -144,7 +145,7 @@ void RenameConversion(List* name, const char* newname)
     /* must have CREATE privilege on namespace */
     aclresult = pg_namespace_aclcheck(namespaceOid, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
 
     /* rename */
     (void)namestrcpy(&(((Form_pg_conversion)GETSTRUCT(tup))->conname), newname);
@@ -152,7 +153,7 @@ void RenameConversion(List* name, const char* newname)
     CatalogUpdateIndexes(rel, tup);
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -223,7 +224,7 @@ static void AlterConversionOwner_internal(Relation rel, Oid conversionOid, Oid n
             /* New owner must have CREATE privilege on namespace */
             aclresult = pg_namespace_aclcheck(convForm->connamespace, newOwnerId, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(convForm->connamespace, true));
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(convForm->connamespace));
         }
 
         /*
@@ -239,7 +240,7 @@ static void AlterConversionOwner_internal(Relation rel, Oid conversionOid, Oid n
         changeDependencyOnOwner(ConversionRelationId, conversionOid, newOwnerId);
     }
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*

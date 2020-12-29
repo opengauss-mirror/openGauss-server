@@ -1,0 +1,302 @@
+--
+-- Test parquet foreign data wrapper.
+--
+-- Settings to make the result deterministic
+SET datestyle = "ISO, YMD";
+-- validator tests
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+CREATE FOREIGN TABLE test_validator_filename_missing (a int) 
+	SERVER hdfs_server distribute by roundrobin; -- ERROR
+ERROR:  Need format option for the foreign table.
+CREATE FOREIGN TABLE test_validator_invalid_option (a int) 
+	SERVER hdfs_server 
+	OPTIONS(format 'parquet', filenames 'bigrow.parquet', bad_option_name '1') distribute by roundrobin; -- ERROR
+ERROR:  Invalid option "bad_option_name"
+HINT:  Valid options in this context are: format, encoding, filenames, foldername, checkencoding
+CREATE FOREIGN TABLE test_validator_tooMany_option (a int) 
+	SERVER hdfs_server 
+	OPTIONS(format 'parquet', filenames 'bigrow.parquet', foldername '/user/hdfs') distribute by roundrobin; -- ERROR
+ERROR:  The path "bigrow.parquet" must be an absolute path.
+drop foreign table test_validator_filename_missing;
+ERROR:  foreign table "test_validator_filename_missing" does not exist
+drop foreign table test_validator_invalid_option;
+ERROR:  foreign table "test_validator_invalid_option" does not exist
+drop foreign table test_validator_tooMany_option;
+ERROR:  foreign table "test_validator_toomany_option" does not exist
+DROP FOREIGN TABLE IF EXISTS lineitem_twoStripes;
+NOTICE:  foreign table "lineitem_twostripes" does not exist, skipping
+Create foreign table lineitem_twoStripes (
+ L_ORDERKEY BIGINT NOT NULL
+ , L_PARTKEY BIGINT NOT NULL
+ , L_SUPPKEY BIGINT NOT NULL
+ , L_LINENUMBER BIGINT NOT NULL
+ , L_QUANTITY DECIMAL(15,2) NOT NULL
+ , L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL
+ , L_DISCOUNT DECIMAL(15,2) NOT NULL
+ , L_TAX DECIMAL(15,2) NOT NULL
+ , L_RETURNFLAG CHAR(1) NOT NULL
+ , L_LINESTATUS CHAR(1) NOT NULL
+ , L_SHIPDATE DATE NOT NULL
+ , L_COMMITDATE DATE NOT NULL
+ , L_RECEIPTDATE DATE NOT NULL
+ , L_SHIPINSTRUCT CHAR(25) NOT NULL
+ , L_SHIPMODE CHAR(10) NOT NULL
+ , L_COMMENT VARCHAR(44) NOT NULL
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/lineitem_parquet/000000_0,/user/hive/warehouse/mppdb.db/lineitem_parquet/000001_0') distribute by roundrobin;
+SELECT L_SHIPDATE FROM lineitem_twoStripes WHERE L_orderkey BETWEEN 509050 AND 509070 order by l_shipdate;
+     l_shipdate      
+---------------------
+ 1993-04-24 00:00:00
+ 1993-04-26 00:00:00
+ 1993-05-07 00:00:00
+ 1993-05-28 00:00:00
+ 1993-06-24 00:00:00
+ 1993-06-25 00:00:00
+ 1993-06-25 00:00:00
+ 1993-10-08 00:00:00
+ 1994-08-06 00:00:00
+ 1994-08-26 00:00:00
+ 1994-10-10 00:00:00
+ 1994-10-11 00:00:00
+ 1994-11-17 00:00:00
+ 1995-10-24 00:00:00
+ 1995-12-14 00:00:00
+ 1996-11-20 00:00:00
+ 1996-11-25 00:00:00
+ 1997-06-22 00:00:00
+ 1997-07-16 00:00:00
+ 1997-08-11 00:00:00
+ 1997-12-19 00:00:00
+ 1998-02-13 00:00:00
+ 1998-02-27 00:00:00
+ 1998-03-08 00:00:00
+ 1998-04-04 00:00:00
+ 1998-07-28 00:00:00
+ 1998-09-05 00:00:00
+ 1998-10-28 00:00:00
+ 1998-11-02 00:00:00
+(29 rows)
+
+select L_TAX from lineitem_twoStripes where L_LINESTATUS = 'V';
+ l_tax 
+-------
+(0 rows)
+
+select L_LINESTATUS from lineitem_twoStripes where L_RETURNFLAG = 'N' order by 1 desc offset 1000 limit 20;
+ l_linestatus 
+--------------
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+ O
+(20 rows)
+
+SELECT count(L_SHIPDATE) FROM lineitem_twoStripes WHERE L_orderkey BETWEEN 509050 AND 509070;
+ count 
+-------
+    29
+(1 row)
+
+drop foreign table lineitem_twoStripes;
+DROP FOREIGN TABLE IF EXISTS lineitem;
+NOTICE:  foreign table "lineitem" does not exist, skipping
+Create foreign table lineitem (
+ L_ORDERKEY BIGINT NOT NULL
+ , L_PARTKEY BIGINT NOT NULL
+ , L_SUPPKEY BIGINT NOT NULL
+ , L_LINENUMBER BIGINT NOT NULL
+ , L_QUANTITY DECIMAL(15,2) NOT NULL
+ , L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL
+ , L_DISCOUNT DECIMAL(15,2) NOT NULL
+ , L_TAX DECIMAL(15,2) NOT NULL
+ , L_RETURNFLAG CHAR(1) NOT NULL
+ , L_LINESTATUS CHAR(1) NOT NULL
+ , L_SHIPDATE DATE NOT NULL
+ , L_COMMITDATE DATE NOT NULL
+ , L_RECEIPTDATE DATE NOT NULL
+ , L_SHIPINSTRUCT CHAR(25) NOT NULL
+ , L_SHIPMODE CHAR(10) NOT NULL
+ , L_COMMENT VARCHAR(44) NOT NULL
+)
+SERVER hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/lineitem_parquet')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS customer;
+NOTICE:  foreign table "customer" does not exist, skipping
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS orders;
+NOTICE:  foreign table "orders" does not exist, skipping
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/orders_parquet')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS part;
+NOTICE:  foreign table "part" does not exist, skipping
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT, 
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/part_parquet')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS supplier;
+NOTICE:  foreign table "supplier" does not exist, skipping
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/supplier_parquet')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS partsupp;
+NOTICE:  foreign table "partsupp" does not exist, skipping
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/partsupp_parquet')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS nation;
+NOTICE:  foreign table "nation" does not exist, skipping
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/nation_parquet')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS region;
+NOTICE:  foreign table "region" does not exist, skipping
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/region_parquet')
+distribute by roundrobin;
+-- there are bugs for the following three queries. cause EOF error from datanode
+SELECT L_shipdate FROM lineitem WHERE L_orderkey between 2125190 and 2125200 order by l_shipdate;
+     l_shipdate      
+---------------------
+ 1994-12-05 00:00:00
+ 1994-12-13 00:00:00
+ 1995-01-03 00:00:00
+ 1995-01-22 00:00:00
+ 1995-02-28 00:00:00
+ 1995-12-26 00:00:00
+ 1995-12-26 00:00:00
+ 1996-02-07 00:00:00
+ 1996-02-15 00:00:00
+ 1996-02-28 00:00:00
+(10 rows)
+
+SELECT count(L_shipdate) FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+ count 
+-------
+    10
+(1 row)
+
+SELECT *  from lineitem WHERE L_orderkey between 2125190 and 2125200 order by l_orderkey, l_partkey;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus |     l_shipdate      |    l_commitdate     |    l_receiptdate    |      l_shipinstruct       | l_shipmode |                 l_comment                  
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+---------------------+---------------------+---------------------+---------------------------+------------+--------------------------------------------
+    2125190 |   1209731 |     59756 |            3 |      24.00 |        39376.08 |        .06 |  0.00 | A            | F            | 1995-02-28 00:00:00 | 1995-02-05 00:00:00 | 1995-03-14 00:00:00 | NONE                      | MAIL       | o beans. carefully special ideas solve a
+    2125190 |   1380607 |     55647 |            1 |      14.00 |        23625.56 |       0.00 |   .03 | R            | F            | 1995-01-22 00:00:00 | 1995-01-23 00:00:00 | 1995-02-09 00:00:00 | TAKE BACK RETURN          | TRUCK      | usly unusua
+    2125190 |   1382501 |     32528 |            5 |      20.00 |        31668.80 |        .06 |  0.00 | A            | F            | 1995-01-03 00:00:00 | 1994-12-23 00:00:00 | 1995-01-13 00:00:00 | DELIVER IN PERSON         | MAIL       | al requests about the thinly special saute
+    2125190 |   1854419 |     54420 |            2 |      24.00 |        32959.68 |        .07 |   .07 | A            | F            | 1994-12-05 00:00:00 | 1995-01-22 00:00:00 | 1994-12-09 00:00:00 | COLLECT COD               | REG AIR    | ans are. carefully pending ideas sleep. qu
+    2125190 |   1937133 |     62153 |            4 |       7.00 |         8190.28 |        .02 |   .02 | R            | F            | 1994-12-13 00:00:00 | 1994-12-30 00:00:00 | 1994-12-16 00:00:00 | NONE                      | FOB        | , pending requests sleep blithely acros
+    2125191 |    280402 |     55409 |            4 |       7.00 |         9676.73 |        .03 |   .03 | N            | O            | 1996-02-07 00:00:00 | 1996-01-11 00:00:00 | 1996-03-06 00:00:00 | COLLECT COD               | FOB        | longside of th
+    2125191 |    585887 |     60903 |            2 |       3.00 |         5918.58 |        .05 |  0.00 | N            | O            | 1995-12-26 00:00:00 | 1995-12-24 00:00:00 | 1996-01-14 00:00:00 | TAKE BACK RETURN          | SHIP       |  special accounts
+    2125191 |    705273 |     55288 |            5 |      35.00 |        44738.40 |        .09 |   .03 | N            | O            | 1996-02-28 00:00:00 | 1996-01-28 00:00:00 | 1996-03-25 00:00:00 | DELIVER IN PERSON         | AIR        | carefully regular plate
+    2125191 |    992342 |     17352 |            3 |      36.00 |        51634.80 |        .01 |  0.00 | N            | O            | 1995-12-26 00:00:00 | 1996-01-08 00:00:00 | 1996-01-14 00:00:00 | COLLECT COD               | RAIL       | the carefully ironic mu
+    2125191 |   1773463 |     48515 |            1 |      23.00 |        35336.74 |        .04 |   .03 | N            | O            | 1996-02-15 00:00:00 | 1996-01-01 00:00:00 | 1996-02-23 00:00:00 | NONE                      | AIR        | ong the slyly express theodolites
+(10 rows)
+
+create foreign table bool_skip_1(i int, a smallint, b bool, c float4, d decimal(10,5))
+server hdfs_server
+options(format 'parquet', foldername '/user/hive/warehouse/bool_skip_1_parquet')
+distribute by roundrobin;
+select * from bool_skip_1 where b is null and i>15000 and i<15020 order by 1,2,3,4,5;
+   i   | a | b | c  |   d    
+-------+---+---+----+--------
+ 15001 | 5 |   | .5 | .80000
+ 15002 | 5 |   | .5 | .80000
+ 15003 | 5 |   | .5 | .80000
+ 15004 | 5 |   | .5 | .80000
+ 15005 | 5 |   | .5 | .80000
+ 15006 | 5 |   | .5 | .80000
+ 15007 | 5 |   | .5 | .80000
+ 15008 | 5 |   | .5 | .80000
+ 15009 | 5 |   | .5 | .80000
+ 15010 | 5 |   | .5 | .80000
+ 15011 | 5 |   | .5 | .80000
+ 15012 | 5 |   | .5 | .80000
+ 15013 | 5 |   | .5 | .80000
+ 15014 | 5 |   | .5 | .80000
+ 15015 | 5 |   | .5 | .80000
+ 15016 | 5 |   | .5 | .80000
+ 15017 | 5 |   | .5 | .80000
+ 15018 | 5 |   | .5 | .80000
+ 15019 | 5 |   | .5 | .80000
+(19 rows)
+
+DROP FOREIGN TABLE IF EXISTS bool_skip_1 CASCADE;
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+DROP SERVER hdfs_server CASCADE;

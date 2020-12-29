@@ -15,8 +15,8 @@
 #define LMGR_H
 
 #include "lib/stringinfo.h"
-#include "storage/itemptr.h"
-#include "storage/lock.h"
+#include "storage/item/itemptr.h"
+#include "storage/lock/lock.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/partcache.h"
@@ -27,19 +27,19 @@ extern void RelationInitLockInfo(Relation relation);
 /* Lock a relation */
 extern void LockRelationOid(Oid relid, LOCKMODE lockmode);
 extern bool ConditionalLockRelationOid(Oid relid, LOCKMODE lockmode);
-extern void UnlockRelationId(LockRelId *relid, LOCKMODE lockmode);
+extern void UnlockRelationId(LockRelId* relid, LOCKMODE lockmode);
 extern void UnlockRelationOid(Oid relid, LOCKMODE lockmode);
 
-extern void LockRelFileNode(const RelFileNode &rnode, LOCKMODE lockmode);
-extern void UnlockRelFileNode(const RelFileNode &rnode, LOCKMODE lockmode);
+extern void LockRelFileNode(const RelFileNode& rnode, LOCKMODE lockmode);
+extern void UnlockRelFileNode(const RelFileNode& rnode, LOCKMODE lockmode);
 
 extern void LockRelation(Relation relation, LOCKMODE lockmode);
 extern bool ConditionalLockRelation(Relation relation, LOCKMODE lockmode);
 extern void UnlockRelation(Relation relation, LOCKMODE lockmode);
 extern bool LockHasWaitersRelation(Relation relation, LOCKMODE lockmode);
 
-extern void LockRelationIdForSession(LockRelId *relid, LOCKMODE lockmode);
-extern void UnlockRelationIdForSession(LockRelId *relid, LOCKMODE lockmode);
+extern void LockRelationIdForSession(LockRelId* relid, LOCKMODE lockmode);
+extern void UnlockRelationIdForSession(LockRelId* relid, LOCKMODE lockmode);
 
 /* Lock a relation for extension */
 extern void LockRelationForExtension(Relation relation, LOCKMODE lockmode);
@@ -47,8 +47,8 @@ extern void UnlockRelationForExtension(Relation relation, LOCKMODE lockmode);
 extern bool ConditionalLockRelationForExtension(Relation relation, LOCKMODE lockmode);
 extern int RelationExtensionLockWaiterCount(Relation relation);
 
-extern void LockRelFileNodeForExtension(const RelFileNode &rnode, LOCKMODE lockmode);
-extern void UnlockRelFileNodeForExtension(const RelFileNode &rnode, LOCKMODE lockmode);
+extern void LockRelFileNodeForExtension(const RelFileNode& rnode, LOCKMODE lockmode);
+extern void UnlockRelFileNodeForExtension(const RelFileNode& rnode, LOCKMODE lockmode);
 
 /* Lock a page (currently only used within indexes) */
 extern void LockPage(Relation relation, BlockNumber blkno, LOCKMODE lockmode);
@@ -97,12 +97,12 @@ extern bool ConditionalLockPartitionWithRetry(Relation relation, Oid partitionId
 void LockPartitionVacuum(Relation prel, Oid partId, LOCKMODE lockmode);
 bool ConditionalLockPartitionVacuum(Relation prel, Oid partId, LOCKMODE lockmode);
 void UnLockPartitionVacuum(Relation prel, Oid partId, LOCKMODE lockmode);
-void LockPartitionVacuumForSession(PartitionIdentifier *partIdtf, Oid partrelid, Oid partid, LOCKMODE lockmode);
-void UnLockPartitionVacuumForSession(PartitionIdentifier *partIdtf, Oid partrelid, Oid partid, LOCKMODE lockmode);
+void LockPartitionVacuumForSession(PartitionIdentifier* partIdtf, Oid partrelid, Oid partid, LOCKMODE lockmode);
+void UnLockPartitionVacuumForSession(PartitionIdentifier* partIdtf, Oid partrelid, Oid partid, LOCKMODE lockmode);
 
-extern void DescribeLockTag(StringInfo buf, const LOCKTAG *tag);
+extern void DescribeLockTag(StringInfo buf, const LOCKTAG* tag);
 
 extern bool ConditionalLockCStoreFreeSpace(Relation relation);
 extern void UnlockCStoreFreeSpace(Relation relation);
-extern const char *GetLockNameFromTagType(uint16 locktag_type);
+extern const char* GetLockNameFromTagType(uint16 locktag_type);
 #endif /* LMGR_H */

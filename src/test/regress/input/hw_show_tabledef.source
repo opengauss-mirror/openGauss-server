@@ -13,7 +13,7 @@ CREATE  TABLE  a1 (
         c integer DEFAULT 2                                                
 )                                                                          
 WITH (orientation=row, compression=no)                                     
-                                                   
+DISTRIBUTE BY REPLICATION                                                  
 TO GROUP group1;                                                                
 CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;         
 CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;
@@ -59,7 +59,7 @@ select * from pg_get_tabledef('serialtest');
          c numeric(20,0)                                           
  )                                                                 
  WITH (orientation=column, compression=low)                        
-                                               
+ DISTRIBUTE BY HASH(a)                                             
  TO GROUP group1                                                        
  PARTITION BY RANGE (a)                                            
  (                                                                 
@@ -106,7 +106,7 @@ select * from pg_get_tabledef('storage_para_t1');
 
 --test unlogged table
 create UNLOGGED table t2(a int, b int)
- ;
+DISTRIBUTE BY HASH(a,b);
 select * from pg_get_tabledef('t2');
 
 -- test RANGE partition table
@@ -117,7 +117,7 @@ CREATE   TABLE  altertable_rangeparttable (
         c4 text                                                                                                
 )                                                                                                              
 WITH (orientation=row, compression=no)                                                                         
-                                                                                          
+DISTRIBUTE BY HASH(c1)                                                                                         
 TO GROUP group1                                                                                                     
 PARTITION BY RANGE (c1, c2, c3, c4)                                                                            
 (                                                                                                              
@@ -183,7 +183,7 @@ select * from pg_get_tabledef('test_range_tsp_3');
          b text COLLATE pg_catalog."en_US" NOT NULL
  )                                                 
  WITH (orientation=row, compression=no)            
-                               
+ DISTRIBUTE BY HASH(a)                             
  TO GROUP group1;
  select * from pg_get_tabledef('collate_test1');
  
@@ -192,7 +192,7 @@ select * from pg_get_tabledef('test_range_tsp_3');
           b text COLLATE pg_catalog."POSIX"
   )                                        
   WITH (orientation=row, compression=no)   
-                       
+  DISTRIBUTE BY HASH(a)                    
   TO GROUP group1;
   select * from pg_get_tabledef('collate_test2');
   
@@ -204,7 +204,7 @@ CREATE TABLE STUDENTS
 	NAME VARCHAR2(20),
 	AGE INT,
 	ADDRESS VARCHAR(30)
-)  ;
+) DISTRIBUTE BY REPLICATION;
  --alter table to add unique index or primary key 
 ALTER TABLE STUDENTS ADD UNIQUE (ID)
 USING INDEX
@@ -272,7 +272,7 @@ select * from pg_get_tabledef('suppliers');
  )                                          
  WITH (orientation=row, compression=no)     
  COMPRESS                                   
-                      
+ DISTRIBUTE BY HASH(a00)                    
  TO GROUP group1;
  
  select * from pg_get_tabledef('compress_18');
@@ -291,7 +291,7 @@ CREATE   TABLE  create_foreign_table_like_basic_info (
  WITH (orientation=row, compression=no)                                                                                       
  COMPRESS                                                                                                                     
  TABLESPACE create_foreign_table_like_tblsp1                                                                                  
-                                                                                                       
+ DISTRIBUTE BY HASH(u_id)                                                                                                     
  TO GROUP group1;                                                                                                                  
  ALTER TABLE create_foreign_table_like_basic_info ADD CONSTRAINT create_foreign_table_like_basic_info_pkey PRIMARY KEY (u_id);
  
@@ -304,7 +304,7 @@ CREATE   TABLE  create_foreign_table_like_basic_info (
      CONSTRAINT ctlt1_a_check CHECK ((length(a) > 2))                             
  )                                                                                
  WITH (orientation=row, compression=no)                                           
-                                                              
+ DISTRIBUTE BY HASH(a)                                                            
  TO GROUP group1;                                                                      
  COMMENT ON COLUMN ctlt1.a IS 'A';                                                
  COMMENT ON COLUMN ctlt1.b IS 'B';                                                
@@ -321,7 +321,7 @@ CREATE   TABLE  create_foreign_table_like_basic_info (
          initial integer                 
  )                                       
  WITH (orientation=row, compression=no)  
-               
+ DISTRIBUTE BY HASH(initial)             
  TO GROUP group1;                             
  COMMENT ON TABLE tmp IS 'table comment';
  
@@ -334,7 +334,7 @@ CREATE   TABLE  create_foreign_table_like_basic_info (
      CONSTRAINT con1 CHECK (((did > 100) AND ((name)::text <> NULL::text)))
  )                                                                         
  WITH (orientation=row, compression=no)                                    
-                                                     
+ DISTRIBUTE BY HASH(did)                                                   
  TO GROUP group1;
  
  select * from pg_get_tabledef('distributors_1');
@@ -346,7 +346,7 @@ CREATE   TABLE  create_foreign_table_like_basic_info (
          t text                                                                                  
  )                                                                                               
  WITH (orientation=row, compression=no)                                                          
-                                                                         
+ DISTRIBUTE BY REPLICATION                                                                       
  TO GROUP group1;                                                                                     
  ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_i_key UNIQUE (i) DEFERRABLE INITIALLY DEFERRED;
  
@@ -366,7 +366,7 @@ ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_t_key UNIQUE (t)  DEFERRABLE IN
           name character varying(40)                                            
   )                                                                             
   WITH (orientation=row, compression=no)                                        
-                                                          
+  DISTRIBUTE BY HASH(did)                                                       
   TO GROUP group1;                                                                   
   ALTER TABLE distributors2 ADD CONSTRAINT distributors2_pkey PRIMARY KEY (did);
   
@@ -418,7 +418,7 @@ select * from pg_get_tabledef('f_create_foreign_table_like_basic_info');
          b integer                            
  )                                            
  WITH (orientation=column, compression=no)    
-                          
+ DISTRIBUTE BY HASH(a)                        
  TO GROUP group1;                                  
  ALTER TABLE tttt ADD PARTIAL CLUSTER KEY (b);
  
@@ -429,7 +429,7 @@ select * from pg_get_tabledef('f_create_foreign_table_like_basic_info');
          "create" character(1)         
  )                                     
  WITH (orientation=row, compression=no)
-            
+ DISTRIBUTE BY HASH("create")          
  TO GROUP group1;
  
   select * from pg_get_tabledef('delete');
@@ -440,7 +440,7 @@ select * from pg_get_tabledef('f_create_foreign_table_like_basic_info');
 		"select" character(1) 
  )                                     
  WITH (orientation=row, compression=no)
-            
+ DISTRIBUTE BY HASH("create", "select")          
  TO GROUP group1;
  
  select * from pg_get_tabledef('update12');
@@ -529,7 +529,7 @@ create foreign table info_cons_add_003 (
  c_id12 varchar(20)
 )
 server hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/sql_on_hadoop.db/info_cons_tab_2')
- 
+distribute by roundrobin
 partition by (c_id12) automapped;
 ALTER FOREIGN TABLE info_cons_add_003
 ADD CONSTRAINT constr_add_003 

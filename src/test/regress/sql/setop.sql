@@ -138,7 +138,7 @@ SELECT 1 AS one except all SELECT 1.1::float8 order by 1;
 --
 
 -- hash + hash + same distributeKey + Append executes on all DNs
-explain (verbose on, costs off, nodes off) select * from setop_hash_table_01 union all select * from setop_hash_table_02;
+explain (verbose on, costs off) select * from setop_hash_table_01 union all select * from setop_hash_table_02;
 select * from setop_hash_table_01 except select * from setop_hash_table_02 order by 1, 2, 3;
 select a, b from setop_hash_table_01 except select b, a from setop_hash_table_03 order by 1, 2;
 select * from setop_hash_table_01 where a = 1 except select * from setop_hash_table_02 where b = s1 order by 1, 2, 3;
@@ -185,7 +185,7 @@ explain (verbose on, costs off) SELECT b FROM setop_hash_table_01 INTERSECT (((S
 SELECT b FROM setop_hash_table_01 INTERSECT (((SELECT a FROM setop_hash_table_02 UNION SELECT b FROM setop_hash_table_03))) ORDER BY 1;
 
 --union all between replication and hash
-explain (nodes off, costs off) select * from setop_replication_table_01 except select * from setop_replication_table_02 
+explain (costs off) select * from setop_replication_table_01 except select * from setop_replication_table_02 
 union all 
 select setop_hash_table_01.a as ta1, setop_hash_table_01.b as tb1, setop_hash_table_01.c as tc1 from setop_hash_table_01 left join setop_hash_table_02 on (setop_hash_table_01.b = setop_hash_table_02.b);
 
@@ -194,7 +194,7 @@ union all
 select setop_hash_table_01.a as ta1, setop_hash_table_01.b as tb1, setop_hash_table_01.c as tc1 from setop_hash_table_01 left join setop_hash_table_02 on (setop_hash_table_01.b = setop_hash_table_02.b) 
 order by 1, 2, 3;
 
-explain (nodes off, costs off) select distinct b*2/3+5 from setop_hash_table_01 union all select a from setop_hash_table_02 order by 1; 
+explain (costs off) select distinct b*2/3+5 from setop_hash_table_01 union all select a from setop_hash_table_02 order by 1; 
 select distinct b*2/3+5 from setop_replication_table_01 union all select a from setop_replication_table_02 order by 1; 
 
 drop table setop_hash_table_01 cascade;

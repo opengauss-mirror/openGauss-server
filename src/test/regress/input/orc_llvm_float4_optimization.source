@@ -1,0 +1,84 @@
+--Test LLVM optimization operator about FLOAT4 data type
+
+DROP FOREIGN TABLE IF EXISTS customer;
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb_small.db/customer_small/')
+distribute by roundrobin;
+
+--test "=" operator
+set enable_codegen = off;
+select * from customer where  c_acctbal = '868.9';
+set enable_codegen = on;
+select * from customer where  c_acctbal = '868.9' ;
+--test ">" operator
+set enable_codegen = off;
+select * from customer where  '868.9' > c_acctbal order by 1 limit 5;
+set enable_codegen = on;
+select * from customer where  '868.9' > c_acctbal order by 1 limit 5;
+set enable_codegen = off;
+select * from customer where  c_acctbal > '868.9' order by 1 limit 5;
+set enable_codegen = on;
+select * from customer where  c_acctbal > '868.9' order by 1 limit 5;
+select * from customer where  c_acctbal > 868.9::float8 order by 1 limit 5;
+--test ">=" operator
+set enable_codegen = off;
+select * from customer where  '868.9' >= c_acctbal order by 1 limit 5;
+set enable_codegen = on;
+select * from customer where  '868.9' >= c_acctbal order by 1 limit 5;
+set enable_codegen = off;
+select * from customer where  c_acctbal >= '868.9' order by 1 limit 5;
+set enable_codegen = on;
+select * from customer where  c_acctbal >= '868.9' order by 1 limit 5;
+select * from customer where  c_acctbal >= 868.9::float8 order by 1 limit 5;
+--test "<" operator
+set enable_codegen = off;
+select * from customer where  '868.9' < c_acctbal order by 1 limit 5;
+set enable_codegen = on;
+select * from customer where  '868.9' < c_acctbal order by 1 limit 5;
+set enable_codegen = off;
+select * from customer where  c_acctbal < '868.9' order by 1 limit 5;
+set enable_codegen = on;
+select * from customer where  c_acctbal < '868.9' order by 1 limit 5;
+select * from customer where  c_acctbal < 868.9::float8 order by 1 limit 5;
+--test "<=" operator
+set enable_codegen = off;
+select * from customer where  '868.9' <= c_acctbal order by 1 limit 5;
+set enable_codegen = on;
+select * from customer where  '868.9' <= c_acctbal order by 1 limit 5;
+set enable_codegen = off;
+select * from customer where  c_acctbal <= '868.9' order by 1 limit 5;
+set enable_codegen = on;
+select * from customer where  c_acctbal <= '868.9' order by 1 limit 5;
+select * from customer where  c_acctbal <= 868.9::float8 order by 1 limit 5;
+--test "<>" operator
+set enable_codegen = off;
+select * from customer where  '868.9' <> c_acctbal order by 1 limit 5;
+set enable_codegen = on;
+select * from customer where  '868.9' <> c_acctbal order by 1 limit 5;
+set enable_codegen = off;
+select * from customer where  c_acctbal <> '868.9' order by 1 limit 5;
+set enable_codegen = on;
+select * from customer where  c_acctbal <> '868.9' order by 1 limit 5;
+select * from customer where  c_acctbal <> 868.9::float8 order by 1 limit 5;
+--test "!=" operator
+set enable_codegen = off;
+select * from customer where  '868.9' != c_acctbal order by 1 limit 5;
+set enable_codegen = on;
+select * from customer where  '868.9' != c_acctbal order by 1 limit 5;
+set enable_codegen = off;
+select * from customer where  c_acctbal != '868.9' order by 1 limit 5;
+set enable_codegen = on;
+select * from customer where  c_acctbal != '868.9' order by 1 limit 5;
+--add llt
+explain performance select * from customer where  c_acctbal != '868.9' order by 1 limit 5;
+
+

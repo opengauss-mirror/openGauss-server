@@ -17,17 +17,21 @@ all: pg_config.h pg_config_os.h
 
 
 # Subdirectories containing headers for server-side dev
-SUBDIRS = bootstrap catalog commands datatype executor foreign lib libpq mb \
+SUBDIRS = bootstrap catalog commands client_logic datatype executor foreign gs_policy iprange lib libpq mb \
 	nodes optimizer parser pgxc postmaster regex replication rewrite  \
 	tcop snowball snowball/libstemmer tsearch tsearch/dicts utils\
 	port port/win32 port/win32_msvc port/win32_msvc/sys \
 	port/win32/arpa port/win32/netinet port/win32/sys \
 	portability \
 	gtm \
-	storage vecexecutor access access/obs tsdb \
-	hotpatch\
-        gstrace\
-	knl knl/knl_guc threadpool workload\
+	storage vecexecutor access streaming access/obs \
+	hotpatch \
+	gstrace \
+	knl knl/knl_guc threadpool workload
+ifneq ($(enable_multiple_nodes), yes)
+    SUBDIRS += storage/lock storage/buf storage/item storage/cstore storage/mot fmgr
+endif
+
 # Install all headers
 install: all installdirs
 # These headers are needed by the public headers of the interfaces.
@@ -67,11 +71,31 @@ install: all installdirs
 	$(INSTALL_DATA) ssl/gs_openssl_client.h '$(DESTDIR)$(includedir_server)/ssl/gs_openssl_client.h'
 	$(INSTALL_DATA) instruments/list.h '$(DESTDIR)$(includedir_server)/instruments/list.h'
 	$(INSTALL_DATA) instruments/instr_event.h '$(DESTDIR)$(includedir_server)/instruments/instr_event.h'
-	$(INSTALL_DATA) storage/dfs/dfs_connector.h '$(DESTDIR)$(includedir_server)/storage/dfs/dfs_connector.h'
+	$(INSTALL_DATA) storage/dfs/dfs_connector.h '$(DESTDIR)$(includedir_server)/storage/dfs/dfs_connector.h' 
+	$(INSTALL_DATA) storage/buf/block.h '$(DESTDIR)$(includedir_server)/storage/buf/block.h'
+	$(INSTALL_DATA) storage/buf/buf.h '$(DESTDIR)$(includedir_server)/storage/buf/buf.h'
+	$(INSTALL_DATA) storage/buf/buf_internals.h '$(DESTDIR)$(includedir_server)/storage/buf/buf_internals.h'
+	$(INSTALL_DATA) storage/buf/buffile.h '$(DESTDIR)$(includedir_server)/storage/buf/buffile.h'
+	$(INSTALL_DATA) storage/buf/bufmgr.h '$(DESTDIR)$(includedir_server)/storage/buf/bufmgr.h'
+	$(INSTALL_DATA) storage/buf/bufpage.h '$(DESTDIR)$(includedir_server)/storage/buf/bufpage.h'
+	$(INSTALL_DATA) storage/buf/buf_internals.h '$(DESTDIR)$(includedir_server)/storage/buf/buf_internals.h'
+	$(INSTALL_DATA) storage/cstore/cstore_compress.h '$(DESTDIR)$(includedir_server)/storage/cstore/cstore_compress.h'
+	$(INSTALL_DATA) storage/cstore/cstore_mem_alloc.h '$(DESTDIR)$(includedir_server)/storage/cstore/cstore_mem_alloc.h'
+	$(INSTALL_DATA) storage/cstore/cstorealloc.h '$(DESTDIR)$(includedir_server)/storage/cstore/cstorealloc.h'
+	$(INSTALL_DATA) storage/item/item.h '$(DESTDIR)$(includedir_server)/storage/item/item.h'
+	$(INSTALL_DATA) storage/item/itemid.h '$(DESTDIR)$(includedir_server)/storage/item/itemid.h'
+	$(INSTALL_DATA) storage/item/itemptr.h '$(DESTDIR)$(includedir_server)/storage/item/itemptr.h'
+	$(INSTALL_DATA) storage/lock/lock.h '$(DESTDIR)$(includedir_server)/storage/lock/lock.h'
+	$(INSTALL_DATA) storage/lock/lwlock.h '$(DESTDIR)$(includedir_server)/storage/lock/lwlock.h'
+	$(INSTALL_DATA) storage/lock/lwlock_be.h '$(DESTDIR)$(includedir_server)/storage/lock/lwlock_be.h'
+	$(INSTALL_DATA) storage/lock/s_lock.h '$(DESTDIR)$(includedir_server)/storage/lock/s_lock.h'
+	$(INSTALL_DATA) storage/lock/pg_sema.h '$(DESTDIR)$(includedir_server)/storage/lock/pg_sema.h'
 	$(INSTALL_DATA) distributelayer/streamConsumer.h '$(DESTDIR)$(includedir_server)/distributelayer/streamConsumer.h'
 	$(INSTALL_DATA) distributelayer/streamCore.h '$(DESTDIR)$(includedir_server)/distributelayer/streamCore.h'
 	$(INSTALL_DATA) distributelayer/streamProducer.h '$(DESTDIR)$(includedir_server)/distributelayer/streamProducer.h'
 	$(INSTALL_DATA) distributelayer/streamTransportCore.h '$(DESTDIR)$(includedir_server)/distributelayer/streamTransportCore.h'
+	$(INSTALL_DATA) fmgr/fmgr_comp.h '$(DESTDIR)$(includedir_server)/fmgr/fmgr_comp.h'
+	$(INSTALL_DATA) fmgr/fmgr_core.h '$(DESTDIR)$(includedir_server)/fmgr/fmgr_core.h'
 # We don't use INSTALL_DATA for performance reasons --- there are a lot of files
 	cp $(srcdir)/*.h '$(DESTDIR)$(includedir_server)'/ || exit; \
 	chmod $(INSTALL_DATA_MODE) '$(DESTDIR)$(includedir_server)'/*.h  || exit; \

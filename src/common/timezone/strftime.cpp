@@ -427,8 +427,7 @@ static char* _conv(int n, const char* format, char* pt, const char* ptlim)
 {
     char buf[INT_STRLEN_MAXIMUM(int) + 1];
 
-    int rc = sprintf_s(buf, sizeof(buf), format, n);
-    securec_check_ss(rc, "", "");
+    (void)sprintf(buf, format, n);
     return _add(buf, pt, ptlim);
 }
 

@@ -1,0 +1,16 @@
+<refentry id="SQL-ALTER_SYSTEM_SET">
+<refmeta>
+<refentrytitle>ALTER SYSTEM SET</refentrytitle>
+<manvolnum>6</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER SYSTEM SET</refname>
+<refpurpose>set a high-level(postmaster, sighup and backend) GUC.</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER SYSTEM SET { GUC_name } TO { GUC_value };
+</synopsis>
+</refsynopsisdiv>
+</refentry>

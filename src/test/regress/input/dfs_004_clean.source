@@ -1,0 +1,5 @@
+--clean enviroment
+drop schema vector_engine cascade;
+drop schema dwSumData_act cascade;
+drop tablespace if exists hdfs_ts;
+\! rm -rf @abs_srcdir@/dfs_init_004

@@ -89,15 +89,15 @@ typedef struct RangeVar {
     List* partitionKeyValuesList;
     bool isbucket;       /* is the RangeVar means a hash bucket id ? */
     List* buckets;       /* the corresponding bucketid list */
+    int length;
+#ifdef ENABLE_MOT
     Oid foreignOid;
+#endif
 } RangeVar;
 
 /*
- * IntoClause - target information for SELECT INTO, CREATE MATERIALIZED VIEW and CREATE TABLE AS
- * 
- * For CREATE MATERIALIZED VIEW, viewQuery is the parsed-but-not-rewritten
- * SELECT Query for the view; otherwise it's NULL.  (Although it's actually
- * Query*, we declare it as Node* to avoid a forward reference.)
+ * IntoClause - target information for SELECT INTO, CREATE TABLE AS, and
+ * CREATE MATERIALIZED VIEW
  */
 typedef struct IntoClause {
     NodeTag type;
@@ -108,8 +108,9 @@ typedef struct IntoClause {
     OnCommitAction onCommit; /* what do we do at COMMIT? */
     int8 row_compress;       /* row compression flag */
     char* tableSpaceName;    /* table space to use, or NULL */
-    Node* viewQuery;          /* materialized view's SELECT query */
     bool skipData;           /* true for WITH NO DATA */
+    bool ivm;                /* true for WITH IVM */
+    char relkind;     /* RELKIND_RELATION or RELKIND_MATVIEW */
 #ifdef PGXC
     struct DistributeBy* distributeby; /* distribution to use, or NULL */
     struct PGXCSubCluster* subcluster; /* subcluster node members */
@@ -324,7 +325,6 @@ typedef struct WindowFunc {
     int location;    /* token location, or -1 if unknown */
 } WindowFunc;
 
-
 /*
  * pseudo-column "ROWNUM"
  */
@@ -333,8 +333,6 @@ typedef struct Rownum {
     Oid  rownumcollid;  /* OID of collation of result */
     int  location;      /* token location, or -1 if unknown */
 } Rownum;
-
-
 /* ----------------
  *	ArrayRef: describes an array subscripting operation
  *
@@ -642,7 +640,6 @@ typedef struct SubPlan {
     bool useHashTable;
     /* TRUE if it's okay to return FALSE when the spec result is UNKNOWN; this allows much simpler handling of null values */
     bool unknownEqFalse; 
-    bool parallel_safe; /* OK to use as part of parallel plan? */
     /* Information for passing params into and out of the subselect: */
     /* setParam and parParam are lists of integers (param IDs) */
     List* setParam; /* initplan subqueries have to set these Params for parent plan */
@@ -1127,6 +1124,13 @@ typedef struct SetToDefault {
     int location;  /* token location, or -1 if unknown */
 } SetToDefault;
 
+/* value expressions (changed for client_logic feature) */
+typedef struct ExprWithComma {
+    NodeTag type;
+    Expr *xpr;
+    int comma_before_loc;
+} ExprWithComma;
+
 /*
  * Node representing [WHERE] CURRENT OF cursor_name
  *
@@ -1315,8 +1319,32 @@ typedef enum DistributionType {
     DISTTYPE_REPLICATION, /* Replicated */
     DISTTYPE_HASH,        /* Hash partitioned */
     DISTTYPE_ROUNDROBIN,  /* Round Robin */
-    DISTTYPE_MODULO       /* Modulo partitioned */
+    DISTTYPE_MODULO,      /* Modulo partitioned */
+    DISTTYPE_HIDETAG,     /* Use a hidden column as distribute column */
+    DISTTYPE_LIST,        /* List */
+    DISTTYPE_RANGE        /* Range */
 } DistributionType;
+
+typedef struct ListSliceDefState {
+    NodeTag type;
+    char* name;
+    List* boundaries; /* list of boundary(multi-values) */
+    char* datanode_name;
+} ListSliceDefState;
+
+typedef struct DistState {
+    NodeTag type;
+    /*
+     * 'r' range slice
+     * 'l' list slice
+     */
+    char strategy;
+    /* list of slice definition, like: 
+     * ListSliceDefState or RangePartitionDefState or RangePartitionStartEndDefState 
+     */
+    List* sliceList; 
+    char* refTableName;
+} DistState;
 
 /* ----------
  * DistributeBy - represents a DISTRIBUTE BY clause in a CREATE TABLE statement
@@ -1327,6 +1355,8 @@ typedef struct DistributeBy {
     NodeTag type;
     DistributionType disttype; /* Distribution type */
     List* colname;             /* Distribution column name */
+    DistState* distState;      /* Slice Definitions */
+    Oid referenceoid;          /* table oid that slice references, InvalidOid if none */
 } DistributeBy;
 
 /* ----------

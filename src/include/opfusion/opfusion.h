@@ -2,16 +2,6 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1998-2016, PostgreSQL Global Development Group
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
  * 
  * opfusion.h
@@ -41,10 +31,20 @@ extern void report_qps_type(CmdType commandType);
 extern const char* getBypassReason(FusionType result);
 extern void BypassUnsupportedReason(FusionType result);
 extern void ExecCheckXactReadOnly(PlannedStmt* plannedstmt);
+void InitParamInFusionConstruct(const TupleDesc tupDesc, Datum** values, bool** isNull);
 extern FusionType getSelectFusionType(List* stmt_list, ParamListInfo params);
 extern FusionType getInsertFusionType(List* stmt_list, ParamListInfo params);
 extern FusionType getUpdateFusionType(List* stmt_list, ParamListInfo params);
 extern FusionType getDeleteFusionType(List* stmt_list, ParamListInfo params);
+extern void tpslot_free_heaptuple(TupleTableSlot* reslot);
+
+typedef struct pnFusionObj {
+    char portalname[NAMEDATALEN];
+    OpFusion *opfusion;
+} pnFusionObj;
+
+#define HASH_TBL_LEN 64
+
 class OpFusion : public BaseObject {
 public:
     OpFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list);
@@ -98,13 +98,27 @@ public:
 
     void executeInit();
 
-    void executeEnd();
+    void executeEnd(const char* portal_name);
 
     void auditRecord();
+
+    void clean();
 
     static bool isQueryCompleted();
 
     void bindClearPosition();
+
+    static void initFusionHtab();
+
+    static void ClearInUnexpectSituation();
+
+    void storeFusion(const char *portalname);
+
+    static OpFusion *locateFusion(const char *portalname);
+
+    static void removeFusionFromHtab(const char *portalname);
+
+    static void refreshCurFusion(StringInfo msg);
 
 public:
     struct ParamLoc {
@@ -159,8 +173,17 @@ public:
     bool m_isCompleted;
 
     long m_position;
+
+    const char *m_portalName;
+
+    Snapshot m_snapshot;
+
+    class ScanFusion* m_scan;
+
 private:
+#ifdef ENABLE_MOT
     static FusionType GetMotFusionType(PlannedStmt* plannedStmt);
+#endif
 };
 
 class SelectFusion : public OpFusion {
@@ -174,8 +197,6 @@ public:
     void close();
 
 private:
-    class ScanFusion* m_scan;
-
     int64 m_limitCount;
 
     int64 m_limitOffset;
@@ -217,8 +238,6 @@ public:
     bool execute(long max_rows, char* completionTag);
 
 private:
-    class ScanFusion* m_scan;
-
     HeapTuple heapModifyTuple(HeapTuple tuple);
 
     void refreshTargetParameterIfNecessary();
@@ -235,7 +254,6 @@ private:
     bool* m_targetIsnull;
 
     Datum* m_curVarValue;
-
     struct VarLoc {
         int varNo;
         int scanKeyIndx;
@@ -268,13 +286,12 @@ public:
     bool execute(long max_rows, char* completionTag);
 
 private:
-    class ScanFusion* m_scan;
-
     EState* m_estate;
 
     bool m_is_bucket_rel;
 };
 
+#ifdef ENABLE_MOT
 class MotJitSelectFusion : public OpFusion {
 public:
     MotJitSelectFusion(MemoryContext context, CachedPlanSource *psrc, List *plantree_list, ParamListInfo params);
@@ -296,6 +313,7 @@ private:
     EState* m_estate;
     CmdType m_cmdType;
 };
+#endif
 
 class SelectForUpdateFusion : public OpFusion {
 public:
@@ -308,11 +326,9 @@ public:
     void close();
 
 private:
-    class ScanFusion* m_scan;
+    int64 m_limitCount;
 
     EState* m_estate;
-
-    int64 m_limitCount;
 
     int64 m_limitOffset;
 
@@ -352,8 +368,6 @@ protected:
         dest->buf = NULL;       /* digits array is not palloc'd */
     }
 
-    class ScanFusion* m_scan;
-
     aggSumFun m_aggSumFunc;
 };
 
@@ -369,27 +383,6 @@ public:
 
 protected:
 
-    class ScanFusion* m_scan;
-
     TupleDesc  m_scanDesc;
 };
-
-#if 0
-class NestLoopFusion: public OpFusion {
-
-public:
-
-    NestLoopFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params);
-
-    ~NestLoopFusion(){};
-
-    bool execute(long max_rows, char *completionTag);
-
-protected:
-
-    class ScanFusion* m_lscan;
-    class RScanFusion* m_rscan;
-};
-#endif
-
 #endif /* SRC_INCLUDE_OPFUSION_OPFUSION_H_ */

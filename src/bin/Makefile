@@ -29,11 +29,13 @@ SUBDIRS = \
 	pgxc_clean \
 	gds \
 	gs_log \
+	pg_redis \
 	gs_cgroup \
 	gsqlerr \
 	pg_upgrade \
 	pg_basebackup \
-	pg_probackup
+	pg_probackup \
+	gs_ktool
 
 ifeq ($(PORTNAME), win32)
 SUBDIRS += pgevent
@@ -53,7 +55,10 @@ SUBDIRS = \
 	gs_guc \
 	gsqlerr \
 	pg_basebackup \
-	pg_probackup 
+	pg_probackup \
+        gs_ktool
+
+
 
 
 endif

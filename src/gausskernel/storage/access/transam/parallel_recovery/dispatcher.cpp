@@ -40,7 +40,7 @@
 #include "access/gin.h"
 
 #include "catalog/storage_xlog.h"
-#include "storage/buf_internals.h"
+#include "storage/buf/buf_internals.h"
 #include "storage/ipc.h"
 #include "storage/standby.h"
 #include "utils/hsearch.h"
@@ -81,14 +81,14 @@ extern THR_LOCAL bool redo_oldversion_xlog;
 namespace parallel_recovery {
 
 typedef struct RmgrDispatchData {
-    bool (*rm_dispatch)(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-    bool (*rm_loginfovalid)(XLogReaderState* record, uint8 minInfo, uint8 maxInfo);
+    bool (*rm_dispatch)(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+    bool (*rm_loginfovalid)(XLogReaderState *record, uint8 minInfo, uint8 maxInfo);
     RmgrId rm_id;
     uint8 rm_mininfo;
     uint8 rm_maxinfo;
 } RmgrDispatchData;
 
-LogDispatcher* g_dispatcher = NULL;
+LogDispatcher *g_dispatcher = NULL;
 
 static const int XLOG_INFO_SHIFT_SIZE = 4; /* xlog info flag shift size */
 
@@ -98,85 +98,85 @@ static const int32 ITEM_QUQUE_SIZE_RATIO = 10;
 
 static const uint32 EXIT_WAIT_DELAY = 100; /* 100 us */
 
-typedef void* (*GetStateFunc)(PageRedoWorker* worker);
+typedef void *(*GetStateFunc)(PageRedoWorker *worker);
 
 static void AddWorkerToSet(uint32);
-static void** CollectStatesFromWorkers(GetStateFunc);
-static void GetWorkerIds(XLogReaderState* record, uint32 designatedWorker, bool rnodedispatch);
-static LogDispatcher* CreateDispatcher();
+static void **CollectStatesFromWorkers(GetStateFunc);
+static void GetWorkerIds(XLogReaderState *record, uint32 designatedWorker, bool rnodedispatch);
+static LogDispatcher *CreateDispatcher();
 static void DestroyRecoveryWorkers();
 
-static void DispatchRecordWithPages(XLogReaderState*, List*, bool);
-static void DispatchRecordWithoutPage(XLogReaderState*, List*);
-static void DispatchTxnRecord(XLogReaderState*, List*, TimestampTz, bool);
+static void DispatchRecordWithPages(XLogReaderState *, List *, bool);
+static void DispatchRecordWithoutPage(XLogReaderState *, List *);
+static void DispatchTxnRecord(XLogReaderState *, List *, TimestampTz, bool);
 static void StartPageRedoWorkers(uint32);
 static void StopRecoveryWorkers(int, Datum);
-static bool XLogWillChangeStandbyState(XLogReaderState*);
-static bool StandbyWillChangeStandbyState(XLogReaderState*);
-static void DispatchToSpecPageWorker(XLogReaderState* record, List* expectedTLIs, bool waittrxnsync);
+static bool XLogWillChangeStandbyState(XLogReaderState *);
+static bool StandbyWillChangeStandbyState(XLogReaderState *);
+static void DispatchToSpecPageWorker(XLogReaderState *record, List *expectedTLIs, bool waittrxnsync);
 
-static bool DispatchXLogRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchXactRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchSmgrRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchCLogRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchHashRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchDataBaseRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchTableSpaceRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchMultiXactRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchRelMapRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchStandbyRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchHeap2Record(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchHeapRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchSeqRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchGinRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchGistRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchSpgistRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchRepSlotRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchHeap3Record(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool DispatchDefaultRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-#ifdef ENABLE_MULTIPLE_NODES
-static bool DispatchBarrierRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-#endif
-static bool DispatchBtreeRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
+static bool DispatchXLogRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchXactRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchSmgrRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchCLogRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchHashRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchDataBaseRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchTableSpaceRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchMultiXactRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchRelMapRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchStandbyRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchHeap2Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchHeapRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchSeqRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchGinRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchGistRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchSpgistRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchRepSlotRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchHeap3Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchDefaultRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchBarrierRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchBtreeRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+#ifdef ENABLE_MOT
 static bool DispatchMotRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
-static bool RmgrRecordInfoValid(XLogReaderState* record, uint8 minInfo, uint8 maxInfo);
-static bool RmgrGistRecordInfoValid(XLogReaderState* record, uint8 minInfo, uint8 maxInfo);
+#endif
+static bool RmgrRecordInfoValid(XLogReaderState *record, uint8 minInfo, uint8 maxInfo);
+static bool RmgrGistRecordInfoValid(XLogReaderState *record, uint8 minInfo, uint8 maxInfo);
 RedoWaitInfo redo_get_io_event(int32 event_id);
 
 /* dispatchTable must consistent with RmgrTable */
 static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
-    {DispatchXLogRecord, RmgrRecordInfoValid, RM_XLOG_ID, XLOG_CHECKPOINT_SHUTDOWN, XLOG_FPI},
-    {DispatchXactRecord, RmgrRecordInfoValid, RM_XACT_ID, XLOG_XACT_COMMIT, XLOG_XACT_COMMIT_COMPACT},
-    {DispatchSmgrRecord, RmgrRecordInfoValid, RM_SMGR_ID, XLOG_SMGR_CREATE, XLOG_SMGR_TRUNCATE},
-    {DispatchCLogRecord, RmgrRecordInfoValid, RM_CLOG_ID, CLOG_ZEROPAGE, CLOG_TRUNCATE},
-    {DispatchDataBaseRecord, RmgrRecordInfoValid, RM_DBASE_ID, XLOG_DBASE_CREATE, XLOG_DBASE_DROP},
-    {DispatchTableSpaceRecord, RmgrRecordInfoValid, RM_TBLSPC_ID, XLOG_TBLSPC_CREATE, XLOG_TBLSPC_RELATIVE_CREATE},
-    {DispatchMultiXactRecord,
-        RmgrRecordInfoValid,
-        RM_MULTIXACT_ID,
-        XLOG_MULTIXACT_ZERO_OFF_PAGE,
-        XLOG_MULTIXACT_CREATE_ID},
-    {DispatchRelMapRecord, RmgrRecordInfoValid, RM_RELMAP_ID, XLOG_RELMAP_UPDATE, XLOG_RELMAP_UPDATE},
+    { DispatchXLogRecord, RmgrRecordInfoValid, RM_XLOG_ID, XLOG_CHECKPOINT_SHUTDOWN, XLOG_DELAY_XLOG_RECYCLE },
+    { DispatchXactRecord, RmgrRecordInfoValid, RM_XACT_ID, XLOG_XACT_COMMIT, XLOG_XACT_COMMIT_COMPACT },
+    { DispatchSmgrRecord, RmgrRecordInfoValid, RM_SMGR_ID, XLOG_SMGR_CREATE, XLOG_SMGR_TRUNCATE },
+    { DispatchCLogRecord, RmgrRecordInfoValid, RM_CLOG_ID, CLOG_ZEROPAGE, CLOG_TRUNCATE },
+    { DispatchDataBaseRecord, RmgrRecordInfoValid, RM_DBASE_ID, XLOG_DBASE_CREATE, XLOG_DBASE_DROP },
+    { DispatchTableSpaceRecord, RmgrRecordInfoValid, RM_TBLSPC_ID, XLOG_TBLSPC_CREATE, XLOG_TBLSPC_RELATIVE_CREATE },
+    { DispatchMultiXactRecord,
+      RmgrRecordInfoValid,
+      RM_MULTIXACT_ID,
+      XLOG_MULTIXACT_ZERO_OFF_PAGE,
+      XLOG_MULTIXACT_CREATE_ID },
+    { DispatchRelMapRecord, RmgrRecordInfoValid, RM_RELMAP_ID, XLOG_RELMAP_UPDATE, XLOG_RELMAP_UPDATE },
 #ifdef ENABLE_MULTIPLE_NODES
     {DispatchStandbyRecord, RmgrRecordInfoValid, RM_STANDBY_ID, XLOG_STANDBY_LOCK, XLOG_STANDBY_CSN},
 #else
     {DispatchStandbyRecord, RmgrRecordInfoValid, RM_STANDBY_ID, XLOG_STANDBY_LOCK, XLOG_STANDBY_CSN_ABORTED},
 #endif
-    {DispatchHeap2Record, RmgrRecordInfoValid, RM_HEAP2_ID, XLOG_HEAP2_FREEZE, XLOG_HEAP2_LOGICAL_NEWPAGE},
-    {DispatchHeapRecord, RmgrRecordInfoValid, RM_HEAP_ID, XLOG_HEAP_INSERT, XLOG_HEAP_INPLACE},
-    {DispatchBtreeRecord, RmgrRecordInfoValid, RM_BTREE_ID, XLOG_BTREE_INSERT_LEAF, XLOG_BTREE_REUSE_PAGE},
-    {DispatchHashRecord, NULL, RM_HASH_ID, 0, 0},
-    {DispatchGinRecord, RmgrRecordInfoValid, RM_GIN_ID, XLOG_GIN_CREATE_INDEX, XLOG_GIN_VACUUM_DATA_LEAF_PAGE},
+    { DispatchHeap2Record, RmgrRecordInfoValid, RM_HEAP2_ID, XLOG_HEAP2_FREEZE, XLOG_HEAP2_LOGICAL_NEWPAGE },
+    { DispatchHeapRecord, RmgrRecordInfoValid, RM_HEAP_ID, XLOG_HEAP_INSERT, XLOG_HEAP_INPLACE },
+    { DispatchBtreeRecord, RmgrRecordInfoValid, RM_BTREE_ID, XLOG_BTREE_INSERT_LEAF, XLOG_BTREE_REUSE_PAGE },
+    { DispatchHashRecord, NULL, RM_HASH_ID, 0, 0 },
+    { DispatchGinRecord, RmgrRecordInfoValid, RM_GIN_ID, XLOG_GIN_CREATE_INDEX, XLOG_GIN_VACUUM_DATA_LEAF_PAGE },
     /* XLOG_GIST_PAGE_DELETE is not used and info isn't continus  */
-    {DispatchGistRecord, RmgrGistRecordInfoValid, RM_GIST_ID, 0, 0},
-    {DispatchSeqRecord, RmgrRecordInfoValid, RM_SEQ_ID, XLOG_SEQ_LOG, XLOG_SEQ_LOG},
-    {DispatchSpgistRecord, RmgrRecordInfoValid, RM_SPGIST_ID, XLOG_SPGIST_CREATE_INDEX, XLOG_SPGIST_VACUUM_REDIRECT},
-    {DispatchRepSlotRecord, RmgrRecordInfoValid, RM_SLOT_ID, XLOG_SLOT_CREATE, XLOG_TERM_LOG},
-    {DispatchHeap3Record, RmgrRecordInfoValid, RM_HEAP3_ID, XLOG_HEAP3_NEW_CID, XLOG_HEAP3_REWRITE},
-#ifdef ENABLE_MULTIPLE_NODES
-    {DispatchBarrierRecord, NULL, RM_BARRIER_ID, 0, 0},
-#endif
+    { DispatchGistRecord, RmgrGistRecordInfoValid, RM_GIST_ID, 0, 0 },
+    { DispatchSeqRecord, RmgrRecordInfoValid, RM_SEQ_ID, XLOG_SEQ_LOG, XLOG_SEQ_LOG },
+    { DispatchSpgistRecord, RmgrRecordInfoValid, RM_SPGIST_ID, XLOG_SPGIST_CREATE_INDEX, XLOG_SPGIST_VACUUM_REDIRECT },
+    { DispatchRepSlotRecord, RmgrRecordInfoValid, RM_SLOT_ID, XLOG_SLOT_CREATE, XLOG_TERM_LOG },
+    { DispatchHeap3Record, RmgrRecordInfoValid, RM_HEAP3_ID, XLOG_HEAP3_NEW_CID, XLOG_HEAP3_REWRITE },
+    { DispatchBarrierRecord, NULL, RM_BARRIER_ID, 0, 0 },
+#ifdef ENABLE_MOT
     {DispatchMotRecord, NULL, RM_MOT_ID, 0, 0},
+#endif
 };
 
 /* Run from the dispatcher and txn worker thread. */
@@ -187,8 +187,8 @@ bool OnHotStandBy()
 
 void RearrangeWorkers()
 {
-    PageRedoWorker* tmpReadyPageWorkers[MOST_FAST_RECOVERY_LIMIT] = {};
-    PageRedoWorker* tmpUnReadyPageWorkers[MOST_FAST_RECOVERY_LIMIT] = {};
+    PageRedoWorker *tmpReadyPageWorkers[MOST_FAST_RECOVERY_LIMIT] = {};
+    PageRedoWorker *tmpUnReadyPageWorkers[MOST_FAST_RECOVERY_LIMIT] = {};
 
     uint32 nextReadyIndex = 0;
     uint32 nextunReadyIndex = 0;
@@ -204,27 +204,19 @@ void RearrangeWorkers()
     }
 
     for (uint32 i = 0; i < nextReadyIndex; ++i) {
-        ereport(LOG,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("RearrangeWorkers, rearrange ready workers originWorkerId :%u, threadId:%lu, "
-                       "newWorkerId:%u",
-                    tmpReadyPageWorkers[i]->id,
-                    tmpReadyPageWorkers[i]->tid.thid,
-                    i)));
+        ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                      errmsg("RearrangeWorkers, rearrange ready workers originWorkerId :%u, threadId:%lu, "
+                             "newWorkerId:%u",
+                             tmpReadyPageWorkers[i]->id, tmpReadyPageWorkers[i]->tid.thid, i)));
         g_dispatcher->pageWorkers[i] = tmpReadyPageWorkers[i];
         g_dispatcher->pageWorkers[i]->id = i;
     }
 
     for (uint32 i = 0; i < nextunReadyIndex; ++i) {
-        ereport(LOG,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("RearrangeWorkers, rearrange ready workers originWorkerId :%u, threadId:%lu, "
-                       "newWorkerId:%u",
-                    tmpUnReadyPageWorkers[i]->id,
-                    tmpUnReadyPageWorkers[i]->tid.thid,
-                    i)));
+        ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                      errmsg("RearrangeWorkers, rearrange ready workers originWorkerId :%u, threadId:%lu, "
+                             "newWorkerId:%u",
+                             tmpUnReadyPageWorkers[i]->id, tmpUnReadyPageWorkers[i]->tid.thid, i)));
         g_dispatcher->pageWorkers[i + nextReadyIndex] = tmpUnReadyPageWorkers[i];
     }
 
@@ -255,12 +247,9 @@ void WaitWorkerReady()
     for (waitLoop = 0; waitLoop < MAX_REDO_WAIT_LOOP; ++waitLoop) {
         readyWorkerCnt = GetReadyWorker();
         if (readyWorkerCnt == g_instance.comm_cxt.predo_cxt.totalNum) {
-            ereport(LOG,
-                (errmodule(MOD_REDO),
-                    errcode(ERRCODE_LOG),
-                    errmsg("WaitWorkerReady total worker count:%u, readyWorkerCnt:%u",
-                        g_dispatcher->totalWorkerCount,
-                        readyWorkerCnt)));
+            ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                          errmsg("WaitWorkerReady total worker count:%u, readyWorkerCnt:%u",
+                                 g_dispatcher->totalWorkerCount, readyWorkerCnt)));
             break;
         }
         pg_usleep(REDO_WAIT_SLEEP_TIME);
@@ -270,19 +259,14 @@ void WaitWorkerReady()
     SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.rwlock));
     readyWorkerCnt = GetReadyWorker();
     if (waitLoop == MAX_REDO_WAIT_LOOP && readyWorkerCnt == 0) {
-        ereport(PANIC,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("WaitWorkerReady failed, no worker is ready for work. totalWorkerCount :%u",
-                    g_dispatcher->totalWorkerCount)));
+        ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                        errmsg("WaitWorkerReady failed, no worker is ready for work. totalWorkerCount :%u",
+                               g_dispatcher->totalWorkerCount)));
     }
 
-    ereport(LOG,
-        (errmodule(MOD_REDO),
-            errcode(ERRCODE_LOG),
-            errmsg("WaitWorkerReady total worker count:%u, readyWorkerCnt:%u",
-                g_dispatcher->totalWorkerCount,
-                readyWorkerCnt)));
+    ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                  errmsg("WaitWorkerReady total worker count:%u, readyWorkerCnt:%u", g_dispatcher->totalWorkerCount,
+                         readyWorkerCnt)));
     RearrangeWorkers();
 }
 
@@ -290,11 +274,9 @@ void CheckAlivePageWorkers()
 {
     for (uint32 i = 0; i < MOST_FAST_RECOVERY_LIMIT; ++i) {
         if (g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadState != PAGE_REDO_WORKER_INVALID) {
-            ereport(PANIC,
-                (errmodule(MOD_REDO),
-                    errcode(ERRCODE_LOG),
-                    errmsg("CheckAlivePageWorkers: thread %lu is still alive",
-                        g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId)));
+            ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                            errmsg("CheckAlivePageWorkers: thread %lu is still alive",
+                                   g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId)));
         }
         g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId = 0;
     }
@@ -312,13 +294,9 @@ void StartRecoveryWorkers()
         if (g_dispatcher->txnWorker != NULL)
             StartPageRedoWorkers(get_real_recovery_parallelism());
 
-        ereport(LOG,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[PR]: max=%d, thrd=%d, workers=%u",
-                    g_instance.attr.attr_storage.max_recovery_parallelism,
-                    get_real_recovery_parallelism(),
-                    g_dispatcher->pageWorkerCount)));
+        ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                      errmsg("[PR]: max=%d, thrd=%d, workers=%u", g_instance.attr.attr_storage.max_recovery_parallelism,
+                             get_real_recovery_parallelism(), g_dispatcher->pageWorkerCount)));
         WaitWorkerReady();
         SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.rwlock));
         g_instance.comm_cxt.predo_cxt.state = REDO_IN_PROGRESS;
@@ -332,14 +310,10 @@ void DumpDispatcher()
     knl_parallel_redo_state state;
     state = g_instance.comm_cxt.predo_cxt.state;
     if ((get_real_recovery_parallelism() > 1) && (GetPageWorkerCount() > 0)) {
-        ereport(LOG,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]dispatcher : pageWorkerCount %u, state %u, curItemNum %u, maxItemNum %u",
-                    g_dispatcher->pageWorkerCount,
-                    (uint32)state,
-                    g_dispatcher->curItemNum,
-                    g_dispatcher->maxItemNum)));
+        ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                      errmsg("[REDO_LOG_TRACE]dispatcher : pageWorkerCount %u, state %u, curItemNum %u, maxItemNum %u",
+                             g_dispatcher->pageWorkerCount, (uint32)state, g_dispatcher->curItemNum,
+                             g_dispatcher->maxItemNum)));
 
         for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; ++i) {
             DumpPageRedoWorker(g_dispatcher->pageWorkers[i]);
@@ -349,11 +323,11 @@ void DumpDispatcher()
     }
 }
 
-List* CheckImcompleteAction(List* imcompleteActionList)
+List *CheckImcompleteAction(List *imcompleteActionList)
 {
     uint32 npageworkers = GetPageWorkerCount();
     for (uint32 i = 0; i < npageworkers; ++i) {
-        List* perWorkerList = (List*)GetBTreeIncompleteActions(g_dispatcher->pageWorkers[i]);
+        List *perWorkerList = (List *)GetBTreeIncompleteActions(g_dispatcher->pageWorkers[i]);
         imcompleteActionList = lappend3(imcompleteActionList, perWorkerList);
 
         /* memory leak */
@@ -363,16 +337,13 @@ List* CheckImcompleteAction(List* imcompleteActionList)
 }
 
 /* Run from the dispatcher thread. */
-static LogDispatcher* CreateDispatcher()
+static LogDispatcher *CreateDispatcher()
 {
-    MemoryContext ctx = AllocSetContextCreate(t_thrd.top_mem_cxt,
-        "ParallelRecoveryDispatcher",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE,
-        SHARED_CONTEXT);
+    MemoryContext ctx = AllocSetContextCreate(g_instance.instance_context, "ParallelRecoveryDispatcher",
+                                              ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+                                              ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
 
-    LogDispatcher* newDispatcher = (LogDispatcher*)MemoryContextAllocZero(ctx, sizeof(LogDispatcher));
+    LogDispatcher *newDispatcher = (LogDispatcher *)MemoryContextAllocZero(ctx, sizeof(LogDispatcher));
 
     g_instance.comm_cxt.predo_cxt.parallelRedoCtx = ctx;
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.rwlock));
@@ -391,7 +362,7 @@ static LogDispatcher* CreateDispatcher()
 /* Run from the dispatcher thread. */
 static void StartPageRedoWorkers(uint32 parallelism)
 {
-    g_dispatcher->pageWorkers = (PageRedoWorker**)palloc(sizeof(PageRedoWorker*) * parallelism);
+    g_dispatcher->pageWorkers = (PageRedoWorker **)palloc(sizeof(PageRedoWorker *) * parallelism);
 
     /* This is necessary to avoid the cache coherence problem. */
     /* Because we are using atomic operation to do the synchronization. */
@@ -403,10 +374,8 @@ static void StartPageRedoWorkers(uint32 parallelism)
     }
 
     if (started == 0) {
-        ereport(PANIC,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]StartPageRedoWorkers we need at least one worker thread")));
+        ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                        errmsg("[REDO_LOG_TRACE]StartPageRedoWorkers we need at least one worker thread")));
     }
 
     g_dispatcher->totalWorkerCount = started;
@@ -414,7 +383,7 @@ static void StartPageRedoWorkers(uint32 parallelism)
     /* (worker num + txn) * (per thread queue num) * 10 */
     g_dispatcher->maxItemNum = (started + 1) * PAGE_WORK_QUEUE_SIZE * ITEM_QUQUE_SIZE_RATIO;
 
-    g_dispatcher->chosedWorkerIds = (uint32*)palloc(sizeof(uint32) * started);
+    g_dispatcher->chosedWorkerIds = (uint32 *)palloc(sizeof(uint32) * started);
 
     g_dispatcher->chosedWorkerCount = 0;
 }
@@ -458,11 +427,9 @@ void SendSingalToPageWorker(int signal)
         if (state == PAGE_REDO_WORKER_READY) {
             int err = gs_signal_send(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId, signal);
             if (0 != err) {
-                ereport(WARNING,
-                    (errmsg("Dispatch kill(pid %lu, signal %d) failed: \"%s\",",
-                        g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId,
-                        signal,
-                        gs_strerror(err))));
+                ereport(WARNING, (errmsg("Dispatch kill(pid %lu, signal %d) failed: \"%s\",",
+                                         g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId, signal,
+                                         gs_strerror(err))));
             }
         }
     }
@@ -471,13 +438,10 @@ void SendSingalToPageWorker(int signal)
 /* Run from the dispatcher thread. */
 static void StopRecoveryWorkers(int code, Datum arg)
 {
-    ereport(LOG,
-        (errmodule(MOD_REDO),
-            errcode(ERRCODE_LOG),
-            errmsg("parallel redo workers are going to stop, "
-                   "code:%d, arg:%lu",
-                code,
-                DatumGetUInt64(arg))));
+    ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                  errmsg("parallel redo workers are going to stop, "
+                         "code:%d, arg:%lu",
+                         code, DatumGetUInt64(arg))));
     SendSingalToPageWorker(SIGTERM);
 
     uint64 count = 0;
@@ -485,11 +449,11 @@ static void StopRecoveryWorkers(int code, Datum arg)
         ++count;
         if ((count & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
             ereport(WARNING,
-                (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("StopRecoveryWorkers wait page work exit")));
+                    (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("StopRecoveryWorkers wait page work exit")));
             if ((count & PRINT_ALL_WAIT_COUNT) == PRINT_ALL_WAIT_COUNT) {
                 DumpDispatcher();
-                ereport(
-                    PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("StopRecoveryWorkers wait too long!!!")));
+                ereport(PANIC,
+                        (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("StopRecoveryWorkers wait too long!!!")));
             }
             pg_usleep(EXIT_WAIT_DELAY);
         }
@@ -523,17 +487,16 @@ static void DestroyRecoveryWorkers()
     }
 }
 
-static bool RmgrRecordInfoValid(XLogReaderState* record, uint8 minInfo, uint8 maxInfo)
+static bool RmgrRecordInfoValid(XLogReaderState *record, uint8 minInfo, uint8 maxInfo)
 {
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
 
     if ((XLogRecGetRmid(record) == RM_HEAP2_ID) || (XLogRecGetRmid(record) == RM_HEAP_ID)) {
         info = (info & XLOG_HEAP_OPMASK);
     }
-    if ((XLogRecGetRmid(record) == RM_MULTIXACT_ID)) {
+    if (XLogRecGetRmid(record) == RM_MULTIXACT_ID) {
         info = (info & XLOG_MULTIXACT_MASK);
     }
-
     info = (info >> XLOG_INFO_SHIFT_SIZE);
     minInfo = (minInfo >> XLOG_INFO_SHIFT_SIZE);
     maxInfo = (maxInfo >> XLOG_INFO_SHIFT_SIZE);
@@ -544,7 +507,7 @@ static bool RmgrRecordInfoValid(XLogReaderState* record, uint8 minInfo, uint8 ma
     return false;
 }
 
-static bool RmgrGistRecordInfoValid(XLogReaderState* record, uint8 minInfo, uint8 maxInfo)
+static bool RmgrGistRecordInfoValid(XLogReaderState *record, uint8 minInfo, uint8 maxInfo)
 {
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
     if ((info == XLOG_GIST_PAGE_UPDATE) || (info == XLOG_GIST_PAGE_SPLIT) || (info == XLOG_GIST_CREATE_INDEX)) {
@@ -554,15 +517,15 @@ static bool RmgrGistRecordInfoValid(XLogReaderState* record, uint8 minInfo, uint
 }
 
 /* Run from the dispatcher thread. */
-void DispatchRedoRecordToFile(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     bool isNeedFullSync = false;
     bool fatalerror = false;
     uint32 indexid = (uint32)-1;
     uint32 rmid = XLogRecGetRmid(record);
     uint32 term = XLogRecGetTerm(record);
-    if (term > g_instance.comm_cxt.localinfo_cxt.term) {
-        g_instance.comm_cxt.localinfo_cxt.term = term;
+    if (term > g_instance.comm_cxt.localinfo_cxt.term_from_xlog) {
+        g_instance.comm_cxt.localinfo_cxt.term_from_xlog = term;
     }
     t_thrd.xlog_cxt.redoItemIdx = 0;
     if ((get_real_recovery_parallelism() > 1) && (GetPageWorkerCount() > 0)) {
@@ -570,8 +533,8 @@ void DispatchRedoRecordToFile(XLogReaderState* record, List* expectedTLIs, Times
             indexid = g_dispatchTable[rmid].rm_id;
             if ((indexid != rmid) ||
                 ((g_dispatchTable[rmid].rm_loginfovalid != NULL) &&
-                    (g_dispatchTable[rmid].rm_loginfovalid(
-                         record, g_dispatchTable[rmid].rm_mininfo, g_dispatchTable[rmid].rm_maxinfo) == false))) {
+                 (g_dispatchTable[rmid].rm_loginfovalid(record, g_dispatchTable[rmid].rm_mininfo,
+                                                        g_dispatchTable[rmid].rm_maxinfo) == false))) {
                 /* it's invalid info */
                 fatalerror = true;
             }
@@ -597,20 +560,15 @@ void DispatchRedoRecordToFile(XLogReaderState* record, List* expectedTLIs, Times
             /* output panic error info */
             DumpDispatcher();
             ereport(PANIC,
-                (errmodule(MOD_REDO),
-                    errcode(ERRCODE_LOG),
-                    errmsg("[REDO_LOG_TRACE]DispatchRedoRecord encounter fatal error:rmgrID:%u, info:%u, indexid:%u",
-                        rmid,
-                        (uint32)XLogRecGetInfo(record),
-                        indexid)));
+                    (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                     errmsg("[REDO_LOG_TRACE]DispatchRedoRecord encounter fatal error:rmgrID:%u, info:%u, indexid:%u",
+                            rmid, (uint32)XLogRecGetInfo(record), indexid)));
         }
     } else {
         ereport(PANIC,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]DispatchRedoRecord could not be here config recovery num %d, work num %u",
-                    get_real_recovery_parallelism(),
-                    GetPageWorkerCount())));
+                (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                 errmsg("[REDO_LOG_TRACE]DispatchRedoRecord could not be here config recovery num %d, work num %u",
+                        get_real_recovery_parallelism(), GetPageWorkerCount())));
     }
 }
 
@@ -619,30 +577,28 @@ void DispatchRedoRecordToFile(XLogReaderState* record, List* expectedTLIs, Times
  * trxnthreadexe is true when the record need execute on trxn thread
  * pagethredexe is true when the record need execute on pageworker thread
  */
-static void DispatchSyncTxnRecord(
-    XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime, uint32 designatedWorker)
+static void DispatchSyncTxnRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime,
+                                  uint32 designatedWorker)
 {
-    RedoItem* item = CreateRedoItem(
-        record, (g_dispatcher->chosedWorkerCount + 1), designatedWorker, expectedTLIs, recordXTime, true);
+    RedoItem *item = CreateRedoItem(record, (g_dispatcher->chosedWorkerCount + 1), designatedWorker, expectedTLIs,
+                                    recordXTime, true);
 
     item->sharewithtrxn = true;
     item->blockbytrxn = false;
 
     if ((g_dispatcher->chosedWorkerCount != 1) && (XLogRecGetRmid(&item->record) != RM_XACT_ID)) {
         ereport(WARNING,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]DispatchSyncTxnRecord maybe some error:rmgrID:%u, info:%u, workerCount:%u",
-                    (uint32)XLogRecGetRmid(&item->record),
-                    (uint32)XLogRecGetInfo(&item->record),
-                    g_dispatcher->chosedWorkerCount)));
+                (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                 errmsg("[REDO_LOG_TRACE]DispatchSyncTxnRecord maybe some error:rmgrID:%u, info:%u, workerCount:%u",
+                        (uint32)XLogRecGetRmid(&item->record), (uint32)XLogRecGetInfo(&item->record),
+                        g_dispatcher->chosedWorkerCount)));
     }
 
     for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; ++i) {
         if (g_dispatcher->chosedWorkerIds[i] > 0) {
             AddPageRedoItem(g_dispatcher->pageWorkers[i], item);
         } else {
-            RedoItem* lsnMarker = CreateLSNMarker(record, expectedTLIs, false);
+            RedoItem *lsnMarker = CreateLSNMarker(record, expectedTLIs, false);
             AddPageRedoItem(g_dispatcher->pageWorkers[i], lsnMarker);
         }
     }
@@ -654,7 +610,7 @@ static void DispatchSyncTxnRecord(
     return;
 }
 
-static void DispatchToOnePageWorker(XLogReaderState* record, const RelFileNode& rnode, List* expectedTLIs)
+static void DispatchToOnePageWorker(XLogReaderState *record, const RelFileNode &rnode, List *expectedTLIs)
 {
     /* for bcm different attr need to dispath to the same page redo thread */
     uint32 workerId = GetWorkerId(rnode, 0, 0);
@@ -673,57 +629,55 @@ static void DispatchToOnePageWorker(XLogReaderState* record, const RelFileNode& 
 * trxn record's recordtime must set , see SetLatestXTime
 
 */
-static void DispatchTxnRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime, bool imcheckpoint)
+static void DispatchTxnRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime, bool imcheckpoint)
 {
     for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
-        RedoItem* item = CreateLSNMarker(record, expectedTLIs, false);
+        RedoItem *item = CreateLSNMarker(record, expectedTLIs, false);
         AddPageRedoItem(g_dispatcher->pageWorkers[i], item);
     }
 
-    RedoItem* trxnItem = CreateRedoItem(record, 1, ANY_WORKER, expectedTLIs, recordXTime, true);
+    RedoItem *trxnItem = CreateRedoItem(record, 1, ANY_WORKER, expectedTLIs, recordXTime, true);
     trxnItem->imcheckpoint = imcheckpoint; /* immdiate checkpoint set imcheckpoint  */
     AddTxnRedoItem(g_dispatcher->txnWorker, trxnItem);
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 /* Run  from the dispatcher thread. */
-static bool DispatchBarrierRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
-{
-    DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
-    return false;
-}
-#endif
-
-/* Run  from the dispatcher thread. */
-static bool DispatchRepSlotRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchBarrierRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
     return false;
 }
 
 /* Run  from the dispatcher thread. */
-static bool DispatchHeap3Record(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchRepSlotRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
+{
+    DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
+    return false;
+}
+
+/* Run  from the dispatcher thread. */
+static bool DispatchHeap3Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
     return false;
 }
 
 /* record of rmid or info error, we inter this function to make every worker run to this position */
-static bool DispatchDefaultRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchDefaultRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
     return true;
 }
 
 /* Run from the dispatcher thread. */
-static bool DispatchXLogRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchXLogRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     bool isNeedFullSync = false;
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
 
     if (IsCheckPoint(record)) {
-        RedoItem* item =
-            CreateRedoItem(record, (g_dispatcher->pageWorkerCount + 1), ALL_WORKER, expectedTLIs, recordXTime, true);
+        RedoItem *item = CreateRedoItem(record, (g_dispatcher->pageWorkerCount + 1), ALL_WORKER, expectedTLIs,
+                                        recordXTime, true);
         for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; ++i) {
             /*
              * A check point record may save a recovery restart point or
@@ -736,7 +690,8 @@ static bool DispatchXLogRecord(XLogReaderState* record, List* expectedTLIs, Time
          */
         AddTxnRedoItem(g_dispatcher->txnWorker, item);
 
-        isNeedFullSync = XLogWillChangeStandbyState(record);
+        isNeedFullSync = g_dispatcher->checkpointNeedFullSync || XLogWillChangeStandbyState(record);
+        g_dispatcher->checkpointNeedFullSync = false;
     } else if ((info == XLOG_FPI) || (info == XLOG_FPI_FOR_HINT)) {
         if (SUPPORT_FPAGE_DISPATCH) {
             DispatchRecordWithPages(record, expectedTLIs, true);
@@ -751,7 +706,7 @@ static bool DispatchXLogRecord(XLogReaderState* record, List* expectedTLIs, Time
 }
 
 /* Run  from the dispatcher thread. */
-static bool DispatchRelMapRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchRelMapRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     /* page redo worker directly use relnode, will not use relmapfile */
     DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
@@ -759,17 +714,17 @@ static bool DispatchRelMapRecord(XLogReaderState* record, List* expectedTLIs, Ti
 }
 
 /* Run  from the dispatcher thread. */
-static bool DispatchXactRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchXactRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     if (XactWillRemoveRelFiles(record)) {
         /* for parallel performance */
         if (SUPPORT_FPAGE_DISPATCH) {
             int nrels = 0;
-            ColFileNodeRel* xnodes = NULL;
+            ColFileNodeRel *xnodes = NULL;
             XactGetRelFiles(record, &xnodes, &nrels);
             for (int i = 0; ((i < nrels) && (xnodes != NULL)); ++i) {
                 ColFileNode node;
-                ColFileNodeRel* nodeRel = xnodes + i;
+                ColFileNodeRel *nodeRel = xnodes + i;
                 ColFileNodeCopy(&node, nodeRel);
                 uint32 id = GetWorkerId(node.filenode, 0, 0);
                 AddWorkerToSet(id);
@@ -794,7 +749,7 @@ static bool DispatchXactRecord(XLogReaderState* record, List* expectedTLIs, Time
 }
 
 /* Run from the dispatcher thread. */
-static bool DispatchStandbyRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchStandbyRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     /* change standbystate, must be full sync, see UpdateStandbyState */
     bool isNeedFullSync = StandbyWillChangeStandbyState(record);
@@ -805,7 +760,7 @@ static bool DispatchStandbyRecord(XLogReaderState* record, List* expectedTLIs, T
 }
 
 /* Run from the dispatcher thread. */
-static bool DispatchMultiXactRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchMultiXactRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     /* page worker will not use multixact */
     DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
@@ -814,19 +769,19 @@ static bool DispatchMultiXactRecord(XLogReaderState* record, List* expectedTLIs,
 }
 
 /* Run from the dispatcher thread. */
-static void DispatchRecordWithoutPage(XLogReaderState* record, List* expectedTLIs)
+static void DispatchRecordWithoutPage(XLogReaderState *record, List *expectedTLIs)
 {
-    RedoItem* item = CreateRedoItem(record, g_dispatcher->pageWorkerCount, ANY_WORKER, expectedTLIs, 0, true);
+    RedoItem *item = CreateRedoItem(record, g_dispatcher->pageWorkerCount, ANY_WORKER, expectedTLIs, 0, true);
     for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++)
         AddPageRedoItem(g_dispatcher->pageWorkers[i], item);
 }
 
 /* Run from the dispatcher thread. */
-static void DispatchRecordWithPages(XLogReaderState* record, List* expectedTLIs, bool rnodedispatch)
+static void DispatchRecordWithPages(XLogReaderState *record, List *expectedTLIs, bool rnodedispatch)
 {
     GetWorkerIds(record, ANY_WORKER, rnodedispatch);
 
-    RedoItem* item = CreateRedoItem(record, g_dispatcher->chosedWorkerCount, ANY_WORKER, expectedTLIs, 0, true);
+    RedoItem *item = CreateRedoItem(record, g_dispatcher->chosedWorkerCount, ANY_WORKER, expectedTLIs, 0, true);
     for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
         if (g_dispatcher->chosedWorkerIds[i] > 0) {
             AddPageRedoItem(g_dispatcher->pageWorkers[i], item);
@@ -834,7 +789,7 @@ static void DispatchRecordWithPages(XLogReaderState* record, List* expectedTLIs,
     }
 }
 
-static bool DispatchHeapRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchHeapRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     if (record->max_block_id >= 0)
         DispatchRecordWithPages(record, expectedTLIs, SUPPORT_FPAGE_DISPATCH);
@@ -844,20 +799,20 @@ static bool DispatchHeapRecord(XLogReaderState* record, List* expectedTLIs, Time
     return false;
 }
 
-static bool DispatchSeqRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchSeqRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     DispatchRecordWithPages(record, expectedTLIs, SUPPORT_FPAGE_DISPATCH);
 
     return false;
 }
 
-static bool DispatchDataBaseRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchDataBaseRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     bool isNeedFullSync = false;
 
     if (IsDataBaseDrop(record)) {
-        RedoItem* item =
-            CreateRedoItem(record, (g_dispatcher->pageWorkerCount + 1), ALL_WORKER, expectedTLIs, recordXTime, true);
+        RedoItem *item = CreateRedoItem(record, (g_dispatcher->pageWorkerCount + 1), ALL_WORKER, expectedTLIs,
+                                        recordXTime, true);
         item->imcheckpoint = true;
         for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
             AddPageRedoItem(g_dispatcher->pageWorkers[i], item);
@@ -871,18 +826,19 @@ static bool DispatchDataBaseRecord(XLogReaderState* record, List* expectedTLIs, 
         /* database dir may impact many rel so need to sync to all pageworks */
         DispatchRecordWithoutPage(record, expectedTLIs);
 
-        RedoItem* txnItem = CreateLSNMarker(record, expectedTLIs, false);
+        RedoItem *txnItem = CreateLSNMarker(record, expectedTLIs, false);
         /* ensure eyery pageworker is receive recored to update pageworker Lsn
          * recordtime not set ,  SetLatestXTime is not need to process
          */
         txnItem->imcheckpoint = true; /* immdiate checkpoint set true  */
         AddTxnRedoItem(g_dispatcher->txnWorker, txnItem);
+        g_dispatcher->checkpointNeedFullSync = true;
     }
 
     return isNeedFullSync;
 }
 
-static bool DispatchTableSpaceRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchTableSpaceRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     bool isNeedFullSync = false;
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
@@ -894,7 +850,7 @@ static bool DispatchTableSpaceRecord(XLogReaderState* record, List* expectedTLIs
         /* tablespace dir may impact many rel so need to sync to all pageworks */
         DispatchRecordWithoutPage(record, expectedTLIs);
 
-        RedoItem* trxnItem = CreateLSNMarker(record, expectedTLIs, false);
+        RedoItem *trxnItem = CreateLSNMarker(record, expectedTLIs, false);
         /* ensure eyery pageworker is receive recored to update pageworker Lsn
          * recordtime not set ,  SetLatestXTime is not need to process
          */
@@ -905,7 +861,7 @@ static bool DispatchTableSpaceRecord(XLogReaderState* record, List* expectedTLIs
     return isNeedFullSync;
 }
 
-static bool DispatchSmgrRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchSmgrRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     bool isNeedFullSync = false;
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
@@ -913,7 +869,7 @@ static bool DispatchSmgrRecord(XLogReaderState* record, List* expectedTLIs, Time
         /* only need to dispatch to one page worker */
         /* for parallel performance */
         if (SUPPORT_FPAGE_DISPATCH) {
-            xl_smgr_create* xlrec = (xl_smgr_create*)XLogRecGetData(record);
+            xl_smgr_create *xlrec = (xl_smgr_create *)XLogRecGetData(record);
             RelFileNode rnode;
             RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
 
@@ -932,7 +888,7 @@ static bool DispatchSmgrRecord(XLogReaderState* record, List* expectedTLIs, Time
         /* for parallel performance */
         if (SUPPORT_FPAGE_DISPATCH) {
             uint32 id;
-            xl_smgr_truncate* xlrec = (xl_smgr_truncate*)XLogRecGetData(record);
+            xl_smgr_truncate *xlrec = (xl_smgr_truncate *)XLogRecGetData(record);
             RelFileNode rnode;
             RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
             id = GetWorkerId(rnode, 0, 0);
@@ -955,20 +911,20 @@ static bool DispatchSmgrRecord(XLogReaderState* record, List* expectedTLIs, Time
 }
 
 /* Run from the dispatcher thread. */
-static bool DispatchCLogRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchCLogRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
     return false;
 }
 
 /* Run from the dispatcher thread. */
-static bool DispatchHashRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchHashRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
     return true;
 }
 
-static bool DispatchBtreeRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchBtreeRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
     if (info == XLOG_BTREE_REUSE_PAGE) {
@@ -980,21 +936,18 @@ static bool DispatchBtreeRecord(XLogReaderState* record, List* expectedTLIs, Tim
 }
 
 /* Run from the dispatcher thread. */
-static bool DispatchGinRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchGinRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     bool isNeedFullSync = false;
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
 
     if (info == XLOG_GIN_DELETE_LISTPAGE) {
-        ginxlogDeleteListPages* data = (ginxlogDeleteListPages*)XLogRecGetData(record);
+        ginxlogDeleteListPages *data = (ginxlogDeleteListPages *)XLogRecGetData(record);
         /* output warning */
         if (data->ndeleted != record->max_block_id) {
-            ereport(WARNING,
-                (errmodule(MOD_REDO),
-                    errcode(ERRCODE_LOG),
-                    errmsg("[REDO_LOG_TRACE]DispatchGinRecord warnninginfo:ndeleted:%d, max_block_id:%d",
-                        data->ndeleted,
-                        record->max_block_id)));
+            ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                              errmsg("[REDO_LOG_TRACE]DispatchGinRecord warnninginfo:ndeleted:%d, max_block_id:%d",
+                                     data->ndeleted, record->max_block_id)));
         }
     }
 
@@ -1013,21 +966,18 @@ static bool DispatchGinRecord(XLogReaderState* record, List* expectedTLIs, Times
 }
 
 /* Run from the dispatcher thread. */
-static bool DispatchGistRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchGistRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
     bool isNeedFullSync = false;
 
     if (info == XLOG_GIST_PAGE_SPLIT) {
-        gistxlogPageSplit* xldata = (gistxlogPageSplit*)XLogRecGetData(record);
+        gistxlogPageSplit *xldata = (gistxlogPageSplit *)XLogRecGetData(record);
         /* output warning */
         if (xldata->npage != record->max_block_id) {
-            ereport(WARNING,
-                (errmodule(MOD_REDO),
-                    errcode(ERRCODE_LOG),
-                    errmsg("[REDO_LOG_TRACE]DispatchGistRecord warnninginfo:npage:%hu, max_block_id:%d",
-                        xldata->npage,
-                        record->max_block_id)));
+            ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                              errmsg("[REDO_LOG_TRACE]DispatchGistRecord warnninginfo:npage:%hu, max_block_id:%d",
+                                     xldata->npage, record->max_block_id)));
         }
     }
 
@@ -1046,7 +996,7 @@ static bool DispatchGistRecord(XLogReaderState* record, List* expectedTLIs, Time
 }
 
 /* Run from the dispatcher thread. */
-static bool DispatchSpgistRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchSpgistRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     /* index not support mvcc, so we need to sync with trx thread when the record is vacuum */
     if (IsSpgistVacuum(record) && SUPPORT_HOT_STANDBY) {
@@ -1072,21 +1022,19 @@ static bool DispatchSpgistRecord(XLogReaderState* record, List* expectedTLIs, Ti
 /**
  *  dispatch record to a specified thread
  */
-static void DispatchToSpecPageWorker(XLogReaderState* record, List* expectedTLIs, bool waittrxnsync)
+static void DispatchToSpecPageWorker(XLogReaderState *record, List *expectedTLIs, bool waittrxnsync)
 {
-    RedoItem* item = CreateRedoItem(record, g_dispatcher->chosedWorkerCount, ANY_WORKER, expectedTLIs, 0, true);
+    RedoItem *item = CreateRedoItem(record, g_dispatcher->chosedWorkerCount, ANY_WORKER, expectedTLIs, 0, true);
 
     item->sharewithtrxn = false;
     item->blockbytrxn = waittrxnsync;
 
     if (g_dispatcher->chosedWorkerCount != 1) {
         ereport(WARNING,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]DispatchToSpecPageWorker maybe some error:rmgrID:%u, info:%u, workerCount:%u",
-                    (uint32)XLogRecGetRmid(&item->record),
-                    (uint32)XLogRecGetInfo(&item->record),
-                    g_dispatcher->chosedWorkerCount)));
+                (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                 errmsg("[REDO_LOG_TRACE]DispatchToSpecPageWorker maybe some error:rmgrID:%u, info:%u, workerCount:%u",
+                        (uint32)XLogRecGetRmid(&item->record), (uint32)XLogRecGetInfo(&item->record),
+                        g_dispatcher->chosedWorkerCount)));
     }
 
     for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
@@ -1094,7 +1042,7 @@ static void DispatchToSpecPageWorker(XLogReaderState* record, List* expectedTLIs
             AddPageRedoItem(g_dispatcher->pageWorkers[i], item);
         } else {
             /* add LSN Marker to pageworker */
-            RedoItem* lsnItem = CreateLSNMarker(record, expectedTLIs, false);
+            RedoItem *lsnItem = CreateLSNMarker(record, expectedTLIs, false);
             AddPageRedoItem(g_dispatcher->pageWorkers[i], lsnItem);
         }
     }
@@ -1105,7 +1053,7 @@ static void DispatchToSpecPageWorker(XLogReaderState* record, List* expectedTLIs
     AddTxnRedoItem(g_dispatcher->txnWorker, CreateLSNMarker(record, expectedTLIs, false));
 }
 
-static bool DispatchHeap2VacuumRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchHeap2VacuumRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     /*
      * don't support consistency view
@@ -1122,7 +1070,7 @@ static bool DispatchHeap2VacuumRecord(XLogReaderState* record, List* expectedTLI
 }
 
 /* Run from the dispatcher thread. */
-static bool DispatchHeap2Record(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
+static bool DispatchHeap2Record(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     bool isNeedFullSync = false;
 
@@ -1135,7 +1083,7 @@ static bool DispatchHeap2Record(XLogReaderState* record, List* expectedTLIs, Tim
          */
         /* for parallel redo performance */
         if (SUPPORT_FPAGE_DISPATCH) {
-            xl_heap_bcm* xlrec = (xl_heap_bcm*)XLogRecGetData(record);
+            xl_heap_bcm *xlrec = (xl_heap_bcm *)XLogRecGetData(record);
 
             RelFileNode tmp_node;
             RelFileNodeCopy(tmp_node, xlrec->node, XLogRecGetBucketId(record));
@@ -1146,7 +1094,7 @@ static bool DispatchHeap2Record(XLogReaderState* record, List* expectedTLIs, Tim
         }
     } else if (info == XLOG_HEAP2_LOGICAL_NEWPAGE) {
         if (IS_DN_MULTI_STANDYS_MODE()) {
-            xl_heap_logical_newpage* xlrec = (xl_heap_logical_newpage*)XLogRecGetData(record);
+            xl_heap_logical_newpage *xlrec = (xl_heap_logical_newpage *)XLogRecGetData(record);
 
             if (xlrec->type == COLUMN_STORE && xlrec->hasdata) {
                 /* for parallel redo performance */
@@ -1158,11 +1106,18 @@ static bool DispatchHeap2Record(XLogReaderState* record, List* expectedTLIs, Tim
                 } else {
                     DispatchRecordWithoutPage(record, expectedTLIs);
                 }
+            } else {
+                RedoItem *item = CreateRedoItem(record, 1, ANY_WORKER, expectedTLIs, 0, true);
+                FreeRedoItem(item);
             }
+
         } else {
             if (!g_instance.attr.attr_storage.enable_mix_replication) {
                 DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
                 isNeedFullSync = true;
+            } else {
+                RedoItem *item = CreateRedoItem(record, 1, ANY_WORKER, expectedTLIs, 0, true);
+                FreeRedoItem(item);
             }
         }
     } else {
@@ -1172,19 +1127,21 @@ static bool DispatchHeap2Record(XLogReaderState* record, List* expectedTLIs, Tim
     return isNeedFullSync;
 }
 
+#ifdef ENABLE_MOT
 /* Run from the dispatcher thread. */
 static bool DispatchMotRecord(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime)
 {
     DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
     return false;
 }
+#endif
 
 /* Run from the dispatcher thread. */
-static void GetWorkerIds(XLogReaderState* record, uint32 designatedWorker, bool rnodedispatch)
+static void GetWorkerIds(XLogReaderState *record, uint32 designatedWorker, bool rnodedispatch)
 {
     uint32 id;
     for (int i = 0; i <= record->max_block_id; i++) {
-        DecodedBkpBlock* block = &record->blocks[i];
+        DecodedBkpBlock *block = &record->blocks[i];
 
         if (block->in_use != true) {
             /* blk number is not continue */
@@ -1210,7 +1167,7 @@ static void GetWorkerIds(XLogReaderState* record, uint32 designatedWorker, bool 
 /**
  * count worker id  by hash
  */
-uint32 GetWorkerId(const RelFileNode& node, BlockNumber block, ForkNumber forkNum)
+uint32 GetWorkerId(const RelFileNode &node, BlockNumber block, ForkNumber forkNum)
 {
     uint32 workerCount = GetPageWorkerCount();
     if (workerCount == 0)
@@ -1218,18 +1175,16 @@ uint32 GetWorkerId(const RelFileNode& node, BlockNumber block, ForkNumber forkNu
 
     BufferTag tag;
     INIT_BUFFERTAG(tag, node, forkNum, block);
+    tag.rnode.bucketNode = 0;
     return tag_hash(&tag, sizeof(tag)) % workerCount;
 }
 
 static void AddWorkerToSet(uint32 id)
 {
     if (id >= g_dispatcher->pageWorkerCount) {
-        ereport(PANIC,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]AddWorkerToSet:input work id error, id:%u, work num %u",
-                    id,
-                    g_dispatcher->pageWorkerCount)));
+        ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                        errmsg("[REDO_LOG_TRACE]AddWorkerToSet:input work id error, id:%u, work num %u", id,
+                               g_dispatcher->pageWorkerCount)));
         return;
     }
 
@@ -1240,14 +1195,14 @@ static void AddWorkerToSet(uint32 id)
 }
 
 /* Run from the dispatcher and each page worker thread. */
-bool XactWillRemoveRelFiles(XLogReaderState* record)
+bool XactWillRemoveRelFiles(XLogReaderState *record)
 {
     /*
      * Relation files under tablespace folders are removed only from
      * applying transaction log record.
      */
     int nrels = 0;
-    ColFileNodeRel* xnodes = NULL;
+    ColFileNodeRel *xnodes = NULL;
 
     if (XLogRecGetRmid(record) != RM_XACT_ID) {
         return false;
@@ -1259,7 +1214,7 @@ bool XactWillRemoveRelFiles(XLogReaderState* record)
 }
 
 /* Run from the dispatcher thread. */
-static bool XLogWillChangeStandbyState(XLogReaderState* record)
+static bool XLogWillChangeStandbyState(XLogReaderState *record)
 {
     /*
      * If standbyState has reached SNAPSHOT_READY, it will not change
@@ -1279,7 +1234,7 @@ static bool XLogWillChangeStandbyState(XLogReaderState* record)
 }
 
 /* Run from the dispatcher thread. */
-static bool StandbyWillChangeStandbyState(XLogReaderState* record)
+static bool StandbyWillChangeStandbyState(XLogReaderState *record)
 {
     /*
      * If standbyState has reached SNAPSHOT_READY, it will not change
@@ -1308,20 +1263,16 @@ void ProcessPendingRecords(bool fullSync)
                 blockcnt++;
                 ApplyReadyTxnLogRecords(g_dispatcher->txnWorker, false);
                 if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
-                    ereport(LOG,
-                        (errmodule(MOD_REDO),
-                            errcode(ERRCODE_LOG),
-                            errmsg("[REDO_LOG_TRACE]ProcessPendingRecords:replayedLsn:%lu, blockcnt:%lu, "
-                                   "WorkerCount:%u, readEndLSN:%lu",
-                                GetXLogReplayRecPtr(NULL, NULL),
-                                blockcnt,
-                                g_dispatcher->pageWorkerCount,
-                                t_thrd.xlog_cxt.EndRecPtr)));
+                    ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                                  errmsg("[REDO_LOG_TRACE]ProcessPendingRecords:replayedLsn:%lu, blockcnt:%lu, "
+                                         "WorkerCount:%u, readEndLSN:%lu",
+                                         GetXLogReplayRecPtr(NULL, NULL), blockcnt, g_dispatcher->pageWorkerCount,
+                                         t_thrd.xlog_cxt.EndRecPtr)));
                     if ((blockcnt & PRINT_ALL_WAIT_COUNT) == PRINT_ALL_WAIT_COUNT) {
                         DumpDispatcher();
                     }
                 }
-                HandleStartupProcInterrupts();
+                RedoInterruptCallBack();
             }
             pgstat_report_waitevent(WAIT_EVENT_END);
         }
@@ -1347,17 +1298,32 @@ void ProcessTrxnRecords(bool fullSync)
 }
 
 /* Run from each page worker thread. */
-void FreeRedoItem(RedoItem* item)
+void FreeRedoItem(RedoItem *item)
 {
-    RedoItem* oldHead = (RedoItem*)pg_atomic_read_uintptr((uintptr_t*)&g_dispatcher->freeHead);
+    RedoItem *oldHead = (RedoItem *)pg_atomic_read_uintptr((uintptr_t *)&g_dispatcher->freeHead);
+    uint32 freed = pg_atomic_read_u32(&item->freed);
+    if (freed != 0) { /* if it happens, there must be problems! check it */
+        ereport(WARNING,
+                (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                 errmsg("FreeRedoItem failed, freed:%u, sharewithtrxn:%u, blockbytrxn:%u, imcheckpoint:%u, "
+                        "shareCount:%u, designatedWorker:%u, refCount:%u, replayed:%u, readPtr:%lu, endPtr:%lu"
+                        "xl_rmid:%u, xl_info:%u, ",
+                        freed, item->sharewithtrxn, item->blockbytrxn, item->imcheckpoint, item->shareCount,
+                        item->designatedWorker, item->refCount, item->replayed, item->record.ReadRecPtr,
+                        item->record.EndRecPtr, (uint32)XLogRecGetRmid(&(item->record)), 
+                        (uint32)XLogRecGetInfo(&(item->record)))));
+        return;
+    }
+
+    pg_atomic_write_u32(&item->freed, 1);
 
     do {
         item->freeNext = oldHead;
-    } while (!pg_atomic_compare_exchange_uintptr(
-        (uintptr_t*)&g_dispatcher->freeHead, (uintptr_t*)&oldHead, (uintptr_t)item));
+    } while (!pg_atomic_compare_exchange_uintptr((uintptr_t *)&g_dispatcher->freeHead, (uintptr_t *)&oldHead,
+                                                 (uintptr_t)item));
 }
 
-void InitReaderStateByOld(XLogReaderState* newState, XLogReaderState* oldState, bool isNew)
+void InitReaderStateByOld(XLogReaderState *newState, XLogReaderState *oldState, bool isNew)
 {
     if (isNew) {
         *newState = *oldState;
@@ -1373,15 +1339,15 @@ void InitReaderStateByOld(XLogReaderState* newState, XLogReaderState* oldState, 
         newState->readRecordBuf = NULL;
         newState->readRecordBufSize = 0;
     } else {
-        char* mData = newState->main_data;
+        char *mData = newState->main_data;
         uint32 mDSize = newState->main_data_bufsz;
-        char* bData[XLR_MAX_BLOCK_ID + 1];
+        char *bData[XLR_MAX_BLOCK_ID + 1];
         uint32 bDSize[XLR_MAX_BLOCK_ID + 1];
         for (int i = 0; i <= XLR_MAX_BLOCK_ID; i++) {
             bData[i] = newState->blocks[i].data;
             bDSize[i] = newState->blocks[i].data_bufsz;
         }
-        char* rrBuf = newState->readRecordBuf;
+        char *rrBuf = newState->readRecordBuf;
         uint32 rrBufSize = newState->readRecordBufSize;
         /* copy state */
         *newState = *oldState;
@@ -1399,26 +1365,26 @@ void InitReaderStateByOld(XLogReaderState* newState, XLogReaderState* oldState, 
     }
 }
 
-static XLogReaderState* GetXlogReader(XLogReaderState* readerState)
+static XLogReaderState *GetXlogReader(XLogReaderState *readerState)
 {
-    XLogReaderState* retReaderState = NULL;
+    XLogReaderState *retReaderState = NULL;
     bool isNew = false;
     uint64 count = 0;
-
+    pgstat_report_waitevent(WAIT_EVENT_PREDO_APPLY);
     do {
         if (g_dispatcher->freeStateHead != NULL) {
             retReaderState = &g_dispatcher->freeStateHead->record;
             g_dispatcher->freeStateHead = g_dispatcher->freeStateHead->freeNext;
         } else {
-            RedoItem* head =
-                (RedoItem*)pg_atomic_exchange_uintptr((uintptr_t*)&g_dispatcher->freeHead, (uintptr_t)NULL);
+            RedoItem *head = (RedoItem *)pg_atomic_exchange_uintptr((uintptr_t *)&g_dispatcher->freeHead,
+                                                                    (uintptr_t)NULL);
             if (head != NULL) {
                 retReaderState = &head->record;
                 g_dispatcher->freeStateHead = head->freeNext;
             } else if (g_dispatcher->maxItemNum > g_dispatcher->curItemNum) {
-                RedoItem* item = (RedoItem*)palloc_extended(
-                    MAXALIGN(sizeof(RedoItem)) + sizeof(RedoItem*) * (GetPageWorkerCount() + 1),
-                    MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+                RedoItem *item = (RedoItem *)palloc_extended(MAXALIGN(sizeof(RedoItem)) +
+                                                                 sizeof(RedoItem *) * (GetPageWorkerCount() + 1),
+                                                             MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
                 if (item != NULL) {
                     retReaderState = &item->record;
                     item->allocatedNext = g_dispatcher->allocatedRedoItem;
@@ -1430,70 +1396,95 @@ static XLogReaderState* GetXlogReader(XLogReaderState* readerState)
 
             ++count;
             if ((count & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
-                ereport(WARNING,
-                    (errmodule(MOD_REDO),
-                        errcode(ERRCODE_LOG),
-                        errmsg("GetXlogReader Allocated record buffer failed!, cur item:%u, max item:%u",
-                            g_dispatcher->curItemNum,
-                            g_dispatcher->maxItemNum)));
+                ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                                  errmsg("GetXlogReader Allocated record buffer failed!, cur item:%u, max item:%u",
+                                         g_dispatcher->curItemNum, g_dispatcher->maxItemNum)));
                 if ((count & PRINT_ALL_WAIT_COUNT) == PRINT_ALL_WAIT_COUNT) {
                     DumpDispatcher();
                 }
             }
             if (retReaderState == NULL) {
                 ProcessTrxnRecords(false);
-                HandleStartupProcInterrupts();
+                RedoInterruptCallBack();
             }
         }
     } while (retReaderState == NULL);
+    pgstat_report_waitevent(WAIT_EVENT_END);
 
     InitReaderStateByOld(retReaderState, readerState, isNew);
 
     return retReaderState;
 }
 
-void CopyDataFromOldReader(XLogReaderState* newReaderState, const XLogReaderState* oldReaderState)
+void CopyDataFromOldReader(XLogReaderState *newReaderState, XLogReaderState *oldReaderState)
 {
     errno_t rc = EOK;
     if ((newReaderState->readRecordBuf == NULL) ||
         (oldReaderState->readRecordBufSize > newReaderState->readRecordBufSize)) {
         if (!allocate_recordbuf(newReaderState, oldReaderState->readRecordBufSize)) {
-            ereport(PANIC,
-                (errmodule(MOD_REDO),
-                    errcode(ERRCODE_LOG),
-                    errmsg("Allocated record buffer failed!, cur item:%u, max item:%u",
-                        g_dispatcher->curItemNum,
-                        g_dispatcher->maxItemNum)));
+            ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                            errmsg("Allocated record buffer failed!, cur item:%u, max item:%u",
+                                   g_dispatcher->curItemNum, g_dispatcher->maxItemNum)));
         }
     }
 
-    rc = memcpy_s(newReaderState->readRecordBuf,
-        newReaderState->readRecordBufSize,
-        oldReaderState->readRecordBuf,
-        oldReaderState->readRecordBufSize);
+    rc = memcpy_s(newReaderState->readRecordBuf, newReaderState->readRecordBufSize, oldReaderState->readRecordBuf,
+                  oldReaderState->readRecordBufSize);
     securec_check(rc, "\0", "\0");
-    newReaderState->decoded_record = (XLogRecord*)newReaderState->readRecordBuf;
+    newReaderState->decoded_record = (XLogRecord *)newReaderState->readRecordBuf;
 
     for (int i = 0; i <= newReaderState->max_block_id; i++) {
         if (newReaderState->blocks[i].has_image)
             newReaderState->blocks[i].bkp_image =
-                (char*)((uintptr_t)newReaderState->decoded_record +
-                        ((uintptr_t)oldReaderState->blocks[i].bkp_image - (uintptr_t)oldReaderState->decoded_record));
+                (char *)((uintptr_t)newReaderState->decoded_record +
+                         ((uintptr_t)oldReaderState->blocks[i].bkp_image - (uintptr_t)oldReaderState->decoded_record));
         if (newReaderState->blocks[i].has_data) {
-            newReaderState->blocks[i].data = oldReaderState->blocks[i].data;
+            if ((newReaderState->blocks[i].data == NULL) ||
+                (oldReaderState->blocks[i].data_len > newReaderState->blocks[i].data_bufsz)) {
+                if (newReaderState->blocks[i].data != NULL) {
+                    pfree(newReaderState->blocks[i].data);
+                    newReaderState->blocks[i].data = NULL;
+                }
+                newReaderState->blocks[i].data = (char *)palloc_extended(oldReaderState->blocks[i].data_len,
+                                                                         MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+                if (newReaderState->blocks[i].data == NULL) {
+                    ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                                    errmsg("Allocated blocks data failed!, cur item:%u, max item:%u",
+                                           g_dispatcher->curItemNum, g_dispatcher->maxItemNum)));
+                }
+
+                newReaderState->blocks[i].data_bufsz = oldReaderState->blocks[i].data_len;
+            }
+            rc = memcpy_s(newReaderState->blocks[i].data, newReaderState->blocks[i].data_bufsz,
+                          oldReaderState->blocks[i].data, oldReaderState->blocks[i].data_len);
+            securec_check(rc, "\0", "\0");
             newReaderState->blocks[i].data_len = oldReaderState->blocks[i].data_len;
         }
     }
     if (oldReaderState->main_data_len > 0) {
+        if ((newReaderState->main_data == NULL) || (oldReaderState->main_data_len > newReaderState->main_data_bufsz)) {
+            if (newReaderState->main_data != NULL) {
+                pfree(newReaderState->main_data);
+                newReaderState->main_data = NULL;
+            }
+            newReaderState->main_data = (char *)palloc_extended(oldReaderState->main_data_len,
+                                                                MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+            if (newReaderState->main_data == NULL) {
+                ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                                errmsg("Allocated main_data failed!, cur item:%u, max item:%u",
+                                       g_dispatcher->curItemNum, g_dispatcher->maxItemNum)));
+            }
 
-        newReaderState->main_data =
-            (char*)((uintptr_t)newReaderState->decoded_record +
-                    ((uintptr_t)oldReaderState->main_data - (uintptr_t)oldReaderState->decoded_record));
+            newReaderState->main_data_bufsz = oldReaderState->main_data_len;
+        }
+        rc = memcpy_s(newReaderState->main_data, newReaderState->main_data_bufsz, oldReaderState->main_data,
+                      oldReaderState->main_data_len);
+        securec_check(rc, "\0", "\0");
         newReaderState->main_data_len = oldReaderState->main_data_len;
     }
 }
 
-XLogReaderState* NewReaderState(XLogReaderState* readerState, bool bCopyState)
+XLogReaderState *NewReaderState(XLogReaderState *readerState, bool bCopyState)
 {
     Assert(readerState != NULL);
     if (!readerState->isPRProcess)
@@ -1501,7 +1492,7 @@ XLogReaderState* NewReaderState(XLogReaderState* readerState, bool bCopyState)
     if (DispatchPtrIsNull())
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("NewReaderState Dispatch is null")));
 
-    XLogReaderState* retReaderState = GetXlogReader(readerState);
+    XLogReaderState *retReaderState = GetXlogReader(readerState);
 
     if (bCopyState) {
         CopyDataFromOldReader(retReaderState, readerState);
@@ -1511,11 +1502,22 @@ XLogReaderState* NewReaderState(XLogReaderState* readerState, bool bCopyState)
 
 void FreeAllocatedRedoItem()
 {
-
+    int bId; /* blockId */
     while ((g_dispatcher != NULL) && (g_dispatcher->allocatedRedoItem != NULL)) {
-        RedoItem* pItem = g_dispatcher->allocatedRedoItem;
+        RedoItem *pItem = g_dispatcher->allocatedRedoItem;
         g_dispatcher->allocatedRedoItem = pItem->allocatedNext;
-        XLogReaderState* tmpRec = &(pItem->record);
+        XLogReaderState *tmpRec = &(pItem->record);
+
+        for (bId = 0; bId <= XLR_MAX_BLOCK_ID; bId++) {
+            if (tmpRec->blocks[bId].data) {
+                pfree(tmpRec->blocks[bId].data);
+                tmpRec->blocks[bId].data = NULL;
+            }
+        }
+        if (tmpRec->main_data) {
+            pfree(tmpRec->main_data);
+            tmpRec->main_data = NULL;
+        }
 
         if (tmpRec->readRecordBuf) {
             pfree(tmpRec->readRecordBuf);
@@ -1529,13 +1531,13 @@ void FreeAllocatedRedoItem()
 /* Run from the dispatcher thread. */
 void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code)
 {
-    ereport(LOG,
-        (errmodule(MOD_REDO),
-            errcode(ERRCODE_LOG),
-            errmsg("[REDO_LOG_TRACE]SendRecoveryEndMarkToWorkersAndWaitForFinish, ready to stop redo workers, code: %d",
+    ereport(
+        LOG,
+        (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+         errmsg("[REDO_LOG_TRACE]SendRecoveryEndMarkToWorkersAndWaitForFinish, ready to stop redo workers, code: %d",
                 code)));
     if ((get_real_recovery_parallelism() > 1) && (GetPageWorkerCount() > 0)) {
-        pg_atomic_write_u32((uint32*)&g_dispatcher->exitCode, (uint32)code);
+        pg_atomic_write_u32((uint32 *)&g_dispatcher->exitCode, (uint32)code);
         ApplyReadyTxnLogRecords(g_dispatcher->txnWorker, true);
         for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
             uint64 blockcnt = 0;
@@ -1544,12 +1546,9 @@ void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code)
                 ApplyReadyTxnLogRecords(g_dispatcher->txnWorker, false);
                 if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
                     ereport(WARNING,
-                        (errmodule(MOD_REDO),
-                            errcode(ERRCODE_LOG),
-                            errmsg("[REDO_LOG_TRACE]RecoveryEndMark:replayedLsn:%lu, blockcnt:%lu, WorkerCount:%u",
-                                GetXLogReplayRecPtr(NULL, NULL),
-                                blockcnt,
-                                g_dispatcher->pageWorkerCount)));
+                            (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                             errmsg("[REDO_LOG_TRACE]RecoveryEndMark:replayedLsn:%lu, blockcnt:%lu, WorkerCount:%u",
+                                    GetXLogReplayRecPtr(NULL, NULL), blockcnt, g_dispatcher->pageWorkerCount)));
                 }
             }
         }
@@ -1561,21 +1560,17 @@ void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code)
         g_instance.comm_cxt.predo_cxt.state = REDO_DONE;
         SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.rwlock));
         ereport(LOG,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]SendRecoveryEndMarkToWorkersAndWaitForFinish, disptach total elapsed: %lu,"
-                       " txn elapsed: %lu, process pending record elapsed: %lu code: %d",
-                    g_dispatcher->totalCostTime,
-                    g_dispatcher->txnCostTime,
-                    g_dispatcher->pprCostTime,
-                    code)));
+                (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                 errmsg("[REDO_LOG_TRACE]SendRecoveryEndMarkToWorkersAndWaitForFinish, disptach total elapsed: %lu,"
+                        " txn elapsed: %lu, process pending record elapsed: %lu code: %d",
+                        g_dispatcher->totalCostTime, g_dispatcher->txnCostTime, g_dispatcher->pprCostTime, code)));
     }
 }
 
 /* Run from each page worker and the txn worker thread. */
 int GetDispatcherExitCode()
 {
-    return (int)pg_atomic_read_u32((uint32*)&g_dispatcher->exitCode);
+    return (int)pg_atomic_read_u32((uint32 *)&g_dispatcher->exitCode);
 }
 
 /* Run from the dispatcher thread. */
@@ -1590,19 +1585,20 @@ bool DispatchPtrIsNull()
 }
 
 /* Run from each page worker thread. */
-PGPROC* StartupPidGetProc(ThreadId pid)
+PGPROC *StartupPidGetProc(ThreadId pid)
 {
     if (pid == g_instance.proc_base->startupProcPid)
         return g_instance.proc_base->startupProc;
     if ((get_real_recovery_parallelism() > 1) && (GetPageWorkerCount() > 0)) {
         for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
-            PGPROC* proc = GetPageRedoWorkerProc(g_dispatcher->pageWorkers[i]);
+            PGPROC *proc = GetPageRedoWorkerProc(g_dispatcher->pageWorkers[i]);
             if (pid == proc->pid)
                 return proc;
         }
     }
     return NULL;
 }
+
 
 /*
  * Used from bufgr to share the value of the buffer that Startup waits on,
@@ -1636,10 +1632,11 @@ uint32 GetStartupBufferPinWaitBufLen()
     return buf_len;
 }
 
+
 /*
  * Used by backends when they receive a request to check for buffer pin waits.
  */
-void GetStartupBufferPinWaitBufId(int* bufids, uint32 len)
+void GetStartupBufferPinWaitBufId(int *bufids, uint32 len)
 {
     for (uint32 i = 0; i < len - 1; i++) {
         bufids[i] = g_dispatcher->pageWorkers[i]->bufferPinWaitBufId;
@@ -1647,7 +1644,7 @@ void GetStartupBufferPinWaitBufId(int* bufids, uint32 len)
     bufids[len - 1] = g_instance.proc_base->startupBufferPinWaitBufId;
 }
 
-void GetReplayedRecPtrFromWorkers(XLogRecPtr* readPtr, XLogRecPtr* endPtr)
+void GetReplayedRecPtrFromWorkers(XLogRecPtr *readPtr, XLogRecPtr *endPtr)
 {
     XLogRecPtr minRead = MAX_XLOG_REC_PTR;
     XLogRecPtr minEnd = MAX_XLOG_REC_PTR;
@@ -1676,11 +1673,9 @@ bool IsRecoveryRestartPointSafeForWorkers(XLogRecPtr restartPoint)
         for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++)
             if (!IsRecoveryRestartPointSafe(g_dispatcher->pageWorkers[i], restartPoint)) {
                 ereport(LOG,
-                    (errmodule(MOD_REDO),
-                        errcode(ERRCODE_LOG),
-                        errmsg("[REDO_LOG_TRACE]IsRecoveryRestartPointSafeForWorkers: workerId:%u, restartPoint:%lu",
-                            i,
-                            restartPoint)));
+                        (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                         errmsg("[REDO_LOG_TRACE]IsRecoveryRestartPointSafeForWorkers: workerId:%u, restartPoint:%lu",
+                                i, restartPoint)));
                 safe = false;
             }
         if (safe) {
@@ -1703,16 +1698,16 @@ void UpdateStandbyState(HotStandbyState newState)
 }
 
 /* Run from the dispatcher thread. */
-void** GetXLogInvalidPagesFromWorkers()
+void **GetXLogInvalidPagesFromWorkers()
 {
     return CollectStatesFromWorkers(GetXLogInvalidPages);
 }
 
 /* Run from the dispatcher thread. */
-static void** CollectStatesFromWorkers(GetStateFunc getStateFunc)
+static void **CollectStatesFromWorkers(GetStateFunc getStateFunc)
 {
     if (g_dispatcher->pageWorkerCount > 0) {
-        void** stateArray = (void**)palloc(sizeof(void*) * g_dispatcher->pageWorkerCount);
+        void **stateArray = (void **)palloc(sizeof(void *) * g_dispatcher->pageWorkerCount);
         for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++)
             stateArray[i] = getStateFunc(g_dispatcher->pageWorkers[i]);
         return stateArray;
@@ -1720,7 +1715,7 @@ static void** CollectStatesFromWorkers(GetStateFunc getStateFunc)
         return NULL;
 }
 
-void DiagLogRedoRecord(XLogReaderState* record, const char* funcName)
+void DiagLogRedoRecord(XLogReaderState *record, const char *funcName)
 {
     uint8 info;
     RelFileNode oldRn = {0};
@@ -1734,8 +1729,8 @@ void DiagLogRedoRecord(XLogReaderState* record, const char* funcName)
     StringInfoData buf;
 
     /* Support  redo old version xlog during upgrade (Just the runningxact log with chekpoint online ) */
-    uint32 rmid = redo_oldversion_xlog ? ((XLogRecordOld*)record->decoded_record)->xl_rmid : XLogRecGetRmid(record);
-    info = redo_oldversion_xlog ? ((((XLogRecordOld*)record->decoded_record)->xl_info) & ~XLR_INFO_MASK)
+    uint32 rmid = redo_oldversion_xlog ? ((XLogRecordOld *)record->decoded_record)->xl_rmid : XLogRecGetRmid(record);
+    info = redo_oldversion_xlog ? ((((XLogRecordOld *)record->decoded_record)->xl_info) & ~XLR_INFO_MASK)
                                 : (XLogRecGetInfo(record) & ~XLR_INFO_MASK);
 
     initStringInfo(&buf);
@@ -1747,43 +1742,24 @@ void DiagLogRedoRecord(XLogReaderState* record, const char* funcName)
     if (XLogRecGetBlockTag(record, 1, &oldRn, &oldFk, &oldblk)) {
         oldBlkExistFlg = true;
     }
-    ereport(DEBUG4,
-        (errmodule(MOD_REDO),
-            errcode(ERRCODE_LOG),
-            errmsg("[REDO_LOG_TRACE]DiagLogRedoRecord: %s, ReadRecPtr:%lu,EndRecPtr:%lu,"
-                   "newBlkExistFlg:%d,"
-                   "newRn(spcNode:%u, dbNode:%u, relNode:%u),newFk:%d,newblk:%u,"
-                   "oldBlkExistFlg:%d,"
-                   "oldRn(spcNode:%u, dbNode:%u, relNode:%u),oldFk:%d,oldblk:%u,"
-                   "info:%u,redo_oldversion_xlog:%d, rm_name:%s, desc:%s,"
-                   "max_block_id:%d",
-                funcName,
-                record->ReadRecPtr,
-                record->EndRecPtr,
-                newBlkExistFlg,
-                newRn.spcNode,
-                newRn.dbNode,
-                newRn.relNode,
-                newFk,
-                newblk,
-                oldBlkExistFlg,
-                oldRn.spcNode,
-                oldRn.dbNode,
-                oldRn.relNode,
-                oldFk,
-                oldblk,
-                (uint32)info,
-                redo_oldversion_xlog,
-                RmgrTable[rmid].rm_name,
-                buf.data,
-                record->max_block_id)));
+    ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                     errmsg("[REDO_LOG_TRACE]DiagLogRedoRecord: %s, ReadRecPtr:%lu,EndRecPtr:%lu,"
+                            "newBlkExistFlg:%d,"
+                            "newRn(spcNode:%u, dbNode:%u, relNode:%u),newFk:%d,newblk:%u,"
+                            "oldBlkExistFlg:%d,"
+                            "oldRn(spcNode:%u, dbNode:%u, relNode:%u),oldFk:%d,oldblk:%u,"
+                            "info:%u,redo_oldversion_xlog:%d, rm_name:%s, desc:%s,"
+                            "max_block_id:%d",
+                            funcName, record->ReadRecPtr, record->EndRecPtr, newBlkExistFlg, newRn.spcNode,
+                            newRn.dbNode, newRn.relNode, newFk, newblk, oldBlkExistFlg, oldRn.spcNode, oldRn.dbNode,
+                            oldRn.relNode, oldFk, oldblk, (uint32)info, redo_oldversion_xlog, RmgrTable[rmid].rm_name,
+                            buf.data, record->max_block_id)));
     pfree_ext(buf.data);
 }
 
-void redo_get_wroker_statistic(uint32* realNum, RedoWorkerStatsData* worker, uint32 workerLen)
+void redo_get_wroker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen)
 {
-    PageRedoWorker* redoWorker = NULL;
-    Assert(workerLen == MAX_RECOVERY_THREAD_NUM);
+    PageRedoWorker *redoWorker = NULL;
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     if (g_dispatcher == NULL) {
         SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
@@ -1805,7 +1781,7 @@ RedoWaitInfo redo_get_io_event(int32 event_id)
 {
     WaitStatisticsInfo tmp_io = {};
     RedoWaitInfo result_info = {};
-    PgBackendStatus* beentry = NULL;
+    PgBackendStatus *beentry = NULL;
     int index = MAX_BACKEND_SLOT + StartupProcess;
 
     if (IS_PGSTATE_TRACK_UNDEFINE || t_thrd.shemem_ptr_cxt.BackendStatusArray == NULL) {
@@ -1817,12 +1793,16 @@ RedoWaitInfo redo_get_io_event(int32 event_id)
     result_info.total_duration = tmp_io.total_duration;
     result_info.counter = tmp_io.counter;
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
-    if (g_dispatcher == NULL || event_id == WAIT_EVENT_WAL_READ || event_id == WAIT_EVENT_PREDO_PROCESS_PENDING) {
+    if (g_dispatcher == NULL || event_id == WAIT_EVENT_WAL_READ || event_id == WAIT_EVENT_PREDO_PROCESS_PENDING ||
+        g_dispatcher->pageWorkers == NULL || g_instance.comm_cxt.predo_cxt.state != REDO_IN_PROGRESS) {
         SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
         return result_info;
     }
 
     for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
+        if (g_dispatcher->pageWorkers[i] == NULL) {
+            break;
+        }
         index = g_dispatcher->pageWorkers[i]->index;
         beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + index;
         tmp_io = beentry->waitInfo.event_info.io_info[event_id - WAIT_EVENT_BUFFILE_READ];
@@ -1835,7 +1815,7 @@ RedoWaitInfo redo_get_io_event(int32 event_id)
 
 void redo_dump_all_stats()
 {
-    RedoPerf* redo = &(g_instance.comm_cxt.predo_cxt.redoPf);
+    RedoPerf *redo = &(g_instance.comm_cxt.predo_cxt.redoPf);
     uint64 redoBytes = redo->read_ptr - redo->redo_start_ptr;
     int64 curr_time = GetCurrentTimestamp();
     uint64 totalTime = curr_time - redo->redo_start_time;
@@ -1843,31 +1823,23 @@ void redo_dump_all_stats()
     if (totalTime > 0) {
         speed = (redoBytes / totalTime) * US_TRANSFER_TO_S / BYTES_TRANSFER_KBYTES;
     }
-    ereport(LOG,
-        (errmodule(MOD_REDO),
-            errcode(ERRCODE_LOG),
-            errmsg("[REDO_STATS]redo_dump_all_stats: the basic statistic during redo are as follows : "
-                   "redo_start_ptr:%lu, redo_start_time:%ld, min_recovery_point:%lu, "
-                   "read_ptr:%lu, last_replayed_read_Ptr:%lu, speed:%lu KB/s",
-                redo->redo_start_ptr,
-                redo->redo_start_time,
-                redo->min_recovery_point,
-                redo->read_ptr,
-                redo->last_replayed_read_ptr,
-                speed)));
+    ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                  errmsg("[REDO_STATS]redo_dump_all_stats: the basic statistic during redo are as follows : "
+                         "redo_start_ptr:%08X/%08X, redo_start_time:%ld, min_recovery_point:%08X/%08X, "
+                         "read_ptr:%08X/%08X, last_replayed_read_Ptr:%08X/%08X, speed:%lu KB/s",
+                         (uint32)(redo->redo_start_ptr >> 32), (uint32)redo->redo_start_ptr, redo->redo_start_time,
+                         (uint32)(redo->min_recovery_point >> 32), (uint32)redo->min_recovery_point,
+                         (uint32)(redo->read_ptr >> 32), (uint32)redo->read_ptr,
+                         (uint32)(redo->last_replayed_end_ptr >> 32), (uint32)redo->last_replayed_end_ptr, speed)));
 
     uint32 type;
     RedoWaitInfo tmp_info;
     for (type = 0; type < WAIT_REDO_NUM; type++) {
         tmp_info = redo_get_io_event(redo_get_event_type_by_wait_type(type));
-        ereport(LOG,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_STATS]redo_dump_all_stats %s: the event io statistic during redo are as follows : "
-                       "total_duration:%ld, counter:%ld",
-                    redo_get_name_by_wait_type(type),
-                    tmp_info.total_duration,
-                    tmp_info.counter)));
+        ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                      errmsg("[REDO_STATS]redo_dump_all_stats %s: the event io statistic during redo are as follows : "
+                             "total_duration:%ld, counter:%ld",
+                             redo_get_name_by_wait_type(type), tmp_info.total_duration, tmp_info.counter)));
     }
 
     if (g_dispatcher != NULL) {
@@ -1875,4 +1847,35 @@ void redo_dump_all_stats()
     }
 }
 
+void WaitRedoWorkerIdle()
+{
+    bool allIdle = false;
+    instr_time startTime;
+    instr_time endTime;
+    INSTR_TIME_SET_CURRENT(startTime);
+    ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+          errmsg("WaitRedoWorkerIdle begin, startTime: %lu us",
+            INSTR_TIME_GET_MICROSEC(startTime))));
+    while (!allIdle) {
+        allIdle = true;
+        for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
+            if (!RedoWorkerIsIdle(g_dispatcher->pageWorkers[i])) {
+                allIdle = false;
+                break;
+            }
+        }
+    }
+    INSTR_TIME_SET_CURRENT(endTime);
+    INSTR_TIME_SUBTRACT(endTime, startTime);
+    ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+      errmsg("WaitRedoWorkerIdle end, cost time: %lu us",
+        INSTR_TIME_GET_MICROSEC(endTime))));
+}
+
+void SendClearMarkToAllWorkers()
+{
+    for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
+        SendPageRedoClearMark(g_dispatcher->pageWorkers[i]);
+    }
+}
 }  // namespace parallel_recovery

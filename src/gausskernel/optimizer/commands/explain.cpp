@@ -15,6 +15,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
@@ -51,6 +52,7 @@
 #include "rewrite/rewriteHandler.h"
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
+#include "utils/hotkey.h"
 #include "utils/json.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
@@ -68,6 +70,7 @@
 #include "workload/workload.h"
 #include "pgxc/execRemote.h"
 #ifdef PGXC
+#include "pgxc/groupmgr.h"
 #include "catalog/pgxc_node.h"
 #include "pgxc/pgxc.h"
 #endif
@@ -79,7 +82,9 @@ THR_LOCAL bool PTFastQueryShippingStore = true;
 THR_LOCAL bool IsExplainPlanStmt = false;
 THR_LOCAL bool IsExplainPlanSelectForUpdateStmt = false;
 
-template void PlanTable::set_plan_name<true, true>();
+/* Hook for plugins to get control in explain_get_index_name() */               
+THR_LOCAL explain_get_index_name_hook_type explain_get_index_name_hook = NULL;
+
 extern TrackDesc trackdesc[];
 extern sortMessage sortmessage[];
 
@@ -105,10 +110,6 @@ static const PlanTableEntry plan_table_cols[] = {{"id", PLANID, INT4OID, ANAL_OP
 #define MIN_FILE_NUM 1024
 #define MIN_DISK_USED 1024
 
-const float MS_PER_SECOND = 1000.0;    /* millisecond per second */
-const int BYTE_PER_KB = 1024;    /* Byte per KB */
-const int KB_PER_MB = 1024;    /* KB per MB */
-
 /* OR-able flags for ExplainXMLTag() */
 #define X_OPENING 0
 #define X_CLOSING 1
@@ -119,16 +120,8 @@ const int KB_PER_MB = 1024;    /* KB per MB */
 #define FILTER_INFORMATIONAL_CONSTRAINT_FLAG "Filter(Informational Constraint Optimization)"
 #define FILTER_FLAG "Filter"
 
-#define SHOW_SCAN_DISTRIBUTEKEY                                                                                     \
-    (IsA(plan, CStoreScan) || IsA(plan, CStoreIndexScan) || IsA(plan, CStoreIndexHeapScan) || IsA(plan, SeqScan) || \
-        IsA(plan, DfsScan) || IsA(plan, IndexScan) || IsA(plan, IndexOnlyScan) || IsA(plan, CteScan) ||             \
-        IsA(plan, ForeignScan) || IsA(plan, VecForeignScan) || IsA(plan, BitmapHeapScan))
-
-/* Hook for plugins to get control in explain_get_index_name() */
-THR_LOCAL explain_get_index_name_hook_type explain_get_index_name_hook = NULL;
-
 static void ExplainOneQuery(
-    Query* query, IntoClause* into, ExplainState* es, const char* queryString, ParamListInfo params);
+     Query* query, IntoClause* into, ExplainState* es, const char* queryString, DestReceiver *dest, ParamListInfo params);
 static void report_triggers(ResultRelInfo* rInfo, bool show_relname, ExplainState* es);
 template <bool is_pretty>
 static void ExplainNode(
@@ -182,6 +175,7 @@ static void ExplainIndexScanDetails(Oid indexid, ScanDirection indexorderdir, Ex
 static void ExplainScanTarget(Scan* plan, ExplainState* es);
 static void ExplainModifyTarget(ModifyTable* plan, ExplainState* es);
 static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es);
+static void show_on_duplicate_info(ModifyTableState* mtstate, ExplainState* es);
 #ifndef PGXC
 static void show_modifytable_info(ModifyTableState* mtstate, ExplainState* es);
 #endif /* PGXC */
@@ -191,7 +185,6 @@ static void ExplainProperty(const char* qlabel, const char* value, bool numeric,
 static void ExplainOpenGroup(const char* objtype, const char* labelname, bool labeled, ExplainState* es);
 static void ExplainCloseGroup(const char* objtype, const char* labelname, bool labeled, ExplainState* es);
 static void ExplainDummyGroup(const char* objtype, const char* labelname, ExplainState* es);
-static void show_on_duplicate_info(ModifyTableState* mtstate, ExplainState* es);
 #ifdef PGXC
 static void ExplainExecNodes(const ExecNodes* en, ExplainState* es);
 static void ExplainRemoteQuery(RemoteQuery* plan, PlanState* planstate, List* ancestors, ExplainState* es);
@@ -244,18 +237,27 @@ static void show_sort_group_keys(PlanState* planstate, const char* qlabel, int n
 static void show_sortorder_options(StringInfo buf, const Node* sortexpr, Oid sortOperator, Oid collation, bool nullsFirst);
 static void show_grouping_set_keys(PlanState* planstate, Agg* aggnode, Sort* sortnode, List* context, bool useprefix,
     List* ancestors, ExplainState* es);
-template <bool is_init>
-static void show_datanodeinit_info(ExplainState* es, int plan_node_id);
+static void show_dn_executor_time(ExplainState* es, int plan_node_id, ExecutorTime stage);
 static void show_stream_send_time(ExplainState* es, const PlanState* planstate);
 static void append_datanode_name(ExplainState* es, char* node_name, int dop, int j);
 static void show_tablesample(Plan* plan, PlanState* planstate, List* ancestors, ExplainState* es);
 void insert_obsscaninfo(
     uint64 queryid, const char* rel_name, int64 file_count, double scan_data_size, double total_time, int format);
-extern Plan* get_foreign_scan(Plan* plan);
 extern List* get_str_targetlist(List* fdw_private);
 static void show_wlm_explain_name(ExplainState* es, const char* plan_name, const char* pname, int plan_node_id);
 extern unsigned char pg_toupper(unsigned char ch);
 static char* set_strtoupper(const char* str, uint32 len);
+#ifdef ENABLE_MULTIPLE_NODES
+static bool show_scan_distributekey(const Plan* plan)
+{
+    return (
+        IsA(plan, CStoreScan) || IsA(plan, CStoreIndexScan) || IsA(plan, CStoreIndexHeapScan) || IsA(plan, SeqScan) ||
+        IsA(plan, DfsScan) || IsA(plan, IndexScan) || IsA(plan, IndexOnlyScan) || IsA(plan, CteScan) ||
+        IsA(plan, ForeignScan) || IsA(plan, VecForeignScan) || IsA(plan, BitmapHeapScan) || IsA(plan, TsStoreScan)
+    );
+}
+#endif   /* ENABLE_MULTIPLE_NODES */
+static void show_unique_check_info(PlanState *planstate, ExplainState *es);
 
 /*
  * ExplainQuery -
@@ -289,12 +291,13 @@ void ExplainQuery(
         if (strcmp(opt->defname, "plan") == 0) {
             es.plan = defGetBoolean(opt);
             if (es.plan) {
-                /* We do not support execute explain plan on pgxc datanode. */
-                if (IS_PGXC_DATANODE && !IS_SINGLE_NODE)
+#ifdef ENABLE_MULTIPLE_NODES
+                /* We do not support execute explain plan on pgxc datanode or single node. */
+                if (IS_PGXC_DATANODE || IS_SINGLE_NODE)
                     ereport(ERROR,
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("EXPLAIN PLAN does not support on datanode or single node.")));
-
+#endif
                 /* If explain option is "PLAN", it must only has one option. */
                 if (list_length(stmt->options) != 1)
                     ereport(ERROR,
@@ -344,19 +347,21 @@ void ExplainQuery(
             es.costs = defGetBoolean(opt);
         else if (strcmp(opt->defname, "buffers") == 0)
             es.buffers = defGetBoolean(opt);
-#if defined(USE_ASSERT_CHECKING) || defined(ENABLE_MULTIPLE_NODES) 
+#ifdef ENABLE_MULTIPLE_NODES
+#ifdef PGXC
         else if (strcmp(opt->defname, "nodes") == 0)
             es.nodes = defGetBoolean(opt);
         else if (strcmp(opt->defname, "num_nodes") == 0)
             es.num_nodes = defGetBoolean(opt);
-        else if (pg_strcasecmp(opt->defname, "detail") == 0)
-            es.detail = true;
-#endif 
+#endif /* PGXC */
+#endif /* ENABLE_MULTIPLE_NODES */
         else if (strcmp(opt->defname, "timing") == 0) {
             timing_set = true;
             es.timing = defGetBoolean(opt);
         } else if (pg_strcasecmp(opt->defname, "cpu") == 0)
             es.cpu = defGetBoolean(opt);
+        else if (pg_strcasecmp(opt->defname, "detail") == 0)
+            es.detail = defGetBoolean(opt);
         else if (pg_strcasecmp(opt->defname, "performance") == 0)
             es.performance = defGetBoolean(opt);
         else if (strcmp(opt->defname, "format") == 0) {
@@ -377,7 +382,7 @@ void ExplainQuery(
 #ifndef ENABLE_MULTIPLE_NODES 
         } else if (strcmp(opt->defname, "predictor") == 0) {
             es.opt_model_name = defGetString(opt);
-#endif
+#endif       
         } else
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("unrecognized EXPLAIN option \"%s\"", opt->defname)));
     }
@@ -387,15 +392,13 @@ void ExplainQuery(
         es.buffers = true;
         es.costs = true;
         es.cpu = true;
-#if defined(USE_ASSERT_CHECKING) || defined(ENABLE_MULTIPLE_NODES) 
         es.detail = true;
+#ifdef ENABLE_MULTIPLE_NODES
+#ifdef PGXC
         es.nodes = true;
         es.num_nodes = true;
-#else 
-        es.detail = false;
-        es.nodes = false;
-        es.num_nodes = false;
-#endif 
+#endif /* PGXC */
+#endif /* ENABLE_MULTIPLE_NODES */
         es.timing = true;
         es.verbose = true;
     }
@@ -455,7 +458,9 @@ void ExplainQuery(
         if (u_sess->attr.attr_sql.enable_autoanalyze && es.analyze &&
             t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL) {
             /* can be not NULL if last-time explain reports error */
+            MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->temp_mem_cxt);
             u_sess->analyze_cxt.autoanalyze_timeinfo = makeStringInfo();
+            (void)MemoryContextSwitchTo(oldcontext);
         } else
             u_sess->analyze_cxt.autoanalyze_timeinfo = NULL;
 
@@ -470,7 +475,7 @@ void ExplainQuery(
 
         /* Explain every plan */
         foreach (l, rewritten) {
-            ExplainOneQuery((Query*)lfirst(l), NULL, &es, queryString, params);
+            ExplainOneQuery((Query*)lfirst(l), NULL, &es, queryString, None_Receiver, params);
 
             /* Separate plans with an appropriate separator */
             if (lnext(l) != NULL)
@@ -489,6 +494,7 @@ void ExplainQuery(
         if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL) {
             es.planinfo->dump(dest);
         } else {
+
             /* output tuples */
             tstate = begin_tup_output_tupdesc(dest, ExplainResultDesc(stmt));
             if (es.format == EXPLAIN_FORMAT_TEXT)
@@ -513,6 +519,7 @@ void ExplainQuery(
 
     stmt->planinfo = es.planinfo;
     pfree_ext(es.str->data);
+    list_free_deep(rewritten);
 }
 
 /*
@@ -524,9 +531,11 @@ void ExplainInitState(ExplainState* es)
     errno_t rc = memset_s(es, sizeof(ExplainState), 0, sizeof(ExplainState));
     securec_check(rc, "\0", "\0");
     es->costs = true;
+#ifdef ENABLE_MULTIPLE_NODES
 #ifdef PGXC
     es->nodes = true;
 #endif /* PGXC */
+#endif /* ENABLE_MULTIPLE_NODES */
     /* Prepare output buffer. */
     es->str = makeStringInfo();
     es->planinfo = NULL;
@@ -579,7 +588,7 @@ TupleDesc ExplainResultDesc(ExplainStmt* stmt)
 
     if (!explain_plan) {
         /* Need a tuple descriptor representing a single TEXT or XML column */
-        tupdesc = CreateTemplateTupleDesc(1, false);
+        tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
 
         /* If current plan is set as random plan, explain desc should show random seed value */
         if (u_sess->attr.attr_sql.plan_mode_seed != OPTIMIZE_PLAN) {
@@ -604,49 +613,42 @@ TupleDesc ExplainResultDesc(ExplainStmt* stmt)
  * "into" is NULL unless we are explaining the contents of a CreateTableAsStmt.
  */
 static void ExplainOneQuery(
-    Query* query, IntoClause* into, ExplainState* es, const char* queryString, ParamListInfo params)
+    Query* query, IntoClause* into, ExplainState* es, const char* queryString, DestReceiver *dest, ParamListInfo params)
 {
     /* only use t_thrd.explain_cxt.explain_light_proxy once */
     if (t_thrd.explain_cxt.explain_light_proxy) {
         ExecNodes* single_exec_node = lightProxy::checkLightQuery(query);
-        if (single_exec_node == NULL || list_length(single_exec_node->nodeList) != 1)
+        if (single_exec_node == NULL || list_length(single_exec_node->nodeList) +
+            list_length(single_exec_node->primarynodelist) != 1) {
             t_thrd.explain_cxt.explain_light_proxy = false;
+        }
+        CleanHotkeyCandidates(true);
     }
 
     u_sess->exec_cxt.remotequery_list = NIL;
-    es->is_explain_gplan = true;
     /* planner will not cope with utility statements */
     if (query->commandType == CMD_UTILITY) {
         if (IsA(query->utilityStmt, CreateTableAsStmt)) {
             CreateTableAsStmt* ctas = (CreateTableAsStmt*)query->utilityStmt;
             List* rewritten = NIL;
 
-            // CREATE TABLE AS SELECT and SELECT INTO are rewritten so that the
-            // target table is created first. The SELECT query is then transformed
-            // into an INSERT INTO statement.
-            //
-            if (ctas->relkind == OBJECT_MATVIEW) {
-                query = (Query*)ctas->query;
-                rewritten = QueryRewrite((Query*) copyObject(query));
-            } else {
-                rewritten = QueryRewriteCTAS(query); 
-            }
-            Assert(list_length(rewritten) == 1);
-
             // INSERT INTO statement needs target table to be created first,
             // so we just support EXPLAIN ANALYZE.
             //
             if (!es->analyze) {
-                if (ctas->relkind == OBJECT_MATVIEW) {
-                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
-                        errmsg("EXPLAIN CREATE MATERIALIZED VIEW requires ANALYZE")));
-                }
                 const char* stmt = ctas->is_select_into ? "SELECT INTO" : "CREATE TABLE AS SELECT";
+
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("EXPLAIN %s requires ANALYZE", stmt)));
             }
-    
-            ExplainOneQuery((Query*) linitial(rewritten), ctas->into, es, queryString, params);
-            
+
+            // CREATE TABLE AS SELECT and SELECT INTO are rewritten so that the
+            // target table is created first. The SELECT query is then transformed
+            // into an INSERT INTO statement.
+            //
+            rewritten = QueryRewriteCTAS(query);
+
+            ExplainOneQuery((Query*)linitial(rewritten), ctas->into, es, queryString, dest, params);
+
             return;
         }
 
@@ -670,10 +672,15 @@ static void ExplainOneQuery(
     PlannedStmt* plan = NULL;
 
     /* plan the query */
-    plan = pg_plan_query(query, CURSOR_OPT_PARALLEL_OK, params, true);
+    plan = pg_plan_query(query, 0, params, true);
+    CleanHotkeyCandidates(true);
+
+    check_gtm_free_plan((PlannedStmt *)plan, es->analyze ? ERROR : WARNING);
+    check_plan_mergeinto_replicate(plan, es->analyze ? ERROR : WARNING);
+    es->is_explain_gplan = true;
 
     /* run it (if needed) and produce output */
-    ExplainOnePlan(plan, into, es, queryString, params);
+    ExplainOnePlan(plan, into, es, queryString, dest, params);
 }
 
 /*
@@ -734,6 +741,7 @@ static void GetNodeList(QueryDesc* qd)
     RemoteQuery* rq = NULL;
     foreach (lc, u_sess->exec_cxt.remotequery_list) {
         rq = (RemoteQuery*)lfirst(lc);
+
         /*
          * when execute pbe query, rq->exec_nodes->nodeList could be NIL,
          * so we should get nodeLists through FindExecNodesInPBE function.
@@ -873,9 +881,13 @@ static void ExecFQSQueryinDn(ExplainState* es, const char* queryString)
  * to call it.
  */
 void ExplainOnePlan(
-    PlannedStmt* plannedstmt, IntoClause* into, ExplainState* es, const char* queryString, ParamListInfo params)
+    PlannedStmt* plannedstmt,
+    IntoClause* into,
+    ExplainState* es,
+    const char* queryString,
+    DestReceiver *dest,
+    ParamListInfo params)
 {
-    DestReceiver* dest = NULL;
     QueryDesc* queryDesc = NULL;
     instr_time starttime;
     instr_time exec_starttime;    /* executor init start time */
@@ -903,15 +915,6 @@ void ExplainOnePlan(
     PushCopiedSnapshot(GetActiveSnapshot());
     UpdateActiveSnapshotCommandId();
 
-    /*
-     * Normally we discard the query's output, but if explaining CREATE TABLE
-     * AS, we'd better use the appropriate tuple receiver.
-     */
-    if (into != NULL && into->viewQuery != NULL)
-            dest = CreateIntoRelDestReceiver(into);
-    else
-            dest = None_Receiver;
-
     /* Create a QueryDesc for the query */
     queryDesc = CreateQueryDesc(
         plannedstmt, queryString, GetActiveSnapshot(), InvalidSnapshot, dest, params, instrument_option);
@@ -935,8 +938,13 @@ void ExplainOnePlan(
      * and than calling ExecutorStart for ExecInitNode in CN.
      */
     /*  only stream plan can use  u_sess->instr_cxt.global_instr to collect executor info */
-    if (IS_PGXC_COORDINATOR && queryDesc->plannedstmt->is_stream_plan == true && check_stream_support() &&
-        instrument_option != 0 && u_sess->instr_cxt.global_instr == NULL && queryDesc->plannedstmt->num_nodes != 0) {
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && queryDesc->plannedstmt->is_stream_plan == true &&
+#else
+    if (queryDesc->plannedstmt->is_stream_plan == true &&
+#endif
+        check_stream_support() && instrument_option != 0 && u_sess->instr_cxt.global_instr == NULL &&
+        queryDesc->plannedstmt->num_nodes != 0) {
         int dop = queryDesc->plannedstmt->query_dop;
 
         u_sess->instr_cxt.global_instr = StreamInstrumentation::InitOnCn(queryDesc, dop);
@@ -946,7 +954,7 @@ void ExplainOnePlan(
             u_sess->instr_cxt.global_instr->allocThreadInstrumentation(queryDesc->plannedstmt->planTree->plan_node_id);
 
         {
-            AutoContextSwitch cxtGuard(u_sess->top_mem_cxt);
+            AutoContextSwitch cxtGuard(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
             u_sess->instr_cxt.obs_instr = New(CurrentMemoryContext) OBSInstrumentation();
         }
     }
@@ -1010,7 +1018,7 @@ void ExplainOnePlan(
             dir = ForwardScanDirection;
 
         if (u_sess->exec_cxt.need_track_resource) {
-            ExplainNodeFinish(queryDesc->planstate, queryDesc->plannedstmt, (TimestampTz)0.0, true);
+            ExplainNodeFinish(queryDesc->planstate, queryDesc->plannedstmt, 0.0, true);
         }
 
         INSTR_TIME_SET_CURRENT(exec_starttime);
@@ -1045,20 +1053,21 @@ void ExplainOnePlan(
         /* We can't run ExecutorEnd 'till we're done printing the stats... */
         totaltime += elapsed_time(&starttime);
     }
-    SetNullPrediction(queryDesc->planstate);
+
 #ifndef ENABLE_MULTIPLE_NODES
+    SetNullPrediction(queryDesc->planstate);
     /* Call machine learning prediction routine for test */
     if (es->opt_model_name != NULL && PredictorIsValid((const char*)es->opt_model_name)) {
         char* file_name = PreModelPredict(queryDesc->planstate, queryDesc->plannedstmt);
         ModelPredictForExplain(queryDesc->planstate, file_name, (const char*)es->opt_model_name);
     }
-#endif
+#endif /* ENABLE_MULTIPLE_NODES */
 
     ExplainOpenGroup("Query", NULL, true, es);
 
     if (IS_PGXC_DATANODE && u_sess->attr.attr_sql.enable_opfusion == true &&
         es->format == EXPLAIN_FORMAT_TEXT) {
-        FusionType type = OpFusion::getFusionType(NULL, NULL, list_make1(queryDesc->plannedstmt));
+        FusionType type = OpFusion::getFusionType(NULL, params, list_make1(queryDesc->plannedstmt));
         if (!es->is_explain_gplan)
             type = NOBYPASS_NO_CPLAN;
         if (type < BYPASS_OK && type > NONE_FUSION) {
@@ -1160,22 +1169,22 @@ void ExplainOnePlan(
     if (es->analyze) {
         if (es->format == EXPLAIN_FORMAT_TEXT) {
             if (t_thrd.explain_cxt.explain_perf_mode == EXPLAIN_NORMAL)
-                appendStringInfo(es->str, "Total runtime: %.3f ms\n", MS_PER_SECOND * totaltime);
+                appendStringInfo(es->str, "Total runtime: %.3f ms\n", 1000.0 * totaltime);
             else if (es->planinfo != NULL && es->planinfo->m_query_summary) {
                 appendStringInfo(es->planinfo->m_query_summary->info_str,
                     "Coordinator executor start time: %.3f ms\n",
-                    MS_PER_SECOND * exec_totaltime);
+                    1000.0 * exec_totaltime);
 
                 appendStringInfo(es->planinfo->m_query_summary->info_str,
                     "Coordinator executor run time: %.3f ms\n",
-                    MS_PER_SECOND * execrun_totaltime);
+                    1000.0 * execrun_totaltime);
 
                 appendStringInfo(es->planinfo->m_query_summary->info_str,
                     "Coordinator executor end time: %.3f ms\n",
-                    MS_PER_SECOND * execend_totaltime);
+                    1000.0 * execend_totaltime);
 
                 if (es->planinfo->m_runtimeinfo && es->planinfo->m_query_summary->m_size) {
-                    long spacePeakKb = (es->planinfo->m_query_summary->m_size + BYTE_PER_KB - 1) / BYTE_PER_KB;
+                    long spacePeakKb = (es->planinfo->m_query_summary->m_size + 1023) / 1024;
                     appendStringInfo(es->planinfo->m_query_summary->info_str, "Total network : %ldkB\n", spacePeakKb);
                 }
                 es->planinfo->m_query_summary->m_size = 0;
@@ -1189,13 +1198,17 @@ void ExplainOnePlan(
 
                 appendStringInfo(es->planinfo->m_query_summary->info_str,
                     "Planner runtime: %.3f ms\n",
-                    MS_PER_SECOND * plannedstmt->plannertime);
+                    1000.0 * plannedstmt->plannertime);
+                appendStringInfo(es->planinfo->m_query_summary->info_str,
+                    "Plan size: %d byte\n",
+                    u_sess->instr_cxt.plan_size);
+
                 appendStringInfo(es->planinfo->m_query_summary->info_str, "Query Id: %lu\n", u_sess->debug_query_id);
                 appendStringInfo(
-                    es->planinfo->m_query_summary->info_str, "Total runtime: %.3f ms\n", MS_PER_SECOND * totaltime);
+                    es->planinfo->m_query_summary->info_str, "Total runtime: %.3f ms\n", 1000.0 * totaltime);
             }
         } else
-            ExplainPropertyFloat("Total Runtime", MS_PER_SECOND * totaltime, 3, es);
+            ExplainPropertyFloat("Total Runtime", 1000.0 * totaltime, 3, es);
     }
 
     output_hint_warning(plannedstmt->plan_hint_warning, WARNING);
@@ -1337,25 +1350,30 @@ void ExplainOneQueryForStatistics(QueryDesc* queryDesc)
 
     int max_plan_id = queryDesc->plannedstmt->num_plannodes;
     int wlm_statistics_plan_max_digit = get_digit(max_plan_id);
-
     es.wlm_statistics_plan_max_digit = &wlm_statistics_plan_max_digit;
 
-    //avoid showing prediction info for wlm statistics
+#ifndef ENABLE_MULTIPLE_NODES
+    /* avoid showing prediction info for wlm statistics */
     SetNullPrediction(queryDesc->planstate);
+#endif
 
-    // adaptation for active sql
+    /* adaptation for active sql */
     StreamInstrumentation* oldInstr = u_sess->instr_cxt.global_instr;
     u_sess->instr_cxt.global_instr = NULL;
+    u_sess->exec_cxt.under_auto_explain = true;
+    appendStringInfo(es.str, "Coordinator Name: %s\n", g_instance.attr.attr_common.PGXCNodeName);
     ExplainNode<false>(queryDesc->planstate, NIL, NULL, NULL, &es);
-
+    u_sess->exec_cxt.under_auto_explain = false;
     u_sess->instr_cxt.global_instr = oldInstr;
 
     AutoContextSwitch memSwitch(g_instance.wlm_cxt->query_resource_track_mcxt);
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan = (char*)palloc0(es.str->len);
+    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan = (char*)palloc0(es.str->len + 1 + 1);
     errno_t rc =
         memcpy_s(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan, es.str->len, es.str->data, es.str->len);
     securec_check(rc, "\0", "\0");
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan[es.str->len - 1] = '\0';
+    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan[es.str->len] = '\n';
+    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan[es.str->len + 1] = '\0';
+    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size = es.str->len + 1 + 1;
 
     t_thrd.explain_cxt.explain_perf_mode = before_explain_perf_mode;
 }
@@ -1406,13 +1424,13 @@ static void report_triggers(ResultRelInfo* rInfo, bool show_relname, ExplainStat
                 appendStringInfo(es->str, " for constraint %s", conname);
             if (show_relname)
                 appendStringInfo(es->str, " on %s", relname);
-            appendStringInfo(es->str, ": time=%.3f calls=%.0f\n", MS_PER_SECOND * instr->total, instr->ntuples);
+            appendStringInfo(es->str, ": time=%.3f calls=%.0f\n", 1000.0 * instr->total, instr->ntuples);
         } else {
             ExplainPropertyText("Trigger Name", trig->tgname, es);
             if (conname != NULL)
                 ExplainPropertyText("Constraint Name", conname, es);
             ExplainPropertyText("Relation", relname, es);
-            ExplainPropertyFloat("Time", MS_PER_SECOND * instr->total, 3, es);
+            ExplainPropertyFloat("Time", 1000.0 * instr->total, 3, es);
             ExplainPropertyFloat("Calls", instr->ntuples, 0, es);
         }
 
@@ -1438,6 +1456,11 @@ static void show_bucket_info(PlanState* planstate, ExplainState* es, bool is_pre
     Scan* scanplan = (Scan*)planstate->plan;
     BucketInfo* bucket_info = scanplan->bucketInfo;
     int selected_buckets = list_length(bucket_info->buckets);
+
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
+
     if (selected_buckets == 0) {
         /* 0 means all buckets */
         selected_buckets = BUCKETDATALEN;
@@ -1501,6 +1524,8 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
                 appendStringInfo(es->str, "NONE");
             else
                 appendStringInfo(es->planinfo->m_detailInfo->info_str, "NONE");
+        } else if (scanplan->pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "%s", "PART");
         } else {
             ListCell* cell = NULL;
             List* part_seqs = scanplan->pruningInfo->ls_rangeSelectedPartitions;
@@ -1590,6 +1615,8 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
     } else {
         if (scanplan->itrs <= 0) {
             ExplainPropertyText("Selected Partitions", "NONE", es);
+        } else if (scanplan->pruningInfo->expr != NULL) {
+            ExplainPropertyText("Selected Partitions", "PART", es);
         } else {
             int i = 0;
             StringInfo strif;
@@ -1600,7 +1627,7 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
                 MOD_EXECUTOR,
                 "unexpect list length");
 
-            /* form a tring of partition numbers, by 2 charaters space splitted */
+            /*form a tring of partition numbers, by 2 charaters space splitted*/
             strif = makeStringInfo();
             foreach (cell, part_seqs) {
                 // store the prev first partID
@@ -1660,7 +1687,7 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
                     appendStringInfo(strif, "%d", partID + 1);
                 i++;
             }
-            /* print out the partition numbers string */
+            /*print out the partition numbers string*/
             ExplainPropertyText("Selected Partitions", strif->data, es);
             pfree_ext(strif->data);
             pfree_ext(strif);
@@ -1668,31 +1695,90 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
     }
 }
 
+static void ExplainNodePartition(const Plan* plan, ExplainState* es)
+{
+    int flag = 0;
+    switch (nodeTag(plan->lefttree)) {
+        case T_SeqScan:
+            if (((SeqScan*)plan->lefttree)->pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
+        case T_IndexScan:
+            if (((IndexScan*)plan->lefttree)->scan.pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
+        case T_IndexOnlyScan:
+            if (((IndexOnlyScan*)plan->lefttree)->scan.pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
+        case T_BitmapIndexScan:
+            if (((BitmapIndexScan*)plan->lefttree)->scan.pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
+        case T_BitmapHeapScan:
+            if (((BitmapHeapScan*)plan->lefttree)->scan.pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
+        case T_CStoreScan:
+            if (((CStoreScan*)plan->lefttree)->pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
+#ifdef ENABLE_MULTIPLE_NODES
+        case T_TsStoreScan:
+            if (((TsStoreScan*)plan->lefttree)->pruningInfo->expr != NULL) {
+                appendStringInfo(es->str, "Iterations: %s", "PART");
+                flag = 1;
+            }
+            break;
+#endif
+        default:
+            appendStringInfo(es->str, "Iterations: %d", ((PartIterator*)plan)->itrs);
+            flag = 1;
+            break;
+    }
+    if (flag == 0) {
+        appendStringInfo(es->str, "Iterations: %d", ((PartIterator*)plan)->itrs);
+    }
+    appendStringInfoChar(es->str, '\n');
+}
+
 #ifndef ENABLE_MULTIPLE_NODES
- static inline void PredAppendInfo(Plan* plan, StringInfoData buf, ExplainState* es)
- {
-     if (plan->pred_total_time >= 0) {
+static void PredAppendInfo(Plan* plan, StringInfoData buf, ExplainState* es)
+{
+    if (plan->pred_total_time >= 0) {
         initStringInfo(&buf);
         appendStringInfo(&buf, "%.0f", plan->pred_total_time);
         es->planinfo->m_planInfo->put(PREDICT_TIME, PointerGetDatum(cstring_to_text(buf.data)));
         pfree_ext(buf.data);
     }
 
-    if (plan->pred_rows >= 0) {
+if (plan->pred_rows >= 0) {
         es->planinfo->m_planInfo->put(PREDICT_ROWS, 
                                         DirectFunctionCall1(dround,
                                                             Float8GetDatum(plan->pred_rows)));
     }
 
-    if (plan->pred_max_memory >= 0) {
+if (plan->pred_max_memory >= 0) {
         es->planinfo->m_planInfo->put(PREDICT_MEMORY,
                                         DirectFunctionCall1(pg_size_pretty, 
                                                             Int64GetDatum(plan->pred_max_memory)));
     }
- }
+}
 
-static inline void PredGetInfo(Plan* plan, ExplainState* es)
- {
+static void PredGetInfo(Plan* plan, ExplainState* es)
+{
     if (plan->pred_startup_time >= 0) {
         ExplainPropertyFloat("Pred Startup Time", plan->pred_startup_time, 2, es);
     }
@@ -1702,7 +1788,7 @@ static inline void PredGetInfo(Plan* plan, ExplainState* es)
     if (plan->pred_rows >= 0) {
         ExplainPropertyFloat("Pred Rows", plan->pred_rows, 0, es);
     }
-    if (plan->pred_total_time >= 0) {
+    if (plan->pred_max_memory >= 0) {
         ExplainPropertyLong("Pred Peak Memory", plan->pred_max_memory, es);
     }
 } 
@@ -1770,12 +1856,13 @@ static void ExplainNode(
             es->planinfo->m_runtimeinfo->put(-1, -1, PLAN_NODE_ID, plan_node_id);
             es->planinfo->m_runtimeinfo->put(-1, -1, PLAN_TYPE, nodeTag(plan));
             from_datanode = es->from_dn;
-            es->planinfo->m_runtimeinfo->put(-1, -1, FROM_DATANODE, BoolGetDatum(from_datanode));
+            es->planinfo->m_runtimeinfo->put(-1, -1, FROM_DATANODE, from_datanode);
         }
 
         if (es->analyze && (IsA(plan, RemoteQuery) || IsA(plan, VecRemoteQuery))) {
-            show_datanodeinit_info<true>(es, plan_node_id);  /* print executor start time */
-            show_datanodeinit_info<false>(es, plan_node_id); /* print executor end time */
+            show_dn_executor_time(es, plan_node_id, DN_START_TIME);  /* print executor start time */
+            show_dn_executor_time(es, plan_node_id, DN_RUN_TIME); /* print executor run time */
+            show_dn_executor_time(es, plan_node_id, DN_END_TIME); /* print executor end time */
         }
     }
 
@@ -1801,9 +1888,6 @@ static void ExplainNode(
                     appendStringInfoString(es->str, "->  ");
                     es->indent += 2;
                 }
-                if (plan->parallel_aware) {
-                    appendStringInfoString(es->str, "Parallel ");
-                }
                 appendStringInfoString(es->str, pname);
 
                 es->indent++;
@@ -1819,16 +1903,15 @@ static void ExplainNode(
             ExplainPropertyText("Parent Relationship", relationship, es);
         if (plan_name != NULL)
             ExplainPropertyText("Subplan Name", plan_name, es);
-        if (plan->parallel_aware) {
-            ExplainPropertyText("Parallel Aware", "true", es);
-        }
     }
 
     switch (nodeTag(plan)) {
         case T_SeqScan:
         case T_CStoreScan:
         case T_DfsScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
         case T_BitmapHeapScan:
         case T_CStoreIndexHeapScan:
         case T_TidScan:
@@ -1980,6 +2063,7 @@ static void ExplainNode(
                     } else if (!(IsA(plan, NestLoop) || IsA(plan, VecNestLoop))) {
                         appendStringInfo(es->str, " Join");
                     }
+
                 } else {
                     if (((Join*)plan)->jointype != JOIN_INNER) {
                         appendStringInfo(tmpName,
@@ -2112,6 +2196,7 @@ static void ExplainNode(
     }
 
     if (is_pretty) {
+
         StringInfoData pretty_plan_name;
         initStringInfo(&pretty_plan_name);
         appendStringInfoSpaces(&pretty_plan_name, es->pindent);
@@ -2141,12 +2226,14 @@ static void ExplainNode(
             if (is_pretty == false) {
                 appendStringInfo(
                     es->str, "  (cost=%.2f..%.2f rows=%.0f ", plan->startup_cost, plan->total_cost, plan->plan_rows);
+#ifndef ENABLE_MULTIPLE_NODES
                 if (plan->pred_total_time >= 0) {
                     appendStringInfo(es->str, "p-time=%.0f ", plan->pred_total_time);
                 }
                 if (plan->pred_rows >= 0) {
                     appendStringInfo(es->str, "p-rows=%.0f ", plan->pred_rows);
                 }
+#endif /* ENABLE_MULTIPLE_NODES */
                 if ((IsA(plan, HashJoin) || IsA(plan, VecHashJoin)) && es->verbose)
                     appendStringInfo(es->str,
                         "distinct=[%.0f, %.0f] ",
@@ -2182,17 +2269,17 @@ static void ExplainNode(
                     char memstr[50] = "\0";
                     if (plan->operatorMemKB[0] > 0) {
                         int rc = 0;
-                        if (plan->operatorMemKB[0] < KB_PER_MB)
+                        if (plan->operatorMemKB[0] < 1024)
                             rc = sprintf_s(memstr, sizeof(memstr), "%dKB", (int)plan->operatorMemKB[0]);
                         else {
                             if (plan->operatorMemKB[0] > MIN_OP_MEM && plan->operatorMaxMem > plan->operatorMemKB[0])
                                 rc = sprintf_s(memstr,
                                     sizeof(memstr),
                                     "%dMB(%dMB)",
-                                    (int)plan->operatorMemKB[0] / KB_PER_MB,
-                                    (int)plan->operatorMaxMem / KB_PER_MB);
+                                    (int)plan->operatorMemKB[0] / 1024,
+                                    (int)plan->operatorMaxMem / 1024);
                             else
-                                rc = sprintf_s(memstr, sizeof(memstr), "%dMB", (int)plan->operatorMemKB[0] / KB_PER_MB);
+                                rc = sprintf_s(memstr, sizeof(memstr), "%dMB", (int)plan->operatorMemKB[0] / 1024);
                         }
                         securec_check_ss(rc, "\0", "\0");
                     }
@@ -2225,8 +2312,13 @@ static void ExplainNode(
         if (is_pretty) {
             if (!es->from_dn) {
                 show_pretty_time(es, planstate->instrument, NULL, -1, -1, 0);
-                if (es->planinfo->m_runtimeinfo)
+                if (es->planinfo->m_runtimeinfo != NULL) {
+                    if (unlikely(planstate->instrument == NULL)) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("invalid planstate->instrument value.")));
+                    }
                     get_oper_time<false>(es, planstate, planstate->instrument, -1, -1);
+                }
             }
         } else {
             show_time<false>(es, planstate->instrument, -1);
@@ -2343,10 +2435,11 @@ static void ExplainNode(
                             show_scan_qual((List*)action->qual, "Insert Cond", planstate, ancestors, es);
                     }
                 }
+
             } else {
                 /* upsert cases */
                 ModifyTableState* mtstate = (ModifyTableState*)planstate;
-                if (mtstate->mt_upsert != NULL &&
+                if (mtstate->mt_upsert != NULL && 
                     mtstate->mt_upsert->us_action != UPSERT_NONE && mtstate->resultRelInfo->ri_NumIndices > 0) {
                     show_on_duplicate_info(mtstate, es);
                 }
@@ -2383,7 +2476,9 @@ static void ExplainNode(
             break;
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
         case T_ValuesScan:
         case T_CteScan:
         case T_WorkTableScan:
@@ -2396,16 +2491,6 @@ static void ExplainNode(
                 show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);
             show_llvm_info(planstate, es);
             break;
-        case T_Gather: {
-            Gather *gather = (Gather *)plan;
-            show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
-            if (plan->qual)
-                show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);
-            ExplainPropertyInteger("Number of Workers", gather->num_workers, es);
-            if (gather->single_copy)
-                ExplainPropertyText("Single Copy", gather->single_copy ? "true" : "false", es);
-            break;
-        }
         case T_DfsScan: {
             show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
             show_pushdown_qual(planstate, ancestors, es, PUSHDOWN_PREDICATE_FLAG);
@@ -2569,6 +2654,7 @@ static void ExplainNode(
                     break;
             }
             show_skew_optimization(planstate, es);
+            show_unique_check_info(planstate, es);
             break;
         case T_Group:
         case T_VecGroup:
@@ -2669,7 +2755,11 @@ static void ExplainNode(
                 ExplainOpenGroup("Cpus In Detail", "Cpus In Detail", false, es);
                 int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
                 for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
+#ifdef ENABLE_MULTIPLE_NODES
                     char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+                    char* node_name = g_instance.exec_cxt.nodeName;
+#endif
                     for (int j = 0; j < dop; j++) {
                         outerCycles = 0.0;
                         innerCycles = 0.0;
@@ -2741,7 +2831,9 @@ static void ExplainNode(
     switch (nodeTag(plan)) {
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
         case T_IndexScan:
         case T_IndexOnlyScan:
         case T_BitmapHeapScan:
@@ -2768,9 +2860,9 @@ static void ExplainNode(
                     } else {
                         appendStringInfoSpaces(es->str, es->indent * 2);
                     }
-                    appendStringInfo(es->str, "Iterations: %d", ((PartIterator*)plan)->itrs);
-                    appendStringInfoChar(es->str, '\n');
+                    ExplainNodePartition(plan, es);
                 } else {
+
                     es->planinfo->m_detailInfo->set_plan_name<true, true>();
                     appendStringInfo(
                         es->planinfo->m_detailInfo->info_str, "Iterations: %d", ((PartIterator*)plan)->itrs);
@@ -2783,58 +2875,6 @@ static void ExplainNode(
 
         default:
             break;
-    }
-
-    /* Show worker detail */
-    if (es->analyze && es->verbose && planstate->worker_instrument) {
-        WorkerInstrumentation* w = planstate->worker_instrument;
-        bool openedGroup = false;
-        int n;
-
-        for (n = 0; n < w->num_workers; ++n) {
-            Instrumentation* instrument = &w->instrument[n];
-            double nloops = instrument->nloops;
-            double startup_sec;
-            double total_sec;
-            double rows;
-
-            if (nloops <= 0) {
-                continue;
-            }
-            startup_sec = 1000.0 * instrument->startup / nloops;
-            total_sec = 1000.0 * instrument->total / nloops;
-            rows = instrument->ntuples / nloops;
-
-            if (es->format == EXPLAIN_FORMAT_TEXT) {
-                appendStringInfoSpaces(es->str, es->indent * 2);
-                appendStringInfo(es->str, "Worker %d: ", n);
-                if (es->timing) {
-                    appendStringInfo(
-                        es->str, "actual time=%.3f..%.3f rows=%.0f loops=%.0f\n", startup_sec, total_sec, rows, nloops);
-                } else {
-                    appendStringInfo(es->str, "actual rows=%.0f loops=%.0f\n", rows, nloops);
-                }
-            } else {
-                if (!openedGroup) {
-                    ExplainOpenGroup("Workers", "Workers", false, es);
-                    openedGroup = true;
-                }
-                ExplainOpenGroup("Worker", NULL, true, es);
-                ExplainPropertyInteger("Worker Number", n, es);
-
-                if (es->timing) {
-                    ExplainPropertyFloat("Actual Startup Time", startup_sec, 3, es);
-                    ExplainPropertyFloat("Actual Total Time", total_sec, 3, es);
-                }
-                ExplainPropertyFloat("Actual Rows", rows, 0, es);
-                ExplainPropertyFloat("Actual Loops", nloops, 0, es);
-                ExplainCloseGroup("Worker", NULL, true, es);
-            }
-        }
-
-        if (openedGroup) {
-            ExplainCloseGroup("Workers", "Workers", false, es);
-        }
     }
 
 runnext:
@@ -2945,26 +2985,20 @@ runnext:
 
     /* Set info for explain plan. Note that we do not deal with query shipping except "explain plan for select for
      * update". */
-    if (es->plan && (planstate->plan->plan_node_id != 0 || IsExplainPlanSelectForUpdateStmt || IS_SINGLE_NODE)) {
+    if (es->plan && (planstate->plan->plan_node_id != 0 || IsExplainPlanSelectForUpdateStmt)) {
         /*
          * 1.Handle the case for select for update.
          * Step 1: Check if it's a select for update case.
          */
-        if (planstate->plan->plan_node_id == 0 && (IsExplainPlanSelectForUpdateStmt || IS_SINGLE_NODE)) {
+        if (planstate->plan->plan_node_id == 0 && IsExplainPlanSelectForUpdateStmt) {
             /* Step 2: Set operation for plan table. */
             GetPlanNodePlainText(plan, &pname, &sname, &strategy, &operation, &pt_operation, &pt_options);
 
             /* Step 3: Set object_type for plan table. */
             RangeTblEntry* rte = (RangeTblEntry*)llast(es->rtable);
             char* objectname = rte->relname;
-            char* object_type = NULL;
-            if (IS_SINGLE_NODE) {
-                es->planinfo->m_planTableData->set_object_type(rte, &object_type);
-                es->planinfo->m_planTableData->set_plan_table_objs(plan->plan_node_id, objectname, object_type, NULL);
-            } else {
-                char* object_type = "REMOTE_QUERY";
-                es->planinfo->m_planTableData->set_plan_table_objs(plan->plan_node_id, objectname, object_type, NULL);
-            }
+            const char* object_type = "REMOTE_QUERY";
+            es->planinfo->m_planTableData->set_plan_table_objs(plan->plan_node_id, objectname, object_type, NULL);
 
             /* Step 4: Set projection for plan table. */
             show_plan_tlist(planstate, ancestors, es);
@@ -3009,7 +3043,9 @@ static void CalculateProcessedRows(
     switch (nodeTag(plan)) {
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
         case T_DfsScan:
             show_removed_rows(1, planstate, idx, smpIdx, &removed_rows);
             *processed_rows += removed_rows;
@@ -3051,7 +3087,7 @@ static void show_plan_execnodes(PlanState* planstate, ExplainState* es)
     Plan* plan = planstate->plan;
 
     if (IsA(plan, Stream) || IsA(plan, VecStream) || IsA(plan, ModifyTable) || IsA(plan, VecModifyTable) ||
-        IsA(plan, RemoteQuery) || IsA(plan, VecRemoteQuery)) {
+        IsA(plan, RemoteQuery) || IsA(plan, VecRemoteQuery) || u_sess->pgxc_cxt.NumDataNodes == 0) {
         return;
     }
 
@@ -3114,9 +3150,9 @@ static void show_plan_tlist(PlanState* planstate, List* ancestors, ExplainState*
     /* For explain plan */
     if (es->plan)
         es->planinfo->m_planTableData->set_plan_table_projection(plan->plan_node_id, result);
-
+#ifdef ENABLE_MULTIPLE_NODES
     /* show distributeKey of scan */
-    if (plan->distributed_keys != NIL && SHOW_SCAN_DISTRIBUTEKEY) {
+    if (plan->distributed_keys != NIL && show_scan_distributekey(plan)) {
         List* distKey = NIL;
         List* keyList = NIL;
         keyList = plan->distributed_keys;
@@ -3133,7 +3169,7 @@ static void show_plan_tlist(PlanState* planstate, List* ancestors, ExplainState*
             ExplainPrettyList(distKey, es);
         }
     }
-
+#endif
 #ifdef STREAMPLAN
     if ((IsA(plan, Stream) || IsA(plan, VecStream)) &&
         (is_redistribute_stream((Stream*)plan) || is_hybid_stream((Stream*)plan)) &&
@@ -3153,6 +3189,7 @@ static void show_plan_tlist(PlanState* planstate, List* ancestors, ExplainState*
             appendStringInfoString(es->planinfo->m_verboseInfo->info_str, "Distribute Key: ");
             ExplainPrettyList(distKey, es);
         }
+        list_free_deep(distKey);
     }
 #endif
 }
@@ -3278,14 +3315,14 @@ static void show_bloomfilter_number(const List* filterNumList, ExplainState* es)
         }
 
         if (es->format == EXPLAIN_FORMAT_TEXT) {
-            /* Append bloom filter num. */
+            /* Append bloom filter num.*/
             if (generate) {
                 appendStringInfo(str, "%s: %s\n", "Generate Bloom Filter On Index", index_info.data);
             } else {
                 appendStringInfo(str, "%s: %s\n", "Filter By Bloom Filter On Index", index_info.data);
             }
         } else {
-            /* Append bloom filter num. */
+            /* Append bloom filter num.*/
             if (generate) {
                 ExplainPropertyText("Generate Bloom Filter On Index", index_info.data, es);
             } else {
@@ -3722,12 +3759,17 @@ static void show_detail_sortinfo_min_max(
  */
 static void show_peak_memory(ExplainState* es, int plan_size)
 {
+    if (u_sess->instr_cxt.global_instr == NULL) {
+            elog(ERROR, "u_sess->instr_cxt.global_instr is NULL");
+    }
+
     bool from_datanode = false;
     bool last_datanode = u_sess->instr_cxt.global_instr->isFromDataNode(1);
 
     for (int i = 1; i < plan_size; i++) {
         int dop = u_sess->instr_cxt.global_instr->getNodeDop(i + 1);
         from_datanode = u_sess->instr_cxt.global_instr->isFromDataNode(i + 1);
+
         if (!last_datanode && from_datanode) {
             int64 peak_memory = (int64)(unsigned)((uint)(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery -
                                                t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->initMemInChunks)
@@ -3747,8 +3789,11 @@ static void show_peak_memory(ExplainState* es, int plan_size)
             for (int j = 0; j < u_sess->instr_cxt.global_instr->getInstruNodeNum(); j++) {
                 for (int k = 0; k < dop; k++) {
                     instr = u_sess->instr_cxt.global_instr->getInstrSlot(j, i + 1, k);
+#ifdef ENABLE_MULTIPLE_NODES
                     char* node_name = PGXCNodeGetNodeNameFromId(j, PGXC_NODE_DATANODE);
-
+#else
+                    char* node_name = g_instance.exec_cxt.nodeName;
+#endif
                     if (instr != NULL) {
                         if (!is_execute)
                             is_execute = true;
@@ -3783,13 +3828,13 @@ static void show_peak_memory(ExplainState* es, int plan_size)
 }
 
 /*
- * @Description: show the min/max of datanode executor start and end time.
+ * @Description: show the min/max of datanode executor start/run/end time.
  * @in es -  the explain state info
  * @in plan_node_id - current plan node id
+ * @in stage - the stage of executor time
  * @out - void
  */
-template <bool is_init>
-static void show_datanodeinit_info(ExplainState* es, int plan_node_id)
+static void show_dn_executor_time(ExplainState* es, int plan_node_id, ExecutorTime stage)
 {
     Instrumentation* instr = NULL;
     double min_time = 0;
@@ -3797,15 +3842,26 @@ static void show_datanodeinit_info(ExplainState* es, int plan_node_id)
     int min_idx = 0;
     int max_idx = 0;
     bool fisrt_time = true;
+    const char* symbol_time = "nostage";
     int data_size = u_sess->instr_cxt.global_instr->getInstruNodeNum();
     for (int i = 0; i < data_size; i++) {
         double exec_time;
         instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, plan_node_id + 1);
         if (instr != NULL) {
-            if (is_init)
-                exec_time = instr->init_time * MS_PER_SECOND;
-            else
-                exec_time = instr->end_time * MS_PER_SECOND;
+            switch (stage) {
+                case DN_START_TIME:
+                    exec_time = instr->init_time * 1000.0;
+                    symbol_time = "start";
+                    break;
+                case DN_RUN_TIME:
+                    exec_time = instr->run_time * 1000.0;
+                    symbol_time = "run";
+                    break;
+                case DN_END_TIME:
+                    exec_time = instr->end_time * 1000.0;
+                    symbol_time = "end";
+                    break;
+            }
             if (fisrt_time) {
                 min_time = exec_time;
                 min_idx = i;
@@ -3825,24 +3881,15 @@ static void show_datanodeinit_info(ExplainState* es, int plan_node_id)
             }
         }
     }
-
+#ifdef ENABLE_MULTIPLE_NODES
     char* min_node_name = PGXCNodeGetNodeNameFromId(min_idx, PGXC_NODE_DATANODE);
     char* max_node_name = PGXCNodeGetNodeNameFromId(max_idx, PGXC_NODE_DATANODE);
+#else
+    char* min_node_name = g_instance.exec_cxt.nodeName;
+    char* max_node_name = g_instance.exec_cxt.nodeName;
+#endif
 
-    if (is_init)
-        appendStringInfo(es->planinfo->m_query_summary->info_str,
-            "Datanode executor start time [%s, %s]: [%.3f ms,%.3f ms]\n",
-            min_node_name,
-            max_node_name,
-            min_time,
-            max_time);
-    else
-        appendStringInfo(es->planinfo->m_query_summary->info_str,
-            "Datanode executor end time [%s, %s]: [%.3f ms,%.3f ms]\n",
-            min_node_name,
-            max_node_name,
-            min_time,
-            max_time);
+    appendStringInfo(es->planinfo->m_query_summary->info_str, "Datanode executor %s time [%s, %s]: [%.3f ms,%.3f ms]\n", symbol_time, min_node_name, max_node_name, min_time, max_time);
 }
 
 /*
@@ -3877,9 +3924,11 @@ static void show_sort_info(SortState* sortstate, ExplainState* es)
                 if (instr == NULL || instr->sorthashinfo.sortMethodId < (int)HEAPSORT ||
                     instr->sorthashinfo.sortMethodId > (int)STILLINPROGRESS)
                     continue;
-
+#ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
-
+#else
+                char* node_name = g_instance.exec_cxt.nodeName;
+#endif
                 sortMethodId = instr->sorthashinfo.sortMethodId;
                 spaceTypeId = instr->sorthashinfo.spaceTypeId;
                 sortMethod = sortmessage[sortMethodId].sortName;
@@ -4076,10 +4125,15 @@ static void show_llvm_info(const PlanState* planstate, ExplainState* es)
         if (es->format == EXPLAIN_FORMAT_TEXT) {
             for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id);
+
                 if (instr != NULL && instr->isLlvmOpt) {
+#ifdef ENABLE_MULTIPLE_NODES
                     char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+                    char* node_name = g_instance.exec_cxt.nodeName;
+#endif
                     if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo->m_runtimeinfo) {
-                        es->planinfo->m_runtimeinfo->put(i, 0, LLVM_OPTIMIZATION, BoolGetDatum(true));
+                        es->planinfo->m_runtimeinfo->put(i, 0, LLVM_OPTIMIZATION, true);
                         es->planinfo->m_datanodeInfo->set_plan_name<false, true>();
                         appendStringInfo(es->planinfo->m_datanodeInfo->info_str, "%s ", node_name);
                         appendStringInfoString(es->planinfo->m_datanodeInfo->info_str, "(LLVM Optimized)\n");
@@ -4103,7 +4157,11 @@ static void show_llvm_info(const PlanState* planstate, ExplainState* es)
                         ExplainOpenGroup("LLVM Detail", "LLVM Detail", false, es);
                     }
                     ExplainOpenGroup("Plan", NULL, true, es);
+#ifdef ENABLE_MULTIPLE_NODES
                     char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+                    char* node_name = g_instance.exec_cxt.nodeName;
+#endif
                     ExplainPropertyText("DN Name", node_name, es);
                     ExplainPropertyText("LLVM", "LLVM Optimized", es);
                     ExplainCloseGroup("Plan", NULL, true, es);
@@ -4176,7 +4234,11 @@ static void show_detail_filenum_info(const PlanState* planstate, ExplainState* e
     if (es->detail) {
         ExplainOpenGroup(label_name, label_name, false, es);
         for (i = 0; i < datanode_size; i++) {
+#ifdef ENABLE_MULTIPLE_NODES
             char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+            char* node_name = g_instance.exec_cxt.nodeName;
+#endif
             for (j = 0; j < dop; j++) {
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
                 if (instr != NULL && instr->nloops > 0) {
@@ -4191,8 +4253,7 @@ static void show_detail_filenum_info(const PlanState* planstate, ExplainState* e
                             es->planinfo->m_staticInfo->set_datanode_name(node_name, j, dop);
 
                             if (is_writefile) {
-                                es->planinfo->m_runtimeinfo->put(i, j, HASH_FILENUM, \
-												Int64GetDatum(instr->sorthashinfo.hash_FileNum));
+                                es->planinfo->m_runtimeinfo->put(i, j, HASH_FILENUM, instr->sorthashinfo.hash_FileNum);
                             }
 
                             show_datanode_filenum_info(es,
@@ -4219,7 +4280,11 @@ static void show_detail_filenum_info(const PlanState* planstate, ExplainState* e
             int file_num = 0;
             for (i = 0; i < datanode_size; i++) {
                 ThreadInstrumentation* threadinstr =
+#ifdef ENABLE_MULTIPLE_NODES
                     u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
+#else
+                    u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
+#endif
                 if (threadinstr == NULL)
                     continue;
                 int count_dop_writefile = 0;
@@ -4300,7 +4365,7 @@ static void show_setop_info(SetOpState* setopstate, ExplainState* es)
                     show_datanode_filenum_info(es, filenum, 0, expand_times, es->str);
                 else {
                     if (es->planinfo->m_runtimeinfo)
-                        es->planinfo->m_runtimeinfo->put(-1, -1, HASH_FILENUM, Int32GetDatum(filenum));
+                        es->planinfo->m_runtimeinfo->put(-1, -1, HASH_FILENUM, filenum);
                     if (es->planinfo->m_staticInfo) {
                         es->planinfo->m_staticInfo->set_plan_name<true, true>();
                         show_datanode_filenum_info(es, filenum, 0, expand_times, es->planinfo->m_staticInfo->info_str);
@@ -4332,10 +4397,18 @@ static void show_detail_execute_info(const PlanState* planstate, ExplainState* e
     if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo->m_runtimeinfo) {
         for (i = 0; i < datanode_size; i++) {
             ThreadInstrumentation* threadinstr =
+#ifdef ENABLE_MULTIPLE_NODES
                 u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
+#else
+                u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
+#endif
             if (threadinstr == NULL)
                 continue;
+#ifdef ENABLE_MULTIPLE_NODES
             char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+            char* node_name = g_instance.exec_cxt.nodeName;
+#endif
             for (j = 0; j < dop; j++) {
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
                 if (instr != NULL && instr->nloops > 0) {
@@ -4401,9 +4474,9 @@ static void show_hashAgg_info(AggState* hashaggstate, ExplainState* es)
                         planstate->instrument->sorthashinfo.hashtable_expand_times,
                         es->str);
                 } else {
-                    if (es->planinfo != NULL && es->planinfo->m_runtimeinfo != NULL)
-                        es->planinfo->m_runtimeinfo->put(-1, -1, HASH_FILENUM, Int32GetDatum(filenum));
-                    if (es->planinfo != NULL && es->planinfo->m_staticInfo != NULL) {
+                    if (es->planinfo->m_runtimeinfo != NULL)
+                        es->planinfo->m_runtimeinfo->put(-1, -1, HASH_FILENUM, filenum);
+                    if (es->planinfo->m_staticInfo != NULL) {
                         es->planinfo->m_staticInfo->set_plan_name<true, true>();
 
                         show_datanode_filenum_info(es,
@@ -4464,18 +4537,23 @@ static void show_hash_info(HashState* hashstate, ExplainState* es)
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id);
                 if (instr == NULL)
                     continue;
+#ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+                char* node_name = g_instance.exec_cxt.nodeName;
+#endif
                 append_datanode_name(es, node_name, 1, 0);
 
-                spacePeakKb = (instr->sorthashinfo.spacePeak + BYTE_PER_KB - 1) / BYTE_PER_KB;
+                spacePeakKb = (instr->sorthashinfo.spacePeak + 1023) / 1024;
                 nbatch = instr->sorthashinfo.nbatch;
                 nbatch_original = instr->sorthashinfo.nbatch_original;
                 nbuckets = instr->sorthashinfo.nbuckets;
-                if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo) {
-                    es->planinfo->m_runtimeinfo->put(i, 0, HASH_BATCH, Int32GetDatum(nbatch));
+                if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo 
+                    && es->planinfo->m_staticInfo && es->planinfo->m_runtimeinfo) {
+                    es->planinfo->m_runtimeinfo->put(i, 0, HASH_BATCH, nbatch);
                     es->planinfo->m_runtimeinfo->put(i, 0, HASH_BATCH_ORIGNAL, nbatch_original);
-                    es->planinfo->m_runtimeinfo->put(i, 0, HASH_BUCKET, Int32GetDatum(nbuckets));
-                    es->planinfo->m_runtimeinfo->put(i, 0, HASH_SPACE, Int64GetDatum(spacePeakKb));
+                    es->planinfo->m_runtimeinfo->put(i, 0, HASH_BUCKET, nbuckets);
+                    es->planinfo->m_runtimeinfo->put(i, 0, HASH_SPACE, spacePeakKb);
 
                     es->planinfo->m_staticInfo->set_plan_name<false, true>();
                     appendStringInfo(es->planinfo->m_staticInfo->info_str, "%s ", node_name);
@@ -4490,12 +4568,13 @@ static void show_hash_info(HashState* hashstate, ExplainState* es)
                 SortHashInfo* psi = NULL;
                 for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
                     instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id);
+
                     if (instr != NULL) {
                         if (!is_execute)
                             is_execute = true;
                         psi = &instr->sorthashinfo;
 
-                        spacePeakKb = (instr->sorthashinfo.spacePeak + BYTE_PER_KB - 1) / BYTE_PER_KB;
+                        spacePeakKb = (instr->sorthashinfo.spacePeak + 1023) / 1024;
                         max_nbatch = rtl::max(max_nbatch, psi->nbatch);
                         min_nbatch = rtl::min(min_nbatch, psi->nbatch);
                         max_nbatch_original = rtl::max(max_nbatch_original, psi->nbatch_original);
@@ -4588,46 +4667,18 @@ static void show_hash_info(HashState* hashstate, ExplainState* es)
                 }
             }
         }
-    } else {
-        Instrumentation* instrument = NULL;
-        /*
-         * In a parallel query, the leader process may or may not have run the
-         * hash join, and even if it did it may not have built a hash table due to
-         * timing (if it started late it might have seen no tuples in the outer
-         * relation and skipped building the hash table).  Therefore we have to be
-         * prepared to get instrumentation data from a worker if there is no hash
-         * table.
-         */
-        if (hashstate->hashtable) {
-            instrument = (Instrumentation*)palloc(sizeof(Instrumentation));
-            ExecHashGetInstrumentation(instrument, hashstate->hashtable);
-        } else if (hashstate->shared_info) {
-            SharedHashInfo* shared_info = hashstate->shared_info;
-            int i;
+    } else if (hashstate->ps.instrument) {
+        SortHashInfo hashinfo = hashstate->ps.instrument->sorthashinfo;
+        spacePeakKb = (hashinfo.spacePeak + 1023) / 1024;
+        nbatch = hashinfo.nbatch;
+        nbatch_original = hashinfo.nbatch_original;
+        nbuckets = hashinfo.nbuckets;
 
-            /* Find the first worker that built a hash table. */
-            for (i = 0; i < shared_info->num_workers; ++i) {
-                if (shared_info->instrument[i].sorthashinfo.nbatch > 0) {
-                    instrument = &shared_info->instrument[i];
-                    break;
-                }
-            }
-        } else if  (hashstate->ps.instrument) {
-            instrument = hashstate->ps.instrument;
-        }
-        if (instrument) {
-            SortHashInfo hashinfo = instrument->sorthashinfo;
-            spacePeakKb = (hashinfo.spacePeak + BYTE_PER_KB - 1) / BYTE_PER_KB;
-            nbatch = hashinfo.nbatch;
-            nbatch_original = hashinfo.nbatch_original;
-            nbuckets = hashinfo.nbuckets;
-
-            /* wlm_statistics_plan_max_digit: this variable is used to judge, isn't it a active sql */
-            if (es->wlm_statistics_plan_max_digit == NULL) {
-                if (es->format == EXPLAIN_FORMAT_TEXT)
-                    appendStringInfoSpaces(es->str, es->indent * 2);
-                show_datanode_hash_info<false>(es, nbatch, nbatch_original, nbuckets, spacePeakKb);
-            }
+        /* wlm_statistics_plan_max_digit: this variable is used to judge, isn't it a active sql */
+        if (es->wlm_statistics_plan_max_digit == NULL) {
+            if (es->format == EXPLAIN_FORMAT_TEXT)
+                appendStringInfoSpaces(es->str, es->indent * 2);
+            show_datanode_hash_info<false>(es, nbatch, nbatch_original, nbuckets, spacePeakKb);
         }
     }
 }
@@ -4648,6 +4699,7 @@ inline static void show_buffers_info(
             appendStringInfo(infostr, " written=%ld", usage->shared_blks_written);
     }
     if (has_local) {
+
         appendStringInfoString(infostr, " local");
         if (usage->local_blks_hit > 0)
             appendStringInfo(infostr, " hit=%ld", usage->local_blks_hit);
@@ -4777,6 +4829,7 @@ static void show_datanode_sonicjoin_detail_info(ExplainState* es, StringInfo ins
 
 static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es)
 {
+
     PlanState* planstate = (PlanState*)hashstate;
     int64 max_file_num = 0;
     int min_file_num = MIN_FILE_NUM;
@@ -4805,9 +4858,13 @@ static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es)
                 if (instr == NULL)
                     continue;
                 is_writefile = instr->sorthashinfo.hash_writefile;
+#ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
-                spaceUsed = (instr->sorthashinfo.spaceUsed + BYTE_PER_KB - 1) / BYTE_PER_KB;
-                spillSize = (instr->sorthashinfo.spill_size + BYTE_PER_KB - 1) / BYTE_PER_KB;
+#else
+                char* node_name = g_instance.exec_cxt.nodeName;
+#endif
+                spaceUsed = (instr->sorthashinfo.spaceUsed + 1023) / 1024;
+                spillSize = (instr->sorthashinfo.spill_size + 1023) / 1024;
                 file_num = instr->sorthashinfo.hash_FileNum;
                 spillNum = instr->sorthashinfo.hash_spillNum;
 
@@ -4818,19 +4875,19 @@ static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es)
                 innerFileNum = instr->sorthashinfo.hash_innerFileNum;
                 outerFileNum = instr->sorthashinfo.hash_outerFileNum;
 
-                spillInnerSize = (instr->sorthashinfo.spill_innerSize + BYTE_PER_KB - 1) / BYTE_PER_KB;
-                spillInnerSizeMax = (instr->sorthashinfo.spill_innerSizePartMax + BYTE_PER_KB - 1) / BYTE_PER_KB;
-                spillInnerSizeMin = (instr->sorthashinfo.spill_innerSizePartMin + BYTE_PER_KB - 1) / BYTE_PER_KB;
-                spillOuterSize = (instr->sorthashinfo.spill_outerSize + BYTE_PER_KB - 1) / BYTE_PER_KB;
-                spillOuterSizeMax = (instr->sorthashinfo.spill_outerSizePartMax + BYTE_PER_KB - 1) / BYTE_PER_KB;
-                spillOuterSizeMin = (instr->sorthashinfo.spill_outerSizePartMin + BYTE_PER_KB - 1) / BYTE_PER_KB;
+                spillInnerSize = (instr->sorthashinfo.spill_innerSize + 1023) / 1024;
+                spillInnerSizeMax = (instr->sorthashinfo.spill_innerSizePartMax + 1023) / 1024;
+                spillInnerSizeMin = (instr->sorthashinfo.spill_innerSizePartMin + 1023) / 1024;
+                spillOuterSize = (instr->sorthashinfo.spill_outerSize + 1023) / 1024;
+                spillOuterSizeMax = (instr->sorthashinfo.spill_outerSizePartMax + 1023) / 1024;
+                spillOuterSizeMin = (instr->sorthashinfo.spill_outerSizePartMin + 1023) / 1024;
 
                 double build_time = instr->sorthashinfo.hashbuild_time;
                 double probe_time = instr->sorthashinfo.hashagg_time;
                 if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && 
                     es->planinfo != NULL && es->planinfo->m_staticInfo != NULL) {
                     if (is_writefile)
-                        es->planinfo->m_runtimeinfo->put(i, 0, HASH_FILENUM, Int64GetDatum(file_num));
+                        es->planinfo->m_runtimeinfo->put(i, 0, HASH_FILENUM, file_num);
                     else
                         es->planinfo->m_runtimeinfo->put(i, 0, HASH_SPACE, spaceUsed);
 
@@ -4913,7 +4970,11 @@ static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es)
                 file_num = 0;
                 for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
                     ThreadInstrumentation* threadinstr =
+#ifdef ENABLE_MULTIPLE_NODES
                         u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
+#else
+                        u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
+#endif
                     if (threadinstr == NULL)
                         continue;
                     instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id);
@@ -5032,7 +5093,11 @@ static void show_recursive_info(RecursiveUnionState* rustate, ExplainState* es)
             appendStringInfoSpaces(es->planinfo->m_recursiveInfo->info_str, 8);
             appendStringInfo(es->planinfo->m_recursiveInfo->info_str, "Iteration[0] (Step 0 None-Recursive)\n");
             for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
+#ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+                char* node_name = g_instance.exec_cxt.nodeName;
+#endif
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id);
                 if (instr == NULL) {
                     continue;
@@ -5059,8 +5124,11 @@ static void show_recursive_info(RecursiveUnionState* rustate, ExplainState* es)
                     if (instr == NULL) {
                         continue;
                     }
-
+#ifdef ENABLE_MULTIPLE_NODES
                     char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+                    char* node_name = g_instance.exec_cxt.nodeName;
+#endif
                     appendStringInfoSpaces(es->planinfo->m_recursiveInfo->info_str, 16);
                     appendStringInfo(es->planinfo->m_recursiveInfo->info_str,
                         "%s return tuples: %lu\n",
@@ -5090,7 +5158,11 @@ static void show_datanode_buffers(ExplainState* es, PlanState* planstate)
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
                 if (instr == NULL)
                     continue;
+#ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+                char* node_name = g_instance.exec_cxt.nodeName;
+#endif
                 append_datanode_name(es, node_name, dop, j);
 
                 if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL) {
@@ -5137,16 +5209,11 @@ static void show_analyze_buffers(ExplainState* es, const PlanState* planstate, S
     long temp_blks_read_min = LONG_MAX;
     long temp_blks_written_max = -1;
     long temp_blks_written_min = LONG_MAX;
-    instr_time blk_read_time_max;
-    instr_time blk_read_time_min;
-    instr_time blk_write_time_max;
-    instr_time blk_write_time_min;
-    BufferUsage* pbu = NULL;
+    instr_time blk_read_time_max, blk_read_time_min;
+    instr_time blk_write_time_max, blk_write_time_min;
     bool is_execute = false;
     Instrumentation* instr = NULL;
     int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
-    int i = 0;
-    int j = 0;
 
     INSTR_TIME_SET_ZERO(blk_read_time_max);
     INSTR_TIME_SET_ZERO(blk_write_time_max);
@@ -5154,15 +5221,19 @@ static void show_analyze_buffers(ExplainState* es, const PlanState* planstate, S
     INSTR_TIME_INITIAL_MIN(blk_write_time_min);
 
     if (nodeNum > 0) {
-        for (i = 0; i < nodeNum; i++) {
+        for (int i = 0; i < nodeNum; i++) {
             ThreadInstrumentation* threadinstr =
+#ifdef ENABLE_MULTIPLE_NODES
                 u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
+#else
+                u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
+#endif
             if (threadinstr == NULL)
                 continue;
-            for (j = 0; j < dop; j++) {
+            for (int j = 0; j < dop; j++) {
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
                 if (instr != NULL && instr->nloops > 0) {
-                    pbu = &instr->bufusage;
+                    BufferUsage* pbu = &instr->bufusage;
 
                     if (!is_execute) {
                         is_execute = true;
@@ -5754,7 +5825,7 @@ static void show_detail_cpu(ExplainState* es, PlanState* planstate)
                     exCycles = incCycles - outerCycles - innerCycles;
                     proRows = (long)(instr->ntuples / instr->nloops);
 
-                    proRows = (proRows != 0 ? (long)(exCycles / proRows) : 0);
+                    proRows = (proRows != 0 ? (long)(exCycles / proRows) : 0.0);
                     incCycles_max = rtl::max(incCycles_max, incCycles);
                     incCycles_min = rtl::min(incCycles_min, incCycles);
                     exCycles_max = rtl::max(exCycles_max, exCycles);
@@ -5789,6 +5860,7 @@ static void show_detail_cpu(ExplainState* es, PlanState* planstate)
             appendStringInfoChar(es->str, '\n');
 
             if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo->m_IOInfo) {
+
                 es->planinfo->m_IOInfo->set_plan_name<true, true>();
                 appendStringInfoString(es->planinfo->m_IOInfo->info_str, "CPU:");
 
@@ -5831,7 +5903,12 @@ static bool get_execute_mode(const ExplainState* es, int idx)
     id = idx < 0 ? 0 : idx;
 
     if (u_sess->instr_cxt.global_instr) {
-        ThreadInstrumentation* threadinstr = u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(id);
+        ThreadInstrumentation* threadinstr =
+#ifdef ENABLE_MULTIPLE_NODES
+            u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(id);
+#else
+            u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(1, 0);
+#endif
         if (threadinstr == NULL)
             return true;
         bool execute = threadinstr->m_instrArray[0].instr.isExecute;
@@ -5983,9 +6060,9 @@ static void show_pretty_time(
             if (es->planinfo->m_runtimeinfo) {
                 es->planinfo->m_runtimeinfo->put(nodeIdx, smpIdx, START_TIME, Float8GetDatum(startup_sec));
                 es->planinfo->m_runtimeinfo->put(nodeIdx, smpIdx, TOTAL_TIME, Float8GetDatum(total_sec));
-                es->planinfo->m_runtimeinfo->put(nodeIdx, smpIdx, PLAN_ROWS, Float8GetDatum(rows));
-                es->planinfo->m_runtimeinfo->put(nodeIdx, smpIdx, PLAN_LOOPS, Float8GetDatum(nloops));
-                es->planinfo->m_runtimeinfo->put(nodeIdx, smpIdx, PEAK_OP_MEMORY, Int64GetDatum(instrument->memoryinfo.peakOpMemory));
+                es->planinfo->m_runtimeinfo->put(nodeIdx, smpIdx, PLAN_ROWS, rows);
+                es->planinfo->m_runtimeinfo->put(nodeIdx, smpIdx, PLAN_LOOPS, nloops);
+                es->planinfo->m_runtimeinfo->put(nodeIdx, smpIdx, PEAK_OP_MEMORY, instrument->memoryinfo.peakOpMemory);
 
                 if (node_name != NULL)
                     es->planinfo->m_runtimeinfo->put(
@@ -6033,7 +6110,11 @@ static StreamTime* get_instrument(
     StreamTime* instrument = NULL;
 
     int dop = u_sess->instr_cxt.global_instr->getNodeDop(plan_node_id);
+#ifdef ENABLE_MULTIPLE_NODES
     char* node_name = PGXCNodeGetNodeNameFromId(j, PGXC_NODE_DATANODE);
+#else
+    char* node_name = g_instance.exec_cxt.nodeName;
+#endif
 
     instrument = &trackpoint->track_time;
 
@@ -6112,9 +6193,11 @@ static void show_track_time_without_plannodeid(ExplainState* es)
                 double rows = instrument->ntuples;
 
                 appendStringInfo(str, "Segment Id: %d  Track name: %s\n", segmentid, track_name);
-
+#ifdef ENABLE_MULTIPLE_NODES
                 char* nodename = PGXCNodeGetNodeNameFromId(0, PGXC_NODE_COORDINATOR);
-
+#else
+                char* nodename = g_instance.exec_cxt.nodeName;
+#endif
                 appendStringInfoSpaces(str, 6);
                 appendStringInfo(str, " %s:", nodename);
 
@@ -6149,7 +6232,8 @@ static void show_track_time_without_plannodeid(ExplainState* es)
         }
 
         for (j = 1; j < threadlen; j++) {
-            threadinstr_tmp = u_sess->instr_cxt.global_instr->get_cnthreadinstrumentation(j);
+
+            ThreadInstrumentation* threadinstr_tmp = u_sess->instr_cxt.global_instr->get_cnthreadinstrumentation(j);
 
             if (threadinstr_tmp != NULL) {
                 Track* generaltrack_tmp = &threadinstr_tmp->m_generalTrackArray[i];
@@ -6258,7 +6342,11 @@ static void show_track_time_info(ExplainState* es)
                         double rows = instrument->ntuples;
 
                         appendStringInfo(str, "Plan Node id: %d  Track name: %s\n", plan_node_id, track_name);
+#ifdef ENABLE_MULTIPLE_NODES
                         char* nodename = PGXCNodeGetNodeNameFromId(0, PGXC_NODE_COORDINATOR);
+#else
+                        char* nodename = g_instance.exec_cxt.nodeName;
+#endif
                         appendStringInfoSpaces(str, 6);
                         appendStringInfo(str, " %s:", nodename);
                         if (instrument->need_timer) {
@@ -6275,6 +6363,7 @@ static void show_track_time_info(ExplainState* es)
                                     rows,
                                     nloops);
                             }
+
                         } else {
                             if (!has_perf) {
                                 appendStringInfo(str, " (total_calls=%.0f loops=%.0f)", rows, nloops);
@@ -6302,7 +6391,11 @@ static void show_track_time_info(ExplainState* es)
                 for (int k = 0; k < u_sess->instr_cxt.global_instr->getInstruNodeNum(); k++) {
                     for (int m = 0; m < u_sess->instr_cxt.global_instr->getNodeDop(j); m++) {
                         ThreadInstrumentation* threadinstr_tmp =
+#ifdef ENABLE_MULTIPLE_NODES
                             u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(k, j, m);
+#else
+                            u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(j, m);
+#endif
                         if (threadinstr_tmp != NULL) {
                             trackArray = threadinstr_tmp->get_tracks(j);
                             /* when m_instrArrayMap is initialized but nodeinstr is not executed, it should return. */
@@ -6461,7 +6554,11 @@ static void show_track_time_info(ExplainState* es)
                 for (int k = 0; k < u_sess->instr_cxt.global_instr->getInstruNodeNum(); k++) {
                     for (int m = 0; m < u_sess->instr_cxt.global_instr->getNodeDop(j); m++) {
                         ThreadInstrumentation* threadinstr_tmp =
+#ifdef ENABLE_MULTIPLE_NODES
                             u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(k, j, m);
+#else
+                            u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(j, m);
+#endif
                         if (threadinstr_tmp != NULL) {
                             Track* trackArray_tmp = threadinstr_tmp->get_tracks(j);
                             /* when m_instrArrayMap is initialized but nodeinstr is not executed, it should return. */
@@ -6563,9 +6660,9 @@ static void show_time(ExplainState* es, const Instrumentation* instrument, int i
 {
     if (instrument != NULL && instrument->nloops > 0) {
         double nloops = instrument->nloops;
-        const double startup_sec = 1000.0 * instrument->startup / nloops;
-        const double total_sec = 1000.0 * instrument->total / nloops;
-        double rows = instrument->ntuples / nloops;
+        const double startup_sec = 1000.0 * instrument->startup;
+        const double total_sec = 1000.0 * instrument->total;
+        double rows = instrument->ntuples;
         if (es->format == EXPLAIN_FORMAT_TEXT) {
             if (is_detail == false)
                 appendStringInfoSpaces(es->str, 1);
@@ -6649,15 +6746,6 @@ static void get_oper_time(ExplainState* es, PlanState* planstate, const Instrume
  */
 static void show_stream_send_time(ExplainState* es, const PlanState* planstate)
 {
-    int i = 0;
-    int j = 0;
-    Instrumentation* instr = NULL;
-    double send_time = 0;
-    double wait_quota_time = 0;
-    double os_send_time;
-    double serialize_time = 0;
-    double copy_time = 0;
-
     bool isSend = false;
     int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
 
@@ -6671,20 +6759,28 @@ static void show_stream_send_time(ExplainState* es, const PlanState* planstate)
         return;
     }
 
-    for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
+    for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
         ThreadInstrumentation* threadinstr =
+#ifdef ENABLE_MULTIPLE_NODES
             u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
+#else
+            u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
+#endif
         if (threadinstr == NULL)
             continue;
+#ifdef ENABLE_MULTIPLE_NODES
         char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
-        for (j = 0; j < dop; j++) {
-            instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
+#else
+        char* node_name = g_instance.exec_cxt.nodeName;
+#endif
+        for (int j = 0; j < dop; j++) {
+            Instrumentation* instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
             if (instr != NULL && instr->stream_senddata.loops == true) {
-                send_time = instr->stream_senddata.total_send_time;
-                wait_quota_time = instr->stream_senddata.total_wait_quota_time;
-                os_send_time = instr->stream_senddata.total_os_send_time;
-                serialize_time = instr->stream_senddata.total_serialize_time;
-                copy_time = instr->stream_senddata.total_copy_time;
+                double send_time = instr->stream_senddata.total_send_time;
+                double wait_quota_time = instr->stream_senddata.total_wait_quota_time;
+                double os_send_time = instr->stream_senddata.total_os_send_time;
+                double serialize_time = instr->stream_senddata.total_serialize_time;
+                double copy_time = instr->stream_senddata.total_copy_time;
 
                 es->planinfo->m_staticInfo->set_plan_name<false, true>();
                 es->planinfo->m_staticInfo->set_datanode_name(node_name, j, dop);
@@ -6735,9 +6831,13 @@ static void show_datanode_time(ExplainState* es, PlanState* planstate)
             appendStringInfoChar(es->str, '\n');
         ExplainOpenGroup("Actual In Detail", "Actual In Detail", false, es);
         for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
+#ifdef ENABLE_MULTIPLE_NODES
             char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
-
             ThreadInstrumentation* threadinstr = u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i);
+#else
+            char* node_name = g_instance.exec_cxt.nodeName;
+            ThreadInstrumentation* threadinstr = u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(1, 0);
+#endif
             if (threadinstr == NULL)
                 continue;
             executed = threadinstr->m_instrArray[0].instr.isExecute;
@@ -6857,7 +6957,11 @@ static void show_datanode_time(ExplainState* es, PlanState* planstate)
         if (u_sess->instr_cxt.global_instr->getInstruNodeNum() > 0) {
             for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
                 ThreadInstrumentation* threadinstr =
+#ifdef ENABLE_MULTIPLE_NODES
                     u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
+#else
+                    u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
+#endif
                 if (threadinstr == NULL)
                     continue;
                 for (j = 0; j < dop; j++) {
@@ -7011,8 +7115,6 @@ static void show_instrumentation_count(const char* qlabel, int which, const Plan
 {
     double nfiltered = 0.0;
     Instrumentation* instr = NULL;
-    int i = 0;
-    int j = 0;
     int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
 
     if (!es->analyze || !planstate->instrument)
@@ -7020,12 +7122,16 @@ static void show_instrumentation_count(const char* qlabel, int which, const Plan
 
     if (planstate->plan->plan_node_id > 0 && u_sess->instr_cxt.global_instr &&
         u_sess->instr_cxt.global_instr->isFromDataNode(planstate->plan->plan_node_id)) {
-        for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
+        for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
             ThreadInstrumentation* threadinstr =
+#ifdef ENABLE_MULTIPLE_NODES
                 u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
+#else
+                u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
+#endif
             if (threadinstr == NULL)
                 continue;
-            for (j = 0; j < dop; j++) {
+            for (int j = 0; j < dop; j++) {
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
                 if (instr != NULL && instr->nloops > 0) {
                     if (which == 1)
@@ -7283,7 +7389,11 @@ static void show_dfs_block_info(PlanState* planstate, ExplainState* es)
 
         if (es->detail) {
             for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
+#ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+                char* node_name = g_instance.exec_cxt.nodeName;
+#endif
                 for (j = 0; j < dop; j++) {
                     instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
                     if (instr == NULL)
@@ -7664,7 +7774,11 @@ static void show_storage_filter_info(PlanState* planstate, ExplainState* es)
 
         if (es->detail) {
             for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
+#ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+                char* node_name = g_instance.exec_cxt.nodeName;
+#endif
                 for (j = 0; j < dop; j++) {
                     instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
                     if (instr == NULL)
@@ -7676,7 +7790,7 @@ static void show_storage_filter_info(PlanState* planstate, ExplainState* es)
                         has_info = true;
                         ExplainOpenGroup("Plan", NULL, true, es);
                         if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo->m_runtimeinfo) {
-                            es->planinfo->m_runtimeinfo->put(i, 0, BLOOM_FILTER_INFO, BoolGetDatum(true));
+                            es->planinfo->m_runtimeinfo->put(i, 0, BLOOM_FILTER_INFO, true);
 
                             es->planinfo->m_datanodeInfo->set_plan_name<false, true>();
                             es->planinfo->m_datanodeInfo->set_datanode_name(node_name, j, dop);
@@ -7739,12 +7853,16 @@ static void show_modifytable_merge_info(const PlanState* planstate, ExplainState
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id);
                 if (instr == NULL)
                     continue;
+#ifdef ENABLE_MULTIPLE_NODES
                 char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+                char* node_name = g_instance.exec_cxt.nodeName;
+#endif
                 append_datanode_name(es, node_name, 1, 0);
 
                 if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo->m_runtimeinfo) {
-                    es->planinfo->m_runtimeinfo->put(i, 0, MERGE_INSERTED, Float8GetDatum(instr->nfiltered1));
-                    es->planinfo->m_runtimeinfo->put(i, 0, MERGE_UPDATED, Float8GetDatum(instr->nfiltered2));
+                    es->planinfo->m_runtimeinfo->put(i, 0, MERGE_INSERTED, instr->nfiltered1);
+                    es->planinfo->m_runtimeinfo->put(i, 0, MERGE_UPDATED, instr->nfiltered2);
 
                     es->planinfo->m_datanodeInfo->set_plan_name<false, true>();
                     appendStringInfo(es->planinfo->m_datanodeInfo->info_str, "%s ", node_name);
@@ -7905,6 +8023,13 @@ static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es)
     }
 
     rte = rt_fetch(rti, es->rtable);
+
+    if (rte == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                errmsg("Unable to get relation.")));
+    }
+
     /* Set object_type from rte->rtekind or rte->relkind for 'plan_table'. */
     if (es->plan && rte) {
         es->planinfo->m_planTableData->set_object_type(rte, &object_type);
@@ -7913,7 +8038,9 @@ static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es)
     switch (nodeTag(plan)) {
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
         case T_DfsScan:
         case T_DfsIndexScan:
         case T_IndexScan:
@@ -7929,7 +8056,8 @@ static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es)
         case T_ModifyTable:
         case T_VecModifyTable: {
             /* Assert it's on a real relation */
-            Assert(rte != NULL && rte->rtekind == RTE_RELATION);
+            Assert(rte != NULL);
+            Assert(rte->rtekind == RTE_RELATION);
             objectname = get_rel_name(rte->relid);
             if (es->verbose || es->plan)
                 namespc = get_namespace_name(get_rel_namespace(rte->relid));
@@ -7958,7 +8086,8 @@ static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es)
             objecttag = "Function Name";
         } break;
         case T_ValuesScan: {
-            Assert(rte != NULL && rte->rtekind == RTE_VALUES);
+            Assert(rte != NULL);
+            Assert(rte->rtekind == RTE_VALUES);
         } break;
         case T_CteScan: {
             /* Assert it's on a non-self-reference CTE */
@@ -8000,7 +8129,7 @@ static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es)
             appendStringInfo(tmpName, " %s", quote_identifier(objectname));
         }
 
-        if (objectname == NULL || (rte && rte->eref && strcmp(rte->eref->aliasname, objectname) != 0)) {
+        if (rte && rte->eref && (objectname == NULL || strcmp(rte->eref->aliasname, objectname) != 0)) {
             appendStringInfo(tmpName, " %s", quote_identifier(rte->eref->aliasname));
         }
 
@@ -8065,7 +8194,6 @@ static void show_on_duplicate_info(ModifyTableState* mtstate, ExplainState* es)
         ExplainPropertyList("Conflict Arbiter Indexes", idxNames, es);
     }
 }
-
 #ifndef PGXC
 /*
  * Show extra information for a ModifyTable node
@@ -8659,7 +8787,11 @@ static void showStreamnetwork(Stream* stream, ExplainState* es)
     if (u_sess->instr_cxt.global_instr && es->planinfo->m_runtimeinfo) {
         int dop = ((Plan*)stream)->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
         for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
+#ifdef ENABLE_MULTIPLE_NODES
             char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
+#else
+            char* node_name = g_instance.exec_cxt.nodeName;
+#endif
             for (int j = 0; j < dop; j++) {
                 instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, plan->plan_node_id, j);
                 if (instr == NULL)
@@ -8708,7 +8840,7 @@ static void ShowRunNodeInfo(const ExecNodes* en, ExplainState* es, const char* q
 {
     if (en != NULL && es->nodes) {
         StringInfo node_names = makeStringInfo();
-
+#ifdef ENABLE_MULTIPLE_NODES
         if (list_length(en->nodeList) == u_sess->pgxc_cxt.NumDataNodes) {
             appendStringInfo(node_names, "All datanodes");
         } else {
@@ -8718,7 +8850,7 @@ static void ShowRunNodeInfo(const ExecNodes* en, ExplainState* es, const char* q
 
             /* we show group name information except in single installation group scenario */
             if (ng_enable_nodegroup_explain()) {
-                char* group_name = ng_get_group_group_name(en->distribution.group_oid);
+                char* group_name = ng_get_dist_group_name((Distribution*)&(en->distribution));
                 appendStringInfo(node_names, "(%s) ", group_name);
             }
 
@@ -8732,7 +8864,9 @@ static void ShowRunNodeInfo(const ExecNodes* en, ExplainState* es, const char* q
                 sep = ", ";
             }
         }
-
+#else
+        appendStringInfo(node_names, "All datanodes");
+#endif
         ExplainPropertyText(qlabel, node_names->data, es);
         if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo->m_verboseInfo) {
             es->planinfo->m_verboseInfo->set_plan_name<false, true>();
@@ -8787,15 +8921,21 @@ static void ExplainRemoteQuery(RemoteQuery* plan, PlanState* planstate, List* an
         int node_no;
 
         if (en->primarynodelist) {
-            sep = "";
-            foreach (lcell, en->primarynodelist) {
-                NameData nodename = {{0}};
-                node_no = lfirst_int(lcell);
-                appendStringInfo(node_names,
-                    "%s%s",
-                    sep,
-                    get_pgxc_nodename(PGXCNodeGetNodeOid(node_no, PGXC_NODE_DATANODE), &nodename));
-                sep = ", ";
+            if (plan->exec_type == EXEC_ON_ALL_NODES) {
+                appendStringInfo(node_names, "All nodes");
+            } else {
+                char exec_node_type =
+                    (plan->exec_type == EXEC_ON_DATANODES) ? (PGXC_NODE_DATANODE) : (PGXC_NODE_COORDINATOR);
+                sep = "";
+                foreach (lcell, en->primarynodelist) {
+                    NameData nodename = {{0}};
+                    node_no = lfirst_int(lcell);
+                    appendStringInfo(node_names,
+                        "%s%s",
+                        sep,
+                        get_pgxc_nodename(PGXCNodeGetNodeOid(node_no, exec_node_type), &nodename));
+                    sep = ", ";
+                }
             }
 
             if (es->format == EXPLAIN_FORMAT_TEXT) {
@@ -8812,6 +8952,8 @@ static void ExplainRemoteQuery(RemoteQuery* plan, PlanState* planstate, List* an
                 appendStringInfo(node_names, "All datanodes");
                 es->datanodeinfo.all_datanodes = true;
             } else {
+                char exec_node_type =
+                    (plan->exec_type == EXEC_ON_DATANODES) ? (PGXC_NODE_DATANODE) : (PGXC_NODE_COORDINATOR);
                 es->datanodeinfo.all_datanodes = false;
                 es->datanodeinfo.len_nodelist = list_length(en->nodeList);
                 if (es->datanodeinfo.node_index) {
@@ -8825,7 +8967,7 @@ static void ExplainRemoteQuery(RemoteQuery* plan, PlanState* planstate, List* an
 
                 /* we show group name information except in single installation group scenario */
                 if (ng_enable_nodegroup_explain()) {
-                    char* group_name = ng_get_group_group_name(en->distribution.group_oid);
+                    char* group_name = ng_get_dist_group_name(&(en->distribution));
                     appendStringInfo(node_names, "(%s) ", group_name);
                 }
 
@@ -8837,7 +8979,7 @@ static void ExplainRemoteQuery(RemoteQuery* plan, PlanState* planstate, List* an
                     appendStringInfo(node_names,
                         "%s%s",
                         sep,
-                        get_pgxc_nodename(PGXCNodeGetNodeOid(node_no, PGXC_NODE_DATANODE), &nodename));
+                        get_pgxc_nodename(PGXCNodeGetNodeOid(node_no, exec_node_type), &nodename));
                     sep = ", ";
                 }
             }
@@ -9061,7 +9203,7 @@ void PlanInformation::init(ExplainState* es, int plansize, int num_nodes, bool q
     /* Init data struct for explain plan. */
     if (es->plan) {
         m_planTableData = (PlanTable*)palloc0(sizeof(PlanTable));
-        if ((IsExplainPlanSelectForUpdateStmt || IS_SINGLE_NODE) && plansize == 0)
+        if (IsExplainPlanSelectForUpdateStmt && plansize == 0)
             plansize = 1;
         m_planTableData->init_plan_table_data(plansize);
     } else
@@ -9426,6 +9568,7 @@ void PlanTable::init_plan_table_data(int num_plan_nodes)
 
 TupleDesc PlanTable::getTupleDesc()
 {
+
     TupleDesc tupdesc;
     int attnum;
     int cur = 1;
@@ -9445,7 +9588,7 @@ TupleDesc PlanTable::getTupleDesc()
         attnum = attnum - 1;
     }
 
-    tupdesc = CreateTemplateTupleDesc(attnum, false);
+    tupdesc = CreateTemplateTupleDesc(attnum, false, TAM_HEAP);
     for (int i = 0; i < SLOT_NUMBER; i++) {
         bool add_slot = false;
 
@@ -9484,11 +9627,12 @@ TupleDesc PlanTable::getTupleDesc()
 
 TupleDesc PlanTable::getTupleDesc_detail()
 {
+
     TupleDesc tupdesc;
     int attnum = EXPLAIN_TOTAL_ATTNUM;
     int i = 1;
 
-    tupdesc = CreateTemplateTupleDesc(attnum, false);
+    tupdesc = CreateTemplateTupleDesc(attnum, false, TAM_HEAP);
     TupleDescInitEntry(tupdesc, (AttrNumber)i++, "query id", INT8OID, -1, 0);
 
     TupleDescInitEntry(tupdesc, (AttrNumber)i++, "plan parent node id", INT4OID, -1, 0);
@@ -9570,7 +9714,7 @@ TupleDesc PlanTable::getTupleDesc(const char* attname)
 {
     TupleDesc tupdesc;
 
-    tupdesc = CreateTemplateTupleDesc(1, false);
+    tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
 
     TupleDescInitEntry(tupdesc, (AttrNumber)1, attname, TEXTOID, -1, 0);
     return tupdesc;
@@ -9578,7 +9722,7 @@ TupleDesc PlanTable::getTupleDesc(const char* attname)
 
 void PlanTable::put(int type, Datum value)
 {
-    AssertEreport(type < SLOT_NUMBER && type >= 0 && m_col_loc[type] >= 0, MOD_EXECUTOR, "unexpect input value");
+    AssertEreport(type < SLOT_NUMBER && m_col_loc[type] >= 0, MOD_EXECUTOR, "unexpect input value");
     m_data[m_plan_node_id - 1][m_col_loc[type]] = value;
     m_isnull[m_plan_node_id - 1][m_col_loc[type]] = false;
 }
@@ -9866,7 +10010,7 @@ void PlanTable::set_plan_table_ops(int plan_node_id, char* operation, char* opti
      * However we need collect plan info for select for update.
      */
     if (plan_node_id == 0) {
-        if (IsExplainPlanSelectForUpdateStmt || IS_SINGLE_NODE)
+        if (IsExplainPlanSelectForUpdateStmt)
             plan_node_id = 1;
         else
             return;
@@ -9982,7 +10126,7 @@ void PlanTable::set_plan_table_objs(
      * However we need collect plan info for select for update.
      */
     if (plan_node_id == 0) {
-        if (IsExplainPlanSelectForUpdateStmt || IS_SINGLE_NODE)
+        if (IsExplainPlanSelectForUpdateStmt)
             plan_node_id = 1;
         else
             return;
@@ -10038,7 +10182,7 @@ void PlanTable::set_plan_table_projection(int plan_node_id, List* tlist)
      * However we need collect plan info for select for update.
      */
     if (plan_node_id == 0) {
-        if (IsExplainPlanSelectForUpdateStmt || IS_SINGLE_NODE)
+        if (IsExplainPlanSelectForUpdateStmt)
             plan_node_id = 1;
         else
             return;
@@ -10046,7 +10190,7 @@ void PlanTable::set_plan_table_projection(int plan_node_id, List* tlist)
 
     m_plan_table[plan_node_id - 1]->m_datum->projection = makeStringInfo();
 
-    /* Add the targetlist into column 'projection' till the length exceed PROJECTIONLEN. */
+    /* Add the targetlist into column 'projection' till the length exceed PROJECTIONLEN.*/
     foreach (lc, tlist) {
         if (m_plan_table[plan_node_id - 1]->m_datum->projection->len + strlen((const char*)lfirst(lc)) > PROJECTIONLEN)
             break;
@@ -10105,7 +10249,7 @@ void PlanTable::insert_plan_table_tuple()
         if (m_plan_table[i]->m_datum->projection != NULL)
             new_record[PT_PROJECTION] = CStringGetTextDatum(m_plan_table[i]->m_datum->projection->data);
 
-        tuple = heap_form_tuple(plan_table_des, new_record, m_plan_table[i]->m_isnull);
+        tuple = (HeapTuple)heap_form_tuple(plan_table_des, new_record, m_plan_table[i]->m_isnull);
         /*
          * Insert new record into plan_table table
          */
@@ -10169,7 +10313,7 @@ int checkPermsForPlanTable(RangeTblEntry* rte)
         else
             return 0;
     } else if (rte->requiredPerms == (ACL_SELECT + ACL_DELETE) /* for plan_table. */
-             || rte->requiredPerms == ACL_DELETE) {  /* for plan_table_data. */
+             || rte->requiredPerms == ACL_DELETE /* for plan_table_data.*/) {
         /* For delete action */
         if (OnlyDeleteFromPlanTable || superuser())
             return 1;
@@ -10372,6 +10516,7 @@ static void show_tablesample(Plan* plan, PlanState* planstate, List* ancestors, 
             ExplainPropertyText("Repeatable Seed", repeatable, es);
         }
     }
+    list_free_deep(params);
 }
 
 void PlanTable::flush_data_to_file()
@@ -10393,7 +10538,7 @@ void PlanTable::flush_data_to_file()
 
     for (i = 0; i < m_plan_size; i++) {
         values = m_multi_info[0][i][0].m_Datum;
-        from_datanode = DatumGetBool(values[FROM_DATANODE]);
+        from_datanode = values[FROM_DATANODE];
         node_num = from_datanode ? m_data_size : 1;
 
         for (j = 0; j < node_num; j++) {
@@ -10481,7 +10626,7 @@ void insert_obsscaninfo(
     values[Anum_pg_obsscaninfo_file_type - 1] = CStringGetTextDatum(file_format);
     values[Anum_pg_obsscaninfo_time_stamp - 1] = TimestampTzGetDatum(ts);
     values[Anum_pg_obsscaninfo_actual_time - 1] = Float8GetDatum(total_time);
-    values[Anum_pg_obsscaninfo_file_scanned - 1] = Int64GetDatum(file_count);
+    values[Anum_pg_obsscaninfo_file_scanned - 1] = file_count;
     values[Anum_pg_obsscaninfo_data_size - 1] = Float8GetDatum(scan_data_size);
     values[Anum_pg_obsscaninfo_billing_info - 1] = CStringGetTextDatum(billing_info);
 
@@ -10491,7 +10636,7 @@ void insert_obsscaninfo(
     (void)simple_heap_insert(pgobsscaninforel, htup);
 
     CatalogUpdateIndexes(pgobsscaninforel, htup);
-    heap_freetuple_ext(htup);
+    tableam_tops_free_tuple(htup);
     heap_close(pgobsscaninforel, RowExclusiveLock);
 
     /* insert the new row into pg_obsscaninfo catalog table */
@@ -10500,7 +10645,7 @@ void insert_obsscaninfo(
     (void)simple_heap_insert(pgobsscaninforel, htup);
 
     CatalogUpdateIndexes(pgobsscaninforel, htup);
-    heap_freetuple_ext(htup);
+    tableam_tops_free_tuple(htup);
     heap_close(pgobsscaninforel, RowExclusiveLock);
 
     elog(DEBUG1, "SyncUp with other CN");
@@ -10571,3 +10716,22 @@ void insert_obsscaninfo(
     pfree_ext(insert_stmt2);
 }
 
+static void show_unique_check_info(PlanState *planstate, ExplainState *es)
+{
+    Agg *aggnode = (Agg *) planstate->plan;
+
+    if (aggnode->unique_check) {
+        const char *str = "Unique Check Required";
+
+        if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo->m_verboseInfo) {
+            es->planinfo->m_verboseInfo->set_plan_name<false, true>();
+            appendStringInfo(es->planinfo->m_verboseInfo->info_str, "%s\n", str);
+        }
+        else {
+            if (es->format == EXPLAIN_FORMAT_TEXT && !es->wlm_statistics_plan_max_digit) {
+                appendStringInfoSpaces(es->str, es->indent * 2);
+                appendStringInfo(es->str, "%s\n", str);
+            }
+        }
+    }
+}

@@ -37,6 +37,7 @@
 #include "utils/date.h"
 #include "utils/nabstime.h"
 #include "utils/guc.h"
+#include "pgxc/groupmgr.h"
 #include "pgxc/locator.h"
 #include "utils/typcache.h"
 #include "vecexecutor/vectorbatch.h"
@@ -44,9 +45,8 @@
 #endif
 
 #ifndef ENABLE_MULTIPLE_NODES
-#define EREPORT_UNSUPPORTED_FEATURE_IN_SINGLE_MODE  \
-    ereport(ERROR,  \
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported proc in single node mode.")))
+#define EREPORT_UNSUPPORTED_FEATURE_IN_SINGLE_MODE \
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported proc in single node mode.")))
 #endif
 
 /* Note: this is used for both "char" and boolean datatypes */
@@ -121,7 +121,7 @@ Datum hashfloat4(PG_FUNCTION_ARGS)
      */
     key8 = key;
 
-    return hash_any((unsigned char*)&key8, sizeof(key8));
+    return hash_any((unsigned char *)&key8, sizeof(key8));
 }
 
 Datum hashfloat8(PG_FUNCTION_ARGS)
@@ -135,39 +135,39 @@ Datum hashfloat8(PG_FUNCTION_ARGS)
     if (key == (float8)0)
         PG_RETURN_UINT32(0);
 
-    return hash_any((unsigned char*)&key, sizeof(key));
+    return hash_any((unsigned char *)&key, sizeof(key));
 }
 
 Datum hashoidvector(PG_FUNCTION_ARGS)
 {
-    oidvector* key = (oidvector*)PG_GETARG_POINTER(0);
+    oidvector *key = (oidvector *)PG_GETARG_POINTER(0);
 
-    return hash_any((unsigned char*)key->values, key->dim1 * sizeof(Oid));
+    return hash_any((unsigned char *)key->values, key->dim1 * sizeof(Oid));
 }
 
 Datum hashint2vector(PG_FUNCTION_ARGS)
 {
-    int2vector* key = (int2vector*)PG_GETARG_POINTER(0);
+    int2vector *key = (int2vector *)PG_GETARG_POINTER(0);
 
-    return hash_any((unsigned char*)key->values, key->dim1 * sizeof(int2));
+    return hash_any((unsigned char *)key->values, key->dim1 * sizeof(int2));
 }
 
 Datum hashname(PG_FUNCTION_ARGS)
 {
-    char* key = NameStr(*PG_GETARG_NAME(0));
+    char *key = NameStr(*PG_GETARG_NAME(0));
     unsigned keylen = strlen(key);
 
-    return hash_any((unsigned char*)key, keylen);
+    return hash_any((unsigned char *)key, keylen);
 }
 
 Datum hashtext(PG_FUNCTION_ARGS)
 {
-    text* key = PG_GETARG_TEXT_PP(0);
+    text *key = PG_GETARG_TEXT_PP(0);
     Datum result;
 
 #ifdef PGXC
     if (g_instance.attr.attr_sql.string_hash_compatible) {
-        result = hash_any((unsigned char*)VARDATA_ANY(key), bcTruelen(key));
+        result = hash_any((unsigned char *)VARDATA_ANY(key), bcTruelen(key));
     } else {
 #endif
         /*
@@ -175,7 +175,7 @@ Datum hashtext(PG_FUNCTION_ARGS)
          * it as a separate function in case we someday want to do something
          * different in non-C locales.	(See also hashbpchar, if so.)
          */
-        result = hash_any((unsigned char*)VARDATA_ANY(key), VARSIZE_ANY_EXHDR(key));
+        result = hash_any((unsigned char *)VARDATA_ANY(key), VARSIZE_ANY_EXHDR(key));
 #ifdef PGXC
     }
 #endif
@@ -192,15 +192,15 @@ Datum hashtext(PG_FUNCTION_ARGS)
  */
 Datum hashvarlena(PG_FUNCTION_ARGS)
 {
-    struct varlena* key = PG_GETARG_VARLENA_PP(0);
+    struct varlena *key = PG_GETARG_VARLENA_PP(0);
     Datum result;
 
 #ifdef PGXC
     if (g_instance.attr.attr_sql.string_hash_compatible) {
-        result = hash_any((unsigned char*)VARDATA_ANY(key), bcTruelen(key));
+        result = hash_any((unsigned char *)VARDATA_ANY(key), bcTruelen(key));
     } else {
 #endif
-        result = hash_any((unsigned char*)VARDATA_ANY(key), VARSIZE_ANY_EXHDR(key));
+        result = hash_any((unsigned char *)VARDATA_ANY(key), VARSIZE_ANY_EXHDR(key));
 #ifdef PGXC
     }
 #endif
@@ -340,7 +340,7 @@ Datum hashvarlena(PG_FUNCTION_ARGS)
  * by using the final values of both b and c.  b is perhaps a little less
  * well mixed than c, however.
  */
-Datum hash_any(register const unsigned char* k, register int keylen)
+Datum hash_any(register const unsigned char *k, register int keylen)
 {
     register uint32 a, b, c, len;
 
@@ -351,7 +351,7 @@ Datum hash_any(register const unsigned char* k, register int keylen)
     /* If the source pointer is word-aligned, we use word-wide fetches */
     if (((intptr_t)k & UINT32_ALIGN_MASK) == 0) {
         /* Code path for aligned source data */
-        register const uint32* ka = (const uint32*)k;
+        register const uint32 *ka = (const uint32 *)k;
 
         /* handle most of the key */
         while (len >= 12) {
@@ -364,86 +364,86 @@ Datum hash_any(register const unsigned char* k, register int keylen)
         }
 
         /* handle the last 11 bytes */
-        k = (const unsigned char*)ka;
+        k = (const unsigned char *)ka;
 #ifdef WORDS_BIGENDIAN
         switch (len) {
             case 11:
                 c += ((uint32)k[10] << 8);
-                /* fall-through */
+            /* fall-through */
             case 10:
                 c += ((uint32)k[9] << 16);
-                /* fall-through */
+            /* fall-through */
             case 9:
                 c += ((uint32)k[8] << 24);
-                /* the lowest byte of c is reserved for the length */
-                /* fall-through */
+            /* the lowest byte of c is reserved for the length */
+            /* fall-through */
             case 8:
                 b += ka[1];
                 a += ka[0];
                 break;
             case 7:
                 b += ((uint32)k[6] << 8);
-                /* fall-through */
+            /* fall-through */
             case 6:
                 b += ((uint32)k[5] << 16);
-                /* fall-through */
+            /* fall-through */
             case 5:
                 b += ((uint32)k[4] << 24);
-                /* fall-through */
+            /* fall-through */
             case 4:
                 a += ka[0];
                 break;
             case 3:
                 a += ((uint32)k[2] << 8);
-                /* fall-through */
+            /* fall-through */
             case 2:
                 a += ((uint32)k[1] << 16);
-                /* fall-through */
+            /* fall-through */
             case 1:
                 a += ((uint32)k[0] << 24);
-                /* case 0: nothing left to add */
-                /* fall-through */
+            /* case 0: nothing left to add */
+            /* fall-through */
             default:
                 break;
         }
-#else        /* !WORDS_BIGENDIAN */
+#else  /* !WORDS_BIGENDIAN */
         switch (len) {
             case 11:
                 c += ((uint32)k[10] << 24);
-                /* fall-through */
+            /* fall-through */
             case 10:
                 c += ((uint32)k[9] << 16);
-                /* fall-through */
+            /* fall-through */
             case 9:
                 c += ((uint32)k[8] << 8);
-                /* the lowest byte of c is reserved for the length */
-                /* fall-through */
+            /* the lowest byte of c is reserved for the length */
+            /* fall-through */
             case 8:
                 b += ka[1];
                 a += ka[0];
                 break;
             case 7:
                 b += ((uint32)k[6] << 16);
-                /* fall-through */
+            /* fall-through */
             case 6:
                 b += ((uint32)k[5] << 8);
-                /* fall-through */
+            /* fall-through */
             case 5:
                 b += k[4];
-                /* fall-through */
+            /* fall-through */
             case 4:
                 a += ka[0];
                 break;
             case 3:
                 a += ((uint32)k[2] << 16);
-                /* fall-through */
+            /* fall-through */
             case 2:
                 a += ((uint32)k[1] << 8);
-                /* fall-through */
+            /* fall-through */
             case 1:
                 a += k[0];
-                /* case 0: nothing left to add */
-                /* fall-through */
+            /* case 0: nothing left to add */
+            /* fall-through */
             default:
                 break;
         }
@@ -471,39 +471,39 @@ Datum hash_any(register const unsigned char* k, register int keylen)
             /* all the case statements fall through */
             case 11:
                 c += ((uint32)k[10] << 8);
-                /* fall-through */
+            /* fall-through */
             case 10:
                 c += ((uint32)k[9] << 16);
-                /* fall-through */
+            /* fall-through */
             case 9:
                 c += ((uint32)k[8] << 24);
-                /* the lowest byte of c is reserved for the length */
-                /* fall-through */
+            /* the lowest byte of c is reserved for the length */
+            /* fall-through */
             case 8:
                 b += k[7];
-                /* fall-through */
+            /* fall-through */
             case 7:
                 b += ((uint32)k[6] << 8);
-                /* fall-through */
+            /* fall-through */
             case 6:
                 b += ((uint32)k[5] << 16);
-                /* fall-through */
+            /* fall-through */
             case 5:
                 b += ((uint32)k[4] << 24);
-                /* fall-through */
+            /* fall-through */
             case 4:
                 a += k[3];
-                /* fall-through */
+            /* fall-through */
             case 3:
                 a += ((uint32)k[2] << 8);
-                /* fall-through */
+            /* fall-through */
             case 2:
                 a += ((uint32)k[1] << 16);
-                /* fall-through */
+            /* fall-through */
             case 1:
                 a += ((uint32)k[0] << 24);
-                /* case 0: nothing left to add */
-                /* fall-through */
+            /* case 0: nothing left to add */
+            /* fall-through */
             default:
                 break;
         }
@@ -512,39 +512,39 @@ Datum hash_any(register const unsigned char* k, register int keylen)
             /* all the case statements fall through */
             case 11:
                 c += ((uint32)k[10] << 24);
-                /* fall-through */
+            /* fall-through */
             case 10:
                 c += ((uint32)k[9] << 16);
-                /* fall-through */
+            /* fall-through */
             case 9:
                 c += ((uint32)k[8] << 8);
-                /* the lowest byte of c is reserved for the length */
-                /* fall-through */
+            /* the lowest byte of c is reserved for the length */
+            /* fall-through */
             case 8:
                 b += ((uint32)k[7] << 24);
-                /* fall-through */
+            /* fall-through */
             case 7:
                 b += ((uint32)k[6] << 16);
-                /* fall-through */
+            /* fall-through */
             case 6:
                 b += ((uint32)k[5] << 8);
-                /* fall-through */
+            /* fall-through */
             case 5:
                 b += k[4];
-                /* fall-through */
+            /* fall-through */
             case 4:
                 a += ((uint32)k[3] << 24);
-                /* fall-through */
+            /* fall-through */
             case 3:
                 a += ((uint32)k[2] << 16);
-                /* fall-through */
+            /* fall-through */
             case 2:
                 a += ((uint32)k[1] << 8);
-                /* fall-through */
+            /* fall-through */
             case 1:
                 a += k[0];
-                /* case 0: nothing left to add */
-                /* fall-through */
+            /* case 0: nothing left to add */
+            /* fall-through */
             default:
                 break;
         }
@@ -650,6 +650,7 @@ Datum compute_hash(Oid type, Datum value, char locator)
         case INT2VECTOROID:
             return DirectFunctionCall1(hashint2vector, value);
 
+        case CLOBOID:
         case NVARCHAR2OID:
         case VARCHAROID:
         case TEXTOID:
@@ -680,8 +681,9 @@ Datum compute_hash(Oid type, Datum value, char locator)
 
         case RAWOID:
         case BYTEAOID:
+        case BYTEAWITHOUTORDERCOLOID:
+        case BYTEAWITHOUTORDERWITHEQUALCOLOID:
             return DirectFunctionCall1(hashvarlena, value);
-
         case DATEOID:
             tmp32 = DatumGetDateADT(value);
             if (locator == LOCATOR_TYPE_HASH)
@@ -706,12 +708,12 @@ Datum compute_hash(Oid type, Datum value, char locator)
             return DirectFunctionCall1(uuid_hash, value);
 
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("Unhandled datatype for modulo or hash distribution\n")));
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("Unhandled datatype for modulo or hash distribution\n")));
     }
     /* Control should not come here. */
-    ereport(
-        ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("Unhandled datatype for modulo or hash distribution\n")));
+    ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("Unhandled datatype for modulo or hash distribution\n")));
     /* Keep compiler silent */
     return (Datum)0;
 }
@@ -733,7 +735,7 @@ uint32 hashValueCombination(uint32 hashValue, Oid colType, Datum val, bool allIs
  * For some cases of hash or modulo distribution, a function might
  * be required or not.
  */
-char* get_compute_hash_function(Oid type, char locator)
+char *get_compute_hash_function(Oid type, char locator)
 {
     switch (type) {
         case INT8OID:
@@ -763,6 +765,7 @@ char* get_compute_hash_function(Oid type, char locator)
             return "hashname";
         case INT2VECTOROID:
             return "hashint2vector";
+        case CLOBOID:
         case VARCHAROID:
         case TEXTOID:
             return "hashtext";
@@ -781,6 +784,8 @@ char* get_compute_hash_function(Oid type, char locator)
             return "hashint8";
         case BPCHAROID:
             return "hashbpchar";
+        case BYTEAWITHOUTORDERWITHEQUALCOLOID:
+        case BYTEAWITHOUTORDERCOLOID:
         case BYTEAOID:
             return "hashvarlena";
         case TIMEOID:
@@ -798,8 +803,8 @@ char* get_compute_hash_function(Oid type, char locator)
             return "uuid_hash";
 
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("Unhandled datatype for modulo or hash distribution\n")));
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("Unhandled datatype for modulo or hash distribution\n")));
     }
 
     /* Keep compiler quiet */
@@ -824,7 +829,10 @@ Datum bucketint4(PG_FUNCTION_ARGS)
     } else {
         hashValue = (long)compute_hash(INT4OID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -849,7 +857,10 @@ Datum bucketint2(PG_FUNCTION_ARGS)
     } else {
         hashValue = (long)compute_hash(INT2OID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -874,7 +885,10 @@ Datum bucketint8(PG_FUNCTION_ARGS)
     } else {
         hashValue = (long)compute_hash(INT8OID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -898,7 +912,10 @@ Datum bucketint1(PG_FUNCTION_ARGS)
     } else {
         hashValue = (long)compute_hash(INT1OID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -918,12 +935,15 @@ Datum bucketbpchar(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(BPCHAROID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(BPCHAROID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -942,12 +962,15 @@ Datum bucketchar(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(CHAROID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(CHAROID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -967,12 +990,15 @@ Datum bucketvarchar(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(VARCHAROID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(VARCHAROID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -992,12 +1018,15 @@ Datum bucketnvarchar2(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(NVARCHAR2OID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(NVARCHAR2OID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1016,12 +1045,15 @@ Datum bucketdate(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(DATEOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(DATEOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1041,12 +1073,15 @@ Datum buckettime(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(TIMEOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(TIMEOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1066,12 +1101,15 @@ Datum buckettimestamp(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(TIMESTAMPOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(TIMESTAMPOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1091,12 +1129,15 @@ Datum buckettimestamptz(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(TIMESTAMPTZOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(TIMESTAMPTZOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1116,12 +1157,15 @@ Datum bucketinterval(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(INTERVALOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(INTERVALOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1140,12 +1184,15 @@ Datum buckettimetz(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(TIMETZOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(TIMETZOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1165,12 +1212,15 @@ Datum bucketsmalldatetime(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(SMALLDATETIMEOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(SMALLDATETIMEOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1190,12 +1240,15 @@ Datum bucketnumeric(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(NUMERICOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(NUMERICOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1216,12 +1269,15 @@ Datum bucketoid(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(OIDOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(OIDOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1241,11 +1297,14 @@ Datum bucketabstime(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0)   /* hash */
+    if (flag == 0) /* hash */
         hashValue = (long)compute_hash(ABSTIMEOID, value, LOCATOR_TYPE_HASH);
     else
         hashValue = (long)compute_hash(ABSTIMEOID, value, LOCATOR_TYPE_MODULO);
-    /* pick up exec node based on bucket list in pgxc_group */
+        // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1265,12 +1324,15 @@ Datum bucketreltime(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(RELTIMEOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(RELTIMEOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1290,12 +1352,15 @@ Datum bucketcash(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(CASHOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(CASHOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1315,12 +1380,15 @@ Datum bucketbytea(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(BYTEAOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(BYTEAOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1340,12 +1408,15 @@ Datum bucketraw(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(RAWOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(RAWOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1365,12 +1436,15 @@ Datum bucketbool(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(BOOLOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(BOOLOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1390,12 +1464,15 @@ Datum bucketname(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(NAMEOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(NAMEOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1415,12 +1492,15 @@ Datum bucketint2vector(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(INT2VECTOROID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(INT2VECTOROID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1440,12 +1520,15 @@ Datum buckettext(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(TEXTOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(TEXTOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1465,12 +1548,15 @@ Datum bucketuuid(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(UUIDOID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(UUIDOID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1490,12 +1576,15 @@ Datum bucketoidvector(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(OIDVECTOROID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(OIDVECTOROID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1515,12 +1604,15 @@ Datum bucketfloat4(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(FLOAT4OID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(FLOAT4OID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1540,12 +1632,15 @@ Datum bucketfloat8(PG_FUNCTION_ARGS)
     int flag = PG_GETARG_INT32(1);
     long hashValue;
 
-    if (flag == 0) {  /* hash */
+    if (flag == 0) { /* hash */
         hashValue = (long)compute_hash(FLOAT8OID, value, LOCATOR_TYPE_HASH);
     } else {
         hashValue = (long)compute_hash(FLOAT8OID, value, LOCATOR_TYPE_MODULO);
     }
-    /* pick up exec node based on bucket list in pgxc_group */
+    // pick up exec node based on bucket list in pgxc_group
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     bucket = compute_modulo(abs(hashValue), BUCKETDATALEN);
     result = Int32GetDatum(bucket);
     return result;
@@ -1567,7 +1662,7 @@ Datum getbucket(PG_FUNCTION_ARGS)
     int32 tupTypmod;
     TupleDesc tupdesc;
     HeapTupleData tmptup;
-    HeapTupleData* tuple = NULL;
+    HeapTupleData *tuple = NULL;
     uint32 hashValue = 0;
     Datum result = 0;
     bool allIsNull = true;
@@ -1588,6 +1683,10 @@ Datum getbucket(PG_FUNCTION_ARGS)
     tmptup.t_data = td;
     tuple = &tmptup;
 
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
+
     for (i = 0; i < tupdesc->natts; i++) {
         Datum val = heap_getattr(tuple, i + 1, tupdesc, &isnull);
         Oid colType = tupdesc->attrs[i]->atttypid;
@@ -1607,7 +1706,7 @@ Datum getbucket(PG_FUNCTION_ARGS)
 #endif
 }
 
-uint32 hash_multikey(MultiHashKey* mkeys)
+uint32 hash_multikey(MultiHashKey *mkeys)
 {
     uint32 hashValue = 0;
     bool allIsNull = true;
@@ -1615,8 +1714,8 @@ uint32 hash_multikey(MultiHashKey* mkeys)
 
     for (uint32 i = 0; i < mkeys->keyNum; i++) {
         if (!mkeys->isNulls[i]) {
-            hashValue =
-                hashValueCombination(hashValue, mkeys->keyTypes[i], mkeys->keyValues[i], allIsNull, locatorType);
+            hashValue = hashValueCombination(hashValue, mkeys->keyTypes[i], mkeys->keyValues[i], allIsNull,
+                                             locatorType);
             allIsNull = false;
         }
     }
@@ -1624,26 +1723,30 @@ uint32 hash_multikey(MultiHashKey* mkeys)
     return hashValue;
 }
 
-ScalarVector* vgetbucket(PG_FUNCTION_ARGS)
+ScalarVector *vgetbucket(PG_FUNCTION_ARGS)
 {
-    VectorBatch* batch = (VectorBatch*)PG_GETARG_DATUM(0);
-    ScalarVector* vecflag = PG_GETARG_VECTOR(1);
+    VectorBatch *batch = (VectorBatch *)PG_GETARG_DATUM(0);
+    ScalarVector *vecflag = PG_GETARG_VECTOR(1);
     char flag = (char)vecflag->m_vals[0];
-    ScalarVector* presultVector = PG_GETARG_VECTOR(3);
+    ScalarVector *presultVector = PG_GETARG_VECTOR(3);
 
     int32 nvalues = PG_GETARG_INT32(2);
-    ScalarValue* presult = PG_GETARG_VECVAL(3);
-    uint8* pflagsRes = (uint8*)(PG_GETARG_VECTOR(3)->m_flag);
-    bool* pselection = PG_GETARG_SELECTION(4);
+    ScalarValue *presult = PG_GETARG_VECVAL(3);
+    uint8 *pflagsRes = (uint8 *)(PG_GETARG_VECTOR(3)->m_flag);
+    bool *pselection = PG_GETARG_SELECTION(4);
 
     uint32 hashValue[BatchMaxSize] = {0};
     bool allIsNull[BatchMaxSize];
-    ScalarVector* pDistributeVec = NULL;
+    ScalarVector *pDistributeVec = NULL;
     Datum val = 0;
     errno_t rc;
 
     rc = memset_s(allIsNull, BatchMaxSize, 1, BatchMaxSize);
     securec_check(rc, "", "");
+
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
 
     if (pselection == NULL) {
         for (int j = 0; j < batch->m_cols; j++) {
@@ -1658,7 +1761,7 @@ ScalarVector* vgetbucket(PG_FUNCTION_ARGS)
                      * adds a byte to store the length of the data
                      */
                     if (colType == INTERVALOID || colType == TIMETZOID) {
-                        val = PointerGetDatum((char*)val + VARHDRSZ_SHORT);
+                        val = PointerGetDatum((char *)val + VARHDRSZ_SHORT);
                     }
                     hashValue[i] = hashValueCombination(hashValue[i], colType, val, allIsNull[i], flag);
                     allIsNull[i] = false;
@@ -1688,7 +1791,7 @@ ScalarVector* vgetbucket(PG_FUNCTION_ARGS)
                          * adds a byte to store the length of the data
                          */
                         if (colType == INTERVALOID || colType == TIMETZOID) {
-                            val = PointerGetDatum((char*)val + VARHDRSZ_SHORT);
+                            val = PointerGetDatum((char *)val + VARHDRSZ_SHORT);
                         }
                         hashValue[i] = hashValueCombination(hashValue[i], colType, val, allIsNull[i], flag);
                         allIsNull[i] = false;

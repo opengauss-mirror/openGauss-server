@@ -36,7 +36,7 @@
 #endif
 #include "utils/elog.h"
 #include "gssignal/gs_signal.h"
-#include "storage/s_lock.h"
+#include "storage/lock/s_lock.h"
 #include "storage/spin.h"
 #include "threadpool/threadpool.h"
 #include "gs_thread.h"
@@ -239,7 +239,8 @@ static int gs_signal_set_signal_by_threadid(ThreadId thread_id, int signo)
     bool found = false;
     gs_thread_t curThread = gs_thread_get_cur_thread();
 
-    Assert(signo >= 0 && signo < GS_SIGNAL_COUNT);
+    Assert(signo >= 0);
+    Assert(signo < GS_SIGNAL_COUNT);
 
     if (NULL == signal_slot) {
         write_stderr(
@@ -256,8 +257,9 @@ static int gs_signal_set_signal_by_threadid(ThreadId thread_id, int signo)
     }
     local_node = pGsSignal->sig_pool.used_head;
     for (; local_node != NULL; local_node = local_node->next) {
-        if ((local_node->sig_data.signo == (unsigned int)signo) &&
-            (signo != SIGCHLD || local_node->sig_data.thread.thid == curThread.thid)) {
+        bool isFound = (local_node->sig_data.signo == (unsigned int)signo) &&
+            (signo != SIGCHLD || local_node->sig_data.thread.thid == curThread.thid);
+        if (isFound) {
             found = true;
             break;
         }
@@ -642,7 +644,8 @@ static gs_sigfunc gs_signal_register_handler(GsSignal* gs_signal, int signo, gs_
     gs_sigfunc prefun;
 
     Assert(gs_signal != NULL);
-    Assert(signo >= 0 && signo < GS_SIGNAL_COUNT);
+    Assert(signo >= 0);
+    Assert(signo < GS_SIGNAL_COUNT);
 
     prefun = gs_signal->handlerList[signo];
     gs_signal->handlerList[signo] = fun;
@@ -669,14 +672,15 @@ static bool gs_signal_handle_check(const GsSndSignal* local_node)
                 (errmodule(MOD_STREAM), errcode(ERRCODE_LOG),
                     errmsg("receive stop signal from queryid %lu, but current queryid is %lu.",
                         local_node->check.debug_query_id,
-                        u_sess != NULL ? u_sess->debug_query_id : 0)));
+                        (u_sess != NULL) ? u_sess->debug_query_id : 0)));
             return false;
         }
         case SIGNAL_CHECK_SESS_KEY: {
             return (u_sess != NULL && local_node->check.session_id == u_sess->session_id);
         }
-        default: 
+        default: {
             return true;
+        }
     }
 }
 

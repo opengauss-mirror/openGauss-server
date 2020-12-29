@@ -43,11 +43,11 @@ typedef char bool;
 
 #endif /* __cplusplus */
 
-typedef void *(*OpenFunc)(char *url, char *mode);
-typedef size_t (*WriteFunc)(void *buf, size_t size, size_t len, void *roach_context, bool complete_line);
-typedef size_t (*ReadFunc)(void *buf, size_t size, size_t len, void *roach_context);
-typedef int (*CloseFunc)(void *roach_context);
-typedef int (*ErrorFunc)(void *roach_context);
+typedef void* (*OpenFunc)(char* url, char* mode);
+typedef size_t (*WriteFunc)(void* buf, size_t size, size_t len, void* roach_context, bool complete_line);
+typedef size_t (*ReadFunc)(void* buf, size_t size, size_t len, void* roach_context);
+typedef int (*CloseFunc)(void* roach_context);
+typedef int (*ErrorFunc)(void* roach_context);
 
 typedef struct RoachRoutine {
     NodeTag type;
@@ -58,4 +58,4 @@ typedef struct RoachRoutine {
     ErrorFunc Error;
 } RoachRoutine;
 
-#endif /* __ROACH_API_H__ */
+#endif /*__ROACH_API_H__*/

@@ -1,7 +1,7 @@
 /*
  * Verify ALL term in recursive CTE is not shippable
  */
-explain (costs off, nodes off) with recursive rq as
+explain (costs off) with recursive rq as
 (
     select id, name from  chinamap where id = 11
     union
@@ -22,7 +22,7 @@ select id, name from rq order by 1;
 /*
  * Verify if CtePlan node is pruned is not shippable
  */
-explain (costs off, nodes off)
+explain (costs off)
 select *, row_number() over() rn from
 (
     with recursive r1 as
@@ -98,7 +98,7 @@ insert into test_rec_part values(20,19,'test');
 create index on test_rec_part(dm) local;
 create index on test_rec_part(sj_dm) local;
 create index on test_rec_part(name) local;
-explain (costs off, nodes off)
+explain (costs off)
 WITH recursive t_result AS (
 	select * from(
 	SELECT dm,sj_dm,name,1 as level
@@ -154,7 +154,7 @@ insert into rec_tb2_rep select * from rec_tb2;
 
 
 set explain_perf_mode=pretty;
-explain (costs off, nodes off)
+explain (costs off)
 with recursive cte as
  (select a.*,1 as level
     from rec_tb1 a
@@ -188,7 +188,7 @@ select count(*)
  inner join rec_tb1
     on rec_tb1.id > cte.parentID;
     
-explain (costs off, nodes off)
+explain (costs off)
 with recursive cte as
  (select a.*,1 as level
     from rec_tb1_rep a
@@ -365,7 +365,7 @@ create index on test_rec_part(dm) local;
 create index on test_rec_part(sj_dm) local;
 create index on test_rec_part(name) local;
 
-explain (costs off, nodes off)
+explain (costs off)
 WITH recursive t_result AS (
 select * from(
 SELECT dm,sj_dm,name,1 as level

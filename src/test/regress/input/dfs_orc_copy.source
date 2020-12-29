@@ -1,0 +1,305 @@
+set enable_global_stats = true;
+\! rm -rf @abs_srcdir@/gds_19999.log
+\! ps -ef|grep @abs_srcdir@/results|grep -v grep|awk '{print $2}'|xargs kill -9 
+\! @abs_bindir@/gds -d @abs_srcdir@/results -p 0.0.0.0:29999 -D -l @abs_srcdir@/gds_19999.log -H 0.0.0.0/0
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--prepare the data
+drop table if exists row_tbl_001;
+drop table if exists dfs_tbl_001;
+drop table if exists col_tbl_001;
+drop foreign table if exists gds_tbl_001;
+drop foreign table if exists gds_tbl_002;
+
+create foreign table gds_tbl_001(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/gds_tbl_*', format 'text', mode 'normal', delimiter ',');
+
+create foreign table gds_tbl_002(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/', format 'text', delimiter ',') write only;
+
+create table row_tbl_001(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money);
+
+create table dfs_tbl_001(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money)tablespace hdfs_ts;
+
+create table col_tbl_001(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) with(orientation=column);
+
+insert into row_tbl_001 values(true, 2, 3, 4, 5, 6.66, 7.77, 8.88, 9.99999, 10.45, 10.45, 'a', 'a2', '333', '444', '55555', '6666', '777', '888', '9999', '10101010', date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+insert into row_tbl_001 values(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+insert into row_tbl_001 values(false, 1, -3, -4, -5, -6.66, -7.77, -8.88, -9.99999, -10.45, -10.45, 'b', '我', '哎被', '禁', '天安', '门', '“1”', '\?', '9999', '/\/', date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+set cstore_insert_mode=main;
+insert into dfs_tbl_001 select * from row_tbl_001;
+reset cstore_insert_mode;
+
+--test data type
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001';
+copy col_tbl_001 from '@abs_srcdir@/results/dfs_tbl_001';
+select * from dfs_tbl_001 minus select * from col_tbl_001;
+delete from col_tbl_001;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+insert into gds_tbl_002 select * from dfs_tbl_001;
+insert into col_tbl_001 select * from gds_tbl_001;
+select * from dfs_tbl_001 minus select * from col_tbl_001;
+delete from col_tbl_001;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--test HDFS表部分列
+copy dfs_tbl_001(a1,b1,c1) to '@abs_srcdir@/results/dfs_tbl_001';
+copy col_tbl_001(a1,b1,c1) from '@abs_srcdir@/results/dfs_tbl_001';
+select a1,b1,c1 from dfs_tbl_001 minus select a1,b1,c1 from col_tbl_001;
+delete from col_tbl_001;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+insert into gds_tbl_002(a1,b1,c1) select a1,b1,c1 from dfs_tbl_001;
+insert into col_tbl_001(a1,b1,c1) select a1,b1,c1 from gds_tbl_001;
+select a1,b1,c1 from dfs_tbl_001 minus select a1,b1,c1 from col_tbl_001;
+delete from col_tbl_001;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--test 只带有HDFS表的查询
+copy (select a1,b1,c1 from dfs_tbl_001 where a2 = 2) to '@abs_srcdir@/results/dfs_tbl_001';
+copy col_tbl_001(a1,b1,c1) from '@abs_srcdir@/results/dfs_tbl_001';
+select a1,b1,c1 from dfs_tbl_001 where a2 = 2 minus select a1,b1,c1 from col_tbl_001;
+delete from col_tbl_001;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+insert into gds_tbl_002(a1,b1,c1) select a1,b1,c1 from dfs_tbl_001 where a2 = 2;
+insert into col_tbl_001(a1,b1,c1) select a1,b1,c1 from gds_tbl_001;
+select a1,b1,c1 from dfs_tbl_001 where a2 = 2 minus select a1,b1,c1 from col_tbl_001;
+delete from col_tbl_001;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--test 带有HDFS表和列存表（行存表）的混合查询
+copy (select dfs_tbl_001.a1,row_tbl_001.b1,dfs_tbl_001.c1 from dfs_tbl_001,row_tbl_001 where dfs_tbl_001.a2=row_tbl_001.a2) to '@abs_srcdir@/results/dfs_tbl_001';
+copy col_tbl_001(a1,b1,c1) from '@abs_srcdir@/results/dfs_tbl_001';
+select dfs_tbl_001.a1,row_tbl_001.b1,dfs_tbl_001.c1 from dfs_tbl_001,row_tbl_001 where dfs_tbl_001.a2=row_tbl_001.a2 minus select a1,b1,c1 from col_tbl_001;
+delete from col_tbl_001;
+insert into gds_tbl_002(a1,b1,c1) select dfs_tbl_001.a1,row_tbl_001.b1,dfs_tbl_001.c1 from dfs_tbl_001,row_tbl_001 where dfs_tbl_001.a2=row_tbl_001.a2; --error
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--test 目标位置'@abs_srcdir@/results/dfs_tbl_001'
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001';
+
+--test format
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (format 'text');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (format 'csv');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (format 'binary');
+
+drop foreign table if exists gds_tbl_003;
+drop foreign table if exists gds_tbl_004;
+create foreign table gds_tbl_003(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/gds_tbl_*', format 'csv', delimiter ',');
+create foreign table gds_tbl_004(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/', format 'csv', delimiter ',') write only;
+
+insert into gds_tbl_004 select * from dfs_tbl_001;
+insert into col_tbl_001 select * from gds_tbl_003;
+select * from dfs_tbl_001 minus select * from col_tbl_001;
+delete from col_tbl_001;
+drop foreign table gds_tbl_003;
+drop foreign table gds_tbl_004;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+create foreign table gds_tbl_003(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/gds_tbl_*', format 'binary', delimiter ','); --error
+
+--test OIDS(not suuport true)
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (oids true);
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (oids false);
+
+--test DELIMITER
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (delimiter '	');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (delimiter ' ');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (delimiter ',');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (delimiter '|');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (delimiter '||');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (delimiter '我'); 
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (delimiter 'a1'); --error
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (delimiter '||', format 'binary'); --error
+
+drop foreign table if exists gds_tbl_003;
+drop foreign table if exists gds_tbl_004;
+create foreign table gds_tbl_003(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/gds_tbl_*', format 'text', delimiter '|,|');
+create foreign table gds_tbl_004(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/', format 'text', delimiter '|,|') write only;
+insert into gds_tbl_004 select * from dfs_tbl_001;
+insert into col_tbl_001 select * from gds_tbl_003;
+select * from dfs_tbl_001 minus select * from col_tbl_001;
+delete from col_tbl_001;
+drop foreign table gds_tbl_003;
+drop foreign table gds_tbl_004;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--test header
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (header true);
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (header true, format 'csv');
+
+--test QUOTE
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (quote '-'); --error
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (quote '""', format 'csv'); --error
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (quote '-', format 'csv');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (quote '', format 'csv'); --error
+
+--test escape
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (escape '-'); --error
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (escape '-', format 'csv');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (escape '--', format 'csv'); --error'
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (escape '', format 'csv');
+
+--test FORCE_QUOTE
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (FORCE_QUOTE (b4), format 'csv');
+
+--test null
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (null '123');
+drop foreign table if exists gds_tbl_003;
+drop foreign table if exists gds_tbl_004;
+create foreign table gds_tbl_003(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/gds_tbl_*', format 'text', delimiter ' ', null '123');
+create foreign table gds_tbl_004(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/', format 'text', delimiter ' ', null '123') write only;
+insert into gds_tbl_004 select * from dfs_tbl_001;
+insert into col_tbl_001 select * from gds_tbl_003;
+select * from dfs_tbl_001 minus select * from col_tbl_001;
+delete from col_tbl_001;
+drop foreign table gds_tbl_003;
+drop foreign table gds_tbl_004;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--test encoding
+--GBK
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'gbk');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'gbk');
+drop table if exists dfs_tbl_002;
+create table dfs_tbl_002(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money)tablespace hdfs_ts;
+set cstore_insert_mode='main';
+copy dfs_tbl_002 from '@abs_srcdir@/results/dfs_tbl_001';
+copy dfs_tbl_002 from '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'gbk');--error
+reset cstore_insert_mode;
+select * from dfs_tbl_002 minus select * from dfs_tbl_001;
+drop table dfs_tbl_002;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+drop foreign table if exists gds_tbl_003;
+drop foreign table if exists gds_tbl_004;
+create foreign table gds_tbl_003(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/gds_tbl_*', format 'text', delimiter '|', encoding 'gbk');
+create foreign table gds_tbl_004(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/', format 'text', delimiter '|', encoding 'gbk') write only;
+insert into gds_tbl_004 select * from dfs_tbl_001;
+insert into col_tbl_001 select * from gds_tbl_003;
+select * from dfs_tbl_001 minus select * from col_tbl_001;
+delete from col_tbl_001;
+drop foreign table gds_tbl_003;
+drop foreign table gds_tbl_004;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--utf-8
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'utf-8');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'utf-8');
+drop table if exists dfs_tbl_002;
+create table dfs_tbl_002(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money)tablespace hdfs_ts;
+set cstore_insert_mode='main';
+copy dfs_tbl_002 from '@abs_srcdir@/results/dfs_tbl_001';
+copy dfs_tbl_002 from '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'utf-8');
+reset cstore_insert_mode;
+select * from dfs_tbl_002 minus select * from dfs_tbl_001;
+drop table dfs_tbl_002;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+drop foreign table if exists gds_tbl_003;
+drop foreign table if exists gds_tbl_004;
+create foreign table gds_tbl_003(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/gds_tbl_*', format 'text', delimiter '|', encoding 'utf-8');
+create foreign table gds_tbl_004(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/', format 'text', delimiter '|', encoding 'utf-8') write only;
+insert into gds_tbl_004 select * from dfs_tbl_001;
+insert into col_tbl_001 select * from gds_tbl_003;
+select * from dfs_tbl_001 minus select * from col_tbl_001;
+delete from col_tbl_001;
+drop foreign table gds_tbl_003;
+drop foreign table gds_tbl_004;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--LATIN1
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'LATIN1');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'LATIN1');
+drop table if exists dfs_tbl_002;
+create table dfs_tbl_002(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money)tablespace hdfs_ts;
+set cstore_insert_mode='main';
+copy dfs_tbl_002 from '@abs_srcdir@/results/dfs_tbl_001';
+copy dfs_tbl_002 from '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'LATIN1');
+reset cstore_insert_mode;
+select * from dfs_tbl_002 minus select * from dfs_tbl_001;
+drop table dfs_tbl_002;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+drop foreign table if exists gds_tbl_003;
+drop foreign table if exists gds_tbl_004;
+create foreign table gds_tbl_003(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/gds_tbl_*', format 'text', delimiter '|', encoding 'LATIN1');
+create foreign table gds_tbl_004(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/', format 'text', delimiter '|', encoding 'LATIN1') write only;
+insert into gds_tbl_004 select * from dfs_tbl_001;
+insert into col_tbl_001 select * from gds_tbl_003;
+select * from dfs_tbl_001 minus select * from col_tbl_001 order by 1;
+delete from col_tbl_001;
+drop foreign table gds_tbl_003;
+drop foreign table gds_tbl_004;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--SQL_ASCII
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'SQL_ASCII');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'SQL_ASCII');
+drop table if exists dfs_tbl_002;
+create table dfs_tbl_002(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money)tablespace hdfs_ts;
+set cstore_insert_mode='main';
+copy dfs_tbl_002 from '@abs_srcdir@/results/dfs_tbl_001';
+copy dfs_tbl_002 from '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'SQL_ASCII');
+reset cstore_insert_mode;
+select * from dfs_tbl_002 minus select * from dfs_tbl_001;
+drop table dfs_tbl_002;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+drop foreign table if exists gds_tbl_003;
+drop foreign table if exists gds_tbl_004;
+create foreign table gds_tbl_003(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/gds_tbl_*', format 'text', delimiter '|', encoding 'SQL_ASCII');
+create foreign table gds_tbl_004(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/', format 'text', delimiter '|', encoding 'SQL_ASCII') write only;
+insert into gds_tbl_004 select * from dfs_tbl_001;
+insert into col_tbl_001 select * from gds_tbl_003;
+select * from dfs_tbl_001 minus select * from col_tbl_001;
+delete from col_tbl_001;
+drop foreign table gds_tbl_003;
+drop foreign table gds_tbl_004;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--ISO_8859_5
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'ISO_8859_5');
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'ISO_8859_5');
+drop table if exists dfs_tbl_002;
+create table dfs_tbl_002(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money)tablespace hdfs_ts;
+set cstore_insert_mode='main';
+copy dfs_tbl_002 from '@abs_srcdir@/results/dfs_tbl_001';
+copy dfs_tbl_002 from '@abs_srcdir@/results/dfs_tbl_001' with (encoding 'ISO_8859_5');
+reset cstore_insert_mode;
+select * from dfs_tbl_002 minus select * from dfs_tbl_001;
+drop table dfs_tbl_002;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+drop foreign table if exists gds_tbl_003;
+drop foreign table if exists gds_tbl_004;
+create foreign table gds_tbl_003(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/gds_tbl_*', format 'text', delimiter '|', encoding 'ISO_8859_5');
+create foreign table gds_tbl_004(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) SERVER gsmpp_server OPTIONS (location 'gsfs://127.0.0.1:29999/', format 'text', delimiter '|', encoding 'ISO_8859_5') write only;
+insert into gds_tbl_004 select * from dfs_tbl_001;
+insert into col_tbl_001 select * from gds_tbl_003;
+select * from dfs_tbl_001 minus select * from col_tbl_001 order by 1;
+delete from col_tbl_001;
+drop foreign table gds_tbl_003;
+drop foreign table gds_tbl_004;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+
+--test delta and delete
+set cstore_insert_mode='auto';
+insert into dfs_tbl_001 values(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001';
+copy col_tbl_001 from '@abs_srcdir@/results/dfs_tbl_001';
+select count(*) from col_tbl_001;
+delete from col_tbl_001;
+delete from dfs_tbl_001 where a1 is null;
+copy dfs_tbl_001 to '@abs_srcdir@/results/dfs_tbl_001';
+copy col_tbl_001 from '@abs_srcdir@/results/dfs_tbl_001';
+select count(*) from col_tbl_001;
+delete from col_tbl_001;
+\! rm -rf @abs_srcdir@/results/gds_tbl_*
+reset cstore_insert_mode;
+
+drop table row_tbl_001;
+drop table col_tbl_001;
+drop table dfs_tbl_001;
+drop foreign table if exists gds_tbl_001;
+drop foreign table if exists gds_tbl_002;
+\! ps -ef|grep @abs_srcdir@/results|grep -v grep|awk '{print $2}'|xargs kill -9

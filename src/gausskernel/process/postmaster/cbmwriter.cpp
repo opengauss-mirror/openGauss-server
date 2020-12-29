@@ -31,10 +31,10 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "postmaster/bgwriter.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "storage/proc.h"
 #include "storage/smgr.h"
 #include "utils/guc.h"
@@ -61,9 +61,7 @@ void CBMWriterMain(void)
     sigjmp_buf local_sigjmp_buf;
     ResourceOwner cbmwriter_resourceOwner;
 
-    knl_thread_set_name("CBMWriter");
-
-    ereport(LOG, (errmsg("CBMWriter started")));
+    ereport(LOG, (errmsg("cbm writer started")));
     u_sess->attr.attr_storage.CheckPointTimeout = g_instance.attr.attr_storage.enableIncrementalCheckpoint
                                                       ? u_sess->attr.attr_storage.incrCheckPointTimeout
                                                       : u_sess->attr.attr_storage.fullCheckPointTimeout;
@@ -102,7 +100,7 @@ void CBMWriterMain(void)
      * Create a resource owner to keep track of our resources (not clear that
      * we need this, but may as well have one).
      */
-    cbmwriter_resourceOwner = ResourceOwnerCreate(NULL, "CBM Writer");
+    cbmwriter_resourceOwner = ResourceOwnerCreate(NULL, "CBM Writer", MEMORY_CONTEXT_STORAGE);
     t_thrd.utils_cxt.CurrentResourceOwner = cbmwriter_resourceOwner;
 
     /*

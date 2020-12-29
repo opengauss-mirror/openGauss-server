@@ -67,18 +67,16 @@ Size datumGetSize(Datum value, bool typByVal, int typLen)
             /* It is a varlena datatype */
             struct varlena* s = (struct varlena*)DatumGetPointer(value);
 
-            if (!PointerIsValid(s)) {
+            if (!PointerIsValid(s))
                 ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("invalid Datum pointer")));
-            }
 
             size = (Size)VARSIZE_ANY(s);
         } else if (typLen == -2) {
             /* It is a cstring datatype */
             char* s = (char*)DatumGetPointer(value);
 
-            if (!PointerIsValid(s)) {
+            if (!PointerIsValid(s))
                 ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("invalid Datum pointer")));
-            }
 
             size = (Size)(strlen(s) + 1);
         } else {
@@ -102,21 +100,20 @@ Datum datumCopyInternal(Datum value, bool typByVal, int typLen, Size* copySize)
 {
     Datum res;
 
-    /* *copySize is 0 when the datum is assigned by value, or NULL pointer.
-     * otherwise compute the real size and remember it.
-     */
+    // *copySize is 0 when the datum is assigned by value, or NULL pointer.
+    // otherwise compute the real size and remember it.
+    //
     *copySize = 0;
 
-    if (typByVal) {
+    if (typByVal)
         res = value;
-    } else {
+    else {
         Size realSize;
         char* s = NULL;
         errno_t rc;
 
-        if (DatumGetPointer(value) == NULL) {
+        if (DatumGetPointer(value) == NULL)
             return PointerGetDatum(NULL);
-        }
 
         realSize = datumGetSize(value, typByVal, typLen);
         s = (char*)palloc(realSize);
@@ -190,139 +187,11 @@ bool datumIsEqual(Datum value1, Datum value2, bool typByVal, int typLen)
          */
         size1 = datumGetSize(value1, typByVal, typLen);
         size2 = datumGetSize(value2, typByVal, typLen);
-        if (size1 != size2) {
+        if (size1 != size2)
             return false;
-        }
-
         s1 = (char*)DatumGetPointer(value1);
         s2 = (char*)DatumGetPointer(value2);
         res = (memcmp(s1, s2, size1) == 0);
     }
     return res;
-}
-
-/* -------------------------------------------------------------------------
- * datumEstimateSpace
- *
- * Compute the amount of space that datumSerialize will require for a
- * particular Datum.
- * -------------------------------------------------------------------------
- */
-Size datumEstimateSpace(Datum value, bool isnull, bool typByVal, int typLen)
-{
-    Size sz = sizeof(int);
-
-    if (!isnull) {
-        /* no need to use add_size, can't overflow */
-        if (typByVal)
-            sz += sizeof(Datum);
-        else
-            sz += datumGetSize(value, typByVal, typLen);
-    }
-
-    return sz;
-}
-
-/* -------------------------------------------------------------------------
- * datumSerialize
- *
- * Serialize a possibly-NULL datum into caller-provided storage.
- *
- * Note: "expanded" objects are flattened so as to produce a self-contained
- * representation, but other sorts of toast pointers are transferred as-is.
- * This is because the intended use of this function is to pass the value
- * to another process within the same database server.  The other process
- * could not access an "expanded" object within this process's memory, but
- * we assume it can dereference the same TOAST pointers this one can.
- *
- * The format is as follows: first, we write a 4-byte header word, which
- * is either the length of a pass-by-reference datum, -1 for a
- * pass-by-value datum, or -2 for a NULL.  If the value is NULL, nothing
- * further is written.  If it is pass-by-value, sizeof(Datum) bytes
- * follow.  Otherwise, the number of bytes indicated by the header word
- * follow.  The caller is responsible for ensuring that there is enough
- * storage to store the number of bytes that will be written; use
- * datumEstimateSpace() to find out how many will be needed.
- * *start_address is updated to point to the byte immediately following
- * those written.
- * -------------------------------------------------------------------------
- */
-void datumSerialize(Datum value, bool isnull, bool typByVal, int typLen, char **start_address, Size *remainLen)
-{
-    int header;
-
-    /* Write header word. */
-    if (isnull) {
-        header = -2;
-    } else if (typByVal) {
-        header = -1;
-    } else {
-        header = datumGetSize(value, typByVal, typLen);
-    }
-    int rc = memcpy_s(*start_address, *remainLen, &header, sizeof(int));
-    securec_check_c(rc, "", "");
-    *remainLen -= sizeof(int);
-    *start_address += sizeof(int);
-
-    /* If not null, write payload bytes. */
-    if (!isnull) {
-        if (typByVal) {
-            rc = memcpy_s(*start_address, *remainLen, &value, sizeof(Datum));
-            securec_check_c(rc, "", "");
-            *remainLen -= sizeof(Datum);
-            *start_address += sizeof(Datum);
-        } else {
-            rc = memcpy_s(*start_address, *remainLen, DatumGetPointer(value), (Size)header);
-            securec_check_c(rc, "", "");
-            *remainLen -= header;
-            *start_address += header;
-        }
-    }
-}
-
-/* -------------------------------------------------------------------------
- * datumRestore
- *
- * Restore a possibly-NULL datum previously serialized by datumSerialize.
- * *start_address is updated according to the number of bytes consumed.
- * -------------------------------------------------------------------------
- */
-Datum datumRestore(char **start_address, Size *remainLen, bool *isnull)
-{
-    int header;
-
-    /* Read header word. */
-    int rc = memcpy_s(&header, *remainLen, *start_address, sizeof(int));
-    securec_check_c(rc, "", "");
-    *remainLen -= sizeof(int);
-    *start_address += sizeof(int);
-
-    /* If this datum is NULL, we can stop here. */
-    if (header == -2) {
-        *isnull = true;
-        return (Datum)0;
-    }
-
-    /* OK, datum is not null. */
-    *isnull = false;
-
-    /* If this datum is pass-by-value, sizeof(Datum) bytes follow. */
-    if (header == -1) {
-        Datum val;
-
-        rc = memcpy_s(&val, *remainLen, *start_address, sizeof(Datum));
-        securec_check_c(rc, "", "");
-        *remainLen -= sizeof(Datum);
-        *start_address += sizeof(Datum);
-        return val;
-    }
-
-    /* Pass-by-reference case; copy indicated number of bytes. */
-    Assert(header > 0);
-    void *d = palloc((Size)header);
-    rc = memcpy_s(d, *remainLen, *start_address, header);
-    securec_check_c(rc, "", "");
-    *remainLen -= header;
-    *start_address += header;
-    return PointerGetDatum(d);
 }

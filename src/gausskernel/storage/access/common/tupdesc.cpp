@@ -40,10 +40,10 @@
  * Tuple type ID information is initially set for an anonymous record type;
  * caller can overwrite this if needed.
  */
-TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid)
+TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, TableAmType tam)
 {
     TupleDesc desc;
-    char* stg = NULL;
+    char *stg = NULL;
     int attroffset;
 
     /*
@@ -66,14 +66,14 @@ TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid)
      */
     attroffset = sizeof(struct tupleDesc) + natts * sizeof(Form_pg_attribute);
     attroffset = MAXALIGN((uint32)attroffset);
-    stg = (char*)palloc0(attroffset + natts * MAXALIGN(ATTRIBUTE_FIXED_PART_SIZE));
+    stg = (char *)palloc0(attroffset + natts * MAXALIGN(ATTRIBUTE_FIXED_PART_SIZE));
     desc = (TupleDesc)stg;
 
     if (natts > 0) {
-        Form_pg_attribute* attrs = NULL;
+        Form_pg_attribute *attrs = NULL;
         int i;
 
-        attrs = (Form_pg_attribute*)(stg + sizeof(struct tupleDesc));
+        attrs = (Form_pg_attribute *)(stg + sizeof(struct tupleDesc));
         desc->attrs = attrs;
         stg += attroffset;
         for (i = 0; i < natts; i++) {
@@ -95,6 +95,7 @@ TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid)
     desc->tdrefcount = -1;    /* assume not reference-counted */
     desc->initdefvals = NULL; /* initialize the attrinitdefvals */
     desc->tdisredistable = false;
+    desc->tdTableAmType = tam;
 
     return desc;
 }
@@ -110,7 +111,7 @@ TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid)
  * Tuple type ID information is initially set for an anonymous record type;
  * caller can overwrite this if needed.
  */
-TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs)
+TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs, TableAmType tam)
 {
     TupleDesc desc;
 
@@ -129,6 +130,7 @@ TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs)
     desc->tdrefcount = -1;    /* assume not reference-counted */
     desc->initdefvals = NULL; /* initialize the attrinitdefvals */
     desc->tdisredistable = false;
+    desc->tdTableAmType = tam;
 
     return desc;
 }
@@ -138,18 +140,18 @@ TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs)
  *		This function creates a new TupInitDefVal by copying from an existing
  *		TupInitDefVal.
  */
-static TupInitDefVal* tupInitDefValCopy(TupInitDefVal* initdef_val, int attr_num)
+static TupInitDefVal *tupInitDefValCopy(TupInitDefVal *pInitDefVal, int nAttr)
 {
-    TupInitDefVal* dvals = (TupInitDefVal*)palloc(attr_num * sizeof(TupInitDefVal));
-    for (int i = 0; i < attr_num; ++i) {
-        dvals[i].isNull = initdef_val[i].isNull;
-        dvals[i].dataLen = initdef_val[i].dataLen;
+    TupInitDefVal *dvals = (TupInitDefVal *)palloc(nAttr * sizeof(TupInitDefVal));
+    for (int i = 0; i < nAttr; ++i) {
+        dvals[i].isNull = pInitDefVal[i].isNull;
+        dvals[i].dataLen = pInitDefVal[i].dataLen;
         dvals[i].datum = NULL;
 
         if (!dvals[i].isNull) {
-            char* data = (char*)palloc(dvals[i].dataLen);
-            MemCpy(data, initdef_val[i].datum, dvals[i].dataLen);
-            dvals[i].datum = (Datum*)data;
+            char *data = (char *)palloc(dvals[i].dataLen);
+            MemCpy(data, pInitDefVal[i].datum, dvals[i].dataLen);
+            dvals[i].datum = (Datum *)data;
         }
     }
     return dvals;
@@ -168,7 +170,7 @@ TupleDesc CreateTupleDescCopy(TupleDesc tupdesc)
     int i;
     errno_t rc = EOK;
 
-    desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid);
+    desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid, tupdesc->tdTableAmType);
 
     for (i = 0; i < desc->natts; i++) {
         rc = memcpy_s(desc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
@@ -197,12 +199,11 @@ TupleDesc CreateTupleDescCopy(TupleDesc tupdesc)
 TupleDesc CreateTupleDescCopyConstr(TupleDesc tupdesc)
 {
     TupleDesc desc;
-    TupleConstr* constr = tupdesc->constr;
+    TupleConstr *constr = tupdesc->constr;
     int i;
     errno_t rc = EOK;
-    size_t length;
 
-    desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid);
+    desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid, tupdesc->tdTableAmType);
 
     for (i = 0; i < desc->natts; i++) {
         rc = memcpy_s(desc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
@@ -210,14 +211,14 @@ TupleDesc CreateTupleDescCopyConstr(TupleDesc tupdesc)
     }
 
     if (constr != NULL) {
-        TupleConstr* cpy = (TupleConstr*)palloc0(sizeof(TupleConstr));
+        TupleConstr *cpy = (TupleConstr *)palloc0(sizeof(TupleConstr));
 
         cpy->has_not_null = constr->has_not_null;
 
         if ((cpy->num_defval = constr->num_defval) > 0) {
-            length = cpy->num_defval * sizeof(AttrDefault);
-            cpy->defval = (AttrDefault*)palloc(length);
-            rc = memcpy_s(cpy->defval, length, constr->defval, length);
+            cpy->defval = (AttrDefault *)palloc(cpy->num_defval * sizeof(AttrDefault));
+            rc = memcpy_s(cpy->defval, cpy->num_defval * sizeof(AttrDefault), constr->defval,
+                          cpy->num_defval * sizeof(AttrDefault));
             securec_check(rc, "\0", "\0");
             for (i = cpy->num_defval - 1; i >= 0; i--) {
                 if (constr->defval[i].adbin) {
@@ -227,9 +228,9 @@ TupleDesc CreateTupleDescCopyConstr(TupleDesc tupdesc)
         }
 
         if ((cpy->num_check = constr->num_check) > 0) {
-            length = cpy->num_check * sizeof(ConstrCheck);
-            cpy->check = (ConstrCheck*)palloc(length);
-            rc = memcpy_s(cpy->check, length, constr->check, length);
+            cpy->check = (ConstrCheck *)palloc(cpy->num_check * sizeof(ConstrCheck));
+            rc = memcpy_s(cpy->check, cpy->num_check * sizeof(ConstrCheck), constr->check,
+                          cpy->num_check * sizeof(ConstrCheck));
             securec_check(rc, "\0", "\0");
             for (i = cpy->num_check - 1; i >= 0; i--) {
                 if (constr->check[i].ccname) {
@@ -273,7 +274,7 @@ void FreeTupleDesc(TupleDesc tupdesc)
 
     if (tupdesc->constr) {
         if (tupdesc->constr->num_defval > 0) {
-            AttrDefault* attrdef = tupdesc->constr->defval;
+            AttrDefault *attrdef = tupdesc->constr->defval;
 
             for (i = tupdesc->constr->num_defval - 1; i >= 0; i--) {
                 if (attrdef[i].adbin)
@@ -282,7 +283,7 @@ void FreeTupleDesc(TupleDesc tupdesc)
             pfree(attrdef);
         }
         if (tupdesc->constr->num_check > 0) {
-            ConstrCheck* check = tupdesc->constr->check;
+            ConstrCheck *check = tupdesc->constr->check;
 
             for (i = tupdesc->constr->num_check - 1; i >= 0; i--) {
                 if (check[i].ccname)
@@ -368,13 +369,13 @@ static bool compareInitdefvals(TupleDesc tupdesc1, TupleDesc tupdesc2)
             Assert(tupdesc1->initdefvals[i].dataLen > 0);
 
             if (memcmp(tupdesc1->initdefvals[i].datum, tupdesc2->initdefvals[i].datum,
-                tupdesc1->initdefvals[i].dataLen) != 0) {
+                       tupdesc1->initdefvals[i].dataLen) != 0) {
                 return false;
             }
         }
         return true;
     } else {
-        TupInitDefVal* vals = tupdesc1->initdefvals == NULL ? tupdesc2->initdefvals : tupdesc1->initdefvals;
+        TupInitDefVal *vals = tupdesc1->initdefvals == NULL ? tupdesc2->initdefvals : tupdesc1->initdefvals;
 
         for (i = 0; i < tupdesc1->natts; i++) {
             if (!vals[i].isNull) {
@@ -391,7 +392,7 @@ static bool compareInitdefvals(TupleDesc tupdesc1, TupleDesc tupdesc2)
  * @Return: true if PCK exists; otherwise, return false.
  * @See also:
  */
-bool tupledesc_have_pck(TupleConstr* constr)
+bool tupledesc_have_pck(TupleConstr *constr)
 {
     return (constr && constr->clusterKeyNum > 0);
 }
@@ -403,15 +404,15 @@ bool tupledesc_have_pck(TupleConstr* constr)
  * @Return: true if the two PCK info are equal to; otherwise false.
  * @See also:
  */
-static bool comparePartialClusterKeys(TupleConstr* const constr1, TupleConstr* const constr2)
+static bool comparePartialClusterKeys(TupleConstr *const constr1, TupleConstr *const constr2)
 {
     int n = constr1->clusterKeyNum;
     if (n != (int)constr2->clusterKeyNum) {
         return false;
     }
 
-    AttrNumber* pck1 = constr1->clusterKeys;
-    AttrNumber* pck2 = constr2->clusterKeys;
+    AttrNumber *pck1 = constr1->clusterKeys;
+    AttrNumber *pck2 = constr2->clusterKeys;
     for (int i = 0; i < n; ++i) {
         /* two PCKs are equal to only if pck1[i] == pck[i],
          * which means that they have the same attributes set
@@ -451,6 +452,10 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
     }
 
     if (tupdesc1->tdisredistable != tupdesc2->tdisredistable) {
+        return false;
+    }
+
+    if (tupdesc1->tdTableAmType != tupdesc2->tdTableAmType) {
         return false;
     }
 
@@ -525,8 +530,8 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
     }
 
     if (tupdesc1->constr != NULL) {
-        TupleConstr* constr1 = tupdesc1->constr;
-        TupleConstr* constr2 = tupdesc2->constr;
+        TupleConstr *constr1 = tupdesc1->constr;
+        TupleConstr *constr2 = tupdesc2->constr;
 
         if (constr2 == NULL) {
             return false;
@@ -543,8 +548,8 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
             return false;
         }
         for (i = 0; i < n; i++) {
-            AttrDefault* defval1 = constr1->defval + i;
-            AttrDefault* defval2 = constr2->defval;
+            AttrDefault *defval1 = constr1->defval + i;
+            AttrDefault *defval2 = constr2->defval;
 
             /*
              * We can't assume that the items are always read from the system
@@ -570,8 +575,8 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
             return false;
         }
         for (i = 0; i < n; i++) {
-            ConstrCheck* check1 = constr1->check + i;
-            ConstrCheck* check2 = constr2->check;
+            ConstrCheck *check1 = constr1->check + i;
+            ConstrCheck *check2 = constr2->check;
 
             /*
              * Similarly, don't assume that the checks are always read in the
@@ -606,16 +611,16 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
  *
  * Note: we don't compare tdtypeid, constraints and pck.
  */
-bool equalDeltaTupleDescs(TupleDesc main_tupdesc, TupleDesc delta_tupdesc)
+bool equalDeltaTupleDescs(TupleDesc mainTupdesc, TupleDesc deltaTupdesc)
 {
     int i;
 
-    if (main_tupdesc->natts != delta_tupdesc->natts)
+    if (mainTupdesc->natts != deltaTupdesc->natts)
         return false;
 
-    for (i = 0; i < main_tupdesc->natts; i++) {
-        Form_pg_attribute attr1 = main_tupdesc->attrs[i];
-        Form_pg_attribute attr2 = delta_tupdesc->attrs[i];
+    for (i = 0; i < mainTupdesc->natts; i++) {
+        Form_pg_attribute attr1 = mainTupdesc->attrs[i];
+        Form_pg_attribute attr2 = deltaTupdesc->attrs[i];
 
         /*
          * We do not need to check every single field here: we can disregard
@@ -667,7 +672,7 @@ bool equalDeltaTupleDescs(TupleDesc main_tupdesc, TupleDesc delta_tupdesc)
     }
 
     /* compare the attinitdefval */
-    return compareInitdefvals(main_tupdesc, delta_tupdesc);
+    return compareInitdefvals(mainTupdesc, deltaTupdesc);
 }
 
 /*
@@ -685,24 +690,24 @@ bool equalDeltaTupleDescs(TupleDesc main_tupdesc, TupleDesc delta_tupdesc)
  * If a nondefault collation is needed, insert it afterwards using
  * TupleDescInitEntryCollation.
  */
-void TupleDescInitEntry(
-    TupleDesc desc, AttrNumber attribute_number, const char* attribute_name, Oid oidtypeid, int32 typmod, int attdim)
+void TupleDescInitEntry(TupleDesc desc, AttrNumber attributeNumber, const char *attributeName, Oid oidtypeid,
+                        int32 typmod, int attdim)
 {
     HeapTuple tuple;
-    Form_pg_type type_form;
+    Form_pg_type typeForm;
     Form_pg_attribute att;
 
     /*
      * sanity checks
      */
     AssertArg(PointerIsValid(desc));
-    AssertArg(attribute_number >= 1);
-    AssertArg(attribute_number <= desc->natts);
+    AssertArg(attributeNumber >= 1);
+    AssertArg(attributeNumber <= desc->natts);
 
     /*
      * initialize the attribute fields
      */
-    att = desc->attrs[attribute_number - 1];
+    att = desc->attrs[attributeNumber - 1];
 
     att->attrelid = 0; /* dummy value */
 
@@ -711,18 +716,18 @@ void TupleDescInitEntry(
      * fill in valid resname values in targetlists, particularly for resjunk
      * attributes. Also, do nothing if caller wants to re-use the old attname.
      */
-    if (attribute_name == NULL) {
+    if (attributeName == NULL) {
         errno_t rc = memset_s(NameStr(att->attname), NAMEDATALEN, 0, NAMEDATALEN);
         securec_check(rc, "\0", "\0");
-    } else if (attribute_name != NameStr(att->attname)) {
-        (void)namestrcpy(&(att->attname), attribute_name);
+    } else if (attributeName != NameStr(att->attname)) {
+        namestrcpy(&(att->attname), attributeName);
     }
 
     att->attstattarget = -1;
     att->attcacheoff = -1;
     att->atttypmod = typmod;
 
-    att->attnum = attribute_number;
+    att->attnum = attributeNumber;
     att->attndims = attdim;
 
     att->attnotnull = false;
@@ -730,20 +735,20 @@ void TupleDescInitEntry(
     att->attisdropped = false;
     att->attislocal = true;
     att->attinhcount = 0;
-    att->attkvtype = ATT_KV_UNDEFINED; /* not specified */
+    att->attkvtype = ATT_KV_UNDEFINED;     /* not specified */
     att->attcmprmode = ATT_CMPR_UNDEFINED; /* not specified */
     /* attacl, attoptions and attfdwoptions are not present in tupledescs */
     tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(oidtypeid));
     if (!HeapTupleIsValid(tuple))
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", oidtypeid)));
-    type_form = (Form_pg_type)GETSTRUCT(tuple);
+    typeForm = (Form_pg_type)GETSTRUCT(tuple);
 
     att->atttypid = oidtypeid;
-    att->attlen = type_form->typlen;
-    att->attbyval = type_form->typbyval;
-    att->attalign = type_form->typalign;
-    att->attstorage = type_form->typstorage;
-    att->attcollation = type_form->typcollation;
+    att->attlen = typeForm->typlen;
+    att->attbyval = typeForm->typbyval;
+    att->attalign = typeForm->typalign;
+    att->attstorage = typeForm->typstorage;
+    att->attcollation = typeForm->typcollation;
 
     ReleaseSysCache(tuple);
 }
@@ -754,25 +759,25 @@ void TupleDescInitEntry(
  * Assign a nondefault collation to a previously initialized tuple descriptor
  * entry.
  */
-void TupleDescInitEntryCollation(TupleDesc desc, AttrNumber attribute_number, Oid collationid)
+void TupleDescInitEntryCollation(TupleDesc desc, AttrNumber attributeNumber, Oid collationid)
 {
     /*
      * sanity checks
      */
     AssertArg(PointerIsValid(desc));
-    AssertArg(attribute_number >= 1);
-    AssertArg(attribute_number <= desc->natts);
+    AssertArg(attributeNumber >= 1);
+    AssertArg(attributeNumber <= desc->natts);
 
-    desc->attrs[attribute_number - 1]->attcollation = collationid;
+    desc->attrs[attributeNumber - 1]->attcollation = collationid;
 }
 
 /*
  * VerifyAttrCompressMode
  * verify the specified compress mode for one attribute
  */
-void VerifyAttrCompressMode(int8 mode, int attlen, const char* attname)
+void VerifyAttrCompressMode(int8 mode, int attlen, const char *attname)
 {
-    char* errinfo = NULL;
+    char *errinfo = NULL;
     switch (mode) {
         case ATT_CMPR_DELTA: {
             if (attlen > 0 && attlen <= 8)
@@ -802,17 +807,16 @@ void VerifyAttrCompressMode(int8 mode, int attlen, const char* attname)
             return;
     }
 
-    ereport(ERROR,
-        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg("column \"%s\" cannot be applied %s compress mode", attname, errinfo)));
+    ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                    errmsg("column \"%s\" cannot be applied %s compress mode", attname, errinfo)));
 }
 
 void copyDroppedAttribute(Form_pg_attribute target, Form_pg_attribute source)
 {
-    char* attribute_name = NameStr(source->attname);
+    char *attributeName = NameStr(source->attname);
 
     target->attrelid = 0;
-    (void)namestrcpy(&(target->attname), attribute_name);
+    namestrcpy(&(target->attname), attributeName);
     target->atttypid = source->atttypid;
     target->attstattarget = source->attstattarget;
     target->attlen = source->attlen;
@@ -833,23 +837,31 @@ void copyDroppedAttribute(Form_pg_attribute target, Form_pg_attribute source)
     target->attcollation = source->attcollation;
 }
 
-
-int UpgradeAdaptAttr(Oid atttypid, ColumnDef* entry)
+int UpgradeAdaptAttr(Oid atttypid, ColumnDef *entry)
 {
     int attdim;
     if (u_sess->attr.attr_common.upgrade_mode != 0 &&
         OidIsValid(u_sess->upg_cxt.Inplace_upgrade_next_heap_pg_class_oid) &&
         u_sess->upg_cxt.Inplace_upgrade_next_heap_pg_class_oid < FirstBootstrapObjectId) {
-            char typcategory;
-            bool type_tmp = false;
-            get_type_category_preferred(atttypid, &typcategory, &type_tmp);
-            attdim = (typcategory == 'A') ? 1 : 0;
+        char typcategory;
+        bool type_tmp = false;
+        get_type_category_preferred(atttypid, &typcategory, &type_tmp);
+        attdim = (typcategory == 'A') ? 1 : 0;
     } else {
         attdim = list_length(entry->typname->arrayBounds);
     }
     return attdim;
 }
 
+static void BlockRowCompressRelOption(const Node *orientedFrom, const ColumnDef *entry)
+{
+    if (pg_strcasecmp(ORIENTATION_ROW, strVal(orientedFrom)) == 0 &&  ATT_CMPR_NOCOMPRESS < entry->cmprs_mode
+        && entry->cmprs_mode <= ATT_CMPR_NUMSTR) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+             errmsg("row-oriented table does not support compression")));
+    }
+}
 
 /*
  * BuildDescForRelation
@@ -860,14 +872,14 @@ int UpgradeAdaptAttr(Oid atttypid, ColumnDef* entry)
  * TupleDesc if it wants OIDs.	Also, tdtypeid will need to be filled in
  * later on.
  */
-TupleDesc BuildDescForRelation(List* schema, Node* oriented_from, char relkind)
+TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
 {
     int natts;
     AttrNumber attnum = 0;
-    ListCell* l = NULL;
+    ListCell *l = NULL;
     TupleDesc desc;
     bool has_not_null = false;
-    char* attname = NULL;
+    char *attname = NULL;
     Oid atttypid;
     int32 atttypmod;
     Oid attcollation;
@@ -877,10 +889,10 @@ TupleDesc BuildDescForRelation(List* schema, Node* oriented_from, char relkind)
      * allocate a new tuple descriptor
      */
     natts = list_length(schema);
-    desc = CreateTemplateTupleDesc(natts, false);
+    desc = CreateTemplateTupleDesc(natts, false, TAM_HEAP);
 
     foreach (l, schema) {
-        ColumnDef* entry = (ColumnDef*)lfirst(l);
+        ColumnDef *entry = (ColumnDef *)lfirst(l);
         AclResult aclresult;
 
         /*
@@ -903,8 +915,8 @@ TupleDesc BuildDescForRelation(List* schema, Node* oriented_from, char relkind)
 
             typTupe = SearchSysCache1(TYPEOID, ObjectIdGetDatum(atttypid));
             if (!HeapTupleIsValid(typTupe)) {
-                ereport(
-                    ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("cache lookup failed for type  %u", atttypid)));
+                ereport(ERROR,
+                        (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("cache lookup failed for type  %u", atttypid)));
             }
             typForm = (Form_pg_type)GETSTRUCT(typTupe);
             if (typForm->typrelid >= FirstNormalObjectId && typForm->typtype == TYPTYPE_COMPOSITE) {
@@ -912,12 +924,13 @@ TupleDesc BuildDescForRelation(List* schema, Node* oriented_from, char relkind)
                 Form_pg_class relForm;
                 if (HeapTupleIsValid(relTupe)) {
                     relForm = (Form_pg_class)GETSTRUCT(relTupe);
-                    if (relForm->relkind == RELKIND_VIEW) {
+                    bool flag = relForm->relkind == RELKIND_VIEW || relForm->relkind == RELKIND_CONTQUERY;
+                    if (flag) {
                         ereport(ERROR,
-                            (errcode(ERRCODE_UNDEFINED_OBJECT),
-                                errmsg("the attribute column of user defined CompositeType does not support view type "
-                                       "\"%s\" ",
-                                    TypeNameToString(entry->typname))));
+                                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                 errmsg("the attribute column of user defined CompositeType does not support view type "
+                                        "\"%s\" ",
+                                        TypeNameToString(entry->typname))));
                     }
                 }
                 ReleaseSysCache(relTupe);
@@ -930,26 +943,23 @@ TupleDesc BuildDescForRelation(List* schema, Node* oriented_from, char relkind)
             aclcheck_error_type(aclresult, atttypid);
 
         attcollation = GetColumnDefCollation(NULL, entry, atttypid);
-		
         attdim = UpgradeAdaptAttr(atttypid, entry);
 
-        if (((0 == pg_strcasecmp(ORIENTATION_COLUMN, strVal(oriented_from))) || 
-            (0 == pg_strcasecmp(ORIENTATION_TIMESERIES, strVal(oriented_from)))) &&
+        if (((0 == pg_strcasecmp(ORIENTATION_COLUMN, strVal(orientedFrom))) ||
+             (0 == pg_strcasecmp(ORIENTATION_TIMESERIES, strVal(orientedFrom)))) &&
             !IsTypeSupportedByCStore(atttypid, atttypmod))
             ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("type \"%s\" is not supported in column store",
-                        format_type_with_typemod(atttypid, atttypmod))));
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("type \"%s\" is not supported in column store",
+                                                                    format_type_with_typemod(atttypid, atttypmod))));
 
-        if ((0 == pg_strcasecmp(ORIENTATION_ORC, strVal(oriented_from))) && !IsTypeSupportedByORCRelation(atttypid))
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("type \"%s\" is not supported in DFS ORC format column store",
-                        format_type_with_typemod(atttypid, atttypmod))));
+        if ((0 == pg_strcasecmp(ORIENTATION_ORC, strVal(orientedFrom))) && !IsTypeSupportedByORCRelation(atttypid))
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("type \"%s\" is not supported in DFS ORC format column store",
+                                   format_type_with_typemod(atttypid, atttypmod))));
 
         if (entry->typname->setof)
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("column \"%s\" cannot be declared SETOF", attname)));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                            errmsg("column \"%s\" cannot be declared SETOF", attname)));
 
         TupleDescInitEntry(desc, attnum, attname, atttypid, atttypmod, attdim);
 
@@ -971,10 +981,12 @@ TupleDesc BuildDescForRelation(List* schema, Node* oriented_from, char relkind)
         thisatt->attkvtype = entry->kvtype;
         VerifyAttrCompressMode(entry->cmprs_mode, thisatt->attlen, attname);
         thisatt->attcmprmode = entry->cmprs_mode;
+
+        BlockRowCompressRelOption(orientedFrom, entry);
     }
 
     if (has_not_null) {
-        TupleConstr* constr = (TupleConstr*)palloc0(sizeof(TupleConstr));
+        TupleConstr *constr = (TupleConstr *)palloc0(sizeof(TupleConstr));
 
         constr->has_not_null = true;
         constr->defval = NULL;
@@ -1000,14 +1012,14 @@ TupleDesc BuildDescForRelation(List* schema, Node* oriented_from, char relkind)
  * This is essentially a cut-down version of BuildDescForRelation for use
  * with functions returning RECORD.
  */
-TupleDesc BuildDescFromLists(List* names, List* types, List* typmods, List* collations)
+TupleDesc BuildDescFromLists(List *names, List *types, List *typmods, List *collations)
 {
     int natts;
     AttrNumber attnum;
-    ListCell* l1 = NULL;
-    ListCell* l2 = NULL;
-    ListCell* l3 = NULL;
-    ListCell* l4 = NULL;
+    ListCell *l1 = NULL;
+    ListCell *l2 = NULL;
+    ListCell *l3 = NULL;
+    ListCell *l4 = NULL;
     TupleDesc desc;
 
     natts = list_length(names);
@@ -1018,7 +1030,7 @@ TupleDesc BuildDescFromLists(List* names, List* types, List* typmods, List* coll
     /*
      * allocate a new tuple descriptor
      */
-    desc = CreateTemplateTupleDesc(natts, false);
+    desc = CreateTemplateTupleDesc(natts, false, TAM_HEAP);
 
     attnum = 0;
 
@@ -1026,7 +1038,7 @@ TupleDesc BuildDescFromLists(List* names, List* types, List* typmods, List* coll
     l3 = list_head(typmods);
     l4 = list_head(collations);
     foreach (l1, names) {
-        char* attname = strVal(lfirst(l1));
+        char *attname = strVal(lfirst(l1));
         Oid atttypid;
         int32 atttypmod;
         Oid attcollation;

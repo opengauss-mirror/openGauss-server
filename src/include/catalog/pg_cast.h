@@ -457,13 +457,13 @@ DATA(insert ( 1562 1562 1687 i f ));
 DATA(insert ( 1700 1700 1703 i f ));
 
 DATA(insert ( 1082 25 4159 i f ));
-DATA(insert ( 1082 90 4159 i f ));
+/*DATA(insert ( 1082 90 4159 i f ));*/
 DATA(insert ( 1082 1042 4160 i f ));
 DATA(insert ( 1082 1043 4161 i f ));
 DATA(insert ( 1043 1082 4162 i f ));
 DATA(insert ( 1042 1082 4163 i f ));
 DATA(insert ( 25 1082 4164 i f ));
-DATA(insert ( 90 1082 4164 i f ));
+/*DATA(insert ( 90 1082 4164 i f ));*/
 
 DATA(insert ( 5545 25 4165 i f ));
 DATA(insert ( 21   25 4166 i f ));
@@ -472,7 +472,6 @@ DATA(insert ( 20   25 4168 i f ));
 DATA(insert ( 700  25 4169 i f ));
 DATA(insert ( 701  25 4170 i f ));
 DATA(insert ( 1700 25 4171 i f ));
-
 DATA(insert ( 5545 90 4165 i f ));
 DATA(insert ( 21   90 4166 i f ));
 DATA(insert ( 23   90 4167 i f ));
@@ -480,7 +479,6 @@ DATA(insert ( 20   90 4168 i f ));
 DATA(insert ( 700  90 4169 i f ));
 DATA(insert ( 701  90 4170 i f ));
 DATA(insert ( 1700 90 4171 i f ));
-
 DATA(insert ( 1042 1700 4172 i f ));
 DATA(insert ( 1043 1700 4173 i f ));
 DATA(insert ( 1043 23 4174 i f ));
@@ -524,5 +522,14 @@ DATA(insert (20 1042 4069 i f ));
 DATA(insert (700 1042 4070 i f ));
 DATA(insert (701 1042 4071 i f ));
 DATA(insert (1700 1042 4072 i f ));
+
+/* hll */
+DATA(insert (4301 4301 4311 i f ));
+DATA(insert (17    4301 0 e b ));
+DATA(insert (20   4303 0 e b ));
+DATA(insert (23   4303 4317 e f ));
+DATA(insert (4402 4301 0 e b ));
+
+
 
 #endif   /* PG_CAST_H */

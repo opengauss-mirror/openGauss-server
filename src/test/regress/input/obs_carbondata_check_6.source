@@ -1,0 +1,370 @@
+\c carbondata
+SET DATESTYLE='ISO, MDY';
+--BYTE
+--format: snappy, sort: yes, invert: yes, type: byte, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_byte = 125 LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_byte = 0 LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_byte >= 125 LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_byte <= -116 LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_byte BETWEEN -2 AND 115 LIMIT 5;
+
+--SHORT
+--format: snappy, sort: yes, invert: yes, type: short, encoder: ADAPTIVE_DELTA_INTEGRAL
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_short = 1265 LIMIT 5;
+--format: snappy, sort: yes, invert: yes, type: short, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_short BETWEEN -5 AND 32756 LIMIT 5;
+--format: snappy, sort: yes, invert: yes, type: short, encoder: ADAPTIVE_INTEGRAL
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_short >= 32756 LIMIT 5;
+
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_short = 0 LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_short <= 32776 LIMIT 5;
+
+--INT
+--format: snappy, sort: yes, invert: yes, type: int, encoder: ADAPTIVE_DELTA_INTEGRAL/INVERTED_INDEX
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_int = 1236511 LIMIT 5;
+--format: snappy, sort: yes, invert: yes, type: int, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_int BETWEEN -5 AND 3271 LIMIT 5;
+--format: snappy, sort: yes, invert: yes, type: int, encoder: ADAPTIVE_INTEGRAL/INVERTED_INDEX
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_int = 0 LIMIT 5;
+
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_int = 1236511 LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_int BETWEEN -122223 AND 2147483635 LIMIT 5;
+
+--LONG
+--format: snappy, sort: yes, invert: yes, type: long, encoder: ADAPTIVE_DELTA_INTEGRAL
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_long = 326 LIMIT 5;
+--format: snappy, sort: yes, invert: yes, type: long, encoder: ADAPTIVE_INTEGRAL
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_long <= 807 LIMIT 5;
+--format: snappy, sort: yes, invert: yes, type: long, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_long > 326 LIMIT 5;
+
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_long >= 9223372036854775578 LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_long BETWEEN -5709541 AND 9223372036854775807 LIMIT 5;
+
+--FLOAT
+--format: snappy, sort: yes, invert: yes, type: float, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_float = -0.000521 LIMIT 5;
+--format: snappy, sort: yes, invert: yes, type: float, encoder: ADAPTIVE_FLOATING
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_float = 5 LIMIT 5;
+
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_float = 12.8333 LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_float >= 403297.2789453 LIMIT 5;
+
+--DOUBLE
+--format: snappy, sort: yes, invert: yes, type: double, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_double = 23.56975423156 LIMIT 5;
+--format: snappy, sort: yes, invert: yes, type: double, encoder: ADAPTIVE_INTEGRAL
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_double = 111 LIMIT 5;
+
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_double >= 0.000000001 LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_double > 23.56975423156 LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_double BETWEEN -68.99906222 AND 20.000001 LIMIT 5;
+
+--DECIMAL
+--format: snappy, sort: yes, invert: yes, type: decimal, encoder: ADAPTIVE_DELTA_INTEGRAL
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_decimal1 >= 919.95 LIMIT 5;
+--format: snappy, sort: yes, invert: yes, type: decimal, encoder: ADAPTIVE_INTEGRAL
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_decimal2 = 119.459 LIMIT 5;
+
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_decimal1 = 919.95146 LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_decimal1 = 0 LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_decimal1 BETWEEN -1.0 AND 11.95146 LIMIT 5;
+
+--BOOLEAN
+--format: snappy, sort: yes, invert: yes, type: bool, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_bool = 'f' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_bool >= 't' LIMIT 5;
+
+--BINARTY
+--format: snappy, sort: yes, invert: yes, type: binary, encoder: DIRECT_COMPRESS_VARCHAR
+--SELECT * FROM data_filter_snappy_sort_invert WHERE c_binary1 <= '' LIMIT 5;
+--SELECT * FROM data_filter_snappy_sort_invert WHERE c_binary1 >= '' LIMIT 5;
+
+--DATE
+--format: snappy, sort: yes, invert: invert: yes, type: int, encoder: ADAPTIVE_INTEGRAL/INVERTED_INDEX/INVERTED_INDEX
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_date = '2000-01-01' LIMIT 5;
+
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_date <= '2019-08-02' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_date >= '0033-02-23' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_date >= '1233-02-33' LIMIT 5;
+
+--TIMESTAMP
+--format: snappy, sort: yes, invert: yes, type: timestamp, encoder: ADAPTIVE_DELTA_INTEGRAL
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_timestamp <= '2019-08-21 06:06:06' LIMIT 5;
+--format: snappy, sort: yes, invert: yes, type: timestamp, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_timestamp <= '2040-01-19 03:14:07' LIMIT 5;
+
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_timestamp >= '2019-08-21 09:09:09' LIMIT 5;
+
+--STRING
+--format: snappy, sort: yes, invert: yes, type: string, encoder: RLE/INVERTED_INDEX
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_string1 = 'Tiger!Tiger!GOGO!!' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_string1 >= 'Tiger!Tiger!!' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_string1 <= 'Gun!Gun!!taiuibceg' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_string2 = 'Lion!Lion!!cdaw' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_string2 <= 'CatPonyo!qswed' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_string2 <= 'qscc1213232ed' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_string1 IS NULL LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_string2 IS NULL LIMIT 5;
+
+--VARCHAR
+--format: snappy, sort: yes, invert: yes, type: varchar, encoder: DIRECT_COMPRESS_VARCHAR/RLE
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar1 = 'Gun!Gun!!xaas' LIMIT 5;
+--format: snappy, sort: yes, invert: yes, type: varchar, encoder: DIRECT_COMPRESS_VARCHAR
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar1 = '没有什么能够阻挡，我对自由的向往！' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar1 >= '没有什么能够阻挡，我对自由的向往' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar1 = 'Sibadsa!!xdsadae' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar1 IS NULL LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar2 = 'a#HA#BTT#OP#ZBJ#SFYCG#asaa' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar2 >= 'TOQUWYHHgaaeGaHa' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar2 IS NULL LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar3 = 'XSAWWSXD' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar3 = 'Build sa 啊飒qw飒' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar3 >= 'XSAWWSXD' LIMIT 5;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar3 IS NULL LIMIT 5;
+
+--BYTE
+--format: gzip, sort: yes, invert: yes, type: byte, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_byte = 125 LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_byte = 0 LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_byte >= 125 LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_byte <= -116 LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_byte BETWEEN -2 AND 115 LIMIT 5;
+
+--SHORT
+--format: gzip, sort: yes, invert: yes, type: short, encoder: ADAPTIVE_DELTA_INTEGRAL
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_short = 1265 LIMIT 5;
+--format: gzip, sort: yes, invert: yes, type: short, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_short BETWEEN -5 AND 32756 LIMIT 5;
+--format: gzip, sort: yes, invert: yes, type: short, encoder: ADAPTIVE_INTEGRAL
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_short >= 32756 LIMIT 5;
+
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_short = 0 LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_short <= 32776 LIMIT 5;
+
+--INT
+--format: gzip, sort: yes, invert: yes, type: int, encoder: ADAPTIVE_DELTA_INTEGRAL/INVERTED_INDEX
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_int = 1236511 LIMIT 5;
+--format: gzip, sort: yes, invert: yes, type: int, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_int BETWEEN -5 AND 3271 LIMIT 5;
+--format: gzip, sort: yes, invert: yes, type: int, encoder: ADAPTIVE_INTEGRAL/INVERTED_INDEX
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_int = 0 LIMIT 5;
+
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_int = 1236511 LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_int BETWEEN -122223 AND 2147483635 LIMIT 5;
+
+--LONG
+--format: gzip, sort: yes, invert: yes, type: long, encoder: ADAPTIVE_DELTA_INTEGRAL
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_long = 326 LIMIT 5;
+--format: gzip, sort: yes, invert: yes, type: long, encoder: ADAPTIVE_INTEGRAL
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_long <= 807 LIMIT 5;
+--format: gzip, sort: yes, invert: yes, type: long, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_long > 326 LIMIT 5;
+
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_long >= 9223372036854775578 LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_long BETWEEN -5709541 AND 9223372036854775807 LIMIT 5;
+
+--FLOAT
+--format: gzip, sort: yes, invert: yes, type: float, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_float = -0.000521 LIMIT 5;
+--format: gzip, sort: yes, invert: yes, type: float, encoder: ADAPTIVE_FLOATING
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_float = 5 LIMIT 5;
+
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_float = 12.8333 LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_float >= 403297.2789453 LIMIT 5;
+
+--DOUBLE
+--format: gzip, sort: yes, invert: yes, type: double, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_double = 23.56975423156 LIMIT 5;
+--format: gzip, sort: yes, invert: yes, type: double, encoder: ADAPTIVE_INTEGRAL
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_double = 111 LIMIT 5;
+
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_double >= 0.000000001 LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_double > 23.56975423156 LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_double BETWEEN -68.99906222 AND 20.000001 LIMIT 5;
+
+--DECIMAL
+--format: gzip, sort: yes, invert: yes, type: decimal, encoder: ADAPTIVE_DELTA_INTEGRAL
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_decimal1 >= 919.95 LIMIT 5;
+--format: gzip, sort: yes, invert: yes, type: decimal, encoder: ADAPTIVE_INTEGRAL
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_decimal2 = 119.459 LIMIT 5;
+
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_decimal1 = 919.95146 LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_decimal1 = 0 LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_decimal1 BETWEEN -1.0 AND 11.95146 LIMIT 5;
+
+--BOOLEAN
+--format: gzip, sort: yes, invert: yes, type: bool, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_bool = 'f' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_bool >= 't' LIMIT 5;
+
+--BINARTY
+--format: gzip, sort: yes, invert: yes, type: binary, encoder: DIRECT_COMPRESS_VARCHAR
+--SELECT * FROM data_filter_gzip_sort_invert WHERE c_binary1 <= '' LIMIT 5;
+--SELECT * FROM data_filter_gzip_sort_invert WHERE c_binary1 >= '' LIMIT 5;
+
+--DATE
+--format: gzip, sort: yes, invert: invert: yes, type: int, encoder: ADAPTIVE_INTEGRAL/INVERTED_INDEX/INVERTED_INDEX
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_date = '2000-01-01' LIMIT 5;
+
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_date <= '2019-08-02' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_date >= '0033-02-23' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_date >= '1233-02-33' LIMIT 5;
+
+--TIMESTAMP
+--format: gzip, sort: yes, invert: yes, type: timestamp, encoder: ADAPTIVE_DELTA_INTEGRAL
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_timestamp <= '2019-08-21 06:06:06' LIMIT 5;
+--format: gzip, sort: yes, invert: yes, type: timestamp, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_timestamp <= '2040-01-19 03:14:07' LIMIT 5;
+
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_timestamp >= '2019-08-21 09:09:09' LIMIT 5;
+
+--STRING
+--format: gzip, sort: yes, invert: yes, type: string, encoder: RLE/INVERTED_INDEX
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_string1 = 'Tiger!Tiger!GOGO!!' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_string1 >= 'Tiger!Tiger!!' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_string1 <= 'Gun!Gun!!taiuibceg' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_string2 = 'Lion!Lion!!cdaw' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_string2 <= 'CatPonyo!qswed' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_string2 <= 'qscc1213232ed' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_string1 IS NULL LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_string2 IS NULL LIMIT 5;
+
+--VARCHAR
+--format: gzip, sort: yes, invert: yes, type: varchar, encoder: DIRECT_COMPRESS_VARCHAR/RLE
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar1 = 'Gun!Gun!!xaas' LIMIT 5;
+--format: gzip, sort: yes, invert: yes, type: varchar, encoder: DIRECT_COMPRESS_VARCHAR
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar1 = '没有什么能够阻挡，我对自由的向往！' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar1 >= '没有什么能够阻挡，我对自由的向往' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar1 = 'Sibadsa!!xdsadae' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar1 IS NULL LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar2 = 'a#HA#BTT#OP#ZBJ#SFYCG#asaa' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar2 >= 'TOQUWYHHgaaeGaHa' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar2 IS NULL LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar3 = 'XSAWWSXD' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar3 = 'Build sa 啊飒qw飒' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar3 >= 'XSAWWSXD' LIMIT 5;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar3 IS NULL LIMIT 5;
+
+--BYTE
+--format: zstd, sort: yes, invert: yes, type: byte, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_byte = 125 LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_byte = 0 LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_byte >= 125 LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_byte <= -116 LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_byte BETWEEN -2 AND 115 LIMIT 5;
+
+--SHORT
+--format: zstd, sort: yes, invert: yes, type: short, encoder: ADAPTIVE_DELTA_INTEGRAL
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_short = 1265 LIMIT 5;
+--format: zstd, sort: yes, invert: yes, type: short, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_short BETWEEN -5 AND 32756 LIMIT 5;
+--format: zstd, sort: yes, invert: yes, type: short, encoder: ADAPTIVE_INTEGRAL
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_short >= 32756 LIMIT 5;
+
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_short = 0 LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_short <= 32776 LIMIT 5;
+
+--INT
+--format: zstd, sort: yes, invert: yes, type: int, encoder: ADAPTIVE_DELTA_INTEGRAL/INVERTED_INDEX
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_int = 1236511 LIMIT 5;
+--format: zstd, sort: yes, invert: yes, type: int, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_int BETWEEN -5 AND 3271 LIMIT 5;
+--format: zstd, sort: yes, invert: yes, type: int, encoder: ADAPTIVE_INTEGRAL/INVERTED_INDEX
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_int = 0 LIMIT 5;
+
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_int = 1236511 LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_int BETWEEN -122223 AND 2147483635 LIMIT 5;
+
+--LONG
+--format: zstd, sort: yes, invert: yes, type: long, encoder: ADAPTIVE_DELTA_INTEGRAL
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_long = 326 LIMIT 5;
+--format: zstd, sort: yes, invert: yes, type: long, encoder: ADAPTIVE_INTEGRAL
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_long <= 807 LIMIT 5;
+--format: zstd, sort: yes, invert: yes, type: long, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_long > 326 LIMIT 5;
+
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_long >= 9223372036854775578 LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_long BETWEEN -5709541 AND 9223372036854775807 LIMIT 5;
+
+--FLOAT
+--format: zstd, sort: yes, invert: yes, type: float, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_float = -0.000521 LIMIT 5;
+--format: zstd, sort: yes, invert: yes, type: float, encoder: ADAPTIVE_FLOATING
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_float = 5 LIMIT 5;
+
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_float = 12.8333 LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_float >= 403297.2789453 LIMIT 5;
+
+--DOUBLE
+--format: zstd, sort: yes, invert: yes, type: double, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_double = 23.56975423156 LIMIT 5;
+--format: zstd, sort: yes, invert: yes, type: double, encoder: ADAPTIVE_INTEGRAL
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_double = 111 LIMIT 5;
+
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_double >= 0.000000001 LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_double > 23.56975423156 LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_double BETWEEN -68.99906222 AND 20.000001 LIMIT 5;
+
+--DECIMAL
+--format: zstd, sort: yes, invert: yes, type: decimal, encoder: ADAPTIVE_DELTA_INTEGRAL
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_decimal1 >= 919.95 LIMIT 5;
+--format: zstd, sort: yes, invert: yes, type: decimal, encoder: ADAPTIVE_INTEGRAL
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_decimal2 = 119.459 LIMIT 5;
+
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_decimal1 = 919.95146 LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_decimal1 = 0 LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_decimal1 BETWEEN -1.0 AND 11.95146 LIMIT 5;
+
+--BOOLEAN
+--format: zstd, sort: yes, invert: yes, type: bool, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_bool = 'f' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_bool >= 't' LIMIT 5;
+
+--BINARTY
+--format: zstd, sort: yes, invert: yes, type: binary, encoder: DIRECT_COMPRESS_VARCHAR
+--SELECT * FROM data_filter_zstd_sort_invert WHERE c_binary1 <= '' LIMIT 5;
+--SELECT * FROM data_filter_zstd_sort_invert WHERE c_binary1 >= '' LIMIT 5;
+
+--DATE
+--format: zstd, sort: yes, invert: invert: yes, type: int, encoder: ADAPTIVE_INTEGRAL/INVERTED_INDEX/INVERTED_INDEX
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_date = '2000-01-01' LIMIT 5;
+
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_date <= '2019-08-02' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_date >= '0033-02-23' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_date >= '1233-02-33' LIMIT 5;
+
+--TIMESTAMP
+--format: zstd, sort: yes, invert: yes, type: timestamp, encoder: ADAPTIVE_DELTA_INTEGRAL
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_timestamp <= '2019-08-21 06:06:06' LIMIT 5;
+--format: zstd, sort: yes, invert: yes, type: timestamp, encoder: DIRECT_COMPRESS
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_timestamp <= '2040-01-19 03:14:07' LIMIT 5;
+
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_timestamp >= '2019-08-21 09:09:09' LIMIT 5;
+
+--STRING
+--format: zstd, sort: yes, invert: yes, type: string, encoder: RLE/INVERTED_INDEX
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_string1 = 'Tiger!Tiger!GOGO!!' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_string1 >= 'Tiger!Tiger!!' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_string1 <= 'Gun!Gun!!taiuibceg' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_string2 = 'Lion!Lion!!cdaw' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_string2 <= 'CatPonyo!qswed' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_string2 <= 'qscc1213232ed' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_string1 IS NULL LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_string2 IS NULL LIMIT 5;
+
+--VARCHAR
+--format: zstd, sort: yes, invert: yes, type: varchar, encoder: DIRECT_COMPRESS_VARCHAR/RLE
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar1 = 'Gun!Gun!!xaas' LIMIT 5;
+--format: zstd, sort: yes, invert: yes, type: varchar, encoder: DIRECT_COMPRESS_VARCHAR
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar1 = '没有什么能够阻挡，我对自由的向往！' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar1 >= '没有什么能够阻挡，我对自由的向往' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar1 = 'Sibadsa!!xdsadae' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar1 IS NULL LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar2 = 'a#HA#BTT#OP#ZBJ#SFYCG#asaa' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar2 >= 'TOQUWYHHgaaeGaHa' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar2 IS NULL LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar3 = 'XSAWWSXD' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar3 = 'Build sa 啊飒qw飒' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar3 >= 'XSAWWSXD' LIMIT 5;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar3 IS NULL LIMIT 5;

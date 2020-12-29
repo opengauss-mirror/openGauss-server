@@ -38,27 +38,25 @@ Datum binary_encode(PG_FUNCTION_ARGS)
     text* result = NULL;
     char* namebuf = NULL;
     int datalen, resultlen, res;
-    const struct pg_encoding* enc = NULL;
+    const struct pg_encoding* enc;
 
     datalen = VARSIZE(data) - VARHDRSZ;
-    if (unlikely(datalen < 0)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid data len:%d", datalen)));
-    }
-    namebuf = TextDatumGetCString(name);
-    enc = pg_find_encoding(namebuf);
 
-    if (enc == NULL) {
+    namebuf = TextDatumGetCString(name);
+
+    enc = pg_find_encoding(namebuf);
+    if (enc == NULL)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unrecognized encoding: \"%s\"", namebuf)));
-    }
 
     resultlen = enc->encode_len(VARDATA(data), datalen);
     result = (text*)palloc(VARHDRSZ + resultlen);
+
     res = enc->encode(VARDATA(data), datalen, VARDATA(result));
 
     /* Make this FATAL 'cause we've trodden on memory ... */
-    if (res > resultlen) {
+    if (res > resultlen)
         ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("overflow - encode estimate too small")));
-    }
+
     SET_VARSIZE(result, VARHDRSZ + res);
 
     PG_RETURN_TEXT_P(result);
@@ -74,20 +72,22 @@ Datum binary_decode(PG_FUNCTION_ARGS)
     const struct pg_encoding* enc;
 
     datalen = VARSIZE(data) - VARHDRSZ;
+
     namebuf = TextDatumGetCString(name);
+
     enc = pg_find_encoding(namebuf);
-    if (enc == NULL) {
+    if (enc == NULL)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unrecognized encoding: \"%s\"", namebuf)));
-    }
 
     resultlen = enc->decode_len(VARDATA(data), datalen);
     result = (bytea*)palloc(VARHDRSZ + resultlen);
+
     res = enc->decode(VARDATA(data), datalen, VARDATA(result));
 
     /* Make this FATAL 'cause we've trodden on memory ... */
-    if (res > resultlen) {
+    if (res > resultlen)
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("overflow - decode estimate too small")));
-    }
+
     SET_VARSIZE(result, VARHDRSZ + res);
 
     PG_RETURN_BYTEA_P(result);
@@ -246,19 +246,18 @@ static inline char get_hex(char c)
 {
     int res = -1;
 
-    if (c > 0 && c < 127) {
+    if (c > 0 && c < 127)
         res = hexlookup[(unsigned char)c];
-    }
-    if (res < 0) {
+
+    if (res < 0)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid hexadecimal digit: \"%c\"", c)));
-    }
+
     return (char)res;
 }
 
 unsigned hex_decode(const char* src, unsigned len, char* dst)
 {
-    const char *s = NULL;
-    const char *srcend = NULL;
+    const char *s = NULL, *srcend;
     char v1, v2, *p;
 
     srcend = src + len;
@@ -270,10 +269,10 @@ unsigned hex_decode(const char* src, unsigned len, char* dst)
             continue;
         }
         v1 = get_hex(*s++) << 4;
-        if (s >= srcend) {
+        if (s >= srcend)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid hexadecimal data: odd number of digits")));
-        }
+
         v2 = get_hex(*s++);
         *p++ = v1 | v2;
     }
@@ -430,10 +429,8 @@ static const int8 b64lookup[128] = {
 
 static unsigned b64_encode(const char* src, unsigned len, char* dst)
 {
-    char *p = NULL;
-    char *lend = dst + 76;
-    const char *s = NULL;
-    const char *end = src + len;
+    char *p = NULL, *lend = dst + 76;
+    const char *s = NULL, *end = src + len;
     int pos = 2;
     uint32 buf = 0;
 
@@ -472,61 +469,54 @@ static unsigned b64_encode(const char* src, unsigned len, char* dst)
 
 static unsigned b64_decode(const char* src, unsigned len, char* dst)
 {
-    const char *srcend = src + len;
-    const char *s = src;
+    const char *srcend = src + len, *s = src;
     char* p = dst;
     char c;
     int b = 0;
     uint32 buf = 0;
-    int pos = 0;
-    int end = 0;
+    int pos = 0, end = 0;
 
     while (s < srcend) {
         c = *s++;
 
-        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
             continue;
-        }
+
         if (c == '=') {
             /* end sequence */
             if (!end) {
-                if (pos == 2) {
+                if (pos == 2)
                     end = 1;
-                } else if (pos == 3) {
+                else if (pos == 3)
                     end = 2;
-                } else {
+                else
                     ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unexpected \"=\"")));
-                }
             }
             b = 0;
         } else {
             b = -1;
-            if (c > 0 && c < 127) {
+            if (c > 0 && c < 127)
                 b = b64lookup[(unsigned char)c];
-            }
-            if (b < 0) {
+            if (b < 0)
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid symbol")));
-            }
         }
         /* add it to buffer */
         buf = (buf << 6) + b;
         pos++;
         if (pos == 4) {
             *p++ = (buf >> 16) & 255;
-            if (end == 0 || end > 1) {
+            if (end == 0 || end > 1)
                 *p++ = (buf >> 8) & 255;
-            }
-            if (end == 0 || end > 2) {
+            if (end == 0 || end > 2)
                 *p++ = buf & 255;
-            }
             buf = 0;
             pos = 0;
         }
     }
 
-    if (pos != 0) {
+    if (pos != 0)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid end sequence")));
-    }
+
     return p - dst;
 }
 
@@ -597,10 +587,10 @@ static unsigned esc_decode(const char* src, unsigned srclen, char* dst)
     int len = 0;
 
     while (src < end) {
-        if (src[0] != '\\') {
+        if (src[0] != '\\')
             *rp++ = *src++;
-        } else if (src + 3 < end && (src[1] >= '0' && src[1] <= '3') &&
-                   (src[2] >= '0' && src[2] <= '7') && (src[3] >= '0' && src[3] <= '7')) {
+        else if (src + 3 < end && (src[1] >= '0' && src[1] <= '3') && (src[2] >= '0' && src[2] <= '7') &&
+                 (src[3] >= '0' && src[3] <= '7')) {
             unsigned int val;
 
             val = VAL(src[1]);
@@ -633,13 +623,13 @@ static unsigned esc_enc_len(const char* src, unsigned srclen)
     int len = 0;
 
     while (src < end) {
-        if (*src == '\0' || IS_HIGHBIT_SET(*src)) {
+        if (*src == '\0' || IS_HIGHBIT_SET(*src))
             len += 4;
-        } else if (*src == '\\') {
+        else if (*src == '\\')
             len += 2;
-        } else {
+        else
             len++;
-        }
+
         src++;
     }
 
@@ -652,9 +642,9 @@ static unsigned esc_dec_len(const char* src, unsigned srclen)
     int len = 0;
 
     while (src < end) {
-        if (src[0] != '\\') {
+        if (src[0] != '\\')
             src++;
-        } else if (src + 3 < end && (src[1] >= '0' && src[1] <= '3') && (src[2] >= '0' && src[2] <= '7') &&
+        else if (src + 3 < end && (src[1] >= '0' && src[1] <= '3') && (src[2] >= '0' && src[2] <= '7') &&
                  (src[3] >= '0' && src[3] <= '7')) {
             /*
              * backslash + valid octal
@@ -686,19 +676,19 @@ static const struct {
     const char* name;
     struct pg_encoding enc;
 } enclist[] =
+
     {{"hex", {hex_enc_len, hex_dec_len, hex_encode, hex_decode}},
-     {"base64", {b64_enc_len, b64_dec_len, b64_encode, b64_decode}},
-     {"escape", {esc_enc_len, esc_dec_len, esc_encode, esc_decode}},
-     {NULL, {NULL, NULL, NULL, NULL}}};
+        {"base64", {b64_enc_len, b64_dec_len, b64_encode, b64_decode}},
+        {"escape", {esc_enc_len, esc_dec_len, esc_encode, esc_decode}},
+        {NULL, {NULL, NULL, NULL, NULL}}};
 
 static const struct pg_encoding* pg_find_encoding(const char* name)
 {
     int i;
 
-    for (i = 0; enclist[i].name; i++) {
-        if (pg_strcasecmp(enclist[i].name, name) == 0) {
+    for (i = 0; enclist[i].name; i++)
+        if (pg_strcasecmp(enclist[i].name, name) == 0)
             return &enclist[i].enc;
-        }
-    }
+
     return NULL;
 }

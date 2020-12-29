@@ -1,0 +1,11 @@
+select * from hash_row order by 1;
+
+select c3, c2 from hash_col order by 1;
+select c3, c2 from rep_col order by 1;
+
+select c3, count(c3) from hash_row group by(c3) order by 1;
+select c3, count(c3) from hash_col group by(c3) order by 1;
+select c3, count(c3) from rep_row group by(c3) order by 1;
+select c3, count(c3) from rep_col group by(c3) order by 1;
+
+select * from hash_row where c1 = 5;

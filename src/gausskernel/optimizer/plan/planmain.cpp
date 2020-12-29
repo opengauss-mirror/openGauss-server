@@ -27,15 +27,17 @@
 #include "parser/parse_hint.h"
 #include "pgxc/pgxc.h"
 #include "optimizer/cost.h"
-#include "optimizer/orclauses.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/paths.h"
 #include "optimizer/placeholder.h"
 #include "optimizer/planmain.h"
-#include "optimizer/planner.h"
 #include "optimizer/randomplan.h"
 #include "optimizer/tlist.h"
 #include "utils/selfuncs.h"
+
+/* Local functions */
+static void canonicalize_all_pathkeys(PlannerInfo* root);
+static void debug_print_log(PlannerInfo* root, Path* sortedpath, int debug_log_level);
 
 /*
  * query_planner
@@ -89,9 +91,8 @@
  * therefore not redundant with limit_tuples.  We use limit_tuples to determine
  * whether a bounded sort can be used at runtime.
  */
-void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double limit_tuples,
-    query_pathkeys_callback qp_callback, void *qp_extra,
-    Path** cheapest_path, Path** sorted_path, double* num_groups, List* rollup_groupclauses, List* rollup_lists)
+void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double limit_tuples, Path** cheapest_path,
+    Path** sorted_path, double* num_groups, List* rollup_groupclauses, List* rollup_lists)
 {
     Query* parse = root->parse;
     List* joinlist = NIL;
@@ -103,7 +104,6 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
     /* local distinct and global distinct */
     double numdistinct[2] = {1, 1};
     bool has_groupby = true;
-    bool consider_parallel = false;
 
     /* Make tuple_fraction, limit_tuples accessible to lower-level routines */
     root->tuple_fraction = tuple_fraction;
@@ -115,16 +115,7 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
      */
     if (parse->jointree->fromlist == NIL) {
         /* We need a trivial path result */
-        RelOptInfo* rel = build_empty_join_rel(root);
-        if (root->glob->parallelModeOK) {
-            consider_parallel = !has_parallel_hazard(parse->jointree->quals, false);
-        }
-        rel->consider_parallel = consider_parallel;
-
-        *cheapest_path = (Path*)create_result_path(rel, (List*)parse->jointree->quals);
-        if (root->glob->parallelModeOK && u_sess->attr.attr_sql.force_parallel_mode != FORCE_PARALLEL_OFF) {
-            (*cheapest_path)->parallel_safe = !has_parallel_hazard(parse->jointree->quals, false);
-        }
+        *cheapest_path = (Path*)create_result_path(root, NULL, (List*)parse->jointree->quals);
         *sorted_path = NULL;
 
         /*
@@ -132,7 +123,7 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
          * something like "SELECT 2+2 ORDER BY 1".
          */
         root->canon_pathkeys = NIL;
-        (*qp_callback) (root, qp_extra);
+        canonicalize_all_pathkeys(root);
         return;
     }
 
@@ -151,6 +142,7 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
     root->right_join_clauses = NIL;
     root->full_join_clauses = NIL;
     root->join_info_list = NIL;
+    root->lateral_info_list = NIL;
     root->placeholder_list = NIL;
     root->initial_rels = NIL;
 
@@ -189,7 +181,17 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
 
     find_placeholders_in_jointree(root);
 
+    find_lateral_references(root);
+
     joinlist = deconstruct_jointree(root);
+
+    process_security_clause_appendrel(root);
+
+    /*
+     * Create the LateralJoinInfo list now that we have finalized
+     * PlaceHolderVar eval levels.
+     */
+    create_lateral_join_info(root);
 
     /*
      * Reconsider any postponed outer-join quals now that we have built up
@@ -212,7 +214,7 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
      * convert previously generated pathkeys (in particular, the requested
      * query_pathkeys) to canonical form.
      */
-    (*qp_callback) (root, qp_extra);
+    canonicalize_all_pathkeys(root);
 
     /*
      * Examine any "placeholder" expressions generated during subquery pullup.
@@ -236,12 +238,6 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
      * placeholder is evaluatable at a base rel.
      */
     add_placeholders_to_base_rels(root);
-
-    /*
-     * Look for join OR clauses that we can extract single-relation
-     * restriction OR clauses from.
-     */
-    extract_restriction_or_clauses(root);
 
     /*
      * We should now have size estimates for every actual table involved in
@@ -276,12 +272,23 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
      * Ready to do the primary planning.
      */
     final_rel = make_one_rel(root, joinlist);
-    final_rel->consider_parallel = consider_parallel;
+
     if (final_rel == NULL || final_rel->cheapest_total_path == NIL) {
         ereport(ERROR,
             (errmodule(MOD_OPT),
                 errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                 errmsg("failed to construct the join relation")));
+    }
+    /* cheapest_total_path should not exist para_info */
+    ListCell *lc = NULL;
+    foreach(lc, final_rel->cheapest_total_path) {
+        Path *judge_path = (Path *)lfirst(lc);
+        if (judge_path->param_info != NULL && PATH_REQ_OUTER(judge_path) != NULL) {
+            ereport(ERROR,
+                    (errmodule(MOD_OPT),
+                    errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                    errmsg("cheapest_total_path should not exist para_info")));
+        }
     }
 
     unsigned int num_datanodes = ng_get_dest_num_data_nodes(root, final_rel);
@@ -483,10 +490,40 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
 
         if (compare_fractional_path_costs(sortedpath, &sort_path, tuple_fraction) > 0) {
             /* Presorted path is a loser */
+            debug_print_log(root, sortedpath, DEBUG2);
             sortedpath = NULL;
         }
     }
 
     *cheapest_path = cheapestpath;
     *sorted_path = sortedpath;
+}
+
+static void debug_print_log(PlannerInfo* root, Path* sortedpath, int debug_log_level)
+{
+    if (log_min_messages > debug_log_level)
+        return;
+
+    ereport(debug_log_level,
+            (errmodule(MOD_OPT),
+                (errmsg("Presorted path is not accepted with cost = %lf .. %lf",
+                        sortedpath->startup_cost,
+                        sortedpath->total_cost))));
+
+    /* print more details */
+    debug1_print_new_path(root, sortedpath, false);
+}
+
+/*
+ * canonicalize_all_pathkeys
+ *		Canonicalize all pathkeys that were generated before entering
+ *		query_planner and then stashed in PlannerInfo.
+ */
+static void canonicalize_all_pathkeys(PlannerInfo* root)
+{
+    root->query_pathkeys = canonicalize_pathkeys(root, root->query_pathkeys);
+    root->group_pathkeys = canonicalize_pathkeys(root, root->group_pathkeys);
+    root->window_pathkeys = canonicalize_pathkeys(root, root->window_pathkeys);
+    root->distinct_pathkeys = canonicalize_pathkeys(root, root->distinct_pathkeys);
+    root->sort_pathkeys = canonicalize_pathkeys(root, root->sort_pathkeys);
 }

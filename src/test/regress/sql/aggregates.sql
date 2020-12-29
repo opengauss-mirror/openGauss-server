@@ -232,46 +232,46 @@ FROM bool_test;
 analyze tenk1;		-- ensure we get consistent plans here
 
 -- Basic cases
-explain (costs off, nodes off)
+explain (costs off)
   select min(unique1) from tenk1;
 
 select min(unique1) from tenk1;
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique1) from tenk1;
 
 select max(unique1) from tenk1;
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique1) from tenk1 where unique1 < 42;
 
 select max(unique1) from tenk1 where unique1 < 42;
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique1) from tenk1 where unique1 > 42;
 
 select max(unique1) from tenk1 where unique1 > 42;
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique1) from tenk1 where unique1 > 42000;
 
 select max(unique1) from tenk1 where unique1 > 42000;
 
 
 -- multi-column index (uses tenk1_thous_tenthous)
-explain (costs off, nodes off)
+explain (costs off)
   select max(tenthous) from tenk1 where thousand = 33;
 
 select max(tenthous) from tenk1 where thousand = 33;
 
-explain (costs off, nodes off)
+explain (costs off)
   select min(tenthous) from tenk1 where thousand = 33;
 
 select min(tenthous) from tenk1 where thousand = 33;
 
 
 -- check parameter propagation into an indexscan subquery
-explain (costs off, nodes off)
+explain (costs off)
   select f1, (select min(unique1) from tenk1 where unique1 > f1) AS gt
     from int4_tbl;
 select f1, (select min(unique1) from tenk1 where unique1 > f1) AS gt
@@ -279,25 +279,25 @@ from int4_tbl
 order by f1;
 
 -- check some cases that were handled incorrectly in 8.3.0
-explain (costs off, nodes off)
+explain (costs off)
   select distinct max(unique2) from tenk1;
 select distinct max(unique2) from tenk1;
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique2) from tenk1 order by 1;
 
 select max(unique2) from tenk1 order by 1;
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique2) from tenk1 order by max(unique2);
 
 select max(unique2) from tenk1 order by max(unique2);
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique2) from tenk1 order by max(unique2)+1;
 
 select max(unique2) from tenk1 order by max(unique2)+1;
 
-explain (costs off, nodes off)
+explain (costs off)
   select max(unique2), generate_series(1,3) as g from tenk1 order by g desc;
 
 select max(unique2), generate_series(1,3) as g from tenk1 order by g desc;
@@ -318,12 +318,12 @@ insert into minmaxtest1 values(13), (14);
 insert into minmaxtest2 values(15), (16);
 insert into minmaxtest3 values(17), (18);
 
-explain (costs off, nodes off)
+explain (costs off)
   select min(f1), max(f1) from minmaxtest;
 select min(f1), max(f1) from minmaxtest;
 
 -- DISTINCT doesn't do anything useful here, but it shouldn't fail
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
   select distinct min(f1), max(f1) from minmaxtest;
 select distinct min(f1), max(f1) from minmaxtest;
 
@@ -353,22 +353,22 @@ select array_agg(distinct a order by a desc nulls last)
 
 -- string_agg tests
 select string_agg(a,',') from (values('aaaa'),('bbbb'),('cccc')) g(a);
-explain (verbose, costs off, nodes off) select string_agg(a,',') from (values('aaaa'),('bbbb'),('cccc')) g(a);
+explain (verbose, costs off) select string_agg(a,',') from (values('aaaa'),('bbbb'),('cccc')) g(a);
 select string_agg(a,',') from (values('aaaa'),(null),('bbbb'),('cccc')) g(a);
 select string_agg(a,'AB') from (values(null),(null),('bbbb'),('cccc')) g(a);
 select string_agg(a,',') from (values(null),(null)) g(a);
 
 -- check some implicit casting cases, as per bug #5564
 select string_agg(distinct f1, ',') from varchar_tbl;  -- ok
-explain (verbose, costs off, nodes off) select string_agg(distinct f1, ',') from varchar_tbl;  -- ok
+explain (verbose, costs off) select string_agg(distinct f1, ',') from varchar_tbl;  -- ok
 select string_agg(distinct f1, ',' order by f1) from varchar_tbl;  -- ok
-explain (verbose, costs off, nodes off) select string_agg(distinct f1, ',' order by f1) from varchar_tbl;  -- ok
+explain (verbose, costs off) select string_agg(distinct f1, ',' order by f1) from varchar_tbl;  -- ok
 select string_agg(distinct f1::text, ',' order by f1) from varchar_tbl;  -- not ok
 select string_agg(distinct f1, ',' order by f1::text) from varchar_tbl;  -- not ok
 select string_agg(distinct f1::text, ',') from varchar_tbl;  -- ok
-explain (verbose, costs off, nodes off) select string_agg(distinct f1::text, ',') from varchar_tbl;  -- ok
+explain (verbose, costs off) select string_agg(distinct f1::text, ',') from varchar_tbl;  -- ok
 select string_agg(distinct f1::text, ',' order by f1::text) from varchar_tbl;  -- ok
-explain (verbose, costs off, nodes off) select string_agg(distinct f1::text, ',' order by f1::text) from varchar_tbl;  -- ok
+explain (verbose, costs off) select string_agg(distinct f1::text, ',' order by f1::text) from varchar_tbl;  -- ok
 
 -- string_agg bytea tests
 create table bytea_test_table(v bytea);
@@ -382,7 +382,7 @@ select string_agg(v, '' order by v) from bytea_test_table;
 insert into bytea_test_table values(decode('aa','hex'));
 
 select string_agg(v, '' order by v) from bytea_test_table;
-explain (verbose, costs off, nodes off) select string_agg(v, '' order by v) from bytea_test_table;
+explain (verbose, costs off) select string_agg(v, '' order by v) from bytea_test_table;
 select string_agg(v, NULL order by v) from bytea_test_table;
 select string_agg(v, decode('ee', 'hex') order by v) from bytea_test_table;
 
@@ -397,7 +397,7 @@ insert into string_agg_dn values(3,'changping','0105888','5', 5);
 insert into string_agg_dn values(4,'nanjing','0565888','6', 6);
 insert into string_agg_dn values(5,'haidian','0211167','1', 8);
 
-explain (verbose off, costs off, nodes off)
+explain (verbose off, costs off)
 select
 	 cino, 
 	 substr(string_agg(addr , ';') , 
@@ -445,33 +445,33 @@ from (select cino,
 group by cino order by cino;
 
 select string_agg(addr, ';') from string_agg_dn;
-explain (verbose, costs off, nodes off) select string_agg(addr, ';') from string_agg_dn;
+explain (verbose, costs off) select string_agg(addr, ';') from string_agg_dn;
 select string_agg(addr, ';' order by cino) from string_agg_dn;
-explain (verbose, costs off, nodes off) select string_agg(addr, ';' order by cino) from string_agg_dn;
+explain (verbose, costs off) select string_agg(addr, ';' order by cino) from string_agg_dn;
 select string_agg(addr, ';') from string_agg_dn where valid_flag='5' group by cino;
-explain (verbose, costs off, nodes off) select string_agg(addr, ';') from string_agg_dn where valid_flag='5' group by cino;
+explain (verbose, costs off) select string_agg(addr, ';') from string_agg_dn where valid_flag='5' group by cino;
 select string_agg(cino, ';') from string_agg_dn where valid_flag='5' group by cino;
-explain (verbose, costs off, nodes off) select string_agg(cino, ';') from string_agg_dn where valid_flag='5' group by id;
+explain (verbose, costs off) select string_agg(cino, ';') from string_agg_dn where valid_flag='5' group by id;
 select cino from string_agg_dn group by cino order by cino;
-explain (verbose, costs off, nodes off) select cino from string_agg_dn group by cino order by cino;
+explain (verbose, costs off) select cino from string_agg_dn group by cino order by cino;
 select max(id) from string_agg_dn having string_agg(cino, ';' order by cino) = '1;2;3;4;5';
-explain (verbose, costs off, nodes off) select max(id) from string_agg_dn having string_agg(cino, ';' order by cino) = '1;2;3;4;5';
+explain (verbose, costs off) select max(id) from string_agg_dn having string_agg(cino, ';' order by cino) = '1;2;3;4;5';
 select string_agg(addr, ';'order by addr) from string_agg_dn  group by valid_flag order by 1;
-explain (verbose, costs off, nodes off) select string_agg(addr, ';'order by addr) from string_agg_dn  group by valid_flag;
+explain (verbose, costs off) select string_agg(addr, ';'order by addr) from string_agg_dn  group by valid_flag;
 select string_agg(distinct addr, ';'order by addr) from string_agg_dn  group by valid_flag order by 1;
-explain (verbose, costs off, nodes off) select string_agg(distinct addr, ';'order by addr) from string_agg_dn  group by valid_flag;
+explain (verbose, costs off) select string_agg(distinct addr, ';'order by addr) from string_agg_dn  group by valid_flag;
 select string_agg(t1.cino,','order by t1.cino) from string_agg_dn t1,string_agg_dn t2 where t1.id=t2.id;
-explain (verbose, costs off, nodes off) select string_agg(t1.cino,','order by t1.cino) from string_agg_dn t1,string_agg_dn t2 where t1.id=t2.id;
+explain (verbose, costs off) select string_agg(t1.cino,','order by t1.cino) from string_agg_dn t1,string_agg_dn t2 where t1.id=t2.id;
 drop table string_agg_dn;
 create table string_agg_dn_col(c1 int, c2 text) with (orientation = column);
 insert into string_agg_dn_col values(1, 'test');
 select c1, string_agg(c2,',') from string_agg_dn_col group by c1;
-explain (verbose, costs off, nodes off) select c1, string_agg(c2,',') from string_agg_dn_col group by c1;
+explain (verbose, costs off) select c1, string_agg(c2,',') from string_agg_dn_col group by c1;
 drop table string_agg_dn_col;
 create table string_agg_dn_dk_null(c1 int, c2 text, c3 regproc);
 insert into string_agg_dn_dk_null values(1, 'test', 'sin');
 select c3, string_agg(c2, ',') from string_agg_dn_dk_null group by c3;
-explain (verbose, costs off, nodes off) select c3, string_agg(c2, ',') from string_agg_dn_dk_null group by c3;
+explain (verbose, costs off) select c3, string_agg(c2, ',') from string_agg_dn_dk_null group by c3;
 drop table string_agg_dn_dk_null;
 
 -- test non-collection agg functions
@@ -480,105 +480,105 @@ insert into t_collection select generate_series(1, 100)%8, generate_series(1, 10
 analyze t_collection;
 
 -- normal
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(d1), 1) from t_collection;
 select array_length(array_agg(d1), 1) from t_collection;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(d1), 1) from t_collection group by b1 order by 1;
 select array_length(array_agg(d1), 1) from t_collection group by b1 order by 1;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1) from t_collection;
 select array_length(array_agg(distinct d1), 1) from t_collection;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1) from t_collection group by b1 order by 1;
 select array_length(array_agg(distinct d1), 1) from t_collection group by b1 order by 1;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(d1 order by d1), ':') from t_collection;
 select array_to_string(array_agg(d1 order by d1), ':') from t_collection;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(d1 order by d1), ':') from t_collection group by b1 order by 1;
 select array_to_string(array_agg(d1 order by d1), ':') from t_collection group by b1 order by 1;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(distinct d1 order by d1), ':') from t_collection;
 select array_to_string(array_agg(distinct d1 order by d1), ':') from t_collection;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(distinct d1 order by d1), ':') from t_collection group by b1 order by 1;
 select array_to_string(array_agg(distinct d1 order by d1), ':') from t_collection group by b1 order by 1;
 
 -- count(distinct)
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(d1), 1), count(distinct(c1)) from t_collection;
 select array_length(array_agg(d1), 1), count(distinct(c1)) from t_collection;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(d1), 1), count(distinct(c1)) from t_collection group by b1 order by 1;
 select array_length(array_agg(d1), 1), count(distinct(c1)) from t_collection group by b1 order by 1;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1), count(distinct(c1)) from t_collection;
 select array_length(array_agg(distinct d1), 1), count(distinct(c1)) from t_collection;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1), count(distinct(c1)) from t_collection group by b1 order by 1;
 select array_length(array_agg(distinct d1), 1), count(distinct(c1)) from t_collection group by b1 order by 1;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(d1 order by d1), ':'), count(distinct(c1)) from t_collection;
 select array_to_string(array_agg(d1 order by d1), ':'), count(distinct(c1)) from t_collection;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(d1 order by d1), ':'), count(distinct(c1)) from t_collection group by b1 order by 1;
 select array_to_string(array_agg(d1 order by d1), ':'), count(distinct(c1)) from t_collection group by b1 order by 1;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(distinct d1 order by d1), ':'), count(distinct(c1)) from t_collection;
 select array_to_string(array_agg(distinct d1 order by d1), ':'), count(distinct(c1)) from t_collection;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(distinct d1 order by d1), ':'), count(distinct(c1)) from t_collection group by b1 order by 1;
 select array_to_string(array_agg(distinct d1 order by d1), ':'), count(distinct(c1)) from t_collection group by b1 order by 1;
 
 -- multi non-collection agg
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(d1), 1), array_length(array_agg(distinct c1), 1) from t_collection;
 select array_length(array_agg(d1), 1), array_length(array_agg(distinct c1), 1) from t_collection;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(d1), 1), array_length(array_agg(distinct c1), 1) from t_collection group by b1 order by 1;
 select array_length(array_agg(d1), 1), array_length(array_agg(distinct c1), 1) from t_collection group by b1 order by 1;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1), array_length(array_agg(distinct c1), 1) from t_collection;
 select array_length(array_agg(distinct d1), 1), array_length(array_agg(distinct c1), 1) from t_collection;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1), array_length(array_agg(distinct c1), 1) from t_collection group by b1 order by 1;
 select array_length(array_agg(distinct d1), 1), array_length(array_agg(distinct c1), 1) from t_collection group by b1 order by 1;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(d1 order by d1), ':'), array_length(array_agg(distinct c1), 1) from t_collection;
 select array_to_string(array_agg(d1 order by d1), ':'), array_length(array_agg(distinct c1), 1) from t_collection;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(d1 order by d1), ':'), array_length(array_agg(distinct c1), 1) from t_collection group by b1 order by 1;
 select array_to_string(array_agg(d1 order by d1), ':'), array_length(array_agg(distinct c1), 1) from t_collection group by b1 order by 1;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(distinct d1 order by d1), ':'), array_length(array_agg(distinct c1), 1) from t_collection;
 select array_to_string(array_agg(distinct d1 order by d1), ':'), array_length(array_agg(distinct c1), 1) from t_collection;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_to_string(array_agg(distinct d1 order by d1), ':'), array_length(array_agg(distinct c1), 1) from t_collection group by b1 order by 1;
 select array_to_string(array_agg(distinct d1 order by d1), ':'), array_length(array_agg(distinct c1), 1) from t_collection group by b1 order by 1;
 select array_to_string(ARRAY[NULL, NULL, NULL, NULL, NULL], ',', NULL) is null;
 SELECT array_to_string(ARRAY[NULL, NULL, NULL, NULL, NULL], ',') is null;
 
 -- grouping sets
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1) from t_collection group by rollup(a1) order by a1;  -- can't push down
 select array_length(array_agg(distinct d1), 1) from t_collection group by rollup(a1) order by a1;  -- can't push down
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_length(array_agg(distinct d1), 1) from t_collection group by rollup(a1), c1 order by a1, c1; -- can push down
 select array_length(array_agg(distinct d1), 1) from t_collection group by rollup(a1), c1 order by a1, c1; -- can push down
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array_agg(distinct d1 order by d1) from t_collection group by rollup(a1), c1 order by a1, c1; -- can push down
 select array_agg(distinct d1 order by d1) from t_collection group by rollup(a1), c1 order by a1, c1; -- can push down
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by grouping sets(c1, d1) order by c1, d1;
 select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by grouping sets(c1, d1) order by c1, d1;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by grouping sets((c1, d1)) order by c1, d1;
 select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by grouping sets((c1, d1)) order by c1, d1;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by cube(c1, d1) order by c1, d1;
 select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by cube(c1, d1) order by c1, d1;
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by cube(c1), d1 order by c1, d1;
 select c1, d1, length(string_agg(distinct b1, 'x')) from t_collection group by cube(c1), d1 order by c1, d1;
 drop table t_collection;
@@ -596,7 +596,7 @@ create table t_fqs_abs (a int, b int, c int, d int);
 insert into t_fqs_abs values (1,1,1,1);
 insert into t_fqs_abs values (2,2,2,2);
 insert into t_fqs_abs values (3,3,3,3);
-explain (nodes off, costs off, verbose on)
+explain (costs off, verbose on)
 SELECT abs(a)
     , abs(a) + sum(b)
 FROM t_fqs_abs
@@ -673,7 +673,7 @@ ALTER TABLE t ADD PRIMARY KEY (pk);
 set enable_sort=off;
 
 -- original
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 SELECT pk, b, (c * sum(d))
 FROM t
 GROUP BY pk
@@ -684,7 +684,7 @@ FROM t
 GROUP BY pk
 order by 1,2;
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 SELECT pk, b, (c * count(distinct d))
 FROM t
 GROUP BY pk
@@ -695,7 +695,7 @@ FROM t
 GROUP BY pk
 order by 1,2;
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 SELECT pk, b, (c * count(distinct d)), count(distinct c)
 FROM t
 GROUP BY pk
@@ -706,7 +706,7 @@ FROM t
 GROUP BY pk
 order by 1,2;
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 SELECT t1.pk, t1.b, (t2.b * count(distinct t1.d)),
 count(distinct t1.c), t1.d+sum(t2.c)+t1.c
 FROM t t1 join t t2 on t1.b=t2.c
@@ -721,7 +721,7 @@ order by 1,2,3,4,5;
 
 drop table t;
 
--- test listagg (compatible with A DB)
+-- test listagg (compatible with A db)
 CREATE SCHEMA listagg_test;
 SET current_schema = listagg_test;
 

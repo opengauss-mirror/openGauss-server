@@ -30,22 +30,29 @@
 #include "utils/memutils.h"
 #include "knl/knl_variable.h"
 
-#define NUM_THREADPOOL_STATUS_ELEM 7
+#define NUM_THREADPOOL_STATUS_ELEM 8
 #define STATUS_INFO_SIZE 256
 
-typedef enum { WORKER_SLOT_UNUSE = 0, WORKER_SLOT_INUSE } WorkerSlotStatus;
+typedef enum { THREAD_SLOT_UNUSE = 0, THREAD_SLOT_INUSE } ThreadSlotStatus;
 
-typedef struct WorkerStatus {
+struct ThreadSentryStatus {
     int spawntick;
     TimestampTz lastSpawnTime;
-    WorkerSlotStatus slotStatus;
-} WorkerStatus;
+    ThreadSlotStatus slotStatus;
+};
 
 struct ThreadWorkerSentry {
-    WorkerStatus stat;
+    ThreadSentryStatus stat;
     ThreadPoolWorker* worker;
-    pthread_mutex_t m_mutex;
-    pthread_cond_t m_cond;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+};
+
+struct ThreadStreamSentry {
+    ThreadSentryStatus stat;
+    ThreadPoolStream* stream;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
 };
 
 typedef struct ThreadPoolStat {
@@ -55,23 +62,27 @@ typedef struct ThreadPoolStat {
     int listenerNum;
     char workerInfo[STATUS_INFO_SIZE];
     char sessionInfo[STATUS_INFO_SIZE];
+    char streamInfo[STATUS_INFO_SIZE];
 } ThreadPoolStat;
 
 class ThreadPoolGroup : public BaseObject {
 public:
     ThreadPoolListener* m_listener;
 
-    ThreadPoolGroup(int maxWorkerNum, int expectWorkerNum,
+    ThreadPoolGroup(int maxWorkerNum, int expectWorkerNum, int maxStreamNum,
                     int groupId, int numaId, int cpuNum, int* cpuArr);
     ~ThreadPoolGroup();
-    void init(bool enableNumaDistribute);
+    void Init(bool enableNumaDistribute);
+    void InitWorkerSentry();
     void ReleaseWorkerSlot(int i);
     void AddWorker(int i);
-    void ShutdownWorker();
+    ThreadId AddStream(StreamProducer* producer);
+    void ShutDownThreads();
     void AddWorkerIfNecessary();
     bool EnlargeWorkers(int enlargeNum);
     void ReduceWorkers(int reduceNum);
     void ShutDownPendingWorkers();
+    void ReduceStreams();
     void WaitReady();
     float4 GetSessionPerThread();
     void GetThreadPoolGroupStat(ThreadPoolStat* stat);
@@ -102,6 +113,16 @@ public:
         return (m_workerNum <= 0);
     }
 
+    ThreadId GetStreamFromPool(StreamProducer* producer);
+    void ReturnStreamToPool(Dlelem* elem);
+    void RemoveStreamFromPool(Dlelem* elem, int idx);
+    void InitStreamSentry();
+
+    inline bool HasFreeStream()
+    {
+        return (m_idleStreamNum > 0);
+    }
+
     friend class ThreadPoolWorker;
     friend class ThreadPoolListener;
     friend class ThreadPoolScheduler;
@@ -111,19 +132,16 @@ private:
     void AttachThreadToNodeLevel(ThreadId thread) const;
 
 private:
-    /*
-     * threadpool_status
-     * node name | group id | binding numaId | binding CpuNum | listener num |
-     * expect worker | actual worker | idle worker | session number | waiting serve session |
-     * run session(= actual worker - idle worker) | idle session
-     */
     int m_maxWorkerNum;
+    int m_maxStreamNum;
     int m_defaultWorkerNum;
     volatile int m_workerNum;
     volatile int m_listenerNum;
     volatile int m_expectWorkerNum;
     volatile int m_idleWorkerNum;
     volatile int m_pendingWorkerNum;
+    volatile int m_streamNum;
+    volatile int m_idleStreamNum;
     volatile int m_sessionCount;           // all session count;
     volatile int m_waitServeSessionCount;  // wait for worker to server
     volatile int m_processTaskCount;
@@ -132,12 +150,15 @@ private:
     int m_numaId;
     int m_groupCpuNum;
     int* m_groupCpuArr;
+    bool m_enableNumaDistribute;
+    cpu_set_t m_nodeCpuSet; /* for numa node distribution only */
 
     ThreadWorkerSentry* m_workers;
     MemoryContext m_context;
     pthread_mutex_t m_mutex;
-    bool m_enableNumaDistribute;
-    cpu_set_t m_nodeCpuSet; /* for numa node distribution only */
+
+    ThreadStreamSentry* m_streams;
+    DllistWithLock* m_freeStreamList;
 };
 
 #endif /* THREAD_POOL_GROUP_H */

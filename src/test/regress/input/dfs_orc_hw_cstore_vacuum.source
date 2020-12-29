@@ -1,0 +1,221 @@
+--VACUUM FULL
+
+\! @abs_bindir@/gs_guc reload -Z coordinator -c "autovacuum = off" -D @cndata@/@coordinator1@
+SET enable_vector_engine = true;
+--
+--case 1: Vacuum full column store TABLE
+--
+DROP TABLE IF EXISTS LINEITEM;
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10)
+  , L_COMMENT      VARCHAR(44)
+)
+with (orientation = orc) tablespace hdfs_ts
+distribute by hash(L_ORDERKEY);
+
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_cstore.data' delimiter '|';
+
+SELECT * FROM LINEITEM ORDER BY L_ORDERKEY, L_PARTKEY, L_SUPPKEY LIMIT 10;
+
+VACUUM FULL LINEITEM;
+
+SELECT * FROM LINEITEM ORDER BY L_ORDERKEY, L_PARTKEY, L_SUPPKEY LIMIT 10;
+
+--
+--case 2: Vacuum full partitioned column store TABLE
+--
+DROP TABLE IF EXISTS LINEITEM;
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10)
+  , L_COMMENT      VARCHAR(44)
+)
+with (orientation = orc)
+distribute by hash(L_ORDERKEY)
+partition by range(L_ORDERKEY)
+(
+    partition p1 values less than (10),
+    partition p2 values less than (100),
+    partition p3 values less than (1000),
+    partition p4 values less than (10000),
+    partition p5 values less than (100000),
+    partition p6 values less than (1000000),
+    partition p7 values less than (10000000),
+    partition p8 values less than (maxvalue)
+);
+
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_cstore.data' delimiter '|';
+
+SELECT * FROM LINEITEM ORDER BY L_ORDERKEY, L_PARTKEY, L_SUPPKEY LIMIT 10;
+
+VACUUM FULL LINEITEM;
+
+SELECT * FROM LINEITEM ORDER BY L_ORDERKEY, L_PARTKEY, L_SUPPKEY LIMIT 10;
+
+DROP TABLE LINEITEM;
+
+--
+-- case3:
+--
+create table coltbl1(a int,b text) with(orientation = orc) tablespace hdfs_ts;
+insert into coltbl1 values(generate_series(1,1000),'asdf'||generate_series(1,1000));
+insert into coltbl1 values(generate_series(11,454),'97');
+select count(*) from coltbl1;
+create table coltbl2(a int,b text) with(orientation = orc) tablespace hdfs_ts;
+insert into coltbl2 select * from coltbl1;
+insert into coltbl2 select * from coltbl1;
+insert into coltbl2 select * from coltbl1;
+insert into coltbl2 select * from coltbl1;
+insert into coltbl2 select * from coltbl1 where a < 45;
+delete from coltbl2;
+delete from coltbl2;
+delete from coltbl2;
+delete from coltbl2;
+select count(*) from coltbl2;
+insert into coltbl2 select * from coltbl1;
+insert into coltbl2 select * from coltbl1;
+insert into coltbl2 select * from coltbl1 where a > 234;
+select count(*) from coltbl2;
+vacuum full coltbl2;
+select count(*) from coltbl2;
+drop table coltbl1;
+drop table coltbl2;
+--
+--case: skip CSTORE.XXXXX relations when VACUUM FULL DATABASE;
+--
+CREATE DATABASE cstore_vacuum_full_db;
+\c cstore_vacuum_full_db
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10)
+  , L_COMMENT      VARCHAR(44)
+)
+with (orientation = orc)
+distribute by hash(L_ORDERKEY)
+partition by range(L_ORDERKEY)
+(
+    partition p1 values less than (10),
+    partition p2 values less than (100),
+    partition p3 values less than (1000),
+    partition p4 values less than (10000),
+    partition p5 values less than (100000),
+    partition p6 values less than (1000000),
+    partition p7 values less than (10000000),
+    partition p8 values less than (maxvalue)
+);
+CREATE FUNCTION check_xmin_xmax(tblname text) RETURNS integer AS $$
+DECLARE
+     parentOid integer;
+	 partOid   integer;
+	 xmin1     integer;
+	 xmax1     integer;
+	 xmin2     integer;
+	 xmax2     integer;
+BEGIN
+	 SELECT INTO parentOid oid from pg_class where relname = $1;
+	 FOR partOid IN select oid from pg_partition where parentid = parentOid and relcudescrelid != 0 LOOP
+		SELECT INTO xmin1 xmin from pg_partition where oid = partOid;
+		SELECT INTO xmin2 xmin FROM pg_class where oid = (select relcudescrelid from pg_partition where oid =  partOid);
+		IF xmin1 = xmin2 THEN
+			SELECT INTO xmin2 xmin FROM pg_class where oid = (select reldeltarelid from pg_partition where oid =  partOid);
+			IF xmin1 <> xmin2 THEN
+				RETURN 0;
+			END IF;
+		ELSE
+			RETURN 0;
+		END IF;
+
+		SELECT INTO xmax1 xmax from pg_partition where oid = partOid;
+		SELECT INTO xmax2 xmax FROM pg_class where oid = (select relcudescrelid from pg_partition where oid =  partOid);
+		IF xmax1 = xmax2 THEN
+			SELECT INTO xmax2 xmax FROM pg_class where oid = (select reldeltarelid from pg_partition where oid =  partOid);
+			IF xmax1 <> xmax2 THEN
+				RETURN 0;
+			END IF;
+		ELSE
+			RETURN 0;
+		END IF;
+	 END LOOP;
+     RETURN 1;
+END $$ LANGUAGE plpgsql;
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_cstore.data' delimiter '|';
+VACUUM FULL LINEITEM;
+EXECUTE DIRECT ON ( datanode1 ) ' SELECT check_xmin_xmax(CAST (varchar ''lineitem'' AS text)) ';
+EXECUTE DIRECT ON ( datanode2 ) ' SELECT check_xmin_xmax(CAST (varchar ''lineitem'' AS text)) ';
+VACUUM FULL;
+EXECUTE DIRECT ON ( datanode1 ) ' SELECT check_xmin_xmax(CAST (varchar ''lineitem'' AS text)) ';
+EXECUTE DIRECT ON ( datanode2 ) ' SELECT check_xmin_xmax(CAST (varchar ''lineitem'' AS text)) ';
+DROP TABLE LINEITEM;
+\c regression
+-- fix bug: table desc
+CREATE FOREIGN TABLE hw_ferrtbl_desc(id integer, name text, memo text, num float) SERVER gsmpp_server OPTIONS ("location" '@abs_srcdir@/test.csv', "format" 'csv', "mode" 'private') with hw_ferrtbl;
+\d+ hw_ferrtbl
+DROP FOREIGN TABLE hw_ferrtbl_desc;
+-- check lock leak about vacuum full ctore relation
+CREATE TABLE session_lock_leak1 (lock_num int, sessionid number);
+CREATE TABLE session_lock_leak2 (lock_num int, sessionid number);
+create table vacuum_full_lock_leak(c1 int2, c2 int4) with (orientation = orc) tablespace hdfs_ts;
+INSERT INTO vacuum_full_lock_leak VALUES(0,1), (1, 2);
+INSERT INTO session_lock_leak1 select count(1),sessionid from pg_locks group by sessionid; -- CN
+vacuum full vacuum_full_lock_leak;
+INSERT INTO session_lock_leak2 select count(1),sessionid from pg_locks group by sessionid; -- CN
+select t1.lock_num = t2.lock_num as release_all_leak from session_lock_leak2 t2, session_lock_leak1 t1 where t1.sessionid = t2.sessionid;
+DROP TABLE session_lock_leak1, session_lock_leak2, vacuum_full_lock_leak;
+-- check relation cache refcount leak
+CREATE TABLE colstore_relcache_leak( a int, b int ) with ( orientation = orc) tablespace hdfs_ts;
+CREATE INDEX colstore_index1 ON colstore_relcache_leak(b);
+VACUUM colstore_index1;
+DROP TABLE colstore_relcache_leak;
+\! @abs_bindir@/gs_guc reload -Z coordinator -c "autovacuum = on" -D @cndata@/@coordinator1@
+
+-- vacuum full bug fix
+CREATE TABLE lost_cudesc_index(w_id int, w_ytd numeric(12,2),sum_d_ytd numeric) with (orientation = orc) tablespace hdfs_ts;
+CREATE TABLE sz_lost_cudesc_index(tblsz bigint);
+INSERT INTO sz_lost_cudesc_index SELECT pg_table_size('lost_cudesc_index');
+VACUUM FULL lost_cudesc_index;
+SELECT pg_table_size('lost_cudesc_index') = (SELECT tblsz from sz_lost_cudesc_index);
+DROP TABLE sz_lost_cudesc_index;
+DROP TABLE lost_cudesc_index;

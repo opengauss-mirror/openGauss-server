@@ -18,8 +18,8 @@
 #include "knl/knl_variable.h"
 #include "utils/atomic.h"
 #include "access/xlog.h"
-#include "storage/buf_internals.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/buf_internals.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/proc.h"
 #include "postmaster/aiocompleter.h" /* this is for the function AioCompltrIsReady() */
 #include "postmaster/pagewriter.h"
@@ -28,7 +28,7 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/storage_gstrace.h"
 
-#define INT_ACCESS_ONCE(var) ((int)(*((volatile int*)&(var))))
+#define INT_ACCESS_ONCE(var) ((int)(*((volatile int *)&(var))))
 
 /*
  * The shared freelist control information.
@@ -58,10 +58,9 @@ typedef struct BufferStrategyControl {
     int bgwprocno;
 } BufferStrategyControl;
 
-typedef struct
-{
-    int64  retry_times;
-    int    cur_delay_time;
+typedef struct {
+    int64 retry_times;
+    int cur_delay_time;
 } StrategyDelayStatus;
 
 const int MIN_DELAY_RETRY = 100;
@@ -97,6 +96,7 @@ static void perform_delay(StrategyDelayStatus *status)
     }
     return;
 }
+
 
 /*
  * ClockSweepTick - Helper routine for StrategyGetBuffer()
@@ -146,8 +146,8 @@ static inline uint32 ClockSweepTick(int max_nbuffer_can_use)
 
                 wrapped = expected % max_nbuffer_can_use;
 
-                success = pg_atomic_compare_exchange_u32(
-                    &t_thrd.storage_cxt.StrategyControl->nextVictimBuffer, &expected, wrapped);
+                success = pg_atomic_compare_exchange_u32(&t_thrd.storage_cxt.StrategyControl->nextVictimBuffer,
+                                                         &expected, wrapped);
                 if (success)
                     t_thrd.storage_cxt.StrategyControl->completePasses++;
                 SpinLockRelease(&t_thrd.storage_cxt.StrategyControl->buffer_strategy_lock);
@@ -167,7 +167,7 @@ static inline uint32 ClockSweepTick(int max_nbuffer_can_use)
  *	strategy is a BufferAccessStrategy object, or NULL for default strategy.
  *
  *	To ensure that no one else can pin the buffer before we do, we must
- *	return the buffer with the buffer header spinlock still held. 
+ *	return the buffer with the buffer header spinlock still held.
  *
  *  If Standby, we restrict its memory usage to shared_buffers_fraction of
  *  NBuffers, Standby will not get buffer from freelist to avoid touching all
@@ -177,16 +177,14 @@ static inline uint32 ClockSweepTick(int max_nbuffer_can_use)
  */
 BufferDesc* StrategyGetBuffer(BufferAccessStrategy strategy, uint32* buf_state)
 {
-    BufferDesc* buf = NULL;
+    BufferDesc *buf = NULL;
     int bgwproc_no;
     int try_counter;
     uint32 local_buf_state = 0; /* to avoid repeated (de-)referencing */
     int max_buffer_can_use;
     bool am_standby = RecoveryInProgress();
-    StrategyDelayStatus	retry_lock_status = {0, 0};
-    StrategyDelayStatus	retry_buf_status = {0, 0};
-
-    gstrace_entry(GS_TRC_ID_StrategyGetBuffer);
+    StrategyDelayStatus retry_lock_status = { 0, 0 };
+    StrategyDelayStatus retry_buf_status = { 0, 0 };
 
     /*
      * If given a strategy object, see whether it can select a buffer. We
@@ -195,7 +193,6 @@ BufferDesc* StrategyGetBuffer(BufferAccessStrategy strategy, uint32* buf_state)
     if (strategy != NULL) {
         buf = GetBufferFromRing(strategy, buf_state);
         if (buf != NULL) {
-            gstrace_exit(GS_TRC_ID_StrategyGetBuffer);
             return buf;
         }
     }
@@ -234,7 +231,7 @@ BufferDesc* StrategyGetBuffer(BufferAccessStrategy strategy, uint32* buf_state)
 
     /* Check the Candidate list */
     if (g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
-        g_instance.attr.attr_storage.bgwriter_thread_num > 0) {
+        g_instance.bgwriter_cxt.bgwriter_num > 0) {
         buf = get_buf_from_candidate_list(strategy, buf_state);
         if (buf != NULL) {
             (void)pg_atomic_fetch_add_u64(&g_instance.bgwriter_cxt.get_buf_num_candidate_list, 1);
@@ -258,8 +255,8 @@ retry:
          */
         if (!retryLockBufHdr(buf, &local_buf_state)) {
             if (--try_get_loc_times == 0) {
-                ereport(
-                    WARNING, (errmsg("try get buf headr lock times equal to maxNBufferCanUse when StrategyGetBuffer")));
+                ereport(WARNING,
+                        (errmsg("try get buf headr lock times equal to maxNBufferCanUse when StrategyGetBuffer")));
                 try_get_loc_times = max_buffer_can_use;
             }
             perform_delay(&retry_lock_status);
@@ -268,7 +265,7 @@ retry:
 
         retry_lock_status.retry_times = 0;
         if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 &&
-            (!dw_page_writer_running() || !(local_buf_state & BM_DIRTY))) {
+            (backend_can_flush_dirty_page() || !(local_buf_state & BM_DIRTY))) {
             /* Found a usable buffer */
             if (strategy != NULL)
                 AddBufferToRing(strategy, buf);
@@ -291,16 +288,10 @@ retry:
                     Min(u_sess->attr.attr_storage.shared_buffers_fraction + 0.1, 1.0);
                 goto retry;
             } else if (dw_page_writer_running()) {
-                /*
-                 * If the page_writer is still able to flush some buffers, we better
-                 * retry (instead of giving up and throwing error).
-                 */
-                ereport(DEBUG3,
-                    (errmsg("double writer is on, no buffer available, this buffer dirty is %u, "
-                            "this buffer refcount is %u, now dirty page num is %ld",
-                        (local_buf_state & BM_DIRTY),
-                        BUF_STATE_GET_REFCOUNT(local_buf_state),
-                        get_dirty_page_num())));
+                ereport(LOG, (errmsg("double writer is on, no buffer available, this buffer dirty is %u, "
+                                     "this buffer refcount is %u, now dirty page num is %ld",
+                                     (local_buf_state & BM_DIRTY), BUF_STATE_GET_REFCOUNT(local_buf_state),
+                                     get_dirty_page_num())));
                 perform_delay(&retry_buf_status);
                 goto retry;
             } else if (t_thrd.storage_cxt.is_btree_split) {
@@ -314,7 +305,6 @@ retry:
     }
 
     /* not reached */
-    gstrace_exit(GS_TRC_ID_StrategyGetBuffer);
     return NULL;
 }
 
@@ -329,7 +319,7 @@ retry:
  * allocs if non-NULL pointers are passed.	The alloc count is reset after
  * being read.
  */
-int StrategySyncStart(uint32* complete_passes, uint32* num_buf_alloc)
+int StrategySyncStart(uint32 *complete_passes, uint32 *num_buf_alloc)
 {
     uint32 next_victim_buffer;
     int result;
@@ -422,7 +412,7 @@ void StrategyInitialize(bool init)
      * Get or create the shared strategy control block
      */
     t_thrd.storage_cxt.StrategyControl =
-        (BufferStrategyControl*)ShmemInitStruct("Buffer Strategy Status", sizeof(BufferStrategyControl), &found);
+        (BufferStrategyControl *)ShmemInitStruct("Buffer Strategy Status", sizeof(BufferStrategyControl), &found);
 
     if (!found) {
         /*
@@ -481,8 +471,8 @@ BufferAccessStrategy GetAccessStrategy(BufferAccessStrategyType btype)
             break;
 
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_OPERATION), (errmsg("unrecognized buffer access strategy: %d", (int)btype))));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                            (errmsg("unrecognized buffer access strategy: %d", (int)btype))));
             return NULL; /* keep compiler quiet */
     }
 
@@ -524,9 +514,9 @@ void FreeAccessStrategy(BufferAccessStrategy strategy)
  *
  * The bufhdr spin lock is held on the returned buffer.
  */
-static BufferDesc* GetBufferFromRing(BufferAccessStrategy strategy, uint32* buf_state)
+static BufferDesc *GetBufferFromRing(BufferAccessStrategy strategy, uint32 *buf_state)
 {
-    BufferDesc* buf = NULL;
+    BufferDesc *buf = NULL;
     Buffer buf_num;
     uint32 local_buf_state; /* to avoid repeated (de-)referencing */
 
@@ -545,30 +535,20 @@ static BufferDesc* GetBufferFromRing(BufferAccessStrategy strategy, uint32* buf_
             ((strategy->btype == BAS_BULKWRITE) && (strategy->current % strategy->flush_rate == 0))) {
             if (strategy->current == 0) {
                 if (strategy->buffers[strategy->ring_size - strategy->flush_rate] != InvalidBuffer) {
-                    PageListBackWrite((uint32*)&strategy->buffers[strategy->ring_size - strategy->flush_rate],
-                        strategy->flush_rate,
-                        STRATEGY_BACKWRITE,
-                        NULL,
-                        NULL,
-                        NULL);
+                    PageListBackWrite((uint32 *)&strategy->buffers[strategy->ring_size - strategy->flush_rate],
+                                      strategy->flush_rate, STRATEGY_BACKWRITE, NULL, NULL, NULL);
                     ereport(DEBUG1,
-                        (errmodule(MOD_ADIO),
-                            errmsg("BufferRingBackWrite, start(%d) count(%d)",
-                                strategy->buffers[strategy->ring_size - strategy->flush_rate],
-                                strategy->flush_rate)));
+                            (errmodule(MOD_ADIO), errmsg("BufferRingBackWrite, start(%d) count(%d)",
+                                                         strategy->buffers[strategy->ring_size - strategy->flush_rate],
+                                                         strategy->flush_rate)));
                 }
             } else {
-                PageListBackWrite((uint32*)&strategy->buffers[strategy->current - strategy->flush_rate],
-                    strategy->flush_rate,
-                    STRATEGY_BACKWRITE,
-                    NULL,
-                    NULL,
-                    NULL);
+                PageListBackWrite((uint32 *)&strategy->buffers[strategy->current - strategy->flush_rate],
+                                  strategy->flush_rate, STRATEGY_BACKWRITE, NULL, NULL, NULL);
                 ereport(DEBUG1,
-                    (errmodule(MOD_ADIO),
-                        errmsg("BufferRingBackWrite, start(%d) count(%d)",
-                            strategy->buffers[strategy->current - strategy->flush_rate],
-                            strategy->flush_rate)));
+                        (errmodule(MOD_ADIO),
+                         errmsg("BufferRingBackWrite, start(%d) count(%d)",
+                                strategy->buffers[strategy->current - strategy->flush_rate], strategy->flush_rate)));
             }
         }
     }
@@ -597,7 +577,7 @@ static BufferDesc* GetBufferFromRing(BufferAccessStrategy strategy, uint32* buf_
     buf = GetBufferDescriptor(buf_num - 1);
     local_buf_state = LockBufHdr(buf);
     if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && BUF_STATE_GET_USAGECOUNT(local_buf_state) <= 1 &&
-        (!dw_page_writer_running() || !(local_buf_state & BM_DIRTY))) {
+        (backend_can_flush_dirty_page() || !(local_buf_state & BM_DIRTY))) {
         strategy->current_was_in_ring = true;
         *buf_state = local_buf_state;
         return buf;
@@ -617,7 +597,7 @@ static BufferDesc* GetBufferFromRing(BufferAccessStrategy strategy, uint32* buf_
  * Caller must hold the buffer header spinlock on the buffer.  Since this
  * is called with the spinlock held, it had better be quite cheap.
  */
-static void AddBufferToRing(BufferAccessStrategy strategy, volatile BufferDesc* buf)
+static void AddBufferToRing(BufferAccessStrategy strategy, volatile BufferDesc *buf)
 {
     strategy->buffers[strategy->current] = BufferDescriptorGetBuffer(buf);
 }
@@ -633,7 +613,7 @@ static void AddBufferToRing(BufferAccessStrategy strategy, volatile BufferDesc* 
  * Returns true if buffer manager should ask for a new victim, and false
  * if this buffer should be written and re-used.
  */
-bool StrategyRejectBuffer(BufferAccessStrategy strategy, BufferDesc* buf)
+bool StrategyRejectBuffer(BufferAccessStrategy strategy, BufferDesc *buf)
 {
     /* We only do this in bulkread mode */
     if (strategy->btype != BAS_BULKREAD)
@@ -652,7 +632,7 @@ bool StrategyRejectBuffer(BufferAccessStrategy strategy, BufferDesc* buf)
     return true;
 }
 
-void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, int* quantity, int* trigger)
+void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, int *quantity, int *trigger)
 {
     int threshold;
     int prefetch_trigger = u_sess->attr.attr_storage.prefetch_quantity;
@@ -671,17 +651,20 @@ void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, in
     }
 }
 
+const int CANDIDATE_DIRTY_LIST_LEN = 100;
 static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, uint32* buf_state)
 {
     BufferDesc* buf = NULL;
     int bgwriter_num = g_instance.bgwriter_cxt.bgwriter_num;
     uint32 local_buf_state;
+    int buf_id = 0;
 
     int list_num = bgwriter_num;
     int list_id = random() % list_num;
+    Buffer *candidate_dirty_list = (Buffer*)palloc0(sizeof(Buffer) * CANDIDATE_DIRTY_LIST_LEN);
+    int dirty_list_num = 0;
     for (int i = 0; i < list_num; i++) {
         int thread_id = (list_id + i) % list_num;
-        int buf_id = 0;
         BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
 
         while (candidate_buf_pop(&buf_id, thread_id)) {
@@ -695,7 +678,11 @@ static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, ui
                         AddBufferToRing(strategy, buf);
                     }
                     *buf_state = local_buf_state;
+                    pfree(candidate_dirty_list);
                     return buf;
+                } else if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 &&
+                    dirty_list_num < CANDIDATE_DIRTY_LIST_LEN) {
+                    candidate_dirty_list[dirty_list_num++] = buf_id;
                 }
             }
 
@@ -703,9 +690,27 @@ static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, ui
         }
 
         /* The current candidate list is empty, wake up the buffer writer. */
-        if (bgwriter->proc != NULL && bgwriter->is_hibernating) {
+        if (bgwriter->proc != NULL) {
             SetLatch(&bgwriter->proc->procLatch);
         }
     }
+    if (backend_can_flush_dirty_page()) {
+        for (int i = 0; i < dirty_list_num; i++) {
+            buf_id = candidate_dirty_list[i];
+            buf = GetBufferDescriptor(buf_id);
+            local_buf_state = LockBufHdr(buf);
+            if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0) {
+                if (strategy != NULL) {
+                    AddBufferToRing(strategy, buf);
+                }
+                *buf_state = local_buf_state;
+                pfree(candidate_dirty_list);
+                return buf;
+            }
+
+            UnlockBufHdr(buf, local_buf_state);
+        }
+    }
+    pfree(candidate_dirty_list);
 	return NULL;
 }

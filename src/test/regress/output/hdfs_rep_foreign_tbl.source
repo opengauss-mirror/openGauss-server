@@ -1,0 +1,1158 @@
+--prepare enviroment
+drop server if exists hdfs_server cascade;
+NOTICE:  server "hdfs_server" does not exist, skipping
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+\! rm -rf @abs_srcdir@/hdfs_rep_foreign_tbl
+drop tablespace if exists hdfs_replication_ts;
+NOTICE:  Tablespace "hdfs_replication_ts" does not exist, skipping.
+create tablespace hdfs_replication_ts location '@abs_srcdir@/hdfs_rep_foreign_tbl' with(filesystem="hDfs", cfgpath='@hdfscfgpath@',storepath="/@hdfsstoreplus@/_ts_hdfs_rep_foreign_tbl");
+ERROR:  Must use single quoted string for "storepath" option.
+create tablespace hdfs_replication_ts location '@abs_srcdir@/hdfs_rep_foreign_tbl' with(filesystem="hDfs", cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/_ts_hdfs_rep_foreign_tbl');
+create schema hdfs_replication_foreign_table_schema;
+set current_schema=hdfs_replication_foreign_table_schema;
+drop table if exists dfs_tbl;
+NOTICE:  table "dfs_tbl" does not exist, skipping
+create table dfs_tbl(a int, b int) tablespace hdfs_replication_ts;
+set cstore_insert_mode=main;
+insert into dfs_tbl values(12, 13);
+insert into dfs_tbl values(14, 15);
+select * from dfs_tbl order by 1;
+ a  | b  
+----+----
+ 12 | 13
+ 14 | 15
+(2 rows)
+
+--create replicaiton foreign table
+drop foreign table if exists rep_foreign_001;
+NOTICE:  foreign table "rep_foreign_001" does not exist, skipping
+create foreign table rep_foreign_001(a int, b int) 
+SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/@hdfsstoreplus@/_ts_hdfs_rep_foreign_tbl/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.dfs_tbl')
+distribute by replication;
+select * from rep_foreign_001 order by 1;
+ a  | b  
+----+----
+ 12 | 13
+ 14 | 15
+(2 rows)
+
+analyze rep_foreign_001;
+select relpages,reltuples from pg_class where relname = 'rep_foreign_001';
+ relpages | reltuples 
+----------+-----------
+        1 |         2
+(1 row)
+
+select starelkind,staattnum,stainherit,stanullfrac,stawidth,stadistinct,stadndistinct
+ from pg_statistic sta join pg_class cla on sta.starelid=cla.oid where relname = 'rep_foreign_001' order by staattnum;
+ starelkind | staattnum | stainherit | stanullfrac | stawidth | stadistinct | stadndistinct 
+------------+-----------+------------+-------------+----------+-------------+---------------
+ c          |         1 | f          |           0 |        4 |          -1 |            -1
+ c          |         2 | f          |           0 |        4 |          -1 |            -1
+(2 rows)
+
+create foreign table round_foreign_001(a int, b int) 
+SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/@hdfsstoreplus@/_ts_hdfs_rep_foreign_tbl/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.dfs_tbl')
+distribute by roundrobin;
+select * from round_foreign_001 order by 1;
+ a  | b  
+----+----
+ 12 | 13
+ 14 | 15
+(2 rows)
+
+analyze round_foreign_001;
+select relpages,reltuples from pg_class where relname = 'round_foreign_001';
+ relpages | reltuples 
+----------+-----------
+        2 |         2
+(1 row)
+
+vacuum analyze round_foreign_001;
+WARNING:  skipping "round_foreign_001" --- cannot vacuum a foreign table
+select relpages,reltuples from pg_class where relname = 'round_foreign_001';
+ relpages | reltuples 
+----------+-----------
+        2 |         2
+(1 row)
+
+select starelkind,staattnum,stainherit,stanullfrac,stawidth,stadistinct,stadndistinct
+ from pg_statistic sta join pg_class cla on sta.starelid=cla.oid where relname = 'round_foreign_001' order by staattnum;
+ starelkind | staattnum | stainherit | stanullfrac | stawidth | stadistinct | stadndistinct 
+------------+-----------+------------+-------------+----------+-------------+---------------
+ c          |         1 | f          |           0 |        4 |          -1 |            -1
+ c          |         2 | f          |           0 |        4 |          -1 |            -1
+(2 rows)
+
+select * from round_foreign_001 minus all select * from rep_foreign_001;
+ a | b 
+---+---
+(0 rows)
+
+drop foreign table if exists rep_foreign_001;
+drop foreign table if exists round_foreign_001;
+drop table dfs_tbl;
+--test partition replicatoin foreign table 
+drop foreign table if exists part_1_roundrobin; 
+NOTICE:  foreign table "part_1_roundrobin" does not exist, skipping
+create foreign table part_1_roundrobin (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+distribute by roundrobin
+partition by (b) automapped;
+\d+ part_1_roundrobin
+                  Foreign table "hdfs_replication_foreign_table_schema.part_1_roundrobin"
+ Column |              Type              | Modifiers | FDW Options | Storage  | Stats target | Description 
+--------+--------------------------------+-----------+-------------+----------+--------------+-------------
+ a      | integer                        |           |             | plain    |              | 
+ b      | character varying(20)          |           |             | extended |              | 
+ c      | timestamp(0) without time zone |           |             | plain    |              | 
+Server: hdfs_server
+FDW Options: (format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+FDW permition: read only
+Value partition by(b)
+Has OIDs: no
+Distribute By: ROUND ROBIN
+Location Nodes: ALL DATANODES
+
+select * from part_1_roundrobin order by 1,2,3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+ 1 |     | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(4 rows)
+
+drop foreign table if exists part_1_replication; 
+NOTICE:  foreign table "part_1_replication" does not exist, skipping
+create foreign table part_1_replication (a int, b varchar(20), c date)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+distribute by replication
+partition by (b) automapped;
+\d+ part_1_replication
+                 Foreign table "hdfs_replication_foreign_table_schema.part_1_replication"
+ Column |              Type              | Modifiers | FDW Options | Storage  | Stats target | Description 
+--------+--------------------------------+-----------+-------------+----------+--------------+-------------
+ a      | integer                        |           |             | plain    |              | 
+ b      | character varying(20)          |           |             | extended |              | 
+ c      | timestamp(0) without time zone |           |             | plain    |              | 
+Server: hdfs_server
+FDW Options: (format 'orc', foldername '/user/hive/warehouse/partition.db/part_1')
+FDW permition: read only
+Value partition by(b)
+Has OIDs: no
+Distribute By: REPLICATION
+Location Nodes: ALL DATANODES
+
+select * from part_1_replication order by 1,2,3;
+ a |  b  |            c             
+---+-----+--------------------------
+ 1 | 123 | Fri Jan 04 00:00:00 2013
+ 1 |     | Fri Jan 04 00:00:00 2013
+ 2 | 123 | Wed Jan 04 00:00:00 2012
+ 2 |     | Sat Jan 04 00:00:00 2014
+(4 rows)
+
+select * from part_1_roundrobin minus all select * from part_1_replication;
+ a | b | c 
+---+---+---
+(0 rows)
+
+drop foreign table if exists part_1_roundrobin;
+drop foreign table if exists part_1_replication;
+--test distribute by clause
+drop foreign table if exists hash_foreign_001;
+NOTICE:  foreign table "hash_foreign_001" does not exist, skipping
+create foreign table hash_foreign_001(a int, b int) 
+SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/@hdfsstoreplus@/_ts_hdfs_rep_foreign_tbl/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.dfs_tbl')
+distribute by hash(b);
+ERROR:  Unsupport distribute type.
+DETAIL:  Supported option values are "roundrobin" and "replication".
+drop foreign table if exists customer_for_1;
+NOTICE:  foreign table "customer_for_1" does not exist, skipping
+create foreign table customer_for_1
+(
+    c_customer_sk integer not null
+)
+server gsmpp_server
+options(location 'gsfs://10.185.240.60:14554/customer.txt', format 'text', mode 'normal', DELIMITER ',',NULL '') distribute by replication;
+ERROR:  Unsupport distribute type.
+DETAIL:  Supported option value is "roundrobin".
+---join
+----prepare phase
+drop table if exists normal_temp_tbl;
+NOTICE:  table "normal_temp_tbl" does not exist, skipping
+create table normal_temp_tbl(a int, b int);
+insert into normal_temp_tbl values(generate_series(1,50000), generate_series(1,50000));
+drop table if exists big_dfs_tbl;
+NOTICE:  table "big_dfs_tbl" does not exist, skipping
+create table big_dfs_tbl(a int, b int) tablespace hdfs_replication_ts;
+set cstore_insert_mode=main;
+insert into big_dfs_tbl select * from normal_temp_tbl;
+drop table if exists normal_temp_tbl;
+--big table roundrobin hdfs ----big_hdfs_tbl_rod
+drop foreign table if exists big_hdfs_tbl_rod;
+NOTICE:  foreign table "big_hdfs_tbl_rod" does not exist, skipping
+create foreign table big_hdfs_tbl_rod(a int, b int)
+SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/@hdfsstoreplus@/_ts_hdfs_rep_foreign_tbl/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.big_dfs_tbl')
+distribute by roundrobin;
+--big table replication hdfs ----big_hdfs_tbl_rep
+drop foreign table if exists big_hdfs_tbl_rep;
+NOTICE:  foreign table "big_hdfs_tbl_rep" does not exist, skipping
+create foreign table big_hdfs_tbl_rep(a int, b int)
+SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/@hdfsstoreplus@/_ts_hdfs_rep_foreign_tbl/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.big_dfs_tbl')
+distribute by replication;
+drop table if exists small_dfs_tbl;
+NOTICE:  table "small_dfs_tbl" does not exist, skipping
+create table small_dfs_tbl(a int, b int) tablespace hdfs_replication_ts;
+set cstore_insert_mode=main;
+drop table if exists normal_temp_tbl;
+NOTICE:  table "normal_temp_tbl" does not exist, skipping
+create table normal_temp_tbl(a int, b int);
+insert into normal_temp_tbl values(generate_series(1,1000), generate_series(1,1000));
+insert into small_dfs_tbl select *from normal_temp_tbl;
+drop table if exists normal_temp_tbl;
+drop foreign table if exists small_hdfs_tbl_rod;
+NOTICE:  foreign table "small_hdfs_tbl_rod" does not exist, skipping
+create foreign table small_hdfs_tbl_rod(a int, b int)
+SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/@hdfsstoreplus@/_ts_hdfs_rep_foreign_tbl/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl')
+distribute by roundrobin;
+drop foreign table if exists small_hdfs_tbl_rep;
+NOTICE:  foreign table "small_hdfs_tbl_rep" does not exist, skipping
+create foreign table small_hdfs_tbl_rep(a int, b int)
+SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/@hdfsstoreplus@/_ts_hdfs_rep_foreign_tbl/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl')
+distribute by replication;
+drop table if exists normal_hash_table;
+NOTICE:  table "normal_hash_table" does not exist, skipping
+create table normal_hash_table(a int, b int);
+insert into normal_hash_table values(generate_series(1,1000), generate_series(1,1000));
+drop table if exists normal_rep_table;
+NOTICE:  table "normal_rep_table" does not exist, skipping
+create table normal_rep_table(a int, b int) distribute by replication;
+insert into normal_rep_table values(generate_series(1,1000), generate_series(1,1000));
+--test for analyze sample table
+set default_statistics_target=-2;
+analyze;
+analyze foreign tables;
+reset default_statistics_target;
+----------------------------------------big table join small table
+----test  big rod hdfs join small rep hdfs
+explain (verbose, costs off) select * from big_hdfs_tbl_rod t1, small_hdfs_tbl_rep t2 where t1.a = t2.a;
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t1.a = t2.a)
+               Generate Bloom Filter On Expr: t2.a
+               Generate Bloom Filter On Index: 0
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.big_hdfs_tbl_rod t1
+                     Output: t1.a, t1.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.big_dfs_tbl
+                     Filter By Bloom Filter On Expr: t1.a
+                     Filter By Bloom Filter On Index: 0
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+                     Output: t2.a, t2.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(19 rows)
+
+----test  big rod hdfs join small round hdfs
+explain (verbose, costs off) select * from big_hdfs_tbl_rod t1, small_hdfs_tbl_rod t2 where t1.a = t2.a;
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t1.a = t2.a)
+               Generate Bloom Filter On Expr: t2.a
+               Generate Bloom Filter On Index: 0
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.big_hdfs_tbl_rod t1
+                     Output: t1.a, t1.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.big_dfs_tbl
+                     Filter By Bloom Filter On Expr: t1.a
+                     Filter By Bloom Filter On Index: 0
+               ->  Vector Streaming(type: BROADCAST)
+                     Output: t2.a, t2.b
+                     ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rod t2
+                           Output: t2.a, t2.b
+                           Server Type: hdfs
+--?                           Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(21 rows)
+
+----test  big dfs join small dfs
+explain (verbose, costs off) select * from big_dfs_tbl t1, small_dfs_tbl t2 where t1.b = t2.b;
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t1.b = t2.b)
+               Generate Bloom Filter On Expr: t2.b
+               Generate Bloom Filter On Index: 0
+               ->  Vector Append
+                     ->  Dfs Scan on hdfs_replication_foreign_table_schema.big_dfs_tbl t1
+                           Output: t1.a, t1.b
+                           Distribute Key: t1.a
+                           Filter By Bloom Filter On Expr: t1.b
+                           Filter By Bloom Filter On Index: 0
+                     ->  Vector Adapter
+                           Output: t1.a, t1.b
+                           ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_big_dfs_tbl t1
+                                 Output: t1.a, t1.b
+                                 Distribute Key: t1.a
+               ->  Vector Streaming(type: BROADCAST)
+                     Output: t2.a, t2.b
+                     ->  Vector Append
+                           ->  Dfs Scan on hdfs_replication_foreign_table_schema.small_dfs_tbl t2
+                                 Output: t2.a, t2.b
+                                 Distribute Key: t2.a
+                           ->  Vector Adapter
+                                 Output: t2.a, t2.b
+                                 ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_small_dfs_tbl t2
+                                       Output: t2.a, t2.b
+                                       Distribute Key: t2.a
+(31 rows)
+
+----test  big dfs join small rep hdfs
+explain (verbose, costs off) select * from big_dfs_tbl t1, small_hdfs_tbl_rep t2 where t1.b = t2.b;
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t1.b = t2.b)
+               Generate Bloom Filter On Expr: t2.b
+               Generate Bloom Filter On Index: 0
+               ->  Vector Append
+                     ->  Dfs Scan on hdfs_replication_foreign_table_schema.big_dfs_tbl t1
+                           Output: t1.a, t1.b
+                           Distribute Key: t1.a
+                           Filter By Bloom Filter On Expr: t1.b
+                           Filter By Bloom Filter On Index: 0
+                     ->  Vector Adapter
+                           Output: t1.a, t1.b
+                           ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_big_dfs_tbl t1
+                                 Output: t1.a, t1.b
+                                 Distribute Key: t1.a
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+                     Output: t2.a, t2.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(24 rows)
+
+----------------------------------------small table join small table
+----test  small rod hdfs join small rod hdfs
+explain (verbose, costs off) select * from small_hdfs_tbl_rod t1, small_hdfs_tbl_rod t2 where t1.a = t2.a;
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t1.a = t2.a)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b
+                     Distribute Key: t1.a
+                     ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rod t1
+                           Output: t1.a, t1.b
+                           Server Type: hdfs
+--?                           Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Output: t2.a, t2.b
+                     Distribute Key: t2.a
+                     ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rod t2
+                           Output: t2.a, t2.b
+                           Server Type: hdfs
+--?                           Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(21 rows)
+
+----test small rod hdfs join small rep hdfs
+explain (verbose, costs off) select * from small_hdfs_tbl_rod t1, small_hdfs_tbl_rep t2 where t1.a = t2.a;
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t2.a = t1.a)
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+                     Output: t2.a, t2.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rod t1
+                     Output: t1.a, t1.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(15 rows)
+
+----test  small rep hdfs join small rep hdfs
+explain (verbose, costs off) select * from small_hdfs_tbl_rep t1, small_hdfs_tbl_rep t2 where t1.a = t2.a;
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t1.a = t2.a)
+               Generate Bloom Filter On Expr: t2.a
+               Generate Bloom Filter On Index: 0
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t1
+                     Output: t1.a, t1.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+                     Filter By Bloom Filter On Expr: t1.a
+                     Filter By Bloom Filter On Index: 0
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+                     Output: t2.a, t2.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(19 rows)
+
+----test  small  dfs join small rep hdfs
+explain (verbose, costs off) select * from small_dfs_tbl t1, small_hdfs_tbl_rep t2 where t1.a = t2.a;
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t2.a = t1.a)
+               Generate Bloom Filter On Expr: t1.a
+               Generate Bloom Filter On Index: 0
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+                     Output: t2.a, t2.b
+                     Distribute Key: t2.a
+                     Filter: (Hash By t2.a)
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+                     Filter By Bloom Filter On Expr: t2.a
+                     Filter By Bloom Filter On Index: 0
+               ->  Vector Append
+                     ->  Dfs Scan on hdfs_replication_foreign_table_schema.small_dfs_tbl t1
+                           Output: t1.a, t1.b
+                           Distribute Key: t1.a
+                     ->  Vector Adapter
+                           Output: t1.a, t1.b
+                           ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_small_dfs_tbl t1
+                                 Output: t1.a, t1.b
+                                 Distribute Key: t1.a
+(26 rows)
+
+----test  small  dfs join small dfs
+explain (verbose, costs off) select * from small_dfs_tbl t1, small_dfs_tbl t2 where t1.a = t2.a;
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t1.a = t2.a)
+               Generate Bloom Filter On Expr: t2.a
+               Generate Bloom Filter On Index: 0
+               ->  Vector Append
+                     ->  Dfs Scan on hdfs_replication_foreign_table_schema.small_dfs_tbl t1
+                           Output: t1.a, t1.b
+                           Distribute Key: t1.a
+                           Filter By Bloom Filter On Expr: t1.a
+                           Filter By Bloom Filter On Index: 0
+                     ->  Vector Adapter
+                           Output: t1.a, t1.b
+                           ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_small_dfs_tbl t1
+                                 Output: t1.a, t1.b
+                                 Distribute Key: t1.a
+               ->  Vector Append
+                     ->  Dfs Scan on hdfs_replication_foreign_table_schema.small_dfs_tbl t2
+                           Output: t2.a, t2.b
+                           Distribute Key: t2.a
+                     ->  Vector Adapter
+                           Output: t2.a, t2.b
+                           ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_small_dfs_tbl t2
+                                 Output: t2.a, t2.b
+                                 Distribute Key: t2.a
+(29 rows)
+
+explain (verbose, costs off) select * from small_dfs_tbl t1, small_dfs_tbl t2 where t1.b = t2.b;
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t1.b = t2.b)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Output: t1.a, t1.b
+                     Distribute Key: t1.b
+                     ->  Vector Append
+                           ->  Dfs Scan on hdfs_replication_foreign_table_schema.small_dfs_tbl t1
+                                 Output: t1.a, t1.b
+                                 Distribute Key: t1.a
+                           ->  Vector Adapter
+                                 Output: t1.a, t1.b
+                                 ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_small_dfs_tbl t1
+                                       Output: t1.a, t1.b
+                                       Distribute Key: t1.a
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Output: t2.a, t2.b
+                     Distribute Key: t2.b
+                     ->  Vector Append
+                           ->  Dfs Scan on hdfs_replication_foreign_table_schema.small_dfs_tbl t2
+                                 Output: t2.a, t2.b
+                                 Distribute Key: t2.a
+                           ->  Vector Adapter
+                                 Output: t2.a, t2.b
+                                 ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_small_dfs_tbl t2
+                                       Output: t2.a, t2.b
+                                       Distribute Key: t2.a
+(31 rows)
+
+------------------------------------
+----test  rep hdfs join rod hdfs
+explain (verbose, costs off) select * from small_hdfs_tbl_rod t1, small_hdfs_tbl_rep t2 where t1.a = t2.a;
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t2.a = t1.a)
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+                     Output: t2.a, t2.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rod t1
+                     Output: t1.a, t1.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(15 rows)
+
+select * from small_hdfs_tbl_rod t1, small_hdfs_tbl_rep t2 where t1.a = t2.a minus select * from small_hdfs_tbl_rod t1, small_hdfs_tbl_rod t2 where t1.a = t2.a;
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+----test  rep hdfs join rep hdfs
+explain (verbose, costs off) select * from small_hdfs_tbl_rep t1, small_hdfs_tbl_rep t2 where t1.a = t2.a;
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t1.a = t2.a)
+               Generate Bloom Filter On Expr: t2.a
+               Generate Bloom Filter On Index: 0
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t1
+                     Output: t1.a, t1.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+                     Filter By Bloom Filter On Expr: t1.a
+                     Filter By Bloom Filter On Index: 0
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+                     Output: t2.a, t2.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(19 rows)
+
+select * from small_hdfs_tbl_rep t1, small_hdfs_tbl_rep t2 where t1.a = t2.a minus select * from small_hdfs_tbl_rod t1, small_hdfs_tbl_rod t2 where t1.a = t2.a;
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+----test normal hash table join rep hdfs table
+explain (verbose, costs off) select * from normal_hash_table t1, small_hdfs_tbl_rep t2 where t1.a = t2.a;
+--?.*
+--?.*
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Hash Join
+         Output: t1.a, t1.b, t2.a, t2.b
+         Hash Cond: (t2.a = t1.a)
+         ->  Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+               Output: t2.a, t2.b
+               Distribute Key: t2.a
+               Filter: (Hash By t2.a)
+               Server Type: hdfs
+--?               Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+         ->  Hash
+               Output: t1.a, t1.b
+               ->  Seq Scan on hdfs_replication_foreign_table_schema.normal_hash_table t1
+                     Output: t1.a, t1.b
+                     Distribute Key: t1.a
+(16 rows)
+
+select * from normal_hash_table t1, small_hdfs_tbl_rep t2 where t1.a = t2.a minus all select * from normal_hash_table t1, small_hdfs_tbl_rod t2 where t1.a = t2.a;
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+----test normal rep table join rep hdfs table
+explain (verbose, costs off) select * from normal_rep_table t1, small_hdfs_tbl_rep t2 where t1.a = t2.a;
+--?.*
+--?.*
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Hash Join
+         Output: t1.a, t1.b, t2.a, t2.b
+         Hash Cond: (t2.a = t1.a)
+         ->  Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+               Output: t2.a, t2.b
+               Server Type: hdfs
+--?               Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+         ->  Hash
+               Output: t1.a, t1.b
+               ->  Seq Scan on hdfs_replication_foreign_table_schema.normal_rep_table t1
+                     Output: t1.a, t1.b
+(13 rows)
+
+select * from normal_rep_table t1, small_hdfs_tbl_rep t2 where t1.a = t2.a minus all select * from normal_rep_table t1, small_hdfs_tbl_rod t2 where t1.a = t2.a;
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+----teet  rep hdfs join hash dfs
+explain (verbose, costs off) select * from small_hdfs_tbl_rep t1, small_dfs_tbl t2 where t1.b = t2.b;
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t1.b = t2.b)
+               Generate Bloom Filter On Expr: t2.b
+               Generate Bloom Filter On Index: 0
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t1
+                     Output: t1.a, t1.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+                     Filter By Bloom Filter On Expr: t1.b
+                     Filter By Bloom Filter On Index: 0
+               ->  Vector Append
+                     ->  Dfs Scan on hdfs_replication_foreign_table_schema.small_dfs_tbl t2
+                           Output: t2.a, t2.b
+                           Distribute Key: t2.a
+                     ->  Vector Adapter
+                           Output: t2.a, t2.b
+                           ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_small_dfs_tbl t2
+                                 Output: t2.a, t2.b
+                                 Distribute Key: t2.a
+(24 rows)
+
+select * from small_hdfs_tbl_rep t1, small_dfs_tbl t2 where t1.b = t2.b minus all select * from small_hdfs_tbl_rod t1, small_dfs_tbl t2 where t1.b = t2.b;
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+---------------teet  rep hdfs join hash dfs, where joinclause on distribution column.
+explain (verbose, costs off) select * from normal_rep_table t1, small_dfs_tbl t2 where t1.a = t2.a;
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Hash Join
+         Output: t1.a, t1.b, t2.a, t2.b
+         Hash Cond: (t1.a = t2.a)
+         ->  Seq Scan on hdfs_replication_foreign_table_schema.normal_rep_table t1
+               Output: t1.a, t1.b
+               Distribute Key: t1.a
+               Filter: (Hash By t1.a)
+         ->  Hash
+               Output: t2.a, t2.b
+               ->  Append
+                     ->  Row Adapter
+                           Output: t2.a, t2.b
+                           ->  Dfs Scan on hdfs_replication_foreign_table_schema.small_dfs_tbl t2
+                                 Output: t2.a, t2.b
+                                 Distribute Key: t2.a
+                     ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_small_dfs_tbl t2
+                           Output: t2.a, t2.b
+                           Distribute Key: t2.a
+(20 rows)
+
+select * from normal_rep_table t1, small_dfs_tbl t2 where t1.a = t2.a minus all select * from small_hdfs_tbl_rod t1, small_dfs_tbl t2 where t1.a = t2.a;
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+---------------teet  rep hdfs join hash dfs, where joinclause not in distribution column.
+explain (verbose, costs off) select * from normal_rep_table t1, small_dfs_tbl t2 where t1.b = t2.b;
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Hash Join
+         Output: t1.a, t1.b, t2.a, t2.b
+         Hash Cond: (t1.b = t2.b)
+         ->  Seq Scan on hdfs_replication_foreign_table_schema.normal_rep_table t1
+               Output: t1.a, t1.b
+         ->  Hash
+               Output: t2.a, t2.b
+               ->  Append
+                     ->  Row Adapter
+                           Output: t2.a, t2.b
+                           ->  Dfs Scan on hdfs_replication_foreign_table_schema.small_dfs_tbl t2
+                                 Output: t2.a, t2.b
+                                 Distribute Key: t2.a
+                     ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_small_dfs_tbl t2
+                           Output: t2.a, t2.b
+                           Distribute Key: t2.a
+(18 rows)
+
+select * from normal_rep_table t1, small_dfs_tbl t2 where t1.b = t2.b minus all select * from small_hdfs_tbl_rod t1, small_dfs_tbl t2 where t1.b = t2.b;
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+----multi-tables join
+explain (verbose, costs off) select * from normal_rep_table t1, normal_hash_table t2, small_hdfs_tbl_rep t3, small_hdfs_tbl_rod t4
+where t1.a=t2.b and t2.b = t3.a and t3.b = t4.a;
+--?.*
+--?.*
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b, t4.a, t4.b
+   ->  Hash Join
+         Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b, t4.a, t4.b
+         Hash Cond: (t3.b = t4.a)
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b
+               Distribute Key: t3.b
+               ->  Hash Join
+                     Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b
+                     Hash Cond: (t3.a = t1.a)
+                     ->  Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t3
+                           Output: t3.a, t3.b
+                           Server Type: hdfs
+--?                           Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+                     ->  Hash
+                           Output: t1.a, t1.b, t2.a, t2.b
+                           ->  Hash Join
+                                 Output: t1.a, t1.b, t2.a, t2.b
+                                 Hash Cond: (t1.a = t2.b)
+                                 ->  Seq Scan on hdfs_replication_foreign_table_schema.normal_rep_table t1
+                                       Output: t1.a, t1.b
+                                 ->  Hash
+                                       Output: t2.a, t2.b
+                                       ->  Seq Scan on hdfs_replication_foreign_table_schema.normal_hash_table t2
+                                             Output: t2.a, t2.b
+                                             Distribute Key: t2.a
+         ->  Hash
+               Output: t4.a, t4.b
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: t4.a, t4.b
+                     Distribute Key: t4.a
+                     ->  Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rod t4
+                           Output: t4.a, t4.b
+                           Server Type: hdfs
+--?                           Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(36 rows)
+
+select * from normal_rep_table t1, normal_hash_table t2, small_hdfs_tbl_rep t3, small_hdfs_tbl_rod t4
+where t1.a=t2.b and t2.b = t3.a and t3.b = t4.a minus all select * from normal_rep_table t1, normal_hash_table t2, small_hdfs_tbl_rod t3, small_hdfs_tbl_rod t4
+where t1.a=t2.b and t2.b = t3.a and t3.b = t4.a;
+ a | b | a | b | a | b | a | b 
+---+---+---+---+---+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from normal_rep_table t1, normal_rep_table t2, small_hdfs_tbl_rep t3, small_hdfs_tbl_rod t4
+where t1.a=t2.b and t2.b = t3.a and t3.b = t4.a;
+--?.*
+--?.*
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b, t4.a, t4.b
+   ->  Hash Join
+         Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b, t4.a, t4.b
+         Hash Cond: (t2.b = t1.a)
+         ->  Seq Scan on hdfs_replication_foreign_table_schema.normal_rep_table t2
+               Output: t2.a, t2.b
+         ->  Hash
+               Output: t1.a, t1.b, t3.a, t3.b, t4.a, t4.b
+               ->  Hash Join
+                     Output: t1.a, t1.b, t3.a, t3.b, t4.a, t4.b
+                     Hash Cond: (t1.a = t3.a)
+                     ->  Seq Scan on hdfs_replication_foreign_table_schema.normal_rep_table t1
+                           Output: t1.a, t1.b
+                     ->  Hash
+                           Output: t3.a, t3.b, t4.a, t4.b
+                           ->  Hash Join
+                                 Output: t3.a, t3.b, t4.a, t4.b
+                                 Hash Cond: (t3.b = t4.a)
+                                 ->  Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t3
+                                       Output: t3.a, t3.b
+                                       Server Type: hdfs
+--?                                       Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+                                 ->  Hash
+                                       Output: t4.a, t4.b
+                                       ->  Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rod t4
+                                             Output: t4.a, t4.b
+                                             Server Type: hdfs
+--?                                             Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(29 rows)
+
+select * from normal_rep_table t1, normal_rep_table t2, small_hdfs_tbl_rep t3, small_hdfs_tbl_rod t4
+where t1.a=t2.b and t2.b = t3.a and t3.b = t4.a minus all select * from normal_rep_table t1, normal_rep_table t2, small_hdfs_tbl_rod t3, small_hdfs_tbl_rod t4
+where t1.a=t2.b and t2.b = t3.a and t3.b = t4.a;
+ a | b | a | b | a | b | a | b 
+---+---+---+---+---+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from normal_rep_table t1, normal_hash_table t2, small_hdfs_tbl_rep t3, small_hdfs_tbl_rod t4, big_dfs_tbl t5, big_hdfs_tbl_rod t6, big_hdfs_tbl_rep t7 , small_dfs_tbl t8 where t1.a=t2.b and t2.b = t3.a and t3.b = t4.a and t4.b=t5.a and t5.b=t6.a and t6.a= t8.b;
+--?.*
+--?.*
+ Streaming (type: GATHER)
+   Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b, t4.a, t4.b, t5.a, t5.b, t6.a, t6.b, t7.a, t7.b, t8.a, t8.b
+   ->  Nested Loop
+         Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b, t4.a, t4.b, t5.a, t5.b, t6.a, t6.b, t7.a, t7.b, t8.a, t8.b
+         ->  Foreign Scan on hdfs_replication_foreign_table_schema.big_hdfs_tbl_rep t7
+               Output: t7.a, t7.b
+               Server Type: hdfs
+--?               Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.big_dfs_tbl
+         ->  Materialize
+               Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b, t4.a, t4.b, t5.a, t5.b, t6.a, t6.b, t8.a, t8.b
+               ->  Hash Join
+                     Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b, t4.a, t4.b, t5.a, t5.b, t6.a, t6.b, t8.a, t8.b
+                     Hash Cond: (t4.a = t3.b)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: t4.a, t4.b, t5.a, t5.b, t6.a, t6.b, t8.a, t8.b
+                           Distribute Key: t4.a
+                           ->  Hash Join
+                                 Output: t4.a, t4.b, t5.a, t5.b, t6.a, t6.b, t8.a, t8.b
+                                 Hash Cond: (t5.b = t8.b)
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: t4.a, t4.b, t5.a, t5.b, t6.a, t6.b
+                                       Distribute Key: t5.b
+                                       ->  Hash Join
+                                             Output: t4.a, t4.b, t5.a, t5.b, t6.a, t6.b
+                                             Hash Cond: (t6.a = t5.b)
+                                             ->  Foreign Scan on hdfs_replication_foreign_table_schema.big_hdfs_tbl_rod t6
+                                                   Output: t6.a, t6.b
+                                                   Server Type: hdfs
+--?                                                   Orc File: .*/_ts_hdfs_rep_foreign_tbl/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.big_dfs_tbl
+                                             ->  Hash
+                                                   Output: t4.a, t4.b, t5.a, t5.b
+                                                   ->  Streaming(type: BROADCAST)
+                                                         Output: t4.a, t4.b, t5.a, t5.b
+                                                         ->  Hash Join
+                                                               Output: t4.a, t4.b, t5.a, t5.b
+                                                               Hash Cond: (t5.a = t4.b)
+                                                               ->  Append
+                                                                     ->  Row Adapter
+                                                                           Output: t5.a, t5.b
+                                                                           ->  Dfs Scan on hdfs_replication_foreign_table_schema.big_dfs_tbl t5
+                                                                                 Output: t5.a, t5.b
+                                                                                 Distribute Key: t5.a
+                                                                                 Filter By Bloom Filter On Expr: t5.a
+                                                                                 Filter By Bloom Filter On Index: 0
+                                                                     ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_big_dfs_tbl t5
+                                                                           Output: t5.a, t5.b
+                                                                           Distribute Key: t5.a
+                                                               ->  Hash
+                                                                     Output: t4.a, t4.b
+                                                                     ->  Streaming(type: REDISTRIBUTE)
+                                                                           Output: t4.a, t4.b
+                                                                           Distribute Key: t4.b
+                                                                           ->  Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rod t4
+                                                                                 Output: t4.a, t4.b
+                                                                                 Server Type: hdfs
+--?                                                                                 Orc File: .*/_ts_hdfs_rep_foreign_tbl/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+                                 ->  Hash
+                                       Output: t8.a, t8.b
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             Output: t8.a, t8.b
+                                             Distribute Key: t8.b
+                                             ->  Append
+                                                   ->  Row Adapter
+                                                         Output: t8.a, t8.b
+                                                         ->  Dfs Scan on hdfs_replication_foreign_table_schema.small_dfs_tbl t8
+                                                               Output: t8.a, t8.b
+                                                               Distribute Key: t8.a
+                                                   ->  Seq Scan on cstore.pg_delta_hdfs_replication_foreign_table_schema_small_dfs_tbl t8
+                                                         Output: t8.a, t8.b
+                                                         Distribute Key: t8.a
+                     ->  Hash
+                           Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b
+                                 Distribute Key: t3.b
+                                 ->  Hash Join
+                                       Output: t1.a, t1.b, t2.a, t2.b, t3.a, t3.b
+                                       Hash Cond: (t3.a = t1.a)
+                                       ->  Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t3
+                                             Output: t3.a, t3.b
+                                             Server Type: hdfs
+--?                                             Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+                                       ->  Hash
+                                             Output: t1.a, t1.b, t2.a, t2.b
+                                             ->  Hash Join
+                                                   Output: t1.a, t1.b, t2.a, t2.b
+                                                   Hash Cond: (t1.a = t2.b)
+                                                   ->  Seq Scan on hdfs_replication_foreign_table_schema.normal_rep_table t1
+                                                         Output: t1.a, t1.b
+                                                   ->  Hash
+                                                         Output: t2.a, t2.b
+                                                         ->  Seq Scan on hdfs_replication_foreign_table_schema.normal_hash_table t2
+                                                               Output: t2.a, t2.b
+                                                               Distribute Key: t2.a
+(94 rows)
+
+---test subquery
+explain (verbose, costs off) select * from small_hdfs_tbl_rod t1 ,(select * from  small_hdfs_tbl_rep t2 where t2.b <10) as t2  where t1.a = t2.a;
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b, t2.a, t2.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b, t2.a, t2.b
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t2.a, t2.b
+               Hash Cond: (t2.a = t1.a)
+               Generate Bloom Filter On Expr: t1.a
+               Generate Bloom Filter On Index: 0
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+                     Output: t2.a, t2.b
+                     Pushdown Predicate Filter: (t2.b < 10)
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+                     Filter By Bloom Filter On Expr: t2.a
+                     Filter By Bloom Filter On Index: 0
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rod t1
+                     Output: t1.a, t1.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(20 rows)
+
+select * from small_hdfs_tbl_rod t1 ,(select * from  small_hdfs_tbl_rep t2 where t2.b <10) as t2  where t1.a = t2.a minus all select * from small_hdfs_tbl_rod t1 ,(select * from  small_hdfs_tbl_rod t2 where t2.b <10) as t2  where t1.a = t2.a;
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from small_hdfs_tbl_rod t1 where exists (select * from  small_hdfs_tbl_rep t2 where t2.b <10);
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b
+         InitPlan 1 (returns $0)
+           ->  Row Adapter
+                 Output: ('Dummy')
+                 ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+                       Output: 'Dummy'
+                       Pushdown Predicate Filter: (t2.b < 10)
+                       Server Type: hdfs
+--?                       Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+         ->  Vector Result
+               Output: t1.a, t1.b
+               One-Time Filter: $0
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rod t1
+                     Output: t1.a, t1.b
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(19 rows)
+
+select * from small_hdfs_tbl_rod t1 where exists (select * from  small_hdfs_tbl_rep t2 where t2.b <10) minus all select * from small_hdfs_tbl_rod t1 where exists (select * from  small_hdfs_tbl_rod t2 where t2.b <10);
+ a | b 
+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from small_hdfs_tbl_rod t1 where t1.b in(select b from  small_hdfs_tbl_rep t2 where t2.b <10);
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b
+         ->  Vector Nest Loop Semi Join
+               Output: t1.a, t1.b
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rod t1
+                     Output: t1.a, t1.b
+                     Pushdown Predicate Filter: (t1.b < 10)
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+                     Output: t2.b
+                     Pushdown Predicate Filter: (t2.b < 10)
+                     Server Type: hdfs
+--?                     Orc File: .*/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(17 rows)
+
+select * from small_hdfs_tbl_rod t1 where t1.b in(select b from  small_hdfs_tbl_rep t2 where t2.b <10) minus all select * from small_hdfs_tbl_rod t1 where t1.b in(select b from  small_hdfs_tbl_rod t2 where t2.b <10);
+ a | b 
+---+---
+(0 rows)
+
+explain (verbose, costs off) select * from small_hdfs_tbl_rod t1 where t1.b not in  (select b from  small_hdfs_tbl_rep t2 where t2.b <10);
+--?.*
+--?.*
+ Row Adapter
+   Output: t1.a, t1.b
+   ->  Vector Streaming (type: GATHER)
+         Output: t1.a, t1.b
+         ->  Vector Nest Loop Anti Join
+               Output: t1.a, t1.b
+               Join Filter: ((t1.b = t2.b) OR (t1.b IS NULL) OR (t2.b IS NULL))
+               ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rod t1
+                     Output: t1.a, t1.b
+                     Server Type: hdfs
+--?                     Orc File: .*/_ts_hdfs_rep_foreign_tbl/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+               ->  Vector Materialize
+                     Output: t2.b
+                     ->  Vector Foreign Scan on hdfs_replication_foreign_table_schema.small_hdfs_tbl_rep t2
+                           Output: t2.b
+                           Pushdown Predicate Filter: (t2.b < 10)
+                           Server Type: hdfs
+--?                           Orc File: .*/_ts_hdfs_rep_foreign_tbl/tablespace_secondary/regression/hdfs_replication_foreign_table_schema.small_dfs_tbl
+(18 rows)
+
+select * from small_hdfs_tbl_rod t1 where t1.b not in  (select b from  small_hdfs_tbl_rep t2 where t2.b <10) minus all select * from small_hdfs_tbl_rod t1 where t1.b not in  (select b from  small_hdfs_tbl_rod t2 where t2.b <10);
+ a | b 
+---+---
+(0 rows)
+
+--test explain option detail off and json format
+\o explain_pretty_format.out
+explain (analyze on, costs off, timing off) select * from big_dfs_tbl t1, small_hdfs_tbl_rep t2 where t1.b = t2.b;
+explain (analyze on, costs off, timing off, format json) select * from big_dfs_tbl t1, small_hdfs_tbl_rep t2 where t1.b = t2.b; 
+explain (analyze on, detail on, costs off, timing off, format xml) select * from big_dfs_tbl t1, small_hdfs_tbl_rep t2 where t1.b = t2.b;
+set explain_perf_mode=pretty;
+explain (analyze on,  detail on, costs off, timing off) select * from big_dfs_tbl t1, small_hdfs_tbl_rep t2 where t1.b = t2.b;
+explain (analyze on, costs off, timing off) select * from big_dfs_tbl t1, small_hdfs_tbl_rep t2 where t1.b = t2.b; 
+reset explain_perf_mode;
+\o
+\! rm explain_pretty_format.out
+-----
+drop foreign table if exists hdfs_empty;
+NOTICE:  foreign table "hdfs_empty" does not exist, skipping
+create foreign table hdfs_empty(a int, b int)
+SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/empty_table')
+distribute by replication;
+select * from hdfs_empty;
+ a | b 
+---+---
+(0 rows)
+
+drop schema hdfs_replication_foreign_table_schema cascade;
+NOTICE:  drop cascades to 9 other objects
+DETAIL:  drop cascades to table big_dfs_tbl
+drop cascades to foreign table big_hdfs_tbl_rod
+drop cascades to foreign table big_hdfs_tbl_rep
+drop cascades to table small_dfs_tbl
+drop cascades to foreign table small_hdfs_tbl_rod
+drop cascades to foreign table small_hdfs_tbl_rep
+drop cascades to table normal_hash_table
+drop cascades to table normal_rep_table
+drop cascades to foreign table hdfs_empty
+\d
+           List of relations
+ Schema | Name | Type | Owner | Storage 
+--------+------+------+-------+---------
+(0 rows)
+
+---test for foreign table
+create schema "table_模式1_#@_schema";
+set current_schema="table_模式1_#@_schema";
+create table dfs_tbl11(a int, b int) tablespace hdfs_replication_ts distribute by hash(a);
+set cstore_insert_mode=main;
+insert into dfs_tbl11 values(10, 11);
+insert into dfs_tbl11 values(12, 13);
+select * from dfs_tbl11 order by 1;
+ a  | b  
+----+----
+ 10 | 11
+ 12 | 13
+(2 rows)
+
+--create roundrobin foreign table name with other identifier
+create foreign table "rod_foreign_表_#@%_TABLE1"(a int, b int) 
+SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/@hdfsstoreplus@/_ts_hdfs_rep_foreign_tbl/tablespace_secondary/regression/table_模式1_#@_schema.dfs_tbl11')
+distribute by roundrobin;
+select * from "rod_foreign_表_#@%_TABLE1" order by 1;
+ a  | b  
+----+----
+ 10 | 11
+ 12 | 13
+(2 rows)
+
+analyze "rod_foreign_表_#@%_TABLE1";
+select relpages,reltuples from pg_class where relname = 'rod_foreign_表_#@%_TABLE1';
+ relpages | reltuples 
+----------+-----------
+        2 |         2
+(1 row)
+
+select starelkind,staattnum,stainherit,stanullfrac,stawidth,stadistinct,stadndistinct
+ from pg_statistic sta join pg_class cla on sta.starelid=cla.oid where relname = 'rod_foreign_表_#@%_TABLE1' order by staattnum;
+ starelkind | staattnum | stainherit | stanullfrac | stawidth | stadistinct | stadndistinct 
+------------+-----------+------------+-------------+----------+-------------+---------------
+ c          |         1 | f          |           0 |        4 |          -1 |            -1
+ c          |         2 | f          |           0 |        4 |          -1 |            -1
+(2 rows)
+
+analyze foreign tables;
+\! @abs_bindir@/gsql -p @portstring@ -d regression -c "analyze foreign tables";
+ANALYZE
+set enable_global_stats=off;
+analyze foreign tables;
+reset enable_global_stats;
+delete from dfs_tbl11;
+vacuum full dfs_tbl11;
+analyze "rod_foreign_表_#@%_TABLE1";
+select relpages,reltuples from pg_class where relname = 'rod_foreign_表_#@%_TABLE1';
+ relpages | reltuples 
+----------+-----------
+        0 |         0
+(1 row)
+
+select starelkind,staattnum,stainherit,stanullfrac,stawidth,stadistinct,stadndistinct
+ from pg_statistic sta join pg_class cla on sta.starelid=cla.oid where relname = 'rod_foreign_表_#@%_TABLE1' order by staattnum;
+ starelkind | staattnum | stainherit | stanullfrac | stawidth | stadistinct | stadndistinct 
+------------+-----------+------------+-------------+----------+-------------+---------------
+(0 rows)
+
+drop table dfs_tbl11;
+drop foreign table if exists "rod_foreign_表_#@%_TABLE1";
+drop schema "table_模式1_#@_schema" cascade;
+drop SERVER hdfs_server;
+drop tablespace hdfs_replication_ts;
+\! rm -rf @abs_srcdir@/hdfs_rep_foreign_tbl

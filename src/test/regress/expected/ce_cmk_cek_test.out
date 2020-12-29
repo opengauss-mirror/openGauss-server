@@ -1,0 +1,99 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+\! gs_ktool -g
+GENERATE
+2
+\! gs_ktool -g
+GENERATE
+3
+select  count(*), 'count' from gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     0 | count
+(1 row)
+
+select  count(*), 'count' from gs_column_keys;
+ count | ?column? 
+-------+----------
+     0 | count
+(1 row)
+
+-- case create CMK - success
+CREATE CLIENT MASTER KEY ImgCMK WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+-- fail  duplicate key
+CREATE CLIENT MASTER KEY ImgCMK WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2" , ALGORITHM = AES_256_CBC);
+ERROR:  duplicate key value violates unique constraint "gs_client_global_keys_name_index"
+DETAIL:  Key (global_key_name, key_namespace)=(imgcmk, 2200) already exists.
+-- fail   didn't support RSA_2048 algorithm
+CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2" , ALGORITHM = RSA_2048);
+ERROR(CLIENT): unsupported global setting algorithm
+-- fail  ALGORITHM is missing or invalid
+CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2");
+ERROR(CLIENT): unsupported global setting algorithm
+-- fail  KEY_PATHis missing or invalid
+CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, ALGORITHM = AES_256_CBC);
+ERROR(CLIENT): key path are mandatory
+-- fail  KEY_STORE is missing or invalid
+CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_PATH = "gs_ktool/2", ALGORITHM = AES_256_CBC);
+ERROR(CLIENT): key store are mandatory
+-- fail duplicate KEY_PATHargs
+CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2", KEY_PATH = "gs_ktool/3", ALGORITHM = AES_256_CBC);
+ERROR(CLIENT): duplicate keyPath args
+-- fail duplicate KEY_STORE args
+CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_STORE = kmc, KEY_PATH = "gs_ktool/2", ALGORITHM = AES_256_CBC);
+ERROR(CLIENT): duplicate keyStore args
+-- fail duplicate ALGORITHM args
+CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2", ALGORITHM = AES_256_CBC, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR(CLIENT): duplicate algorithm args
+-- case create CEK - success
+CREATE COLUMN ENCRYPTION KEY ImgCEK WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY ImgCEK1 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE='abcdefghijklmnopqrstuvwxyz12');
+--fail  encryption key too short
+CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE='abcdefghijklmnopqrstuvwxyz1');
+ERROR(CLIENT): encryption key too short
+--fail object does not exist
+CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK2, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR(CLIENT): failed to get global setting imgcmk2 from cache
+-- fail   duplicate key value
+CREATE COLUMN ENCRYPTION KEY ImgCEK WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR:  duplicate key value violates unique constraint "gs_column_keys_name_index"
+DETAIL:  Key (column_key_name, key_namespace)=(imgcek, 2200) already exists.
+--fail    ImgCMK1 dose not exist
+CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK1, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR(CLIENT): failed to get global setting imgcmk1 from cache
+-- fail  didn't support AES_128_CBC algorithm
+CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AES_128_CBC);
+ERROR(CLIENT): syntax error parsing cek creation query.
+-- fail   syntax error parsing cek creation query
+CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK);
+ERROR(CLIENT): syntax error parsing cek creation query.
+-- fail   syntax error parsing cek creation query
+CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (ALGORITHM = AEAD_AES_128_CBC_HMAC_SHA256);
+ERROR(CLIENT): failed to get global setting from cache
+select  count(*), 'count' from gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     1 | count
+(1 row)
+
+select  count(*), 'count' from gs_column_keys;
+ count | ?column? 
+-------+----------
+     2 | count
+(1 row)
+
+--cek dose not exist
+CREATE TABLE account(user_id INT, username VARCHAR (50)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = ImgCEK3, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+ERROR(CLIENT):error while trying to retrieve column setting from cache
+DROP CLIENT MASTER KEY ImgCMK CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to column setting: imgcek
+drop cascades to column setting: imgcek1
+\! gs_ktool -d all
+DELETE ALL
+ 1 2 3

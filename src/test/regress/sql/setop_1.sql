@@ -56,7 +56,7 @@ create table item
     i_class_id                integer
 )
 ;
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select s_market_id
           from store
          inner join item
@@ -71,7 +71,7 @@ select s_market_id
         select count(*) from income_band;
 
 -- Setop targetlist doesn't match subplan's targetlist
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select '',  s_market_id,
 octet_length('abc') + s_market_id%4 - (array_length(array [ '', ' ', 'fgsg' ], 1) - 32.09)   from store
 inner join item

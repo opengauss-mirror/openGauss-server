@@ -21,7 +21,7 @@
 
 MODULE_big = connector
 
-OBJS = connector.o 
+OBJS = connector.o odbc_connector.o odbc.o
 SUBDIRS =
 
 LDFLAGS_SL += $(filter -lm, $(LIBS))

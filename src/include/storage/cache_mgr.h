@@ -12,12 +12,12 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- *
+ * 
  * cache_mgr.h
  *        routines to support common cache
- *
- *
- *
+ * 
+ * 
+ * 
  * IDENTIFICATION
  *        src/include/storage/cache_mgr.h
  *
@@ -30,8 +30,11 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "utils/hsearch.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "storage/spin.h"
+
+// CU Cache Pool sizes.
+//
 
 #define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2 * (int)(!!(condition))]))
 
@@ -59,16 +62,20 @@ const uint16 CACHE_BLOCK_MAX_USAGE = 5;
 #define MAX_CACHE_TAG_LEN (32)
 
 typedef enum CacheType {
-    /* only used for init cache type, for not exist type */
+    /*only used for init cache type, for not exist type*/
     CACHE_TYPE_NONE = 0,
 
-    /* data block */
+    /* data block*/
     CACHE_COlUMN_DATA,
     CACHE_ORC_DATA,
     CACHE_OBS_DATA,
+    CACHE_CARBONDATA_DATA,
 
-    /* index block */
-    CACHE_ORC_INDEX
+    /*index block*/
+    CACHE_ORC_INDEX,
+
+    /* metadata block */
+    CACHE_CARBONDATA_METADATA
 } CacheType;
 
 typedef enum MgrCacheType {
@@ -78,7 +85,29 @@ typedef enum MgrCacheType {
 } MgrCacheType;
 
 typedef struct CacheTag {
-    /* common cache tag */
+    /*cu
+    RelFileNode rnode;
+    int32 col_id;
+    int32 cu_id;
+    uint32 padding;
+    CUPointer offset;
+    */
+
+    /*orc compress data
+    RelFileNode m_rnode;
+    int32 m_fileId;
+    uint64	m_offset;
+    uint64  m_length;
+    */
+
+    /*orc meta data
+    RelFileNode fileNode;
+    int32 fileID;
+    uint32 stripeID;
+    uint32 columnID;
+    */
+
+    /*common cache tag*/
     int32 type;
     char key[MAX_CACHE_TAG_LEN];
 } CacheTag;
@@ -104,7 +133,7 @@ typedef struct CacheDesc {
      */
     LWLock *m_compress_lock;
 
-    /* The data size in the one slot. */
+    /*The data size in the one slot.*/
     int m_datablock_size;
 
     /*
@@ -140,15 +169,15 @@ public:
     void Destroy(void);
 
     /* operate cache block */
-    void InitCacheBlockTag(CacheTag *cacheTag, int32 type, const void *key, int32 length) const;
-    CacheSlotId_t FindCacheBlock(CacheTag *cacheTag, bool first_enter_block);
-    void InvalidateCacheBlock(CacheTag *cacheTag);
-    void DeleteCacheBlock(CacheTag *cacheTag);
-    CacheSlotId_t ReserveCacheBlock(CacheTag *cacheTag, int size, bool &hasFound);
+    void InitCacheBlockTag(CacheTag* cacheTag, int32 type, const void* key, int32 length) const;
+    CacheSlotId_t FindCacheBlock(CacheTag* cacheTag, bool first_enter_block);
+    void InvalidateCacheBlock(CacheTag* cacheTag);
+    void DeleteCacheBlock(CacheTag* cacheTag);
+    CacheSlotId_t ReserveCacheBlock(CacheTag* cacheTag, int size, bool& hasFound);
     bool ReserveCacheBlockWithSlotId(CacheSlotId_t slotId);
     bool ReserveCstoreCacheBlockWithSlotId(CacheSlotId_t slotId);
-    void *GetCacheBlock(CacheSlotId_t slotId);
-    const CacheTag *GetCacheBlockTag(CacheSlotId_t slotId, uint32 *refcount) const;
+    void* GetCacheBlock(CacheSlotId_t slotId);
+    const CacheTag* GetCacheBlockTag(CacheSlotId_t slotId, uint32* refcount) const;
     bool PinCacheBlock(CacheSlotId_t slotId);
     void UnPinCacheBlock(CacheSlotId_t slotId);
 
@@ -193,15 +222,15 @@ public:
     {
         return m_CaccheSlotMax;
     }
-    void CopyCacheBlockTag(CacheSlotId_t slotId, CacheTag *outTag);
+    void CopyCacheBlockTag(CacheSlotId_t slotId, CacheTag* outTag);
 
-    char *m_CacheSlots;
+    char* m_CacheSlots;
 
 #ifndef ENABLE_UT
 private:
 #endif  // ENABLE_UT
 
-    uint32 GetHashCode(CacheTag *cacheTag);
+    uint32 GetHashCode(CacheTag* cacheTag);
 
     /* internal block operate */
     CacheSlotId_t EvictCacheBlock(int size, int retryNum);
@@ -228,14 +257,14 @@ private:
     bool CacheBlockIsPinned(CacheSlotId_t slotId) const;
     void PinCacheBlock_Locked(CacheSlotId_t slotId);
 
-    CacheSlotId_t AllocateBlockFromCache(CacheTag *cacheTag, uint32 hashCode, int size, bool &hasFound);
+    CacheSlotId_t AllocateBlockFromCache(CacheTag* cacheTag, uint32 hashCode, int size, bool& hasFound);
     void AllocateBlockFromCacheWithSlotId(CacheSlotId_t slotId);
     void WaitEvictSlot(CacheSlotId_t slotId);
 
     MgrCacheType m_cache_type;
-    HTAB *m_hash;
+    HTAB* m_hash;
     uint32 m_slot_length;
-    CacheDesc *m_CacheDesc;
+    CacheDesc* m_CacheDesc;
 
     int m_CacheSlotsNum; /* total slot num */
     int m_CaccheSlotMax; /* used max slot id */

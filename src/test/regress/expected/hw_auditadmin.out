@@ -19,3 +19,27 @@ ERROR:  permission denied to delete audit
 CONTEXT:  referenced column: pg_delete_audit
 \c
 DROP ROLE noaudituser;
+-- test for EXECUTE DIRECT
+CREATE USER notauditor PASSWORD 'yh7U8ikl';
+CREATE USER auditor WITH AUDITADMIN PASSWORD 'cd5tVF6y';
+SET ROLE notauditor PASSWORD 'yh7U8ikl';
+EXECUTE DIRECT ON (datanode1) 'SELECT DISTINCT type FROM pg_query_audit(''1012-11-10'', ''3012-11-11'') WHERE type=''internal_event'';';
+ERROR:  must be system admin or monitor admin to use EXECUTE DIRECT
+SET ROLE auditor PASSWORD 'cd5tVF6y';
+CREATE TABLE auditor_pg_query_audit001(col1 text);
+CREATE TABLE pg_query_audit(col1 text);
+--The distributed capability is not supported currently.
+--EXECUTE DIRECT ON (datanode1) 'SELECT DISTINCT type FROM pg_query_audit(''1012-11-10'', ''3012-11-11'') WHERE type=''internal_event'';';
+--EXECUTE DIRECT ON (datanode1) 'SELECT DISTINCT type FROM Pg_qUery_AUDIT(''1012-11-10'', ''3012-11-11'') WHERE type=''internal_event'';';
+--EXECUTE DIRECT ON (datanode1) 'SELECT DISTINCT type FROM pg_query_audit   (''1012-11-10'', ''3012-11-11'') WHERE type=''internal_event'';';
+--EXECUTE DIRECT ON (datanode1) 'SELECT DISTINCT type FROM pg_query_audit  
+--(''1012-11-10'', ''3012-11-11'') WHERE type=''internal_event'';';
+EXECUTE DIRECT ON (datanode1) 'SELECT * FROM auditor_pg_query_audit001;';
+ERROR:  must be system admin or monitor admin to use EXECUTE DIRECT
+EXECUTE DIRECT ON (datanode1) 'SELECT * FROM pg_query_audit;';
+ERROR:  must be system admin or monitor admin to use EXECUTE DIRECT
+DROP TABLE auditor_pg_query_audit001;
+DROP TABLE pg_query_audit;
+\c
+DROP USER notauditor;
+DROP USER auditor;

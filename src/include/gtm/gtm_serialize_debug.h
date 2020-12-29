@@ -18,7 +18,7 @@
 
 #include "gtm/gtm_txn.h"
 
-void dump_transactions_elog(GTM_Transactions *, int);
-void dump_transactioninfo_elog(GTM_TransactionInfo *);
+void dump_transactions_elog(GTM_Transactions*, int);
+void dump_transactioninfo_elog(GTM_TransactionInfo*);
 
 #endif /* GTM_SERIALIZE_DEBUG_H */

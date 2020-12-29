@@ -24,19 +24,25 @@ where option can be:
     | {INHERIT | NOINHERIT}
     | {AUDITADMIN | NOAUDITADMIN}
     | {SYSADMIN | NOSYSADMIN}
+    | {MONADMIN | NOMONADMIN}
+    | {OPRADMIN | NOOPRADMIN}
+    | {POLADMIN | NOPOLADMIN}
     | {USEFT | NOUSEFT}
     | {LOGIN | NOLOGIN}
     | {REPLICATION | NOREPLICATION}
     | {INDEPENDENT | NOINDEPENDENT}
     | {VCADMIN | NOVCADMIN}
+    | {PERSISTENCE | NOPERSISTENCE}
     | CONNECTION LIMIT connlimit
-    | [ ENCRYPTED | UNENCRYPTED ] PASSWORD { 'password' | DISABLE }
-    | [ ENCRYPTED | UNENCRYPTED ] IDENTIFIED BY { 'password' [ REPLACE 'old_password' ] | DISABLE }
+    | [ ENCRYPTED | UNENCRYPTED ] PASSWORD { 'password' [ EXPIRED ] | DISABLE | EXPIRED }
+    | [ ENCRYPTED | UNENCRYPTED ] IDENTIFIED BY { 'password' [ REPLACE 'old_password' | EXPIRED ] | DISABLE }
     | VALID BEGIN 'timestamp'
     | VALID UNTIL 'timestamp'
     | RESOURCE POOL 'respool'
     | USER GROUP 'groupuser'
     | PERM SPACE 'spacelimit'
+    | TEMP SPACE 'tmpspacelimit'
+    | SPILL SPACE 'spillspacelimit'
     | NODE GROUP logic_cluster_name
     | ACCOUNT { LOCK | UNLOCK }
     | PGUSER

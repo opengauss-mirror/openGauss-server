@@ -12,6 +12,10 @@
  *
  * -------------------------------------------------------------------------
  */
+#ifdef FRONTEND_PARSER
+#include "postgres_fe.h"
+#include "nodes/parsenodes_common.h"
+#else
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
@@ -25,11 +29,10 @@
 #include "utils/lsyscache.h"
 #include "optimizer/streamplan.h"
 #include "parser/parse_expr.h"
+#endif /* FRONTEND_PARSER */
 
 static bool expression_returns_set_walker(Node* node, void* context);
 static int leftmostLoc(int loc1, int loc2);
-static bool planstate_walk_subplans(List *plans, bool (*walker)(), void *context);
-static bool planstate_walk_members(List *plans, PlanState **planstates, bool (*walker)(), void *context);
 
 /*
  *	exprType -
@@ -1784,7 +1787,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
             }
             if (p2walker(from->quals, context)) {
                 return true;
-            }
+			}
         } break;
         case T_UpsertExpr: {
             UpsertExpr* upsertClause = (UpsertExpr*)node;
@@ -1891,7 +1894,7 @@ bool query_tree_walker(Query* query, bool (*walker)(), void* context, int flags)
         return true;
     }
     if (p2walker((Node*)query->upsertClause, context)) {
-        return true;
+	return true;
     }
     if (p2walker((Node*)query->returningList, context)) {
         return true;
@@ -1950,6 +1953,7 @@ bool range_table_walker(List* rtable, bool (*walker)(), void* context, int flags
                 if (p2walker((Node*)rte->tablesample, context)) {
                     return true;
                 }
+                /* fall through */
             case RTE_CTE:
                 /* nothing to do */
                 break;
@@ -2755,7 +2759,6 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_ParamRef:
         case T_A_Const:
         case T_A_Star:
-        case T_Rownum:
             /* primitive node types with no subnodes */
             break;
         case T_Alias:
@@ -2847,9 +2850,6 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
                 return true;
             }
             /* colNames, options are deemed uninteresting */
-            /* viewQuery should be null in raw parsetree, but check it */
-            if (p2walker(into->viewQuery, context))
-                return true;
         } break;
         case T_List:
             foreach (temp, (List*)node) {
@@ -2876,9 +2876,6 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (p2walker(stmt->withClause, context)) {
                 return true;
             }
-            if (p2walker(stmt->upsertClause, context)) {
-                return true;
-            }
         } break;
         case T_DeleteStmt: {
             DeleteStmt* stmt = (DeleteStmt*)node;
@@ -2896,6 +2893,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
                 return true;
             }
             if (p2walker(stmt->withClause, context)) {
+                return true;
+            }
+            if (p2walker(stmt->limitClause, context)) {
                 return true;
             }
         } break;
@@ -3187,116 +3187,4 @@ bool lockNextvalWalker(Node* node, void* context)
     /* lock nextval on cn when select nextval to avoid dead lock with alter sequence */
     lockSeqForNextvalFunc(node);
     return expression_tree_walker(node, (bool (*)())lockNextvalWalker, context);
-}
-
-/*
- * planstate_tree_walker --- walk plan state trees
- *
- * The walker has already visited the current node, and so we need only
- * recurse into any sub-nodes it has.
- */
-bool planstate_tree_walker(PlanState *planstate, bool (*walker)(), void *context)
-{
-    Plan *plan = planstate->plan;
-    bool (*p2walker)(PlanState *, void *) = (bool (*)(PlanState *, void *))walker;
-
-    /* initPlan-s */
-    if (planstate_walk_subplans(planstate->initPlan, walker, context)) {
-        return true;
-    }
-
-    /* lefttree */
-    if (outerPlanState(planstate)) {
-        if (p2walker(outerPlanState(planstate), context)) {
-            return true;
-        }
-    }
-
-    /* righttree */
-    if (innerPlanState(planstate)) {
-        if (p2walker(innerPlanState(planstate), context)) {
-            return true;
-        }
-    }
-
-    /* special child plans */
-    switch (nodeTag(plan)) {
-        case T_ModifyTable:
-            if (planstate_walk_members(((ModifyTable *)plan)->plans, ((ModifyTableState *)planstate)->mt_plans, walker,
-                context))
-                return true;
-            break;
-        case T_Append:
-            if (planstate_walk_members(((Append *)plan)->appendplans, ((AppendState *)planstate)->appendplans, walker,
-                context))
-                return true;
-            break;
-        case T_MergeAppend:
-            if (planstate_walk_members(((MergeAppend *)plan)->mergeplans, ((MergeAppendState *)planstate)->mergeplans,
-                walker, context))
-                return true;
-            break;
-        case T_BitmapAnd:
-            if (planstate_walk_members(((BitmapAnd *)plan)->bitmapplans, ((BitmapAndState *)planstate)->bitmapplans,
-                walker, context))
-                return true;
-            break;
-        case T_BitmapOr:
-            if (planstate_walk_members(((BitmapOr *)plan)->bitmapplans, ((BitmapOrState *)planstate)->bitmapplans,
-                walker, context))
-                return true;
-            break;
-        case T_SubqueryScan:
-            if (p2walker(((SubqueryScanState *)planstate)->subplan, context))
-                return true;
-            break;
-        default:
-            break;
-    }
-
-    /* subPlan-s */
-    if (planstate_walk_subplans(planstate->subPlan, walker, context)) {
-        return true;
-    }
-
-    return false;
-}
-
-/*
- * Walk a list of SubPlans (or initPlans, which also use SubPlan nodes).
- */
-static bool planstate_walk_subplans(List *plans, bool (*walker)(), void *context)
-{
-    ListCell *lc = NULL;
-    bool (*p2walker)(PlanState *, void *) = (bool (*)(PlanState *, void *))walker;
-
-    foreach (lc, plans) {
-        SubPlanState *sps = (SubPlanState *)lfirst(lc);
-
-        Assert(IsA(sps, SubPlanState));
-        if (p2walker(sps->planstate, context))
-            return true;
-    }
-
-    return false;
-}
-
-/*
- * Walk the constituent plans of a ModifyTable, Append, MergeAppend,
- * BitmapAnd, or BitmapOr node.
- *
- * Note: we don't actually need to examine the Plan list members, but
- * we need the list in order to determine the length of the PlanState array.
- */
-static bool planstate_walk_members(List *plans, PlanState **planstates, bool (*walker)(), void *context)
-{
-    int nplans = list_length(plans);
-    bool (*p2walker)(PlanState *, void *) = (bool (*)(PlanState *, void *))walker;
-
-    for (int j = 0; j < nplans; j++) {
-        if (p2walker(planstates[j], context))
-            return true;
-    }
-
-    return false;
 }

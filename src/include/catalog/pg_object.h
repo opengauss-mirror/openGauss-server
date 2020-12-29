@@ -91,7 +91,9 @@ typedef FormData_pg_object* Form_pg_object;
 #define OBJECT_TYPE_INDEX 'i'
 #define OBJECT_TYPE_SEQUENCE 's'
 #define OBJECT_TYPE_VIEW 'v'
+#define OBJECT_TYPE_CONTQUERY 'o'
 #define OBJECT_TYPE_PROC 'P'
+#define OBJECT_TYPE_STREAM 'e'
 
 extern void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, bool hasCtime, bool hasMtime);
 extern void DeletePgObject(Oid objectOid, PgObjectType objectType);

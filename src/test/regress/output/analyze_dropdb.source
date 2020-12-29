@@ -1,0 +1,17 @@
+-- drop database after analyze in CN2
+CREATE DATABASE my_db1;
+\c my_db1
+create table tt1(a int);
+insert into tt1 values(1);
+create schema "table_模式1_#@_schema";
+set current_schema="table_模式1_#@_schema";
+create table "bbb_表_#@%_TABLE1"(a int);
+insert into "bbb_表_#@%_TABLE1" select generate_series(1,100);
+analyze;
+\! @abs_bindir@/gsql -p @portstring@ -d my_db1 -c "analyze";
+ANALYZE
+\! @abs_bindir@/gsql -p @portstring@ -d my_db1 -c "/*alter table stock add constraint pk_stock primary key (s_w_id, s_i_id) ;*/VACUUM analyse tt1;";
+VACUUM
+\! sleep 5
+set enable_global_stats=off;
+analyze;

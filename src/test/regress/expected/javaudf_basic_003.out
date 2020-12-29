@@ -1,0 +1,306 @@
+/*
+ * This file is used to test the function of JavaUDF
+ * on support limitations, authority limitations, related guc,
+ * java type boundary and etc.
+ */
+---- test autority limitations
+---test: normal user can not create javaudf
+CREATE USER udf_usr PASSWORD 'GAUSS@123';
+GRANT ALL PRIVILEGES ON LANGUAGE java TO udf_usr;
+ERROR:  language "java" is not trusted
+HINT:  Only system admin can use "java" languages.
+SET SESSION SESSION AUTHORIZATION udf_usr PASSWORD 'GAUSS@123';
+CREATE FUNCTION java_addOne_Integer(INTEGER)
+	RETURNS INTEGER
+	AS 'huawei.javaudf.basic.BasicJavaUDF.addOne(java.lang.Integer)'
+	IMMUTABLE LANGUAGE java;
+ERROR:  permission denied for language java
+---test: sysadmin user can create and use javaudf */
+RESET SESSION AUTHORIZATION;
+CREATE USER udf_admin PASSWORD 'GAUSS@123' SYSADMIN;
+SET SESSION SESSION AUTHORIZATION udf_admin PASSWORD 'GAUSS@123';
+CREATE FUNCTION nullOnEven(INTEGER)
+	RETURNS INTEGER
+	AS 'huawei.javaudf.basic.BasicJavaUDF.nullOnEven'
+	IMMUTABLE LANGUAGE java;
+SELECT nullOnEven(2);
+ nulloneven 
+------------
+           
+(1 row)
+
+---test: normal user can use granted udf */
+GRANT ALL PRIVILEGES ON SCHEMA udf_admin TO udf_usr;
+SET SESSION SESSION AUTHORIZATION udf_usr PASSWORD 'GAUSS@123';
+SELECT udf_admin.nullOnEven(2);
+ nulloneven 
+------------
+           
+(1 row)
+
+RESET SESSION AUTHORIZATION;
+DROP USER udf_admin CASCADE;
+DROP USER udf_usr CASCADE;
+DROP SCHEMA javaudf_basic_002 CASCADE;
+ERROR:  schema "javaudf_basic_002" does not exist
+CREATE SCHEMA javaudf_basic_002;
+SET CURRENT_SCHEMA = javaudf_basic_002;
+-- support limitation: do not support not fenced JavaUDF
+CREATE FUNCTION dummy(INT4)
+	RETURNS INT4
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	LANGUAGE java NOT FENCED;
+ERROR:  Java UDF dose not support NOT FENCED functions.
+CREATE FUNCTION dummy(INT4)
+	RETURNS INT4
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	LANGUAGE java;
+ALTER FUNCTION dummy(INT4) NOT FENCED;
+ERROR:  Java UDF dose not support NOT FENCED functions.
+-- only has dummy_int2_only(int2) in java, all other should return cannot find java method
+CREATE FUNCTION dummy_int2_only(INT2)
+	RETURNS INT2
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummyShortOnly'
+	LANGUAGE java;
+SELECT  dummy_int2_only(int4Col::INT4)
+FROM javaudf_basic.typeTable
+WHERE dummy_int2_only(int4Col::INT4) < 3
+ORDER BY 1;
+ dummy_int2_only 
+-----------------
+               1
+               2
+(2 rows)
+
+SELECT dummy_int2_only(int8Col::INT8)
+FROM javaudf_basic.typeTable
+WHERE dummy_int2_only(int8Col::INT8) < 3
+ORDER BY 1;
+ERROR:  function dummy_int2_only(bigint) does not exist
+LINE 1: SELECT dummy_int2_only(int8Col::INT8)
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: dummy_int2_only
+--try transaction
+START TRANSACTION;
+CREATE FUNCTION dummy_int2(INT2)
+	RETURNS INT2
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	LANGUAGE java;
+ROLLBACK;
+SELECT  proname FROM pg_proc WHERE proname = 'dummy_int2'; 
+ proname 
+---------
+(0 rows)
+
+START TRANSACTION;
+CREATE FUNCTION dummy_int2(INT2)
+	RETURNS INT2
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	LANGUAGE java;
+COMMIT;
+SELECT  proname FROM pg_proc WHERE proname = 'dummy_int2'; 
+  proname   
+------------
+ dummy_int2
+(1 row)
+
+START TRANSACTION;
+DROP FUNCTION dummy_int2;
+ROLLBACK;
+SELECT  proname FROM pg_proc WHERE proname = 'dummy_int2'; 
+  proname   
+------------
+ dummy_int2
+(1 row)
+
+START TRANSACTION;
+DROP FUNCTION dummy_int2;
+COMMIT;
+SELECT  proname FROM pg_proc WHERE proname = 'dummy_int2';
+ proname 
+---------
+(0 rows)
+
+--test guc UDFWorkerMemHardLimit: should not over 1G
+SHOW UDFWorkerMemHardLimit;
+ UDFWorkerMemHardLimit 
+-----------------------
+ 1GB
+(1 row)
+
+SET FencedUDFMemoryLimit = 1048577;
+ERROR:  invalid value for parameter "FencedUDFMemoryLimit": 1048577
+DETAIL:  "FencedUDFMemoryLimit" cannot be greater than "UDFWorkerMemHardLimit".
+--test on write file: not allowed
+CREATE FUNCTION write_file(TEXT)
+	RETURNS BOOL
+	AS 'huawei.javaudf.basic.BasicJavaUDF.write_file'
+	LANGUAGE java;
+SELECT  write_file('hello.txt');
+ write_file 
+------------
+ f
+(1 row)
+
+--test on showing error massage
+CREATE FUNCTION test_error()
+	RETURNS TEXT
+	AS 'huawei.javaudf.basic.BasicJavaUDF.get_error_msg'
+	LANGUAGE java;
+SELECT test_error();
+ERROR:  UDF Error:java.lang.NoClassDefFoundError: huawei/javaudf/test/Test
+	at huawei.javaudf.basic.BasicJavaUDF.get_error_msg(BasicJavaUDF.java:621)
+Caused by : huawei.javaudf.test.Test
+	at org.postgresql.pljava.sqlj.JarLoader.findClass(JarLoader.java:119)
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:418)
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:351)
+	at huawei.javaudf.basic.BasicJavaUDF.get_error_msg(BasicJavaUDF.java:621)
+CONTEXT:  referenced column: test_error
+--test Java container value boundary
+CREATE FUNCTION getShortMin()
+	RETURNS INT2
+	AS 'huawei.javaudf.basic.BasicJavaUDF.getShortMin'
+	LANGUAGE java;
+CREATE FUNCTION getIntegerMin()
+	RETURNS INTEGER
+	AS 'huawei.javaudf.basic.BasicJavaUDF.getIntegerMin'
+	LANGUAGE java;
+CREATE FUNCTION getLongMin()
+	RETURNS INT8
+	AS 'huawei.javaudf.basic.BasicJavaUDF.getLongMin'
+	LANGUAGE java;
+CREATE FUNCTION getFloatMin()
+	RETURNS FLOAT4
+	AS 'huawei.javaudf.basic.BasicJavaUDF.getFloatMin'
+	LANGUAGE java;
+CREATE FUNCTION getDoubleMin()
+	RETURNS FLOAT8
+	AS 'huawei.javaudf.basic.BasicJavaUDF.getDoubleMin'
+	LANGUAGE java;
+CREATE FUNCTION getByteMin()
+	RETURNS "char"
+	AS 'huawei.javaudf.basic.BasicJavaUDF.getByteMin'
+	LANGUAGE java;
+CREATE FUNCTION getShortMax()
+	RETURNS INT2
+	AS 'huawei.javaudf.basic.BasicJavaUDF.getShortMax'
+	LANGUAGE java;
+CREATE FUNCTION getIntegerMax()
+	RETURNS INTEGER
+	AS 'huawei.javaudf.basic.BasicJavaUDF.getIntegerMax'
+	LANGUAGE java;
+CREATE FUNCTION getLongMax()
+	RETURNS INT8
+	AS 'huawei.javaudf.basic.BasicJavaUDF.getLongMax'
+	LANGUAGE java;
+CREATE FUNCTION getFloatMax()
+	RETURNS FLOAT4
+	AS 'huawei.javaudf.basic.BasicJavaUDF.getFloatMax'
+	LANGUAGE java;
+CREATE FUNCTION getDoubleMax()
+	RETURNS FLOAT8
+	AS 'huawei.javaudf.basic.BasicJavaUDF.getDoubleMax'
+	LANGUAGE java;
+CREATE FUNCTION getByteMax()
+	RETURNS "char"
+	AS 'huawei.javaudf.basic.BasicJavaUDF.getByteMax'
+	LANGUAGE java;
+SELECT getShortMin(), getIntegerMin(), getLongMin(), getFloatMin(), getDoubleMin(), getByteMin();
+ getshortmin | getintegermin |      getlongmin      | getfloatmin |     getdoublemin      | getbytemin 
+-------------+---------------+----------------------+-------------+-----------------------+------------
+      -32768 |   -2147483648 | -9223372036854775808 |  1.4013e-45 | 4.94065645841247e-324 | 
+(1 row)
+
+SELECT getShortMax(), getIntegerMax(), getLongMax(), getFloatMax(), getDoubleMax(), getByteMax();
+ getshortmax | getintegermax |     getlongmax      | getfloatmax |     getdoublemax      | getbytemax 
+-------------+---------------+---------------------+-------------+-----------------------+------------
+       32767 |    2147483647 | 9223372036854775807 | 3.40282e+38 | 1.79769313486232e+308 | \x7F
+(1 row)
+
+-- test type: void
+CREATE FUNCTION java_retrunVoid()
+	RETURNS void
+	AS 'huawei.javaudf.basic.BasicJavaUDF.returnVoid'
+	LANGUAGE java;
+SELECT java_retrunVoid();
+ java_retrunvoid 
+-----------------
+ 
+(1 row)
+
+--test type: array
+CREATE FUNCTION dummy(INT2[])
+	RETURNS INT2[]
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	LANGUAGE java;
+SELECT dummy(ARRAY[2,3,4]::INT2[]);
+  dummy  
+---------
+ {2,3,4}
+(1 row)
+
+CREATE FUNCTION dummy(INT4[])
+	RETURNS INT4[]
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	LANGUAGE java;
+SELECT dummy(ARRAY[4,5,6]::INT4[]);
+  dummy  
+---------
+ {4,5,6}
+(1 row)
+
+CREATE FUNCTION dummy(INT8[])
+	RETURNS INT8[]
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	LANGUAGE java;
+SELECT dummy(ARRAY[4,5,6]::INT8[]);
+  dummy  
+---------
+ {4,5,6}
+(1 row)
+
+CREATE FUNCTION dummy(FLOAT4[])
+	RETURNS FLOAT4[]
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	LANGUAGE java;
+SELECT dummy(ARRAY[0.8,0.9,1.0]::FLOAT4[]);
+   dummy   
+-----------
+ {.8,.9,1}
+(1 row)
+
+CREATE FUNCTION dummy(FLOAT8[])
+	RETURNS FLOAT8[]
+	AS 'huawei.javaudf.basic.BasicJavaUDF.dummy'
+	LANGUAGE java;
+SELECT dummy(ARRAY[0.8,0.9,1.0]::FLOAT8[]);
+   dummy   
+-----------
+ {.8,.9,1}
+(1 row)
+
+DROP SCHEMA javaudf_basic_002 CASCADE;
+NOTICE:  drop cascades to 22 other objects
+DETAIL:  drop cascades to function dummy(integer)
+drop cascades to function dummy_int2_only(smallint)
+drop cascades to function write_file(text)
+drop cascades to function test_error()
+drop cascades to function getshortmin()
+drop cascades to function getintegermin()
+drop cascades to function getlongmin()
+drop cascades to function getfloatmin()
+drop cascades to function getdoublemin()
+drop cascades to function getbytemin()
+drop cascades to function getshortmax()
+drop cascades to function getintegermax()
+drop cascades to function getlongmax()
+drop cascades to function getfloatmax()
+drop cascades to function getdoublemax()
+drop cascades to function getbytemax()
+drop cascades to function java_retrunvoid()
+drop cascades to function dummy(smallint[])
+drop cascades to function dummy(integer[])
+drop cascades to function dummy(bigint[])
+drop cascades to function dummy(real[])
+drop cascades to function dummy(double precision[])

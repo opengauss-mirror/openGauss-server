@@ -14,6 +14,7 @@
  * ---------------------------------------------------------------------------------------
  * 
  * knl_session_attr_memory.h
+ * knl_session_attr_memory.h
  *        Data struct to store all knl_session_attr_memory GUC variables.
  *
  *   When anyone try to added variable in this file, which means add a guc

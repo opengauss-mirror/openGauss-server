@@ -68,40 +68,32 @@ const int PGSTAT_RESTART_INTERVAL = 60;
 
 using namespace std;
 
-typedef struct TableList {
-    List* multiDbTableList;   /* tables do not need to read data across the database */
-    List* oneDbTableList;     /* tables need to read data from multi database */
-    List* lastOneDbTableList; /* the table of "snap_class_vital_info" must be placed at end of each snapshot */
-    List* lastStatTableList;  /* the table of "global_record_reset_time" */
-    List* analyzeTableList;   /* Some tables are often updated and need to be analyzed in advance */
-} TablesList;
 /*
  * function
  */
 NON_EXEC_STATIC void SnapshotMain();
 
 namespace SnapshotNameSpace {
-void CleanSnapshot(uint64 curr_min_snapid, const TablesList& tablesList);
-void take_snapshot(const TablesList& tablesList);
+void CleanSnapshot(uint64 curr_min_snapid);
+void take_snapshot(void);
 void SubSnapshotMain(void);
-void InsertOneTableData(List* ViewNameList, uint64 snapid);
-void InsertTablesData(uint64 snapid, const TablesList& tablesList);
-void DeleteTablesData(List* tableList, uint64 snapid);
+void InsertOneTableData(const char** views, int numViews, uint64 snapid);
+void InsertTablesData(uint64 snapid);
+void DeleteTablesData(const char** views, int numViews, uint64 snapid);
 void GetQueryData(const char* query, bool with_column_name, List** cstring_values);
 bool ExecuteQuery(const char* query, int SPI_OK_STAT);
 void init_curr_table_size(void);
 void init_curr_snapid(void);
-void CreateTable(List* tableList, bool ismultidbtable);
-void InitTables(TablesList& tablesList);
+void CreateTable(const char** views, int numViews, bool ismultidbtable);
+void InitTables(void);
 void CreateSnapStatTables(void);
 void CreateIndexes(void);
 void CreateSequence(void);
 void UpdateSnapEndTime(uint64 curr_snapid);
 void GetQueryStr(StringInfoData& query, const char* viewname, uint64 curr_snapid, const char* dbname);
 void GetDatabaseList(List** databaselist);
-void InsertOneDbTables(uint64 curr_snapid, const List* tablesList);
-void InsertDatabaseData(const char* dbname, uint64 curr_snapid, const List* tablesList);
-void InitTableList(TablesList& tablesList);
+void InsertOneDbTables(const char** views, int numViews, uint64 curr_snapid);
+void InsertDatabaseData(const char* dbname, uint64 curr_snapid, const char** views, int numViews);
 void SplitString(const char* str, const char* delim, List** res);
 void SetSnapshotSize(uint32* max_snap_size);
 void SleepCheckInterrupt(uint32 minutes);
@@ -110,18 +102,20 @@ void SetThrdCxt(void);
 void AnalyzeTable(List* analyzeList);
 void GetAnalyzeList(List** analyzeList);
 char* GetTableColAttr(const char* viewname, bool onlyViewCol, bool addType);
-void InsertViewsIntoList(List* &tableList, const char** views, int viewsNum);
+}  // namespace SnapshotNameSpace
+
 /*
  * select these views in a different database gives the same result,
  * We just need to snapshot these views under postgres database
  */
-const char* g_sharedViews[] = {"global_os_runtime", "global_os_threads", "global_instance_time",
+static const char* sharedViews[] = {"global_os_runtime", "global_os_threads", "global_instance_time",
     "summary_workload_sql_count", "summary_workload_sql_elapse_time", "global_workload_transaction",
-    "summary_workload_transaction", "global_thread_wait_status",
-    "global_operator_history_table",
-    "global_operator_history", "global_operator_runtime", "global_statement_complex_history",
-    "global_statement_complex_history_table", "global_statement_complex_runtime", "global_memory_node_detail",
+    "summary_workload_transaction", "global_thread_wait_status", "global_memory_node_detail",
     "global_shared_memory_detail",
+#ifdef ENABLE_MULTIPLE_NODES
+    "global_comm_delay", "global_comm_recv_stream", "global_comm_send_stream", "global_comm_status",
+    "global_pooler_status",
+#endif
     "global_stat_db_cu", "global_stat_database", "summary_stat_database",
     "global_stat_database_conflicts", "summary_stat_database_conflicts",
     "global_stat_bad_block", "summary_stat_bad_block", "global_file_redo_iostat", "summary_file_redo_iostat",
@@ -139,22 +133,14 @@ const char* g_sharedViews[] = {"global_os_runtime", "global_os_threads", "global
  * select these views in a different database gives the different result,
  * We just need to snapshot these views under different database
  */
-const char* g_dbRelatedViews[] = {"global_statio_all_indexes", "summary_statio_all_indexes",
+static const char* dbRelatedViews[] = {"global_statio_all_indexes", "summary_statio_all_indexes",
     "global_statio_all_sequences", "summary_statio_all_sequences", "global_statio_all_tables",
-    "summary_statio_all_tables", "global_statio_sys_indexes", "summary_statio_sys_indexes",
-    "global_statio_sys_sequences", "summary_statio_sys_sequences", "global_statio_sys_tables",
-    "summary_statio_sys_tables", "global_statio_user_indexes", "summary_statio_user_indexes",
-    "global_statio_user_sequences", "summary_statio_user_sequences", "global_statio_user_tables",
-    "summary_statio_user_tables", "global_stat_all_indexes", "summary_stat_all_indexes",
-    "global_stat_sys_indexes", "summary_stat_sys_indexes", "global_stat_user_tables",
-    "summary_stat_user_tables", "global_stat_user_indexes", "summary_stat_user_indexes",
-    "summary_stat_user_functions", "global_stat_user_functions"};
+    "summary_statio_all_tables", "global_stat_all_indexes", "summary_stat_all_indexes",
+    "summary_stat_user_functions", "global_stat_user_functions", "global_stat_all_tables", "summary_stat_all_tables"};
 
 /* At each snapshot, these views must be placed behind them for the snapshot */
-const char* g_lastDbRelatedViews[] = {"class_vital_info"};
-const char* g_lastStatViews[] = {"global_record_reset_time"};
-}  // namespace SnapshotNameSpace
-
+static const char* lastDbRelatedViews[] = {"class_vital_info"};
+static const char* lastStatViews[] = {"global_record_reset_time"};
 void instrSnapshotClean(void)
 {
     dblinkCloseConn();
@@ -195,13 +181,12 @@ static void check_snapshot_thd_exit()
 {
     bool need_exit = false;
 
-    StartTransactionCommand();
+    start_xact_command();
     char* redis_group = PgxcGroupGetInRedistributionGroup();
     if (redis_group != NULL) {
         need_exit = true;
-        u_sess->attr.attr_common.ExitOnAnyError = true;
     }
-    CommitTransactionCommand();
+    finish_xact_command();
 
     if (need_exit || u_sess->attr.attr_common.upgrade_mode != 0) {
         /* to avoid postmaster to start snapshot thread again immediately,
@@ -231,14 +216,14 @@ static bool CheckMemProtectInit()
     PG_TRY();
     {
         errno_t rc;
-        StartTransactionCommand();
+        start_xact_command();
         if ((rc = SPI_connect()) != SPI_OK_CONNECT)
             ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
                 errmsg("SPI_connect failed: %s", SPI_result_code_string(rc))));
         const char *query = "select * from DBE_PERF.global_memory_node_detail";
         (void)SnapshotNameSpace::ExecuteQuery(query, SPI_OK_SELECT);
         SPI_finish();
-        CommitTransactionCommand();
+        finish_xact_command();
         res = true;
     }
     PG_CATCH();
@@ -250,13 +235,12 @@ static bool CheckMemProtectInit()
         FlushErrorState();
         FreeErrorData(edata);
         AbortCurrentTransaction();
+        t_thrd.postgres_cxt.xact_started = false;
     }
     PG_END_TRY();
     return res;
 }
 
-
-#ifdef ENABLE_MULTIPLE_NODES
 /* kill snapshot thread on all CN node */
 void kill_snapshot_remote()
 {
@@ -278,7 +262,6 @@ void kill_snapshot_remote()
     FreeParallelFunctionState(state);
     pfree_ext(buf.data);
 }
-#endif
 
 /*
  * kill snapshot thread
@@ -289,11 +272,13 @@ void kill_snapshot_remote()
  */
 Datum kill_snapshot(PG_FUNCTION_ARGS)
 {
-    if (!superuser()) {
+    if (!superuser() && !has_rolreplication(GetUserId())) {
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("only system admin can kill snapshot thread")));
     }
 
-    if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR) {
+#endif
         /* CN need to kill snapshot thread */
         if (g_instance.pid_cxt.SnapshotPID != 0) {
             if (PgxcGroupGetInRedistributionGroup() != NULL) {
@@ -337,8 +322,9 @@ Datum kill_snapshot(PG_FUNCTION_ARGS)
             kill_snapshot_remote();
 #endif
         }
+#ifdef ENABLE_MULTIPLE_NODES
     }
-
+#endif
     PG_RETURN_VOID();
 }
 static void ReloadInfo()
@@ -359,7 +345,7 @@ static void set_lock_timeout()
 {
     int rc = 0;
     /* lock wait timeout to 3s */
-    const char* timeout_sql = "set lockwait_timeout = 3000;";
+    const char* timeout_sql = "set lockwait_timeout = 3000";
     if ((rc = SPI_execute(timeout_sql, false, 0)) != SPI_OK_UTILITY) {
         ereport(ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR), errmsg("set lockwait_timeout failed:  %s", SPI_result_code_string(rc))));
@@ -586,7 +572,7 @@ void SnapshotNameSpace::GetQueryData(const char* query, bool with_column_name, L
  * we use curr_tables_size to record the number of snapshots,
  * and use MAX_TABLE_SIZE to control the size of the snapshot disk space.
  */
-void SnapshotNameSpace::take_snapshot(const TablesList& tablesList)
+void SnapshotNameSpace::take_snapshot()
 {
     StringInfoData query;
     initStringInfo(&query);
@@ -609,7 +595,7 @@ void SnapshotNameSpace::take_snapshot(const TablesList& tablesList)
             if (isnull) {
                 colval = 0;
             }
-            SnapshotNameSpace::CleanSnapshot(DatumGetObjectId(colval), tablesList);
+            SnapshotNameSpace::CleanSnapshot(DatumGetObjectId(colval));
             t_thrd.perf_snap_cxt.curr_table_size--;
         }
         SnapshotNameSpace::init_curr_snapid();
@@ -619,14 +605,14 @@ void SnapshotNameSpace::take_snapshot(const TablesList& tablesList)
             t_thrd.perf_snap_cxt.curr_snapid,
             GetCurrentTimeStampString());
         if (SPI_execute(query.data, false, 0) == SPI_OK_INSERT) {
-            SnapshotNameSpace::InsertTablesData(t_thrd.perf_snap_cxt.curr_snapid, tablesList);
+            SnapshotNameSpace::InsertTablesData(t_thrd.perf_snap_cxt.curr_snapid);
             t_thrd.perf_snap_cxt.curr_table_size++;
         } else {
             ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("invalid query: %s", query.data)));
         }
         SnapshotNameSpace::UpdateSnapEndTime(t_thrd.perf_snap_cxt.curr_snapid);
         pfree_ext(query.data);
-        (void)SPI_finish();
+        SPI_finish();
     }
     PG_CATCH();
     {
@@ -654,20 +640,18 @@ static bool IsCgroupInit(const char* viewname)
     return true;
 }
 
-void SnapshotNameSpace::DeleteTablesData(List* viewNameList, uint64 snapid)
+void SnapshotNameSpace::DeleteTablesData(const char** views, int numViews, uint64 snapid)
 {
     StringInfoData query;
     initStringInfo(&query);
-    foreach_cell(cellViewName, viewNameList)
-    {
-        char* viewName = (char*)lfirst(cellViewName);
-        if (!IsCgroupInit(viewName)) {
+    for (int i = 0; i < numViews; i++) {
+        if (!IsCgroupInit(views[i])) {
             continue;
         }
         resetStringInfo(&query);
-        appendStringInfo(&query, "delete from snapshot.snap_%s where snapshot_id = %lu", viewName, snapid);
+        appendStringInfo(&query, "delete from snapshot.snap_%s where snapshot_id = %lu", views[i], snapid);
         if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_DELETE)) {
-            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("clean table of snap_%s is failed", viewName)));
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("clean table of snap_%s is failed", views[i])));
         }
     }
     pfree_ext(query.data);
@@ -717,24 +701,16 @@ void SnapshotNameSpace::AnalyzeTable(List* analyzeList)
  * insert into a table of snapshot schema from a view data from dbe_perf schema
  * and must get start time and end time when snapshot table insert
  */
-void SnapshotNameSpace::InsertOneTableData(List* ViewNameList, uint64 snapid)
+void SnapshotNameSpace::InsertOneTableData(const char** views, int numViews, uint64 snapid)
 {
     char* dbName = NULL;
     StringInfoData query;
     initStringInfo(&query);
 
-    dbName = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-    if (dbName == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                    errmsg("database with OID %u does not exist",
-                        u_sess->proc_cxt.MyDatabaseId)));
-    }
-
-    foreach_cell(cellViewName, ViewNameList)
-    {
-        char* viewName = (char*)lfirst(cellViewName);
+    dbName = get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true);
+    for (int i = 0; i < numViews; i++) {
         if (!t_thrd.perf_snap_cxt.is_mem_protect &&
-            (strcmp(viewName, "global_memory_node_detail") == 0))
+            (strcmp(views[i], "global_memory_node_detail") == 0))
             continue;
         resetStringInfo(&query);
         CHECK_FOR_INTERRUPTS();
@@ -744,7 +720,7 @@ void SnapshotNameSpace::InsertOneTableData(List* ViewNameList, uint64 snapid)
             "values(%lu, '%s', 'snap_%s', '%s')",
             snapid,
             dbName,
-            viewName,
+            views[i],
             GetCurrentTimeStampString());
         if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_INSERT)) {
             ereport(ERROR,
@@ -754,19 +730,19 @@ void SnapshotNameSpace::InsertOneTableData(List* ViewNameList, uint64 snapid)
 
         CHECK_FOR_INTERRUPTS();
         resetStringInfo(&query);
-        char* snapColAttr = SnapshotNameSpace::GetTableColAttr(viewName, false, false);
-        char* colAttr = SnapshotNameSpace::GetTableColAttr(viewName, true, false);
+        char* snapColAttr = SnapshotNameSpace::GetTableColAttr(views[i], false, false);
+        char* colAttr = SnapshotNameSpace::GetTableColAttr(views[i], true, false);
         appendStringInfo(&query,
             "INSERT INTO snapshot.snap_%s(snapshot_id, %s) select %lu, %s from dbe_perf.%s",
-            viewName,
+            views[i],
             snapColAttr,
             snapid,
             colAttr,
-            viewName);
+            views[i]);
         pfree(colAttr);
         pfree(snapColAttr);
         if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_INSERT)) {
-            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("insert into snap_%s is failed", viewName)));
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("insert into snap_%s is failed", views[i])));
         }
         CHECK_FOR_INTERRUPTS();
 
@@ -778,7 +754,7 @@ void SnapshotNameSpace::InsertOneTableData(List* ViewNameList, uint64 snapid)
             GetCurrentTimeStampString(),
             snapid,
             dbName,
-            viewName);
+            views[i]);
         if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UPDATE)) {
             ereport(ERROR,
                 (errcode(ERRCODE_DATA_EXCEPTION), errmsg("update tables_snap_timestamp end time stamp is failed")));
@@ -788,12 +764,16 @@ void SnapshotNameSpace::InsertOneTableData(List* ViewNameList, uint64 snapid)
     pfree_ext(query.data);
 }
 
-void SnapshotNameSpace::InsertTablesData(uint64 snapid, const TablesList& tablesList)
+void SnapshotNameSpace::InsertTablesData(uint64 snapid)
 {
-    SnapshotNameSpace::InsertOneDbTables(snapid, tablesList.oneDbTableList);
-    SnapshotNameSpace::InsertOneTableData(tablesList.multiDbTableList, snapid);
-    SnapshotNameSpace::InsertOneTableData(tablesList.lastStatTableList, snapid);
-    SnapshotNameSpace::InsertOneDbTables(snapid, tablesList.lastOneDbTableList);
+    int numViews = COUNT_ARRAY_SIZE(dbRelatedViews);
+    SnapshotNameSpace::InsertOneDbTables(dbRelatedViews, numViews, snapid);
+    numViews = COUNT_ARRAY_SIZE(sharedViews);
+    SnapshotNameSpace::InsertOneTableData(sharedViews, numViews, snapid);
+    numViews = COUNT_ARRAY_SIZE(lastStatViews);
+    SnapshotNameSpace::InsertOneTableData(lastStatViews, numViews, snapid);
+    numViews = COUNT_ARRAY_SIZE(lastDbRelatedViews);
+    SnapshotNameSpace::InsertOneDbTables(lastDbRelatedViews, numViews, snapid);
 }
 
 static void DeleteStatTableDate(uint64 curr_min_snapid)
@@ -822,13 +802,17 @@ static void DeleteStatTableDate(uint64 curr_min_snapid)
  * Called when the tablespace exceeds the set value
  * Delete the smallest case of snapid in the table
  */
-void SnapshotNameSpace::CleanSnapshot(uint64 curr_min_snapid, const TablesList& tablesList)
+void SnapshotNameSpace::CleanSnapshot(uint64 curr_min_snapid)
 {
     DeleteStatTableDate(curr_min_snapid);
-    SnapshotNameSpace::DeleteTablesData(tablesList.multiDbTableList, curr_min_snapid);
-    SnapshotNameSpace::DeleteTablesData(tablesList.oneDbTableList, curr_min_snapid);
-    SnapshotNameSpace::DeleteTablesData(tablesList.lastOneDbTableList, curr_min_snapid);
-    SnapshotNameSpace::DeleteTablesData(tablesList.lastStatTableList, curr_min_snapid);
+    int numViews = COUNT_ARRAY_SIZE(sharedViews);
+    SnapshotNameSpace::DeleteTablesData(sharedViews, numViews, curr_min_snapid);
+    numViews = COUNT_ARRAY_SIZE(dbRelatedViews);
+    SnapshotNameSpace::DeleteTablesData(dbRelatedViews, numViews, curr_min_snapid);
+    numViews = COUNT_ARRAY_SIZE(lastDbRelatedViews);
+    SnapshotNameSpace::DeleteTablesData(lastDbRelatedViews, numViews, curr_min_snapid);
+    numViews = COUNT_ARRAY_SIZE(lastStatViews);
+    SnapshotNameSpace::DeleteTablesData(lastStatViews, numViews, curr_min_snapid);
     ereport(LOG, (errmsg("delete snapshot where snapshot_id = " UINT64_FORMAT, curr_min_snapid)));
 }
 /*
@@ -921,55 +905,46 @@ void SnapshotNameSpace::CreateSnapStatTables(void)
 
     CreateStatTable(createSnapshot, tablename2);
 }
-/*
- *
- *
- */
-void SnapshotNameSpace::InitTables(TablesList& tablesList)
-{
-    tablesList.multiDbTableList = NIL;
-    tablesList.oneDbTableList = NIL;
-    tablesList.lastOneDbTableList = NIL;
-    tablesList.lastStatTableList = NIL;
-    tablesList.analyzeTableList = NIL;
-    SnapshotNameSpace::InitTableList(tablesList);
 
+void SnapshotNameSpace::InitTables()
+{
     SnapshotNameSpace::CreateSnapStatTables();
     SnapshotNameSpace::CreateSequence();
-
-    SnapshotNameSpace::CreateTable(tablesList.multiDbTableList, true);
-    SnapshotNameSpace::CreateTable(tablesList.oneDbTableList, false);
-    SnapshotNameSpace::CreateTable(tablesList.lastOneDbTableList, false);
-    SnapshotNameSpace::CreateTable(tablesList.lastStatTableList, true);
+    int numViews = COUNT_ARRAY_SIZE(sharedViews);
+    SnapshotNameSpace::CreateTable(sharedViews, numViews, true);
+    numViews = COUNT_ARRAY_SIZE(dbRelatedViews);
+    SnapshotNameSpace::CreateTable(dbRelatedViews, numViews, false);
+    numViews = COUNT_ARRAY_SIZE(lastDbRelatedViews);
+    SnapshotNameSpace::CreateTable(lastDbRelatedViews, numViews, false);
+    numViews = COUNT_ARRAY_SIZE(lastStatViews);
+    SnapshotNameSpace::CreateTable(lastStatViews, numViews, true);
     SnapshotNameSpace::CreateIndexes();
 }
 
-void SnapshotNameSpace::CreateTable(List* tableList, bool isMultiDbTable)
+void SnapshotNameSpace::CreateTable(const char** views, int numViews, bool isSharedViews)
 {
     bool isnull = false;
     StringInfoData query;
     initStringInfo(&query);
-    foreach_cell(cellTable, tableList)
-    {
-        char* tableName = (char*)lfirst(cellTable);
+    for (int i = 0; i < numViews; i++) {
         resetStringInfo(&query);
         /* if the table is not created, we will create it */
         appendStringInfo(&query,
             "select count(*) from pg_tables where tablename = 'snap_%s' "
             "and schemaname = 'snapshot'",
-            tableName);
+            views[i]);
         Datum colval = GetDatumValue(query.data, 0, 0, &isnull);
         if (!DatumGetInt32(colval)) {
             resetStringInfo(&query);
             /* Get the attributes of a table's columns */
-            char* snapColAttrType = SnapshotNameSpace::GetTableColAttr(tableName, false, true);
-            if (isMultiDbTable) {
+            char* snapColAttrType = SnapshotNameSpace::GetTableColAttr(views[i], false, true);
+            if (isSharedViews) {
                 appendStringInfo(
-                    &query, "create table snapshot.snap_%s(snapshot_id bigint, %s)", tableName, snapColAttrType);
+                    &query, "create table snapshot.snap_%s(snapshot_id bigint, %s)", views[i], snapColAttrType);
             } else {
                 appendStringInfo(&query,
                     "create table snapshot.snap_%s(snapshot_id bigint, db_name text, %s)",
-                    tableName,
+                    views[i],
                     snapColAttrType);
             }
             if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UTILITY)) {
@@ -1047,14 +1022,14 @@ void SnapshotNameSpace::GetDatabaseList(List** databaselist)
  * InsertOneDbTables
  *        for exemple pg_stat_xxx and pg_statio_xxx tables relation with pg_class
  */
-void SnapshotNameSpace::InsertOneDbTables(uint64 curr_snapid, const List* tablesList)
+void SnapshotNameSpace::InsertOneDbTables(const char** views, int numViews, uint64 curr_snapid)
 {
     List* databaseList = NIL;
     SnapshotNameSpace::GetDatabaseList(&databaseList);
     foreach_cell(cell, databaseList)
     {
         List* row = (List*)lfirst(cell);
-        SnapshotNameSpace::InsertDatabaseData((char*)linitial(row), curr_snapid, tablesList);
+        SnapshotNameSpace::InsertDatabaseData((char*)linitial(row), curr_snapid, views, numViews);
     }
     DeepListFree(databaseList, true);
 }
@@ -1090,45 +1065,18 @@ void SnapshotNameSpace::SplitString(const char* str, const char* delim, List** r
     pfree(strs);
 }
 
-void SnapshotNameSpace::InsertViewsIntoList(List* &tableList, const char** views, int viewsNum)
-{
-    for (int i = 0; i < viewsNum; i++) {
-        tableList = lappend(tableList, (char*)views[i]);
-    }
-}
-
-void SnapshotNameSpace::InitTableList(TablesList& tablesList)
-{
-    /* table such as global_stat_xxx ,global_statio_xxx, summary_stat_xxx or summary_statio_xxx
-     * come from pg_class, only describe statistics in a database
-     */
-    MemoryContext old_context = MemoryContextSwitchTo(t_thrd.perf_snap_cxt.PerfSnapMemCxt);
-    SnapshotNameSpace::InsertViewsIntoList(tablesList.oneDbTableList, SnapshotNameSpace::g_dbRelatedViews,
-        COUNT_ARRAY_SIZE(SnapshotNameSpace::g_dbRelatedViews));
-    SnapshotNameSpace::InsertViewsIntoList(tablesList.lastOneDbTableList, SnapshotNameSpace::g_lastDbRelatedViews,
-        COUNT_ARRAY_SIZE(SnapshotNameSpace::g_lastDbRelatedViews));
-    SnapshotNameSpace::InsertViewsIntoList(tablesList.lastStatTableList, SnapshotNameSpace::g_lastStatViews,
-        COUNT_ARRAY_SIZE(SnapshotNameSpace::g_lastStatViews));
-    SnapshotNameSpace::InsertViewsIntoList(tablesList.multiDbTableList, SnapshotNameSpace::g_sharedViews,
-        COUNT_ARRAY_SIZE(SnapshotNameSpace::g_sharedViews));
-    
-    (void)MemoryContextSwitchTo(old_context);
-}
 /*
  * GetDatabaseData
  * get other database data for snapshot
  */
-void SnapshotNameSpace::InsertDatabaseData(const char* dbname, uint64 curr_snapid, const List* tableList)
+void SnapshotNameSpace::InsertDatabaseData(const char* dbname, uint64 curr_snapid, const char** views, int numViews)
 {
     StringInfoData query;
     initStringInfo(&query);
     StringInfoData sql;
     initStringInfo(&sql);
-
-    foreach_cell(cellViewName, tableList)
-    {
-        char* viewName = (char*)lfirst(cellViewName);
-        SnapshotNameSpace::GetQueryStr(query, viewName, curr_snapid, dbname);
+    for (int i = 0; i < numViews; i++) {
+        SnapshotNameSpace::GetQueryStr(query, views[i], curr_snapid, dbname);
         resetStringInfo(&sql);
         CHECK_FOR_INTERRUPTS();
         appendStringInfo(&sql,
@@ -1137,7 +1085,7 @@ void SnapshotNameSpace::InsertDatabaseData(const char* dbname, uint64 curr_snapi
             "values(%lu, '%s', 'snap_%s', '%s')",
             curr_snapid,
             dbname,
-            viewName,
+            views[i],
             GetCurrentTimeStampString());
         if (!SnapshotNameSpace::ExecuteQuery(sql.data, SPI_OK_INSERT)) {
             ereport(ERROR,
@@ -1146,7 +1094,7 @@ void SnapshotNameSpace::InsertDatabaseData(const char* dbname, uint64 curr_snapi
 
         CHECK_FOR_INTERRUPTS();
         if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_INSERT)) {
-            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("insert into snap_%s is failed", viewName)));
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("insert into snap_%s is failed", views[i])));
         }
 
         CHECK_FOR_INTERRUPTS();
@@ -1157,7 +1105,7 @@ void SnapshotNameSpace::InsertDatabaseData(const char* dbname, uint64 curr_snapi
             GetCurrentTimeStampString(),
             curr_snapid,
             dbname,
-            viewName);
+            views[i]);
         if (!SnapshotNameSpace::ExecuteQuery(sql.data, SPI_OK_UPDATE)) {
             ereport(
                 ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("update tables_snap_timestamp end time stamp failed")));
@@ -1345,7 +1293,7 @@ void SnapshotNameSpace::SetThrdCxt(void)
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Snapshot");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Snapshot", MEMORY_CONTEXT_DFX);
 }
 static void SetMyproc()
 {
@@ -1354,7 +1302,7 @@ static void SetMyproc()
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    knl_thread_set_name("WDRSnapshot");
+    t_thrd.proc_cxt.MyProgName = "WDRSnapshot";
     u_sess->attr.attr_common.application_name = pstrdup("WDRSnapshot");
 }
 /*
@@ -1427,29 +1375,29 @@ NON_EXEC_STATIC void SnapshotMain()
  * "Do analyze for them in order to generate optimized plan",
  * request analyze from snapshot thread.
  */
-static void analyze_snap_table(TablesList& tablesList)
+static void analyze_snap_table()
 {
+    List* analyzeTableList = NULL;
     int rc = 0;
-    StartTransactionCommand();
+    start_xact_command();
     if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
         ereport(ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR),
                 errmsg("analyze table, connection failed: %s", SPI_result_code_string(rc))));
     }
-    SnapshotNameSpace::GetAnalyzeList(&(tablesList.analyzeTableList));
+    SnapshotNameSpace::GetAnalyzeList(&(analyzeTableList));
     set_lock_timeout();
-    SnapshotNameSpace::AnalyzeTable(tablesList.analyzeTableList);
-    (void)SPI_finish();
-    CommitTransactionCommand();
+    SnapshotNameSpace::AnalyzeTable(analyzeTableList);
+    SPI_finish();
+    finish_xact_command();
 }
 
-
-void InitSnapshot(TablesList& tablesList)
+void InitSnapshot()
 {
     /* Check if global_memory_node_detail view can do snapshot */
     t_thrd.perf_snap_cxt.is_mem_protect = CheckMemProtectInit();
     /* All the tables list will be initialized once. when database is restarted or powered on */
-    StartTransactionCommand();
+    start_xact_command();
     int rc = 0;
     /* connect SPI to execute query */
     if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
@@ -1458,11 +1406,11 @@ void InitSnapshot(TablesList& tablesList)
                 errmsg("snapshot thread SPI_connect failed: %s", SPI_result_code_string(rc))));
     }
     set_lock_timeout();
-    SnapshotNameSpace::InitTables(tablesList);
+    SnapshotNameSpace::InitTables();
     SPI_finish();
-    CommitTransactionCommand();
+    finish_xact_command();
     ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("create snapshot tables succeed")));
-    analyze_snap_table(tablesList);
+    analyze_snap_table();
 }
 /*
  * Background thread for loop collection snapshot
@@ -1471,10 +1419,8 @@ void SnapshotNameSpace::SubSnapshotMain(void)
 {
     pgstat_report_activity(STATE_RUNNING, NULL);
     TimestampTz next_timestamp = GetCurrentTimestamp();
-    TablesList tablesList;
     const int SLEEP_GAP_AFTER_ERROR = 1;
-    InitSnapshot(tablesList);
-    u_sess->attr.attr_common.ExitOnAnyError = false;
+    InitSnapshot();
 
     while (!t_thrd.perf_snap_cxt.need_exit &&
            (PgxcIsCentralCoordinator(g_instance.attr.attr_common.PGXCNodeName) || IS_SINGLE_NODE) &&
@@ -1491,9 +1437,9 @@ void SnapshotNameSpace::SubSnapshotMain(void)
         {
             pgstat_report_activity(STATE_RUNNING, NULL);
             ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("WDR snapshot start")));
-            StartTransactionCommand();
-            SnapshotNameSpace::take_snapshot(tablesList);
-            CommitTransactionCommand();
+            start_xact_command();
+            SnapshotNameSpace::take_snapshot();
+            finish_xact_command();
             ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("WDR snapshot end")));
 
             /*  a snapshot has token on next_timestamp, we need get next_timestamp */
@@ -1514,6 +1460,7 @@ void SnapshotNameSpace::SubSnapshotMain(void)
             FlushErrorState();
             ereport(WARNING, (errcode(ERRCODE_WARNING), errmsg("WDR snapshot failed")));
             AbortCurrentTransaction();
+            t_thrd.postgres_cxt.xact_started = false;
             pgstat_report_activity(STATE_IDLE, NULL);
             t_thrd.perf_snap_cxt.request_snapshot = false;
             SnapshotNameSpace::SleepCheckInterrupt(SLEEP_GAP_AFTER_ERROR);

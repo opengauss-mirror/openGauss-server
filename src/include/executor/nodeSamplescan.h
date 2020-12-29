@@ -104,7 +104,7 @@ public:
     void getMaxOffset();
 };
 
-extern AbsTblScanDesc InitSampleScanDesc(ScanState *scanstate, Relation currentRelation);
+extern TableScanDesc InitSampleScanDesc(ScanState *scanstate, Relation currentRelation);
 extern TupleTableSlot* SeqSampleNext(SeqScanState *node);
 extern TupleTableSlot* HbktSeqSampleNext(SeqScanState *node);
 

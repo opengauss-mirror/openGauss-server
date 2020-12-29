@@ -25,14 +25,18 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "executor/executor.h"
 #include "vecexecutor/vecnoderowtovector.h"
 #include "utils/memutils.h"
 #include "catalog/pg_type.h"
+#include "parser/parse_type.h"
 #include "utils/builtins.h"
 #include "utils/numeric.h"
 #include "utils/numeric_gs.h"
-#include "storage/itemptr.h"
+#include "storage/item/itemptr.h"
+
+static void CheckTypeSupportRowToVec(List* targetlist);
 
 /*
  * @Description: Pack one tuple into vectorbatch.
@@ -48,13 +52,14 @@ bool VectorizeOneTuple(_in_ VectorBatch* pBatch, _in_ TupleTableSlot* slot, _in_
     int i, j;
 
     /* Switch to Current Transfform Context */
-    
     MemoryContext old_context = MemoryContextSwitchTo(transformContext);
 
     /*
      * Extract all the values of the old tuple.
      */
-    slot_getallattrs(slot);
+    Assert(slot != NULL && slot->tts_tupleDescriptor != NULL);
+
+    tableam_tslot_getallattrs(slot);
 
     j = pBatch->m_rows;
     for (i = 0; i < slot->tts_nvalid; i++) {
@@ -192,6 +197,8 @@ RowToVecState* ExecInitRowToVec(RowToVec* node, EState* estate, int eflags)
     state->ps.state = estate;
     state->ps.vectorized = true;
 
+    CheckTypeSupportRowToVec(node->plan.targetlist);
+
     /*
      * tuple table initialization
      *
@@ -221,7 +228,9 @@ RowToVecState* ExecInitRowToVec(RowToVec* node, EState* estate, int eflags)
      * initialize tuple type.  no need to initialize projection info because
      * this node doesn't do projections.
      */
-    ExecAssignResultTypeFromTL(&state->ps);
+    ExecAssignResultTypeFromTL(
+            &state->ps,
+            ExecGetResultType(outerPlanState(state))->tdTableAmType);
 
     TupleDesc res_desc = state->ps.ps_ResultTupleSlot->tts_tupleDescriptor;
     state->m_pCurrentBatch = New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, res_desc);
@@ -257,4 +266,25 @@ void ExecReScanRowToVec(RowToVecState* node)
     node->m_fNoMoreRows = false;
     node->m_pCurrentBatch->m_rows = 0;
     ExecReScan(node->ps.lefttree);
+}
+
+/*
+ * Check if there is any data type unsupported by cstore. If so, stop rowtovec
+ */
+static void CheckTypeSupportRowToVec(List* targetlist)
+{
+    ListCell* cell = NULL;
+    TargetEntry* entry = NULL;
+    Var* var = NULL;
+    foreach(cell, targetlist) {
+        entry = (TargetEntry*)lfirst(cell);
+        if (IsA(entry->expr, Var)) {
+            var = (Var*)entry->expr;
+            if (var->varattno > 0 && var->varoattno > 0 && !IsTypeSupportedByCStore(var->vartype, var->vartypmod)) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("type \"%s\" is not supported in column store",
+                        format_type_with_typemod(var->vartype, var->vartypmod))));
+            }
+        }
+    }
 }

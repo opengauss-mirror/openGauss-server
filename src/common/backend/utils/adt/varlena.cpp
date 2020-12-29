@@ -39,6 +39,7 @@
 #include "utils/int8.h"
 #include "utils/sortsupport.h"
 #include "executor/nodeSort.h"
+#include "pgxc/groupmgr.h"
 
 #define JUDGE_INPUT_VALID(X, Y) ((NULL == (X)) || (NULL == (Y)))
 #define GET_POSITIVE(X) ((X) > 0 ? (X) : ((-1) * (X)))
@@ -62,7 +63,8 @@ typedef struct {
 } TextPositionState;
 
 typedef struct {
-    char* buf1; /* 1st string, or abbreviation original string buf */
+    char* buf1; /* 1st string, or abbreviation original string
+                 * buf */
     char* buf2; /* 2nd string, or abbreviation strxfrm() buf */
     int buflen1;
     int buflen2;
@@ -72,7 +74,8 @@ typedef struct {
     bool cache_blob;   /* Does buf2 contain strxfrm() blob, etc? */
     bool collate_c;
     bool bpchar;                /* Sorting pbchar, not varchar/text/bytea? */
-    bool estimating;            /* true if estimating cardinality refer to NumericSortSupport */
+    bool estimating;            /* true if estimating cardinality
+                                 * refer to NumericSortSupport */
     hyperLogLogState abbr_card; /* Abbreviated key cardinality state */
     /* hyperLogLogState full_card;  Full key cardinality state */
     /* Don't use abbr_card/full_card to evaluate weather abort
@@ -110,26 +113,30 @@ static int text_position_next(int start_pos, TextPositionState* state);
 static void text_position_cleanup(TextPositionState* state);
 static text* text_catenate(text* t1, text* t2);
 static text* text_overlay(text* t1, text* t2, int sp, int sl);
-static void append_string_info_text(StringInfo str, const text* t);
+static void appendStringInfoText(StringInfo str, const text* t);
 static bytea* bytea_catenate(bytea* t1, bytea* t2);
 static bytea* bytea_substring(Datum str, int S, int L, bool length_not_specified);
 static bytea* bytea_substring_orclcompat(Datum str, int S, int L, bool length_not_specified);
 static bytea* bytea_overlay(bytea* t1, bytea* t2, int sp, int sl);
-static StringInfo make_string_agg_state(FunctionCallInfo fcinfo);
+static StringInfo makeStringAggState(FunctionCallInfo fcinfo);
 
 static Datum text_to_array_internal(PG_FUNCTION_ARGS);
 static text* array_to_text_internal(FunctionCallInfo fcinfo, ArrayType* v, char* fldsep, char* null_string);
 
 static bool text_format_parse_digits(const char** ptr, const char* end_ptr, int* value);
 static const char* text_format_parse_format(
-    const char* start_ptr, const char* end_ptr, int* arg_pos, int* width_pos, int* flags, int* width);
+    const char* start_ptr, const char* end_ptr, int* argpos, int* widthpos, int* flags, int* width);
 static void text_format_string_conversion(
-    StringInfo buf, char conversion, FmgrInfo* typ_output, Datum value, bool is_null, int flags, int width);
+    StringInfo buf, char conversion, FmgrInfo* typOutputInfo, Datum value, bool isNull, int flags, int width);
 
 static void text_format_append_string(StringInfo buf, const char* str, int flags, int width);
 
-// adapt a's substrb
+// adapt A db's substrb
 static text* get_substring_really(Datum str, int32 start, int32 length, bool length_not_specified);
+
+/*****************************************************************************
+ *	 CONVERSION ROUTINES EXPORTED FOR USE BY C CODE							 *
+ *****************************************************************************/
 
 #define TEXTISORANULL(t) ((t) == NULL || VARSIZE_ANY_EXHDR(t) == 0)
 
@@ -160,6 +167,19 @@ text* cstring_to_text_with_len(const char* s, size_t len)
         int rc = memcpy_s(VARDATA(result), len, s, len);
         securec_check(rc, "\0", "\0");
     }
+    return result;
+}
+
+bytea* cstring_to_bytea_with_len(const char* s, int len)
+{
+    bytea *result = (bytea *) palloc0(len + VARHDRSZ);
+
+    SET_VARSIZE(result, len + VARHDRSZ);
+    if (len > 0) {
+        int rc = memcpy_s(VARDATA(result), len, s, len);
+        securec_check(rc, "\0", "\0");
+    }
+
     return result;
 }
 
@@ -211,24 +231,24 @@ char* text_to_cstring(const text* t)
 void text_to_cstring_buffer(const text* src, char* dst, size_t dst_len)
 {
     /* must cast away the const, unfortunately */
-    text* src_unpacked = pg_detoast_datum_packed((struct varlena*)src);
-    size_t src_len = VARSIZE_ANY_EXHDR(src_unpacked);
+    text* srcunpacked = pg_detoast_datum_packed((struct varlena*)src);
+    size_t src_len = VARSIZE_ANY_EXHDR(srcunpacked);
 
     if (dst_len > 0) {
         dst_len--;
         if (dst_len >= src_len)
             dst_len = src_len;
         else /* ensure truncation is encoding-safe */
-            dst_len = pg_mbcliplen(VARDATA_ANY(src_unpacked), src_len, dst_len);
+            dst_len = pg_mbcliplen(VARDATA_ANY(srcunpacked), src_len, dst_len);
         if (dst_len > 0) {
-            int rc = memcpy_s(dst, dst_len, VARDATA_ANY(src_unpacked), dst_len);
+            int rc = memcpy_s(dst, dst_len, VARDATA_ANY(srcunpacked), dst_len);
             securec_check(rc, "\0", "\0");
         }
         dst[dst_len] = '\0';
     }
 
-    if (src_unpacked != src)
-        pfree_ext(src_unpacked);
+    if (srcunpacked != src)
+        pfree_ext(srcunpacked);
 }
 
 /*****************************************************************************
@@ -250,7 +270,7 @@ void text_to_cstring_buffer(const text* src, char* dst, size_t dst_len)
  */
 Datum byteain(PG_FUNCTION_ARGS)
 {
-    char* input_text = PG_GETARG_CSTRING(0);
+    char* inputText = PG_GETARG_CSTRING(0);
     char* tp = NULL;
     char* rp = NULL;
     int bc;
@@ -258,12 +278,12 @@ Datum byteain(PG_FUNCTION_ARGS)
     bytea* result = NULL;
 
     /* Recognize hex input */
-    if (input_text[0] == '\\' && input_text[1] == 'x') {
-        size_t len = strlen(input_text);
+    if (inputText[0] == '\\' && inputText[1] == 'x') {
+        size_t len = strlen(inputText);
 
         bc = (len - 2) / 2 + VARHDRSZ; /* maximum possible length */
         result = (bytea*)palloc(bc);
-        bc = hex_decode(input_text + 2, len - 2, VARDATA(result));
+        bc = hex_decode(inputText + 2, len - 2, VARDATA(result));
         SET_VARSIZE(result, bc + VARHDRSZ); /* actual length */
 
         PG_RETURN_BYTEA_P(result);
@@ -271,7 +291,7 @@ Datum byteain(PG_FUNCTION_ARGS)
 
     /* Else, it's the traditional escaped style */
     bc = 0;
-    tp = input_text;
+    tp = inputText;
     while (*tp != '\0') {
         if (tp[0] != '\\') {
             cl = pg_mblen(tp);
@@ -298,14 +318,13 @@ Datum byteain(PG_FUNCTION_ARGS)
     result = (bytea*)palloc(bc);
     SET_VARSIZE(result, bc);
 
-    tp = input_text;
+    tp = inputText;
     rp = VARDATA(result);
     while (*tp != '\0') {
         if (tp[0] != '\\') {
             cl = pg_mblen(tp);
-            for (int i = 0; i < cl; i++) {
+            for (int i = 0; i < cl; i++)
                 *rp++ = *tp++;
-            }
         } else if ((tp[0] == '\\') && (tp[1] >= '0' && tp[1] <= '3') && (tp[2] >= '0' && tp[2] <= '7') &&
                    (tp[3] >= '0' && tp[3] <= '7')) {
             bc = VAL(tp[1]);
@@ -357,15 +376,12 @@ Datum byteaout(PG_FUNCTION_ARGS)
         len = 1; /* empty string has 1 char */
         vp = VARDATA_ANY(vlena);
         for (i = VARSIZE_ANY_EXHDR(vlena); i != 0; i--, vp++) {
-            if (*vp == '\\') {
+            if (*vp == '\\')
                 len += 2;
-            }
-            else if ((unsigned char)*vp < 0x20 || (unsigned char)*vp > 0x7e) {
+            else if ((unsigned char)*vp < 0x20 || (unsigned char)*vp > 0x7e)
                 len += 4;
-            }
-            else {
+            else
                 len++;
-            }
         }
         rp = result = (char*)palloc(len);
         vp = VARDATA_ANY(vlena);
@@ -384,9 +400,8 @@ Datum byteaout(PG_FUNCTION_ARGS)
                 val >>= 3;
                 rp[1] = DIG(val & 03);
                 rp += 4;
-            } else {
+            } else
                 *rp++ = *vp;
-            }
         }
     } else {
         ereport(ERROR,
@@ -415,15 +430,14 @@ Datum rawin(PG_FUNCTION_ARGS)
 
     len = strlen(cstring_arg1);
 
-    if ((len % 2) != 0) {
+    if (0 != (len % 2)) {
         tmp = (char*)palloc0(len + 2);
         tmp[0] = '0';
         rc = strncat_s(tmp, len + 2, cstring_arg1, len + 1);
         securec_check(rc, tmp, "\0");
         arg1 = DirectFunctionCall1(textin, CStringGetDatum(tmp));
-    } else {
+    } else
         arg1 = DirectFunctionCall1(textin, PG_GETARG_DATUM(0));
-    }
 
     result = DirectFunctionCall2(binary_decode, arg1, fmt);
 
@@ -433,21 +447,38 @@ Datum rawin(PG_FUNCTION_ARGS)
 // output interface of RAW type
 Datum rawout(PG_FUNCTION_ARGS)
 {
-    Datum result;
-    Datum datum;
-
-    /* fcinfo->fncollation is set to 0 when calling Macro FuncCall1,
-     * so the collation value needs to be reset.
+    /*fcinfo->fncollation is set to 0 when calling Macro FuncCall1,
+     *so the collation value needs to be reset.
      */
     if (!OidIsValid(fcinfo->fncollation))
         fcinfo->fncollation = DEFAULT_COLLATION_OID;
 
-    datum = DirectFunctionCall1(textin, CStringGetDatum(pstrdup("HEX")));
+    bytea* data = PG_GETARG_BYTEA_P(0);
+    text* ans = NULL;
+    int datalen = 0;
+    int resultlen = 0;
+    int ans_len = 0;
+    char* out_string = NULL;
 
-    result = DirectFunctionCall2(binary_encode, PG_GETARG_DATUM(0), datum);
+    datalen = VARSIZE(data) - VARHDRSZ;
 
-    result = DirectFunctionCall1Coll(upper, PG_GET_COLLATION(), result);
-    return DirectFunctionCall1(textout, result);
+    resultlen = datalen << 1;
+
+    if (resultlen < (int)(MaxAllocSize - VARHDRSZ)) {
+        ans = (text*)palloc(VARHDRSZ + resultlen);
+        ans_len = hex_encode(VARDATA(data), datalen, VARDATA(ans));
+        /* Make this FATAL 'cause we've trodden on memory ... */
+        if (ans_len > resultlen)
+            ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("overflow - encode estimate too small")));
+
+        SET_VARSIZE(ans, VARHDRSZ + ans_len);
+        
+        out_string = str_toupper_for_raw(VARDATA_ANY(ans), VARSIZE_ANY_EXHDR(ans), PG_GET_COLLATION());
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("blob length: %d ,out of memory", resultlen)));
+    }
+    pfree_ext(ans);
+    PG_RETURN_CSTRING(out_string);
 }
 
 // Implements interface of rawtohex(text)
@@ -487,6 +518,14 @@ Datum bytearecv(PG_FUNCTION_ARGS)
     int nbytes;
 
     nbytes = buf->len - buf->cursor;
+
+    /* Because of the hex encoding when output a blob, the output size of blob
+       will be twice(as func hex_enc_len). And the max palloc size is 1GB, so
+       we only input blobs less than 500M */
+    if ((long)nbytes* 2 + VARHDRSZ > (long)(MaxAllocSize)) {
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY),
+                        errmsg("blob/bytea size:%d, only can recevie blob/bytea less than 500M ", nbytes)));
+    }
     result = (bytea*)palloc(nbytes + VARHDRSZ);
     SET_VARSIZE(result, nbytes + VARHDRSZ);
     pq_copymsgbytes(buf, VARDATA(result), nbytes);
@@ -517,7 +556,7 @@ Datum bytea_string_agg_transfn(PG_FUNCTION_ARGS)
 
         /* On the first time through, we ignore the delimiter. */
         if (state == NULL)
-            state = make_string_agg_state(fcinfo);
+            state = makeStringAggState(fcinfo);
         else if (!PG_ARGISNULL(2)) {
             bytea* delim = PG_GETARG_BYTEA_PP(2);
 
@@ -563,9 +602,9 @@ Datum bytea_string_agg_finalfn(PG_FUNCTION_ARGS)
  */
 Datum textin(PG_FUNCTION_ARGS)
 {
-    char* input_text = PG_GETARG_CSTRING(0);
+    char* inputText = PG_GETARG_CSTRING(0);
 
-    PG_RETURN_TEXT_P(cstring_to_text(input_text));
+    PG_RETURN_TEXT_P(cstring_to_text(inputText));
 }
 
 /*
@@ -657,6 +696,8 @@ Datum unknownsend(PG_FUNCTION_ARGS)
     pq_sendtext(&buf, str, strlen(str));
     PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
+
+/* ========== PUBLIC ROUTINES ========== */
 
 /*
  * textlen -
@@ -758,12 +799,10 @@ static text* text_catenate(text* t1, text* t2)
     len2 = VARSIZE_ANY_EXHDR(t2);
 
     /* paranoia ... probably should throw error instead? */
-    if (len1 < 0) {
+    if (len1 < 0)
         len1 = 0;
-    }
-    if (len2 < 0) {
+    if (len2 < 0)
         len2 = 0;
-    }
 
     len = len1 + len2 + VARHDRSZ;
     result = (text*)palloc(len);
@@ -793,6 +832,9 @@ void text_to_bktmap(text* gbucket, uint2* bktmap, int len)
     char dest_str[MAX_NODE_DIG + 1] = {0};
     char* s = text_to_cstring(gbucket);
     int len_text = text_length((Datum)gbucket);
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     while (s_idx < len_text && s[s_idx] != '\0' && res_idx < BUCKETDATALEN) {
         if (s[s_idx] == ',') {
             dest_str[dest_idx] = '\0';
@@ -885,16 +927,16 @@ Datum text_substr_null(PG_FUNCTION_ARGS)
     int32 length = PG_GETARG_INT32(2);
     int32 eml = pg_database_encoding_max_length();
     bool is_compress = false;
-    int base_idx;
+    int baseIdx;
     bool is_null = false;
     mblen_converter fun_mblen;
     fun_mblen = *pg_wchar_table[GetDatabaseEncoding()].mblen;
 
     is_compress = (VARATT_IS_COMPRESSED(DatumGetPointer(str)) || VARATT_IS_EXTERNAL(DatumGetPointer(str)));
     // orclcompat is false withlen is true
-    base_idx = 2 + is_compress + (eml - 1) * 8;
+    baseIdx = 2 + (int)is_compress + (eml - 1) * 8;
 
-    result = (*substr_Array[base_idx])(str, start, length, &is_null, fun_mblen);
+    result = (*substr_Array[baseIdx])(str, start, length, &is_null, fun_mblen);
 
     if (is_null == true)
         PG_RETURN_NULL();
@@ -909,16 +951,16 @@ Datum text_substr_no_len_null(PG_FUNCTION_ARGS)
     int32 start = PG_GETARG_INT32(1);
     int32 eml = pg_database_encoding_max_length();
     bool is_compress = false;
-    int base_idx;
+    int baseIdx;
     bool is_null = false;
     mblen_converter fun_mblen;
     fun_mblen = *pg_wchar_table[GetDatabaseEncoding()].mblen;
 
     is_compress = (VARATT_IS_COMPRESSED(DatumGetPointer(str)) || VARATT_IS_EXTERNAL(DatumGetPointer(str)));
     // orclcompat is false withlen is false
-    base_idx = is_compress + (eml - 1) * 8;
+    baseIdx = (int)is_compress + (eml - 1) * 8;
 
-    result = (*substr_Array[base_idx])(str, start, 0, &is_null, fun_mblen);
+    result = (*substr_Array[baseIdx])(str, start, 0, &is_null, fun_mblen);
 
     if (is_null == true)
         PG_RETURN_NULL();
@@ -961,9 +1003,10 @@ text* text_substring(Datum str, int32 start, int32 length, bool length_not_speci
     if (eml == 1) {
         S1 = Max(S, 1);
 
-        if (length_not_specified) {  /* special case - get length to end of string */
+        if (length_not_specified) /* special case - get length to end of
+                                   * string */
             L1 = -1;
-        } else {
+        else {
             /* end position */
             int E = S + length;
 
@@ -971,18 +1014,17 @@ text* text_substring(Datum str, int32 start, int32 length, bool length_not_speci
              * A negative value for L is the only way for the end position to
              * be before the start. SQL99 says to throw an error.
              */
-            if (S > E) {
+            if (E < S)
                 ereport(ERROR, (errcode(ERRCODE_SUBSTRING_ERROR), errmsg("negative substring length not allowed")));
-            }
 
             /*
              * A zero or negative value for the end position can happen if the
              * start was negative or one. SQL99 says to return a zero-length
              * string.
              */
-            if (E < 1) {
+            if (E < 1)
                 return cstring_to_text("");
-            }
+
             L1 = E - S1;
         }
 
@@ -1021,9 +1063,9 @@ text* text_substring(Datum str, int32 start, int32 length, bool length_not_speci
          */
         slice_start = 0;
 
-        if (length_not_specified) {  /* special case - get length to end of string */
+        if (length_not_specified) /* special case - get length to end of
+                                   * string */
             slice_size = L1 = -1;
-        }
         else {
             int E = S + length;
 
@@ -1031,18 +1073,16 @@ text* text_substring(Datum str, int32 start, int32 length, bool length_not_speci
              * A negative value for L is the only way for the end position to
              * be before the start. SQL99 says to throw an error.
              */
-            if (S > E) {
+            if (E < S)
                 ereport(ERROR, (errcode(ERRCODE_SUBSTRING_ERROR), errmsg("negative substring length not allowed")));
-            }
 
             /*
              * A zero or negative value for the end position can happen if the
              * start was negative or one. SQL99 says to return a zero-length
              * string.
              */
-            if (E < 1) {
+            if (E < 1)
                 return cstring_to_text("");
-            }
 
             /*
              * if E is past the end of the string, the tuple toaster will
@@ -1131,7 +1171,7 @@ text* text_substring(Datum str, int32 start, int32 length, bool length_not_speci
     return NULL;
 }
 
-// adapt a's substr(text str,integer start,integer length)
+// adapt A db's substr(text str,integer start,integer length)
 // when start<0, amend the sartPosition to abs(start) from last char,
 // then search backward
 Datum text_substr_orclcompat(PG_FUNCTION_ARGS)
@@ -1142,16 +1182,16 @@ Datum text_substr_orclcompat(PG_FUNCTION_ARGS)
     int32 length = PG_GETARG_INT32(2);
     bool is_null = false;
     bool is_compress = false;
-    int base_idx;
+    int baseIdx;
     int32 eml = pg_database_encoding_max_length();
     mblen_converter fun_mblen;
     fun_mblen = *pg_wchar_table[GetDatabaseEncoding()].mblen;
 
     is_compress = (VARATT_IS_COMPRESSED(DatumGetPointer(str)) || VARATT_IS_EXTERNAL(DatumGetPointer(str)));
     // orclcompat is true, withlen is true
-    base_idx = 6 + is_compress + (eml - 1) * 8;
+    baseIdx = 6 + (int)is_compress + (eml - 1) * 8;
 
-    result = (*substr_Array[base_idx])(str, start, length, &is_null, fun_mblen);
+    result = (*substr_Array[baseIdx])(str, start, length, &is_null, fun_mblen);
 
     if (is_null == true)
         PG_RETURN_NULL();
@@ -1159,7 +1199,7 @@ Datum text_substr_orclcompat(PG_FUNCTION_ARGS)
         return result;
 }
 
-// adapt a's substr(text str,integer start)
+// adapt A db's substr(text str,integer start)
 // when start<0, amend the sartPosition to abs(start) from last char,
 // then search backward
 Datum text_substr_no_len_orclcompat(PG_FUNCTION_ARGS)
@@ -1169,16 +1209,16 @@ Datum text_substr_no_len_orclcompat(PG_FUNCTION_ARGS)
     int32 start = PG_GETARG_INT32(1);
     int32 eml = pg_database_encoding_max_length();
     bool is_compress = false;
-    int base_idx;
+    int baseIdx;
     bool is_null = false;
     mblen_converter fun_mblen;
     fun_mblen = *pg_wchar_table[GetDatabaseEncoding()].mblen;
 
     is_compress = (VARATT_IS_COMPRESSED(DatumGetPointer(str)) || VARATT_IS_EXTERNAL(DatumGetPointer(str)));
     // orclcompat is true, withlen is false
-    base_idx = 4 + is_compress + (eml - 1) * 8;
+    baseIdx = 4 + (int)is_compress + (eml - 1) * 8;
 
-    result = (*substr_Array[base_idx])(str, start, 0, &is_null, fun_mblen);
+    result = (*substr_Array[baseIdx])(str, start, 0, &is_null, fun_mblen);
 
     if (is_null == true)
         PG_RETURN_NULL();
@@ -1329,8 +1369,8 @@ static void text_position_setup(text* t1, text* t2, TextPositionState* state)
      * save anything in that case.
      */
     if (len1 >= len2 && len2 > 1) {
-        int search_length = len1 - len2;
-        int skip_table_mask;
+        int searchlength = len1 - len2;
+        int skiptablemask;
         int last;
         int i;
 
@@ -1346,31 +1386,29 @@ static void text_position_setup(text* t1, text* t2, TextPositionState* state)
          * Note: since we use bit-masking to select table elements, the skip
          * table size MUST be a power of 2, and so the mask must be 2^N-1.
          */
-        if (search_length < 16) {
-            skip_table_mask = 3;
-        } else if (search_length < 64) {
-            skip_table_mask = 7;
-        } else if (search_length < 128) {
-            skip_table_mask = 15;
-        } else if (search_length < 512) {
-            skip_table_mask = 31;
-        } else if (search_length < 2048) {
-            skip_table_mask = 63;
-        } else if (search_length < 4096) {
-            skip_table_mask = 127;
-        } else {
-            skip_table_mask = 255;
-        }
-        state->skiptablemask = skip_table_mask;
+        if (searchlength < 16)
+            skiptablemask = 3;
+        else if (searchlength < 64)
+            skiptablemask = 7;
+        else if (searchlength < 128)
+            skiptablemask = 15;
+        else if (searchlength < 512)
+            skiptablemask = 31;
+        else if (searchlength < 2048)
+            skiptablemask = 63;
+        else if (searchlength < 4096)
+            skiptablemask = 127;
+        else
+            skiptablemask = 255;
+        state->skiptablemask = skiptablemask;
 
         /*
          * Initialize the skip table.  We set all elements to the needle
          * length, since this is the correct skip distance for any character
          * not found in the needle.
          */
-        for (i = 0; i <= skip_table_mask; i++) {
+        for (i = 0; i <= skiptablemask; i++)
             state->skiptable[i] = len2;
-        }
 
         /*
          * Now examine the needle.	For each character except the last one,
@@ -1384,15 +1422,13 @@ static void text_position_setup(text* t1, text* t2, TextPositionState* state)
         if (!state->use_wchar) {
             const char* str2 = state->str2;
 
-            for (i = 0; i < last; i++) {
-                state->skiptable[(unsigned char)str2[i] & (unsigned int)skip_table_mask] = last - i;
-            }
+            for (i = 0; i < last; i++)
+                state->skiptable[(unsigned char)str2[i] & (unsigned int)skiptablemask] = last - i;
         } else {
             const pg_wchar* wstr2 = state->wstr2;
 
-            for (i = 0; i < last; i++) {
-                state->skiptable[wstr2[i] & (unsigned int)skip_table_mask] = last - i;
-            }
+            for (i = 0; i < last; i++)
+                state->skiptable[wstr2[i] & (unsigned int)skiptablemask] = last - i;
         }
     }
 }
@@ -1401,20 +1437,18 @@ static int text_position_next(int start_pos, TextPositionState* state)
 {
     int haystack_len = state->len1;
     int needle_len = state->len2;
-    int skip_table_mask = state->skiptablemask;
+    int skiptablemask = state->skiptablemask;
 
     Assert(start_pos > 0); /* else caller error */
 
-    if (needle_len <= 0) {
+    if (needle_len <= 0)
         return start_pos; /* result for empty pattern */
-    }
 
     start_pos--; /* adjust for zero based arrays */
 
     /* Done if the needle can't possibly fit */
-    if (haystack_len < start_pos + needle_len) {
+    if (haystack_len < start_pos + needle_len)
         return 0;
-    }
 
     if (!state->use_wchar) {
         /* simple case - single byte encoding */
@@ -1429,9 +1463,8 @@ static int text_position_next(int start_pos, TextPositionState* state)
 
             hptr = &haystack[start_pos];
             while (hptr < haystack_end) {
-                if (*hptr == nchar) {
+                if (*hptr == nchar)
                     return hptr - haystack + 1;
-                }
                 hptr++;
             }
         } else {
@@ -1448,9 +1481,8 @@ static int text_position_next(int start_pos, TextPositionState* state)
                 p = hptr;
                 while (*nptr == *p) {
                     /* Matched it all?	If so, return 1-based position */
-                    if (nptr == needle) {
+                    if (nptr == needle)
                         return p - haystack + 1;
-                    }
                     nptr--, p--;
                 }
 
@@ -1463,7 +1495,7 @@ static int text_position_next(int start_pos, TextPositionState* state)
                  * that haystack position.	Otherwise we can advance by the
                  * whole needle length.
                  */
-                hptr += state->skiptable[(unsigned char)*hptr & (unsigned int)skip_table_mask];
+                hptr += state->skiptable[(unsigned char)*hptr & (unsigned int)skiptablemask];
             }
         }
     } else {
@@ -1479,9 +1511,8 @@ static int text_position_next(int start_pos, TextPositionState* state)
 
             hptr = &haystack[start_pos];
             while (hptr < haystack_end) {
-                if (*hptr == nchar) {
+                if (*hptr == nchar)
                     return hptr - haystack + 1;
-                }
                 hptr++;
             }
         } else {
@@ -1498,9 +1529,8 @@ static int text_position_next(int start_pos, TextPositionState* state)
                 p = hptr;
                 while (*nptr == *p) {
                     /* Matched it all?	If so, return 1-based position */
-                    if (nptr == needle) {
+                    if (nptr == needle)
                         return p - haystack + 1;
-                    }
                     nptr--, p--;
                 }
 
@@ -1513,7 +1543,7 @@ static int text_position_next(int start_pos, TextPositionState* state)
                  * that haystack position.	Otherwise we can advance by the
                  * whole needle length.
                  */
-                hptr += state->skiptable[*hptr & (unsigned int)skip_table_mask];
+                hptr += state->skiptable[*hptr & (unsigned int)skiptablemask];
             }
         }
     }
@@ -1548,14 +1578,12 @@ int varstr_cmp(char* arg1, int len1, char* arg2, int len2, Oid collid)
      */
     if (lc_collate_is_c(collid)) {
         result = memcmp(arg1, arg2, Min(len1, len2));
-        if ((result == 0) && (len1 != len2)) {
+        if ((result == 0) && (len1 != len2))
             result = (len1 < len2) ? -1 : 1;
-        }
     } else {
         char a1buf[TEXTBUFLEN];
         char a2buf[TEXTBUFLEN];
-        char *a1p = NULL;
-        char *a2p = NULL;
+        char *a1p = NULL, *a2p = NULL;
 
 #ifdef HAVE_LOCALE_T
         pg_locale_t mylocale = 0;
@@ -1641,7 +1669,8 @@ int varstr_cmp(char* arg1, int len1, char* arg2, int len2, Oid collid)
             else
 #endif
                 result = wcscoll((LPWSTR)a1p, (LPWSTR)a2p);
-            if (result == 2147483647) /* _NLSCMPERROR; missing from mingw headers */
+            if (result == 2147483647) /* _NLSCMPERROR; missing from mingw
+                                       * headers */
                 ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("could not compare Unicode strings: %m")));
 
             /*
@@ -1652,32 +1681,27 @@ int varstr_cmp(char* arg1, int len1, char* arg2, int len2, Oid collid)
              */
             if (result == 0) {
                 result = memcmp(arg1, arg2, Min(len1, len2));
-                if ((result == 0) && (len1 != len2)) {
+                if ((result == 0) && (len1 != len2))
                     result = (len1 < len2) ? -1 : 1;
-                }
             }
 
-            if (a1p != a1buf) {
+            if (a1p != a1buf)
                 pfree_ext(a1p);
-            }
-            if (a2p != a2buf) {
+            if (a2p != a2buf)
                 pfree_ext(a2p);
-            }
 
             return result;
         }
 #endif /* WIN32 */
 
-        if (len1 >= TEXTBUFLEN) {
+        if (len1 >= TEXTBUFLEN)
             a1p = (char*)palloc(len1 + 1);
-        } else {
+        else
             a1p = a1buf;
-        }
-        if (len2 >= TEXTBUFLEN) {
+        if (len2 >= TEXTBUFLEN)
             a2p = (char*)palloc(len2 + 1);
-        } else {
+        else
             a2p = a2buf;
-        }
 
         errno_t err = EOK;
         if (len1 > 0) {
@@ -1692,9 +1716,9 @@ int varstr_cmp(char* arg1, int len1, char* arg2, int len2, Oid collid)
         a2p[len2] = '\0';
 
 #ifdef HAVE_LOCALE_T
-        if (mylocale) {
+        if (mylocale)
             result = strcoll_l(a1p, a2p, mylocale);
-        } else
+        else
 #endif
             result = strcoll(a1p, a2p);
 
@@ -1704,15 +1728,13 @@ int varstr_cmp(char* arg1, int len1, char* arg2, int len2, Oid collid)
          * so we follow Perl's lead and sort "equal" strings according to
          * strcmp().
          */
-        if (result == 0) {
+        if (result == 0)
             result = strcmp(a1p, a2p);
-        }
-        if (a1p != a1buf) {
+
+        if (a1p != a1buf)
             pfree_ext(a1p);
-        }
-        if (a2p != a2buf) {
+        if (a2p != a2buf)
             pfree_ext(a2p);
-        }
     }
 
     return result;
@@ -1724,8 +1746,7 @@ int varstr_cmp(char* arg1, int len1, char* arg2, int len2, Oid collid)
  */
 int text_cmp(text* arg1, text* arg2, Oid collid)
 {
-    char *a1p = NULL;
-    char *a2p = NULL;
+    char *a1p = NULL, *a2p = NULL;
     int len1, len2;
 
     a1p = VARDATA_ANY(arg1);
@@ -1761,9 +1782,9 @@ Datum texteq(PG_FUNCTION_ARGS)
      */
     len1 = toast_raw_datum_size(arg1);
     len2 = toast_raw_datum_size(arg2);
-    if (len1 != len2) {
+    if (len1 != len2)
         result = false;
-    } else {
+    else {
         text* targ1 = DatumGetTextPP(arg1);
         text* targ2 = DatumGetTextPP(arg2);
 
@@ -1786,9 +1807,9 @@ Datum textne(PG_FUNCTION_ARGS)
     /* See comment in texteq() */
     len1 = toast_raw_datum_size(arg1);
     len2 = toast_raw_datum_size(arg2);
-    if (len1 != len2) {
+    if (len1 != len2)
         result = true;
-    } else {
+    else {
         text* targ1 = DatumGetTextPP(arg1);
         text* targ2 = DatumGetTextPP(arg2);
 
@@ -1811,9 +1832,9 @@ static void vtextne_internal(ScalarVector* arg1, uint8* pflags1, ScalarVector* a
     if (BOTH_NOT_NULL(pflags1[idx], pflags2[idx])) {
         Size len1 = m_const1 ? len : toast_raw_datum_size(arg1->m_vals[idx]);
         Size len2 = m_const2 ? len : toast_raw_datum_size(arg2->m_vals[idx]);
-        if (len1 != len2) {
+        if (len1 != len2)
             vresult->m_vals[idx] = BoolGetDatum(true);
-        } else {
+        else {
             text* targ1 = m_const1 ? targ : DatumGetTextPP(arg1->m_vals[idx]);
             text* targ2 = m_const2 ? targ : DatumGetTextPP(arg2->m_vals[idx]);
             bool result = memcmp(VARDATA_ANY(targ1), VARDATA_ANY(targ2), len1 - VARHDRSZ) != 0;
@@ -1859,24 +1880,22 @@ ScalarVector* vtextne(PG_FUNCTION_ARGS)
     if (pselection != NULL) {
         for (k = 0; k < nvalues; k++) {
             if (pselection[k]) {
-                if (!arg1->m_const && arg2->m_const) {
+                if (!arg1->m_const && arg2->m_const)
                     vtextne_internal<false, true>(arg1, pflags1, arg2, pflags2, vresult, pflagRes, len, targ, k);
-                } else if (arg1->m_const && !arg2->m_const) {
+                else if (arg1->m_const && !arg2->m_const)
                     vtextne_internal<true, false>(arg1, pflags1, arg2, pflags2, vresult, pflagRes, len, targ, k);
-                } else {
+                else
                     vtextne_internal<false, false>(arg1, pflags1, arg2, pflags2, vresult, pflagRes, len, targ, k);
-                }
             }
         }
     } else {
         for (k = 0; k < nvalues; k++) {
-            if (!arg1->m_const && arg2->m_const) {
+            if (!arg1->m_const && arg2->m_const)
                 vtextne_internal<false, true>(arg1, pflags1, arg2, pflags2, vresult, pflagRes, len, targ, k);
-            } else if (arg1->m_const && !arg2->m_const) {
+            else if (arg1->m_const && !arg2->m_const)
                 vtextne_internal<true, false>(arg1, pflags1, arg2, pflags2, vresult, pflagRes, len, targ, k);
-            } else {
+            else
                 vtextne_internal<false, false>(arg1, pflags1, arg2, pflags2, vresult, pflagRes, len, targ, k);
-            }
         }
     }
 
@@ -1958,14 +1977,14 @@ Datum bttextsortsupport(PG_FUNCTION_ARGS)
 {
     SortSupport ssup = (SortSupport)PG_GETARG_POINTER(0);
     Oid collid = ssup->ssup_collation;
-    MemoryContext old_context;
+    MemoryContext oldcontext;
 
-    old_context = MemoryContextSwitchTo(ssup->ssup_cxt);
+    oldcontext = MemoryContextSwitchTo(ssup->ssup_cxt);
 
     /* Use generic string SortSupport */
     varstr_sortsupport(ssup, collid, false);
 
-    (void)MemoryContextSwitchTo(old_context);
+    MemoryContextSwitchTo(oldcontext);
 
     PG_RETURN_VOID();
 }
@@ -2009,18 +2028,16 @@ void varstr_sortsupport(SortSupport ssup, Oid collid, bool bpchar)
      * the case of text) via the fmgr trampoline.
      */
     if (lc_collate_is_c(collid)) {
-        if (!bpchar) {
+        if (!bpchar)
             ssup->comparator = varstrfastcmp_c;
-        } else {
+        else
             ssup->comparator = bpcharfastcmp_c;
-        }
 
         collate_c = true;
     }
 #ifdef WIN32
-    else if (GetDatabaseEncoding() == PG_UTF8) {
+    else if (GetDatabaseEncoding() == PG_UTF8)
         return;
-    }
 #endif
     else {
         ssup->comparator = varstrfastcmp_locale;
@@ -2145,17 +2162,14 @@ static int varstrfastcmp_c(Datum x, Datum y, SortSupport ssup)
     len2 = VARSIZE_ANY_EXHDR(arg2);
 
     result = memcmp(a1p, a2p, Min(len1, len2));
-    if ((result == 0) && (len1 != len2)) {
+    if ((result == 0) && (len1 != len2))
         result = (len1 < len2) ? -1 : 1;
-    }
 
     /* We can't afford to leak memory here. */
-    if (PointerGetDatum(arg1) != x) {
+    if (PointerGetDatum(arg1) != x)
         pfree_ext(arg1);
-    }
-    if (PointerGetDatum(arg2) != y) {
+    if (PointerGetDatum(arg2) != y)
         pfree_ext(arg2);
-    }
 
     return result;
 }
@@ -2178,17 +2192,14 @@ static int bpcharfastcmp_c(Datum x, Datum y, SortSupport ssup)
     len2 = bpchartruelen(a2p, VARSIZE_ANY_EXHDR(arg2));
 
     cmp = memcmp(a1p, a2p, Min(len1, len2));
-    if ((cmp == 0) && (len1 != len2)) {
+    if ((cmp == 0) && (len1 != len2))
         cmp = (len1 < len2) ? -1 : 1;
-    }
 
     /* We can't afford to leak memory here. */
-    if (PointerGetDatum(arg1) != x) {
+    if (PointerGetDatum(arg1) != x)
         pfree_ext(arg1);
-    }
-    if (PointerGetDatum(arg2) != y) {
+    if (PointerGetDatum(arg2) != y)
         pfree_ext(arg2);
-    }
 
     return cmp;
 }
@@ -2287,9 +2298,9 @@ static int varstrfastcmp_locale(Datum x, Datum y, SortSupport ssup)
     }
 
 #ifdef HAVE_LOCALE_T
-    if (sss->locale) {
+    if (sss->locale)
         result = strcoll_l(sss->buf1, sss->buf2, sss->locale);
-    } else
+    else
 #endif
         result = strcoll(sss->buf1, sss->buf2);
 
@@ -2298,21 +2309,18 @@ static int varstrfastcmp_locale(Datum x, Datum y, SortSupport ssup)
      * equal. Believing that would be bad news for a number of reasons, so we
      * follow Perl's lead and sort "equal" strings according to strcmp().
      */
-    if (result == 0) {
+    if (result == 0)
         result = strcmp(sss->buf1, sss->buf2);
-    }
 
     /* Cache result, perhaps saving an expensive strcoll() call next time */
     sss->cache_blob = false;
     sss->last_returned = result;
 done:
     /* We can't afford to leak memory here. */
-    if (PointerGetDatum(arg1) != x) {
+    if (PointerGetDatum(arg1) != x)
         pfree_ext(arg1);
-    }
-    if (PointerGetDatum(arg2) != y) {
+    if (PointerGetDatum(arg2) != y)
         pfree_ext(arg2);
-    }
 
     return result;
 }
@@ -2329,13 +2337,12 @@ static int varstrcmp_abbrev(Datum x, Datum y, SortSupport ssup)
      * authoritatively, for the same reason that there is a strcoll()
      * tie-breaker call to strcmp() in varstr_cmp().
      */
-    if (x > y) {
+    if (x > y)
         return 1;
-    } else if (x == y) {
+    else if (x == y)
         return 0;
-    } else {
+    else
         return -1;
-    }
 }
 
 /*
@@ -2368,9 +2375,8 @@ static Datum varstr_abbrev_convert(Datum original, SortSupport ssup)
     len = VARSIZE_ANY_EXHDR(authoritative);
 
     /* Get number of bytes, ignoring trailing spaces */
-    if (sss->bpchar) {
+    if (sss->bpchar)
         len = bpchartruelen(authoritative_data, len);
-    }
 
     /*
      * If we're using the C collation, use memcpy(), rather than strxfrm(), to
@@ -2432,16 +2438,15 @@ static Datum varstr_abbrev_convert(Datum original, SortSupport ssup)
 
         for (;;) {
 #ifdef HAVE_LOCALE_T
-            if (sss->locale) {
+            if (sss->locale)
                 bsize = strxfrm_l(sss->buf2, sss->buf1, sss->buflen2, sss->locale);
-            } else
+            else
 #endif
                 bsize = strxfrm(sss->buf2, sss->buf1, sss->buflen2);
 
             sss->last_len2 = bsize;
-            if ((int)bsize < sss->buflen2) {
+            if ((int)bsize < sss->buflen2)
                 break;
-            }
 
             /*
              * The C standard states that the contents of the buffer is now
@@ -2527,9 +2532,8 @@ static bool varstr_abbrev_abort(int memtupcount, SortSupport ssup)
     Assert(ssup->abbreviate);
 
     /* Have a little patience */
-    if (memtupcount < 100 || !sss->estimating) {
+    if (memtupcount < 100 || !sss->estimating)
         return false;
-    }
 
     abbrev_distinct = estimateHyperLogLog(&sss->abbr_card);
     key_distinct = sss->input_count;
@@ -2560,13 +2564,11 @@ static bool varstr_abbrev_abort(int memtupcount, SortSupport ssup)
      * NULLs are generally disregarded, if only NULL values were seen so far,
      * that might misrepresent costs if we failed to clamp.
      */
-    if (abbrev_distinct <= 1.0) {
+    if (abbrev_distinct <= 1.0)
         abbrev_distinct = 1.0;
-    }
 
-    if (key_distinct <= 1.0) {
+    if (key_distinct <= 1.0)
         key_distinct = 1.0;
-    }
 
         /*
          * In the worst case all abbreviated keys are identical, while at the same
@@ -2630,9 +2632,8 @@ static bool varstr_abbrev_abort(int memtupcount, SortSupport ssup)
          * abort.  If it isn't caught early, by the time the problem is
          * apparent it's probably not worth aborting.
          */
-        if (memtupcount > 10000) {
+        if (memtupcount > 10000)
             sss->prop_card *= 0.65;
-        }
 
         return false;
     }
@@ -2649,7 +2650,7 @@ static bool varstr_abbrev_abort(int memtupcount, SortSupport ssup)
      * lose but much to gain, which our strategy reflects.
      */
 #ifdef TRACE_SORT
-    if (u_sess->attr.attr_common.trace_sort) {
+    if (u_sess->attr.attr_common.trace_sort)
         elog(LOG,
             "varstr_abbrev: aborted abbreviation at %d "
             "(abbrev_distinct: %f, key_distinct: %f, prop_card: %f)",
@@ -2657,8 +2658,8 @@ static bool varstr_abbrev_abort(int memtupcount, SortSupport ssup)
             abbrev_distinct,
             key_distinct,
             sss->prop_card);
-    }
 #endif
+
     return true;
 }
 
@@ -2700,15 +2701,14 @@ static int internal_text_pattern_compare(text* arg1, text* arg2)
     len2 = VARSIZE_ANY_EXHDR(arg2);
 
     result = memcmp(VARDATA_ANY(arg1), VARDATA_ANY(arg2), Min(len1, len2));
-    if (result != 0) {
+    if (result != 0)
         return result;
-    } else if (len1 < len2) {
+    else if (len1 < len2)
         return -1;
-    } else if (len1 > len2) {
+    else if (len1 > len2)
         return 1;
-    } else {
+    else
         return 0;
-    }
 }
 
 Datum text_pattern_lt(PG_FUNCTION_ARGS)
@@ -2827,12 +2827,10 @@ static bytea* bytea_catenate(bytea* t1, bytea* t2)
     len2 = VARSIZE_ANY_EXHDR(t2);
 
     /* paranoia ... probably should throw error instead? */
-    if (len1 < 0) {
+    if (len1 < 0)
         len1 = 0;
-    }
-    if (len2 < 0) {
+    if (len2 < 0)
         len2 = 0;
-    }
 
     len = len1 + len2 + VARHDRSZ;
     result = (bytea*)palloc(len);
@@ -2906,18 +2904,16 @@ static bytea* bytea_substring(Datum str, int S, int L, bool length_not_specified
          * A negative value for L is the only way for the end position to be
          * before the start. SQL99 says to throw an error.
          */
-        if (S > E) {
+        if (E < S)
             ereport(ERROR, (errcode(ERRCODE_SUBSTRING_ERROR), errmsg("negative substring length not allowed")));
-        }
 
         /*
          * A zero or negative value for the end position can happen if the
          * start was negative or one. SQL99 says to return a zero-length
          * string.
          */
-        if (E < 1) {
+        if (E < 1)
             return PG_STR_GET_BYTEA("");
-        }
 
         L1 = E - S1;
     }
@@ -2930,7 +2926,7 @@ static bytea* bytea_substring(Datum str, int S, int L, bool length_not_specified
     return DatumGetByteaPSlice(str, S1 - 1, L1);
 }
 
-// adapt a's substr(bytea str,integer start,integer length)
+// adapt A db's substr(bytea str,integer start,integer length)
 // when start<0, amend the sartPosition to abs(start) from last char,
 // then search backward
 Datum bytea_substr_orclcompat(PG_FUNCTION_ARGS)
@@ -2944,9 +2940,10 @@ Datum bytea_substr_orclcompat(PG_FUNCTION_ARGS)
 
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((length < 0) || (start > total) || (start + total < 0)) {
-        if (DB_IS_CMPT(DB_CMPT_A | DB_CMPT_B)) {
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT ||
+            u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
             PG_RETURN_NULL();
-        } else {
+        else {
             result = PG_STR_GET_BYTEA("");
             PG_RETURN_BYTEA_P(result);
         }
@@ -2957,14 +2954,13 @@ Datum bytea_substr_orclcompat(PG_FUNCTION_ARGS)
      */
     result = bytea_substring_orclcompat(str, start, length, false);
 
-    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
+    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_BYTEA_P(result);
-    }
 }
 
-// adapt a's substr(bytea x,integer y)
+// adapt A db's substr(bytea x,integer y)
 // when start<0, amend the sartPosition to abs(start) from last char,
 // then search backward
 Datum bytea_substr_no_len_orclcompat(PG_FUNCTION_ARGS)
@@ -2976,9 +2972,9 @@ Datum bytea_substr_no_len_orclcompat(PG_FUNCTION_ARGS)
 
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((start > total) || (start + total < 0)) {
-        if (DB_IS_CMPT(DB_CMPT_A)) {
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
             PG_RETURN_NULL();
-        } else {
+        else {
             result = PG_STR_GET_BYTEA("");
             PG_RETURN_BYTEA_P(result);
         }
@@ -2989,11 +2985,10 @@ Datum bytea_substr_no_len_orclcompat(PG_FUNCTION_ARGS)
      */
     result = bytea_substring_orclcompat(str, start, -1, true);
 
-    if (( result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
+    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_BYTEA_P(result);
-    }
 }
 
 // Does the real work for bytea_substr_orclcompat() and bytea_substr_no_len_orclcompat().
@@ -3017,7 +3012,7 @@ static bytea* bytea_substring_orclcompat(Datum str, int S, int L, bool length_no
      */
     if (S < 0) {
         S = total + S + 1;
-    } else if (S == 0) {
+    } else if (0 == S) {
         S = 1;
     }
 
@@ -3040,18 +3035,16 @@ static bytea* bytea_substring_orclcompat(Datum str, int S, int L, bool length_no
          * A negative value for L is the only way for the end position to be
          * before the start. SQL99 says to throw an error.
          */
-        if (S > E) {
+        if (E < S)
             ereport(ERROR, (errcode(ERRCODE_SUBSTRING_ERROR), errmsg("negative substring length not allowed")));
-        }
 
         /*
          * A zero or negative value for the end position can happen if the
          * start was negative or one. SQL99 says to return a zero-length
          * string.
          */
-        if (E < 1) {
+        if (E < 1)
             return PG_STR_GET_BYTEA("");
-        }
 
         L1 = E - S1;
     }
@@ -3104,12 +3097,10 @@ static bytea* bytea_overlay(bytea* t1, bytea* t2, int sp, int sl)
      * "substring length" error because that's what should be expected
      * according to the spec's definition of OVERLAY().
      */
-    if (sp <= 0) {
+    if (sp <= 0)
         ereport(ERROR, (errcode(ERRCODE_SUBSTRING_ERROR), errmsg("negative substring length not allowed")));
-    }
-    if (pg_add_s32_overflow(sp, sl, &sp_pl_sl)) {
+    if (pg_add_s32_overflow(sp, sl, &sp_pl_sl))
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("integer out of range")));
-    }
 
     s1 = bytea_substring(PointerGetDatum(t1), 1, sp - 1, false);
     s2 = bytea_substring(PointerGetDatum(t1), sp_pl_sl, -1, true);
@@ -3132,15 +3123,14 @@ Datum byteapos(PG_FUNCTION_ARGS)
     int pos;
     int px, p;
     int len1, len2;
-    char *p1 = NULL;
-    char *p2 = NULL;
+    char *p1 = NULL, *p2 = NULL;
 
     len1 = VARSIZE_ANY_EXHDR(t1);
     len2 = VARSIZE_ANY_EXHDR(t2);
 
-    if (len2 <= 0) {
+    if (len2 <= 0)
         PG_RETURN_INT32(1); /* result for empty pattern */
-    }
+
     p1 = VARDATA_ANY(t1);
     p2 = VARDATA_ANY(t2);
 
@@ -3173,10 +3163,10 @@ Datum byteaGetByte(PG_FUNCTION_ARGS)
 
     len = VARSIZE_ANY_EXHDR(v);
 
-    if (n < 0 || n >= len) {
+    if (n < 0 || n >= len)
         ereport(
             ERROR, (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("index %d out of valid range, 0..%d", n, len - 1)));
-    }
+
     byte = ((unsigned char*)VARDATA_ANY(v))[n];
 
     PG_RETURN_INT32(byte);
@@ -3194,27 +3184,25 @@ Datum byteaGetBit(PG_FUNCTION_ARGS)
 {
     bytea* v = PG_GETARG_BYTEA_PP(0);
     int32 n = PG_GETARG_INT32(1);
-    int byte_no;
-    int bit_no;
+    int byteNo, bitNo;
     int len;
     int byte;
 
     len = VARSIZE_ANY_EXHDR(v);
 
-    if (n < 0 || n >= len * 8) {
+    if (n < 0 || n >= len * 8)
         ereport(ERROR,
             (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("index %d out of valid range, 0..%d", n, len * 8 - 1)));
-    }
-    byte_no = n / 8;
-    bit_no = n % 8;
 
-    byte = ((unsigned char*)VARDATA_ANY(v))[byte_no];
+    byteNo = n / 8;
+    bitNo = n % 8;
 
-    if (byte & (1 << bit_no)) {
+    byte = ((unsigned char*)VARDATA_ANY(v))[byteNo];
+
+    if ((unsigned int)byte & (unsigned int)(1 << bitNo))
         PG_RETURN_INT32(1);
-    } else {
+    else
         PG_RETURN_INT32(0);
-    }
 }
 
 /* -------------------------------------------------------------
@@ -3229,17 +3217,17 @@ Datum byteaSetByte(PG_FUNCTION_ARGS)
 {
     bytea* v = PG_GETARG_BYTEA_P(0);
     int32 n = PG_GETARG_INT32(1);
-    int32 new_byte = PG_GETARG_INT32(2);
+    int32 newByte = PG_GETARG_INT32(2);
     int len;
     bytea* res = NULL;
     errno_t rc = 0;
 
     len = VARSIZE(v) - VARHDRSZ;
 
-    if (n < 0 || n >= len) {
+    if (n < 0 || n >= len)
         ereport(
             ERROR, (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("index %d out of valid range, 0..%d", n, len - 1)));
-    }
+
     /*
      * Make a copy of the original varlena.
      */
@@ -3250,7 +3238,8 @@ Datum byteaSetByte(PG_FUNCTION_ARGS)
     /*
      * Now set the byte.
      */
-    ((unsigned char*)VARDATA(res))[n] = new_byte;
+    ((unsigned char*)VARDATA(res))[n] = newByte;
+
     PG_RETURN_BYTEA_P(res);
 }
 
@@ -3266,28 +3255,27 @@ Datum byteaSetBit(PG_FUNCTION_ARGS)
 {
     bytea* v = PG_GETARG_BYTEA_P(0);
     int32 n = PG_GETARG_INT32(1);
-    int32 new_bit = PG_GETARG_INT32(2);
+    int32 newBit = PG_GETARG_INT32(2);
     bytea* res = NULL;
     int len;
-    int old_byte;
-    int new_byte;
-    int byte_no;
-    int bit_no;
+    int oldByte, newByte;
+    int byteNo, bitNo;
 
     len = VARSIZE(v) - VARHDRSZ;
-    if (n < 0 || n >= len * 8) {
+
+    if (n < 0 || n >= len * 8)
         ereport(ERROR,
             (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("index %d out of valid range, 0..%d", n, len * 8 - 1)));
-    }
-    byte_no = n / 8;
-    bit_no = n % 8;
+
+    byteNo = n / 8;
+    bitNo = n % 8;
 
     /*
      * sanity check!
      */
-    if (new_bit != 0 && new_bit != 1) {
+    if (newBit != 0 && newBit != 1)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("new bit must be 0 or 1")));
-    }
+
     /*
      * Make a copy of the original varlena.
      */
@@ -3297,13 +3285,14 @@ Datum byteaSetBit(PG_FUNCTION_ARGS)
     /*
      * Update the byte.
      */
-    old_byte = ((unsigned char*)VARDATA(res))[byte_no];
-    if (new_bit == 0) {
-        new_byte = old_byte & (~(1 << bit_no));
-    } else {
-        new_byte = old_byte | (1 << bit_no);
-    }
-    ((unsigned char*)VARDATA(res))[byte_no] = new_byte;
+    oldByte = ((unsigned char*)VARDATA(res))[byteNo];
+
+    if (newBit == 0)
+        newByte = (unsigned int)oldByte & (unsigned int)(~(1 << bitNo));
+    else
+        newByte = (unsigned int)oldByte | (unsigned int)(1 << bitNo);
+
+    ((unsigned char*)VARDATA(res))[byteNo] = newByte;
 
     PG_RETURN_BYTEA_P(res);
 }
@@ -3316,12 +3305,13 @@ Datum text_name(PG_FUNCTION_ARGS)
     text* s = PG_GETARG_TEXT_PP(0);
     Name result;
     int len;
+
     len = VARSIZE_ANY_EXHDR(s);
 
     /* Truncate oversize input */
-    if (len >= NAMEDATALEN) {
+    if (len >= NAMEDATALEN)
         len = pg_mbcliplen(VARDATA_ANY(s), len, NAMEDATALEN - 1);
-    }
+
     /* We use palloc0 here to ensure result is zero-padded */
     result = (Name)palloc0(NAMEDATALEN);
     MemCpy(NameStr(*result), VARDATA_ANY(s), len);
@@ -3349,29 +3339,29 @@ Datum name_text(PG_FUNCTION_ARGS)
  */
 List* textToQualifiedNameList(text* textval)
 {
-    char* raw_name = NULL;
+    char* rawname = NULL;
     List* result = NIL;
-    List* name_list = NIL;
+    List* namelist = NIL;
     ListCell* l = NULL;
 
     /* Convert to C string (handles possible detoasting). */
-    /* Note we rely on being able to modify raw_name below. */
-    raw_name = text_to_cstring(textval);
+    /* Note we rely on being able to modify rawname below. */
+    rawname = text_to_cstring(textval);
 
-    if (!SplitIdentifierString(raw_name, '.', &name_list)) {
+    if (!SplitIdentifierString(rawname, '.', &namelist))
         ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("invalid name syntax")));
-    }
-    if (name_list == NIL) {
+
+    if (namelist == NIL)
         ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("invalid name syntax")));
-    }
-    foreach (l, name_list) {
+
+    foreach (l, namelist) {
         char* curname = (char*)lfirst(l);
 
         result = lappend(result, makeString(pstrdup(curname)));
     }
 
-    pfree_ext(raw_name);
-    list_free_ext(name_list);
+    pfree_ext(rawname);
+    list_free_ext(namelist);
 
     return result;
 }
@@ -3391,7 +3381,7 @@ List* textToQualifiedNameList(text* textval)
  *			   (typically '.' or ',').	Whitespace may also appear around
  *			   identifiers.
  * Outputs:
- *	name_list: filled with a palloc'd list of pointers to identifiers within
+ *	namelist: filled with a palloc'd list of pointers to identifiers within
  *			  rawstring.  Caller should list_free_ext() this even on error return.
  *
  * Returns TRUE if okay, FALSE if there is a syntax error in the string.
@@ -3399,19 +3389,20 @@ List* textToQualifiedNameList(text* textval)
  * Note that an empty string is considered okay here, though not in
  * textToQualifiedNameList.
  */
-bool SplitIdentifierString(char* rawstring, char separator, List** name_list, bool downCase)
+bool SplitIdentifierString(char* rawstring, char separator, List** namelist, bool downCase, bool truncateToolong)
 {
     char* nextp = rawstring;
     bool done = false;
     errno_t ss_rc = 0;
-    *name_list = NIL;
 
-    while (isspace((unsigned char)*nextp)) {
+    *namelist = NIL;
+
+    while (isspace((unsigned char)*nextp))
         nextp++; /* skip leading whitespace */
-    }
-    if (*nextp == '\0') {
+
+    if (*nextp == '\0')
         return true; /* allow empty string */
-    }
+
     /* At the top of the loop, we are at start of a new identifier. */
     char* curname = NULL;
     char* endp = NULL;
@@ -3422,12 +3413,10 @@ bool SplitIdentifierString(char* rawstring, char separator, List** name_list, bo
             curname = nextp + 1;
             for (;;) {
                 endp = strchr(nextp + 1, '\"');
-                if (endp == NULL) {
+                if (endp == NULL)
                     return false; /* mismatched quotes */
-                }
-                if (endp[1] != '\"') {
+                if (endp[1] != '\"')
                     break; /* found end of quoted name */
-                }
                 /* Collapse adjacent quotes into one quote, and look again */
                 if (strlen(endp) > 0) {
                     ss_rc = memmove_s(endp, strlen(endp), endp + 1, strlen(endp));
@@ -3442,13 +3431,12 @@ bool SplitIdentifierString(char* rawstring, char separator, List** name_list, bo
             int len;
 
             curname = nextp;
-            while (*nextp && *nextp != separator && !isspace((unsigned char)*nextp)) {
+            while (*nextp && *nextp != separator && !isspace((unsigned char)*nextp))
                 nextp++;
-            }
             endp = nextp;
-            if (curname == nextp) {
+            if (curname == nextp)
                 return false; /* empty unquoted name not allowed */
-            }
+
             /*
              * Downcase the identifier, using same code as main lexer does.
              *
@@ -3474,30 +3462,29 @@ bool SplitIdentifierString(char* rawstring, char separator, List** name_list, bo
             }
         }
 
-        while (isspace((unsigned char)*nextp)) {
+        while (isspace((unsigned char)*nextp))
             nextp++; /* skip trailing whitespace */
-        }
+
         if (*nextp == separator) {
             nextp++;
-            while (isspace((unsigned char)*nextp)) {
+            while (isspace((unsigned char)*nextp))
                 nextp++; /* skip leading whitespace for next */
-            }
                          /* we expect another name, so done remains false */
-        } else if (*nextp == '\0') {
+        } else if (*nextp == '\0')
             done = true;
-        } else {
+        else
             return false; /* invalid syntax */
-        }
+
         /* Now safe to overwrite separator with a null */
         *endp = '\0';
-
-        /* Truncate name if it's overlength */
-        truncate_identifier(curname, strlen(curname), false);
-
+        if (truncateToolong == true) {
+            /* Truncate name if it's overlength */
+            truncate_identifier(curname, strlen(curname), false);
+        }
         /*
          * Finished isolating current name --- add it to list
          */
-        *name_list = lappend(*name_list, curname);
+        *namelist = lappend(*namelist, curname);
 
         /* Loop back if we didn't reach end of string */
     } while (!done);
@@ -3505,19 +3492,20 @@ bool SplitIdentifierString(char* rawstring, char separator, List** name_list, bo
     return true;
 }
 
-bool SplitIdentifierInteger(char* rawstring, char separator, List** name_list)
+bool SplitIdentifierInteger(char* rawstring, char separator, List** namelist)
 {
     const int LEN = 2;
     char* nextp = rawstring;
     bool done = false;
-    *name_list = NIL;
 
-    while (isspace((unsigned char)*nextp)) {
+    *namelist = NIL;
+
+    while (isspace((unsigned char)*nextp))
         nextp++; /* skip leading whitespace */
-    }
-    if (*nextp == '\0') {
+
+    if (*nextp == '\0')
         return true; /* allow empty string */
-    }
+
     /* At the top of the loop, we are at start of a new identifier. */
     char* curname = NULL;
     char* endp = NULL;
@@ -3533,39 +3521,36 @@ bool SplitIdentifierInteger(char* rawstring, char separator, List** name_list)
             return false; /* empty unquoted name not allowed */
 
         len = endp - curname;
-        if (len > LEN) {
+
+        if (len > LEN)
             return false;
-        }
 
         for (int i = 0; i < len; i++) {
             unsigned char ch = (unsigned char)curname[i];
-            if (ch < '0' || ch > '9') {
+            if (ch < '0' || ch > '9')
                 return false;
-            }
         }
 
-        while (isspace((unsigned char)*nextp)) {
+        while (isspace((unsigned char)*nextp))
             nextp++; /* skip trailing whitespace */
-        }
 
         if (*nextp == separator) {
             nextp++;
-            while (isspace((unsigned char)*nextp)) {
+            while (isspace((unsigned char)*nextp))
                 nextp++; /* skip leading whitespace for next */
-            }
                          /* we expect another name, so done remains false */
-        } else if (*nextp == '\0') {
+        } else if (*nextp == '\0')
             done = true;
-        } else {
+        else
             return false; /* invalid syntax */
-        }
+
         /* Now safe to overwrite separator with a null */
         *endp = '\0';
 
         /*
          * Finished isolating current name --- add it to list
          */
-        *name_list = lappend(*name_list, curname);
+        *namelist = lappend(*namelist, curname);
 
         /* Loop back if we didn't reach end of string */
     } while (!done);
@@ -3580,6 +3565,7 @@ bool SplitIdentifierInteger(char* rawstring, char separator, List** name_list)
  * be careful to free working copies of toasted datums.  Most places don't
  * need to be so careful.
  *****************************************************************************/
+
 Datum byteaeq(PG_FUNCTION_ARGS)
 {
     Datum arg1 = PG_GETARG_DATUM(0);
@@ -3621,9 +3607,9 @@ Datum byteane(PG_FUNCTION_ARGS)
      */
     len1 = toast_raw_datum_size(arg1);
     len2 = toast_raw_datum_size(arg2);
-    if (len1 != len2) {
+    if (len1 != len2)
         result = true;
-    } else {
+    else {
         bytea* barg1 = DatumGetByteaPP(arg1);
         bytea* barg2 = DatumGetByteaPP(arg2);
 
@@ -3719,9 +3705,8 @@ Datum byteacmp(PG_FUNCTION_ARGS)
     len2 = VARSIZE_ANY_EXHDR(arg2);
 
     cmp = memcmp(VARDATA_ANY(arg1), VARDATA_ANY(arg2), Min(len1, len2));
-    if ((cmp == 0) && (len1 != len2)) {
+    if ((cmp == 0) && (len1 != len2))
         cmp = (len1 < len2) ? -1 : 1;
-    }
 
     PG_FREE_IF_COPY(arg1, 0);
     PG_FREE_IF_COPY(arg2, 1);
@@ -3732,14 +3717,14 @@ Datum byteacmp(PG_FUNCTION_ARGS)
 Datum bytea_sortsupport(PG_FUNCTION_ARGS)
 {
     SortSupport ssup = (SortSupport)PG_GETARG_POINTER(0);
-    MemoryContext old_context;
+    MemoryContext oldcontext;
 
-    old_context = MemoryContextSwitchTo(ssup->ssup_cxt);
+    oldcontext = MemoryContextSwitchTo(ssup->ssup_cxt);
 
     /* Use generic string SortSupport, forcing "C" collation */
     varstr_sortsupport(ssup, C_COLLATION_OID, false);
 
-    (void)MemoryContextSwitchTo(old_context);
+    MemoryContextSwitchTo(oldcontext);
 
     PG_RETURN_VOID();
 }
@@ -3755,11 +3740,11 @@ Datum raweq(PG_FUNCTION_ARGS)
     len2 = VARSIZE_ANY_EXHDR(arg2);
 
     /* fast path for different-length inputs */
-    if (len1 != len2) {
+    if (len1 != len2)
         result = false;
-    } else {
+    else
         result = (memcmp(VARDATA_ANY(arg1), VARDATA_ANY(arg2), len1) == 0);
-    }
+
     PG_FREE_IF_COPY(arg1, 0);
     PG_FREE_IF_COPY(arg2, 1);
 
@@ -3777,11 +3762,11 @@ Datum rawne(PG_FUNCTION_ARGS)
     len2 = VARSIZE_ANY_EXHDR(arg2);
 
     /* fast path for different-length inputs */
-    if (len1 != len2) {
+    if (len1 != len2)
         result = true;
-    } else {
+    else
         result = (memcmp(VARDATA_ANY(arg1), VARDATA_ANY(arg2), len1) != 0);
-    }
+
     PG_FREE_IF_COPY(arg1, 0);
     PG_FREE_IF_COPY(arg2, 1);
 
@@ -3871,9 +3856,8 @@ Datum rawcmp(PG_FUNCTION_ARGS)
     len2 = VARSIZE_ANY_EXHDR(arg2);
 
     cmp = memcmp(VARDATA_ANY(arg1), VARDATA_ANY(arg2), Min(len1, len2));
-    if ((cmp == 0) && (len1 != len2)) {
+    if ((cmp == 0) && (len1 != len2))
         cmp = (len1 < len2) ? -1 : 1;
-    }
 
     PG_FREE_IF_COPY(arg1, 0);
     PG_FREE_IF_COPY(arg2, 1);
@@ -3891,22 +3875,20 @@ Datum rawcat(PG_FUNCTION_ARGS)
     errno_t rc = EOK;
 
     len1 = VARSIZE_ANY_EXHDR(t1);
-    if (len1 < 0) {
+    if (len1 < 0)
         len1 = 0;
-    }
 
     len2 = VARSIZE_ANY_EXHDR(t2);
-    if (len2 < 0) {
+    if (len2 < 0)
         len2 = 0;
-    }
 
     len = len1 + len2 + VARHDRSZ;
     result = (bytea*)palloc(len);
 
-    /* Set size of result string */
+    /* Set size of result string*/
     SET_VARSIZE(result, len);
 
-    /* Fill data field of result string */
+    /* Fill data field of result string*/
     ptr = VARDATA(result);
     if (len1 > 0) {
         rc = memcpy_s(ptr, len1, VARDATA_ANY(t1), len1);
@@ -3921,12 +3903,12 @@ Datum rawcat(PG_FUNCTION_ARGS)
 }
 
 /*
- * append_string_info_text
+ * appendStringInfoText
  *
  * Append a text to str.
  * Like appendStringInfoString(str, text_to_cstring(t)) but faster.
  */
-static void append_string_info_text(StringInfo str, const text* t)
+static void appendStringInfoText(StringInfo str, const text* t)
 {
     appendBinaryStringInfo(str, VARDATA_ANY(t), VARSIZE_ANY_EXHDR(t));
 }
@@ -3954,17 +3936,18 @@ Datum replace_text(PG_FUNCTION_ARGS)
     char* start_ptr = NULL;
     StringInfoData str;
 
-    if (PG_ARGISNULL(0)) {
+    if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
-    }
     src_text = PG_GETARG_TEXT_PP(0);
-    if (PG_ARGISNULL(1)) {
+
+    if (PG_ARGISNULL(1))
         PG_RETURN_TEXT_P(src_text);
-    }
+
     from_sub_text = PG_GETARG_TEXT_PP(1);
-    if (!PG_ARGISNULL(2)) {
+
+    if (!PG_ARGISNULL(2))
         to_sub_text = PG_GETARG_TEXT_PP(2);
-    }
+
     text_position_setup(src_text, from_sub_text, &state);
 
     /*
@@ -3991,6 +3974,7 @@ Datum replace_text(PG_FUNCTION_ARGS)
 
     /* start_ptr points to the start_posn'th character of src_text */
     start_ptr = VARDATA_ANY(src_text);
+
     initStringInfo(&str);
 
     do {
@@ -4000,9 +3984,9 @@ Datum replace_text(PG_FUNCTION_ARGS)
         chunk_len = charlen_to_bytelen(start_ptr, curr_posn - start_posn);
         appendBinaryStringInfo(&str, start_ptr, chunk_len);
 
-        if (to_sub_text != NULL) {
-            append_string_info_text(&str, to_sub_text);
-        }
+        if (to_sub_text != NULL)
+            appendStringInfoText(&str, to_sub_text);
+
         start_posn = curr_posn;
         start_ptr += chunk_len;
         start_posn += from_sub_text_len;
@@ -4014,16 +3998,16 @@ Datum replace_text(PG_FUNCTION_ARGS)
     /* copy trailing data */
     chunk_len = ((char*)src_text + VARSIZE_ANY(src_text)) - start_ptr;
     appendBinaryStringInfo(&str, start_ptr, chunk_len);
+
     text_position_cleanup(&state);
 
     ret_text = cstring_to_text_with_len(str.data, str.len);
     pfree_ext(str.data);
 
-    if (VARHDRSZ == VARSIZE(ret_text) && DB_IS_CMPT(DB_CMPT_A)) {
+    if (VARHDRSZ == VARSIZE(ret_text) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TEXT_P(ret_text);
-    }
 }
 
 /*
@@ -4038,15 +4022,13 @@ static bool check_replace_text_has_escape_char(const text* replace_text)
 
     if (pg_database_encoding_max_length() == 1) {
         for (; p < p_end; p++) {
-            if (*p == '\\') {
+            if (*p == '\\')
                 return true;
-            }
         }
     } else {
         for (; p < p_end; p += pg_mblen(p)) {
-            if (*p == '\\') {
+            if (*p == '\\')
                 return true;
-            }
         }
     }
 
@@ -4074,19 +4056,20 @@ static void appendStringInfoRegexpSubstr(
 
         /* Find next escape char. */
         if (eml == 1) {
-            for (; p < p_end && *p != '\\'; p++) {}
+            for (; p < p_end && *p != '\\'; p++)
+                /* nothing */;
         } else {
-            for (; p < p_end && *p != '\\'; p += pg_mblen(p)) {}
+            for (; p < p_end && *p != '\\'; p += pg_mblen(p))
+                /* nothing */;
         }
 
         /* Copy the text we just scanned over, if any. */
-        if (p > chunk_start) {
+        if (p > chunk_start)
             appendBinaryStringInfo(str, chunk_start, p - chunk_start);
-        }
+
         /* Done if at end of string, else advance over escape char. */
-        if (p >= p_end) {
+        if (p >= p_end)
             break;
-        }
         p++;
 
         if (p >= p_end) {
@@ -4170,9 +4153,8 @@ text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool
     data_len = pg_mb2wchar_with_len(VARDATA_ANY(src_text), data, src_text_len);
 
     /* Check whether replace_text has escape char. */
-    if (replace_text != NULL) {
+    if (replace_text != NULL)
         have_escape = check_replace_text_has_escape_char(replace_text);
-    }
 
     /* start_ptr points to the data_pos'th character of src_text */
     start_ptr = (char*)VARDATA_ANY(src_text);
@@ -4193,9 +4175,8 @@ text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool
             pmatch,
             0);
 
-        if (regexec_result == REG_NOMATCH) {
+        if (regexec_result == REG_NOMATCH)
             break;
-        }
 
         if (regexec_result != REG_OKAY) {
             char errMsg[100];
@@ -4227,11 +4208,11 @@ text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool
          * Copy the replace_text. Process back references when the
          * replace_text has escape characters.
          */
-        if (replace_text != NULL && have_escape) {
+        if (replace_text != NULL && have_escape)
             appendStringInfoRegexpSubstr(&buf, replace_text, pmatch, start_ptr, data_pos);
-        } else if (replace_text != NULL) {
-            append_string_info_text(&buf, replace_text);
-        }
+        else if (replace_text != NULL)
+            appendStringInfoText(&buf, replace_text);
+
         /* Advance start_ptr and data_pos over the matched text. */
         start_ptr += charlen_to_bytelen(start_ptr, pmatch[0].rm_eo - data_pos);
         data_pos = pmatch[0].rm_eo;
@@ -4239,9 +4220,9 @@ text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool
         /*
          * When global option is off, replace the first instance only.
          */
-        if (!glob) {
+        if (!glob)
             break;
-        }
+
         /*
          * Advance search position.	Normally we start the next search at the
          * end of the previous match; but if the match was of zero length, we
@@ -4249,9 +4230,8 @@ text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool
          * again.
          */
         search_start = data_pos;
-        if (pmatch[0].rm_so == pmatch[0].rm_eo) {
+        if (pmatch[0].rm_so == pmatch[0].rm_eo)
             search_start++;
-        }
     }
 
     /*
@@ -4290,9 +4270,8 @@ Datum split_text(PG_FUNCTION_ARGS)
     text* result_text = NULL;
 
     /* field number is 1 based */
-    if (fldnum < 1) {
+    if (fldnum < 1)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("field position must be greater than zero")));
-    }
 
     text_position_setup(inputstring, fldsep, &state);
 
@@ -4306,9 +4285,11 @@ Datum split_text(PG_FUNCTION_ARGS)
     /* return empty string for empty input string */
     if (inputstring_len < 1) {
         text_position_cleanup(&state);
-        if (DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
+
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
             PG_RETURN_NULL();
         }
+
         PG_RETURN_TEXT_P(cstring_to_text(""));
     }
 
@@ -4319,11 +4300,11 @@ Datum split_text(PG_FUNCTION_ARGS)
         if (fldnum == 1) {
             PG_RETURN_TEXT_P(inputstring);
         }
-        
-        if (DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
+
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
             PG_RETURN_NULL();
         }
-        
+
         PG_RETURN_TEXT_P(cstring_to_text(""));
     }
 
@@ -4338,11 +4319,11 @@ Datum split_text(PG_FUNCTION_ARGS)
         if (fldnum == 1) {
             PG_RETURN_TEXT_P(inputstring);
         }
-        
-        if (DB_IS_CMPT(DB_CMPT_A)) {
+
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
             PG_RETURN_NULL();
         }
-        
+
         PG_RETURN_TEXT_P(cstring_to_text(""));
     }
 
@@ -4357,20 +4338,19 @@ Datum split_text(PG_FUNCTION_ARGS)
     if (fldnum > 0) {
         /* N'th field separator not found */
         /* if last field requested, return it, else empty string */
-        if (fldnum == 1) {
+        if (fldnum == 1)
             result_text = text_substring(PointerGetDatum(inputstring), start_posn, -1, true);
-        } else {
+        else
             result_text = cstring_to_text("");
-        }
     } else {
         /* non-last field requested */
         result_text = text_substring(PointerGetDatum(inputstring), start_posn, end_posn - start_posn, false);
     }
 
-    if (TEXTISORANULL(result_text) && DB_IS_CMPT(DB_CMPT_A)) {
+    if (TEXTISORANULL(result_text) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
         PG_RETURN_NULL();
     }
-    
+
     PG_RETURN_TEXT_P(result_text);
 }
 
@@ -4423,24 +4403,23 @@ static Datum text_to_array_internal(PG_FUNCTION_ARGS)
     ArrayBuildState* astate = NULL;
 
     /* when input string is NULL, then result is NULL too */
-    if (PG_ARGISNULL(0)) {
+    if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
-    }
 
     inputstring = PG_GETARG_TEXT_PP(0);
 
     /* fldsep can be NULL */
-    if (!PG_ARGISNULL(1)) {
+    if (!PG_ARGISNULL(1))
         fldsep = PG_GETARG_TEXT_PP(1);
-    } else {
+    else
         fldsep = NULL;
-    }
+
     /* null_string can be NULL or omitted */
-    if (PG_NARGS() > 2 && !PG_ARGISNULL(2)) {
+    if (PG_NARGS() > 2 && !PG_ARGISNULL(2))
         null_string = PG_GETARG_TEXT_PP(2);
-    } else {
+    else
         null_string = NULL;
-    }
+
     if (fldsep != NULL) {
         /*
          * Normal case with non-null fldsep.  Use the text_position machinery
@@ -4483,18 +4462,13 @@ static Datum text_to_array_internal(PG_FUNCTION_ARGS)
         /* start_ptr points to the start_posn'th character of inputstring */
         start_ptr = VARDATA_ANY(inputstring);
 
-        for (fldnum = 1;; fldnum++) {  /* field number is 1 based */
+        for (fldnum = 1;; fldnum++) { /* field number is 1 based */
             CHECK_FOR_INTERRUPTS();
 
             end_posn = text_position_next(start_posn, &state);
 
-            if (end_posn == 0) {
-                /* fetch last field */
-                chunk_len = ((char*)inputstring + VARSIZE_ANY(inputstring)) - start_ptr;
-            } else {
-                /* fetch non-last field */
-                chunk_len = charlen_to_bytelen(start_ptr, end_posn - start_posn);
-            }
+            chunk_len = (end_posn == 0) ? (((char*)inputstring + VARSIZE_ANY(inputstring)) - start_ptr) :
+                charlen_to_bytelen(start_ptr, end_posn - start_posn);
 
             /* must build a temp text datum to pass to accumArrayResult */
             result_text = cstring_to_text_with_len(start_ptr, chunk_len);
@@ -4505,9 +4479,9 @@ static Datum text_to_array_internal(PG_FUNCTION_ARGS)
 
             pfree_ext(result_text);
 
-            if (end_posn == 0) {
+            if (end_posn == 0)
                 break;
-            }
+
             start_posn = end_posn;
             start_ptr += chunk_len;
             start_posn += fldsep_len;
@@ -4524,9 +4498,9 @@ static Datum text_to_array_internal(PG_FUNCTION_ARGS)
         inputstring_len = VARSIZE_ANY_EXHDR(inputstring);
 
         /* return empty array for empty input string */
-        if (inputstring_len < 1) {
+        if (inputstring_len < 1)
             PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
-        }
+
         start_ptr = VARDATA_ANY(inputstring);
 
         while (inputstring_len > 0) {
@@ -4564,8 +4538,8 @@ Datum array_to_text(PG_FUNCTION_ARGS)
 
     result = array_to_text_internal(fcinfo, v, fldsep, NULL);
 
-    /* To a, empty string need return NULL. */
-    if (VARSIZE_ANY_EXHDR(result) == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+    /* To A db, empty string need return NULL.*/
+    if (0 == VARSIZE_ANY_EXHDR(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(result);
@@ -4587,22 +4561,22 @@ Datum array_to_text_null(PG_FUNCTION_ARGS)
     text* result = NULL;
 
     /* returns NULL when first or second parameter is NULL */
-    if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) {
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
         PG_RETURN_NULL();
-    }
+
     v = PG_GETARG_ARRAYTYPE_P(0);
     fldsep = text_to_cstring(PG_GETARG_TEXT_PP(1));
 
     /* NULL null string is passed through as a null pointer */
-    if (!PG_ARGISNULL(2)) {
+    if (!PG_ARGISNULL(2))
         null_string = text_to_cstring(PG_GETARG_TEXT_PP(2));
-    } else {
+    else
         null_string = NULL;
-    }
+
     result = array_to_text_internal(fcinfo, v, fldsep, null_string);
 
-    /* To a db, empty string need return NULL. */
-    if (VARSIZE_ANY_EXHDR(result) == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+    /* To A db, empty string need return NULL.*/
+    if (0 == VARSIZE_ANY_EXHDR(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(result);
@@ -4615,8 +4589,7 @@ Datum array_to_text_null(PG_FUNCTION_ARGS)
 static text* array_to_text_internal(FunctionCallInfo fcinfo, ArrayType* v, char* fldsep, char* null_string)
 {
     text* result = NULL;
-    int nitems;
-    int *dims = NULL, ndims;
+    int nitems, *dims = NULL, ndims;
     Oid element_type;
     int typlen;
     bool typbyval = false;
@@ -4634,9 +4607,9 @@ static text* array_to_text_internal(FunctionCallInfo fcinfo, ArrayType* v, char*
     nitems = ArrayGetNItems(ndims, dims);
 
     /* if there are no elements, return an empty string */
-    if (nitems == 0) {
+    if (nitems == 0)
         return cstring_to_text_with_len("", 0);
-    }
+
     element_type = ARR_ELEMTYPE(v);
     initStringInfo(&buf);
 
@@ -4683,11 +4656,10 @@ static text* array_to_text_internal(FunctionCallInfo fcinfo, ArrayType* v, char*
         if (bitmap && (*bitmap & bitmask) == 0) {
             /* if null_string is NULL, we just ignore null elements */
             if (null_string != NULL) {
-                if (printed) {
+                if (printed)
                     appendStringInfo(&buf, "%s%s", fldsep, null_string);
-                } else {
+                else
                     appendStringInfoString(&buf, null_string);
-                }
                 printed = true;
             }
         } else {
@@ -4695,11 +4667,10 @@ static text* array_to_text_internal(FunctionCallInfo fcinfo, ArrayType* v, char*
 
             value = OutputFunctionCall(&my_extra->proc, itemvalue);
 
-            if (printed) {
+            if (printed)
                 appendStringInfo(&buf, "%s%s", fldsep, value);
-            } else {
+            else
                 appendStringInfoString(&buf, value);
-            }
             printed = true;
 
             p = att_addlength_pointer(p, typlen, p);
@@ -4784,9 +4755,8 @@ Datum md5_text(PG_FUNCTION_ARGS)
     len = VARSIZE_ANY_EXHDR(in_text);
 
     /* get the hash result */
-    if (pg_md5_hash(VARDATA_ANY(in_text), len, hexsum) == false) {
+    if (pg_md5_hash(VARDATA_ANY(in_text), len, hexsum) == false)
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
-    }
 
     /* convert to text and return it */
     PG_RETURN_TEXT_P(cstring_to_text(hexsum));
@@ -4803,9 +4773,9 @@ Datum md5_bytea(PG_FUNCTION_ARGS)
     char hexsum[MD5_HASH_LEN + 1];
 
     len = VARSIZE_ANY_EXHDR(in);
-    if (pg_md5_hash(VARDATA_ANY(in), len, hexsum) == false) {
+    if (pg_md5_hash(VARDATA_ANY(in), len, hexsum) == false)
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
-    }
+
     PG_RETURN_TEXT_P(cstring_to_text(hexsum));
 }
 
@@ -4826,15 +4796,15 @@ Datum pg_column_size(PG_FUNCTION_ARGS)
         Oid argtypeid = get_fn_expr_argtype(fcinfo->flinfo, 0);
 
         typlen = get_typlen(argtypeid);
-        if (typlen == 0) {  /* should not happen */
+        if (typlen == 0) /* should not happen */
             ereport(
                 ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", argtypeid)));
-        }
+
         fcinfo->flinfo->fn_extra = MemoryContextAlloc(fcinfo->flinfo->fn_mcxt, sizeof(int));
         *((int*)fcinfo->flinfo->fn_extra) = typlen;
-    } else {
+    } else
         typlen = *((int*)fcinfo->flinfo->fn_extra);
-    }
+
     if (typlen == -1) {
         /* varlena type, possibly toasted */
         result = toast_datum_size(value);
@@ -4927,13 +4897,13 @@ Datum datalength(PG_FUNCTION_ARGS)
  */
 
 /* subroutine to initialize state */
-static StringInfo make_string_agg_state(FunctionCallInfo fcinfo)
+static StringInfo makeStringAggState(FunctionCallInfo fcinfo)
 {
     StringInfo state;
-    MemoryContext agg_context;
-    MemoryContext old_context;
+    MemoryContext aggcontext;
+    MemoryContext oldcontext;
 
-    if (!AggCheckCallContext(fcinfo, &agg_context)) {
+    if (!AggCheckCallContext(fcinfo, &aggcontext)) {
         /* cannot be called directly because of internal-type argument */
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -4944,9 +4914,9 @@ static StringInfo make_string_agg_state(FunctionCallInfo fcinfo)
      * Create state in aggregate context.  It'll stay there across subsequent
      * calls.
      */
-    old_context = MemoryContextSwitchTo(agg_context);
+    oldcontext = MemoryContextSwitchTo(aggcontext);
     state = makeStringInfo();
-    (void)MemoryContextSwitchTo(old_context);
+    MemoryContextSwitchTo(oldcontext);
 
     return state;
 }
@@ -4960,12 +4930,12 @@ Datum string_agg_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
-        }
-        append_string_info_text(state, PG_GETARG_TEXT_PP(1)); /* value */
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
+
+        appendStringInfoText(state, PG_GETARG_TEXT_PP(1)); /* value */
     }
 
     /*
@@ -4984,48 +4954,45 @@ Datum string_agg_finalfn(PG_FUNCTION_ARGS)
 
     state = PG_ARGISNULL(0) ? NULL : (StringInfo)PG_GETARG_POINTER(0);
 
-    if (state != NULL) {
+    if (state != NULL)
         PG_RETURN_TEXT_P(cstring_to_text_with_len(state->data, state->len));
-    } else {
+    else
         PG_RETURN_NULL();
-    }
 }
 
 /*
- * checksumtext_agg_transfn - sum the old_sumof_hash_val and the value of text input and returns numeric.
+ * checksumtext_agg_transfn - sum the oldsumofhashvalue and the value of text input and returns numeric.
  *
  * Syntax: checksumtext_agg_transfn(numeric, text) RETURNS numeric
  *
  */
 Datum checksumtext_agg_transfn(PG_FUNCTION_ARGS)
 {
-    Numeric old_sumof_hash_val;
-    Datum new_hash_val;
-    int64 hash_val;
+    Numeric oldsumofhashval;
+    Datum newhashval;
+    int64 hashval;
 
     if (PG_ARGISNULL(0)) {
         /* No non-null input seen so far... */
-        if (PG_ARGISNULL(1)) {
+        if (PG_ARGISNULL(1))
             PG_RETURN_NULL(); /* still no non-null */
-        }
         /* This is the first non-null input. */
-        hash_val = (int64)DirectFunctionCall1(hashtext, PG_GETARG_DATUM(1));
-        new_hash_val = DirectFunctionCall1(int8_numeric, hash_val);
-        PG_RETURN_DATUM(new_hash_val);
+        hashval = (int64)DirectFunctionCall1(hashtext, PG_GETARG_DATUM(1));
+        newhashval = DirectFunctionCall1(int8_numeric, hashval);
+        PG_RETURN_DATUM(newhashval);
     }
 
-    old_sumof_hash_val = PG_GETARG_NUMERIC(0);
+    oldsumofhashval = PG_GETARG_NUMERIC(0);
 
-    /* Leave old_sumof_hash_val unchanged if new input is null. */
-    if (PG_ARGISNULL(1)) {
-        PG_RETURN_NUMERIC(old_sumof_hash_val);
-    }
+    /* Leave oldsumofhashval unchanged if new input is null. */
+    if (PG_ARGISNULL(1))
+        PG_RETURN_NUMERIC(oldsumofhashval);
 
     /* OK to do the addition. */
-    hash_val = (int64)DirectFunctionCall1(hashtext, PG_GETARG_DATUM(1));
-    new_hash_val = DirectFunctionCall1(int8_numeric, hash_val);
+    hashval = (int64)DirectFunctionCall1(hashtext, PG_GETARG_DATUM(1));
+    newhashval = DirectFunctionCall1(int8_numeric, hashval);
 
-    PG_RETURN_DATUM(DirectFunctionCall2(numeric_add, NumericGetDatum(old_sumof_hash_val), new_hash_val));
+    PG_RETURN_DATUM(DirectFunctionCall2(numeric_add, NumericGetDatum(oldsumofhashval), newhashval));
 }
 
 Datum list_agg_transfn(PG_FUNCTION_ARGS)
@@ -5037,12 +5004,12 @@ Datum list_agg_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
-        }
-        append_string_info_text(state, PG_GETARG_TEXT_PP(1)); /* value */
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
+
+        appendStringInfoText(state, PG_GETARG_TEXT_PP(1)); /* value */
     }
 
     /*
@@ -5061,11 +5028,10 @@ Datum list_agg_finalfn(PG_FUNCTION_ARGS)
 
     state = PG_ARGISNULL(0) ? NULL : (StringInfo)PG_GETARG_POINTER(0);
 
-    if (state != NULL) {
+    if (state != NULL)
         PG_RETURN_TEXT_P(cstring_to_text_with_len(state->data, state->len));
-    } else {
+    else
         PG_RETURN_NULL();
-    }
 }
 
 Datum list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
@@ -5077,12 +5043,12 @@ Datum list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, cstring_to_text("")); /* delimiter */
-        }
-        append_string_info_text(state, PG_GETARG_TEXT_PP(1)); /* value */
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
+
+        appendStringInfoText(state, PG_GETARG_TEXT_PP(1)); /* value */
     }
 
     /*
@@ -5101,11 +5067,11 @@ Datum int2_list_agg_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
+
         appendStringInfo(state, "%hd", PG_GETARG_INT16(1)); /* value */
     }
 
@@ -5125,11 +5091,11 @@ Datum int2_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, cstring_to_text("")); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
+
         appendStringInfo(state, "%hd", PG_GETARG_INT16(1)); /* value */
     }
 
@@ -5149,11 +5115,11 @@ Datum int4_list_agg_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
+
         appendStringInfo(state, "%d", PG_GETARG_INT32(1)); /* value */
     }
 
@@ -5173,11 +5139,11 @@ Datum int4_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, cstring_to_text("")); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
+
         appendStringInfo(state, "%d", PG_GETARG_INT32(1)); /* value */
     }
 
@@ -5197,11 +5163,11 @@ Datum int8_list_agg_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
+
         appendStringInfo(state, "%ld", PG_GETARG_INT64(1)); /* value */
     }
 
@@ -5221,11 +5187,11 @@ Datum int8_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, cstring_to_text("")); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
+
         appendStringInfo(state, "%ld", PG_GETARG_INT64(1)); /* value */
     }
 
@@ -5245,11 +5211,11 @@ Datum float4_list_agg_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
+
         appendStringInfo(state, "%f", PG_GETARG_FLOAT4(1)); /* value */
     }
 
@@ -5269,11 +5235,11 @@ Datum float4_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, cstring_to_text("")); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
+
         appendStringInfo(state, "%lf", PG_GETARG_FLOAT4(1)); /* value */
     }
 
@@ -5293,11 +5259,11 @@ Datum float8_list_agg_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
+
         appendStringInfo(state, "%lf", PG_GETARG_FLOAT8(1)); /* value */
     }
 
@@ -5317,11 +5283,11 @@ Datum float8_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
     /* Append the value unless null. */
     if (!PG_ARGISNULL(1)) {
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, cstring_to_text("")); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
+
         appendStringInfo(state, "%lf", PG_GETARG_FLOAT8(1)); /* value */
     }
 
@@ -5349,11 +5315,11 @@ Datum numeric_list_agg_transfn(PG_FUNCTION_ARGS)
         val = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
 
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
+
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
     }
@@ -5382,11 +5348,11 @@ Datum numeric_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
         val = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
 
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, cstring_to_text("")); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
+
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
     }
@@ -5411,11 +5377,11 @@ Datum date_list_agg_transfn(PG_FUNCTION_ARGS)
         val = DatumGetCString(DirectFunctionCall1(date_out, dateVal));
 
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
+
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
     }
@@ -5440,11 +5406,11 @@ Datum date_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
         val = DatumGetCString(DirectFunctionCall1(date_out, dateVal));
 
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, cstring_to_text("")); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
+
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
     }
@@ -5469,11 +5435,11 @@ Datum timestamp_list_agg_transfn(PG_FUNCTION_ARGS)
         val = DatumGetCString(DirectFunctionCall1(timestamp_out, timestamp));
 
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
+
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
     }
@@ -5498,11 +5464,11 @@ Datum timestamp_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
         val = DatumGetCString(DirectFunctionCall1(timestamp_out, timestamp));
 
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, cstring_to_text("")); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
+
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
     }
@@ -5527,11 +5493,11 @@ Datum timestamptz_list_agg_transfn(PG_FUNCTION_ARGS)
         val = DatumGetCString(DirectFunctionCall1(timestamptz_out, dt));
 
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
+
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
     }
@@ -5556,11 +5522,11 @@ Datum timestamptz_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
         val = DatumGetCString(DirectFunctionCall1(timestamptz_out, dt));
 
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, cstring_to_text("")); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
+
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
     }
@@ -5585,11 +5551,11 @@ Datum interval_list_agg_transfn(PG_FUNCTION_ARGS)
         val = DatumGetCString(DirectFunctionCall1(interval_out, PointerGetDatum(span)));
 
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, PG_GETARG_TEXT_PP(2)); /* delimiter */
+
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
     }
@@ -5614,11 +5580,11 @@ Datum interval_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
         val = DatumGetCString(DirectFunctionCall1(interval_out, PointerGetDatum(span)));
 
         /* On the first time through, we ignore the delimiter. */
-        if (state == NULL) {
-            state = make_string_agg_state(fcinfo);
-        } else if (!PG_ARGISNULL(2)) {
-            append_string_info_text(state, cstring_to_text("")); /* delimiter */
-        }
+        if (state == NULL)
+            state = makeStringAggState(fcinfo);
+        else if (!PG_ARGISNULL(2))
+            appendStringInfoText(state, cstring_to_text("")); /* delimiter */
+
         appendStringInfo(state, "%s", val); /* value */
         pfree_ext(val);
     }
@@ -5647,10 +5613,8 @@ static text* concat_internal(const char* sepstr, int seplen, int argidx, Functio
             ArrayType* arr = NULL;
 
             /* concat(VARIADIC NULL) is defined as NULL */
-            if (PG_ARGISNULL(argidx)) {
-                fcinfo->isnull = true;
-                return NULL;
-            }
+            if (PG_ARGISNULL(argidx))
+                PG_RETURN_NULL();
 
             /*
              * Non-null argument had better be an array.  We assume that any call
@@ -5680,43 +5644,37 @@ static text* concat_internal(const char* sepstr, int seplen, int argidx, Functio
     for (i = argidx; i < PG_NARGS(); i++) {
         if (!PG_ARGISNULL(i)) {
             Datum value = PG_GETARG_DATUM(i);
-            Oid val_type;
-            Oid typ_output;
-            bool typ_is_varlena = false;
+            Oid valtype;
+            Oid typOutput;
+            bool typIsVarlena = false;
 
             /* add separator if appropriate */
-            if (first_arg) {
+            if (first_arg)
                 first_arg = false;
-            } else {
+            else
                 appendBinaryStringInfo(&str, sepstr, seplen);
-            }
+
             /* call the appropriate type output function, append the result */
-            val_type = get_fn_expr_argtype(fcinfo->flinfo, i);
-            if (!OidIsValid(val_type)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INDETERMINATE_DATATYPE),
+            valtype = get_fn_expr_argtype(fcinfo->flinfo, i);
+            if (!OidIsValid(valtype))
+                ereport(ERROR, (errcode(ERRCODE_INDETERMINATE_DATATYPE),
                         errmsg("could not determine data type of concat() input")));
-            }
-            getTypeOutputInfo(val_type, &typ_output, &typ_is_varlena);
-            appendStringInfoString(&str, OidOutputFunctionCall(typ_output, value));
-        } else if (PG_ARGISNULL(i) && DB_IS_CMPT(DB_CMPT_B) && !is_concat_ws) {
+            getTypeOutputInfo(valtype, &typOutput, &typIsVarlena);
+            appendStringInfoString(&str, OidOutputFunctionCall(typOutput, value));
+        } else if (PG_ARGISNULL(i) && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && !is_concat_ws) {
             pfree_ext(str.data);
-            fcinfo->isnull = true;
-            return NULL;
+            PG_RETURN_NULL();
         }
     }
 
     result = cstring_to_text_with_len(str.data, str.len);
     pfree_ext(str.data);
 
-    if ((result == NULL ||
-            (VARSIZE_ANY_EXHDR(result) == 0 && !DB_IS_CMPT(DB_CMPT_B | DB_CMPT_PG))) &&
-        (CONCAT_VARIADIC || DB_IS_CMPT(DB_CMPT_A))) {
-        fcinfo->isnull = true;
-        return NULL;
-    } else {
+    if ((result == NULL || (0 == VARSIZE_ANY_EXHDR(result) && !DB_IS_CMPT(B_FORMAT | PG_FORMAT))) &&
+        (CONCAT_VARIADIC || DB_IS_CMPT(A_FORMAT)))
+        PG_RETURN_NULL();
+    else
         return result;
-    }
 }
 
 /*
@@ -5734,16 +5692,14 @@ Datum text_concat(PG_FUNCTION_ARGS)
 Datum text_concat_ws(PG_FUNCTION_ARGS)
 {
     /* return NULL when separator is NULL */
-    if (PG_ARGISNULL(0)) {
+    if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
-    }
 
     char* sep = text_to_cstring(PG_GETARG_TEXT_PP(0));
     text* result = concat_internal(sep, strlen(sep), 1, fcinfo, true);
 
-    if (result == NULL) {
+    if (result == NULL)
         PG_RETURN_NULL();
-    }
 
     PG_RETURN_TEXT_P(result);
 }
@@ -5775,11 +5731,11 @@ Datum text_left(PG_FUNCTION_ARGS)
     }
 
     rlen = pg_mbcharcliplen(p, len, part_off);
-    if (rlen == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+    if (0 == rlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
         PG_RETURN_NULL();
-    } else {
-        PG_RETURN_TEXT_P(cstring_to_text_with_len(p, rlen));
     }
+
+    PG_RETURN_TEXT_P(cstring_to_text_with_len(p, rlen));
 }
 /*
  * Return last n characters in the string. When n is negative,
@@ -5795,11 +5751,11 @@ Datum text_right(PG_FUNCTION_ARGS)
     int off;
     text* part_str = NULL;
 
-    if (n < 0) {
+    if (n < 0)
         n = -n;
-    } else {
+    else
         n = pg_mbstrlen_with_len(p, len) - n;
-    }
+
     if (n >= 0) {
         part_str = text_substring(PointerGetDatum(str), 1, n, false);
         if (part_str != NULL) {
@@ -5808,11 +5764,11 @@ Datum text_right(PG_FUNCTION_ARGS)
         }
     }
     off = pg_mbcharcliplen(p, len, part_off);
-    if ((len - off) == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+    if (0 == (len - off) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
         PG_RETURN_NULL();
-    } else {
-        PG_RETURN_TEXT_P(cstring_to_text_with_len(p + off, len - off));
     }
+
+    PG_RETURN_TEXT_P(cstring_to_text_with_len(p + off, len - off));
 }
 
 /*
@@ -5846,9 +5802,8 @@ Datum text_reverse(PG_FUNCTION_ARGS)
         }
     } else {
         /* single byte version */
-        while (p < endp) {
+        while (p < endp)
             *(--dst) = *p++;
-        }
     }
 
     PG_RETURN_TEXT_P(result);
@@ -5888,25 +5843,24 @@ Datum text_format(PG_FUNCTION_ARGS)
     FmgrInfo typoutputinfo_width;
 
     /* When format string is null, immediately return null */
-    if (PG_ARGISNULL(0)) {
+    if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
-    }
 
     /* If argument is marked VARIADIC, expand array into elements */
     if (get_fn_expr_variadic(fcinfo->flinfo)) {
         ArrayType* arr = NULL;
-        int16 elm_len;
-        bool elm_by_val = false;
-        char elm_align;
+        int16 elmlen;
+        bool elmbyval = false;
+        char elmalign;
         int nitems = 0;
 
         /* Should have just the one argument */
         Assert(PG_NARGS() == 2);
 
         /* If argument is NULL, we treat it as zero-length array */
-        if (PG_ARGISNULL(1)) {
+        if (PG_ARGISNULL(1))
             nitems = 0;
-        } else {
+        else {
             /*
              * Non-null argument had better be an array.  We assume that any
              * call context that could let get_fn_expr_variadic return true
@@ -5921,10 +5875,10 @@ Datum text_format(PG_FUNCTION_ARGS)
 
             /* Get info about array element type */
             element_type = ARR_ELEMTYPE(arr);
-            get_typlenbyvalalign(element_type, &elm_len, &elm_by_val, &elm_align);
+            get_typlenbyvalalign(element_type, &elmlen, &elmbyval, &elmalign);
 
             /* Extract all array elements */
-            deconstruct_array(arr, element_type, elm_len, elm_by_val, elm_align, &elements, &nulls, &nitems);
+            deconstruct_array(arr, element_type, elmlen, elmbyval, elmalign, &elements, &nulls, &nitems);
         }
 
         nargs = nitems + 1;
@@ -5944,12 +5898,12 @@ Datum text_format(PG_FUNCTION_ARGS)
 
     /* Scan format string, looking for conversion specifiers. */
     for (cp = start_ptr; cp < end_ptr; cp++) {
-        int arg_pos;
-        int width_pos;
+        int argpos;
+        int widthpos;
         int flags;
         int width;
         Datum value;
-        bool is_null = false;
+        bool isNull = false;
         Oid typid;
 
         /*
@@ -5970,7 +5924,7 @@ Datum text_format(PG_FUNCTION_ARGS)
         }
 
         /* Parse the optional portions of the format specifier */
-        cp = text_format_parse_format(cp, end_ptr, &arg_pos, &width_pos, &flags, &width);
+        cp = text_format_parse_format(cp, end_ptr, &argpos, &widthpos, &flags, &width);
 
         /*
          * Next we should see the main conversion specifier.  Whether or not
@@ -5980,27 +5934,26 @@ Datum text_format(PG_FUNCTION_ARGS)
          * ones before we try to fetch arguments, so as to produce the least
          * confusing response to a mis-formatted specifier.
          */
-        if (strchr("sIL", *cp) == NULL) {
+        if (strchr("sIL", *cp) == NULL)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unrecognized conversion specifier \"%c\"", *cp)));
-        }
 
         /* If indirect width was specified, get its value */
-        if (width_pos >= 0) {
+        if (widthpos >= 0) {
             /* Collect the specified or next argument position */
-            if (width_pos > 0)
-                arg = width_pos;
+            if (widthpos > 0)
+                arg = widthpos;
             if (arg >= nargs)
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("too few arguments for format")));
 
             /* Get the value and type of the selected argument */
             if (!funcvariadic) {
                 value = PG_GETARG_DATUM(arg);
-                is_null = PG_ARGISNULL(arg);
+                isNull = PG_ARGISNULL(arg);
                 typid = get_fn_expr_argtype(fcinfo->flinfo, arg);
             } else {
                 value = elements[arg - 1];
-                is_null = nulls[arg - 1];
+                isNull = nulls[arg - 1];
                 typid = element_type;
             }
             if (!OidIsValid(typid))
@@ -6011,22 +5964,22 @@ Datum text_format(PG_FUNCTION_ARGS)
             arg++;
 
             /* We can treat NULL width the same as zero */
-            if (is_null) {
+            if (isNull)
                 width = 0;
-            } else if (typid == INT4OID) {
+            else if (typid == INT4OID)
                 width = DatumGetInt32(value);
-            } else if (typid == INT2OID) {
+            else if (typid == INT2OID)
                 width = DatumGetInt16(value);
-            } else {
+            else {
                 /* For less-usual datatypes, convert to text then to int */
                 char* str = NULL;
 
                 if (typid != prev_width_type) {
-                    Oid typ_output_func;
-                    bool typ_is_varlena = false;
+                    Oid typoutputfunc;
+                    bool typIsVarlena = false;
 
-                    getTypeOutputInfo(typid, &typ_output_func, &typ_is_varlena);
-                    fmgr_info(typ_output_func, &typoutputinfo_width);
+                    getTypeOutputInfo(typid, &typoutputfunc, &typIsVarlena);
+                    fmgr_info(typoutputfunc, &typoutputinfo_width);
                     prev_width_type = typid;
                 }
 
@@ -6040,19 +5993,19 @@ Datum text_format(PG_FUNCTION_ARGS)
         }
 
         /* Collect the specified or next argument position */
-        if (arg_pos > 0)
-            arg = arg_pos;
+        if (argpos > 0)
+            arg = argpos;
         if (arg >= nargs)
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("too few arguments for format")));
 
         /* Get the value and type of the selected argument */
         if (!funcvariadic) {
             value = PG_GETARG_DATUM(arg);
-            is_null = PG_ARGISNULL(arg);
+            isNull = PG_ARGISNULL(arg);
             typid = get_fn_expr_argtype(fcinfo->flinfo, arg);
         } else {
             value = elements[arg - 1];
-            is_null = nulls[arg - 1];
+            isNull = nulls[arg - 1];
             typid = element_type;
         }
         if (!OidIsValid(typid))
@@ -6062,16 +6015,16 @@ Datum text_format(PG_FUNCTION_ARGS)
         arg++;
 
         /*
-         * Get the appropriate typ_output function, reusing previous one if
+         * Get the appropriate typOutput function, reusing previous one if
          * same type as previous argument.  That's particularly useful in the
          * variadic-array case, but often saves work even for ordinary calls.
          */
         if (typid != prev_type) {
-            Oid typ_output_func;
-            bool typ_is_varlena = false;
+            Oid typoutputfunc;
+            bool typIsVarlena = false;
 
-            getTypeOutputInfo(typid, &typ_output_func, &typ_is_varlena);
-            fmgr_info(typ_output_func, &typoutputfinfo);
+            getTypeOutputInfo(typid, &typoutputfunc, &typIsVarlena);
+            fmgr_info(typoutputfunc, &typoutputfinfo);
             prev_type = typid;
         }
 
@@ -6082,7 +6035,7 @@ Datum text_format(PG_FUNCTION_ARGS)
             case 's':
             case 'I':
             case 'L':
-                text_format_string_conversion(&str, *cp, &typoutputfinfo, value, is_null, flags, width);
+                text_format_string_conversion(&str, *cp, &typoutputfinfo, value, isNull, flags, width);
                 break;
             default:
                 /* should not get here, because of previous check */
@@ -6094,22 +6047,19 @@ Datum text_format(PG_FUNCTION_ARGS)
     }
 
     /* Don't need deconstruct_array results anymore. */
-    if (elements != NULL) {
+    if (elements != NULL)
         pfree_ext(elements);
-    }
-    if (nulls != NULL) {
+    if (nulls != NULL)
         pfree_ext(nulls);
-    }
 
     /* Generate results. */
     result = cstring_to_text_with_len(str.data, str.len);
     pfree_ext(str.data);
 
-    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
+    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TEXT_P(result);
-    }
 }
 
 /*
@@ -6131,9 +6081,8 @@ static bool text_format_parse_digits(const char** ptr, const char* end_ptr, int*
     while (*cp >= '0' && *cp <= '9') {
         int8 digit = (*cp - '0');
 
-        if (pg_mul_s32_overflow(val, 10, &val) || pg_add_s32_overflow(val, digit, &val)) {
+        if (pg_mul_s32_overflow(val, 10, &val) || pg_add_s32_overflow(val, digit, &val))
             ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("number is out of range")));
-        }
         ADVANCE_PARSE_POINTER(cp, end_ptr);
         found = true;
     }
@@ -6148,12 +6097,12 @@ static bool text_format_parse_digits(const char** ptr, const char* end_ptr, int*
  * Parse a format specifier (generally following the SUS printf spec).
  *
  * We have already advanced over the initial '%', and we are looking for
- * [arg_pos][flags][width]type (but the type character is not consumed here).
+ * [argpos][flags][width]type (but the type character is not consumed here).
  *
  * Inputs are start_ptr (the position after '%') and end_ptr (string end + 1).
  * Output parameters:
- *	arg_pos: argument position for value to be printed.  -1 means unspecified.
- *	width_pos: argument position for width.  Zero means the argument position
+ *	argpos: argument position for value to be printed.  -1 means unspecified.
+ *	widthpos: argument position for width.  Zero means the argument position
  *			was unspecified (ie, take the next arg) and -1 means no width
  *			argument (width was omitted or specified as a constant).
  *	flags: bitmask of flags.
@@ -6168,14 +6117,14 @@ static bool text_format_parse_digits(const char** ptr, const char* end_ptr, int*
  * string end (end_ptr) at entry, and this is still true at exit.
  */
 static const char* text_format_parse_format(
-    const char* start_ptr, const char* end_ptr, int* arg_pos, int* width_pos, int* flags, int* width)
+    const char* start_ptr, const char* end_ptr, int* argpos, int* widthpos, int* flags, int* width)
 {
     const char* cp = start_ptr;
     int n;
 
     /* set defaults for output parameters */
-    *arg_pos = -1;
-    *width_pos = -1;
+    *argpos = -1;
+    *widthpos = -1;
     *flags = 0;
     *width = 0;
 
@@ -6187,13 +6136,12 @@ static const char* text_format_parse_format(
             return cp;
         }
         /* The number was argument position */
-        *arg_pos = n;
+        *argpos = n;
         /* Explicit 0 for argument index is immediately refused */
-        if (n == 0) {
+        if (n == 0)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("format specifies argument 0, but arguments are numbered from 1")));
-        }
         ADVANCE_PARSE_POINTER(cp, end_ptr);
     }
 
@@ -6208,28 +6156,24 @@ static const char* text_format_parse_format(
         ADVANCE_PARSE_POINTER(cp, end_ptr);
         if (text_format_parse_digits(&cp, end_ptr, &n)) {
             /* number in this position must be closed by $ */
-            if (*cp != '$') {
+            if (*cp != '$')
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("width argument position must be ended by \"$\"")));
-            }
             /* The number was width argument position */
-            *width_pos = n;
+            *widthpos = n;
             /* Explicit 0 for argument index is immediately refused */
-            if (n == 0) {
+            if (n == 0)
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("format specifies argument 0, but arguments are numbered from 1")));
-            }
             ADVANCE_PARSE_POINTER(cp, end_ptr);
-        } else {
-            *width_pos = 0; /* width's argument position is unspecified */
-        }
+        } else
+            *widthpos = 0; /* width's argument position is unspecified */
     } else {
         /* Check for direct width specification */
-        if (text_format_parse_digits(&cp, end_ptr, &n)) {
+        if (text_format_parse_digits(&cp, end_ptr, &n))
             *width = n;
-        }
     }
 
     /* cp should now be pointing at type character */
@@ -6240,26 +6184,25 @@ static const char* text_format_parse_format(
  * Format a %s, %I, or %L conversion
  */
 static void text_format_string_conversion(
-    StringInfo buf, char conversion, FmgrInfo* typ_output_info, Datum value, bool is_null, int flags, int width)
+    StringInfo buf, char conversion, FmgrInfo* typOutputInfo, Datum value, bool isNull, int flags, int width)
 {
     char* str = NULL;
 
     /* Handle NULL arguments before trying to stringify the value. */
-    if (is_null) {
-        if (conversion == 's') {
+    if (isNull) {
+        if (conversion == 's')
             text_format_append_string(buf, "", flags, width);
-        } else if (conversion == 'L') {
+        else if (conversion == 'L')
             text_format_append_string(buf, "NULL", flags, width);
-        } else if (conversion == 'I') {
+        else if (conversion == 'I')
             ereport(ERROR,
                 (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                     errmsg("null values cannot be formatted as an SQL identifier")));
-        }
         return;
     }
 
     /* Stringify. */
-    str = OutputFunctionCall(typ_output_info, value);
+    str = OutputFunctionCall(typOutputInfo, value);
 
     /* Escape. */
     if (conversion == 'I') {
@@ -6306,14 +6249,12 @@ static void text_format_append_string(StringInfo buf, const char* str, int flags
     if (align_to_left) {
         /* left justify */
         appendStringInfoString(buf, str);
-        if (len < width) {
+        if (len < width)
             appendStringInfoSpaces(buf, width - len);
-        }
     } else {
         /* right justify */
-        if (len < width) {
+        if (len < width)
             appendStringInfoSpaces(buf, width - len);
-        }
         appendStringInfoString(buf, str);
     }
 }
@@ -6335,7 +6276,7 @@ static int getResultPostion(text* textStr, text* textStrToSearch, int32 beginInd
 {
     int i = 0;
     int result = 0;
-    int scan_index = 0;
+    int scanIndex = 0;
     TextPositionState state = {0};
 
     if (JUDGE_INPUT_VALID(textStr, textStrToSearch)) {
@@ -6343,16 +6284,16 @@ static int getResultPostion(text* textStr, text* textStrToSearch, int32 beginInd
     }
 
     text_position_setup(textStr, textStrToSearch, &state);
-    scan_index = beginIndex;
+    scanIndex = beginIndex;
     result = 0;
 
     for (i = 0; i < occurTimes; ++i) {
-        result = text_position_next(scan_index, &state);
+        result = text_position_next(scanIndex, &state);
         if (!result) {
             break;
         }
 
-        scan_index = result + 1;
+        scanIndex = result + 1;
     }
 
     text_position_cleanup(&state);
@@ -6365,9 +6306,9 @@ static int getResultPostionReverse(text* textStr, text* textStrToSearch, int32 b
 {
     int result = 0;
     int len = 0;
-    int count = 0;
-    int ret_pos = 0;
-    int scan_pos = 0;
+    int count = 1;
+    int retPos = 0;
+    int scanPos = 0;
     TextPositionState state = {0};
 
     if (JUDGE_INPUT_VALID(textStr, textStrToSearch)) {
@@ -6375,17 +6316,16 @@ static int getResultPostionReverse(text* textStr, text* textStrToSearch, int32 b
     }
 
     len = VARSIZE_ANY_EXHDR(textStr);
-    count = 1;
 
     text_position_setup(textStr, textStrToSearch, &state);
 
-    for (scan_pos = len + 1 + beginIndex; scan_pos > 0; scan_pos--) {
-        ret_pos = text_position_next(scan_pos, &state);
+    for (scanPos = len + 1 + beginIndex; scanPos > 0; scanPos--) {
+        retPos = text_position_next(scanPos, &state);
 
         /* finding new substring until position is different with last substring */
-        if ((ret_pos != 0) && (scan_pos == ret_pos)) {
+        if ((0 != retPos) && (scanPos == retPos)) {
             if (count >= occurTimes) {
-                result = ret_pos;
+                result = retPos;
                 break;
             }
 
@@ -6401,7 +6341,7 @@ static int getResultPostionReverse(text* textStr, text* textStrToSearch, int32 b
 // start from beginIndex, find the first position of textStrToSearch in textStr
 int text_instr_3args(text* textStr, text* textStrToSearch, int32 beginIndex)
 {
-    if (JUDGE_INPUT_VALID(textStr, textStrToSearch) || (beginIndex == 0))
+    if (JUDGE_INPUT_VALID(textStr, textStrToSearch) || (0 == beginIndex))
         return 0;
 
     return text_instr_4args(textStr, textStrToSearch, beginIndex, 1);
@@ -6412,22 +6352,22 @@ int text_instr_4args(text* textStr, text* textStrToSearch, int32 beginIndex, int
 {
     int result = 0;
     int len = 0;
-    int search_len = 0;
+    int searchLen = 0;
 
-    if (JUDGE_INPUT_VALID(textStr, textStrToSearch) || (beginIndex == 0)) {
+    if (JUDGE_INPUT_VALID(textStr, textStrToSearch) || (0 == beginIndex)) {
         return 0;
     }
 
     len = VARSIZE_ANY_EXHDR(textStr);
-    search_len = VARSIZE_ANY_EXHDR(textStrToSearch);
+    searchLen = VARSIZE_ANY_EXHDR(textStrToSearch);
 
-    if ((search_len > len) || (GET_POSITIVE(beginIndex) > len)) {
+    if ((searchLen > len) || (GET_POSITIVE(beginIndex) > len)) {
         return 0;
     }
 
     if (beginIndex > 0) {
         result = getResultPostion(textStr, textStrToSearch, beginIndex, occurTimes);
-    } else {  /* beginIndex<0, scan the source string backward */
+    } else { /* beginIndex<0, scan the source string backward */
         result = getResultPostionReverse(textStr, textStrToSearch, beginIndex, occurTimes);
     }
 
@@ -6456,7 +6396,7 @@ Datum instr_4args(PG_FUNCTION_ARGS)
     return Int32GetDatum(text_instr_4args(text_str, text_str_to_search, beg_index, occur_index));
 }
 
-// adapt a's empty_blob ()
+// adapt A db's empty_blob ()
 Datum get_empty_blob(PG_FUNCTION_ARGS)
 {
     bytea* result = NULL;
@@ -6467,7 +6407,7 @@ Datum get_empty_blob(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(result);
 }
 
-// adapt a's substrb(text str,integer start,integer length)
+// adapt A db's substrb(text str,integer start,integer length)
 Datum substrb_with_lenth(PG_FUNCTION_ARGS)
 {
     text* result = NULL;
@@ -6478,22 +6418,21 @@ Datum substrb_with_lenth(PG_FUNCTION_ARGS)
     int32 total = 0;
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((length < 0) || (total == 0) || (start > total) || (start + total < 0)) {
-        if (DB_IS_CMPT(DB_CMPT_A)) {
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
             PG_RETURN_NULL();
-        } else {
+        else {
             result = cstring_to_text("");
             PG_RETURN_TEXT_P(result);
         }
     }
 
     result = get_substring_really(str, start, length, false);
-    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
+    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
-    }
     PG_RETURN_TEXT_P(result);
 }
 
-// adapt a's substr(text str,integer start)
+// adapt A db's substr(text str,integer start)
 Datum substrb_without_lenth(PG_FUNCTION_ARGS)
 {
     text* result = NULL;
@@ -6503,18 +6442,17 @@ Datum substrb_without_lenth(PG_FUNCTION_ARGS)
     int32 total = 0;
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((total == 0) || (start > total) || (start + total < 0)) {
-        if (DB_IS_CMPT(DB_CMPT_A)) {
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
             PG_RETURN_NULL();
-        } else {
+        else {
             result = cstring_to_text("");
             PG_RETURN_TEXT_P(result);
         }
     }
 
     result = get_substring_really(str, start, -1, true);
-    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
+    if ((NULL == result || 0 == VARSIZE_ANY_EXHDR(result)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
-    }
     PG_RETURN_TEXT_P(result);
 }
 
@@ -6559,32 +6497,29 @@ static text* get_substring_really(Datum str, int32 start, int32 length, bool len
     errno_t rc = EOK;
 
     /* amend the start position and end position */
-    if (start < 0) {
+    if (start < 0)
         start_pos += total + 1;
-    } else if (start == 0) {
+    else if (0 == start)
         start_pos = 1;
-    }
 
-    if (length_not_specified) {
+    if (length_not_specified)
         end_pos = total;
-    } else {
+    else
         end_pos = start_pos + length - 1 > total ? total : start_pos + length - 1;
-    }
+
     len = end_pos - start_pos + 1;
-    if (len == 0) {
+    if (0 == len)
         return cstring_to_text("");
-    }
 
     /*
      * If we're working with an untoasted source, no need to do an extra
      * copying step.
      */
     ret = (text*)palloc(VARHDRSZ + len);
-    if (VARATT_IS_COMPRESSED(DatumGetPointer(str)) || VARATT_IS_EXTERNAL(DatumGetPointer(str))) {
+    if (VARATT_IS_COMPRESSED(DatumGetPointer(str)) || VARATT_IS_EXTERNAL(DatumGetPointer(str)))
         slice = DatumGetTextPSlice(str, 0, end_pos);
-    } else {
+    else
         slice = (text*)DatumGetPointer(str);
-    }
 
     SET_VARSIZE(ret, VARHDRSZ + len);
     rc = memcpy_s(VARDATA_ANY(ret), len, VARDATA_ANY(slice) + start_pos - 1, len);
@@ -6595,16 +6530,13 @@ static text* get_substring_really(Datum str, int32 start, int32 length, bool len
     end_pos_filled_bytes = length_not_specified ? 0 : front_part_of_mbchar(VARDATA_ANY(slice), end_pos);
 
     /* fill the uncomplete mbchar with blank */
-    for (i = 0; i < start_pos_filled_bytes && start_pos + i <= end_pos; i++) {
+    for (i = 0; i < start_pos_filled_bytes && start_pos + i <= end_pos; i++)
         ret->vl_dat[i] = ' ';
-    }
-    for (i = 0; i < end_pos_filled_bytes && end_pos - i >= start_pos; i++) {
+    for (i = 0; i < end_pos_filled_bytes && end_pos - i >= start_pos; i++)
         ret->vl_dat[len - i - 1] = ' ';
-    }
 
-    if (slice != (text*)DatumGetPointer(str)) {
+    if (slice != (text*)DatumGetPointer(str))
         pfree_ext(slice);
-    }
 
     return ret;
 }

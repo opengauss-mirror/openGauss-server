@@ -22,8 +22,9 @@
 
 /*
  * Data representation
- * The unit size can be adjusted by changing these three declarations:
  */
+
+/* The unit size can be adjusted by changing these three declarations: */
 #define BITS_PER_BITMAPWORD 32
 typedef uint32 bitmapword;      /* must be an unsigned type */
 typedef int32 signedbitmapword; /* must be the matching signed type */
@@ -53,7 +54,6 @@ typedef enum {
  */
 extern Bitmapset* bms_copy(const Bitmapset* a);
 extern bool bms_equal(const Bitmapset* a, const Bitmapset* b);
-extern int bms_compare(const Bitmapset *a, const Bitmapset *b);
 extern Bitmapset* bms_make_singleton(int x);
 extern void bms_free(Bitmapset* a);
 

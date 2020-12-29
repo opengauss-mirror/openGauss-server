@@ -1,0 +1,109 @@
+set explain_perf_mode=normal;
+
+
+set resource_track_log=detail;
+
+-- outer-level aggregates
+
+explain (verbose on, costs off) select c8, sum(distinct c4) from aggtable1 a group by c8
+having exists (select 1 from aggtable1 b where sum(distinct a.c4) = b.c4)
+order by c8;
+
+-- condition, having
+select avg(c1) from aggtable1 group by c8 having c8 = 200 order by c8;
+explain (verbose on, costs off) select avg(c1) from aggtable1 group by c8 having c8 = 200 order by c8;
+
+-- window function
+select c1, c2, avg(c1) from aggtable1 group by cube(c1, c2) order by c1, c2, avg(c1);
+explain (verbose on, costs off) select c1, c2, avg(c1) from aggtable1 group by cube(c1, c2) order by c1, c2, avg(c1);
+
+-- implicit case
+explain (verbose on, costs off) select avg(distinct(substr(c2, 4, 1))) from implicit_cast;
+
+-- tpch Q1
+explain (verbose on, costs off)
+select
+        l_returnflag,
+        l_linestatus,
+        sum(l_quantity) as sum_qty,
+        sum(l_extendedprice) as sum_base_price,
+        sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+        sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)/1000) as sum_charge, --add /1000
+        avg(l_quantity) as avg_qty,
+        avg(l_extendedprice) as avg_price,
+        avg(l_discount) as avg_disc,
+        count(*) as count_order
+from
+        lineitem
+where
+        l_shipdate <= date '1998-12-01' - interval '3 day'
+group by
+        l_returnflag,
+        l_linestatus
+order by
+        l_returnflag,
+        l_linestatus;
+
+select
+        l_returnflag,
+        l_linestatus,
+        sum(l_quantity) as sum_qty,
+        sum(l_extendedprice) as sum_base_price,
+        sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+        sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)/1000) as sum_charge, --add /1000
+        avg(l_quantity) as avg_qty,
+        avg(l_extendedprice) as avg_price,
+        avg(l_discount) as avg_disc,
+        count(*) as count_order
+from
+        lineitem
+where
+        l_shipdate <= date '1998-12-01' - interval '3 day'
+group by
+        l_returnflag,
+        l_linestatus
+order by
+        l_returnflag,
+        l_linestatus;
+
+-- invalid scanrelid in foreignscan node, so doesn't pushdown agg node
+
+explain (verbose on, costs off)
+select max(lpad(hd_buy_potential,20,'my')), (select min(t1.hd_demo_sk))
+from   household_demographics as t1
+where  t1.hd_demo_sk not in
+       (select min(hd_demo_sk)
+        from   household_demographics
+        where  length(hd_buy_potential) > 2 and hd_vehicle_count is null);
+
+explain (verbose on, costs off)
+select c2, c3
+from aggtable1
+where c3 in
+      (select count(*)
+       from household_demographics
+       where hd_buy_potential like '%s%')
+order by 1, 2;
+
+-- special case for group by column
+
+explain (verbose on, costs off)
+select min(t7.wd_varchar),
+       t7.wd_bigint,
+       t7.wd_numeric,
+       max(t7.wd_date4),
+       avg(wd_tinyint),
+       count(t7.wd_smallint),
+       sum(t1.c_d_id),
+       coalesce(t1.c_discount, 2.5),
+       t7.wd_int
+  from multdistr_07 t7
+ inner join multdistr_05 t1
+    on t1.c_w_id + 1 = t7.wd_tinyint
+   and t1.c_id + 1 = t7.wd_bigint
+ where (t1.c_d_id, t1.c_w_id) in
+       (select t2.col_int - 1, t2.col_bigint
+          from multdistr_02 t2
+         where t2.col_int < 2000)
+ group by t7.wd_bigint, t7.wd_numeric, coalesce(t1.c_discount, 2.5), 9
+ order by 1, 2, 3, 4, 5, 6, 7, 8, 9 limit 200;

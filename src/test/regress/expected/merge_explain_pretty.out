@@ -1,0 +1,198 @@
+--
+-- MERGE INTO, test explain command
+--
+-- initial
+CREATE SCHEMA mergeinto_explain_pretty;
+SET current_schema = mergeinto_explain_pretty;
+CREATE TABLE products_base
+(
+product_id INTEGER DEFAULT 0,
+product_name VARCHAR(60) DEFAULT 'null',
+category VARCHAR(60) DEFAULT 'unknown',
+total INTEGER DEFAULT '0'
+);
+INSERT INTO products_base VALUES (1501, 'vivitar 35mm', 'electrncs', 100);
+INSERT INTO products_base VALUES (1502, 'olympus is50', 'electrncs', 100);
+INSERT INTO products_base VALUES (1600, 'play gym', 'toys', 100);
+INSERT INTO products_base VALUES (1601, 'lamaze', 'toys', 100);
+INSERT INTO products_base VALUES (1666, 'harry potter', 'dvd', 100);
+CREATE TABLE newproducts_base
+(
+product_id INTEGER DEFAULT 0,
+product_name VARCHAR(60) DEFAULT 'null',
+category VARCHAR(60) DEFAULT 'unknown',
+total INTEGER DEFAULT '0'
+);
+INSERT INTO newproducts_base VALUES (1502, 'olympus camera', 'electrncs', 200);
+INSERT INTO newproducts_base VALUES (1601, 'lamaze', 'toys', 200);
+INSERT INTO newproducts_base VALUES (1666, 'harry potter', 'toys', 200);
+INSERT INTO newproducts_base VALUES (1700, 'wait interface', 'books', 200);
+ANALYZE products_base;
+ANALYZE newproducts_base;
+--
+-- row table
+--
+CREATE TABLE products_row
+(
+product_id INTEGER DEFAULT 0,
+product_name VARCHAR(60) DEFAULT 'null',
+category VARCHAR(60) DEFAULT 'unknown',
+total INTEGER DEFAULT '0'
+);
+CREATE TABLE newproducts_row
+(
+product_id INTEGER DEFAULT 0,
+product_name VARCHAR(60) DEFAULT 'null',
+category VARCHAR(60) DEFAULT 'unknown',
+total INTEGER DEFAULT '0'
+);
+INSERT INTO products_row SELECT * FROM products_base;
+INSERT INTO newproducts_row SELECT * FROM newproducts_base;
+ANALYZE products_row;
+ANALYZE newproducts_row;
+-- pretty mode performance
+SET explain_perf_mode=pretty;
+-- explain verbose
+EXPLAIN (VERBOSE on, COSTS off)
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+ id |                                operation                                
+----+-------------------------------------------------------------------------
+  1 | ->  Streaming (type: GATHER)
+  2 |    ->  Merge on mergeinto_explain_pretty.products_row p
+  3 |       ->  Streaming(type: REDISTRIBUTE)
+  4 |          ->  Nested Loop Left Join (5, 6)
+  5 |             ->  Seq Scan on mergeinto_explain_pretty.newproducts_row np
+  6 |             ->  Seq Scan on mergeinto_explain_pretty.products_row p
+(6 rows)
+
+    Predicate Information (identified by plan id)    
+-----------------------------------------------------
+   4 --Nested Loop Left Join (5, 6)
+         Join Filter: (p.product_id = np.product_id)
+(2 rows)
+
+                                                                                         Targetlist Information (identified by plan id)                                                                                         
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   1 --Streaming (type: GATHER)
+         Node/s: All datanodes
+   2 --Merge on mergeinto_explain_pretty.products_row p
+   3 --Streaming(type: REDISTRIBUTE)
+         Output: np.product_id, np.product_name, np.category, np.total, p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id, np.ctid, (CASE WHEN (p.ctid IS NULL) THEN np.product_id ELSE p.product_id END)
+         Distribute Key: (CASE WHEN (p.ctid IS NULL) THEN np.product_id ELSE p.product_id END)
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+   4 --Nested Loop Left Join (5, 6)
+         Output: np.product_id, np.product_name, np.category, np.total, p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id, np.ctid, CASE WHEN (p.ctid IS NULL) THEN np.product_id ELSE p.product_id END
+   5 --Seq Scan on mergeinto_explain_pretty.newproducts_row np
+         Output: np.product_id, np.product_name, np.category, np.total, np.ctid
+         Distribute Key: np.product_id
+   6 --Seq Scan on mergeinto_explain_pretty.products_row p
+         Output: p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id
+         Distribute Key: p.product_id
+(16 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+-- explain analyze
+BEGIN;
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+ id |                   operation                    | A-rows |  Peak Memory  | A-width 
+----+------------------------------------------------+--------+---------------+---------
+--?  1 | ->  Streaming (type: GATHER)                   |      0 | .*
+--?  2 |    ->  Merge on products_row p                 |      4 | .*
+--?  3 |       ->  Streaming(type: REDISTRIBUTE)        |      4 | .*
+--?  4 |          ->  Nested Loop Left Join (5, 6)      |      4 | .*
+--?  5 |             ->  Seq Scan on newproducts_row np |      4 | .*
+--?  6 |             ->  Seq Scan on products_row p     |      5 | .*
+(6 rows)
+
+    Predicate Information (identified by plan id)    
+-----------------------------------------------------
+   2 --Merge on products_row p
+         Merge Inserted: 1
+         Merge Updated: 3
+   4 --Nested Loop Left Join (5, 6)
+         Join Filter: (p.product_id = np.product_id)
+         Rows Removed by Join Filter: 2
+(6 rows)
+
+ Memory Information (identified by plan id) 
+--------------------------------------------
+ Coordinator Query Peak Memory:
+--?.*
+ Datanode:
+--?.*
+--?.*
+(5 rows)
+
+                      User Define Profiling                       
+------------------------------------------------------------------
+ Segment Id: 2  Track name: Datanode build connection
+ Plan Node id: 1  Track name: coordinator get datanode connection
+(2 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(11 rows)
+
+ROLLBACK;
+-- explain performance
+\o merge_explain_pretty.txt
+BEGIN;
+EXPLAIN PERFORMANCE
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+ROLLBACK;
+SET explain_perf_mode=run;
+BEGIN;
+EXPLAIN PERFORMANCE
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+ROLLBACK;
+\o
+-- clean up
+DROP SCHEMA mergeinto_explain_pretty CASCADE;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table products_base
+drop cascades to table newproducts_base
+drop cascades to table products_row
+drop cascades to table newproducts_row

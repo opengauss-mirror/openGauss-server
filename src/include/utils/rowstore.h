@@ -84,7 +84,7 @@
 #ifndef ROWSTORE_H
 #define ROWSTORE_H
 
-#include "storage/buffile.h"
+#include "storage/buf/buffile.h"
 #include "utils/memprot.h"
 #include "utils/memutils.h"
 #include "pgxc/pgxcnode.h"
@@ -130,10 +130,15 @@ typedef RowStoreCellData* RowStoreCell;
  */
 typedef struct RowStoreManagerData {
 
-    Bank** banks;          /* each datanode has its own bank */
     MemoryContext context; /* memory context for the RowStore */
-    int bank_num;          /* total number of banks, should equal to NumDataNodes */
+
+    Bank** cn_banks;          /* each coordinator has its own bank */
+    int cn_bank_num;          /* total number of cn_banks, should equal to NumCoordinates */
+
+    Bank** dn_banks;          /* each datanode has its own bank */
+    int dn_bank_num;          /* total number of dn_banks, should equal to NumDataNodes */
 } RowStoreManagerData;
+
 
 typedef RowStoreManagerData* RowStoreManager;
 
@@ -153,6 +158,9 @@ extern bool RowStoreFetch(RowStoreManager rs, RemoteDataRow datarow);
 
 /* get the length of row store */
 extern int RowStoreLen(RowStoreManager rs);
+
+/* reset a row store */
+extern void RowStoreReset(RowStoreManager rs);
 
 /* distory a row store */
 extern void RowStoreDestory(RowStoreManager rs);

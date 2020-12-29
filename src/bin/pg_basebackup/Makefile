@@ -31,11 +31,19 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
+ifeq ($(enable_mot), yes)
 OBJS=receivelog.o streamutil.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a $(top_builddir)/src/bin/pg_ctl/fetchmot.o \
-     xlogreader.o xlogreader_common.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a $(top_builddir)/src/lib/build_query/libbuildquery.a \
+     xlogreader.o  $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a $(top_builddir)/src/lib/build_query/libbuildquery.a \
      $(top_builddir)/src/lib/pgcommon/libpgcommon.a \
      $(top_builddir)/src/lib/hotpatch/client/libhotpatchclient.a \
 	 $(top_builddir)/src/common/backend/lib/string.o
+else
+OBJS=receivelog.o streamutil.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a \
+     xlogreader.o  $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a $(top_builddir)/src/lib/build_query/libbuildquery.a \
+     $(top_builddir)/src/lib/pgcommon/libpgcommon.a \
+     $(top_builddir)/src/lib/hotpatch/client/libhotpatchclient.a \
+	 $(top_builddir)/src/common/backend/lib/string.o
+endif
 
 
 all: gs_basebackup pg_receivexlog pg_recvlogical
@@ -54,8 +62,7 @@ pg_recvlogical: pg_recvlogical.o $(OBJS) $(top_builddir)/src/lib/pgcommon/libpgc
 
 xlogreader.cpp: % : $(top_srcdir)/src/gausskernel/storage/access/transam/%
 	rm -f $@ && $(LN_S) $< .
-xlogreader_common.cpp: % : $(top_srcdir)/src/gausskernel/storage/access/redo/%
-	rm -f $@ && $(LN_S) $< .
+
 
 install: all installdirs
 	$(INSTALL_PROGRAM) gs_basebackup$(X) '$(DESTDIR)$(bindir)/gs_basebackup$(X)'
@@ -80,14 +87,13 @@ clean distclean maintainer-clean:
 $(top_builddir)/src/lib/build_query/libbuildquery.a:
 		$(MAKE) -C $(top_builddir)/src/lib/build_query libbuildquery.a
 
-$(top_builddir)/src/lib/elog/elog.a:
-		$(MAKE) -C $(top_builddir)/src/lib/elog elog.a
-
 $(top_builddir)/src/lib/pgcommon/libpgcommon.a:
 		$(MAKE) -C $(top_builddir)/src/lib/pgcommon libpgcommon.a
 
+ifeq ($(enable_mot), yes)
 $(top_builddir)/src/bin/pg_ctl/fetchmot.o:
 		$(MAKE) -C $(top_builddir)/src/bin/pg_ctl fetchmot.o
+endif
 
 $(top_builddir)/src/lib/hotpatch/client/libhotpatchclient.a:
 		$(MAKE) -C $(top_builddir)/src/lib/hotpatch/client libhotpatchclient.a

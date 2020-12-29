@@ -117,7 +117,7 @@ LIC_ULONG registerBbomControlInfo()
     LIC_STATIC_ITEM_INFO_STRU* pstResInfo = LIC_NULL_PTR;
 
     pstResInfo = (LIC_STATIC_ITEM_INFO_STRU*)malloc(ulResCount * sizeof(LIC_STATIC_ITEM_INFO_STRU));
-    if (pstResInfo == LIC_NULL_PTR) {
+    if (LIC_NULL_PTR == pstResInfo) {
         printf("\r\n The memory alloc fail for stResInfo");
         return LIC_ERR_MEM_ALLOC_FAIL;
     }
@@ -165,7 +165,6 @@ LIC_ULONG registerBbomControlInfo()
 /*****************************************************************************/
 LIC_ULONG readFileToBuf(LIC_CHAR* filePath, LIC_CHAR* pBuf, LIC_ULONG* pulFileLen)
 {
-#define MAX_REALPATH_LEN 4096
     FILE* pFile = LIC_NULL_PTR;
     LIC_ULONG ulLength = 0;
     LIC_ULONG ulRet = LIC_OK;
@@ -175,16 +174,7 @@ LIC_ULONG readFileToBuf(LIC_CHAR* filePath, LIC_CHAR* pBuf, LIC_ULONG* pulFileLe
         return LIC_ERROR;
     }
 
-    if (!is_absolute_path(filePath)) {
-        char Lrealpath[MAX_REALPATH_LEN + 1] = {0};
-        if (realpath(filePath, Lrealpath) == NULL) {
-            printf("[%s] realpath failed : %s!\n", FILE_NOT_EXIST, filePath);
-            return LIC_ERROR;
-        }
-        pFile = fopen(Lrealpath, "rb+");
-    } else {
-        pFile = fopen(filePath, "rb+");
-    }
+    pFile = fopen(filePath, "rb+");
     if (LIC_NULL_PTR == pFile) {
         printf("[%s] File %s Open Failed\n", FILE_NOT_EXIST, filePath);
         return LIC_ERROR;
@@ -330,7 +320,6 @@ LIC_ULONG activeLicense(char* filename)
     LIC_CHAR* pBuf = LIC_NULL_PTR;
     LIC_ULONG uiFileLen = 0x4000;
     LIC_VERIFY_RESULT_STRU* pstVerifyResult = LIC_NULL_PTR;
-    size_t itemResultSize;
 
     pBuf = (LIC_CHAR*)malloc(uiFileLen);
     if (NULL == pBuf) {
@@ -354,14 +343,14 @@ LIC_ULONG activeLicense(char* filename)
     securec_check_c(ss_rc, "\0", "\0");
 
     pstVerifyResult->ulItemCount = LIC_RES_MAX_NUM;
-    itemResultSize = pstVerifyResult->ulItemCount * sizeof(LIC_ITEM_RESULT_STRU);
-    pstVerifyResult->pstItemResult = (LIC_ITEM_RESULT_STRU*)malloc(itemResultSize);
+    pstVerifyResult->pstItemResult =
+        (LIC_ITEM_RESULT_STRU*)malloc(pstVerifyResult->ulItemCount * sizeof(LIC_ITEM_RESULT_STRU));
     if (LIC_NULL_PTR == pstVerifyResult->pstItemResult) {
         free(pstVerifyResult);
         free(pBuf);
         return LIC_ERROR;
     }
-    ss_rc = memset_s(pstVerifyResult->pstItemResult, itemResultSize, 0x0, itemResultSize);
+    ss_rc = memset_s(pstVerifyResult->pstItemResult, pstVerifyResult->ulItemCount, 0x0, pstVerifyResult->ulItemCount);
     securec_check_c(ss_rc, "\0", "\0");
 
     ulRet = ALM_ActivateLicenseKey(uiFileLen, pBuf, LIC_TRUE, pstVerifyResult);

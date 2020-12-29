@@ -1,0 +1,69 @@
+--test dummy server 
+--Positive testing
+--create server
+drop server if exists dummy_server;
+NOTICE:  server "dummy_server" does not exist, skipping
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7200', username 'hanfeng', password 'Gauss@123', type 'dummy');
+--alter server
+alter server dummy_server options (set address '10.185.178.241:25001');
+alter server dummy_server options (set username 'newuser', set password 'Gauss@123');
+--negative test
+--create server
+drop server if exists dummy_server;
+create server dummy_server foreign data wrapper dfs_fdw options(username 'hanfeng', password 'Gauss@123', type 'dummy');
+ERROR:  Need address option for the dummy server.
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', password 'Gauss@123', type 'dummy');
+ERROR:  Need username option for the dummy server.
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', type 'dummy');
+ERROR:  Need password option for the dummy server.
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', password 'Gauss@123');
+ERROR:  Need type option for the server.
+HINT:  Valid options in this context are: obs, hdfs, dummy
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', password 'Gauss@123', type 'dummy', foldername '/data/data001');
+ERROR:  Invalid option "foldername"
+HINT:  Valid options in this context are: address, dbname, remoteservername, username, password, type
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', password 'Gauss@123', type 'dummy', encrypt 'encrypt123');
+ERROR:  Invalid option "encrypt"
+HINT:  Valid options in this context are: address, dbname, remoteservername, username, password, type
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', password 'Gauss@123', type 'dummy', hdfscfgpath '/opt/config');
+ERROR:  Invalid option "hdfscfgpath"
+HINT:  Valid options in this context are: address, dbname, remoteservername, username, password, type
+drop SERVER hdfs_server_test;
+ERROR:  server "hdfs_server_test" does not exist
+CREATE SERVER hdfs_server_test FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (address '10.185.178.241:25000,10.185.178.239:25000',hdfscfgpath '/opt/config', type 'hdfs', username 'hanfeng', password 'Gauss@123');
+ERROR:  Invalid option "username"
+HINT:  Valid options in this context are: address, hdfscfgpath, type
+--do not create two dummy server 
+create server dummy_server001 foreign data wrapper hdfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', password 'Gauss@123', type 'dummy');
+create server dummy_server002 foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', password 'Gauss@123', type 'dummy');
+ERROR:  Only one dummy server is allowed to exist in one database.
+DETAIL:  There is a "dummy_server001" server in the database.
+--alter server
+alter server dummy_server001 options (add username 'Gauss@123');
+ERROR:  option "username" provided more than once
+alter server dummy_server001 options (add password 'Gauss@123');
+ERROR:  option "password" provided more than once
+alter server dummy_server001 options (add address 'Gauss@123');
+ERROR:  option "address" provided more than once
+alter server dummy_server001 options (drop type);
+ERROR:  Need type option for the server.
+HINT:  Valid options in this context are: obs, hdfs, dummy
+alter server dummy_server001 options (drop username);
+ERROR:  Need username option for the dummy server.
+alter server dummy_server001 options (drop password);
+ERROR:  Need password option for the dummy server.
+alter server dummy_server001 options (drop address);
+ERROR:  Need address option for the dummy server.
+--add other option
+alter server dummy_server001 options (add hdfscfgpath '/opt/config', encrypt 'encrypt123');
+ERROR:  Invalid option "hdfscfgpath"
+HINT:  Valid options in this context are: address, dbname, remoteservername, username, password, type
+--failed to create dummy server, do not print password in log
+create server dummy_server003 foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', password 'Gauss@123', type 'dummy');
+ERROR:  Need username option for the dummy server.
+--do not create foreign table on dummy server
+create foreign table obd_foreign_tbl_error(a int) server dummy_server001 options( type 'obs');
+ERROR:  Failed to create foreign table "obd_foreign_tbl_error".
+DETAIL:  It is not allowed to create foreign table with dummy server.
+--clean enviroment
+drop server dummy_server001;

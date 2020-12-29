@@ -39,6 +39,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "executor/execdebug.h"
 #include "executor/nodeMergeAppend.h"
 
@@ -50,9 +51,9 @@
 typedef int SlotNumber;
 typedef int HeapPosition;
 
-static void HeapInsertSlot(MergeAppendState* node, SlotNumber new_slot);
-static void HeapSiftupSlot(MergeAppendState* node);
-static int32 HeapCompareSlots(MergeAppendState* node, SlotNumber slot1, SlotNumber slot2);
+static void heap_insert_slot(MergeAppendState* node, SlotNumber new_slot);
+static void heap_siftup_slot(MergeAppendState* node);
+static int32 heap_compare_slots(MergeAppendState* node, SlotNumber slot1, SlotNumber slot2);
 
 /* ----------------------------------------------------------------
  *		ExecInitMergeAppend
@@ -115,8 +116,10 @@ MergeAppendState* ExecInitMergeAppend(MergeAppend* node, EState* estate, int efl
 
     /*
      * initialize output tuple type
+     * src/gausskernel/runtime/executor/nodeMergeAppend.cpp
+     * set to default value HEAP
      */
-    ExecAssignResultTypeFromTL(&merge_state->ps);
+    ExecAssignResultTypeFromTL(&merge_state->ps, TAM_HEAP);
     merge_state->ps.ps_ProjInfo = NULL;
 
     /*
@@ -173,7 +176,7 @@ TupleTableSlot* ExecMergeAppend(MergeAppendState* node)
         for (i = 0; i < node->ms_nplans; i++) {
             node->ms_slots[i] = ExecProcNode(node->mergeplans[i]);
             if (!TupIsNull(node->ms_slots[i]))
-                HeapInsertSlot(node, i);
+                heap_insert_slot(node, i);
         }
         node->ms_initialized = true;
     } else {
@@ -186,7 +189,7 @@ TupleTableSlot* ExecMergeAppend(MergeAppendState* node)
         i = node->ms_last_slot;
         node->ms_slots[i] = ExecProcNode(node->mergeplans[i]);
         if (!TupIsNull(node->ms_slots[i]))
-            HeapInsertSlot(node, i);
+            heap_insert_slot(node, i);
     }
 
     if (node->ms_heap_size > 0) {
@@ -194,7 +197,7 @@ TupleTableSlot* ExecMergeAppend(MergeAppendState* node)
         i = node->ms_heap[0];
         result = node->ms_slots[i];
         node->ms_last_slot = i;
-        HeapSiftupSlot(node);
+        heap_siftup_slot(node);
     } else {
         /* All the subplans are exhausted, and so is the heap */
         result = ExecClearTuple(node->ps.ps_ResultTupleSlot);
@@ -206,7 +209,7 @@ TupleTableSlot* ExecMergeAppend(MergeAppendState* node)
 /*
  * Insert a new slot into the heap.  The slot must contain a valid tuple.
  */
-static void HeapInsertSlot(MergeAppendState* node, SlotNumber new_slot)
+static void heap_insert_slot(MergeAppendState* node, SlotNumber new_slot)
 {
     SlotNumber* heap = node->ms_heap;
     HeapPosition j;
@@ -217,7 +220,7 @@ static void HeapInsertSlot(MergeAppendState* node, SlotNumber new_slot)
     while (j > 0) {
         int i = (j - 1) / 2;
 
-        if (HeapCompareSlots(node, new_slot, node->ms_heap[i]) >= 0)
+        if (heap_compare_slots(node, new_slot, node->ms_heap[i]) >= 0)
             break;
         heap[j] = heap[i];
         j = i;
@@ -228,7 +231,7 @@ static void HeapInsertSlot(MergeAppendState* node, SlotNumber new_slot)
 /*
  * Delete the heap top (the slot in heap[0]), and sift up.
  */
-static void HeapSiftupSlot(MergeAppendState* node)
+static void heap_siftup_slot(MergeAppendState* node)
 {
     SlotNumber* heap = node->ms_heap;
     HeapPosition i, n;
@@ -243,10 +246,10 @@ static void HeapSiftupSlot(MergeAppendState* node)
         if (j >= n) {
             break;
         }
-        if (j + 1 < n && HeapCompareSlots(node, heap[j], heap[j + 1]) > 0) {
+        if (j + 1 < n && heap_compare_slots(node, heap[j], heap[j + 1]) > 0) {
             j++;
         }
-        if (HeapCompareSlots(node, heap[n], heap[j]) <= 0) {
+        if (heap_compare_slots(node, heap[n], heap[j]) <= 0) {
             break;
         }
         heap[i] = heap[j];
@@ -258,10 +261,14 @@ static void HeapSiftupSlot(MergeAppendState* node)
 /*
  * Compare the tuples in the two given slots.
  */
-static int32 HeapCompareSlots(MergeAppendState* node, SlotNumber slot1, SlotNumber slot2)
+static int32 heap_compare_slots(MergeAppendState* node, SlotNumber slot1, SlotNumber slot2)
 {
     TupleTableSlot* s1 = node->ms_slots[slot1];
     TupleTableSlot* s2 = node->ms_slots[slot2];
+
+    Assert(s1 != NULL);
+    Assert(s2 != NULL);
+
     int nkey;
 
     Assert(!TupIsNull(s1));
@@ -275,8 +282,8 @@ static int32 HeapCompareSlots(MergeAppendState* node, SlotNumber slot1, SlotNumb
         bool isNull2 = false;
         int compare;
 
-        datum1 = slot_getattr(s1, attno, &isNull1);
-        datum2 = slot_getattr(s2, attno, &isNull2);
+        datum1 = tableam_tslot_getattr(s1, attno, &isNull1);
+        datum2 = tableam_tslot_getattr(s2, attno, &isNull2);
 
         compare = ApplySortComparator(datum1, isNull1, datum2, isNull2, sortKey);
         if (compare != 0)

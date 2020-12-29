@@ -29,11 +29,11 @@
  * itself, because that's what will be used for any subsidiary info attached
  * to the ScanKey's FmgrInfo record.
  */
-void ScanKeyEntryInitialize(ScanKey entry, uint32 flags, AttrNumber attribute_number, StrategyNumber strategy,
-    Oid subtype, Oid collation, RegProcedure procedure, Datum argument)
+void ScanKeyEntryInitialize(ScanKey entry, uint32 flags, AttrNumber attributeNumber, StrategyNumber strategy,
+                            Oid subtype, Oid collation, RegProcedure procedure, Datum argument)
 {
     entry->sk_flags = flags;
-    entry->sk_attno = attribute_number;
+    entry->sk_attno = attributeNumber;
     entry->sk_strategy = strategy;
     entry->sk_subtype = subtype;
     entry->sk_collation = collation;
@@ -64,11 +64,11 @@ void ScanKeyEntryInitialize(ScanKey entry, uint32 flags, AttrNumber attribute_nu
  * itself, because that's what will be used for any subsidiary info attached
  * to the ScanKey's FmgrInfo record.
  */
-void ScanKeyInit(
-    ScanKey entry, AttrNumber attribute_number, StrategyNumber strategy, RegProcedure procedure, Datum argument)
+void ScanKeyInit(ScanKey entry, AttrNumber attributeNumber, StrategyNumber strategy, RegProcedure procedure,
+                 Datum argument)
 {
     entry->sk_flags = 0;
-    entry->sk_attno = attribute_number;
+    entry->sk_attno = attributeNumber;
     entry->sk_strategy = strategy;
     entry->sk_subtype = InvalidOid;
     entry->sk_collation = DEFAULT_COLLATION_OID;
@@ -85,11 +85,11 @@ void ScanKeyInit(
  * itself, because that's what will be used for any subsidiary info attached
  * to the ScanKey's FmgrInfo record.
  */
-void ScanKeyEntryInitializeWithInfo(ScanKey entry, uint32 flags, AttrNumber attribute_number, StrategyNumber strategy,
-    Oid subtype, Oid collation, FmgrInfo* finfo, Datum argument)
+void ScanKeyEntryInitializeWithInfo(ScanKey entry, uint32 flags, AttrNumber attributeNumber, StrategyNumber strategy,
+                                    Oid subtype, Oid collation, FmgrInfo *finfo, Datum argument)
 {
     entry->sk_flags = flags;
-    entry->sk_attno = attribute_number;
+    entry->sk_attno = attributeNumber;
     entry->sk_strategy = strategy;
     entry->sk_subtype = subtype;
     entry->sk_collation = collation;

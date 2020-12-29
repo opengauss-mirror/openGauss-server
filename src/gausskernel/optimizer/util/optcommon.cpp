@@ -137,6 +137,7 @@ void GetPlanNodePlainText(
                 }
             }
             break;
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
             *pt_operation = "TABLE ACCESS";
             if (!((Scan*)plan)->tablesample) {
@@ -153,10 +154,7 @@ void GetPlanNodePlainText(
                 }
             }
             break;
-        case T_Gather:
-            *pt_operation = "Gather";
-            *pname = *sname = *pt_options = "Gather";
-            break;
+#endif   /* ENABLE_MULTIPLE_NODES */
         case T_IndexScan:
             *pt_operation = "INDEX";
             if (((IndexScan*)plan)->scan.isPartTbl)

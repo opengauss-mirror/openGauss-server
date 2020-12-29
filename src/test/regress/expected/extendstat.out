@@ -7,39 +7,43 @@ CREATE TABLE es_test (
     b   int,
     c   int
 )
-;
+DISTRIBUTE BY hash(c);
 drop table if exists es_test_copy;
 NOTICE:  table "es_test_copy" does not exist, skipping
 CREATE TABLE es_test_copy (
     a   int,
     b   int
 )
-;
+DISTRIBUTE BY hash(a);
 INSERT INTO es_test values(generate_series(1,10000)/100, generate_series(1,10000)/500, 1);
 INSERT INTO es_test_copy SELECT a,b FROM es_test;
 set default_statistics_target = -2;
 set explain_perf_mode = normal;
+set query_dop = 1;
 ANALYZE es_test;
 ANALYZE es_test_copy;
 EXPLAIN SELECT * FROM es_test WHERE (a = 1) AND (b = 0);
-                        QUERY PLAN                        
-----------------------------------------------------------
- Seq Scan on es_test  (cost=0.00..205.00 rows=2 width=12)
-   Filter: ((a = 1) AND (b = 0))
-(2 rows)
+                           QUERY PLAN                           
+----------------------------------------------------------------
+--? Streaming (type: GATHER)  (cost=.* rows=2 width=12)
+   Node/s: All datanodes
+--?   ->  Seq Scan on es_test  (cost=.* rows=2 width=12)
+         Filter: ((a = 1) AND (b = 0))
+(4 rows)
 
 EXPLAIN SELECT * FROM es_test t1, es_test_copy t2 WHERE (t1.a = t2.a) AND (t1.b = t2.b);
-                                   QUERY PLAN                                    
----------------------------------------------------------------------------------
- Merge Join  (cost=1628.77..2548.69 rows=48281 width=20)
-   Merge Cond: ((t1.a = t2.a) AND (t1.b = t2.b))
-   ->  Sort  (cost=819.39..844.39 rows=10000 width=12)
-         Sort Key: t1.a, t1.b
-         ->  Seq Scan on es_test t1  (cost=0.00..155.00 rows=10000 width=12)
-   ->  Sort  (cost=809.39..834.39 rows=10000 width=8)
-         Sort Key: t2.a, t2.b
-         ->  Seq Scan on es_test_copy t2  (cost=0.00..145.00 rows=10000 width=8)
-(8 rows)
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+--? Streaming (type: GATHER)  (cost=.* rows=48281 width=20)
+   Node/s: All datanodes
+--?   ->  Hash Join  (cost=.* rows=48281 width=20)
+         Hash Cond: ((t2.a = t1.a) AND (t2.b = t1.b))
+         ->  Seq Scan on es_test_copy t2  (cost=0.00..12.33 rows=10000 width=8)
+--?         ->  Hash  (cost=.* rows=9996 width=12)
+--?               ->  Streaming(type: REDISTRIBUTE)  (cost=.* rows=10000 width=12)
+                     Spawn on: All datanodes
+--?                     ->  Seq Scan on es_test t1  (cost=.* rows=10000 width=12)
+(9 rows)
 
 --using extended statistic
 delete from pg_statistic where staattnum < 0;
@@ -56,33 +60,45 @@ order by 1,3;
 (0 rows)
 
 EXPLAIN SELECT * FROM es_test WHERE (a = 1) AND (b = 0);
-                        QUERY PLAN                         
------------------------------------------------------------
- Seq Scan on es_test  (cost=0.00..207.62 rows=99 width=12)
-   Filter: ((a = 1) AND (b = 0))
-(2 rows)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+--? Streaming (type: GATHER)  (cost=.* rows=97 width=12)
+   Node/s: All datanodes
+--?   ->  Seq Scan on es_test  (cost=.* rows=97 width=12)
+         Filter: ((a = 1) AND (b = 0))
+(4 rows)
 
 EXPLAIN SELECT * FROM es_test t1, es_test_copy t2 WHERE (t1.a = t2.a) AND (t1.b = t2.b);
-                                   QUERY PLAN                                    
----------------------------------------------------------------------------------
- Hash Join  (cost=299.25..13325.48 rows=1024942 width=20)
-   Hash Cond: ((t1.a = t2.a) AND (t1.b = t2.b))
-   ->  Seq Scan on es_test t1  (cost=0.00..156.75 rows=10175 width=12)
-   ->  Hash  (cost=146.70..146.70 rows=10170 width=8)
-         ->  Seq Scan on es_test_copy t2  (cost=0.00..146.70 rows=10170 width=8)
-(5 rows)
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+--? Streaming (type: GATHER)  (cost=.* rows=990476 width=20)
+   Node/s: All datanodes
+--?   ->  Hash Join  (cost=.* rows=990476 width=20)
+         Hash Cond: ((t1.a = t2.a) AND (t1.b = t2.b))
+--?         ->  Streaming(type: REDISTRIBUTE)  (cost=.* rows=10000 width=12)
+               Spawn on: All datanodes
+--?               ->  Seq Scan on es_test t1  (cost=.* rows=10000 width=12)
+         ->  Hash  (cost=12.33..12.33 rows=9996 width=8)
+               ->  Seq Scan on es_test_copy t2  (cost=0.00..12.33 rows=10000 width=8)
+(9 rows)
 
 EXPLAIN (ANALYZE OFF, TIMING OFF, COSTS OFF) SELECT * FROM es_test t1 where exists (select * from es_test_copy t2 where (t1.a = t2.a) AND (t1.b = t2.b));
-                   QUERY PLAN                   
-------------------------------------------------
- Hash Join
-   Hash Cond: ((t1.a = t2.a) AND (t1.b = t2.b))
-   ->  Seq Scan on es_test t1
-   ->  Hash
-         ->  HashAggregate
-               Group By Key: t2.a, t2.b
-               ->  Seq Scan on es_test_copy t2
-(7 rows)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: ((t1.a = t2.a) AND (t1.b = t2.b))
+         ->  Seq Scan on es_test t1
+         ->  Hash
+               ->  HashAggregate
+                     Group By Key: t2.a, t2.b
+                     ->  Streaming(type: BROADCAST)
+                           Spawn on: All datanodes
+                           ->  HashAggregate
+                                 Group By Key: t2.a, t2.b
+                                 ->  Seq Scan on es_test_copy t2
+(13 rows)
 
 create table es_test_null(c1 int, c2 int, c3 int);
 -- create even values
@@ -95,56 +111,74 @@ insert into es_test_null select 1,2   ,NULL from generate_series(1,30) as v;
 insert into es_test_null select 2,NULL,NULL from generate_series(1,35) as v;
 analyze es_test_null((c2, c3));
 explain select * from es_test_null where c2 is null and c3 = 1;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Seq Scan on es_test_null  (cost=0.00..3.19 rows=20 width=12)
-   Filter: ((c2 IS NULL) AND (c3 = 1))
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Streaming (type: GATHER)  (cost=0.25..13.04 rows=20 width=12)
+   Node/s: All datanodes
+   ->  Seq Scan on es_test_null  (cost=0.00..11.41 rows=20 width=12)
+         Filter: ((c2 IS NULL) AND (c3 = 1))
+(4 rows)
 
 explain select * from es_test_null where c2 is null and c3 = 2;
-                         QUERY PLAN                          
--------------------------------------------------------------
- Seq Scan on es_test_null  (cost=0.00..3.19 rows=1 width=12)
-   Filter: ((c2 IS NULL) AND (c3 = 2))
-(2 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)  (cost=0.06..11.82 rows=1 width=12)
+   Node/s: All datanodes
+   ->  Seq Scan on es_test_null  (cost=0.00..11.41 rows=1 width=12)
+         Filter: ((c2 IS NULL) AND (c3 = 2))
+(4 rows)
 
 explain select * from es_test_null where c2 = 2 and c3 is null;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Seq Scan on es_test_null  (cost=0.00..3.19 rows=30 width=12)
-   Filter: ((c3 IS NULL) AND (c2 = 2))
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Streaming (type: GATHER)  (cost=0.38..13.85 rows=30 width=12)
+   Node/s: All datanodes
+   ->  Seq Scan on es_test_null  (cost=0.00..11.41 rows=30 width=12)
+         Filter: ((c3 IS NULL) AND (c2 = 2))
+(4 rows)
 
 explain select * from es_test_null where c2 = 5 and c3 is null;
-                         QUERY PLAN                          
--------------------------------------------------------------
- Seq Scan on es_test_null  (cost=0.00..3.19 rows=1 width=12)
-   Filter: ((c3 IS NULL) AND (c2 = 5))
-(2 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)  (cost=0.06..11.82 rows=1 width=12)
+   Node/s: All datanodes
+   ->  Seq Scan on es_test_null  (cost=0.00..11.41 rows=1 width=12)
+         Filter: ((c3 IS NULL) AND (c2 = 5))
+(4 rows)
 
 explain select * from es_test_null where c2 is null and c3 is null;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Seq Scan on es_test_null  (cost=0.00..2.75 rows=35 width=12)
-   Filter: ((c2 IS NULL) AND (c3 IS NULL))
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Streaming (type: GATHER)  (cost=0.44..14.17 rows=35 width=12)
+   Node/s: All datanodes
+   ->  Seq Scan on es_test_null  (cost=0.00..11.33 rows=35 width=12)
+         Filter: ((c2 IS NULL) AND (c3 IS NULL))
+(4 rows)
 
 explain select * from es_test_null where c2 is not null and c3 = 1;
-                         QUERY PLAN                          
--------------------------------------------------------------
- Seq Scan on es_test_null  (cost=0.00..3.19 rows=1 width=12)
-   Filter: ((c2 IS NOT NULL) AND (c3 = 1))
-(2 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)  (cost=0.06..11.82 rows=1 width=12)
+   Node/s: All datanodes
+   ->  Seq Scan on es_test_null  (cost=0.00..11.41 rows=1 width=12)
+         Filter: ((c2 IS NOT NULL) AND (c3 = 1))
+(4 rows)
 
 explain select * from es_test_null t1, es_test_null t2 where t1.c2=t2.c2 and t1.c3=t2.c3;
-                                  QUERY PLAN                                  
-------------------------------------------------------------------------------
- Hash Join  (cost=5.38..19.56 rows=881 width=24)
-   Hash Cond: ((t1.c2 = t2.c2) AND (t1.c3 = t2.c3))
-   ->  Seq Scan on es_test_null t1  (cost=0.00..2.75 rows=175 width=12)
-   ->  Hash  (cost=2.75..2.75 rows=175 width=12)
-         ->  Seq Scan on es_test_null t2  (cost=0.00..2.75 rows=175 width=12)
-(5 rows)
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+--? Streaming (type: GATHER)  (cost=.* rows=881 width=24)
+   Node/s: All datanodes
+--?   ->  Hash Join  (cost=.* rows=881 width=24)
+         Hash Cond: ((t1.c2 = t2.c2) AND (t1.c3 = t2.c3))
+         ->  Streaming(type: REDISTRIBUTE)  (cost=0.00..16.16 rows=175 width=12)
+               Spawn on: All datanodes
+               ->  Seq Scan on es_test_null t1  (cost=0.00..11.33 rows=175 width=12)
+         ->  Hash  (cost=16.16..16.16 rows=175 width=12)
+               ->  Streaming(type: REDISTRIBUTE)  (cost=0.00..16.16 rows=175 width=12)
+                     Spawn on: All datanodes
+                     ->  Seq Scan on es_test_null t2  (cost=0.00..11.33 rows=175 width=12)
+(11 rows)
 
 reset default_statistics_target;
 drop table es_test;
@@ -158,7 +192,7 @@ create table item
     i_class_id                integer                       
 )
  with (orientation=column)
- ;
+ DISTRIBUTE by hash(i_item_sk);
  
 set resource_track_cost=10;   
 select  1
@@ -171,5 +205,6 @@ substr(i_brand_id,1,1)=i_class_id
 ----------
 (0 rows)
 
+set query_dop = 2002;
 drop schema extendstat cascade;
 NOTICE:  drop cascades to table item

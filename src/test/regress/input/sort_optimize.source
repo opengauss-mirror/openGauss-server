@@ -1,0 +1,116 @@
+--Row sort, sortagg, merge join
+
+drop schema if exists row_sort cascade;
+create schema row_sort;
+
+--Create Table
+create table row_sort.test_sort_1(id int, num1 numeric, num2 decimal, str1 char(8), str2 char(8), str3 varchar(8), str4 varchar(8), str5 bytea, str6 bytea);
+
+--Insert Data
+COPY row_sort.test_sort_1 FROM '@abs_srcdir@/data/sort_optimize.data' delimiter ',';
+
+insert into row_sort.test_sort_1(id) values (generate_series(5001, 5100));
+
+--Sortagg
+set enable_hashagg=off;
+
+-- numeric
+select count(distinct(id)) as num from row_sort.test_sort_1 group by num1 order by num limit 10; 
+select count(distinct(id)) as num from row_sort.test_sort_1 group by num2 order by num limit 10; 
+
+-- text
+select count(distinct(id)) as num from row_sort.test_sort_1 group by str1 order by num limit 10; 
+select count(distinct(id)) as num from row_sort.test_sort_1 group by str2 order by num limit 10; 
+select count(distinct(id)) as num from row_sort.test_sort_1 group by str3 order by num limit 10; 
+select count(distinct(id)) as num from row_sort.test_sort_1 group by str4 order by num limit 10; 
+select count(distinct(id)) as num from row_sort.test_sort_1 group by str5 order by num limit 10; 
+select count(distinct(id)) as num from row_sort.test_sort_1 group by str6 order by num limit 10; 
+
+CREATE TABLE row_sort.test_sort_2(COL_NAME varchar2(20), COL_POPU char(5)) ;
+INSERT INTO row_sort.test_sort_2 VALUES('num_1','chart');
+INSERT INTO row_sort.test_sort_2 VALUES('num_2','ch');
+INSERT INTO row_sort.test_sort_2 VALUES('num_3','Infin');
+INSERT INTO row_sort.test_sort_2 VALUES('num_3','-Infi');
+INSERT INTO row_sort.test_sort_2 VALUES('num_5',' ');
+
+SELECT COL_POPU,length(COL_POPU),
+CASE COL_POPU
+WHEN 'chart' THEN 'man'
+WHEN cast('-Infinity' AS char(5)) THEN '-Infinity be cut'
+WHEN cast('Infinity' AS char(5)) THEN 'Infinity be cut'
+WHEN ' ' THEN 'space'
+ELSE 'others'
+END AS CASE_CHAR
+FROM row_sort.test_sort_2 ORDER BY COL_POPU,CASE_CHAR;
+
+reset enable_hashagg;
+--drop schema
+drop schema if exists row_sort cascade;
+
+
+--Column sort, sortagg, merge join
+
+drop schema if exists column_sort cascade;
+create schema column_sort;
+
+--Create Table
+create table column_sort.test_sort_1(id int, num1 numeric, num2 decimal, str1 char(8), str2 char(8), str3 varchar(8), str4 varchar(8), str5 bytea, str6 bytea) with(orientation=column);
+
+--Insert Data
+COPY column_sort.test_sort_1 FROM '@abs_srcdir@/data/sort_optimize.data' delimiter ',';
+
+insert into column_sort.test_sort_1(id) values (generate_series(5001, 5100));
+
+--Sortagg
+set enable_hashagg=off;
+
+-- numeric
+select count(distinct(id)) as num from column_sort.test_sort_1 group by num1 order by num limit 10; 
+select count(distinct(id)) as num from column_sort.test_sort_1 group by num2 order by num limit 10; 
+
+-- text
+select count(distinct(id)) as num from column_sort.test_sort_1 group by str1 order by num limit 10; 
+select count(distinct(id)) as num from column_sort.test_sort_1 group by str2 order by num limit 10; 
+select count(distinct(id)) as num from column_sort.test_sort_1 group by str3 order by num limit 10; 
+select count(distinct(id)) as num from column_sort.test_sort_1 group by str4 order by num limit 10; 
+select count(distinct(id)) as num from column_sort.test_sort_1 group by str5 order by num limit 10; 
+select count(distinct(id)) as num from column_sort.test_sort_1 group by str6 order by num limit 10;
+
+CREATE TABLE column_sort.test_sort_2(COL_NAME varchar2(20), COL_POPU char(5)) with(orientation=column);
+INSERT INTO column_sort.test_sort_2 VALUES('num_1','chart');
+INSERT INTO column_sort.test_sort_2 VALUES('num_2','ch');
+INSERT INTO column_sort.test_sort_2 VALUES('num_3','Infin');
+INSERT INTO column_sort.test_sort_2 VALUES('num_3','-Infi');
+INSERT INTO column_sort.test_sort_2 VALUES('num_5',' ');
+
+SELECT COL_POPU,length(COL_POPU),
+CASE COL_POPU
+WHEN 'chart' THEN 'man'
+WHEN cast('-Infinity' AS char(5)) THEN '-Infinity be cut'
+WHEN cast('Infinity' AS char(5)) THEN 'Infinity be cut'
+WHEN ' ' THEN 'space'
+ELSE 'others'
+END AS CASE_CHAR
+FROM column_sort.test_sort_2 ORDER BY COL_POPU,CASE_CHAR;
+
+CREATE DATABASE test_sort TEMPLATE=template0 ENCODING='sql_ascii' LC_COLLATE='C' LC_CTYPE='C';
+\c test_sort
+CREATE TABLE sort_row(id numeric, num numeric, str char(10)); 
+CREATE TABLE sort_col(id numeric, num numeric, str char(10)) with(orientation=column);
+COPY sort_col FROM '@abs_srcdir@/data/sort_num.data';
+COPY sort_row FROM '@abs_srcdir@/data/sort_num.data';
+set work_mem='128MB';
+set enable_hashagg=off;
+select id, count(str) from sort_row group by id order by 1,2 limit 1;
+select num, count(str) from sort_row group by num order by 1,2 limit 1;
+select str, count(id) from sort_row group by str order by 1,2 limit 1;
+select id, count(str) from sort_col group by id order by 1,2 limit 1;
+select num, count(str) from sort_col group by num order by 1,2 limit 1;
+select str, count(id) from sort_col group by str order by 1,2 limit 1;
+DROP TABLE sort_row;
+DROP TABLE sort_col;
+\c regression
+
+reset enable_hashagg;
+--drop schema
+drop schema if exists column_sort cascade;

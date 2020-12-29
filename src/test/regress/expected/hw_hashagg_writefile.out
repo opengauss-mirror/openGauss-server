@@ -39,20 +39,21 @@ SELECT Party_Id, Zone_Num, Asset_Max_Belong_Org_Num FROM(SELECT
 FROM TMP_CUST_ASSET_SUM_1 T1 group by 1,2,3
 )AA WHERE QUA_ROW_NUM_1 <= 1
 ;
-                                                 QUERY PLAN                                                  
--------------------------------------------------------------------------------------------------------------
---? Subquery Scan on aa (actual time=.* rows=100000 loops=1)
-   Filter: (aa.qua_row_num_1 <= 1)
---?   ->  WindowAgg (actual time=.* rows=100000 loops=1)
---?         ->  Sort (actual time=.* rows=100000 loops=1)
-               Sort Key: t1.party_id
-               Sort Method: external merge  Memory: 4688kB
---?               ->  HashAggregate (actual time=.* rows=100000 loops=1)
-                     Group By Key: t1.party_id, t1.zone_num, t1.asset_max_belong_org_num
- Temp File Num: 48
---?                     ->  Seq Scan on tmp_cust_asset_sum_1 t1 (actual time=.* rows=200000 loops=1)
---? Total runtime: .* ms
-(11 rows)
+--?                                                         QUERY PLAN                                                         
+--?----------------------------------------------------------------------------------------------------------------------------
+--? Streaming (type: GATHER) (actual time=158.995..547.718 rows=100000 loops=1)
+   Node/s: All datanodes
+--?   ->  Subquery Scan on aa (actual time=[118.092,195.683]..[430.965,500.971], rows=100000)
+         Filter: (aa.qua_row_num_1 <= 1)
+--?         ->  WindowAgg (actual time=[118.087,189.014]..[430.959,493.320], rows=100000)
+--?               ->  Sort (actual time=[118.079,143.955]..[430.948,457.423], rows=100000)
+                     Sort Key: t1.party_id
+--?                     Sort Method: external merge  Disk:.*
+--?                     ->  HashAggregate (actual time=[47.300,78.058]..[83.069,298.455], rows=100000)
+                           Group By Key: t1.party_id, t1.zone_num, t1.asset_max_belong_org_num
+--?                           ->  Seq Scan on tmp_cust_asset_sum_1 t1 (actual time=[0.012,8.077]..[0.027,12.140], rows=200000)
+--? Total runtime: 559.526 ms
+(12 rows)
 
 SELECT Party_Id, Zone_Num, Asset_Max_Belong_Org_Num FROM(SELECT 
    T1.Party_Id                                            

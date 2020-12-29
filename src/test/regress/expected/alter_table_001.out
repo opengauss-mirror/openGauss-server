@@ -372,7 +372,7 @@ alter table nv_child_2010 add check (d between '2010-01-01'::date and '2010-12-3
 ERROR:  relation "nv_child_2010" does not exist
 alter table nv_child_2011 add check (d between '2011-01-01'::date and '2011-12-31'::date) not valid;
 ERROR:  relation "nv_child_2011" does not exist
-explain (costs off, nodes off) select * from nv_parent where d between '2011-08-01' and '2011-08-31';
+explain (costs off) select * from nv_parent where d between '2011-08-01' and '2011-08-31';
                                                                   QUERY PLAN                                                                   
 -----------------------------------------------------------------------------------------------------------------------------------------------
  Seq Scan on nv_parent
@@ -381,14 +381,14 @@ explain (costs off, nodes off) select * from nv_parent where d between '2011-08-
 
 create table nv_child_2009 (check (d between '2009-01-01'::date and '2009-12-31'::date)) inherits (nv_parent);
 ERROR:  CREATE TABLE ... INHERITS is not yet supported.
-explain (costs off, nodes off) select * from nv_parent where d between '2011-08-01'::date and '2011-08-31'::date;
+explain (costs off) select * from nv_parent where d between '2011-08-01'::date and '2011-08-31'::date;
                                                                      QUERY PLAN                                                                      
 -----------------------------------------------------------------------------------------------------------------------------------------------------
  Seq Scan on nv_parent
    Filter: ((d >= 'Mon Aug 01 00:00:00 2011'::timestamp(0) without time zone) AND (d <= 'Wed Aug 31 00:00:00 2011'::timestamp(0) without time zone))
 (2 rows)
 
-explain (costs off, nodes off) select * from nv_parent where d between '2009-08-01'::date and '2009-08-31'::date;
+explain (costs off) select * from nv_parent where d between '2009-08-01'::date and '2009-08-31'::date;
                                                                      QUERY PLAN                                                                      
 -----------------------------------------------------------------------------------------------------------------------------------------------------
  Seq Scan on nv_parent
@@ -398,7 +398,7 @@ explain (costs off, nodes off) select * from nv_parent where d between '2009-08-
 -- after validation, the constraint should be used
 alter table nv_child_2011 VALIDATE CONSTRAINT nv_child_2011_d_check;
 ERROR:  relation "nv_child_2011" does not exist
-explain (costs off, nodes off) select * from nv_parent where d between '2009-08-01'::date and '2009-08-31'::date;
+explain (costs off) select * from nv_parent where d between '2009-08-01'::date and '2009-08-31'::date;
                                                                      QUERY PLAN                                                                      
 -----------------------------------------------------------------------------------------------------------------------------------------------------
  Seq Scan on nv_parent

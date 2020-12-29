@@ -94,6 +94,7 @@
 #include "replication/heartbeat/libpq/libpq-be.h"
 #include "utils/elog.h"
 #include "utils/palloc.h"
+#include "pgstat.h"
 
 namespace PureLibpq {
 #define MAXGTMPATH 256
@@ -104,8 +105,8 @@ namespace PureLibpq {
 #define TCP_MAX_RETRY_TIMES 3
 
 /* Internal functions */
-static int internal_putbytes(Port* myport, const char* s, size_t len);
-static int internal_flush(Port* myport);
+static int internal_putbytes(Port *myport, const char *s, size_t len);
+static int internal_flush(Port *myport);
 
 /*
  * StreamServerPort -- open a "listening" port to accept connections.
@@ -115,7 +116,7 @@ static int internal_flush(Port* myport);
  *
  * RETURNS: STATUS_OK or STATUS_ERROR
  */
-int StreamServerPort(int family, char* hostName, unsigned short portNumber, int ListenSocket[], int MaxListen)
+int StreamServerPort(int family, char *hostName, unsigned short portNumber, int ListenSocket[], int MaxListen)
 {
     const int PORT_STR_LEN = 32;
     const int FAMILY_DESC_LEN = 64;
@@ -124,11 +125,11 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, int 
     int maxconn;
     int ret;
     char portNumberStr[PORT_STR_LEN];
-    const char* familyDesc = NULL;
+    const char *familyDesc = NULL;
     char familyDescBuf[FAMILY_DESC_LEN];
-    char* service = NULL;
-    struct addrinfo* addrs = NULL;
-    struct addrinfo* addr = NULL;
+    char *service = NULL;
+    struct addrinfo *addrs = NULL;
+    struct addrinfo *addr = NULL;
     struct addrinfo hint;
     int listen_index = 0;
     int added = 0;
@@ -153,11 +154,8 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, int 
     ret = pg_getaddrinfo_all(hostName, service, &hint, &addrs);
     if (ret || (addrs == NULL)) {
         if (hostName != NULL)
-            ereport(LOG,
-                (errmsg("could not translate host name \"%s\", service \"%s\" to address: %s",
-                    hostName,
-                    service,
-                    gai_strerror(ret))));
+            ereport(LOG, (errmsg("could not translate host name \"%s\", service \"%s\" to address: %s", hostName,
+                                 service, gai_strerror(ret))));
         else
             ereport(LOG, (errmsg("could not translate service \"%s\" to address: %s", service, gai_strerror(ret))));
         if (addrs != NULL)
@@ -195,11 +193,8 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, int 
                 break;
 #endif
             default:
-                rc = snprintf_s(familyDescBuf,
-                    sizeof(familyDescBuf),
-                    sizeof(familyDescBuf) - 1,
-                    "unrecognized address family %d",
-                    addr->ai_family);
+                rc = snprintf_s(familyDescBuf, sizeof(familyDescBuf), sizeof(familyDescBuf) - 1,
+                                "unrecognized address family %d", addr->ai_family);
                 securec_check_ss(rc, "\0", "\0");
                 familyDesc = familyDescBuf;
                 break;
@@ -224,7 +219,7 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, int 
          * SO_REUSEADDR.
          */
         if (!IS_AF_UNIX(addr->ai_family)) {
-            if ((setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char*)&one, sizeof(one))) == -1) {
+            if ((setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof(one))) == -1) {
                 ereport(LOG, (errmsg("setsockopt(SO_REUSEADDR) failed.")));
                 close(fd);
                 continue;
@@ -234,7 +229,7 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, int 
 
 #ifdef IPV6_V6ONLY
         if (addr->ai_family == AF_INET6) {
-            if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&one, sizeof(one)) == -1) {
+            if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (char *)&one, sizeof(one)) == -1) {
                 ereport(LOG, (errmsg("setsockopt(IPV6_V6ONLY) failed.")));
                 close(fd);
                 continue;
@@ -250,11 +245,9 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, int 
          */
         err = bind(fd, addr->ai_addr, addr->ai_addrlen);
         if (err < 0) {
-            ereport(LOG,
-                (errmsg("could not bind %s socket: Is another instance already running on port %d?"
-                        " If not, wait a few seconds and retry.",
-                    familyDesc,
-                    (int)portNumber)));
+            ereport(LOG, (errmsg("could not bind %s socket: Is another instance already running on port %d?"
+                                 " If not, wait a few seconds and retry.",
+                                 familyDesc, (int)portNumber)));
 
             close(fd);
             continue;
@@ -295,11 +288,8 @@ int SetSocketNoBlock(int isocketId)
 
     iFlag = fcntl(isocketId, F_GETFL, 0);
     if (iFlag < 0) {
-        ereport(LOG,
-            (errmsg("Get socket info is failed(socketId = %d,errno = %d,errinfo = %s).",
-                isocketId,
-                errno,
-                strerror(errno))));
+        ereport(LOG, (errmsg("Get socket info is failed(socketId = %d,errno = %d,errinfo = %s).", isocketId, errno,
+                             strerror(errno))));
         return STATUS_ERROR;
     }
 
@@ -308,11 +298,8 @@ int SetSocketNoBlock(int isocketId)
 
     ret = fcntl(isocketId, F_SETFL, uFlag);
     if (ret < 0) {
-        ereport(LOG,
-            (errmsg("Set socket block is failed(socketId = %d,errno = %d,errinfo = %s).",
-                isocketId,
-                errno,
-                strerror(errno))));
+        ereport(LOG, (errmsg("Set socket block is failed(socketId = %d,errno = %d,errinfo = %s).", isocketId, errno,
+                             strerror(errno))));
         return STATUS_ERROR;
     }
 
@@ -329,11 +316,11 @@ int SetSocketNoBlock(int isocketId)
  *
  * RETURNS: STATUS_OK or STATUS_ERROR
  */
-int StreamConnection(int server_fd, Port* port)
+int StreamConnection(int server_fd, Port *port)
 {
     /* accept connection and fill in the client (remote) address */
     port->raddr.salen = sizeof(port->raddr.addr);
-    if ((port->sock = accept(server_fd, (struct sockaddr*)&port->raddr.addr, (socklen_t*)&port->raddr.salen)) < 0) {
+    if ((port->sock = accept(server_fd, (struct sockaddr *)&port->raddr.addr, (socklen_t *)&port->raddr.salen)) < 0) {
         ereport(LOG, (errmsg("could not accept new connection.")));
 
         /*
@@ -358,7 +345,7 @@ int StreamConnection(int server_fd, Port* port)
 
     /* fill in the server (local) address */
     port->laddr.salen = sizeof(port->laddr.addr);
-    if (getsockname(port->sock, (struct sockaddr*)&port->laddr.addr, (socklen_t*)&port->laddr.salen) < 0) {
+    if (getsockname(port->sock, (struct sockaddr *)&port->laddr.addr, (socklen_t *)&port->laddr.salen) < 0) {
         ereport(LOG, (errmsg("getsockname() failed !")));
         return STATUS_ERROR;
     }
@@ -369,13 +356,13 @@ int StreamConnection(int server_fd, Port* port)
 
 #ifdef TCP_NODELAY
         on = 1;
-        if (setsockopt(port->sock, IPPROTO_TCP, TCP_NODELAY, (char*)&on, sizeof(on)) < 0) {
+        if (setsockopt(port->sock, IPPROTO_TCP, TCP_NODELAY, (char *)&on, sizeof(on)) < 0) {
             ereport(LOG, (errmsg("setsockopt(TCP_NODELAY) failed.")));
             return STATUS_ERROR;
         }
 #endif
         on = 1;
-        if (setsockopt(port->sock, SOL_SOCKET, SO_KEEPALIVE, (char*)&on, sizeof(on)) < 0) {
+        if (setsockopt(port->sock, SOL_SOCKET, SO_KEEPALIVE, (char *)&on, sizeof(on)) < 0) {
             ereport(LOG, (errmsg("setsockopt(SO_KEEPALIVE) failed.")));
             return STATUS_ERROR;
         }
@@ -411,21 +398,20 @@ void StreamClose(int sock)
  *		returns 0 if OK, EOF if trouble
  * --------------------------------
  */
-static int pq_recvbuf(Port* myport)
+static int pq_recvbuf(Port *myport)
 {
     errno_t rc;
     if (myport->PqRecvPointer > 0) {
         if (myport->PqRecvLength > myport->PqRecvPointer) {
             /* still some unread data, left-justify it in the buffer */
-            rc = memmove_s(myport->PqRecvBuffer,
-                myport->PqRecvLength,
-                myport->PqRecvBuffer + myport->PqRecvPointer,
-                myport->PqRecvLength - myport->PqRecvPointer);
+            rc = memmove_s(myport->PqRecvBuffer, myport->PqRecvLength, myport->PqRecvBuffer + myport->PqRecvPointer,
+                           myport->PqRecvLength - myport->PqRecvPointer);
             securec_check(rc, "\0", "\0");
             myport->PqRecvLength -= myport->PqRecvPointer;
             myport->PqRecvPointer = 0;
-        } else
+        } else {
             myport->PqRecvLength = myport->PqRecvPointer = 0;
+        }
     }
 
     /* Can fill buffer from myport->PqRecvLength and upwards */
@@ -433,11 +419,12 @@ static int pq_recvbuf(Port* myport)
         int r;
         int retry_times = 0;
 
+        PGSTAT_INIT_TIME_RECORD();
+        PGSTAT_START_TIME_RECORD();
     retry:
-        r = recv(myport->sock,
-            myport->PqRecvBuffer + myport->PqRecvLength,
-            PQ_BUFFER_SIZE - myport->PqRecvLength,
-            MSG_DONTWAIT);
+        r = recv(myport->sock, myport->PqRecvBuffer + myport->PqRecvLength, PQ_BUFFER_SIZE - myport->PqRecvLength,
+                 MSG_DONTWAIT);
+        END_NET_RECV_INFO(r);
         myport->last_call = LastCall_RECV;
 
         if (r < 0) {
@@ -488,7 +475,7 @@ static int pq_recvbuf(Port* myport)
  *		pq_getbyte	- get a single byte from connection, or return EOF
  * --------------------------------
  */
-int pq_getbyte(Port* myport)
+int pq_getbyte(Port *myport)
 {
     int ret;
     while (myport->PqRecvPointer >= myport->PqRecvLength) {
@@ -508,7 +495,7 @@ int pq_getbyte(Port* myport)
  *		returns 0 if OK, EOF if trouble
  * --------------------------------
  */
-int pq_getbytes(Port* myport, char* s, size_t len)
+int pq_getbytes(Port *myport, char *s, size_t len)
 {
     size_t amount;
     int ret;
@@ -539,12 +526,12 @@ int pq_getbytes(Port* myport, char* s, size_t len)
  *      returns 0 if OK, EOF if trouble
  * --------------------------------
  */
-int pq_putbytes(Port* myport, const char* s, size_t len)
+int pq_putbytes(Port *myport, const char *s, size_t len)
 {
     return internal_putbytes(myport, s, len);
 }
 
-static int internal_putbytes(Port* myport, const char* s, size_t len)
+static int internal_putbytes(Port *myport, const char *s, size_t len)
 {
     size_t amount;
     int ret;
@@ -576,7 +563,7 @@ static int internal_putbytes(Port* myport, const char* s, size_t len)
  *		returns 0 if OK, EOF if trouble
  * --------------------------------
  */
-int pq_flush(Port* myport)
+int pq_flush(Port *myport)
 {
     int res;
 
@@ -585,19 +572,22 @@ int pq_flush(Port* myport)
     return res;
 }
 
-static int internal_flush(Port* myport)
+static int internal_flush(Port *myport)
 {
     static THR_LOCAL int last_reported_send_errno = 0;
 
-    char* bufptr = myport->PqSendBuffer;
-    char* bufend = myport->PqSendBuffer + myport->PqSendPointer;
+    char *bufptr = myport->PqSendBuffer;
+    char *bufend = myport->PqSendBuffer + myport->PqSendPointer;
 
     while (bufptr < bufend) {
         int r;
         int retry_times = 0;
     resend:
         errno = 0;
+        PGSTAT_INIT_TIME_RECORD();
+        PGSTAT_START_TIME_RECORD();
         r = send(myport->sock, bufptr, bufend - bufptr, MSG_DONTWAIT);
+        END_NET_SEND_INFO(r);
         myport->last_call = LastCall_SEND;
         if (r <= 0) {
             myport->last_errno = errno;
@@ -673,7 +663,7 @@ static int internal_flush(Port* myport)
  *		returns 0 if OK, EOF if trouble
  * --------------------------------
  */
-int pq_putmessage(Port* myport, char msgtype, const char* s, size_t len)
+int pq_putmessage(Port *myport, char msgtype, const char *s, size_t len)
 {
     uint32 n32;
     int ret;
@@ -685,7 +675,7 @@ int pq_putmessage(Port* myport, char msgtype, const char* s, size_t len)
     }
 
     n32 = htonl((uint32)(len + sizeof(uint32)));
-    ret = internal_putbytes(myport, (char*)&n32, sizeof(uint32));
+    ret = internal_putbytes(myport, (char *)&n32, sizeof(uint32));
     if (ret != 0) {
         return ret;
     }
@@ -698,7 +688,7 @@ int pq_putmessage(Port* myport, char msgtype, const char* s, size_t len)
     return 0;
 }
 
-void CloseAndFreePort(Port* port)
+void CloseAndFreePort(Port *port)
 {
     if (port != NULL) {
         if (port->sock >= 0) {
@@ -708,4 +698,5 @@ void CloseAndFreePort(Port* port)
         pfree(port);
     }
 }
+
 }  // namespace PureLibpq

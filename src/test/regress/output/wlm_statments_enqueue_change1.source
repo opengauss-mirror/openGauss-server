@@ -1,0 +1,126 @@
+--create resource pool success.
+CREATE RESOURCE POOL respool_temp15;
+CREATE RESOURCE POOL respool_temp15;
+ERROR:  Resource Pool "respool_temp15": object already defined
+ALTER RESOURCE POOL respool_temp15;
+ERROR:  No options specified
+ALTER RESOURCE POOL xxx;
+ERROR:  Resource Pool "xxx": object not defined
+CREATE RESOURCE POOL respool_temp16 WITH (MEM_PERCENT=10);
+CREATE RESOURCE POOL respool_temp14 WITH (CPU_AFFINITY=10);
+ERROR:  cpu_affinity is not supported currently!
+CREATE RESOURCE POOL respool_temp17 WITH (XXX=10);
+ERROR:  incorrect option: xxx
+CREATE RESOURCE POOL respool_temp17 WITH (active_statements=-10);
+ERROR:  active_statements value can't be -10.
+CREATE RESOURCE POOL respool_temp17 WITH (active_statements=1,active_statements=2);
+ERROR:  redundant options: "active_statements"
+CREATE RESOURCE POOL respool_temp17 WITH (max_dop=-1);
+ERROR:  max_dop value can't be -1.
+CREATE RESOURCE POOL respool_temp17 WITH (max_dop=1,max_dop=2);
+ERROR:  redundant options: "max_dop"
+CREATE RESOURCE POOL respool_temp17 WITH (memory_limit='1.5GB');
+WARNING:  memory_limit is not available currently!
+ERROR:  invalid value "1.5GB" for parameter "memory_limit"
+HINT:  Valid units for this parameter are "kB", "MB", and "GB".
+CREATE RESOURCE POOL respool_temp17 WITH (memory_limit='1GB',memory_limit='2GB');
+WARNING:  memory_limit is not available currently!
+WARNING:  memory_limit is not available currently!
+ERROR:  redundant options: "memory_limit"
+CREATE RESOURCE POOL respool_temp17;
+CREATE WORKLOAD GROUP group_temp15;
+CREATE WORKLOAD GROUP group_temp15;
+ERROR:  Workload Group "group_temp15": object already defined
+CREATE WORKLOAD GROUP WLGROUP_15 USING RESOURCE POOL "xxx";
+ERROR:  Resource Pool "xxx": object not defined
+CREATE WORKLOAD GROUP group_temp16 WITH (ACT_STATEMENTS=-1);
+ERROR:  act_statements must be positive
+CREATE WORKLOAD GROUP group_temp16 WITH (xxx=-1);
+ERROR:  incorrect option: xxx
+CREATE WORKLOAD GROUP group_temp16 WITH (ACT_STATEMENTS=1,ACT_STATEMENTS=2);
+ERROR:  redundant options
+ALTER WORKLOAD GROUP group_temp15;
+ERROR:  No options specified
+ALTER WORKLOAD GROUP xxx;
+ERROR:  Workload Group "xxx": object not defined
+ALTER WORKLOAD GROUP group_temp15 USING RESOURCE POOL respool_temp15;
+CREATE APP WORKLOAD GROUP MAPPING app1;
+CREATE APP WORKLOAD GROUP MAPPING pgxc;
+ERROR:  Application Workload Group Mapping "pgxc": object can not create
+CREATE APP WORKLOAD GROUP MAPPING app1;
+ERROR:  Application Workload Group Mapping "app1": object already defined
+ALTER APP WORKLOAD GROUP MAPPING app1;
+ERROR:  No options specified
+ALTER APP WORKLOAD GROUP MAPPING xxx;
+ERROR:  Application Workload Group Mapping "xxx": object not defined
+ALTER APP WORKLOAD GROUP MAPPING app1 WITH (WORKLOAD_GPNAME='group_temp15');
+CREATE APP WORKLOAD GROUP MAPPING app2 WITH (WORKLOAD_GPNAME='xxx');
+ERROR:  Workload Group "xxx": object not defined
+CREATE APP WORKLOAD GROUP MAPPING app2 WITH (WORKLOAD_GPNAME='group_temp15',WORKLOAD_GPNAME='group_temp16');
+ERROR:  redundant options
+CREATE APP WORKLOAD GROUP MAPPING app2 WITH (xxx='xxx');
+ERROR:  incorrect option: xxx
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "ALTER RESOURCE POOL respool_temp16 WITH (control_group=\"class1:wg1\");" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "ALTER RESOURCE POOL respool_temp17 WITH (control_group=\"Rush\");" > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -c -S class1 -G wg1 -g 20 > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "set cgroup_name=\"class1:Rush\";select * from pg_resource_pool;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "set cgroup_name=\"class1:wg1\";select * from pg_resource_pool;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "ALTER RESOURCE POOL respool_temp17 WITH (control_group=\"class1:wg1\");" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "set cgroup_name=\"High\"; CREATE RESOURCE POOL respool_temp18; set cgroup_name=\"Low\"; DROP RESOURCE POOL respool_temp18;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "set cgroup_name=\"class2:Rush\";select * from pg_resource_pool;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "set cgroup_name=\"class1:wg2\";select * from pg_resource_pool;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "set cgroup_name=\"rush1\";select * from pg_resource_pool;select * from pg_workload_group;" > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -d -S class1 -G wg1 -g 20 > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -d -S class1 -G wg1 -g 20 > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -d -S class1 > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -d -S class1 > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pg_session_wlmstat;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pg_wlm_statistics;" > /dev/null 2>&1
+--create data tables.
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pg_control_group_config;" > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -c -N class1 -F 20 > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -c -N class1 -d > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_wlm_switch_cgroup(1234567890, 'class1:wg2');" > /dev/null 2>&1
+select * from pg_shared_memctx_detail('ProcessMemory');
+ pg_shared_memctx_detail 
+-------------------------
+ t
+(1 row)
+
+select * from pg_shared_memctx_detail('');
+ERROR:  invalid name of memory context: NULL or ""
+select * from pg_shared_memctx_detail('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+ERROR:  The name of memory context is too long(>=64bytes)
+select * from pg_stat_get_mem_mbytes_reserved(-1);
+ pg_stat_get_mem_mbytes_reserved 
+---------------------------------
+ GetFailed
+(1 row)
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_stat_get_mem_mbytes_reserved(threadid) from pg_session_wlmstat;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_wlm_get_session_info(123456);" > /dev/null 2>&1
+select * from gs_wlm_session_info;
+ERROR:  relation "gs_wlm_session_info" does not exist
+HINT:  please use database "postgres"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_wlm_cgroup_info;" > /dev/null 2>&1
+--drop resource pool success.
+DROP WORKLOAD GROUP group_temp15;
+ERROR:  cannot drop workload group "group_temp15" because other objects depend on it
+DETAIL:  application "app1" depends on workload group "group_temp15"
+DROP APP WORKLOAD GROUP MAPPING app1;
+DROP WORKLOAD GROUP group_temp15;
+DROP RESOURCE POOL respool_temp15;
+DROP RESOURCE POOL xxx;
+ERROR:  Resource Pool "xxx": object not defined
+DROP RESOURCE POOL IF EXISTS xxx;
+NOTICE:  Resource Pool "xxx" does not exist, skipping
+DROP WORKLOAD GROUP xxx;
+ERROR:  Workload Group "xxx": object not defined
+DROP WORKLOAD GROUP IF EXISTS xxx;
+NOTICE:  Workload Group "xxx" does not exist, skipping
+DROP APP WORKLOAD GROUP MAPPING xxx;
+ERROR:  App Workload Group Mapping "xxx": object not defined
+DROP APP WORKLOAD GROUP MAPPING IF EXISTS xxx;
+NOTICE:  App Workload Group Mapping "xxx" does not exist, skipping
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "DROP RESOURCE POOL respool_temp16;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "DROP RESOURCE POOL respool_temp17;" > /dev/null 2>&1

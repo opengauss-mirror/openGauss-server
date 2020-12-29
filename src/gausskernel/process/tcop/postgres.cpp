@@ -19,6 +19,7 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "catalog/pg_user_status.h"
 
 #include <fcntl.h>
 #include <limits.h>
@@ -36,21 +37,22 @@
 #include <poll.h>
 #endif
 
-#include "access/parallel.h"
 #include "access/printtup.h"
 #include "access/xact.h"
 #include "access/dfs/dfs_am.h"
+#include "access/double_write.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_authid.h"
 #include "commands/async.h"
+#include "commands/matview.h"
 #include "commands/prepare.h"
-#include "executor/spi.h"
 #include "commands/user.h"
 #include "commands/vacuum.h"
 #ifdef PGXC
 #include "commands/trigger.h"
 #endif
+#include "executor/spi.h"
 #include "executor/nodeRecursiveunion.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
@@ -58,6 +60,7 @@
 #include "miscadmin.h"
 #include "nodes/print.h"
 #include "optimizer/planner.h"
+#include "optimizer/bucketpruning.h"
 #include "pgstat.h"
 #include "pg_trace.h"
 #include "parser/analyze.h"
@@ -68,14 +71,14 @@
 #endif /* PGXC */
 #include "postmaster/autovacuum.h"
 #include "postmaster/postmaster.h"
-#include "postmaster/bgworker.h"
 #include "replication/dataqueue.h"
 #include "replication/datasender.h"
 #include "replication/walsender.h"
 #include "replication/slot.h"
 #include "rewrite/rewriteHandler.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
+#include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/procsignal.h"
 #include "storage/sinval.h"
@@ -84,6 +87,8 @@
 #include "tcop/tcopprot.h"
 #include "tcop/utility.h"
 #include "utils/be_module.h"
+#include "utils/hotkey.h"
+#include "utils/inval.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/postinit.h"
@@ -98,7 +103,9 @@
 #include "auditfuncs.h"
 #include "funcapi.h"
 #ifdef PGXC
+#include "distributelayer/streamMain.h"
 #include "storage/procarray.h"
+#include "pgxc/groupmgr.h"
 #include "pgxc/pgxc.h"
 #include "access/gtm.h"
 /* PGXC_COORD */
@@ -111,6 +118,7 @@
 #include "pgxc/pgxcnode.h"
 #include "pgxc/locator.h"
 #include "commands/copy.h"
+#include "commands/matview.h"
 #include "workload/cpwlm.h"
 #include "workload/workload.h"
 /* PGXC_DATANODE */
@@ -130,15 +138,24 @@ extern int optreset; /* might not be declared by system headers */
 #include "executor/nodeIndexscan.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/tcop_gstrace.h"
+#include "gs_policy/policy_common.h"
 #include "instruments/instr_unique_sql.h"
 #include "instruments/snapshot.h"
+#include "instruments/instr_slow_query.h"
 #include "instruments/unique_query.h"
+#include "instruments/instr_handle_mgr.h"
+#include "instruments/instr_statement.h"
 #include "nodes/parsenodes.h"
 #include "opfusion/opfusion.h"
 #include "parser/parser.h"
 #include "parser/parsetree.h"
+#include "pgxc/route.h"
 #include "tcop/stmt_retry.h"
 #include "threadpool/threadpool.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "pgxc/pgFdwRemote.h"
+#include "tsdb/utils/ts_redis.h"
+#endif
 #include "utils/acl.h"
 #include "utils/distribute_test.h"
 #include "utils/elog.h"
@@ -146,9 +163,19 @@ extern int optreset; /* might not be declared by system headers */
 #include "utils/memprot.h"
 #include "utils/memtrack.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
+#include "utils/plancache.h"
+#include "utils/globalpreparestmt.h"
+#include "commands/tablecmds.h"
+#include "catalog/gs_matview.h"
+#include "streaming/dictcache.h"
+#include "parser/parse_target.h"
+#include "streaming/streaming_catalog.h"
+#ifdef ENABLE_MOT
 #include "storage/mot/jit_exec.h"
-#include "libpq/pqmq.h"
+#endif
+
+THR_LOCAL VerifyCopyCommandIsReparsed copy_need_to_be_reparse = NULL;
 
 #define GSCGROUP_ATTACH_TASK()                                                                                   \
     {                                                                                                            \
@@ -206,6 +233,7 @@ static void get_query_result(TupleTableSlot* slot, DestReceiver* self);
  * @hdfs
  * Define different mesage type used for exec_simple_query
  */
+typedef enum { QUERY_MESSAGE = 0, HYBRID_MESSAGE } MessageType;
 
 /* ----------------------------------------------------------------
  *		decls for routines only used in this file
@@ -219,7 +247,6 @@ static List* pg_rewrite_query(Query* query);
 static bool check_log_statement(List* stmt_list);
 static int errdetail_execute(List* raw_parsetree_list);
 static int errdetail_params(ParamListInfo params);
-static int errdetail_abort(void);
 static int errdetail_recovery_conflict(void);
 static bool IsTransactionExitStmt(Node* parsetree);
 static bool IsTransactionExitStmtList(List* parseTrees);
@@ -228,44 +255,12 @@ static void drop_unnamed_stmt(void);
 static void SigHupHandler(SIGNAL_ARGS);
 static void log_disconnections(int code, Datum arg);
 static void ForceModifyInitialPwd(const char* query_string, List* parsetree_list);
+static void ForceModifyExpiredPwd(const char* queryString, const List* parsetreeList);
 #ifdef ENABLE_MULTIPLE_NODES
 static void InitGlobalNodeDefinition(PlannedStmt* planstmt);
 #endif
-extern void initRandomState(TimestampTz start_time, TimestampTz stop_time);
 static int getSingleNodeIdx_internal(ExecNodes* exec_nodes, ParamListInfo params);
 extern void CancelAutoAnalyze();
-extern List* RevalidateCachedQuery(CachedPlanSource* plansource);
-static void InitRecursiveCTEGlobalVariables(const PlannedStmt* planstmt);
-
-bool StreamThreadAmI()
-{
-    return (t_thrd.role == STREAM_WORKER);
-}
-
-void StreamTopConsumerIam()
-{
-    t_thrd.subrole = TOP_CONSUMER;
-}
-
-void StreamThreadIam()
-{
-    t_thrd.role = STREAM_WORKER;
-}
-
-bool StreamTopConsumerAmI()
-{
-    return (t_thrd.subrole == TOP_CONSUMER);
-}
-
-bool ParallelWorkerAmI()
-{
-    return t_thrd.role == BACKGROUND_WORKER;
-}
-
-bool ParallelLeaderAmI()
-{
-    return t_thrd.subrole == BACKGROUND_LEADER;
-}
 
 void EnableDoingCommandRead()
 {
@@ -284,7 +279,7 @@ static void exec_batch_bind_execute(StringInfo input_message);
 /*
  * MPP with recursive support
  */
-static void InitRecursiveCTEGlobalVariables(const PlannedStmt* planstmt)
+void InitRecursiveCTEGlobalVariables(const PlannedStmt* planstmt)
 {
     producer_top_plannode_str = NULL;
     is_syncup_producer = false;
@@ -322,7 +317,7 @@ static void InitRecursiveCTEGlobalVariables(const PlannedStmt* planstmt)
     pfree_ext(si.data);
 }
 
-#ifdef ENABLE_MULTIPLE_NODES /* PGXC_DATANODE */
+#ifdef ENABLE_MULTIPLE_NODES
 /* ----------------------------------------------------------------
  *		PG-XC routines
  * ----------------------------------------------------------------
@@ -341,6 +336,25 @@ static void DataNodeShutdown(int code, Datum arg)
     /* Free gxip */
     UnsetGlobalSnapshotData();
 }
+
+/*
+ * Check if the SIGUSR2 is trying to cancel GTM connection.
+ */
+static bool SignalCancelGTMConnection()
+{
+    if (t_thrd.proc != NULL) {
+        uint32 gtmhost_flag = pg_atomic_fetch_add_u32(&t_thrd.proc->signal_cancel_gtm_conn_flag, 0);
+        (void)pg_atomic_exchange_u32(&t_thrd.proc->signal_cancel_gtm_conn_flag, 0);
+        if (gtmhost_flag > 0) {
+            SetGTMInterruptFlag();
+            t_thrd.proc->suggested_gtmhost = FLAG2HOST(gtmhost_flag);
+            return true;
+        }
+    }
+
+    return false;
+}
+
 #endif
 
 /* ----------------------------------------------------------------
@@ -459,7 +473,9 @@ static int interactive_getc(void)
 static int SocketBackend(StringInfo inBuf)
 {
     int qtype;
-
+#ifdef ENABLE_MULTIPLE_NODES
+    int aCount = 0;
+#endif
     /*
      * Get message type code from the frontend.
      */
@@ -484,7 +500,12 @@ static int SocketBackend(StringInfo inBuf)
             u_sess->tri_cxt.exec_row_trigger_on_datanode = false;
             return qtype;
         } else if (qtype == 'a') { /* on DN only */
-#ifdef ENABLE_MULTIPLE_NODES       /* PGXC_DATANODE */
+#ifdef ENABLE_MULTIPLE_NODES      
+            if (aCount > MSG_A_REPEAT_NUM_MAX) {
+                ereport(DEBUG1, (errmsg("the character is repeat : %c", qtype)));
+                break;
+            }
+            aCount++;
             u_sess->tri_cxt.exec_row_trigger_on_datanode = true;
             ereport(DEBUG1, (errmsg("received trigger shipping message : %c", qtype)));
             qtype = pq_getbyte();
@@ -496,6 +517,9 @@ static int SocketBackend(StringInfo inBuf)
             break;
         }
     }
+
+    /* reset doing_extended_query_message */
+    u_sess->postgres_cxt.doing_extended_query_message = false;
 
     /*
      * Validate message type code before trying to read body; if we have lost
@@ -511,7 +535,6 @@ static int SocketBackend(StringInfo inBuf)
         case 'Z': /* simple plan  */
         case 'h': /* hybrid message query */
         case 'Y': /* plan with params */
-            u_sess->postgres_cxt.doing_extended_query_message = false;
             if (PG_PROTOCOL_MAJOR(FrontendProtocol) < 3) {
                 /* old style without length word; convert */
                 if (pq_getstring(inBuf)) {
@@ -536,8 +559,8 @@ static int SocketBackend(StringInfo inBuf)
             break;
 
         case 'F': /* fastpath function call */
-            /* we let fastpath.c cope with old-style input of this */
-            u_sess->postgres_cxt.doing_extended_query_message = false;
+        case 'I': /* Push, Pop schema name */
+        case 'L': /* Link gc_fdw */
             break;
 
         case 'X': /* terminate */
@@ -594,8 +617,9 @@ static int SocketBackend(StringInfo inBuf)
         case 'e': /* Thread ID */
         case 'w': /* dynamic WLM */
         case 'R': /* Reply collect info */
-        case 'n': /* Commit csn */
-        case 'N': /* Committing */
+        case 'n': /* Committing */
+        case 'N': /* Commit csn */
+        case 'l': /* get and handle csn for csnminsync */
         case 'G': /* PGXCBucketMap and PGXCNodeId */
         case 'j': /* Check gtm mode */
         case 'a': /* Not reach : Trigger shipped to DN */
@@ -603,12 +627,6 @@ static int SocketBackend(StringInfo inBuf)
         case 'z': /* PBE for DDL */
             break;
 #endif
-
-        case 'I': /* Push, Pop schema name */
-            break;
-
-        case 'L': /* Link gc_fdw */
-            break;
 
         default:
 
@@ -666,6 +684,7 @@ static int ReadCommand(StringInfo inBuf)
     if (!disable_session_sig_alarm())
         ereport(FATAL, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("could not disable timer for session timeout")));
 
+    u_sess->proc_cxt.firstChar = (char)result;
     return result;
 }
 
@@ -734,6 +753,8 @@ void client_read_ended(void)
 {
     if (t_thrd.postgres_cxt.DoingCommandRead) {
         int save_errno = errno;
+        /* Should reset ImmediateInterruptOK before proccessing catchup interrupts */
+        t_thrd.int_cxt.ImmediateInterruptOK = false;
 
         /* Process sinval catchup interrupts that happened while reading */
         if (catchupInterruptPending)
@@ -743,7 +764,6 @@ void client_read_ended(void)
         if (notifyInterruptPending)
             ProcessNotifyInterrupt();
 
-        t_thrd.int_cxt.ImmediateInterruptOK = false;
         errno = save_errno;
     }
 }
@@ -820,6 +840,16 @@ List* pg_analyze_and_rewrite(Node* parsetree, const char* query_string, Oid* par
     if (u_sess->attr.attr_common.log_parser_stats)
         ResetUsage();
 
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
+                IsA(parsetree, SelectStmt) && 
+                !is_streaming_thread() &&
+                !streaming_context_is_ddl() &&
+                is_contquery_with_dict((Node *)((SelectStmt *) parsetree)->fromClause)) {
+        transform_contquery_selectstmt_with_dict((SelectStmt *) parsetree);
+    }
+#endif
+
     query = parse_analyze(parsetree, query_string, paramTypes, numParams);
 
     if (u_sess->attr.attr_common.log_parser_stats)
@@ -876,8 +906,10 @@ List* pg_analyze_and_rewrite_params(
 
     query = transformTopLevelStmt(pstate, parsetree);
 
-    if (post_parse_analyze_hook)
+    /* it's unsafe to deal with plugins hooks as dynamic lib may be released */
+    if (post_parse_analyze_hook && !(g_instance.status > NoShutdown)) {
         (*post_parse_analyze_hook)(pstate, query);
+    }
 
     free_parsestate(pstate);
 
@@ -922,21 +954,77 @@ static List* pg_rewrite_query(Query* query)
 
     PGSTAT_START_TIME_RECORD();
 
-#ifdef PGXC
-    if (query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt) && 
-        ((CreateTableAsStmt*)query->utilityStmt)->relkind != OBJECT_MATVIEW &&
-        u_sess->cmd_cxt.isUnderRefreshMatview == false) {
-        /*
-         * CREATE TABLE AS SELECT and SELECT INTO are rewritten so that the
-         * target table is created first. The SELECT query is then transformed
-         * into an INSERT INTO statement
-         */
-        querytree_list = QueryRewriteCTAS(query);
-    } else
+    if (query->commandType == CMD_UTILITY) {
+#ifdef ENABLE_MULTIPLE_NODES
+        if (IsA(query->utilityStmt, CreateTableAsStmt)) {
+            /*
+             * CREATE TABLE AS SELECT and SELECT INTO are rewritten so that the
+             * target table is created first. The SELECT query is then transformed
+             * into an INSERT INTO statement
+             */
+             /* handle materilized view. */
+            CreateTableAsStmt *stmt = (CreateTableAsStmt *)query->utilityStmt;
+            if (IS_PGXC_COORDINATOR && stmt->relkind == OBJECT_MATVIEW) {
+                /* Check if OK to create matview */
+                check_basetable((Query *)stmt->query, true, stmt->into->ivm);
+                /* Check for select privilege */
+                (void)ExecCheckRTPerms(query->rtable, true);
+
+                if (stmt->into) {
+                    if (stmt->into->ivm) {
+                        check_matview_op_supported(stmt);
+                        stmt->into->distributeby = infer_incmatview_distkey(stmt);
+                    }
+                }
+            }
+             
+            if (stmt->relkind == OBJECT_MATVIEW && IS_PGXC_DATANODE) {
+                querytree_list = list_make1(query);
+            } else {
+                /*
+                 * CREATE TABLE AS SELECT and SELECT INTO are rewritten so that the
+                 * target table is created first. The SELECT query is then transformed
+                 * into an INSERT INTO statement
+                 */
+                querytree_list = QueryRewriteCTAS(query);
+            }
+        } else if (IsA(query->utilityStmt, CopyStmt)) {
+            querytree_list = query_rewrite_copy(query);
+        } else if(IsA(query->utilityStmt, RefreshMatViewStmt)) {
+            RefreshMatViewStmt *stmt = (RefreshMatViewStmt *)query->utilityStmt;
+            if (!stmt->incremental && !isIncMatView(stmt->relation)) {
+                querytree_list = QueryRewriteRefresh(query);
+            } else {
+                querytree_list = list_make1(query);
+            }
+        } else if (IsA(query->utilityStmt, AlterTableStmt)) {
+            querytree_list = query_rewrite_alter_table(query);
+        } else {
+            /* don't rewrite utilities, just dump them into result list */
+            querytree_list = list_make1(query);
+        }
+#else
+        if (IsA(query->utilityStmt, CreateTableAsStmt)) {
+            CreateTableAsStmt *stmt = (CreateTableAsStmt *)query->utilityStmt;
+            if (stmt->relkind == OBJECT_MATVIEW) {
+
+                /* Check if OK to create matview */
+                check_basetable((Query *)stmt->query, true, stmt->into->ivm);
+                /* Check for select privilege */
+                (void)ExecCheckRTPerms(query->rtable, true);
+
+                if (stmt->into && stmt->into->ivm) {
+                    check_matview_op_supported(stmt);
+                }
+
+                querytree_list = list_make1(query);
+            } else {
+                querytree_list = QueryRewriteCTAS(query);
+            }
+        } else {
+            querytree_list = list_make1(query);
+        }
 #endif
-        if (query->commandType == CMD_UTILITY) {
-        /* don't rewrite utilities, just dump 'em into result list */
-        querytree_list = list_make1(query);
     } else {
         /* rewrite regular queries */
         querytree_list = QueryRewrite(query);
@@ -997,11 +1085,22 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
 {
     PlannedStmt* plan = NULL;
     PGSTAT_INIT_TIME_RECORD();
+    bool multi_node_hint = false;
 
     /* Utility commands have no plans. */
     if (querytree->commandType == CMD_UTILITY)
         return NULL;
 
+    if (querytree->hintState != NULL) {
+        multi_node_hint = querytree->hintState->multi_node_hint;
+    }
+
+    /* Planner must have a snapshot in case it calls user-defined functions. */
+    if (!GTM_LITE_MODE) {  /* Skip if GTMLite */
+#ifndef ENABLE_MOT  /* To support skipping snapshot in case of MOT tables. */
+       Assert(ActiveSnapshotSet());
+#endif
+    }
     TRACE_POSTGRESQL_QUERY_PLAN_START();
 
     if (u_sess->attr.attr_common.log_planner_stats)
@@ -1056,8 +1155,40 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
 
     plan->is_stream_plan = u_sess->opt_cxt.is_stream;
 
+    plan->multi_node_hint = multi_node_hint;
+
     return plan;
 }
+
+/*
+ * Check whether the query is insert multiple values query.
+ * In the insert query, only one RTE_VALUES in the ratble is a multi-values query..
+ */
+static bool is_insert_multiple_values_query_in_gtmfree(Query* query)
+{
+    if (query->commandType != CMD_INSERT || !g_instance.attr.attr_storage.enable_gtm_free) {
+        return false;
+    }
+    List* rtables = query->rtable;
+    ListCell* cell = NULL;
+    RangeTblEntry* rte = NULL;
+    RangeTblEntry* values_rte = NULL;
+    foreach(cell, rtables) {
+        rte = (RangeTblEntry*)lfirst(cell);
+        if (rte->rtekind == RTE_VALUES) {
+            if (values_rte != NULL) {
+                return false;
+            }
+            values_rte = rte;
+        }
+    }
+    if (values_rte != NULL) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
 
 /*
  * Generate plans for a list of already-rewritten queries.
@@ -1071,7 +1202,7 @@ List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundPa
     ListCell* query_list = NULL;
 
     /* for abstimeout, transfer time to str in insert has some problem,
-     *  so distinguish insert and select situation for ABSTIMEOUTFUN to avoid problem. */
+     *  so distinguish insert and select situation for ABSTIMEOUTFUN to avoid problem.*/
     t_thrd.time_cxt.is_abstimeout_in = true;
 
     /* Set initalized plan seed according to guc plan_mode_seed for random plan testing function */
@@ -1091,9 +1222,23 @@ List* pg_plan_queries(List* querytrees, int cursorOptions, ParamListInfo boundPa
         } else {
             query->boundParamsQ = boundParams;
 
+            bool is_insert_multiple_values = is_insert_multiple_values_query_in_gtmfree(query);
+
             stmt = (Node*)pg_plan_query(query, cursorOptions, boundParams);
+ 
+            /* When insert multiple values query is a generate plan,
+             * we don't consider whether it can be executed on a single dn.
+             * Because it can be executed on a single DN only in custom plan.
+             * u_sess->pcache_cxt.query_has_params: checks whether the plan is in cachedplan.
+             * boundParams: checks whether the plan is a generate plan.
+             */
+            if (!(is_insert_multiple_values && boundParams == NULL && u_sess->pcache_cxt.query_has_params)) {
+                check_gtm_free_plan((PlannedStmt *)stmt, u_sess->attr.attr_sql.explain_allow_multinode ? WARNING : ERROR);
+            }
 
             ps = (PlannedStmt*)stmt;
+            check_plan_mergeinto_replicate(ps, ERROR);
+
             if (ps != NULL)
                 u_sess->wlm_cxt->wlm_num_streams += ps->num_streams;
         }
@@ -1245,8 +1390,6 @@ void exec_simple_plan(PlannedStmt* plan)
          */
         commandTag = CreateCommandTagForPlan(plan->commandType);
 
-        knl_thread_set_name(commandTag, true);
-
         set_ps_display(commandTag, false);
 
         BeginCommand(commandTag, dest);
@@ -1263,7 +1406,8 @@ void exec_simple_plan(PlannedStmt* plan)
             ereport(ERROR,
                 (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
                     errmsg("current transaction is aborted, "
-                           "commands ignored until end of transaction block"),
+                        "commands ignored until end of transaction block, firstChar[%c]",
+                        u_sess->proc_cxt.firstChar),
                     errdetail_abort()));
 
         /* Make sure we are in a transaction command */
@@ -1300,7 +1444,7 @@ void exec_simple_plan(PlannedStmt* plan)
                         sizeof(g_wlm_params->rpdata.rpname) - 1,
                         "%s",
                         foreignrp_name);
-                    securec_check_ss(rc, "\0", "\0");
+                    securec_check_ss(rc, "", "");
 
                     pfree(foreignrp_name);
 
@@ -1312,7 +1456,7 @@ void exec_simple_plan(PlannedStmt* plan)
                         sizeof(g_wlm_params->rpdata.rpname) - 1,
                         "%s",
                         DEFAULT_POOL_NAME);
-                    securec_check_ss(rc, "\0", "\0");
+                    securec_check_ss(rc, "", "");
                 }
             } else {
                 WLMSetControlGroup(GSCGROUP_INVALID_GROUP);
@@ -1324,7 +1468,7 @@ void exec_simple_plan(PlannedStmt* plan)
                 sizeof(g_wlm_params->ngroup) - 1,
                 "%s",
                 g_instance.wlm_cxt->local_dn_ngname);
-            securec_check_ss(rc, "\0", "\0");
+            securec_check_ss(rc, "", "");
         }
 
         GSCGROUP_ATTACH_TASK();
@@ -1446,11 +1590,11 @@ void exec_simple_plan(PlannedStmt* plan)
      */
     switch (check_log_duration(msec_str, was_logged)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms", msec_str), errhidestmt(true)));
+            ereport(DEBUG1, (errmsg("duration: %s ms, debugid %ld, unique id %lu", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2:
-            ereport(LOG,
-                (errmsg("duration: %s ms  statement: %s", msec_str, "TODO: deparse plan"),  // vam query_string),
+            ereport(DEBUG1,
+                (errmsg("duration: %s ms, debug id %ld unique id %lu statement: %s", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id, "TODO: deparse plan"),  // vam query_string),
                     errhidestmt(true)
                     // vam errdetail_execute(parsetree_list)
                     ));
@@ -1504,6 +1648,11 @@ static size_t split_querystring_sql_info(const char* query_string, char*& sql_qu
 
     /* skip the end char '}' which serialized Const info of queryStringLen. */
     position += 1;
+
+    if (strlen(position) <= queryStringLen) {
+        ereport(ERROR,  (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Input queryStringLen is illegal.")));
+    }
+
     /*
      * Get sql_query_string from query_string
      */
@@ -1613,8 +1762,8 @@ static void attach_info_to_plantree_list(List* plantree_list, AttachInfoContext*
                                     if (!HDFSNode->isHdfsForeignTbl) {
                                         vacuumStmt->HDFSDnWorkFlow = NULL;
                                     } else {
-                                        /* 
-                                         * hdfs foreign table 
+                                        /*
+                                         * hdfs foreign table
                                          * we must set default node as -1, because the nodeNo of the dn1 is 0,
                                          * we can't discriminate if do analyze on dn1.
                                          */
@@ -1692,8 +1841,8 @@ static void attach_info_to_plantree_list(List* plantree_list, AttachInfoContext*
                 if (attachInfoCtx->info_node == NULL) {
                     n = (Node*)stringToNode(info_query_string);
                     if (n == NULL) {
-                        ereport(ERROR,(errmsg("node n is null.")));
-                   }
+                        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("node n is null.")));
+                    }
 
                     if (IsA(n, Const)) {
                         Const* c = (Const*)n;
@@ -1726,8 +1875,12 @@ static void attach_info_to_plantree_list(List* plantree_list, AttachInfoContext*
                 attachInfoCtx->info_index++;
                 break;
             }
+#ifdef ENABLE_MOT
             case T_CreateStmt:  /* fall through */
             case T_CreateForeignTableStmt: {
+#else
+            case T_CreateStmt: {
+#endif
                 Node* l = (Node*)stringToNode(info_query_string);
                 CreateStmt* cstmt = (CreateStmt*)stmt;
 
@@ -1765,17 +1918,18 @@ void exec_init_poolhandles(void)
 {
 #ifdef ENABLE_MULTIPLE_NODES
     /* If this postmaster is launched from another Coord, do not initialize handles. skip it */
-    if (IS_PGXC_COORDINATOR && !IsPoolHandle() && IsPostmasterEnvironment) {
+    if (IS_PGXC_COORDINATOR && IsPostmasterEnvironment) {
         ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
 
         /* we use session memory context to remember all node info in this cluster. */
-        MemoryContext old = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+        MemoryContext old = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
 
-        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(currentOwner, "ForPGXCNodes");
+        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(currentOwner, "ForPGXCNodes",
+            MEMORY_CONTEXT_COMMUNICATION);
 
         if (currentOwner != NULL) {
             InitMultinodeExecutor(false);
-            if (!IsConnFromGTMTool() && !IsConnFromCoord()) {
+            if (!IsConnFromGTMTool() && !IsConnFromCoord() && !IsPoolHandle()) {
                 PoolHandle* pool_handle = GetPoolManagerHandle();
                 if (pool_handle == NULL) {
                     ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("Can not connect to pool manager")));
@@ -1799,13 +1953,13 @@ void exec_init_poolhandles(void)
                     session_options_ptr);
                 if (session_options_ptr != NULL)
                     pfree(session_options_ptr);
-                MemoryContextSwitchTo(u_sess->top_mem_cxt);
+                MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
             }
         } else {
             PG_TRY();
             {
                 InitMultinodeExecutor(false);
-                if (!IsConnFromGTMTool() && !IsConnFromCoord()) {
+                if (!IsConnFromGTMTool() && !IsConnFromCoord() && !IsPoolHandle()) {
                     PoolHandle* pool_handle = GetPoolManagerHandle();
                     if (pool_handle == NULL) {
                         ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("Can not connect to pool manager")));
@@ -1830,7 +1984,7 @@ void exec_init_poolhandles(void)
 
                     if (session_options_ptr != NULL)
                         pfree(session_options_ptr);
-                    MemoryContextSwitchTo(u_sess->top_mem_cxt);
+                    MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
                 }
             }
             PG_CATCH();
@@ -1888,7 +2042,7 @@ void exec_init_poolhandles(void)
  * hybridmesage, this parameter will be set to 1 to tell us the normal query string
  * followed by information string. query_string = normal querystring + message.
  */
-void exec_simple_query(const char* query_string, MessageType messageType, StringInfo msg)
+static void exec_simple_query(const char* query_string, MessageType messageType, StringInfo msg = NULL)
 {
     CommandDest dest = (CommandDest)t_thrd.postgres_cxt.whereToSendOutput;
     MemoryContext oldcontext;
@@ -1913,6 +2067,22 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
      */
     char* sql_query_string = NULL;
     char* info_query_string = NULL;
+
+#ifdef ENABLE_DISTRIBUTE_TEST
+    if (IS_PGXC_COORDINATOR && IsConnFromCoord()) {
+        if (TEST_STUB(NON_EXEC_CN_IS_DOWN, twophase_default_error_emit)) {
+            ereport(g_instance.distribute_test_param_instance->elevel,
+                (errmsg("SUBXACT_TEST %s: non-exec cn is down.", g_instance.attr.attr_common.PGXCNodeName)));
+        }
+
+        /* white box test start */
+        if (execute_whitebox(WHITEBOX_LOC, NULL, WHITEBOX_DEFAULT, DEFAULT_PROBABILITY)) {
+            ereport(g_instance.distribute_test_param_instance->elevel,
+                (errmsg("WHITE_BOX TEST %s: non-exec cn is down.", g_instance.attr.attr_common.PGXCNodeName)));
+        }
+    }
+    /* white box test end */
+#endif
 
     /*
      * Set query dop at the first beginning of a query.
@@ -1957,6 +2127,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
         pgstat_report_activity(STATE_RUNNING, sql_query_string);
         t_thrd.postgres_cxt.debug_query_string = sql_query_string;
     }
+    instr_stmt_report_start_time();
 
     /*
      * Start up a transaction command.	All queries generated by the
@@ -2011,7 +2182,17 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
     if (HYBRID_MESSAGE == messageType) {
         parsetree_list = pg_parse_query(sql_query_string);
     } else {
-        parsetree_list = pg_parse_query(query_string, &query_string_locationlist);
+        if (copy_need_to_be_reparse != NULL && g_instance.status == NoShutdown) {
+            bool reparse_query = false;
+            gs_stl::gs_string reparsed_query;
+            do {
+                parsetree_list = pg_parse_query(reparsed_query.empty() ?
+                                                query_string : reparsed_query.c_str(), &query_string_locationlist);
+                reparse_query = copy_need_to_be_reparse(parsetree_list, query_string, reparsed_query);
+            } while (reparse_query);
+        } else {
+            parsetree_list = pg_parse_query(query_string, &query_string_locationlist);
+        }
     }
 
     /* Log immediately if dictated by log_statement */
@@ -2031,8 +2212,10 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
 
     /* Light proxy is only enabled for single query from 'Q' message */
     bool runLightProxyCheck = (msg != NULL) && IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
-        /* GTMLite needs to run this check to determine single shard statement */
-        (u_sess->attr.attr_sql.enable_light_proxy || GTM_LITE_MODE) &&
+        u_sess->attr.attr_sql.enable_light_proxy &&
+        (list_length(parsetree_list) == 1) && (query_string_len < SECUREC_MEM_MAX_LEN);
+
+    bool runOpfusionCheck = (msg != NULL) && IS_PGXC_DATANODE && u_sess->attr.attr_sql.enable_opfusion &&
         (list_length(parsetree_list) == 1) && (query_string_len < SECUREC_MEM_MAX_LEN);
 
     /*
@@ -2048,6 +2231,15 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
     }
 
     /*
+     * Read password status from pg_user_status. If is in aborted block, don't check.
+     */
+    Oid current_user = GetUserId();
+    if (current_user != BOOTSTRAP_SUPERUSERID) {
+        if (!IsAbortedTransactionBlockState() && GetAccountPasswordExpired(current_user) == EXPIRED_STATUS) {
+            ForceModifyExpiredPwd((const char*)query_string, parsetree_list);
+        }
+    }
+    /*
      * We'll tell PortalRun it's a top-level command iff there's exactly one
      * raw parsetree.  If more than one, it's effectively a transaction block
      * and we want PreventTransactionChain to reject unsafe commands. (Note:
@@ -2055,7 +2247,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
      * significant to PreventTransactionChain.)
      */
     isTopLevel = (list_length(parsetree_list) == 1);
-    u_sess->SPI_cxt.is_toplevel_stp = isTopLevel;
+    stp_retore_old_xact_stmt_state(isTopLevel);
 
     if (isTopLevel != 1)
         t_thrd.explain_cxt.explain_perf_mode = EXPLAIN_NORMAL;
@@ -2086,28 +2278,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
      * Run through the raw parsetree(s) and process each one.
      */
     foreach (parsetree_item, parsetree_list) {
-        if (is_local_unique_sql()) {
-            u_sess->debug_query_id = 0;
-            /* reset unique_sql */
-            if (is_unique_sql_enabled()) {
-                ResetCurrentUniqueSQL();
-                u_sess->unique_sql_cxt.unique_sql_start_time = u_sess->unique_sql_cxt.unique_sql_start_time > 0
-                                                                   ? GetCurrentTimestamp()
-                                                                   : GetCurrentStatementLocalStartTimestamp();
-
-                /*
-                 * INSTR: when track type is TOP, before query to start,
-                 * we reset is_top_unique_sql to false
-                 */
-                if (IS_UNIQUE_SQL_TRACK_TOP)
-                    SetIsTopUniqueSQL(false);
-
-                /* reset unique sql returned rows(SELECT) */
-                UniqueSQLStatCountResetReturnedRows();
-                UniqueSQLStatCountResetParseCounter();
-            }
-        }
-
+        instr_unique_sql_handle_multi_sql(parsetree_item == list_head(parsetree_list));
         Node* parsetree = (Node*)lfirst(parsetree_item);
         bool snapshot_set = false;
         const char* commandTag = NULL;
@@ -2120,7 +2291,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
         char* randomPlanInfo = NULL;
 
         /* Reset the single_shard_stmt flag */
-        u_sess->attr.attr_sql.single_shard_stmt = false;
+        u_sess->exec_cxt.single_shard_stmt = false;
 
         /*
          * When dealing with a multi-query, get the snippets of each single querys through
@@ -2160,8 +2331,6 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
          */
         commandTag = CreateCommandTag(parsetree);
 
-        knl_thread_set_name(commandTag, true);
-
         set_ps_display(commandTag, false);
 
         BeginCommand(commandTag, dest);
@@ -2178,7 +2347,8 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
             ereport(ERROR,
                 (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
                     errmsg("current transaction is aborted, "
-                           "commands ignored until end of transaction block"),
+                        "commands ignored until end of transaction block, firstChar[%c]",
+                        u_sess->proc_cxt.firstChar),
                     errdetail_abort()));
 
         /* Make sure we are in a transaction command */
@@ -2222,6 +2392,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
         else
             querytree_list = pg_analyze_and_rewrite(parsetree, sql_query_string, NULL, 0);
 
+#ifdef ENABLE_MOT
         /* check cross engine queries and transactions violation for MOT */
         StorageEngineType storageEngineType = SE_TYPE_UNSPECIFIED;
         if (querytree_list) {
@@ -2251,46 +2422,16 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
             ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Update of indexed column is not supported for memory table")));
         }
+#endif
 
-        // judge whether we can use light proxy
-        if (runLightProxyCheck && (list_length(querytree_list) == 1)) {
-            ExecNodes* single_exec_node = NULL;
-            lightProxy* proxy = NULL;
-            Query* query = (Query*)linitial(querytree_list);
-
-            single_exec_node = lightProxy::checkLightQuery(query);
-            /* only deal with single node */
-            if (single_exec_node && list_length(single_exec_node->nodeList) == 1) {
-                /* GTMLite: need to mark that this is single shard statement */
-                u_sess->attr.attr_sql.single_shard_stmt = true;
-
-                if (u_sess->attr.attr_sql.enable_light_proxy) {
-                	proxy = New(OptimizerContext) lightProxy(query);
-                	proxy->m_nodeIdx = linitial_int(single_exec_node->nodeList);
-                	if (u_sess->attr.attr_resource.resource_track_cost == 0 &&
-                    	u_sess->attr.attr_resource.enable_resource_track &&
-                    	u_sess->attr.attr_resource.resource_track_level != RESOURCE_TRACK_NONE) {
-                    	u_sess->exec_cxt.need_track_resource = true;
-                    	WLMSetCollectInfoStatus(WLM_STATUS_RUNNING);
-                	}
-                	proxy->runSimpleQuery(msg);
-
-                	/* Done with the snapshot used for parsing/planning */
-                	if (snapshot_set)
-                    	PopActiveSnapshot();
-
-                	FreeExecNodes(&single_exec_node);
-                	WLMSetCollectInfoStatus(WLM_STATUS_FINISHED);
-                	u_sess->exec_cxt.need_track_resource = false;
-                	t_thrd.wlm_cxt.parctl_state.except = 0;
-                		(void)MemoryContextSwitchTo(oldcontext);
-                		break;
-            	}
-            }
-            FreeExecNodes(&single_exec_node);
+        /* Try using light proxy to execute query */
+        if (runLightProxyCheck &&
+            exec_query_through_light_proxy(querytree_list, parsetree, snapshot_set, msg, OptimizerContext)) {
+            (void)MemoryContextSwitchTo(oldcontext);
+            break;
         }
 
-        plantree_list = pg_plan_queries(querytree_list, CURSOR_OPT_PARALLEL_OK, NULL);
+        plantree_list = pg_plan_queries(querytree_list, 0, NULL);
 
         randomPlanInfo = get_random_plan_string();
         if (was_logged != false && randomPlanInfo != NULL) {
@@ -2330,7 +2471,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
             vacuumForceXid = true;
 
             /* If vaccum(analyze) one relation, don't force getting xid from GTM. Instead, use Xid sent down by CN */
-            if (!(vacstmt->options & VACOPT_VACUUM) && vacstmt->relation)
+            if (!((uint32)vacstmt->options & VACOPT_VACUUM) && vacstmt->relation)
                 vacuumForceXid = false;
         }
 
@@ -2345,7 +2486,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
             SetForceXidFromGTM(true);
 #endif
         /* SQL bypass */
-        if (IS_PGXC_DATANODE) {
+        if (runOpfusionCheck) {
             (void)MemoryContextSwitchTo(oldcontext);
             void* opFusionObj = OpFusion::FusionFactory(
                 OpFusion::getFusionType(NULL, NULL, plantree_list), oldcontext, NULL, plantree_list, NULL);
@@ -2356,13 +2497,12 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
                     finish_xact_command();
                     EndCommand(completionTag, dest);
                     MemoryContextReset(OptimizerContext);
-                    return;
+                    break;
                 }
                 Assert(0);
             }
             (void)MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
         }
-
         /*
          * Create unnamed portal to run the query or queries in. If there
          * already is one, silently drop it.
@@ -2391,7 +2531,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
                 pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.statement);
             }
 
-            AutoContextSwitch memSwitch(g_instance.wlm_cxt->query_resource_track_mcxt);
+            AutoContextSwitch memSwitch(t_thrd.wlm_cxt.query_resource_track_mcxt);
             /* g_collectInfo.sdetail.statement will be free in WLMReleaseStmtDetailItem() */
             if (strlen(portal->sourceText) < 8 * KBYTES) {
                 t_thrd.wlm_cxt.collect_info->sdetail.statement = pstrdup(portal->sourceText);
@@ -2399,7 +2539,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
                 t_thrd.wlm_cxt.collect_info->sdetail.statement = (char*)palloc0(8 * KBYTES);
                 errno_t rc = strncpy_s(
                     t_thrd.wlm_cxt.collect_info->sdetail.statement, 8 * KBYTES, portal->sourceText, 8 * KBYTES - 1);
-                securec_check_c(rc, "\0", "\0");
+                securec_check(rc, "\0", "\0");
             }
         }
 
@@ -2421,7 +2561,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
             if (!stmt->ismove) {
                 Portal fportal = GetPortalByName(stmt->portalname);
 
-                if (PortalIsValid(fportal) && (fportal->cursorOptions & CURSOR_OPT_BINARY))
+                if (PortalIsValid(fportal) && ((uint32)fportal->cursorOptions & CURSOR_OPT_BINARY))
                     format = 1; /* BINARY */
             }
         }
@@ -2453,6 +2593,8 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
         (*receiver->rDestroy)(receiver);
 
         PortalDrop(portal, false);
+
+        CleanHotkeyCandidates(true);
 
         if (IsA(parsetree, TransactionStmt)) {
             /*
@@ -2487,21 +2629,22 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
          * aborted by error will not send an EndCommand report at all.)
          */
         EndCommand(completionTag, dest);
-
+#ifndef ENBALE_MULTIPLE_NODE
+        /* Set sync point for waiting all stream threads complete. */
+        StreamNodeGroup::syncQuit(STREAM_COMPLETE);
+        UnRegisterStreamSnapshots();
+#endif
         MemoryContextReset(OptimizerContext);
     }
     /* end loop over parsetrees */
 
     /* Reset the single_shard_stmt flag */
-    u_sess->attr.attr_sql.single_shard_stmt = false;
-
-    MemoryContextDelete(OptimizerContext);
+    u_sess->exec_cxt.single_shard_stmt = false;
 
     /* Reset store procedure's session variables. */
-    u_sess->SPI_cxt.is_toplevel_stp = false;
-    u_sess->SPI_cxt.is_stp = true;
-    u_sess->SPI_cxt.is_proconfig_set = false;
-    u_sess->SPI_cxt.portal_stp_exception_counter = 0;
+    stp_reset_opt_values();
+
+    MemoryContextDelete(OptimizerContext);
 
     /*
      * Close down transaction statement, if one is open.
@@ -2522,8 +2665,10 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
             else
                 WLMReleaseGroupActiveStatement();
             dywlm_client_max_release(&t_thrd.wlm_cxt.parctl_state);
-        } else
+        } else {
             WLMParctlRelease(&t_thrd.wlm_cxt.parctl_state);
+        }
+        WLMSetCollectInfoStatusFinish();
     }
 
     /*
@@ -2531,14 +2676,14 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
      */
     switch (check_log_duration(msec_str, was_logged)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms", msec_str), errhidestmt(true)));
+            ereport(DEBUG1, (errmsg("duration: %s ms, queryid %ld, unique id %lu", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
             char* mask_string = NULL;
 
             MASK_PASSWORD_START(mask_string, query_string);
-            ereport(LOG,
-                (errmsg("duration: %s ms  statement: %s", msec_str, mask_string),
+            ereport(DEBUG1,
+                (errmsg("duration: %s ms queryid %ld unique id %ld statement: %s", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id,mask_string),
                     errhidestmt(true),
                     errdetail_execute(parsetree_list)));
             MASK_PASSWORD_END(mask_string, query_string);
@@ -2589,6 +2734,7 @@ static void exec_plan_with_params(StringInfo input_message)
 
     const char* plan_string = NULL;
     PlannedStmt* planstmt = NULL;
+    Node* node = NULL;
 
     int numParams;
     Oid* paramTypes = NULL;
@@ -2616,7 +2762,16 @@ static void exec_plan_with_params(StringInfo input_message)
 
     /* get plan */
     plan_string = pq_getmsgstring(input_message);
-    planstmt = (PlannedStmt*)stringToNode((char*)plan_string);
+    if (strlen(plan_string) > SECUREC_MEM_MAX_LEN) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Too long plan_string.")));
+    }
+    node = (Node*)stringToNode((char*)plan_string);
+    if (node != NULL && !IsA(node, PlannedStmt)) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg("Received unexpected node type.")));
+    }
+
+    planstmt = (PlannedStmt*) node;
 
     InitGlobalNodeDefinition(planstmt);
 
@@ -2760,7 +2915,6 @@ static void exec_plan_with_params(StringInfo input_message)
                     pfree(pstring);
                 }
             } else {
-                Assert(0);
                 ereport(
                     ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unsupported format code: %d", pformat)));
             }
@@ -2808,8 +2962,6 @@ static void exec_plan_with_params(StringInfo input_message)
 
         commandTag = "SELECT";
 
-        knl_thread_set_name(commandTag, true);
-
         set_ps_display(commandTag, false);
 
         BeginCommand(commandTag, dest);
@@ -2818,7 +2970,8 @@ static void exec_plan_with_params(StringInfo input_message)
             ereport(ERROR,
                 (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
                     errmsg("current transaction is aborted, "
-                           "commands ignored until end of transaction block"),
+                        "commands ignored until end of transaction block, firstChar[%c]",
+                        u_sess->proc_cxt.firstChar),
                     errdetail_abort()));
         }
 
@@ -2895,6 +3048,7 @@ static void exec_plan_with_params(StringInfo input_message)
 }
 #endif
 
+#ifdef ENABLE_MOT
 static void TryMotJitCodegenQuery(const char* queryString, CachedPlanSource* psrc, Query* query)
 {
     // Try to generate LLVM jitted code - first cleanup jit of previous run.
@@ -2916,6 +3070,7 @@ static void TryMotJitCodegenQuery(const char* queryString, CachedPlanSource* psr
         }
     }
 }
+#endif
 
 /*
  * exec_parse_message
@@ -2924,7 +3079,7 @@ static void TryMotJitCodegenQuery(const char* queryString, CachedPlanSource* psr
  * If paramTypeNames is specified, paraTypes is filled with corresponding OIDs.
  * The caller is expected to allocate space for the paramTypes.
  */
-void exec_parse_message(const char* query_string,        /* string to execute */
+static void exec_parse_message(const char* query_string, /* string to execute */
     const char* stmt_name,                               /* name for prepared stmt */
     Oid* paramTypes,                                     /* parameter types */
     char** paramTypeNames,                               /* parameter type names */
@@ -2966,6 +3121,7 @@ void exec_parse_message(const char* query_string,        /* string to execute */
     u_sess->opt_cxt.query_dop = u_sess->opt_cxt.query_dop_store;
 
     pgstat_report_activity(STATE_RUNNING, query_string);
+    instr_stmt_report_start_time();
 
     // Init pool handlers
     exec_init_poolhandles();
@@ -3018,12 +3174,15 @@ void exec_parse_message(const char* query_string,        /* string to execute */
      */
     is_named = (stmt_name[0] != '\0');
     if (is_named) {
-        if (ENABLE_DN_GPC) {
-            GPCEnv *env = GPC->PlanFetch(query_string, strlen(query_string), numParams);
+        if (ENABLE_GPC) {
+            CachedPlanSource * plansource = g_instance.plan_cache->Fetch(query_string, strlen(query_string),
+                                                                         numParams, NULL);
 
-            if (env != NULL) {
-                GPC->PrepareStore(stmt_name, env->plansource, false);
-                GPC->RefcountAdd(env->plansource);
+            if (plansource != NULL) {
+                if (ENABLE_CN_GPC)
+                    StorePreparedStatementCNGPC(stmt_name, plansource, false, true);
+                else
+                    g_instance.prepare_cache->Store(stmt_name, plansource, false, true);
                 goto pass_parsing;
             }
         }
@@ -3034,11 +3193,8 @@ void exec_parse_message(const char* query_string,        /* string to execute */
         /* Unnamed prepared statement --- release any prior unnamed stmt */
         drop_unnamed_stmt();
         /* Create context for parsing */
-        unnamed_stmt_context = AllocSetContextCreate(u_sess->temp_mem_cxt,
-            "unnamed prepared statement",
-            ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE);
+        unnamed_stmt_context = AllocSetContextCreate(u_sess->temp_mem_cxt, "unnamed prepared statement",
+            ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
         oldcontext = MemoryContextSwitchTo(unnamed_stmt_context);
     }
 
@@ -3056,17 +3212,15 @@ void exec_parse_message(const char* query_string,        /* string to execute */
         // And if transaction is abort state, we should abort query
         //
         if (IsAbortedTransactionBlockState() && numParams > 0)
-            ereport(ERROR,
-                (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
-                    errmsg("current transaction is aborted, "
-                           "commands ignored until end of transaction block"),
-                    errdetail_abort()));
+            ereport(ERROR, (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION), errmsg("current transaction is aborted, "
+                        "commands ignored until end of transaction block, firstChar[%c]",
+                        u_sess->proc_cxt.firstChar), errdetail_abort()));
 
         /* we don't expect type mod */
         for (cnt_param = 0; cnt_param < numParams; cnt_param++)
             parseTypeString(paramTypeNames[cnt_param], &paramTypes[cnt_param], NULL);
     }
-#endif /* ENABLE_MULTIPLE_NODES */
+#endif /* PGXC */
 
     /*
      * Do basic parsing of the query or queries (this should be safe even if
@@ -3104,11 +3258,21 @@ void exec_parse_message(const char* query_string,        /* string to execute */
          * state, but not many...)
          */
         if (IsAbortedTransactionBlockState() && !IsTransactionExitStmt(raw_parse_tree))
-            ereport(ERROR,
-                (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
+            ereport(ERROR, (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
                     errmsg("current transaction is aborted, "
-                           "commands ignored until end of transaction block"),
-                    errdetail_abort()));
+                        "commands ignored until end of transaction block, firstChar[%c]",
+                        u_sess->proc_cxt.firstChar), errdetail_abort()));
+
+        /*
+         * Read password status from pg_user_status.
+         */
+        Oid current_user = GetUserId();
+        if (current_user != BOOTSTRAP_SUPERUSERID) {
+            if (!IsAbortedTransactionBlockState() && GetAccountPasswordExpired(current_user) == EXPIRED_STATUS) {
+                ForceModifyExpiredPwd((const char*)query_string, parsetree_list);
+            }
+        } 
+    
 
             /*
              * Create the CachedPlanSource before we do parse analysis, since it
@@ -3119,10 +3283,6 @@ void exec_parse_message(const char* query_string,        /* string to execute */
 #else
         psrc = CreateCachedPlan(raw_parse_tree, query_string, commandTag);
 #endif
-
-        if (ENABLE_DN_GPC && psrc->gpc.env != NULL) {
-            psrc->gpc.env->num_params = numParams;
-        }
 
         if (psrc != NULL) {
             /* initialized it to false first. */
@@ -3145,8 +3305,12 @@ void exec_parse_message(const char* query_string,        /* string to execute */
         if (u_sess->attr.attr_common.log_parser_stats)
             ResetUsage();
 
+#ifdef ENABLE_MULTIPLE_NODES
+        query = parse_analyze_varparams(raw_parse_tree, query_string, &paramTypes, &numParams);
+#else
         query = parse_analyze_varparams(raw_parse_tree, query_string, &paramTypes, &numParams, paramTypeNames);
-
+#endif		
+#ifdef ENABLE_MOT
         /* check cross engine queries  */
         StorageEngineType storageEngineType = SE_TYPE_UNSPECIFIED;
         CheckTablesStorageEngine(query, &storageEngineType);
@@ -3168,6 +3332,12 @@ void exec_parse_message(const char* query_string,        /* string to execute */
             ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Update of indexed column is not supported for memory table")));
         }
+#endif
+
+        if (ENABLE_CN_GPC && psrc->gpc.status.IsSharePlan() && contains_temp_tables(query->rtable)) {
+            /* temp table unsupport shared */
+            psrc->gpc.status.SetKind(GPC_UNSHARED);
+        }
 
         /*
          * Check all parameter types got determined.
@@ -3176,8 +3346,7 @@ void exec_parse_message(const char* query_string,        /* string to execute */
             Oid ptype = paramTypes[i];
 
             if (ptype == InvalidOid || ptype == UNKNOWNOID)
-                ereport(ERROR,
-                    (errcode(ERRCODE_INDETERMINATE_DATATYPE),
+                ereport(ERROR, (errcode(ERRCODE_INDETERMINATE_DATATYPE),
                         errmsg("could not determine data type of parameter $%d", i + 1)));
         }
 
@@ -3188,32 +3357,36 @@ void exec_parse_message(const char* query_string,        /* string to execute */
 #ifdef ENABLE_MULTIPLE_NODES
         if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
             ListCell* lc = NULL;
-            runOnSingleNode = (u_sess->attr.attr_sql.enable_light_proxy || GTM_LITE_MODE) &&
-                              (list_length(querytree_list) == 1);
+            runOnSingleNode = u_sess->attr.attr_sql.enable_light_proxy && list_length(querytree_list) == 1;
 
             foreach (lc, querytree_list) {
                 Query* cur_query = (Query*)lfirst(lc);
 
                 if (runOnSingleNode) {
-                    single_exec_node = lightProxy::checkLightQuery(cur_query);
+                    if (ENABLE_ROUTER(cur_query->commandType)) {
+                        single_exec_node = lightProxy::checkRouterQuery(cur_query);
+                    } else {
+                        single_exec_node = lightProxy::checkLightQuery(cur_query);
+                    }
+
+                    CleanHotkeyCandidates(true);
 
                     /* only deal with single node/param */
-                    if (single_exec_node == NULL || list_length(single_exec_node->nodeList) > 1) {
+                    if (single_exec_node == NULL || list_length(single_exec_node->nodeList) +
+                        list_length(single_exec_node->primarynodelist) > 1) {
                         runOnSingleNode = false;
                         FreeExecNodes(&single_exec_node);
                     } else {
                         psrc->single_shard_stmt = true;
-                        if (u_sess->attr.attr_sql.enable_light_proxy) {
-                        	is_read_only = (cur_query->commandType == CMD_SELECT && !cur_query->hasForUpdate);
+                        is_read_only = (cur_query->commandType == CMD_SELECT && !cur_query->hasForUpdate);
 
-                        	/* do here but not bind to only process once */
-                        	if (is_named)
-                            	(void)light_set_datanode_queries(stmt_name);
+                        /* do here but not bind to only process once */
+                        if (is_named) {
+                            (void)light_set_datanode_queries(stmt_name);
+                        }
 
-                        	LPROXY_DEBUG(ereport(DEBUG2,
-                            	(errmsg("[LIGHT PROXY] Got Parse slim: name %s, query %s", stmt_name, query_string))));
-                        } else
-                            FreeExecNodes(&single_exec_node);
+                        LPROXY_DEBUG(ereport(DEBUG2,
+                            (errmsg("[LIGHT PROXY] Got Parse slim: name %s, query %s", stmt_name, query_string))));
                     }
                 }
 
@@ -3255,17 +3428,9 @@ void exec_parse_message(const char* query_string,        /* string to execute */
         MemoryContextSetParent(psrc->context, u_sess->temp_mem_cxt);
 
     /* Finish filling in the CachedPlanSource */
-    CompleteCachedPlan(psrc,
-        querytree_list,
-        unnamed_stmt_context,
-        paramTypes,
-        numParams,
-        NULL,
-        NULL,
+    CompleteCachedPlan(psrc, querytree_list, unnamed_stmt_context, paramTypes, numParams, NULL, NULL,
         0, /* default cursor options */
-        true,
-        stmt_name,
-        single_exec_node,
+        true, stmt_name, single_exec_node,
         is_read_only); /* fixed result */
 
     /* If we got a cancel signal during analysis, quit */
@@ -3307,15 +3472,14 @@ pass_parsing:
      */
     switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms", msec_str), errhidestmt(true)));
+            ereport(DEBUG1, (errmsg("duration: %s ms, queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
             char* cur_mask_string = NULL;
 
             MASK_PASSWORD_START(cur_mask_string, query_string);
-            ereport(LOG,
-                (errmsg(
-                     "duration: %s ms  parse %s: %s", msec_str, *stmt_name ? stmt_name : "<unnamed>", cur_mask_string),
+            ereport(DEBUG1, (errmsg(
+                     "duration: %s ms queryid %ld unique id %ld parse %s: %s", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id, *stmt_name ? stmt_name : "<unnamed>", cur_mask_string),
                     errhidestmt(true)));
             MASK_PASSWORD_END(cur_mask_string, query_string);
             break;
@@ -3375,7 +3539,8 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
         ereport(ERROR,
             (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
                 errmsg("current transaction is aborted, "
-                       "commands ignored until end of transaction block"),
+                    "commands ignored until end of transaction block, firstChar[%c]",
+                    u_sess->proc_cxt.firstChar),
                 errdetail_abort()));
 
     /*
@@ -3385,8 +3550,12 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
      * snapshot active till we're done, so that plancache.c doesn't have to
      * take new ones.
      */
+#ifdef ENABLE_MOT
     if (!(psrc->storageEngineType == SE_TYPE_MOT) && !GTM_LITE_MODE &&
         (numParams > 0 || analyze_requires_snapshot(psrc->raw_parse_tree))) {
+#else
+    if (!GTM_LITE_MODE && (numParams > 0 || analyze_requires_snapshot(psrc->raw_parse_tree))) {
+#endif
         PushActiveSnapshot(GetTransactionSnapshot());
         snapshot_set = true;
     }
@@ -3419,11 +3588,10 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
             plength = pq_getmsgint(input_message, 4);
             isNull = (plength == -1);
             /* add null value process for date type */
-            if (plength == 0 && DB_IS_CMPT(DB_CMPT_A) && 
-                (VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
-                 TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype)) {
+            if ((VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
+                    TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
+                0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
                 isNull = true;
-            }
 
             /*
              * Insert into bind values support illegal characters import,
@@ -3535,7 +3703,9 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
     }
 
     /* Make sure the querytree list is valid and we have parse-time locks */
-    RevalidateCachedQuery(psrc);
+    if (!ENABLE_CN_GPC) {
+        RevalidateCachedQuery(psrc);
+    }
 
     if (!psrc->single_exec_node) {
         ereport(LOG, (errmsg("[LIGHT PROXY] distribute key of table in cached plan is changed")));
@@ -3562,6 +3732,53 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
     return idx;
 }
 
+static ExecNodes* GetSingleNodeForEqualExpr(ExecNodes* execNodes, ParamListInfo params, bool* singleNodeFlag)
+{
+    ExecNodes* singleNode = NULL;
+    RelationLocInfo* relLocInfo = GetRelationLocInfo(execNodes->en_relid);
+    if (relLocInfo == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("rel_loc_info is NULL.")));
+    }
+
+    int len = list_length(relLocInfo->partAttrNum);
+    Datum* distcolValue = (Datum*)palloc(len * sizeof(Datum));
+    bool* distcolIsnull = (bool*)palloc(len * sizeof(bool));
+    Oid* distcolType = (Oid*)palloc(len * sizeof(Oid));
+    List* idxDist = NULL;
+    int i = 0;
+    ListCell* cell = NULL;
+
+    *singleNodeFlag = true;
+    foreach (cell, execNodes->en_expr) {
+        Expr* distcolExpr = (Expr*)lfirst(cell);
+        distcolExpr = (Expr*)eval_const_expressions_params(NULL, (Node*)distcolExpr, params);
+        if (distcolExpr && IsA(distcolExpr, Const)) {
+            Const* constExpr = (Const*)distcolExpr;
+            distcolValue[i] = constExpr->constvalue;
+            distcolIsnull[i] = constExpr->constisnull;
+            distcolType[i] = constExpr->consttype;
+            idxDist = lappend_int(idxDist, i);
+            i++;
+        } else {
+            Assert(distcolExpr != NULL);
+            ereport(LOG, (errmsg("[LIGHT PROXY] param of distribute key is not const")));
+            *singleNodeFlag = false;
+            return NULL;
+        }
+    }
+
+    singleNode = GetRelationNodes(relLocInfo, distcolValue, distcolIsnull,
+        distcolType, idxDist, execNodes->accesstype);
+
+    pfree(distcolValue);
+    pfree(distcolIsnull);
+    pfree(distcolType);
+    list_free(idxDist);
+    FreeRelationLocInfo(relLocInfo);
+
+    return singleNode;
+}
+
 static int getSingleNodeIdx_internal(ExecNodes* exec_nodes, ParamListInfo params)
 {
     int idx = -1;
@@ -3570,44 +3787,20 @@ static int getSingleNodeIdx_internal(ExecNodes* exec_nodes, ParamListInfo params
     Assert(exec_nodes->nodeList != NIL || exec_nodes->en_expr != NIL);
 
     if (exec_nodes->en_expr != NIL) {
-        RelationLocInfo* rel_loc_info = GetRelationLocInfo(exec_nodes->en_relid);
-        if (rel_loc_info == NULL) {
-            ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("rel_loc_info is NULL.")));
-        }
-
-        int len = list_length(rel_loc_info->partAttrNum);
-        Datum* distcol_value = (Datum*)palloc(len * sizeof(Datum));
-        bool* distcol_isnull = (bool*)palloc(len * sizeof(bool));
-        Oid* distcol_type = (Oid*)palloc(len * sizeof(Oid));
-        List* idx_dist = NULL;
-        int i = 0;
-        ListCell* cell = NULL;
-
-        foreach (cell, exec_nodes->en_expr) {
-            Expr* distcol_expr = (Expr*)lfirst(cell);
-            distcol_expr = (Expr*)eval_const_expressions_params(NULL, (Node*)distcol_expr, params);
-            if (distcol_expr && IsA(distcol_expr, Const)) {
-                Const* const_expr = (Const*)distcol_expr;
-                distcol_value[i] = const_expr->constvalue;
-                distcol_isnull[i] = const_expr->constisnull;
-                distcol_type[i] = const_expr->consttype;
-                idx_dist = lappend_int(idx_dist, i);
-                i++;
-            } else {
-                Assert(distcol_expr != NULL);
-                ereport(LOG, (errmsg("[LIGHT PROXY] param of distribute key is not const")));
+        if (exec_nodes->need_range_prune) {
+            single_node = makeNode(ExecNodes);
+            *single_node = *exec_nodes;
+            PruningDatanode(single_node, params);
+        } else {
+            bool singleNodeFlag = false;
+            single_node = GetSingleNodeForEqualExpr(exec_nodes, params, &singleNodeFlag);
+            if (!singleNodeFlag) {
                 return -1;
             }
         }
-        single_node = GetRelationNodes(
-            rel_loc_info, distcol_value, distcol_isnull, distcol_type, idx_dist, exec_nodes->accesstype);
-
-        pfree(distcol_value);
-        pfree(distcol_isnull);
-        pfree(distcol_type);
-        list_free(idx_dist);
-    } else
+    } else {
         single_node = exec_nodes;
+    }
 
     /* make sure it is one dn */
     if (list_length(single_node->nodeList) != 1) {
@@ -3632,11 +3825,26 @@ static void exec_get_ddl_params(StringInfo input_message)
     int numRFormats;
     int16* rformats = NULL;
     ParamListInfo params = NULL;
-    u_sess->parser_cxt.ddl_pbe_context = AllocSetContextCreate(u_sess->top_mem_cxt,
-        "DDLPBEContext",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+
+    if (unlikely(!((IS_PGXC_COORDINATOR || IS_PGXC_DATANODE) && IsConnFromCoord()))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_IO_ERROR),
+                errmsg("The current node should not receive z messages")));
+    }
+
+    if (u_sess->top_transaction_mem_cxt == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                errmsg("current transaction is not start")));
+    }
+
+    if (u_sess->parser_cxt.ddl_pbe_context == NULL) {
+        u_sess->parser_cxt.ddl_pbe_context = AllocSetContextCreate(u_sess->top_mem_cxt,
+            "DDLPBEContext",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
+    }
     MemoryContext old_context = MemoryContextSwitchTo(u_sess->parser_cxt.ddl_pbe_context);
 
     /*
@@ -3705,10 +3913,11 @@ static void exec_get_ddl_params(StringInfo input_message)
             } else if (numPFormats > 0) {
                 Assert(NULL != pformats);
                 pformat = pformats[0];
-            } else
+            } else {
                 pformat = 0; /* default = text */
-
-            if (pformat == 0) {/* text mode */
+            }
+            if (pformat == 0) /* text mode */
+            {
                 Oid typinput;
                 Oid typioparam;
                 char* pstring = NULL;
@@ -3721,7 +3930,8 @@ static void exec_get_ddl_params(StringInfo input_message)
                 /* Free result of encoding conversion, if any */
                 if (pstring != NULL && pstring != pbuf.data)
                     pfree(pstring);
-            } else if (pformat == 1) { /* binary mode */
+            } else if (pformat == 1) /* binary mode */
+            {
                 Oid typreceive;
                 Oid typioparam;
                 StringInfo bufptr;
@@ -3759,9 +3969,9 @@ static void exec_get_ddl_params(StringInfo input_message)
             params->params[paramno].pflags = PARAM_FLAG_CONST;
             params->params[paramno].ptype = ptype;
         }
-    } else
+    } else {
         params = NULL;
-
+    }
     u_sess->parser_cxt.param_info = (void*)params;
 
     MemoryContextSwitchTo(old_context);
@@ -3790,7 +4000,7 @@ static void exec_get_ddl_params(StringInfo input_message)
  *
  * Process a "Bind" message to create a portal from a prepared statement
  */
-void exec_bind_message(StringInfo input_message)
+static void exec_bind_message(StringInfo input_message)
 {
     const char* portal_name = NULL;
     const char* stmt_name = NULL;
@@ -3825,7 +4035,7 @@ void exec_bind_message(StringInfo input_message)
     stmt_name = pq_getmsgstring(input_message);
     /* Check not NULL */
     if (portal_name == NULL || stmt_name == NULL) {
-        ereport(ERROR, (errmsg("portal_name or stmt_name is null.")));
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("portal_name or stmt_name is null.")));
     }
     if (strlen(portal_name) > SECUREC_MEM_MAX_LEN || strlen(stmt_name) > SECUREC_MEM_MAX_LEN)
         ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("Too long portal_name and stmt_name.")));
@@ -3844,9 +4054,9 @@ void exec_bind_message(StringInfo input_message)
 
     /* Find prepared statement */
     if (stmt_name[0] != '\0') {
-        PreparedStatement* pstmt = NULL;
+        PreparedStatement *pstmt = NULL;
 
-        pstmt = FetchPreparedStatement(stmt_name, true);
+        pstmt = FetchPreparedStatement(stmt_name, true, true);
         psrc = pstmt->plansource;
     } else {
         /* special-case the unnamed statement */
@@ -3864,6 +4074,7 @@ void exec_bind_message(StringInfo input_message)
     t_thrd.postgres_cxt.debug_query_string = psrc->query_string;
 
     pgstat_report_activity(STATE_RUNNING, psrc->query_string);
+    instr_stmt_report_start_time();
 
     set_ps_display("BIND", false);
 
@@ -3877,6 +4088,7 @@ void exec_bind_message(StringInfo input_message)
      */
     start_xact_command();
 
+#ifdef ENABLE_MOT
     /* set transaction storage engine and check for cross transaction violation */
     SetCurrentTransactionStorageEngine(psrc->storageEngineType);
     if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMixedEngineUsed())
@@ -3898,6 +4110,7 @@ void exec_bind_message(StringInfo input_message)
     if (psrc->mot_jit_context != NULL) {
         JitResetScan(psrc->mot_jit_context);
     }
+#endif
 
     /* set unique sql id to current context */
     SetUniqueSQLIdFromCachedPlanSource(psrc);
@@ -3908,9 +4121,17 @@ void exec_bind_message(StringInfo input_message)
         (void)RevalidateCachedQuery(psrc);
 
         if (psrc->opFusionObj != NULL) {
-            ((OpFusion*)psrc->opFusionObj)->bindClearPosition();
+            Assert(psrc->cplan == NULL);
+        	((OpFusion*)psrc->opFusionObj)->bindClearPosition();
             ((OpFusion*)psrc->opFusionObj)->updatePreAllocParamter(input_message);
             ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
+            if (portal_name[0] != '\0')
+                ((OpFusion *)psrc->opFusionObj)->storeFusion(portal_name);
+
+            CachedPlanSource* cps = ((OpFusion*)psrc->opFusionObj)->m_psrc;
+            if (cps != NULL && cps->gplan) {
+                setCachedPlanBucketId(cps->gplan, ((OpFusion*)psrc->opFusionObj)->m_params);
+            }
 
             if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
                 pq_putemptymessage('2');
@@ -3941,23 +4162,42 @@ void exec_bind_message(StringInfo input_message)
         /* save the cursor in case of error */
         int msg_cursor = input_message->cursor;
         int nodeIdx = getSingleNodeIdx(input_message, psrc, stmt_name);
-
         if (nodeIdx != -1) {
             lightProxy* scn = NULL;
-            if (psrc->lightProxyObj == NULL) {
+            bool enable_gpc = (ENABLE_CN_GPC && stmt_name[0] != '\0');
+            if (enable_gpc)
+                scn = lightProxy::locateLpByStmtName(stmt_name);
+            else
+                scn = (lightProxy *)psrc->lightProxyObj;
+
+            if (scn == NULL) {
                 /* initialize session cache context; typically it won't store much */
-                MemoryContext context = AllocSetContextCreate(u_sess->cache_mem_cxt,
-                    "LightPorxyMemory",
-                    ALLOCSET_SMALL_MINSIZE,
-                    ALLOCSET_SMALL_INITSIZE,
-                    ALLOCSET_SMALL_MAXSIZE);
-
-                scn = New(context) lightProxy(context, psrc);
-                psrc->lightProxyObj = scn;
-            } else
-                scn = (lightProxy*)psrc->lightProxyObj;
-
-            scn->m_nodeIdx = nodeIdx;
+                MemoryContext context = AllocSetContextCreate(u_sess->cache_mem_cxt, "LightPorxyMemory",
+                    ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE);
+                scn = New(context)lightProxy(context, psrc, portal_name, stmt_name);
+                if (enable_gpc) {
+                    scn->storeLpByStmtName(stmt_name);
+                    psrc->lightProxyObj = NULL;
+                } else {
+                    psrc->lightProxyObj = scn;
+                }
+            } else {
+                if (portal_name[0] != '\0') {
+                    MemoryContext old_cxt = MemoryContextSwitchTo(scn->m_context);
+                    scn->storeLightProxy(pstrdup(portal_name));
+                    MemoryContextSwitchTo(old_cxt);
+                }
+            }
+            if (enable_gpc) {
+                /* cngpc need fill gpc msg just like BuildCachedPlan. */
+                GPCFillMsgForLp(psrc);
+            }
+            /* set nodeidx to router node if in router */
+            if (HAS_ROUTER) {
+                scn->m_nodeIdx = u_sess->exec_cxt.CurrentRouter->GetRouterNodeId();
+            } else {
+                scn->m_nodeIdx = nodeIdx;
+            }
             lightProxy::setCurrentProxy(scn);
             lightProxy::processMsg(BIND_MESSAGE, input_message);
 
@@ -3974,10 +4214,14 @@ void exec_bind_message(StringInfo input_message)
 
             if (tmp_en != NULL)
                 FreeExecNodes(&tmp_en);
+            lightProxy* lp = NULL;
+            if (ENABLE_CN_GPC && stmt_name[0] != '\0')
+                lp = lightProxy::locateLpByStmtName(stmt_name);
+            else
+                lp = (lightProxy *)psrc->lightProxyObj;
 
             /* clean lightProxyObj if exists */
-            if (psrc->lightProxyObj != NULL) {
-                lightProxy* lp = (lightProxy*)psrc->lightProxyObj;
+            if (lp != NULL) {
                 lightProxy::tearDown(lp);
                 psrc->lightProxyObj = NULL;
             }
@@ -3999,26 +4243,18 @@ void exec_bind_message(StringInfo input_message)
     /* Get the parameter value count */
     numParams = pq_getmsgint(input_message, 2);
 
-    if (unlikely(numParams < 0)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                errmsg("bind message supplies wrong parameter number (%d)", numParams)));
-    }
-
-    if (numPFormats > 1 && numPFormats != numParams) {
+    if (numPFormats > 1 && numPFormats != numParams)
         ereport(ERROR,
             (errcode(ERRCODE_PROTOCOL_VIOLATION),
                 errmsg("bind message has %d parameter formats but %d parameters", numPFormats, numParams)));
-    }
 
-    if (numParams != psrc->num_params) {
+    if (numParams != psrc->num_params)
         ereport(ERROR,
             (errcode(ERRCODE_PROTOCOL_VIOLATION),
                 errmsg("bind message supplies %d parameters, but prepared statement \"%s\" requires %d",
                     numParams,
                     stmt_name,
                     psrc->num_params)));
-    }
 
     /*
      * If we are in aborted transaction state, the only portals we can
@@ -4032,7 +4268,8 @@ void exec_bind_message(StringInfo input_message)
         ereport(ERROR,
             (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
                 errmsg("current transaction is aborted, "
-                       "commands ignored until end of transaction block"),
+                    "commands ignored until end of transaction block, firstChar[%c]",
+                    u_sess->proc_cxt.firstChar),
                 errdetail_abort()));
 
     /*
@@ -4078,8 +4315,12 @@ void exec_bind_message(StringInfo input_message)
      * snapshot active till we're done, so that plancache.c doesn't have to
      * take new ones.
      */
+#ifdef ENABLE_MOT
     if (!(psrc->storageEngineType == SE_TYPE_MOT) &&
         (numParams > 0 || analyze_requires_snapshot(psrc->raw_parse_tree))) {
+#else
+    if (numParams > 0 || analyze_requires_snapshot(psrc->raw_parse_tree)) {
+#endif
         PushActiveSnapshot(GetTransactionSnapshot());
         snapshot_set = true;
     }
@@ -4098,7 +4339,6 @@ void exec_bind_message(StringInfo input_message)
         params->parserSetupArg = NULL;
         params->params_need_process = false;
         params->numParams = numParams;
-        params->paramMask = NULL;
 
         for (paramno = 0; paramno < numParams; paramno++) {
             Oid ptype = psrc->param_types[paramno];
@@ -4114,7 +4354,7 @@ void exec_bind_message(StringInfo input_message)
             /* add null value process for date type */
             if ((VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
                     TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
-                0 == plength && DB_IS_CMPT(DB_CMPT_A))
+                0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
                 isNull = true;
 
             /*
@@ -4228,7 +4468,7 @@ void exec_bind_message(StringInfo input_message)
     } else {
         params = NULL;
     }
-    /* u_sess->parser_cxt.param_info is for ddl pbe. If the logic is not ddl pbe, It will not be used */
+    /* u_sess->parser_cxt.param_info is for ddl pbe. If the logic is not ddl pbe, It will not be used*/
     if (t_thrd.proc->workingVersionNum >= DDL_PBE_VERSION_NUM) {
         u_sess->parser_cxt.param_info = (void*)params;
     }
@@ -4280,14 +4520,16 @@ void exec_bind_message(StringInfo input_message)
     PortalDefineQuery(portal, saved_stmt_name, query_string, psrc->commandTag, cplan->stmt_list, cplan);
 
     if (IS_PGXC_DATANODE && psrc->cplan == NULL && psrc->is_checked_opfusion == false) {
-        psrc->opFusionObj =
-            OpFusion::FusionFactory(OpFusion::getFusionType(cplan, params, NULL), psrc->context, psrc, NULL, params);
+        psrc->opFusionObj = OpFusion::FusionFactory(OpFusion::getFusionType(cplan, params, NULL),
+            u_sess->cache_mem_cxt, psrc, NULL, params);
         psrc->is_checked_opfusion = true;
         if (psrc->opFusionObj != NULL) {
-            ((OpFusion*)psrc->opFusionObj)->bindClearPosition();
+        	((OpFusion*)psrc->opFusionObj)->bindClearPosition();
             ((OpFusion*)psrc->opFusionObj)->useOuterParameter(params);
             ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
             ((OpFusion*)psrc->opFusionObj)->CopyFormats(rformats, numRFormats);
+            if (portal_name[0] != '\0')
+                ((OpFusion *)psrc->opFusionObj)->storeFusion(portal_name);
 
             if (snapshot_set)
                 PopActiveSnapshot();
@@ -4330,15 +4572,17 @@ void exec_bind_message(StringInfo input_message)
      */
     switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms", msec_str), errhidestmt(true)));
+            ereport(DEBUG1, (errmsg("duration: %s ms, queryid %ld, unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
             char* mask_string = NULL;
 
             MASK_PASSWORD_START(mask_string, psrc->query_string);
-            ereport(LOG,
-                (errmsg("duration: %s ms  bind %s%s%s: %s",
+            ereport(DEBUG1,
+                (errmsg("duration: %s ms queryid %ld unique id %ld bind %s%s%s: %s",
                      msec_str,
+                     u_sess->debug_query_id,
+                     u_sess->slow_query_cxt.slow_query.unique_sql_id,
                      *stmt_name ? stmt_name : "<unnamed>",
                      *portal_name ? "/" : "",
                      *portal_name ? portal_name : "",
@@ -4364,7 +4608,7 @@ void exec_bind_message(StringInfo input_message)
  *
  * Process an "Execute" message for a portal
  */
-void exec_execute_message(const char* portal_name, long max_rows)
+static void exec_execute_message(const char* portal_name, long max_rows)
 {
     CommandDest dest;
     DestReceiver* receiver = NULL;
@@ -4379,7 +4623,6 @@ void exec_execute_message(const char* portal_name, long max_rows)
     bool execute_is_fetch = false;
     bool was_logged = false;
     char msec_str[32];
-    bool savedIsTopLevelForSTP = false;
 
     gstrace_entry(GS_TRC_ID_exec_execute_message);
     /* Adjust destination to tell printtup.c what to do */
@@ -4401,7 +4644,9 @@ void exec_execute_message(const char* portal_name, long max_rows)
      * EmptyQueryResponse.
      */
     if (portal->commandTag == NULL) {
-        Assert(portal->stmts == NIL);
+        if (portal->stmts != NIL) {
+            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("stmts is not NULL")));
+        }
         NullCommand(dest);
 
         if (ENABLE_WORKLOAD_CONTROL) {
@@ -4410,12 +4655,13 @@ void exec_execute_message(const char* portal_name, long max_rows)
             } else {
                 WLMParctlRelease(&t_thrd.wlm_cxt.parctl_state);
             }
-
-            WLMSetCollectInfoStatus(WLM_STATUS_FINISHED);
         }
-
         gstrace_exit(GS_TRC_ID_exec_execute_message);
         return;
+    }
+
+    if (ENABLE_GPC) {
+        portal->stmts = CopyLocalStmt(portal->cplan->stmt_list);
     }
 
     /* Does the portal contain a transaction command? */
@@ -4452,8 +4698,6 @@ void exec_execute_message(const char* portal_name, long max_rows)
     t_thrd.postgres_cxt.debug_query_string = sourceText;
 
     pgstat_report_activity(STATE_RUNNING, sourceText);
-
-    knl_thread_set_name(portal->commandTag, true);
 
     set_ps_display(portal->commandTag, false);
 
@@ -4514,20 +4758,35 @@ void exec_execute_message(const char* portal_name, long max_rows)
         ereport(ERROR,
             (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
                 errmsg("current transaction is aborted, "
-                       "commands ignored until end of transaction block"),
+                    "commands ignored until end of transaction block, firstChar[%c]",
+                    u_sess->proc_cxt.firstChar),
                 errdetail_abort()));
 
     /* Check for cancel signal before we start execution */
     CHECK_FOR_INTERRUPTS();
-
-    savedIsTopLevelForSTP = u_sess->SPI_cxt.is_toplevel_stp;
-    u_sess->SPI_cxt.is_toplevel_stp = true;
 
     /*
      * Okay to run the portal.
      */
     if (max_rows <= 0)
         max_rows = FETCH_ALL;
+
+    bool savedisAllowCommitRollback = false;
+    savedisAllowCommitRollback = stp_enable_and_get_old_xact_stmt_state();
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /* check plans contain stream node */
+    ListCell* cell_new = NULL;
+    foreach (cell_new, portal->cplan->stmt_list) {
+        Node* pstmt = (Node*)lfirst(cell_new);
+        if (IsA(pstmt, PlannedStmt)) {
+            PlannedStmt* planEntry = (PlannedStmt*)pstmt;
+            if (InitStreamObject(planEntry)) {
+                break;
+            }
+        }
+    }
+#endif
 
     completed = PortalRun(portal,
         max_rows,
@@ -4536,7 +4795,14 @@ void exec_execute_message(const char* portal_name, long max_rows)
         receiver,
         completionTag);
 
-    u_sess->SPI_cxt.is_toplevel_stp = savedIsTopLevelForSTP;
+    // for fetch size, free stringinfo each time
+    if (!completed && dest == DestRemoteExecute) {
+        DR_printtup* myState = (DR_printtup*)receiver;
+        StringInfo buf = &myState->buf;
+        pfree_ext(buf->data);
+    }
+
+    stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
     (*receiver->rDestroy)(receiver);
 
     if (completed) {
@@ -4556,7 +4822,6 @@ void exec_execute_message(const char* portal_name, long max_rows)
 
         /* Send appropriate CommandComplete to client */
         EndCommand(completionTag, dest);
-
         u_sess->xact_cxt.pbe_execute_complete = true;
     } else {
         /* Portal run not complete, so send PortalSuspended */
@@ -4565,6 +4830,12 @@ void exec_execute_message(const char* portal_name, long max_rows)
 
         u_sess->xact_cxt.pbe_execute_complete = false;
     }
+
+#ifndef ENBALE_MULTIPLE_NODE
+    /* Set sync point for waiting all stream threads complete. */
+    StreamNodeGroup::syncQuit(STREAM_COMPLETE);
+    UnRegisterStreamSnapshots();
+#endif
 
     if (ENABLE_WORKLOAD_CONTROL) {
         if (g_instance.wlm_cxt->dynamic_workload_inited) {
@@ -4582,15 +4853,17 @@ void exec_execute_message(const char* portal_name, long max_rows)
      */
     switch (check_log_duration(msec_str, was_logged)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms", msec_str), errhidestmt(true)));
+            ereport(DEBUG1, (errmsg("duration: %s ms queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
             char* mask_string = NULL;
 
             MASK_PASSWORD_START(mask_string, sourceText);
-            ereport(LOG,
-                (errmsg("duration: %s ms  %s %s%s%s: %s",
+            ereport(DEBUG1,
+                (errmsg("duration: %s ms queryid %ld unique id %ld %s %s%s%s: %s",
                      msec_str,
+                     u_sess->debug_query_id,
+                     u_sess->slow_query_cxt.slow_query.unique_sql_id,
                      execute_is_fetch ? _("execute fetch from") : _("execute"),
                      prepStmtName,
                      *portal_name ? "/" : "",
@@ -4662,6 +4935,8 @@ int check_log_duration(char* msec_str, bool was_logged)
         int msecs;
         bool exceeded = false;
 
+        u_sess->slow_query_cxt.slow_query.debug_query_sql_id = u_sess->debug_query_id;
+
         TimestampDifference(GetCurrentStatementLocalStartTimestamp(), GetCurrentTimestamp(), &secs, &usecs);
         msecs = usecs / 1000;
 
@@ -4679,14 +4954,16 @@ int check_log_duration(char* msec_str, bool was_logged)
          * Only record the time, which is larger than log_min_duration_statement.
          * This condition can reduce the impactation on performance.
          */
-        if (exceeded && u_sess->attr.attr_sql.log_duration) {
-            errno_t rc =
-                snprintf_s(msec_str, PRINTF_DST_MAX, PRINTF_DST_MAX - 1, "%ld.%03d", secs * 1000 + msecs, usecs % 1000);
-            securec_check_ss(rc, "\0", "\0");
-            if (exceeded && !was_logged) {
-                return 2;
-            } else {
-                return 1;
+        if (exceeded) {
+            if (u_sess->attr.attr_sql.log_duration) {
+                errno_t rc =
+                    snprintf_s(msec_str, PRINTF_DST_MAX, PRINTF_DST_MAX - 1, "%ld.%03d", secs * 1000 + msecs, usecs % 1000);
+                securec_check_ss(rc, "", "");
+                if (exceeded && !was_logged) {
+                    return 2;
+                } else {
+                    return 1;
+                }
             }
         }
     }
@@ -4709,9 +4986,9 @@ static int errdetail_execute(List* raw_parsetree_list)
 
         if (IsA(parsetree, ExecuteStmt)) {
             ExecuteStmt* stmt = (ExecuteStmt*)parsetree;
-            PreparedStatement* pstmt = NULL;
+            PreparedStatement *pstmt = NULL;
 
-            pstmt = FetchPreparedStatement(stmt->name, false);
+            pstmt = FetchPreparedStatement(stmt->name, false, false);
             if (pstmt != NULL) {
                 errdetail("prepare: %s", pstmt->plansource->query_string);
                 return 0;
@@ -4747,7 +5024,7 @@ static int errdetail_params(ParamListInfo params)
             char* pstring = NULL;
             char* p = NULL;
 
-            appendStringInfo(&param_str, "%s$%d = ", paramno > 0 ? ", " : "", paramno + 1);
+            appendStringInfo(&param_str, "%s$%d = ", (paramno > 0) ? ", " : "", paramno + 1);
 
             if (prm->isnull || !OidIsValid(prm->ptype)) {
                 appendStringInfoString(&param_str, "NULL");
@@ -4784,7 +5061,7 @@ static int errdetail_params(ParamListInfo params)
  *
  * Add an errdetail() line showing abort reason, if any.
  */
-static int errdetail_abort(void)
+int errdetail_abort(void)
 {
     if (t_thrd.proc->recoveryConflictPending)
         errdetail("abort reason: recovery conflict");
@@ -4831,7 +5108,7 @@ static int errdetail_recovery_conflict(void)
  *
  * Process a "Describe" message for a prepared statement
  */
-void exec_describe_statement_message(const char* stmt_name)
+static void exec_describe_statement_message(const char* stmt_name)
 {
     CachedPlanSource* psrc = NULL;
     int i;
@@ -4847,9 +5124,9 @@ void exec_describe_statement_message(const char* stmt_name)
 
     /* Find prepared statement */
     if (stmt_name[0] != '\0') {
-        PreparedStatement* pstmt = NULL;
+        PreparedStatement *pstmt = NULL;
 
-        pstmt = FetchPreparedStatement(stmt_name, true);
+        pstmt = FetchPreparedStatement(stmt_name, true, true);
         psrc = pstmt->plansource;
     } else {
         /* special-case the unnamed statement */
@@ -4864,8 +5141,10 @@ void exec_describe_statement_message(const char* stmt_name)
     /* Prepared statements shouldn't have changeable result descs */
     Assert(psrc->fixed_result);
 
+#ifdef ENABLE_MOT
     /* set current transaction storage engine */
     SetCurrentTransactionStorageEngine(psrc->storageEngineType);
+#endif
 
     /*
      * If we are in aborted transaction state, we can't run
@@ -4880,7 +5159,8 @@ void exec_describe_statement_message(const char* stmt_name)
         ereport(ERROR,
             (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
                 errmsg("current transaction is aborted, "
-                       "commands ignored until end of transaction block"),
+                    "commands ignored until end of transaction block, firstChar[%c]",
+                    u_sess->proc_cxt.firstChar),
                 errdetail_abort()));
 
     if (t_thrd.postgres_cxt.whereToSendOutput != DestRemote)
@@ -4949,7 +5229,8 @@ static void exec_describe_portal_message(const char* portal_name)
         ereport(ERROR,
             (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
                 errmsg("current transaction is aborted, "
-                       "commands ignored until end of transaction block"),
+                    "commands ignored until end of transaction block, firstChar[%c]",
+                    u_sess->proc_cxt.firstChar),
                 errdetail_abort()));
 
     if (t_thrd.postgres_cxt.whereToSendOutput != DestRemote)
@@ -5077,8 +5358,13 @@ static void drop_unnamed_stmt(void)
     if (u_sess->pcache_cxt.unnamed_stmt_psrc) {
         CachedPlanSource* psrc = u_sess->pcache_cxt.unnamed_stmt_psrc;
         u_sess->pcache_cxt.unnamed_stmt_psrc = NULL;
-
+        if (ENABLE_GPC) {
+            GPC_LOG("drop private plansource", psrc, psrc->stmt_name);
+        }
         DropCachedPlan(psrc);
+        if ((ENABLE_GPC)) {
+            GPC_LOG("drop private plansource end", psrc, 0);
+        }
     }
 }
 
@@ -5156,6 +5442,11 @@ void die(SIGNAL_ARGS)
 
         InterruptPending = true;
         t_thrd.int_cxt.ProcDiePending = true;
+
+        /*  Set flag to handle SIGUSER2 and SIGTERM during connection */
+        if (t_thrd.proc_cxt.pooler_connection_inprogress) {
+            g_pq_interrupt_happened = true;
+        }
 
         /*
          * in libcomm interrupt is not allow,
@@ -5236,6 +5527,13 @@ void StatementCancelHandler(SIGNAL_ARGS)
  */
 void PoolValidateCancelHandler(SIGNAL_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    if (SignalCancelGTMConnection()) {
+        /* If it is going to cancel GTM connection, return immediately. */
+        return;
+    }
+#endif
+
     int save_errno = errno;
     t_thrd.int_cxt.InterruptByCN = true;
 
@@ -5247,7 +5545,7 @@ void PoolValidateCancelHandler(SIGNAL_ARGS)
         t_thrd.int_cxt.QueryCancelPending = true;
         t_thrd.int_cxt.PoolValidateCancelPending = true;
 
-        /*  only set flag to notify libpq during connection */
+        /*  Set flag to handle SIGUSER2 and SIGTERM during connection */
         if (t_thrd.proc_cxt.pooler_connection_inprogress) {
             g_pq_interrupt_happened = true;
         }
@@ -5364,7 +5662,7 @@ void RecoveryConflictInterrupt(ProcSignalReason reason)
                     return;
 
                 /* Intentional drop through to check wait for pin */
-
+                /* fall through */
             case PROCSIG_RECOVERY_CONFLICT_BUFFERPIN:
 
                 /*
@@ -5377,7 +5675,7 @@ void RecoveryConflictInterrupt(ProcSignalReason reason)
                 t_thrd.proc->recoveryConflictPending = true;
 
                 /* Intentional drop through to error handling */
-
+                /* fall through */
             case PROCSIG_RECOVERY_CONFLICT_LOCK:
             case PROCSIG_RECOVERY_CONFLICT_TABLESPACE:
             case PROCSIG_RECOVERY_CONFLICT_SNAPSHOT:
@@ -5420,7 +5718,7 @@ void RecoveryConflictInterrupt(ProcSignalReason reason)
                 }
 
                 /* Intentional drop through to session cancel */
-
+                /* fall through */
             case PROCSIG_RECOVERY_CONFLICT_DATABASE:
                 t_thrd.postgres_cxt.RecoveryConflictPending = true;
                 t_thrd.int_cxt.ProcDiePending = true;
@@ -5499,10 +5797,12 @@ void ProcessInterrupts(void)
         // It's more efficient to notify all stream threads to cancel the query first
         // and then top consumer can quit quickly.
         //
-#ifdef ENABLE_MULTIPLE_NODES
         StreamNodeGroup::cancelStreamThread();
-#endif
         return;
+    }
+
+    if (StreamThreadAmI() && u_sess->debug_query_id == 0) {
+        Assert(0);
     }
 
     InterruptPending = false;
@@ -5614,9 +5914,7 @@ void ProcessInterrupts(void)
             u_sess->wlm_cxt->cancel_from_space_limit || u_sess->wlm_cxt->cancel_from_defaultXact_readOnly ||
             g_pq_interrupt_happened) {
             t_thrd.int_cxt.ImmediateInterruptOK = false; /* not idle anymore */
-#ifdef ENABLE_MULTIPLE_NODES
             StreamNodeGroup::cancelStreamThread();
-#endif
             char* str = NULL;
             int err_code = ERRCODE_QUERY_CANCELED;
             if (t_thrd.storage_cxt.cancel_from_timeout) {
@@ -5687,9 +5985,7 @@ void ProcessInterrupts(void)
          */
         if (!t_thrd.postgres_cxt.DoingCommandRead) {
             t_thrd.int_cxt.ImmediateInterruptOK = false; /* not idle anymore */
-#ifdef ENABLE_MULTIPLE_NODES
             StreamNodeGroup::cancelStreamThread();
-#endif
             CancelAutoAnalyze();
             lightProxy::setCurrentProxy(NULL);
 
@@ -5716,16 +6012,12 @@ void ProcessInterrupts(void)
                     ereport(ERROR,
                         (errcode(error_code),
                             errmsg("canceling statement due to %s request", is_datanode ? "coordinator" : "user")));
-                }    
+                }
             }
         }
         if (IsJobSnapshotProcess()) {
             ereport(ERROR, (errcode(ERRCODE_QUERY_CANCELED), errmsg("canceling snapshot task")));
         }
-    }
-
-    if (t_thrd.bgworker_cxt.ParallelMessagePending) {
-        HandleParallelMessages();
     }
     /* If we get here, do nothing (probably, t_thrd.int_cxt.QueryCancelPending was reset) */
 }
@@ -6073,7 +6365,8 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
 
             case 'D':
                 if (secure)
-                    t_thrd.postgres_cxt.userDoption = MemoryContextStrdup(t_thrd.top_mem_cxt, optCtxt.optarg);
+                    t_thrd.postgres_cxt.userDoption = MemoryContextStrdup(
+                        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), optCtxt.optarg);
                 break;
 
             case 'd':
@@ -6194,10 +6487,10 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
                 char* value = NULL;
 
                 ParseLongOption(optCtxt.optarg, &name, &value);
+#ifdef PGXC
 #ifndef ENABLE_MULTIPLE_NODES
                 if (flag == '-' && (strcmp(name, "coordinator") == 0 || strcmp(name, "datanode") == 0)) {
-                    ereport(FATAL,
-                        (errcode(ERRCODE_SYNTAX_ERROR),
+                    ereport(FATAL, (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("Single node mode: must start as single node (--single_node)\n")));
                 }
 #endif
@@ -6216,7 +6509,9 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
                         ereport(ERROR,
                             (errcode(ERRCODE_SYNTAX_ERROR), errmsg("local xids can be used only in single user mode")));
                     useLocalXid = true;
-                } else { /* default case */
+                } else /* default case */
+                {
+#endif /* PGXC */
                     if (value == NULL) {
                         if (flag == '-')
                             ereport(ERROR,
@@ -6235,8 +6530,7 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
                     SetConfigOption(name, value, ctx, gucsource);
                 }
                 pfree(name);
-                if (value != NULL)
-                    pfree(value);
+                pfree_ext(value);
                 break;
             }
 
@@ -6249,13 +6543,13 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
             break;
     }
 
+#ifdef PGXC
     /*
      * Make sure we specified the mode if Coordinator or Datanode.
      * Allow for the exception of initdb by checking config option
      */
     if (!IS_PGXC_COORDINATOR && !IS_PGXC_DATANODE && IsUnderPostmaster) {
-        ereport(FATAL,
-            (errcode(ERRCODE_SYNTAX_ERROR),
+        ereport(FATAL, (errcode(ERRCODE_SYNTAX_ERROR),
                 errmsg("Postgres-XC: must start as either a Coordinator (--coordinator) or Datanode (--datanode)\n")));
     }
     if (!IsPostmasterEnvironment) {
@@ -6263,13 +6557,14 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
         g_instance.role = VDATANODE;
         isSingleMode = true;
     }
+#endif
 
     /*
      * Optional database name should be there only if *dbname is NULL.
      */
     if (errs == 0 && dbname != NULL && *dbname == NULL && argc - optCtxt.optind >= 1) {
         char* tmp_str = argv[optCtxt.optind++];
-        *dbname = MemoryContextStrdup(u_sess->top_mem_cxt, tmp_str);
+        *dbname = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), tmp_str);
     }
 
     if (errs || argc != optCtxt.optind) {
@@ -6278,13 +6573,11 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
 
         /* spell the error message a bit differently depending on context */
         if (IsUnderPostmaster)
-            ereport(FATAL,
-                (errcode(ERRCODE_SYNTAX_ERROR),
+            ereport(FATAL, (errcode(ERRCODE_SYNTAX_ERROR),
                     errmsg("invalid command-line argument for server process: %s", argv[optCtxt.optind]),
                     errhint("Try \"%s --help\" for more information.", progname)));
         else
-            ereport(FATAL,
-                (errcode(ERRCODE_SYNTAX_ERROR),
+            ereport(FATAL, (errcode(ERRCODE_SYNTAX_ERROR),
                     errmsg("%s: invalid command-line argument: %s", progname, argv[optCtxt.optind]),
                     errhint("Try \"%s --help\" for more information.", progname)));
     }
@@ -6298,505 +6591,6 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
 #endif
 }
 
-static void execute_stream_end(StreamProducer* producer)
-{
-    int consumer_number;
-    int i, res;
-
-    consumer_number = producer->getConnNum();
-    StreamTransport** transport = producer->getTransport();
-
-    // prepare an end message to all the consumer backend thread.
-    //
-    // if is dummy, do not bother send
-    if (producer->isDummy() == false) {
-        for (i = 0; i < consumer_number; i++) {
-            if (producer->netSwitchDest(i)) {
-                if (PG_PROTOCOL_MAJOR(FrontendProtocol) >= 3) {
-                    StringInfoData buf;
-
-                    pq_beginmessage(&buf, 'Z');
-                    pq_sendbyte(&buf, TransactionBlockStatusCode());
-                    pq_endmessage(&buf);
-                } else if (PG_PROTOCOL_MAJOR(FrontendProtocol) >= 2)
-                    pq_putemptymessage('Z');
-                /* Flush output at end of cycle in any case. */
-                res = pq_flush();
-                if (res == EOF) {
-                    transport[i]->release();
-                }
-                producer->netStatusSave(i);
-            }
-        }
-    }
-    producer->finalizeLocalStream();
-    timeInfoRecordEnd();
-    StreamNodeGroup::syncQuit(STREAM_COMPLETE);
-    ForgetRegisterStreamSnapshots();
-}
-
-static void execute_stream_plan(StreamProducer* producer)
-{
-    /*
-     * Start up a transaction command.	All queries generated by the
-     * query_string will be in this same command block, *unless* we find a
-     * BEGIN/COMMIT/ABORT statement; we have to force a new xact command after
-     * one of those, else bad things will happen in xact.c. (Note that this
-     * will normally change current memory context.)
-     */
-    start_xact_command();
-
-    producer->setUpStreamTxnEnvironment();
-
-    PlannedStmt* planstmt = producer->getPlan();
-    CommandDest dest = producer->getDest();
-    bool save_log_statement_stats = u_sess->attr.attr_common.log_statement_stats;
-    bool was_logged = false;
-    bool isTopLevel = false;
-    const char* commandTag = NULL;
-    char completionTag[COMPLETION_TAG_BUFSIZE];
-    Portal portal = NULL;
-    DestReceiver* receiver = NULL;
-    int16 format;
-    char msec_str[32];
-
-    t_thrd.postgres_cxt.debug_query_string = planstmt->query_string;
-    pgstat_report_activity(STATE_RUNNING, t_thrd.postgres_cxt.debug_query_string);
-    /* Use planNodeId as thread_level, same as the key which SCTP use for send/receive */
-    pgstat_report_parent_sessionid(producer->getParentSessionid(), producer->getKey().planNodeId);
-
-    if (u_sess->instr_cxt.global_instr &&
-        u_sess->instr_cxt.perf_monitor_enable)  // Don't use perf util you set has_use_perf = true
-        CPUMon::Initialize(CMON_GENERAL);
-
-    /*
-     * We use save_log_statement_stats so ShowUsage doesn't report incorrect
-     * results because ResetUsage wasn't called.
-     */
-    if (save_log_statement_stats)
-        ResetUsage();
-
-    isTopLevel = true;
-
-    // For now plan shipping is used only for SELECTs, in future
-    // we should remove this hard coding and get the tag automatically
-    commandTag = "SELECT";
-
-    knl_thread_set_name(commandTag, true);
-
-    set_ps_display(commandTag, false);
-
-    BeginCommand(commandTag, dest);
-
-    /*
-     * If we are in an aborted transaction, reject all commands except
-     * COMMIT/ABORT.  It is important that this test occur before we try
-     * to do parse analysis, rewrite, or planning, since all those phases
-     * try to do database accesses, which may fail in abort state. (It
-     * might be safe to allow some additional utility commands in this
-     * state, but not many...)
-     */
-    if (IsAbortedTransactionBlockState())  // &&
-        ereport(ERROR,
-            (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
-                errmsg("current transaction is aborted, "
-                       "commands ignored until end of transaction block"),
-                errdetail_abort()));
-
-    /* Make sure we are in a transaction command */
-    start_xact_command();
-
-    /* If we got a cancel signal in parsing or prior command, quit */
-    CHECK_FOR_INTERRUPTS();
-
-    /*
-     * Create unnamed portal to run the query or queries in. If there
-     * already is one, silently drop it.
-     */
-    portal = CreatePortal("", true, true);
-    /* Don't display the portal in pg_cursors */
-    portal->visible = false;
-
-    u_sess->instr_cxt.global_instr = producer->getStreamInstrumentation();
-    u_sess->instr_cxt.obs_instr = producer->getOBSInstrumentation();
-    if (u_sess->instr_cxt.obs_instr)
-        u_sess->instr_cxt.p_OBS_instr_valid = u_sess->instr_cxt.obs_instr->m_p_globalOBSInstrument_valid;
-
-    PortalDefineQuery(portal, NULL, "DUMMY", commandTag, lappend(NULL, planstmt), NULL);
-
-    /*
-     * Start the portal.  No parameters here.
-     */
-    PortalStart(portal, producer->getParams(), 0, producer->getSnapShot());
-    format = 0;
-    PortalSetResultFormat(portal, 1, &format);
-
-    receiver = CreateDestReceiver(dest);
-    if (dest >= DestTupleBroadCast)
-        SetStreamReceiverParams(receiver, producer, portal);
-
-    /*
-     * Run the portal to completion, and then drop it (and the receiver).
-     */
-    (void)PortalRun(portal, FETCH_ALL, isTopLevel, receiver, receiver, completionTag);
-
-    (*receiver->rDestroy)(receiver);
-
-    PortalDrop(portal, false);
-
-    finish_xact_command();
-
-    /*
-     * Emit duration logging if appropriate.
-     */
-    switch (check_log_duration(msec_str, was_logged)) {
-        case 1:
-            ereport(LOG, (errmsg("duration: %s ms", msec_str), errhidestmt(true)));
-            break;
-        case 2:
-            ereport(LOG,
-                (errmsg("duration: %s ms  statement: %s", msec_str, "TODO: deparse plan"),  // vam query_string),
-                    errhidestmt(true)
-                    // vam errdetail_execute(parsetree_list)
-                    ));
-            break;
-        default:
-            break;
-    }
-
-    if (save_log_statement_stats)
-        ShowUsage("QUERY STATISTICS");
-}
-
-/*
- * Called when the Stream thread is ending.
- */
-static void StreamQuitAndClean(int code, Datum arg)
-{
-    /* Close connection with GTM, if active */
-    CloseGTM();
-
-    /* Free remote xact state */
-    free_RemoteXactState();
-}
-
-/* ----------------------------------------------------------------
- * StreamMain
- *	   stream thread main entrance
- * ----------------------------------------------------------------
- */
-int StreamMain(void* arg)
-{
-    sigjmp_buf local_sigjmp_buf;
-
-    initRandomState(0, GetCurrentTimestamp());
-
-    t_thrd.proc_cxt.MyProcPid = gs_thread_self();
-
-    knl_thread_set_name("Stream");
-
-    /*
-     * Rebind stream thread to instance bind CPU in thread pool mode.
-     * Otherwise the stream thread will follow its parent thread's bind CPU,
-     * which will lead to a terrible performance in AP field.
-     */
-    if (g_threadPoolControler != NULL) {
-        g_threadPoolControler->ReBindStreamThread(t_thrd.proc_cxt.MyProcPid);
-    }
-    u_sess->exec_cxt.under_stream_runtime = true;
-    t_thrd.codegen_cxt.g_runningInFmgr = false;
-
-    Assert(u_sess->stream_cxt.producer_obj != NULL);
-    Assert(u_sess->stream_cxt.global_obj != NULL);
-
-    u_sess->wlm_cxt->wlm_params = u_sess->stream_cxt.producer_obj->getWlmParams();
-
-    WLMGeneralParam* g_wlm_params = &u_sess->wlm_cxt->wlm_params;
-
-    u_sess->instr_cxt.gs_query_id->procId = u_sess->stream_cxt.producer_obj->getExplainThreadid();
-    u_sess->exec_cxt.need_track_resource = u_sess->stream_cxt.producer_obj->getExplainTrack();
-    u_sess->unique_sql_cxt.unique_sql_id = u_sess->stream_cxt.producer_obj->getUnqiueSQLId();
-    errno_t ret =
-        sprintf_s(u_sess->wlm_cxt->control_group, sizeof(u_sess->wlm_cxt->control_group), "%s", g_wlm_params->cgroup);
-    securec_check_ss(ret, "\0", "\0");
-
-    /* Get the node group information */
-    t_thrd.wlm_cxt.thread_node_group = WLMGetNodeGroupFromHTAB(g_wlm_params->ngroup);
-
-    t_thrd.wlm_cxt.thread_climgr = &t_thrd.wlm_cxt.thread_node_group->climgr;
-    t_thrd.wlm_cxt.thread_srvmgr = &t_thrd.wlm_cxt.thread_node_group->srvmgr;
-
-    /* Set the right pgxcnodeid */
-    u_sess->pgxc_cxt.PGXCNodeId = u_sess->stream_cxt.producer_obj->getPgxcNodeId();
-    u_sess->instr_cxt.global_instr = u_sess->stream_cxt.producer_obj->getStreamInstrumentation();
-    u_sess->proc_cxt.MyProcPort->database_name = u_sess->stream_cxt.producer_obj->getDbName();
-    u_sess->proc_cxt.MyProcPort->user_name = u_sess->stream_cxt.producer_obj->getUserName();
-
-    /* runtimethreadinstr */
-    if (u_sess->instr_cxt.global_instr) {
-        Assert(u_sess->instr_cxt.thread_instr == NULL);
-
-        int segmentId = u_sess->stream_cxt.producer_obj->getPlan()->planTree->plan_node_id;
-
-        u_sess->instr_cxt.thread_instr = u_sess->instr_cxt.global_instr->allocThreadInstrumentation(segmentId);
-    }
-
-    u_sess->stream_cxt.producer_obj->netInit();
-    u_sess->stream_cxt.producer_obj->setThreadInit(true);
-    u_sess->stream_cxt.producer_obj->initSkewState();
-
-    FrontendProtocol = PG_PROTOCOL_LATEST;
-    u_sess->attr.attr_common.remoteConnType = REMOTE_CONN_DATANODE;
-
-    if (u_sess->stream_cxt.producer_obj->isDummy()) {
-        u_sess->exec_cxt.executor_stop_flag = true;
-        u_sess->stream_cxt.dummy_thread = true;
-    } else {
-        u_sess->exec_cxt.executor_stop_flag = false;
-        u_sess->stream_cxt.dummy_thread = false;
-    }
-
-    /* Initialize the global variables for recursive */
-    InitRecursiveCTEGlobalVariables(u_sess->stream_cxt.producer_obj->getPlan());
-
-    STREAM_LOG(DEBUG2,
-        "enter StreamMain, StreamKey(%lu, %u, %u)",
-        u_sess->stream_cxt.producer_obj->getKey().queryId,
-        u_sess->stream_cxt.producer_obj->getKey().planNodeId,
-        u_sess->stream_cxt.producer_obj->getKey().smpIdentifier);
-
-    SetProcessingMode(InitProcessing);
-
-    /* Compute paths, if we didn't inherit them from postmaster */
-    if (my_exec_path[0] == '\0') {
-        if (find_my_exec("postgres", my_exec_path) < 0)
-            ereport(FATAL, (errmsg("postgres: could not locate my own executable path")));
-    }
-
-    if (t_thrd.proc_cxt.pkglib_path[0] == '\0')
-        get_pkglib_path(my_exec_path, t_thrd.proc_cxt.pkglib_path);
-
-    (void)gspqsignal(SIGINT, StatementCancelHandler);
-    (void)gspqsignal(SIGTERM, die);
-    (void)gspqsignal(SIGALRM, handle_sig_alarm); /* timeout conditions */
-    (void)gs_signal_unblock_sigusr2();
-
-    if (IsUnderPostmaster) {
-        /* We allow SIGQUIT (quickdie) at all times */
-        (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
-    }
-
-    /* Early initialization */
-    BaseInit();
-
-    /* We need to allow SIGINT, etc during the initial transaction */
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
-
-    /* Initialize the memory tracking information */
-    MemoryTrackingInit();
-
-    /*
-     * General initialization.
-     *
-     * NOTE: if you are tempted to add code in this vicinity, consider putting
-     * it inside InitPostgres() instead.  In particular, anything that
-     * involves database access should be there, not here.
-     */
-    t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(
-        u_sess->stream_cxt.producer_obj->getDbName(), InvalidOid, u_sess->stream_cxt.producer_obj->getUserName());
-    t_thrd.proc_cxt.PostInit->InitStreamWorker();
-
-    /* stream workers share the same session memory entry as their parents */
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry = u_sess->stream_cxt.producer_obj->getSessionMemory();
-    if (t_thrd.proc) {
-        t_thrd.proc->sessMemorySessionid = u_sess->stream_cxt.producer_obj->getParentSessionid();
-        Assert(t_thrd.proc->sessMemorySessionid == t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->sessionid);
-    }
-
-    InitVecFuncMap();
-
-    repair_guc_variables();
-    /*
-     * Create the memory context we will use in the main loop.
-     *
-     * t_thrd.mem_cxt.msg_mem_cxt is reset once per iteration of the main loop, ie, upon
-     * completion of processing of each command message from the client.
-     */
-    t_thrd.mem_cxt.msg_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt,
-        "MessageContext",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
-
-    t_thrd.mem_cxt.mask_password_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt,
-        "MaskPasswordCtx",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
-
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "stream thread");
-
-    if (t_thrd.mem_cxt.postmaster_mem_cxt) {
-        MemoryContextDelete(t_thrd.mem_cxt.postmaster_mem_cxt);
-        t_thrd.mem_cxt.postmaster_mem_cxt = NULL;
-    }
-
-    SetProcessingMode(NormalProcessing);
-
-    on_proc_exit(StreamQuitAndClean, 0);
-
-    /*
-     * process any libraries that should be preloaded at backend start (this
-     * likewise can't be done until GUC settings are complete)
-     */
-    process_local_preload_libraries();
-
-    pgstat_report_queryid(u_sess->debug_query_id);
-    pgstat_report_smpid(u_sess->stream_cxt.smp_id);
-    timeInfoRecordStart();
-
-    int curTryCounter;
-    int* oldTryCounter = NULL;
-    if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
-        gstrace_tryblock_exit(true, oldTryCounter);
-
-        (void)pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);
-
-        /* Prevent interrupts while cleaning up */
-        HOLD_INTERRUPTS();
-
-        /* output the memory tracking information when error happened */
-        MemoryTrackingOutputFile();
-
-        /*
-         * Abort the current transaction in order to recover.
-         */
-        ereport(DEBUG1,
-            (errmsg("stream thread %lu end transaction " XID_FMT " abnormally",
-                t_thrd.proc_cxt.MyProcPid,
-                GetCurrentTransactionIdIfAny())));
-
-        /*
-         * when clearing the BCM encounter ERROR, we should ResetBCMArray, or it
-         * will enter ClearBCMArray infinite loop, then coredump.
-         */
-        ResetBCMArray();
-
-        /* release operator-level hash table in memory */
-        releaseExplainTable();
-
-        /* Mark recursive vfd is invalid before aborting transaction. */
-        StreamNodeGroup::MarkRecursiveVfdInvalid();
-
-        AbortCurrentTransaction();
-
-        LWLockReleaseAll();
-
-        if (NULL != u_sess->stream_cxt.producer_obj) {
-            u_sess->stream_cxt.producer_obj->reportError();
-        }
-
-        if (ENABLE_WORKLOAD_CONTROL)
-            WLMResetStatInfo4Exception();
-
-        RESUME_INTERRUPTS();
-
-        timeInfoRecordEnd();
-        StreamNodeGroup::syncQuit(STREAM_ERROR);
-
-        CloseGTM();
-    } else {
-        oldTryCounter = gstrace_tryblock_entry(&curTryCounter);
-
-        MemoryContext oldMemory = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
-        CodeGenThreadInitialize();
-        (void)MemoryContextSwitchTo(oldMemory);
-
-        /* We can now handle ereport(ERROR) */
-        t_thrd.log_cxt.PG_exception_stack = &local_sigjmp_buf;
-
-        /* Wait thread ID ready */
-        u_sess->stream_cxt.producer_obj->waitThreadIdReady();
-
-        execute_stream_plan(u_sess->stream_cxt.producer_obj);
-        execute_stream_end(u_sess->stream_cxt.producer_obj);
-
-        /* Reset here so that we can get debug_query_string when Stream thread is in Sync point */
-        t_thrd.postgres_cxt.debug_query_string = NULL;
-
-        // Note that parent thread will do commit or abort transaction.
-        // Stream thread should not change clog file
-        //
-        ResetTransactionInfo();
-    }
-
-    CloseGTM();
-
-    return 0;
-}
-
-// reset some flag related to stream
-void ResetStreamEnv()
-{
-    t_thrd.subrole = NO_SUBROLE;
-    u_sess->stream_cxt.dummy_thread = false;
-    u_sess->exec_cxt.executor_stop_flag = false;
-    u_sess->stream_cxt.global_obj = NULL;
-    u_sess->stream_cxt.producer_obj = NULL;
-    u_sess->instr_cxt.global_instr = NULL;
-    u_sess->instr_cxt.thread_instr = NULL;
-    u_sess->exec_cxt.under_stream_runtime = false;
-    u_sess->stream_cxt.in_waiting_quit = false;
-    u_sess->stream_cxt.enter_sync_point = false;
-
-    t_thrd.pgxc_cxt.GlobalNetInstr = NULL;
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->initMemInChunks = t_thrd.utils_cxt.trackedMemChunks;
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->queryMemInChunks = t_thrd.utils_cxt.trackedMemChunks;
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery = t_thrd.utils_cxt.trackedMemChunks;
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->spillCount = 0;
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->spillSize = 0;
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->broadcastSize = 0;
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->estimate_time = 0;
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->estimate_memory = 0;
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->warning = 0;
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->iscomplex = 0;
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnStartTime = GetCurrentTimestamp();
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnEndTime = 0;
-
-    if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan) {
-        pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
-    }
-    if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue) {
-        pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
-    }
-
-    /*
-     * When gaussdb backend running in Query or Operator level, we are going to use global
-     * variable notplanshipping to mark current query is not plan shipping, so we do string
-     * initialization here
-     */
-    u_sess->opt_cxt.not_shipping_info->need_log = true;
-    errno_t errorno = memset_s(
-        u_sess->opt_cxt.not_shipping_info->not_shipping_reason, NOTPLANSHIPPING_LENGTH, '\0', NOTPLANSHIPPING_LENGTH);
-    securec_check_c(errorno, "\0", "\0");
-
-    t_thrd.postgres_cxt.table_created_in_CTAS = false;
-
-    if (IS_PGXC_COORDINATOR) {
-        u_sess->exec_cxt.need_track_resource = false;
-    }
-
-    u_sess->instr_cxt.gs_query_id->queryId = 0;
-
-    u_sess->wlm_cxt->local_foreign_respool = NULL;
-
-    t_thrd.postmaster_cxt.forceNoSeparate = false;
-
-    u_sess->pcache_cxt.gpc_remote_msg = false;
-
-    t_thrd.postgres_cxt.gpc_fisrt_send_clean = true;
-}
-
 /* clear key message that may appear in core file for security */
 static void clear_memory(char* qstr, char* msg, int maxlen)
 {
@@ -6807,12 +6601,11 @@ static void clear_memory(char* qstr, char* msg, int maxlen)
         errno_t errorno = EOK;
         PgBackendStatus* beentry = NULL;
 
-        GS_UINT32 qstr_len = strlen(qstr);
-        errorno = memset_s(qstr, qstr_len, 0, qstr_len);
-        securec_check(errorno, "\0", "\0");
+        errorno = memset_s(qstr, strlen(qstr), 0, strlen(qstr));
+        securec_check(errorno, "", "");
 
         errorno = memset_s(msg, maxlen, 0, maxlen);
-        securec_check(errorno, "\0", "\0");
+        securec_check(errorno, "", "");
 
         beentry = GetMyBEEntry();
         if (beentry != NULL) {
@@ -6820,7 +6613,7 @@ static void clear_memory(char* qstr, char* msg, int maxlen)
                 g_instance.attr.attr_common.pgstat_track_activity_query_size,
                 0,
                 g_instance.attr.attr_common.pgstat_track_activity_query_size);
-            securec_check(errorno, "\0", "\0");
+            securec_check(errorno, "", "");
         }
         t_thrd.postgres_cxt.clear_key_memory = false;
     }
@@ -6862,7 +6655,8 @@ static void InitGlobalNodeDefinition(PlannedStmt* planstmt)
     if (planstmt == NULL)
         return;
 
-    if (global_node_definition != NULL && global_node_definition->num_nodes == planstmt->num_nodes)
+    if ((global_node_definition != NULL && global_node_definition->num_nodes == planstmt->num_nodes)
+		|| planstmt->nodesDefinition == NULL)
         return;
 
     AutoMutexLock copyLock(&nodeDefCopyLock);
@@ -6871,7 +6665,7 @@ static void InitGlobalNodeDefinition(PlannedStmt* planstmt)
     /* first initialization or need update when cluster size changes */
     if (global_node_definition == NULL ||
         (global_node_definition != NULL && global_node_definition->num_nodes != planstmt->num_nodes)) {
-        MemoryContext oldMemory = MemoryContextSwitchTo(g_instance.instance_context);
+        MemoryContext oldMemory = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
         Size nodeDefSize;
         errno_t rc = EOK;
 
@@ -6883,12 +6677,12 @@ static void InitGlobalNodeDefinition(PlannedStmt* planstmt)
         }
 
         global_node_definition = (GlobalNodeDefinition*)palloc(sizeof(GlobalNodeDefinition));
-        if (planstmt->num_nodes > 0) {
+        if ((planstmt->num_nodes > 0) && ((uint)(INT_MAX / planstmt->num_nodes) > sizeof(NodeDefinition))) {
             global_node_definition->num_nodes = planstmt->num_nodes;
             nodeDefSize = mul_size(sizeof(NodeDefinition), (Size)planstmt->num_nodes);
             global_node_definition->nodesDefinition = (NodeDefinition*)palloc(nodeDefSize);
             rc = memcpy_s(global_node_definition->nodesDefinition, nodeDefSize, planstmt->nodesDefinition, nodeDefSize);
-            securec_check_c(rc, "\0", "\0");
+            securec_check(rc, "\0", "\0");
         } else {
             copyLock.unLock();
             ereport(ERROR,
@@ -6929,12 +6723,15 @@ void RemoveTempNamespace()
         {
             StringInfoData str;
             initStringInfo(&str);
+            StringInfoData str_temp_table;
+            initStringInfo(&str_temp_table);
 
             if (u_sess->catalog_cxt.myTempNamespace) {
                 ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
 
-                t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForTempTableDrop");
-                char* nspname = get_namespace_name(u_sess->catalog_cxt.myTempNamespace, true);
+                t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForTempTableDrop",
+                    MEMORY_CONTEXT_OPTIMIZER);
+                char* nspname = get_namespace_name(u_sess->catalog_cxt.myTempNamespace);
                 ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, true, true);
                 ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_LOCKS, true, true);
                 ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_AFTER_LOCKS, true, true);
@@ -6947,12 +6744,13 @@ void RemoveTempNamespace()
                 if (nspname != NULL) {
                     ereport(LOG, (errmsg("Session quiting, drop temp schema %s", nspname)));
                     appendStringInfo(&str, "DROP SCHEMA %s, pg_toast_temp_%s CASCADE", nspname, &nspname[8]);
+                    appendStringInfo(&str_temp_table, "DELETE FROM gs_encrypted_columns WHERE rel_id in ( select pg_class.oid from pg_class join pg_namespace ON (pg_class.relnamespace = pg_namespace.oid ) where pg_namespace.nspname = \'%s\')", nspname);
 
                     pgstatCountSQL4SessionLevel();
 
                     t_thrd.postgres_cxt.whereToSendOutput = DestNone;
                     exec_simple_query(str.data, QUERY_MESSAGE);
-
+                    exec_simple_query(str_temp_table.data, QUERY_MESSAGE);
                     u_sess->catalog_cxt.myTempNamespace = InvalidOid;
                     u_sess->catalog_cxt.myTempToastNamespace = InvalidOid;
                 }
@@ -7000,6 +6798,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     TimestampTz stmtsys_timestamp;
     GTM_Timeline timeline;
     int ss_need_sync_wait_all = 0;
+    errno_t rc = EOK;
+    CsnType csn_type;
 #endif
 
     CommandDest saved_whereToSendOutput = DestNone;
@@ -7014,7 +6814,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-        knl_thread_set_name("BackendMode");
+        t_thrd.proc_cxt.MyProgName = "gaussdb";
 
         /*
          * Initialize random() for the first time, like PostmasterMain()
@@ -7024,7 +6824,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          */
         srandom((unsigned int)(t_thrd.proc_cxt.MyProcPid ^ (unsigned int)t_thrd.proc_cxt.MyStartTime));
     } else {
-        knl_thread_set_name("gaussdb");
+        t_thrd.proc_cxt.MyProgName = "postgres";
     }
 
     /*
@@ -7080,13 +6880,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     }
 
     /* initialize guc variables which need to be sended to stream threads */
-#ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_DATANODE && IsUnderPostmaster)
         init_sync_guc_variables();
-#endif
-    /* initialize statement retry controller, stmt retry phase : init */
-    StatementRetryController* StmtRetryController = NULL;
-    StmtRetryController = StmtRetryInitController();
+
     /*
      * You might expect to see a setsid() call here, but it's not needed,
      * because if we are under a postmaster then BackendInitialize() did it.
@@ -7243,7 +7039,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             sizeof(t_thrd.proc->myProgName) - 1,
             "%s",
             t_thrd.proc_cxt.MyProgName);
-        securec_check_ss(rc, "\0", "\0");
+        securec_check_ss(rc, "", "");
         t_thrd.proc->myStartTime = t_thrd.proc_cxt.MyStartTime;
         t_thrd.proc->sessMemorySessionid = (IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid);
     }
@@ -7432,18 +7228,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     int curTryCounter;
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
-        /* error process of autonomous transaction */
-        if (t_thrd.msqueue_cxt.is_changed) {
-            pq_stop_redirect_to_shm_mq();
-        }
-        if (t_thrd.autonomous_cxt.handle.slot >= 0) {
-            StopBackgroundWorker();
-        }
         gstrace_tryblock_exit(true, oldTryCounter);
+        Assert(t_thrd.proc->dw_pos == -1);
 
-        u_sess->SPI_cxt.is_stp = true;
-        u_sess->SPI_cxt.is_proconfig_set = false;
-        u_sess->SPI_cxt.portal_stp_exception_counter = 0;
+        /* reset STP global valuebles */
+        stp_reset_opt_values();
 
         (void)pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);
         t_thrd.pgxc_cxt.GlobalNetInstr = NULL;
@@ -7464,6 +7253,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         t_thrd.storage_cxt.is_btree_split = false;
 
         SetForceXidFromGTM(false);
+        /* reset timestamp_from_cn if error happen between 't' message and start transaction */
+        t_thrd.xact_cxt.timestamp_from_cn = false;
 
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();
@@ -7486,10 +7277,15 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         /* Make sure libpq is in a good state */
         pq_comm_reset();
 
+#ifdef ENABLE_MULTIPLE_NODES
+        /* release pooler locks */
+        CommReleasePoolerLock();
+#endif
+
         /* statement retry phase : long jump */
         if (IsStmtRetryEnabled()) {
             bool is_extended_query = u_sess->postgres_cxt.doing_extended_query_message;
-            if (!is_extended_query && (StmtRetryController->MessageOnExecuting() == S_MESSAGE)) {
+            if (!is_extended_query && (u_sess->exec_cxt.RetryController->MessageOnExecuting() == S_MESSAGE)) {
                 /*
                  * if ereport error when processing a sync message, then doing_extended_query_message will be false,
                  * but we want it to be retried as a pbe message.
@@ -7497,10 +7293,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 is_extended_query = true;
             }
 
-            if (IsStmtRetryCapable(StmtRetryController, is_extended_query)) {
-                StmtRetryController->TriggerRetry(is_extended_query);
+            if (IsStmtRetryCapable(u_sess->exec_cxt.RetryController, is_extended_query)) {
+                u_sess->exec_cxt.RetryController->TriggerRetry(is_extended_query);
             } else {
-                StmtRetryController->DisableRetry();
+                u_sess->exec_cxt.RetryController->DisableRetry();
                 if (!pq_disk_is_temp_file_created())
                     pq_disk_disable_temp_file();
             }
@@ -7514,7 +7310,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
 #ifdef USE_RETRY_STUB
         if (IsStmtRetryEnabled())
-            StmtRetryController->stub_.CloseOneStub();
+            u_sess->exec_cxt.RetryController->stub_.CloseOneStub();
 #endif
         /*
          * when clearing the BCM encounter ERROR, we should ResetBCMArray, or it
@@ -7543,7 +7339,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             }
         }
 
-        OpFusion::setCurrentOpFusionObj(NULL);
+        u_sess->pcache_cxt.gpc_in_try_store = false;
+
+        OpFusion::tearDown(u_sess->exec_cxt.CurrentOpFusionObj);
         /* init pbe execute status when long jump */
         u_sess->xact_cxt.pbe_execute_complete = true;
 
@@ -7555,21 +7353,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         }
 
         /* Mark recursive vfd is invalid before aborting transaction. */
-#ifdef ENABLE_MULTIPLE_NODES
         StreamNodeGroup::MarkRecursiveVfdInvalid();
-#endif
-        if (t_thrd.postgres_cxt.gpc_fisrt_send_clean == true) {
-            t_thrd.postgres_cxt.gpc_fisrt_send_clean = false;
-            GPC->SendPrepareDestoryMsg();
-        }
-        
+
         /*
          * Abort the current transaction in order to recover.
          */
         AbortCurrentTransaction();
-
-        PortalErrorCleanup();
-        SPICleanup();
 
         /* Notice: at the most time it isn't necessary to call because
          *   all the LWLocks are released in AbortCurrentTransaction().
@@ -7581,10 +7370,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         /* We should syncQuit after LWLockRelease to avoid dead lock of LWLocks. */
         RESUME_INTERRUPTS();
-#ifdef ENABLE_MULTIPLE_NODES
         StreamNodeGroup::syncQuit(STREAM_ERROR);
         StreamNodeGroup::destroy(STREAM_ERROR);
-#endif
         HOLD_INTERRUPTS();
         ForgetRegisterStreamSnapshots();
 
@@ -7597,9 +7384,16 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          */
         t_thrd.postgres_cxt.debug_query_string = NULL;
 
+        if (u_sess->unique_sql_cxt.need_update_calls &&
+            is_unique_sql_enabled() && is_local_unique_sql()) {
+            UpdateUniqueSQLStat(NULL, NULL, u_sess->unique_sql_cxt.unique_sql_start_time);
+        }
         /* reset unique sql */
         ResetCurrentUniqueSQL(true);
         SetIsTopUniqueSQL(false);
+
+        PortalErrorCleanup();
+        SPICleanup();
 
         /*
          * We can't release replication slots inside AbortTransaction() as we
@@ -7617,7 +7411,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          * Now return to normal top-level context and clear ErrorContext for
          * next time.
          */
-        MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+        MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
         FlushErrorState();
 
         /*
@@ -7631,6 +7425,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         /* We don't have a transaction command open anymore */
         t_thrd.postgres_cxt.xact_started = false;
 
+        u_sess->pcache_cxt.cur_stmt_name = NULL;
         /* Now we can allow interrupts again */
         RESUME_INTERRUPTS();
     }
@@ -7657,7 +7452,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     }
     PG_END_TRY();
     /* statement retry phase : RI */
-    if (IsStmtRetryEnabled() && StmtRetryController->IsQueryRetrying()) {
+    if (IsStmtRetryEnabled() && u_sess->exec_cxt.RetryController->IsQueryRetrying()) {
         /*
          * if stmt is retring, we can't send ready for query
          * if we are retrying a extend query message, we can't ignore message before
@@ -7665,7 +7460,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          */
         u_sess->debug_query_id = 0;
         send_ready_for_query = false;
-        ++StmtRetryController->retry_times;
+        ++u_sess->exec_cxt.RetryController->retry_times;
 
         /*
          * here are some actions can't be done in long jump
@@ -7674,11 +7469,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         /* clean send buffer and temp file */
         pq_abandon_sendbuffer();
 
-        StmtRetryController->cached_msg_context.Reset();
+        u_sess->exec_cxt.RetryController->cached_msg_context.Reset();
 
-        if (StmtRetryController->IsExtendQueryRetrying()) {
+        if (u_sess->exec_cxt.RetryController->IsExtendQueryRetrying()) {
             u_sess->postgres_cxt.ignore_till_sync = false;
-            StmtRetryController->CleanPreparedStmt();
+            u_sess->exec_cxt.RetryController->CleanPreparedStmt();
         }
     }
     /*
@@ -7689,13 +7484,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          * Since max_query_rerty_times is a USERSET GUC, so must check Statement retry
          * in each query loop here.
          */
-        StmtRetryValidate(StmtRetryController);
-
-        /*
-         * At top of loop, reset extended-query-message flag, so that any
-         * errors encountered in "idle" state don't provoke skip.
-         */
-        u_sess->postgres_cxt.doing_extended_query_message = false;
+        StmtRetryValidate(u_sess->exec_cxt.RetryController);
 
         /* Add the pg_delete_audit operation to audit log */
         t_thrd.audit.Audit_delete = false;
@@ -7711,12 +7500,13 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
         MemoryContextResetAndDeleteChildren(t_thrd.mem_cxt.msg_mem_cxt);
         MemoryContextResetAndDeleteChildren(u_sess->temp_mem_cxt);
+        MemoryContextResetAndDeleteChildren(u_sess->stat_cxt.hotkeySessContext);
+        u_sess->stat_cxt.hotkeyCandidates = NIL;
 
         initStringInfo(&input_message);
         t_thrd.postgres_cxt.debug_query_string = NULL;
         t_thrd.postgres_cxt.g_NoAnalyzeRelNameList = NIL;
         u_sess->analyze_cxt.is_under_analyze = false;
-        u_sess->cmd_cxt.isUnderRefreshMatview = false;
         t_thrd.postgres_cxt.mark_explain_analyze = false;
         t_thrd.postgres_cxt.mark_explain_only = false;
         if (unlikely(t_thrd.log_cxt.msgbuf->data != NULL)) {
@@ -7759,9 +7549,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             if (IsStmtRetryEnabled()) {
 #ifdef USE_RETRY_STUB
-                StmtRetryController->stub_.FinishStubTest(StmtRetryController->PBEFlowStr());
+                u_sess->exec_cxt.RetryController->stub_.FinishStubTest(u_sess->exec_cxt.RetryController->PBEFlowStr());
 #endif
-                StmtRetryController->FinishRetry();
+                u_sess->exec_cxt.RetryController->FinishRetry();
             }
 
             if (IsAbortedTransactionBlockState()) {
@@ -7779,7 +7569,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             }
 
             /* We're ready for a new query, reset wait status and u_sess->debug_query_id */
-            (void)pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);
+            pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);
             pgstat_report_queryid(0);
 
             if (IS_CLIENT_CONN_VALID(u_sess->proc_cxt.MyProcPort))
@@ -7804,6 +7594,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
              * node, so can be reused, if reset here, PBE will
              * lost the unique sql entry.
              */
+            ReportQueryStatus();
+            statement_commit_metirc_context();
             ResetCurrentUniqueSQL();
 
             send_ready_for_query = false;
@@ -7828,13 +7620,14 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             t_thrd.threadpool_cxt.worker->WaitMission();
             Assert(u_sess->status != KNL_SESS_FAKE);
         }
-        if (isRestoreMode) {
+        if (isRestoreMode && !IsAbortedTransactionBlockState()) {
             ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
 
             /* we use t_thrd.top_mem_cxt to remember all node info in this cluster. */
             MemoryContext old = MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
 
-            t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForPGXCNodes");
+            t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForPGXCNodes",
+                MEMORY_CONTEXT_COMMUNICATION);
 
             /* Update node table in the shared memory */
             PgxcNodeListAndCount();
@@ -7883,16 +7676,16 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         /* stmt retry routine phase : pack input_message */
         if (IsStmtRetryEnabled()) {
 #ifdef USE_ASSERT_CHECKING
-            if (StmtRetryController->IsExtendQueryRetrying()) {
-                StmtRetryController->ValidateExecuting(firstchar);
+            if (u_sess->exec_cxt.RetryController->IsExtendQueryRetrying()) {
+                u_sess->exec_cxt.RetryController->ValidateExecuting(firstchar);
             }
 #endif
             if (IsQueryMessage(firstchar)) {
-                StmtRetryController->CacheCommand(firstchar, &input_message);
+                u_sess->exec_cxt.RetryController->CacheCommand(firstchar, &input_message);
                 pq_disk_enable_temp_file();
             }
-            StmtRetryController->TrackMessageOnExecuting(firstchar);
-            StmtRetryController->LogTraceInfo(MessageInfo(firstchar, input_message.len));
+            u_sess->exec_cxt.RetryController->TrackMessageOnExecuting(firstchar);
+            u_sess->exec_cxt.RetryController->LogTraceInfo(MessageInfo(firstchar, input_message.len));
             ereport(DEBUG2, (errmodule(MOD_CN_RETRY), errmsg("%s cache command.", PRINT_PREFIX_TYPE_PATH)));
         }
 
@@ -7923,21 +7716,20 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         // reset some flag related to stream
         ResetStreamEnv();
-        // t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnStartTime is just set to GetCurrentTimestamp()
-        // in the above call to ResetStreamEnv(). So, just reusing that here instead of calling
-        // GetCurrentTimestamp() again, which will call gettimeofday.
-        TimestampTz currentTimestamp = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnStartTime;
+
         t_thrd.codegen_cxt.codegen_IRload_thr_count = 0;
         IsExplainPlanStmt = false;
         t_thrd.codegen_cxt.g_runningInFmgr = false;
         PTFastQueryShippingStore = true;
-
-        MemoryContext oldMemory = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+        u_sess->opt_cxt.is_under_append_plan = false;
+        u_sess->attr.attr_sql.explain_allow_multinode = false;
+        MemoryContext oldMemory =
+            MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
         CodeGenThreadInitialize();
         (void)MemoryContextSwitchTo(oldMemory);
-
+        u_sess->exec_cxt.single_shard_stmt = false;
         /* Set statement_timestamp */
-        SetStatementStartTimestamp(currentTimestamp);
+        SetCurrentStatementStartTimestamp();
 
         if (u_sess->proc_cxt.MyProcPort && u_sess->proc_cxt.MyProcPort->is_logic_conn)
             LIBCOMM_DEBUG_LOG("postgres to node[nid:%d,sid:%d] with msg:%c.",
@@ -8039,9 +7831,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 const char* query_string = NULL;
 
                 query_string = pq_getmsgstring(&input_message);
-
+                if (query_string == NULL) {
+                    ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                                    errmsg("query_string is NULL.")));
+                }
                 if (strlen(query_string) > SECUREC_MEM_MAX_LEN) {
-                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                     errmsg("Too long query_string.")));
                 }
 
@@ -8050,13 +7845,18 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_getmsgend(&input_message);
 
                 pgstatCountSQL4SessionLevel();
+                statement_init_metric_context();
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled()) {
-                    StmtRetryController->stub_.StartOneStubTest(firstchar);
-                    StmtRetryController->stub_.ECodeStubTest();
+                    u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
+                    u_sess->exec_cxt.RetryController->stub_.ECodeStubTest();
                 }
 #endif
                 exec_simple_query(query_string, QUERY_MESSAGE, &input_message); /* @hdfs Add the second parameter */
+#ifndef ENBALE_MULTIPLE_NODE
+                // After query done, producer container is not usable anymore.
+                StreamNodeGroup::destroy(STREAM_COMPLETE);
+#endif
                 u_sess->debug_query_id = 0;
                 send_ready_for_query = true;
             } break;
@@ -8074,6 +7874,16 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 int err = -1;
                 MemoryContext oldcontext;
 
+                /* Only pooler stateless reuse mode in the cluster uses 'O' packets. Other paths are invalid. */
+                if(!IsConnFromCoord()) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Invalid packet path, remoteConnType[%d], remote_host[%s], remote_port[%s].",
+                                u_sess->attr.attr_common.remoteConnType,
+                                u_sess->proc_cxt.MyProcPort->remote_host,
+                                u_sess->proc_cxt.MyProcPort->remote_port)));
+                }
+
                 query_string = pq_getmsgstring(&input_message);
 
                 t_thrd.postgres_cxt.clobber_qstr = query_string;
@@ -8086,12 +7896,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     ereport(ERROR,
                         (errcode(ERRCODE_SYSTEM_ERROR),
                             errmsg("Acceptter in pooler stateless resue mode reset connection params %d > sql[%d].",
-                                (int)(strlen(query_string) + 1),
+                                (int)strlen(query_string) + 1,
                                 (int)sizeof(sql))));
                 }
 
                 err = sprintf_s(sql, sizeof(sql), "%s", query_string);
-                securec_check_ss(err, "\0", "\0");
+                securec_check_ss(err, "", "");
 
                 slot_session_reset = strtok_r(sql, "@", &sql_strtok_r);
                 user_name_reset = strtok_r(NULL, "@", &sql_strtok_r);
@@ -8106,7 +7916,23 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
                 /* Reset user_name pgoptions */
                 if (user_name_reset != NULL && pgoptions_reset != NULL) {
-                    oldcontext = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+                    oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
+
+                    /* check if role exits */
+                    ResourceOwner currentOwner = NULL;
+                    currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+                    ResourceOwner tmpOwner =
+                            ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "CheckUserOid",
+                                MEMORY_CONTEXT_SECURITY);
+                    t_thrd.utils_cxt.CurrentResourceOwner = tmpOwner;
+                    if (!OidIsValid(get_role_oid(user_name_reset, false))) {
+                        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role \"%s\" does not exist", user_name_reset)));
+                    }
+                    ResourceOwnerRelease(tmpOwner, RESOURCE_RELEASE_BEFORE_LOCKS, true, true);
+                    ResourceOwnerRelease(tmpOwner, RESOURCE_RELEASE_LOCKS, true, true);
+                    ResourceOwnerRelease(tmpOwner, RESOURCE_RELEASE_AFTER_LOCKS, true, true);
+                    t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+                    ResourceOwnerDelete(tmpOwner);
 
                     if (u_sess->proc_cxt.MyProcPort->user_name)
                         pfree(u_sess->proc_cxt.MyProcPort->user_name);
@@ -8137,22 +7963,32 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 send_ready_for_query = true;
             } break;
 
-
             case 'I': {
                 // Procedure overrideStack
                 int pushtype;
                 const char* schema_name = NULL;
                 pushtype = pq_getmsgbyte(&input_message);
                 schema_name = pq_getmsgstring(&input_message);
+                if (strlen(schema_name) > SECUREC_MEM_MAX_LEN) {
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                    errmsg("Too long schema_name.")));
+                }
+
                 pq_getmsgend(&input_message);
 
                 switch (pushtype) {
                     case 'P': {
+                        // check the list is override max depth
+                        if (list_length(u_sess->catalog_cxt.overrideStack) > OVERRIDE_STACK_LENGTH_MAX) {
+                            ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                                            errmsg("The overrideStack list has been reach the max length.")));
+                        }
                         // push
                         ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
                         MemoryContext old = MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
                         ResourceOwner tmpOwner =
-                            ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "ForPushProcedure");
+                            ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "ForPushProcedure",
+                                MEMORY_CONTEXT_EXECUTOR);
                         t_thrd.utils_cxt.CurrentResourceOwner = tmpOwner;
 
                         Oid namespaceOid = get_namespace_oid(schema_name, false);
@@ -8217,14 +8053,30 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         u_sess->unique_sql_cxt.unique_sql_cn_id = (uint32)pq_getmsgint(&input_message, sizeof(uint32));
                         u_sess->unique_sql_cxt.unique_sql_user_id = (Oid)pq_getmsgint(&input_message, sizeof(uint32));
                         u_sess->unique_sql_cxt.unique_sql_id = (uint64)pq_getmsgint64(&input_message);
+                        u_sess->slow_query_cxt.slow_query.unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;
+                        pgstat_report_queryid(u_sess->debug_query_id);
+                        Oid procId = 0;
+                        uint64 queryId = 0;
+                        int64 stamp = 0;
+                        if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION || input_message.cursor < input_message.len ) {
+                            procId = (Oid)pq_getmsgint(&input_message, sizeof(uint32));
+                            queryId = (uint64)pq_getmsgint64(&input_message);
+                            stamp = (int64)pq_getmsgint64(&input_message);
+                            u_sess->wlm_cxt->wlm_params.qid.procId = procId;
+                            u_sess->wlm_cxt->wlm_params.qid.queryId = queryId;
+                            u_sess->wlm_cxt->wlm_params.qid.stamp = stamp;
+                        }
 
                         ereport(DEBUG1,
                             (errmodule(MOD_INSTR),
                                 errmsg("[UniqueSQL] "
-                                       "Received new unique cn_id: %u, user_id: %u, sql id: %lu",
+                                       "Received new unique cn_id: %u, user_id: %u, sql id: %lu, procId %u, queryId %lu, stamp %ld",
                                     u_sess->unique_sql_cxt.unique_sql_cn_id,
                                     u_sess->unique_sql_cxt.unique_sql_user_id,
-                                    u_sess->unique_sql_cxt.unique_sql_id)));
+                                    u_sess->unique_sql_cxt.unique_sql_id,
+                                    procId,
+                                    queryId,
+                                    stamp)));
                     } break;
                     case 's': {
                         /* get unique sql ids, then reply the unique sqls stat */
@@ -8264,6 +8116,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_getmsgend(&input_message);
 
                 pgstatCountSQL4SessionLevel();
+                statement_init_metric_context();
 
                 /*
                  * @hdfs
@@ -8288,10 +8141,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 if (IS_PGXC_DATANODE && IsConnFromCoord())
                     u_sess->pgxc_cxt.PGXCNodeId = pq_getmsgint(&input_message, 4);
 
-                stmt_name = pq_getmsgstring(&input_message); // it may be null string
-
+                stmt_name = pq_getmsgstring(&input_message);
                 query_string = pq_getmsgstring(&input_message);
-
                 if (strlen(query_string) > SECUREC_MEM_MAX_LEN) {
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                     errmsg("Too long query_string.")));
@@ -8310,22 +8161,22 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     } else
 #endif /* ENABLE_MULTIPLE_NODES */
                     {
-                        for (i = 0; i < numParams; i++) {
+                        for (i = 0; i < numParams; i++)
                             paramTypes[i] = pq_getmsgint(&input_message, 4);
-                        }
                     }
                 }
-                
                 pq_getmsgend(&input_message);
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled())
-                    StmtRetryController->stub_.StartOneStubTest(firstchar);
+                    u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
 #endif
                 PG_TRY();
                 {
                     /* Disable enable_trigger_shipping for PBE. */
                     u_sess->attr.attr_sql.enable_trigger_shipping = false;
+                    statement_init_metric_context();
                     exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, numParams);
+                    statement_commit_metirc_context();
                 }
                 PG_CATCH();
                 {
@@ -8342,16 +8193,18 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                  * happens.
                  */
                 if (IsStmtRetryEnabled() && stmt_name[0] != '\0') {
-                    StmtRetryController->CacheStmtName(stmt_name);
+                    u_sess->exec_cxt.RetryController->CacheStmtName(stmt_name);
                 }
+
             } break;
 
             case 'B': /* bind */
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled())
-                    StmtRetryController->stub_.StartOneStubTest(firstchar);
+                    u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
 #endif
 
+                statement_init_metric_context();
                 /*
                  * this message is complex enough that it seems best to put
                  * the field extraction out-of-line
@@ -8400,7 +8253,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pgstatCountSQL4SessionLevel();
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled())
-                    StmtRetryController->stub_.StartOneStubTest(firstchar);
+                    u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
 #endif
                 exec_execute_message(portal_name, max_rows);
             } break;
@@ -8408,27 +8261,52 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 #ifdef ENABLE_MULTIPLE_NODES
             case 'k':
                 {
-                    errno_t rc = EOK;
+                    if (!ENABLE_DN_GPC)
+                        ereport(ERROR, (errmodule(MOD_GPC), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                          errmsg("cn has enabled global plan cache but dn %s disabled", g_instance.attr.attr_common.PGXCNodeName)));
+                    if (t_thrd.proc->workingVersionNum >= 92128) {
+                        rc = memcpy_s(&u_sess->sess_ident.cn_sessid, sizeof(uint64), pq_getmsgbytes(&input_message, sizeof(uint64)),
+                                sizeof(uint64));
+                        securec_check(rc,"\0","\0");
 
-                    rc = memcpy_s(&u_sess->global_sess_id, sizeof(uint64), pq_getmsgbytes(&input_message, sizeof(uint64)),
-                            sizeof(uint64));
-                    securec_check_c(rc,"\0","\0");
+                        rc = memcpy_s(&u_sess->sess_ident.cn_timeline, sizeof(uint32), pq_getmsgbytes(&input_message, sizeof(uint32)),
+                                sizeof(uint32));
+                        securec_check(rc,"","");
 
-                    uint32 gpc_timeline = 0;
-                    rc = memcpy_s(&gpc_timeline, sizeof(PGXCNode_HandleGPC), pq_getmsgbytes(&input_message, sizeof(PGXCNode_HandleGPC)),
-                            sizeof(PGXCNode_HandleGPC));
-                    securec_check_c(rc,"\0","\0");
+                        rc = memcpy_s(&u_sess->sess_ident.cn_nodeid, sizeof(uint32), pq_getmsgbytes(&input_message, sizeof(uint32)),
+                                sizeof(uint32));
+                        securec_check(rc,"","");
 
-                    PGXCNode_HandleGPC handle_type;
-                    rc = memcpy_s(&handle_type, sizeof(PGXCNode_HandleGPC), pq_getmsgbytes(&input_message, sizeof(PGXCNode_HandleGPC)),
-                            sizeof(PGXCNode_HandleGPC));
-                    securec_check_c(rc,"\0","\0");
-                    pq_getmsgend(&input_message);
-
-                    if (handle_type == HANDLE_CLEAN) {
-                        GPC->PrepareDropAll(u_sess->global_sess_id, true);
-                    } else if (handle_type == HANDLE_FIRST_SEND) {
-                        GPC->CheckTimeline(gpc_timeline);
+                        PGXCNode_HandleGPC handle_type;
+                        rc = memcpy_s(&handle_type, sizeof(PGXCNode_HandleGPC), pq_getmsgbytes(&input_message, sizeof(PGXCNode_HandleGPC)),
+                                sizeof(PGXCNode_HandleGPC));
+                        securec_check(rc,"","");
+                        u_sess->pgxc_cxt.PGXCNodeId = pq_getmsgint(&input_message, 4);
+                        pq_getmsgend(&input_message);
+                        g_instance.prepare_cache->UpdateUseTime(&u_sess->sess_ident, false);
+                        if (handle_type == HANDLE_FIRST_SEND) {
+                            g_instance.prepare_cache->CheckTimeline();
+                        }
+                    } else {
+                        uint64 origin_global_session_id;
+                        rc = memcpy_s(&origin_global_session_id, sizeof(uint64), pq_getmsgbytes(&input_message, sizeof(uint64)),
+                                sizeof(uint64));
+                        securec_check(rc,"","");
+                        
+                        rc = memcpy_s(&u_sess->sess_ident.cn_timeline, sizeof(uint32), pq_getmsgbytes(&input_message, sizeof(uint32)),
+                                sizeof(uint32));
+                        securec_check(rc,"","");
+                        u_sess->sess_ident.cn_nodeid = (uint32)(origin_global_session_id >> 48);
+                        u_sess->sess_ident.cn_sessid = (uint64)(origin_global_session_id & 0xffffffffffff);
+                        PGXCNode_HandleGPC handle_type;
+                        rc = memcpy_s(&handle_type, sizeof(PGXCNode_HandleGPC), pq_getmsgbytes(&input_message, sizeof(PGXCNode_HandleGPC)),
+                                sizeof(PGXCNode_HandleGPC));
+                        securec_check(rc,"","");
+                        pq_getmsgend(&input_message);
+                        g_instance.prepare_cache->UpdateUseTime(&u_sess->sess_ident, false);
+                        if (handle_type == HANDLE_FIRST_SEND) {
+                            g_instance.prepare_cache->CheckTimeline();
+                        }
                     }
                 }
                 break;
@@ -8477,28 +8355,23 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             case 'C': /* close */
             {
                 int close_type;
-                const char* close_target = NULL;
+                const char* closeTarget = NULL;
 
                 close_type = pq_getmsgbyte(&input_message);
-                close_target = pq_getmsgstring(&input_message);
+                closeTarget = pq_getmsgstring(&input_message);
                 pq_getmsgend(&input_message);
 
-                if (close_target && strlen(close_target) > SECUREC_MEM_MAX_LEN) {
+                if (closeTarget && strlen(closeTarget) > SECUREC_MEM_MAX_LEN) {
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                    errmsg("Too long close_target.")));
+                                    errmsg("Too long closeTarget.")));
                 }
 
                 exec_init_poolhandles();
 
-                if (u_sess->exec_cxt.CurrentOpFusionObj != NULL) {
-                    u_sess->exec_cxt.CurrentOpFusionObj->close();
-                    u_sess->exec_cxt.CurrentOpFusionObj = NULL;
-                }
-
                 switch (close_type) {
                     case 'S':
-                        if (close_target[0] != '\0') {
-                            DropPreparedStatement(close_target, false);
+                        if (closeTarget[0] != '\0') {
+                            DropPreparedStatement(closeTarget, false);
                         } else {
                             /* special-case the unnamed statement */
                             drop_unnamed_stmt();
@@ -8506,8 +8379,15 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         break;
                     case 'P': {
                         Portal portal;
+                        if (IS_PGXC_COORDINATOR && closeTarget[0] != '\0') {
+                            lightProxy::removeLightProxy(closeTarget);
+                        }
 
-                        portal = GetPortalByName(close_target);
+                        if (IS_PGXC_DATANODE && closeTarget[0] != '\0') {
+                            OpFusion::removeFusionFromHtab(closeTarget);
+                        }
+
+                        portal = GetPortalByName(closeTarget);
                         if (PortalIsValid(portal)) {
                             PortalDrop(portal, false);
                         }
@@ -8548,7 +8428,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_getmsgend(&input_message);
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled()) {
-                    StmtRetryController->stub_.StartOneStubTest(firstchar);
+                    u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
                 }
 #endif
                 exec_init_poolhandles();
@@ -8581,7 +8461,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_getmsgend(&input_message);
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled()) {
-                    StmtRetryController->stub_.StartOneStubTest(firstchar);
+                    u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
                 }
 #endif
                 if (u_sess->xact_cxt.pbe_execute_complete == true) {
@@ -8606,6 +8486,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                  */
             case 'X':
             case EOF:
+                /* unified auditing logout */
+                audit_processlogout_unified();
+
                 /*
                  * isSingleMode means we are doing initdb. Some temp tables
                  * will be created to store intermediate result, so should do cleaning
@@ -8619,7 +8502,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 InitThreadLocalWhenSessionExit();
 
                 if (IS_THREAD_POOL_WORKER) {
+                    (void)gs_signal_block_sigusr2();
                     t_thrd.threadpool_cxt.worker->CleanUpSession(false);
+                    (void)gs_signal_unblock_sigusr2();
                     break;
                 } else {
                     /*
@@ -8667,7 +8552,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     sizeof(uint64),
                     pq_getmsgbytes(&input_message, sizeof(uint64)),
                     sizeof(uint64));
-                securec_check_c(rc, "\0", "\0");
+                securec_check(rc, "\0", "\0");
                 ereport(DEBUG1, (errmsg("Received new query id %lu", u_sess->debug_query_id)));
                 pq_getmsgend(&input_message);
                 pgstat_report_queryid(u_sess->debug_query_id);
@@ -8696,7 +8581,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     sizeof(uint64),
                     pq_getmsgbytes(&input_message, sizeof(uint64)),
                     sizeof(uint64));
-                securec_check_c(rc, "\0", "\0");
+                securec_check(rc, "\0", "\0");
                 ereport(DEBUG1, (errmsg("Received new query id %lu", u_sess->debug_query_id)));
                 pq_getmsgend(&input_message);
 
@@ -8724,11 +8609,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     sizeof(TransactionId),
                     pq_getmsgbytes(&input_message, sizeof(TransactionId)),
                     sizeof(TransactionId));
-                securec_check_c(rc, "\0", "\0");
+                securec_check(rc, "\0", "\0");
 
                 /* get the tag indicates if it's a special xid for check, true(xid for check) */
                 rc = memcpy_s(&is_check_xid, sizeof(bool), pq_getmsgbytes(&input_message, sizeof(bool)), sizeof(bool));
-                securec_check_c(rc, "\0", "\0");
+                securec_check(rc, "\0", "\0");
 
                 if (!is_check_xid) {
                     ereport(DEBUG1, (errmsg("Received new gxid %lu", gxid)));
@@ -8754,29 +8639,30 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             case 's': /* snapshot */
             {
                 errno_t rc = EOK;
-                int snapshot_type = -1;
+                int gtm_snapshot_type = -1;
 
                 if (GTM_LITE_MODE) { /* gtm lite mode */
                     rc = memcpy_s(&ss_need_sync_wait_all, sizeof(int),
                                   pq_getmsgbytes(&input_message, sizeof(bool)), sizeof(bool));
-                    securec_check_c(rc,"\0","\0");
+                    securec_check(rc,"\0","\0");
                     rc = memcpy_s(&cn_xc_maintain_mode, sizeof(bool),
                                   pq_getmsgbytes(&input_message, sizeof(bool)), sizeof(bool));
-                    securec_check_c(rc,"\0","\0");
+                    securec_check(rc,"\0","\0");
                     rc = memcpy_s(&csn, sizeof(uint64),
                                   pq_getmsgbytes(&input_message, sizeof(uint64)), sizeof(uint64));
-                    securec_check_c(rc,"\0","\0");
-                    rc = memcpy_s(&snapshot_type, sizeof(int),
+                    securec_check(rc,"\0","\0");
+                    rc = memcpy_s(&gtm_snapshot_type, sizeof(int),
                                   pq_getmsgbytes(&input_message, sizeof(int)), sizeof(int));
-                    securec_check_c(rc,"\0","\0");
+                    securec_check(rc,"\0","\0");
                     remote_gtm_mode = pq_getmsgbyte(&input_message);
                     pq_getmsgend(&input_message);
                     /* if message length is correct, set u_sess variables */
                     u_sess->utils_cxt.cn_xc_maintain_mode = cn_xc_maintain_mode;
-                    if (snapshot_type == SNAPSHOT_TYPE_LOCAL) {
+                    if (gtm_snapshot_type == GTM_SNAPSHOT_TYPE_LOCAL) {
                         UnsetGlobalSnapshotData();
                     } else {
-                        set_proc_csn_and_check("PostgresMain", csn, (SnapshotType)snapshot_type);
+                        u_sess->utils_cxt.is_autovacuum_snapshot =
+                            (gtm_snapshot_type == GTM_SNAPSHOT_TYPE_AUTOVACUUM) ? true : false;
                         SetGlobalSnapshotData(InvalidTransactionId, InvalidTransactionId, csn,
                                               InvalidTransactionTimeline, ss_need_sync_wait_all);
                         /* quickly set my recent global xmin */
@@ -8786,35 +8672,35 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     /* Set the snapshot we were passed down */
                     rc = memcpy_s(
                         &ss_need_sync_wait_all, sizeof(int), pq_getmsgbytes(&input_message, sizeof(bool)), sizeof(bool));
-                    securec_check_c(rc, "\0", "\0");
+                    securec_check(rc, "", "");
 
                     rc = memcpy_s(&xmin,
                         sizeof(TransactionId),
                         pq_getmsgbytes(&input_message, sizeof(TransactionId)),
                         sizeof(TransactionId));
-                    securec_check_c(rc, "\0", "\0");
+                    securec_check(rc, "", "");
                     rc = memcpy_s(&xmax,
                         sizeof(TransactionId),
                         pq_getmsgbytes(&input_message, sizeof(TransactionId)),
                         sizeof(TransactionId));
-                    securec_check_c(rc, "\0", "\0");
+                    securec_check(rc, "", "");
                     rc = memcpy_s(&recent_global_xmin,
                         sizeof(TransactionId),
                         pq_getmsgbytes(&input_message, sizeof(TransactionId)),
                         sizeof(TransactionId));
-                    securec_check_c(rc, "\0", "\0");
+                    securec_check(rc, "", "");
                     rc = memcpy_s(&csn, sizeof(uint64), pq_getmsgbytes(&input_message, sizeof(uint64)), sizeof(uint64));
-                    securec_check_c(rc, "\0", "\0");
+                    securec_check(rc, "", "");
                     rc = memcpy_s(&timeline,
                         sizeof(GTM_Timeline),
                         pq_getmsgbytes(&input_message, sizeof(GTM_Timeline)),
                         sizeof(GTM_Timeline));
-                    securec_check_c(rc, "\0", "\0");
+                    securec_check(rc, "", "");
                     rc = memcpy_s(&cn_xc_maintain_mode,
                         sizeof(bool),
                         pq_getmsgbytes(&input_message, sizeof(bool)),
                         sizeof(bool));
-                    securec_check_c(rc, "\0", "\0");
+                    securec_check(rc, "", "");
                     if (t_thrd.proc->workingVersionNum >= 92012) {
                         remote_gtm_mode = pq_getmsgbyte(&input_message);
                     }
@@ -8831,7 +8717,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                      * If u_sess->utils_cxt.RecentGlobalXmin is larger than local xmins, tuples being accessed might be
                      * cleaned.
                      */
-                    u_sess->utils_cxt.RecentGlobalXmin = GetOldestXmin(NULL, true);  
+                    u_sess->utils_cxt.RecentGlobalXmin = GetOldestXmin(NULL, true);
                 }
                 /* check gtm mode, remote should be false, local cannot be true */
                 if (remote_gtm_mode != g_instance.attr.attr_storage.enable_gtm_free &&
@@ -8861,6 +8747,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                  * and the timestampreceivedvalues for Datanode reference
                  */
                 SetCurrentGTMTimestamp(gtmstart_timestamp);
+                t_thrd.xact_cxt.timestamp_from_cn = true;
 
                 SetCurrentStmtTimestamp(stmtsys_timestamp);
 
@@ -8890,6 +8777,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         ProcessCreateBarrierExecute(id);
                         break;
 
+                    case CREATE_BARRIER_QUERY_ARCHIVE:
+                        ProcessCreateBarrierQueryArchive(id);
+                        break;
                     default:
                         ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("Invalid command received")));
                         break;
@@ -8929,24 +8819,24 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 const char* respool = pq_getmsgstring(&input_message);
 
                 if (StringIsValid(respool)) {
-                    errno_t err = snprintf_s(g_wlm_params->rpdata.rpname,
+                    rc = snprintf_s(g_wlm_params->rpdata.rpname,
                         sizeof(g_wlm_params->rpdata.rpname),
                         sizeof(g_wlm_params->rpdata.rpname) - 1,
                         "%s",
                         respool);
-                    securec_check_ss(err, "\0", "\0");
+                    securec_check_ss(rc, "", "");
                 }
 
                 /* get the node group name */
                 const char* ngname = pq_getmsgstring(&input_message);
 
                 if (StringIsValid(ngname)) {
-                    errno_t err = snprintf_s(g_wlm_params->ngroup,
+                    rc = snprintf_s(g_wlm_params->ngroup,
                         sizeof(g_wlm_params->ngroup),
                         sizeof(g_wlm_params->ngroup) - 1,
                         "%s",
                         ngname);
-                    securec_check_ss(err, "\0", "\0");
+                    securec_check_ss(rc, "", "");
                 }
 
                 /* local dn has vcgroup */
@@ -8973,7 +8863,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
                 pq_getmsgend(&input_message);
             } break;
-
             case 'w': {
                 Assert(StringIsValid(g_instance.attr.attr_common.PGXCNodeName));
 
@@ -8990,7 +8879,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
                 finish_xact_command();
             } break;
-
             case 'R': /* reply collect info */
             {
                 /* start an xact for this function invocation */
@@ -9005,6 +8893,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 process_request(&input_message);
                 break;
 
+#ifdef ENABLE_MULTIPLE_NODES
             case 'L': /* link gc_fdw  */
             {
                 start_xact_command();
@@ -9013,13 +8902,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
                 finish_xact_command();
             } break;
-
+#endif
             case 'n': /* commiting */
-            {
-                errno_t rc = EOK;
                 /* Get the csn passed down */
                 rc = memcpy_s(&csn, sizeof(uint64), pq_getmsgbytes(&input_message, sizeof(uint64)), sizeof(uint64));
-                securec_check_c(rc, "\0", "\0");
+                securec_check(rc, "", "");
                 pq_getmsgend(&input_message);
 
                 /* Set the commit csn to commit_in_progress */
@@ -9028,19 +8915,51 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 /* Send back response */
                 pq_putemptymessage('m');
                 pq_flush();
-            } break;
+                break;
+
             case 'N': /* commit csn */
-            {
-                errno_t rc = EOK;
                 /* Set the commit csn passed down */
                 rc = memcpy_s(&csn, sizeof(uint64), pq_getmsgbytes(&input_message, sizeof(uint64)), sizeof(uint64));
-                securec_check_c(rc, "\0", "\0");
+                securec_check(rc, "", "");
                 pq_getmsgend(&input_message);
+                if (!COMMITSEQNO_IS_COMMITTED(csn)) {
+                    ereport(ERROR, (errmsg("Received an invalid commit csn: %lu.", csn)));
+                }
                 setCommitCsn(csn);
                 ereport(DEBUG1,
                     (errmsg(
                         "proc %lu %d set csn %lu", t_thrd.proc->pid, t_thrd.proc->pgprocno, t_thrd.proc->commitCSN)));
-            } break;
+                break;
+
+#ifdef ENABLE_MULTIPLE_NODES
+            case 'l': /* get and handle csn for csnminsync */
+                rc = memcpy_s(&csn, sizeof(uint64),
+                    pq_getmsgbytes(&input_message, sizeof(uint64)), sizeof(uint64));
+                securec_check(rc, "", "");
+                rc = memcpy_s(&csn_type, sizeof(CsnType),
+                    pq_getmsgbytes(&input_message, sizeof(CsnType)), sizeof(CsnType));
+                securec_check(rc, "", "");
+                pq_getmsgend(&input_message);
+                if (module_logging_is_on(MOD_TRANS_SNAPSHOT)) {
+                    ereport(LOG, (errmodule(MOD_TRANS_SNAPSHOT),
+                        errmsg("get csn : %lu, csn_type: %d", csn, (int)csn_type)));
+                }
+                if (csn_type == FETCH_CSN) {
+                    /* calculate and send local_csn_min to Center Cn */
+                    t_thrd.xact_cxt.ShmemVariableCache->local_csn_min = calculate_local_csn_min();
+                    ereport(DEBUG1, (errmsg("report local_csn_min %lu to CCN",
+                        t_thrd.xact_cxt.ShmemVariableCache->local_csn_min)));
+                    send_local_csn_min_to_ccn();
+                } else { /* get global_csn_min */
+                    t_thrd.xact_cxt.ShmemVariableCache->cutoff_csn_min =
+                        (csn < t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo) ?
+                        csn : t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo;
+                    ereport(DEBUG1, (errmsg("set the cutoff_csn_min %lu",
+                        t_thrd.xact_cxt.ShmemVariableCache->cutoff_csn_min)));
+                    forward_recent_global_xmin();
+                }
+                break;
+#endif
 
             case 'j': /* check gtm mode */
                 remote_gtm_mode = pq_getmsgbyte(&input_message);
@@ -9063,13 +8982,17 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                             errmsg("Need to set support_batch_bind=true if executing batch")));
 
                 pgstatCountSQL4SessionLevel();
+                statement_init_metric_context();
 #ifdef USE_RETRY_STUB
                 if (IsStmtRetryEnabled())
-                    StmtRetryController->stub_.StartOneStubTest(firstchar);
+                    u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
 #endif
                 exec_init_poolhandles();
 
                 exec_batch_bind_execute(&input_message);
+                if (is_unique_sql_enabled() && is_local_unique_sql()) {
+                    UpdateUniqueSQLStat(NULL, NULL, GetCurrentStatementLocalStartTimestamp());
+                }
             } break;
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -9079,19 +9002,25 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
             case 'G': /* MSG_TYPE_PGXC_BUCKET_MAP for PGXCBucketMap and PGXCNodeId */
             {
-                errno_t rc = EOK;
+                if (u_sess->top_transaction_mem_cxt == NULL) {
+                    ereport(
+                        ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                        errmsg("current transaction is not start")));
+                }
+
                 if (!IS_PGXC_DATANODE)
                     ereport(
                         ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Only dn can receive the bucket map")));
                 t_thrd.xact_cxt.PGXCNodeId = pq_getmsgint(&input_message, 4);
                 if (t_thrd.xact_cxt.PGXCNodeId != MAX_DN_NODE_NUM) {
+                    CheckBucketMapLenValid();
                     int len = BUCKETDATALEN * sizeof(uint2);
                     if (NULL == t_thrd.xact_cxt.PGXCBucketMap) {
                         t_thrd.xact_cxt.PGXCBucketMap =
                             (uint2*)MemoryContextAlloc(u_sess->top_transaction_mem_cxt, len);
                     }
                     rc = memcpy_s(t_thrd.xact_cxt.PGXCBucketMap, len, pq_getmsgbytes(&input_message, len), len);
-                    securec_check_c(rc, "\0", "\0");
+                    securec_check(rc, "", "");
                 }
                 pq_getmsgend(&input_message);
             } break;
@@ -9278,6 +9207,7 @@ static void log_disconnections(int code, Datum arg)
             port->remote_port[0] ? " port=" : "",
             port->remote_port)));
 }
+
 /* Aduit user logout */
 /*
  * Brief		    : audit_processlogout
@@ -9286,6 +9216,22 @@ static void log_disconnections(int code, Datum arg)
 void audit_processlogout(int code, Datum arg)
 {
     pgaudit_user_logout();
+    return;
+}
+
+/* Aduit user logout */
+/*
+ * Brief		    : audit_processlogout_unified
+ * Description	    : audit logout
+ */
+void audit_processlogout_unified()
+{
+    /* it's unsafe to deal with plugins hooks as dynamic lib may be released */
+    if (!(g_instance.status > NoShutdown) && user_login_hook) {
+        user_login_hook(u_sess->proc_cxt.MyProcPort->database_name,
+                        u_sess->proc_cxt.MyProcPort->user_name, true, false);
+    }
+
     return;
 }
 
@@ -9347,6 +9293,59 @@ static void ForceModifyInitialPwd(const char* query_string, List* parsetree_list
             }
         }
     }
+}
+
+/*
+ * Require user to modify password since password is expired, 
+ * all the commands from APP should be forbidden except the
+ * "ALTER USER ***".
+ */
+static void ForceModifyExpiredPwd(const char* queryString, const List* parsetreeList)
+{
+    if (parsetreeList == NIL) {
+        return;
+    }
+
+    if (!IsUnderPostmaster || !IsConnFromApp()) {
+        return;
+    }
+    
+    /* check if gsql use -U -W */ 
+    if (strcmp(queryString, "SELECT intervaltonum(gs_password_deadline())") == 0 ||
+        strcmp(queryString, "SELECT gs_password_notifytime()") == 0 ||
+        strcmp(queryString, "SELECT VERSION()") == 0) {
+        return;    
+    }
+
+    /* Check if the role in "AlterRoleStmt" matches the current_user. */
+    Oid current_user = GetUserId();
+    Node* parsetree = (Node*)linitial(parsetreeList);
+    char* current_user_name = GetUserNameFromId(current_user);
+    if (IsA(parsetree, AlterRoleStmt)) {
+        char* alter_name = ((AlterRoleStmt*)parsetree)->role;
+        ListCell* option = NULL;
+        foreach (option, ((AlterRoleStmt*)parsetree)->options) {
+            DefElem* defel = (DefElem*)lfirst(option);
+            DefElem* dpassword = NULL;
+
+            if ((strcmp(defel->defname, "encryptedPassword") == 0 || 
+                strcmp(defel->defname, "unencryptedPassword") == 0 ||
+                strcmp(defel->defname, "password") == 0) && 
+                strcasecmp(current_user_name, alter_name) == 0) {
+                dpassword = defel;
+            }
+
+            if (dpassword != NULL && dpassword->arg != NULL) {
+                return;
+            }            
+        }   
+    }
+
+    ereport(ERROR,
+        (errcode(ERRCODE_INITIAL_PASSWORD_NOT_MODIFIED),
+            errmsg("Please use \"ALTER ROLE user_name IDENTIFIED BY 'password' REPLACE 'old "
+                "password';\" to modify the expired password of user %s before operation!",
+                current_user_name)));
 }
 
 /*
@@ -9463,8 +9462,6 @@ void exec_query_for_merge(const char* query_string)
          */
         commandTag = CreateCommandTag(parsetree);
 
-        knl_thread_set_name(commandTag, true);
-
         set_ps_display(commandTag, false);
 
         BeginCommand(commandTag, dest);
@@ -9481,7 +9478,8 @@ void exec_query_for_merge(const char* query_string)
             ereport(ERROR,
                 (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
                     errmsg("current transaction is aborted, "
-                           "commands ignored until end of transaction block"),
+                        "commands ignored until end of transaction block, firstChar[%c]",
+                        u_sess->proc_cxt.firstChar),
                     errdetail_abort()));
 
         /* Make sure we are in a transaction command */
@@ -9559,7 +9557,7 @@ void exec_query_for_merge(const char* query_string)
             if (!stmt->ismove) {
                 Portal fportal = GetPortalByName(stmt->portalname);
 
-                if (PortalIsValid(fportal) && (fportal->cursorOptions & CURSOR_OPT_BINARY))
+                if (PortalIsValid(fportal) && ((uint32)fportal->cursorOptions & CURSOR_OPT_BINARY))
                     format = 1; /* BINARY */
             }
         }
@@ -9708,7 +9706,7 @@ void execute_simple_query(const char* query_string)
  *   If query is not SELECT/INSERT/UPDATE/DELETE, return completionTag, else NULL.
  */
 static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int numRFormats, int16* rformats,
-    bool send_DP_msg, CommandDest dest, char* completionTag)
+    bool send_DP_msg, CommandDest dest, char* completionTag, const char* stmt_name)
 {
     CachedPlan* cplan = NULL;
     Portal portal;
@@ -9718,18 +9716,27 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
     OpFusion::clearForCplan((OpFusion*)psrc->opFusionObj, psrc);
 
     if (psrc->opFusionObj != NULL) {
-        ((OpFusion*)psrc->opFusionObj)->bindClearPosition();
-        ((OpFusion*)psrc->opFusionObj)->useOuterParameter(params);
-        ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
+        (void)RevalidateCachedQuery(psrc);
 
-        if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, true)) {
-            CommandCounterIncrement();
+        if (psrc->opFusionObj != NULL) {
+            Assert(psrc->cplan == NULL);
+            ((OpFusion*)psrc->opFusionObj)->bindClearPosition();
+            ((OpFusion*)psrc->opFusionObj)->useOuterParameter(params);
+            ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
+
+            CachedPlanSource* cps = ((OpFusion*)psrc->opFusionObj)->m_psrc;
+            if (cps != NULL && cps->gplan) {
+                setCachedPlanBucketId(cps->gplan, params);
+            }
+
+            if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, true)) {
+                CommandCounterIncrement();
+                return;
+            }
+
+            Assert(0);
             return;
         }
-
-        Assert(0);
-
-        return;
     }
 
     /*
@@ -9739,6 +9746,20 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
      * an error 'table already exists' will raise. table_created_in_CTAS is to solve this.
      */
     t_thrd.postgres_cxt.table_created_in_CTAS = true;
+
+    portal = CreatePortal("", true, true);
+
+    MemoryContext oldContext = MemoryContextSwitchTo(PortalGetHeapMemory(portal));
+    const char* saved_stmt_name = NULL;
+    const char* cur_stmt_name = NULL;
+    if (ENABLE_CN_GPC) {
+        saved_stmt_name = (stmt_name[0] != '\0') ? pstrdup(stmt_name) : NULL;
+        cur_stmt_name = psrc->gpc.status.IsPrivatePlan() ? psrc->stmt_name : saved_stmt_name;
+    } else {
+        cur_stmt_name = psrc->stmt_name;
+    }
+    (void)MemoryContextSwitchTo(oldContext);
+
     /*
      * Obtain a plan from the CachedPlanSource.  Any cruft from (re)planning
      * will be generated in t_thrd.mem_cxt.msg_mem_cxt.  The plan refcount will be
@@ -9756,6 +9777,24 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
     }
 
     /*
+     * Now we can define the portal.
+     *
+     * DO NOT put any code that could possibly throw an error between the
+     * above GetCachedPlan call and here.
+     */
+    PortalDefineQuery(portal,
+        (psrc != u_sess->pcache_cxt.unnamed_stmt_psrc) ? cur_stmt_name : NULL,
+        psrc->query_string,
+        psrc->commandTag,
+        cplan->stmt_list,
+        cplan);
+
+    if (ENABLE_GPC) {
+        portal->stmts = CopyLocalStmt(portal->cplan->stmt_list);
+    }
+
+#ifdef ENABLE_MOT
+    /*
      * MOT JIT Execution:
      * Assist in distinguishing query boundaries in case of range query when client uses batches. This allows us to
      * know a new query started, and in case a previous execution did not fetch all records (since user is working in
@@ -9765,13 +9804,15 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
     if (psrc->mot_jit_context != NULL) {
         JitResetScan(psrc->mot_jit_context);
     }
+#endif
 
-    if (IS_PGXC_DATANODE && psrc->cplan == NULL && psrc->is_checked_opfusion == false) {
+    bool checkSQLBypass  = IS_PGXC_DATANODE && (psrc->cplan == NULL) && (psrc->is_checked_opfusion == false);
+    if (checkSQLBypass) {
         psrc->opFusionObj =
             OpFusion::FusionFactory(OpFusion::getFusionType(cplan, params, NULL), psrc->context, psrc, NULL, params);
         psrc->is_checked_opfusion = true;
         if (psrc->opFusionObj != NULL) {
-            ((OpFusion*)psrc->opFusionObj)->bindClearPosition();
+        	((OpFusion*)psrc->opFusionObj)->bindClearPosition();
             ((OpFusion*)psrc->opFusionObj)->useOuterParameter(params);
             ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
             ((OpFusion*)psrc->opFusionObj)->CopyFormats(rformats, numRFormats);
@@ -9785,20 +9826,6 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
         }
     }
 
-    portal = CreatePortal("", true, true);
-
-    /*
-     * Now we can define the portal.
-     *
-     * DO NOT put any code that could possibly throw an error between the
-     * above GetCachedPlan call and here.
-     */
-    PortalDefineQuery(portal,
-        psrc != u_sess->pcache_cxt.unnamed_stmt_psrc ? psrc->stmt_name : NULL,
-        psrc->query_string,
-        psrc->commandTag,
-        cplan->stmt_list,
-        cplan);
 
     /*
      * And we're ready to start portal execution.
@@ -9881,7 +9908,8 @@ static void light_preprocess_batchmsg_set(CachedPlanSource* psrc, const ParamLis
     Assert(exec_nodes->nodeList != NIL || exec_nodes->en_expr != NIL);
 
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
-    ResourceOwner tmpOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "BatchLightProxy");
+    ResourceOwner tmpOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "BatchLightProxy",
+        MEMORY_CONTEXT_EXECUTOR);
     t_thrd.utils_cxt.CurrentResourceOwner = tmpOwner;
 
     if (exec_nodes->en_expr != NIL) {
@@ -9930,6 +9958,7 @@ static void light_preprocess_batchmsg_set(CachedPlanSource* psrc, const ParamLis
 
             single_node = GetRelationNodes(
                 rel_loc_info, distcol_value, distcol_isnull, distcol_type, idx_dist, exec_nodes->accesstype);
+
             /* make sure it is one dn */
             if (single_node == NULL || list_length(single_node->nodeList) != 1)
                 ereport(ERROR,
@@ -10014,7 +10043,7 @@ static StringInfo light_construct_batchmsg_set(StringInfo input, const int* para
     input->cursor = 0;
     batch_count = pq_getmsgint(input, 4);
     if (unlikely(batch_count <= 0)) {
-        ereport(ERROR, 
+        ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                  errmsg("unexpected batch_count %d get from inputmessage", batch_count)));
     }
@@ -10062,7 +10091,8 @@ static StringInfo light_construct_batchmsg_set(StringInfo input, const int* para
             idx = node_idx_set[i];
             batch_msg = &batch_msg_dnset[idx];
             if (unlikely(batch_msg->maxlen <= 0)) {
-                ereport(ERROR, (errmsg("unexpected maxlen %d ", batch_msg->maxlen)));
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("unexpected maxlen %d ", batch_msg->maxlen)));
             }
 
             /* append params */
@@ -10116,7 +10146,7 @@ static StringInfo light_construct_batchmsg_set(StringInfo input, const int* para
  * Returns: process_count
  */
 static int light_execute_batchmsg_set(
-    lightProxy* scn, const StringInfo batch_msg_dnset, int* batch_count_dnset, bool send_DP_msg)
+    lightProxy* scn, const StringInfo batch_msg_dnset, const int* batch_count_dnset, bool send_DP_msg)
 {
     int process_count = 0;
     int tmp_count = 0;
@@ -10134,8 +10164,12 @@ static int light_execute_batchmsg_set(
 
         /* Check for cancel signal before we start execution */
         CHECK_FOR_INTERRUPTS();
+        /* in router, only execute batch msg on router node */
+        if (HAS_ROUTER)
+            scn->m_nodeIdx = u_sess->exec_cxt.CurrentRouter->GetRouterNodeId();
+        else
+            scn->m_nodeIdx = i;
 
-        scn->m_nodeIdx = i;
         tmp_count = scn->runBatchMsg(&batch_msg_dnset[i], sendDMsg, batch_count_dn);
         process_count += tmp_count;
         if (sendDMsg)
@@ -10194,6 +10228,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
      * Only support normal perf mode for PBE, as DestRemoteExecute can not send T message automatically.
      */
     t_thrd.explain_cxt.explain_perf_mode = EXPLAIN_NORMAL;
+    instr_stmt_report_start_time();
 
     /* 'U' Message format: many B-like and one D and one E message together
      * batchCount
@@ -10227,7 +10262,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
     portal_name = pq_getmsgstring(input_message);
     stmt_name = pq_getmsgstring(input_message);
     /* Check not NULL */
-    AssertEreport(portal_name != NULL && stmt_name != NULL, MOD_OPT, "");
+    AssertEreport(portal_name != NULL && stmt_name != NULL, MOD_OPT, "portal_name and stmt_name can not be NULL");
     if (strlen(portal_name) > SECUREC_MEM_MAX_LEN || strlen(stmt_name) > SECUREC_MEM_MAX_LEN)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Too long portal_name and stmt_name.")));
     if (portal_name[0] != '\0')
@@ -10243,8 +10278,8 @@ static void exec_batch_bind_execute(StringInfo input_message)
 
     /* Find prepared statement */
     if (stmt_name[0] != '\0') {
-        PreparedStatement* pstmt = NULL;
-        pstmt = FetchPreparedStatement(stmt_name, true);
+        PreparedStatement *pstmt = NULL;
+        pstmt = FetchPreparedStatement(stmt_name, true, true);
         psrc = pstmt->plansource;
     } else {
         /* special-case the unnamed statement */
@@ -10255,6 +10290,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
     }
 
     Assert(NULL != psrc);
+    SetUniqueSQLIdFromCachedPlanSource(psrc);
 
     /* Check command type: only support IUD */
     initStringInfo(&process_result);
@@ -10290,8 +10326,6 @@ static void exec_batch_bind_execute(StringInfo input_message)
      */
     t_thrd.postgres_cxt.debug_query_string = psrc->query_string;
     pgstat_report_activity(STATE_RUNNING, psrc->query_string);
-
-    knl_thread_set_name(psrc->commandTag, true);
 
     set_ps_display(psrc->commandTag, false);
 
@@ -10338,7 +10372,6 @@ static void exec_batch_bind_execute(StringInfo input_message)
             (errcode(ERRCODE_PROTOCOL_VIOLATION),
                 errmsg("Batch bind-execute message with invalid parameter number: %d", numPFormats)));
     }
-
     if (numPFormats > 0) {
         pformats = (int16*)palloc0(numPFormats * sizeof(int16));
         for (int i = 0; i < numPFormats; i++) {
@@ -10352,7 +10385,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
         ereport(ERROR,
             (errcode(ERRCODE_PROTOCOL_VIOLATION),
                 errmsg("Batch bind-execute message with invalid parameter number: %d", numRFormats)));
-    } 
+    }
     if (numRFormats > 0) {
         rformats = (int16*)palloc0(numRFormats * sizeof(int16));
         for (int i = 0; i < numRFormats; i++) {
@@ -10386,7 +10419,8 @@ static void exec_batch_bind_execute(StringInfo input_message)
         ereport(ERROR,
             (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
                 errmsg("current transaction is aborted, "
-                       "commands ignored until end of transaction block"),
+                    "commands ignored until end of transaction block, firstChar[%c]",
+                    u_sess->proc_cxt.firstChar),
                 errdetail_abort()));
 
     /*
@@ -10402,7 +10436,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
     }
 
     /* Make sure the querytree list is valid and we have parse-time locks */
-    if (psrc->single_exec_node != NULL)
+    if (!ENABLE_CN_GPC && psrc->single_exec_node != NULL)
         RevalidateCachedQuery(psrc);
 
     /* record the params set position for light cn to contruct batch message */
@@ -10439,10 +10473,9 @@ static void exec_batch_bind_execute(StringInfo input_message)
                 isNull = (plength == -1);
                 /* add null value process for date type */
                 if ((VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
-                     TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
-                    plength == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+                        TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
+                    0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
                     isNull = true;
-                }
 
                 /*
                  * Insert into bind values support illegal characters import,
@@ -10679,7 +10712,6 @@ static void exec_batch_bind_execute(StringInfo input_message)
         int* node_idx_set = NULL;
         int* batch_count_dnset = NULL;
         int* params_size_dnset = NULL;
-        lightProxy* scn = NULL;
 
         /* No nodes found ?? */
         if (u_sess->pgxc_cxt.NumDataNodes == 0)
@@ -10724,17 +10756,29 @@ static void exec_batch_bind_execute(StringInfo input_message)
             input_message, params_set_end, node_idx_set, batch_count_dnset, params_size_dnset, desc_msg, &execute_msg);
 
         /* 3.run for each dn */
-        if (psrc->lightProxyObj == NULL) {
+        lightProxy *scn = NULL;
+        bool enable_gpc = (ENABLE_CN_GPC && stmt_name[0] != '\0');
+        if (enable_gpc)
+            scn = lightProxy::locateLpByStmtName(stmt_name);
+        else
+            scn = (lightProxy *)psrc->lightProxyObj;
+
+        if (scn == NULL) {
             /* initialize session cache context; typically it won't store much */
-            MemoryContext context = AllocSetContextCreate(u_sess->cache_mem_cxt,
-                "LightPorxyMemory",
-                ALLOCSET_SMALL_MINSIZE,
-                ALLOCSET_SMALL_INITSIZE,
-                ALLOCSET_SMALL_MAXSIZE);
-            scn = New(context) lightProxy(context, psrc);
-            psrc->lightProxyObj = scn;
-        } else
-            scn = (lightProxy*)psrc->lightProxyObj;
+            MemoryContext context = AllocSetContextCreate(u_sess->cache_mem_cxt, "LightPorxyMemory",
+                ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE);
+            scn = New(context)lightProxy(context, psrc, portal_name, stmt_name);
+            if (enable_gpc) {
+                scn->storeLpByStmtName(stmt_name);
+                psrc->lightProxyObj = NULL;
+            } else {
+                psrc->lightProxyObj = scn;
+            }
+        }
+        if (enable_gpc) {
+            /* cngpc need fill gpc msg just like BuildCachedPlan. */
+            GPCFillMsgForLp(psrc);
+        }
 
         Assert(scn != NULL);
         process_count = light_execute_batchmsg_set(scn, batch_msg_dnset, batch_count_dnset, send_DP_msg);
@@ -10749,8 +10793,8 @@ static void exec_batch_bind_execute(StringInfo input_message)
 
         if (use_original_logic) {
             for (int i = 0; i < batch_count; i++) {
-                exec_one_in_batch(
-                    psrc, params_set[i], numRFormats, rformats, i == 0 ? send_DP_msg : false, dest, completionTag);
+                exec_one_in_batch(psrc, params_set[i], numRFormats, rformats,
+                                  (i == 0) ? send_DP_msg : false, dest, completionTag, stmt_name);
             }
 
             /* only send the last commandTag */
@@ -10759,8 +10803,8 @@ static void exec_batch_bind_execute(StringInfo input_message)
             int tmp_count = 0;
 
             for (int i = 0; i < batch_count; i++) {
-                exec_one_in_batch(
-                    psrc, params_set[i], numRFormats, rformats, i == 0 ? send_DP_msg : false, dest, completionTag);
+                exec_one_in_batch(psrc, params_set[i], numRFormats, rformats,
+                                  (i == 0) ? send_DP_msg : false, dest, completionTag, stmt_name);
 
                 /* Get process_count (X) from completionTag */
                 if (completionTag[0] == 'I') {
@@ -10811,15 +10855,17 @@ static void exec_batch_bind_execute(StringInfo input_message)
      */
     switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms", msec_str), errhidestmt(true)));
+            ereport(DEBUG1, (errmsg("duration: %s ms, queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
             char* mask_string = NULL;
 
             MASK_PASSWORD_START(mask_string, psrc->query_string);
-            ereport(LOG,
-                (errmsg("duration: %s ms  batch bind-execute %s%s%s: %s",
+            ereport(DEBUG1,
+                (errmsg("duration: %s ms  queryid %ld unique id %ld batch bind-execute %s%s%s: %s",
                      msec_str,
+                     u_sess->debug_query_id,
+                     u_sess->slow_query_cxt.slow_query.unique_sql_id,
                      *stmt_name ? stmt_name : "<unnamed>",
                      *portal_name ? "/" : "",
                      *portal_name ? portal_name : "",
@@ -10851,9 +10897,9 @@ void lock_codegen_process_add()
 /* lock function for  g_instance.codegen_IRload_process_count Subtraction */
 void lock_codegen_process_sub(int count)
 {
-	if (count == 0) {
-		return;
-	}
+    if (count == 0) {
+        return;
+    }
     AutoMutexLock copyLock(&nodeDefCopyLock);
     copyLock.lock();
     g_instance.codegen_IRload_process_count = g_instance.codegen_IRload_process_count - count;
@@ -10893,25 +10939,23 @@ OM_ONLINE_STATE get_om_online_state()
     } else {
         return OM_ONLINE_NODE_REPLACE;
     }
+
 }
 
-/*
+/* 
  * check whether sql_compatibility is valid
- * sql_compatibility has 4 values: A, B, C, PG
  */
-bool CheckCompArgs(const char *cmptFmt)
+bool checkCompArgs(const char *compFormat)
 {
     /* make sure input is not null */
-    if (cmptFmt == NULL) {
+    if (compFormat == NULL) {
         return false;
     }
-
-    if (pg_strcasecmp(cmptFmt, DB_CMPT_OPT_A) == 0 ||
-        pg_strcasecmp(cmptFmt, DB_CMPT_OPT_B) == 0 ||
-        pg_strcasecmp(cmptFmt, DB_CMPT_OPT_C) == 0 ||
-        pg_strcasecmp(cmptFmt, DB_CMPT_OPT_PG) == 0) {
-        return true;
+    if (pg_strncasecmp(compFormat, g_dbCompatArray[DB_CMPT_A].name, sizeof(g_dbCompatArray[DB_CMPT_A].name)) != 0 &&
+        pg_strncasecmp(compFormat, g_dbCompatArray[DB_CMPT_B].name, sizeof(g_dbCompatArray[DB_CMPT_B].name)) != 0 &&
+        pg_strncasecmp(compFormat, g_dbCompatArray[DB_CMPT_C].name, sizeof(g_dbCompatArray[DB_CMPT_C].name)) != 0 &&
+        pg_strncasecmp(compFormat, g_dbCompatArray[DB_CMPT_PG].name, sizeof(g_dbCompatArray[DB_CMPT_PG].name)) != 0) {
+        return false;
     }
-
-    return false;
+    return true;
 }

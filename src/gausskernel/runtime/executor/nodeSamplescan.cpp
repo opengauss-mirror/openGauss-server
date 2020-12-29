@@ -41,7 +41,6 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
-#include "utils/tqual.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "nodes/execnodes.h"
 
@@ -56,11 +55,11 @@ static double sample_random_fract(void);
  *
  * Returns: HeapScanDesc
  */
-AbsTblScanDesc InitSampleScanDesc(ScanState* scanstate, Relation currentRelation)
+TableScanDesc InitSampleScanDesc(ScanState* scanstate, Relation currentRelation)
 {
     bool allow_sync = false;
     bool use_bulkread = false;
-    AbsTblScanDesc current_scan_desc = NULL;
+    TableScanDesc current_scan_desc = NULL;
     SampleScanParams* sample_scan_info = &scanstate->sampleScanInfo;
 
     /* Need scan all block. */
@@ -82,25 +81,15 @@ AbsTblScanDesc InitSampleScanDesc(ScanState* scanstate, Relation currentRelation
         use_bulkread = (((BaseTableSample*)sample_scan_info->tsm_state)->percent[0] >= 1);
     }
 
-    current_scan_desc = abs_tbl_beginscan_sampling(
+    current_scan_desc = scan_handler_tbl_beginscan_sampling(
         currentRelation, scanstate->ps.state->es_snapshot, 0, NULL, use_bulkread, allow_sync, scanstate);
 
     return current_scan_desc;
 }
 static inline HeapTuple SampleFetchNextTuple(SeqScanState* node)
 {
-    HeapScanDesc heapScanDesc = GetHeapScanDesc(node->ss_currentScanDesc);
-    if (heapScanDesc == NULL) {
-        /*
-         * We reach here if the scan is not parallel, or if we're executing
-         * a scan that was intended to be parallel serially.
-         * It must be a non-partitioned table.
-         */
-        Assert(!node->isPartTbl);
-        heapScanDesc = (HeapScanDesc)InitSampleScanDesc(node, node->ss_currentRelation);
-        node->ss_currentScanDesc = (AbsTblScanDesc)heapScanDesc;
-    }
-    heapScanDesc->rs_ss_accessor = node->ss_scanaccessor;
+    TableScanDesc tableScanDesc = GetTableScanDesc(node->ss_currentScanDesc, node->ss_currentRelation);
+    tableScanDesc->rs_ss_accessor = node->ss_scanaccessor;
 
     /*
      * Get the next tuple for table sample, and return it.
@@ -125,16 +114,15 @@ TupleTableSlot* SeqSampleNext(SeqScanState* node)
     TupleTableSlot* slot = node->ss_ScanTupleSlot;
     HeapTuple tuple = SampleFetchNextTuple(node);
 
-    return ExecMakeTupleSlot(tuple, GetHeapScanDesc(node->ss_currentScanDesc), slot);
+    node->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType = node->ss_currentRelation->rd_tam_type;
+    return ExecMakeTupleSlot(tuple, GetTableScanDesc(node->ss_currentScanDesc, node->ss_currentRelation), slot, node->ss_currentRelation->rd_tam_type);
 }
 
 TupleTableSlot* HbktSeqSampleNext(SeqScanState* node)
 {
     TupleTableSlot* slot = node->ss_ScanTupleSlot;
     HeapTuple tuple = NULL;
-    HBktTblScanDesc hb_scan = (HBktTblScanDesc)node->ss_currentScanDesc;
-
-    Assert(node->ss_currentScanDesc->type == T_ScanDesc_HBucket);
+    TableScanDesc hb_scan = node->ss_currentScanDesc;
 
     while (hb_scan != NULL) {
         tuple = SampleFetchNextTuple(node);
@@ -150,7 +138,11 @@ TupleTableSlot* HbktSeqSampleNext(SeqScanState* node)
         (((RowTableSample*)node->sampleScanInfo.tsm_state)->resetSampleScan)();
     }
 
-    return ExecMakeTupleSlot(tuple, GetHeapScanDesc(node->ss_currentScanDesc), slot);
+    node->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType = node->ss_currentRelation->rd_tam_type;
+    return ExecMakeTupleSlot(
+            tuple, GetTableScanDesc(node->ss_currentScanDesc, node->ss_currentRelation),
+            slot,
+            node->ss_currentRelation->rd_tam_type);
 }
 
 /*
@@ -360,14 +352,14 @@ BaseTableSample::BaseTableSample(void* scanstate)
     /* We can transform hybrid to system or bernoulli for optimize according to value of args. */
     if ((sampleType == BERNOULLI_SAMPLE) ||
         (sampleType == HYBRID_SAMPLE && percent[SYSTEM_SAMPLE] == MAX_PERCENT_ARG)) {
-        percent[BERNOULLI_SAMPLE] = (sampleType == BERNOULLI_SAMPLE) ? percent[0] / MAX_PERCENT_ARG
-                                                                     : percent[BERNOULLI_SAMPLE] / MAX_PERCENT_ARG;
+        percent[BERNOULLI_SAMPLE] = (sampleType == BERNOULLI_SAMPLE) ? (percent[0] / MAX_PERCENT_ARG)
+                                                                     : (percent[BERNOULLI_SAMPLE] / MAX_PERCENT_ARG);
         nextSampleBlock_function = &BaseTableSample::bernoulli_nextsampleblock;
         nextSampleTuple_function = &BaseTableSample::bernoulli_nextsampletuple;
     } else if ((sampleType == SYSTEM_SAMPLE) ||
                (sampleType == HYBRID_SAMPLE && percent[BERNOULLI_SAMPLE] == MAX_PERCENT_ARG)) {
         percent[SYSTEM_SAMPLE] =
-            (sampleType == SYSTEM_SAMPLE) ? percent[0] / MAX_PERCENT_ARG : percent[SYSTEM_SAMPLE] / MAX_PERCENT_ARG;
+            (sampleType == SYSTEM_SAMPLE) ? (percent[0] / MAX_PERCENT_ARG) : (percent[SYSTEM_SAMPLE] / MAX_PERCENT_ARG);
         nextSampleBlock_function = &BaseTableSample::system_nextsampleblock;
         nextSampleTuple_function = &BaseTableSample::system_nextsampletuple;
     } else {
@@ -427,32 +419,32 @@ RowTableSample::~RowTableSample()
  */
 void RowTableSample::getMaxOffset()
 {
-    HeapScanDesc heapscan = NULL;
-    AbsTblScanDesc scan = sampleScanState->ss_currentScanDesc;
-    bool pagemode = (GetHeapScanDesc(scan)->rs_flags) & SO_ALLOW_PAGEMODE;
+    TableScanDesc tablescan = NULL;
+    TableScanDesc scan = sampleScanState->ss_currentScanDesc;
+    bool pagemode = GetTableScanDesc(scan, sampleScanState->ss_currentRelation)->rs_pageatatime;
     Page page;
 
     Assert(BlockNumberIsValid(currentBlock));
 
     if (scanTupState == NEWBLOCK) {
-        abs_tbl_getpage(scan, currentBlock);
+        tableam_scan_getpage(GetTableScanDesc(scan, sampleScanState->ss_currentRelation), currentBlock);
     }
 
     /*
      * When not using pagemode, we must lock the buffer during tuple
      * visibility checks.
      */
-    heapscan = GetHeapScanDesc(scan);
+    tablescan = GetTableScanDesc(scan, sampleScanState->ss_currentRelation);
     if (!pagemode) {
-        LockBuffer(heapscan->rs_cbuf, BUFFER_LOCK_SHARE);
+        LockBuffer(tablescan->rs_cbuf, BUFFER_LOCK_SHARE);
     }
 
-    page = (Page)BufferGetPage(heapscan->rs_cbuf);
+    page = (Page)BufferGetPage(tablescan->rs_cbuf);
     curBlockMaxoffset = PageGetMaxOffsetNumber(page);
 
     /* Found visible tuple, return it. */
     if (!pagemode) {
-        LockBuffer(heapscan->rs_cbuf, BUFFER_LOCK_UNLOCK);
+        LockBuffer(tablescan->rs_cbuf, BUFFER_LOCK_UNLOCK);
     }
 }
 
@@ -465,9 +457,9 @@ void RowTableSample::getMaxOffset()
  */
 ScanValid RowTableSample::scanTup()
 {
-    HeapScanDesc scan = GetHeapScanDesc(sampleScanState->ss_currentScanDesc);
-    bool pagemode = scan->rs_flags & SO_ALLOW_PAGEMODE;
-    HeapTuple tuple = &(scan->rs_ctup);
+    TableScanDesc scan = GetTableScanDesc(sampleScanState->ss_currentScanDesc, sampleScanState->ss_currentRelation);
+    bool pagemode = scan->rs_pageatatime;
+    HeapTuple tuple = &(((HeapScanDesc)scan)->rs_ctup);
     Snapshot snapshot = scan->rs_snapshot;
     ItemId itemid;
     Page page;
@@ -513,7 +505,7 @@ ScanValid RowTableSample::scanTup()
 
     Assert(currentBlock < scan->rs_nblocks);
 
-    /* Current block alreadly have be readed. */
+    /* Current block alreadly have be readed.*/
     if (currentOffset == InvalidOffsetNumber) {
         /*
          * If we get here, it means we've exhausted the items on this page and
@@ -602,8 +594,8 @@ ScanValid RowTableSample::scanTup()
  */
 HeapTuple RowTableSample::scanSample()
 {
-    HeapScanDesc scan = GetHeapScanDesc(sampleScanState->ss_currentScanDesc);
-    HeapTuple tuple = &(scan->rs_ctup);
+    TableScanDesc scan = GetTableScanDesc(sampleScanState->ss_currentScanDesc, sampleScanState->ss_currentRelation);
+    HeapTuple tuple = &(((HeapScanDesc)scan)->rs_ctup);
 
     if (finished == true) {
         return NULL;
@@ -671,14 +663,14 @@ HeapTuple RowTableSample::scanSample()
                 switch (scanState) {
                     case VALIDDATA: {
                         runState = GETOFFSET;
-                        return &(scan->rs_ctup);
+                        return &(((HeapScanDesc)scan)->rs_ctup);
                     }
                     case NEXTDATA: {
                         runState = GETOFFSET;
                         break;
                     }
                     case INVALIDBLOCKNO: {
-                        /* All block alreadly be scaned finish. */
+                        /* All block alreadly be scaned finish.*/
                         finished = true;
                         return NULL;
                     }
@@ -854,7 +846,7 @@ ScanValid ColumnTableSample::scanBatch(VectorBatch* pOutBatch)
 {
     Assert(BlockNumberIsValid(currentBlock));
 
-    /* Current block alreadly have be readed. */
+    /* Current block alreadly have be readed.*/
     if (currentOffset == InvalidOffsetNumber) {
         if (batchRowCount > 0) {
             /*
@@ -932,7 +924,7 @@ void ColumnTableSample::scanVecSample(VectorBatch* pOutBatch)
                 (this->*nextSampleBlock_function)();
 
                 if (!BlockNumberIsValid(currentBlock)) {
-                    /* All block alreadly be scaned finish. */
+                    /* All block alreadly be scaned finish.*/
                     finished = true;
                     return;
                 }

@@ -1,0 +1,3 @@
+Path,TestCase,Classification,Owner Number
+Code/src/test/regress/sql,sequence,SQL,z00238108
+Code/src/test/regress/input,hw_cstore_btree_index,STORAGE,w00302472

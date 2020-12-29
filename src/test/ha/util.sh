@@ -80,7 +80,7 @@ function check_most_available() {
 
 function build_primary_as_standby() {
   echo "start building primary as standby"
-  gs_ctl build -D $data_dir/datanode1
+  gs_ctl build -D $data_dir/datanode1 -Z single_node
   if [ $? -eq 0 ]; then
     echo "standby built"
   else
@@ -91,7 +91,7 @@ function build_primary_as_standby() {
 
 function build_standby_as_standby() {
   echo "start building standby as standby"
-  gs_ctl build -D $data_dir/datanode1_standby
+  gs_ctl build -D $data_dir/datanode1_standby -Z single_node
   if [ $? -eq 0 ]; then
     echo "standby built"
   else
@@ -102,7 +102,7 @@ function build_standby_as_standby() {
 
 function build_standby2_as_standby() {
   echo "start building standby2 as standby"
-  gs_ctl build -D $data_dir/datanode2_standby
+  gs_ctl build -D $data_dir/datanode2_standby -Z single_node
   if [ $? -eq 0 ]; then
     echo "standby built"
   else
@@ -113,7 +113,7 @@ function build_standby2_as_standby() {
 
 function build_standby3_as_standby() {
   echo "start building standby3 as standby"
-  gs_ctl build -D $data_dir/datanode3_standby
+  gs_ctl build -D $data_dir/datanode3_standby -Z single_node
   if [ $? -eq 0 ]; then
     echo "standby built"
   else
@@ -124,7 +124,7 @@ function build_standby3_as_standby() {
 
 function build_standby4_as_standby() {
   echo "start building standby4 as standby"
-  gs_ctl build -D $data_dir/datanode4_standby
+  gs_ctl build -D $data_dir/datanode4_standby -Z single_node
   if [ $? -eq 0 ]; then
     echo "standby built"
   else
@@ -180,10 +180,10 @@ function set_default_helper() {
   cluster_dns=($primary_data_dir $standby_data_dir $standby2_data_dir $standby3_data_dir)
   for element in ${cluster_dns[@]}
   do
-    gs_guc set -D $element -c "synchronous_commit = on"
-    gs_guc set -D $element -c "synchronous_standby_names = '*'"
-    gs_guc set -D $element -c "most_available_sync = on"
-    #gs_guc set -D $element -c "enable_mix_replication = off"
+    gs_guc set -Z datanode -D $element -c "synchronous_commit = on"
+    gs_guc set -Z datanode -D $element -c "synchronous_standby_names = '*'"
+    gs_guc set -Z datanode -D $element -c "most_available_sync = on"
+    #gs_guc set -Z datanode -D $element -c "enable_mix_replication = off"
   done
 }
 
@@ -191,25 +191,25 @@ function set_enable_mix_replication() {
   cluster_dns=($primary_data_dir $standby_data_dir $standby2_data_dir $standby3_data_dir $standby4_data_dir)
   #for element in ${cluster_dns[@]}
   #do
-    #gs_guc set -D $element -c "enable_mix_replication = $1"
+    #gs_guc set -Z datanode -D $element -c "enable_mix_replication = $1"
   #done
 }
 
 
 #function set_data_replicate_helper() {
-  #gs_guc set -D $primary_data_dir -c "enable_data_replicate = on"
-  #gs_guc set -D $standby_data_dir -c "enable_data_replicate = on"
-  #gs_guc set -D $dummystandby_data_dir -c "enable_data_replicate = on"
-  #gs_guc set -D $standby2_data_dir -c "enable_data_replicate = off"
+  #gs_guc set -Z datanode -D $primary_data_dir -c "enable_data_replicate = on"
+  #gs_guc set -Z datanode -D $standby_data_dir -c "enable_data_replicate = on"
+  #gs_guc set -Z datanode -D $dummystandby_data_dir -c "enable_data_replicate = on"
+  #gs_guc set -Z datanode -D $standby2_data_dir -c "enable_data_replicate = off"
 #}
 
 function set_most_available_sync_helper() {
-  gs_guc set -D $primary_data_dir -c "most_available_sync = on"
-  gs_guc set -D $standby_data_dir -c "most_available_sync = on"
+  gs_guc set -Z datanode -D $primary_data_dir -c "most_available_sync = on"
+  gs_guc set -Z datanode -D $standby_data_dir -c "most_available_sync = on"
   for((i=2;i<$node_num+1;i++))
   do
       data_dir="datanode"$i"_standby"
-      gs_guc set -D $data_dir -c "most_available_sync = on"  
+      gs_guc set -Z datanode -D $data_dir -c "most_available_sync = on"  
   done  
   
 }
@@ -347,3 +347,105 @@ function wait_recovery_done() {
 #check_synchronous_commit "datanode1" 1
 #check_detailed_instance
 #check_primary "datanode1" 2
+
+
+###################################################################################################################
+#cascade standby
+#hacheck
+#cascade_data_dir=$standby2_data_dir
+
+function build_cascade_standby_as_cascade_standby() {
+  echo "start building cascade standby as cascade standby"
+  gs_ctl build -D $data_dir/datanode2_standby -Z single_node -M cascade_standby
+  if [ $? -eq 0 ]; then
+    echo "cascade standby built"
+  else
+    echo "$failed_keyword, build cascade standby as cascade_standby failed"
+    exit 1
+  fi
+}
+
+function build_cascade_standbys() {
+        build_standby_as_standby
+        build_cascade_standby_as_cascade_standby
+}
+
+function kill_cascade_cluster() {
+  kill_primary
+  kill_standby
+  kill_cascade_standby
+}
+
+function start_cascade_cluster() {
+  start_primary
+  start_standby
+  start_cascade_standby
+}
+
+function set_cascade_default() {
+  kill_cascade_cluster
+  set_cascade_default_helper
+  start_cascade_cluster
+  switchover_to_primary
+  build_cascade_standbys
+}
+
+function set_cascade_default_helper() {
+  cluster_dns=($primary_data_dir $standby_data_dir $standby2_data_dir)
+  for element in ${cluster_dns[@]}
+  do
+    gs_guc set -Z datanode -D $element -c "synchronous_commit = on"
+    gs_guc set -Z datanode -D $element -c "synchronous_standby_names = '*'"
+    gs_guc set -Z datanode -D $element -c "most_available_sync = on"
+    #gs_guc set -Z datanode -D $element -c "enable_mix_replication = off"
+  done
+}
+
+function failover_to_cascade_standby() {
+  gs_ctl failover -w -t $gsctl_wait_time -D $data_dir/datanode2_standby
+  if [ $? -eq 0 ]; then
+    echo "failover to cascade standby success!"
+  else
+    echo "$failed_keyword, failover to cascade standby fail!"
+    exit 1
+  fi
+}
+
+function switchover_to_cascade_standby() {
+  gs_ctl switchover -w -t $gsctl_wait_time -D $data_dir/datanode2_standby
+  if [ $? -eq 0 ]; then
+    echo "switchover to cascade standby success!"
+  else
+    echo "$failed_keyword, switchover to cascade standby fail!"
+    exit 1
+  fi
+}
+
+function check_cascade_detailed_instance(){
+  sleep 2
+  #date
+  #can grep datanode1 datanode1_standby datanode1_dummystandby gtm
+  #ps -ef | grep $data_dir | grep -v grep
+  echo query ps check cascade
+  if [ $(ps -ef | grep $data_dir | grep -v grep | wc -l) -eq 3 ]; then
+    echo "ps check cascade process success!"
+  else
+    sleep 2
+        if [ $(ps -ef | grep $data_dir | grep -v grep | wc -l) -eq 5 ]; then
+          echo "ps check cascade process success!"
+        else
+          echo "$failed_keyword, ps check cascade process failure, process info is displayed as: "
+          ps -ef | grep $data_dir | grep -v grep
+      exit 1
+        fi
+  fi
+  sleep 1
+
+  check_dn_no_need_repair "datanode1"
+  check_dn_no_need_repair "datanode1_standby"
+  check_dn_no_need_repair "datanode2_standby"
+
+  check_dn_state "datanode1" "db_state" "Normal" 1
+  check_dn_state "datanode1_standby" "db_state" "Normal" 1
+  check_dn_state "datanode2_standby" "db_state" "Normal" 1
+}

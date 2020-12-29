@@ -29,6 +29,7 @@
 #ifndef ATOMIC_ARM_H
 #define ATOMIC_ARM_H
 #include "c.h"
+#include "elog.h"
 
 #ifdef __aarch64__
 
@@ -83,6 +84,7 @@ static inline uint128_u __lse_compare_and_swap_u128(volatile uint128_u *ptr, uin
     old.u64[1] = x1;                                                            \
     return old;
 }
+
 #endif /* __aarch64__ */
 
 #endif

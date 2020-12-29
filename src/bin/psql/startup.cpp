@@ -32,6 +32,7 @@
 /* Database Security: Data importing/dumping support AES128. */
 #include <time.h>
 #include "pgtime.h"
+#include "mb/pg_wchar.h"
 
 #ifndef WIN32
 #include "libpq/libpq-int.h"
@@ -81,6 +82,7 @@ static void process_psqlrc(const char* argv0);
 static void process_psqlrc_file(char* filename);
 static void showVersion(void);
 static void EstablishVariableSpace(void);
+static char* GetEnvStr(const char* env);
 
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
 bool check_parseonly_parameter(adhoc_opts options)
@@ -100,7 +102,11 @@ bool check_parseonly_parameter(adhoc_opts options)
 /* Database Security: Data importing/dumping support AES128. */
 static void set_aes_key(const char* dencrypt_key);
 
+#ifdef HAVE_CE
+#define PARAMS_ARRAY_SIZE 11
+#else
 #define PARAMS_ARRAY_SIZE 10
+#endif
 /*
  *
  * main
@@ -125,9 +131,7 @@ int main(int argc, char* argv[])
 
     if (strcmp(libpqVersionString, DEF_GS_VERSION) != 0) {
         fprintf(stderr,
-            "[Warning]: The \"libpq.so\" loaded mismatch the version of gsql, "
-            "please check it.\n"
-            "expected: %s\nresult: %s\n",
+            "The \"libpq.so\" loaded mismatch the version of gsql, please check it.\nexpected: %s\nresult: %s\n",
             DEF_GS_VERSION,
             libpqVersionString);
 #ifdef ENABLE_MULTIPLE_NODES
@@ -283,19 +287,23 @@ int main(int argc, char* argv[])
         values[6] = (char*)((pset.notty || (tmpenv != NULL)) ? NULL : "auto");
         keywords[7] = "connect_timeout";
         values[7] = CONNECT_TIMEOUT;
+#ifdef HAVE_CE
+        keywords[8] = "enable_ce";
+        values[8] = (pset.enable_client_encryption) ? (char*)"1" : NULL;
+#endif
         if (pset.maintance) {
-            keywords[8] = "options";
-            values[8] = (char*)("-c xc_maintenance_mode=on");
+            keywords[PARAMS_ARRAY_SIZE - 2] = "options";
+            values[PARAMS_ARRAY_SIZE - 2] = (char *)("-c xc_maintenance_mode=on");
         } else {
-            keywords[8] = NULL;
-            values[8] = NULL;
+            keywords[PARAMS_ARRAY_SIZE - 2] = NULL;
+            values[PARAMS_ARRAY_SIZE - 2] = NULL;
         }
 
         if (tmpenv != NULL)
             free(tmpenv);
         tmpenv = NULL;
-        keywords[9] = NULL;
-        values[9] = NULL;
+        keywords[PARAMS_ARRAY_SIZE - 1] = NULL;
+        values[PARAMS_ARRAY_SIZE - 1] = NULL;
         new_pass = false;
         pset.db = PQconnectdbParams(keywords, values, (int)true);
 
@@ -310,7 +318,7 @@ int main(int argc, char* argv[])
 
         /* Encode password and stored in memory here for gsql parallel execute function. */
         if ((password != NULL) && strlen(password) != 0) {
-            encodetext = SEC_encodeBase64((char*)password, (GS_UINT32)strlen(password));
+            encodetext = SEC_encodeBase64((char*)password, strlen(password));
             if (encodetext == NULL) {
                 fprintf(stderr, "%s: encode the parallel connect value failed.", pset.progname);
                 PQfinish(pset.db);
@@ -340,6 +348,12 @@ int main(int argc, char* argv[])
             PQfinish(pset.db);
             password = simple_prompt(password_prompt, MAX_PASSWORD_LENGTH, false);
             new_pass = true;
+            free(keywords);
+            keywords = NULL;
+            free(values);
+            values = NULL;
+            free(values_free);
+            values_free = NULL;
         }
     } while (new_pass);
     if (options.passwd == NULL) {
@@ -356,6 +370,8 @@ int main(int argc, char* argv[])
     if (options.passwd != NULL) {
         rc = memset_s(options.passwd, strlen(options.passwd), 0, strlen(options.passwd));
         securec_check_c(rc, "\0", "\0");
+        free(options.passwd);
+        options.passwd = NULL;
     }
 #ifndef WIN32
     if (pset.db->pgpass != NULL) {
@@ -388,6 +404,7 @@ int main(int argc, char* argv[])
     }
 
     if (options.logfilename != NULL) {
+        canonicalize_path(options.logfilename);
         pset.logfile = fopen(options.logfilename, "a");
         if (pset.logfile == NULL)
             fprintf(stderr,
@@ -405,9 +422,30 @@ int main(int argc, char* argv[])
     }
 
     /* show warning message when the client and server have diffrent version numbers */
-    if (!isparseonly)
-        client_server_version_check(pset.db);
-
+    if (!isparseonly) {
+        /* show warning message when the client and server have diffrent version numbers */
+        (void)client_server_version_check(pset.db);
+    } else {
+        /*
+            we could not get the encoding from the server so let's get the encoding from the environment variable
+        */
+        if (pset.encoding == -1) {
+            char *encodingStr = GetEnvStr("PGCLIENTENCODING");
+            if (encodingStr) {
+                check_env_value(encodingStr);
+                pset.encoding = pg_char_to_encoding(encodingStr);
+                free(encodingStr);
+                encodingStr = NULL;
+            }
+        }
+        /*
+            again we could not get the encoding so let's try the default encoding of ASCII
+            All we want is to print to the screen for the debugging so why not.
+        */
+        if (pset.encoding == -1) {
+            pset.encoding = PG_SQL_ASCII;
+        }
+    }
      /* Now find something to do */
      /* process file given by -f */
     if (options.action == ACT_FILE) {
@@ -445,18 +483,11 @@ int main(int argc, char* argv[])
      * If the query given to -c was a normal one, send it
      */
     else if (options.action == ACT_SINGLE_QUERY) {
-        char* action_string = pg_strdup(options.action_string);
-        char* tmp_action_string = pg_strdup(options.action_string);
-        tmp_action_string = pg_strtolower(tmp_action_string);
-        /* clear action string after -c command */
-        if (strstr(tmp_action_string, "password") != NULL || strstr(tmp_action_string, "identified") != NULL) {
-            rc = memset_s(options.action_string, strlen(options.action_string), 0, strlen(options.action_string));
-            securec_check_c(rc, "\0", "\0");
-        }
-
-        successResult = MainLoop(NULL, action_string);
-        free(action_string);
-        free(tmp_action_string);
+        successResult = MainLoop(NULL, options.action_string);
+        rc = memset_s(options.action_string, strlen(options.action_string), 0, strlen(options.action_string));
+        securec_check_c(rc, "\0", "\0");
+        free(options.action_string);
+        options.action_string = NULL;
     }
 
     /*
@@ -472,7 +503,7 @@ int main(int argc, char* argv[])
             printf(_("Type \"help\" for help.\n\n"));
 
         canAddHist = true;
-        initializeInput(options.no_readline ? 0 : 1);
+
         successResult = MainLoop(stdin);
     }
 
@@ -521,9 +552,6 @@ int main(int argc, char* argv[])
     ResetQueryRetryController();
     EmptyRetryErrcodesList(pset.errcodes_list);
 
-    if (successResult == EXIT_SUCCESS)
-        finishInput();
-
     return successResult;
 }
 
@@ -553,6 +581,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
         {"port", required_argument, NULL, 'p'},
         {"pset", required_argument, NULL, 'P'},
         {"quiet", no_argument, NULL, 'q'},
+        {"disable-client-logic", no_argument, NULL, 'C'},
         {"record-separator", required_argument, NULL, 'R'},
         {"record-separator-zero", no_argument, NULL, '0'},
         {"single-step", no_argument, NULL, 's'},
@@ -588,7 +617,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
     check_memset_s(rc);
 
     while ((c = getopt_long(
-                argc, argv, "aAc:d:eEf:F:gh:Hlk:L:mno:p:P:qR:rsStT:U:v:W:VxXz?01", long_options, &optindex)) != -1) {
+                argc, argv, "aAc:d:eEf:F:gh:Hlk:L:mno:p:P:qCR:rsStT:U:v:W:VxXz?01", long_options, &optindex)) != -1) {
         switch (c) {
             case 'a':
                 if (!SetVariable(pset.vars, "ECHO", "all")) {
@@ -603,8 +632,15 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 if (optarg[0] == '\\') {
                     options->action = ACT_SINGLE_SLASH;
                     options->action_string++;
-                } else
+                } else {
                     options->action = ACT_SINGLE_QUERY;
+                    options->action_string = pg_strdup(optarg); /* need to free in main() */
+                    /* clear action string after -c command when it inludes sensitive info */
+                    if (SensitiveStrCheck(optarg)) {
+                        rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
+                        check_memset_s(rc);
+                    }
+                }
                 break;
             case 'd':
                 options->dbname = optarg;
@@ -641,8 +677,12 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
             /* Database Security: Data importing/dumping support AES128. */
             case 'k': {
                 pset.decryptInfo.encryptInclude = true;
-                dencrypt_key = optarg;
-                set_aes_key(dencrypt_key);
+                if (optarg != NULL) {
+                    dencrypt_key = pg_strdup(optarg);
+                    rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
+                    check_memset_s(rc);
+                    set_aes_key(dencrypt_key);
+                }
                 break;
             }
             case 'L':
@@ -685,6 +725,9 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
             case 'q':
                 SetVariableBool(pset.vars, "QUIET");
                 break;
+            case 'C':
+                pset.enable_client_encryption = true;
+                break;
             case 'r':
                 useReadline = true;
                 break;
@@ -709,8 +752,8 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 pset.popt.topt.tableAttr = pg_strdup(optarg);
                 break;
             case 'U':
-                if (strlen(optarg) >= NAMEDATALEN) {
-                    fprintf(stderr, _("%s: invalid username, max username len:%d\n"), pset.progname, NAMEDATALEN - 1);
+                if (strlen(optarg) >= MAXPGPATH) {
+                    fprintf(stderr, _("%s: invalid username, max username len:%d\n"), pset.progname, MAXPGPATH);
                     exit(EXIT_FAILURE);
                 }
                 options->username = optarg;
@@ -743,7 +786,11 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 exit(EXIT_SUCCESS);
             case 'W':
                 pset.getPassword = TRI_YES;
-                options->passwd = optarg;
+                if (optarg != NULL) {
+                    options->passwd = pg_strdup(optarg);
+                    rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
+                    check_memset_s(rc);
+                }
                 break;
             case 'x':
                 pset.popt.topt.expanded = (unsigned short int)true;
@@ -788,14 +835,26 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
      * if we still have arguments, use it as the database name and username
      */
     while (argc - optind >= 1) {
-        if (options->dbname == NULL)
+        if (options->dbname == NULL) {
             options->dbname = argv[optind];
-        else if (options->username == NULL)
+            /* mask informations in URI string. */
+            if (strncmp(options->dbname, "postgresql://", strlen("postgresql://")) == 0) {
+                options->dbname = pg_strdup(argv[optind]);
+                char *off_argv = argv[optind] + strlen("postgresql://");
+                rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
+                check_memset_s(rc);
+            } else if (strncmp(options->dbname, "postgres://", strlen("postgres://")) == 0) {
+                options->dbname = pg_strdup(argv[optind]);
+                char *off_argv = argv[optind] + strlen("postgres://");
+                rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
+                check_memset_s(rc);
+            }
+        } else if (options->username == NULL) {
             options->username = argv[optind];
-        else if (!pset.quiet)
+        } else if (!pset.quiet) {
             fprintf(
                 stderr, _("%s: warning: extra command-line argument \"%s\" ignored\n"), pset.progname, argv[optind]);
-
+        }
         optind++;
     }
 }
@@ -1058,6 +1117,7 @@ static bool ReadRetryErrcodesConfigFile(void)
         free(gausshome_dir);
     gausshome_dir = NULL;
 
+    canonicalize_path(retry_errcodes_path);
     fp = fopen(retry_errcodes_path, "r");
     if (fp == NULL) {
         psql_error("Could not open retry errcodes config file.\n");
@@ -1212,3 +1272,27 @@ static void set_aes_key(const char* dencrypt_key)
     }
 }
 
+/*
+ * GetEnvStr
+ *
+ * Note: malloc space for get the return of getenv() function, then return the malloc space.
+ *         so, this space need be free.
+ */
+static char* GetEnvStr(const char* env)
+{
+    char* tmpvar = NULL;
+    const char* temp = getenv(env);
+    errno_t rc = 0;
+    if (temp != NULL) {
+        size_t len = strlen(temp);
+        if (0 == len)
+            return NULL;
+        tmpvar = (char*)malloc(len + 1);
+        if (tmpvar != NULL) {
+            rc = strcpy_s(tmpvar, len + 1, temp);
+            securec_check_c(rc, "\0", "\0");
+            return tmpvar;
+        }
+    }
+    return NULL;
+}

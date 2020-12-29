@@ -1,0 +1,29 @@
+<refentry id="SQL-ALTER_MASKING_POLICY">
+<refmeta>
+<refentrytitle>ALTER MASKING POLICY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER MASKING POLICY</refname>
+<refpurpose>change a masking policy</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER MASKING POLICY policy_name { ADD | REMOVE | MODIFY } masking_actions [, ... ];
+ALTER MASKING POLICY policy_name MODIFY ( filter_group_clause ); 
+ALTER MASKING POLICY policy_name DROP FILTER; 
+ALTER MASKING POLICY policy_name { ENABLE | DISABLE }; 
+
+where masking_actions can be:
+masking_function ON LABEL(label_name [, ... ])
+
+where masking_function can be:
+{ maskall | randommasking | creditcardmasking | basicemailmasking | fullemailmasking | shufflemasking | alldigitsmasking }
+
+where filter_group_clause can be:
+FILTER ON { ( FILTER_TYPE ( filter_value [, ... ] ) ) [, ... ] }
+
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -562,7 +562,7 @@ FdwRoutine* GetFdwRoutineByServerId(Oid serverid)
     /* Get foreign-data wrapper OID for the server. */
     tp = SearchSysCache1(FOREIGNSERVEROID, ObjectIdGetDatum(serverid));
     if (!HeapTupleIsValid(tp))
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("cache lookup failed for foreign server %u", serverid)));
     serverform = (Form_pg_foreign_server) GETSTRUCT(tp);
     fdwid = serverform->srvfdw;
@@ -934,6 +934,7 @@ char* HdfsGetOptionValue(Oid foreignTableId, const char* optionName)
 #define DEST_CIPHER_LENGTH 1024
     char* optionValue = NULL;
     char decrypStr[DEST_CIPHER_LENGTH] = {'\0'};
+    errno_t rc = EOK;
 
     DefElem* optionDef = HdfsGetOptionDefElem(foreignTableId, optionName);
 
@@ -942,6 +943,8 @@ char* HdfsGetOptionValue(Oid foreignTableId, const char* optionName)
         if (0 == pg_strcasecmp(optionName, OPTION_NAME_SERVER_SAK)) {
             decryptKeyString(optionValue, decrypStr, DEST_CIPHER_LENGTH);
             optionValue = pstrdup(decrypStr);
+            rc = memset_s(decrypStr, DEST_CIPHER_LENGTH, 0, DEST_CIPHER_LENGTH);
+            securec_check(rc, "\0", "\0");
         }
     }
 
@@ -953,7 +956,8 @@ ObsOptions* getObsOptions(Oid foreignTableId)
 #define LOCAL_STRING_BUFFER_SIZE 512
 
     ObsOptions* obsOptions = NULL;
-    AutoContextSwitch newContext(g_instance.instance_context);
+    AutoContextSwitch newContext(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+    errno_t rc = EOK;
 
     obsOptions = (ObsOptions*)palloc0(sizeof(ObsOptions));
 
@@ -962,7 +966,6 @@ ObsOptions* getObsOptions(Oid foreignTableId)
         int ibegin = 0;
         int iend = 0;
         int copylen = 0;
-        errno_t rc = EOK;
 
         char* location = HdfsGetOptionValue(foreignTableId, optLocation);
         ibegin = find_Nth(location, 2, "/");
@@ -991,6 +994,8 @@ ObsOptions* getObsOptions(Oid foreignTableId)
     char* tempStr = HdfsGetOptionValue(foreignTableId, OPTION_NAME_SERVER_SAK);
     if (tempStr != NULL) {
         obsOptions->secret_access_key = (char*)SEC_encodeBase64(tempStr, strlen(tempStr));
+        rc = memset_s(tempStr, strlen(tempStr), 0, strlen(tempStr));
+        securec_check(rc, "\0", "\0");
         pfree(tempStr);
     }
 
@@ -1213,6 +1218,7 @@ ObsOptions* setObsSrvOptions(ForeignOptions* fOptions)
 
     ObsOptions* options = (ObsOptions*)palloc0(sizeof(ObsOptions));
     char* address = getFTOptionValue(fOptions->fOptions, OPTION_NAME_ADDRESS);
+    errno_t rc = EOK;
 
     if (NULL == address) {
         char* region = getFTOptionValue(fOptions->fOptions, OPTION_NAME_REGION);
@@ -1238,6 +1244,9 @@ ObsOptions* setObsSrvOptions(ForeignOptions* fOptions)
     char decrypStr[DEST_CIPHER_LENGTH] = {'\0'};
     decryptKeyString(sak, decrypStr, DEST_CIPHER_LENGTH, obskey);
     options->secret_access_key = pstrdup(decrypStr);
+
+    rc = memset_s(decrypStr, DEST_CIPHER_LENGTH, 0, DEST_CIPHER_LENGTH);
+    securec_check(rc, "\0", "\0");
 
     return options;
 }
@@ -1520,9 +1529,8 @@ char* rebuildLocationOption(char* regionCode, char* location)
     char* region = readDataFromJsonFile(regionCode);
     char* rebuildLocation = NULL;
     size_t rebuildLen = strlen(region) + strlen(location) + 2;
-    size_t offsetLen = 0;
 
-    rebuildLocation = (char*)palloc0(rebuildLen);
+    rebuildLocation = (char*)palloc0(rebuildLen * (sizeof(char)));
 
     ereport(DEBUG1,
         (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_DFS), errmsg("The location string: %s.", location)));
@@ -1537,24 +1545,20 @@ char* rebuildLocationOption(char* regionCode, char* location)
 
     errorno = strncpy_s(rebuildLocation, rebuildLen, OBS_PREFIX, OBS_PREfIX_LEN + 1);
     securec_check(errorno, "\0", "\0");
-    offsetLen += OBS_PREfIX_LEN;
     rebuildLocation[OBS_PREfIX_LEN] = '\0';
 
-    errorno = strncpy_s(rebuildLocation + offsetLen, rebuildLen - offsetLen, region, strlen(region) + 1);
+    errorno = strncpy_s(rebuildLocation + OBS_PREfIX_LEN, rebuildLen, region, strlen(region) + 1);
     securec_check(errorno, "\0", "\0");
-    offsetLen += strlen(region);
-    rebuildLocation[offsetLen] = '\0';
+    rebuildLocation[OBS_PREfIX_LEN + strlen(region)] = '\0';
 
-    errorno = strncpy_s(rebuildLocation + offsetLen, rebuildLen - offsetLen, "/", 1 + 1);
+    errorno = strncpy_s(rebuildLocation + OBS_PREfIX_LEN + strlen(region), rebuildLen, "/", 1 + 1);
     securec_check(errorno, "\0", "\0");
-    offsetLen += 1;
-    rebuildLocation[offsetLen] = '\0';
+    rebuildLocation[OBS_PREfIX_LEN + strlen(region) + 1] = '\0';
 
     errorno = strncpy_s(
-        rebuildLocation + offsetLen, rebuildLen - offsetLen, location + pos, strlen(location + pos) + 1);
+        rebuildLocation + OBS_PREfIX_LEN + strlen(region) + 1, rebuildLen, location + pos, strlen(location + pos) + 1);
     securec_check(errorno, "\0", "\0");
-    offsetLen += strlen(location + pos);
-    rebuildLocation[offsetLen] = '\0';
+    rebuildLocation[OBS_PREfIX_LEN + strlen(region) + strlen(location + pos) + 1] = '\0';
 
     ereport(DEBUG1,
         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

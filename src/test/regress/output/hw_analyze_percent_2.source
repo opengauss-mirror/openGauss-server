@@ -1,0 +1,48 @@
+create schema analyze_percent_2;
+set current_schema=analyze_percent_2;
+create table analyze_table_03
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+distribute by hash(L_ORDERKEY);
+COPY analyze_table_03 FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
+set default_statistics_target = -30;
+analyze analyze_table_03;
+set default_statistics_target = 100;
+alter table analyze_table_03 alter column l_orderkey set statistics percent 31;
+analyze analyze_table_03;
+\! @abs_bindir@/gs_dump regression -p @portstring@  -t 'analyze_percent.analyze_table_03' > @abs_bindir@/analyze_table_03.sql 2>&1
+alter table analyze_table_03 alter column l_orderkey set statistics  31;
+analyze analyze_table_03;
+--error test
+alter table analyze_table_03 alter column l_orderkey set statistics percent -31;
+ERROR:  statistics percent valid value is between 0 and 100
+--reset column statisics
+alter table analyze_table_03 alter column l_orderkey set statistics -1;
+reset default_statistics_target;
+--test index analyze
+create index analyze_table_03_index1 on analyze_table_03(L_PARTKEY);
+create index analyze_table_03_index2 on analyze_table_03 (int8pl(l_partkey,2));
+analyze analyze_table_03;
+alter table analyze_table_03_index2 alter column int8pl set statistics percent 34;
+analyze analyze_table_03;
+alter table analyze_table_03_index2 alter column int8pl set statistics -1;
+set default_statistics_target = -30;
+analyze analyze_table_03;
+drop schema analyze_percent_2 cascade;
+NOTICE:  drop cascades to table analyze_table_03

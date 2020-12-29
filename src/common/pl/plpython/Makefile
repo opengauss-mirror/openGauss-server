@@ -32,7 +32,7 @@ endif
 # to work without, we have to skip it.
 ifneq (,$(findstring yes, $(shared_libpython)$(allow_nonpic_in_shlib)))
 
-override CPPFLAGS := -I. -I$(srcdir) $(python_includespec) $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -O0
+override CPPFLAGS := -I. -I$(srcdir) $(python_includespec) $(filter-out -fPIE, $(CPPFLAGS)) -fPIC
 
 rpathdir = $(python_libdir)
 

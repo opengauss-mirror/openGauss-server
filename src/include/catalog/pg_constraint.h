@@ -95,7 +95,6 @@ CATALOG(pg_constraint,2606) BKI_SCHEMA_MACRO
 
     bool        consoft; /* @hdfs show informational constraint. */
     bool        conopt;  /* @hdfs  decide whether to optimize plan by using informational constraint. */
-    bool        conisenable;  /* enable = 1, disable = 0*/
 
 #ifdef CATALOG_VARLEN            /* variable-length fields start here */
 
@@ -163,7 +162,7 @@ typedef FormData_pg_constraint *Form_pg_constraint;
  *        compiler constants for pg_constraint
  * ----------------
  */
-#define Natts_pg_constraint                    28
+#define Natts_pg_constraint                    27
 #define Anum_pg_constraint_conname             1
 #define Anum_pg_constraint_connamespace        2
 #define Anum_pg_constraint_contype             3
@@ -182,16 +181,15 @@ typedef FormData_pg_constraint *Form_pg_constraint;
 #define Anum_pg_constraint_connoinherit        16
 #define Anum_pg_constraint_consoft             17
 #define Anum_pg_constraint_conopt              18
-#define Anum_pg_constraint_conisenable         19
-#define Anum_pg_constraint_conkey              20
-#define Anum_pg_constraint_confkey             21
-#define Anum_pg_constraint_conpfeqop           22
-#define Anum_pg_constraint_conppeqop           23
-#define Anum_pg_constraint_conffeqop           24
-#define Anum_pg_constraint_conexclop           25
-#define Anum_pg_constraint_conbin              26
-#define Anum_pg_constraint_consrc              27
-#define Anum_pg_constraint_conincluding        28
+#define Anum_pg_constraint_conkey              19
+#define Anum_pg_constraint_confkey             20
+#define Anum_pg_constraint_conpfeqop           21
+#define Anum_pg_constraint_conppeqop           22
+#define Anum_pg_constraint_conffeqop           23
+#define Anum_pg_constraint_conexclop           24
+#define Anum_pg_constraint_conbin              25
+#define Anum_pg_constraint_consrc              26
+#define Anum_pg_constraint_conincluding        27
 
 
 /* Valid values for contype */

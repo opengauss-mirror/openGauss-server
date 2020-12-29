@@ -25,7 +25,7 @@ ALTER ROLE account2 ACCOUNT LOCK;
 SET ROLE account2 PASSWORD '1q2w3e4r#';
 ERROR:  The account has been locked.
 SET ROLE account2 PASSWORD '1q2w3e4r@';
-ERROR:  Invalid username/password,set role denied.
+ERROR:  The account has been locked.
 SET ROLE account2;
 ERROR:  Invalid username/password,set role denied.
 ALTER ROLE account2 IDENTIFIED BY '1q2w3e4r#' REPLACE '1q2w3e4r@';

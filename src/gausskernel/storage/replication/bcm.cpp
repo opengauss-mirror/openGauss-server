@@ -1,19 +1,9 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
+
  *
  * bcm.cpp
  *	  bcm map for tracking modify of heap blocks
@@ -60,7 +50,7 @@
 #include "catalog/pg_database.h"
 #include "catalog/pg_tablespace.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
 #include "storage/fd.h"
@@ -94,26 +84,24 @@
 /* prototypes for internal routines */
 static Buffer BCM_readbuf(Relation rel, BlockNumber blkno, bool extend, int col = 0);
 static void BCM_extend(Relation rel, BlockNumber nvmblocks, int col = 0);
-static void searchBCMFiles(
-    const char* tableSpacePath, const char* relativepath, bool undertablespace, bool clear, int iterations);
-#ifdef ENABLE_MULTIPLE_NODES
-static void GetIncrementalBcmFilePathForDefault(const RelFileNodeKey& data, char* path, int length);
-static void GetIncrementalBcmFilePathForCustome(const RelFileNodeKey& data, char* path, int length);
-#endif
-static void HandleBCMfile(char* bcmpath, bool clear);
-static void BCMClearFile(const RelFileNode& relfilenode, int col = 0);
-static void BCMSendData(const RelFileNode& relfilenode, const char* bcmpath, int col = 0);
-static void bcm_read_multi_cu(
-    CUFile* cFile, Relation rel, int col, BlockNumber heapBlock, int& contibits, BlockNumber maxHeapBlock);
+static void searchBCMFiles(const char *tableSpacePath, const char *relativepath, bool undertablespace, bool clear,
+                           int iterations);
+static void GetIncrementalBcmFilePathForDefault(const RelFileNodeKey &data, char *path, int length);
+static void GetIncrementalBcmFilePathForCustome(const RelFileNodeKey &data, char *path, int length);
+static void HandleBCMfile(char *bcmpath, bool clear);
+static void BCMClearFile(const RelFileNode &relfilenode, int col = 0);
+static void BCMSendData(const RelFileNode &relfilenode, const char *bcmpath, int col = 0);
+static void bcm_read_multi_cu(CUFile *cFile, Relation rel, int col, BlockNumber heapBlock, int &contibits,
+                              BlockNumber maxHeapBlock);
 static void BCMSetMetaBit(Relation rel, BlockNumber block, BCMBitStatus status, int col = 0);
 static void BCMClearMetaBit(Relation rel, int col = 0);
 static void BCMResetMetaBit(Relation rel, BlockNumber metablk, int col = 0);
-static void BCMWalkMetaBuffer(Relation rel, CUFile* cFile, Buffer metabuffer, BlockNumber& heapBlock, int& contibits,
-    BlockNumber maxHeapBlock, int col = 0);
-static void BCMSendOneBuffer(Relation rel, CUFile* cFile, Buffer bcmbuffer, BlockNumber& heapBlock, int& contibits,
-    BlockNumber maxHeapBlock, int col = 0);
+static void BCMWalkMetaBuffer(Relation rel, CUFile *cFile, Buffer metabuffer, BlockNumber &heapBlock, int &contibits,
+                              BlockNumber maxHeapBlock, int col = 0);
+static void BCMSendOneBuffer(Relation rel, CUFile *cFile, Buffer bcmbuffer, BlockNumber &heapBlock, int &contibits,
+                             BlockNumber maxHeapBlock, int col = 0);
 static BlockNumber BCMGetDataFileMaxSize(Relation rel, int col);
-static bool CheckFilePostfix(const char* str1, const char* str2);
+static bool CheckFilePostfix(const char *str1, const char *str2);
 
 // check tablespace size limitation when extending BCM file.
 static inline void VerifyTblspcWhenBcmExtend(Relation rel, int col, int nblocks)
@@ -145,10 +133,10 @@ void createBCMFile(Relation rel, int col)
     ADIO_END();
 
     PageInit(bcmHeader, BLCKSZ, 0);
-    BCMHeader* hd = NULL;
+    BCMHeader *hd = NULL;
     ForkNumber forknum = BCM_FORKNUM;
 
-    hd = (BCMHeader*)PageGetContents(bcmHeader);
+    hd = (BCMHeader *)PageGetContents(bcmHeader);
 
     /* FUTURE CASE:: for COLUMN_STORE, only support ROW_STORE by now. */
     hd->type = col > 0 ? COLUMN_STORE : ROW_STORE;
@@ -156,7 +144,7 @@ void createBCMFile(Relation rel, int col)
     hd->node.relNode = rel->rd_node.relNode;
     hd->node.spcNode = rel->rd_node.spcNode;
     hd->node.bucketNode = rel->rd_node.bucketNode;
-    hd->blockSize = col > 0 ? ALIGNOF_CUSIZE : BLCKSZ; /* defaut size for ROW_STORE */
+    hd->blockSize = col > 0 ? CUAlignUtils::GetCuAlignSizeColumnId(col) : BLCKSZ; /* defaut size for ROW_STORE */
 
     if (col > 0)
         forknum = ColumnId2ColForkNum(col);
@@ -168,7 +156,7 @@ void createBCMFile(Relation rel, int col)
     PageSetChecksumInplace(bcmHeader, 0);
 
     /* Now extend the file */
-    smgrextend(rel->rd_smgr, forknum, 0, (char*)bcmHeader, false);
+    smgrextend(rel->rd_smgr, forknum, 0, (char *)bcmHeader, false);
 
     ADIO_RUN()
     {
@@ -200,10 +188,9 @@ void BCMLogCU(Relation rel, uint64 offset, int col, BCMBitStatus status, int cou
         {
             uint64 cuBlock = 0;
             XLogRecPtr recptr = InvalidXLogRecPtr;
-
-            cuBlock = CSTORE_OFFSET_TO_CSTOREBLOCK(offset);
+            uint64 align_size = (uint64)(uint32)CUAlignUtils::GetCuAlignSizeColumnId(col);
+            cuBlock = cstore_offset_to_cstoreblock(offset, align_size);
             recptr = log_cu_bcm(&(rel->rd_node), col, cuBlock, status, count);
-
             PageSetLSN(page, recptr);
         }
         END_CRIT_SECTION();
@@ -233,7 +220,7 @@ static void BCMSetMetaBit(Relation rel, BlockNumber block, BCMBitStatus status, 
     BCMBitStatus pageStatus0 = 0;
     BCMBitStatus pageStatus1 = 0;
     Page page;
-    unsigned char* map = NULL;
+    unsigned char *map = NULL;
 
     Assert(status == SYNCED || status == NOTSYNCED);
 
@@ -241,7 +228,7 @@ static void BCMSetMetaBit(Relation rel, BlockNumber block, BCMBitStatus status, 
     Assert(BufferIsValid(metabuffer));
     LockBuffer(metabuffer, BUFFER_LOCK_EXCLUSIVE);
     page = BufferGetPage(metabuffer);
-    map = (unsigned char*)PageGetContents(page);
+    map = (unsigned char *)PageGetContents(page);
 
     /* get sync bit 0 & 1 status */
     pageStatus0 = ((map[metaByte] >> bshift) & META_SYNC0_BITMASK) >> 3;
@@ -271,7 +258,7 @@ static void BCMClearMetaBit(Relation rel, int col)
     BlockNumber metablock = 1;
     Buffer metabuffer = InvalidBuffer;
     Page page;
-    unsigned char* map = NULL;
+    unsigned char *map = NULL;
     uint32 bshift = 0;
     BCMBitStatus pageStatus0 = 0;
     int i = 0;
@@ -285,11 +272,10 @@ static void BCMClearMetaBit(Relation rel, int col)
     do {
         LockBuffer(metabuffer, BUFFER_LOCK_EXCLUSIVE);
         page = BufferGetPage(metabuffer);
-        map = (unsigned char*)PageGetContents(page);
+        map = (unsigned char *)PageGetContents(page);
 
-        ereport(DEBUG1, (errmsg("relation %u/%u/%u col %d try to clear meta block %u",
-            rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode,
-            col, metablock)));
+        ereport(DEBUG1, (errmsg("relation %u/%u/%u col %d try to clear meta block %u", rel->rd_node.spcNode,
+                                rel->rd_node.dbNode, rel->rd_node.relNode, col, metablock)));
 
         /* clear sync bit 0 status */
         START_CRIT_SECTION();
@@ -328,7 +314,7 @@ static void BCMResetMetaBit(Relation rel, BlockNumber metablk, int col)
     BlockNumber metablock = 1;
     Buffer metabuffer = InvalidBuffer;
     Page page;
-    unsigned char* map = NULL;
+    unsigned char *map = NULL;
     uint32 bshift = 0;
     BCMBitStatus pageStatus0 = 0;
     BCMBitStatus pageStatus1 = 0;
@@ -339,21 +325,16 @@ static void BCMResetMetaBit(Relation rel, BlockNumber metablk, int col)
     for (metablock = 1; metablock < metablk; metablock += (META_BLOCKS_PER_PAGE + 1)) {
         metabuffer = BCM_readbuf(rel, metablock, false, col);
         if (!BufferIsValid(metabuffer))
-            ereport(ERROR,
-                (errcode(ERRCODE_DATA_CORRUPTED),
-                    errmsg("%u/%u/%u invalid bcm meta buffer %u",
-                        rel->rd_node.spcNode,
-                        rel->rd_node.dbNode,
-                        rel->rd_node.relNode,
-                        metablock)));
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                            errmsg("%u/%u/%u invalid bcm meta buffer %u", rel->rd_node.spcNode, rel->rd_node.dbNode,
+                                   rel->rd_node.relNode, metablock)));
 
         LockBuffer(metabuffer, BUFFER_LOCK_EXCLUSIVE);
         page = BufferGetPage(metabuffer);
-        map = (unsigned char*)PageGetContents(page);
+        map = (unsigned char *)PageGetContents(page);
 
-        ereport(DEBUG1, (errmsg("relation %u/%u/%u col %d try to reset meta block %u",
-            rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode,
-            col, metablock)));
+        ereport(DEBUG1, (errmsg("relation %u/%u/%u col %d try to reset meta block %u", rel->rd_node.spcNode,
+                                rel->rd_node.dbNode, rel->rd_node.relNode, col, metablock)));
         /*
          * Clear the latest set sync bit 1 status, the the page status 0 has been set
          * to NOTSYNCED sync last meta clear, we should skip this BCM block.
@@ -395,24 +376,18 @@ void BCMSetStatusBit(Relation rel, uint64 heapBlk, Buffer buf, BCMBitStatus stat
     BCMBitStatus bcmStatus = 0;
     bool needwal = false;
     Page page;
-    unsigned char* map = NULL;
+    unsigned char *map = NULL;
 
 #ifdef TRACE_BCMMAP
-    elog(LOG,
-        "BCMSetStatusBit: rel: %s col: %d blk: %lu  status: %d ",
-        RelationGetRelationName(rel),
-        col,
-        heapBlk,
-        status);
+    elog(LOG, "BCMSetStatusBit: rel: %s col: %d blk: %lu  status: %d ", RelationGetRelationName(rel), col, heapBlk,
+         status);
 #endif
 
     if (!BufferIsValid(buf) || BufferGetBlockNumber(buf) != mapBlock)
         ereport(ERROR,
-            (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("wrong buffer passed to BCM_clear, BlockNumber from buf is %u,"
-                       "mapBlock is %u",
-                    BufferGetBlockNumber(buf),
-                    mapBlock)));
+                (errcode(ERRCODE_DATA_CORRUPTED), errmsg("wrong buffer passed to BCM_clear, BlockNumber from buf is %u,"
+                                                         "mapBlock is %u",
+                                                         BufferGetBlockNumber(buf), mapBlock)));
 
     Assert(status == SYNCED || status == NOTSYNCED);
 
@@ -420,7 +395,7 @@ void BCMSetStatusBit(Relation rel, uint64 heapBlk, Buffer buf, BCMBitStatus stat
         BCMSetMetaBit(rel, mapBlock, NOTSYNCED, col);
 
     page = BufferGetPage(buf);
-    map = (unsigned char*)PageGetContents(page);
+    map = (unsigned char *)PageGetContents(page);
 
     bcmStatus = (map[mapByte] >> bshift) & BCM_SYNC_BITMASK;
     bcmStatus = bcmStatus >> 1;
@@ -428,13 +403,8 @@ void BCMSetStatusBit(Relation rel, uint64 heapBlk, Buffer buf, BCMBitStatus stat
 
     /* Bcm status must be 0 before it will be set to 1 */
     if (!RecoveryInProgress() && status == NOTSYNCED && bcmStatus == NOTSYNCED)
-        ereport(WARNING,
-            (errmsg("BCM page maybe damage, rnode[%u,%u,%u] col:%d block:%lu ",
-                rel->rd_node.spcNode,
-                rel->rd_node.dbNode,
-                rel->rd_node.relNode,
-                col,
-                heapBlk)));
+        ereport(WARNING, (errmsg("BCM page maybe damage, rnode[%u,%u,%u] col:%d block:%lu ", rel->rd_node.spcNode,
+                                 rel->rd_node.dbNode, rel->rd_node.relNode, col, heapBlk)));
 
     needwal = (RelationNeedsWAL(rel) && !t_thrd.xlog_cxt.InRecovery);
 
@@ -496,21 +466,17 @@ void BCMClearRel(Relation rel, int col)
     /* We begin clear from page 1 not page 0 */
     for (mapBlock = 1; mapBlock < totalblocks; mapBlock++) {
         Buffer mapBuffer;
-        unsigned char* map = NULL;
+        unsigned char *map = NULL;
         errno_t rc = 0;
 
         mapBuffer = BCM_readbuf(rel, mapBlock, false, col);
         if (!BufferIsValid(mapBuffer))
             ereport(ERROR,
-                (errcode(ERRCODE_DATA_CORRUPTED),
-                    errmsg("%u/%u/%u invalid bcm buffer %u",
-                        rel->rd_node.spcNode,
-                        rel->rd_node.dbNode,
-                        rel->rd_node.relNode,
-                        mapBlock)));
+                    (errcode(ERRCODE_DATA_CORRUPTED), errmsg("%u/%u/%u invalid bcm buffer %u", rel->rd_node.spcNode,
+                                                             rel->rd_node.dbNode, rel->rd_node.relNode, mapBlock)));
 
         LockBuffer(mapBuffer, BUFFER_LOCK_EXCLUSIVE);
-        map = (unsigned char*)PageGetContents(BufferGetPage(mapBuffer));
+        map = (unsigned char *)PageGetContents(BufferGetPage(mapBuffer));
 
         /* NB: We clear the whole page, including the dcm bits, is that ok? */
         rc = memset_s(map, BCMMAPSIZE, 0, BCMMAPSIZE);
@@ -535,7 +501,6 @@ void BCMClearRel(Relation rel, int col)
  */
 void BCM_truncate(Relation rel)
 {
-
 #ifdef TRACE_BCMMAP
     ereport(DEBUG1, (errmodule(MOD_REP), errmsg("bcm_truncate %s", RelationGetRelationName(rel))));
 #endif
@@ -679,7 +644,7 @@ static void BCM_extend(Relation rel, BlockNumber bcm_nblocks, int col)
     while (bcm_nblocks_now < bcm_nblocks) {
         PageSetChecksumInplace(pg, bcm_nblocks_now);
 
-        smgrextend(rel->rd_smgr, forknum, bcm_nblocks_now, (char*)pg, false);
+        smgrextend(rel->rd_smgr, forknum, bcm_nblocks_now, (char *)pg, false);
         bcm_nblocks_now++;
     }
 
@@ -710,17 +675,16 @@ static void BCM_extend(Relation rel, BlockNumber bcm_nblocks, int col)
 }
 
 /* Read bcm page */
-void BCM_CStore_pin(Relation rel, int col, uint64 offset, Buffer* buf)
+void BCM_CStore_pin(Relation rel, int col, uint64 offset, Buffer *buf)
 {
     Assert(col > 0);
-
-    BlockNumber mapBlock = CSTORE_OFFSET_TO_BCMBLOCK(offset);
-
+    uint64 align_size = (uint64)(uint32)CUAlignUtils::GetCuAlignSizeColumnId(col);
+    BlockNumber mapBlock = cstore_offset_to_bcmblock(offset, align_size);
     *buf = BCM_readbuf(rel, mapBlock, true, col);
 }
 
 /* Read bcm page */
-void BCM_pin(Relation rel, BlockNumber heapBlk, Buffer* buf)
+void BCM_pin(Relation rel, BlockNumber heapBlk, Buffer *buf)
 {
     BlockNumber mapBlock = HEAPBLK_TO_BCMBLOCK(heapBlk);
 
@@ -737,9 +701,9 @@ void BCM_pin(Relation rel, BlockNumber heapBlk, Buffer* buf)
  * In order to speed up the check efficiency, we just need to walk the
  * bcm meta buffer instead. More comments see in bcm meta buffer.
  */
-static void BCMSendData(const RelFileNode& relfilenode, const char* bcmpath, int col)
+static void BCMSendData(const RelFileNode &relfilenode, const char *bcmpath, int col)
 {
-    RelFileNode InvalidRelFileNode = {0, 0, 0, -1};
+    RelFileNode InvalidRelFileNode = { 0, 0, 0, -1 };
     Relation rel;
     Buffer metabuffer = InvalidBuffer;
     ForkNumber forknum = BCM_FORKNUM;
@@ -748,7 +712,7 @@ static void BCMSendData(const RelFileNode& relfilenode, const char* bcmpath, int
     BlockNumber maxHeapBlock = InvalidBlockNumber;
     struct stat stat_buf;
 
-    volatile DataSndCtlData* datasndctl = t_thrd.datasender_cxt.DataSndCtl;
+    volatile DataSndCtlData *datasndctl = t_thrd.datasender_cxt.DataSndCtl;
     bool isColStore = col > 0 ? true : false;
     int contibits = 0;
 
@@ -824,7 +788,7 @@ static void BCMSendData(const RelFileNode& relfilenode, const char* bcmpath, int
         return;
     }
 
-    CUFile* cFile = isColStore ? New(CurrentMemoryContext) CUFile(relfilenode, col) : NULL;
+    CUFile *cFile = isColStore ? New(CurrentMemoryContext) CUFile(relfilenode, col) : NULL;
     do {
         ereport(DEBUG3, (errmsg("valid bcm meta buffer :%u", metanum)));
 
@@ -871,8 +835,8 @@ static void BCMSendData(const RelFileNode& relfilenode, const char* bcmpath, int
  * Walk through every bit in current meta page to find out if any corresponding
  * BCM page needs to search.
  */
-static void BCMWalkMetaBuffer(Relation rel, CUFile* cFile, Buffer metabuffer, BlockNumber& heapBlock, int& contibits,
-    BlockNumber maxHeapBlock, int col)
+static void BCMWalkMetaBuffer(Relation rel, CUFile *cFile, Buffer metabuffer, BlockNumber &heapBlock, int &contibits,
+                              BlockNumber maxHeapBlock, int col)
 {
     Buffer bcmbuffer = InvalidBuffer;
     BlockNumber metaBlock;
@@ -882,12 +846,12 @@ static void BCMWalkMetaBuffer(Relation rel, CUFile* cFile, Buffer metabuffer, Bl
     uint32 bshift;
     BCMBitStatus status;
     Page metapage;
-    unsigned char* map = NULL;
+    unsigned char *map = NULL;
 
     Assert(BufferIsValid(metabuffer));
     metaBlock = BufferGetBlockNumber(metabuffer);
     metapage = BufferGetPage(metabuffer);
-    map = (unsigned char*)PageGetContents(metapage);
+    map = (unsigned char *)PageGetContents(metapage);
 
     for (i = 0; i < (int)BCMMAPSIZE; i++) {
         for (j = 0; j < META_BLOCKS_PER_BYTE; j++) {
@@ -899,13 +863,8 @@ static void BCMWalkMetaBuffer(Relation rel, CUFile* cFile, Buffer metabuffer, Bl
                 CatchupShutdownIfNoDataSender();
                 /* get bcm page block */
                 bcmBlock = GET_BCM_BLOCK(metaBlock, i, j);
-                ereport(DEBUG2,
-                    (errmsg("relation %u/%u/%u col %d try to sync bcm block %u",
-                        rel->rd_node.spcNode,
-                        rel->rd_node.dbNode,
-                        rel->rd_node.relNode,
-                        col,
-                        bcmBlock)));
+                ereport(DEBUG2, (errmsg("relation %u/%u/%u col %d try to sync bcm block %u", rel->rd_node.spcNode,
+                                        rel->rd_node.dbNode, rel->rd_node.relNode, col, bcmBlock)));
                 /*
                  * We assume that if the bcm buffer is invalid, it means that some
                  * thread has just extended that block, and we can see it in meta page
@@ -928,15 +887,15 @@ static void BCMWalkMetaBuffer(Relation rel, CUFile* cFile, Buffer metabuffer, Bl
  * Walk through every bit in current bcm page to find out if any corresponding
  * heap pages or CU units need to send to standby.
  */
-static void BCMSendOneBuffer(Relation rel, CUFile* cFile, Buffer bcmbuffer, BlockNumber& heapBlock, int& contibits,
-    BlockNumber maxHeapBlock, int col)
+static void BCMSendOneBuffer(Relation rel, CUFile *cFile, Buffer bcmbuffer, BlockNumber &heapBlock, int &contibits,
+                             BlockNumber maxHeapBlock, int col)
 {
     Buffer heapbuffer = InvalidBuffer;
     Page bcmpage;
     int i;
     int j;
     uint32 bshift;
-    unsigned char* map = NULL;
+    unsigned char *map = NULL;
     BCMBitStatus status;
     BlockNumber blocknum = 0;
     bool isColStore = col > 0 ? true : false;
@@ -953,7 +912,7 @@ static void BCMSendOneBuffer(Relation rel, CUFile* cFile, Buffer bcmbuffer, Bloc
      * then deadlock occured.
      */
     bcmpage = BufferGetPage(bcmbuffer);
-    map = (unsigned char*)PageGetContents(bcmpage);
+    map = (unsigned char *)PageGetContents(bcmpage);
 
     for (i = 0; i < (int)BCMMAPSIZE; i++) {
         for (j = 0; j < BCM_BLOCKS_PER_BYTE; j++) {
@@ -973,16 +932,10 @@ static void BCMSendOneBuffer(Relation rel, CUFile* cFile, Buffer bcmbuffer, Bloc
                     heapBlock = GET_HEAP_BLOCK(blocknum, i, j);
 
                     if (u_sess->attr.attr_storage.HaModuleDebug) {
-                        ereport(LOG,
-                            (errmsg("HA-BCMSendOneBuffer: relation %u/%u/%u col %d try to sync bcm "
-                                    "blockno %u heap blockno %u maxHeapBlock %u",
-                                rel->rd_node.spcNode,
-                                rel->rd_node.dbNode,
-                                rel->rd_node.relNode,
-                                col,
-                                blocknum,
-                                heapBlock,
-                                maxHeapBlock)));
+                        ereport(LOG, (errmsg("HA-BCMSendOneBuffer: relation %u/%u/%u col %d try to sync bcm "
+                                             "blockno %u heap blockno %u maxHeapBlock %u",
+                                             rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, col,
+                                             blocknum, heapBlock, maxHeapBlock)));
                     }
 
                     /*
@@ -1005,7 +958,8 @@ static void BCMSendOneBuffer(Relation rel, CUFile* cFile, Buffer bcmbuffer, Bloc
                  * for column store, we record the continuous no-sync status,
                  * load CU data for once as much as possible.
                  */
-                if (contibits > 0 && (status == SYNCED || contibits >= MAXCONTIBITS))
+                int max_contibits = (512 * 1024) / CUAlignUtils::GetCuAlignSizeColumnId(col);
+                if (contibits > 0 && (status == SYNCED || contibits >= max_contibits))
                     bcm_read_multi_cu(cFile, rel, col, heapBlock, contibits, maxHeapBlock);
             }
         }
@@ -1021,21 +975,19 @@ static BlockNumber BCMGetDataFileMaxSize(Relation rel, int col)
 
     if (col > 0) {
         uint64 filesize = GetColDataFileSize(rel, col);
-        maxHeapBlock = (BlockNumber)(filesize / ALIGNOF_CUSIZE);
+        maxHeapBlock = (BlockNumber)(filesize / CUAlignUtils::GetCuAlignSizeColumnId(col));
     } else {
         if (smgrexists(rel->rd_smgr, MAIN_FORKNUM)) {
             maxHeapBlock = smgrnblocks(rel->rd_smgr, MAIN_FORKNUM);
         } else {
-            char* rpath = NULL;
+            char *rpath = NULL;
             RelFileNodeBackend smgr_rnode;
             smgr_rnode.node = rel->rd_node;
             smgr_rnode.backend = InvalidBackendId;
             rpath = relpath(smgr_rnode, MAIN_FORKNUM);
-            ereport(WARNING,
-                (errcode_for_file_access(),
-                    errmsg("relation file is not exist when get max block num "
-                           "for bcm file relfilenode: \"%s\": %m",
-                        rpath)));
+            ereport(WARNING, (errcode_for_file_access(), errmsg("relation file is not exist when get max block num "
+                                                                "for bcm file relfilenode: \"%s\": %m",
+                                                                rpath)));
             pfree(rpath);
             rpath = NULL;
         }
@@ -1050,7 +1002,7 @@ static BlockNumber BCMGetDataFileMaxSize(Relation rel, int col)
 /*
  * Check if we have specific postfix in the string.
  */
-static bool CheckFilePostfix(const char* str1, const char* str2)
+static bool CheckFilePostfix(const char *str1, const char *str2)
 {
     int len1 = 0;
     int len2 = 0;
@@ -1078,9 +1030,9 @@ static bool CheckFilePostfix(const char* str1, const char* str2)
  * FUTURE CASE:: Maybe we should Consider concurrency scenarios,
  * one is clearing file another is setting.
  */
-static void BCMClearFile(const RelFileNode& relfilenode, int col)
+static void BCMClearFile(const RelFileNode &relfilenode, int col)
 {
-    RelFileNode InvalidRelFileNode = {0, 0, 0, -1};
+    RelFileNode InvalidRelFileNode = { 0, 0, 0, -1 };
     Relation rel;
 
     if (0 == memcmp(&relfilenode, &InvalidRelFileNode, sizeof(RelFileNode)))
@@ -1092,11 +1044,11 @@ static void BCMClearFile(const RelFileNode& relfilenode, int col)
 }
 
 /* Recursion search BCM files with the tableSpacePath */
-static void searchBCMFiles(
-    const char* tableSpacePath, const char* relativepath, bool undertablespace, bool clear, int iterations)
+static void searchBCMFiles(const char *tableSpacePath, const char *relativepath, bool undertablespace, bool clear,
+                           int iterations)
 {
-    DIR* dir = NULL;
-    struct dirent* de;
+    DIR *dir = NULL;
+    struct dirent *de;
     char path[MAXPGPATH] = {'\0'};
     char rpath[MAXPGPATH] = {'\0'};
     int nRet = 0;
@@ -1163,33 +1115,25 @@ static void searchBCMFiles(
     FreeDir(dir);
 }
 
-static void HandleBCMfile(char* bcmpath, bool clear)
+static void HandleBCMfile(char *bcmpath, bool clear)
 {
     RelFileNodeForkNum bcmfilenode;
 
     bcmfilenode = relpath_to_filenode(bcmpath);
     if (bcmfilenode.forknumber == InvalidForkNumber) {
         ereport(WARNING,
-            (errmsg("relfilenode [spcNode%u] [dbNode%u] [relNode%u]"
-                    "[backendId%d] [segno%u] [forkNumber-%d] forkNumber is invalid",
-                bcmfilenode.rnode.node.spcNode,
-                bcmfilenode.rnode.node.dbNode,
-                bcmfilenode.rnode.node.relNode,
-                bcmfilenode.rnode.backend,
-                bcmfilenode.segno,
-                bcmfilenode.forknumber)));
+                (errmsg("relfilenode [spcNode%u] [dbNode%u] [relNode%u]"
+                        "[backendId%d] [segno%u] [forkNumber-%d] forkNumber is invalid",
+                        bcmfilenode.rnode.node.spcNode, bcmfilenode.rnode.node.dbNode, bcmfilenode.rnode.node.relNode,
+                        bcmfilenode.rnode.backend, bcmfilenode.segno, bcmfilenode.forknumber)));
         return;
     }
 
     ereport(DEBUG3,
-        (errmsg("relfilenode [spcNode%u] [dbNode%u] [relNode%u]"
-                "[backendId%d] [segno%u] [forkNumber-%d]",
-            bcmfilenode.rnode.node.spcNode,
-            bcmfilenode.rnode.node.dbNode,
-            bcmfilenode.rnode.node.relNode,
-            bcmfilenode.rnode.backend,
-            bcmfilenode.segno,
-            bcmfilenode.forknumber)));
+            (errmsg("relfilenode [spcNode%u] [dbNode%u] [relNode%u]"
+                    "[backendId%d] [segno%u] [forkNumber-%d]",
+                    bcmfilenode.rnode.node.spcNode, bcmfilenode.rnode.node.dbNode, bcmfilenode.rnode.node.relNode,
+                    bcmfilenode.rnode.backend, bcmfilenode.segno, bcmfilenode.forknumber)));
 
     if (clear) {
         /* Clear this bcm file */
@@ -1207,26 +1151,22 @@ static void HandleBCMfile(char* bcmpath, bool clear)
     }
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 /* Get all bcm files, clear all or send the according not sync heap blocks */
 void GetBcmFileList(bool clear)
 {
-    DIR* dir = NULL;
-    List* tablespaces = NIL;
-    ListCell* lc = NULL;
-    struct dirent* de;
-    tablespaceinfo* ti = NULL;
+    DIR *dir = NULL;
+    List *tablespaces = NIL;
+    ListCell *lc = NULL;
+    struct dirent *de;
+    tablespaceinfo *ti = NULL;
 
     MemoryContext bcm_context;
     MemoryContext old_context;
 
     int nRet = 0;
 
-    bcm_context = AllocSetContextCreate(CurrentMemoryContext,
-        "Search BCM files context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    bcm_context = AllocSetContextCreate(CurrentMemoryContext, "Search BCM files context", ALLOCSET_DEFAULT_MINSIZE,
+                                        ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     old_context = MemoryContextSwitchTo(bcm_context);
     ereport(LOG, (errmsg("catchup process start to search all of bcm files.")));
 
@@ -1261,7 +1201,7 @@ void GetBcmFileList(bool clear)
         }
         linkpath[rllen] = '\0';
 
-        ti = (tablespaceinfo*)palloc(sizeof(tablespaceinfo));
+        ti = (tablespaceinfo *)palloc(sizeof(tablespaceinfo));
         ti->oid = pstrdup(de->d_name);
         ti->path = pstrdup(linkpath);
         ti->relativePath = pstrdup(fullpath);
@@ -1275,16 +1215,16 @@ void GetBcmFileList(bool clear)
          * them. Warn about it and ignore.
          */
         ereport(WARNING,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("tablespaces are not supported on this platform")));
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("tablespaces are not supported on this platform")));
 #endif
     }
 
     /* Add a node for the base directory at the end */
-    ti = (tablespaceinfo*)palloc0(sizeof(tablespaceinfo));
+    ti = (tablespaceinfo *)palloc0(sizeof(tablespaceinfo));
     tablespaces = lcons(ti, tablespaces);
 
     foreach (lc, tablespaces) {
-        tablespaceinfo* tsi = (tablespaceinfo*)lfirst(lc);
+        tablespaceinfo *tsi = (tablespaceinfo *)lfirst(lc);
         if (tsi->path != NULL) {
             /* Tablespace create by user */
             ereport(DEBUG1, (errmsg("bcm path: %s; relative path: %s.", tsi->path, tsi->relativePath)));
@@ -1308,8 +1248,8 @@ void GetIncrementalBcmFileList()
 {
     int num = 0;
     char path[MAXPGPATH] = {'\0'};
-    char* temp = NULL;
-    char* fileList = NULL;
+    char *temp = NULL;
+    char *fileList = NULL;
     int msgLength = 0;
     errno_t errorno = EOK;
     ereport(LOG, (errmsg("catchup process start to search incremental bcm files.")));
@@ -1325,7 +1265,7 @@ void GetIncrementalBcmFileList()
     while (num != 0) {
         TimestampTz parseBcmStartTime = GetCurrentTimestamp();
         RelFileNodeKey data;
-        errorno = memcpy_s((void*)&data, sizeof(RelFileNodeKey), temp, sizeof(RelFileNodeKey));
+        errorno = memcpy_s((void *)&data, sizeof(RelFileNodeKey), temp, sizeof(RelFileNodeKey));
         securec_check(errorno, "", "");
         temp += sizeof(RelFileNodeKey);
 
@@ -1344,33 +1284,28 @@ void GetIncrementalBcmFileList()
         num--;
     }
     ReplaceOrFreeBcmFileListBuffer(NULL, 0);
-    ereport(LOG,
+    ereport(
+        LOG,
         (errmsg("incremental catchup parsing bcm costs %d milliseconds, handling bcm costs %d milliseconds, and total "
                 "costs %d milliseconds",
-            getIncrementalCatchupParseBcmTime,
-            getIncrementalCatchupHandleBcmTime,
-            getIncrementalCatchupParseBcmTime + getIncrementalCatchupHandleBcmTime)));
+                getIncrementalCatchupParseBcmTime, getIncrementalCatchupHandleBcmTime,
+                getIncrementalCatchupParseBcmTime + getIncrementalCatchupHandleBcmTime)));
     ereport(LOG, (errmsg("catchup process done to search incremental bcm files.")));
 }
 
 /* Get incremental bcm file path for default tablespace path example: base/dbnode/relnode_BCM */
-static void GetIncrementalBcmFilePathForDefault(const RelFileNodeKey& data, char* path, int length)
+static void GetIncrementalBcmFilePathForDefault(const RelFileNodeKey &data, char *path, int length)
 {
     int nRet = 0;
 
     if ((int)data.relfilenode.spcNode == DEFAULTTABLESPACE_OID) {
         if (data.columnid != 0) {
-            nRet = snprintf_s(path,
-                length,
-                length - 1,
-                "base/%u/%u_C%d_bcm",
-                data.relfilenode.dbNode,
-                data.relfilenode.relNode,
-                data.columnid);
+            nRet = snprintf_s(path, length, length - 1, "base/%u/%u_C%d_bcm", data.relfilenode.dbNode,
+                              data.relfilenode.relNode, data.columnid);
             securec_check_ss(nRet, "", "");
         } else {
-            nRet = snprintf_s(
-                path, length, length - 1, "base/%u/%u_bcm", data.relfilenode.dbNode, data.relfilenode.relNode);
+            nRet = snprintf_s(path, length, length - 1, "base/%u/%u_bcm", data.relfilenode.dbNode,
+                              data.relfilenode.relNode);
             securec_check_ss(nRet, "", "");
         }
         if (u_sess->attr.attr_storage.HaModuleDebug) {
@@ -1381,10 +1316,10 @@ static void GetIncrementalBcmFilePathForDefault(const RelFileNodeKey& data, char
 
 /* Get incremental bcm file path for custome tablespace path example:
  * pg_tblspc/spcnode/version_nodename/dbnode/relnode_BCM */
-static void GetIncrementalBcmFilePathForCustome(const RelFileNodeKey& data, char* path, int length)
+static void GetIncrementalBcmFilePathForCustome(const RelFileNodeKey &data, char *path, int length)
 {
     int nRet = 0;
-    DIR* dir = NULL;
+    DIR *dir = NULL;
     char fullPath[MAXPGPATH];
     char linkPath[MAXPGPATH];
     int readLinkPathLength;
@@ -1420,33 +1355,20 @@ static void GetIncrementalBcmFilePathForCustome(const RelFileNodeKey& data, char
          * them. Warn about it and ignore.
          */
         ereport(WARNING,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("tablespaces are not supported on this platform")));
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("tablespaces are not supported on this platform")));
 #endif
 
         if (data.columnid != 0) {
             /* pg_tblspc/spcnode/version_nodename/dbnode/relnode_C1_BCM */
-            nRet = snprintf_s(path,
-                length,
-                length - 1,
-                "%s/%s_%s/%u/%u_C%d_bcm",
-                fullPath,
-                TABLESPACE_VERSION_DIRECTORY,
-                g_instance.attr.attr_common.PGXCNodeName,
-                data.relfilenode.dbNode,
-                data.relfilenode.relNode,
-                data.columnid);
+            nRet = snprintf_s(path, length, length - 1, "%s/%s_%s/%u/%u_C%d_bcm", fullPath,
+                              TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName,
+                              data.relfilenode.dbNode, data.relfilenode.relNode, data.columnid);
             securec_check_ss(nRet, "", "");
         } else {
             /* pg_tblspc/spcnode/version_nodename/dbnode/relnode_BCM */
-            nRet = snprintf_s(path,
-                length,
-                length - 1,
-                "%s/%s_%s/%u/%u_bcm",
-                fullPath,
-                TABLESPACE_VERSION_DIRECTORY,
-                g_instance.attr.attr_common.PGXCNodeName,
-                data.relfilenode.dbNode,
-                data.relfilenode.relNode);
+            nRet = snprintf_s(path, length, length - 1, "%s/%s_%s/%u/%u_bcm", fullPath, TABLESPACE_VERSION_DIRECTORY,
+                              g_instance.attr.attr_common.PGXCNodeName, data.relfilenode.dbNode,
+                              data.relfilenode.relNode);
             securec_check_ss(nRet, "", "");
         }
         if (u_sess->attr.attr_storage.HaModuleDebug) {
@@ -1454,31 +1376,25 @@ static void GetIncrementalBcmFilePathForCustome(const RelFileNodeKey& data, char
         }
     }
 }
-#endif
 
 /*
  * Load multiple CU units to buffer, push data to sender queue.
  * Cause the CU manager may not return the exact size we expected,
  * so try again until we get the data we need.
  */
-static void bcm_read_multi_cu(
-    CUFile* cFile, Relation rel, int col, BlockNumber heapBlock, int& contibits, BlockNumber maxHeapBlock)
+static void bcm_read_multi_cu(CUFile *cFile, Relation rel, int col, BlockNumber heapBlock, int &contibits,
+                              BlockNumber maxHeapBlock)
 {
-    uint64 offset = ALIGNOF_CUSIZE * (uint64)heapBlock;
-    char* write_buf = NULL;
+    uint64 align_size = (uint64)(uint32)CUAlignUtils::GetCuAlignSizeColumnId(col);
+    uint64 offset = align_size * (uint64)heapBlock;
+    char *write_buf = NULL;
     int realSize = 0;
 
     if (u_sess->attr.attr_storage.HaModuleDebug) {
-        ereport(LOG,
-            (errmsg("HA-bcm_read_multi_cu: relation %u/%u/%u col %d try to sync "
-                    "cu blockno %u, contibits %d, maxHeapBlock %u",
-                rel->rd_node.spcNode,
-                rel->rd_node.dbNode,
-                rel->rd_node.relNode,
-                col,
-                heapBlock,
-                contibits,
-                maxHeapBlock)));
+        ereport(LOG, (errmsg("HA-bcm_read_multi_cu: relation %u/%u/%u col %d try to sync "
+                             "cu blockno %u, contibits %d, maxHeapBlock %u",
+                             rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, col, heapBlock, contibits,
+                             maxHeapBlock)));
     }
 
     /* The heapBlock of data file must be not exist */
@@ -1492,7 +1408,7 @@ static void bcm_read_multi_cu(
 
     while (contibits > 0) {
         CatchupShutdownIfNoDataSender();
-        write_buf = cFile->Read(offset, ALIGNOF_CUSIZE * contibits, &realSize);
+        write_buf = cFile->Read(offset, align_size * contibits, &realSize, (int)align_size);
         if (write_buf == NULL) {
             Assert(realSize == 0);
             contibits = 0;
@@ -1500,26 +1416,38 @@ static void bcm_read_multi_cu(
         }
 
         if (u_sess->attr.attr_storage.HaModuleDebug)
-            check_cu_block(write_buf, realSize);
+            check_cu_block(write_buf, realSize, (int)align_size);
 
         PushCUToDataQueue(rel, col, write_buf, offset, realSize, false);
         ereport(DEBUG3, (errmsg("cuBlock %u col %d read and send data's realsize is %d.", heapBlock, col, realSize)));
         offset += realSize;
-        contibits -= realSize / ALIGNOF_CUSIZE;
+        contibits -= realSize / align_size;
     }
     Assert(contibits == 0);
 }
 
-void check_cu_block(char* mem, int size)
+void check_cu_block(char *mem, int size, int alignSize)
 {
-    int cuUnit = size / ALIGNOF_CUSIZE;
-    char zeroBlock[ALIGNOF_CUSIZE] = {0};
-    char* mem_temp = mem;
+    Assert(alignSize > 0);
+    int cuUnit = size / alignSize;
+    char zeroBlock[alignSize] = {0};
+    char *mem_temp = mem;
 
     for (int i = 0; i < cuUnit; i++) {
-        if (memcmp(mem_temp, zeroBlock, ALIGNOF_CUSIZE) == 0)
+        if (memcmp(mem_temp, zeroBlock, alignSize) == 0)
             ereport(WARNING, (errmsg("HA-check_cu_block: check cu blockno %d failed, it is zeropage", i)));
 
-        mem_temp += ALIGNOF_CUSIZE;
+        mem_temp += alignSize;
     }
+}
+
+uint64 cstore_offset_to_cstoreblock(uint64 offset, uint64 align_size)
+{
+    return offset / align_size;
+}
+
+uint64 cstore_offset_to_bcmblock(uint64 offset, uint64 align_size)
+{
+    uint64 cstore_block = cstore_offset_to_cstoreblock(offset, align_size);
+    return (cstore_block / BCM_BLOCKS_PER_PAGE) + UNITBLK_TO_BCMGROUP(cstore_block) + 2;
 }

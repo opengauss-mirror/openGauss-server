@@ -248,7 +248,7 @@ Datum citext_smaller(PG_FUNCTION_ARGS)
     text* right = PG_GETARG_TEXT_PP(1);
     text* result = NULL;
 
-    result = citextcmp(left, right, PG_GET_COLLATION()) < 0 ? left : right;
+    result = (citextcmp(left, right, PG_GET_COLLATION()) < 0) ? left : right;
     PG_RETURN_TEXT_P(result);
 }
 
@@ -260,6 +260,6 @@ Datum citext_larger(PG_FUNCTION_ARGS)
     text* right = PG_GETARG_TEXT_PP(1);
     text* result = NULL;
 
-    result = citextcmp(left, right, PG_GET_COLLATION()) > 0 ? left : right;
+    result = (citextcmp(left, right, PG_GET_COLLATION()) > 0) ? left : right;
     PG_RETURN_TEXT_P(result);
 }

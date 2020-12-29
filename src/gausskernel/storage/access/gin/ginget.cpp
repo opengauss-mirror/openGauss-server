@@ -9,7 +9,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *			src/gausskernel/storage/access/gin/ginget.cpp
+ *    src/gausskernel/storage/access/gin/ginget.cpp
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
@@ -29,10 +29,10 @@ typedef struct pendingPosition {
     OffsetNumber firstOffset;
     OffsetNumber lastOffset;
     ItemPointerData item;
-    bool* hasMatchKey;
+    bool *hasMatchKey;
 } pendingPosition;
 
-static int CompareItemPointers(const void* a, const void* b)
+static int CompareItemPointers(const void *a, const void *b)
 {
     int res = ginCompareItemPointers((ItemPointer)a, (ItemPointer)b);
     return res;
@@ -41,7 +41,7 @@ static int CompareItemPointers(const void* a, const void* b)
 /*
  * Goes to the next page if current offset is outside of bounds
  */
-static bool moveRightIfItNeeded(GinBtreeData* btree, GinBtreeStack* stack)
+static bool moveRightIfItNeeded(GinBtreeData *btree, GinBtreeStack *stack)
 {
     Page page = BufferGetPage(stack->buffer);
     if (stack->off > PageGetMaxOffsetNumber(page)) {
@@ -66,7 +66,7 @@ static bool moveRightIfItNeeded(GinBtreeData* btree, GinBtreeStack* stack)
 static void scanPostingTree(Relation index, GinScanEntry scanEntry, BlockNumber rootPostingTree, bool isColStore)
 {
     GinBtreeData btree;
-    GinBtreeStack* stack = NULL;
+    GinBtreeStack *stack = NULL;
     Buffer buffer;
     Page page;
 
@@ -92,8 +92,8 @@ static void scanPostingTree(Relation index, GinScanEntry scanEntry, BlockNumber 
                     scanEntry->matchList = (ItemPointer)palloc(nitems * sizeof(ItemPointerData));
                     scanEntry->matchNum = 0;
                 } else {
-                    scanEntry->matchList = (ItemPointer)repalloc(
-                        scanEntry->matchList, (scanEntry->matchNum + nitems) * sizeof(ItemPointerData));
+                    scanEntry->matchList = (ItemPointer)repalloc(scanEntry->matchList, (scanEntry->matchNum + nitems) *
+                                                                                           sizeof(ItemPointerData));
                 }
                 for (int i = 0; i < nitems; i++) {
                     scanEntry->matchList[scanEntry->matchNum + i] = items[i];
@@ -128,14 +128,14 @@ static void scanPostingTree(Relation index, GinScanEntry scanEntry, BlockNumber 
  *
  * Returns true if done, false if it's necessary to restart scan from scratch
  */
-static bool collectMatchBitmap(GinBtreeData* btree, GinBtreeStack* stack, GinScanEntry scanEntry, bool isColStore)
+static bool collectMatchBitmap(GinBtreeData *btree, GinBtreeStack *stack, GinScanEntry scanEntry, bool isColStore)
 {
     OffsetNumber attnum;
     Form_pg_attribute attr;
 
     /* Initialize empty bitmap result */
     if (!isColStore) {
-        scanEntry->matchBitmap = tbm_create(u_sess->attr.attr_memory.work_mem * 1024L, NULL);
+        scanEntry->matchBitmap = tbm_create(u_sess->attr.attr_memory.work_mem * 1024L);
     }
 
     /* Null query cannot partial-match anything */
@@ -190,11 +190,9 @@ static bool collectMatchBitmap(GinBtreeData* btree, GinBtreeStack* stack, GinSca
              * ----------
              */
             cmp = DatumGetInt32(FunctionCall4Coll(&btree->ginstate->comparePartialFn[attnum - 1],
-                btree->ginstate->supportCollation[attnum - 1],
-                scanEntry->queryKey,
-                idatum,
-                UInt16GetDatum(scanEntry->strategy),
-                PointerGetDatum(scanEntry->extra_data)));
+                                                  btree->ginstate->supportCollation[attnum - 1], scanEntry->queryKey,
+                                                  idatum, UInt16GetDatum(scanEntry->strategy),
+                                                  PointerGetDatum(scanEntry->extra_data)));
             if (cmp > 0)
                 return true;
             else if (cmp < 0) {
@@ -287,8 +285,8 @@ static bool collectMatchBitmap(GinBtreeData* btree, GinBtreeStack* stack, GinSca
                 if (scanEntry->matchList == NULL) {
                     scanEntry->matchList = (ItemPointer)palloc(nipd * sizeof(ItemPointerData));
                 } else {
-                    scanEntry->matchList = (ItemPointer)repalloc(
-                        scanEntry->matchList, (scanEntry->matchNum + nipd) * sizeof(ItemPointerData));
+                    scanEntry->matchList = (ItemPointer)repalloc(scanEntry->matchList, (scanEntry->matchNum + nipd) *
+                                                                                           sizeof(ItemPointerData));
                 }
                 for (int i = 0; i < nipd; i++) {
                     scanEntry->matchList[scanEntry->matchNum + i] = ipd[i];
@@ -310,10 +308,10 @@ static bool collectMatchBitmap(GinBtreeData* btree, GinBtreeStack* stack, GinSca
 /*
  * Start* functions setup beginning state of searches: finds correct buffer and pins it.
  */
-static void startScanEntry(GinState* ginstate, GinScanEntry entry, bool isColStore)
+static void startScanEntry(GinState *ginstate, GinScanEntry entry, bool isColStore)
 {
     GinBtreeData btreeEntry;
-    GinBtreeStack* stackEntry = NULL;
+    GinBtreeStack *stackEntry = NULL;
     Page page;
     bool needUnlock = false;
 
@@ -321,17 +319,13 @@ restartScanEntry:
     entry->buffer = InvalidBuffer;
     ItemPointerSetMin(&entry->curItem);
     entry->offset = InvalidOffsetNumber;
-    if (entry->list)
-        pfree(entry->list);
-    entry->list = NULL;
+    pfree_ext(entry->list);
     entry->nlist = 0;
     entry->matchBitmap = NULL;
     entry->matchResult = NULL;
     entry->reduceResult = false;
     entry->predictNumberResult = 0;
-    if (entry->matchList)
-        pfree(entry->matchList);
-    entry->matchList = NULL;
+    pfree_ext(entry->matchList);
     entry->matchNum = 0;
 
     /*
@@ -392,7 +386,7 @@ restartScanEntry:
         IndexTuple itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, stackEntry->off));
         if (GinIsPostingTree(itup)) {
             BlockNumber rootPostingTree = GinGetPostingTree(itup);
-            GinBtreeStack* stack = NULL;
+            GinBtreeStack *stack = NULL;
             ItemPointerData minItem;
 
             /*
@@ -445,11 +439,11 @@ restartScanEntry:
  * Comparison function for scan entry indexes. Sorts by predictNumberResult,
  * least frequent items first.
  */
-static int entryIndexByFrequencyCmp(const void* a1, const void* a2, void* arg)
+static int entryIndexByFrequencyCmp(const void *a1, const void *a2, void *arg)
 {
     const GinScanKey key = (const GinScanKey)arg;
-    int i1 = *(const int*)a1;
-    int i2 = *(const int*)a2;
+    int i1 = *(const int *)a1;
+    int i2 = *(const int *)a2;
     uint32 n1 = key->scanEntry[i1]->predictNumberResult;
     uint32 n2 = key->scanEntry[i2]->predictNumberResult;
 
@@ -461,12 +455,12 @@ static int entryIndexByFrequencyCmp(const void* a1, const void* a2, void* arg)
         return 1;
 }
 
-static void startScanKey(GinState* ginstate, GinScanOpaque so, GinScanKey key)
+static void startScanKey(GinState *ginstate, GinScanOpaque so, GinScanKey key)
 {
     MemoryContext oldCtx = CurrentMemoryContext;
     int i;
     int j;
-    int* entryIndexes = NULL;
+    int *entryIndexes = NULL;
 
     ItemPointerSetMin(&key->curItem);
     key->curItemMatches = false;
@@ -496,7 +490,7 @@ static void startScanKey(GinState* ginstate, GinScanOpaque so, GinScanKey key)
     if (key->nentries > 1) {
         MemoryContextSwitchTo(so->tempCtx);
 
-        entryIndexes = (int*)palloc(sizeof(int) * key->nentries);
+        entryIndexes = (int *)palloc(sizeof(int) * key->nentries);
         for (i = 0; i < (int)key->nentries; i++)
             entryIndexes[i] = i;
         qsort_arg(entryIndexes, key->nentries, sizeof(int), entryIndexByFrequencyCmp, key);
@@ -516,8 +510,8 @@ static void startScanKey(GinState* ginstate, GinScanOpaque so, GinScanKey key)
 
         key->nrequired = i + 1;
         key->nadditional = key->nentries - key->nrequired;
-        key->requiredEntries = (GinScanEntry*)palloc(key->nrequired * sizeof(GinScanEntry));
-        key->additionalEntries = (GinScanEntry*)palloc(key->nadditional * sizeof(GinScanEntry));
+        key->requiredEntries = (GinScanEntry *)palloc(key->nrequired * sizeof(GinScanEntry));
+        key->additionalEntries = (GinScanEntry *)palloc(key->nadditional * sizeof(GinScanEntry));
 
         j = 0;
         for (i = 0; i < key->nrequired; i++)
@@ -532,7 +526,7 @@ static void startScanKey(GinState* ginstate, GinScanOpaque so, GinScanKey key)
 
         key->nrequired = 1;
         key->nadditional = 0;
-        key->requiredEntries = (GinScanEntry*)palloc(1 * sizeof(GinScanEntry));
+        key->requiredEntries = (GinScanEntry *)palloc(1 * sizeof(GinScanEntry));
         key->requiredEntries[0] = key->scanEntry[0];
     }
     MemoryContextSwitchTo(oldCtx);
@@ -541,7 +535,7 @@ static void startScanKey(GinState* ginstate, GinScanOpaque so, GinScanKey key)
 static void startScan(IndexScanDesc scan, bool isColStore)
 {
     GinScanOpaque so = (GinScanOpaque)scan->opaque;
-    GinState* ginstate = &so->ginstate;
+    GinState *ginstate = &so->ginstate;
     uint32 i;
 
     for (i = 0; i < so->totalentries; i++)
@@ -585,7 +579,7 @@ static void startScan(IndexScanDesc scan, bool isColStore)
  * Note that we copy the page into GinScanEntry->list array and unlock it, but
  * keep it pinned to prevent interference with vacuum.
  */
-static void entryLoadMoreItems(GinState* ginstate, GinScanEntry entry, ItemPointerData advancePast)
+static void entryLoadMoreItems(GinState *ginstate, GinScanEntry entry, ItemPointerData advancePast)
 {
     Page page;
     int i;
@@ -606,7 +600,7 @@ static void entryLoadMoreItems(GinState* ginstate, GinScanEntry entry, ItemPoint
         stepright = true;
         LockBuffer(entry->buffer, GIN_SHARE);
     } else {
-        GinBtreeStack* stack = NULL;
+        GinBtreeStack *stack = NULL;
 
         ReleaseBuffer(entry->buffer);
 
@@ -629,11 +623,8 @@ static void entryLoadMoreItems(GinState* ginstate, GinScanEntry entry, ItemPoint
         stepright = false;
     }
 
-    ereport(DEBUG2,
-        (errmsg("entryLoadMoreItems, %u/%hu, skip: %d",
-            GinItemPointerGetBlockNumber(&advancePast),
-            GinItemPointerGetOffsetNumber(&advancePast),
-            !stepright)));
+    ereport(DEBUG2, (errmsg("entryLoadMoreItems, %u/%hu, skip: %d", GinItemPointerGetBlockNumber(&advancePast),
+                            GinItemPointerGetOffsetNumber(&advancePast), !stepright)));
 
     page = BufferGetPage(entry->buffer);
     for (;;) {
@@ -718,7 +709,7 @@ static void entryLoadMoreItems(GinState* ginstate, GinScanEntry entry, ItemPoint
  * logic in keyGetItem and scanGetItem; see comment in scanGetItem.)  In the
  * current implementation this is guaranteed by the behavior of tidbitmaps.
  */
-static void entryGetItem(GinState* ginstate, GinScanEntry entry, ItemPointerData advancePast)
+static void entryGetItem(GinState *ginstate, GinScanEntry entry, ItemPointerData advancePast)
 {
     Assert(!entry->isFinished);
 
@@ -837,6 +828,7 @@ static void entryGetItem(GinState* ginstate, GinScanEntry entry, ItemPointerData
                     return;
                 }
             }
+
             entry->curItem = entry->list[entry->offset++];
 
             /* If we're not past advancePast, keep scanning */
@@ -857,6 +849,7 @@ static void entryGetItem(GinState* ginstate, GinScanEntry entry, ItemPointerData
         }
     }
 }
+
 /*
  * Identify the "current" item among the input entry streams for this scan key
  * that is greater than advancePast, and test whether it passes the scan key
@@ -878,7 +871,7 @@ static void entryGetItem(GinState* ginstate, GinScanEntry entry, ItemPointerData
  * item pointers for the same page.  (Doing so would break the key-combination
  * logic in scanGetItem.)
  */
-static void keyGetItem(GinState* ginstate, MemoryContext tempCtx, GinScanKey key, ItemPointerData advancePast)
+static void keyGetItem(GinState *ginstate, MemoryContext tempCtx, GinScanKey key, ItemPointerData advancePast)
 {
     ItemPointerData minItem;
     ItemPointerData curPageLossy;
@@ -1122,7 +1115,7 @@ static void keyGetItem(GinState* ginstate, MemoryContext tempCtx, GinScanKey key
  * that we know the keys are to be combined with AND logic, whereas in
  * keyGetItem() the combination logic is known only to the consistentFn.
  */
-static bool scanGetItem(IndexScanDesc scan, ItemPointerData advancePast, ItemPointerData* item, bool* recheck)
+static bool scanGetItem(IndexScanDesc scan, ItemPointerData advancePast, ItemPointerData *item, bool *recheck)
 {
     GinScanOpaque so = (GinScanOpaque)scan->opaque;
     uint32 i;
@@ -1248,7 +1241,7 @@ static bool scanGetItem(IndexScanDesc scan, ItemPointerData advancePast, ItemPoi
  * The pendingBuffer is presumed pinned and share-locked on entry, and is
  * pinned and share-locked on success exit.  On failure exit it's released.
  */
-static bool scanGetCandidate(IndexScanDesc scan, pendingPosition* pos)
+static bool scanGetCandidate(IndexScanDesc scan, pendingPosition *pos)
 {
     OffsetNumber maxoff;
     Page page;
@@ -1322,8 +1315,8 @@ static bool scanGetCandidate(IndexScanDesc scan, pendingPosition* pos)
  * datum[]/category[]/datumExtracted[] arrays are used to cache the results
  * of gintuple_get_key() on the current page.
  */
-static bool matchPartialInPendingList(GinState* ginstate, Page page, OffsetNumber off, OffsetNumber maxoff,
-    GinScanEntry entry, Datum* datum, GinNullCategory* category, bool* datumExtracted)
+static bool matchPartialInPendingList(GinState *ginstate, Page page, OffsetNumber off, OffsetNumber maxoff,
+                                      GinScanEntry entry, Datum *datum, GinNullCategory *category, bool *datumExtracted)
 {
     IndexTuple itup;
     int32 cmp;
@@ -1354,11 +1347,9 @@ static bool matchPartialInPendingList(GinState* ginstate, Page page, OffsetNumbe
          * ----------
          */
         cmp = DatumGetInt32(FunctionCall4Coll(&ginstate->comparePartialFn[entry->attnum - 1],
-            ginstate->supportCollation[entry->attnum - 1],
-            entry->queryKey,
-            datum[off - 1],
-            UInt16GetDatum(entry->strategy),
-            PointerGetDatum(entry->extra_data)));
+                                              ginstate->supportCollation[entry->attnum - 1], entry->queryKey,
+                                              datum[off - 1], UInt16GetDatum(entry->strategy),
+                                              PointerGetDatum(entry->extra_data)));
         if (cmp == 0)
             return true;
         else if (cmp > 0)
@@ -1382,7 +1373,7 @@ static bool matchPartialInPendingList(GinState* ginstate, Page page, OffsetNumbe
  *
  * The pendingBuffer is presumed pinned and share-locked on entry.
  */
-static bool collectMatchesForHeapRow(IndexScanDesc scan, pendingPosition* pos)
+static bool collectMatchesForHeapRow(IndexScanDesc scan, pendingPosition *pos)
 {
     GinScanOpaque so = (GinScanOpaque)scan->opaque;
     OffsetNumber attrnum;
@@ -1397,8 +1388,7 @@ static bool collectMatchesForHeapRow(IndexScanDesc scan, pendingPosition* pos)
     for (i = 0; i < so->nkeys; i++) {
         GinScanKey key = so->keys + i;
 
-        ret = memset_s(
-            key->entryRes, sizeof(GinTernaryValue) * key->nentries, GIN_FALSE, sizeof(GinTernaryValue) * key->nentries);
+        ret = memset_s(key->entryRes, key->nentries, GIN_FALSE, key->nentries);
         securec_check(ret, "", "");
     }
     ret = memset_s(pos->hasMatchKey, so->nkeys, FALSE, so->nkeys);
@@ -1414,10 +1404,8 @@ static bool collectMatchesForHeapRow(IndexScanDesc scan, pendingPosition* pos)
         bool datumExtracted[BLCKSZ / sizeof(IndexTupleData)];
 
         Assert(pos->lastOffset > pos->firstOffset);
-        ret = memset_s(datumExtracted + pos->firstOffset - 1,
-            sizeof(bool) * (pos->lastOffset - pos->firstOffset),
-            0,
-            sizeof(bool) * (pos->lastOffset - pos->firstOffset));
+        ret = memset_s(datumExtracted + pos->firstOffset - 1, sizeof(bool) * (pos->lastOffset - pos->firstOffset), 0,
+                       sizeof(bool) * (pos->lastOffset - pos->firstOffset));
         securec_check(ret, "", "");
 
         page = BufferGetPage(pos->pendingBuffer);
@@ -1477,12 +1465,8 @@ static bool collectMatchesForHeapRow(IndexScanDesc scan, pendingPosition* pos)
                             res = 0;
                         }
                     } else {
-                        res = ginCompareEntries(&so->ginstate,
-                            entry->attnum,
-                            entry->queryKey,
-                            entry->queryCategory,
-                            datum[StopMiddle - 1],
-                            category[StopMiddle - 1]);
+                        res = ginCompareEntries(&so->ginstate, entry->attnum, entry->queryKey, entry->queryCategory,
+                                                datum[StopMiddle - 1], category[StopMiddle - 1]);
                     }
 
                     if (res == 0) {
@@ -1499,14 +1483,9 @@ static bool collectMatchesForHeapRow(IndexScanDesc scan, pendingPosition* pos)
                             if (pos->lastOffset > BLCKSZ / sizeof(IndexTupleData)) {
                                 key->entryRes[j] = false;
                             } else {
-                                key->entryRes[j] = matchPartialInPendingList(&so->ginstate,
-                                    page,
-                                    StopMiddle,
-                                    pos->lastOffset,
-                                    entry,
-                                    datum,
-                                    category,
-                                    datumExtracted);
+                                key->entryRes[j] = matchPartialInPendingList(&so->ginstate, page, StopMiddle,
+                                                                             pos->lastOffset, entry, datum, category,
+                                                                             datumExtracted);
                             }
                         } else {
                             key->entryRes[j] = true;
@@ -1533,8 +1512,8 @@ static bool collectMatchesForHeapRow(IndexScanDesc scan, pendingPosition* pos)
                     if (pos->lastOffset > BLCKSZ / sizeof(IndexTupleData)) {
                         key->entryRes[j] = false;
                     } else {
-                        key->entryRes[j] = matchPartialInPendingList(
-                            &so->ginstate, page, StopHigh, pos->lastOffset, entry, datum, category, datumExtracted);
+                        key->entryRes[j] = matchPartialInPendingList(&so->ginstate, page, StopHigh, pos->lastOffset,
+                                                                     entry, datum, category, datumExtracted);
                     }
                 }
 
@@ -1559,9 +1538,8 @@ static bool collectMatchesForHeapRow(IndexScanDesc scan, pendingPosition* pos)
             ItemPointerData item = pos->item;
 
             if (scanGetCandidate(scan, pos) == false || !ItemPointerEquals(&pos->item, &item)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("could not find additional pending pages for same heap tuple")));
+                ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                errmsg("could not find additional pending pages for same heap tuple")));
             }
         }
     }
@@ -1581,7 +1559,7 @@ static bool collectMatchesForHeapRow(IndexScanDesc scan, pendingPosition* pos)
 /*
  * Collect all matched rows from pending list into bitmap
  */
-static void scanPendingInsert(IndexScanDesc scan, TIDBitmap* tbm, int64* ntids)
+static void scanPendingInsert(IndexScanDesc scan, TIDBitmap *tbm, int64 *ntids)
 {
     GinScanOpaque so = (GinScanOpaque)scan->opaque;
     MemoryContext oldCtx;
@@ -1611,7 +1589,7 @@ static void scanPendingInsert(IndexScanDesc scan, TIDBitmap* tbm, int64* ntids)
     LockBuffer(pos.pendingBuffer, GIN_SHARE);
     pos.firstOffset = FirstOffsetNumber;
     UnlockReleaseBuffer(metabuffer);
-    pos.hasMatchKey = (bool*)palloc(sizeof(bool) * so->nkeys);
+    pos.hasMatchKey = (bool *)palloc(sizeof(bool) * so->nkeys);
 
     /*
      * loop for each heap row. scanGetCandidate returns full row or row's
@@ -1664,11 +1642,11 @@ static void scanPendingInsert(IndexScanDesc scan, TIDBitmap* tbm, int64* ntids)
 Datum gingetbitmap(PG_FUNCTION_ARGS)
 {
     IndexScanDesc scan = (IndexScanDesc)PG_GETARG_POINTER(0);
-    TIDBitmap* tbm = (TIDBitmap*)PG_GETARG_POINTER(1);
+    TIDBitmap *tbm = (TIDBitmap *)PG_GETARG_POINTER(1);
 
     if (scan == NULL || tbm == NULL)
-        ereport(
-            ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function gingetbitmap")));
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function gingetbitmap")));
 
     GinScanOpaque so = (GinScanOpaque)scan->opaque;
     int64 ntids;
@@ -1722,21 +1700,35 @@ Datum gingetbitmap(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(ntids);
 }
 
+static void PutItemIdToSorter(ItemPointer src, IndexSortState *sorter, VectorBatch *tids, int &offset)
+{
+    ScalarVector *vecs = tids->m_arr;
+
+    ItemPointer itemP = (ItemPointer) & (vecs[0].m_vals[offset]);
+    ItemPointerCopy(src, itemP);
+
+    offset++;
+    if (offset == BatchMaxSize) {
+        vecs[0].m_rows = offset;
+        tids->m_rows = offset;
+        PutBatchToSorter(sorter, tids);
+        tids->Reset(true);
+        offset = 0;
+    }
+}
+
 /*
  * Collect all matched rows from pending list into sort
  */
-static void scanCGinPendingInsert(IndexScanDesc scan, IndexSortState* sort, VectorBatch* tids, int64* ntids)
+static uint32 ScanCGinPendingInsert(IndexScanDesc scan, IndexSortState *sort, VectorBatch *tids, int64 *ntids)
 {
     GinScanOpaque so = (GinScanOpaque)scan->opaque;
-    MemoryContext oldCtx;
-    bool recheck = false;
-    bool match = false;
-    uint32 i;
     pendingPosition pos;
     Buffer metabuffer = ReadBuffer(scan->indexRelation, GIN_METAPAGE_BLKNO);
     BlockNumber blkno;
-    ScalarVector* vecs = tids->m_arr;
+    ScalarVector *vecs = tids->m_arr;
     int offset = 0;
+    uint32 maxCuID = FirstCUID;
 
     *ntids = 0;
 
@@ -1749,14 +1741,14 @@ static void scanCGinPendingInsert(IndexScanDesc scan, IndexSortState* sort, Vect
     if (blkno == InvalidBlockNumber) {
         /* No pending list, so proceed with normal scan */
         UnlockReleaseBuffer(metabuffer);
-        return;
+        return maxCuID;
     }
 
     pos.pendingBuffer = ReadBuffer(scan->indexRelation, blkno);
     LockBuffer(pos.pendingBuffer, GIN_SHARE);
     pos.firstOffset = FirstOffsetNumber;
     UnlockReleaseBuffer(metabuffer);
-    pos.hasMatchKey = (bool*)palloc(sizeof(bool) * so->nkeys);
+    pos.hasMatchKey = (bool *)palloc(sizeof(bool) * so->nkeys);
 
     /*
      * loop for each heap row. scanGetCandidate returns full row or row's
@@ -1777,42 +1769,34 @@ static void scanCGinPendingInsert(IndexScanDesc scan, IndexSortState* sort, Vect
          * Matching of entries of one row is finished, so check row using
          * consistent functions.
          */
-        oldCtx = MemoryContextSwitchTo(so->tempCtx);
-        recheck = false;
-        match = true;
+        MemoryContext oldCtx = MemoryContextSwitchTo(so->tempCtx);
+        bool match = true;
 
-        for (i = 0; i < so->nkeys; i++) {
+        for (uint32 i = 0; i < so->nkeys; i++) {
             GinScanKey key = so->keys + i;
-
             if (!key->boolConsistentFn(key)) {
                 match = false;
                 break;
             }
-            recheck = recheck || key->recheckCurItem;
         }
 
-        MemoryContextSwitchTo(oldCtx);
+        (void)MemoryContextSwitchTo(oldCtx);
         MemoryContextReset(so->tempCtx);
 
         if (match) {
-            ItemPointer itemP = (ItemPointer) & (vecs[0].m_vals[offset]);
-            itemP->ip_blkid = pos.item.ip_blkid;
-            itemP->ip_posid = pos.item.ip_posid;
-
-            offset++;
-            if (offset == BatchMaxSize) {
-                vecs[0].m_rows = offset;
-                tids->m_rows = offset;
-                PutBatchToSorter(sort, tids);
-                tids->Reset(true);
-                offset = 0;
+            if (sort != NULL) {
+                PutItemIdToSorter(&pos.item, sort, tids, offset);
+                (*ntids)++;
+            } else {
+                uint32 tmpCuID = ItemPointerGetBlockNumber(&pos.item);
+                if (tmpCuID > maxCuID) {
+                    maxCuID = tmpCuID;
+                }
             }
-
-            (*ntids)++;
         }
     }
 
-    if (offset > 0) {
+    if (sort != NULL && offset > 0) {
         vecs[0].m_rows = offset;
         tids->m_rows = offset;
         PutBatchToSorter(sort, tids);
@@ -1820,24 +1804,17 @@ static void scanCGinPendingInsert(IndexScanDesc scan, IndexSortState* sort, Vect
 
     pfree(pos.hasMatchKey);
     pos.hasMatchKey = NULL;
+
+    return maxCuID;
 }
 
-Datum cgingetbitmap(PG_FUNCTION_ARGS)
+static Datum CGinGetBitmap(IndexScanDesc scan, IndexSortState *sort, VectorBatch *tids)
 {
-    IndexScanDesc scan = (IndexScanDesc)PG_GETARG_POINTER(0);
-    IndexSortState* sort = (IndexSortState*)PG_GETARG_POINTER(1);
-    VectorBatch* tids = (VectorBatch*)PG_GETARG_POINTER(2);
-
-    if (scan == NULL || sort == NULL || tids == NULL)
-        ereport(
-            ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function cgingetbitmap")));
-
-    ScalarVector* vecs = tids->m_arr;
+    ScalarVector *vecs = tids->m_arr;
     int offset = 0;
     GinScanOpaque so = (GinScanOpaque)scan->opaque;
     ItemPointerData iptr;
     bool recheck = false;
-
     int64 ntids = 0;
 
     /*
@@ -1852,7 +1829,7 @@ Datum cgingetbitmap(PG_FUNCTION_ARGS)
     /*
      * First scan the pending list.
      */
-    scanCGinPendingInsert(scan, sort, tids, &ntids);
+    (void)ScanCGinPendingInsert(scan, sort, tids, &ntids);
 
     /*
      * Now scan the main index.
@@ -1868,19 +1845,7 @@ Datum cgingetbitmap(PG_FUNCTION_ARGS)
             sort->m_tidEnd = true;
             break;
         }
-
-        ItemPointer itemP = (ItemPointer) & (vecs[0].m_vals[offset]);
-        itemP->ip_blkid = iptr.ip_blkid;
-        itemP->ip_posid = iptr.ip_posid;
-
-        offset++;
-        if (offset == BatchMaxSize) {
-            vecs[0].m_rows = offset;
-            tids->m_rows = offset;
-            PutBatchToSorter(sort, tids);
-            tids->Reset(true);
-            offset = 0;
-        }
+        PutItemIdToSorter(&iptr, sort, tids, offset);
         ntids++;
     }
 
@@ -1891,4 +1856,72 @@ Datum cgingetbitmap(PG_FUNCTION_ARGS)
     }
 
     PG_RETURN_INT64(ntids);
+}
+
+static Datum CGinGetMaxCuId(IndexScanDesc scan, VectorBatch *tids)
+{
+    GinScanOpaque so = (GinScanOpaque)scan->opaque;
+
+    /*
+     * Set up the scan keys, and check for unsatisfiable query.
+     */
+    ginFreeScanKeys(so); /* there should be no keys yet, but just to be sure */
+    ginNewScanKey(scan);
+
+    if (GinIsVoidRes(scan)) {
+        PG_RETURN_INT64(0);
+    }
+
+    /*
+     * First scan the pending list.
+     */
+    int64 ntids = 0;
+    uint32 maxCuID = ScanCGinPendingInsert(scan, NULL, tids, &ntids);
+
+    /*
+     * Now scan the main index.
+     */
+    startScan(scan, true);
+
+    ItemPointerData iptr;
+    ItemPointerSetMin(&iptr);
+
+    for (;;) {
+        CHECK_FOR_INTERRUPTS();
+
+        bool recheck = false;
+        if (!scanGetItem(scan, iptr, &iptr, &recheck)) {
+            break;
+        }
+
+        uint32 tmpCuID = ItemPointerGetBlockNumber(&iptr);
+        if (tmpCuID > maxCuID) {
+            maxCuID = tmpCuID;
+        }
+    }
+
+    tids->Reset(true);
+    ScalarVector *vecs = tids->m_arr;
+    ItemPointer itemP = (ItemPointer) & (vecs[0].m_vals[0]);
+    ItemPointerSet(itemP, maxCuID, FirstOffsetNumber);
+    vecs[0].m_rows = 1;
+    tids->m_rows = 1;
+    PG_RETURN_INT64(1);
+}
+
+/*
+ * Adds the TIDs of all heap tuples satisfying the scan keys into the sort if sort is nor NULL.
+ * Add the TID of max cu ID into the tids and return 1.
+ */
+Datum cgingetbitmap(PG_FUNCTION_ARGS)
+{
+    IndexScanDesc scan = (IndexScanDesc)PG_GETARG_POINTER(0);
+    IndexSortState *sort = (IndexSortState *)PG_GETARG_POINTER(1);
+    VectorBatch *tids = (VectorBatch *)PG_GETARG_POINTER(2);
+
+    if (NULL == sort) {
+        return CGinGetMaxCuId(scan, tids);
+    } else {
+        return CGinGetBitmap(scan, sort, tids);
+    }
 }

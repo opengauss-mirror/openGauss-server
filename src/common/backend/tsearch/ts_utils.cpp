@@ -126,6 +126,10 @@ char* get_tsfile_absolute_path(char* pathname, const char* basename, const char*
         pname = pstrdup(pname);
         check_file_path(pname);
     } else if (strncmp(pathname, FILEPATH_PREFIX_OBS, obs_plen) == 0) {
+        if (!isSecurityMode) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("FilePath must set an absolute path followed by \"file:///\".")));
+        }
         /* Skip prefix and trim */
         pname = trim(pathname + obs_plen);
         if (strlen(pname) == 0) {

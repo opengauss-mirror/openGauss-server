@@ -32,7 +32,7 @@
 extern bool CodeGenThreadObjectReady();
 extern bool CodeGenPassThreshold(double rows, int dn_num, int dop);
 
-static VectorBatch* produce_batch(VecGroupState* node);
+static VectorBatch* ProduceBatch(VecGroupState* node);
 
 VectorBatch* ExecVecGroup(VecGroupState* node)
 {
@@ -78,7 +78,7 @@ VectorBatch* ExecVecGroup(VecGroupState* node)
                 sizeof(GUCell*) * (2 * BatchMaxSize - remain_grp));
             securec_check(rc, "\0", "\0");
             *idx = remain_grp - 1;
-            res_batch = produce_batch(node);
+            res_batch = ProduceBatch(node);
             if (unlikely(BatchIsNull(res_batch))) {
                 // release the space
                 node->bckBuf->Reset();
@@ -101,10 +101,10 @@ VectorBatch* ExecVecGroup(VecGroupState* node)
     }
 
     node->grp_done = true;
-    return produce_batch(node);
+    return ProduceBatch(node);
 }
 
-static VectorBatch* produce_batch(VecGroupState* node)
+static VectorBatch* ProduceBatch(VecGroupState* node)
 {
     ExprContext* expr_context = NULL;
     VectorBatch* p_res = NULL;
@@ -188,8 +188,13 @@ VecGroupState* ExecInitVecGroup(VecGroup* node, EState* estate, int eflags)
     // initialize child nodes
     outerPlanState(grp_state) = ExecInitNode(outerPlan(node), estate, eflags);
 
-    // Initialize result tuple type and projection info.
-    ExecAssignResultTypeFromTL(&grp_state->ss.ps);
+    /*
+     * Initialize result tuple type and projection info.
+     * Group node result tuple slot always holds virtual tuple, so
+     * default tableAm type is set to HEAP.
+     */
+    ExecAssignResultTypeFromTL(&grp_state->ss.ps, TAM_HEAP);
+
     grp_state->ss.ps.ps_ProjInfo = ExecBuildVecProjectionInfo(grp_state->ss.ps.targetlist,
         node->plan.qual,
         grp_state->ss.ps.ps_ExprContext,

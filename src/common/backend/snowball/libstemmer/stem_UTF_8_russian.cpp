@@ -2,7 +2,6 @@
 /* This file was generated automatically by the Snowball to ANSI C compiler */
 
 #include "header.h"
-#include "snowball/libstemmer/stem_UTF_8_russian.h"
 
 #ifdef __cplusplus
 extern "C" {

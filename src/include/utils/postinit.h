@@ -54,7 +54,7 @@ public:
 
     ~PostgresInitializer();
 
-    void SetDatabaseAndUser(const char* in_dbname, Oid dboid, const char* username, Oid useroid = InvalidOid);
+    void SetDatabaseAndUser(const char* in_dbname, Oid dboid, const char* username);
 
     void GetDatabaseName(char* out_dbname);
 
@@ -66,11 +66,17 @@ public:
 
     void InitSnapshotWorker();
 
+    void InitAspWorker();
+
+    void InitStatementWorker();
+
     void InitPercentileWorker();
 
     void InitAutoVacLauncher();
 
     void InitAutoVacWorker();
+
+    void InitCsnminSync();
 
     void InitCatchupWorker();
 
@@ -84,14 +90,22 @@ public:
 
     void InitSession();
 
+    void InitStreamingBackend();
+
+    void InitCompactionWorker();
+
+    void InitCompactionWorkerSwitchSession();
+    
+    void InitStreamSession();
+
+    void InitBarrierCreator();
+
 public:
     const char* m_indbname;
 
     Oid m_dboid;
 
     const char* m_username;
-
-    Oid m_useroid;
 
 private:
     void InitThread();
@@ -140,7 +154,7 @@ private:
 
     void ProcessStartupOpt();
 
-    void CheckDatabaseAuth();
+    void InitDatabase();
 
     void InitPGXCPort();
 
@@ -149,6 +163,8 @@ private:
     void FinishInit();
 
     void AuditUserLogin();
+
+    void InitCompactionThread();
 
 private:
     bool m_isSuperUser;
@@ -159,5 +175,7 @@ private:
 
     char* m_fullpath;
 };
+
+void ShutdownPostgres(int code, Datum arg);
 
 #endif /* UTILS_POSTINIT_H */

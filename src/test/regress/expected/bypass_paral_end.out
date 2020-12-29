@@ -1,0 +1,30 @@
+--
+-- bypass parallel test end
+--
+reset enable_seqscan;
+reset enable_bitmapscan;
+reset opfusion_debug_mode;
+reset enable_opfusion;
+reset enable_indexscan;
+select * from bypass_paral order by col1,col2;
+ col1 | col2 |    col3     
+------+------+-------------
+    0 |    0 | 14
+    1 |    2 | test_insert
+      |    1 | pp3
+      |    2 | test_insert
+      |    2 | pp3
+(5 rows)
+
+select * from bypass_paral2 order by col1,col2;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    0 |    0 | pp3  | pp4
+    1 |    1 | 0    | 0
+    2 |      | 1    | 1
+      |    1 | 1    | 
+      |    2 | 3    | 4
+(5 rows)
+
+drop table bypass_paral;
+drop table bypass_paral2;

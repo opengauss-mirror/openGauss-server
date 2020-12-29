@@ -1,0 +1,256 @@
+--test orc foreign data wrapper.
+--
+
+-- Settings to make the result deterministic
+SET datestyle = "ISO, YMD";
+set enable_vector_engine=false;
+set enable_hdfs_predicate_pushdown=false;
+
+--Unit 1. test plan without distributed clause
+DROP FOREIGN TABLE IF EXISTS lineitem;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table lineitem (
+L_ORDERKEY BIGINT NOT NULL
+, L_PARTKEY BIGINT NOT NULL
+, L_SUPPKEY BIGINT NOT NULL
+, L_LINENUMBER BIGINT NOT NULL
+, L_QUANTITY DECIMAL(15,2) NOT NULL
+, L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL
+, L_DISCOUNT DECIMAL(15,2) NOT NULL
+, L_TAX DECIMAL(15,2) NOT NULL
+, L_RETURNFLAG CHAR(1) NOT NULL
+, L_LINESTATUS CHAR(1) NOT NULL
+, L_SHIPDATE DATE NOT NULL
+, L_COMMITDATE DATE NOT NULL
+, L_RECEIPTDATE DATE NOT NULL
+, L_SHIPINSTRUCT CHAR(25) NOT NULL
+, L_SHIPMODE CHAR(10) NOT NULL
+, L_COMMENT VARCHAR(44) NOT NULL
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/lineitem_parquet/000000_0')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS nation;
+create foreign table nation  (
+N_NATIONKEY INT NOT NULL
+, N_NAME CHAR(25) NOT NULL
+, N_REGIONKEY INT NOT NULL
+, N_COMMENT VARCHAR(152)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/nation_parquet/000000_0')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS region;
+create foreign table region  (
+R_REGIONKEY INT NOT NULL
+, R_NAME TEXT NOT NULL
+, R_COMMENT VARCHAR(152)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/region_parquet/000000_0')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS part;
+create foreign table part  (
+P_PARTKEY BIGINT NOT NULL
+, P_NAME VARCHAR(55) NOT NULL
+, P_MFGR CHAR(25) NOT NULL
+, P_BRAND CHAR(10) NOT NULL
+, P_TYPE VARCHAR(25) NOT NULL
+, P_SIZE BIGINT NOT NULL
+, P_CONTAINER CHAR(10) NOT NULL
+, P_RETAILPRICE DECIMAL(15,2) NOT NULL
+, P_COMMENT VARCHAR(23) NOT NULL
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/part_parquet/000000_0')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS supplier;
+create foreign table supplier  (
+S_SUPPKEY BIGINT NOT NULL
+, S_NAME CHAR(25) NOT NULL
+, S_ADDRESS VARCHAR(40) NOT NULL
+, S_NATIONKEY INT NOT NULL
+, S_PHONE CHAR(15) NOT NULL
+, S_ACCTBAL DECIMAL(15,2) NOT NULL
+, S_COMMENT VARCHAR(101) NOT NULL
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/supplier_parquet/000000_0')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS partsupp;
+create foreign table partsupp (
+PS_PARTKEY BIGINT NOT NULL
+, PS_SUPPKEY BIGINT NOT NULL
+, PS_AVAILQTY BIGINT NOT NULL
+, PS_SUPPLYCOST DECIMAL(15,2) NOT NULL
+, PS_COMMENT VARCHAR(199) NOT NULL
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/partsupp_parquet/000000_0')
+distribute by roundrobin;
+
+analyze foreign tables;
+
+explain (verbose, costs off, nodes off) SELECT L_SHIPDATE FROM lineitem WHERE L_orderkey BETWEEN 509050 AND 509070;
+
+explain (verbose, costs off, nodes off) SELECT count(L_SHIPDATE) FROM lineitem WHERE L_orderkey BETWEEN 509050 AND 509070;
+
+explain (verbose, costs off, nodes off) select n_name, r_name from nation join region on n_regionkey=r_regionkey;
+
+explain (costs on, nodes off) select n_name from nation;
+
+--Test Unit 2: distributed foreign table
+DROP FOREIGN TABLE IF EXISTS lineitem;
+Create foreign table lineitem (
+L_ORDERKEY BIGINT NOT NULL
+, L_PARTKEY BIGINT NOT NULL
+, L_SUPPKEY BIGINT NOT NULL
+, L_LINENUMBER BIGINT NOT NULL
+, L_QUANTITY DECIMAL(15,2) NOT NULL
+, L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL
+, L_DISCOUNT DECIMAL(15,2) NOT NULL
+, L_TAX DECIMAL(15,2) NOT NULL
+, L_RETURNFLAG CHAR(1) NOT NULL
+, L_LINESTATUS CHAR(1) NOT NULL
+, L_SHIPDATE DATE NOT NULL
+, L_COMMITDATE DATE NOT NULL
+, L_RECEIPTDATE DATE NOT NULL
+, L_SHIPINSTRUCT CHAR(25) NOT NULL
+, L_SHIPMODE CHAR(10) NOT NULL
+, L_COMMENT VARCHAR(44) NOT NULL
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/lineitem_parquet')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS customer;
+CREATE FOREIGN TABLE customer ( 
+C_CUSTKEY BIGINT NOT NULL
+, C_NAME VARCHAR(25) NOT NULL
+, C_ADDRESS VARCHAR(40) NOT NULL
+, C_NATIONKEY INT NOT NULL
+, C_PHONE CHAR(15) NOT NULL
+, C_ACCTBAL DECIMAL(15,2) NOT NULL
+, C_MKTSEGMENT CHAR(10) NOT NULL
+, C_COMMENT VARCHAR(117) NOT NULL
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/customer_parquet/000000_0')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS orders;
+create foreign table orders (
+O_ORDERKEY BIGINT NOT NULL
+, O_CUSTKEY BIGINT NOT NULL
+, O_ORDERSTATUS CHAR(1) NOT NULL
+, O_TOTALPRICE DECIMAL(15,2) NOT NULL
+, O_ORDERDATE DATE NOT NULL
+, O_ORDERPRIORITY CHAR(15) NOT NULL
+, O_CLERK CHAR(15) NOT NULL
+, O_SHIPPRIORITY BIGINT NOT NULL
+, O_COMMENT VARCHAR(79) NOT NULL
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/orders_parquet')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS part;
+create foreign table part  (
+P_PARTKEY BIGINT NOT NULL
+, P_NAME VARCHAR(55) NOT NULL
+, P_MFGR CHAR(25) NOT NULL
+, P_BRAND CHAR(10) NOT NULL
+, P_TYPE VARCHAR(25) NOT NULL
+, P_SIZE BIGINT NOT NULL
+, P_CONTAINER CHAR(10) NOT NULL
+, P_RETAILPRICE DECIMAL(15,2) NOT NULL
+, P_COMMENT VARCHAR(23) NOT NULL
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/part_parquet/000000_0')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS supplier;
+create foreign table supplier  (
+S_SUPPKEY BIGINT NOT NULL
+, S_NAME CHAR(25) NOT NULL
+, S_ADDRESS VARCHAR(40) NOT NULL
+, S_NATIONKEY INT NOT NULL
+, S_PHONE CHAR(15) NOT NULL
+, S_ACCTBAL DECIMAL(15,2) NOT NULL
+, S_COMMENT VARCHAR(101) NOT NULL
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/supplier_parquet/000000_0')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS partsupp;
+create foreign table partsupp (
+PS_PARTKEY BIGINT NOT NULL
+, PS_SUPPKEY BIGINT NOT NULL
+, PS_AVAILQTY BIGINT NOT NULL
+, PS_SUPPLYCOST DECIMAL(15,2) NOT NULL
+, PS_COMMENT VARCHAR(199) NOT NULL
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/partsupp_parquet/000000_0')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS nation;
+create foreign table nation  (
+N_NATIONKEY INT NOT NULL
+, N_NAME CHAR(25) NOT NULL
+, N_REGIONKEY INT NOT NULL
+, N_COMMENT VARCHAR(152)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/nation_parquet/000000_0')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS region;
+create foreign table region  (
+R_REGIONKEY INT NOT NULL
+, R_NAME TEXT NOT NULL
+, R_COMMENT VARCHAR(152)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/region_parquet/000000_0')
+distribute by roundrobin;
+
+analyze foreign tables;
+
+explain (verbose, costs off, nodes off) SELECT count(t1.*) FROM region t1;
+SELECT count(t1.*) FROM region t1;
+explain (verbose, costs off, nodes off) SELECT count(*) FROM region;
+SELECT count(*) FROM region;
+SELECT region FROM region order by 1 limit 1;
+select sum(r_regionkey), count(row(array[r_regionkey, 2]))from region;
+-- there are bugs for the following three queries. cause EOF error from datanode
+explain (verbose, costs off, nodes off) SELECT L_shipdate FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+explain (costs on, nodes off) SELECT L_shipdate FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+explain (verbose, costs off, nodes off) SELECT count(L_shipdate) FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+
+-- TPCH - Q1
+explain (verbose, costs off, nodes off) SELECT 
+  L_RETURNFLAG, L_LINESTATUS, SUM(L_QUANTITY), SUM(L_EXTENDEDPRICE), SUM(L_EXTENDEDPRICE*(1-L_DISCOUNT)), SUM(L_EXTENDEDPRICE*(1-L_DISCOUNT)*(1+L_TAX)), AVG(L_QUANTITY), AVG(L_EXTENDEDPRICE), AVG(L_DISCOUNT), COUNT(1) 
+FROM 
+  lineitem 
+WHERE 
+  L_SHIPDATE<='1998-09-02' 
+GROUP BY L_RETURNFLAG, L_LINESTATUS 
+ORDER BY L_RETURNFLAG, L_LINESTATUS;
+
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+DROP SERVER hdfs_server CASCADE;

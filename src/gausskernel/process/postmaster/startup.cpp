@@ -32,7 +32,9 @@
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
 #include "utils/guc.h"
+#ifdef ENABLE_MOT
 #include "storage/mot/mot_fdw.h"
+#endif
 
 #include "gssignal/gs_signal.h"
 #include "access/parallel_recovery/dispatcher.h"
@@ -196,8 +198,6 @@ static void StartupReleaseAllLocks(int code, Datum arg)
  */
 void StartupProcessMain(void)
 {
-    knl_thread_set_name("StartupProcess");
-
     /*
      * Properly accept or ignore signals the postmaster might send us.
      *
@@ -233,6 +233,7 @@ void StartupProcessMain(void)
     (void)gspqsignal(SIGCONT, SIG_DFL);
     (void)gspqsignal(SIGWINCH, SIG_DFL);
 
+    (void)RegisterRedoInterruptCallBack(HandleStartupProcInterrupts);
     /*
      * Unblock signals (they were blocked when the postmaster forked us)
      */
@@ -246,6 +247,7 @@ void StartupProcessMain(void)
     } else {
         on_shmem_exit(StartupReleaseAllLocks, 0);
 
+#ifdef ENABLE_MOT
         /*
          * Init MOT first
          */
@@ -254,6 +256,7 @@ void StartupProcessMain(void)
         /*
          * MOT recovery is part of StartupXlog
          */
+#endif
         StartupXLOG();
     }
 
@@ -286,59 +289,54 @@ void PostRestoreCommand(void)
 
 bool IsFailoverTriggered(void)
 {
-    if (AmStartupProcess())
+    if (AmStartupProcess()) {
         return t_thrd.startup_cxt.failover_triggered;
-	else
-	{
-	    /* check for primary */
+    } else {
         uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
-		if (tgigger == (uint32)extreme_rto::TRIGGER_FAILOVER)
-	        return true;	
-	}
-	return false;
+        if (tgigger == (uint32)extreme_rto::TRIGGER_FAILOVER) {
+            return true;
+        }
+    }
+    return false;
 }
-
 
 bool IsSwitchoverTriggered(void)
 {
-    if (AmStartupProcess())
+    if (AmStartupProcess()) {
         return t_thrd.startup_cxt.switchover_triggered;
-    else
-	{
-	    /* check for primary */
+    } else {
         uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
-		if (tgigger == (uint32)extreme_rto::TRIGGER_SWITCHOVER)
-	        return true;
-	}
-	return false;
+        if (tgigger == (uint32)extreme_rto::TRIGGER_SWITCHOVER) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool IsPrimaryTriggered(void)
 {
-    if (AmStartupProcess())
+    if (AmStartupProcess()) {
         return t_thrd.startup_cxt.primary_triggered;
-    else
-	{
-	    /* check for primary */
+    } else {
         uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
-		if (tgigger == (uint32)extreme_rto::TRIGGER_PRIMARY)
-	        return true;
-	}
-	return false;
+        if (tgigger == (uint32)extreme_rto::TRIGGER_PRIMARY) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool IsStandbyTriggered(void)
 {
-    if (AmStartupProcess())
+    if (AmStartupProcess()) {
         return t_thrd.startup_cxt.standby_triggered;
-    else
-	{
-	    /* check for primary */
+    } else {
         uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
-		if (tgigger == (uint32)extreme_rto::TRIGGER_STADNBY)
-	        return true;
-	}
-	return false;
+        if (tgigger == (uint32)extreme_rto::TRIGGER_STADNBY) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void ResetFailoverTriggered(void)
@@ -426,3 +424,4 @@ static void SetStaticConnNum(void)
         SpinLockRelease(&hashmdata->mutex);
     }
 }
+

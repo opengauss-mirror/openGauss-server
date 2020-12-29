@@ -160,4 +160,13 @@ pqsigfunc pqsignal(int signo, pqsigfunc func)
 #endif /* !HAVE_POSIX_SIGNALS */
 }
 
+int install_signal(int signo, sa_sigaction_t func)
+{
+    struct sigaction sa;
+    sa.sa_flags = SA_SIGINFO;
+    sa.sa_sigaction = func;
+    (void)sigemptyset(&sa.sa_mask);
+
+    return sigaction(signo, &sa, NULL);
+}
 #endif /* WIN32 */

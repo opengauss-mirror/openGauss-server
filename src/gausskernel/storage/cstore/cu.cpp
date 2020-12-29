@@ -28,9 +28,9 @@
 #include "utils/rel_gs.h"
 #include "access/reloptions.h"
 #include "access/tupmacs.h"
-#include "knl/knl_session.h"
+#include "knl/knl_instance.h"
 #include "nodes/primnodes.h"
-#include "storage/cstore_compress.h"
+#include "storage/cstore/cstore_compress.h"
 #include "storage/cu.h"
 #include "utils/gs_bitmap.h"
 #include "utils/numeric.h"
@@ -39,6 +39,22 @@
 #include "port/pg_crc32c.h"
 #include "utils/builtins.h"
 #include "storage/time_series_compress.h"
+
+
+int CUAlignUtils::GetCuAlignSizeColumnId(int columnId)
+{
+    Assert(columnId > 0);
+    int align_size = ALIGNOF_CUSIZE;
+    if (columnId >= TS_COLUMN_ID_BASE) {
+        align_size = ALIGNOF_TIMESERIES_CUSIZE;
+    }
+    return align_size;
+}
+
+uint32 CUAlignUtils::AlignCuSize(int len, int align_size)
+{
+    return TYPEALIGN(((uint32)align_size), (len));
+}
 
 static inline int uint64_to_str(char* str, uint64 val)
 {
@@ -82,36 +98,36 @@ void CUDesc::Reset()
 FORCE_INLINE
 void CUDesc::SetNullCU()
 {
-    Assert((cu_mode & CU_MODE_LOWMASK) == 0);
-    cu_mode |= CU_FULL_NULL;
+    Assert(((uint32)cu_mode & CU_MODE_LOWMASK) == 0);
+    cu_mode = (int)((uint32)cu_mode | CU_FULL_NULL);
 }
 
 FORCE_INLINE
 void CUDesc::SetNormalCU()
 {
-    Assert((cu_mode & CU_MODE_LOWMASK) == 0);
-    cu_mode |= CU_NORMAL;
+    Assert(((uint32)cu_mode & CU_MODE_LOWMASK) == 0);
+    cu_mode = (int)((uint32)cu_mode | CU_NORMAL);
 }
 
 FORCE_INLINE
 void CUDesc::SetSameValCU()
 {
-    Assert((cu_mode & CU_MODE_LOWMASK) == 0);
-    cu_mode |= CU_SAME_VAL;
+    Assert(((uint32)cu_mode & CU_MODE_LOWMASK) == 0);
+    cu_mode = (int)((uint32)cu_mode | CU_SAME_VAL);
 }
 
 FORCE_INLINE
 void CUDesc::SetNoMinMaxCU()
 {
-    Assert((cu_mode & CU_MODE_LOWMASK) == 0);
-    cu_mode |= CU_NO_MINMAX_CU;
+    Assert(((uint32)cu_mode & CU_MODE_LOWMASK) == 0);
+    cu_mode = (int)((uint32)cu_mode | CU_NO_MINMAX_CU);
 }
 
 FORCE_INLINE
 void CUDesc::SetCUHasNull()
 {
-    Assert((cu_mode & CU_MODE_LOWMASK) == 0);
-    cu_mode |= CU_HAS_NULL;
+    Assert(((uint32)cu_mode & CU_MODE_LOWMASK) == 0);
+    cu_mode = (int)((uint32)cu_mode | CU_HAS_NULL);
 }
 
 FORCE_INLINE
@@ -222,7 +238,7 @@ CU::CU()
 CU::~CU()
 {
     FreeSrcBuf();
-    
+
     m_nulls = NULL;
     m_tmpinfo = NULL;
     m_compressedBuf = NULL;
@@ -242,7 +258,13 @@ void CU::InitMem(uint32 initialSize, int rowCount, bool hasNull)
         m_bpNullRawSize = bitmap_size(rowCount);
     }
 
-    m_srcBufSize = initialSize + m_bpNullRawSize;
+    if (initialSize < UINT32_MAX - m_bpNullRawSize - 8) {
+        m_srcBufSize = initialSize + m_bpNullRawSize;
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                        errmsg("inititalSize is too large: initialSize(%u), m_bpNullRawSize(%u)",
+                               initialSize, m_bpNullRawSize)));
+    }
     Assert(m_srcBuf == NULL);
     // In order to avoid over-boundary read in the function readData, more 8 byte memory is allocated.
     m_srcBuf = (char*)CStoreMemAlloc::Palloc(m_srcBufSize + 8, !m_inCUCache);
@@ -320,8 +342,8 @@ bool CU::CheckCrc()
     bool isSame = EQ_CRC32C(m_crc, tmpCrc);
     if (unlikely(!isSame)) {
         ereport(WARNING,
-            (ERRCODE_DATA_CORRUPTED,
-                errmsg("CU verification failed, calculated checksum %u but expected %u", m_crc, tmpCrc)));
+                (ERRCODE_DATA_CORRUPTED,
+                 errmsg("CU verification failed, calculated checksum %u but expected %u", m_crc, tmpCrc)));
 
         if (u_sess->attr.attr_common.ignore_checksum_failure)
             return true;
@@ -342,8 +364,8 @@ bool CU::CheckMagic(uint32 magic) const
 
     if (unlikely(!is_same)) {
         ereport(WARNING,
-            (ERRCODE_DATA_CORRUPTED,
-                errmsg("CU magic verification failed, magic %u but expected %u", tmp_magic, magic)));
+                (ERRCODE_DATA_CORRUPTED,
+                 errmsg("CU magic verification failed, magic %u but expected %u", tmp_magic, magic)));
     }
 
     return is_same;
@@ -444,10 +466,10 @@ uint32 CU::GenerateCrc(uint16 info_mode) const
 
             if (!EQ_CRC32C(tmpCrc, sb8_crc32c)) {
                 ereport(ERROR,
-                    (errcode(ERRCODE_DATATYPE_MISMATCH),
-                        errmsg("the CRC32C checksum are different between SSE42 (0x%x) and SB8 (0x%x).",
-                            tmpCrc,
-                            sb8_crc32c)));
+                        (errcode(ERRCODE_DATATYPE_MISMATCH),
+                         errmsg("the CRC32C checksum are different between SSE42 (0x%x) and SB8 (0x%x).",
+                                tmpCrc,
+                                sb8_crc32c)));
             }
         }
 #endif
@@ -467,14 +489,14 @@ uint32 CU::GenerateCrc(uint16 info_mode) const
  * @IN valCount: values count
  * @See also:
  */
-void CU::Compress(int valCount, int16 compress_modes)
+void CU::Compress(int valCount, int16 compress_modes, int align_size)
 {
     errno_t rc;
 
     // Step 1: initialize allocate the size of compress_buffer
     // source data size + nulls bitmap size + header size
     // We guarantee that compress data size will not exceed it
-    m_compressedBufSize = ALLIGN_CUSIZE(m_srcDataSize + m_bpNullRawSize + sizeof(CU));
+    m_compressedBufSize = CUAlignUtils::AlignCuSize(m_srcDataSize + m_bpNullRawSize + sizeof(CU), align_size);
     m_compressedBuf = (char*)CStoreMemAlloc::Palloc(m_compressedBufSize, !m_inCUCache);
 
     int16 headerLen = GetCUHeaderSize();
@@ -486,7 +508,7 @@ void CU::Compress(int valCount, int16 compress_modes)
     // Step 3: Compress data
     bool compressed = false;
     if (COMPRESS_NO != heaprel_get_compression_from_modes(compress_modes))
-        compressed = CompressData(buf, valCount, compress_modes);
+        compressed = CompressData(buf, valCount, compress_modes, align_size);
 
     // case 1: user defines that input data shouldn't be compressed.
     // case 2: even though user has defined to compress data, but the compressed data' size
@@ -496,7 +518,7 @@ void CU::Compress(int valCount, int16 compress_modes)
         rc = memcpy_s(buf, m_srcDataSize, m_srcData, m_srcDataSize);
         securec_check(rc, "\0", "\0");
         m_cuSizeExcludePadding = headerLen + m_bpNullCompressedSize + m_srcDataSize;
-        m_cuSize = ALLIGN_CUSIZE(m_cuSizeExcludePadding);
+        m_cuSize = CUAlignUtils::AlignCuSize(m_cuSizeExcludePadding, align_size);
         PADDING_CU(buf + m_srcDataSize, m_cuSize - m_cuSizeExcludePadding);
     }
 
@@ -519,11 +541,11 @@ void CU::Compress(int valCount, int16 compress_modes)
 int16 CU::GetCUHeaderSize(void) const
 {
     return sizeof(m_crc) +   // CRC
-        sizeof(m_magic) +    // magic
-        sizeof(m_infoMode) + // Info data
-                             // Nulls Bitmap if it's compressed
-        (HasNullValue() ? sizeof(m_bpNullCompressedSize) : 0) + sizeof(m_srcDataSize) + // uncompressed data size
-        sizeof(int);                                                                    // compressed data size
+            sizeof(m_magic) +    // magic
+            sizeof(m_infoMode) + // Info data
+            // Nulls Bitmap if it's compressed
+            (HasNullValue() ? sizeof(m_bpNullCompressedSize) : 0) + sizeof(m_srcDataSize) + // uncompressed data size
+            sizeof(int);                                                                    // compressed data size
 }
 
 void CU::FillCompressBufHeader(void)
@@ -545,7 +567,7 @@ void CU::FillCompressBufHeader(void)
 
     if (HasNullValue()) {
         rc = memcpy_s(
-            buf + pos, sizeof(m_bpNullCompressedSize), &m_bpNullCompressedSize, sizeof(m_bpNullCompressedSize));
+                 buf + pos, sizeof(m_bpNullCompressedSize), &m_bpNullCompressedSize, sizeof(m_bpNullCompressedSize));
         securec_check(rc, "\0", "\0");
         pos += sizeof(m_bpNullCompressedSize);
     }
@@ -589,7 +611,7 @@ char* CU::CompressNullBitmapIfNeed(_in_ char* buf)
  * @Return:
  * @See also:
  */
-bool CU::CompressData(_out_ char* outBuf, _in_ int nVals, _in_ int16 compress_modes)
+bool CU::CompressData(_out_ char* outBuf, _in_ int nVals, _in_ int16 compress_modes, int align_size)
 {
     int compressOutSize = 0;
     bool beDelta2Compressed = false;
@@ -610,7 +632,7 @@ bool CU::CompressData(_out_ char* outBuf, _in_ int nVals, _in_ int16 compress_mo
     /* set compression filter for this CU data */
     compression_options* ref_filter = (compression_options*)m_tmpinfo->m_options;
 
-    if (u_sess->attr.attr_common.enable_tsdb && (ATT_IS_TIMESTAMP(m_atttypid) || ATT_IS_FLOAT(m_atttypid))) {
+    if (g_instance.attr.attr_common.enable_tsdb && (ATT_IS_TIMESTAMP(m_atttypid) || ATT_IS_FLOAT(m_atttypid))) {
         SequenceCodec sequenceCoder(m_eachValSize, m_atttypid);
         compressOutSize = sequenceCoder.compress(input, output);
         if (ATT_IS_TIMESTAMP(m_atttypid)) {
@@ -692,7 +714,7 @@ bool CU::CompressData(_out_ char* outBuf, _in_ int nVals, _in_ int16 compress_mo
         m_infoMode |= (output.modes & CU_INFOMASK1);
 
         m_cuSizeExcludePadding = (outBuf - m_compressedBuf) + compressOutSize;
-        m_cuSize = ALLIGN_CUSIZE(m_cuSizeExcludePadding);
+        m_cuSize = CUAlignUtils::AlignCuSize(m_cuSizeExcludePadding, align_size);
         Assert(m_cuSize <= m_compressedBufSize);
         PADDING_CU(m_compressedBuf + m_cuSizeExcludePadding, m_cuSize - m_cuSizeExcludePadding);
 
@@ -707,7 +729,7 @@ bool CU::CompressData(_out_ char* outBuf, _in_ int nVals, _in_ int16 compress_mo
     return false;
 }
 
-void CU::UnCompress(_in_ int rowCount, _in_ uint32 magic)
+void CU::UnCompress(_in_ int rowCount, _in_ uint32 magic, int align_size)
 {
     Assert(m_compressedBuf && m_compressedBufSize > 0);
     Assert(m_cuSize > 0);
@@ -715,12 +737,12 @@ void CU::UnCompress(_in_ int rowCount, _in_ uint32 magic)
 
     if (unlikely(!(m_compressedBuf && m_compressedBufSize > 0) || !(m_cuSize > 0))) {
         ereport(ERROR,
-            (errcode(ERRCODE_OUT_OF_MEMORY),
-                errmsg("Find invalid compressed buffer or invalid CU while uncompressing.")));
+                (errcode(ERRCODE_OUT_OF_MEMORY),
+                 errmsg("Find invalid compressed buffer or invalid CU while uncompressing.")));
     }
 
     // Step 1: UnCompress CU header
-    char* buf = UnCompressHeader(magic);
+    char* buf = UnCompressHeader(magic, align_size);
 
     Assert((HasNullValue() && (m_bpNullCompressedSize <= bitmap_size(rowCount))) ||
            (!HasNullValue() && (m_bpNullCompressedSize == 0)));
@@ -757,7 +779,7 @@ void CU::UnCompress(_in_ int rowCount, _in_ uint32 magic)
     m_cache_compressed = false;
 }
 
-char* CU::UnCompressHeader(_in_ uint32 magic)
+char* CU::UnCompressHeader(_in_ uint32 magic, int align_size)
 {
     int pos = 0;
 
@@ -771,8 +793,8 @@ char* CU::UnCompressHeader(_in_ uint32 magic)
 
     if (magic != m_magic)
         ereport(PANIC,
-            (errmsg(
-                "magic is not matched, maybe data has corrupted, cudesc magic(%u) stored magic(%u)", magic, m_magic)));
+                (errmsg(
+                     "magic is not matched, maybe data has corrupted, cudesc magic(%u) stored magic(%u)", magic, m_magic)));
 
     m_infoMode = *(int16*)(m_compressedBuf + pos);
     pos += sizeof(m_infoMode);
@@ -790,17 +812,18 @@ char* CU::UnCompressHeader(_in_ uint32 magic)
 
     Assert(pos == GetCUHeaderSize());
     m_cuSizeExcludePadding = (pos + m_bpNullCompressedSize + cmprDataSize);
-    if (m_cuSize != ALLIGN_CUSIZE(m_cuSizeExcludePadding)) {
+    uint32 align_cu_size = (uint32)CUAlignUtils::AlignCuSize(m_cuSizeExcludePadding, align_size);
+    if (m_cuSize != align_cu_size) {
         // this may caused by upgrade
         if (m_cuSize == ALLIGN_CUSIZE32(m_cuSizeExcludePadding) ||
             m_cuSize == ALIGNOF_CUSIZE512(m_cuSizeExcludePadding)) {
             return m_compressedBuf + pos;
         }
         ereport(ERROR,
-            (errcode(ERRCODE_OUT_OF_MEMORY),
-                errmsg("CU size error, %u in CU descriptor but %lu in CU header",
-                    m_cuSize,
-                    ALLIGN_CUSIZE(m_cuSizeExcludePadding))));
+                (errcode(ERRCODE_OUT_OF_MEMORY),
+                 errmsg("CU size error, %u in CU descriptor but %u in CU header",
+                        m_cuSize,
+                        align_cu_size)));
     }
 
     return m_compressedBuf + pos;
@@ -846,7 +869,12 @@ void CU::UncompressNumeric(char* inBuf, int nNotNulls, int typmode)
 
     if ((this->m_infoMode & CU_INFOMASK1) & (~CU_IntLikeCompressed)) {
         /// decompress directly using lz4/zlib method.
-        tmpOutBufSize = this->m_srcDataSize;
+        if (this->m_srcDataSize < INT_MAX - 8) {
+            tmpOutBufSize = this->m_srcDataSize;
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                            errmsg("this->m_srcDataSize is too large: %u", this->m_srcDataSize)));
+        }
 
         // In order to avoid over-boundary read in the function readData, more 8 byte memory is allocated.
         tmpOutBuf = (char*)palloc(tmpOutBufSize + 8);
@@ -858,17 +886,17 @@ void CU::UncompressNumeric(char* inBuf, int nNotNulls, int typmode)
         StringCoder strDecoder;
         err_code = strDecoder.Decompress(in, out);
         if (err_code <= 0) {
-            /// maybe it's not necessary but it's a good habit.
+            /// maybe i's not necessary but it'ts a good habit.
             /// this memory will be freed when aborting transaction.
             pfree(tmpOutBuf);
             tmpOutBuf = NULL;
             if (-2 == err_code) {
                 ereport(ERROR,
-                    (errcode(ERRCODE_OUT_OF_MEMORY),
-                        errmsg("memory is not enough during decompressing CU for integer type %d", (m_eachValSize))));
+                        (errcode(ERRCODE_OUT_OF_MEMORY),
+                         errmsg("memory is not enough during decompressing CU for integer type %d", (m_eachValSize))));
             } else {
                 ereport(PANIC,
-                    (errmsg("data corrupts during decompressing CU for integer type %d", (m_eachValSize))));
+                        (errmsg("data corrupts during decompressing CU for integer type %d", (m_eachValSize))));
             }
         }
         Assert(err_code == out.sz);
@@ -955,15 +983,15 @@ void CU::UnCompressData(char* buf, int rowCount)
 
         if (CU_Delta2Compressed == (m_infoMode & CU_COMPRESS_MASK1)) {
             ereport(DEBUG1,
-                (errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg("CU::UnCompressdaData use delta2 uncompress, m_infoMode (0x%hx)", m_infoMode)));
+                    (errcode(ERRCODE_DATATYPE_MISMATCH),
+                     errmsg("CU::UnCompressdaData use delta2 uncompress, m_infoMode (0x%hx)", m_infoMode)));
             SequenceCodec sequenceCoder(sizeof(int64), m_atttypid);
             err_code = sequenceCoder.decompress(in, out);
         } else if (CU_XORCompressed == (m_infoMode & CU_COMPRESS_MASK1)) {
             // XOR Decompress
             ereport(DEBUG1,
-                (errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg("CU::UnCompressdaData use XOR uncompress, m_infoMode (0x%hx)", m_infoMode)));
+                    (errcode(ERRCODE_DATATYPE_MISMATCH),
+                     errmsg("CU::UnCompressdaData use XOR uncompress, m_infoMode (0x%hx)", m_infoMode)));
             SequenceCodec sequenceCoder(eachValSize, m_atttypid);
             err_code = sequenceCoder.decompress(in, out);
         } else {
@@ -1001,8 +1029,8 @@ void CU::UnCompressData(char* buf, int rowCount)
         if (err_code <= 0) {
             if (-2 == err_code)
                 ereport(ERROR,
-                    (errcode(ERRCODE_OUT_OF_MEMORY),
-                        errmsg("memory is not enough during decompressing CU for integer type %d", (m_eachValSize))));
+                        (errcode(ERRCODE_OUT_OF_MEMORY),
+                         errmsg("memory is not enough during decompressing CU for integer type %d", (m_eachValSize))));
             else
                 ereport(PANIC, (errmsg("data corrupts during decompressing CU for integer type %d", (m_eachValSize))));
         }
@@ -1126,7 +1154,7 @@ void CU::FormValuesOffset(int rows)
      * If this CU is IntLikeCompressed, numeric type, not null value and all data
      * in the numeric CU can be transformed to Int64, we can calculate the offset in the fast way.
      */
-    if ((m_infoMode & CU_IntLikeCompressed) 
+    if ((m_infoMode & CU_IntLikeCompressed)
         && ATT_IS_NUMERIC_TYPE(m_atttypid) && !hasNull && m_numericIntLike) {
         for (int i = 1; i < rows + 1; ++i) {
             this->m_offset[i] = i * NUMERIC_64SZ;
@@ -1151,8 +1179,8 @@ void CU::FormValuesOffset(int rows)
                  */
                 if (unlikely((uint32)tmp > this->m_srcBufSize)) {
                     ereport(defence_errlevel(),
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                            errmsg("The offset is incorrect, idx = %d, offset = %d.", i, tmp)));
+                            (errcode(ERRCODE_INTERNAL_ERROR),
+                             errmsg("The offset is incorrect, idx = %d, offset = %d.", i, tmp)));
                 }
             }
         }
@@ -1167,8 +1195,8 @@ void CU::FormValuesOffset(int rows)
             /* Check the valid offset. */
             if (unlikely((uint32)this->m_offset[i] > this->m_srcBufSize)) {
                 ereport(defence_errlevel(),
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                        errmsg("The offset is incorrect, idx = %d, offset = %d.", i, tmp)));
+                        (errcode(ERRCODE_INTERNAL_ERROR),
+                         errmsg("The offset is incorrect, idx = %d, offset = %d.", i, tmp)));
             }
         }
     } else if (this->m_eachValSize > 0) {
@@ -1279,9 +1307,9 @@ int CU::ToVectorLateRead<8, false>(_in_ ScalarVector* tids, _out_ ScalarVector* 
         /* rowCnt is point to the first tid in the next contiguous data. */
         --rowCnt;
         errno_t rc = memcpy_s((char*)(vec->m_vals + pos),
-            (size_t)(contiguous << 3),
-            ((uint64*)this->m_srcData + firstOffset),
-            (size_t)(contiguous << 3));
+                              (size_t)(contiguous << 3),
+                              ((uint64*)this->m_srcData + firstOffset),
+                              (size_t)(contiguous << 3));
         securec_check(rc, "\0", "\0");
 
         pos += contiguous;
@@ -1349,7 +1377,7 @@ int CU::ToVectorLateRead<-1, false>(_in_ ScalarVector* tids, _out_ ScalarVector*
             *dest++ = (ScalarValue)(base + *offset++);
             *dest++ = (ScalarValue)(base + *offset++);
         }
-        for (int k = 0; k < (contiguous & 0x3); k++)
+        for (uint32 k = 0; k < ((uint32)contiguous & 0x3); k++)
             *dest++ = (ScalarValue)(base + *offset++);
         pos += contiguous;
     }
@@ -1374,40 +1402,9 @@ template int CU::ToVectorLateRead<16, false>(ScalarVector*, ScalarVector*);
 template int CU::ToVectorLateRead<-1, false>(ScalarVector*, ScalarVector*);
 template int CU::ToVectorLateRead<-2, false>(ScalarVector*, ScalarVector*);
 
-template <int attlen, bool hasDeadRow>
-int CU::ToVector(_out_ ScalarVector* vec, _in_ int leftRows, _in_ int rowCursorInCU, __inout int& curScanPos,
-    _out_ int& deadRows, _in_ uint8* cuDelMask)
-{
-    int num = 0;
-
-    if (!this->HasNullValue())
-        num = this->ToVectorT<attlen, false, hasDeadRow>(vec, leftRows, rowCursorInCU, curScanPos, deadRows, cuDelMask);
-    else
-        num = this->ToVectorT<attlen, true, hasDeadRow>(vec, leftRows, rowCursorInCU, curScanPos, deadRows, cuDelMask);
-    return num;
-}
-
-// enumerate possible instances
-template int CU::ToVector<1, true>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<2, true>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<4, true>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<8, true>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<12, true>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<16, true>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<-1, true>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<-2, true>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<1, false>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<2, false>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<4, false>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<8, false>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<12, false>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<16, false>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<-1, false>(ScalarVector*, int, int, int&, int&, uint8*);
-template int CU::ToVector<-2, false>(ScalarVector*, int, int, int&, int&, uint8*);
-
 template <int attlen, bool hasNull, bool hasDeadRow>
 int CU::ToVectorT(_out_ ScalarVector* vec, _in_ int leftRows, _in_ int rowCursorInCU, __inout int& curScanPos,
-    _out_ int& deadRows, _in_ uint8* cuDelMask)
+                  _out_ int& deadRows, _in_ uint8* cuDelMask)
 {
     ScalarValue* dest = vec->m_vals;
     char* src = m_srcData + curScanPos;
@@ -1440,7 +1437,7 @@ int CU::ToVectorT(_out_ ScalarVector* vec, _in_ int leftRows, _in_ int rowCursor
             // Now this is a live row
             switch (attlen) {
                 case sizeof(char):
-                    dest[pos] = *src;
+                    dest[pos] = *(uint8 *)src;
                     src += sizeof(char);
                     curScanPos += sizeof(char);
                     break;
@@ -1504,7 +1501,7 @@ int CU::ToVectorT(_out_ ScalarVector* vec, _in_ int leftRows, _in_ int rowCursor
 // i.e., (attlen == -1), by copying all elements in one batch togeher.
 template <>
 int CU::ToVectorT<-1, false, false>(_out_ ScalarVector* vec, _in_ int leftRows, _in_ int rowCursorInCU,
-    __inout int& curScanPos, _out_ int& deadRows, _in_ uint8* cuDelMask)
+                                    __inout int& curScanPos, _out_ int& deadRows, _in_ uint8* cuDelMask)
 {
     Assert((uint32)curScanPos < this->m_srcBufSize);
     Assert((uint32)rowCursorInCU < (this->m_offsetSize / sizeof(int32)));
@@ -1542,7 +1539,7 @@ int CU::ToVectorT<-1, false, false>(_out_ ScalarVector* vec, _in_ int leftRows, 
 // A specilized tempalte optimized implementation when *attlen* is 8.
 template <>
 int CU::ToVectorT<8, false, false>(_out_ ScalarVector* vec, _in_ int leftRows, _in_ int rowCursorInCU,
-    __inout int& curScanPos, _out_ int& deadRows, _in_ uint8* cuDelMask)
+                                   __inout int& curScanPos, _out_ int& deadRows, _in_ uint8* cuDelMask)
 {
     Assert(sizeof(ScalarValue) == 8);
 
@@ -1562,6 +1559,37 @@ int CU::ToVectorT<8, false, false>(_out_ ScalarVector* vec, _in_ int leftRows, _
 
     return totalRows;
 }
+
+template <int attlen, bool hasDeadRow>
+int CU::ToVector(_out_ ScalarVector* vec, _in_ int leftRows, _in_ int rowCursorInCU, __inout int& curScanPos,
+                 _out_ int& deadRows, _in_ uint8* cuDelMask)
+{
+    int num = 0;
+
+    if (!this->HasNullValue())
+        num = this->ToVectorT<attlen, false, hasDeadRow>(vec, leftRows, rowCursorInCU, curScanPos, deadRows, cuDelMask);
+    else
+        num = this->ToVectorT<attlen, true, hasDeadRow>(vec, leftRows, rowCursorInCU, curScanPos, deadRows, cuDelMask);
+    return num;
+}
+
+// enumerate possible instances
+template int CU::ToVector<1, true>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<2, true>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<4, true>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<8, true>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<12, true>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<16, true>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<-1, true>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<-2, true>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<1, false>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<2, false>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<4, false>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<8, false>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<12, false>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<16, false>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<-1, false>(ScalarVector*, int, int, int&, int&, uint8*);
+template int CU::ToVector<-2, false>(ScalarVector*, int, int, int&, int&, uint8*);
 
 FORCE_INLINE
 bool CU::HasNullValue() const
@@ -1671,3 +1699,77 @@ void CU::CUDataDecrypt(char* buf)
         m_infoMode &= ~CU_ENCRYPT;
     }
 }
+
+/* 
+ * @description: memmove cu.m_srcData to cu.m_srcBuf + null_size
+ *               then copy null buffer to cu.m_srcBuf, ts function
+ * @param {CU}
+ * @param {bitmap*} : bitmap of null data
+ * @param {null_size*} : bitmap size
+ * @return {void} 
+ */
+void CU::copy_nullbuf_to_cu(const char* bitmap, uint16 null_size)
+{
+    errno_t rc = memmove_s(m_srcBuf + null_size, m_srcBufSize - null_size, m_srcData, m_srcDataSize);
+    securec_check(rc, "\0", "\0");
+    m_srcData = m_srcBuf + null_size;
+    m_nulls = (unsigned char*)m_srcBuf;
+    rc = memcpy_s(m_nulls, null_size, bitmap, null_size);
+    securec_check(rc, "\0", "\0");
+    m_bpNullRawSize = null_size;
+}
+
+/* 
+ * @description:  we estimate the memory size, not so exactly, ts function
+ * @param {reserved_cu_byte} 
+ * @return {uint32} total_field_srcbuf_size
+ */
+uint32 CU::init_field_mem(const int reserved_cu_byte)
+{
+    const uint32 field_srcbuf_init_size = 8 * 1024 * 1024; // 8M, just one estimated size without exact caculation
+    Size init_size = (Size)GetCUHeaderSize() + sizeof(Datum) + field_srcbuf_init_size;
+    init_size = MAXALIGN(init_size);
+    uint32 null_size = (uint32)bitmap_size(MAX_BATCH_ROWS);
+    m_inCUCache = true;
+    m_srcBufSize = init_size + null_size;
+    m_srcBuf = reinterpret_cast<char*>(CStoreMemAlloc::Palloc(m_srcBufSize + reserved_cu_byte, !m_inCUCache));
+    SetMagic((uint32)(GetCurrentTransactionIdIfAny()));
+    m_compressedBufSize =
+        CUAlignUtils::AlignCuSize(m_srcBufSize + null_size + sizeof(CU), ALIGNOF_TIMESERIES_CUSIZE);
+    m_compressedBuf = reinterpret_cast<char*>(CStoreMemAlloc::Palloc(m_compressedBufSize, !m_inCUCache));
+    return m_srcBufSize;
+}
+
+/* 
+ * @description:  Init time rows used memory in CU
+ * @param {CU}
+ * @return {} total_time_srcbuf_size
+ */
+uint32 CU::init_time_mem(const int reserved_cu_byte)
+{
+    Size init_size = (Size)GetCUHeaderSize() + sizeof(Datum) + sizeof(TimestampTz) * MAX_BATCH_ROWS;
+    init_size = MAXALIGN(init_size);
+    Size null_size = bitmap_size(MAX_BATCH_ROWS);
+    m_inCUCache = true;
+
+    m_srcBufSize = init_size + null_size;
+    m_srcBuf = reinterpret_cast<char*>(CStoreMemAlloc::Palloc(m_srcBufSize + reserved_cu_byte, !m_inCUCache));
+    SetMagic((uint32)(GetCurrentTransactionIdIfAny()));
+    m_compressedBufSize =
+        CUAlignUtils::AlignCuSize(m_srcBufSize + null_size + sizeof(CU), ALIGNOF_TIMESERIES_CUSIZE);
+    m_compressedBuf = reinterpret_cast<char*>(CStoreMemAlloc::Palloc(m_compressedBufSize, !m_inCUCache));
+    return m_srcBufSize;
+}
+
+void CU::check_cu_consistence(const CUDesc* cudesc) const
+{
+    if (m_srcBuf == NULL ||
+        (m_eachValSize < 0 && m_offset == NULL) ||
+        (HasNullValue() && m_offset == NULL) ||
+        (m_magic != cudesc->magic) ||
+        (m_cuSize != (uint32)cudesc->cu_size)) {
+            ereport(defence_errlevel(), (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("CU info dismatch CUDesc info.")));
+        }
+}
+

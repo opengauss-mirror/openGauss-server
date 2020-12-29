@@ -681,6 +681,10 @@ other			.
 
 {dolqdelim}		{
 					cur_state->dolqstart = pg_strdup(yytext);
+					if (cur_state->dolqstart == NULL) {
+						fprintf(stderr, "out of memory\n");
+						exit(1);
+					}
 					BEGIN(xdolq);
 					ECHO;
 				}
@@ -2208,15 +2212,19 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			state->count_to_read = -1;
 			break;
 		case IDEN_RETURN:
+                        /* when meet a RETURN, we can read max identify number is 7  */
+                        /* for example:RETURN INTEGER RETURNS NULL ON NULL INPUT  */
 			state->gram_state[IDEN_AS] = true;
 			state->gram_state[IDEN_IS] = true;
 			state->gram_state[IDEN_DETERMINISTIC] = true;
-			state->count_to_read = 5;
+			state->count_to_read = 7;
 			break;
 		case IDEN_DETERMINISTIC:
+                        /* when meet a DETERMINISTIC, we can read max identify number is 6  */
+                        /* for example:RETURN INTEGER DETERMINISTIC RETURNS NULL ON NULL INPUT  */
 			state->gram_state[IDEN_AS] = true;
 			state->gram_state[IDEN_IS] = true;
-			state->count_to_read = 1;
+			state->count_to_read = 6;
 			break;
 		case IDEN_RETURNS:
 			break;

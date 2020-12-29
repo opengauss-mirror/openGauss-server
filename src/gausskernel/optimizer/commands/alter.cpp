@@ -16,6 +16,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
@@ -53,6 +54,9 @@ void ExecRenameStmt(RenameStmt* stmt)
 {
     switch (stmt->renameType) {
         case OBJECT_AGGREGATE:
+            /* Given ordered set aggregate with no direct args, aggr_args variable is modified in gram.y.
+               So the parse of aggr_args should be changed. See gram.y for detail. */
+            stmt->objarg = (List*)linitial(stmt->objarg);
             RenameAggregate(stmt->object, stmt->objarg, stmt->newname);
             break;
 
@@ -133,9 +137,11 @@ void ExecRenameStmt(RenameStmt* stmt)
         case OBJECT_TABLE:
         case OBJECT_SEQUENCE:
         case OBJECT_VIEW:
+        case OBJECT_CONTQUERY:
         case OBJECT_MATVIEW:
         case OBJECT_INDEX:
         case OBJECT_FOREIGN_TABLE:
+        case OBJECT_STREAM:
             RenameRelation(stmt);
             break;
 
@@ -188,6 +194,9 @@ void ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt* stmt)
 {
     switch (stmt->objectType) {
         case OBJECT_AGGREGATE:
+            /* Given ordered set aggregate with no direct args, aggr_args variable is modified in gram.y.
+               So the parse of aggr_args should be changed. See gram.y for detail. */
+            stmt->objarg = (List*)linitial(stmt->objarg);
             AlterFunctionNamespace(stmt->object, stmt->objarg, true, stmt->newschema);
             break;
 
@@ -222,13 +231,20 @@ void ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt* stmt)
         case OBJECT_SEQUENCE:
         case OBJECT_TABLE:
         case OBJECT_VIEW:
+        case OBJECT_CONTQUERY:
         case OBJECT_MATVIEW:
         case OBJECT_FOREIGN_TABLE:
+        case OBJECT_STREAM:
             if (stmt->objectType == OBJECT_FOREIGN_TABLE)
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("Un-support feature"),
                         errdetail("target table is a foreign table")));
+            if (stmt->objectType == OBJECT_STREAM)
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Un-support feature"),
+                        errdetail("target table is a stream")));
             AlterTableNamespace(stmt);
             break;
 
@@ -389,7 +405,8 @@ Oid AlterObjectNamespace(Relation rel, int oidCacheId, int nameCacheId, Oid obji
             (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for object %u of catalog \"%s\"", objid, RelationGetRelationName(rel))));
 
-    name = heap_getattr(tup, Anum_name, RelationGetDescr(rel), &isnull);
+    // AM_TODO: system table access, not necessary to use API
+    name = tableam_tops_tuple_getattr(tup, Anum_name, RelationGetDescr(rel), &isnull);
     Assert(!isnull);
     nmspace = heap_getattr(tup, Anum_namespace, RelationGetDescr(rel), &isnull);
     Assert(!isnull);
@@ -421,7 +438,7 @@ Oid AlterObjectNamespace(Relation rel, int oidCacheId, int nameCacheId, Oid obji
         /* User must have CREATE privilege on new namespace */
         aclresult = pg_namespace_aclcheck(nspOid, GetUserId(), ACL_CREATE);
         if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(nspOid, true));
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(nspOid));
     }
 
     /*
@@ -434,7 +451,7 @@ Oid AlterObjectNamespace(Relation rel, int oidCacheId, int nameCacheId, Oid obji
             (errcode(ERRCODE_DUPLICATE_OBJECT),
                 errmsg("%s already exists in schema \"%s\"",
                     getObjectDescriptionOids(classId, objid),
-                    get_namespace_name(nspOid, true))));
+                    get_namespace_name(nspOid))));
 
     /* Build modified tuple */
     values = (Datum*)palloc0(RelationGetNumberOfAttributes(rel) * sizeof(Datum));
@@ -442,7 +459,7 @@ Oid AlterObjectNamespace(Relation rel, int oidCacheId, int nameCacheId, Oid obji
     replaces = (bool*)palloc0(RelationGetNumberOfAttributes(rel) * sizeof(bool));
     values[Anum_namespace - 1] = ObjectIdGetDatum(nspOid);
     replaces[Anum_namespace - 1] = true;
-    newtup = heap_modify_tuple(tup, RelationGetDescr(rel), values, nulls, replaces);
+    newtup = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel), values, nulls, replaces);
 
     /* Perform actual update */
     simple_heap_update(rel, &tup->t_self, newtup);
@@ -465,21 +482,13 @@ Oid AlterObjectNamespace(Relation rel, int oidCacheId, int nameCacheId, Oid obji
  */
 void ExecAlterOwnerStmt(AlterOwnerStmt* stmt)
 {
-    const char* newOwnerName = stmt->newowner;
-    Oid newowner;
-    if (strcmp(newOwnerName, "current_user") == 0) {
-        /* CURRENT_USER */
-        newowner = GetUserId();
-    } else if (strcmp(newOwnerName, "session_user") == 0) {
-        /* SESSION_USER */
-        newowner = GetSessionUserId();
-    } else {
-        /* Normal User */
-        newowner = get_role_oid(newOwnerName, false);
-    }
+    Oid newowner = get_role_oid(stmt->newowner, false);
 
     switch (stmt->objectType) {
         case OBJECT_AGGREGATE:
+            /* Given ordered set aggregate with no direct args, aggr_args variable is modified in gram.y.
+               So the parse of aggr_args should be changed. See gram.y for detail. */
+            stmt->objarg = (List*)linitial(stmt->objarg);
             AlterAggregateOwner(stmt->object, stmt->objarg, newowner);
             break;
 

@@ -22,6 +22,7 @@
  * ---------------------------------------------------------------------------------------
  */
 #include "access/cstore_psort.h"
+#include "access/tableam.h"
 #include "storage/cu.h"
 #include "utils/datum.h"
 #include "utils/memutils.h"
@@ -86,10 +87,10 @@ CStorePSort::CStorePSort(Relation rel, AttrNumber* sortKeys, int keyNum, int typ
     }
 
     m_psortMemContext = AllocSetContextCreate(CurrentMemoryContext,
-        "PartialSort",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+                                              "PartialSort",
+                                              ALLOCSET_DEFAULT_MINSIZE,
+                                              ALLOCSET_DEFAULT_INITSIZE,
+                                              ALLOCSET_DEFAULT_MAXSIZE);
 
     // WARNING: all the following variables should be regenerated
     // after m_psortMemContext is reset.
@@ -98,15 +99,14 @@ CStorePSort::CStorePSort(Relation rel, AttrNumber* sortKeys, int keyNum, int typ
 
     if (m_type == TUPLE_SORT) {
         m_tupleSortState = tuplesort_begin_heap(m_tupDesc,
-            m_keyNum,
-            m_sortKeys,
-            m_sortOperators,
-            m_sortCollations,
-            m_nullsFirst,
-            sortMem,
-            NULL,
-            false,
-            canSpreadmaxMem);
+                                                m_keyNum,
+                                                m_sortKeys,
+                                                m_sortOperators,
+                                                m_sortCollations,
+                                                m_nullsFirst,
+                                                sortMem,
+                                                false,
+                                                canSpreadmaxMem);
 
         m_funcGetBatchValue = &CStorePSort::GetBatchValueFromTupleSort;
 
@@ -115,14 +115,14 @@ CStorePSort::CStorePSort(Relation rel, AttrNumber* sortKeys, int keyNum, int typ
         m_tupleSlot = MakeSingleTupleTableSlot(m_tupDesc);
     } else {
         m_batchSortState = batchsort_begin_heap(m_tupDesc,
-            m_keyNum,
-            m_sortKeys,
-            m_sortOperators,
-            m_sortCollations,
-            m_nullsFirst,
-            sortMem,
-            false,
-            canSpreadmaxMem);
+                                                m_keyNum,
+                                                m_sortKeys,
+                                                m_sortOperators,
+                                                m_sortCollations,
+                                                m_nullsFirst,
+                                                sortMem,
+                                                false,
+                                                canSpreadmaxMem);
 
         m_funcGetBatchValue = &CStorePSort::GetBatchValueFromBatchSort;
 
@@ -189,17 +189,17 @@ void CStorePSort::InitPsortMemArg(MemInfoArg* ArgmemInfo)
          * m_psortMemInfo->MemSort is one partition sort Mem for partition table.
          */
         m_psortMemInfo->canSpreadmaxMem = (ArgmemInfo->canSpreadmaxMem - ArgmemInfo->MemInsert > 0) ?
-            ArgmemInfo->canSpreadmaxMem - ArgmemInfo->MemInsert :
-            0;
+                                        ArgmemInfo->canSpreadmaxMem - ArgmemInfo->MemInsert :
+                                        0;
         m_psortMemInfo->MemInsert = ArgmemInfo->MemInsert;
         m_psortMemInfo->MemSort = ArgmemInfo->MemSort;
         m_psortMemInfo->spreadNum = ArgmemInfo->spreadNum;
         m_psortMemInfo->partitionNum = ArgmemInfo->partitionNum;
         MEMCTL_LOG(DEBUG2,
-            "CStorePSort(init ArgmemInfo):Insert workmem is : %dKB, sort workmem: %dKB,can spread maxMem is %dKB.",
-            m_psortMemInfo->MemInsert,
-            m_psortMemInfo->MemSort,
-            m_psortMemInfo->canSpreadmaxMem);
+                   "CStorePSort(init ArgmemInfo):Insert workmem is : %dKB, sort workmem: %dKB,can spread maxMem is %dKB.",
+                   m_psortMemInfo->MemInsert,
+                   m_psortMemInfo->MemSort,
+                   m_psortMemInfo->canSpreadmaxMem);
     } else {
         m_psortMemInfo->canSpreadmaxMem = 0;
         m_psortMemInfo->MemInsert = 0;
@@ -227,7 +227,7 @@ void CStorePSort::PutTuple(Datum* values, bool* nulls)
 
     AutoContextSwitch memContextGuard(m_psortMemContext);
 
-    HeapTuple tuple = heap_form_tuple(m_tupDesc, values, nulls);
+    HeapTuple tuple = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, values, nulls, HEAP_TUPLE);
 
     TupleTableSlot* slot = MakeSingleTupleTableSlot(m_tupDesc);
 
@@ -286,8 +286,8 @@ VectorBatch* CStorePSort::GetVectorBatch()
     Assert(m_batchSortState && m_vecBatch && m_type == BATCH_SORT);
     if (unlikely(!(m_tupleSortState && m_tupleSlot && m_type == TUPLE_SORT))) {
         ereport(ERROR,
-            (errcode(ERRCODE_INTERNAL_ERROR),
-                errmsg("Invalid tupleSortState, tupleSlot, or sorting strategy while getting tuple in cstore psort.")));
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("Invalid tupleSortState, tupleSlot, or sorting strategy while getting tuple in cstore psort.")));
     }
     m_vecBatch->Reset(true);
     batchsort_getbatch(m_batchSortState, true, m_vecBatch);
@@ -299,8 +299,8 @@ TupleTableSlot* CStorePSort::GetTuple()
     Assert(m_tupleSortState && m_tupleSlot && m_type == TUPLE_SORT);
     if (unlikely(!(m_tupleSortState && m_tupleSlot && m_type == TUPLE_SORT))) {
         ereport(ERROR,
-            (errcode(ERRCODE_INTERNAL_ERROR),
-                errmsg("Invalid tupleSortState, tupleSlot, or sorting strategy while getting tuple in cstore psort.")));
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("Invalid tupleSortState, tupleSlot, or sorting strategy while getting tuple in cstore psort.")));
     }
     if (!TupIsNull(m_tupleSlot))
         (void)ExecClearTuple(m_tupleSlot);
@@ -354,15 +354,14 @@ void CStorePSort::ResetTupleSortState(bool endFlag)
 
     if (!endFlag) {
         m_tupleSortState = tuplesort_begin_heap(m_tupDesc,
-            m_keyNum,
-            m_sortKeys,
-            m_sortOperators,
-            m_sortCollations,
-            m_nullsFirst,
-            sortMem,
-            NULL,
-            false,
-            canSpreadMaxMem);
+                                                m_keyNum,
+                                                m_sortKeys,
+                                                m_sortOperators,
+                                                m_sortCollations,
+                                                m_nullsFirst,
+                                                sortMem,
+                                                false,
+                                                canSpreadMaxMem);
 
         m_tupleSlot = MakeSingleTupleTableSlot(m_tupDesc);
     }
@@ -391,14 +390,14 @@ void CStorePSort::ResetBatchSortState(bool endFlag)
 
     if (!endFlag) {
         m_batchSortState = batchsort_begin_heap(m_tupDesc,
-            m_keyNum,
-            m_sortKeys,
-            m_sortOperators,
-            m_sortCollations,
-            m_nullsFirst,
-            sortMem,
-            false,
-            canSpreadMaxMem);
+                                                m_keyNum,
+                                                m_sortKeys,
+                                                m_sortOperators,
+                                                m_sortCollations,
+                                                m_nullsFirst,
+                                                sortMem,
+                                                false,
+                                                canSpreadMaxMem);
 
         m_vecBatch = New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, m_tupDesc);
     }
@@ -418,7 +417,7 @@ void CStorePSort::GetBatchValueFromTupleSort(bulkload_rows* batchRowsPtr)
             break;
         }
 
-        heap_deform_tuple(slot->tts_tuple, m_tupDesc, m_val, m_null);
+        heap_deform_tuple((HeapTuple)slot->tts_tuple, m_tupDesc, m_val, m_null);
         if (batchRowsPtr->append_one_tuple(m_val, m_null, m_tupDesc))
             break;
     }
@@ -434,6 +433,7 @@ void CStorePSort::GetBatchValueFromBatchSort(bulkload_rows* batchRowsPtr)
     //
     Assert(batchRowsPtr->m_rows_maxnum > 0);
     Assert(batchRowsPtr->m_rows_maxnum % BatchMaxSize == 0);
+    bool is_start = true;
 
     if (BathCursorIsValid(m_vecBatchCursor)) {
         // first fetch tuples from last vector batch.
@@ -450,6 +450,7 @@ void CStorePSort::GetBatchValueFromBatchSort(bulkload_rows* batchRowsPtr)
         // it's fine to continue to hold more tuples.
         // first of all reset this cursor.
         m_vecBatchCursor = InvalidBathCursor;
+        is_start = false;
     }
 
     // here it isn't a dead loop.
@@ -462,7 +463,9 @@ void CStorePSort::GetBatchValueFromBatchSort(bulkload_rows* batchRowsPtr)
             // break if there isn't any tuple
             break;
         }
-        Assert(batchRowsPtr->m_rows_curnum % BatchMaxSize == 0);
+        if (is_start) {
+            Assert(batchRowsPtr->m_rows_curnum % BatchMaxSize == 0);
+        }
 
         // we have to copy datum, because it belongs to
         // m_vecBatch which is reset by batchsort_getbatch().

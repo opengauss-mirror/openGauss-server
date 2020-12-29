@@ -11,6 +11,7 @@
 subdir = src
 top_builddir = ..
 include Makefile.global
+-include distribute/Makefile.dist
 
 ifeq ($(enable_multiple_nodes), yes)
 SUBDIRS = \
@@ -23,9 +24,10 @@ SUBDIRS = \
 	lib/elog \
 	bin \
 	gausskernel \
-        common/backend/utils/mb/conversion_procs \
-        common/backend/snowball \
+	common/backend/utils/mb/conversion_procs \
+	common/backend/snowball \
 	include \
+	distribute/include \
 	common/pl \
 	makefiles \
 	distribute/test/regress \
@@ -35,10 +37,10 @@ SUBDIRS = \
 	lib \
 	common \
 	lib/elog \
-	gausskernel \
+	gausskernel $(dirs_in_central_mode) \
 	bin \
-        common/backend/utils/mb/conversion_procs \
-        common/backend/snowball \
+	common/backend/utils/mb/conversion_procs \
+	common/backend/snowball \
 	include \
 	common/pl \
 	makefiles \
@@ -51,12 +53,12 @@ endif
 
 # cm and gtm all depends on etcdapi, build it first
 ifeq ($(enable_multiple_nodes), yes)
-all: $(top_builddir)/src/distribute/cm/etcdapi/clientv3/libgoetcdapi.h
+all: $(top_builddir)/src/distribute/cm/cm_etcdapi/libgoetcdapi.h
 
-install: $(top_builddir)/src/distribute/cm/etcdapi/clientv3/libgoetcdapi.h
+install: $(top_builddir)/src/distribute/cm/cm_etcdapi/libgoetcdapi.h
 
-$(top_builddir)/src/distribute/cm/etcdapi/clientv3/libgoetcdapi.h:
-	$(MAKE) -C $(top_builddir)/src/distribute/cm/etcdapi/clientv3
+$(top_builddir)/src/distribute/cm/cm_etcdapi/libgoetcdapi.h:
+	$(MAKE) -C $(top_builddir)/src/distribute/cm/cm_etcdapi
 endif
 
 $(recurse)

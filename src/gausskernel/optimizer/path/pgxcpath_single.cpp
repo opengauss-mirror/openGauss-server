@@ -85,7 +85,7 @@ static RemoteQueryPath* create_remotequery_path(PlannerInfo* root, RelOptInfo* r
     rqpath->rqhas_unshippable_qual = unshippable_quals;
     rqpath->rqhas_unshippable_tlist = !pgxc_is_expr_shippable((Expr*)rel->reltargetlist, NULL);
 
-    /* PGXCTODO - set cost properly */
+    /* set cost properly */
     cost_remotequery(rqpath, root, rel);
 
     return rqpath;

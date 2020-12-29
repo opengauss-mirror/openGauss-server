@@ -361,8 +361,8 @@ select count(*) from tbl_part where a%2=0;
 (1 row)
 
 explain analyze select count(*) from tbl_part where a%2=0;
---?  .*QUERY PLAN
---? .*
+                                                                    QUERY PLAN                                                                    
+--------------------------------------------------------------------------------------------------------------------------------------------------
 --? Aggregate  (cost=.* rows=1 width=8) (actual time=.* rows=1 loops=1)
 --?   ->  Partition Iterator  (cost=.* rows=12 width=0) (actual time=.* rows=25 loops=1)
          Iterations: 5

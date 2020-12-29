@@ -35,7 +35,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = elog.o 
+OBJS = elog.o
 
 all:elog.a
 

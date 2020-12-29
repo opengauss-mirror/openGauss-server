@@ -1,0 +1,833 @@
+-- verify if the partitioned table reluples are set to zero in pg_class after truncate operation
+drop schema if exists PART_TRUN_TEST;
+create schema PART_TRUN_TEST;
+drop table if exists col_hash_emp_tb;
+create table col_hash_emp_tb(a bool, b real, c timestamp with time zone, d decimal) partition by range(b) (partition p1 start(1) end (223.237198) every(111));
+insert into col_hash_emp_tb (b) values(generate_series(1,100));
+analyze col_hash_emp_tb;
+select reltuples from pg_class where relname='col_hash_emp_tb';
+truncate col_hash_emp_tb;
+select reltuples from pg_class where relname='col_hash_emp_tb';
+drop table col_hash_emp_tb;
+drop schema PART_TRUN_TEST;
+---
+-- test range partition with START/END syntax. 2018/5/11
+--
+-- Part-1: test syntax logic and integer (smallint, int, bigint)
+-- Part-2: test float(float4, double) and numeric
+-- Part-3: test date and timestamp(6) without time zone
+-- Part-4: test timestamp(6) with time zone
+-- Part-5: test add partition with start/end
+-- Part-6: test split partition with start/end
+-- Part-7: start/end vs less/than
+-- Part-8: test other cases(col-table, tablespace, etc.)
+-- 
+
+drop schema if exists schema_start_end_s cascade;
+create schema schema_start_end_s;
+set current_schema=schema_start_end_s;
+set datestyle='ISO,MDY';
+set time zone 'PRC';
+---
+-- Part-1: test syntax logic and integer (smallint, int, bigint)
+---
+
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (''));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (0), partition p2 start(''));
+create table t1 (c1 int) partition by range(c1) (partition p1 end (1), partition p2 end (''));
+create table t1 (c1 int) partition by range(c1) (partition p1 start(0) end (10) every(''));
+create table t1 (c1 int) partition by range(c1) (partition p1 start(0) end ('') every(1));
+create table t1 (c1 int, c2 varchar(20)) partition by range(c2) (partition p1 start('a') end ('b'));
+
+create table t1 (c1 int) partition by range(c1) (partition p1 start (MINVALUE) end (MAXVALUE));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (-100) every (30));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (-30));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (101));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p1 end (MAXVALUE));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p1_1 end (500));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (-100));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (100), partition p2 start(20));
+create table t1 (c1 int) partition by range(c1) (partition p1 end (100), partition p2 end(20));
+create table t1 (c1 int, c2 int) partition by range (c1, c2) (partition p1 start(1));
+create table t1 (c1 int, c2 int) partition by range (c1) (partition p1 start(1, 2));
+
+create table t1 (c1 int) partition by range (c1) (partition p1 start(1));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int) partition by range (c1) (partition p1 end(1));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int) partition by range (c1) (partition p1 end(MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 start (40));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 start (200));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 start (100));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 end (20));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 end (200));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 start (40) end (200));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 start (200) end (400));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 start (100) end (200));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+create table t1 (c1 int) partition by range(c1) (partition p1 start (100), partition p2 start (40));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1), partition p2 start (200), partition p3 start(100));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (MAXVALUE), partition p2 start (100));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1), partition p2 start (100), partition p3 start(200));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100), partition p2 start (100), partition p3 end (200));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (200), partition p2 end(100));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (MAXVALUE) end (200), partition p2 end(300));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (200), partition p2 end(300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int) partition by range(c1) (partition p1 end (1), partition p2 end (MAXVALUE), partition p3 end(200));
+create table t1 (c1 int) partition by range(c1) (partition p1 end (1), partition p2 end (100), partition p3 end(200));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+create table t1 (c1 int) partition by range(c1) (
+	partition p1 end (1), 
+	partition p2 start(1), 
+	partition p3 start(100) end (200) every (50),
+	partition p4 start(200) end (1000) every (500),
+	partition p5 start (1000) end (MAXVALUE)
+);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+create table t1 (c1 int) partition by range(c1) (partition p1 start(1) end (200) every (50), partition p2 start(100) end (1000), partition p3 start(1000) end (2000));
+create table t1 (c1 int) partition by range(c1) (partition p1 start(1) end (200) every (50), partition p2 start(400) end (1000), partition p3 start(1000) end (2000));
+create table t1 (c1 int) partition by range(c1) (partition p1 start(1) end (200) every (50), partition p2 start(200) end (1000), partition p3 start(1000) end (2000));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- smallint: [-32768, 32767]
+-- start, end, every value must be a smallint; every value must be positive; partition number must be no more than 32767
+
+-- smallint-failure
+create table t1 (c1 smallint) partition by range(c1) (partition p1 end (-32769), partition p2 end (MAXVALUE));
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (0) end (32767) every (-1), partition p2 end (MAXVALUE));
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (1) end (-1) every (1), partition p2 end (MAXVALUE));
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (-32768) end (32767) every (1), partition p2 end (MAXVALUE));
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (-32768) end (32767) every (65535), partition p2 end (MAXVALUE));
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (0) end (32766) every (1), partition p2 end (MAXVALUE));
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (0) end (32765) every (1), partition p2 start(32765), partition p3 start(32766));
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (-32768) end (32767) every (32767), partition p2 end (MAXVALUE));
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (32761) end (32767) every (4), partition p2 end (MAXVALUE));
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (0.5) end (10) every(5));
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (1) end (10.1) every(5));
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (-1) end (10) every(5.01));
+
+-- smallint-success
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (-1.0) end (10) every(5.0));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 smallint) partition by range(c1) (partition p1 start (32761) end (32767) every (3), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 smallint) partition by range(c1) (
+	partition p1 end (-32768), 
+	partition p2 end (0), 
+	partition p3 end (100),
+	partition p4 start (100),
+	partition p5 start (200),
+	partition p6 start(400) end (1000) every (499),
+	partition p7 start(1000) end (10000) every (5001),
+	partition p8 start(10000) end (32767),
+	partition p9 end (MAXVALUE)
+);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- int: [-2147483648, 2147483647]
+-- start, end, every value must be a int; every value must be positive; partition number must be no more than 32767
+
+-- int-failure
+create table t1 (c1 int) partition by range(c1) (partition p1 end (-2147483649), partition p2 end (MAXVALUE));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (0) end (2147483647) every (-1), partition p2 end (MAXVALUE));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (-1) every (1), partition p2 end (MAXVALUE));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (-2147483648) end (2147483647) every (1), partition p2 end (MAXVALUE));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (-2147483648) end (2147483647) every (4294967295), partition p2 end (MAXVALUE));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (2147450881) end (2147483647) every (1), partition p2 end (MAXVALUE));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (-2147483648) end (2147483647) every (2147483647), partition p2 end (MAXVALUE));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (2147483641) end (2147483647) every (4), partition p2 end (MAXVALUE));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (0.5) end (10) every(5));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (10.1) every(5));
+create table t1 (c1 int) partition by range(c1) (partition p1 start (-1) end (10) every(5.01));
+
+-- int-success
+create table t1 (c1 int) partition by range(c1) (partition p1 start (-1.0) end (10) every(5.0));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int) partition by range(c1) (partition p1 start (2147483641) end (2147483647) every (3), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int) partition by range(c1) (
+	partition p1 end (-2147483648), 
+	partition p2 end (0), 
+	partition p3 end (100),
+	partition p4 start (100),
+	partition p5 start (200),
+	partition p6 start(400) end (1000) every (499),
+	partition p7 start(1000) end (10000) every (5001),
+	partition p8 start(10000) end (2147483647),
+	partition p9 end (MAXVALUE)
+);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- bigint: [-9223372036854775808, 9223372036854775807]
+-- start, end, every value must be a bigint; every value must be positive; partition number must be no more than 32767
+
+-- bigint-failure
+create table t1 (c1 bigint) partition by range(c1) (partition p1 end (-9223372036854775809), partition p2 end (MAXVALUE));
+create table t1 (c1 bigint) partition by range(c1) (partition p1 start (0) end (9223372036854775807) every (-1), partition p2 end (MAXVALUE));
+create table t1 (c1 bigint) partition by range(c1) (partition p1 start (1) end (-1) every (1), partition p2 end (MAXVALUE));
+create table t1 (c1 bigint) partition by range(c1) (partition p1 start (-9223372036854775808) end (9223372036854775807) every (1), partition p2 end (MAXVALUE));
+create table t1 (c1 bigint) partition by range(c1) (partition p1 start (-9223372036854775808) end (9223372036854775807) every (18446744073709551615), partition p2 end (MAXVALUE));
+create table t1 (c1 bigint) partition by range(c1) (partition p1 start (9223372036854743041) end (9223372036854775807) every (1), partition p2 end (MAXVALUE));
+create table t1 (c1 bigint) partition by range(c1) (partition p1 start (-9223372036854775808) end (9223372036854775807) every (9223372036854775807), partition p2 end (MAXVALUE));
+create table t1 (c1 bigint) partition by range(c1) (partition p1 start (9223372036854775801) end (9223372036854775807) every (4), partition p2 end (MAXVALUE));
+create table t1 (c1 bigint) partition by range(c1) (partition p1 start (0.5) end (10) every(5));
+create table t1 (c1 bigint) partition by range(c1) (partition p1 start (1) end (10.1) every(5));
+create table t1 (c1 bigint) partition by range(c1) (partition p1 start (-1) end (10) every(5.01));
+
+-- bigint-success
+create table t1 (c1 bigint) partition by range(c1) (partition p1 start (-1.0) end (10) every(5.0));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 bigint) partition by range(c1) (partition p1 start (9223372036854775801) end (9223372036854775807) every (3), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 bigint) partition by range(c1) (
+	partition p1 end (-9223372036854775808), 
+	partition p2 end (0), 
+	partition p3 end (100),
+	partition p4 start (100),
+	partition p5 start (200),
+	partition p6 start(400) end (1000) every (499),
+	partition p7 start(1000) end (10000) every (5001),
+	partition p8 start(10000) end (9223372036854775807),
+	partition p9 end (MAXVALUE)
+);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+---
+-- Part-2: test float(float4, float8) and numeric
+---
+
+-- float4-failure
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(1e39));
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 end(1e39));
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(0) end (1) every(1e39));
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(0) end (10.001) every(-1));
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(0) end (2e38) every(1e38));
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(0) end ('infinity') every(1));  -- not allowed
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(0) end (3.14) every('infinity'));
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start('infinity'), partition p2 start (0) end (3.14) every(1));
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(-1), partition p2 start (0) end (3.14) every(1), partition p3 end ('infinity'), partition p4 end (20.01));
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(1) end (1.00007) every(0.00001));  -- cast(0.00001 as float4) inaccurate, report ambiguous
+
+-- float4-success
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start('infinity'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 end ('infinity'), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(0) end (3.14) every(1), partition p2 end ('infinity')); -- it's ok
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(1.00001) end (10.00001) every(1)); -- cast(10.00001 as float4) == 10
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 float4) partition by range(c2) (
+	partition p1 start(1.00001) end (5.00007) every(1),
+	partition p2 end (8.1),
+	partition p3 start(8.1) end (20.03) every(4),
+	partition p4 start(20.03)
+);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- float8-failure
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(1e309));
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 end(1e309));
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (1) every(1e309));
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (1) every(1e39));
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (1) every(0));
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (1e308) every(9e307));
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end ('infinity') every(1));  -- not allowed
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (3.14) every('infinity'));
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start('infinity'), partition p2 start (0) end (3.14) every(1));
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(-1), partition p2 start (0) end (3.14) every(1), partition p3 end ('infinity'), partition p4 end (20.01));
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(1) end (1.000000000000007) every(0.000000000000001));  -- report ambiguous
+
+-- float8-success
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start('infinity'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 end ('infinity'), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (3.14) every(1), partition p2 end ('infinity')); -- it's ok
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(1) end (1.00000000000007) every(0.00000000000001));  -- ok, just do it
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(1) end (1.00007) every(0.00001));  -- cast(0.00001 as float8) == 0.000010000000000
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(1.00001) end (10.00001) every(1)); -- cast(10.00001 as float8) == 10.000010000000000
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (1e308) every(6e307));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 float8) partition by range(c2) (
+	partition p1 start(1.00001) end (5.00007) every(1),
+	partition p2 end (8.1),
+	partition p3 start(8.1) end (20.03) every(4.009),
+	partition p4 start(20.03)
+);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- numeric-failure
+create table t1 (c1 int, c2 numeric) partition by range(c2) (partition p1 start('nan') end (123.456) every (2.11));
+create table t1 (c1 int, c2 numeric) partition by range(c2) (partition p1 start(123.456) end ('nan') every (2.11));
+create table t1 (c1 int, c2 numeric) partition by range(c2) (partition p1 start(123.456) end (345.1) every ('nan'));
+create table t1 (c1 int, c2 numeric(15,4)) partition by range(c2) (partition p1 start('nan') end (123.456) every (2.11));
+create table t1 (c1 int, c2 numeric(15,4)) partition by range(c2) (partition p1 start(123.456) end ('nan') every (2.11));
+create table t1 (c1 int, c2 numeric(15,4)) partition by range(c2) (partition p1 start(123.456) end (345.1) every ('nan'));
+create table t1 (c1 int, c2 numeric) partition by range(c2) (partition p1 start(1.00000000000000000000000000000000000000001) end (1.00000000000000000000000000000000000000007) every (0.00000000000000000000000000000000000000007));
+create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (10000000000.00001) end (10000000000.00003)); -- 10000000000.00003::numeric(15,4) == 10000000000.0000
+create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (10000000000.00001) end (10000000000.00007) every (0.00001)); -- ambiguous partition rule
+create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (10000000000.0001) end (10000000000.0007) every (0.00001)); 
+create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (100000000000.0001) end (10000000000.0006) every (0.0002));
+create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (10000000000.0001) end (10000000000.0006) every (100000000000.0001));
+
+-- numeric-success
+create table t1 (c1 int, c2 numeric) partition by range(c2) (partition p1 start(1.00000000000000000000000000000000000000001) end (1.00000000000000000000000000000000000000007) every (0.00000000000000000000000000000000000000001));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (10000000000.0001) end (10000000000.0007) every (0.0001));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (99999999993.0001) end (99999999999.0006) every (3.0002));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 numeric) partition by range(c2) (
+	partition p1 start(1.00001) end (5.00007) every(1),
+	partition p2 end (8.1),
+	partition p3 start(8.1) end (20.03) every(4.009),
+	partition p4 start(20.03)
+);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 numeric(15,4)) partition by range(c2) (
+	partition p1 start(1.00001) end (5.00007) every(1),
+	partition p2 end (8.1),
+	partition p3 start(8.1) end (20.03) every(4.009),
+	partition p4 start(20.03)
+);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+---
+-- Part-3: test date and timestamp(6) without time zone, NOTE: date == timestamp(0) without time zone 
+---
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2012') end ('12-01-2014') every ('3 year'));
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2015') end ('12-01-2014') every ('1 year'));
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2012') end ('12-01-2014') every ('0 year'));
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2012') end ('12-01-2014') every ('1 year'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2019'), partition p2 start('12-01-2012') end ('12-01-2014') every ('1 year'), partition p3 end (MAXVALUE));
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2009'), partition p2 start('12-01-2012') end ('12-01-2014') every ('1 year'), partition p3 end ('12-01-2013'));
+
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2012') end ('12-01-2014') every ('1 year'), partition p3 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2012') end ('12-01-2013') every ('1 month'), partition p3 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2012') end ('12-05-2012') every ('1 day'), partition p3 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 16:13:14') every ('1 hour'), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 12:15:15') every ('1 minute'), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 12:13:18') every ('1 second'), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 12:13:18') every ('1.599999 second'), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- interval day to hour
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-03-2012 12:13:18') every (interval '1 12' day to hour), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-03-2012 12:13:18') every ('1 12:'), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- interval day to minute
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-03-2012 12:13:18') every (interval '1 12:12' day to minute), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-03-2012 12:13:18') every ('1 12:12'), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- interval day to second
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-03-2012 12:13:18') every (interval '1 12:12' day to second), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-03-2012 12:13:18') every ('1 12:12:12'), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- interval hour to minute
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 18:13:18') every (interval '1:12' hour to minute), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 18:13:18') every ('1:12'), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- interval hour to minute
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 18:13:18') every (interval '1:12:12' hour to second), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 18:13:18') every ('1:12:12'), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- interval minute to second
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 12:23:18') every (interval '1:12' minute to second), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 12:23:18') every ('0:1:12'), partition p2 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- general
+create table t1 (c1 int, c2 timestamp(6)) 
+partition by range (c2) (
+	partition p1 start ('12-01-2012 12:13:14.999999') end ('12-01-2012 12:23:15.888888') every ('0:01:14.333333'), 
+	partition p2 end ('12-03-2018'), 
+	partition p3 start ('12-03-2018') end ('12-04-2019') every ('1 month'), 
+	partition p4 start ('12-04-2019') end ('12-05-2022 12:13:14') every (interval '1 year'), 
+	partition p5 start ('12-05-2022 12:13:14.000001'), 
+	partition p6 start ('12-04-2032 12:11:10.333333') end ('12-05-2033 12:13:14.999999') every (interval '3 11:12:13.222222' day to second), 
+	partition p7 end (MAXVALUE)
+);
+create table t1 (c1 int, c2 timestamp(6)) 
+partition by range (c2) (
+	partition p1 start ('12-01-2012 12:13:14.999999') end ('12-01-2012 12:23:15.888888') every ('0:01:14.333333'), 
+	partition p2 end ('12-03-2018'), 
+	partition p3 start ('12-03-2018') end ('12-04-2019') every ('1 month'), 
+	partition p4 start ('12-04-2019') end ('12-05-2022 12:13:14') every (interval '1 year'), 
+	partition p5 start ('12-05-2022 12:13:14'), 
+	partition p6 start ('11-04-2032 12:11:10.333333') end ('12-01-2032 12:13:14.999999') every (interval '3 11:12:13.222222' day to second), 
+	partition p7 end (MAXVALUE)
+);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+---
+-- Part-4: test timestamp(6) with time zone, NOTE: BJ-Time=GMT+8, PST=UTC-8, GMT=UTC (roughly), so input: xx PST <==> in-gaussdb: xx + 16 GMT+8
+---
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-02-2018 12:13:15.888888 pst') every ('1 year'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-02-2013 12:13:15.888888 pst') every ('1 month'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every ('1 day'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- interval day to hour
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every (interval '1 12' day to hour));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every ('1 12:'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- interval day to minute
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every (interval '1 12:13' day to minute));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every ('1 12:13'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- interval day to second
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every (interval '1 12:13:14.333333' day to second));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every ('1 12:13:14.333333'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- interval hour to minute
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every (interval '12:13' hour to minute));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every ('12:13'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- interval hour to second
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every (interval '12:13:14.333333' hour to second));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every ('12:13:14.333333'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- interval minute to second 
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-01-2012 12:23:15.888888 pst') every (interval '1:14.333333' minute to second));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-01-2012 12:23:15.888888 pst') every ('0:01:14.333333'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- general
+create table t1 (c1 int, c2 timestamp(6) with time zone) 
+partition by range (c2) (
+	partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-01-2012 12:23:15.888888 pst') every ('0:01:14.333333'), 
+	partition p2 end ('12-03-2011'), 
+	partition p3 start ('12-03-2018') end ('12-04-2019') every ('1 month'), 
+	partition p4 end (MAXVALUE)
+);
+create table t1 (c1 int, c2 timestamp(6) with time zone) 
+partition by range (c2) (
+	partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-01-2012 12:23:15.888888 pst') every ('0:01:14.333333'), 
+	partition p2 end ('12-03-2018'), 
+	partition p3 start ('12-03-2018') end ('12-04-2019') every ('1 month'), 
+	partition p4 end (MAXVALUE)
+);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- out of range
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('now') end ('infinity') every ('1 year'));
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('-infinity') end ('now') every ('1 year'));
+create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('now') end ('tomorrow') every ('infinity'));
+create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('now') end ('infinity') every ('1 year'));
+create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('-infinity') end ('now') every ('1 year'));
+create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('now') end ('tomorrow') every ('infinity'));
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start('now') end ('infinity') every ('1 year'));
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start('-infinity') end ('now') every ('1 year'));
+create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start('now') end ('tomorrow') every ('infinity'));
+create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('293400-12-01 12:13:14') end ('294000-12-01 12:13:14') every ('700 year')); 
+create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('293400-12-01 12:13:14') end ('294400-12-01 12:13:14') every ('1000 year'));
+create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('293400-12-01 12:13:14') end ('294000-12-01 12:13:14') every ('1000 year'));
+create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('293400-12-01 12:13:14') end ('294000-12-01 12:13:14') every ('600 year'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+---
+-- Part-5: test add partition with start/end
+---
+
+-- test logic
+create table t1 (c1 int) partition by range(c1) (partition p1 start(1) end(1000) every(300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p1_2 start(1000);
+alter table t1 add partition p2 start(999);
+alter table t1 add partition p2 start(1000), partition p3 start(2000);
+alter table t1 add partition p2 start(1000) end (maxvalue) every(1000);
+alter table t1 add partition p2 start(1000) end (2000) every(maxvalue);
+alter table t1 add partition p3 end (1500);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p3 end (maxvalue);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p3 start(300);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 drop partition p3;
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p3 start(350) end (500) every (50);
+alter table t1 add partition p3 start(300) end (500) every (50); 
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p4 values less than (500);
+alter table t1 add partition p4 values less than (800);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p5 end (maxvalue);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- too many partition keys
+create table t1 (c1 int, c2 timestamp) partition by range(c1, c2) (partition p1 values less than (1, '2012-12-01 12:13:14.11111'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p2 start(1) end (100);
+alter table t1 add partition p2 start(1, '2012-12-01 12:13:14.11111') end (100, maxvalue);
+drop table t1;
+
+-- other datatype
+create table t1 (c1 int, c2 timestamp) partition by range(c2) (partition p1 values less than ('2012-12-01 12:13:14.11111'));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p2 end ('2014-12-01 12:13:15.11111');
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p3 start ('2014-12-01 12:13:15.11110');
+alter table t1 add partition p3 start ('2014-12-01 12:13:15.11111') end ('2014-12-08 11:12:13') every ('2 day');
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p4 start ('2014-12-08 11:12:13.000000') end ('2015-02-08 11:14:13') every (interval '20 3:4:5.00010' day to second);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p5 end (maxvalue);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- many times partition operation-success
+create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p3 start(300)end(400)every(10),add partition p4 start(400)end(500)every(10);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p5 start(500)end(600),add partition p6 start(600)end(700);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 drop partition p6,add partition p7 start(600)end(800);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 drop partition p2,add partition p3 start(100)end(500);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p3 start(100)end(200),drop partition p2;
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- many times partition operation-failure
+create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p3 start(300)end(400)every(10),add partition p4 start(450)end(500)every(10);
+drop table t1;
+create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p3 start(300)end(600),add partition p4 start(700)end(800);
+drop table t1;
+create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 drop partition p2,add partition p3 start(300)end(500);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p3 start(300)end(500),drop partition p2;
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition p3 start(300),add partition p4 start(500);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+---
+-- Part-6: test split partition with start/end
+---
+
+create table t1 (c1 int) partition by range(c1) (partition p1 start(0) end(3000));
+alter table t1 split partition p1_1 at (1500) into (partition q1, partition q2);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+
+-- split left-most partition
+alter table t1 split partition for (-1) into (partition s3 start(-1000), partition s4 start(-500) end (0) every(30), partition s5 start(0));
+alter table t1 split partition for (-1) into (partition s3 start(-1000), partition s4 start(-500) end (-10) every(300), partition s5 start(-10));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+insert into t1 values (-11);
+select c1 from t1;
+alter table t1 drop partition s4_2;
+select c1 from t1;
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 split partition s3_0 into (partition s6 end(-1000));
+alter table t1 split partition s3_0 into (partition s6 end(-2000), partition s7 end(-1000));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 drop partition s6;
+insert into t1 values (-5000);
+select c1 from t1;
+truncate table t1;
+
+-- split middle partition
+alter table t1 split partition for (1000) into (partition y1 end(-500), partition y2 start(500) end (1000));
+alter table t1 split partition for (1000) into (partition y1 end(500), partition y2 start(500) end (1000));
+alter table t1 split partition for (1000) into (partition y1 start(500), partition y2 start(700) end (1000));
+alter table t1 split partition for (1000) into (partition y1 start(0));
+alter table t1 split partition for (1000) into (partition y1 start(0), partition y2 start(500), partition y3 end(1500));
+alter table t1 split partition for (1000) into (partition y1 start(0), partition y2 start(500), partition y3 start(800) end (2000));
+alter table t1 split partition for (1000) into (partition y1 start(0), partition y2 start(500), partition y3 start(800) end (1500) every(300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+insert into t1 values (800);
+select c1 from t1;
+alter table t1 drop partition for (800);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+select c1 from t1;
+truncate table t1;
+
+-- split right-most partition
+alter table t1 split partition for (2000) into (partition q3 start(1500), partition q4 start(2000) end (3000) every(30), partition q5 start(3000));
+alter table t1 split partition q2 into (partition q3 start(1500), partition q4 start(1600) end (2000) every(300), partition q5 end(2200), partition q6 start(2200));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+alter table t1 add partition q7 start(3000) end (4000) every(800);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+insert into t1 values (3666);
+select c1 from t1;
+alter table t1 drop partition q7_1;
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+select c1 from t1;
+alter table t1 add partition q8 end (maxvalue);
+alter table t1 split partition for (4000) into (partition q91 start(4000) end (4500) every(200), partition q92 end(5000));
+alter table t1 split partition for (4000) into (partition q91 start(4000) end (4500) every(200), partition q92 end(maxvalue));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+truncate table t1;
+
+-- drop table
+drop table t1;
+
+---
+-- Part-7: start/end vs less/than
+---
+
+create table t1 (c1 int) partition by range(c1) (
+	partition p1 start(0) end(100), 
+	partition p2 end (200), 
+	partition p3 start(200) end (400) every (40), 
+	partition p4 start(400)
+	);
+create table t2 (c1 int) partition by range(c1) (
+	partition p1_0 values less than (0), 
+	partition p1_1 values less than (100),
+	partition p2 values less than (200),
+	partition p3_1 values less than (240),
+	partition p3_2 values less than (280),
+	partition p3_3 values less than (320),
+	partition p3_4 values less than (360),
+	partition p3_5 values less than (400),
+	partition p4 values less than (MAXVALUE)
+	);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t2'::regclass order by relname;
+select count(*) from pg_partition a1 where a1.parentid='schema_start_end_s.t1'::regclass and a1.relname in (
+	select relname from pg_partition a2 where a2.parentid='schema_start_end_s.t2'::regclass and a2.boundaries=a1.boundaries
+	);
+drop table t1;
+drop table t2;
+
+---
+-- Part-8: test other cases(col-table, tablespace, etc.)
+---
+
+-- partition name
+create table t1 (c1 int) partition by range(c1) (partition p12345678901234567890123456789012345678901234567890123456789012345 end (MAXVALUE));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+create table t1 (c1 int) partition by range(c1) (partition p12345678901234567890123456789012345678901234567890123456789012345 start(1) end (100) every(20));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- col-table
+create table t1 (c1 int) with (orientation=column) partition by range(c1) (partition p1 start(1), partition p2 start(100) end(300), partition p3 start(300));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+insert into t1 values (400);
+alter table t1 add column c2 int;
+alter table t1 drop partition p3;
+select c1,c2 from t1;
+alter table t1 add partition p3 end(500);
+select c1,c2 from t1;
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+-- tablespace
+create tablespace tblspc_se_x001 location '@abs_srcdir@/tmp_check/schema_start_end_s_tbs_1';
+create tablespace tblspc_se_x002 location '@abs_srcdir@/tmp_check/schema_start_end_s_tbs_2';
+create tablespace tblspc_se_x003 location '@abs_srcdir@/tmp_check/schema_start_end_s_tbs_3';
+create tablespace tblspc_se_x004 location '@abs_srcdir@/tmp_check/schema_start_end_s_tbs_4';
+create tablespace tblspc_se_x005 location '@abs_srcdir@/tmp_check/schema_start_end_s_tbs_5';
+create tablespace tblspc_se_x006 location '@abs_srcdir@/tmp_check/schema_start_end_s_tbs_6';
+
+create table t1 (c1 int) partition by range(c1) (
+	partition p1 start(0) tablespace tblspc_se_x001,
+	partition p2 start(10) end (100) every(20) tablespace tblspc_se_x002,
+	partition p3 end (400) tablespace tblspc_se_x003,
+	partition p4 start(400) end(600) tablespace tblspc_se_x004
+);
+
+alter table t1 add partition p5 start (600) end(700) every(30) tablespace tblspc_se_x005;
+alter table t1 split partition p4 into (
+	partition q1 end (450), 
+	partition q2 start (450) end(500) every(15) tablespace tblspc_se_x006, 
+	partition q3 start(500) tablespace tblspc_se_x006
+	);
+select relname, parttype, partstrategy, boundaries, spcname from pg_partition join pg_tablespace b on b.oid=reltablespace
+where parentid='schema_start_end_s.t1'::regclass order by relname;
+drop table t1;
+
+drop tablespace tblspc_se_x001;
+drop tablespace tblspc_se_x002;
+drop tablespace tblspc_se_x003;
+drop tablespace tblspc_se_x004;
+drop tablespace tblspc_se_x005;
+drop tablespace tblspc_se_x006;
+
+-- test table-like clause
+create table t1 (c1 int);
+create table t2 (c2 int) partition by range (c2) (partition p1 start (1) end (100) every (30));
+create table t3 (like t1 including partition, c3 text);
+create table t3 (like t1, c3 text) partition by range (c1) (partition q1 start (20) end (80) every(40));
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t3'::regclass order by relname;
+drop table t3;
+create table t3 (like t2 including partition, c3 text) partition by range (c1) (partition q1 start (20) end (80) every(40));
+create table t3 (like t2 including partition, c3 text);
+select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t3'::regclass order by relname;
+drop table t3;
+
+drop table t1;
+drop table t2;
+
+-- test unsupported datatype
+create table t1 (c1 smalldatetime) partition by range (c1) (partition p1 end (maxvalue));
+create table t1 (c1 time) partition by range (c1) (partition p1 end (maxvalue));
+create table t1 (c1 tinyint) partition by range (c1) (partition p1 end (maxvalue));
+create table t1 (c1 interval day to minute) partition by range (c1) (partition p1 end (maxvalue));
+
+-- test help
+\h create table partition
+\h alter table partition
+
+---
+-- end test START/END
+---
+reset datestyle;
+drop schema schema_start_end_s cascade;

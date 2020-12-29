@@ -1,0 +1,457 @@
+--
+--Create table
+--
+--Foreign table
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (address '@obshostname@', type 'obs', access_key '@ak@', secret_access_key '@sk@');
+CREATE FOREIGN TABLE customer_reviews
+        (
+            customer_id TEXT ,
+            review_date DATE ,
+            review_rating INTEGER ,
+            review_votes INTEGER,
+            review_helpful_votes INTEGER,
+            product_id CHAR(10) ,
+            product_title TEXT ,
+            product_sales_rank BIGINT,
+            product_group TEXT,
+            product_category TEXT,
+            product_subcategory TEXT,
+            similar_product_ids CHAR(10)
+        )
+        SERVER obs_server
+        OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/customer_reviews/') distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS d_bigrow;
+CREATE FOREIGN TABLE d_bigrow(
+    boolean1 BOOLEAN,
+    short1 INT2,
+    integer1 INT,
+    long1 INT8,
+    list1 INT,
+    float1 FLOAT4,
+    double1 FLOAT8,
+    string1 TEXT,
+    list2 TEXT,
+    date1 DATE,
+    timestamp1 TIMESTAMP
+) SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/d_bigrow/') distribute by roundrobin;
+
+--Regular table
+create table t (c1 int, c2 int) distribute by roundrobin;
+create table s (b1 int, b2 int, b3 int) distribute by roundrobin;
+create table r (a1 int, a2 int, a3 int) distribute by roundrobin;
+insert into t values (1, 2), (2, 3), (3, 4), (4, 5);
+insert into s values (1, 2, 2), (2, 3, 3), (3, 4, 4), (4, 5, 5);
+insert into r values (3, 2,1 ), (4,3,2), (5, 4, 3), (6, 5, 4);
+
+--TPCH table
+CREATE TABLE customer (
+    c_custkey integer NOT NULL,
+    c_name character varying(25) NOT NULL,
+    c_address character varying(40) NOT NULL,
+    c_nationkey integer NOT NULL,
+    c_phone character(15) NOT NULL,
+    c_acctbal numeric(15,2) NOT NULL,
+    c_mktsegment character(10) NOT NULL,
+    c_comment character varying(117) NOT NULL
+)
+DISTRIBUTE BY ROUNDROBIN ;
+
+CREATE TABLE lineitem (
+    l_orderkey integer NOT NULL,
+    l_partkey integer NOT NULL,
+    l_suppkey integer NOT NULL,
+    l_linenumber integer NOT NULL,
+    l_quantity numeric(15,2) NOT NULL,
+    l_extendedprice numeric(15,2) NOT NULL,
+    l_discount numeric(15,2) NOT NULL,
+    l_tax numeric(15,2) NOT NULL,
+    l_returnflag character(1) NOT NULL,
+    l_linestatus character(1) NOT NULL,
+    l_shipdate date NOT NULL,
+    l_commitdate date NOT NULL,
+    l_receiptdate date NOT NULL,
+    l_shipinstruct character(25) NOT NULL,
+    l_shipmode character(10) NOT NULL,
+    l_comment character varying(44) NOT NULL
+)
+DISTRIBUTE BY ROUNDROBIN ;
+
+CREATE TABLE nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25) NOT NULL,
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)
+DISTRIBUTE BY ROUNDROBIN ;
+CREATE TABLE orders (
+    o_orderkey integer NOT NULL,
+    o_custkey integer NOT NULL,
+    o_orderstatus character(1) NOT NULL,
+    o_totalprice numeric(15,2) NOT NULL,
+    o_orderdate date NOT NULL,
+    o_orderpriority character(15) NOT NULL,
+    o_clerk character(15) NOT NULL,
+    o_shippriority integer NOT NULL,
+    o_comment character varying(79) NOT NULL
+)
+DISTRIBUTE BY ROUNDROBIN ;
+
+CREATE TABLE part (
+    p_partkey integer NOT NULL,
+    p_name character varying(55) NOT NULL,
+    p_mfgr character(25) NOT NULL,
+    p_brand character(10) NOT NULL,
+    p_type character varying(25) NOT NULL,
+    p_size integer NOT NULL,
+    p_container character(10) NOT NULL,
+    p_retailprice numeric(15,2) NOT NULL,
+    p_comment character varying(23) NOT NULL
+)
+DISTRIBUTE BY ROUNDROBIN ;
+CREATE TABLE partsupp (
+    ps_partkey integer NOT NULL,
+    ps_suppkey integer NOT NULL,
+    ps_availqty integer NOT NULL,
+    ps_supplycost numeric(15,2) NOT NULL,
+    ps_comment character varying(199) NOT NULL
+)
+DISTRIBUTE BY ROUNDROBIN ;
+
+CREATE TABLE region (
+    r_regionkey integer NOT NULL,
+    r_name character(25) NOT NULL,
+    r_comment character varying(152)
+)
+DISTRIBUTE BY ROUNDROBIN ;
+
+CREATE TABLE supplier (
+    s_suppkey integer NOT NULL,
+    s_name character(25) NOT NULL,
+    s_address character varying(40) NOT NULL,
+    s_nationkey integer NOT NULL,
+    s_phone character(15) NOT NULL,
+    s_acctbal numeric(15,2) NOT NULL,
+    s_comment character varying(101) NOT NULL
+)
+DISTRIBUTE BY ROUNDROBIN ;
+\i @abs_srcdir@/data/tpch.data
+
+--
+--Test Begin
+--
+--*Disable fstream
+explain (verbose on, costs off, nodes off) select * from t where c1 in (select b1 from s where c2=b2) order by c1;
+explain (verbose on, costs off, nodes off) select * from d_bigrow where short1 in  (select review_rating from customer_reviews where review_votes = integer1) order by short1;
+select * from t where c1 in (select b1 from s where c2=b2) order by c1;
+select * from d_bigrow where short1 in  (select review_rating from customer_reviews where review_votes = integer1) order by short1;
+--Remote sort
+explain (verbose on, costs off, nodes off) select * from (select all * from t where c1 < 3 order by c1);
+select * from (select all * from t where c1 < 3 order by c1);
+--Agg
+with revenue (total_revenue) as  
+( select sum(l_extendedprice * (1 - l_discount)) from lineitem where l_suppkey=1 )
+select * from revenue;
+
+--*Enable fstream
+
+explain (verbose on, costs off, nodes off) select * from t where c1 in (select b1 from s where c2=b2) order by c1;
+select * from t where c1 in (select b1 from s where c2=b2)  order by c1;
+explain (verbose on, costs off, nodes off) select * from d_bigrow where short1 in  (select review_rating from customer_reviews where review_votes = integer1)  order by short1;
+select * from d_bigrow where short1 in  (select review_rating from customer_reviews where review_votes = integer1)  order by short1;
+explain (verbose on, costs off, nodes off) select * from t where c1 in (select sum(b2) sb2 from s group by b1 having c2 =  sum(b2)) order by c1;
+explain (verbose on, costs off, nodes off)  select * from t where c1 in (select b1 from s group by b1 having sum(b2) = c2) order by c1;
+select * from t where c1 in (select b1 from s group by b1 having sum(b2) = c2) order by c1;
+explain (verbose on, costs off, nodes off) select * from t where c1 in (select b1 from s, r where a2 = b2  group by b1 having sum(b3) = c2) order by c1;
+select * from t where c1 in (select b1 from s, r where a2 = b2  group by b1 having sum(b3) = c2)  order by c1;
+--Remote sort
+explain (verbose on, costs off, nodes off) select * from (select all * from t where c1 < 3 order by c1);
+explain performance select * from (select all * from t where c1 < 3 order by c1);
+select * from (select all * from t where c1 < 3 order by c1);
+explain (verbose on, costs off, nodes off) select * from (select all * from orders where o_orderkey < 3 order by o_orderkey);
+select * from (select all * from orders where o_orderkey < 3 order by o_orderkey);
+--Agg
+with revenue (total_revenue) as  
+( select sum(l_extendedprice * (1 - l_discount)) from lineitem where l_suppkey=1 )
+select * from revenue;
+
+-- normal table
+create table hotel1000 ( 
+                        lkbh text,
+                        xm text,
+                        xb text,
+                        csrq text,
+                        zjlx text,
+                        zjhm text,
+                        rzsj text,
+                        rzsj_yf float4,
+                        rjfh text,
+                        tfsj text,
+                        lddm text,
+                        ldmc text,
+                        pcsdm text,
+                        fjdm text,
+                        rzsj_q8 text,
+                        etlgxsj text,
+                        hjszd text) distribute by roundrobin;
+
+explain (verbose on, costs off, nodes off) select 
+       dddd.xm || ' '|| dddd.ldmc || ' rzsj:' || to_char(dddd.rzsj) as info1,
+       a.xm || ' '|| a.ldmc || ' rzsj:' || to_char(a.rzsj) as info2
+from hotel1000 a,
+       (select 
+                            xm,ldmc,lddm,rzsj,zjhm
+        from 
+                            (select 
+                                     xm,ldmc,lddm,rzsj,zjhm
+                            from
+                                     hotel1000 
+                             where 
+                                     rzsj >= '2014-01-01 01:00:00'
+                                     and 
+                                     rzsj <= '2014-12-30 23:00:00'
+                            )
+        where 
+                            xm like 'wang%'
+                            and
+                            lddm in(
+                                     select 
+                                               lddm 
+                                     from
+                                               hotel1000
+                                     where
+                                               ldmc like '%shangwu%'
+                            )
+                   ) dddd
+where 
+         a.zjhm <> dddd.zjhm and
+         ABS(INTERVALTONUM(to_timestamp(a.rzsj,'yyyy-mm-dd hh24:mi:ss') - to_timestamp(dddd.rzsj,'yyyy-mm-dd hh24:mi:ss'))) < 1
+;
+explain (verbose on, costs off, nodes off) select 
+       dddd.xm || ' '|| dddd.ldmc || ' rzsj:' || to_char(dddd.rzsj) as info1,
+       a.xm || ' '|| a.ldmc || ' rzsj:' || to_char(a.rzsj) as info2
+from hotel1000 a,
+       (select 
+                            xm,ldmc,lddm,rzsj,zjhm
+        from 
+                            (select 
+                                     xm,ldmc,lddm,rzsj,zjhm
+                            from
+                                     hotel1000 
+                             where 
+                                     rzsj >= '2014-01-01 01:00:00'
+                                     and 
+                                     rzsj <= '2014-12-30 23:00:00'
+                            )
+        where 
+                            xm like 'wang%'
+                            and
+                            lddm in(
+                                     select 
+                                               lddm 
+                                     from
+                                               hotel1000
+                                     where
+                                               ldmc like '%shangwu%'
+                            )
+                   ) dddd
+where 
+         a.zjhm <> dddd.zjhm and
+         ABS(INTERVALTONUM(to_timestamp(a.rzsj,'yyyy-mm-dd hh24:mi:ss') - to_timestamp(dddd.rzsj,'yyyy-mm-dd hh24:mi:ss'))) < 1
+;
+drop table hotel1000;
+--create foreign table
+create foreign table hotel1000 ( 
+                        lkbh text,
+                        xm text,
+                        xb text,
+                        csrq text,
+                        zjlx text,
+                        zjhm text,
+                        rzsj text,
+                        rzsj_yf float4,
+                        rjfh text,
+                        tfsj text,
+                        lddm text,
+                        ldmc text,
+                        pcsdm text,
+                        fjdm text,
+                        rzsj_q8 text,
+                        etlgxsj text,
+                        hjszd text) 
+server obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/fvt_data_query_hive.db/hotel_1000/')
+distribute by roundrobin;
+explain (verbose on, costs off, nodes off) select 
+       dddd.xm || ' '|| dddd.ldmc || ' rzsj:' || to_char(dddd.rzsj) as info1,
+       a.xm || ' '|| a.ldmc || ' rzsj:' || to_char(a.rzsj) as info2
+from hotel1000 a,
+       (select 
+                            xm,ldmc,lddm,rzsj,zjhm
+        from 
+                            (select 
+                                     xm,ldmc,lddm,rzsj,zjhm
+                            from
+                                     hotel1000 
+                             where 
+                                     rzsj >= '2014-01-01 01:00:00'
+                                     and 
+                                     rzsj <= '2014-12-30 23:00:00'
+                            )
+        where 
+                            xm like 'wang%'
+                            and
+                            lddm in(
+                                     select 
+                                               lddm 
+                                     from
+                                               hotel1000
+                                     where
+                                               ldmc like '%shangwu%'
+                            )
+                   ) dddd
+where 
+         a.zjhm <> dddd.zjhm and
+         ABS(INTERVALTONUM(to_timestamp(a.rzsj,'yyyy-mm-dd hh24:mi:ss') - to_timestamp(dddd.rzsj,'yyyy-mm-dd hh24:mi:ss'))) < 1
+;
+
+--add LLT 
+drop table if exists testllt001;
+
+create table testllt001(id int, name text) distribute by replication;
+
+explain (verbose on, costs off, nodes off) select * from t where c1 in (select id from testllt001 where id =2);
+
+drop table if exists testllt003;
+
+create table testllt003( id int);
+
+explain (verbose on, costs off, nodes off) select * from testllt003 union select R_REGIONKEY from region;
+
+drop table testllt001;
+drop table testllt003;
+
+drop table if exists testllt100t;
+create table testllt100t(c1 int, c2 int) distribute by roundrobin ;
+create index testllt100t_index on testllt100t (c1);
+
+drop table if exists testllt100s;
+create table testllt100s (b1 int, b2 int, b3 int) ;
+create index testllt100s_index on testllt100s (b1);
+
+explain (verbose on, costs off, nodes off) select c1 from testllt100t where c1 in (select b1 from testllt100s where b1=7);
+explain (verbose on, costs off, nodes off) select c1 from testllt100t where c1 in (select b2 from testllt100s where b1=7);
+
+drop table if exists testllt100t;
+create table testllt100t(c1 int, c2 int) with (orientation=column) distribute by roundrobin ;
+
+drop table if exists testllt100s;
+create table testllt100s (b1 int, b2 int, b3 int) with (orientation=column);
+
+explain (verbose on, costs off, nodes off) select c1 from testllt100t where c1 in (select b1 from testllt100s where b1=7);
+
+create index testllt100t_index on testllt100t (c1);
+create index testllt100s_index on testllt100s (b1);
+
+explain (verbose on, costs off, nodes off) select c1 from testllt100t where c1 in (select b1 from testllt100s where b1=7);
+
+drop table testllt100t;
+drop table testllt100s;
+
+create foreign table SUBQUERY_T1(
+D_ID int,
+D_W_ID int,
+D_NAME varchar(10),
+D_STREET_1 varchar(20))SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/hive/subquery_orc_t1/')
+distribute by roundrobin;
+explain (verbose on, costs off, nodes off) WITH tmp1 as (select D_ID from SUBQUERY_T1 order by D_ID)SELECT DISTINCT * FROM ( SELECT ALL * FROM SUBQUERY_T1 where D_ID = D_W_ID group by D_ID,D_NAME,D_W_ID,D_STREET_1 having D_ID < 10 order by D_ID,D_NAME,D_W_ID,D_STREET_1 DESC NULLS FIRST LIMIT 1   ) group by D_ID,D_NAME,D_W_ID,D_STREET_1 order by D_ID,D_NAME,D_W_ID,D_STREET_1 FETCH NEXT 20 ROWS ONLY ;
+drop foreign table SUBQUERY_T1;
+
+create table test_mergeappend_1(a integer);
+create table test_mergeappend_2(a integer);
+explain (verbose on, costs off, nodes off)(select * from test_mergeappend_1 order by a) union all (select * from test_mergeappend_2 order by 1) order by 1;
+drop table test_mergeappend_1;
+drop table test_mergeappend_2;
+create table t_subqueryscan (a int, b int);
+explain (verbose on, costs off, nodes off) select a from (select count(a) as a, count(b) as b from t_subqueryscan) order by 1;
+drop table t_subqueryscan;
+--end LLT
+create table test200(id200 int ) distribute by roundrobin;
+explain (verbose on, costs off, nodes off)select * from (select id200 as id from test200 ) y, (select id200 from test200)x;
+create view test200_view as select * from test200;
+explain (verbose on, costs off, nodes off)select * from (select id200 as id from test200_view ) y, (select id200 from test200_view)x;
+
+drop table test200 cascade;
+
+drop foreign table if exists reason;
+drop foreign table if exists store_sales;
+create foreign table  reason ( 
+       r_reason_sk     int       ,
+       r_reason_id     char(16)  ,
+       r_reason_desc   char(100) ) 
+server obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/reason/')
+distribute by roundrobin;
+
+create foreign table  store_sales ( 
+       ss_sold_date_sk        int          ,
+       ss_sold_time_sk        int          ,
+       ss_item_sk             int          ,
+       ss_customer_sk         int          ,
+       ss_cdemo_sk            int          ,
+       ss_hdemo_sk            int          ,
+       ss_addr_sk             int          ,
+       ss_store_sk            int          ,
+       ss_promo_sk            int          ,
+       ss_ticket_number       int          ,
+       ss_quantity            int          ,
+       ss_wholesale_cost      decimal(7,2) ,
+       ss_list_price          decimal(7,2) ,
+       ss_sales_price         decimal(7,2) ,
+       ss_ext_discount_amt    decimal(7,2) ,
+       ss_ext_sales_price     decimal(7,2) ,
+       ss_ext_wholesale_cost  decimal(7,2) ,
+       ss_ext_list_price      decimal(7,2) ,
+       ss_ext_tax             decimal(7,2) ,
+       ss_coupon_amt          decimal(7,2) ,
+       ss_net_paid            decimal(7,2) ,
+       ss_net_paid_inc_tax    decimal(7,2) ,
+       ss_net_profit          decimal(7,2) ) 
+server obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/store_sales/')
+distribute by roundrobin;
+
+select  case when (select count(*) 
+                  from store_sales 
+                  where ss_quantity between 1 and 20) > 0.001*74129
+            then (select avg(ss_ext_discount_amt) 
+                  from store_sales 
+                  where ss_quantity between 1 and 20) 
+            else (select avg(ss_net_paid)
+                  from store_sales
+                  where ss_quantity between 1 and 20) end bucket1
+from reason
+where r_reason_sk = 1
+limit 100;
+
+drop foreign table if exists reason;
+drop foreign table if exists store_sales;
+--
+--Drop table
+--
+drop foreign table d_bigrow;
+drop foreign table customer_reviews;
+drop foreign table hotel1000;
+drop table t;
+drop table s;
+drop table r;
+
+drop table customer;
+drop table lineitem;
+drop table part;
+drop table partsupp;
+drop table orders;
+drop table supplier;
+drop table nation;
+drop table region;
+DROP SERVER obs_server CASCADE;
+

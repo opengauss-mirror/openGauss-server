@@ -21,6 +21,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/tuptoaster.h"
+#include "access/tableam.h"
 #include "executor/tstoreReceiver.h"
 
 typedef struct {
@@ -99,7 +100,11 @@ static void tstoreReceiveSlot_detoast(TupleTableSlot *slot, DestReceiver *self)
     MemoryContext oldcxt;
 
     /* Make sure the tuple is fully deconstructed */
-    slot_getallattrs(slot);
+
+    /* Get the Table Accessor Method*/
+    Assert(slot != NULL && slot->tts_tupleDescriptor != NULL);
+
+    tableam_tslot_getallattrs(slot);
 
     /*
      * Fetch back any out-of-line datums.  We build the new datums array in
@@ -172,6 +177,7 @@ DestReceiver *CreateTuplestoreDestReceiver(void)
     self->pub.rShutdown = tstoreShutdownReceiver;
     self->pub.rDestroy = tstoreDestroyReceiver;
     self->pub.mydest = DestTuplestore;
+    self->pub.tmpContext = NULL;
 
     /* private fields will be set by SetTuplestoreDestReceiverParams */
     return (DestReceiver *)self;

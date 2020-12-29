@@ -12,6 +12,7 @@
 #define USER_H
 
 #include "nodes/parsenodes.h"
+#include "utils/timestamp.h"
 
 /* Hook to check passwords in CreateRole() and AlterRole() */
 #define PASSWORD_TYPE_PLAINTEXT 0
@@ -22,11 +23,21 @@ typedef struct LockInfoBuck {
     Oid database;
     Oid nspoid;
 } LockInfoBuck;
+
+typedef struct AccountLockHashEntry {
+    Oid roleoid;
+    int4 failcount;
+    TimestampTz locktime;
+    int2 rolstatus;
+    slock_t mutex;
+} AccountLockHashEntry;
+
 #define PASSWORD_TYPE_SHA256 2
 #define UNLOCK_FLAG -1
 
 /* status of the account */
 typedef enum { UNLOCK_STATUS = 0, LOCK_STATUS, SUPERLOCK_STATUS } USER_STATUS;
+typedef enum { UNEXPIRED_STATUS = 0, EXPIRED_STATUS } PASSWORD_STATUS;
 
 typedef void (*check_password_hook_type)(
     const char* username, const char* password, int password_type, Datum validuntil_time, bool validuntil_null);
@@ -49,30 +60,30 @@ extern void DropUserStatus(Oid roleID);
 extern Oid GetRoleOid(const char* username);
 extern bool IsRoleExist(const char* username);
 bool HasModifiedInitPwdByChkAuthHistory(Oid roleID);
-void CheckLockPrivilege(Oid roleID, HeapTuple tuple);
+void CheckLockPrivilege(Oid roleID, HeapTuple tuple, bool is_opradmin);
+extern bool is_role_persistence(Oid roleid);
 void CheckAlterAuditadminPrivilege(Oid roleid, bool isOnlyAlterPassword);
 extern char* GetRoleName(Oid rolid, char* rolname, size_t size);
 extern char* GetSuperUserName(char* username);
 extern int decode_iteration(const char* auth_iteration_string);
 extern void initSqlCount();
 extern void initWaitCount(Oid userid);
+extern PASSWORD_STATUS GetAccountPasswordExpired(Oid roleID);
 
-void ReportLockAccountMessage(bool locked, char *rolename);
+void ReportLockAccountMessage(bool locked, const char *rolename);
 bool LockAccountParaValid(Oid roleID, int extrafails, bool superlock);
 void UpdateFailCountToHashTable(Oid roleid, int extrafails, bool superlock);
-bool CanUnlockAccount(TimestampTz locktime);
 bool UnlockAccountToHashTable(Oid roleid, bool superlock, bool isreset);
 int64 SearchAllAccounts();
 void InitAccountLockHashTable();
 extern USER_STATUS GetAccountLockedStatusFromHashTable(Oid roleid);
 extern void UpdateAccountInfoFromHashTable();
-extern List* roleNamesToIds(const List* memberNames);
+
 
 extern inline void str_reset(char* str)
 {
     if (str != NULL) {
-        int rc = memset_s(str, strlen(str), 0, strlen(str));
-        securec_check(rc, "", "");
+        memset(str, 0, strlen(str));
     }
 
     return;
@@ -83,4 +94,3 @@ extern void PreCleanAndCheckUserConns(const char* username, bool missing_ok);
 #endif /* PGXC */
 
 #endif /* USER_H */
-

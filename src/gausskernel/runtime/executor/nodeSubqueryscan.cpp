@@ -136,8 +136,13 @@ SubqueryScanState* ExecInitSubqueryScan(SubqueryScan* node, EState* estate, int 
     /*
      * Initialize result tuple type and projection info.
      */
-    ExecAssignResultTypeFromTL(&sub_query_state->ss.ps);
+    ExecAssignResultTypeFromTL(
+            &sub_query_state->ss.ps,
+            sub_query_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+
     ExecAssignScanProjectionInfo(&sub_query_state->ss);
+
+    Assert(sub_query_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
 
     return sub_query_state;
 }

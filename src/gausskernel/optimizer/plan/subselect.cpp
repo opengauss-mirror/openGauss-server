@@ -71,19 +71,25 @@ typedef struct varWalkerContext {
     int maxLevelsUp; /* Keep level up of var */
 } varWalkerContext;
 
-typedef struct pull_node_clause {
-    List* nodeList;
-    bool skipOpExpr;
+typedef struct pull_node_clause
+{
+    List    *nodeList;
+    List    *nameList;
+    char    *name;
+    bool     recurse;
+    int      flag;
 } pull_node_clause;
-
-typedef struct include_not_strict_context {
-    bool has_no_strict;
-} include_not_strict_context;
 
 typedef struct push_qual_context {
     int varno;       /* Var no. */
     List* qual_list; /* Find qual list. */
 } push_qual_context;
+
+/* flags bits for pull_expr_walker and pull expr_mutator */
+#define PE_OPEXPR   0x01        /* pull expr of op expr */
+#define PE_NULLTEST 0x02        /* pull expr of null test */
+#define PE_NOTCLAUSE    0x04        /* pull expr of not clause */
+
 
 static Node* build_subplan(PlannerInfo* root, Plan* plan, PlannerInfo* subroot, List* plan_params,
     SubLinkType subLinkType, Node* testexpr, bool adjust_testexpr, bool unknownEqFalse);
@@ -98,26 +104,79 @@ static bool simplify_EXISTS_query(Query* query);
 static Query* convert_EXISTS_to_ANY(PlannerInfo* root, Query* subselect, Node** testexpr, List** paramIds);
 static Node* replace_correlation_vars_mutator(Node* node, PlannerInfo* root);
 static Node* process_sublinks_mutator(Node* node, process_sublinks_context* context);
-static Bitmapset* finalize_plan(
-    PlannerInfo* root, Plan* plan, int gather_param, Bitmapset* valid_params, Bitmapset* scan_params);
+static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_params, Bitmapset* scan_params);
 static bool finalize_primnode(Node* node, finalize_primnode_context* context);
 static Node* convert_joinqual_to_antiqual(Node* node, Query* parse);
 static Node* convert_opexpr_to_boolexpr_for_antijoin(Node* node, Query* parse);
-static bool get_equal_operates(OpExpr* qual, List** pullUpQual);
+static bool get_equal_operates(OpExpr* qual, List** pullUpQual, bool paramAllowed);
 static bool equal_expr(Node* node);
 static bool has_correlation_in_rte(List* rtable);
-static bool safe_convert_EXPR(OpExpr* opExpr, SubLink* sublink, Relids available_rels);
-static void append_target_and_group(Query* subQuery, Node* node);
-static bool get_pullUp_equal_expr(Node* node, List** pullUpQual);
+static bool safe_convert_EXPR(PlannerInfo *root, Node *clause, SubLink* sublink, Relids available_rels, bool in_or_clause = false);
+static void append_target_and_group(PlannerInfo *root, Query* subQuery, Node* node);
+static bool get_pullUp_equal_expr(Node* node, List** pullUpQual, bool paramAllowed = true);
 static bool pull_sublink_clause_walker(Node* node, pull_node_clause* context);
-static bool safe_convert_EXISTS(SubLink* sublink, Relids available_rels);
-static bool safe_convert_ANY(SubLink* sublink, Relids available_rels);
-static bool safe_convert_ORCLAUSE(OpExpr* op_expr, SubLink* sublink, Relids available_rels);
+static bool safe_convert_EXISTS(PlannerInfo *root, SubLink* sublink, Relids available_rels);
+static bool safe_convert_ANY(PlannerInfo *root, SubLink* sublink, Relids available_rels);
+static bool safe_convert_ORCLAUSE(PlannerInfo *root, Node *clause, SubLink* sublink, Relids available_rels);
 static bool finalize_agg_primnode(Node* node, finalize_primnode_context* context);
 static Var* locate_base_var(Expr* node);
 static void SS_process_one_cte(PlannerInfo* root, CommonTableExpr* cte, Query* subquery);
+static Node *generate_filter_on_opexpr_sublink(PlannerInfo *root, int rtIndex,
+                                            Node *targetExpr, Query *subQuery);
+static Node*transform_equal_expr(PlannerInfo *root, Query *subQuery,
+                    List *pullUpEqualExpr,  Node **quals, bool isLimit, bool isnull = false);
+static bool all_replicate_table(Query *query);
+static Node* convert_expr_subink_with_agg_targetlist(PlannerInfo *root,
+                                                                Node **jtlink1,
+                                                                Node *inout_quals,
+                                                                SubLink *sublink,
+                                                                Relids *available_rels,
+                                                                Node *all_quals,
+                                                                const char *refname);
+static Node* convert_expr_sublink_with_limit_clause(PlannerInfo *root,
+                                    Node ** currJoinLink,
+                                    SubLink *sublink,
+                                    Node *exprQual,
+                                    Relids *available_rels,
+                                    Node *all_quals, const char *refname);
+static bool CanExprHashable(List *pullUpEqualExpr);
 
 #define PLANNAMELEN 64
+
+static char *denominate_sublink_name(int sublink_counter)
+{
+    int nRet = 0;
+    char subname[SUBLINK_COUNTER];
+
+    nRet = sprintf_s(subname, sizeof(subname), "sublink_%d", sublink_counter);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    int newlen = strlen(subname) + 1;
+    char *subquery_name = (char *)palloc0(newlen);
+    nRet = strncpy_s(subquery_name, newlen, subname, strlen(subname));
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    return subquery_name;
+}
+
+static bool
+all_replicate_table(Query *query)
+{
+    Relids          varnos = get_relids_in_jointree((Node *) query->jointree, false);
+    int         attnum = 0;
+
+    while ((attnum = bms_first_member(varnos)) >= 0) {
+        RangeTblEntry *r_table = (RangeTblEntry*)rt_fetch(attnum, query->rtable);
+        if (r_table->rtekind == RTE_RELATION) {
+            if (GetLocatorType(r_table->relid) == LOCATOR_TYPE_REPLICATED)
+                continue;
+        }
+
+        return false;
+    }
+
+    return true;
+}
 
 /*
  * Select a PARAM_EXEC number to identify the given Var as a parameter for
@@ -590,7 +649,7 @@ static Node* make_subplan(
     /* reset u_sess->analyze_cxt.need_autoanalyze */
     tmp_need_autoanalyze = u_sess->analyze_cxt.need_autoanalyze;
     u_sess->analyze_cxt.need_autoanalyze = false;
-    plan = subquery_planner(root->glob, subquery, root, false, tuple_fraction, &subroot);
+    plan = subquery_planner(root->glob, subquery, root, false, tuple_fraction, &subroot, (SUBQUERY_SUBLINK | SUBQUERY_NORMAL));
     u_sess->analyze_cxt.need_autoanalyze = tmp_need_autoanalyze;
 
     /* Reset u_sess->opt_cxt.query_dop. */
@@ -634,7 +693,7 @@ static Node* make_subplan(
         subquery = convert_EXISTS_to_ANY(root, subquery, &newtestexpr, &paramIds);
         if (subquery != NULL) {
             /* Generate the plan for the ANY subquery; we'll need all rows */
-            plan = subquery_planner(root->glob, subquery, root, false, 0.0, &subroot);
+            plan = subquery_planner(root->glob, subquery, root, false, 0.0, &subroot, (SUBQUERY_SUBLINK | SUBQUERY_NORMAL));
 
             /* Isolate the params needed by this specific subplan */
             plan_params = root->plan_params;
@@ -700,7 +759,6 @@ static Node* build_subplan(PlannerInfo* root, Plan* plan, PlannerInfo* subroot, 
     get_first_col_type(plan, &splan->firstColType, &splan->firstColTypmod, &splan->firstColCollation);
     splan->useHashTable = false;
     splan->unknownEqFalse = unknownEqFalse;
-    splan->parallel_safe = plan->parallel_safe;
     splan->setParam = NIL;
     splan->parParam = NIL;
     splan->args = NIL;
@@ -830,7 +888,7 @@ static Node* build_subplan(PlannerInfo* root, Plan* plan, PlannerInfo* subroot, 
         result = (Node*)splan;
         isInitPlan = false;
     }
-
+#ifdef ENABLE_MULTIPLE_NODES
     /* For init plan, we should make it broadcasted if not */
     if (IS_STREAM_PLAN && is_execute_on_datanodes(plan) &&
         (isInitPlan || subLinkType == ANY_SUBLINK || subLinkType == ALL_SUBLINK)) {
@@ -855,6 +913,7 @@ static Node* build_subplan(PlannerInfo* root, Plan* plan, PlannerInfo* subroot, 
                 plan = materialize_finished_plan(plan, true, root->glob->vectorized);
         }
     }
+#endif
     /*
      * Add the subplan and its PlannerInfo to the global lists.
      */
@@ -1343,11 +1402,6 @@ static void SS_process_one_cte(PlannerInfo* root, CommonTableExpr* cte, Query* s
     get_first_col_type(plan, &splan->firstColType, &splan->firstColTypmod, &splan->firstColCollation);
     splan->useHashTable = false;
     splan->unknownEqFalse = false;
-    /*
-     * CTE scans are not considered for parallelism (cf
-     * set_rel_consider_parallel).
-     */
-    splan->parallel_safe = false;
     splan->setParam = NIL;
     splan->parParam = NIL;
     splan->args = NIL;
@@ -1573,7 +1627,7 @@ JoinExpr* convert_ANY_sublink_to_join(PlannerInfo* root, SubLink* sublink, bool 
      * below). Therefore this is a lot easier than what pull_up_subqueries has
      * to go through.
      */
-    rte = addRangeTableEntryForSubquery(NULL, subselect, makeAlias("ANY_subquery", NIL), false, true);
+    rte = addRangeTableEntryForSubquery(NULL, subselect, makeAlias("ANY_subquery", NIL), false, false, true);
     parse->rtable = lappend(parse->rtable, rte);
     rtindex = list_length(parse->rtable);
 
@@ -1618,6 +1672,9 @@ JoinExpr* convert_ANY_sublink_to_join(PlannerInfo* root, SubLink* sublink, bool 
     result->usingClause = NIL;
     result->alias = NULL;
     result->rtindex = 0; /* we don't need an RTE for it */
+
+    /* Mark query's can_push */
+    mark_parent_child_pushdown_flag(root->parse, subselect);
 
     return result;
 }
@@ -1775,6 +1832,9 @@ JoinExpr* convert_EXISTS_sublink_to_join(PlannerInfo* root, SubLink* sublink, bo
     result->quals = whereClause;
     result->alias = NULL;
     result->rtindex = 0; /* we don't need an RTE for it */
+
+    /* Mark query's can_push */
+    mark_parent_child_pushdown_flag(root->parse, subselect);
 
     return result;
 }
@@ -2312,7 +2372,7 @@ void SS_finalize_plan(PlannerInfo* root, Plan* plan, bool attach_initplans)
     /*
      * Now recurse through plan tree.
      */
-    (void)finalize_plan(root, plan, -1, valid_params, NULL);
+    (void)finalize_plan(root, plan, valid_params, NULL);
 
     bms_free_ext(valid_params);
 
@@ -2372,22 +2432,19 @@ static bool finalize_agg_primnode(Node* node, finalize_primnode_context* context
     return expression_tree_walker(node, (bool (*)())finalize_agg_primnode, (void*)context);
 }
 
-static void finalize_plans(PlannerInfo* root, finalize_primnode_context* context, List* plans, Bitmapset* valid_params,
-    Bitmapset* scan_params, int gather_param = -1)
+static void finalize_plans(
+    PlannerInfo* root, finalize_primnode_context* context, List* plans, Bitmapset* valid_params, Bitmapset* scan_params)
 {
     ListCell* lc = NULL;
 
     foreach (lc, plans) {
-        context->paramids = bms_add_members(
-            context->paramids, finalize_plan(root, (Plan*)lfirst(lc), gather_param, valid_params, scan_params));
+        context->paramids =
+            bms_add_members(context->paramids, finalize_plan(root, (Plan*)lfirst(lc), valid_params, scan_params));
     }
 }
 
 /*
  * Recursive processing of all nodes in the plan tree
- *
- * gather_param is the rescan_param of an ancestral Gather/GatherMerge,
- * or -1 if there is none.
  *
  * valid_params is the set of param IDs considered valid to reference in
  * this plan node or its children.
@@ -2398,8 +2455,7 @@ static void finalize_plans(PlannerInfo* root, finalize_primnode_context* context
  * The return value is the computed allParam set for the given Plan node.
  * This is just an internal notational convenience.
  */
-static Bitmapset* finalize_plan(
-    PlannerInfo* root, Plan* plan, int gather_param, Bitmapset* valid_params, Bitmapset* scan_params)
+static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_params, Bitmapset* scan_params)
 {
     finalize_primnode_context context;
     int locally_added_param;
@@ -2424,17 +2480,6 @@ static Bitmapset* finalize_plan(
     (void)finalize_primnode((Node*)plan->targetlist, &context);
     (void)finalize_primnode((Node*)plan->qual, &context);
 
-    /*
-     * If it's a parallel-aware scan node, mark it as dependent on the parent
-     * Gather/GatherMerge's rescan Param.
-     */
-    if (plan->parallel_aware) {
-        if (gather_param < 0) {
-            elog(ERROR, "parallel-aware plan node is not below a Gather");
-        }
-        context.paramids = bms_add_member(context.paramids, gather_param);
-    }
-
     /* Check additional node-type-specific fields */
     switch (nodeTag(plan)) {
         case T_BaseResult:
@@ -2444,7 +2489,9 @@ static Bitmapset* finalize_plan(
         case T_SeqScan:
         case T_CStoreScan:
         case T_DfsScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
             if (((Scan*)plan)->tablesample) {
                 (void)finalize_primnode((Node*)((Scan*)plan)->tablesample, &context);
             }
@@ -2589,7 +2636,7 @@ static Bitmapset* finalize_plan(
             context.paramids = bms_add_members(context.paramids, scan_params);
 
             /* child nodes if any */
-            finalize_plans(root, &context, cscan->extensible_plans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, cscan->extensible_plans, valid_params, scan_params);
         } break;
 
         case T_ModifyTable: {
@@ -2601,7 +2648,7 @@ static Bitmapset* finalize_plan(
             scan_params = bms_add_member(bms_copy(scan_params), locally_added_param);
             (void)finalize_primnode((Node*)mtplan->returningLists, &context);
             (void)finalize_primnode((Node*)mtplan->updateTlist, &context);
-            finalize_plans(root, &context, mtplan->plans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, mtplan->plans, valid_params, scan_params);
         } break;
 #ifdef PGXC
         case T_RemoteQuery:
@@ -2610,28 +2657,27 @@ static Bitmapset* finalize_plan(
 #endif
 
         case T_Append: {
-            finalize_plans(root, &context, ((Append*)plan)->appendplans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, ((Append*)plan)->appendplans, valid_params, scan_params);
         } break;
+
         case T_MergeAppend: {
-            finalize_plans(root, &context, ((MergeAppend*)plan)->mergeplans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, ((MergeAppend*)plan)->mergeplans, valid_params, scan_params);
         } break;
 
         case T_BitmapAnd: {
-            finalize_plans(root, &context, ((BitmapAnd*)plan)->bitmapplans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, ((BitmapAnd*)plan)->bitmapplans, valid_params, scan_params);
 
         } break;
 
         case T_BitmapOr: {
-            finalize_plans(root, &context, ((BitmapOr*)plan)->bitmapplans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, ((BitmapOr*)plan)->bitmapplans, valid_params, scan_params);
         } break;
 
         case T_CStoreIndexAnd: {
-            finalize_plans(
-                root, &context, ((CStoreIndexAnd*)plan)->bitmapplans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, ((CStoreIndexAnd*)plan)->bitmapplans, valid_params, scan_params);
         } break;
         case T_CStoreIndexOr: {
-            finalize_plans(
-                root, &context, ((CStoreIndexOr*)plan)->bitmapplans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, ((CStoreIndexOr*)plan)->bitmapplans, valid_params, scan_params);
         } break;
         case T_NestLoop: {
             ListCell* l = NULL;
@@ -2691,23 +2737,7 @@ static Bitmapset* finalize_plan(
             valid_params = bms_add_member(bms_copy(valid_params), locally_added_param);
             /* wtParam does *not* get added to scan_params */
             break;
-        case T_Gather:
-            /* child nodes are allowed to reference rescan_param, if any */
-            locally_added_param = ((Gather*)plan)->rescan_param;
-            if (locally_added_param >= 0) {
-                valid_params = bms_add_member(bms_copy(valid_params), locally_added_param);
 
-                /*
-                 * We currently don't support nested Gathers.  The issue so
-                 * far as this function is concerned would be how to identify
-                 * which child nodes depend on which Gather.
-                 */
-                Assert(gather_param < 0);
-                /* Pass down rescan_param to child parallel-aware nodes */
-                gather_param = locally_added_param;
-            }
-            /* rescan_param does *not* get added to scan_params */
-            break;
         case T_LockRows:
             /* Force descendant scan nodes to reference epqParam */
             locally_added_param = ((LockRows*)plan)->epqParam;
@@ -2756,19 +2786,18 @@ static Bitmapset* finalize_plan(
     }
 
     /* Process left and right child plans, if any */
-    child_params = finalize_plan(root, plan->lefttree, gather_param, valid_params, scan_params);
+    child_params = finalize_plan(root, plan->lefttree, valid_params, scan_params);
     context.paramids = bms_add_members(context.paramids, child_params);
 
     if (nestloop_params != NULL) {
         /* right child can reference nestloop_params as well as valid_params */
-        child_params =
-            finalize_plan(root, plan->righttree, gather_param, bms_union(nestloop_params, valid_params), scan_params);
+        child_params = finalize_plan(root, plan->righttree, bms_union(nestloop_params, valid_params), scan_params);
         /* ... and they don't count as parameters used at my level */
         child_params = bms_difference(child_params, nestloop_params);
         bms_free_ext(nestloop_params);
     } else {
         /* easy case */
-        child_params = finalize_plan(root, plan->righttree, gather_param, valid_params, scan_params);
+        child_params = finalize_plan(root, plan->righttree, valid_params, scan_params);
     }
     context.paramids = bms_add_members(context.paramids, child_params);
 
@@ -3290,8 +3319,13 @@ void convert_multi_count_distinct(PlannerInfo* root)
         }
         partial_query->targetList = list_concat((List*)copyObject(group_exprs), target_list);
 
+#ifdef ENABLE_MULTIPLE_NODES
+        /* Set can_push flag of query. */
+        mark_query_canpush_flag((Node *) partial_query);
+#endif
+
         /* Generate subquery rte and add it to the range tables */
-        rte = addRangeTableEntryForSubquery(NULL, partial_query, makeAlias("subquery", NIL), true);
+        rte = addRangeTableEntryForSubquery(NULL, partial_query, makeAlias("subquery", NIL), false, true);
         rtable = lappend(rtable, rte);
         rtindex = list_length(rtable);
 
@@ -3381,34 +3415,51 @@ static bool pull_sublink_clause_walker(Node* node, pull_node_clause* context)
         return false;
 
     switch (nodeTag(node)) {
+        case T_NullTest:
+            if (context->flag & PE_NULLTEST) {
+                context->nodeList = lappend(context->nodeList, node);
+                return false;
+            }
+            break;
         case T_CoalesceExpr:
         case T_CaseExpr:
-        case T_NullTest:
+        case T_FuncExpr:
+            break;
         case T_NullIfExpr:
-            return false;
+            if (!context->recurse) {
+                return false;
+            }
+            break;
         case T_BoolExpr: {
             /* Traversion will ceased when return true */
             if (((BoolExpr*)node)->boolop == NOT_EXPR) {
-                return false;
+                if (context->flag & PE_NOTCLAUSE) {
+                    context->nodeList = lappend(context->nodeList, node);
+                }
+                if (!context->recurse) {
+                    return false;
+                }
             }
             break;
         }
-        case T_OpExpr: {
-            if (context->skipOpExpr) {
-                return false;
-            }
-            break;
-        }
-        case T_FuncExpr: {
-            Oid funoid = ((FuncExpr*)node)->funcid;
-            if (is_not_strict_agg(funoid)) {
+        case T_OpExpr:
+        {
+            if (context->flag & PE_OPEXPR) {
+                context->nodeList = lappend(context->nodeList, node);
                 return false;
             }
             break;
         }
         case T_SubLink:
             context->nodeList = lappend(context->nodeList, node);
+            context->nameList = lappend(context->nameList, context->name);
             return false;
+        case T_TargetEntry:
+        {
+            TargetEntry *entry= (TargetEntry *)node;
+            context->name = entry->resname;
+            break;
+        }
 
         default:
             break;
@@ -3424,14 +3475,22 @@ static bool pull_sublink_clause_walker(Node* node, pull_node_clause* context)
  *
  * @return - sublink list.
  */
-List* pull_sublink(Node* node, bool skipOpExpr)
+List *pull_sublink(Node *node, int flag, bool is_name, bool recurse)
 {
     pull_node_clause context;
 
     context.nodeList = NIL;
-    context.skipOpExpr = skipOpExpr;
+    context.nameList = NIL;
+    context.recurse = recurse;
+    context.flag = flag;
+    context.name = NULL;
 
     (void)pull_sublink_clause_walker(node, &context);
+
+    if (is_name) {
+        return context.nameList;
+    }
+
     return context.nodeList;
 }
 
@@ -3464,7 +3523,7 @@ List* pull_opExpr(Node* node)
     pull_node_clause context;
 
     context.nodeList = NIL;
-    context.skipOpExpr = true;
+    context.flag = PE_OPEXPR;
 
     (void)pull_opExpr_clause_walker(node, &context);
 
@@ -3476,7 +3535,7 @@ List* pull_opExpr(Node* node)
  * two size all include level up var, return false, this qual can not pull
  * up.
  */
-static bool get_equal_operates(OpExpr* qual, List** pullUpQual)
+static bool get_equal_operates(OpExpr* qual, List** pullUpQual, bool paramAllowed)
 {
     List* qualVarList = NULL;
     ListCell* lc = NULL;
@@ -3514,7 +3573,8 @@ static bool get_equal_operates(OpExpr* qual, List** pullUpQual)
     if ((levelUp[0] == 1 && levelUp[1] == 0) || (levelUp[0] == 0 && levelUp[1] == 1)) {
         Oid leftArgType = exprType((Node*)linitial(qual->args));
 
-        if (op_hashjoinable(qual->opno, leftArgType) || op_mergejoinable(qual->opno, leftArgType)) {
+        if (paramAllowed &&
+            (op_hashjoinable(qual->opno, leftArgType) || op_mergejoinable(qual->opno, leftArgType))) {
             *pullUpQual = lappend(*pullUpQual, qual);
         } else {
             return false;
@@ -3596,21 +3656,14 @@ static bool has_correlation_in_rte(List* rtable)
 /* judge_OpExpr_pullUp
  * Judge this opexpr which include sublink if can pull up.
  */
-static bool safe_convert_EXPR(OpExpr* opExpr, SubLink* sublink, Relids available_rels)
+static bool safe_convert_EXPR(PlannerInfo *root, Node *clause, SubLink* sublink, Relids available_rels, bool in_or_clause)
 {
     Relids varnos = NULL;
     Relids level_up_varnos = NULL;
     Query* subQuery = NULL;
+    bool        limit1_in_sublink = false;
 
     subQuery = (Query*)sublink->subselect;
-
-    /* Must do agg operatot */
-    if (!subQuery->hasAggs) {
-        ereport(DEBUG2,
-            (errmodule(MOD_OPT_REWRITE),
-                (errmsg("[Expr sublink pull up failure reason]: Subquery does not include agg."))));
-        return false;
-    }
 
     if (subQuery->jointree->fromlist == NULL) {
         ereport(DEBUG2,
@@ -3619,22 +3672,83 @@ static bool safe_convert_EXPR(OpExpr* opExpr, SubLink* sublink, Relids available
         return false;
     }
 
-    /* Can not support gropuing clause */
-    if (subQuery->cteList || subQuery->hasWindowFuncs || subQuery->hasModifyingCTE || subQuery->havingQual ||
-        subQuery->groupingSets || subQuery->groupClause || subQuery->limitOffset || subQuery->limitCount ||
-        subQuery->rowMarks) {
+    /* Can not support gropuing clause*/
+    if (subQuery->cteList ||
+        subQuery->hasWindowFuncs ||
+        subQuery->hasModifyingCTE ||
+        subQuery->havingQual ||
+        subQuery->groupingSets ||
+        subQuery->groupClause ||
+        subQuery->limitOffset ||
+        subQuery->rowMarks ||
+        subQuery->distinctClause ||
+        subQuery->windowClause) {
         ereport(DEBUG2,
             (errmodule(MOD_OPT_REWRITE),
                 (errmsg("[Expr sublink pull up failure reason]: Subquery includes cte, windowFun, havingQual, group, "
-                        "limit or rowMark."))));
+                        "limitoffset, distinct or rowMark."))));
         return false;
     }
 
-    /* Targetlist of subquery only can include one element */
-    if (list_length(subQuery->targetList) != 1) {
+    /* Only handle limit 1. */
+    if (subQuery->limitCount) {
+        Node *estLimit = NULL;
+        int64 limitCnt = 0;
+
+        /*
+         * Check whether the limit field exists in the sublink and whether
+         * the value of the limit field is 1.
+         */
+        estLimit = eval_const_expressions(NULL, subQuery->limitCount);
+        if (estLimit && IsA(estLimit, Const)) {
+            limitCnt = (((Const *) estLimit)->constisnull) ? 0 :
+    
+                DatumGetInt64(((Const *) estLimit)->constvalue);
+        } else {
+            limitCnt = 0;
+        }
+    
+        if (limitCnt != 1) {
+            ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+    
+                (errmsg("[Expr sublink pull up failure reason]: limit count of subquery is't equal to 1."))));
+            return false;
+        } else {
+            limit1_in_sublink = true;
+        }
+    }
+
+    /*
+     * In the case of without agg, we can only pull up sublink when we have limit 1 or
+     * unique_check which is not in or clause.
+     */
+    if (!subQuery->hasAggs) {
+        if (!(limit1_in_sublink || (((unsigned int)u_sess->attr.attr_sql.rewrite_rule & SUBLINK_PULLUP_WITH_UNIQUE_CHECK) && permit_from_rewrite_hint(root, SUBLINK_PULLUP_WITH_UNIQUE_CHECK))))  {
+            ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+                    (errmsg("[Expr sublink pull up failure reason]: with no agg and don't have limit1 or unique check."))));
+            return false;
+        } else if (in_or_clause) {
+            /* We will remove this restriction after support pull up no agg in or clause in the near future. */
+            ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+                (errmsg("[Expr sublink pull up failure reason]: with no agg in or clause can not pull up temporarily."))));
+            return false;
+        }
+    }
+
+    /* Targetlist of subquery can only include one element without junk attribute*/
+    int tle_without_junk_number = 0;
+    ListCell* lc = NULL;
+    foreach (lc, subQuery->targetList) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        if (!(tle->resjunk)) {
+            tle_without_junk_number++;
+        }
+    }
+    if (tle_without_junk_number != 1) {
         ereport(DEBUG2,
             (errmodule(MOD_OPT_REWRITE),
-                (errmsg("[Expr sublink pull up failure reason]: Subquery targetlist length is greater than 1."))));
+                (errmsg("[Expr sublink pull up failure reason]: Subquery targetlist contains more than one element "
+                        "without the junk attribute."))));
         return false;
     }
 
@@ -3646,7 +3760,7 @@ static bool safe_convert_EXPR(OpExpr* opExpr, SubLink* sublink, Relids available
         return false;
     }
 
-    varnos = pull_varnos((Node*)opExpr, 0, true);
+    varnos = pull_varnos(clause, 0, true);
 
     /* Varnos in op need belong to available_rels otherwise it can not be pulled up */
     if (!bms_is_subset(varnos, available_rels)) {
@@ -3685,13 +3799,6 @@ static bool safe_convert_EXPR(OpExpr* opExpr, SubLink* sublink, Relids available
         return false;
     }
 
-    if (contain_nonstrict_functions((Node*)subQuery->targetList, true)) {
-        ereport(DEBUG2,
-            (errmodule(MOD_OPT_REWRITE),
-                (errmsg("[Expr sublink pull up failure reason]: Sublink targetlist includes nonstrict expression."))));
-        return false;
-    }
-
     if (expression_returns_set((Node*)subQuery->targetList)) {
         ereport(DEBUG2,
             (errmodule(MOD_OPT_REWRITE),
@@ -3716,13 +3823,29 @@ static bool safe_convert_EXPR(OpExpr* opExpr, SubLink* sublink, Relids available
                         "whose arguments are correlated."))));
         return false;
     }
+
+    /*
+     * Disable pullup sublink for fast query shipping plan or stream plan with replicated table, as
+     * these scenarios don't need stream operator, so we can use index plan to accelerate the executor.
+     * Notice : We don't know whether have index or whether in TP scenario ,so we use rewrite_rule to control.
+     */
+    if ((((unsigned int)u_sess->attr.attr_sql.rewrite_rule & SUBLINK_PULLUP_DISABLE_REPLICATED) && 
+            permit_from_rewrite_hint(root, SUBLINK_PULLUP_DISABLE_REPLICATED)) &&
+        (IS_PGXC_DATANODE || (IS_STREAM_PLAN && all_replicate_table(subQuery)))) {
+        ereport(DEBUG2,
+               (errmodule(MOD_OPT_REWRITE),
+                (errmsg("[Expr sublink pull up failure reason]: Sublink pull up of replicated table is disabled."))));
+
+        return false;
+    }
+
     return true;
 }
 
 /* append_target_and_group
  * Append node to targetlist and group by clause
  */
-static void append_target_and_group(Query* subQuery, Node* node)
+static void append_target_and_group(PlannerInfo *root, Query* subQuery, Node* node)
 {
     Oid sortop = InvalidOid;
     Oid eqop = InvalidOid;
@@ -3730,11 +3853,32 @@ static void append_target_and_group(Query* subQuery, Node* node)
     TargetEntry* tle = NULL;
     SortGroupClause* grpcl = NULL;
     int len = list_length(subQuery->targetList) + 1;
+    bool find = false;
 
-    /* Append this parameter to subquery targestlist */
-    tle = makeTargetEntry((Expr*)node, len, pstrdup("?column?"), false);
-    tle->ressortgroupref = len;
-    subQuery->targetList = lappend(subQuery->targetList, tle);
+    if (ENABLE_PRED_PUSH_ALL(root)) {
+        ListCell* lc = NULL;
+        int pos = 1;
+
+        foreach (lc, subQuery->targetList) {
+            TargetEntry* tge = (TargetEntry*)lfirst(lc);
+
+            if (IsA(tge->expr, Var) && equal(tge->expr, node)) {
+                len = pos;
+                tge->ressortgroupref = len;
+                find = true;
+                break;
+            }
+            pos++;
+        }
+    }
+
+    if (!find)
+    {
+        /* Append this parameter to subquery targestlist*/
+        tle = makeTargetEntry((Expr*)node, len, pstrdup("?column?"), false);
+        tle->ressortgroupref = len;
+        subQuery->targetList = lappend(subQuery->targetList, tle);
+    }
 
     /* This node need participate group of subquery. determine the eqop and optional sortop
      */
@@ -3750,11 +3894,26 @@ static void append_target_and_group(Query* subQuery, Node* node)
     subQuery->groupClause = lappend(subQuery->groupClause, grpcl);
 }
 
+static bool get_pullUp_equal_expr_internal(JoinExpr* je, List** pullUpQual, bool paramAllowed)
+{
+    if(!get_pullUp_equal_expr(je->quals, pullUpQual, paramAllowed)) {
+        return false;
+    }
+    if(!get_pullUp_equal_expr(je->larg, pullUpQual, paramAllowed)) {
+        return false;
+    }
+    if(!get_pullUp_equal_expr(je->rarg, pullUpQual, paramAllowed)) {
+        return false;
+    }
+
+    return true;
+}
+
 /* get_pullUp_equal_expr
  * Sublink can be pulled up when function return true and pullUpQual is not null.
  * pullUpQual include all need pull up equal operator.
  */
-static bool get_pullUp_equal_expr(Node* node, List** pullUpQual)
+static bool get_pullUp_equal_expr(Node* node, List** pullUpQual, bool paramAllowed)
 {
     if (node == NULL) {
         return true;
@@ -3766,12 +3925,12 @@ static bool get_pullUp_equal_expr(Node* node, List** pullUpQual)
             ListCell* lc = NULL;
             foreach (lc, fromExpr->fromlist) {
                 Node* jtree = (Node*)lfirst(lc);
-                if (!get_pullUp_equal_expr(jtree, pullUpQual)) {
+                if (!get_pullUp_equal_expr(jtree, pullUpQual, paramAllowed)) {
                     return false;
                 }
             }
 
-            if (!get_pullUp_equal_expr(fromExpr->quals, pullUpQual)) {
+            if (!get_pullUp_equal_expr(fromExpr->quals, pullUpQual, paramAllowed)) {
                 return false;
             }
             break;
@@ -3779,23 +3938,21 @@ static bool get_pullUp_equal_expr(Node* node, List** pullUpQual)
         case T_JoinExpr: {
             JoinExpr* je = (JoinExpr*)node;
             if (je->jointype != JOIN_INNER) {
+                /*
+                 * Supports the promotion of sublinks that contain related columns
+                 * in the where condition of outer join. The promotion of on conditions
+                 * of outer join does not support promotion.
+                 */
+                paramAllowed = false;
+            }
+            if (!get_pullUp_equal_expr_internal(je, pullUpQual, paramAllowed)) {
                 return false;
-            } else {
-                if (!get_pullUp_equal_expr(je->quals, pullUpQual)) {
-                    return false;
-                }
-                if (!get_pullUp_equal_expr(je->larg, pullUpQual)) {
-                    return false;
-                }
-                if (!get_pullUp_equal_expr(je->larg, pullUpQual)) {
-                    return false;
-                }
             }
             break;
         }
         case T_OpExpr: {
             OpExpr* expr = (OpExpr*)node;
-            if (!get_equal_operates(expr, pullUpQual)) {
+            if (!get_equal_operates(expr, pullUpQual, paramAllowed)) {
                 return false;
             }
             break;
@@ -3806,13 +3963,13 @@ static bool get_pullUp_equal_expr(Node* node, List** pullUpQual)
                     return false;
                 }
             } else {
-                AssertEreport(and_clause(node), MOD_OPT_REWRITE, "Clause to be pulled up should be and clause");
+                Assert(and_clause(node));
 
                 BoolExpr* andExpr = (BoolExpr*)node;
                 ListCell* lc = NULL;
                 foreach (lc, andExpr->args) {
                     Node* qual = (Node*)lfirst(lc);
-                    if (!get_pullUp_equal_expr(qual, pullUpQual)) {
+                    if (!get_pullUp_equal_expr(qual, pullUpQual, paramAllowed)) {
                         return false;
                     }
                 }
@@ -3845,16 +4002,36 @@ static bool get_pullUp_equal_expr(Node* node, List** pullUpQual)
 }
 
 /*
+ * Disable pullup sublink for fast query shipping plan or stream plan with replicated table, as
+ * these scenarios don't need stream operator, so we can use index plan to accelerate the executor.
+ * Notice : We don't know whether have index or whether in TP scenario ,so we use rewrite_rule to control.
+ */
+static bool cannot_covert_ANY(PlannerInfo *root, Query* sub_select)
+{
+    if ((((unsigned int)u_sess->attr.attr_sql.rewrite_rule & SUBLINK_PULLUP_DISABLE_REPLICATED) && 
+            permit_from_rewrite_hint(root, SUBLINK_PULLUP_DISABLE_REPLICATED)) &&
+        (IS_PGXC_DATANODE || (IS_STREAM_PLAN && all_replicate_table(sub_select)))) {
+        return true;
+    }
+
+    return false;
+}
+
+/*
  * @Description: Judge this any sublink if can pull up.
  * @in sublink - sublink node.
  * @in available_rels1 - available rel numbers.
  */
-static bool safe_convert_ANY(SubLink* sublink, Relids available_rels)
+static bool safe_convert_ANY(PlannerInfo *root, SubLink* sublink, Relids available_rels)
 {
     Relids varnos = NULL;
     Query* sub_select = (Query*)sublink->subselect;
 
     if (contain_vars_of_level_or_above((Node*)sub_select, 1)) {
+        ereport(DEBUG2,
+            (errmodule(MOD_OPT_REWRITE),
+            (errmsg("[Any sublink pull up failure reason]: Sublink includes var with levelup which is greater than 0."))));
+
         return false;
     }
 
@@ -3862,13 +4039,30 @@ static bool safe_convert_ANY(SubLink* sublink, Relids available_rels)
         return false;
     }
 
-    if (sub_select->commandType != CMD_SELECT || sub_select->setOperations || sub_select->hasAggs ||
-        sub_select->groupingSets || sub_select->hasWindowFuncs || sub_select->hasModifyingCTE ||
-        sub_select->havingQual || sub_select->limitOffset || sub_select->limitCount || sub_select->rowMarks) {
+    if (sub_select->commandType != CMD_SELECT ||
+        sub_select->cteList ||
+        sub_select->setOperations ||
+        sub_select->hasAggs ||
+        sub_select->groupingSets ||
+        sub_select->hasWindowFuncs ||
+        sub_select->hasModifyingCTE ||
+        sub_select->havingQual ||
+        sub_select->limitOffset ||
+        sub_select->limitCount ||
+        sub_select->rowMarks) {
+        ereport(DEBUG2,
+                (errmodule(MOD_OPT_REWRITE),
+                (errmsg("[Any sublink pull up failure reason]:"
+                        "Sublink is not select or includes"
+                        " cte, setop, agg, windowfunc, having, grouping, limit or rowmark."))));
+
         return false;
     }
 
     if (expression_returns_set((Node*)sub_select->targetList)) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+               (errmsg("[Any sublink pull up failure reason]: Sublink targetlist returns a set."))));
+
         return false;
     }
 
@@ -3876,11 +4070,17 @@ static bool safe_convert_ANY(SubLink* sublink, Relids available_rels)
      * The subquery must have a nonempty jointree, else we won't have a join.
      */
     if (sub_select->jointree->fromlist == NIL) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+               (errmsg("[Any sublink pull up failure reason]: Sublink's fromlist is null."))));
+
         return false;
     }
 
     varnos = pull_varnos(sublink->testexpr);
     if (bms_is_empty(varnos)) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+                (errmsg("[Any sublink pull up failure reason]: Sublink's outer query contains no varnos."))));
+
         return false;
     }
 
@@ -3888,6 +4088,9 @@ static bool safe_convert_ANY(SubLink* sublink, Relids available_rels)
      * However, it can't refer to anything outside available_rels.
      */
     if (!bms_is_subset(varnos, available_rels)) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Any sublink pull up failure reason]: Sublink refer to unavailable rels."))));
+
         return false;
     }
 
@@ -3895,6 +4098,14 @@ static bool safe_convert_ANY(SubLink* sublink, Relids available_rels)
      * The combining operators and left-hand expressions mustn't be volatile.
      */
     if (contain_volatile_functions(sublink->testexpr)) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Any sublink pull up failure reason]: Sublink's outer query includes volatile functions."))));
+
+        return false;
+    }
+
+
+    if (cannot_covert_ANY(root, sub_select)) {
         return false;
     }
 
@@ -3906,13 +4117,17 @@ static bool safe_convert_ANY(SubLink* sublink, Relids available_rels)
  * @in sublink - sublink node.
  * @in available_rels1 - available rel numbers.
  */
-static bool safe_convert_EXISTS(SubLink* sublink, Relids available_rels)
+static bool safe_convert_EXISTS(PlannerInfo *root, SubLink* sublink, Relids available_rels)
 {
     Query* subselect = (Query*)(sublink->subselect);
     Node* whereClause = NULL;
     Relids clause_varnos = NULL;
 
     if (contain_vars_of_level_or_above((Node*)subselect, 2)) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Exists sublink pull up failure reason]: "
+                "Sublink includes var with levelup which is greater than 1."))));
+
         return false;
     }
 
@@ -3924,17 +4139,30 @@ static bool safe_convert_EXISTS(SubLink* sublink, Relids available_rels)
      * this case, since it just produces a subquery RTE that doesn't have to
      * get flattened into the parent query.
      */
-    if (subselect->cteList) {
-        return false;
-    }
 
-    if (subselect->commandType != CMD_SELECT || subselect->setOperations || subselect->hasAggs ||
-        subselect->groupingSets || subselect->hasWindowFuncs || subselect->hasModifyingCTE || subselect->havingQual ||
-        subselect->limitOffset || subselect->limitCount || subselect->rowMarks) {
+    if (subselect->commandType != CMD_SELECT ||
+        subselect->cteList ||
+        subselect->setOperations ||
+        subselect->hasAggs ||
+        subselect->groupingSets ||
+        subselect->hasWindowFuncs ||
+        subselect->hasModifyingCTE ||
+        subselect->havingQual ||
+        subselect->limitOffset ||
+        subselect->limitCount ||
+        subselect->rowMarks) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+       (errmsg("[Exists sublink pull up failure reason]:"
+               " Sublink is not select or includes"
+               " cte, setop, agg, windowfunc, having, grouping, limit or rowmark."))));
+
         return false;
     }
 
     if (expression_returns_set((Node*)subselect->targetList)) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Exists sublink pull up failure reason]: Sublink targetlist returns a set."))));
+
         return false;
     }
 
@@ -3942,6 +4170,23 @@ static bool safe_convert_EXISTS(SubLink* sublink, Relids available_rels)
      * The subquery must have a nonempty jointree, else we won't have a join.
      */
     if (subselect->jointree->fromlist == NIL) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Exists sublink pull up failure reason]: Sublink's fromlist is null."))));
+
+        return false;
+    }
+
+    /*
+     * Disable pullup sublink for fast query shipping plan or stream plan with replicated table, as
+     * these scenarios don't need stream operator, so we can use index plan to accelerate the executor.
+     * Notice : We don't know whether have index or whether in TP scenario ,so we use rewrite_rule to control.
+     */
+    if ((((unsigned int)u_sess->attr.attr_sql.rewrite_rule & SUBLINK_PULLUP_DISABLE_REPLICATED) && 
+            permit_from_rewrite_hint(root, SUBLINK_PULLUP_DISABLE_REPLICATED)) &&
+        (IS_PGXC_DATANODE || (IS_STREAM_PLAN && all_replicate_table(subselect))))  {
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Exists sublink pull up failure reason]: Sublink pull up of replicated table is disabled."))));
+
         return false;
     }
 
@@ -3959,6 +4204,10 @@ static bool safe_convert_EXISTS(SubLink* sublink, Relids available_rels)
      */
     if (contain_vars_of_level((Node*)subselect, 1)) {
         subselect->jointree->quals = whereClause;
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Exists sublink pull up failure reason]: "
+        "Sublink without whereclause refer any vars of the parent."))));
+
         return false;
     }
 
@@ -3968,6 +4217,9 @@ static bool safe_convert_EXISTS(SubLink* sublink, Relids available_rels)
      */
     if (!contain_vars_of_level(whereClause, 1)) {
         subselect->jointree->quals = whereClause;
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Exists sublink pull up failure reason]: Sublink's whereclause have no var of parent query."))));
+
         return false;
     }
 
@@ -3975,6 +4227,9 @@ static bool safe_convert_EXISTS(SubLink* sublink, Relids available_rels)
      * We don't risk optimizing if the WHERE clause is volatile, either.
      */
     if (contain_volatile_functions(whereClause)) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Exists sublink pull up failure reason]: Sublink whereclause includes volatile functions."))));
+
         subselect->jointree->quals = whereClause;
         return false;
     }
@@ -3982,6 +4237,9 @@ static bool safe_convert_EXISTS(SubLink* sublink, Relids available_rels)
     clause_varnos = pull_varnos(whereClause, 1, true);
     if (bms_is_empty(clause_varnos) || !bms_is_subset(clause_varnos, available_rels)) {
         subselect->jointree->quals = whereClause;
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Exists sublink pull up failure reason]: Sublink's whereclause refer to unavailable rels."))));
+
         return false;
     }
 
@@ -3995,24 +4253,149 @@ static bool safe_convert_EXISTS(SubLink* sublink, Relids available_rels)
  * @in sunlink - SubLink node.
  * @return - true say this sublink can be pulled up; false say this sublink can not pulled up.
  */
-static bool safe_convert_ORCLAUSE(OpExpr* op_expr, SubLink* sublink, Relids available_rels)
+static bool safe_convert_ORCLAUSE(PlannerInfo *root, Node* clause, SubLink* sublink, Relids available_rels)
 {
     bool result = false;
     switch (sublink->subLinkType) {
         case EXISTS_SUBLINK:
-            result = safe_convert_EXISTS(sublink, available_rels);
+            result = safe_convert_EXISTS(root, sublink, available_rels);
             break;
         case ANY_SUBLINK:
-            result = safe_convert_ANY(sublink, available_rels);
+            result = safe_convert_ANY(root, sublink, available_rels);
             break;
         case EXPR_SUBLINK:
-            result = safe_convert_EXPR(op_expr, sublink, available_rels);
+            result = safe_convert_EXPR(root, clause, sublink, available_rels, true);
             break;
         default:
             break;
     }
 
     return result;
+}
+
+static int get_target_idx(List *targetlist, Node* node)
+{
+    ListCell *lc = NULL;
+    int pos = 1;
+    foreach (lc, targetlist) {
+        TargetEntry* tge = (TargetEntry*)lfirst(lc);
+
+        if (IsA(tge->expr, Var) && equal(tge->expr, node)) {
+            return pos;
+        }
+        pos++;
+    }
+
+    return -1;
+}
+
+static void
+append_target_and_windowClause(PlannerInfo *root, Query *subQuery, Node *node, bool isRowNumberFunc)
+{
+    ListCell        *lc = NULL;
+    TargetEntry     *tle = NULL;
+    SortGroupClause *sortGroupClause = NULL;
+    WindowClause    *windowClause = NULL;
+    WindowFunc      *rowNumerFunc = NULL;
+
+    /* Append windowFunc to subquery targetlist. */
+    if (subQuery->windowClause == NIL) {
+        windowClause = (WindowClause *) makeNode(WindowClause);
+        windowClause->partitionClause = NIL;
+        windowClause->frameOptions = FRAMEOPTION_DEFAULTS;
+        windowClause->winref = 1;
+        subQuery->windowClause = lappend(subQuery->windowClause, windowClause);
+        subQuery->hasWindowFuncs = true;
+        
+    } else {
+        windowClause = (WindowClause *) linitial(subQuery->windowClause);
+    }
+
+    if (!isRowNumberFunc) {
+
+        /* Append this parameter to subquery targestlist. */
+        Oid sortOp = InvalidOid;
+        Oid eqOp = InvalidOid;
+        bool hashable = false;
+        int len = list_length(subQuery->targetList) + 1;
+        bool find = false;
+        
+        if (ENABLE_PRED_PUSH_ALL(root)) {
+            lc = NULL;
+            int pos = 1;
+            foreach (lc, subQuery->targetList) {
+                TargetEntry* tge = (TargetEntry*)lfirst(lc);
+
+                if (IsA(tge->expr, Var) && equal(tge->expr, node)) {
+                    len = pos;
+                    tge->ressortgroupref = len;
+                    find = true;
+                    break;
+                }
+                pos++;
+            }
+        }
+        
+        if (!find)
+        {
+            tle = makeTargetEntry((Expr*)node, len, pstrdup("?column?"), false);
+            tle->ressortgroupref = len;
+            subQuery->targetList = lappend(subQuery->targetList, tle);
+        }
+
+        get_sort_group_operators(exprType(node),
+                                false, true, false,
+                                &sortOp, &eqOp, NULL,
+                                &hashable);
+        sortGroupClause = (SortGroupClause *) makeNode(SortGroupClause);
+        sortGroupClause->tleSortGroupRef = len;
+        sortGroupClause->eqop = eqOp;
+        sortGroupClause->sortop = sortOp;
+        sortGroupClause->hashable = hashable;
+        windowClause->partitionClause = lappend(windowClause->partitionClause, sortGroupClause);
+    } else {
+        rowNumerFunc = (WindowFunc *) makeNode(WindowFunc);
+        rowNumerFunc->winfnoid = ROWNUMBERFUNCOID;
+        rowNumerFunc->wintype = INT8OID;
+        rowNumerFunc->wincollid = 0;
+        rowNumerFunc->inputcollid = 0;
+        rowNumerFunc->winref = windowClause->winref;
+        subQuery->targetList = lappend(subQuery->targetList,
+                        makeTargetEntry((Expr *) rowNumerFunc,
+                        list_length(subQuery->targetList) + 1,
+                        pstrdup("?column?"), false));
+
+        foreach(lc, subQuery->sortClause)
+        {
+            Node * subQueryOrderNode = NULL;
+            Node * sortGroupNode = (Node *) lfirst(lc);
+
+            subQueryOrderNode = (Node *)copyObject(sortGroupNode);
+            windowClause->orderClause = lappend(windowClause->orderClause, subQueryOrderNode);
+        }
+        subQuery->sortClause = NULL;        
+    }
+}
+
+static List* get_targetList_with_resjunk(List** subList)
+{
+    List* tmptargetList = NIL;
+    List* targetList_with_resjunk = NIL;
+    ListCell* lc = NULL;
+    int len = 0;
+    foreach (lc, *subList) {
+        TargetEntry* te = (TargetEntry*)lfirst(lc);
+        if (te->resjunk) {
+            targetList_with_resjunk = lappend(targetList_with_resjunk, te);
+        } else {
+            len++;
+            te->resno = (int16)len;
+            tmptargetList = lappend(tmptargetList, te);
+        }
+    }
+    list_free(*subList);
+    *subList = tmptargetList;
+    return targetList_with_resjunk;
 }
 
 /*
@@ -4024,7 +4407,12 @@ static bool safe_convert_ORCLAUSE(OpExpr* op_expr, SubLink* sublink, Relids avai
  * @out quals - not null expr.
  * @return - join qual.
  */
-static Node* transform_equal_expr(PlannerInfo* root, Query* subQuery, List* pullUpEqualExpr, Node** quals)
+static Node* transform_equal_expr(PlannerInfo* root,
+                                        Query* subQuery,
+                                        List* pullUpEqualExpr,
+                                        Node** quals,
+                                        bool isLimit,
+                                        bool isnull)
 {
     int targetListLen = 0;
     List* constList = NULL;
@@ -4033,14 +4421,24 @@ static Node* transform_equal_expr(PlannerInfo* root, Query* subQuery, List* pull
     Node* joinQual = NULL;
     Var* var = NULL;
 
-    /* The position of subquery int rtable */
+    /*The position of subquery int rtable*/
     rtindex = list_length(root->parse->rtable) + 1;
+
+    /*
+     * We need to extract the junk column, when isLimit is true.
+     * Because we will append node to targetlist, if the Junk column is not at the end,
+     * It'll go wrong. After apending node,we will add the junk cloumn at the end.
+     */
+    List* targetList_with_resjunk = NIL;
+    if (isLimit) {
+        targetList_with_resjunk = get_targetList_with_resjunk(&(subQuery->targetList));
+    }
 
     targetListLen = list_length(subQuery->targetList);
 
-    /* Deal with equal expr in sublink */
+    /* Deal with equal expr in sublink*/
     foreach (lc, pullUpEqualExpr) {
-        AssertEreport(IsA(lfirst(lc), OpExpr), MOD_OPT_REWRITE, "Each pulled up expr should be equal expr");
+        Assert(IsA(lfirst(lc), OpExpr));
         OpExpr* pullUpExpr = (OpExpr*)lfirst(lc);
 
         ListCell* cell = NULL;
@@ -4053,27 +4451,74 @@ static Node* transform_equal_expr(PlannerInfo* root, Query* subQuery, List* pull
             Node* node = (Node*)lfirst(cell);
 
             if (contain_vars_of_level(node, 0)) {
-                targetListLen++;
+                
+                if (ENABLE_PRED_PUSH_ALL(root)) {
+                    int pos = get_target_idx(subQuery->targetList, node);
+                    if (pos != -1) {
+                        targetListLen = pos;
+                    }
+                    else {
+                        targetListLen = list_length(subQuery->targetList);
+                        targetListLen++;
+                    }
+                } else {
+                    targetListLen++;
+                }
 
                 lfirst(cell) = var =
                     makeVar(rtindex, targetListLen, exprType(node), exprTypmod(node), exprCollation(node), 0);
 
-                /* Append node to targetlist and group by clause of subquery */
-                append_target_and_group(subQuery, (Node*)copyObject(node));
-
-                if (quals && (*quals) == NULL) {
-                    *quals = (Node*)makeNullTest(IS_NOT_NULL, (Expr*)copyObject(var));
+                /*Append node to targetlist and group by clause of subquery*/
+                if (isLimit) {
+                    append_target_and_windowClause(root, subQuery, (Node*)copyObject(node), false);
+                } else {
+                    append_target_and_group(root, subQuery, (Node*)copyObject(node));
                 }
+                
+                if(quals && (*quals) == NULL) {
+                    NullTestType nullType = isnull ? IS_NULL : IS_NOT_NULL;
+                    *quals = (Node*)makeNullTest(nullType, (Expr*)copyObject(var));
+                }
+
             }
         }
 
-        /* pull up this subQuery equal qual */
+        /*pull up this subQuery equal qual*/
         joinQual = make_and_qual((Node*)joinQual, (Node*)pullUpExpr);
-
         constList = lappend(constList, makeBoolConst(true, false));
     }
 
-    /* Delete qual from subquery, it will be pull up */
+    if (isLimit) {
+        append_target_and_windowClause(root, subQuery, NULL, true);
+
+        /* The value of SortGroupRef is incorrect because the junk column is obtained. 
+         * After the junk column is added, the size of SortGroupRef needs to be adjusted.
+         */
+        int len = list_length(targetList_with_resjunk);
+        WindowClause* windowClause = (WindowClause *) linitial(subQuery->windowClause);
+        foreach (lc, windowClause->partitionClause) {
+            SortGroupClause* sortGroupClause = (SortGroupClause*)lfirst(lc);
+            ListCell* lc1 = NULL;
+            foreach (lc1, subQuery->targetList) {
+                TargetEntry* te = (TargetEntry*)lfirst(lc1);
+                if (sortGroupClause->tleSortGroupRef == te->ressortgroupref) {
+                    sortGroupClause->tleSortGroupRef += (Index)len;
+                    te->ressortgroupref += (Index)len;
+                    break;
+                }
+            }
+        }
+        /* Append junk node to targetlist at the end. */
+        targetListLen = list_length(subQuery->targetList);
+        foreach (lc, targetList_with_resjunk) {
+            targetListLen++;
+            TargetEntry* te = (TargetEntry*)lfirst(lc);
+            te->resno = (int16)targetListLen;
+            subQuery->targetList = lappend(subQuery->targetList, te);
+        }
+    }
+
+    /* Delete qual from subquery, it will be pull up*/
     subQuery->jointree = (FromExpr*)replace_node_clause((Node*)subQuery->jointree,
         (Node*)pullUpEqualExpr,
         (Node*)constList,
@@ -4261,6 +4706,11 @@ static SubLink* build_any_sublink(PlannerInfo* root, List* qual_list, int relid,
 
         selectQuery->jointree = makeFromExpr(list_make1(rtr), quals_node);
 
+#ifdef ENABLE_MULTIPLE_NODES
+        /* Set can_push flag of query. */
+        mark_query_canpush_flag((Node *) selectQuery);
+#endif   /* ENABLE_MULTIPLE_NODES */
+
         sub_link = makeNode(SubLink);
         sub_link->subLinkType = ANY_SUBLINK;
 
@@ -4269,6 +4719,133 @@ static SubLink* build_any_sublink(PlannerInfo* root, List* qual_list, int relid,
     }
 
     return sub_link;
+}
+
+/*
+ * @Description: When the opexpr sublink is converted to the left join, the converted
+ *      filtering condition needs to be generated according to the targetlist.
+ *      For example :
+ *      select * from t1 where t1.a = (select count(*) from t2 where t1.b = t2.b);
+ *      
+ *      Rewritten form :
+ *      select t1.* from t1 left join (select count(t2.a) as cnt, b from t2 group by t2.b)
+ *      as tt on tt.b = t1.b where t1.a = coalesce(tt.cnt,0);.
+ *      
+ *      This function is used to generate 't1.a = coalesce(tt.cnt, 0)' based on count(*),
+ *      other similar.
+ * @in root - PlannerInfo.
+ * @in rtIndex - Varno of new vars to be built.
+ * @in targetExpr - TargetEntry expr.
+ * @in subQuery - Subquery of opexpr sublink.
+ * @return : Filter condition.
+ */
+static Node*
+generate_filter_on_opexpr_sublink(PlannerInfo *root,
+                                int rtIndex,
+                                Node *targetExpr,
+                                Query *subQuery)
+{
+    List        *varClauseList = NIL;
+    List        *aggFuncList = NIL;
+    ListCell    *lc = NULL;
+    Node        *filterExpr = NULL;
+    Var         *aggVar = NULL;
+    TargetEntry *aggTargetEntry = NULL;
+
+    /* Recursively iterates through targetExpr and finds the aggregate function in it. */
+    filterExpr = (Node *) copyObject(targetExpr);
+    varClauseList = pull_var_clause(filterExpr,
+                                    PVC_INCLUDE_AGGREGATES,
+                                    PVC_REJECT_PLACEHOLDERS,
+                                    PVC_RECURSE_SPECIAL_EXPR);
+    /* Notice, We only need agg functions. */
+    foreach(lc, varClauseList)
+    {
+        bool exists = false;
+        Node *tNode = (Node *) lfirst(lc);
+
+        if (IsA(tNode, Aggref)) {
+            ListCell * innerLc = NULL;
+            foreach(innerLc , aggFuncList) {
+                Node *aggFuncNode = (Node *) lfirst(innerLc);
+                
+                Assert(IsA(aggFuncNode, Aggref));
+                if (((Aggref *) tNode)->aggfnoid == ((Aggref *) aggFuncNode)->aggfnoid &&
+                    equal(((Aggref *) tNode)->args, ((Aggref *) aggFuncNode)->args)) {
+                    exists = true;
+                    break;
+                }
+            }
+
+            if (!exists) {
+                aggFuncList = lappend(aggFuncList, tNode);
+            }
+        }
+        
+        exists = false;
+    }
+
+    list_free_ext(varClauseList);
+
+    if (aggFuncList == NIL) {
+        return (Node *)makeVar(rtIndex, 1, 
+                        exprType((Node *) targetExpr), 
+                        exprTypmod((Node *) targetExpr), 
+                        exprCollation((Node *) targetExpr),
+                        0);
+    }
+    
+    foreach(lc, aggFuncList) {
+        ListCell *innerLc = NULL;
+        Node *aggFuncNode = (Node *) lfirst(lc);
+        Node *decoratedConstraints = NULL;
+        Node *constNode = NULL;
+
+        Assert(((Aggref *) aggFuncNode)->agglevelsup == 0);
+        /*
+         * Try to find target entry only including this function node. If not found,
+         * construct a new targetEntry based on agg function node, and append it to
+         * the targetList of subQuery.
+         */
+        foreach(innerLc, subQuery->targetList) {
+            TargetEntry *tempTargetEntry = (TargetEntry *) lfirst(innerLc);
+            if (equal(tempTargetEntry->expr, aggFuncNode)) {
+                aggTargetEntry = tempTargetEntry;
+                break;
+            }
+        }
+        
+        /* If not found, add a new targetEntry. */
+        if (innerLc == NULL) {
+            aggTargetEntry = makeTargetEntry((Expr *) aggFuncNode,
+                                            list_length(subQuery->targetList) + 1,
+                                            pstrdup("?column?"),
+                                            false);
+            subQuery->targetList = lappend(subQuery->targetList, aggTargetEntry);
+        }
+
+        /* Construct a new aggregate var to replace the aggregate function in targetExpr. */
+        aggVar = makeVarFromTargetEntry(rtIndex, aggTargetEntry);
+
+        if ((((Aggref *) aggFuncNode)->aggfnoid == ANYCOUNTOID) ||
+            (((Aggref *) aggFuncNode)->aggfnoid == COUNTOID)) {
+            constNode = (Node *) makeConst(INT4OID, -1, InvalidOid, sizeof(uint32),
+                                    Int32GetDatum(0), false, true);
+            decoratedConstraints = (Node *) makeNode(CoalesceExpr);
+            ((CoalesceExpr *) decoratedConstraints)->coalescecollid = InvalidOid;
+            ((CoalesceExpr *) decoratedConstraints)->coalescetype = exprType((Node *) aggFuncNode);
+            ((CoalesceExpr *) decoratedConstraints)->args = list_make2(aggVar, (Node *) constNode);
+        } else {
+            decoratedConstraints = (Node *) aggVar;
+        }
+
+        filterExpr = replace_node_clause((Node *) filterExpr, 
+                                        (Node *) aggFuncNode,
+                                        (Node *) decoratedConstraints,
+                                        RNC_COPY_NON_LEAF_NODES);
+    }
+
+    return filterExpr;
 }
 
 /*
@@ -4371,47 +4948,356 @@ static Node* push_down_qual(PlannerInfo* root, Node* all_quals, List* pullUpEqua
  * @in all_quals: Quals.
  * @return: Final join quals.
  */
-Node* convert_EXPR_sublink_to_join(PlannerInfo* root, Node** jtlink1, OpExpr* inout_quals, SubLink* sublink,
-    Relids available_rels, bool* isPullUp, Node* all_quals)
+Node*
+convert_EXPR_sublink_to_join(PlannerInfo *root,
+                                Node **jtlink1,
+                                Node *inout_quals,
+                                SubLink *sublink,
+                                Relids *available_rels,
+                                Node *all_quals,
+                                const char *refname)
 {
-    int rtindex = 0;
-    List* pullUpEqualExpr = NIL;
-    Query* subQuery = NULL;
-    Node* joinQual = NULL;
-    Node* push_quals = NULL;
+    Query   *subQuery = (Query *)sublink->subselect;
 
-    if (!safe_convert_EXPR(inout_quals, sublink, available_rels)) {
-        return (Node*)inout_quals;
+    if (!safe_convert_EXPR(root, inout_quals, sublink, *available_rels)) {
+        return inout_quals;
     }
 
+    /* 
+     * Situation 1: limit 1
+     * For example:
+     * select * from t1 where t1.a = (select t2.a from t2 where t2.b = t1.b limit 1)
+     */
+    if (!subQuery->hasAggs && subQuery->limitCount)
+    {
+        return convert_expr_sublink_with_limit_clause(root,
+                                                    jtlink1,
+                                                    sublink,
+                                                    inout_quals,
+                                                    available_rels,
+                                                    all_quals, refname);
+    }
+    else
+    {
+        /* 
+         * Situation 2: agg
+         * For example:
+         * select * from t1 where t1.a = (select avg(t2.a) from t2 where t2.b = t1.b)
+         * select * from t1 where t1.a = (select avg(t2.a) from t2 where t2.b = t1.b limit 1)
+         * select * from t1 where t1.a = (select t2.a from t2 where where t2.b = t1.b)
+         */
+        return convert_expr_subink_with_agg_targetlist(root,
+                                                    jtlink1,
+                                                    inout_quals,
+                                                    sublink,
+                                                    available_rels,
+                                                    all_quals, refname);
+    }
+
+    return NULL;
+}
+
+static TargetEntry* getRowNumberTargetEntry(const List *subList)
+{
+    ListCell* lc = NULL;
+    foreach (lc, subList) {
+        TargetEntry* tle = (TargetEntry*)lfirst(lc);
+        if (IsA(tle->expr, WindowFunc) && ((WindowFunc*)(tle->expr))->winfnoid == ROWNUMBERFUNCOID) {
+            return tle;
+        }
+    }
+    ereport(ERROR,
+        (errmodule(MOD_OPT),
+             errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+             (errmsg("Can't find targetEntry with rownumber window function."))));
+    return NULL;
+}
+
+/*
+ * @Description: Convert expr-sublink which targetlist does't contain agg function,
+ *      but includes limit clause to left join.
+ *      For example:
+ *      select * from t1 where t1.a = (select t2.a from t2 where t2.b = t1.b
+ *      order by t2.a limit 1)
+ *      
+ * @in root - PlannerInfo.
+ * @in currJoinLink - Current join link.
+ * @in sublink - Sublink which will be pulled up.
+ * @in exprQual - Condition expression that contains sublink.
+ * @in available_rels - Available relids.
+ * @return : Expr node.
+ */
+static Node*
+convert_expr_sublink_with_limit_clause(PlannerInfo *root,
+                                    Node ** currJoinLink,
+                                    SubLink *sublink,
+                                    Node *exprQual,
+                                    Relids *available_rels,
+                                    Node *all_quals, const char *refname)
+{
+    List        *pullUpEqualQuals = NIL;
+    ListCell    *lc = NULL;
+    Node        *joinQual = NULL;
+    Node        *push_quals = NULL;
+    Node        *rowNumVar = NULL;
+    Node        *tmpExprQual = exprQual;
+    Query       *subQuery = NULL;
+    Query       *newSubquery = NULL;
+    RangeTblEntry   *rte = NULL;
+    RangeTblRef     *rtr = NULL;
+    Index           rtIndex = 0;
+
+    subQuery = (Query *) sublink->subselect;
+
+    /* 
+     * Check whether the conditions of the sublink meet the requirements
+     * of the pull. The conditions are met only when the conditions are
+     * all equal.
+     */
+    if (get_pullUp_equal_expr((Node*)subQuery->jointree, &pullUpEqualQuals) &&
+        pullUpEqualQuals)
+    {
+        /* Guc rewrite_rule need set to magicset.*/
+        if (((u_sess->attr.attr_sql.rewrite_rule & MAGIC_SET) && permit_from_rewrite_hint(root, MAGIC_SET)) && !contain_subplans((Node*)subQuery->jointree))
+        {
+            /* Get can push down to subquery's quals. */
+            push_quals = push_down_qual(root, all_quals, pullUpEqualQuals);
+        }
+
+        joinQual = transform_equal_expr(root, subQuery, pullUpEqualQuals, NULL, true);
+
+        /*
+         * Upper-level vars in subquery will now be one level closer to their
+         * parent than before; in particular, anything that had been level 1
+         * becomes level zero.
+         */
+        rtIndex = list_length(root->parse->rtable) + 1;
+        IncrementVarSublevelsUp(joinQual, -1, 1);
+        *available_rels = bms_add_member(*available_rels, (int)rtIndex);
+
+        if (push_quals != NULL)
+        {
+            subQuery->jointree->quals = make_and_qual(subQuery->jointree->quals, push_quals);
+            subQuery->hasSubLinks = true;
+        }
+        
+        newSubquery = makeNode(Query);
+        newSubquery->commandType = CMD_SELECT;
+        newSubquery->can_push = true;
+        if (refname != NULL && ENABLE_PRED_PUSH_ALL(root)) {
+            rte = addRangeTableEntryForSubquery(NULL,
+                                            subQuery,
+                                            makeAlias(refname, NIL),
+                                            false,
+                                            false,
+                                            true);
+        } else {
+            rte = addRangeTableEntryForSubquery(NULL,
+                                            subQuery,
+                                            makeAlias("subquery", NIL),
+                                            false,
+                                            false,
+                                            true);
+        }
+        newSubquery->rtable = list_make1(rte);
+        newSubquery->targetList = NIL;
+        
+        int tleIdx = 1;
+        foreach(lc, subQuery->targetList)
+        {
+            TargetEntry *te = (TargetEntry *) lfirst(lc);
+
+            if (te->resjunk) {
+                continue;
+            }
+
+            TargetEntry *newTe = NULL;
+            Var *newVar = makeVarFromTargetEntry(1, te);
+
+            Assert(tleIdx <= list_length(subQuery->targetList));
+            newTe = makeTargetEntry((Expr *) newVar, tleIdx, pstrdup("?column?"), false);
+            newSubquery->targetList = lappend(newSubquery->targetList, newTe);
+            tleIdx++;
+        }
+
+        rtr = makeNode(RangeTblRef);
+        rtr->rtindex = 1;
+        newSubquery->jointree = (FromExpr *) makeNode(FromExpr);
+        newSubquery->jointree->fromlist = list_make1(rtr);
+
+        rowNumVar = (Node *) makeVarFromTargetEntry(1, getRowNumberTargetEntry(subQuery->targetList));
+        newSubquery->jointree->quals = (Node *) make_opclause(INT84EQOID, BOOLOID,
+                                    false,
+                                    (Expr *) rowNumVar,
+                                    (Expr *) subQuery->limitCount,
+                                    InvalidOid,
+                                    InvalidOid);
+        subQuery->limitCount = NULL;
+
+        /* Replace sublink with the first targetentry expr of newSubquery. */
+        Var *replaceSublinkVar = makeVarFromTargetEntry(rtIndex, (TargetEntry *) linitial(newSubquery->targetList));
+        exprQual = replace_node_clause(exprQual,
+                            (Node *) sublink,
+                            (Node *) replaceSublinkVar,
+                            RNC_RECURSE_AGGREF | RNC_COPY_NON_LEAF_NODES);
+    
+        /* Add new subquery to root->ratble */
+        rte = addRangeTableEntryForSubquery(NULL,
+                                            newSubquery,
+                                            makeAlias("newSubquery", NIL),
+                                            false,
+                                            false,
+                                            true);
+        root->parse->rtable = lappend(root->parse->rtable, rte);
+        
+        /* 
+         * This qual of include sublink need be pull up, we will it replace with true here. 
+         * For example:
+         * select * from t1 inner join t2 on t2.a = (select avg(t3.a) from t3 where t3.b = t2.b);
+         */
+        if (IsA(*currJoinLink, JoinExpr)) {
+            
+            ((JoinExpr*)*currJoinLink)->quals = replace_node_clause(((JoinExpr*)*currJoinLink)->quals, 
+                                    tmpExprQual, 
+                                    makeBoolConst(true, false),
+                                    RNC_RECURSE_AGGREF | RNC_COPY_NON_LEAF_NODES);
+            
+        } else if (IsA(*currJoinLink, FromExpr)) {
+            ((FromExpr*)*currJoinLink)->quals = replace_node_clause(((FromExpr*)*currJoinLink)->quals, 
+                                    tmpExprQual, 
+                                    makeBoolConst(true, false),
+                                    RNC_RECURSE_AGGREF | RNC_COPY_NON_LEAF_NODES);
+        }
+
+        /* Make new RangeTblEntry, refference to the newSubquery created. */
+        rtr = (RangeTblRef *) makeNode(RangeTblRef);
+        rtr->rtindex = list_length(root->parse->rtable);
+        
+        /* Make JoinExpr of left join. */
+        JoinExpr *result = NULL;
+        result = (JoinExpr *) makeNode(JoinExpr);
+        result->jointype = JOIN_LEFT;
+        result->quals = joinQual;
+        result->larg = *currJoinLink;
+        result->rarg = (Node *) rtr;
+
+        /* 
+         * Add JoinExpr to rangetableentry. In subsequent processing, the left
+         * external connection may be converted into an internal connection.
+         */
+        rte = addRangeTableEntryForJoin(NULL,
+                                        NIL,
+                                        result->jointype,
+                                        NIL,
+                                        result->alias,
+                                        true);
+        root->parse->rtable = lappend(root->parse->rtable, rte);
+        
+        *currJoinLink = (Node *) result;
+
+        /* Mark query's can_push */
+        mark_parent_child_pushdown_flag(root->parse, newSubquery);
+
+        list_free_ext(pullUpEqualQuals);
+
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Sublink pull up failure reason]: Sublink need 'equal' with suitable level vars and can only combined with 'and'."))));
+
+        return exprQual;
+    }
+    else
+    {
+        list_free_ext(pullUpEqualQuals);
+        return exprQual;
+    }
+}
+
+/*
+ * @Description: Convert expr-sublink which targetlist contains agg function. 
+ *      For example:
+ *      select * from t1 where t1.a = (select avg(t2.a) from t2 where t2.b = t1.b);
+ *      
+ * @in root - PlannerInfo.
+ * @in jtlink1 - Current join link.
+ * @in inout_quals - Condition expression that contains sublink.
+ * @in sublink - Sublink which will be pulled up.
+ * @in available_rels - Available relids.
+ * @in all_quals - Quals
+ * @return : Expr node.
+ */
+static Node*
+convert_expr_subink_with_agg_targetlist(PlannerInfo *root,
+                                        Node **jtlink1,
+                                        Node *inout_quals,
+                                        SubLink *sublink,
+                                        Relids *available_rels,
+                                        Node *all_quals, const char *refname)
+{
+    int         rtindex = 0;
+    List        *pullUpEqualExpr = NIL; 
+    Query       *subQuery = NULL;
+    Node        *joinQual = NULL;
+    Node        *push_quals = NULL;
+    
     subQuery = (Query*)sublink->subselect;
 
     /*
-     * Judge this sublink if all quals is 'equal' and it is connected by 'and', and equal expr one size include level up
-     * var other not include if so it can pull up or else not, and append need pull up equal expr in sublink to list.
-     * sublink can br pulled up where get_pullUp_equal_expr return true and pullUpEqualExpr is not null.
+     * Judge this sublink if all quals is 'equal' and it is connected by 'and', and equal expr
+     * one size include level up var other not include if so it can pull up or else not, and
+     * append need pull up equal expr in sublink to list. sublink can br pulled up where 
+     * get_pullUp_equal_expr return true and pullUpEqualExpr is not null.
      */
-    if (get_pullUp_equal_expr((Node*)subQuery->jointree, &pullUpEqualExpr) && pullUpEqualExpr) {
-        /* Guc u_sess->attr.attr_sql.rewrite_rule need set to magicset. */
-        if ((u_sess->attr.attr_sql.rewrite_rule & MAGIC_SET) && !contain_subplans((Node*)subQuery->jointree)) {
-            /* Get can push down to subquery's quals. */
+    if (get_pullUp_equal_expr((Node*)subQuery->jointree, &pullUpEqualExpr) && pullUpEqualExpr)
+    {
+        /* Guc rewrite_rule need set to magicset.*/
+        if (((u_sess->attr.attr_sql.rewrite_rule & MAGIC_SET) && permit_from_rewrite_hint(root, MAGIC_SET)) && !contain_subplans((Node*)subQuery->jointree))
+        {
+            /* Get can push down to subquery's quals.*/
             push_quals = push_down_qual(root, all_quals, pullUpEqualExpr);
         }
 
-        joinQual = transform_equal_expr(root, subQuery, pullUpEqualExpr, NULL);
+        /* Mark unique_check flag of subquery */
+        subQuery->unique_check = !subQuery->hasAggs;
 
-        /* pull up sublink */
-        JoinExpr* result = NULL;
-        OpExpr* tmp_opexpr = inout_quals;
-        /* Replace var by sublink that come from subquery */
-        Node* expr = (Node*)((TargetEntry*)linitial(subQuery->targetList))->expr;
+        /* Rollback to don't pull up sublink when cannot hash or in upgrade. */
+        if (subQuery->unique_check &&
+            (!CanExprHashable(pullUpEqualExpr) ||
+            t_thrd.proc->workingVersionNum < SUBLINKPULLUP_VERSION_NUM))
+        {
+            subQuery->unique_check = false;
+            list_free_ext(pullUpEqualExpr);
 
+            ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+            (errmsg("[Expr sublink pull up failure reason]: Only support unique check for hashable scenario."))));
+
+            return inout_quals;
+        }
+
+        joinQual = transform_equal_expr(root, subQuery, pullUpEqualExpr, NULL, false);
+
+        /* Pull up sublink, replace var by sublink that come from subquery. */
+        JoinExpr    *result = NULL;
+        Node        *tmp_opexpr = inout_quals;
+        Node        *expr = (Node *)((TargetEntry *)linitial(subQuery->targetList))->expr;
+        Node        *decoratedConstraints = NULL;
+
+        /* Add new rtindex of rangeTblRef, append rindex to available rel number. */
         rtindex = list_length(root->parse->rtable) + 1;
-        Var* aggVar = makeVar(rtindex, 1, exprType(expr), exprTypmod(expr), exprCollation(expr), 0);
-
-        inout_quals = (OpExpr*)replace_node_clause(
-            (Node*)inout_quals, (Node*)sublink, (Node*)aggVar, RNC_RECURSE_AGGREF | RNC_COPY_NON_LEAF_NODES);
-
+        *available_rels = bms_add_member(*available_rels, rtindex);
+        
+        /* 
+         * Generates filtering conditions for left join based on the targetlist of
+         * the subLink.
+         */
+        decoratedConstraints = generate_filter_on_opexpr_sublink(root,
+                                                            rtindex,
+                                                            expr,
+                                                            subQuery);
+        if (decoratedConstraints != NULL) {
+            inout_quals = replace_node_clause(inout_quals, (Node*) sublink, 
+                            decoratedConstraints, RNC_RECURSE_AGGREF | RNC_COPY_NON_LEAF_NODES);
+        }
+        
         /*
          * Upper-level vars in subquery will now be one level closer to their
          * parent than before; in particular, anything that had been level 1
@@ -4419,54 +5305,70 @@ Node* convert_EXPR_sublink_to_join(PlannerInfo* root, Node** jtlink1, OpExpr* in
          */
         IncrementVarSublevelsUp(joinQual, -1, 1);
 
-        /* This qual of include sublink need be pull up, we will it replace with true here */
+        /* This qual of include sublink need be pull up, we will it replace with true here. */
         if (IsA(*jtlink1, JoinExpr)) {
-
-            ((JoinExpr*)*jtlink1)->quals = replace_node_clause(((JoinExpr*)*jtlink1)->quals,
-                (Node*)tmp_opexpr,
-                makeBoolConst(true, false),
-                RNC_RECURSE_AGGREF | RNC_COPY_NON_LEAF_NODES);
-
+            ((JoinExpr*)*jtlink1)->quals = replace_node_clause(((JoinExpr*)*jtlink1)->quals, 
+                                    tmp_opexpr, 
+                                    makeBoolConst(true, false),
+                                    RNC_RECURSE_AGGREF | RNC_COPY_NON_LEAF_NODES);
         } else if (IsA(*jtlink1, FromExpr)) {
-            AssertEreport(IsA(*jtlink1, FromExpr), MOD_OPT, "");
-            ((FromExpr*)*jtlink1)->quals = replace_node_clause(((FromExpr*)*jtlink1)->quals,
-                (Node*)tmp_opexpr,
-                makeBoolConst(true, false),
-                RNC_RECURSE_AGGREF | RNC_COPY_NON_LEAF_NODES);
+            Assert(IsA(*jtlink1, FromExpr));
+            ((FromExpr*)*jtlink1)->quals = replace_node_clause(((FromExpr*)*jtlink1)->quals, 
+                                    tmp_opexpr, 
+                                    makeBoolConst(true, false),
+                                    RNC_RECURSE_AGGREF | RNC_COPY_NON_LEAF_NODES);
         }
 
-        available_rels = bms_add_member(available_rels, rtindex);
-
-        if (push_quals != NULL) {
+        if (push_quals != NULL)
+        {
             subQuery->jointree->quals = make_and_qual(subQuery->jointree->quals, push_quals);
             subQuery->hasSubLinks = true;
         }
 
-        /* Append subquery to rtable */
+        /* Append subquery to rtable*/
         RangeTblEntry* rte = NULL;
 
-        rte = addRangeTableEntryForSubquery(NULL, subQuery, makeAlias("subquery", NIL), false, true);
+        if (refname != NULL && ENABLE_PRED_PUSH_ALL(root)) {
+            rte = addRangeTableEntryForSubquery(NULL, subQuery, makeAlias(refname, NIL), false, false, true);
+        } else {
+            rte = addRangeTableEntryForSubquery(NULL, subQuery, makeAlias("subquery", NIL), false, false, true);
+        }
         root->parse->rtable = lappend(root->parse->rtable, rte);
 
-        /* Append rangeTblRef to fromlist */
-        RangeTblRef* rtr = makeNode(RangeTblRef);
-
+        /* Append rangeTblRef to fromlist. */
+        RangeTblRef *rtr = makeNode(RangeTblRef);
         rtr->rtindex = rtindex;
-
         result = makeNode(JoinExpr);
-        result->jointype = JOIN_INNER;
-        result->quals = make_and_qual((Node*)inout_quals, joinQual);
+        result->jointype = JOIN_LEFT;
         result->larg = *jtlink1;
         result->rarg = (Node*)rtr;
         result->alias = NULL;
-        *jtlink1 = (Node*)result;
+        result->quals = joinQual;
 
-        *isPullUp = true;
-        list_free_ext(pullUpEqualExpr);
-        return (Node*)inout_quals;
-    } else {
-        list_free_ext(pullUpEqualExpr);
-        return (Node*)inout_quals;
+        /* Append joinExpr to rtable. */
+        rte = addRangeTableEntryForJoin(NULL,
+                                        NIL,
+                                        result->jointype,
+                                        NIL,
+                                        result->alias,
+                                        true);
+        root->parse->rtable = lappend(root->parse->rtable, rte);
+        *jtlink1 = (Node*) result;
+
+        /* Mark query's can_push */
+        mark_parent_child_pushdown_flag(root->parse, subQuery);
+        
+        list_free_ext(pullUpEqualExpr); 
+        return inout_quals;
+    }
+    else
+    {
+        list_free_ext(pullUpEqualExpr); 
+
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Sublink pull up failure reason]: Sublink need 'equal' with suitable level vars and can only combined with 'and'."))));
+
+        return inout_quals;
     }
 }
 
@@ -4481,7 +5383,7 @@ Node* convert_EXPR_sublink_to_join(PlannerInfo* root, Node** jtlink1, OpExpr* in
  * @return -   Returns the replacement qual node, or NULL if the qual should be removed.
  */
 void convert_OREXISTS_to_join(
-    PlannerInfo* root, BoolExpr* or_clause, SubLink* exists_sublink, Node** jtlink1, Relids available_rels1)
+    PlannerInfo* root, BoolExpr* or_clause, SubLink* exists_sublink, Node** jtlink1, Relids available_rels1, bool isnull)
 {
     Query* subQuery = NULL;
     List* pullUpEqualExpr = NULL;
@@ -4491,7 +5393,7 @@ void convert_OREXISTS_to_join(
     Node* quals = NULL;
     RangeTblEntry* rte = NULL;
 
-    if (!safe_convert_ORCLAUSE(NULL, exists_sublink, available_rels1)) {
+    if (!safe_convert_ORCLAUSE(root, NULL, exists_sublink, available_rels1)) {
         return;
     }
 
@@ -4512,9 +5414,9 @@ void convert_OREXISTS_to_join(
     whereClause = subQuery->jointree->quals;
 
     if (get_pullUp_equal_expr(whereClause, &pullUpEqualExpr) && pullUpEqualExpr) {
-        joinQual = transform_equal_expr(root, subQuery, pullUpEqualExpr, &quals);
+        joinQual = transform_equal_expr(root, subQuery, pullUpEqualExpr, &quals, false, isnull);
 
-        /* Replace this sublink with quals which is "not null" expr. */
+        /* Replace this sublink with quals which is "not null" expr.*/
         or_clause = (BoolExpr*)replace_node_clause(
             (Node*)or_clause, (Node*)exists_sublink, (Node*)quals, RNC_RECURSE_AGGREF | RNC_REPLACE_FIRST_ONLY);
 
@@ -4534,10 +5436,15 @@ void convert_OREXISTS_to_join(
          */
         IncrementVarSublevelsUp(joinQual, -1, 1);
 
-        /* Append subquery to rtable */
-        rte = addRangeTableEntryForSubquery(NULL, subQuery, makeAlias("subquery", NIL), false, true);
+        /* Append subquery to rtable*/
+        if (root->glob->sublink_counter != 0 && ENABLE_PRED_PUSH_ALL(root)) {
+            char *subquery_name = denominate_sublink_name(root->glob->sublink_counter);
+            rte = addRangeTableEntryForSubquery(NULL, subQuery, makeAlias(subquery_name, NIL), false, false, true);
+        } else {
+            rte = addRangeTableEntryForSubquery(NULL, subQuery, makeAlias("subquery", NIL), false, false, true);
+        }
 
-        /* Now we can attach the modified subquery rtable to the parent. */
+        /* Now we can attach the modified subquery rtable to the parent.*/
         root->parse->rtable = lappend(root->parse->rtable, rte);
 
         RangeTblRef* rtr = makeNode(RangeTblRef);
@@ -4551,6 +5458,12 @@ void convert_OREXISTS_to_join(
         result->rarg = (Node*)rtr;
         result->alias = NULL;
         *jtlink1 = (Node*)result;
+
+        /* Mark query's can_push */
+        mark_parent_child_pushdown_flag(root->parse, subQuery);
+
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Sublink pull up failure reason]: Sublink need 'equal' with suitable level vars and can only combined with 'and'."))));
 
         list_free_ext(pullUpEqualExpr);
         return;
@@ -4616,7 +5529,7 @@ void convert_ORANY_to_join(
     RangeTblRef* rtr = NULL;
     JoinExpr* result = NULL;
 
-    if (!safe_convert_ORCLAUSE(NULL, any_sublink, available_rels)) {
+    if (!safe_convert_ORCLAUSE(root, NULL, any_sublink, available_rels)) {
         return;
     }
 
@@ -4659,7 +5572,12 @@ void convert_ORANY_to_join(
         or_clause =
             (BoolExpr*)replace_node_clause((Node*)or_clause, (Node*)any_sublink, (Node*)nullTest, RNC_RECURSE_AGGREF);
 
-        rte = addRangeTableEntryForSubquery(NULL, sub_select, makeAlias("subquery", NIL), false, true);
+        if (root->glob->sublink_counter != 0 && ENABLE_PRED_PUSH_ALL(root)) {
+            char *subquery_name = denominate_sublink_name(root->glob->sublink_counter);
+            rte = addRangeTableEntryForSubquery(NULL, sub_select, makeAlias(subquery_name, NIL), false, false, true);
+        } else {
+            rte = addRangeTableEntryForSubquery(NULL, sub_select, makeAlias("subquery", NIL), false, false, true);
+        }
 
         /* Append this query to rtable. */
         parse->rtable = lappend(parse->rtable, rte);
@@ -4678,7 +5596,11 @@ void convert_ORANY_to_join(
         result->rarg = (Node*)rtr;
         result->alias = NULL;
         *jtlink1 = (Node*)result;
+
+        /* Mark query's can_push */
+        mark_parent_child_pushdown_flag(root->parse, sub_select);
     }
+
     return;
 }
 
@@ -4688,30 +5610,40 @@ void convert_ORANY_to_join(
  * @in or_clause - current or clause.
  * @in jtlink1 - current joinExpr
  * @available_rels1 - available rel number.
+ * @replace - if the node should be replaced
+ * @isnull - isnull flag of clause
  * @return - not null expr this expr will replace op_expr.
  */
-Node* convert_OREXPR_to_join(PlannerInfo* root, BoolExpr* or_clause, OpExpr* op_expr, SubLink* expr_sublink,
-    Node** jtlink1, Relids available_rels, bool replace)
+Node*
+convert_OREXPR_to_join(PlannerInfo *root, BoolExpr *or_clause, 
+                                Node *clause,
+                                SubLink *expr_sublink, 
+                                Node **jtlink1, 
+                                Relids *available_rels,
+                                bool replace,
+                                bool isnull)
 {
-    Query* subQuery = NULL;
-    List* EqualExprList = NULL;
-    Node* joinQual = NULL;
-    Node* notNullTest = NULL;
-    JoinExpr* result = NULL;
-    RangeTblEntry* rte = NULL;
-    RangeTblRef* rtr = NULL;
-    int rtindex = 0;
-
-    /* Judge this sublink if can pull up. */
-    if (!safe_convert_ORCLAUSE(op_expr, expr_sublink, available_rels)) {
+    Query       *subQuery = NULL;
+    List        *EqualExprList = NULL;
+    Node        *joinQual = NULL;
+    Node        *notNullTest = NULL;
+    Node        *filterNode = NULL;
+    JoinExpr        *result = NULL;
+    RangeTblEntry   *rte = NULL;
+    RangeTblRef     *rtr = NULL;
+    int             rtindex = 0;
+    
+    /* Judge this sublink if can pull up.*/
+    if (!safe_convert_ORCLAUSE(root, clause, expr_sublink, *available_rels)) {
         return NULL;
     }
 
-    subQuery = (Query*)expr_sublink->subselect;
-
+    subQuery = (Query *)copyObject(expr_sublink->subselect);
+    expr_sublink->subselect = (Node *)subQuery;
+    
     if (get_pullUp_equal_expr((Node*)subQuery->jointree, &EqualExprList) && EqualExprList) {
-        joinQual = transform_equal_expr(root, subQuery, EqualExprList, &notNullTest);
-
+        joinQual = transform_equal_expr(root, subQuery, EqualExprList, &notNullTest, false, isnull);
+        
         /*
          * Upper-level vars in subquery will now be one level closer to their
          * parent than before; in particular, anything that had been level 1
@@ -4719,86 +5651,101 @@ Node* convert_OREXPR_to_join(PlannerInfo* root, BoolExpr* or_clause, OpExpr* op_
          */
         IncrementVarSublevelsUp(joinQual, -1, 1);
 
-        rte = addRangeTableEntryForSubquery(NULL, subQuery, makeAlias("subquery", NIL), false, true);
+        /* Add new rtindex of rangeTblRef, append rindex to available rel number. */
+        rtindex = list_length(root->parse->rtable) + 1;
+        *available_rels = bms_add_member(*available_rels, rtindex);
 
-        root->parse->rtable = lappend(root->parse->rtable, rte);
-
-        rtindex = list_length(root->parse->rtable);
-
-        /* append this rtindex to available rel number. */
-        available_rels = bms_add_member(available_rels, rtindex);
-
-        rtr = makeNode(RangeTblRef);
-        rtr->rtindex = rtindex;
-
-        /*
-         * Now, This sublink will be replaced by var which is come from new rtable,
+        /* 
+         * Now, This sublink will be replaced by var which is come from new rtable, 
          * and this op_expr will as join quals.
          */
-        Node* expr = (Node*)((TargetEntry*)linitial(subQuery->targetList))->expr;
-        Var* agg_var = makeVar(rtindex, 1, exprType(expr), exprTypmod(expr), exprCollation(expr), 0);
-        op_expr = (OpExpr*)replace_node_clause((Node*)op_expr, (Node*)expr_sublink, (Node*)agg_var, RNC_RECURSE_AGGREF);
+        Node *decoratedConstraints = NULL;
+        Node *expr = (Node *) ((TargetEntry *)linitial(subQuery->targetList))->expr;
+        decoratedConstraints = generate_filter_on_opexpr_sublink(root, rtindex, (Node *) expr, subQuery);
+        if (decoratedConstraints != NULL) {
+            clause = replace_node_clause(clause,
+                                        (Node *)expr_sublink,
+                                        decoratedConstraints,
+                                        RNC_RECURSE_AGGREF);
+        }
 
+        /* Append subquery to rtable. */
+        rte = addRangeTableEntryForSubquery(NULL,
+                                            subQuery,
+                                            makeAlias("subquery", NIL),
+                                            false,
+                                            false,
+                                            true);
+        root->parse->rtable = lappend(root->parse->rtable, rte);
+        rtr = makeNode(RangeTblRef);
+        rtr->rtindex = rtindex;
+        
         result = makeNode(JoinExpr);
         result->jointype = JOIN_LEFT;
-
-        result->quals = make_and_qual((Node*)op_expr, joinQual);
+        result->quals = joinQual;
+        filterNode = make_and_qual(notNullTest, clause);
 
         /*
          * This op_expr already be pull up as current left join's join quals.
          * So, we need delete this op_expr from the previous hoin expr.
          */
-        if (replace) {
-            AssertEreport(IsA(*jtlink1, JoinExpr), MOD_OPT_REWRITE, "The rewritten rte should be join expr");
+        if (replace)
+        {
+            Assert(IsA(*jtlink1, JoinExpr));
 
-            JoinExpr* join_expr = (JoinExpr*)(*jtlink1);
+            JoinExpr *join_expr = (JoinExpr*)(*jtlink1);
 
-            join_expr->quals = replace_node_clause(
-                (Node*)join_expr->quals, (Node*)op_expr, makeBoolConst(true, false), RNC_RECURSE_AGGREF);
+            join_expr->quals = replace_node_clause((Node *)join_expr->quals, 
+                                        clause, 
+                                        makeBoolConst(true, false),
+                                        RNC_RECURSE_AGGREF);
         }
 
         result->larg = *jtlink1;
         result->rarg = (Node*)rtr;
         result->alias = NULL;
+
+        /* Append JoinExpr to rtable. */
+        rte = addRangeTableEntryForJoin(NULL,
+                                        NIL,
+                                        result->jointype,
+                                        NIL,
+                                        result->alias,
+                                        true);
+        root->parse->rtable = lappend(root->parse->rtable, rte);
         *jtlink1 = (Node*)result;
 
+        /* Mark query's can_push */
+        mark_parent_child_pushdown_flag(root->parse, subQuery);
+
         list_free_ext(EqualExprList);
-        return notNullTest;
-    } else {
+        return filterNode;
+    }
+    else
+    {
+        ereport(DEBUG2, (errmodule(MOD_OPT_REWRITE),
+        (errmsg("[Sublink pull up failure reason]:"
+                " Sublink need 'equal' with suitable level vars and can only combined with 'and'."))));
+
         list_free_ext(EqualExprList);
         return NULL;
     }
 }
 
-/*
- * we can only handle EXPR_SUBLINK for now
- * caller has check this is an or clause
- */
-bool can_convert_ORCLAUSE_to_JOIN(Node* node)
+static void convert_to_join_by_sublinktype(PlannerInfo *root, BoolExpr *or_clause, Node **jtlink1,
+    Relids *available_rels1, bool isnull, SubLink *sublink)
 {
-    ListCell* lc = NULL;
-    List* sublinkList = NIL;
-    List* opExprList = NIL;
-
-    if (!or_clause(node))
-        return false;
-
-    opExprList = pull_opExpr((Node*)node);
-
-    foreach (lc, opExprList) {
-        OpExpr* op_expr = (OpExpr*)lfirst(lc);
-        ListCell* cell = NULL;
-
-        sublinkList = pull_sublink((Node*)op_expr);
-        foreach (cell, sublinkList) {
-            SubLink* sublink = (SubLink*)lfirst(cell);
-
-            if (sublink->subLinkType != EXPR_SUBLINK)
-                return false;
-        }
+    switch (sublink->subLinkType) {
+        case EXISTS_SUBLINK:
+            convert_OREXISTS_to_join(root, or_clause, sublink, jtlink1, *available_rels1, isnull);
+            break;
+        case ANY_SUBLINK:
+            convert_ORANY_to_join(root, or_clause, sublink, jtlink1, *available_rels1);
+            break;
+        default:
+            break;
     }
-
-    return true;
+    return;
 }
 
 /*
@@ -4808,60 +5755,93 @@ bool can_convert_ORCLAUSE_to_JOIN(Node* node)
  * @in jtlink1 - current joinExpr
  * @available_rels1 - available rel number.
  */
-void convert_ORCLAUSE_to_join(PlannerInfo* root, BoolExpr* or_clause, Node** jtlink1, Relids available_rels1)
+void convert_ORCLAUSE_to_join(PlannerInfo *root, BoolExpr *or_clause, Node **jtlink1, Relids *available_rels1)
 {
 
-    List* sublinkList = NULL;
-    ListCell* lc = NULL;
-    List* opExprList = pull_opExpr((Node*)or_clause);
-    Node* notNullExpr = NULL;
+    List        *sublinkList = NULL;
+    ListCell    *lc = NULL;
+    List        *pullExprList = pull_sublink((Node*)or_clause, PE_OPEXPR | PE_NULLTEST | PE_NOTCLAUSE, false);
+    Node        *notNullExpr = NULL;
 
-    foreach (lc, opExprList) {
-        OpExpr* op_expr = (OpExpr*)lfirst(lc);
-        Node* notNullAnd = NULL;
-        bool replace = false;
-        ListCell* cell = NULL;
+    foreach(lc, pullExprList)
+    {
+        Node    *clause = (Node *) lfirst(lc);
+        bool        isnull = false;
+        SubLink *sublink = NULL;
 
-        sublinkList = pull_sublink((Node*)op_expr);
-        foreach (cell, sublinkList) {
-            SubLink* sublink = (SubLink*)lfirst(cell);
+        switch(nodeTag(clause))
+        {
+            case T_NullTest:
+                if (((NullTest *) clause)->nulltesttype == IS_NULL)
+                    isnull = true;
+                /* fall through */
+            case T_OpExpr:
+            {
+                Node        *notNullAnd = NULL;
+                bool        replace = false;
+                ListCell    *cell = NULL;
 
-            /* For subquery will pulled up, we should substitute ctes */
-            if (IS_STREAM_PLAN)
-                substitute_ctes_with_subqueries(root, (Query*)sublink->subselect, root->is_under_recursive_tree);
+                sublinkList = pull_sublink(clause, 0, false);
+                foreach(cell, sublinkList)
+                {
+                    sublink = (SubLink*)lfirst(cell);
 
-            notNullExpr = convert_OREXPR_to_join(root, or_clause, op_expr, sublink, jtlink1, available_rels1, replace);
+                    /* We only convert expr_sublink of or_clause to join. */
+                    if (sublink->subLinkType != EXPR_SUBLINK) {
+                        continue;
+                    }
 
-            if (notNullExpr != NULL) {
-                notNullAnd = make_and_qual(notNullAnd, notNullExpr);
-                replace = true;
+                    /* For subquery will pulled up, we should substitute ctes */
+                    if (IS_STREAM_PLAN) {
+                        substitute_ctes_with_subqueries(root, (Query *) sublink->subselect,
+                                                        root->is_under_recursive_tree);
+                    }
+
+                    notNullExpr = convert_OREXPR_to_join(root, or_clause, clause, sublink,
+                                            jtlink1, available_rels1, replace, isnull);
+
+                    if (notNullExpr != NULL) {
+                        notNullAnd = make_and_qual(notNullAnd, notNullExpr);
+                        replace = true;
+                    }
+                }
+
+                /* This opexpr's sublink always be pulled up, and it will be replaced with not null expr.*/
+
+                if (notNullAnd != NULL) {
+                    or_clause = (BoolExpr*)replace_node_clause((Node*)or_clause, clause, notNullAnd, RNC_RECURSE_AGGREF);
+                }
             }
-        }
-
-        /* This opexpr's sublink always be pulled up, and it will be replaced with not null expr. */
-        if (notNullAnd != NULL) {
-            or_clause =
-                (BoolExpr*)replace_node_clause((Node*)or_clause, (Node*)op_expr, notNullAnd, RNC_RECURSE_AGGREF);
-        }
-    }
-
-    /* Get all sublink, and skip opExpr */
-    sublinkList = pull_sublink((Node*)or_clause, true);
-
-    foreach (lc, sublinkList) {
-        SubLink* sublink = (SubLink*)lfirst(lc);
-        AssertEreport(IsA(sublink, SubLink), MOD_OPT_REWRITE, "All need to pull up should be sublink");
-
-        /* For subquery will pulled up, we should substitute ctes */
-        if (IS_STREAM_PLAN)
-            substitute_ctes_with_subqueries(root, (Query*)sublink->subselect, root->is_under_recursive_tree);
-
-        switch (sublink->subLinkType) {
-            case EXISTS_SUBLINK:
-                convert_OREXISTS_to_join(root, or_clause, sublink, jtlink1, available_rels1);
                 break;
-            case ANY_SUBLINK:
-                convert_ORANY_to_join(root, or_clause, sublink, jtlink1, available_rels1);
+
+            case T_BoolExpr:
+                if (not_clause(clause)) {
+                    /* If the immediate argument of NOT is EXISTS, try to convert */
+                    sublink = (SubLink *) get_notclausearg((Expr *) clause);
+
+                    /* not in sublink is not supported since it's not equality join */
+                    if (!IsA(sublink, SubLink) ||
+                            sublink->subLinkType == ANY_SUBLINK) {
+                        continue;
+                    }
+                    /* keep isnull as false since not clause is always here */
+                } else {
+                    continue;
+                }
+                /* fall through */
+            case T_SubLink:
+                if (IsA(clause, SubLink)) {
+                    sublink = (SubLink *) clause;
+                }
+
+                /* For subquery will pulled up, we should substitute ctes */
+                if (IS_STREAM_PLAN) {
+                    substitute_ctes_with_subqueries(root, (Query *) sublink->subselect,
+                                                    root->is_under_recursive_tree);
+                }
+
+                root->glob->sublink_counter++;
+                convert_to_join_by_sublinktype(root, or_clause, jtlink1, available_rels1, isnull, sublink);
                 break;
             default:
                 break;
@@ -4904,3 +5884,36 @@ static Var* locate_base_var(Expr* node)
 
     return NULL;
 }
+
+/*
+ * CanExprHashable:
+ *	Check whether pullup expr can hashable
+ * Parameters:
+ *	@in node: list of expr pulled up
+ * Output:
+ *	true for all expr pulled up can hashable
+ */
+static bool
+CanExprHashable(List *pullUpEqualExpr)
+{
+    ListCell *lc = NULL;
+
+    foreach(lc, pullUpEqualExpr) {
+        OpExpr *pullUpExpr = (OpExpr*)lfirst(lc);
+        ListCell *cell = NULL;
+
+        foreach(cell, pullUpExpr->args) {
+            Node *node = (Node*)lfirst(cell);
+            if (contain_vars_of_level(node, 0)) {
+                Oid sortop = InvalidOid;
+                Oid eqop = InvalidOid;
+                bool hashable = false;
+                get_sort_group_operators(exprType(node), false, true, false, &sortop, &eqop, NULL, &hashable);
+                if (!hashable)
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+

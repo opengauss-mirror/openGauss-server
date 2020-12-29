@@ -23,37 +23,37 @@ grant_on_tables_clause
   | revoke_on_functions_clause
   | revoke_on_types_clause
 where grant_on_tables_clause can be:
-GRANT { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES }
-    [, ...] | ALL [ PRIVILEGES ] }
+GRANT { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES |
+    ALTER | DROP | COMMENT | INDEX | VACUUM } [, ...] | ALL [ PRIVILEGES ] }
     ON TABLES
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
     [ WITH GRANT OPTION ]
 where grant_on_functions_clause can be:
-GRANT { EXECUTE | ALL [ PRIVILEGES ] }
+GRANT { { EXECUTE | ALTER | DROP | COMMENT } [, ...] | ALL [ PRIVILEGES ] }
     ON FUNCTIONS
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
     [ WITH GRANT OPTION ]
 where grant_on_types_clause can be:
-GRANT { USAGE | ALL [ PRIVILEGES ] }
+GRANT { { USAGE | ALTER | DROP | COMMENT } [, ...] | ALL [ PRIVILEGES ] }
     ON TYPES
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
     [ WITH GRANT OPTION ]
 where revoke_on_tables_clause can be:
 REVOKE [ GRANT OPTION FOR ]
-    { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES }
-    [, ...] | ALL [ PRIVILEGES ] }
+    { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES |
+    ALTER | DROP | COMMENT | INDEX | VACUUM } [, ...] | ALL [ PRIVILEGES ] }
     ON TABLES
     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
     [ CASCADE | RESTRICT | CASCADE CONSTRAINTS ]
 where revoke_on_functions_clause can be:
 REVOKE [ GRANT OPTION FOR ]
-    { EXECUTE | ALL [ PRIVILEGES ] }
+    { { EXECUTE | ALTER | DROP | COMMENT } [, ...] | ALL [ PRIVILEGES ] }
     ON FUNCTIONS
     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
     [ CASCADE | RESTRICT | CASCADE CONSTRAINTS ]
 where revoke_on_types_clause can be:
 REVOKE [ GRANT OPTION FOR ]
-    { USAGE | ALL [ PRIVILEGES ] }
+    { { USAGE | ALTER | DROP | COMMENT } [, ...] | ALL [ PRIVILEGES ] }
     ON TYPES
     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
     [ CASCADE | RESTRICT | CASCADE CONSTRAINTS ]

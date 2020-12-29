@@ -48,7 +48,7 @@ extern char* get_rte_attribute_name(RangeTblEntry* rte, AttrNumber attnum);
  * type and typemod info for that attribute of that RTE.
  */
 extern void get_rte_attribute_type(
-    RangeTblEntry* rte, AttrNumber attnum, Oid* vartype, int32* vartypmod, Oid* varcollid);
+    RangeTblEntry* rte, AttrNumber attnum, Oid* vartype, int32* vartypmod, Oid* varcollid, int* kvtype = NULL);
 
 /*
  * Check whether an attribute of an RTE has been dropped (note that

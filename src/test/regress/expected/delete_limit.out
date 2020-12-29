@@ -1,0 +1,28 @@
+CREATE TABLE t_d_limit(a Integer, b Integer);
+insert into t_d_limit values(1,2);
+insert into t_d_limit values(1,2);
+insert into t_d_limit values(1,2);
+insert into t_d_limit values(1,2);
+insert into t_d_limit values(1,2);
+insert into t_d_limit values(2,3);
+insert into t_d_limit values(2,3);
+insert into t_d_limit values(2,3);
+insert into t_d_limit values(2,3);
+insert into t_d_limit values(2,3);
+insert into t_d_limit values(3,4);
+insert into t_d_limit values(3,4);
+insert into t_d_limit values(3,4);
+insert into t_d_limit values(3,4);
+insert into t_d_limit values(3,4);
+prepare stmt(INTEGER) as delete from t_d_limit where a = $1 limit 1;
+execute stmt(1);
+select a from t_d_limit where a=1;
+ a 
+---
+ 1
+ 1
+ 1
+ 1
+(4 rows)
+
+DROP TABLE t_d_limit;

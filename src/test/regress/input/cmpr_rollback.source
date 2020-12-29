@@ -14,11 +14,11 @@ CREATE TABLE cmpr_rollback (
 	I3601 numeric(23,2) NULL,
 	I3602 numeric(23,0) NULL,
 	I3603 float NULL
-) COMPRESS;
+) ;
 SELECT COUNT(*) FROM cmpr_rollback;
 SELECT * FROM cmpr_rollback;
 START TRANSACTION;
-COPY cmpr_rollback FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_common.data';
+COPY cmpr_rollback FROM '@abs_srcdir@/data/cmpr_common.data';
 ROLLBACK TRANSACTION;
 SELECT COUNT(*) FROM cmpr_rollback;
 SELECT * FROM cmpr_rollback;
@@ -39,7 +39,7 @@ CREATE TABLE cmpr_rollback_raw (
 SELECT COUNT(*) FROM cmpr_rollback_raw;
 SELECT * FROM cmpr_rollback_raw;
 START TRANSACTION;
-COPY cmpr_rollback_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_common.data';
+COPY cmpr_rollback_raw FROM '@abs_srcdir@/data/cmpr_common.data';
 ROLLBACK TRANSACTION;
 SELECT COUNT(*) FROM cmpr_rollback_raw;
 SELECT * FROM cmpr_rollback_raw;

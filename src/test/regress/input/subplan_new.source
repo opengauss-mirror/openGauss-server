@@ -10,7 +10,7 @@ INSERT INTO ROW_COMPARISON_018 VALUES(2,1,'F');
 INSERT INTO ROW_COMPARISON_018 VALUES(4,1,'F');
 INSERT INTO ROW_COMPARISON_018_1 VALUES(3,2,'TRUE');
 INSERT INTO ROW_COMPARISON_018_2 VALUES(1,4,'0');
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 SELECT INT1 AS RESULT1,BOOL_AND(BOL3)AS RESULT2 FROM ROW_COMPARISON_018 WHERE (INT1,INT2,BOL3) = (SELECT INT1,INT2,BOL3 FROM ROW_COMPARISON_018_1)OR (INT1,INT2,BOL3) = (SELECT INT1,
 INT2,BOL3 FROM ROW_COMPARISON_018_2) GROUP BY INT1,BOL3 ORDER BY INT1,BOL3;
 
@@ -19,7 +19,7 @@ INT2,BOL3 FROM ROW_COMPARISON_018_2) GROUP BY INT1,BOL3 ORDER BY INT1,BOL3;
 
 create table BOOLOR_006(COL_BOOLOR boolean primary key)  ;
 insert into BOOLOR_006 values(false),(true);
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 update BOOLOR_006 set COL_BOOLOR = false where COL_BOOLOR = (select bool_or(COL_BOOLOR) from BOOLOR_006);
 update BOOLOR_006 set COL_BOOLOR = false where COL_BOOLOR = (select bool_or(COL_BOOLOR) from BOOLOR_006);
 update BOOLOR_006 set COL_BOOLOR = false where COL_BOOLOR = not (select bool_or(COL_BOOLOR) from BOOLOR_006);
@@ -170,7 +170,7 @@ create table customer_address
 ) 
    ;
 
-explain (verbose off, costs off, nodes off)
+explain (verbose off, costs off)
 select sum(cd_demo_sk),count(distinct cd_dep_count),max(cd_dep_employed_count) 
 from 
  customer_demographics
@@ -353,7 +353,7 @@ partition by range(wp_rec_start_date)
 )
 ; 
 
-explain (verbose off, costs off, nodes off)
+explain (verbose off, costs off)
 select distinct *  
 from ( 
 select max(s_manager), sum(c_birth_day%2), avg(s_tax_precentage) 
@@ -460,7 +460,7 @@ create table web_site_1
         partition p7 values less than(maxvalue)
 );
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select count(*) from customer where c_birth_day in (
 select max(web_mkt_id)
 from web_site_1

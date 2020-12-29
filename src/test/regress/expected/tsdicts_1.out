@@ -1,0 +1,543 @@
+--Test text search dictionaries and configurations
+-- Test ISpell dictionary with ispell affix file
+CREATE TEXT SEARCH DICTIONARY ispell (
+                        Template=ispell,
+                        DictFile=ispell_sample,
+                        AffFile=ispell_sample
+);
+ERROR:  user-defined text search dictionary is not yet supported.
+SELECT ts_lexize('ispell', 'skies');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'skies');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'bookings');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'bookings');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'booking');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'booking');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'foot');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'foot');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'foots');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'foots');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'rebookings');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'rebookings');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'rebooking');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'rebooking');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'rebook');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'rebook');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'unbookings');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'unbookings');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'unbooking');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'unbooking');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'unbook');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'unbook');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'footklubber');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'footklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'footballklubber');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'footballklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'ballyklubber');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'ballyklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('ispell', 'footballyklubber');
+ERROR:  text search dictionary "ispell" does not exist
+LINE 1: SELECT ts_lexize('ispell', 'footballyklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+-- Test ISpell dictionary with hunspell affix file
+CREATE TEXT SEARCH DICTIONARY hunspell (
+                        Template=ispell,
+                        DictFile=ispell_sample,
+                        AffFile=hunspell_sample
+);
+ERROR:  user-defined text search dictionary is not yet supported.
+SELECT ts_lexize('hunspell', 'skies');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'skies');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'bookings');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'bookings');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'booking');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'booking');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'foot');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'foot');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'foots');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'foots');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'rebookings');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'rebookings');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'rebooking');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'rebooking');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'rebook');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'rebook');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'unbookings');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'unbookings');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'unbooking');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'unbooking');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'unbook');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'unbook');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'footklubber');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'footklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'footballklubber');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'footballklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'ballyklubber');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'ballyklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell', 'footballyklubber');
+ERROR:  text search dictionary "hunspell" does not exist
+LINE 1: SELECT ts_lexize('hunspell', 'footballyklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+-- Test ISpell dictionary with hunspell affix file with FLAG long parameter
+CREATE TEXT SEARCH DICTIONARY hunspell_long (
+                        Template=ispell,
+                        DictFile=hunspell_sample_long,
+                        AffFile=hunspell_sample_long
+);
+ERROR:  user-defined text search dictionary is not yet supported.
+SELECT ts_lexize('hunspell_long', 'skies');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'skies');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'bookings');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'bookings');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'booking');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'booking');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'foot');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'foot');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'foots');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'foots');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'rebookings');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'rebookings');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'rebooking');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'rebooking');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'rebook');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'rebook');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'unbookings');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'unbookings');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'unbooking');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'unbooking');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'unbook');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'unbook');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'booked');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'booked');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'footklubber');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'footklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'footballklubber');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'footballklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'ballyklubber');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'ballyklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'ballsklubber');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'ballsklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'footballyklubber');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'footballyklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_long', 'ex-machina');
+ERROR:  text search dictionary "hunspell_long" does not exist
+LINE 1: SELECT ts_lexize('hunspell_long', 'ex-machina');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+-- Test ISpell dictionary with hunspell affix file with FLAG num parameter
+CREATE TEXT SEARCH DICTIONARY hunspell_num (
+                        Template=ispell,
+                        DictFile=hunspell_sample_num,
+                        AffFile=hunspell_sample_num
+);
+ERROR:  user-defined text search dictionary is not yet supported.
+SELECT ts_lexize('hunspell_num', 'skies');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'skies');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'sk');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'sk');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'bookings');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'bookings');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'booking');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'booking');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'foot');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'foot');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'foots');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'foots');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'rebookings');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'rebookings');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'rebooking');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'rebooking');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'rebook');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'rebook');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'unbookings');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'unbookings');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'unbooking');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'unbooking');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'unbook');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'unbook');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'booked');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'booked');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'footklubber');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'footklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'footballklubber');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'footballklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'ballyklubber');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'ballyklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('hunspell_num', 'footballyklubber');
+ERROR:  text search dictionary "hunspell_num" does not exist
+LINE 1: SELECT ts_lexize('hunspell_num', 'footballyklubber');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+-- Synonim dictionary
+CREATE TEXT SEARCH DICTIONARY synonym (
+						Template=synonym,
+						Synonyms=synonym_sample
+);
+ERROR:  user-defined text search dictionary is not yet supported.
+SELECT ts_lexize('synonym', 'PoStGrEs');
+ERROR:  text search dictionary "synonym" does not exist
+LINE 1: SELECT ts_lexize('synonym', 'PoStGrEs');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('synonym', 'Gogle');
+ERROR:  text search dictionary "synonym" does not exist
+LINE 1: SELECT ts_lexize('synonym', 'Gogle');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+SELECT ts_lexize('synonym', 'indices');
+ERROR:  text search dictionary "synonym" does not exist
+LINE 1: SELECT ts_lexize('synonym', 'indices');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+-- Create and simple test thesaurus dictionary
+-- More tests in configuration checks because ts_lexize()
+-- cannot pass more than one word to thesaurus.
+CREATE TEXT SEARCH DICTIONARY thesaurus (
+                        Template=thesaurus,
+						DictFile=thesaurus_sample,
+						Dictionary=english_stem
+);
+ERROR:  user-defined text search dictionary is not yet supported.
+SELECT ts_lexize('thesaurus', 'one');
+ERROR:  text search dictionary "thesaurus" does not exist
+LINE 1: SELECT ts_lexize('thesaurus', 'one');
+                         ^
+CONTEXT:  referenced column: ts_lexize
+-- Test ispell dictionary in configuration
+CREATE TEXT SEARCH CONFIGURATION ispell_tst (
+						COPY=english
+);
+ALTER TEXT SEARCH CONFIGURATION ispell_tst ALTER MAPPING FOR
+	word, numword, asciiword, hword, numhword, asciihword, hword_part, hword_numpart, hword_asciipart
+	WITH ispell, english_stem;
+ERROR:  text search dictionary "ispell" does not exist
+SELECT to_tsvector('ispell_tst', 'Booking the skies after rebookings for footballklubber from a foot');
+                       to_tsvector                       
+---------------------------------------------------------
+ 'book':1 'foot':10 'footballklubb':7 'rebook':5 'sky':3
+(1 row)
+
+SELECT to_tsquery('ispell_tst', 'footballklubber');
+   to_tsquery    
+-----------------
+ 'footballklubb'
+(1 row)
+
+SELECT to_tsquery('ispell_tst', 'footballyklubber:b & rebookings:A & sky');
+               to_tsquery                
+-----------------------------------------
+ 'footballyklubb':B & 'rebook':A & 'sky'
+(1 row)
+
+-- Test ispell dictionary with hunspell affix in configuration
+CREATE TEXT SEARCH CONFIGURATION hunspell_tst (
+						COPY=ispell_tst
+);
+ALTER TEXT SEARCH CONFIGURATION hunspell_tst ALTER MAPPING
+	REPLACE ispell WITH hunspell;
+ERROR:  text search dictionary "ispell" does not exist
+SELECT to_tsvector('hunspell_tst', 'Booking the skies after rebookings for footballklubber from a foot');
+                       to_tsvector                       
+---------------------------------------------------------
+ 'book':1 'foot':10 'footballklubb':7 'rebook':5 'sky':3
+(1 row)
+
+SELECT to_tsquery('hunspell_tst', 'footballklubber');
+   to_tsquery    
+-----------------
+ 'footballklubb'
+(1 row)
+
+SELECT to_tsquery('hunspell_tst', 'footballyklubber:b & rebookings:A & sky');
+               to_tsquery                
+-----------------------------------------
+ 'footballyklubb':B & 'rebook':A & 'sky'
+(1 row)
+
+-- Test ispell dictionary with hunspell affix with FLAG long in configuration
+ALTER TEXT SEARCH CONFIGURATION hunspell_tst ALTER MAPPING
+	REPLACE hunspell WITH hunspell_long;
+ERROR:  text search dictionary "hunspell" does not exist
+SELECT to_tsvector('hunspell_tst', 'Booking the skies after rebookings for footballklubber from a foot');
+                       to_tsvector                       
+---------------------------------------------------------
+ 'book':1 'foot':10 'footballklubb':7 'rebook':5 'sky':3
+(1 row)
+
+SELECT to_tsquery('hunspell_tst', 'footballklubber');
+   to_tsquery    
+-----------------
+ 'footballklubb'
+(1 row)
+
+SELECT to_tsquery('hunspell_tst', 'footballyklubber:b & rebookings:A & sky');
+               to_tsquery                
+-----------------------------------------
+ 'footballyklubb':B & 'rebook':A & 'sky'
+(1 row)
+
+-- Test ispell dictionary with hunspell affix with FLAG num in configuration
+ALTER TEXT SEARCH CONFIGURATION hunspell_tst ALTER MAPPING
+	REPLACE hunspell_long WITH hunspell_num;
+ERROR:  text search dictionary "hunspell_long" does not exist
+SELECT to_tsvector('hunspell_tst', 'Booking the skies after rebookings for footballklubber from a foot');
+                       to_tsvector                       
+---------------------------------------------------------
+ 'book':1 'foot':10 'footballklubb':7 'rebook':5 'sky':3
+(1 row)
+
+SELECT to_tsquery('hunspell_tst', 'footballklubber');
+   to_tsquery    
+-----------------
+ 'footballklubb'
+(1 row)
+
+SELECT to_tsquery('hunspell_tst', 'footballyklubber:b & rebookings:A & sky');
+               to_tsquery                
+-----------------------------------------
+ 'footballyklubb':B & 'rebook':A & 'sky'
+(1 row)
+
+-- Test synonym dictionary in configuration
+CREATE TEXT SEARCH CONFIGURATION synonym_tst (
+						COPY=english
+);
+ALTER TEXT SEARCH CONFIGURATION synonym_tst ALTER MAPPING FOR
+	asciiword, hword_asciipart, asciihword
+	WITH synonym, english_stem;
+ERROR:  text search dictionary "synonym" does not exist
+SELECT to_tsvector('synonym_tst', 'Postgresql is often called as postgres or pgsql and pronounced as postgre');
+                               to_tsvector                               
+-------------------------------------------------------------------------
+ 'call':4 'often':3 'pgsql':8 'postgr':6,12 'postgresql':1 'pronounc':10
+(1 row)
+
+SELECT to_tsvector('synonym_tst', 'Most common mistake is to write Gogle instead of Google');
+                           to_tsvector                           
+-----------------------------------------------------------------
+ 'common':2 'gogl':7 'googl':10 'instead':8 'mistak':3 'write':6
+(1 row)
+
+SELECT to_tsvector('synonym_tst', 'Indexes or indices - Which is right plural form of index?');
+                     to_tsvector                      
+------------------------------------------------------
+ 'form':8 'index':1,10 'indic':3 'plural':7 'right':6
+(1 row)
+
+SELECT to_tsquery('synonym_tst', 'Index & indices');
+    to_tsquery     
+-------------------
+ 'index' & 'indic'
+(1 row)
+
+-- test thesaurus in configuration
+-- see thesaurus_sample.ths to understand 'odd' resulting tsvector
+CREATE TEXT SEARCH CONFIGURATION thesaurus_tst (
+						COPY=synonym_tst
+);
+ALTER TEXT SEARCH CONFIGURATION thesaurus_tst ALTER MAPPING FOR
+	asciiword, hword_asciipart, asciihword
+	WITH synonym, thesaurus, english_stem;
+ERROR:  text search dictionary "synonym" does not exist
+SELECT to_tsvector('thesaurus_tst', 'one postgres one two one two three one');
+                 to_tsvector                  
+----------------------------------------------
+ 'one':1,3,5,8 'postgr':2 'three':7 'two':4,6
+(1 row)
+
+SELECT to_tsvector('thesaurus_tst', 'Supernovae star is very new star and usually called supernovae (abbrevation SN)');
+                                to_tsvector                                 
+----------------------------------------------------------------------------
+ 'abbrev':11 'call':9 'new':5 'sn':12 'star':2,6 'supernova':1,10 'usual':8
+(1 row)
+
+SELECT to_tsvector('thesaurus_tst', 'Booking tickets is looking like a booking a tickets');
+                to_tsvector                
+-------------------------------------------
+ 'book':1,7 'like':5 'look':4 'ticket':2,9
+(1 row)
+

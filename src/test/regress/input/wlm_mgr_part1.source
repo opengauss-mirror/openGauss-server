@@ -1,0 +1,41 @@
+CREATE DATABASE wmpdb;
+\c wmpdb
+set resource_track_duration=0;
+set query_band='wmpdb_test';
+--name: 3.12.3_wlm_mgr_part1
+--show info
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "show use_workload_manager;"
+--output
+--output
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "show query_mem;"
+--output
+--test
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "create resource pool rp_t;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "alter resource pool rp_t with (mem_percent=20);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "alter resource pool rp_t with (active_statements=3);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "create user user_t resource pool 'rp_t' user group default password 'admin@123';" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "select rolname, rolsystemadmin from pg_authid where rolname = 'user_t';"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "select * from pg_resource_pool where respool_name = 'rp_t';"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -U user_t -W 'admin@123' -c "select * from pg_sleep(10);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -U user_t -W 'admin@123' -c "select * from pg_sleep(10);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -U user_t -W 'admin@123' -c "select * from pg_sleep(10);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -U user_t -W 'admin@123' -c "select * from pg_sleep(10);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -U user_t -W 'admin@123' -c "select * from pg_sleep(10);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -U user_t -W 'admin@123' -c "select * from pg_sleep(10);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "select count(*) from pg_session_wlmstat where query like '%pg_sleep(30)%';"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "select pg_terminate_backend(a.threadid) from pg_session_wlmstat a where query like '%pg_sleep(30)%' and query not like '%pg_terminate_backend%';"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "select count(*) from pg_session_wlmstat where query like '%pg_sleep(30)%';"
+--output
+--clean up
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "drop user user_t;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "drop resource pool rp_t;" > /dev/null 2>&1
+\c postgres
+drop database wmpdb;
+\c regression
+--end of file

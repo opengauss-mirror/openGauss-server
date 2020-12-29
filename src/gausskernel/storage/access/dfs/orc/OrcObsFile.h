@@ -21,7 +21,6 @@
  * -------------------------------------------------------------------------
  */
 
-
 #ifndef ORCOBSFILE_H
 #define ORCOBSFILE_H
 
@@ -51,6 +50,5 @@ DFS_UNIQUE_PTR<GSInputStream> readObsFile(OBSReadWriteHandler *handler, const st
  */
 DFS_UNIQUE_PTR<GSInputStream> readObsFileWithCache(OBSReadWriteHandler *handler, const std::string &path,
                                                    dfs::reader::ReaderState *readerState);
-
 }  // namespace dfs
 #endif

@@ -30,18 +30,16 @@
 #include "knl/knl_thread.h"
 #include "utils/palloc.h"
 
-static const uint32 DW_BOOTSTRAP_VERSION = 91261;
-
 static const uint32 HALF_K = 512;
 
 static const char DW_FILE_NAME[] = "global/pg_dw";
-
+static const char SINGLE_DW_FILE_NAME[] = "global/pg_dw_single";
 static const char DW_BUILD_FILE_NAME[] = "global/pg_dw.build";
 
 static const uint32 DW_TRY_WRITE_TIMES = 8;
-
+#ifndef WIN32
 static const int DW_FILE_FLAG = (O_RDWR | O_SYNC | O_DIRECT | PG_BINARY);
-
+#endif
 static const mode_t DW_FILE_PERM = (S_IRUSR | S_IWUSR);
 
 static const int DW_FILE_EXTEND_SIZE = (BLCKSZ * HALF_K);
@@ -51,12 +49,12 @@ static const uint16 DW_FILE_PAGE = 32768;
 
 static const int64 DW_FILE_SIZE = (DW_FILE_PAGE * BLCKSZ);
 
-/* make file head size to 512 bytes in total, 10 bytes including head and tail, 502 bytes alignment */
-static const uint32 DW_FILE_HEAD_ALIGN_BYTES = 502;
+/* make file head size to 512 bytes in total, 12 bytes including head and tail, 500 bytes alignment */
+static const uint32 DW_FILE_HEAD_ALIGN_BYTES = 500;
 
 /**
- * | file_head | batch head | data pages ... | batch tail/next batch head | ... |
- * |    0      |     1      |   409 at most  |          1                 | ... |
+ * | file_head | batch head | data pages   | batch tail/next batch head | ... |
+ * |    0   |     1    | 409 at most |          1           | ... |
  */
 static const uint16 DW_BATCH_FILE_START = 1;
 
@@ -69,30 +67,28 @@ typedef struct st_dw_page_head {
 
 typedef struct st_dw_page_tail {
     uint16 checksum;
-    uint16 dwn;
+    uint16 dwn; /* double write number, updated when file header changed */
 } dw_page_tail_t;
 
 typedef struct st_dw_file_head {
     dw_page_head_t head;
     uint16 start;
+    uint16 buftag_version;
     uint8 unused[DW_FILE_HEAD_ALIGN_BYTES]; /* 512 bytes total, one sector for most disks */
     dw_page_tail_t tail;
 } dw_file_head_t;
 
-static const uint16 DW_FILE_HEAD_ID_MAX = (uint16)(BLCKSZ / sizeof(dw_file_head_t));
-
-static const uint16 DW_FILE_HEAD_MID_ID = DW_FILE_HEAD_ID_MAX >> 1U;
-
 static const uint32 DW_FILE_HEAD_ID_NUM = 3;
 
 /* write file head 3 times, distributed in start, middle, end of the first page of dw file */
-static const uint16 g_dw_file_head_ids[DW_FILE_HEAD_ID_NUM] = {0, DW_FILE_HEAD_MID_ID, DW_FILE_HEAD_ID_MAX - 1};
+static const uint16 g_dw_file_head_ids[DW_FILE_HEAD_ID_NUM] = {0, 8, 15};
 
 const static uint64 DW_SLEEP_US = 1000L;
 
 const static uint16 DW_WRITE_STAT_LOWER_LIMIT = 16;
 
 const static int DW_VIEW_COL_NUM = 11;
+const static int DW_SINGLE_VIEW_COL_NUM = 6;
 
 const static uint32 DW_VIEW_COL_NAME_LEN = 32;
 
@@ -124,7 +120,7 @@ typedef struct st_dw_read_asst {
     char* buf;
 } dw_read_asst_t;
 
-typedef struct st_dw_stat_info {
+typedef struct dw_stat_info_batch {
     volatile uint64 file_trunc_num;        /* truncate file */
     volatile uint64 file_reset_num;        /* file full and restart from beginning */
     volatile uint64 total_writes;          /* total double write */
@@ -133,32 +129,24 @@ typedef struct st_dw_stat_info {
     volatile uint64 total_pages;           /* pages total */
     volatile uint64 low_threshold_pages;   /* less than 16 pages total */
     volatile uint64 high_threshold_pages;  /* more than one full batch (409 pages) total */
-} dw_stat_info;
+} dw_stat_info_batch;
 
-typedef struct knl_g_dw_context {
-    int fd;
-    struct LWLock* flush_lock;
+typedef struct dw_stat_info_single {
+    volatile uint64 file_trunc_num;        /* truncate file */
+    volatile uint64 file_reset_num;        /* file full and restart from beginning */
+    volatile uint64 total_writes;          /* total double write */
+} dw_stat_info_single;
 
-    volatile uint16 write_pos; /* the copied pages in buffer, updated when mark page */
-#ifndef ENABLE_THREAD_CHECK
-    volatile slock_t initialized;
-    volatile slock_t closed;
-#else
-    volatile int initialized;
-    volatile int closed;
-#endif
-    uint16 flush_page; /* total number of flushed pages before truncate or reset */
-    uint16 last_flush_page; /* total number of flushed pages before last dw_perform */
-    uint16 unused;
+typedef struct single_slot_pos {
+    LWLock* write_lock;    /* The dw write lock corresponding to the slot */
+    uint16 actual_pos;    /* correspond to the actual double write file slot */
+}single_slot_pos;
 
-    char* buf;
-    bool contain_hashbucket; /* */
-    dw_file_head_t* file_head;
-    char* unaligned_buf;
-    dw_stat_info stat_info;
-    MemoryContext mem_ctx;
-} dw_context_t;
+typedef struct single_slot_state {
+    bool data_flush;     /* The buffer corresponding to the slot finish data file flush */
+}single_slot_state;
 
 extern const dw_view_col_t g_dw_view_col_arr[DW_VIEW_COL_NUM];
+extern const dw_view_col_t g_dw_single_view[DW_SINGLE_VIEW_COL_NUM];
 
 #endif /* DOUBLE_WRITE_BASIC_H */

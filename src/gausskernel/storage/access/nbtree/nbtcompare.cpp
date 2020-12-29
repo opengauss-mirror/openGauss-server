@@ -255,8 +255,8 @@ Datum btoidsortsupport(PG_FUNCTION_ARGS)
 
 Datum btoidvectorcmp(PG_FUNCTION_ARGS)
 {
-    oidvector* a = (oidvector*)PG_GETARG_POINTER(0);
-    oidvector* b = (oidvector*)PG_GETARG_POINTER(1);
+    oidvector *a = (oidvector *)PG_GETARG_POINTER(0);
+    oidvector *b = (oidvector *)PG_GETARG_POINTER(1);
     int i;
 
     /* We arbitrarily choose to sort first by vector length */
@@ -306,4 +306,3 @@ Datum btnamesortsupport(PG_FUNCTION_ARGS)
     ssup->comparator = btnamefastcmp;
     PG_RETURN_VOID();
 }
-

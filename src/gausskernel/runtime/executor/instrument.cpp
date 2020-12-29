@@ -30,7 +30,7 @@
 #include <asm/unistd.h>
 #include "postmaster/fork_process.h"
 #include "postmaster/postmaster.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/pmsignal.h"
@@ -42,7 +42,7 @@
 #include "libpq/pqformat.h"
 #include "libpq/pqsignal.h"
 #include "access/xact.h"
-
+#include "distributelayer/streamMain.h"
 #include "commands/dbcommands.h"
 #include "utils/builtins.h"
 #include "utils/snapmgr.h"
@@ -59,7 +59,6 @@ extern const char* GetStreamType(Stream* node);
 extern void insert_obsscaninfo(
     uint64 queryid, const char* rel_name, int64 file_count, double scan_data_size, double total_time, int format);
 
-static void BufferUsageAdd(BufferUsage *dst, const BufferUsage *add);
 static void BufferUsageAccumDiff(BufferUsage* dst, const BufferUsage* add, const BufferUsage* sub);
 static void CPUUsageGetCurrent(CPUUsage* cur);
 static void CPUUsageAccumDiff(CPUUsage* dst, const CPUUsage* add, const CPUUsage* sub);
@@ -142,6 +141,18 @@ TrackDesc trackdesc[] = {
 
     {CNNET_INIT, "coordinator get datanode connection", true, TRACK_TIME | TRACK_COUNT},
 
+    {CN_CHECK_AND_UPDATE_NODEDEF, "Coordinator check and update node definition", true, TRACK_TIME | TRACK_COUNT}, 
+
+    {CN_SERIALIZE_PLAN, "Coordinator serialize plan", true, TRACK_TIME | TRACK_COUNT},
+
+    {CN_SEND_QUERYID_WITH_SYNC, "Coordinator send query id with sync", true, TRACK_TIME | TRACK_COUNT},
+
+    {CN_SEND_BEGIN_COMMAND, "Coordinator send begin command", true, TRACK_TIME | TRACK_COUNT},
+
+    {CN_START_COMMAND, "Coordinator start transaction and send query", true, TRACK_TIME | TRACK_COUNT},
+
+    {DN_STREAM_THREAD_INIT, "Datanode start up stream thread", true, TRACK_TIME | TRACK_COUNT},
+
     {FILL_LATER_BATCH, "fill later vector batch", true, TRACK_TIME | TRACK_COUNT},
 
     {GET_CU_DATA_LATER_READ, "get cu data for later read", true, TRACK_TIME | TRACK_COUNT},
@@ -163,6 +174,12 @@ TrackDesc trackdesc[] = {
     {GET_PG_LOG_TUPLES, "get pg_log tuples", true, TRACK_TIME | TRACK_COUNT},
 
     {GET_GS_PROFILE_TUPLES, "get gs_profile tuples", true, TRACK_TIME | TRACK_COUNT},
+
+    {TSSTORE_PROJECT, "timeseries projection and filter", true, TRACK_TIME | TRACK_COUNT},
+
+    {TSSTORE_SEARCH, "search timeseries table", true, TRACK_TIME | TRACK_COUNT},
+
+    {TSSTORE_SEARCH_TAGID, "search tag table get tag id", true, TRACK_TIME | TRACK_COUNT},
 };
 
 /*
@@ -455,15 +472,6 @@ Instrumentation* InstrAlloc(int n, int instrument_options)
     return instr;
 }
 
-/* Initialize an pre-allocated instrumentation structure. */
-void InstrInit(Instrumentation *instr, int instrument_options)
-{
-    int rc = memset_s(instr, sizeof(Instrumentation), 0, sizeof(Instrumentation));
-    securec_check(rc, "", "");
-    instr->need_bufusage = (instrument_options & INSTRUMENT_BUFFERS) != 0;
-    instr->need_timer = (instrument_options & INSTRUMENT_TIMER) != 0;
-}
-
 /* Entry to a plan node */
 void InstrStartNode(Instrumentation* instr)
 {
@@ -699,72 +707,11 @@ void StreamEndLoop(StreamTime* instr)
     instr->tuplecount = 0;
 }
 
-/* aggregate instrumentation information */
-void InstrAggNode(Instrumentation *dst, Instrumentation *add)
-{
-    if (!dst->running && add->running) {
-        dst->running = true;
-        dst->firsttuple = add->firsttuple;
-    } else if (dst->running && add->running && dst->firsttuple > add->firsttuple) {
-        dst->firsttuple = add->firsttuple;
-    }
-
-    INSTR_TIME_ADD(dst->counter, add->counter);
-
-    dst->tuplecount += add->tuplecount;
-    dst->startup += add->startup;
-    dst->total += add->total;
-    dst->ntuples += add->ntuples;
-    dst->nloops += add->nloops;
-    dst->nfiltered1 += add->nfiltered1;
-    dst->nfiltered2 += add->nfiltered2;
-
-    /* Add delta of buffer usage since entry to node's totals */
-    if (dst->need_bufusage)
-        BufferUsageAdd(&dst->bufusage, &add->bufusage);
-}
-
-/* note current values during parallel executor startup */
-void InstrStartParallelQuery(void)
-{
-    t_thrd.bgworker_cxt.save_pgBufferUsage = u_sess->instr_cxt.pg_buffer_usage;
-}
-
-/* report usage after parallel executor shutdown */
-void InstrEndParallelQuery(BufferUsage *result)
-{
-    int rc = memset_s(result, sizeof(BufferUsage), 0, sizeof(BufferUsage));
-    securec_check(rc, "", "");
-    BufferUsageAccumDiff(result, u_sess->instr_cxt.pg_buffer_usage, t_thrd.bgworker_cxt.save_pgBufferUsage);
-}
-
-/* accumulate work done by workers in leader's stats */
-void InstrAccumParallelQuery(BufferUsage *result)
-{
-    BufferUsageAdd(u_sess->instr_cxt.pg_buffer_usage, result);
-}
-
-static void BufferUsageAdd(BufferUsage *dst, const BufferUsage *add)
-{
-    dst->shared_blks_hit += add->shared_blks_hit;
-    dst->shared_blks_read += add->shared_blks_read;
-    dst->shared_blks_dirtied += add->shared_blks_dirtied;
-    dst->shared_blks_written += add->shared_blks_written;
-    dst->local_blks_hit += add->local_blks_hit;
-    dst->local_blks_read += add->local_blks_read;
-    dst->local_blks_dirtied += add->local_blks_dirtied;
-    dst->local_blks_written += add->local_blks_written;
-    dst->temp_blks_read += add->temp_blks_read;
-    dst->temp_blks_written += add->temp_blks_written;
-    INSTR_TIME_ADD(dst->blk_read_time, add->blk_read_time);
-    INSTR_TIME_ADD(dst->blk_write_time, add->blk_write_time);
-}
-
-/*
+/* 
  * BufferUsageAccumDiff
- * calculate every element of dst like: dst += add - sub
+ * calculate every element of dst like: dst += add - sub 
  */
-static void BufferUsageAccumDiff(BufferUsage *dst, const BufferUsage *add, const BufferUsage *sub)
+static void BufferUsageAccumDiff(BufferUsage* dst, const BufferUsage* add, const BufferUsage* sub)
 {
     dst->shared_blks_hit += add->shared_blks_hit - sub->shared_blks_hit;
     dst->shared_blks_read += add->shared_blks_read - sub->shared_blks_read;
@@ -872,7 +819,7 @@ ThreadInstrumentation::~ThreadInstrumentation()
  * @in estate: Estate
  * @return: Instrumentatin
  */
-Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int parent_id, Plan* plan, struct EState* e_state)
+Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int parent_id, Plan* plan, struct EState* estate)
 {
     char* pname = NULL;
     char* relname = NULL;
@@ -1048,6 +995,16 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
             }
             plan_type = IO_OP;
             break;
+#ifdef ENABLE_MULTIPLE_NODES
+        case T_TsStoreScan:
+            if (!((Scan*)plan)->tablesample) {
+                pname = "Partitioned TsStore Scan";
+            } else {
+                pname = "Partitioned TsSore Sample Scan";
+            }
+            plan_type = IO_OP;
+            break;
+#endif   /* ENABLE_MULTIPLE_NODES */
         case T_IndexScan:
             if (((IndexScan*)plan)->scan.isPartTbl)
                 pname = "Partitioned Index Scan";
@@ -1207,6 +1164,10 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
             } else
                 pname = "Vector Foreign Scan";
             plan_type = IO_OP;
+            break;
+        case T_ExtensiblePlan:
+            pname = "Extensible Plan";
+            plan_type = UTILITY_OP;
             break;
         case T_Material:
             pname = "Materialize";
@@ -1382,6 +1343,9 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
         case T_SeqScan:
         case T_CStoreScan:
         case T_DfsScan:
+#ifdef ENABLE_MULTIPLE_NODES
+        case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
         case T_DfsIndexScan:
         case T_IndexScan:
         case T_IndexOnlyScan:
@@ -1393,7 +1357,7 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
         case T_ForeignScan:
         case T_VecForeignScan: {
             Index rti = ((Scan*)plan)->scanrelid;
-            RangeTblEntry* rte = rt_fetch(rti, e_state->es_range_table);
+            RangeTblEntry* rte = rt_fetch(rti, estate->es_range_table);
             /* Assert it's on a real relation */
             Assert(rte->rtekind == RTE_RELATION);
             relname = get_rel_name(rte->relid);
@@ -1413,9 +1377,9 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
         securec_check_ss(rc, "\0", "\0");
     }
 
-    if (e_state->es_instrument & (INSTRUMENT_BUFFERS | INSTRUMENT_TIMER)) {
-        bool need_buffers = (e_state->es_instrument & INSTRUMENT_BUFFERS) != 0;
-        bool need_timer = (e_state->es_instrument & INSTRUMENT_TIMER) != 0;
+    if (estate->es_instrument & (INSTRUMENT_BUFFERS | INSTRUMENT_TIMER)) {
+        bool need_buffers = (estate->es_instrument & INSTRUMENT_BUFFERS) != 0;
+        bool need_timer = (estate->es_instrument & INSTRUMENT_TIMER) != 0;
 
         node_instr->instr.instruPlanData.need_timer = need_timer;
         node_instr->instr.instruPlanData.need_bufusage = need_buffers;
@@ -1543,14 +1507,20 @@ StreamInstrumentation::StreamInstrumentation(int size, int num_streams, int gath
         /* including thr top consumer list and cn */
         m_streamInfo = (ThreadInstrInfo*)palloc0(sizeof(ThreadInstrInfo) * (m_num_streams + m_gather_count + 1));
     } else {
+#ifdef ENABLE_MULTIPLE_NODES
         /*
          * in DN, m_gather_count is 1 in general(gather operator)
          * in compute pool, m_gather_count = 3 actually.
          */
         m_threadInstrArrayLen = (m_num_streams + m_gather_count) * m_query_dop;
-
         /* including the top consumer list. */
         m_streamInfo = (ThreadInstrInfo*)palloc0(sizeof(ThreadInstrInfo) * (m_num_streams + m_gather_count));
+#else
+        /* single node need a lot gather operator */
+        m_threadInstrArrayLen = (m_num_streams + m_gather_count + 1) * m_query_dop;
+        m_streamInfo = (ThreadInstrInfo*)palloc0(sizeof(ThreadInstrInfo) * (m_num_streams + m_gather_count + 1));
+#endif
+
     }
 
     /* streamInfo INIT */
@@ -1820,6 +1790,14 @@ void StreamInstrumentation::getStreamInfo(
                 &m_streamInfo[m_streamInfoIdx],
                 m_streamInfo[m_streamInfoIdx].offset);
         } break;
+        case T_ExtensiblePlan: {
+            ExtensiblePlan* eplan = (ExtensiblePlan*)result_plan;
+            ListCell* lc = NULL;
+            foreach (lc, eplan->extensible_plans) {
+                Plan* plan = (Plan*)lfirst(lc);
+                getStreamInfo(plan, planned_stmt, dop, info, offset);
+            }
+        } break;
 
         default:
             if (result_plan->lefttree)
@@ -1838,6 +1816,7 @@ void StreamInstrumentation::getStreamInfo(
 
             /* subplan' plannode id should add to its parentnodeid. */
             if (result_plan->plan_node_id == sub_plan->parent_node_id) {
+#ifdef ENABLE_MULTIPLE_NODES
                 /* CN, allocate memory for all plan nodes. */
                 if (IS_PGXC_COORDINATOR)
                     getStreamInfo(sub_plan, planned_stmt, dop, info, offset);
@@ -1846,6 +1825,10 @@ void StreamInstrumentation::getStreamInfo(
                     (sub_plan->exec_type == EXEC_ON_DATANODES || sub_plan->exec_type == EXEC_ON_ALL_NODES)) {
                     getStreamInfo(sub_plan, planned_stmt, dop, info, offset);
                 }
+#else
+                /* single node, allocate memory for all plan nodes */
+                getStreamInfo(sub_plan, planned_stmt, dop, info, offset);
+#endif
             }
         }
     }
@@ -1899,7 +1882,6 @@ void StreamInstrumentation::allocateAllThreadInstrOnDN(bool in_compute_pool)
 /* alloc threadInstrumentation in Compute pool in need */
 void StreamInstrumentation::allocateAllThreadInstrOnCP(int dop)
 {
-
     int i, j;
     Assert(dop == 1);
     int dn_num_streams = DN_NUM_STREAMS_IN_CN(m_num_streams, m_gather_count, dop);
@@ -1929,6 +1911,11 @@ void StreamInstrumentation::allocateAllThreadInstrOnCN()
 void StreamInstrumentation::serializeSend()
 {
     StringInfoData buf;
+
+    if (m_query_dop == 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("m_query_dop can not be zero")));
+    }
 
     for (int i = 0; i < m_threadInstrArrayLen; i++) {
         ThreadInstrumentation* thread_instr = m_threadInstrArray[i];
@@ -2277,12 +2264,13 @@ Instrumentation* StreamInstrumentation::getInstrSlot(int idx, int plan_node_id)
 {
     Instrumentation* instr = NULL;
 
-    /* plannode offset in m_threadInstrArray of CN */
-    int offset =
-        m_planIdOffsetArray[plan_node_id - 1] == 0 ? -1 : (m_planIdOffsetArray[plan_node_id - 1] - 1) * m_query_dop;
-    int dn_num_streams = DN_NUM_STREAMS_IN_CN(m_num_streams, m_gather_count, m_query_dop);
+    ThreadInstrumentation* thread_instr =
+#ifdef ENABLE_MULTIPLE_NODES
+        getThreadInstrumentationCN(idx, plan_node_id, 0);
+#else
+        getThreadInstrumentationDN(plan_node_id, 0);
+#endif
 
-    ThreadInstrumentation* thread_instr = m_threadInstrArray[1 + idx * dn_num_streams + offset];
     /* if threadinstr is not execute ,return NULL */
     if (thread_instr == NULL)
         return NULL;
@@ -2308,12 +2296,13 @@ Instrumentation* StreamInstrumentation::getInstrSlot(int idx, int plan_node_id, 
 {
     Instrumentation* instr = NULL;
 
-    /* plannode offset in m_threadInstrArray of CN */
-    int offset =
-        m_planIdOffsetArray[plan_node_id - 1] == 0 ? -1 : (m_planIdOffsetArray[plan_node_id - 1] - 1) * m_query_dop;
-    int dn_num_streams = DN_NUM_STREAMS_IN_CN(m_num_streams, m_gather_count, m_query_dop);
+    ThreadInstrumentation* thread_instr =
+#ifdef ENABLE_MULTIPLE_NODES
+        getThreadInstrumentationCN(idx, plan_node_id, smp_id);
+#else
+        getThreadInstrumentationDN(plan_node_id, smp_id);
+#endif
 
-    ThreadInstrumentation* thread_instr = m_threadInstrArray[1 + idx * dn_num_streams + offset + smp_id];
     /* if threadinstr is not execute ,return NULL */
     if (thread_instr == NULL)
         return NULL;
@@ -2375,6 +2364,7 @@ void StreamInstrumentation::TrackEndTime(int plan_node_id, int track_id)
 /* run in CN only m_planIdOffsetArray[planNodeId-1] > 0 , planNodeId RUN IN DN */
 bool StreamInstrumentation::isFromDataNode(int plan_node_id)
 {
+#ifdef ENABLE_MULTIPLE_NODES
     if (u_sess->instr_cxt.global_instr && m_planIdOffsetArray[plan_node_id - 1] > 0) {
         int num_streams = u_sess->instr_cxt.global_instr->getInstruThreadNum();
         int query_dop = u_sess->instr_cxt.global_instr->get_query_dop();
@@ -2390,6 +2380,9 @@ bool StreamInstrumentation::isFromDataNode(int plan_node_id)
         return false;
     }
     return false;
+#else
+    return true;
+#endif
 }
 
 /* set NetWork in DN */
@@ -3204,7 +3197,7 @@ void setCnGeneralInfo(ExplainGeneralInfo* stat_element, OperatorInfo* opstr)
 
 static inline void CpyCStringField(char** dest, const char* src)
 {
-    if(dest == NULL)
+    if (dest == NULL)
         ereport(ERROR, (errmodule(MOD_OPT_AI),  errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                         errmsg("Unexpected NULL value.")));
     if (src != NULL) {
@@ -3214,7 +3207,7 @@ static inline void CpyCStringField(char** dest, const char* src)
     }
 }
 
-static inline void PredSetOptMem(OperatorInfo *operatorMemory, OperatorPlanInfo* opt_plan_info)
+static void PredSetOptMem(OperatorInfo *operatorMemory, OperatorPlanInfo* opt_plan_info)
 {
     if (opt_plan_info != NULL) {
         CpyCStringField(&operatorMemory->planinfo.operation, opt_plan_info->operation);
@@ -3237,79 +3230,79 @@ static inline void PredSetOptMem(OperatorInfo *operatorMemory, OperatorPlanInfo*
     }
 }
 
-void setOperatorInfo(OperatorInfo* operator_memory, Instrumentation* instr_memory, OperatorPlanInfo* opt_plan_info)
+void setOperatorInfo(OperatorInfo* operatorMemory, Instrumentation* InstrMemory, OperatorPlanInfo* opt_plan_info)
 {
     static const int s_to_ms = 1000;
-    operator_memory->total_tuples = (int64)(instr_memory->ntuples + instr_memory->tuplecount);
-    operator_memory->peak_memory = instr_memory->memoryinfo.peakOpMemory;
-    operator_memory->spill_size = instr_memory->sorthashinfo.spill_size;
-    operator_memory->enter_time = instr_memory->enter_time;
-    operator_memory->startup_time = (int64)(instr_memory->startup * s_to_ms);
-    operator_memory->execute_time =
-        (int64)(instr_memory->total * s_to_ms + INSTR_TIME_GET_DOUBLE(instr_memory->counter) * s_to_ms);
-    operator_memory->status = instr_memory->status;
+    operatorMemory->total_tuples = (int64)(InstrMemory->ntuples + InstrMemory->tuplecount);
+    operatorMemory->peak_memory = InstrMemory->memoryinfo.peakOpMemory;
+    operatorMemory->spill_size = InstrMemory->sorthashinfo.spill_size;
+    operatorMemory->enter_time = InstrMemory->enter_time;
+    operatorMemory->startup_time = (int64)(InstrMemory->startup * s_to_ms);
+    operatorMemory->execute_time =
+        (int64)(InstrMemory->total * s_to_ms + INSTR_TIME_GET_DOUBLE(InstrMemory->counter) * s_to_ms);
+    operatorMemory->status = InstrMemory->status;
 
-    MemoryContext old_context;
-    old_context = MemoryContextSwitchTo(g_instance.wlm_cxt->oper_resource_track_mcxt);
-    operator_memory->datname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-    PredSetOptMem(operator_memory, opt_plan_info);
-    MemoryContextSwitchTo(old_context);
+    MemoryContext oldcontext;
+    oldcontext = MemoryContextSwitchTo(g_instance.wlm_cxt->oper_resource_track_mcxt);
+    operatorMemory->datname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
+    PredSetOptMem(operatorMemory, opt_plan_info);
+    MemoryContextSwitchTo(oldcontext);
 
-    operator_memory->warning = instr_memory->warning;
-    if (instr_memory->sysBusy) {
-        operator_memory->warning |= (1 << WLM_WARN_EARLY_SPILL);
+    operatorMemory->warning = InstrMemory->warning;
+    if (InstrMemory->sysBusy) {
+        operatorMemory->warning |= (1 << WLM_WARN_EARLY_SPILL);
     }
 
-    if (instr_memory->spreadNum > 0 && instr_memory->sorthashinfo.spill_size > 0) {
-        operator_memory->warning |= (1 << WLM_WARN_SPILL_ON_MEMORY_SPREAD);
+    if (InstrMemory->spreadNum > 0 && InstrMemory->sorthashinfo.spill_size > 0) {
+        operatorMemory->warning |= (1 << WLM_WARN_SPILL_ON_MEMORY_SPREAD);
     }
 
-    operator_memory->ec_operator = instr_memory->ec_operator;
-    if (operator_memory->ec_operator == IS_EC_OPERATOR) {
-        operator_memory->ec_status = instr_memory->ec_status;
-        operator_memory->ec_libodbc_type = instr_memory->ec_libodbc_type;
-        operator_memory->ec_fetch_count = instr_memory->ec_fetch_count;
+    operatorMemory->ec_operator = InstrMemory->ec_operator;
+    if (operatorMemory->ec_operator == IS_EC_OPERATOR) {
+        operatorMemory->ec_status = InstrMemory->ec_status;
+        operatorMemory->ec_libodbc_type = InstrMemory->ec_libodbc_type;
+        operatorMemory->ec_fetch_count = InstrMemory->ec_fetch_count;
 
-        old_context = MemoryContextSwitchTo(g_instance.wlm_cxt->oper_resource_track_mcxt);
+        oldcontext = MemoryContextSwitchTo(g_instance.wlm_cxt->oper_resource_track_mcxt);
 
         errno_t rc = EOK;
-        if (instr_memory->ec_execute_datanode) {
-            int len = strlen(instr_memory->ec_execute_datanode) + 1;
-            operator_memory->ec_execute_datanode = (char*)palloc(len);
-            rc = memcpy_s(operator_memory->ec_execute_datanode, len, instr_memory->ec_execute_datanode, len);
+        if (InstrMemory->ec_execute_datanode) {
+            int len = strlen(InstrMemory->ec_execute_datanode) + 1;
+            operatorMemory->ec_execute_datanode = (char*)palloc(len);
+            rc = memcpy_s(operatorMemory->ec_execute_datanode, len, InstrMemory->ec_execute_datanode, len);
             securec_check(rc, "\0", "\0");
         } else {
-            operator_memory->ec_execute_datanode = (char*)palloc0(1);
+            operatorMemory->ec_execute_datanode = (char*)palloc0(1);
         }
 
-        if (instr_memory->ec_dsn) {
-            int len = strlen(instr_memory->ec_dsn) + 1;
-            operator_memory->ec_dsn = (char*)palloc(len);
-            rc = memcpy_s(operator_memory->ec_dsn, len, instr_memory->ec_dsn, len);
+        if (InstrMemory->ec_dsn) {
+            int len = strlen(InstrMemory->ec_dsn) + 1;
+            operatorMemory->ec_dsn = (char*)palloc(len);
+            rc = memcpy_s(operatorMemory->ec_dsn, len, InstrMemory->ec_dsn, len);
             securec_check(rc, "\0", "\0");
         } else {
-            operator_memory->ec_dsn = (char*)palloc0(1);
+            operatorMemory->ec_dsn = (char*)palloc0(1);
         }
 
-        if (instr_memory->ec_username) {
-            int len = strlen(instr_memory->ec_username) + 1;
-            operator_memory->ec_username = (char*)palloc(len);
-            rc = memcpy_s(operator_memory->ec_username, len, instr_memory->ec_username, len);
+        if (InstrMemory->ec_username) {
+            int len = strlen(InstrMemory->ec_username) + 1;
+            operatorMemory->ec_username = (char*)palloc(len);
+            rc = memcpy_s(operatorMemory->ec_username, len, InstrMemory->ec_username, len);
             securec_check(rc, "\0", "\0");
         } else {
-            operator_memory->ec_username = (char*)palloc0(1);
+            operatorMemory->ec_username = (char*)palloc0(1);
         }
 
-        if (instr_memory->ec_query) {
-            int len = strlen(instr_memory->ec_query) + 1;
-            operator_memory->ec_query = (char*)palloc(len);
-            rc = memcpy_s(operator_memory->ec_query, len, instr_memory->ec_query, len);
+        if (InstrMemory->ec_query) {
+            int len = strlen(InstrMemory->ec_query) + 1;
+            operatorMemory->ec_query = (char*)palloc(len);
+            rc = memcpy_s(operatorMemory->ec_query, len, InstrMemory->ec_query, len);
             securec_check(rc, "\0", "\0");
         } else {
-            operator_memory->ec_query = (char*)palloc0(1);
+            operatorMemory->ec_query = (char*)palloc0(1);
         }
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
     }
 }
 
@@ -3320,12 +3313,12 @@ void fillCommonOperatorInfo(size_info* info, OperatorInfo* operator_info)
     start_time = operator_info->enter_time;
     if (info->start_time == 0 || (start_time != 0 && start_time < info->start_time))
         info->start_time = start_time;
-    if (info->startup_time == -1 || operator_info->startup_time < info->startup_time)
+    if (info->startup_time == -1 || (info->startup_time != -1 && operator_info->startup_time < info->startup_time))
         info->startup_time = operator_info->startup_time;
     if (operator_info->execute_time > info->duration_time)
         info->duration_time = operator_info->execute_time;
     info->warn_prof_info |= operator_info->warning;
-    info->warn_prof_info |= get_warning_info(operator_info->spill_size, info->plan_node_name);
+    info->warn_prof_info |= (uint)get_warning_info(operator_info->spill_size, info->plan_node_name);
     info->status &= operator_info->status;
 
     info->total_tuple += operator_info->total_tuples;
@@ -3705,7 +3698,8 @@ void* ExplainGetSessionStatistics(int* num)
     }
 
     ExplainGeneralInfo* stat_element = NULL;
-    ExplainGeneralInfo* stat_array = (ExplainGeneralInfo*)palloc0(*num * sizeof(ExplainGeneralInfo));
+    Size array_size = mul_size(sizeof(ExplainGeneralInfo), (Size)(*num));
+    ExplainGeneralInfo* stat_array = (ExplainGeneralInfo*)palloc0(array_size);
 
     hash_seq_init(&hash_seq, g_operator_table.explain_info_hashtbl);
 
@@ -3885,7 +3879,7 @@ void ExplainSetSessionInfo(int plan_node_id, Instrumentation* instr, bool on_dat
         p_detail->status = Operator_Normal;
         UnLockOperHistHashPartition(hash_code);
 #ifndef ENABLE_MULTIPLE_NODES
-        return;
+            return;
 #endif
     }
 

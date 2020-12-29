@@ -69,6 +69,8 @@ DATA(insert OID =  426 (403        bpchar_ops        PGNSP PGUID));
 DATA(insert OID =  427 (405        bpchar_ops        PGNSP PGUID));
 DATA(insert OID =  428 (403        bytea_ops        PGNSP PGUID));
 #define BYTEA_BTREE_FAM_OID 428
+DATA(insert OID =  436 (403        byteawithoutorderwithequalcol_ops PGNSP PGUID));
+#define ENCRYPTEDCOL_BTREE_FAM_OID 436
 DATA(insert OID =  429 (403        char_ops        PGNSP PGUID));
 DATA(insert OID =  431 (405        char_ops        PGNSP PGUID));
 DATA(insert OID =  434 (403        datetime_ops    PGNSP PGUID));
@@ -96,7 +98,6 @@ DATA(insert OID = 1990 (405        oid_ops            PGNSP PGUID));
 DATA(insert OID = 1991 (403        oidvector_ops    PGNSP PGUID));
 DATA(insert OID = 1992 (405        oidvector_ops    PGNSP PGUID));
 DATA(insert OID = 2994 (403        record_ops        PGNSP PGUID));
-DATA(insert OID = 3194 (403        record_image_ops  PGNSP PGUID));
 DATA(insert OID = 1994 (403        text_ops        PGNSP PGUID));
 #define TEXT_BTREE_FAM_OID 1994
 DATA(insert OID = 1995 (405        text_ops        PGNSP PGUID));
@@ -115,6 +116,7 @@ DATA(insert OID = 2099 (403        money_ops        PGNSP PGUID));
 DATA(insert OID = 2222 (405        bool_ops        PGNSP PGUID));
 #define BOOL_HASH_FAM_OID 2222
 DATA(insert OID = 2223 (405        bytea_ops        PGNSP PGUID));
+DATA(insert OID = 4470 (405        byteawithoutorderwithequalcol_ops        PGNSP PGUID ));
 DATA(insert OID = 2224 (405        int2vector_ops    PGNSP PGUID));
 DATA(insert OID = 2789 (403        tid_ops            PGNSP PGUID));
 DATA(insert OID = 2225 (405        xid_ops            PGNSP PGUID));

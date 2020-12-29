@@ -35,10 +35,10 @@
 #include "utils/atomic.h"
 #include "utils/lsyscache.h"
 #include "utils/memprot.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "workload/memctl.h"
-
 #include "workload/workload.h"
+#include "optimizer/nodegroups.h"
 
 #define CPU_UTIL_THRESHOLD 95
 #define IO_UTIL_THRESHOLD 90
@@ -623,13 +623,15 @@ EnqueueType dywlm_client_send(ClientDynamicManager* climgr, DynamicMessageInfo* 
                         ereport(LOG,
                             (errmsg("receive message error, "
                                     "error occurred on central node, %s",
-                                ccn_handle->error == NULL ? "receive data failed" : ccn_handle->error)));
+                                (ccn_handle->error == NULL) ? "receive data failed" : ccn_handle->error)));
                         release_pgxc_handles(pgxc_handles);
                         pgxc_handles = NULL;
                     }
                     break;
-                default:
+                default: {
+                    ereport(ERROR, (errmsg("Unknow message type '%c' for dywlm client send.", msg_type)));;
                     break;
+                }
             }
 
             if (isFinished) {
@@ -640,7 +642,7 @@ EnqueueType dywlm_client_send(ClientDynamicManager* climgr, DynamicMessageInfo* 
             ereport(ERROR,
                 (errcode(ERRCODE_CONNECTION_FAILURE),
                     errmsg("[DYWLM] Failed to receive queue info from CCN, error info: %s",
-                        ccn_handle->error == NULL ? "receive data failed" : ccn_handle->error)));
+                        (ccn_handle->error == NULL) ? "receive data failed" : ccn_handle->error)));
         }
     }
 
@@ -770,7 +772,7 @@ int64 dywlm_client_get_max_memory_internal(bool* use_tenant)
 
     if (g_instance.wlm_cxt->dynamic_workload_inited) {
         /* We allow at least two queries concurrently */
-        multiple = t_thrd.wlm_cxt.thread_climgr->active_statements > 1 ? 2 : 1;
+        multiple = (t_thrd.wlm_cxt.thread_climgr->active_statements > 1) ? 2 : 1;
 
         /* the default resource pool uses the global maximum memory */
         if (!OidIsValid(u_sess->wlm_cxt->wlm_params.rpdata.rpoid) ||
@@ -896,9 +898,12 @@ int64 dywlm_client_get_free_memory(void)
  */
 void dywlm_client_get_memory_info(int* total_mem, int* free_mem, bool* use_tenant)
 {
+    Assert(total_mem != NULL && free_mem != NULL && use_tenant != NULL);
+
     int query_mem = ASSIGNED_QUERY_MEM(u_sess->attr.attr_sql.statement_mem, u_sess->attr.attr_sql.statement_max_mem);
     int max_mem = (int)dywlm_client_get_max_memory(use_tenant);
     int available_mem = 0;
+    const int kb_per_mb = 1024;
 
     if (g_instance.wlm_cxt->dynamic_workload_inited && g_instance.wlm_cxt->dynamic_memory_collected && max_mem == 0) {
         (elog(LOG, "[DYWLM] System max process memory unexpected to be 0."));
@@ -913,8 +918,8 @@ void dywlm_client_get_memory_info(int* total_mem, int* free_mem, bool* use_tenan
             max_mem = query_mem;
         }
         available_mem =
-            (u_sess->attr.attr_memory.work_mem >= STATEMENT_MIN_MEM * 1024 ? u_sess->attr.attr_memory.work_mem
-                                                                           : max_mem);
+            ((u_sess->attr.attr_memory.work_mem >= (STATEMENT_MIN_MEM * kb_per_mb)) ?
+                                                   u_sess->attr.attr_memory.work_mem : max_mem);
         available_mem = Min(available_mem, max_mem);
 
     /* We use dynamic workload if query_mem is not set */
@@ -924,7 +929,7 @@ void dywlm_client_get_memory_info(int* total_mem, int* free_mem, bool* use_tenan
         if (*use_tenant) {
             available_mem = u_sess->attr.attr_memory.work_mem;
         } else {
-            available_mem = Min(Max(dywlm_mem, STATEMENT_MIN_MEM * 1024), max_mem);
+            available_mem = Min(Max(dywlm_mem, STATEMENT_MIN_MEM * kb_per_mb), max_mem);
         }
     }
 
@@ -1086,9 +1091,7 @@ int dywlm_client_wait(DynamicMessageInfo* msginfo)
     if (!COMP_ACC_CLUSTER && msginfo->memsize <= 0) {
         ereport(DEBUG1,
             (errmsg("query[%u:%lu:%ld] request memory is less than 0",
-                msginfo->qid.procId,
-                msginfo->qid.queryId,
-                msginfo->qid.stamp)));
+                msginfo->qid.procId, msginfo->qid.queryId, msginfo->qid.stamp)));
 
         return 0;
     }
@@ -1166,8 +1169,7 @@ int dywlm_client_wait(DynamicMessageInfo* msginfo)
             ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory of central node")));
             break;
         case ENQUEUE_GROUPERR:
-            ereport(ERROR,
-                (errcode(ERRCODE_UNDEFINED_OBJECT),
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
                     errmsg("group name %s does not exist on central node", msginfo->groupname)));
             break;
         case ENQUEUE_RECOVERY:
@@ -1193,10 +1195,8 @@ int dywlm_client_wait(DynamicMessageInfo* msginfo)
 
         ereport(DEBUG3,
             (errmsg("force run qid [%u, %lu, %ld] since it uses plan A, etype: %d",
-                msginfo->qid.procId,
-                msginfo->qid.queryId,
-                msginfo->qid.stamp,
-                etype)));
+                msginfo->qid.procId, msginfo->qid.queryId,
+                msginfo->qid.stamp, etype)));
 
         t_thrd.wlm_cxt.parctl_state.enqueue = 0;
         t_thrd.wlm_cxt.parctl_state.rp_release = 1;
@@ -1224,9 +1224,7 @@ int dywlm_client_wait(DynamicMessageInfo* msginfo)
         ereport(DEBUG3,
             (errmsg("---OVERRUN dywlm_client_wait() reserve --- "
                     "active_statements: %d, central_waiting_count: %d, max_active_statements: %d.\n",
-                g_climgr->active_statements,
-                g_climgr->central_waiting_count,
-                g_climgr->max_active_statements)));
+                g_climgr->active_statements, g_climgr->central_waiting_count, g_climgr->max_active_statements)));
 
         /*
          * It will wake up a statement if there are
@@ -1815,7 +1813,9 @@ void dywlm_update_max_statements(int active_statements)
 void dywlm_client_reserve(QueryDesc* queryDesc, bool isQueryDesc)
 {
     /* need not do enqueue */
-    if (!t_thrd.wlm_cxt.parctl_state.enqueue || t_thrd.wlm_cxt.parctl_state.simple || !IsQueuedSubquery()) {
+    bool isNeedEnqueue = !t_thrd.wlm_cxt.parctl_state.enqueue || t_thrd.wlm_cxt.parctl_state.simple || 
+                            !IsQueuedSubquery();
+    if (isNeedEnqueue) {
         return;
     }
 
@@ -2286,7 +2286,13 @@ DynamicWorkloadRecord* dywlm_client_get_records(ClientDynamicManager* climgr, in
     bool isFinished = false;
 
     /* receive message */
-    while (!pgxc_node_receive(1, &ccn_handle, &timeout)) {
+    for (;;) {
+        if (pgxc_node_receive(1, &ccn_handle, &timeout)) {
+            ereport(LOG,
+                (errmsg("%s:%d recv fail", __FUNCTION__, __LINE__)));
+            break;
+        }
+
         char* msg = NULL;
         int len;
         char msg_type;
@@ -2319,7 +2325,12 @@ DynamicWorkloadRecord* dywlm_client_get_records(ClientDynamicManager* climgr, in
             case 'r': /* get workload record */
             {
                 /* in a while loop, first it will be case n, and then it will enter case r, so the records will not be null */
-                Assert(records);
+                if (records == NULL) {
+                    ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("records is NULL.")));
+                }
+                if (offset >= retcode) {
+                    ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory of records.")));
+                }
                 DynamicWorkloadRecord* record = records + offset;
 
                 StringInfoData input_msg;
@@ -2687,18 +2698,15 @@ void dywlm_client_init(WLMNodeGroupInfo* info)
  * @Return: void
  * @See also:
  */
-void dywlm_client_verify_register_internal(ClientDynamicManager* climgr, int num_backends)
+void dywlm_client_verify_register_internal(ClientDynamicManager* climgr)
 {
     USE_AUTO_LWLOCK(WorkloadStatHashLock, LW_SHARED);
 
     int i = 0;
     int count = hash_get_num_entries(climgr->dynamic_info_hashtbl);
 
-    ereport(DEBUG3,
-        (errmsg("WLMmonitorMain: dywlm_client_verify_register_internal: "
-                "length of climgr->dynamic_info_hashtbl: %d from NG: %s",
-            count,
-            climgr->group_name)));
+    ereport(DEBUG3, (errmsg("WLMmonitorMain: dywlm_client_verify_register_internal: "
+            "length of climgr->dynamic_info_hashtbl: %d from NG: %s", count, climgr->group_name)));
 
     if (count == 0) {
         return;
@@ -2720,13 +2728,16 @@ void dywlm_client_verify_register_internal(ClientDynamicManager* climgr, int num
 
     RELEASE_AUTO_LWLOCK();
 
+    uint32 num_backends = 0;
+    PgBackendStatusNode* node = gs_stat_read_current_status(&num_backends);
+
     for (i = 0; i < count; ++i) {
-        int j = 0;
-
+        uint32 j = 0;
+        PgBackendStatusNode* tmpNode = node;
         if (nodes[i].threadid > 0) {
-            for (j = 0; j < num_backends; ++j) {
-                PgBackendStatus* beentry = pgstat_fetch_stat_beentry(j + 1);
-
+            while (tmpNode != NULL) {
+                PgBackendStatus* beentry = tmpNode->data;
+                tmpNode = tmpNode->next;
                 /*
                  * If the backend thread is valid and the state
                  * is not idle or undefined, we treat it as a active thread.
@@ -2735,16 +2746,15 @@ void dywlm_client_verify_register_internal(ClientDynamicManager* climgr, int num
                     beentry->st_block_start_time == nodes[i].qid.stamp) {
                     break;
                 }
+
+                j++;
             }
         }
 
         if (nodes[i].threadid == 0 || j >= num_backends) {
             USE_AUTO_LWLOCK(WorkloadStatHashLock, LW_EXCLUSIVE);
-            ereport(DEBUG1,
-                (errmsg("VERIFY: remove job info from client record, qid:[%u, %lu, %ld]",
-                    nodes[i].qid.procId,
-                    nodes[i].qid.queryId,
-                    nodes[i].qid.stamp)));
+            ereport(DEBUG1, (errmsg("VERIFY: remove job info from client record, qid:[%u, %lu, %ld]",
+                                    nodes[i].qid.procId, nodes[i].qid.queryId, nodes[i].qid.stamp)));
             hash_search(climgr->dynamic_info_hashtbl, &nodes[i].qid, HASH_REMOVE, NULL);
         }
     }
@@ -2760,9 +2770,8 @@ void dywlm_client_verify_register_internal(ClientDynamicManager* climgr, int num
  */
 void dywlm_client_verify_register(void)
 {
-    int num_backends = pgstat_get_backend_entries();
 
-    dywlm_client_verify_register_internal(&g_instance.wlm_cxt->MyDefaultNodeGroup.climgr, num_backends);
+    dywlm_client_verify_register_internal(&g_instance.wlm_cxt->MyDefaultNodeGroup.climgr);
 
     USE_AUTO_LWLOCK(WorkloadNodeGroupLock, LW_SHARED);
 
@@ -2777,10 +2786,11 @@ void dywlm_client_verify_register(void)
             continue;
         }
 
-        dywlm_client_verify_register_internal(&hdata->climgr, num_backends);
+        dywlm_client_verify_register_internal(&hdata->climgr);
     }
 
     pgstat_reset_current_status();
+
 }
 
 /*

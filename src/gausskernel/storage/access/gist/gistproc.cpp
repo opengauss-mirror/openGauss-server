@@ -12,7 +12,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *	      src/gausskernel/storage/access/gist/gistproc.cpp
+ *	  src/gausskernel/storage/access/gist/gistproc.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -323,7 +323,6 @@ static inline void g_box_consider_split(ConsiderSplitContext *context, int dimNu
      * entries count.
      */
     ratio = ((float4)Min(leftCount, rightCount)) / ((float4)context->entriesCount);
-
     if (ratio > LIMIT_RATIO) {
         bool selectthis = false;
 
@@ -918,7 +917,6 @@ Datum gist_poly_compress(PG_FUNCTION_ARGS)
             ret = memcpy_s((void *)r, sizeof(BOX), (void *)&(in->boundbox), sizeof(BOX));
             securec_check(ret, "", "");
             gistentryinit(*retval, PointerGetDatum(r), entry->rel, entry->page, entry->offset, FALSE);
-
         } else {
             gistentryinit(*retval, (Datum)0, entry->rel, entry->page, entry->offset, FALSE);
         }
@@ -1186,7 +1184,6 @@ Datum gist_point_consistent(PG_FUNCTION_ARGS)
             result = DatumGetBool(DirectFunctionCall5(gist_poly_consistent, PointerGetDatum(entry),
                                                       PolygonPGetDatum(query), Int16GetDatum(RTOverlapStrategyNumber),
                                                       0, PointerGetDatum(recheck)));
-
             if (GIST_LEAF(entry) && result) {
                 /*
                  * We are on leaf page and quick check shows overlapping
@@ -1206,7 +1203,6 @@ Datum gist_point_consistent(PG_FUNCTION_ARGS)
             result = DatumGetBool(DirectFunctionCall5(gist_circle_consistent, PointerGetDatum(entry),
                                                       CirclePGetDatum(query), Int16GetDatum(RTOverlapStrategyNumber), 0,
                                                       PointerGetDatum(recheck)));
-
             if (GIST_LEAF(entry) && result) {
                 /*
                  * We are on leaf page and quick check shows overlapping

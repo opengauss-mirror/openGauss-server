@@ -1,0 +1,99 @@
+--
+-- partsupp
+--
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_partsupp_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+DROP FOREIGN TABLE if exists EXTPARTSUPP;
+NOTICE:  foreign table "extpartsupp" does not exist, skipping
+CREATE FOREIGN TABLE EXTPARTSUPP (
+  PS_PARTKEY    INTEGER NOT NULL, -- references P_PARTKEY
+  PS_SUPPKEY    INTEGER NOT NULL, -- references S_SUPPKEY
+  PS_AVAILQTY   INTEGER,
+  PS_SUPPLYCOST DECIMAL,
+  PS_COMMENT    VARCHAR(199)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_partsupp/partsupp',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+DROP TABLE if exists PARTSUPP;
+NOTICE:  table "partsupp" does not exist, skipping
+CREATE TABLE PARTSUPP (
+  PS_PARTKEY    INTEGER NOT NULL, -- references P_PARTKEY
+  PS_SUPPKEY    INTEGER NOT NULL, -- references S_SUPPKEY
+  PS_AVAILQTY   INTEGER,
+  PS_SUPPLYCOST DECIMAL,
+  PS_COMMENT    VARCHAR(199)
+);
+insert into PARTSUPP select * from EXTPARTSUPP;
+DROP FOREIGN TABLE if exists EXTPARTSUPP_WRITE;
+NOTICE:  foreign table "extpartsupp_write" does not exist, skipping
+CREATE FOREIGN TABLE EXTPARTSUPP_WRITE (
+  PS_PARTKEY    INTEGER NOT NULL, -- references P_PARTKEY
+  PS_SUPPKEY    INTEGER NOT NULL, -- references S_SUPPKEY
+  PS_AVAILQTY   INTEGER,
+  PS_SUPPLYCOST DECIMAL,
+  PS_COMMENT    VARCHAR(199)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_partsupp_out/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+)
+Write Only;
+insert into EXTPARTSUPP_WRITE select * from PARTSUPP;
+drop foreign table if exists EXTPARTSUPP_READ;
+NOTICE:  foreign table "extpartsupp_read" does not exist, skipping
+CREATE FOREIGN TABLE EXTPARTSUPP_READ
+(
+  PS_PARTKEY    INTEGER NOT NULL, -- references P_PARTKEY
+  PS_SUPPKEY    INTEGER NOT NULL, -- references S_SUPPKEY
+  PS_AVAILQTY   INTEGER,
+  PS_SUPPLYCOST DECIMAL,
+  PS_COMMENT    VARCHAR(199)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_partsupp_out/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+select count(*) from EXTPARTSUPP_READ;
+ count 
+-------
+ 80000
+(1 row)
+
+drop table if exists PARTSUPP_READ;
+NOTICE:  table "partsupp_read" does not exist, skipping
+CREATE TABLE PARTSUPP_READ
+(
+  PS_PARTKEY    INTEGER NOT NULL, -- references P_PARTKEY
+  PS_SUPPKEY    INTEGER NOT NULL, -- references S_SUPPKEY
+  PS_AVAILQTY   INTEGER,
+  PS_SUPPLYCOST DECIMAL,
+  PS_COMMENT    VARCHAR(199)
+);
+insert into PARTSUPP_READ select * from EXTPARTSUPP_READ;
+select count(*) from (select * from PARTSUPP minus all select * from PARTSUPP_READ);
+ count 
+-------
+     0
+(1 row)
+
+drop foreign table EXTPARTSUPP_READ;
+drop foreign table EXTPARTSUPP_WRITE;
+drop table PARTSUPP_READ;
+drop table PARTSUPP;
+drop foreign table EXTPARTSUPP;
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_partsupp_out/ address=@obshostname@ ak=@ak@ sk=@sk@

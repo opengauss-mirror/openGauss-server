@@ -224,7 +224,7 @@ inline void CheckContextParameter(const char* name, bool isTracked, MemoryContex
         AsanBlock block;
 
         if (t_thrd.utils_cxt.gs_mp_inited) {
-            block = (AsanBlock)(*func->malloc)(blkSize);
+            block = (AsanBlock)(*func->malloc)(blkSize, true);
         } else {
             gs_malloc(blkSize, block, AsanBlock);
         }
@@ -269,13 +269,12 @@ MemoryContext AsanMemoryAllocator::AllocSetContextCreate(MemoryContext parent, c
      * Don't limit the memory allocation for ErrorContext.
      * And skip memory tracking memory allocation.
      */
-    if (t_thrd.utils_cxt.gs_mp_inited && (0 != strcmp(name, "ErrorContext")) &&
-        (0 != strcmp(name, "MemoryTrackMemoryContext"))) {
+    if ((strcmp(name, "ErrorContext") != 0) && (strcmp(name, "MemoryTrackMemoryContext") != 0)) {
         value |= IS_PROTECT;
     }
 
     /* only track the unshared context after MemoryTrackMemoryContext is created */
-    if (func == &GenericFunctions && parent && t_thrd.mem_cxt.mem_track_mem_cxt &&
+    if (func == &GenericFunctions && parent && MEMORY_TRACKING_MODE && t_thrd.mem_cxt.mem_track_mem_cxt &&
         (t_thrd.utils_cxt.ExecutorMemoryTrack == NULL || ((AsanSet)parent)->track)) {
         isTracked = true;
         value |= IS_TRACKED;
@@ -379,7 +378,7 @@ void AsanMemoryAllocator::AllocSetReset(MemoryContext context)
                 MemoryTrackingFreeInfo(context, tempSize);
             }
             /* Normal case, release the block */
-            if (enableMemoryProtect) {
+            if (GS_MP_INITED) {
                 (*func->free)(block, tempSize);
             } else {
                 gs_free(block, tempSize);
@@ -422,6 +421,7 @@ void AsanMemoryAllocator::AllocSetDelete(MemoryContext context)
     MemoryContextLock(context);
 
     if (set->blocks == NULL) {
+        MemoryContextUnlock(context);
         return;
     }
 
@@ -446,7 +446,7 @@ void AsanMemoryAllocator::AllocSetDelete(MemoryContext context)
             MemoryTrackingFreeInfo(context, tempSize);
         }
 
-        if (enableMemoryProtect) {
+        if (GS_MP_INITED) {
             (*func->free)(block, tempSize);
         } else {
             gs_free(block, tempSize);
@@ -469,8 +469,8 @@ inline AsanBlock DoAllocMemoryInternal(MemoryContext context, Size size, const c
 
     AssertArg(AsanSetIsValid(set));
 
-    if (isProtect) {
-        block = (AsanBlock)(*func->malloc)(blkSize);
+    if (GS_MP_INITED) {
+        block = (AsanBlock)(*func->malloc)(blkSize, isProtect);
     } else {
         gs_malloc(blkSize, block, AsanBlock);
     }
@@ -631,7 +631,7 @@ void AsanMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
         MemoryTrackingFreeInfo(context, tempSize);
     }
 
-    if (enableMemoryProtect) {
+    if (GS_MP_INITED) {
         (*func->free)(block, tempSize);
     } else {
         gs_free(block, tempSize);
@@ -649,8 +649,8 @@ AsanBlock DoReallocMemoryInternal(MemoryContext context, AsanBlock oldBlock, Siz
     AsanBlock newBlock;
     Size newSize = ASAN_BLOCKRELSZ(size);
 
-    if (isProtect) {
-        newBlock = (AsanBlock)(*func->realloc)(oldBlock, oldSize, newSize);
+    if (GS_MP_INITED) {
+        newBlock = (AsanBlock)(*func->realloc)(oldBlock, oldSize, newSize, isProtect);
     } else {
         gs_realloc(oldBlock, oldSize, newBlock, newSize, AsanBlock);
     }

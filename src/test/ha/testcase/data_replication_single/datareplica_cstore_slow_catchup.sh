@@ -32,9 +32,9 @@ sleep 20
 if [ $(gsql -d $db -p $dn1_primary_port -c "show enable_mix_replication;" | grep "off" |wc -l) -eq 1 ]; then
 	stop_primary
 	#take the data replication slow.
-	gs_guc set -D $data_dir/datanode1 -c "walsender_max_send_size=1MB"
-	gs_guc set -D $data_dir/datanode1 -c "data_replicate_buffer_size=4MB"
-	gs_guc set -D $data_dir/datanode1_standby -c "data_replicate_buffer_size=4MB"
+	gs_guc set -Z datanode -D $data_dir/datanode1 -c "walsender_max_send_size=1MB"
+	gs_guc set -Z datanode -D $data_dir/datanode1 -c "data_replicate_buffer_size=4MB"
+	gs_guc set -Z datanode -D $data_dir/datanode1_standby -c "data_replicate_buffer_size=4MB"
 	start_primary
 fi
 
@@ -114,9 +114,9 @@ gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test4;"
 if [ $(gsql -d $db -p $dn1_primary_port -c "show enable_mix_replication;" | grep "off" |wc -l) -eq 1 ]; then
 	stop_primary
 	stop_standby
-	gs_guc set -D $data_dir/datanode1 -c "walsender_max_send_size=8MB"
-	gs_guc set -D $data_dir/datanode1 -c "data_replicate_buffer_size=16MB"
-	gs_guc set -D $data_dir/datanode1_standby -c "data_replicate_buffer_size=16MB"
+	gs_guc set -Z datanode -D $data_dir/datanode1 -c "walsender_max_send_size=8MB"
+	gs_guc set -Z datanode -D $data_dir/datanode1 -c "data_replicate_buffer_size=16MB"
+	gs_guc set -Z datanode -D $data_dir/datanode1_standby -c "data_replicate_buffer_size=16MB"
 	start_standby
 	start_primary
 fi

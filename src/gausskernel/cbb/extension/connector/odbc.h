@@ -160,6 +160,7 @@ private:
 
 /* Execute function */
 result execute(connection& conn, const string_type& query, long batch_operations = 1, long timeout = 0);
+
 } /* end of namespace myodbc */
 
 #endif /* ODBC_H */

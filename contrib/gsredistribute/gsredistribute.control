@@ -1,5 +1,5 @@
 # gsredistribute extension
-comment = 'connect to other PostgreSQL databases from within a database'
+comment = 'function for table redistribution'
 default_version = '1.0'
 module_pathname = '$libdir/gsredistribute'
 relocatable = true

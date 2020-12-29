@@ -160,6 +160,7 @@ vacuum analyze test_vacuum_lazy;
 delete from test_vacuum_lazy where b % 3 = 0 and d <> 999;
 vacuum test_vacuum_lazy;
 \parallel off
+
 set enable_bitmapscan=off;
 set enable_seqscan=off;
 explain (costs off) select * from test_vacuum_lazy where d = 999 order by 1;

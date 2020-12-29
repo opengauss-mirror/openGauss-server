@@ -1,0 +1,1759 @@
+create table heap_tbl_a(c1 int, c2 int, c3 int);
+create table heap_tbl_b(c1 int, c2 int, c3 int);
+create table heap_tbl_c(c1 int, c2 int, c3 int)
+partition by range (c2) (
+  partition p1 values less than(5), 
+  partition p2 values less than(10), 
+  partition p3 values less than(15), 
+  partition p8 values less than(maxvalue)
+);
+insert into heap_tbl_a select v%20,v,v from generate_series(1, 100) as v;
+insert into heap_tbl_b select * from heap_tbl_a;
+insert into heap_tbl_c select * from heap_tbl_a;
+analyze heap_tbl_a;
+analyze heap_tbl_b;
+analyze heap_tbl_c;
+update pg_class set reltuples = 1200000 
+where relname in ('heap_tbl_a', 'heap_tbl_b', 'heap_tbl_c');
+-- test nestloop seqscan
+set enable_indexscan=off;
+set enable_indexonlyscan=off;
+set enable_bitmapscan=off;
+set enable_material=off;
+set enable_seqscan=on;
+-- test nestloop
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+from heap_tbl_a, heap_tbl_b
+where heap_tbl_a.c2 = heap_tbl_b.c2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Nested Loop
+   Join Filter: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Seq Scan on heap_tbl_a
+   ->  Seq Scan on heap_tbl_b
+(4 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ nestloop(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2
+	from heap_tbl_a, heap_tbl_b
+	where heap_tbl_a.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2
+from heap_tbl_a, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Nested Loop
+   Join Filter: (heap_tbl_a.c2 = heap_tbl_c.c2)
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_c
+               Selected Partitions:  1..4
+   ->  Seq Scan on heap_tbl_a
+(7 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2
+	from heap_tbl_a, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+--------------------------------------
+-- test hashjoin
+explain (costs off)
+select /*+ hashjoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+from heap_tbl_a, heap_tbl_b
+where heap_tbl_a.c2 = heap_tbl_b.c2;
+                  QUERY PLAN                  
+----------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Seq Scan on heap_tbl_a
+   ->  Hash
+         ->  Seq Scan on heap_tbl_b
+(5 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ hashjoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+	from heap_tbl_a, heap_tbl_b
+	where heap_tbl_a.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on heap_tbl_c
+               Selected Partitions:  1..4
+   ->  Hash
+         ->  Seq Scan on heap_tbl_a
+(8 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+-- test mergejoin
+explain (costs off)
+select /*+ mergejoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+from heap_tbl_a, heap_tbl_b
+where heap_tbl_a.c2 = heap_tbl_b.c2;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Sort
+         Sort Key: heap_tbl_a.c2
+         ->  Seq Scan on heap_tbl_a
+   ->  Sort
+         Sort Key: heap_tbl_b.c2
+         ->  Seq Scan on heap_tbl_b
+(8 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ mergejoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+	from heap_tbl_a, heap_tbl_b
+	where heap_tbl_a.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2
+from heap_tbl_a, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_a.c2 = heap_tbl_c.c2)
+   ->  Sort
+         Sort Key: heap_tbl_a.c2
+         ->  Seq Scan on heap_tbl_a
+   ->  Sort
+         Sort Key: heap_tbl_c.c2
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_c
+                     Selected Partitions:  1..4
+(11 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2
+	from heap_tbl_a, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+set enable_material=on;
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+from heap_tbl_a, heap_tbl_b
+where heap_tbl_a.c2 = heap_tbl_b.c2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Nested Loop
+   Join Filter: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Seq Scan on heap_tbl_a
+   ->  Materialize
+         ->  Seq Scan on heap_tbl_b
+(5 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ nestloop(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+	from heap_tbl_a, heap_tbl_b
+	where heap_tbl_a.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Nested Loop
+   Join Filter: (heap_tbl_a.c2 = heap_tbl_c.c2)
+   ->  Seq Scan on heap_tbl_a
+   ->  Materialize
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_c
+                     Selected Partitions:  1..4
+(8 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2
+	from heap_tbl_a, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+-- test three table join
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Nested Loop
+         Join Filter: (heap_tbl_a.c2 = heap_tbl_c.c2)
+         ->  Seq Scan on heap_tbl_a
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_c
+                           Selected Partitions:  1..4
+   ->  Hash
+         ->  Seq Scan on heap_tbl_b
+(12 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_b, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_c.c2
+   ->  Hash Join
+         Hash Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+         ->  Nested Loop
+               Join Filter: (heap_tbl_a.c2 = heap_tbl_c.c2)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on heap_tbl_c
+                           Selected Partitions:  1..4
+               ->  Materialize
+                     ->  Seq Scan on heap_tbl_a
+                           Filter: (c1 = 1)
+         ->  Hash
+               ->  Seq Scan on heap_tbl_b
+(15 rows)
+
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+ ac1 | bc2 
+-----+-----
+   1 |   1
+   1 |  21
+   1 |  41
+   1 |  61
+   1 |  81
+(5 rows)
+
+explain (costs off)
+select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Hash Join
+         Hash Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on heap_tbl_c
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Seq Scan on heap_tbl_a
+   ->  Hash
+         ->  Seq Scan on heap_tbl_b
+(12 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_b, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_c.c2
+   ->  Hash Join
+         Hash Cond: (heap_tbl_b.c2 = heap_tbl_a.c2)
+         ->  Seq Scan on heap_tbl_b
+         ->  Hash
+               ->  Hash Join
+                     Hash Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on heap_tbl_c
+                                 Selected Partitions:  1..4
+                     ->  Hash
+                           ->  Seq Scan on heap_tbl_a
+                                 Filter: (c1 = 1)
+(15 rows)
+
+select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+ ac1 | bc2 
+-----+-----
+   1 |   1
+   1 |  21
+   1 |  41
+   1 |  61
+   1 |  81
+(5 rows)
+
+explain (costs off)
+select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Merge Join
+         Merge Cond: (heap_tbl_a.c2 = heap_tbl_c.c2)
+         ->  Sort
+               Sort Key: heap_tbl_a.c2
+               ->  Seq Scan on heap_tbl_a
+         ->  Materialize
+               ->  Sort
+                     Sort Key: heap_tbl_c.c2
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on heap_tbl_c
+                                 Selected Partitions:  1..4
+   ->  Hash
+         ->  Seq Scan on heap_tbl_b
+(16 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_b, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_c.c2
+   ->  Hash Join
+         Hash Cond: (heap_tbl_b.c2 = heap_tbl_a.c2)
+         ->  Seq Scan on heap_tbl_b
+         ->  Hash
+               ->  Merge Join
+                     Merge Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+                     ->  Sort
+                           Sort Key: heap_tbl_c.c2
+                           ->  Partition Iterator
+                                 Iterations: 4
+                                 ->  Partitioned Seq Scan on heap_tbl_c
+                                       Selected Partitions:  1..4
+                     ->  Sort
+                           Sort Key: heap_tbl_a.c2
+                           ->  Seq Scan on heap_tbl_a
+                                 Filter: (c1 = 1)
+(18 rows)
+
+select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+ ac1 | bc2 
+-----+-----
+   1 |   1
+   1 |  21
+   1 |  41
+   1 |  61
+   1 |  81
+(5 rows)
+
+---------------------------------------------------------------------------------
+-- index test 
+create index heap_tbl_b_index_0b on heap_tbl_b(c2);
+create index heap_tbl_c_index_0c on heap_tbl_c(c2) local;
+set enable_indexscan=on;
+set enable_indexonlyscan=off;
+set enable_bitmapscan=off;
+set enable_material=off;
+set enable_seqscan=off;
+-- test nestloop
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+from heap_tbl_a, heap_tbl_b
+where heap_tbl_a.c2 = heap_tbl_b.c2;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on heap_tbl_a
+   ->  Index Scan using heap_tbl_b_index_0b on heap_tbl_b
+         Index Cond: (c2 = heap_tbl_a.c2)
+(4 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ nestloop(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+	from heap_tbl_a, heap_tbl_b
+	where heap_tbl_a.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2
+from heap_tbl_a, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on heap_tbl_a
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using heap_tbl_c_index_0c on heap_tbl_c
+               Index Cond: (c2 = heap_tbl_a.c2)
+               Selected Partitions:  1..4
+(7 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2
+	from heap_tbl_a, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+set enable_indexscan=on;
+set enable_indexonlyscan=on;
+set enable_bitmapscan=off;
+set enable_material=off;
+set enable_seqscan=off;
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2
+from heap_tbl_a, heap_tbl_b
+where heap_tbl_a.c2 = heap_tbl_b.c2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on heap_tbl_a
+   ->  Index Only Scan using heap_tbl_b_index_0b on heap_tbl_b
+         Index Cond: (c2 = heap_tbl_a.c2)
+(4 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ nestloop(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2
+	from heap_tbl_a, heap_tbl_b
+	where heap_tbl_a.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ mergejoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2
+from heap_tbl_a, heap_tbl_b
+where heap_tbl_a.c2 = heap_tbl_b.c2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Sort
+         Sort Key: heap_tbl_a.c2
+         ->  Seq Scan on heap_tbl_a
+   ->  Index Only Scan using heap_tbl_b_index_0b on heap_tbl_b
+(6 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ mergejoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2
+	from heap_tbl_a, heap_tbl_b
+	where heap_tbl_a.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2
+from heap_tbl_a, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Only Scan using heap_tbl_c_index_0c on heap_tbl_c
+               Selected Partitions:  1..4
+   ->  Sort
+         Sort Key: heap_tbl_a.c2
+         ->  Seq Scan on heap_tbl_a
+(9 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ mergejoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2
+	from heap_tbl_a, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ hashjoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2
+from heap_tbl_a, heap_tbl_b
+where heap_tbl_a.c2 = heap_tbl_b.c2;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Seq Scan on heap_tbl_a
+   ->  Hash
+         ->  Index Only Scan using heap_tbl_b_index_0b on heap_tbl_b
+(5 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ hashjoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2
+	from heap_tbl_a, heap_tbl_b
+	where heap_tbl_a.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2
+from heap_tbl_a, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_a.c2 = heap_tbl_c.c2)
+   ->  Seq Scan on heap_tbl_a
+   ->  Hash
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using heap_tbl_c_index_0c on heap_tbl_c
+                     Selected Partitions:  1..4
+(8 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ hashjoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2
+	from heap_tbl_a, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+-- test three table join
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on heap_tbl_a
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using heap_tbl_c_index_0c on heap_tbl_c
+                     Index Cond: (c2 = heap_tbl_a.c2)
+                     Selected Partitions:  1..4
+   ->  Index Only Scan using heap_tbl_b_index_0b on heap_tbl_b
+         Index Cond: (c2 = heap_tbl_a.c2)
+(10 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_b, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Sort
+         Sort Key: heap_tbl_a.c2
+         ->  Nested Loop
+               ->  Seq Scan on heap_tbl_a
+                     Filter: (c1 = 1)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using heap_tbl_c_index_0c on heap_tbl_c
+                           Index Cond: (c2 = heap_tbl_a.c2)
+                           Selected Partitions:  1..4
+   ->  Index Only Scan using heap_tbl_b_index_0b on heap_tbl_b
+(13 rows)
+
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+ ac1 | bc2 
+-----+-----
+   1 |   1
+   1 |  21
+   1 |  41
+   1 |  61
+   1 |  81
+(5 rows)
+
+explain (costs off)
+select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Nested Loop
+   ->  Hash Join
+         Hash Cond: (heap_tbl_a.c2 = heap_tbl_c.c2)
+         ->  Seq Scan on heap_tbl_a
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using heap_tbl_c_index_0c on heap_tbl_c
+                           Selected Partitions:  1..4
+   ->  Index Only Scan using heap_tbl_b_index_0b on heap_tbl_b
+         Index Cond: (c2 = heap_tbl_a.c2)
+(11 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_b, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Sort
+         Sort Key: heap_tbl_a.c2
+         ->  Hash Join
+               Hash Cond: (heap_tbl_a.c2 = heap_tbl_c.c2)
+               ->  Seq Scan on heap_tbl_a
+                     Filter: (c1 = 1)
+               ->  Hash
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Index Only Scan using heap_tbl_c_index_0c on heap_tbl_c
+                                 Selected Partitions:  1..4
+   ->  Index Only Scan using heap_tbl_b_index_0b on heap_tbl_b
+(14 rows)
+
+select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+ ac1 | bc2 
+-----+-----
+   1 |   1
+   1 |  21
+   1 |  41
+   1 |  61
+   1 |  81
+(5 rows)
+
+explain (costs off)
+select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Merge Join
+         Merge Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using heap_tbl_c_index_0c on heap_tbl_c
+                     Selected Partitions:  1..4
+         ->  Sort
+               Sort Key: heap_tbl_a.c2
+               ->  Seq Scan on heap_tbl_a
+   ->  Index Only Scan using heap_tbl_b_index_0b on heap_tbl_b
+(12 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_b, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Merge Join
+         Merge Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using heap_tbl_c_index_0c on heap_tbl_c
+                     Selected Partitions:  1..4
+         ->  Sort
+               Sort Key: heap_tbl_a.c2
+               ->  Seq Scan on heap_tbl_a
+                     Filter: (c1 = 1)
+   ->  Index Only Scan using heap_tbl_b_index_0b on heap_tbl_b
+(13 rows)
+
+select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+ ac1 | bc2 
+-----+-----
+   1 |   1
+   1 |  21
+   1 |  41
+   1 |  61
+   1 |  81
+(5 rows)
+
+set enable_indexscan=off;
+set enable_indexonlyscan=off;
+set enable_bitmapscan=on;
+set enable_material=off;
+set enable_seqscan=off;
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+from heap_tbl_a, heap_tbl_b
+where heap_tbl_a.c2 = heap_tbl_b.c2;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on heap_tbl_a
+   ->  Bitmap Heap Scan on heap_tbl_b
+         Recheck Cond: (c2 = heap_tbl_a.c2)
+         ->  Bitmap Index Scan on heap_tbl_b_index_0b
+               Index Cond: (c2 = heap_tbl_a.c2)
+(6 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ nestloop(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+	from heap_tbl_a, heap_tbl_b
+	where heap_tbl_a.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on heap_tbl_a
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Bitmap Heap Scan on heap_tbl_c
+               Recheck Cond: (c2 = heap_tbl_a.c2)
+               Selected Partitions:  1..4
+               ->  Partitioned Bitmap Index Scan on heap_tbl_c_index_0c
+                     Index Cond: (c2 = heap_tbl_a.c2)
+                     Selected Partitions:  1..4
+(10 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ mergejoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+from heap_tbl_a, heap_tbl_b
+where heap_tbl_a.c2 = heap_tbl_b.c2;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Sort
+         Sort Key: heap_tbl_a.c2
+         ->  Seq Scan on heap_tbl_a
+   ->  Index Scan using heap_tbl_b_index_0b on heap_tbl_b
+(6 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ mergejoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+	from heap_tbl_a, heap_tbl_b
+	where heap_tbl_a.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Merge Join
+   Merge Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using heap_tbl_c_index_0c on heap_tbl_c
+               Selected Partitions:  1..4
+   ->  Sort
+         Sort Key: heap_tbl_a.c2
+         ->  Seq Scan on heap_tbl_a
+(9 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ hashjoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+from heap_tbl_a, heap_tbl_b
+where heap_tbl_a.c2 = heap_tbl_b.c2;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Seq Scan on heap_tbl_a
+   ->  Hash
+         ->  Index Scan using heap_tbl_b_index_0b on heap_tbl_b
+(5 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ hashjoin(heap_tbl_a heap_tbl_b) */ heap_tbl_a.c1 ac1, heap_tbl_b.c2 bc2 
+	from heap_tbl_a, heap_tbl_b
+	where heap_tbl_a.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using heap_tbl_c_index_0c on heap_tbl_c
+               Selected Partitions:  1..4
+   ->  Hash
+         ->  Seq Scan on heap_tbl_a
+(8 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+-- test three table join
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on heap_tbl_a
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on heap_tbl_c
+                     Recheck Cond: (c2 = heap_tbl_a.c2)
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on heap_tbl_c_index_0c
+                           Index Cond: (c2 = heap_tbl_a.c2)
+                           Selected Partitions:  1..4
+   ->  Bitmap Heap Scan on heap_tbl_b
+         Recheck Cond: (c2 = heap_tbl_a.c2)
+         ->  Bitmap Index Scan on heap_tbl_b_index_0b
+               Index Cond: (c2 = heap_tbl_a.c2)
+(15 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_b, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_c.c2
+   ->  Nested Loop
+         ->  Nested Loop
+               ->  Seq Scan on heap_tbl_a
+                     Filter: (c1 = 1)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on heap_tbl_c
+                           Recheck Cond: (c2 = heap_tbl_a.c2)
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on heap_tbl_c_index_0c
+                                 Index Cond: (c2 = heap_tbl_a.c2)
+                                 Selected Partitions:  1..4
+         ->  Bitmap Heap Scan on heap_tbl_b
+               Recheck Cond: (c2 = heap_tbl_a.c2)
+               ->  Bitmap Index Scan on heap_tbl_b_index_0b
+                     Index Cond: (c2 = heap_tbl_a.c2)
+(18 rows)
+
+select /*+ nestloop(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+ ac1 | bc2 
+-----+-----
+   1 |   1
+   1 |  21
+   1 |  41
+   1 |  61
+   1 |  81
+(5 rows)
+
+explain (costs off)
+select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Nested Loop
+   ->  Hash Join
+         Hash Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using heap_tbl_c_index_0c on heap_tbl_c
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Seq Scan on heap_tbl_a
+   ->  Bitmap Heap Scan on heap_tbl_b
+         Recheck Cond: (c2 = heap_tbl_a.c2)
+         ->  Bitmap Index Scan on heap_tbl_b_index_0b
+               Index Cond: (c2 = heap_tbl_a.c2)
+(13 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_b, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: heap_tbl_c.c2
+   ->  Nested Loop
+         Join Filter: (heap_tbl_a.c2 = heap_tbl_b.c2)
+         ->  Hash Join
+               Hash Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using heap_tbl_c_index_0c on heap_tbl_c
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Seq Scan on heap_tbl_a
+                           Filter: (c1 = 1)
+         ->  Bitmap Heap Scan on heap_tbl_b
+               Recheck Cond: (c2 = heap_tbl_c.c2)
+               ->  Bitmap Index Scan on heap_tbl_b_index_0b
+                     Index Cond: (c2 = heap_tbl_c.c2)
+(17 rows)
+
+select /*+ hashjoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+ ac1 | bc2 
+-----+-----
+   1 |   1
+   1 |  21
+   1 |  41
+   1 |  61
+   1 |  81
+(5 rows)
+
+explain (costs off)
+select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Nested Loop
+   ->  Merge Join
+         Merge Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using heap_tbl_c_index_0c on heap_tbl_c
+                     Selected Partitions:  1..4
+         ->  Sort
+               Sort Key: heap_tbl_a.c2
+               ->  Seq Scan on heap_tbl_a
+   ->  Bitmap Heap Scan on heap_tbl_b
+         Recheck Cond: (c2 = heap_tbl_a.c2)
+         ->  Bitmap Index Scan on heap_tbl_b_index_0b
+               Index Cond: (c2 = heap_tbl_a.c2)
+(14 rows)
+
+select ac1, sum(bc2) from (
+	select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+	from heap_tbl_a, heap_tbl_b, heap_tbl_c
+	where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2
+) group by 1 order by 1;
+ ac1 | sum 
+-----+-----
+   0 | 300
+   1 | 205
+   2 | 210
+   3 | 215
+   4 | 220
+   5 | 225
+   6 | 230
+   7 | 235
+   8 | 240
+   9 | 245
+  10 | 250
+  11 | 255
+  12 | 260
+  13 | 265
+  14 | 270
+  15 | 275
+  16 | 280
+  17 | 285
+  18 | 290
+  19 | 295
+(20 rows)
+
+explain (costs off)
+select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Nested Loop
+   Join Filter: (heap_tbl_a.c2 = heap_tbl_b.c2)
+   ->  Merge Join
+         Merge Cond: (heap_tbl_c.c2 = heap_tbl_a.c2)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using heap_tbl_c_index_0c on heap_tbl_c
+                     Selected Partitions:  1..4
+         ->  Sort
+               Sort Key: heap_tbl_a.c2
+               ->  Seq Scan on heap_tbl_a
+                     Filter: (c1 = 1)
+   ->  Bitmap Heap Scan on heap_tbl_b
+         Recheck Cond: (c2 = heap_tbl_c.c2)
+         ->  Bitmap Index Scan on heap_tbl_b_index_0b
+               Index Cond: (c2 = heap_tbl_c.c2)
+(16 rows)
+
+select /*+ mergejoin(heap_tbl_a heap_tbl_c) */ heap_tbl_a.c1 ac1, heap_tbl_c.c2 bc2 
+from heap_tbl_a, heap_tbl_b, heap_tbl_c
+where heap_tbl_a.c2 = heap_tbl_c.c2 and heap_tbl_c.c2 = heap_tbl_b.c2 and heap_tbl_a.c1 = 1
+order by 1, 2;
+ ac1 | bc2 
+-----+-----
+   1 |   1
+   1 |  21
+   1 |  41
+   1 |  61
+   1 |  81
+(5 rows)
+
+drop table heap_tbl_a;
+drop table heap_tbl_b;
+drop table heap_tbl_c;

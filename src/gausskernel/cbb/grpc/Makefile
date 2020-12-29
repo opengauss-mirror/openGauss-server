@@ -36,9 +36,7 @@ OBJS= remote_read.pb.o remote_read.grpc.pb.o rpc_server.o rpc_client.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
 
-#ifneq ($(with_3rd), NONE)
 #remote_read.pb.cc:remote_read.proto
 #	protoc --cpp_out=. $<
 #remote_read.grpc.pb.cc:remote_read.proto
 #	protoc --grpc_out=. --plugin=protoc-gen-grpc=`which grpc_cpp_plugin` $<
-#endif

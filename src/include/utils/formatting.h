@@ -7,7 +7,7 @@
  *	 Portions Copyright (c) 1999-2012, PostgreSQL Global Development Group
  *
  *	 The PostgreSQL routines for a DateTime/int/float/numeric formatting,
- *	 inspire with A TO_CHAR() / TO_DATE() / TO_NUMBER() routines.
+ *	 inspire with A db TO_CHAR() / TO_DATE() / TO_NUMBER() routines.
  *
  *	 Karel Zak
  *
@@ -83,6 +83,7 @@ typedef struct NUMCacheEntry {
 
 extern char* str_tolower(const char* buff, size_t nbytes, Oid collid);
 extern char* str_toupper(const char* buff, size_t nbytes, Oid collid);
+extern char* str_toupper_for_raw(const char* buff, size_t nbytes, Oid collid);
 extern char* str_initcap(const char* buff, size_t nbytes, Oid collid);
 
 extern char* asc_tolower(const char* buff, size_t nbytes);

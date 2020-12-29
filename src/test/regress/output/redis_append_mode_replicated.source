@@ -1,5 +1,5 @@
 --prepare
-create table t1 (c1 int, c2 int)  ;
+create table t1 (c1 int, c2 int) distribute by replication;
 create table source_table(c1 int, c2 int);
 insert into source_table values(generate_series(1,100),10);
 CREATE OR REPLACE FUNCTION pg_get_redis_rel_start_ctid(text,name) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute.so', 'pg_get_redis_rel_start_ctid' LANGUAGE C STABLE not fenced;
@@ -16,7 +16,7 @@ create unlogged table data_redis.pg_delete_delta_12345
 	block_number bigint,
 	block_offset int
 )
- ;
+distribute by replication;
 --ut1 UT2 TEST empty table
 ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);   
 select count(*) from ctid_view;
@@ -123,7 +123,7 @@ select count(*) from ctid_view;
  truncate data_redis.pg_delete_delta_12345;
  truncate t1;
  ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
- COPY t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ft1.data';
+ COPY t1 FROM '@abs_srcdir@/data/ft1.data';
  ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
  select min(c1),max(c1),count(*) from ctid_view;
  min | max | count 

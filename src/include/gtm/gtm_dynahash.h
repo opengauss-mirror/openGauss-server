@@ -21,10 +21,10 @@
 #define NUM_FREELISTS 32
 
 /* A hash bucket is a linked list of HASHELEMENTs */
-typedef HASHELEMENT *HASHBUCKET;
+typedef HASHELEMENT* HASHBUCKET;
 
 /* A hash segment is an array of bucket headers */
-typedef HASHBUCKET *HASHSEGMENT;
+typedef HASHBUCKET* HASHSEGMENT;
 
 /*
  * Using array of FreeListData instead of separate arrays of mutexes, nentries
@@ -34,7 +34,7 @@ typedef HASHBUCKET *HASHSEGMENT;
 typedef struct {
     slock_t mutex;         /* spinlock */
     long nentries;         /* number of entries */
-    HASHELEMENT *freeList; /* list of free elements */
+    HASHELEMENT* freeList; /* list of free elements */
 } FreeListData;
 
 /*
@@ -85,7 +85,7 @@ struct HASHHDR {
 #endif
 };
 
-/* the offset of the last padding if exists */
+/* the offset of the last padding if exists*/
 #define HTAB_PAD_OFFSET 104
 
 /*
@@ -93,15 +93,15 @@ struct HASHHDR {
  * has its own copy (OK since no fields change at runtime)
  */
 struct HTAB {
-    HASHHDR *hctl;           /* => shared control information */
-    HASHSEGMENT *dir;        /* directory of segment starts */
+    HASHHDR* hctl;           /* => shared control information */
+    HASHSEGMENT* dir;        /* directory of segment starts */
     HashValueFunc hash;      /* hash function */
     HashCompareFunc match;   /* key comparison function */
     HashCopyFunc keycopy;    /* key copying function */
     HashAllocFunc alloc;     /* memory allocator */
     HashDeallocFunc dealloc; /* memory deallocator */
     MemoryContext hcxt;      /* memory context if default allocator used */
-    char *tabname;           /* table name (for error messages) */
+    char* tabname;           /* table name (for error messages) */
     bool isshared;           /* true if table is in shared memory */
     bool isfixed;            /* if true, don't enlarge */
 

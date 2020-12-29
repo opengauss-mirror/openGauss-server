@@ -23,7 +23,9 @@
 #include "catalog/namespace.h"
 #include "commands/trigger.h"
 #include "executor/spi.h"
-#include "tcop/autonomous.h"
+#ifndef ENABLE_MULTIPLE_NODES
+#include "tcop/autonomoustransaction.h"
+#endif
 
 /**********************************************************************
  * Definitions
@@ -84,7 +86,7 @@ enum {
     PLPGSQL_TTYPE_SCALAR, /* scalar types and domains */
     PLPGSQL_TTYPE_ROW,    /* composite types */
     PLPGSQL_TTYPE_REC,    /* RECORD pseudotype */
-    PLPGSQL_TTYPE_RECORD, /* RECORD pseudotype complitable a */
+    PLPGSQL_TTYPE_RECORD, /* RECORD pseudotype complitable A db */
     PLPGSQL_TTYPE_PSEUDO  /* other pseudotypes */
 };
 
@@ -117,9 +119,9 @@ enum PLpgSQL_stmt_types {
     PLPGSQL_STMT_FETCH,
     PLPGSQL_STMT_CLOSE,
     PLPGSQL_STMT_PERFORM,
-    PLPGSQL_STMT_NULL,
     PLPGSQL_STMT_COMMIT,
-    PLPGSQL_STMT_ROLLBACK
+    PLPGSQL_STMT_ROLLBACK,
+    PLPGSQL_STMT_NULL
 };
 
 /* ----------
@@ -216,6 +218,9 @@ typedef struct PLpgSQL_expr { /* SQL Query to plan and execute	*/
     bool expr_simple_in_use;      /* true if eval tree is active */
     LocalTransactionId expr_simple_lxid;
     bool isouttype;               /* the parameter will output */
+    bool is_funccall;
+    uint32 idx;
+    bool is_cachedplan_shared;
 } PLpgSQL_expr;
 
 typedef struct { /* Postgres data type */
@@ -383,7 +388,9 @@ typedef struct PLpgSQL_stmt_block { /* Block of statements			*/
     int cmd_type;
     int lineno;
     char* label;
+#ifndef ENABLE_MULTIPLE_NODES	
     bool autonomous;
+#endif	
     List* body; /* List of statements */
     int n_initvars;
     int* initvarnos;
@@ -406,19 +413,18 @@ typedef struct { /* PERFORM statement		*/
 /*
  * COMMIT statement
  */
-typedef struct PLpgSQL_stmt_commit {
+typedef struct {
     int cmd_type;
-	int lineno;
+    int lineno;
 } PLpgSQL_stmt_commit;
 
 /*
  * ROLLBACK statement
  */
-typedef struct PLpgSQL_stmt_rollback {
+typedef struct {
     int cmd_type;
-	int lineno;
+    int lineno;
 } PLpgSQL_stmt_rollback;
-
 
 typedef struct { /* Get Diagnostics item		*/
     int kind;    /* id for diagnostic value desired */
@@ -641,7 +647,7 @@ typedef struct { /* Generic SQL statement to execute */
     bool strict;      /* INTO STRICT flag */
     PLpgSQL_rec* rec; /* INTO target, if record */
     PLpgSQL_row* row; /* INTO target, if row */
-    // a db function invoke feature
+    // A db function invoke feature
     int placeholders;
     bool multi_func;
 } PLpgSQL_stmt_execsql;
@@ -777,7 +783,9 @@ typedef struct PLpgSQL_execstate { /* Runtime execution data	*/
     MemoryContext tuple_store_cxt;
     ResourceOwner tuple_store_owner;
     ReturnSetInfo* rsi;
+#ifndef ENABLE_MULTIPLE_NODES
     AutonomousSession *autonomous_session;
+#endif	
     int found_varno;
 
     /*
@@ -890,6 +898,13 @@ typedef struct {
  * Functions in pl_comp.c
  * ----------
  */
+
+typedef struct plpgsql_hashent {
+    PLpgSQL_func_hashkey key;
+    PLpgSQL_function* function;
+    DListCell* cell; /* Dlist cell for delete function compile results. */
+} plpgsql_HashEnt;
+
 extern PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool forValidator);
 extern PLpgSQL_function* plpgsql_compile_nohashkey(FunctionCallInfo fcinfo);
 extern PLpgSQL_function* plpgsql_compile_inline(char* proc_source);
@@ -914,6 +929,9 @@ extern int plpgsql_add_initdatums(int** varnos);
 extern void plpgsql_HashTableInit(void);
 extern PLpgSQL_row* build_row_from_rec_type(const char* rowname, int lineno, PLpgSQL_rec_type* type);
 extern bool plpgsql_check_colocate(Query* query, RangeTblEntry* rte, void* plpgsql_func);
+extern void plpgsql_HashTableDeleteAll();
+extern void plpgsql_HashTableDeleteFunc(Oid func_oid);
+extern void plpgsql_HashTableDelete(PLpgSQL_function* func);
 
 /* ----------
  * Functions in pl_handler.c
@@ -932,6 +950,7 @@ extern "C" {
 Datum regexp_substr(PG_FUNCTION_ARGS);
 Datum intervaltonum(PG_FUNCTION_ARGS);
 Datum rawtohex(PG_FUNCTION_ARGS);
+Datum report_application_error(PG_FUNCTION_ARGS);
 }
 
 extern THR_LOCAL PLpgSQL_execstate* plpgsql_estate;
@@ -947,6 +966,17 @@ extern void plpgsql_subxact_cb(SubXactEvent event, SubTransactionId mySubid, Sub
 extern Oid exec_get_datum_type(PLpgSQL_execstate* estate, PLpgSQL_datum* datum);
 extern void exec_get_datum_type_info(PLpgSQL_execstate* estate, PLpgSQL_datum* datum, Oid* typid, int32* typmod,
     Oid* collation, PLpgSQL_function* func = NULL);
+extern void exec_assign_value(PLpgSQL_execstate *estate,
+				  PLpgSQL_datum *target,
+				  Datum value, Oid valtype, bool *isNull);
+extern void exec_eval_datum(PLpgSQL_execstate *estate,
+				PLpgSQL_datum *datum,
+				Oid *typeId,
+				int32 *typetypmod,
+				Datum *value,
+				bool *isnull,
+				bool isretry);
+extern void exec_eval_cleanup(PLpgSQL_execstate *estate);
 extern void free_expr(PLpgSQL_expr* expr);
 
 /* ----------

@@ -12,10 +12,10 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- *
+ * 
  * vecmodifytable.h
- *
- *
+ * 
+ * 
  * IDENTIFICATION
  *        src/include/vecexecutor/vecmodifytable.h
  *
@@ -38,17 +38,17 @@ extern void ExecReScanVecModifyTable(VecModifyTableState* node);
 
 template <class T>
 extern VectorBatch* ExecVecUpdate(
-    VecModifyTableState* state, T* update_op, VectorBatch* batch, EState* estate, bool can_set_tag, int options);
+    VecModifyTableState* state, T* update_op, VectorBatch* batch, EState* estate, bool canSetTag, int options);
 
 template <class T>
-extern VectorBatch* ExecVecInsert(VecModifyTableState* state, T* insert_op, VectorBatch* batch, VectorBatch* plan_batch,
-    EState* estate, bool can_set_tag, int options);
+extern VectorBatch* ExecVecInsert(VecModifyTableState* state, T* insert_op, VectorBatch* batch, VectorBatch* planBatch,
+    EState* estate, bool canSetTag, int options);
 
 extern bool checkInsertScanPartitionSame(VecModifyTableState* mtstate);
 
 struct InsertArg;
-extern void* CreateOperatorObject(CmdType operation, bool is_partitioned, Relation result_rel_desc,
-    ResultRelInfo* result_rel_info, EState* estate, TupleDesc sort_tup_desc, InsertArg* args, Relation* data_dest_rel,
+extern void* CreateOperatorObject(CmdType operation, bool isPartitioned, Relation resultRelationDesc,
+    ResultRelInfo* resultRelInfo, EState* estate, TupleDesc sortTupDesc, InsertArg* args, Relation* dataDestRel,
     VecModifyTableState* node);
 
 #endif /* VECMODIFYTABLE_H */

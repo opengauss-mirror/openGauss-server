@@ -1,0 +1,293 @@
+set current_schema='shipping_schema';
+---create function shippable---
+CREATE FUNCTION shipping_func_time_01() RETURNS timestamptz
+    AS 'select clock_timestamp();'
+    LANGUAGE SQL
+    stable shippable
+    RETURNS NULL ON NULL INPUT;
+---create function not shippable---
+CREATE FUNCTION shipping_func_time_02() RETURNS timestamptz
+    AS 'select clock_timestamp();'
+    LANGUAGE SQL
+    stable not shippable
+    RETURNS NULL ON NULL INPUT;
+---create function defalut shippable---
+CREATE FUNCTION shipping_func_time_03() RETURNS timestamptz
+    AS 'select clock_timestamp();'
+    LANGUAGE SQL
+    volatile 
+    RETURNS NULL ON NULL INPUT;
+---create function defalut shippable---
+CREATE FUNCTION shipping_func_time_04() RETURNS timestamptz
+    AS 'select clock_timestamp();'
+    LANGUAGE SQL
+    immutable 
+    RETURNS NULL ON NULL INPUT;
+---confirm results1---
+select proname,proshippable from pg_proc where  proname='shipping_func_time_02' or proname='shipping_func_time_01' or proname='shipping_func_time_03' order by 1;
+        proname        | proshippable 
+-----------------------+--------------
+ shipping_func_time_01 | t
+ shipping_func_time_02 | f
+ shipping_func_time_03 | f
+(3 rows)
+
+/* shipping */
+explain (costs off)  select shipping_func_time_01(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Limit
+   ->  Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Limit
+               ->  Nested Loop
+                     Join Filter: (t4.b = t5.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Seq Scan on t4
+                     ->  Materialize
+                           ->  Seq Scan on t5
+(11 rows)
+
+/* not shipping */
+explain (costs off)  select shipping_func_time_02(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Limit
+   ->  Hash Join
+         Hash Cond: (t4.b = t5.a)
+         ->  Data Node Scan on t4 "_REMOTE_TABLE_QUERY_"
+               Node/s: All datanodes
+         ->  Hash
+               ->  Data Node Scan on t5 "_REMOTE_TABLE_QUERY_"
+                     Node/s: All datanodes
+(8 rows)
+
+/* not shipping */
+explain (costs off)  select shipping_func_time_03(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (clock_timestamp())
+         ->  Hash Join
+               Hash Cond: (t4.b = t5.a)
+               ->  Data Node Scan on t4 "_REMOTE_TABLE_QUERY_"
+                     Node/s: All datanodes
+               ->  Hash
+                     ->  Data Node Scan on t5 "_REMOTE_TABLE_QUERY_"
+                           Node/s: All datanodes
+(10 rows)
+
+---confirm results2---
+alter function shipping_func_time_01() shippable;
+select proname,proshippable from pg_proc where proname='shipping_func_time_02' or proname='shipping_func_time_01' or proname='shipping_func_time_03' order by 1;
+        proname        | proshippable 
+-----------------------+--------------
+ shipping_func_time_01 | t
+ shipping_func_time_02 | f
+ shipping_func_time_03 | f
+(3 rows)
+
+/* shipping */
+explain (costs off)  select shipping_func_time_01(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Limit
+   ->  Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Limit
+               ->  Nested Loop
+                     Join Filter: (t4.b = t5.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Seq Scan on t4
+                     ->  Materialize
+                           ->  Seq Scan on t5
+(11 rows)
+
+---confirm results3---
+alter function shipping_func_time_01() not shippable;
+select proname,proshippable from pg_proc where proname='shipping_func_time_02' or proname='shipping_func_time_01' or proname='shipping_func_time_03' order by 1;
+        proname        | proshippable 
+-----------------------+--------------
+ shipping_func_time_01 | f
+ shipping_func_time_02 | f
+ shipping_func_time_03 | f
+(3 rows)
+
+/* not shipping */
+explain (costs off)  select shipping_func_time_01(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Limit
+   ->  Hash Join
+         Hash Cond: (t4.b = t5.a)
+         ->  Data Node Scan on t4 "_REMOTE_TABLE_QUERY_"
+               Node/s: All datanodes
+         ->  Hash
+               ->  Data Node Scan on t5 "_REMOTE_TABLE_QUERY_"
+                     Node/s: All datanodes
+(8 rows)
+
+---confirm results4---
+alter function shipping_func_time_02() shippable;
+select proname,proshippable from pg_proc where proname='shipping_func_time_02' or proname='shipping_func_time_01' or proname='shipping_func_time_03' order by 1;
+        proname        | proshippable 
+-----------------------+--------------
+ shipping_func_time_01 | f
+ shipping_func_time_02 | t
+ shipping_func_time_03 | f
+(3 rows)
+
+/* shipping */
+explain (costs off)  select shipping_func_time_02(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Limit
+   ->  Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Limit
+               ->  Nested Loop
+                     Join Filter: (t4.b = t5.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Seq Scan on t4
+                     ->  Materialize
+                           ->  Seq Scan on t5
+(11 rows)
+
+---confirm results5---
+alter function shipping_func_time_03() shippable;
+select proname,proshippable from pg_proc where proname='shipping_func_time_02' or proname='shipping_func_time_01' or proname='shipping_func_time_03' order by 1;
+        proname        | proshippable 
+-----------------------+--------------
+ shipping_func_time_01 | f
+ shipping_func_time_02 | t
+ shipping_func_time_03 | t
+(3 rows)
+
+/* shipping */
+explain (costs off)  select shipping_func_time_03(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Limit
+   ->  Streaming (type: GATHER)
+         Merge Sort Key: (clock_timestamp())
+         Node/s: All datanodes
+         ->  Limit
+               ->  Sort
+                     Sort Key: (clock_timestamp())
+                     ->  Hash Join
+                           Hash Cond: (t4.b = t5.a)
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Spawn on: All datanodes
+                                 ->  Seq Scan on t4
+                           ->  Hash
+                                 ->  Seq Scan on t5
+(14 rows)
+
+----confirm results6----
+/*immutable function shipping always */
+select proname,proshippable from pg_proc where proname='shipping_func_time_04';
+        proname        | proshippable 
+-----------------------+--------------
+ shipping_func_time_04 | f
+(1 row)
+
+explain (costs off)  select shipping_func_time_04(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Limit
+   ->  Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Limit
+               ->  Nested Loop
+                     Join Filter: (t4.b = t5.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Seq Scan on t4
+                     ->  Materialize
+                           ->  Seq Scan on t5
+(11 rows)
+
+alter function shipping_func_time_04() not shippable;
+NOTICE:  Immutable function will be shippable anyway.
+explain (costs off)  select shipping_func_time_04(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Limit
+   ->  Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Limit
+               ->  Nested Loop
+                     Join Filter: (t4.b = t5.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Seq Scan on t4
+                     ->  Materialize
+                           ->  Seq Scan on t5
+(11 rows)
+
+------------------------C function-------------------
+CREATE FUNCTION shipping_c_func_time_05()
+   RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C IMMUTABLE not fenced;
+explain (costs off)  select shipping_c_func_time_05(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Limit
+   ->  Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Limit
+               ->  Nested Loop
+                     Join Filter: (t4.b = t5.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Seq Scan on t4
+                     ->  Materialize
+                           ->  Seq Scan on t5
+(11 rows)
+
+CREATE FUNCTION shipping_c_func_time_06()
+   RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C STABLE shippable not fenced;
+explain (costs off)  select shipping_c_func_time_06(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Limit
+   ->  Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Limit
+               ->  Nested Loop
+                     Join Filter: (t4.b = t5.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Seq Scan on t4
+                     ->  Materialize
+                           ->  Seq Scan on t5
+(11 rows)
+
+alter function shipping_c_func_time_06() not shippable;
+explain (costs off)  select shipping_c_func_time_06(),t5.c from t4, t5 where t4.b=t5.a order by 1 limit 3;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Limit
+   ->  Hash Join
+         Hash Cond: (t4.b = t5.a)
+         ->  Data Node Scan on t4 "_REMOTE_TABLE_QUERY_"
+               Node/s: All datanodes
+         ->  Hash
+               ->  Data Node Scan on t5 "_REMOTE_TABLE_QUERY_"
+                     Node/s: All datanodes
+(8 rows)
+
+--------------------clean --------------------------------------
+drop function shipping_func_time_01();
+drop function shipping_func_time_02();
+drop function shipping_func_time_03();
+drop function shipping_func_time_04();
+drop function shipping_c_func_time_05();
+drop function shipping_c_func_time_06();

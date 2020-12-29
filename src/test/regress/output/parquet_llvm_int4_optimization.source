@@ -1,0 +1,423 @@
+--Test LLVM optimization operator about int4 data type
+DROP FOREIGN TABLE IF EXISTS orders;
+NOTICE:  foreign table "orders" does not exist, skipping
+create foreign table orders (
+ O_ORDERKEY       INT,
+ O_CUSTKEY        INT,
+ O_ORDERSTATUS    CHAR(1),
+ O_TOTALPRICE     DECIMAL(15,2),
+ O_ORDERDATE      DATE,
+ O_ORDERPRIORITY  CHAR(15),  
+ O_CLERK          CHAR(15), 
+ O_SHIPPRIORITY   INT,
+ O_COMMENT        VARCHAR(79)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb_small.db/tpch_orders_small_parquet_compressed/')
+distribute by roundrobin;
+--test "=" operator
+set enable_codegen = off;
+select * from orders where  272067654 = O_ORDERKEY;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |         o_comment          
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+(1 row)
+
+set enable_codegen = on;
+select * from orders where  272067654 = O_ORDERKEY;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |         o_comment          
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+(1 row)
+
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY = 272067654;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |         o_comment          
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+(1 row)
+
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY = 272067654 ;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |         o_comment          
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+(1 row)
+
+--add llt
+select * from orders where  O_ORDERKEY = 2::int2 ;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice | o_orderdate | o_orderpriority | o_clerk | o_shippriority | o_comment 
+------------+-----------+---------------+--------------+-------------+-----------------+---------+----------------+-----------
+(0 rows)
+
+select * from orders where  O_ORDERKEY = 2::int8 ;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice | o_orderdate | o_orderpriority | o_clerk | o_shippriority | o_comment 
+------------+-----------+---------------+--------------+-------------+-----------------+---------+----------------+-----------
+(0 rows)
+
+--test ">" operator
+set enable_codegen = off;
+select * from orders where  272067654 > O_ORDERKEY order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+(6 rows)
+
+set enable_codegen = on;
+select * from orders where  272067654 > O_ORDERKEY order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+(6 rows)
+
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY > 272067654 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                    o_comment                    
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+-------------------------------------------------
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(3 rows)
+
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY > 272067654 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                    o_comment                    
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+-------------------------------------------------
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(3 rows)
+
+select * from orders where  O_ORDERKEY > 272067654::int2 order by 1 limit 10;
+ERROR:  smallint out of range
+select * from orders where  O_ORDERKEY > 272067654::int8 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                    o_comment                    
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+-------------------------------------------------
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(3 rows)
+
+--test ">=" operator
+set enable_codegen = off;
+select * from orders where  272067654 >= O_ORDERKEY order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+(7 rows)
+
+set enable_codegen = on;
+select * from orders where  272067654 >= O_ORDERKEY order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+(7 rows)
+
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY >= 272067654 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                    o_comment                    
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+-------------------------------------------------
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(4 rows)
+
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY >= 272067654 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                    o_comment                    
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+-------------------------------------------------
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(4 rows)
+
+select * from orders where  O_ORDERKEY >= 272067654::int2 order by 1 limit 10;
+ERROR:  smallint out of range
+select * from orders where  O_ORDERKEY >= 272067654::int8 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                    o_comment                    
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+-------------------------------------------------
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(4 rows)
+
+--test "<" operator
+set enable_codegen = off;
+select * from orders where  272067654 < O_ORDERKEY order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                    o_comment                    
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+-------------------------------------------------
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(3 rows)
+
+set enable_codegen = on;
+select * from orders where  272067654 < O_ORDERKEY order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                    o_comment                    
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+-------------------------------------------------
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(3 rows)
+
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY < 272067654 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+(6 rows)
+
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY < 272067654 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+(6 rows)
+
+select * from orders where  O_ORDERKEY < 272067654::int2 order by 1 limit 10;
+ERROR:  smallint out of range
+select * from orders where  O_ORDERKEY < 272067654::int8 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+(6 rows)
+
+--test "<=" operator
+set enable_codegen = off;
+select * from orders where  272067654 <= O_ORDERKEY order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                    o_comment                    
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+-------------------------------------------------
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(4 rows)
+
+set enable_codegen = on;
+select * from orders where  272067654 <= O_ORDERKEY order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                    o_comment                    
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+-------------------------------------------------
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(4 rows)
+
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY <= 272067654 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+(7 rows)
+
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY <= 272067654 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+(7 rows)
+
+select * from orders where  O_ORDERKEY <= 272067654::int2 order by 1 limit 10;
+ERROR:  smallint out of range
+select * from orders where  O_ORDERKEY <= 272067654::int8 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067654 |  10988500 | O             |    270172.99 | Fri Jan 12 00:00:00 1996 | 1-URGENT        | Clerk#000003411 |              0 | tructions along the furiou
+(7 rows)
+
+--test "<>" operator
+set enable_codegen = off;
+select * from orders where  272067654 <> O_ORDERKEY order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(9 rows)
+
+set enable_codegen = on;
+select * from orders where  272067654 <> O_ORDERKEY order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(9 rows)
+
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY <> 272067654 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(9 rows)
+
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY <> 272067654 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(9 rows)
+
+select * from orders where  O_ORDERKEY <> 272067654::int2 order by 1 limit 10;
+ERROR:  smallint out of range
+select * from orders where  O_ORDERKEY <> 272067654::int8 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(9 rows)
+
+--test "!=" operator
+set enable_codegen = off;
+select * from orders where  272067654 != O_ORDERKEY order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(9 rows)
+
+set enable_codegen = on;
+select * from orders where  272067654 != O_ORDERKEY order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(9 rows)
+
+set enable_codegen = off;
+select * from orders where  O_ORDERKEY != 272067654 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(9 rows)
+
+set enable_codegen = on;
+select * from orders where  O_ORDERKEY != 272067654 order by 1 limit 10;
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                              o_comment                               
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------------------
+  272067648 |  10221352 | O             |    116406.17 | Fri Nov 24 00:00:00 1995 | 3-MEDIUM        | Clerk#000038679 |              0 | requests: regular dep
+  272067649 |  10243066 | F             |    199999.10 | Sat Jan 22 00:00:00 1994 | 4-NOT SPECIFIED | Clerk#000063006 |              0 | y unusual accounts. sile
+  272067650 |    207248 | O             |    312848.80 | Sat Jun 29 00:00:00 1996 | 5-LOW           | Clerk#000034376 |              0 | accounts believe carefull
+  272067651 |   3212747 | O             |     36557.63 | Sat Apr 05 00:00:00 1997 | 4-NOT SPECIFIED | Clerk#000056327 |              0 | ven requests. silently regular excuses lose furiously above the sly 
+  272067652 |  11628700 | O             |     55875.38 | Sun Aug 11 00:00:00 1996 | 3-MEDIUM        | Clerk#000080008 |              0 | y carefully quick theodolites. 
+  272067653 |   8530136 | O             |    267510.52 | Sat Oct 19 00:00:00 1996 | 5-LOW           | Clerk#000080747 |              0 | eodolites. slyly bold asymp
+  272067655 |   3709639 | F             |    343614.42 | Thu Aug 06 00:00:00 1992 | 1-URGENT        | Clerk#000024696 |              0 | cross the packages are blithely acr
+  272067680 |   7891061 | O             |    214606.37 | Fri Nov 15 00:00:00 1996 | 3-MEDIUM        | Clerk#000058447 |              0 | y ironic depths maintain slyly against the furi
+  272067681 |  10052836 | O             |    197397.17 | Fri May 08 00:00:00 1998 | 3-MEDIUM        | Clerk#000007527 |              0 |  final, ironic escapa
+(9 rows)
+

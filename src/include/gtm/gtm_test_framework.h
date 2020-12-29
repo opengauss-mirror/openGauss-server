@@ -27,7 +27,7 @@
 
 #include "gtm/gtm_c.h"
 #include "gtm/gtm_opt.h"
-#include "gtm/elog.h"
+#include "gtm/utils/elog.h"
 
 #ifdef USE_ASSERT_CHECKING
 #ifdef ENABLE_MULTIPLE_NODES
@@ -88,17 +88,18 @@ typedef struct GtmWhiteBoxInjectStruct {
     GTM_TransactionHandle handle;
 } GtmWhiteBoxInjectStruct;
 
-typedef void (*on_whitebox_callback)(GtmWhiteBoxInjectStruct *wbinfo);
+typedef void (*on_whitebox_callback)(GtmWhiteBoxInjectStruct* wbinfo);
 
-extern GtmDistributeTestParam *gtmDistributeTestParam;
+extern GtmDistributeTestParam* gtmDistributeTestParam;
 
-extern void gtm_default_whitebox_emit(GtmWhiteBoxInjectStruct *wbinfo);
-extern bool gtm_check_distribute_test_param(char **newval, void **extra, GtmOptSource source);
-extern void gtm_assign_distribute_test_param(const char *newval, void *extra);
-extern bool gtm_execute_whitebox(const char *filename, int lineno, const char *funcname, GlobalTransactionId xid,
-                                 GTM_TransactionHandle handle, int failureType, double probability);
+extern void gtm_default_whitebox_emit(GtmWhiteBoxInjectStruct* wbinfo);
+extern bool gtm_check_distribute_test_param(char** newval, void** extra, GtmOptSource source);
+extern void gtm_assign_distribute_test_param(const char* newval, void* extra);
+extern bool gtm_execute_whitebox(const char* filename, int lineno, const char* funcname, GlobalTransactionId xid,
+    GTM_TransactionHandle handle, int failureType, double probability);
 
-/* GTM exception scenes */
+/*GTM exception scenes*/
+
 #endif
 
 #endif /* DISTRIBUTE_TEST_H */

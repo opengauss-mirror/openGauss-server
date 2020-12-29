@@ -1,0 +1,53 @@
+/*
+ *  UT12:  1)redis_proc get the access share lock of the partition
+ *         2)IUD came
+ *         3)AT truncate partition DOES NOT wait and cancels redis_proc directly but acquires lock until IUD finishes
+ *           - cancel happens at pg_sleep time
+ *           - IUD continues
+ *           - truncate partition finishes after IUD finishes
+ */
+START TRANSACTION;
+	select pg_enable_redis_proc_cancelable();
+ pg_enable_redis_proc_cancelable 
+---------------------------------
+ t
+(1 row)
+
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	LOCK TABLE ptx IN ACCESS SHARE MODE;
+	insert into data_redis.data_redis_tmp_12345 select * from ptx partition (p0);insert into data_redis.data_redis_tmp_12345 select * from ptx partition (p1); insert into data_redis.data_redis_tmp_12345 select * from ptx partition (p2);
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	select pg_sleep(10);
+ERROR:  canceling data redistribution task
+CONTEXT:  referenced column: pg_sleep
+	select current_timestamp;
+--?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
+COMMIT;
+select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select count(*) from data_redis.data_redis_tmp_12345;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from ptx partition (p0);
+ count 
+-------
+     0
+(1 row)
+

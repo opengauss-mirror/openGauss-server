@@ -390,24 +390,39 @@ void PersistHoldablePortal(Portal portal)
          */
         MemoryContextSwitchTo(portal->holdContext);
 
-        if (portal->atEnd) {
-            /* we can handle this case even if posOverflow */
-            while (tuplestore_advance(portal->holdStore, true))
-                /* continue */;
-        } else {
-            long store_pos;
+        /*
+         * This code, previously used only in cursor hold mode, is reused when we add commit/rollback features;
+         * distributed or single nodes will call tuplestore_rescan to rewind the active read pointer to start, 
+         * but singlenode needs to call tuplestore_advance separately to mark the data that has been read before the deletion
+         */
 
-            if (portal->posOverflow) /* oops, cannot trust portalPos */
-                ereport(ERROR,
-                    (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("could not reposition held cursor")));
+#ifdef ENABLE_MULTIPLE_NODES
+        if (portal->cursorOptions & CURSOR_OPT_HOLD) {
+#endif
+            if (portal->atEnd) {
+                /* we can handle this case even if posOverflow */
+                while (tuplestore_advance(portal->holdStore, true))
+                    /* continue */;
+            } else {
+                long store_pos;
 
-            tuplestore_rescan(portal->holdStore);
+                if (portal->posOverflow) /* oops, cannot trust portalPos */
+                    ereport(ERROR,
+                        (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("could not reposition held cursor")));
 
-            for (store_pos = 0; store_pos < portal->portalPos; store_pos++) {
-                if (!tuplestore_advance(portal->holdStore, true))
-                    ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_CHUNK_VALUE), errmsg("unexpected end of tuple stream")));
+                tuplestore_rescan(portal->holdStore);
+
+                for (store_pos = 0; store_pos < portal->portalPos; store_pos++) {
+                    if (!tuplestore_advance(portal->holdStore, true))
+                        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_CHUNK_VALUE), errmsg("unexpected end of tuple stream")));
+                }
             }
+#ifdef ENABLE_MULTIPLE_NODES
         }
+        else {
+            tuplestore_rescan(portal->holdStore);
+        }
+#endif
     }
     PG_CATCH();
     {

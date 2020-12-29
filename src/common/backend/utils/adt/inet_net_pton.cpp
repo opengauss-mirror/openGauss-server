@@ -97,8 +97,9 @@ static int inet_cidr_pton_ipv4(const char* src, u_char* dst, size_t size)
     ch = *src++;
     if (ch == '0' && (src[0] == 'x' || src[0] == 'X') && isxdigit((unsigned char)src[1])) {
         /* Hexadecimal: Eat nybble string. */
-        if (size <= 0U)
+        if (size <= 0U) {
             goto emsgsize;
+        }
         dirty = 0;
         src++; /* skip x or X. */
         while ((ch = *src++) != '\0' && isxdigit((unsigned char)ch)) {
@@ -111,7 +112,8 @@ static int inet_cidr_pton_ipv4(const char* src, u_char* dst, size_t size)
                 tmp = n;
             } else {
                 tmp = (tmp << 4) | (unsigned int)n;
-            } if (++dirty == 2) {
+            }
+            if (++dirty == 2) {
                 if (size-- <= 0U) {
                     goto emsgsize;
                 }
@@ -134,8 +136,9 @@ static int inet_cidr_pton_ipv4(const char* src, u_char* dst, size_t size)
                 Assert(n >= 0 && n <= 9);
                 tmp *= 10;
                 tmp += n;
-                if (tmp > 255)
+                if (tmp > 255) {
                     goto enoent;
+                }
             } while ((ch = *src++) != '\0' && isdigit((unsigned char)ch));
             if (size-- <= 0U) {
                 goto emsgsize;
@@ -181,17 +184,22 @@ static int inet_cidr_pton_ipv4(const char* src, u_char* dst, size_t size)
     }
 
     /* If nothing was written to the destination, we found no address. */
-    if (dst == odst)
+    if (dst == odst) {
         goto enoent;
+    }
     /* If no CIDR spec was given, infer width from net class. */
     if (bits == -1) {
-        if (*odst >= 240) { /* Class E */
+        if (*odst >= 240) {
+            /* Class E */
             bits = 32;
-        } else if (*odst >= 224) { /* Class D */
+        } else if (*odst >= 224) {
+            /* Class D */
             bits = 8;
-        } else if (*odst >= 192) { /* Class C */
+        } else if (*odst >= 192) {
+            /* Class C */
             bits = 24;
-        } else if (*odst >= 128) { /* Class B */
+        } else if (*odst >= 128) {
+            /* Class B */
             bits = 16;
         } else {
             /* Class A */
@@ -310,8 +318,7 @@ static int inet_net_pton_ipv4(const char* src, u_char* dst)
     if (bits == -1) {
         if (dst - odst == 4) {
             bits = 32;
-        }
-        else {
+        } else {
             goto enoent;
         }
     }
@@ -325,6 +332,7 @@ static int inet_net_pton_ipv4(const char* src, u_char* dst)
     if ((bits / 8) > (dst - odst)) {
         goto enoent;
     }
+
     /* Extend address to four octets. */
     while (size-- > 0) {
         *dst++ = 0;
@@ -355,12 +363,14 @@ static int getbits(const char* src, int* bitsp)
 
         pch = strchr(digits, ch);
         if (pch != NULL) {
-            if (n++ != 0 && val == 0) { /* no leading zeros */
+            if (n++ != 0 && val == 0) {
+                /* no leading zeros */
                 return (0);
             }
             val *= 10;
             val += (pch - digits);
-            if (val > 128) { /* range */
+            if (val > 128) {
+                /* range */
                 return (0);
             }
             continue;
@@ -389,18 +399,21 @@ static int getv4(const char* src, u_char* dst, int* bitsp)
 
         pch = strchr(digits, ch);
         if (pch != NULL) {
-            if (n++ != 0 && val == 0) { /* no leading zeros */
+            if (n++ != 0 && val == 0) {
+                /* no leading zeros */
                 return (0);
             }
             val *= 10;
             val += (pch - digits);
-            if (val > 255) { /* range */
+            if (val > 255) {
+                /* range */
                 return (0);
             }
             continue;
         }
         if (ch == '.' || ch == '/') {
-            if (dst - odst > 3) { /* too many octets? */
+            if (dst - odst > 3) {
+                /* too many octets? */
                 return (0);
             }
             *dst++ = val;
@@ -416,7 +429,8 @@ static int getv4(const char* src, u_char* dst, int* bitsp)
     if (n == 0) {
         return (0);
     }
-    if (dst - odst > 3) { /* too many octets? */
+    if (dst - odst > 3) {
+        /* too many octets? */
         return (0);
     }
     *dst++ = val;
@@ -434,14 +448,9 @@ static int inet_net_pton_ipv6(const char* src, u_char* dst)
 
 static int inet_cidr_pton_ipv6(const char* src, u_char* dst, size_t size)
 {
-    static const char xdigits_l[] = "0123456789abcdef";
-	static const char xdigits_u[] = "0123456789ABCDEF";
-    u_char tmp[NS_IN6ADDRSZ];
-	u_char *tp = NULL;
-	u_char *endp = NULL;
-	u_char *colonp = NULL;
-    const char *xdigits = NULL;
-	const char *curtok = NULL;
+    static const char xdigits_l[] = "0123456789abcdef", xdigits_u[] = "0123456789ABCDEF";
+    u_char tmp[NS_IN6ADDRSZ], *tp = NULL, *endp = NULL, *colonp = NULL;
+    const char *xdigits = NULL, *curtok = NULL;
     int ch, saw_xdigit;
     u_int val;
     int digits;

@@ -27,7 +27,7 @@ set enable_nestloop=off;
 --1. Limit within top query;
 --2. Locator type is hash;
 
-explain (verbose, costs off, nodes off) select c1, c2, c3 from limit_table_01 limit 2 offset 1;
+explain (verbose, costs off) select c1, c2, c3 from limit_table_01 limit 2 offset 1;
 
 select c1, c2, c3 from limit_table_01 order by c1 limit 2 offset 1;
 select c1, c2, c3 from limit_table_01 order by c1 limit 2;
@@ -54,14 +54,14 @@ insert into limit_table_03 values (16, 26, 36);
 --1. Limit within top query;
 --2. Locator type is replication;
 
-explain (verbose, costs off, nodes off) select c1, c2, c3 from limit_table_03 limit 2 offset 1;
+explain (verbose, costs off) select c1, c2, c3 from limit_table_03 limit 2 offset 1;
 select c1, c2, c3 from limit_table_03 order by c1 limit 2 offset 1;
 
 --Test settings:
 --1. Limit within sub query;
 --2. Locator type is replication;
 
-explain (verbose, costs off, nodes off) select a.c1, b.c2, b.c3 from (select c1 from limit_table_02 limit 2 offset 1) a , limit_table_01 b where a.c1=b.c2;
+explain (verbose, costs off) select a.c1, b.c2, b.c3 from (select c1 from limit_table_02 limit 2 offset 1) a , limit_table_01 b where a.c1=b.c2;
 select a.c1, b.c2, b.c3 from (select c1 from limit_table_03 order by c1 limit 2 offset 1) a , limit_table_02 b where a.c1=b.c2 order by a.c1;
 select a.c1, b.c2, b.c3 from (select c1 from limit_table_03 order by c1 limit 2) a , limit_table_02 b where a.c1=b.c2 order by a.c1;
 select a.c1, b.c2, b.c3 from (select c1 from limit_table_03 order by c1 offset 1) a , limit_table_02 b where a.c1=b.c2 order by a.c1;

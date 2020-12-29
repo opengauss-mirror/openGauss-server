@@ -201,6 +201,7 @@ void sepgsql_relation_post_create(Oid relOid)
             tclass = SEPG_CLASS_DB_SEQUENCE;
             tclass_text = "sequence";
             break;
+        case RELKIND_CONTQUERY:
         case RELKIND_VIEW:
             tclass = SEPG_CLASS_DB_VIEW;
             tclass_text = "view";
@@ -307,7 +308,7 @@ void sepgsql_relation_drop(Oid relOid)
         tclass = SEPG_CLASS_DB_TABLE;
     else if (relkind == RELKIND_SEQUENCE)
         tclass = SEPG_CLASS_DB_SEQUENCE;
-    else if (relkind == RELKIND_VIEW)
+    else if (relkind == RELKIND_VIEW || relkind == RELKIND_CONTQUERY)
         tclass = SEPG_CLASS_DB_VIEW;
     else
         return;
@@ -380,7 +381,7 @@ void sepgsql_relation_relabel(Oid relOid, const char* seclabel)
         tclass = SEPG_CLASS_DB_TABLE;
     else if (relkind == RELKIND_SEQUENCE)
         tclass = SEPG_CLASS_DB_SEQUENCE;
-    else if (relkind == RELKIND_VIEW)
+    else if (relkind == RELKIND_VIEW || relkind == RELKIND_CONTQUERY)
         tclass = SEPG_CLASS_DB_VIEW;
     else
         ereport(ERROR,

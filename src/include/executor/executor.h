@@ -67,7 +67,7 @@
 #define EXEC_FLAG_SKIP_TRIGGERS 0x0010 /* skip AfterTrigger calls */
 #define EXEC_FLAG_WITH_OIDS 0x0020     /* force OIDs in returned tuples */
 #define EXEC_FLAG_WITHOUT_OIDS 0x0040  /* force no OIDs in returned tuples */
-#define EXEC_FLAG_WITH_NO_DATA 0x0080  /* rel scannability doesn't matter */
+#define EXEC_FLAG_WITH_NO_DATA	0x0080	/* rel scannability doesn't matter */
 
 extern inline bool is_errmodule_enable(int elevel, ModuleId mod_id);
 
@@ -189,7 +189,7 @@ extern TupleHashEntry FindTupleHashEntry(
 /*
  * prototypes from functions in execJunk.c
  */
-extern JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* slot);
+extern JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* slot, TableAmType tam = TAM_HEAP);
 extern JunkFilter* ExecInitJunkFilterConversion(List* targetList, TupleDesc cleanTupType, TupleTableSlot* slot);
 extern AttrNumber ExecFindJunkAttribute(JunkFilter* junkfilter, const char* attrName);
 extern AttrNumber ExecFindJunkAttributeInTlist(List* targetlist, const char* attrName);
@@ -227,8 +227,8 @@ extern ExecRowMark* ExecFindRowMark(EState* estate, Index rti);
 extern ExecAuxRowMark* ExecBuildAuxRowMark(ExecRowMark* erm, List* targetlist);
 extern TupleTableSlot* EvalPlanQual(
     EState* estate, EPQState* epqstate, Relation relation, Index rti, ItemPointer tid, TransactionId priorXmax);
-extern HeapTuple EvalPlanQualFetch(
-    EState* estate, Relation relation, int lockmode, ItemPointer tid, TransactionId priorXmax);
+extern HeapTuple heap_lock_updated(
+    CommandId cid, Relation relation, int lockmode, ItemPointer tid, TransactionId priorXmax);
 extern void EvalPlanQualInit(EPQState* epqstate, EState* estate, Plan* subplan, List* auxrowmarks, int epqParam);
 extern void EvalPlanQualSetPlan(EPQState* epqstate, Plan* subplan, List* auxrowmarks);
 extern void EvalPlanQualSetTuple(EPQState* epqstate, Index rti, HeapTuple tuple);
@@ -247,8 +247,7 @@ extern PlanState* ExecInitNode(Plan* node, EState* estate, int eflags);
 extern TupleTableSlot* ExecProcNode(PlanState* node);
 extern Node* MultiExecProcNode(PlanState* node);
 extern void ExecEndNode(PlanState* node);
-extern bool ExecShutdownNode(PlanState *node);
-extern void ExecSetTupleBound(int64 tuples_needed, PlanState *child_node);
+extern bool NeedStubExecution(Plan* plan);
 
 extern long ExecGetPlanMemCost(Plan* node);
 
@@ -275,13 +274,13 @@ extern void ExecScanReScan(ScanState* node);
 /*
  * prototypes from functions in execTuples.c
  */
-extern void ExecInitResultTupleSlot(EState* estate, PlanState* planstate);
-extern void ExecInitScanTupleSlot(EState* estate, ScanState* scanstate);
-extern TupleTableSlot* ExecInitExtraTupleSlot(EState* estate);
+extern void ExecInitResultTupleSlot(EState* estate, PlanState* planstate, TableAmType tam = TAM_HEAP);
+extern void ExecInitScanTupleSlot(EState* estate, ScanState* scanstate, TableAmType tam = TAM_HEAP);
+extern TupleTableSlot* ExecInitExtraTupleSlot(EState* estate, TableAmType tam = TAM_HEAP);
 extern TupleTableSlot* ExecInitNullTupleSlot(EState* estate, TupleDesc tupType);
-extern TupleDesc ExecTypeFromTL(List* targetList, bool hasoid, bool markdropped = false);
-extern TupleDesc ExecCleanTypeFromTL(List* targetList, bool hasoid);
-extern TupleDesc ExecTypeFromExprList(List* exprList, List* namesList);
+extern TupleDesc ExecTypeFromTL(List* targetList, bool hasoid, bool markdropped = false, TableAmType tam = TAM_HEAP);
+extern TupleDesc ExecCleanTypeFromTL(List* targetList, bool hasoid, TableAmType tam = TAM_HEAP);
+extern TupleDesc ExecTypeFromExprList(List* exprList, List* namesList, TableAmType tam = TAM_HEAP);
 extern void UpdateChangedParamSet(PlanState* node, Bitmapset* newchg);
 
 typedef struct TupOutputState {
@@ -349,7 +348,7 @@ extern ExprContext* MakePerTupleExprContext(EState* estate);
 
 extern void ExecAssignExprContext(EState* estate, PlanState* planstate);
 extern void ExecAssignResultType(PlanState* planstate, TupleDesc tupDesc);
-extern void ExecAssignResultTypeFromTL(PlanState* planstate);
+extern void ExecAssignResultTypeFromTL(PlanState* planstate, TableAmType tam = TAM_HEAP);
 extern TupleDesc ExecGetResultType(PlanState* planstate);
 extern void ExecAssignVectorForExprEval(ExprContext* econtext);
 extern ProjectionInfo* ExecBuildProjectionInfo(
@@ -372,8 +371,7 @@ extern Partition ExecOpenScanParitition(
 extern void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative);
 extern void ExecCloseIndices(ResultRelInfo* resultRelInfo);
 extern List* ExecInsertIndexTuples(
-    TupleTableSlot* slot, ItemPointer tupleid, EState* estate, Relation targetPartRel,
-    Partition p, int2 bucketId, bool* conflict);
+    TupleTableSlot* slot, ItemPointer tupleid, EState* estate, Relation targetPartRel, Partition p, int2 bucketId, bool* conflict);
 extern bool ExecCheckIndexConstraints(TupleTableSlot* slot, EState* estate,
     Relation targetRel, Partition p, int2 bucketId, ItemPointer conflictTid);
 extern bool check_exclusion_constraint(Relation heap, Relation index, IndexInfo* indexInfo, ItemPointer tupleid,
@@ -391,6 +389,7 @@ extern int PthreadMutexUnlock(ResourceOwner owner, pthread_mutex_t* mutex, bool 
 
 extern bool executorEarlyStop();
 extern void ExecEarlyFree(PlanState* node);
+extern void ExecEarlyFreeBody(PlanState* node);
 extern void ExecReSetRecursivePlanTree(PlanState* node);
 
 extern void ExplainNodePending(PlanState* result_plan);

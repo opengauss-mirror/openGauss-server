@@ -96,8 +96,8 @@ Create table hw_global_index_t1
 	C2 int
 );
 Create unique index t1_unique_index_1 on hw_global_index_t1 (c1) global;
-ERROR:  non-partitioned table does not support local partitioned indexes 
---fail non-partitioned table does not support global global index
+ERROR:  non-partitioned table does not support global partitioned indexes 
+--fail non-partitioned table does not support global partitioned indexes
 drop table hw_global_index_t1;
 create table hw_global_index_rp
 (
@@ -116,9 +116,9 @@ Create index rp_global_index on hw_global_index_rp (c1) global;
 COMMENT ON INDEX rp_global_index IS 'global index comment';
 \di+ rp_global_index;
 --?.*
---? Schema |      Name       | Type  |    .*    |       Table        |    Size    | Storage |     Description      
+--? Schema |      Name       |          Type          | .*  |       Table        |    Size    | Storage |     Description      
 --?.*
---? public | rp_global_index | index | .* | hw_global_index_rp | 8192 bytes |         | global index comment
+--? public | rp_global_index | global partition index | .* | hw_global_index_rp | 8192 bytes |         | global index comment
 (1 row)
 
 \d rp_global_index;
@@ -148,9 +148,9 @@ select pg_get_indexdef('rp_global_index'::regclass);
 COMMENT ON INDEX rp_global_index IS NULL;
 \di+ rp_global_index;
 --?.*
---? Schema |      Name       | Type  |    .*    |       Table        |    Size    | Storage | Description 
+--? Schema |      Name       |          Type          | .*  |       Table        |    Size    | Storage | Description 
 --?.*
---? public | rp_global_index | index | .* | hw_global_index_rp | 8192 bytes |         | 
+--? public | rp_global_index | global partition index | .* | hw_global_index_rp | 8192 bytes |         | 
 (1 row)
 
 drop table hw_global_index_rp;
@@ -227,11 +227,11 @@ Number of partition: 5 (View pg_partition to check each partition range.)
 
 insert into test_gpi_create_like values(generate_series(0,9999), 1);
 explain (costs off) select * from test_gpi_create_like where c1 = 0;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                             
+--------------------------------------------------------------------
  Bitmap Heap Scan on test_gpi_create_like
    Recheck Cond: (c1 = 0)
-   ->  Bitmap Index Scan on test_gpi_create_like_c1_tableoid_idx
+   ->  Bitmap Index Scan on test_gpi_create_like_c1_c2_tableoid_idx
          Index Cond: (c1 = 0)
 (4 rows)
 

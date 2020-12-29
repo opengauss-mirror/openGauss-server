@@ -29,8 +29,16 @@
 #include "utils/memutils.h"
 #include "optimizer/pruning.h"
 #include "access/tableam.h"
+#include "nodes/makefuncs.h"
 
 static void ExecInitNextPartitionForBitmapIndexScan(BitmapIndexScanState* node);
+/* If bitmapscan uses global partition index, set tbm to global */
+static inline void GpiUpdateTbmType(BitmapIndexScanState* node, TIDBitmap* tbm)
+{
+    if (RelationIsGlobalIndex(node->biss_RelationDesc)) {
+        tbm_set_global(tbm, true);
+    }
+}
 
 /* ----------------------------------------------------------------
  *		MultiExecBitmapIndexScan(node)
@@ -39,7 +47,7 @@ static void ExecInitNextPartitionForBitmapIndexScan(BitmapIndexScanState* node);
 Node* MultiExecBitmapIndexScan(BitmapIndexScanState* node)
 {
     TIDBitmap* tbm = NULL;
-    AbsIdxScanDesc scandesc;
+    IndexScanDesc scandesc;
     double nTuples = 0;
     bool doscan = false;
 
@@ -91,13 +99,10 @@ Node* MultiExecBitmapIndexScan(BitmapIndexScanState* node)
         node->biss_result = NULL; /* reset for next time */
     } else {
         /* XXX should we use less than u_sess->attr.attr_memory.work_mem for this? */
-        tbm = tbm_create(u_sess->attr.attr_memory.work_mem * 1024L,
-            ((BitmapIndexScan *) node->ss.ps.plan)->isshared ? t_thrd.bgworker_cxt.memCxt : NULL);
+        tbm = tbm_create(u_sess->attr.attr_memory.work_mem * 1024L);
 
         /* If bitmapscan uses global partition index, set tbm to global */
-        if (RelationIsGlobalIndex(node->biss_RelationDesc)) {
-            tbm_set_global(tbm, true);
-        }
+        GpiUpdateTbmType(node, tbm);
     }
 
     if (hbkt_idx_need_switch_bkt(scandesc, node->ss.ps.hbktScanSlot.currSlot)) {
@@ -107,13 +112,13 @@ Node* MultiExecBitmapIndexScan(BitmapIndexScanState* node)
      * Get TIDs from index and insert into bitmap
      */
     while (doscan) {
-        nTuples += (double)abs_idx_getbitmap(scandesc, tbm);
+        nTuples += (double)(scan_handler_idx_getbitmap(scandesc, tbm));
 
         CHECK_FOR_INTERRUPTS();
 
         doscan = ExecIndexAdvanceArrayKeys(node->biss_ArrayKeys, node->biss_NumArrayKeys);
         if (doscan) /* reset index scan */
-            abs_idx_rescan_local(node->biss_ScanDesc, node->biss_ScanKeys, node->biss_NumScanKeys, NULL, 0);
+            scan_handler_idx_rescan_local(node->biss_ScanDesc, node->biss_ScanKeys, node->biss_NumScanKeys, NULL, 0);
     }
 
     /* must provide our own instrumentation support */
@@ -185,7 +190,7 @@ void ExecReScanBitmapIndexScan(BitmapIndexScanState* node)
              */
 			 Assert(node->biss_ScanDesc);
 
-			 abs_idx_endscan(node->biss_ScanDesc);
+			 scan_handler_idx_endscan(node->biss_ScanDesc);
 
              /*  initialize Scan for the next partition */
              ExecInitNextPartitionForBitmapIndexScan(node);
@@ -197,7 +202,7 @@ void ExecReScanBitmapIndexScan(BitmapIndexScanState* node)
 
     /* reset index scan */
     if (node->biss_RuntimeKeysReady)
-        abs_idx_rescan_local(node->biss_ScanDesc, node->biss_ScanKeys, node->biss_NumScanKeys, NULL, 0);
+        scan_handler_idx_rescan_local(node->biss_ScanDesc, node->biss_ScanKeys, node->biss_NumScanKeys, NULL, 0);
 }
 
 /* ----------------------------------------------------------------
@@ -207,7 +212,7 @@ void ExecReScanBitmapIndexScan(BitmapIndexScanState* node)
 void ExecEndBitmapIndexScan(BitmapIndexScanState* node)
 {
     Relation indexRelationDesc;
-    AbsIdxScanDesc indexScanDesc;
+    IndexScanDesc indexScanDesc;
 
     /*
      * extract information from the node
@@ -227,7 +232,7 @@ void ExecEndBitmapIndexScan(BitmapIndexScanState* node)
      * close the index relation (no-op if we didn't open it)
      */
     if (indexScanDesc)
-        abs_idx_endscan(indexScanDesc);
+        scan_handler_idx_endscan(indexScanDesc);
 
     /*
      * close the index relation (no-op if we didn't open it)
@@ -373,22 +378,25 @@ BitmapIndexScanState* ExecInitBitmapIndexScan(BitmapIndexScan* node, EState* est
             /* Initialize table partition and index partition */
             ExecInitPartitionForBitmapIndexScan(indexstate, estate, currentrel);
 
-            /* get the first index partition */
-            currentindex = (Partition)list_nth(indexstate->biss_IndexPartitionList, 0);
-            indexstate->biss_CurrentIndexPartition = partitionGetRelation(indexstate->biss_RelationDesc, currentindex);
+            if (indexstate->biss_IndexPartitionList != NIL) {
+                /* get the first index partition */
+                currentindex = (Partition)list_nth(indexstate->biss_IndexPartitionList, 0);
+                indexstate->biss_CurrentIndexPartition = 
+                    partitionGetRelation(indexstate->biss_RelationDesc, currentindex);
 
-            ExecCloseScanRelation(currentrel);
-
-            indexstate->biss_ScanDesc = abs_idx_beginscan_bitmap(indexstate->biss_CurrentIndexPartition,
-                estate->es_snapshot,
-                indexstate->biss_NumScanKeys,
-                (ScanState*)indexstate);
+                ExecCloseScanRelation(currentrel);
+    
+                indexstate->biss_ScanDesc = scan_handler_idx_beginscan_bitmap(indexstate->biss_CurrentIndexPartition,
+                    estate->es_snapshot,
+                    indexstate->biss_NumScanKeys,
+                    (ScanState*)indexstate);
+            }
         }
     } else {
         /*
          * Initialize scan descriptor.
          */
-        indexstate->biss_ScanDesc = abs_idx_beginscan_bitmap(
+        indexstate->biss_ScanDesc = scan_handler_idx_beginscan_bitmap(
             indexstate->biss_RelationDesc, estate->es_snapshot, indexstate->biss_NumScanKeys, (ScanState*)indexstate);
     }
 
@@ -398,7 +406,7 @@ BitmapIndexScanState* ExecInitBitmapIndexScan(BitmapIndexScan* node, EState* est
      */
     if ((indexstate->biss_NumRuntimeKeys == 0 && indexstate->biss_NumArrayKeys == 0) &&
         PointerIsValid(indexstate->biss_ScanDesc))
-        abs_idx_rescan_local(
+        scan_handler_idx_rescan_local(
             indexstate->biss_ScanDesc, indexstate->biss_ScanKeys, indexstate->biss_NumScanKeys, NULL, 0);
 
     if (!PointerIsValid(indexstate->biss_ScanDesc)) {
@@ -448,7 +456,7 @@ static void ExecInitNextPartitionForBitmapIndexScan(BitmapIndexScanState* node)
     node->biss_CurrentIndexPartition = currentindexpartitionrel;
 
     /* Initialize scan descriptor. */
-    node->biss_ScanDesc = abs_idx_beginscan_bitmap(
+    node->biss_ScanDesc = scan_handler_idx_beginscan_bitmap(
         node->biss_CurrentIndexPartition, node->ss.ps.state->es_snapshot, node->biss_NumScanKeys, (ScanState*)node);
 
     Assert(PointerIsValid(node->biss_ScanDesc));
@@ -477,13 +485,24 @@ void ExecInitPartitionForBitmapIndexScan(BitmapIndexScanState* indexstate, EStat
         Partition indexpartition = NULL;
         bool relistarget = false;
         LOCKMODE lock;
-        ListCell* cell = NULL;
-        List* part_seqs = plan->scan.pruningInfo->ls_rangeSelectedPartitions;
 
-        Assert(plan->scan.itrs == plan->scan.pruningInfo->ls_rangeSelectedPartitions->length);
         relistarget = ExecRelationIsTargetRelation(estate, plan->scan.scanrelid);
         lock = (relistarget ? RowExclusiveLock : AccessShareLock);
         indexstate->lockMode = lock;
+        PruningResult* resultPlan = NULL;
+        if (plan->scan.pruningInfo->expr) {
+            resultPlan = GetPartitionInfo(plan->scan.pruningInfo, estate, rel);
+        } else {
+            resultPlan = plan->scan.pruningInfo;
+        }
+        if (resultPlan->ls_rangeSelectedPartitions != NULL) {
+            indexstate->part_id = resultPlan->ls_rangeSelectedPartitions->length;
+        } else {
+            indexstate->part_id = 0;
+        }
+
+        ListCell* cell = NULL;
+        List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
 
         foreach (cell, part_seqs) {
             Oid tablepartitionid = InvalidOid;

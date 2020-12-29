@@ -1,0 +1,433 @@
+set enable_global_stats = true;
+/*
+ * This file is used to test the function of ExecVecResult()
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_result_engine;
+set current_schema=vector_result_engine;
+create table vector_result_engine.ROW_RESULT_TABLE_01
+(
+    col_int		int
+   ,col_bint	bigint
+   ,col_serial	bigint
+   ,col_char	char(25)
+   ,col_vchar	varchar(35)
+   ,col_text	text
+   ,col_num		numeric(10,4)
+   ,col_decimal	decimal
+   ,col_float	float
+   ,col_date	date
+   ,col_time	time
+   ,col_timetz	timetz
+   ,col_interval	interval
+   ,col_tinterval	tinterval
+)distribute by hash(col_int);
+create table vector_result_engine.VECTOR_RESULT_TABLE_01
+(
+    col_int		int
+   ,col_bint	bigint
+   ,col_serial	bigint
+   ,col_char	char(25)
+   ,col_vchar	varchar(35)
+   ,col_text	text
+   ,col_num		numeric(10,4)
+   ,col_decimal	decimal
+   ,col_float	float
+   ,col_date	date
+   ,col_time	time
+   ,col_timetz	timetz
+   ,col_interval	interval
+   ,col_tinterval	tinterval
+)with(orientation = orc) tablespace hdfs_ts distribute by hash(col_int);
+CREATE OR REPLACE PROCEDURE func_insert_tbl_result_01()
+AS  
+BEGIN  
+	FOR I IN 1..10000 LOOP
+		IF i > 0 AND i < 2000 then
+			INSERT INTO vector_result_engine.row_result_table_01 VALUES(i, i * 2, i*10, 'aa','result_bb','result_MPPDBBJ',i+0.001,i+1.12,i+10.123,'1986-12-24','11:20:00','11:20:22+06','2 day 13:24:56','["Sep 4, 1983 23:59:12" "Oct4, 1983 23:59:12"]');
+		ELSIF i > 1999 AND i < 6000 then
+			INSERT INTO vector_result_engine.row_result_table_01 VALUES(i, i * 3, i*5, 'dd','result_bb','result_MPPDBXA',i+0.111,i+2.34,i+10.008,'1996-06-08 10:11:15','02:15:01','02:15:01+04','4 day 13:24:56','["Sep 6, 1981 23:59:12" "Oct4, 1983 23:59:12"]');
+		ELSE
+			INSERT INTO vector_result_engine.row_result_table_01 VALUES(i, i * 1, i*12, 'hg','result_bb','result_MPPDBSZ',i+0.222,i+5.67,i+6.789,'2015-06-02','08:12:36','08:12:36+08','1 day 11:24:56','["Sep 4, 1983 23:59:12" "Oct4, 1996 23:28:12"]');
+		END IF;
+	END LOOP; 
+END;
+/
+CALL func_insert_tbl_result_01();
+ func_insert_tbl_result_01 
+---------------------------
+ 
+(1 row)
+
+insert into vector_result_table_01 select * from row_result_table_01;
+CREATE TABLE vector_result_engine.VECTOR_RESULT_TABLE_02(
+    a1 character varying(1000),
+    a2 integer,
+    a3 character varying(1000),
+    a4 integer,
+    a5 character varying(1000),
+    a6 integer,
+    a7 character varying(1000),
+    a8 integer,
+    a9 character varying(1000),
+    a10 integer
+)
+WITH (orientation = column)
+DISTRIBUTE BY HASH (a4)
+PARTITION BY RANGE (a2)
+(
+    PARTITION p1 VALUES LESS THAN (1),
+    PARTITION p50001 VALUES LESS THAN (50001)
+);
+create table vector_result_engine.VECTOR_RESULT_TABLE_03
+(
+   a int
+  ,b varchar(23)
+)with(orientation = orc) tablespace hdfs_ts;
+create table vector_result_engine.VECTOR_RESULT_TABLE_04
+(
+   a int
+  ,b text
+)with(orientation = orc) tablespace hdfs_ts;
+insert into VECTOR_RESULT_TABLE_03 values(1,'tianjian');
+create table vector_result_engine.ROW_RESULT_TABLE_05 
+(
+   c_int integer
+  ,c_smallint smallint
+  ,c_bigint bigint
+  ,c_decimal decimal
+  ,c_numeric numeric
+  ,c_real real
+  ,c_double double precision
+  ,c_serial bigint
+  ,c_bigserial bigint
+  ,c_money money
+  ,c_character_varying character varying(1123)
+  ,c_varchar varchar(16678)
+  ,c_char char(14675)
+  ,c_text text
+  ,c_bytea bytea
+  ,c_timestamp_without  timestamp without time zone
+  ,c_timestamp_with timestamp with time zone
+  ,c_boolean boolean
+  ,c_cidr cidr
+  ,c_inet inet 
+  ,c_bit bit(20)
+  ,c_bit_varying bit varying(20)
+  ,c_oid oid
+  ,c_character character(10)
+  ,c_interval interval
+  ,c_date date
+  ,c_time_without time without time zone
+  ,c_time_with time with time zone
+  ,c_binary_integer binary_integer
+  ,c_binary_double binary_double
+  ,c_dec dec(18,9)
+  ,c_numeric_1 numeric(19,9)
+  ,c_varchar2 varchar2
+)distribute by replication;
+create table vector_result_engine.VECTOR_RESULT_TABLE_05 with(orientation = orc) tablespace hdfs_ts distribute by hash(c_int) as select * from vector_result_engine.ROW_RESULT_TABLE_05;
+ERROR:  type "bytea" is not supported in DFS ORC format column store
+analyze vector_result_table_01;
+analyze vector_result_table_02;
+analyze vector_result_table_03;
+analyze vector_result_table_04;
+----
+--- case 1: Basic Case
+----
+explain (verbose on, costs off) select col_serial from vector_result_table_01 where current_date>'2015-02-14' order by  1 limit 10;
+                                                                   QUERY PLAN                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: vector_result_engine.vector_result_table_01.col_serial
+   ->  Vector Limit
+         Output: vector_result_engine.vector_result_table_01.col_serial
+         ->  Vector Streaming (type: GATHER)
+               Output: vector_result_engine.vector_result_table_01.col_serial
+               Merge Sort Key: vector_result_engine.vector_result_table_01.col_serial
+               Node/s: All datanodes
+               ->  Vector Limit
+                     Output: vector_result_engine.vector_result_table_01.col_serial
+                     ->  Vector Sort
+                           Output: vector_result_engine.vector_result_table_01.col_serial
+                           Sort Key: vector_result_engine.vector_result_table_01.col_serial
+                           ->  Vector Result
+                                 Output: vector_result_engine.vector_result_table_01.col_serial
+                                 ->  Vector Append
+                                       ->  Dfs Scan on vector_result_engine.vector_result_table_01
+                                             Output: vector_result_engine.vector_result_table_01.col_serial
+                                             Distribute Key: vector_result_engine.vector_result_table_01.col_int
+                                       ->  Vector Adapter
+                                             Output: cstore.vector_result_table_01.col_serial
+                                             ->  Seq Scan on cstore.pg_delta_vector_result_engine_vector_result_table_01 vector_result_table_01
+                                                   Output: cstore.vector_result_table_01.col_serial
+                                                   Distribute Key: cstore.vector_result_table_01.col_int
+(24 rows)
+
+select col_serial from vector_result_table_01 where current_date>'2015-02-14' order by  1 limit 10;
+ col_serial 
+------------
+         10
+         20
+         30
+         40
+         50
+         60
+         70
+         80
+         90
+        100
+(10 rows)
+
+select col_time+'00:00:20' from vector_result_table_01 where current_date < '2010-02-14' order by  1 limit 5;
+ ?column? 
+----------
+(0 rows)
+
+select 'aa'  from vector_result_table_01  where current_date > '2015-02-14' and col_timetz = '08:12:36+08' limit 5;
+ ?column? 
+----------
+ aa
+ aa
+ aa
+ aa
+ aa
+(5 rows)
+
+select ctid, * from vector_result_table_01 where col_text is NULL;
+ ctid | col_int | col_bint | col_serial | col_char | col_vchar | col_text | col_num | col_decimal | col_float | col_date | col_time | col_timetz | col_interval | col_tinterval 
+------+---------+----------+------------+----------+-----------+----------+---------+-------------+-----------+----------+----------+------------+--------------+---------------
+(0 rows)
+
+select  col_timetz, ctid from vector_result_table_01 where current_date > '2015-02-14' and col_int < 5 order by 1, 2;
+ col_timetz  | ctid  
+-------------+-------
+ 11:20:22+06 | (0,1)
+ 11:20:22+06 | (0,1)
+ 11:20:22+06 | (0,1)
+ 11:20:22+06 | (0,2)
+(4 rows)
+
+execute direct on(datanode1) 'select 2 from vector_result_engine.vector_result_table_01 where col_int > 500 limit 10';
+ ?column? 
+----------
+        2
+        2
+        2
+        2
+        2
+        2
+        2
+        2
+        2
+        2
+(10 rows)
+
+----
+--- case 2: With NULL
+----
+INSERT INTO vector_result_engine.row_result_table_01 VALUES(25, 252, 2525, NULL,'result_bb','result_MPPDBSZ',0.222,5.67,6.789,'2015-09-02',NULL,'08:12:36+08','1 day 11:24:56',NULL);
+INSERT INTO vector_result_engine.row_result_table_01 VALUES(NULL,NULL,212525,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
+delete from vector_result_table_01;
+insert into vector_result_table_01 select * from row_result_table_01;
+select *,ctid from vector_result_table_01 where col_vchar is NULL order by 1, 2, 3;
+ col_int | col_bint | col_serial | col_char | col_vchar | col_text | col_num | col_decimal | col_float | col_date | col_time | col_timetz | col_interval | col_tinterval |  ctid   
+---------+----------+------------+----------+-----------+----------+---------+-------------+-----------+----------+----------+------------+--------------+---------------+---------
+         |          |     212525 |          |           |          |         |             |           |          |          |            |              |               | (42,13)
+(1 row)
+
+select col_date from vector_result_table_01 where current_date>'2015-02-14' and col_char is NULL order by 1;
+         col_date         
+--------------------------
+ Wed Sep 02 00:00:00 2015
+ 
+(2 rows)
+
+----
+--- case 3: Function Case
+----
+CREATE FUNCTION vec_result_func(int, bigint) RETURNS bigint
+    AS 'select count(*) from vector_result_table_01 where col_int<$1 and col_bint<$2;'
+    LANGUAGE SQL
+    IMMUTABLE
+    RETURNS NULL ON NULL INPUT;
+select * from vec_result_func(5,500);
+ vec_result_func 
+-----------------
+               4
+(1 row)
+
+drop function vec_result_func;
+CREATE FUNCTION vec_result_func(int, bigint) RETURNS bigint
+    AS 'select count(*) from vector_result_table_01 where col_int<$1'
+    LANGUAGE SQL
+    IMMUTABLE
+	RETURNS NULL ON NULL INPUT;;
+select * from vec_result_func(5,500);
+ vec_result_func 
+-----------------
+               4
+(1 row)
+
+drop function vec_result_func;
+----
+--- case 4: With Partition
+----
+SELECT a1, a2 FROM vector_result_table_02 WHERE a9='da' AND a9=' l' AND current_date>'2015-02-14'  ORDER BY a1, a2;
+ a1 | a2 
+----+----
+(0 rows)
+
+----
+--- case 5: coerce transformation
+----
+insert into vector_result_table_04 select * from vector_result_table_03;
+select * from vector_result_table_03;
+ a |    b     
+---+----------
+ 1 | tianjian
+(1 row)
+
+select * from vector_result_table_04;
+ a |    b     
+---+----------
+ 1 | tianjian
+(1 row)
+
+----
+--- case 6: Test Vtimstamp_part
+----
+explain (costs off, verbose on) select distinct date_trunc('microsecon',col_date), date_trunc('millisecon',col_date) from vector_result_table_01 order by 1, 2;
+                                                                                                        QUERY PLAN                                                                                                        
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (date_trunc('microsecon'::text, vector_result_engine.vector_result_table_01.col_date)), (date_trunc('millisecon'::text, vector_result_engine.vector_result_table_01.col_date))
+   ->  Vector Streaming (type: GATHER)
+         Output: (date_trunc('microsecon'::text, vector_result_engine.vector_result_table_01.col_date)), (date_trunc('millisecon'::text, vector_result_engine.vector_result_table_01.col_date))
+         Merge Sort Key: (date_trunc('microsecon'::text, vector_result_engine.vector_result_table_01.col_date)), (date_trunc('millisecon'::text, vector_result_engine.vector_result_table_01.col_date))
+         ->  Vector Sort
+               Output: (date_trunc('microsecon'::text, vector_result_engine.vector_result_table_01.col_date)), (date_trunc('millisecon'::text, vector_result_engine.vector_result_table_01.col_date))
+               Sort Key: (date_trunc('microsecon'::text, vector_result_engine.vector_result_table_01.col_date)), (date_trunc('millisecon'::text, vector_result_engine.vector_result_table_01.col_date))
+               ->  Vector Sonic Hash Aggregate
+                     Output: (date_trunc('microsecon'::text, vector_result_engine.vector_result_table_01.col_date)), (date_trunc('millisecon'::text, vector_result_engine.vector_result_table_01.col_date))
+                     Group By Key: (date_trunc('microsecon'::text, vector_result_engine.vector_result_table_01.col_date)), (date_trunc('millisecon'::text, vector_result_engine.vector_result_table_01.col_date))
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Output: (date_trunc('microsecon'::text, vector_result_engine.vector_result_table_01.col_date)), (date_trunc('millisecon'::text, vector_result_engine.vector_result_table_01.col_date))
+                           Distribute Key: (date_trunc('microsecon'::text, vector_result_engine.vector_result_table_01.col_date)), (date_trunc('millisecon'::text, vector_result_engine.vector_result_table_01.col_date))
+                           ->  Vector Sonic Hash Aggregate
+                                 Output: (date_trunc('microsecon'::text, vector_result_engine.vector_result_table_01.col_date)), (date_trunc('millisecon'::text, vector_result_engine.vector_result_table_01.col_date))
+                                 Group By Key: date_trunc('microsecon'::text, vector_result_engine.vector_result_table_01.col_date), date_trunc('millisecon'::text, vector_result_engine.vector_result_table_01.col_date)
+                                 ->  Vector Result
+                                       Output: date_trunc('microsecon'::text, vector_result_engine.vector_result_table_01.col_date), date_trunc('millisecon'::text, vector_result_engine.vector_result_table_01.col_date)
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_result_engine.vector_result_table_01
+                                                   Output: vector_result_engine.vector_result_table_01.col_date
+                                                   Distribute Key: vector_result_engine.vector_result_table_01.col_int
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_result_table_01.col_date
+                                                   ->  Seq Scan on cstore.pg_delta_vector_result_engine_vector_result_table_01 vector_result_table_01
+                                                         Output: cstore.vector_result_table_01.col_date
+                                                         Distribute Key: cstore.vector_result_table_01.col_int
+(28 rows)
+
+select distinct date_trunc('microsecon',col_date), date_trunc('millisecon',col_date) from vector_result_table_01 order by 1, 2;
+        date_trunc        |        date_trunc        
+--------------------------+--------------------------
+ Wed Dec 24 00:00:00 1986 | Wed Dec 24 00:00:00 1986
+ Sat Jun 08 10:11:15 1996 | Sat Jun 08 10:11:15 1996
+ Tue Jun 02 00:00:00 2015 | Tue Jun 02 00:00:00 2015
+ Wed Sep 02 00:00:00 2015 | Wed Sep 02 00:00:00 2015
+                          | 
+(5 rows)
+
+--select distinct date_part('seconds',col_timetz), date_part('min',col_timetz), date_part('hours',col_timetz) from vector_result_table_01 order by 1,2,3;
+select distinct date_trunc('months',col_date), date_trunc('qtr',col_date), date_trunc('days',col_date) from vector_result_table_01 order by 1,2 ,3;
+        date_trunc        |        date_trunc        |        date_trunc        
+--------------------------+--------------------------+--------------------------
+ Mon Dec 01 00:00:00 1986 | Wed Oct 01 00:00:00 1986 | Wed Dec 24 00:00:00 1986
+ Sat Jun 01 00:00:00 1996 | Mon Apr 01 00:00:00 1996 | Sat Jun 08 00:00:00 1996
+ Mon Jun 01 00:00:00 2015 | Wed Apr 01 00:00:00 2015 | Tue Jun 02 00:00:00 2015
+ Tue Sep 01 00:00:00 2015 | Wed Jul 01 00:00:00 2015 | Wed Sep 02 00:00:00 2015
+                          |                          | 
+(5 rows)
+
+select distinct date_trunc('decades',col_date), date_trunc('weeks',col_date), date_trunc('years',col_date) from vector_result_table_01 order by 1,2,3;
+        date_trunc        |        date_trunc        |        date_trunc        
+--------------------------+--------------------------+--------------------------
+ Tue Jan 01 00:00:00 1980 | Mon Dec 22 00:00:00 1986 | Wed Jan 01 00:00:00 1986
+ Mon Jan 01 00:00:00 1990 | Mon Jun 03 00:00:00 1996 | Mon Jan 01 00:00:00 1996
+ Fri Jan 01 00:00:00 2010 | Mon Jun 01 00:00:00 2015 | Thu Jan 01 00:00:00 2015
+ Fri Jan 01 00:00:00 2010 | Mon Aug 31 00:00:00 2015 | Thu Jan 01 00:00:00 2015
+                          |                          | 
+(5 rows)
+
+select distinct date_trunc('millennia',col_date),date_trunc('centuries',col_date) from vector_result_table_01 order by 1,2;
+        date_trunc        |        date_trunc        
+--------------------------+--------------------------
+ Thu Jan 01 00:00:00 1001 | Tue Jan 01 00:00:00 1901
+ Mon Jan 01 00:00:00 2001 | Mon Jan 01 00:00:00 2001
+                          | 
+(3 rows)
+
+select distinct date_trunc('hours',col_time), date_trunc('minute',col_interval) from vector_result_table_01 order by 1, 2;
+ date_trunc |        date_trunc         
+------------+---------------------------
+ @ 2 hours  | @ 4 days 13 hours 24 mins
+ @ 8 hours  | @ 1 day 11 hours 24 mins
+ @ 11 hours | @ 2 days 13 hours 24 mins
+            | @ 1 day 11 hours 24 mins
+            | 
+(5 rows)
+
+--select distinct date_part('timezone_h',col_timetz) from vector_result_table_01 order by 1;
+--select distinct date_part('timezone_m',col_timetz) from vector_result_table_01 order by 1;
+--select distinct date_part('timezone',col_timetz) from vector_result_table_01 order by 1;
+select date_trunc('microsecon',col_date), date_trunc('millisecon',col_date) from vector_result_table_01 where col_num > 1998 and col_float < 2015 order by 1,2;
+        date_trunc        |        date_trunc        
+--------------------------+--------------------------
+ Wed Dec 24 00:00:00 1986 | Wed Dec 24 00:00:00 1986
+ Wed Dec 24 00:00:00 1986 | Wed Dec 24 00:00:00 1986
+ Sat Jun 08 10:11:15 1996 | Sat Jun 08 10:11:15 1996
+ Sat Jun 08 10:11:15 1996 | Sat Jun 08 10:11:15 1996
+ Sat Jun 08 10:11:15 1996 | Sat Jun 08 10:11:15 1996
+ Sat Jun 08 10:11:15 1996 | Sat Jun 08 10:11:15 1996
+ Sat Jun 08 10:11:15 1996 | Sat Jun 08 10:11:15 1996
+(7 rows)
+
+--select distinct date_part('timezone_h',col_timetz) from vector_result_table_01 where col_char > 'aa' and col_timetz < '11:20:22+06' order by 1;
+----
+--- Test table_skewness function
+----
+create table test(id int);
+select table_skewness('test');
+          table_skewness           
+-----------------------------------
+ ("datanode1           ",0,0.000%)
+ ("datanode10          ",0,0.000%)
+ ("datanode11          ",0,0.000%)
+ ("datanode12          ",0,0.000%)
+ ("datanode2           ",0,0.000%)
+ ("datanode3           ",0,0.000%)
+ ("datanode4           ",0,0.000%)
+ ("datanode5           ",0,0.000%)
+ ("datanode6           ",0,0.000%)
+ ("datanode7           ",0,0.000%)
+ ("datanode8           ",0,0.000%)
+ ("datanode9           ",0,0.000%)
+(12 rows)
+
+drop table test;
+----
+--- Clean Table and Resource
+----
+drop schema vector_result_engine cascade;
+NOTICE:  drop cascades to 7 other objects
+DETAIL:  drop cascades to table row_result_table_01
+drop cascades to table vector_result_table_01
+drop cascades to function func_insert_tbl_result_01()
+drop cascades to table vector_result_table_02
+drop cascades to table vector_result_table_03
+drop cascades to table vector_result_table_04
+drop cascades to table row_result_table_05

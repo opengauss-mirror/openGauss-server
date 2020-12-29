@@ -4,14 +4,18 @@
  *
  * Portions Copyright (c) 1996-2018, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- *
+ * 
  * IDENTIFICATION
- *    src/common/backend/parser/parse_merge.cpp
+ *	  src/common/backend/parser/parse_merge.cpp
  *
  * -------------------------------------------------------------------------
  */
 
 
+#ifdef FRONTEND_PARSER
+#include "nodes/parsenodes_common.h"
+#include "nodes/feparser_memutils.h"
+#else
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
@@ -49,7 +53,7 @@ static bool contain_subquery(Node* clause);
 static bool contain_subquery_walker(Node* node, void* context);
 static void check_sublink_in_action(List* mergeActionList, bool is_insert_update);
 static void check_source_table_replicated(Node* source_relation);
-static void check_target_table_columns(ParseState* pstate);
+static void check_target_table_columns(ParseState* pstate, bool is_insert_update);
 static bool checkTargetTableReplicated(RangeTblEntry* rte);
 static void check_system_column_varlist(List* varlist, bool is_insert_update);
 static void check_system_column_node(Node* node, bool is_insert_update);
@@ -95,7 +99,7 @@ static void transformMergeJoinClause(ParseState* pstate, Node* merge)
     Assert(IsA(merge, JoinExpr));
 
     n = transformFromClauseItem(
-        pstate, merge, &rte, &rtindex, &rt_rte, &rt_rtindex, &relnamespace, &containedRels, true, false, true);
+        pstate, merge, &rte, &rtindex, &rt_rte, &rt_rtindex, &relnamespace, true, false, true);
     bms_free(containedRels);
 
     pstate->p_joinlist = list_make1(n);
@@ -125,30 +129,17 @@ static void transformMergeJoinClause(ParseState* pstate, Node* merge)
     ListCell* cell1 = NULL;
     ListCell* cell2 = NULL;
     foreach (cell1, relnamespace) {
-        RangeTblEntry* entry1 = (RangeTblEntry*)lfirst(cell1);
+        ParseNamespaceItem* nitem1 = (ParseNamespaceItem*)lfirst(cell1);
+        RangeTblEntry* entry1 = nitem1->p_rte;
+
         foreach (cell2, pstate->p_relnamespace) {
-            RangeTblEntry* entry2 = (RangeTblEntry*)lfirst(cell2);
+            ParseNamespaceItem* nitem2 = (ParseNamespaceItem*)lfirst(cell2);
+            RangeTblEntry* entry2 = nitem2->p_rte;
 
             if (entry1->relid == entry2->relid) {
                 continue;
             }
             pstate->p_relnamespace = lappend(pstate->p_relnamespace, lfirst(cell1));
-        }
-    }
-}
-
-/* traverse set_clause_list and judge if the ColId is equal to aliasname of table */
-void fixResTargetNameWithAlias(List* clause_list, const char* aliasname)
-{
-    ListCell* cell = NULL;
-    foreach (cell, clause_list) {
-        if (IsA(lfirst(cell), ResTarget)) {
-            ResTarget* res = (ResTarget*)lfirst(cell);
-            if (!strcmp(res->name, aliasname) && res->indirection) {
-                char* resname = pstrdup((char*)(((Value*)lfirst(list_head(res->indirection)))->val.str));
-                ((ResTarget*)lfirst(cell))->name = resname;
-                ((ResTarget*)lfirst(cell))->indirection = RemoveListCell(res->indirection, 1);
-            }
         }
     }
 }
@@ -596,7 +587,8 @@ void fix_relation_alias(ParseState* pstate, MergeStmt* stmt)
         foreach (cell, select_value_lists) {
             select_value_list = (List*)lfirst(cell);
 
-            for (i = 0; i < list_length(select_value_list); i++) {
+            int len = list_length(select_value_list);
+            for (i = 0; i < len; i++) {
                 if (IsA(list_nth(select_value_list, i), SetToDefault)) {
                     attrno = list_nth_int(rel_valid_attrnos, i);
                     expr = build_column_default(pstate->p_target_relation, attrno, false);
@@ -723,7 +715,98 @@ static List* transformUpdateTargetList(ParseState* pstate, List* origTlist)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("UPDATE target count mismatch --- internal error")));
     }
+
     return tlist;
+}
+
+/*
+ * buildJoinExpr -
+ *  Create a JOIN between the target and the source relation.
+ */
+static JoinExpr* buildJoinExpr(MergeStmt* stmt, AclMode targetPerms)
+{
+    JoinExpr* joinexpr = makeNode(JoinExpr);
+    joinexpr->isNatural = false;
+    joinexpr->alias = NULL;
+    joinexpr->usingClause = NIL;
+    joinexpr->quals = stmt->join_condition;
+    joinexpr->larg = (Node*)stmt->relation;
+    joinexpr->rarg = (Node*)stmt->source_relation;
+
+    /*
+     * Simplify the MERGE query as much as possible
+     *
+     * These seem like things that could go into Optimizer, but they are
+     * semantic simplifications rather than optimizations, per se.
+     *
+     * If there are no INSERT actions we won't be using the non-matching
+     * candidate rows for anything, so no need for an outer join. We do still
+     * need an inner join for UPDATE and DELETE actions.
+     */
+    if (targetPerms & ACL_INSERT)
+        joinexpr->jointype = JOIN_RIGHT;
+    else
+        joinexpr->jointype = JOIN_INNER;
+    return joinexpr;
+}
+
+static void checkUnsupportedCases(ParseState* pstate, MergeStmt* stmt)
+{
+    /**
+     * replicate table is not yet supported for upsert.
+     * merge into replicate table will be examined later in
+     *      check_plan_mergeinto_replicate
+     *      check_entry_mergeinto_replicate
+     */
+    if (checkTargetTableReplicated(pstate->p_target_rangetblentry)) {
+        if (stmt->is_insert_update) {
+            check_source_table_replicated(stmt->source_relation);
+        }
+        check_target_table_columns(pstate, stmt->is_insert_update);
+    }
+
+    if (unlikely(pstate->p_target_relation == NULL)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                errmsg("pstate->p_target_relation should not be null")));
+    }
+
+    /* system catalog is not yet supported */
+    checkTargetTableSystemCatalog(pstate->p_target_relation);
+
+    /* internal relation is not yet supported */
+    if (pstate->p_target_relation != NULL &&
+        ((unsigned int)RelationGetInternalMask(pstate->p_target_relation) & INTERNAL_MASK_DUPDATE))
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("internal relation doesn't allow %s",
+                    stmt->is_insert_update ? "INSERT ... ON DUPLICATE KEY UPDATE" : "MERGE INTO")));
+
+    /* Check unsupported relation kind */
+    if (!(RelationIsCUFormat(pstate->p_target_relation) || RelationIsRowFormat(pstate->p_target_relation)))
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Target relation type is not supported for %s",
+                    stmt->is_insert_update ? "INSERT ... ON DUPLICATE KEY UPDATE" : "MERGE INTO")));
+}
+
+static Query* tryTransformMergeInsertStmt(ParseState* pstate, MergeStmt* stmt)
+{
+    Query* insert_query = NULL;
+    ParseState* insert_pstate = make_parsestate(NULL);
+    insert_pstate->p_resolve_unknowns = pstate->p_resolve_unknowns;
+    insert_pstate->p_paramref_hook = pstate->p_paramref_hook;
+    insert_pstate->p_ref_hook_state = pstate->p_ref_hook_state;
+    insert_pstate->p_pre_columnref_hook = pstate->p_pre_columnref_hook;
+    insert_pstate->p_post_columnref_hook = pstate->p_post_columnref_hook;
+    insert_pstate->p_coerce_param_hook = pstate->p_coerce_param_hook;
+
+    insert_query = transformStmt(insert_pstate, stmt->insert_stmt);
+
+    /* free the parse state no matter we found correct insert query or not */
+    free_parsestate(insert_pstate);
+    return insert_query;
 }
 
 /*
@@ -843,62 +926,15 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
         true,
         targetPerms);
 
-    /* replicate table is not yet supported */
-    if (checkTargetTableReplicated(pstate->p_target_rangetblentry)) {
-        if (stmt->is_insert_update) {
-            check_source_table_replicated(stmt->source_relation);
-            check_target_table_columns(pstate);
-        } else {
-            ereport(ERROR,
-                (errmodule(MOD_OPT_REWRITE),
-                    errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Replicate table is not yet supported for MERGE INTO")));
-        }
-    }
+    checkUnsupportedCases(pstate, stmt);
 
-    /* system catalog is not yet supported */
-    checkTargetTableSystemCatalog(pstate->p_target_relation);
-
-    /* internal relation is not yet supported */
-    if (pstate->p_target_relation != NULL &&
-        ((unsigned int)RelationGetInternalMask(pstate->p_target_relation) & INTERNAL_MASK_DUPDATE)) {
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("internal relation doesn't allow %s",
-                    stmt->is_insert_update ? "INSERT ... ON DUPLICATE KEY UPDATE" : "MERGE INTO")));
-    }
     qry->mergeTarget_relation = qry->resultRelation;
 
-    if (stmt->is_insert_update) {
+    if (stmt->is_insert_update)
         fix_merge_stmt_for_insert_update(pstate, stmt);
-    }
-    /*
-     * Create a JOIN between the target and the source relation.
-     */
-    joinexpr = makeNode(JoinExpr);
-    joinexpr->isNatural = false;
-    joinexpr->alias = NULL;
-    joinexpr->usingClause = NIL;
-    joinexpr->quals = stmt->join_condition;
-    joinexpr->larg = (Node*)stmt->relation;
-    joinexpr->rarg = (Node*)stmt->source_relation;
 
-    /*
-     * Simplify the MERGE query as much as possible
-     *
-     * These seem like things that could go into Optimizer, but they are
-     * semantic simplifications rather than optimizations, per se.
-     *
-     * If there are no INSERT actions we won't be using the non-matching
-     * candidate rows for anything, so no need for an outer join. We do still
-     * need an inner join for UPDATE and DELETE actions.
-     */
-    if (targetPerms & ACL_INSERT) {
-        joinexpr->jointype = JOIN_RIGHT;
-    } else {
-        joinexpr->jointype = JOIN_INNER;
-    }
+    joinexpr = buildJoinExpr(stmt, targetPerms);
+
     /*
      * We use a special purpose transformation here because the normal
      * routines don't quite work right for the MERGE case.
@@ -960,32 +996,24 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
     qry->jointree = makeFromExpr(pstate->p_joinlist, NULL);
     qry->rtable = pstate->p_rtable;
 
-    /* Check unsupported relation kind */
-    if (!(RelationIsCUFormat(pstate->p_target_relation) || RelationIsRowFormat(pstate->p_target_relation))) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Target relation type is not supported for %s",
-                    stmt->is_insert_update ? "INSERT ... ON DUPLICATE KEY UPDATE" : "MERGE INTO")));
-    }
     /* Check unsupported merge when clauses */
-    if (list_length(stmt->mergeWhenClauses) > 2) {
+    if (list_length(stmt->mergeWhenClauses) > 2)
         ereport(
             ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("More than two MERGE WHEN clauses are specified")));
-    }
+
     if (list_length(stmt->mergeWhenClauses) == 2) {
         MergeWhenClause* mergeWhenClause1 = (MergeWhenClause*)linitial(stmt->mergeWhenClauses);
         MergeWhenClause* mergeWhenClause2 = (MergeWhenClause*)lsecond(stmt->mergeWhenClauses);
 
-        if (mergeWhenClause1->matched == true && mergeWhenClause2->matched == true) {
+        if (mergeWhenClause1->matched == true && mergeWhenClause2->matched == true)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Two WHEN MATCHED clauses are not supported for MERGE INTO")));
-        }
-        if (mergeWhenClause1->matched == false && mergeWhenClause2->matched == false) {
+
+        if (mergeWhenClause1->matched == false && mergeWhenClause2->matched == false)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Two WHEN NOT MATCHED clauses are not supported for MERGE INTO")));
-        }
     }
 
     /*
@@ -1036,7 +1064,7 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
                  * source relation.
                  */
                 save_relnamespace = pstate->p_relnamespace;
-                pstate->p_relnamespace = list_make1(sourceRelRTE);
+                pstate->p_relnamespace = list_make1(makeNamespaceItem(sourceRelRTE, false, true));
 
                 /*
                  * Transform the when condition.
@@ -1088,8 +1116,9 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
                      * If td_compatible_truncation equal true and no foreign table found,
                      * the auto truncation funciton should be enabled.
                      */
-                    if (DB_IS_CMPT(DB_CMPT_C) && pstate->p_target_relation != NULL &&
-                        !RelationIsForeignTable(pstate->p_target_relation)) {
+                    if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && pstate->p_target_relation != NULL &&
+                        !RelationIsForeignTable(pstate->p_target_relation) &&
+                        !RelationIsStream(pstate->p_target_relation)) {
                         if (u_sess->attr.attr_sql.td_compatible_truncation) {
                             pstate->p_is_td_compatible_truncation = true;
                         } else {
@@ -1177,33 +1206,35 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
      * in order by tell whether the UPSERT statement is shippable or not
      * later in the pgxc_FQS_planner
      */
-    if (stmt->is_insert_update) {
+    if (
+#ifdef 	ENABLE_MULTIPLE_NODES
+	IS_PGXC_COORDINATOR &&
+#endif
+		stmt->is_insert_update) {
         Assert(stmt->insert_stmt != NULL);
         Assert(IsA(stmt->insert_stmt, InsertStmt));
 
-        if (check_update_action_targetlist(mergeActionList, qry->mergeSourceTargetList)) {
+        /*
+         * in the process of grey upgrade, when the version number is ahead
+         * of UPSERT_ROW_STORE_VERSION_NUM, do not support update EXCLUDED
+         */
+        if (
+#ifdef ENABLE_MULTIPLE_NODES
+			t_thrd.proc->workingVersionNum < UPSERT_ROW_STORE_VERSION_NUM &&
+#endif
+            check_update_action_targetlist(mergeActionList, qry->mergeSourceTargetList)) {
+#ifndef ENABLE_MULTIPLE_NODES
             if (u_sess->attr.attr_sql.enable_upsert_to_merge) {
                 return qry;
             }
+#endif
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_COLUMN),
                     errmsg("Invalid column reference in the UPDATE target values"),
                     errhint("Only allow to reference target table's column in the UPDATE clause")));
         }
 
-        Query* insert_query = NULL;
-        ParseState* insert_pstate = make_parsestate(NULL);
-        insert_pstate->p_resolve_unknowns = pstate->p_resolve_unknowns;
-        insert_pstate->p_paramref_hook = pstate->p_paramref_hook;
-        insert_pstate->p_ref_hook_state = pstate->p_ref_hook_state;
-        insert_pstate->p_pre_columnref_hook = pstate->p_pre_columnref_hook;
-        insert_pstate->p_post_columnref_hook = pstate->p_post_columnref_hook;
-        insert_pstate->p_coerce_param_hook = pstate->p_coerce_param_hook;
-
-        insert_query = transformStmt(insert_pstate, stmt->insert_stmt);
-
-        /* free the parse state no matter we found correct insert query or not */
-        free_parsestate(insert_pstate);
+        Query* insert_query = tryTransformMergeInsertStmt(pstate, stmt);
 
         if (insert_query == NULL) {
             ereport(ERROR,
@@ -1211,8 +1242,10 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
                     errcode(ERRCODE_UNEXPECTED_NODE_STATE),
                     errmsg("failed to transform InsertStmt for INSERT ON DUPLICATE KEY UPDATE statement.")));
         } else {
-            /* put the mergeActionList into the Query for nessesary deparse later */
-            insert_query->mergeActionList = qry->mergeActionList;
+            if (unlikely(t_thrd.proc->workingVersionNum < UPSERT_ROW_STORE_VERSION_NUM)) {
+                /* put the mergeActionList into the Query for nessesary deparse later */
+                insert_query->mergeActionList = qry->mergeActionList;
+            }
 
             /* adjust the permission level, UPSERT need SELECT, INSERT, UPDATE permission. */
             RangeTblEntry* rte = (RangeTblEntry*)lfirst(list_nth_cell(insert_query->rtable, 0));
@@ -1226,6 +1259,9 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
             qry->upsertQuery = insert_query;
         }
     }
+
+    qry->hintState = stmt->hintState;
+
     return qry;
 }
 
@@ -1465,7 +1501,7 @@ static void checkTargetTableSystemCatalog(Relation targetRel)
     }
 }
 
-static void check_target_table_columns(ParseState* pstate)
+static void check_target_table_columns(ParseState* pstate, bool is_insert_update)
 {
     List* rel_valid_cols = NIL;
     List* rel_valid_attrnos = NIL;
@@ -1483,12 +1519,14 @@ static void check_target_table_columns(ParseState* pstate)
             ereport(ERROR,
                 (errmodule(MOD_PARSER),
                     errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("It is not allowed to use INSERT ... ON DUPLICATE KEY UPDATE on the replicate table (%s) "
+                    errmsg("It is not allowed to use %s on the replicate table (%s) "
                            "with column (%s) of unstable default value.",
+                        is_insert_update ? "INSERT ... ON DUPLICATE KEY UPDATE" : "MERGE INTO",
                         RelationGetRelationName(target_relation),
                         NameStr(target_relation->rd_att->attrs[attrno - 1]->attname))));
         }
     }
+    list_free_deep(rel_valid_cols);
 }
 
 static void checkUpdateOnDistributeKey(RangeTblEntry* rte, List* targetlist)
@@ -1499,8 +1537,12 @@ static void checkUpdateOnDistributeKey(RangeTblEntry* rte, List* targetlist)
         return;
     }
 
+#ifdef ENABLE_MOT
     if (rte != NULL && rte->relkind != RELKIND_RELATION &&
         !(rte->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(rte->relid))) {
+#else
+    if (rte != NULL && rte->relkind != RELKIND_RELATION) {
+#endif
         /* Bad relation type */
         return;
     }
@@ -1861,5 +1903,26 @@ void check_insert_action_targetlist(List* merge_action_list, List* source_target
             (errcode(ERRCODE_UNDEFINED_COLUMN),
                 errmsg("Invalid column reference in the INSERT VALUES Clause"),
                 errhint("You may have referenced target table's column")));
+    }
+}
+#endif /* FRONTEND_PARSER */
+
+/* traverse set_clause_list and judge if the ColId is equal to aliasname of table */
+void fixResTargetNameWithAlias(List *clause_list, const char *aliasname)
+{
+    ListCell *cell = NULL;
+    foreach (cell, clause_list) {
+        if (IsA(lfirst(cell), ResTarget)) {
+            ResTarget *res = (ResTarget *)lfirst(cell);
+            if (!strcmp(res->name, aliasname) && res->indirection) {
+#ifndef FRONTEND_PARSER
+                char *resname = pstrdup((char *)(((Value *)lfirst(list_head(res->indirection)))->val.str));
+#else
+                char *resname = feparser_strdup((char *)(((Value *)lfirst(list_head(res->indirection)))->val.str));
+#endif
+                ((ResTarget *)lfirst(cell))->name = resname;
+                ((ResTarget *)lfirst(cell))->indirection = RemoveListCell(res->indirection, 1);
+            }
+        }
     }
 }

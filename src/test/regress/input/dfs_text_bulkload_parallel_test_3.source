@@ -1,0 +1,34 @@
+--
+-- BULK LOAD PARALLEL TEST 3
+--
+----
+--16. noescaping in TEXT format
+----
+create foreign table escaping(c1 int, c2 varchar, c3 int) server hdfs_server options (filenames '/user/hive/warehouse/text_on_hdfs/load_escape.data', format 'text', noescaping 'true', delimiter '|') distribute by roundrobin;
+select * from escaping;
+drop foreign table escaping;
+----
+--17. write only is invalid
+----
+CREATE FOREIGN TABLE FT_WRITE_ONLY_TEST
+(
+c1 int,
+c2 varchar(10)
+)
+SERVER hdfs_server
+OPTIONS(filenames '/user/hive/warehouse/text_on_hdfs/*', format 'text', delimiter ',') write only
+distribute by roundrobin;
+----
+--18. ignore_extra_data and fill_missing_fields
+----
+create foreign table extra_data(c1 int, c2 varchar) server hdfs_server options (filenames '/user/hive/warehouse/text_on_hdfs/load_escape.data', format 'text', noescaping 'true', delimiter '|', ignore_extra_data 'true') distribute by roundrobin;
+select * from extra_data;
+alter foreign table extra_data options(set ignore_extra_data 'false');
+select * from extra_data;
+create foreign table missing_fields(c1 int, c2 varchar, c3 int, c4 int) server hdfs_server options (filenames '/user/hive/warehouse/text_on_hdfs/load_escape.data', format 'text', noescaping 'true', delimiter '|', fill_missing_fields 'true') distribute by roundrobin;
+select * from missing_fields;
+alter foreign table missing_fields options(set fill_missing_fields 'false');
+select * from missing_fields;
+explain (costs off, nodes off) select * from missing_fields;
+drop foreign table extra_data;
+drop foreign table missing_fields;

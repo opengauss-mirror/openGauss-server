@@ -1,0 +1,27 @@
+-- prepare
+create table test(c1 int);
+insert into test values(1);
+-- base op
+drop Materialized view mvtest_tm;
+ERROR:  materialized view "mvtest_tm" does not exist
+CREATE MATERIALIZED VIEW mvtest_tm AS select *from test;
+select *From mvtest_tm;
+ c1 
+----
+  1
+(1 row)
+
+insert into test values(1);
+REFRESH MATERIALIZED VIEW mvtest_tm;
+select *from mvtest_tm;
+ c1 
+----
+  1
+  1
+(2 rows)
+
+drop Materialized view mvtest_tm;
+-- error
+create incremental MATERIALIZED VIEW mvtest_inc AS select *from test;
+REFRESH incremental MATERIALIZED VIEW mvtest_tm;
+ERROR:  relation "mvtest_tm" does not exist

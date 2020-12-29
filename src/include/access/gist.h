@@ -6,6 +6,7 @@
  *	  changes should be made with care.
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -18,8 +19,8 @@
 
 #include "access/xlog.h"
 #include "access/xlogdefs.h"
-#include "storage/block.h"
-#include "storage/bufpage.h"
+#include "storage/buf/block.h"
+#include "storage/buf/bufpage.h"
 #include "utils/relcache.h"
 
 /*
@@ -58,7 +59,7 @@
 /*
  * Page opaque data in a GiST index page.
  */
-#define F_LEAF (1)           /* leaf page */
+#define F_LEAF (1 << 0)           /* leaf page */
 #define F_DELETED (1 << 1)        /* the page has been deleted */
 #define F_TUPLES_DELETED (1 << 2) /* some tuples on the page are dead */
 #define F_FOLLOW_RIGHT (1 << 3)   /* page to the right has no downlink */

@@ -1,7 +1,7 @@
 CREATE ROLE account;
 CREATE ROLE account IDENTIFIED BY '1q2w3e';
 CREATE ROLE account IDENTIFIED BY '1q2w3e4r5t';
-CREATE ROLE testdbccount IDENTIFIED BY 'testdbccount';
+CREATE ROLE gaussdbaccount IDENTIFIED BY 'gaussdbaccount';
 
 CREATE ROLE account IDENTIFIED BY '1q2w3e4r@';
 ALTER ROLE account IDENTIFIED BY '1q2w3e4r@';
@@ -9,15 +9,15 @@ DROP ROLE account;
 
 
 --test alter user
-CREATE USER SECURITY_ADMIN1 WITH CREATEROLE PASSWORD 'testdb@123';
-CREATE USER SECURITY_ADMIN2 WITH CREATEROLE PASSWORD 'testdb@123';
-CREATE USER SYSADMIN1 WITH SYSADMIN   PASSWORD 'testdb@123';
-set role security_admin1 password 'testdb@123';
-ALTER USER SECURITY_ADMIN2 PASSWORD 'testdb@1234';
+CREATE USER SECURITY_ADMIN1 WITH CREATEROLE PASSWORD 'gaussdb@123';
+CREATE USER SECURITY_ADMIN2 WITH CREATEROLE PASSWORD 'gaussdb@123';
+CREATE USER SYSADMIN1 WITH SYSADMIN   PASSWORD 'gaussdb@123';
+set role security_admin1 password 'gaussdb@123';
+ALTER USER SECURITY_ADMIN2 PASSWORD 'gaussdb@1234';
 reset role;
 show enableSeparationOfDuty;
-set role sysadmin1 password 'testdb@123';
-ALTER USER SECURITY_ADMIN2 PASSWORD 'testdb@1234';
+set role sysadmin1 password 'gaussdb@123';
+ALTER USER SECURITY_ADMIN2 PASSWORD 'gaussdb@1234';
 reset role;
 
 drop user SECURITY_ADMIN1;
@@ -26,17 +26,17 @@ drop user SYSADMIN1;
 
 
 --test new password complexity
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_max_length=9" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_max_length=9" >/dev/null 2>&1
 select pg_sleep(1);
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_length=9" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_length=9" >/dev/null 2>&1
 select pg_sleep(1);
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_uppercase=2" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_uppercase=2" >/dev/null 2>&1
 select pg_sleep(1);
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_lowercase=2" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_lowercase=2" >/dev/null 2>&1
 select pg_sleep(1);
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_digital=3" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_digital=3" >/dev/null 2>&1
 select pg_sleep(1);
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_special=2" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_special=2" >/dev/null 2>&1
 select pg_sleep(1);
 CREATE ROLE role_pwd_complex PASSWORD 'Abcd123@#';
 CREATE ROLE role_pwd_complex PASSWORD 'ABCd123@#';
@@ -44,28 +44,28 @@ CREATE ROLE role_pwd_complex PASSWORD 'ABcd12$@#';
 CREATE ROLE role_pwd_complex PASSWORD 'ABcd1234#';
 CREATE ROLE role_pwd_complex PASSWORD 'ABcd123@#';
 CREATE ROLE role_pwd_complex_2 PASSWORD 'ABcd123@#x';
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_max_length=32" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_max_length=32" >/dev/null 2>&1
 select pg_sleep(1);
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_length=8" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_length=8" >/dev/null 2>&1
 select pg_sleep(1);
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_uppercase=0" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_uppercase=0" >/dev/null 2>&1
 select pg_sleep(1);
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_lowercase=0" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_lowercase=0" >/dev/null 2>&1
 select pg_sleep(1);
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_digital=0" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_digital=0" >/dev/null 2>&1
 select pg_sleep(1);
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_special=0" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_min_special=0" >/dev/null 2>&1
 select pg_sleep(1);
 --test max time of password effect
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_effect_time=1" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_effect_time=1" >/dev/null 2>&1
 select pg_sleep(1);
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_notify_time=2" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_notify_time=2" >/dev/null 2>&1
 select pg_sleep(1);
 SELECT gs_password_deadline();
 SELECT gs_password_notifytime();
 
 --test null password for '-W' in exists and noexists user condition
-create user exists_user password 'Ttest@123';
+create user exists_user password 'Gauss@123';
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -U exists_user -W ''
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -U noexists_user -W ''
 select type,result,username,database,object_name,detail_info from pg_query_audit('1111-1-1','3333-3-3') where username = 'exists_user';

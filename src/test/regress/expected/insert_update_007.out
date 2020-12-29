@@ -1,0 +1,353 @@
+DROP SCHEMA test_insert_update_007 CASCADE;
+ERROR:  schema "test_insert_update_007" does not exist
+CREATE SCHEMA test_insert_update_007;
+SET CURRENT_SCHEMA TO test_insert_update_007;
+-- test t4 with one primary key with three columns
+CREATE TABLE t4 (
+    col1 INT,
+    col2 INT DEFAULT 0,
+    col3 VARCHAR DEFAULT 1,
+    col4 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    col5 BIGSERIAL,
+    PRIMARY KEY (col2, col3, col5)
+)DISTRIBUTE BY hash(col2)
+PARTITION BY RANGE (col2)
+(
+    PARTITION P1 VALUES LESS THAN (2),
+    PARTITION P2 VALUES LESS THAN (100),
+    PARTITION P3 VALUES LESS THAN (MAXVALUE)
+)ENABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE will create implicit sequence "t4_col5_seq" for serial column "t4.col5"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t4_pkey" for table "t4"
+--- should insert
+INSERT INTO t4 VALUES (1) ON DUPLICATE KEY UPDATE col1 = 10;
+INSERT INTO t4 VALUES (1) ON DUPLICATE KEY UPDATE col1 = 10;
+INSERT INTO t4 VALUES (2, 2, 2) ON DUPLICATE KEY UPDATE col1 = 200;
+INSERT INTO t4 VALUES (100, 100, 100, CURRENT_TIMESTAMP, 100) ON DUPLICATE KEY UPDATE col1 = 1000;
+SELECT col1, col2, col3, col5 FROM t4 ORDER BY col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+    1 |    0 | 1    |    1
+    1 |    0 | 1    |    2
+    2 |    2 | 2    |    3
+  100 |  100 | 100  |  100
+(4 rows)
+
+--- should update
+INSERT INTO t4 VALUES (2, 2, 2, CURRENT_TIMESTAMP, 3) ON DUPLICATE KEY UPDATE col1 = 200;
+INSERT INTO t4 VALUES (100, 100, 100, CURRENT_TIMESTAMP, 100) ON DUPLICATE KEY UPDATE col1 = 1000;
+SELECT col1, col2, col3, col5 FROM t4 ORDER BY col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+    1 |    0 | 1    |    1
+    1 |    0 | 1    |    2
+  200 |    2 | 2    |    3
+ 1000 |  100 | 100  |  100
+(4 rows)
+
+--- error: duplicate key update on (x, x, 20)
+--- this is because current version is not inplace update but merge,
+--- so when the subquery contains multiple same values, it will cause duplicate insert failure.
+SELECT col3, sum(col3) * 10 FROM t4 GROUP BY col3 ORDER BY 1, 2;
+ col3 | ?column? 
+------+----------
+ 1    |       20
+ 100  |     1000
+ 2    |       20
+(3 rows)
+
+INSERT INTO t4 (col1, col5)
+    (SELECT col3, sum(col3) * 10 FROM t4 GROUP BY col3)
+    ON DUPLICATE KEY UPDATE col1 = 3;
+ERROR:  duplicate key value violates unique constraint "t4_pkey"
+DETAIL:  Key (col2, col3, col5)=(0, 1, 20) already exists.
+-- test t5 with sequence column in constaint index
+CREATE TABLE t5 (
+    col1 INT,
+    col2 TEXT DEFAULT '1',
+    col3 BIGSERIAL,
+--    col4 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    col5 INTEGER(10, 5) DEFAULT RANDOM(),
+    CONSTRAINT u_t5_index1 UNIQUE (col1, col3)
+)DISTRIBUTE BY hash(col1)
+PARTITION BY RANGE (col1)
+(
+    PARTITION P1 VALUES LESS THAN (2),
+    PARTITION P2 VALUES LESS THAN (4),
+    PARTITION P3 VALUES LESS THAN (6),
+    PARTITION P4 VALUES LESS THAN (MAXVALUE)
+)DISABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE will create implicit sequence "t5_col3_seq" for serial column "t5.col3"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "u_t5_index1" for table "t5"
+--- should insert
+INSERT INTO t5 VALUES (1), (1), (1) ON DUPLICATE KEY UPDATE col2 = col3;
+INSERT INTO t5 DEFAULT VALUES ON DUPLICATE KEY UPDATE col2 = col3;
+SELECT * FROM t5 ORDER BY col3;
+ col1 | col2 | col3 |  col5  
+------+------+------+--------
+--?    1 | 1    |    1 | .05332
+--?    1 | 1    |    2 | .55030
+--?    1 | 1    |    3 | .37671
+--?      | 1    |    4 | .15686
+(4 rows)
+
+--- should update
+INSERT INTO t5 (col1, col3) VALUES (1, 1), (1, 2), (1, 3) ON DUPLICATE KEY UPDATE col5 = col2, col2 = col3 * 10;
+SELECT * FROM t5 WHERE col1 = 1 ORDER BY col3;
+ col1 | col2 | col3 |  col5   
+------+------+------+---------
+    1 | 10   |    1 | 1.00000
+    1 | 20   |    2 | 1.00000
+    1 | 30   |    3 | 1.00000
+(3 rows)
+
+--- should some insert some update
+INSERT INTO t5 (col1, col3) VALUES (2, 5), (2, 6);
+SELECT col1, col2, col3 FROM t5 ORDER BY col3;
+ col1 | col2 | col3 
+------+------+------
+    1 | 10   |    1
+    1 | 20   |    2
+    1 | 30   |    3
+      | 1    |    4
+    2 | 1    |    5
+    2 | 1    |    6
+(6 rows)
+
+INSERT INTO t5 (col1) VALUES (2), (2), (2) ON DUPLICATE KEY UPDATE col2 = col3;
+SELECT col1, col2, col3 FROM t5 ORDER BY col3;
+ col1 | col2 | col3 
+------+------+------
+    1 | 10   |    1
+    1 | 20   |    2
+    1 | 30   |    3
+      | 1    |    4
+    2 | 5    |    5
+    2 | 6    |    6
+    2 | 1    |    7
+(7 rows)
+
+--- should INSERT and sequence starting from 7
+INSERT INTO t5 VALUES (2), (2);
+SELECT col1, col2, col3 FROM t5 ORDER BY col3;
+ col1 | col2 | col3 
+------+------+------
+    1 | 10   |    1
+    1 | 20   |    2
+    1 | 30   |    3
+      | 1    |    4
+    2 | 5    |    5
+    2 | 6    |    6
+    2 | 1    |    7
+    2 | 1    |    8
+    2 | 1    |    9
+(9 rows)
+
+--- test subquery, some insert and some update
+INSERT INTO t5 (col1, col3)
+    SELECT col1, col3 + 2 FROM t5 PARTITION (P1)
+ON DUPLICATE KEY UPDATE col2 = col1 * 100;
+SELECT col1, col2, col3 FROM t5 ORDER BY col3;
+ col1 | col2 | col3 
+------+------+------
+    1 | 10   |    1
+    1 | 20   |    2
+    1 | 100  |    3
+      | 1    |    4
+    1 | 1    |    4
+    1 | 1    |    5
+    2 | 5    |    5
+    2 | 6    |    6
+    2 | 1    |    7
+    2 | 1    |    8
+    2 | 1    |    9
+(11 rows)
+
+-- test with volatile function as default column in constraint index
+TRUNCATE t5;
+ALTER TABLE t5 DROP CONSTRAINT u_t5_index1;
+ALTER TABLE t5 ADD CONSTRAINT u_t5_index2 UNIQUE (col1, col5);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "u_t5_index2" for table "t5"
+--- should insert
+INSERT INTO t5 VALUES (3), (3), (3) ON DUPLICATE KEY UPDATE col2 = col3;
+INSERT INTO t5 (col1) VALUES (4), (4), (4) ON DUPLICATE KEY UPDATE col2 = col3;
+SELECT * FROM t5 ORDER BY col3;
+ col1 | col2 | col3 |  col5  
+------+------+------+--------
+--?    3 | 1    |   10 | .29056
+--?    3 | 1    |   11 | .78169
+--?    3 | 1    |   12 | .22068
+--?    4 | 1    |   13 | .46699
+--?    4 | 1    |   14 | .77446
+--?    4 | 1    |   15 | .47994
+(6 rows)
+
+--- should update
+INSERT INTO t5 (col1, col5) SELECT col1, col5 FROM t5 where col1 = 3 ON DUPLICATE KEY UPDATE col2 = col5 * 100;
+SELECT * FROM t5 ORDER BY col3;
+ col1 |   col2   | col3 |  col5  
+------+----------+------+--------
+--?    3 | 29.05600 |   10 | .29056
+--?    3 | 78.16900 |   11 | .78169
+--?    3 | 22.06800 |   12 | .22068
+--?    4 | 1        |   13 | .46699
+--?    4 | 1        |   14 | .77446
+--?    4 | 1        |   15 | .47994
+(6 rows)
+
+--- test subquery
+---- should insert
+INSERT INTO t5 (col1, col2) SELECT col1, col2 FROM t5 PARTITION (P3) ON DUPLICATE KEY UPDATE col2 = col5 * 100;
+SELECT * FROM t5 ORDER BY col3;
+ col1 |   col2   | col3 |  col5  
+------+----------+------+--------
+--?    3 | 29.05600 |   10 | .29056
+--?    3 | 78.16900 |   11 | .78169
+--?    3 | 22.06800 |   12 | .22068
+--?    4 | 1        |   13 | .46699
+--?    4 | 1        |   14 | .77446
+--?    4 | 1        |   15 | .47994
+--?    4 | 1        |   16 | .94383
+--?    4 | 1        |   17 | .91735
+--?    4 | 1        |   18 | .91876
+(9 rows)
+
+---- should update
+INSERT INTO t5 SELECT * FROM t5 PARTITION (P3) ON DUPLICATE KEY UPDATE col2 = col5 * 1000;
+SELECT * FROM t5 ORDER BY col3;
+ col1 |   col2    | col3 |  col5  
+------+-----------+------+--------
+--?    3 | 29.05600  |   10 | .29056
+--?    3 | 78.16900  |   11 | .78169
+--?    3 | 22.06800  |   12 | .22068
+--?    4 | 466.99000 |   13 | .46699
+--?    4 | 774.46000 |   14 | .77446
+--?    4 | 479.94000 |   15 | .47994
+--?    4 | 943.83000 |   16 | .94383
+--?    4 | 917.35000 |   17 | .91735
+--?    4 | 918.76000 |   18 | .91876
+(9 rows)
+
+-- test t6 with one more index
+CREATE TABLE t6 (
+    col1 INT,
+    col2 INT DEFAULT 1,
+    col3 BIGSERIAL,
+--    col4 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    col5 INTEGER(10, 5) DEFAULT RANDOM(),
+    col6 TEXT,
+    col7 TEXT
+)DISTRIBUTE BY hash(col1)
+PARTITION BY RANGE (col1)
+(
+    PARTITION P1 VALUES LESS THAN (2),
+    PARTITION P2 VALUES LESS THAN (4),
+    PARTITION P3 VALUES LESS THAN (6),
+    PARTITION P4 VALUES LESS THAN (MAXVALUE)
+)ENABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE will create implicit sequence "t6_col3_seq" for serial column "t6.col3"
+ALTER TABLE t6 ADD PRIMARY KEY (col1, col3);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "t6_pkey" for table "t6"
+ALTER TABLE t6 ADD CONSTRAINT u_t6_index1 UNIQUE (col1, col5, col6);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "u_t6_index1" for table "t6"
+INSERT INTO t6 (col1) VALUES (1), (2), (3), (4), (5);
+SELECT col1, col2, col3, col6, col7 FROM t6 ORDER BY col3;
+ col1 | col2 | col3 | col6 | col7 
+------+------+------+------+------
+    1 |    1 |    1 |      | 
+    2 |    1 |    2 |      | 
+    3 |    1 |    3 |      | 
+    4 |    1 |    4 |      | 
+    5 |    1 |    5 |      | 
+(5 rows)
+
+--- should insert
+INSERT INTO t6 (col1) VALUES (1), (2), (3), (4), (5) ON DUPLICATE KEY UPDATE col6 = power(col1, col2);
+SELECT col1, col2, col3, col6, col7 FROM t6 ORDER BY col3;
+ col1 | col2 | col3 | col6 | col7 
+------+------+------+------+------
+    1 |    1 |    1 |      | 
+    2 |    1 |    2 |      | 
+    3 |    1 |    3 |      | 
+    4 |    1 |    4 |      | 
+    5 |    1 |    5 |      | 
+    1 |    1 |    6 |      | 
+    2 |    1 |    7 |      | 
+    3 |    1 |    8 |      | 
+    4 |    1 |    9 |      | 
+    5 |    1 |   10 |      | 
+(10 rows)
+
+--- should update because primary key matches
+INSERT INTO t6 (col1, col3) VALUES (6, 11), (6, 12);
+SELECT col1, col2, col3, col6, col7 FROM t6 WHERE col1 = 6 ORDER BY col3;
+ col1 | col2 | col3 | col6 | col7 
+------+------+------+------+------
+    6 |    1 |   11 |      | 
+    6 |    1 |   12 |      | 
+(2 rows)
+
+INSERT INTO t6 (col1) VALUES (6), (6), (6) ON DUPLICATE KEY UPDATE col2 = col1 + col3, col6 =  col2 * 10;
+SELECT col1, col2, col3, col6, col7 FROM t6 WHERE col1 = 6 ORDER BY col3;
+ col1 | col2 | col3 | col6 | col7 
+------+------+------+------+------
+    6 |   17 |   11 | 10   | 
+    6 |   18 |   12 | 10   | 
+    6 |    1 |   13 |      | 
+(3 rows)
+
+--- should update for those col6 is not null bacause they will match the unique index,
+--- and insert for those col6 is null because the unique index containing null never matches,
+--- also primary key will not match
+--- be ware the sequence column of the inserted row will jump n step, where n is the count of the not null rows,
+--- because those sequence have to be generated during the unique index join stage.
+INSERT INTO t6 (col1, col5, col6) 
+    (SELECT col1, col5, col6 FROM t6 PARTITION (P4) WHERE col1 = 6)
+    ON DUPLICATE KEY UPDATE
+        col7 = col2 + 1;
+SELECT col1, col2, col3, col6, col7 FROM t6 WHERE col1 = 6 ORDER BY col1, col3, col6, col7;
+ col1 | col2 | col3 | col6 | col7 
+------+------+------+------+------
+    6 |   17 |   11 | 10   | 18
+    6 |   18 |   12 | 10   | 19
+    6 |    1 |   13 |      | 
+    6 |    1 |   16 |      | 
+(4 rows)
+
+--- should update because unique index and primary key both match
+INSERT INTO t6 (col1, col3, col5, col6)
+    (SELECT col1, col3, col5, col6 FROM t6 PARTITION (P4) WHERE col1 = 6 AND col6 IS NOT NULL)
+    ON DUPLICATE KEY UPDATE
+        col7 = col7 * 10;
+SELECT col1, col2, col3, col6, col7 FROM t6 WHERE col1 = 6 ORDER BY col1, col3, col6, col7;
+ col1 | col2 | col3 | col6 | col7 
+------+------+------+------+------
+    6 |   17 |   11 | 10   | 180
+    6 |   18 |   12 | 10   | 190
+    6 |    1 |   13 |      | 
+    6 |    1 |   16 |      | 
+(4 rows)
+
+--- insert when col3 = 17 because constaints does not match,
+--- but update when col3 = 18 because 18 has been inserted and will cause a match
+INSERT INTO t6 (col1, col3, col5, col6) VALUES (7, 18, 100, 100);
+SELECT * FROM t6 WHERE col3 > 16 ORDER BY col1, col3, col6, col7;
+ col1 | col2 | col3 |   col5    | col6 | col7 
+------+------+------+-----------+------+------
+    7 |    1 |   18 | 100.00000 | 100  | 
+(1 row)
+
+INSERT INTO t6 (col1, col5, col6) VALUES (7, 10, 10), (7, 100, 100) ON DUPLICATE KEY UPDATE
+    col7 = col3 * 100;
+SELECT * FROM t6 WHERE col1 = 7 ORDER BY col1, col3, col6, col7;
+ col1 | col2 | col3 |   col5    | col6 | col7 
+------+------+------+-----------+------+------
+    7 |    1 |   17 |  10.00000 | 10   | 
+    7 |    1 |   18 | 100.00000 | 100  | 1800
+(2 rows)
+
+DROP SCHEMA test_insert_update_007 CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table t4
+drop cascades to table t5
+drop cascades to table t6

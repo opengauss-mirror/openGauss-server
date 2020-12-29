@@ -54,7 +54,7 @@ static Bitmapset* fixup_whole_row_references(Oid relOid, Bitmapset* columns)
         elog(ERROR, "cache lookup failed for relation %u", relOid);
 
     CatalogRelationBuildParam catalogParam = GetCatalogParam(relOid);
-    if (catalogParam.oId != InvalidOid) {
+    if (catalogParam.oid != InvalidOid) {
         natts = (AttrNumber)catalogParam.natts;
     } else {
         natts = ((Form_pg_class)GETSTRUCT(tuple))->relnatts;
@@ -188,6 +188,7 @@ static bool check_relation_privileges(Oid relOid, Bitmapset* selected, Bitmapset
                     &object, SEPG_CLASS_DB_SEQUENCE, SEPG_DB_SEQUENCE__GET_VALUE, audit_name, abort);
             break;
 
+        case RELKIND_CONTQUERY:
         case RELKIND_VIEW:
             result = sepgsql_avc_check_perms(&object, SEPG_CLASS_DB_VIEW, SEPG_DB_VIEW__EXPAND, audit_name, abort);
             break;

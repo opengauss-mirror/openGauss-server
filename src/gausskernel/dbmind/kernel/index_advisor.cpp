@@ -26,6 +26,7 @@
 
 #include "postgres.h"
 
+#include "access/tableam.h"
 #include "access/tupdesc.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_attribute.h"
@@ -46,11 +47,11 @@
 #include "utils/syscache.h"
 #include "utils/lsyscache.h"
 #include "utils/palloc.h"
-#include "utils/tqual.h"
 #include "utils/fmgroids.h"
+#include "utils/snapmgr.h"
 
-#define RAND_ROWS 10000      /* sampling range for executing a query */
-#define CARDINALITY_LEVEL 30 /* the threshold of index selection */ 
+#define MAX_SAMPLE_ROWS 10000      /* sampling range for executing a query */
+#define CARDINALITY_THRESHOLD 30   /* the threshold of index selection */ 
 #define MAX_QUERY_LEN 256
 
 typedef struct {
@@ -85,11 +86,11 @@ typedef struct {
     char *table_field;
 } JoinCell;
 
-THR_LOCAL List *stmt_list = NIL;
-THR_LOCAL List *tmp_table_list = NIL;
-THR_LOCAL List *table_list = NIL;
-THR_LOCAL List *drived_tables = NIL;
-THR_LOCAL TableCell *driver_table = NULL;
+THR_LOCAL List *g_stmt_list = NIL;
+THR_LOCAL List *g_tmp_table_list = NIL;
+THR_LOCAL List *g_table_list = NIL;
+THR_LOCAL List *g_drived_tables = NIL;
+THR_LOCAL TableCell *g_driver_table = NULL;
 
 static SuggestedIndex *suggest_index(const char *, _out_ int *);
 static StmtResult *execute_stmt(const char *query_string, bool need_result = false);
@@ -105,12 +106,12 @@ static void destroy(DestReceiver *self);
 static void free_global_resource();
 static void find_select_stmt(Node *);
 static void parse_where_clause(Node *);
-static void field_value_trans(char *, A_Const *);
+static void field_value_trans(_out_ char *, A_Const *);
 static void parse_field_expr(List *, List *, List *);
 static inline uint4 tuple_to_uint(List *);
-static uint4 get_table_count(char *);
-static uint4 calculate_field_cardinality(char *, char *);
-static bool is_tmp_table(char *);
+static uint4 get_table_count(const char *);
+static uint4 calculate_field_cardinality(const char *, const char *);
+static bool is_tmp_table(const char *);
 static char *find_field_name(List *);
 static char *find_table_name(List *);
 static TableCell *find_or_create_tblcell(char *, char *);
@@ -118,7 +119,7 @@ static void add_index_from_field(char *, IndexCell *);
 static char *parse_group_clause(List *);
 static char *parse_order_clause(List *);
 static void add_index_from_group_order(TableCell *, List *, bool);
-static Oid find_table_oid(List *, char *);
+static Oid find_table_oid(List *, const char *);
 static void generate_final_index(TableCell *, Oid);
 static void parse_from_clause(List *);
 static void add_drived_tables(RangeVar *);
@@ -127,12 +128,16 @@ static void add_join_cond(TableCell *, char *, TableCell *, char *);
 static void parse_join_expr(Node *);
 static void parse_join_expr(JoinExpr *);
 static void determine_driver_table();
-static uint4 get_join_table_result_set(char *, char *);
+static uint4 get_join_table_result_set(const char *, const char *);
 static void add_index_from_join(TableCell *, char *);
 static void add_index_for_drived_tables();
 
 Datum gs_index_advise(PG_FUNCTION_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("not support for distributed scenarios yet.")));
+#endif
+
     FuncCallContext *func_ctx = NULL;
     SuggestedIndex *array = NULL;
 
@@ -212,11 +217,11 @@ Datum gs_index_advise(PG_FUNCTION_ARGS)
  */
 SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
 {
-    stmt_list = NIL;
-    tmp_table_list = NIL;
-    table_list = NIL;
-    drived_tables = NIL;
-    driver_table = NULL;
+    g_stmt_list = NIL;
+    g_tmp_table_list = NIL;
+    g_table_list = NIL;
+    g_drived_tables = NIL;
+    g_driver_table = NULL;
 
     List *parse_tree_list = raw_parser(query_string);
     if (parse_tree_list == NULL || list_length(parse_tree_list) <= 0) {
@@ -230,39 +235,36 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
     Node *parsetree = (Node *)lfirst(list_head(parse_tree_list));
     find_select_stmt(parsetree);
 
-    if (!stmt_list) {
+    if (!g_stmt_list) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("can not advise for query: %s.", query_string)));
     }
 
     // Parse the SelectStmt structures
     ListCell *item = NULL;
 
-    foreach (item, stmt_list) {
+    foreach (item, g_stmt_list) {
         SelectStmt *stmt = (SelectStmt *)lfirst(item);
         parse_from_clause(stmt->fromClause);
         /* Note: the structure JoinExpr will be modified after 'parse_analyze', so 'parse_from_clause'
         should be executed first. */
         Query *query_tree = parse_analyze((Node *)stmt, query_string, NULL, 0);
 
-        // Analyze tables from statement, so that we can get accurate statistics.
-        analyze_tables(query_tree->rtable);
-
-        if (table_list) {
+        if (g_table_list) {
             parse_where_clause(stmt->whereClause);
             determine_driver_table();
             if (parse_group_clause(stmt->groupClause)) {
-                add_index_from_group_order(driver_table, stmt->groupClause, true);
+                add_index_from_group_order(g_driver_table, stmt->groupClause, true);
             } else if (parse_order_clause(stmt->sortClause)) {
-                add_index_from_group_order(driver_table, stmt->sortClause, false);
+                add_index_from_group_order(g_driver_table, stmt->sortClause, false);
             }
-            if (table_list->length > 1 && driver_table) {
+            if (g_table_list->length > 1 && g_driver_table) {
                 add_index_for_drived_tables();
             }
 
             // Generate the final index string for each table.
             ListCell *table_item = NULL;
 
-            foreach (table_item, table_list) {
+            foreach (table_item, g_table_list) {
                 TableCell *table = (TableCell *)lfirst(table_item);
                 if (table->index != NIL) {
                     Oid table_oid = find_table_oid(query_tree->rtable, table->table_name);
@@ -272,19 +274,19 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
                     generate_final_index(table, table_oid);
                 }
             }
-            driver_table = NULL;
+            g_driver_table = NULL;
         }
     }
 
     // Format the returned result, e.g., 'table1, "(col1,col2),(col3)"'.
-    int array_len = table_list == NIL ? 0 : table_list->length;
+    int array_len = g_table_list == NIL ? 0 : g_table_list->length;
     *len = array_len;
     SuggestedIndex *array = (SuggestedIndex *)palloc(sizeof(SuggestedIndex) * array_len);
     errno_t rc = EOK;
     item = NULL;
     int i = 0;
 
-    foreach (item, table_list) {
+    foreach (item, g_table_list) {
         TableCell *cur_table = (TableCell *)lfirst(item);
         List *index_list = cur_table->index_print;
 
@@ -323,15 +325,15 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
 
 void free_global_resource()
 {
-    list_free_deep(drived_tables);
-    list_free_deep(table_list);
-    list_free_deep(tmp_table_list);
-    list_free(stmt_list);
-    table_list = NIL;
-    tmp_table_list = NIL;
-    stmt_list = NIL;
-    drived_tables = NIL;
-    driver_table = NULL;
+    list_free_deep(g_drived_tables);
+    list_free_deep(g_table_list);
+    list_free_deep(g_tmp_table_list);
+    list_free(g_stmt_list);
+    g_table_list = NIL;
+    g_tmp_table_list = NIL;
+    g_stmt_list = NIL;
+    g_drived_tables = NIL;
+    g_driver_table = NULL;
 }
 
 /* Update table statistics obtained from query tree by executing the 'analyze table' statement. */
@@ -497,7 +499,7 @@ void receive(TupleTableSlot *slot, DestReceiver *self)
     MemoryContext oldcontext = MemoryContextSwitchTo(result->mxct);
 
     for (i = 0; i < natts; ++i) {
-        origattr = slot_getattr(slot, i + 1, &isnull);
+        origattr = tableam_tslot_getattr(slot, i + 1, &isnull);
         if (isnull) {
             continue;
         }
@@ -545,7 +547,7 @@ void destroy(DestReceiver *self)
  *
  * The 'SelectStmt' structure may exist in set operations and the 'with',
  * 'from' and 'where' clauses, and it is added to the global variable
- * "stmt_list" only if it has no subquery structure.
+ * "g_stmt_list" only if it has no subquery structure.
  */
 void find_select_stmt(Node *parsetree)
 {
@@ -571,7 +573,7 @@ void find_select_stmt(Node *parsetree)
 
                         foreach (item, cte_list) {
                             CommonTableExpr *cte = (CommonTableExpr *)lfirst(item);
-                            tmp_table_list = lappend(tmp_table_list, cte->ctename);
+                            g_tmp_table_list = lappend(g_tmp_table_list, cte->ctename);
                             find_select_stmt(cte->ctequery);
                         }
                         break;
@@ -615,7 +617,7 @@ void find_select_stmt(Node *parsetree)
                     }
 
                     if (!has_substmt) {
-                        stmt_list = lappend(stmt_list, stmt);
+                        g_stmt_list = lappend(g_stmt_list, stmt);
                     }
                     break;
                 }
@@ -631,7 +633,7 @@ void find_select_stmt(Node *parsetree)
     }
 }
 
-Oid find_table_oid(List *list, char *table_name)
+Oid find_table_oid(List *list, const char *table_name)
 {
     ListCell *item = NULL;
 
@@ -810,8 +812,8 @@ void add_drived_tables(RangeVar *join_node)
     if (!join_table) {
         return;
     }
-    if (!list_member(drived_tables, join_table)) {
-        drived_tables = lappend(drived_tables, join_table);
+    if (!list_member(g_drived_tables, join_table)) {
+        g_drived_tables = lappend(g_drived_tables, join_table);
     }
 }
 
@@ -834,7 +836,9 @@ void parse_join_tree(JoinExpr *join_tree)
 
     if (join_tree->isNatural == true) {
         return;
-    } else if (join_tree->usingClause) {
+    } 
+
+    if (join_tree->usingClause) {
         parse_join_expr(join_tree);
     } else {
         parse_join_expr(join_tree->quals);
@@ -886,11 +890,11 @@ void parse_join_expr(Node *item_join)
     add_join_cond(rtable, r_field_name, ltable, l_field_name);
 
     // add possible drived tables
-    if (!list_member(drived_tables, ltable)) {
-        drived_tables = lappend(drived_tables, ltable);
+    if (!list_member(g_drived_tables, ltable)) {
+        g_drived_tables = lappend(g_drived_tables, ltable);
     }
-    if (!list_member(drived_tables, rtable)) {
-        drived_tables = lappend(drived_tables, rtable);
+    if (!list_member(g_drived_tables, rtable)) {
+        g_drived_tables = lappend(g_drived_tables, rtable);
     }
 }
 
@@ -922,7 +926,7 @@ void parse_join_expr(JoinExpr *join_tree)
 }
 
 // convert field value to string
-void field_value_trans(char *target, A_Const *field_value)
+void field_value_trans(_out_ char *target, A_Const *field_value)
 {
     Value value = ((A_Const *)field_value)->val;
 
@@ -997,7 +1001,7 @@ void parse_field_expr(List *field, List *op, List *lfield_values)
     pfree(field_value);
 
     uint4 cardinality = calculate_field_cardinality(table_name, field_expr);
-    if (cardinality > CARDINALITY_LEVEL) {
+    if (cardinality > CARDINALITY_THRESHOLD) {
         IndexCell *index = (IndexCell *)palloc(sizeof(*index));
         index->index_name = index_name;
         index->cardinality = cardinality;
@@ -1012,7 +1016,7 @@ inline uint4 tuple_to_uint(List *tuples)
     return pg_atoi((char *)linitial((List *)linitial(tuples)), sizeof(uint4), 0);
 }
 
-uint4 get_table_count(char *table_name)
+uint4 get_table_count(const char *table_name)
 {
     uint4 table_count = 0;
     char query_string[MAX_QUERY_LEN] = {0x00};
@@ -1027,21 +1031,23 @@ uint4 get_table_count(char *table_name)
     return table_count;
 }
 
-uint4 calculate_field_cardinality(char *table_name, char *field_expr)
+uint4 calculate_field_cardinality(const char *table_name, const char *field_expr)
 {
+    const int sample_factor = 2;
+
     uint4 cardinality;
     uint4 table_count = get_table_count(table_name);
-    uint4 rand_rows = (table_count / 2) > RAND_ROWS ? RAND_ROWS : (table_count / 2);
+    uint4 sample_rows = (table_count / sample_factor) > MAX_SAMPLE_ROWS ? MAX_SAMPLE_ROWS : (table_count / sample_factor);
     char query_string[MAX_QUERY_LEN] = {0x00};
     errno_t rc = sprintf_s(query_string, MAX_QUERY_LEN, "select count(*) from ( select * from %s limit %d) where %s",
-        table_name, rand_rows, field_expr);
+        table_name, sample_rows, field_expr);
     securec_check_ss_c(rc, "\0", "\0");
 
     StmtResult *result = execute_stmt(query_string, true);
     uint4 row = tuple_to_uint(result->tuples);
     (*result->pub.rDestroy)((DestReceiver *)result);
 
-    cardinality = row == 0 ? rand_rows : rand_rows / row;
+    cardinality = row == 0 ? sample_rows : (sample_rows / row);
 
     return cardinality;
 }
@@ -1079,7 +1085,7 @@ char *find_table_name(List *fields)
             free_global_resource();
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("can not advise for temporary table: %s.", table)));
         } else {
-            foreach (item, table_list) {
+            foreach (item, g_table_list) {
                 TableCell *cur_table = (TableCell *)lfirst(item);
                 if (strcasecmp(table, cur_table->table_name) == 0 ||
                     (cur_table->alias_name && strcasecmp(table, cur_table->alias_name) == 0)) {
@@ -1097,7 +1103,7 @@ char *find_table_name(List *fields)
     char *column_name = strVal(linitial(fields));
 
     // check which table has the given column_name
-    foreach (item, table_list) {
+    foreach (item, g_table_list) {
         char *table_name = ((TableCell *)lfirst(item))->table_name;
         errno_t rc = sprintf_s(query_string, MAX_QUERY_LEN,
             "select count(*) from information_schema.columns where table_name = '%s' and column_name = '%s'",
@@ -1122,11 +1128,11 @@ char *find_table_name(List *fields)
 }
 
 // Check whether the table is temporary.
-bool is_tmp_table(char *table_name)
+bool is_tmp_table(const char *table_name)
 {
     ListCell *item = NULL;
 
-    foreach (item, tmp_table_list) {
+    foreach (item, g_tmp_table_list) {
         char *tmp_table_name = (char *)lfirst(item);
         if (strcasecmp(tmp_table_name, table_name) == 0) {
             return true;
@@ -1138,7 +1144,7 @@ bool is_tmp_table(char *table_name)
 /*
  * find_or_create_tblcell
  *     Find the TableCell that has given table_name(alias_name) among the global
- *     variable 'table_list', and if not found, create a TableCell and return it.
+ *     variable 'g_table_list', and if not found, create a TableCell and return it.
  */
 TableCell *find_or_create_tblcell(char *table_name, char *alias_name)
 {
@@ -1153,8 +1159,8 @@ TableCell *find_or_create_tblcell(char *table_name, char *alias_name)
     // seach the table among existed tables
     ListCell *item = NULL;
 
-    if (table_list != NIL) {
-        foreach (item, table_list) {
+    if (g_table_list != NIL) {
+        foreach (item, g_table_list) {
             TableCell *cur_table = (TableCell *)lfirst(item);
             char *cur_table_name = cur_table->table_name;
             char *cur_alias_name = cur_table->alias_name;
@@ -1173,7 +1179,7 @@ TableCell *find_or_create_tblcell(char *table_name, char *alias_name)
     new_table->index = NIL;
     new_table->join_cond = NIL;
     new_table->index_print = NIL;
-    table_list = lappend(table_list, new_table);
+    g_table_list = lappend(g_table_list, new_table);
 
     return new_table;
 }
@@ -1240,14 +1246,14 @@ void add_index_from_field(char *table_name, IndexCell *index)
 // The table that has smallest result set is set as the driver table.
 void determine_driver_table()
 {
-    if (table_list->length == 1) {
-        driver_table = (TableCell *)linitial(table_list);
+    if (g_table_list->length == 1) {
+        g_driver_table = (TableCell *)linitial(g_table_list);
     } else {
-        if (drived_tables != NIL) {
+        if (g_drived_tables != NIL) {
             uint4 small_result_set = UINT32_MAX;
             ListCell *item = NULL;
 
-            foreach (item, drived_tables) {
+            foreach (item, g_drived_tables) {
                 TableCell *table = (TableCell *)lfirst(item);
                 uint4 result_set;
                 if (table->index) {
@@ -1257,17 +1263,17 @@ void determine_driver_table()
                     result_set = get_join_table_result_set(table->table_name, NULL);
                 }
                 if (result_set < small_result_set) {
-                    driver_table = table;
+                    g_driver_table = table;
                     small_result_set = result_set;
                 }
             }
         }
     }
-    list_free(drived_tables);
-    drived_tables = NIL;
+    list_free(g_drived_tables);
+    g_drived_tables = NIL;
 }
 
-uint4 get_join_table_result_set(char *table_name, char *condition)
+uint4 get_join_table_result_set(const char *table_name, const char *condition)
 {
     char query_string[MAX_QUERY_LEN] = {0x00};
     errno_t rc = EOK;
@@ -1314,7 +1320,7 @@ void add_index_for_drived_tables()
 {
     List *joined_tables = NIL;
     List *to_be_joined_tables = NIL;
-    to_be_joined_tables = lappend(to_be_joined_tables, driver_table);
+    to_be_joined_tables = lappend(to_be_joined_tables, g_driver_table);
     TableCell *join_table;
 
     while (to_be_joined_tables != NIL) {
@@ -1332,7 +1338,7 @@ void add_index_for_drived_tables()
             if (list_member(joined_tables, to_be_joined_table)) {
                 continue;
             }
-            if (join_table != driver_table) {
+            if (join_table != g_driver_table) {
                 add_index_from_join(join_table, join_cond->field);
             }
             add_index_from_join(to_be_joined_table, join_cond->table_field);
@@ -1372,7 +1378,7 @@ char *parse_group_clause(List *group_clause)
     }
 
     if (is_only_one_table && pre_table) {
-        if (table_list->length == 1 || (driver_table && strcasecmp(pre_table, driver_table->table_name) == 0)) {
+        if (g_table_list->length == 1 || (g_driver_table && strcasecmp(pre_table, g_driver_table->table_name) == 0)) {
             return pre_table;
         }
     }
@@ -1406,7 +1412,7 @@ char *parse_order_clause(List *order_clause)
     }
 
     if (is_only_one_table && pre_table) {
-        if (table_list->length == 1 || (driver_table && strcasecmp(pre_table, driver_table->table_name) == 0)) {
+        if (g_table_list->length == 1 || (g_driver_table && strcasecmp(pre_table, g_driver_table->table_name) == 0)) {
             return pre_table;
         }
     }

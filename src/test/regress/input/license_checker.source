@@ -1,0 +1,5 @@
+--for LLT
+--test license_checker tool 
+\! @abs_bindir@/license_checker 
+\! @abs_bindir@/license_checker test_license.dat
+\! @abs_bindir@/license_checker @abs_bindir@/license.dat 

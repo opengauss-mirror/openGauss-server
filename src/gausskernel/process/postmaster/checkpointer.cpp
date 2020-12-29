@@ -38,8 +38,6 @@
 
 #include <signal.h>
 #include <sys/time.h>
-#include <time.h>
-#include <unistd.h>
 
 #include "access/xlog_internal.h"
 #include "libpq/pqsignal.h"
@@ -47,9 +45,9 @@
 #include "pgstat.h"
 #include "postmaster/bgwriter.h"
 #include "replication/syncrep.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
 #include "storage/smgr.h"
@@ -124,9 +122,8 @@ typedef struct {
 typedef struct CheckpointerShmemStruct {
     ThreadId checkpointer_pid; /* PID (0 if not started) */
     slock_t ckpt_lck;          /* protects all the ckpt_* fields */
-    bool fsync_request_launched;
-    bool fsync_request_absorbed;
-    bool fsync_request_finished;
+    int64 fsync_start;
+    int64 fsync_done;
 
     int ckpt_started; /* advances when checkpoint starts */
     int ckpt_done;    /* advances when checkpoint done */
@@ -142,11 +139,15 @@ typedef struct CheckpointerShmemStruct {
     CheckpointerRequest requests[1]; /* VARIABLE LENGTH ARRAY */
 } CheckpointerShmemStruct;
 
+#ifdef ENABLE_MOT
 typedef struct CheckpointCallbackItem {
     struct CheckpointCallbackItem* next;
     CheckpointCallback callback;
     void* arg;
 } CheckpointCallbackItem;
+#endif
+
+extern volatile PMState pmState;
 
 /* interval for calling AbsorbFsyncRequests in CheckpointWriteDelay */
 #define WRITES_PER_ABSORB 1000
@@ -182,11 +183,8 @@ void CheckpointerMain(void)
     u_sess->attr.attr_storage.CheckPointTimeout = g_instance.attr.attr_storage.enableIncrementalCheckpoint
                                                       ? u_sess->attr.attr_storage.incrCheckPointTimeout
                                                       : u_sess->attr.attr_storage.fullCheckPointTimeout;
-
-    knl_thread_set_name("Checkpointer");
-
     ereport(
-        LOG, (errmsg("Checkpointer started, CheckPointTimeout is %d", u_sess->attr.attr_storage.CheckPointTimeout)));
+        LOG, (errmsg("checkpointer started, CheckPointTimeout is %d", u_sess->attr.attr_storage.CheckPointTimeout)));
 
     /*
      * Properly accept or ignore signals the postmaster might send us
@@ -228,7 +226,7 @@ void CheckpointerMain(void)
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Checkpointer");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Checkpointer", MEMORY_CONTEXT_STORAGE);
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -265,8 +263,10 @@ void CheckpointerMain(void)
         /* abort async io, must before LWlock release */
         AbortAsyncListIO();
 
+#ifdef ENABLE_MOT
         /* cleanups any leftovers in other storage engines (release MOT snapshot lock if taken) */
         CallCheckpointCallback(EVENT_CHECKPOINT_ABORT, 0);
+#endif
 
         /*
          * These operations are really just a minimal subset of
@@ -475,11 +475,12 @@ void CheckpointerMain(void)
              * The end-of-recovery checkpoint is a real checkpoint that's
              * performed while we're still in recovery.
              */
-            if (flags & CHECKPOINT_END_OF_RECOVERY)
+            if (flags & CHECKPOINT_END_OF_RECOVERY) {
                 do_restartpoint = false;
+            }
 
-            /* timed checkpoint request has higher priority than file-sync-only request */
-            if ((flags & CHECKPOINT_FILE_SYNC) && !(flags & CHECKPOINT_CAUSE_TIME)) {
+            /* timed checkpoint request and force checkpoint have higher priority than file-sync-only request */
+            if ((flags & CHECKPOINT_FILE_SYNC) && !(flags & CHECKPOINT_CAUSE_TIME) && !(flags & CHECKPOINT_FORCE)) {
                 do_filesync = true;
             }
 
@@ -580,9 +581,6 @@ void CheckpointerMain(void)
          */
         now = (pg_time_t)time(NULL);
         elapsed_secs = now - t_thrd.checkpoint_cxt.last_checkpoint_time;
-        if (elapsed_secs < 0) {
-            elapsed_secs = 0;
-        }
 
         if (elapsed_secs >= u_sess->attr.attr_storage.CheckPointTimeout)
             continue; /* no sleep for us ... */
@@ -945,6 +943,16 @@ void CheckpointerShmemInit(void)
     }
 }
 
+void set_flag_checkpoint_file_sync(int flags, volatile CheckpointerShmemStruct* cps)
+{
+    if (flags & CHECKPOINT_FILE_SYNC) {
+    } else {
+        /* normal checkpoint request also includes file sync, so unset this bit */
+        cps->ckpt_flags &= ~CHECKPOINT_FILE_SYNC;
+    }
+}
+
+
 /*
  * RequestCheckpoint
  *		Called in backend processes to request a checkpoint
@@ -997,18 +1005,10 @@ void RequestCheckpoint(int flags)
      * chosen to make this work!
      */
     SpinLockAcquire(&cps->ckpt_lck);
-
     old_failed = cps->ckpt_failed;
     old_started = cps->ckpt_started;
     cps->ckpt_flags |= flags;
-    if (flags & CHECKPOINT_FILE_SYNC) {
-            cps->fsync_request_launched = true;
-            cps->fsync_request_absorbed = false;
-            cps->fsync_request_finished = false;
-    } else {
-        /* normal checkpoint request also includes file sync, so unset this bit */
-        cps->ckpt_flags &= ~CHECKPOINT_FILE_SYNC;
-    }
+    set_flag_checkpoint_file_sync(flags, cps);
     SpinLockRelease(&cps->ckpt_lck);
 
     /*
@@ -1021,7 +1021,7 @@ void RequestCheckpoint(int flags)
     for (ntries = 0;; ntries++) {
         if (t_thrd.checkpoint_cxt.CheckpointerShmem->checkpointer_pid == 0) {
             /* max wait CheckPointWaitTime secs */
-            if (ntries >= (u_sess->attr.attr_storage.CheckPointWaitTimeOut * 10)) {
+            if (ntries >= (u_sess->attr.attr_storage.CheckPointWaitTimeOut * 10) || pmState == PM_SHUTDOWN_2) {
                 if (flags & CHECKPOINT_WAIT) {
                     ereport(ERROR,
                         (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION),
@@ -1045,7 +1045,7 @@ void RequestCheckpoint(int flags)
         } else {
             break; /* signal sent successfully */
         }
-           
+
         CHECK_FOR_INTERRUPTS();
         pg_usleep(100000L); /* wait 0.1 sec, then retry */
     }
@@ -1409,11 +1409,13 @@ bool FirstCallSinceLastCheckpoint(void)
     return FirstCall;
 }
 
+#ifdef ENABLE_MOT
 void RegisterCheckpointCallback(CheckpointCallback callback, void* arg)
 {
     CheckpointCallbackItem *item;
 
-    item = (CheckpointCallbackItem*)MemoryContextAlloc(g_instance.instance_context, sizeof(CheckpointCallbackItem));
+    item = (CheckpointCallbackItem*)MemoryContextAlloc(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(CheckpointCallbackItem));
     item->callback = callback;
     item->arg = arg;
     item->next = g_instance.ckpt_cxt_ctl->ckptCallback;
@@ -1428,6 +1430,7 @@ void CallCheckpointCallback(CheckpointEvent checkpointEvent, XLogRecPtr lsn)
         (*item->callback) (checkpointEvent, lsn, item->arg);
     }
 }
+#endif
 
 /*
  * smgrsync_for_dw() -- File sync before dw file can be truncated or recycled.
@@ -1438,27 +1441,48 @@ void CallCheckpointCallback(CheckpointEvent checkpointEvent, XLogRecPtr lsn)
  */
 void smgrsync_for_dw(void)
 {
-    Assert(!IsUnderPostmaster || AmStartupProcess() || AmCheckpointerProcess() || AmPageWriterProcess() ||
-        AmMulitBackgroundWriterProcess());
-    if (!AmPageWriterProcess() && !AmMulitBackgroundWriterProcess()) {
+    if (u_sess->storage_cxt.pendingOpsTable) {
+        Assert(!IsUnderPostmaster || AmStartupProcess() || AmCheckpointerProcess());
         smgrsync();
     } else {
+        int64 old_fsync_start = 0;
+        int64 new_fsync_start = 0;
+        int64 new_fsync_done = 0;
         volatile CheckpointerShmemStruct* cps = t_thrd.checkpoint_cxt.CheckpointerShmem;
-        bool needWait = true;
+        SpinLockAcquire(&cps->ckpt_lck);
+        old_fsync_start = cps->fsync_start;
+        SpinLockRelease(&cps->ckpt_lck);
 
         RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_FILE_SYNC);
 
-        while (needWait) {
+        /* Wait for a new checkpoint to start. */
+        for (;;) {
             SpinLockAcquire(&cps->ckpt_lck);
-            if (cps->fsync_request_finished) {
-                cps->fsync_request_finished = false;
-                needWait = false;
-            }
+            new_fsync_start = cps->fsync_start;
             SpinLockRelease(&cps->ckpt_lck);
 
-            if (needWait) {
-                pg_usleep(10000L); /* wait ten mili sec */
+            if (new_fsync_start != old_fsync_start) {
+                break;
             }
+
+            CHECK_FOR_INTERRUPTS();
+            pg_usleep(100000L);
+        }
+
+        /*
+         * We are waiting for ckpt_done >= new_started, in a modulo sense.
+         */
+        for (;;) {
+            SpinLockAcquire(&cps->ckpt_lck);
+            new_fsync_done = cps->fsync_done;
+            SpinLockRelease(&cps->ckpt_lck);
+
+            if (new_fsync_done - new_fsync_start >= 0) {
+                break;
+            }
+
+            CHECK_FOR_INTERRUPTS();
+            pg_usleep(100000L);
         }
     }
 
@@ -1473,19 +1497,12 @@ void smgrsync_with_absorption(void)
     volatile CheckpointerShmemStruct* cps = t_thrd.checkpoint_cxt.CheckpointerShmem;
 
     SpinLockAcquire(&cps->ckpt_lck);
-    if (cps->fsync_request_launched) {
-        cps->fsync_request_absorbed = true;
-        cps->fsync_request_launched = false;
-    }
+    cps->fsync_start++;
     SpinLockRelease(&cps->ckpt_lck);
 
     smgrsync();
 
     SpinLockAcquire(&cps->ckpt_lck);
-    if (cps->fsync_request_absorbed) {
-        cps->fsync_request_finished = true;
-        cps->fsync_request_absorbed = false;
-    }
+    cps->fsync_done = cps->fsync_start;
     SpinLockRelease(&cps->ckpt_lck);
 }
-

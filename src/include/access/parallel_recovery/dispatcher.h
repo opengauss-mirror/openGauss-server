@@ -38,9 +38,7 @@
 #include "access/parallel_recovery/txn_redo.h"
 #include "access/redo_statistic.h"
 
-
 namespace parallel_recovery {
-
 
 typedef struct LogDispatcher {
     MemoryContext oldCtx;
@@ -63,11 +61,17 @@ typedef struct LogDispatcher {
     uint32* chosedWorkerIds;
     uint32 chosedWorkerCount;
     uint32 readyWorkerCnt;
+    bool checkpointNeedFullSync;
 } LogDispatcher;
 
 extern LogDispatcher* g_dispatcher;
 
-const static XLogRecPtr MAX_XLOG_REC_PTR = (XLogRecPtr)0xFFFFFFFFFFFFFFFF;
+#ifdef ENABLE_MULTIPLE_NODES
+const static bool SUPPORT_HOT_STANDBY = false;   /* don't support consistency view */
+#else
+const static bool SUPPORT_HOT_STANDBY = true;
+#endif
+const static bool SUPPORT_FPAGE_DISPATCH = true; /*  support file dispatch if true, else support page dispatche */
 
 const static uint64 OUTPUT_WAIT_COUNT = 0x7FFFFFF;
 const static uint64 PRINT_ALL_WAIT_COUNT = 0x7FFFFFFFF;
@@ -111,7 +115,8 @@ void SetPageWorkStateByThreadId(uint32 threadState);
 RedoWaitInfo redo_get_io_event(int32 event_id);
 void redo_get_wroker_statistic(uint32* realNum, RedoWorkerStatsData* worker, uint32 workerLen);
 extern void redo_dump_all_stats();
-
+void WaitRedoWorkerIdle();
+void SendClearMarkToAllWorkers();
 extern void SetStartupBufferPinWaitBufId(int bufid);
 extern void GetStartupBufferPinWaitBufId(int *bufids, uint32 len);
 extern uint32 GetStartupBufferPinWaitBufLen();

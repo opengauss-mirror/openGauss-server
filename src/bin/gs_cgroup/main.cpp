@@ -23,7 +23,6 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -34,6 +33,8 @@
 #include "cgutil.h"
 #include "pg_config.h"
 #include "getopt_long.h"
+
+extern int CheckBackendEnv(const char* input_env_value);
 
 /* global variable to describe Cgroup configuration file */
 gscgroup_grp_t* cgutil_vaddr[GSCGROUP_ALLNUM] = {NULL};
@@ -310,11 +311,10 @@ static int check_percentage_value(int bkd, int grp, int cls, int top)
 
 /*
  * @Description: check if the node group is valid.
- * @IN gname: group name
  * @Return:  -1: abnormal 0: normal
  * @See also:
  */
-static int check_node_group_name(const char* gname)
+static int check_node_group_name()
 {
     char path[MAX_PATH_LEN];
     struct stat stat_buf;
@@ -329,7 +329,9 @@ static int check_node_group_name(const char* gname)
         fprintf(stderr, "ERROR: Get GAUSSHOME failed, please check.\n");
         return -1;
     }
-    check_backend_env(exec_path);
+    if (CheckBackendEnv(exec_path) != 0) {
+        return -1;
+    }
     sret = snprintf_s(path,
         MAX_PATH_LEN,
         MAX_PATH_LEN - 1,
@@ -466,8 +468,9 @@ static int check_input_valid(void)
     }
 
     /* get current mount points */
-    if (cgexec_get_mount_points() < 0)
+    if (cgexec_get_mount_points() < 0) {
         return -1;
+    }
 
     /* check '-c', '-d', '-u' flag */
     if ((cgutil_opt.cflag && cgutil_opt.dflag) || (cgutil_opt.cflag && cgutil_opt.uflag) ||
@@ -745,7 +748,7 @@ static int check_group_name_process(int top, int bkd)
     /* Check if the node group has been created or will be created */
     if ('\0' != cgutil_opt.nodegroup[0]) {
         if ((cgutil_opt.clsname[0] != '\0' || cgutil_opt.wdname[0] != '\0' || cgutil_opt.refresh) &&
-            -1 == check_node_group_name(cgutil_opt.nodegroup)) {
+            -1 == check_node_group_name()) {
             fprintf(stderr, "ERROR: please check if the node group exists!\n");
             return -1;
         }
@@ -941,6 +944,9 @@ static int initialize_cgroup_config(void)
                 fprintf(stderr, "ERROR: environment variable $GAUSSHOME is not set!\n");
                 return -1;
             }
+            if (CheckBackendEnv(hpath) != 0) {
+                return -1;
+            }
             sret = snprintf_s(cgutil_opt.hpath, sizeof(cgutil_opt.hpath), sizeof(cgutil_opt.hpath) - 1, "%s", hpath);
             securec_check_intval(sret, , -1);
         }
@@ -1071,6 +1077,7 @@ static int parse_options(int argc, char** argv)
             case 'E': /* Exceptional data */
                 sret = strncpy_s(cgutil_opt.edata, EXCEPT_LEN, optarg, EXCEPT_LEN - 1);
                 securec_check_errno(sret, , -1);
+                check_input_for_security(cgutil_opt.edata);
                 break;
             case 'h': /* help */
                 usage();
@@ -1116,6 +1123,7 @@ static int parse_options(int argc, char** argv)
             case 'r': /* IO bps read */
                 sret = strncpy_s(cgutil_opt.bpsread, IODATA_LEN, optarg, IODATA_LEN - 1);
                 securec_check_errno(sret, , -1);
+                check_input_for_security(cgutil_opt.bpsread);
 
                 if (*cgutil_opt.bpsread == '\0')
                     fprintf(stdout, "NOTICE: invalid IO value for '-r' flag!\n");
@@ -1124,6 +1132,7 @@ static int parse_options(int argc, char** argv)
             case 'R': /* IO iops read */
                 sret = strncpy_s(cgutil_opt.iopsread, IODATA_LEN, optarg, IODATA_LEN - 1);
                 securec_check_errno(sret, , -1);
+                check_input_for_security(cgutil_opt.iopsread);
 
                 if (*cgutil_opt.iopsread == '\0')
                     fprintf(stdout, "NOTICE: invalid IO value for '-R' flag!\n");
@@ -1169,10 +1178,12 @@ static int parse_options(int argc, char** argv)
             case 'w': /* IO bps write */
                 sret = strncpy_s(cgutil_opt.bpswrite, IODATA_LEN, optarg, IODATA_LEN - 1);
                 securec_check_errno(sret, , -1);
+                check_input_for_security(cgutil_opt.bpswrite);
                 break;
             case 'W': /* IO iops write */
                 sret = strncpy_s(cgutil_opt.iopswrite, IODATA_LEN, optarg, IODATA_LEN - 1);
                 securec_check_errno(sret, , -1);
+                check_input_for_security(cgutil_opt.iopswrite);
                 break;
             case 1:
                 if (IS_EXCEPT_FLAG(cgutil_opt.eflag, EXCEPT_NONE))
@@ -1281,16 +1292,18 @@ int main(int argc, char** argv)
         cgutil_opt.refresh = 1;
 
         /* maybe we need not do upgrade */
-        if (cgexec_check_mount_for_upgrade() == -1)
+        if (cgexec_check_mount_for_upgrade() == -1) {
             goto error;
+        }
     }
 
     if (cgutil_opt.cflag) {
         /* run as root user */
         if (geteuid() == 0 && cgutil_opt.upgrade == 0) {
             /* check if cgroups have been mounted if it doesn't specify mflag */
-            if (-1 == (ret = cgexec_mount_root_cgroup()))
+            if (-1 == (ret = cgexec_mount_root_cgroup())) {
                 goto error;
+            }
         }
     }
 
@@ -1318,29 +1331,35 @@ int main(int argc, char** argv)
 
     /* create/delete/update operation */
     if (cgutil_opt.cflag) {
-        if (cgexec_create_groups() == -1)
+        if (cgexec_create_groups() == -1) {
             goto error;
+        }
     } else if (cgutil_opt.dflag) {
-        if (cgexec_drop_groups() == -1)
+        if (cgexec_drop_groups() == -1) {
             goto error;
+        }
     } else if (cgutil_opt.uflag) {
-        if (cgexec_update_groups() == -1)
+        if (cgexec_update_groups() == -1) {
             goto error;
+        }
     } else if (cgutil_opt.revert) {
-        if (cgexec_revert_groups() == -1)
+        if (cgexec_revert_groups() == -1) {
             goto error;
+        }
     }
 
     /* refresh current groups */
     if (cgutil_opt.refresh) {
-        if (cgexec_refresh_groups() == -1)
+        if (cgexec_refresh_groups() == -1) {
             goto error;
+        }
     }
 
     /* recover the last changes of groups */
     if (cgutil_opt.recover) {
-        if (cgexec_recover_groups() == -1)
+        if (cgexec_recover_groups() == -1) {
             goto error;
+        }
     }
 
     /* process the exceptional data */
@@ -1353,8 +1372,9 @@ int main(int argc, char** argv)
 
     /* display the cgroup tree information */
     if (cgutil_opt.ptree) {
-        if (cgptree_display_cgroups() == -1)
+        if (cgptree_display_cgroups() == -1) {
             goto error;
+        }
     }
 
     if (cgutil_vaddr[0] != NULL)
@@ -1389,7 +1409,8 @@ void cgroup_set_default_group()
     cgutil_vaddr[TOPCG_BACKEND]->used = 1;
     cgutil_vaddr[TOPCG_BACKEND]->gid = TOPCG_BACKEND;
     cgutil_vaddr[TOPCG_BACKEND]->gtype = GROUP_TOP;
-    (void)strncpy_s(cgutil_vaddr[TOPCG_BACKEND]->grpname, GPNAME_LEN - 1, GSCGROUP_TOP_BACKEND, GPNAME_LEN);
+    sret = strncpy_s(cgutil_vaddr[TOPCG_BACKEND]->grpname, GPNAME_LEN, GSCGROUP_TOP_BACKEND, GPNAME_LEN - 1);
+    securec_check_errno(sret, , );
     cgutil_vaddr[TOPCG_BACKEND]->ginfo.top.percent = TOP_BACKEND_PERCENT;
     cgutil_vaddr[TOPCG_BACKEND]->ainfo.shares = DEFAULT_CPU_SHARES * TOP_BACKEND_PERCENT / 10;
     cgutil_vaddr[TOPCG_BACKEND]->ainfo.weight = IO_WEIGHT_CALC(MAX_IO_WEIGHT, TOP_BACKEND_PERCENT);
@@ -1532,10 +1553,10 @@ void cgroup_unit_test_case()
     int sret = 0;
 
     cgutil_opt.mpflag = 1;
-    cgexec_mount_root_cgroup();
-    cgexec_umount_root_cgroup();
+    (void)cgexec_mount_root_cgroup();
+    (void)cgexec_umount_root_cgroup();
 
-    parse_options(argc, argv);
+    (void)parse_options(argc, argv);
 
     for (int i = 0; i < GSCGROUP_ALLNUM; ++i) {
         if (NULL == (cgutil_vaddr[i] = (gscgroup_grp_t*)malloc(sizeof(gscgroup_grp_t)))) {

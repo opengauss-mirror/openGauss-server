@@ -23,6 +23,7 @@
 #include "access/heapam.h"
 #include "access/nbtree.h"
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/objectaccess.h"
@@ -46,7 +47,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 /*
  * We use lists of this struct type to keep track of both operators and
@@ -260,7 +261,7 @@ static Oid CreateOpFamily(char* amname, char* opfname, Oid namespaceoid, Oid amo
 
     CatalogUpdateIndexes(rel, tup);
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 
     /*
      * Create dependencies for the opfamily proper.  Note: we do not create a
@@ -325,7 +326,7 @@ void DefineOpClass(CreateOpClassStmt* stmt)
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(namespaceoid, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceoid, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceoid));
 
     /* Get necessary info about access method */
     tup = SearchSysCache1(AMNAME, CStringGetDatum(stmt->amname));
@@ -545,6 +546,7 @@ void DefineOpClass(CreateOpClassStmt* stmt)
         SysScanDesc scan;
 
         ScanKeyInit(&skey[0], Anum_pg_opclass_opcmethod, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(amoid));
+
         scan = systable_beginscan(rel, OpclassAmNameNspIndexId, true, SnapshotNow, 1, skey);
 
         while (HeapTupleIsValid(tup = systable_getnext(scan))) {
@@ -585,7 +587,7 @@ void DefineOpClass(CreateOpClassStmt* stmt)
 
     CatalogUpdateIndexes(rel, tup);
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 
     /*
      * Now add tuples to pg_amop and pg_amproc tying in the operators and
@@ -639,6 +641,8 @@ void DefineOpClass(CreateOpClassStmt* stmt)
     InvokeObjectAccessHook(OAT_POST_CREATE, OperatorClassRelationId, opclassoid, 0, NULL);
 
     heap_close(rel, RowExclusiveLock);
+    list_free(operators);
+    list_free(procedures);
 }
 
 /*
@@ -658,7 +662,7 @@ void DefineOpFamily(CreateOpFamilyStmt* stmt)
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(namespaceoid, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceoid, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceoid));
 
     /* Get access method OID, throwing an error if it doesn't exist. */
     amoid = get_am_oid(stmt->amname, false);
@@ -740,9 +744,6 @@ static void AlterOpFamilyAdd(
     List* operators = NIL;  /* OpFamilyMember list for operators */
     List* procedures = NIL; /* OpFamilyMember list for support procs */
     ListCell* l = NULL;
-
-    operators = NIL;
-    procedures = NIL;
 
     /*
      * Scan the "items" list to obtain additional info.
@@ -844,6 +845,8 @@ static void AlterOpFamilyAdd(
      */
     storeOperators(opfamilyname, amoid, opfamilyoid, InvalidOid, operators, true);
     storeProcedures(opfamilyname, amoid, opfamilyoid, InvalidOid, procedures, true);
+    list_free(operators);
+    list_free(procedures);
 }
 
 /*
@@ -977,6 +980,7 @@ static void assignOperTypes(OpFamilyMember* member, Oid amoid, Oid typeoid)
             ereport(ERROR,
                 (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for access method %u", amoid)));
         pg_am = (Form_pg_am)GETSTRUCT(amtup);
+
         if (!pg_am->amcanorderbyop)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
@@ -1138,6 +1142,7 @@ static void storeOperators(List* opfamilyname, Oid amoid, Oid opfamilyoid, Oid o
     Oid entryoid;
     ObjectAddress myself, referenced;
     ListCell* l = NULL;
+    errno_t ss_rc = 0;
 
     rel = heap_open(AccessMethodOperatorRelationId, RowExclusiveLock);
 
@@ -1154,17 +1159,18 @@ static void storeOperators(List* opfamilyname, Oid amoid, Oid opfamilyoid, Oid o
                          ObjectIdGetDatum(op->lefttype),
                          ObjectIdGetDatum(op->righttype),
                          Int16GetDatum(op->number)))
-            ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT),
-                errmsg("operator %d(%s,%s) already exists in operator family \"%s\"",
-                    op->number,
-                    format_type_be(op->lefttype),
-                    format_type_be(op->righttype),
-                    NameListToString(opfamilyname))));
+            ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                    errmsg("operator %d(%s,%s) already exists in operator family \"%s\"",
+                        op->number,
+                        format_type_be(op->lefttype),
+                        format_type_be(op->righttype),
+                        NameListToString(opfamilyname))));
 
         oppurpose = OidIsValid(op->sortfamily) ? AMOP_ORDER : AMOP_SEARCH;
 
         /* Create the pg_amop entry */
-        errno_t ss_rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        ss_rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(ss_rc, "\0", "\0");
         ss_rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
         securec_check(ss_rc, "\0", "\0");
@@ -1184,7 +1190,7 @@ static void storeOperators(List* opfamilyname, Oid amoid, Oid opfamilyoid, Oid o
 
         CatalogUpdateIndexes(rel, tup);
 
-        heap_freetuple_ext(tup);
+        tableam_tops_free_tuple(tup);
 
         /* Make its dependencies */
         myself.classId = AccessMethodOperatorRelationId;
@@ -1244,6 +1250,7 @@ static void storeProcedures(
     Oid entryoid;
     ObjectAddress myself, referenced;
     ListCell* l = NULL;
+    errno_t ss_rc = 0;
 
     rel = heap_open(AccessMethodProcedureRelationId, RowExclusiveLock);
 
@@ -1259,15 +1266,16 @@ static void storeProcedures(
                          ObjectIdGetDatum(proc->lefttype),
                          ObjectIdGetDatum(proc->righttype),
                          Int16GetDatum(proc->number)))
-            ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT),
-                errmsg("function %d(%s,%s) already exists in operator family \"%s\"",
-                    proc->number,
-                    format_type_be(proc->lefttype),
-                    format_type_be(proc->righttype),
-                    NameListToString(opfamilyname))));
+            ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                    errmsg("function %d(%s,%s) already exists in operator family \"%s\"",
+                        proc->number,
+                        format_type_be(proc->lefttype),
+                        format_type_be(proc->righttype),
+                        NameListToString(opfamilyname))));
 
         /* Create the pg_amproc entry */
-        errno_t ss_rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        ss_rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(ss_rc, "\0", "\0");
         ss_rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
         securec_check(ss_rc, "\0", "\0");
@@ -1284,7 +1292,7 @@ static void storeProcedures(
 
         CatalogUpdateIndexes(rel, tup);
 
-        heap_freetuple_ext(tup);
+        tableam_tops_free_tuple(tup);
 
         /* Make its dependencies */
         myself.classId = AccessMethodProcedureRelationId;
@@ -1502,7 +1510,7 @@ void RenameOpClass(List* name, const char* access_method, const char* newname)
 
     /* Look up the opclass. */
     origtup = OpClassCacheLookup(amOid, name, false);
-    tup = heap_copytuple(origtup);
+    tup = (HeapTuple)tableam_tops_copy_tuple(origtup);
     ReleaseSysCache(origtup);
     opcOid = HeapTupleGetOid(tup);
     namespaceOid = ((Form_pg_opclass)GETSTRUCT(tup))->opcnamespace;
@@ -1515,7 +1523,7 @@ void RenameOpClass(List* name, const char* access_method, const char* newname)
                 errmsg("operator class \"%s\" for access method \"%s\" already exists in schema \"%s\"",
                     newname,
                     access_method,
-                    get_namespace_name(namespaceOid, true))));
+                    get_namespace_name(namespaceOid))));
     }
 
     /* must be owner */
@@ -1525,7 +1533,7 @@ void RenameOpClass(List* name, const char* access_method, const char* newname)
     /* must have CREATE privilege on namespace */
     aclresult = pg_namespace_aclcheck(namespaceOid, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
 
     /* rename */
     (void)namestrcpy(&(((Form_pg_opclass)GETSTRUCT(tup))->opcname), newname);
@@ -1533,7 +1541,7 @@ void RenameOpClass(List* name, const char* access_method, const char* newname)
     CatalogUpdateIndexes(rel, tup);
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -1593,7 +1601,7 @@ void RenameOpFamily(List* name, const char* access_method, const char* newname)
                 errmsg("operator family \"%s\" for access method \"%s\" already exists in schema \"%s\"",
                     newname,
                     access_method,
-                    get_namespace_name(namespaceOid, true))));
+                    get_namespace_name(namespaceOid))));
     }
 
     /* must be owner */
@@ -1603,7 +1611,7 @@ void RenameOpFamily(List* name, const char* access_method, const char* newname)
     /* must have CREATE privilege on namespace */
     aclresult = pg_namespace_aclcheck(namespaceOid, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
 
     /* rename */
     (void)namestrcpy(&(((Form_pg_opfamily)GETSTRUCT(tup))->opfname), newname);
@@ -1611,7 +1619,7 @@ void RenameOpFamily(List* name, const char* access_method, const char* newname)
     CatalogUpdateIndexes(rel, tup);
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -1630,12 +1638,12 @@ void AlterOpClassOwner(List* name, const char* access_method, Oid newOwnerId)
 
     /* Look up the opclass. */
     origtup = OpClassCacheLookup(amOid, name, false);
-    tup = heap_copytuple(origtup);
+    tup = (HeapTuple)tableam_tops_copy_tuple(origtup);
     ReleaseSysCache(origtup);
 
     AlterOpClassOwner_internal(rel, tup, newOwnerId);
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
     heap_close(rel, NoLock);
 }
 
@@ -1656,7 +1664,7 @@ void AlterOpClassOwner_oid(Oid opclassOid, Oid newOwnerId)
 
     AlterOpClassOwner_internal(rel, tup, newOwnerId);
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
     heap_close(rel, NoLock);
 }
 
@@ -1694,7 +1702,7 @@ static void AlterOpClassOwner_internal(Relation rel, HeapTuple tup, Oid newOwner
             /* New owner must have CREATE privilege on namespace */
             aclresult = pg_namespace_aclcheck(namespaceOid, newOwnerId, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid, true));
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
         }
 
         /*
@@ -1714,7 +1722,7 @@ static void AlterOpClassOwner_internal(Relation rel, HeapTuple tup, Oid newOwner
 /*
  * ALTER OPERATOR CLASS any_name USING access_method SET SCHEMA name
  */
-void AlterOpClassNamespace(List* name, char* access_method, const char* newschema)
+void AlterOpClassNamespace(List* name, const char* access_method, const char* newschema)
 {
     Oid amOid;
     Relation rel;
@@ -1814,7 +1822,7 @@ void AlterOpFamilyOwner(List* name, const char* access_method, Oid newOwnerId)
 
     AlterOpFamilyOwner_internal(rel, tup, newOwnerId);
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
     heap_close(rel, NoLock);
 }
 
@@ -1835,7 +1843,7 @@ void AlterOpFamilyOwner_oid(Oid opfamilyOid, Oid newOwnerId)
 
     AlterOpFamilyOwner_internal(rel, tup, newOwnerId);
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
     heap_close(rel, NoLock);
 }
 
@@ -1873,7 +1881,7 @@ static void AlterOpFamilyOwner_internal(Relation rel, HeapTuple tup, Oid newOwne
             /* New owner must have CREATE privilege on namespace */
             aclresult = pg_namespace_aclcheck(namespaceOid, newOwnerId, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid, true));
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
         }
 
         /*
@@ -1909,7 +1917,7 @@ Oid get_am_oid(const char* amname, bool missing_ok)
 /*
  * ALTER OPERATOR FAMILY any_name USING access_method SET SCHEMA name
  */
-void AlterOpFamilyNamespace(List* name, char* access_method, const char* newschema)
+void AlterOpFamilyNamespace(List* name, const char* access_method, const char* newschema)
 {
     Oid amOid;
     Relation rel;

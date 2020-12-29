@@ -1,1 +1,0 @@
-select lanname from pg_language where oid > 16384;

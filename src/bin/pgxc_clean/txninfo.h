@@ -56,7 +56,8 @@ typedef struct txn_info {
     TXN_STATUS* txn_stat; /* Array for each nodes */
     gid_info* txn_gid_info;
     bool new_version;
-    bool missing_cn_in_chain;
+    bool is_exec_cn_prepared;
+    bool new_ddl_version;
     char* msg;            /* Notice message for this txn. */
 } txn_info;
 
@@ -85,9 +86,8 @@ extern node_info* find_node_info(const char* node_name);
 #endif
 extern int find_node_index(const char* node_name);
 extern int set_node_info(const char* node_name, int port, const char* host, NODE_TYPE type, int index);
-extern TXN_STATUS check_txn_global_status(txn_info* txn);
+extern TXN_STATUS check_txn_global_status(txn_info* txn, bool commit_all_prepared, bool rollback_all_prepared);
 extern bool check2PCExists(void);
 extern char* str_txn_stat(TXN_STATUS status);
 
 #endif /* TXNINFO_H */
-

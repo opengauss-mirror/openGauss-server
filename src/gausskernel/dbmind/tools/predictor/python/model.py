@@ -98,7 +98,8 @@ class FeatureParser():
         except:
             raise
         if self.dim_red > 0:
-            path_pca_model = os.path.join(settings.PATH_MODELS, self.model_name, self.model_name + '.pkl')
+            path_pca_model = os.path.realpath(
+                os.path.join(settings.PATH_MODELS, self.model_name, self.model_name + '.pkl'))
             if is_train:
                 try:
                     reload_pca = open(path_pca_model, 'rb')
@@ -114,6 +115,8 @@ class FeatureParser():
                     self.parse_logger.debug('[reduce ratio]:{}'.format(self.dim_red))
                     self.parse_logger.debug('[PCA] n_dim:{}'.format(dim_reducer.n_components_))
                     self.parse_logger.debug('[PCA] explained:{}'.format(np.sum(dim_reducer.explained_variance_ratio_)))
+                if not os.path.exists(pca_to_save):
+                    os.mknod(pca_to_save, 0o600)
                 pca_to_save = open(path_pca_model, 'wb')
                 pickle.dump(dim_reducer, pca_to_save)
                 pca_to_save.close()

@@ -136,7 +136,8 @@ PGconn* connectDatabase(const char* dbname, const char* pghost, const char* pgpo
     } while (new_pass);
 
     if (password != NULL) {
-        str_reset(password);
+        errno_t ret = memset_s(password, strlen(password), 0, strlen(password));
+        check_memset_s(ret);
         free(password);
     }
 

@@ -31,6 +31,7 @@
 #include "commands/user.h"
 #include "executor/functions.h"
 #include "funcapi.h"
+#include "gs_policy/gs_policy_masking.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
@@ -58,7 +59,7 @@
 #endif
 #include "catalog/pg_authid.h"
 #include "catalog/pgxc_node.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "postmaster/postmaster.h"
 #include "commands/dbcommands.h"
 #include "storage/lmgr.h"
@@ -101,12 +102,12 @@ static void copyLibraryToSpecialName(char* absolutePath, const char* final_file_
     const char* libPath, CFunType function_type);
 static void send_library_to_Backup(char* sourcePath);
 
-static char* getCFunProbin(const char* probin, const char* fun_name, Oid procNamespace, Oid proowner,
+static char* getCFunProbin(const char* probin, Oid procNamespace, Oid proowner,
     const char* filename, char** final_file_name);
 
 static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, Oid proowner, Oid returnType,
     Datum allParameterTypes, Datum parameterModes, Datum parameterNames, bool returnsSet, bool replace, bool isOraStyle,
-    char prokind);
+    bool isAgg, bool isWindowFunc);
 static bool user_define_func_check(Oid languageId, const char* probin, char** absolutePath, CFunType* function_type);
 static const char* get_file_name(const char* filePath, CFunType function_type);
 
@@ -330,7 +331,8 @@ static void send_library_other_node(char* absolutePath)
 
     appendStringInfo(&strinfo, "python %s %d %s %s", transfer_path, SENDTOOTHERNODE, absolutePath, temp_library_name);
 
-    int rc = gs_system_security(strinfo.data);
+    int rc = system(strinfo.data);
+
     if (rc != 0) {
         ereport(ERROR,
             (errcode(ERRCODE_SYSTEM_ERROR), errmsg("Send library to all node fail: %m, command %s", strinfo.data)));
@@ -359,7 +361,8 @@ static void send_library_to_Backup(char* sourcePath)
         sourcePath,
         g_instance.attr.attr_common.PGXCNodeName);
 
-    int rc = gs_system_security(strinfo.data);
+    int rc = system(strinfo.data);
+
     if (rc != 0) {
         ereport(ERROR,
             (errcode(ERRCODE_SYSTEM_ERROR), errmsg("Send library to backup fail: %m, command %s", strinfo.data)));
@@ -487,7 +490,7 @@ static const char* get_file_name(const char* filePath, CFunType function_type)
  * @in final_file_name: Final file name.
  * @return: Finial library path which will be keep to system table.
  */
-static char* getCFunProbin(const char* probin, const char* fun_name, Oid procNamespace, Oid proowner,
+static char* getCFunProbin(const char* probin, Oid procNamespace, Oid proowner,
     const char* filename, char** final_file_name)
 {
     if (strlen(filename) >= MAXPGPATH - 1) {
@@ -676,12 +679,13 @@ static bool checkPackageFunctionConflicts(
  * @in parameterNames: Parameter Names.
  * @in returnsSet: Return type if is set.
  * @in replace: Is replace.
- * @in isOraStyle: Is a style.
- * @in prokind: Procedure kind.
+ * @in isOraStyle: Is A db style.
+ * @in isAgg: Is agg function.
+ * @in isWindowFunc: Is windows function.
  */
 static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, Oid proowner, Oid returnType,
     Datum allParameterTypes, Datum parameterModes, Datum parameterNames, bool returnsSet, bool replace, bool isOraStyle,
-    char prokind)
+    bool isAgg, bool isWindowFunc)
 {
     Datum proargnames;
     bool isnull = false;
@@ -701,12 +705,18 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
     /* if the function is a builtin function, its oid is less than 10000.
      * we can't allow replace the builtin functions
      */
-    if (IsBuiltinFuncOid(HeapTupleGetOid(oldtup)) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
+    if (IsSystemObjOid(HeapTupleGetOid(oldtup)) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("function \"%s\" is a builtin function,it can not be changed", procedureName)));
     }
-    /* a donot check function return type when replace */
+    /* if the function is a masking function, we can't allow to replace it. */
+    if (IsMaskingFunctionOid(HeapTupleGetOid(oldtup)) && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("function \"%s\" is a masking function,it can not be changed", procedureName)));
+    }
+    /* A db donot check function return type when replace */
     if (!isOraStyle) {
         /*
          * Not okay to change the return type of the existing proc, since
@@ -777,8 +787,8 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
     }
 
     /* Can't change aggregate or window-function status, either */
-    if ((PROC_IS_AGG(oldproc->prokind) || PROC_IS_AGG(prokind)) && oldproc->prokind != prokind) {
-        if (PROC_IS_AGG(oldproc->prokind)) {
+    if (oldproc->proisagg != isAgg) {
+        if (oldproc->proisagg) {
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("function \"%s\" is an aggregate function", procedureName)));
@@ -789,8 +799,8 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
         }
     }
 
-    if ((PROC_IS_WIN(oldproc->prokind) || PROC_IS_WIN(prokind)) && oldproc->prokind != prokind) {
-        if (PROC_IS_WIN(oldproc->prokind)) {
+    if (oldproc->proiswindow != isWindowFunc) {
+        if (oldproc->proiswindow) {
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("function \"%s\" is a window function", procedureName)));
         } else {
@@ -809,20 +819,38 @@ static void cfunction_check_user(const char* probin)
 {
     struct stat statbuf;
     if (lstat(probin, &statbuf) != 0) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", probin)));
+        ereport(ERROR, (errcode_for_file_access(),
+            errmsg("could not stat file \"%s\": %m", probin),
+            errdetail("the dynamic library for C function should be placed in $libdir/pg_plugin")));
     }
 
-    passwd* pw = getpwuid(statbuf.st_uid);
-    if (pw == NULL || pw->pw_name == NULL) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("can not get current user name.")));
+    /* Get the user name of C function .so file. */
+    passwd* filepw = getpwuid(statbuf.st_uid);
+    if (filepw == NULL || filepw->pw_name == NULL) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("can not get current user name for the C function file.")));
     }
 
-    char superuser_name[NAMEDATALEN];
-    (void)GetSuperUserName(superuser_name);
+    /* Get the user name of current process. */
+    passwd* syspw = getpwuid(getuid());
+    if (syspw == NULL || syspw->pw_name == NULL) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("can not get user name for current process.")));
+    }
 
-    if (strncmp(superuser_name, pw->pw_name, NAMEDATALEN) != 0) {
+    if (strncmp(syspw->pw_name, filepw->pw_name, NAMEDATALEN) != 0) {
         ereport(
-            ERROR, (errcode_for_file_access(), errmsg("the owner of file \"%s\" must be %s.", probin, superuser_name)));
+            ERROR, (errcode_for_file_access(), errmsg("the owner of file \"%s\" must be %s.", probin, syspw->pw_name)));
+    }
+}
+
+/*
+ * Detect if a given path contain a substring "../".
+ */
+inline void IsLeavingDefaultPath(const char* path)
+{
+    if (strstr(path, "../") != NULL) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Path \"%s\" is not admitted. Don't use \"../\" "
+                "when enable_default_cfunc_libpath is on.", path)));
     }
 }
 
@@ -837,40 +865,52 @@ static void cfunction_check_user(const char* probin)
 static bool user_define_func_check(Oid languageId, const char* probin, char** absolutePath, CFunType* function_type)
 {
     char* library_path = NULL;
+    char* new_path = (char *)probin;
     bool user_define_fun = false;
     CFunType fun_type = NormalType;
     bool check_user = false;
 
     if (languageId == ClanguageId) {
-        /*
-         * C language function defined by users if probin is absolute path.
-         * Probin can be start with "$libdir/pg_plugin/" when upgrading.
-         */
-        if (is_absolute_path(probin)) {
-            user_define_fun = true;
-        }
-        /* This function can be dump out function */
-        if (strncmp(probin, "$libdir/pg_plugin/", strlen("$libdir/pg_plugin/")) == 0) {
+        if (strncmp(probin, PORC_PLUGIN_LIB_PATH, strlen(PORC_PLUGIN_LIB_PATH)) == 0) {
+            /* Probin can be start with "$libdir/pg_plugin/" when upgrading. */
             user_define_fun = true;
             fun_type = DumpType;
-        } else {
+        } else if (strncmp(probin, PORC_SRC_LIB_PATH, strlen(PORC_SRC_LIB_PATH)) == 0) {
+            user_define_fun = true;
             check_user = true;
+        } else if (strncmp(probin, PROC_LIB_PATH, strlen(PROC_LIB_PATH)) == 0) {
+            /* During the initdb and upgrade, we need to use .so file in $libdir to create extension. */
+            if (superuser()) {
+                check_user = true;
+            }
+        } else {
+            if (g_instance.attr.attr_sql.enable_default_cfunc_libpath) {
+                /* Check if probin is a legal path. We need to detect "../" in probin since the existence of "../"
+                 * may cause the target path leaves the default path. */
+                IsLeavingDefaultPath(probin);
+                /* Add plugin path. */
+                int len = strlen(PORC_SRC_LIB_PATH) + strlen(probin) + 1;
+                new_path = (char*)palloc0(len);
+                errno_t rc = strcpy_s(new_path, len, PORC_SRC_LIB_PATH);
+                securec_check(rc, "\0", "\0");
+                rc = strcat_s(new_path, len, probin);
+                securec_check(rc, "\0", "\0");
+                user_define_fun = true;
+                check_user = true;
+            } else {
+                /* C language function defined by users if probin is absolute path. */
+                if (is_absolute_path(probin)) {
+                    user_define_fun = true;
+                }
+                check_user = true;
+            }
         }
 
         if (user_define_fun) {
-            /*
-            As online expandition needs C functions, we have to allow C function in security mode.
-            if (isSecurityMode)
-            {
-                ereport(ERROR,
-                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                errmsg("C-function is not supported in security mode.")));
-            }
-            */
-            library_path = expand_dynamic_library_name(probin);
+            library_path = expand_dynamic_library_name(new_path);
 
-            if ((IS_PGXC_COORDINATOR && !IsConnFromCoord()) || IS_SINGLE_NODE) {
-                /* Check path which input by user input valid. */
+            if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+                /* Check path which input by user input valid.*/
                 check_library_path(library_path, fun_type);
 
                 if (check_user == true) {
@@ -896,10 +936,10 @@ static bool user_define_func_check(Oid languageId, const char* probin, char** ab
  */
 Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyle, bool replace, bool returnsSet,
     Oid returnType, Oid proowner, Oid languageObjectId, Oid languageValidator, const char* prosrc, const char* probin,
-    char prokind, bool security_definer, bool isLeakProof, bool isStrict, char volatility,
+    bool isAgg, bool isWindowFunc, bool security_definer, bool isLeakProof, bool isStrict, char volatility,
     oidvector* parameterTypes, Datum allParameterTypes, Datum parameterModes, Datum parameterNames,
     List* parameterDefaults, Datum proconfig, float4 procost, float4 prorows, int2vector* prodefaultargpos, bool fenced,
-    bool shippable, bool package)
+    bool shippable, bool package, bool proIsProcedure)
 {
     Oid retval;
     int parameterCount;
@@ -1144,7 +1184,8 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
     values[Anum_pg_proc_prorows - 1] = Float4GetDatum(prorows);
     values[Anum_pg_proc_provariadic - 1] = ObjectIdGetDatum(variadicType);
     values[Anum_pg_proc_protransform - 1] = ObjectIdGetDatum(InvalidOid);
-    values[Anum_pg_proc_prokind - 1] = CharGetDatum(prokind);
+    values[Anum_pg_proc_proisagg - 1] = BoolGetDatum(isAgg);
+    values[Anum_pg_proc_proiswindow - 1] = BoolGetDatum(isWindowFunc);
     values[Anum_pg_proc_prosecdef - 1] = BoolGetDatum(security_definer);
     values[Anum_pg_proc_proleakproof - 1] = BoolGetDatum(isLeakProof);
     values[Anum_pg_proc_proisstrict - 1] = BoolGetDatum(isStrict);
@@ -1175,17 +1216,20 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
     }
 
     values[Anum_pg_proc_prosrc - 1] = CStringGetTextDatum(prosrc);
-
     values[Anum_pg_proc_fenced - 1] = BoolGetDatum(fenced);
     values[Anum_pg_proc_shippable - 1] = BoolGetDatum(shippable);
     values[Anum_pg_proc_package - 1] = BoolGetDatum(package);
+    values[Anum_pg_proc_prokind - 1] = CharGetDatum(proIsProcedure ? PROKIND_PROCEDURE : PROKIND_FUNCTION);
+
     if (probin != NULL) {
         /* Check user defined function. */
         user_defined_c_fun = user_define_func_check(languageObjectId, probin, &absolutePath, &function_type);
         if (user_defined_c_fun) {
-            filename = get_file_name(probin, function_type);
+            filename = get_file_name(absolutePath, function_type);
             check_backend_env(pstrdup(filename));
-            libPath = getCFunProbin(probin, procedureName, procNamespace, proowner, filename, &final_file_name);
+            /* Check dynamic lib file first */
+            check_external_function(absolutePath, filename, prosrc);
+            libPath = getCFunProbin(probin, procNamespace, proowner, filename, &final_file_name);
 
             values[Anum_pg_proc_probin - 1] = CStringGetTextDatum(libPath);
         } else {
@@ -1203,9 +1247,9 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
     rel = heap_open(ProcedureRelationId, RowExclusiveLock);
     tupDesc = RelationGetDescr(rel);
 
-    /* a do not overload a function by arguments. */
+    /* A db do not overload a function by arguments.*/
     if (isOraStyle && !package) {
-        List* name = list_make2(makeString(get_namespace_name(procNamespace, true)), makeString(pstrdup(procedureName)));
+        List* name = list_make2(makeString(get_namespace_name(procNamespace)), makeString(pstrdup(procedureName)));
 
         FuncCandidateList listfunc = FuncnameGetCandidates(name, -1, NULL, false, false, true);
         if (listfunc) {
@@ -1242,7 +1286,8 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
             returnsSet,
             replace,
             isOraStyle,
-            prokind);
+            isAgg,
+            isWindowFunc);
 
         bool isNull = false;
         Datum ispackage = SysCacheGetAttr(PROCOID, oldtup, Anum_pg_proc_package, &isNull);
@@ -1526,8 +1571,11 @@ Datum fmgr_c_validator(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("null probin for C function %u", funcoid)));
     probin = TextDatumGetCString(tmp);
     if (strcmp(probin, "$libdir/plpgsql") && strcmp(probin, "$libdir/dist_fdw") && strcmp(probin, "$libdir/file_fdw") &&
-        strcmp(probin, "$libdir/mot_fdw") && strcmp(probin, "$libdir/log_fdw") &&
-        strcmp(probin, "$libdir/hdfs_fdw")) {
+#ifdef ENABLE_MOT
+        strcmp(probin, "$libdir/mot_fdw") &&
+#endif
+        strcmp(probin, "$libdir/log_fdw") && strcmp(probin, "$libdir/hdfs_fdw") &&
+        strcmp(probin, "$libdir/postgres_fdw")) {
         (void)load_external_function(probin, prosrc, true, true);
     }
 
@@ -1871,7 +1919,7 @@ static bool pgxc_query_contains_view(List* queries)
         foreach (lc, query->rtable) {
             RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
 
-            if (rte->relkind == RELKIND_VIEW)
+            if (rte->relkind == RELKIND_VIEW || rte->relkind == RELKIND_CONTQUERY)
                 return true;
         }
     }

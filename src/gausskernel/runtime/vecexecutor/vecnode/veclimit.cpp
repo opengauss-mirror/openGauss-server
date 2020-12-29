@@ -54,7 +54,7 @@ VectorBatch* ExecVecLimit(VecLimitState* node) {
              */
             recompute_limits(node);
 
-            /* FALL THRU */
+            /* fall through */
         case LIMIT_RESCAN:
 
             /*
@@ -307,7 +307,10 @@ VecLimitState* ExecInitVecLimit(VecLimit* node, EState* estate, int eflags)
      * limit nodes do no projections, so initialize projection info for this
      * node appropriately
      */
-    ExecAssignResultTypeFromTL(&limit_state->ps);
+    ExecAssignResultTypeFromTL(
+            &limit_state->ps,
+            ExecGetResultType(outerPlanState(limit_state))->tdTableAmType);
+
     limit_state->ps.ps_ProjInfo = NULL;
     limit_state->subBatch = NULL;
 

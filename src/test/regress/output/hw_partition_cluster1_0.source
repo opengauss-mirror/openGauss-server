@@ -1,0 +1,326 @@
+--
+---- TEST FOR CLUSTER PARTITIONED TABLE
+--
+--  ALTER TABLE CLUSTER ON index_name
+--  ALTER TABLE SET WITHOUT CLUSTER
+--  CLUSTER [VERBOSE] table_name [ USING index_name ]
+--
+----  ALTER TABLE CLUSTER ON index_name
+--
+-- 1. test function
+-- 2. test toast and tablespace
+-- 1. test function
+create table test_alter_table_cluster_on(a int, b int, c text)
+partition by range (a)
+(
+	partition p1_test_alter_table_cluster_on values less than (1),
+	partition p2_test_alter_table_cluster_on values less than (4),
+	partition p3_test_alter_table_cluster_on values less than (7)
+);
+create index test_alter_table_cluster_on_a_index on test_alter_table_cluster_on (a) local;
+create index test_alter_table_cluster_on_b_index on test_alter_table_cluster_on (b) local;
+create index test_alter_table_cluster_on_c_index on test_alter_table_cluster_on (c) local;
+create index test_alter_table_cluster_on_a_c_index on test_alter_table_cluster_on (a, c) local;
+create index test_alter_table_cluster_on_b_c_index on test_alter_table_cluster_on (b, c) local;
+insert into test_alter_table_cluster_on values (0, 0, 'd');
+insert into test_alter_table_cluster_on values (0, 0, 'c');
+insert into test_alter_table_cluster_on values (0, 5, 'a');
+insert into test_alter_table_cluster_on values (0, 3, 'b');
+insert into test_alter_table_cluster_on values (0, 6, 'e');
+insert into test_alter_table_cluster_on values (0, 6, 'd');
+insert into test_alter_table_cluster_on values (0, 1, 'ab');
+insert into test_alter_table_cluster_on values (0, 2, 'bd');
+insert into test_alter_table_cluster_on values (0, 4, 'fg');
+insert into test_alter_table_cluster_on values (2, 0, 'd');
+insert into test_alter_table_cluster_on values (2, 0, 'c');
+insert into test_alter_table_cluster_on values (2, 5, 'a');
+insert into test_alter_table_cluster_on values (2, 3, 'b');
+insert into test_alter_table_cluster_on values (2, 6, 'e');
+insert into test_alter_table_cluster_on values (2, 6, 'd');
+insert into test_alter_table_cluster_on values (2, 1, 'ab');
+insert into test_alter_table_cluster_on values (2, 2, 'bd');
+insert into test_alter_table_cluster_on values (2, 4, 'fg');
+-- cluster on test_alter_table_cluster_on_a_index
+cluster test_alter_table_cluster_on using test_alter_table_cluster_on_a_index;
+select * from test_alter_table_cluster_on order by 1, 2, 3;
+ a | b | c  
+---+---+----
+ 0 | 0 | c
+ 0 | 0 | d
+ 0 | 1 | ab
+ 0 | 2 | bd
+ 0 | 3 | b
+ 0 | 4 | fg
+ 0 | 5 | a
+ 0 | 6 | d
+ 0 | 6 | e
+ 2 | 0 | c
+ 2 | 0 | d
+ 2 | 1 | ab
+ 2 | 2 | bd
+ 2 | 3 | b
+ 2 | 4 | fg
+ 2 | 5 | a
+ 2 | 6 | d
+ 2 | 6 | e
+(18 rows)
+
+select * from test_alter_table_cluster_on partition (p1_test_alter_table_cluster_on) order by 1, 2, 3;
+ a | b | c  
+---+---+----
+ 0 | 0 | c
+ 0 | 0 | d
+ 0 | 1 | ab
+ 0 | 2 | bd
+ 0 | 3 | b
+ 0 | 4 | fg
+ 0 | 5 | a
+ 0 | 6 | d
+ 0 | 6 | e
+(9 rows)
+
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_alter_table_cluster_on'
+	AND indisclustered;
+               relname               
+-------------------------------------
+ test_alter_table_cluster_on_a_index
+(1 row)
+
+-- cluster on test_alter_table_cluster_on_b_index
+alter table test_alter_table_cluster_on cluster on test_alter_table_cluster_on_b_index;
+cluster test_alter_table_cluster_on;
+select * from test_alter_table_cluster_on order by 1, 2, 3;
+ a | b | c  
+---+---+----
+ 0 | 0 | c
+ 0 | 0 | d
+ 0 | 1 | ab
+ 0 | 2 | bd
+ 0 | 3 | b
+ 0 | 4 | fg
+ 0 | 5 | a
+ 0 | 6 | d
+ 0 | 6 | e
+ 2 | 0 | c
+ 2 | 0 | d
+ 2 | 1 | ab
+ 2 | 2 | bd
+ 2 | 3 | b
+ 2 | 4 | fg
+ 2 | 5 | a
+ 2 | 6 | d
+ 2 | 6 | e
+(18 rows)
+
+select * from test_alter_table_cluster_on partition (p1_test_alter_table_cluster_on) order by 1, 2, 3;
+ a | b | c  
+---+---+----
+ 0 | 0 | c
+ 0 | 0 | d
+ 0 | 1 | ab
+ 0 | 2 | bd
+ 0 | 3 | b
+ 0 | 4 | fg
+ 0 | 5 | a
+ 0 | 6 | d
+ 0 | 6 | e
+(9 rows)
+
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_alter_table_cluster_on'
+	AND indisclustered;
+               relname               
+-------------------------------------
+ test_alter_table_cluster_on_b_index
+(1 row)
+
+	
+-- cluster on test_alter_table_cluster_on_a_c_index
+alter table test_alter_table_cluster_on cluster on test_alter_table_cluster_on_a_c_index;
+cluster test_alter_table_cluster_on;
+select * from test_alter_table_cluster_on order by 1, 2, 3;
+ a | b | c  
+---+---+----
+ 0 | 0 | c
+ 0 | 0 | d
+ 0 | 1 | ab
+ 0 | 2 | bd
+ 0 | 3 | b
+ 0 | 4 | fg
+ 0 | 5 | a
+ 0 | 6 | d
+ 0 | 6 | e
+ 2 | 0 | c
+ 2 | 0 | d
+ 2 | 1 | ab
+ 2 | 2 | bd
+ 2 | 3 | b
+ 2 | 4 | fg
+ 2 | 5 | a
+ 2 | 6 | d
+ 2 | 6 | e
+(18 rows)
+
+select * from test_alter_table_cluster_on partition (p1_test_alter_table_cluster_on) order by 1, 2, 3;
+ a | b | c  
+---+---+----
+ 0 | 0 | c
+ 0 | 0 | d
+ 0 | 1 | ab
+ 0 | 2 | bd
+ 0 | 3 | b
+ 0 | 4 | fg
+ 0 | 5 | a
+ 0 | 6 | d
+ 0 | 6 | e
+(9 rows)
+
+-- Verify that indisclustered is correctly set
+SELECT pg_class.relname FROM pg_index, pg_class, pg_class AS pg_class_2
+WHERE pg_class.oid=indexrelid
+	AND indrelid=pg_class_2.oid
+	AND pg_class_2.relname = 'test_alter_table_cluster_on'
+	AND indisclustered;
+                relname                
+---------------------------------------
+ test_alter_table_cluster_on_a_c_index
+(1 row)
+
+-- clean
+drop table test_alter_table_cluster_on;
+-- 2. test toast and tablespace
+\! rm -fr '@testtablespace@/ts_one'
+\! mkdir '@testtablespace@/ts_one'
+create tablespace ts_one location '@testtablespace@/ts_one';
+create table test_alter_table_cluster_on_toast_tablespace(a int, b int, c text)
+tablespace ts_one
+partition by range (a)
+(
+	partition p1_test_alter_table_cluster_on_toast_tablespace values less than (1),
+	partition p2_test_alter_table_cluster_on_toast_tablespace values less than (4) tablespace ts_one,
+	partition p3_test_alter_table_cluster_on_toast_tablespace values less than (7)
+);
+create index test_alter_table_cluster_on_toast_tablespace_a_index on test_alter_table_cluster_on_toast_tablespace (a) local;
+create index test_alter_table_cluster_on_toast_tablespace_b_index on test_alter_table_cluster_on_toast_tablespace (b) local;
+create index test_alter_table_cluster_on_toast_tablespace_c_index on test_alter_table_cluster_on_toast_tablespace (c) local;
+create index test_alter_table_cluster_on_toast_tablespace_a_c_index on test_alter_table_cluster_on_toast_tablespace (a, c) local;
+create index test_alter_table_cluster_on_toast_tablespace_b_c_index on test_alter_table_cluster_on_toast_tablespace (b, c) local;
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 0, 'd');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 0, 'c');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 5, 'a');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 3, 'b');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 6, 'e');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 6, 'd');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 1, 'ab');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 2, 'bd');
+insert into test_alter_table_cluster_on_toast_tablespace values (0, 4, 'fg');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 0, 'd');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 0, 'c');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 5, 'a');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 3, 'b');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 6, 'e');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 6, 'd');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 1, 'ab');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 2, 'bd');
+insert into test_alter_table_cluster_on_toast_tablespace values (2, 4, 'fg');
+-- look up tablespace of every partition
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.relname='p1_test_alter_table_cluster_on_toast_tablespace' or p.relname='p2_test_alter_table_cluster_on_toast_tablespace'or p.relname='p3_test_alter_table_cluster_on_toast_tablespace'  or p.relname='test_alter_table_cluster_on_toast_tablespace' order by p.relname;
+                     relname                     | spcname 
+-------------------------------------------------+---------
+ p1_test_alter_table_cluster_on_toast_tablespace | ts_one
+ p2_test_alter_table_cluster_on_toast_tablespace | ts_one
+ p3_test_alter_table_cluster_on_toast_tablespace | ts_one
+ test_alter_table_cluster_on_toast_tablespace    | ts_one
+(4 rows)
+
+-- look up toast of every partition
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p1_test_alter_table_cluster_on_toast_tablespace');
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p2_test_alter_table_cluster_on_toast_tablespace');
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p3_test_alter_table_cluster_on_toast_tablespace');
+ count 
+-------
+     1
+(1 row)
+
+-- cluster on test_alter_table_cluster_on_toast_tablespace_a_index
+cluster test_alter_table_cluster_on_toast_tablespace using test_alter_table_cluster_on_toast_tablespace_a_index;
+-- look up tablespace of every partition
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.relname='p1_test_alter_table_cluster_on_toast_tablespace' or p.relname='p2_test_alter_table_cluster_on_toast_tablespace'or p.relname='p3_test_alter_table_cluster_on_toast_tablespace'  or p.relname='test_alter_table_cluster_on_toast_tablespace' order by p.relname;
+                     relname                     | spcname 
+-------------------------------------------------+---------
+ p1_test_alter_table_cluster_on_toast_tablespace | ts_one
+ p2_test_alter_table_cluster_on_toast_tablespace | ts_one
+ p3_test_alter_table_cluster_on_toast_tablespace | ts_one
+ test_alter_table_cluster_on_toast_tablespace    | ts_one
+(4 rows)
+
+-- look up toast of every partition
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p1_test_alter_table_cluster_on_toast_tablespace');
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p2_test_alter_table_cluster_on_toast_tablespace');
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p3_test_alter_table_cluster_on_toast_tablespace');
+ count 
+-------
+     1
+(1 row)
+
+-- cluster on test_alter_table_cluster_on_toast_tablespace_b_c_index
+cluster test_alter_table_cluster_on_toast_tablespace using test_alter_table_cluster_on_toast_tablespace_b_c_index;
+-- look up tablespace of every partition
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.relname='p1_test_alter_table_cluster_on_toast_tablespace' or p.relname='p2_test_alter_table_cluster_on_toast_tablespace'or p.relname='p3_test_alter_table_cluster_on_toast_tablespace'  or p.relname='test_alter_table_cluster_on_toast_tablespace' order by p.relname;
+                     relname                     | spcname 
+-------------------------------------------------+---------
+ p1_test_alter_table_cluster_on_toast_tablespace | ts_one
+ p2_test_alter_table_cluster_on_toast_tablespace | ts_one
+ p3_test_alter_table_cluster_on_toast_tablespace | ts_one
+ test_alter_table_cluster_on_toast_tablespace    | ts_one
+(4 rows)
+
+-- look up toast of every partition
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p1_test_alter_table_cluster_on_toast_tablespace');
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p2_test_alter_table_cluster_on_toast_tablespace');
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from pg_class where relname= 'pg_toast_part_'||(select oid from pg_partition where relname='p3_test_alter_table_cluster_on_toast_tablespace');
+ count 
+-------
+     1
+(1 row)
+
+-- clean
+drop table test_alter_table_cluster_on_toast_tablespace;
+drop tablespace ts_one;

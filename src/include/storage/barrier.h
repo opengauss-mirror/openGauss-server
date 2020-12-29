@@ -13,7 +13,7 @@
 #ifndef BARRIER_H
 #define BARRIER_H
 
-#include "storage/s_lock.h"
+#include "storage/lock/s_lock.h"
 
 /*
  * A compiler barrier need not (and preferably should not) emit any actual
@@ -89,9 +89,34 @@
  * performance, here use dmb memory barrier.
  */
 #define pg_memory_barrier_dsb(opt) __asm__ __volatile__("DMB " #opt::: "memory")
+
+#ifndef ENABLE_THREAD_CHECK
+
 #define pg_memory_barrier() pg_memory_barrier_dsb(ish)
 #define pg_read_barrier() pg_memory_barrier_dsb(ishld)
 #define pg_write_barrier() pg_memory_barrier_dsb(ishst)
+
+#else
+
+#include "tsan_annotation.h"
+
+#define pg_memory_barrier() do { \
+    TsAnnotateReadBarrier(); \
+    TsAnnotateWriteBarrier(); \
+    pg_memory_barrier_dsb(ish); \
+} while (0)
+
+#define pg_read_barrier() do { \
+    TsAnnotateReadBarrier(); \
+    pg_memory_barrier_dsb(ishld); \
+} while (0)
+
+#define pg_write_barrier() do { \
+    TsAnnotateWriteBarrier(); \
+    pg_memory_barrier_dsb(ishst); \
+} while (0)
+
+#endif
 #elif defined(__ia64__) || defined(__ia64)
 
 /*

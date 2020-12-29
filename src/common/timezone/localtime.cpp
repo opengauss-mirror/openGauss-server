@@ -20,9 +20,6 @@
 #include "private.h"
 #include "pgtz.h"
 #include "tzfile.h"
-#include "securec.h"
-#include "utils/elog.h"
-
 
 #ifndef WILDABBR
 /* ----------
@@ -673,7 +670,6 @@ int tzparse(const char* name, struct state* sp, int lastditch)
     unsigned char* typep = NULL;
     char* cp = NULL;
     int load_result;
-    int rc = 0;
 
     stdname = name;
     if (lastditch) {
@@ -896,13 +892,11 @@ int tzparse(const char* name, struct state* sp, int lastditch)
         return -1;
     }
     cp = sp->chars;
-    rc = strncpy_s(cp, sizeof sp->chars, stdname, stdlen);
-    securec_check_c(rc, "", "");
+    (void)strncpy(cp, stdname, stdlen);
     cp += stdlen;
     *cp++ = '\0';
     if (dstlen != 0) {
-        rc = strncpy_s(cp, sizeof sp->chars, dstname, dstlen);
-        securec_check_c(rc, "", "");
+        (void)strncpy(cp, dstname, dstlen);
         *(cp + dstlen) = '\0';
     }
     return 0;

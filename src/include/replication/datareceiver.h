@@ -48,7 +48,8 @@
  */
 typedef enum {
     DATARCV_STOPPED,  /* stopped and mustn't start up again */
-    DATARCV_STARTING, /* launched, but the process hasn't initialized yet */
+    DATARCV_STARTING, /* launched, but the process hasn't
+                       * initialized yet */
     DATARCV_RUNNING,  /* datareceiver is running */
     DATARCV_STOPPING  /* requested to stop, but still running */
 } DataRcvState;
@@ -129,7 +130,7 @@ extern void wakeupWalRcvWriter(void);
 /* Receive writer */
 extern bool DataRcvWriterInProgress(void);
 extern void DataRcvDataCleanup(void);
-extern void walRcvDataCleanup();
+extern void walRcvDataCleanup(void);
 
 /* prototypes for functions in datarcvreceiver.cpp */
 extern void DataRcvWriterMain(void);
@@ -146,4 +147,3 @@ extern void CloseDataFile(void);
 extern uint32 DoDataWrite(char* buf, uint32 nbytes);
 
 #endif /* _DATARECEIVER_H */
-

@@ -188,7 +188,7 @@ def global_search(env, config):
         pbound = {name: (0, 1) for name in env.db.ordered_knob_list}
 
         def performance_function(**params):
-            assert len(params) == env.nb_actions, "Failed to check the input feature dimension."
+            assert len(params) == env.nb_actions, 'Failed to check the input feature dimension.'
 
             for name, val in params.items():
                 index = env.db.ordered_knob_list.index(name)
@@ -202,7 +202,6 @@ def global_search(env, config):
             pbounds=pbound
         )
         optimizer.maximize(
-            init_points=config['particle_nums'],
             n_iter=config['max_iterations']
         )
     elif method == 'pso':

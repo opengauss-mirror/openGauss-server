@@ -117,16 +117,6 @@ static bool checkLevel(lquery_level* curq, ltree_level* curt)
     return false;
 }
 
-/*
-void
-printFieldNot(FieldNot *fn ) {
-    while(fn->q) {
-        elog(NOTICE,"posQ:%d lenQ:%d posT:%d lenT:%d", fn->posq,fn->nq,fn->post,fn->nt);
-        fn++;
-    }
-}
-*/
-
 static struct {
     bool muse;
     uint32 high_pos;

@@ -32,7 +32,7 @@ set enable_nestloop=off;
 --1. Distinct within top query;
 --2. Without Group;
 --3. Without Agg;
-explain (verbose, costs off, nodes off) select distinct c2, c3 from distribute_table_01 order by c2, c3 asc;
+explain (verbose, costs off) select distinct c2, c3 from distribute_table_01 order by c2, c3 asc;
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Unique
@@ -44,7 +44,7 @@ explain (verbose, costs off, nodes off) select distinct c2, c3 from distribute_t
                Output: c2, c3
 (7 rows)
 
-explain (verbose, costs off, nodes off) select distinct c1, c2, c3 from distribute_table_01 order by c1, c2, c3 asc;
+explain (verbose, costs off) select distinct c1, c2, c3 from distribute_table_01 order by c1, c2, c3 asc;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
  Unique
@@ -168,7 +168,7 @@ select distinct c31 from (select distinct c2, count(c3) c31 from distribute_tabl
 --1. With union;
 --2. With or without distributed columns;
 --3. Using agg or unique node;
-explain (verbose, costs off, nodes off) 
+explain (verbose, costs off) 
 (select distinct c1, c2, c3 from distribute_table_01 where c1<13) 
 union
 (select distinct c1, c2, c3 from distribute_table_01 where c1>=13);
@@ -344,7 +344,7 @@ SELECT DISTINCT ATTRIBUTE FROM CTH WHERE ATTRIBUTE = 'A' ORDER BY 1;
 -----------
 (0 rows)
 
-EXPLAIN (VERBOSE, COSTS OFF, NODES OFF) SELECT DISTINCT ATTRIBUTE FROM CTH WHERE ATTRIBUTE = 'A' ORDER BY 1;
+EXPLAIN (VERBOSE, COSTS OFF) SELECT DISTINCT ATTRIBUTE FROM CTH WHERE ATTRIBUTE = 'A' ORDER BY 1;
                  QUERY PLAN                  
 ---------------------------------------------
  Unique

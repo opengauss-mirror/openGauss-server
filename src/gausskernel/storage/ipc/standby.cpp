@@ -23,8 +23,9 @@
 #include "access/xact.h"
 #include "access/xloginsert.h"
 #include "access/csnlog.h"
+#include "access/multi_redo_api.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
@@ -204,8 +205,10 @@ static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlis
 
                 old_status = get_ps_display(&len);
                 new_status = (char*)palloc(len + strlen);
-                rc = memcpy_s(new_status, len, old_status, len);
-                securec_check(rc, "\0", "\0");
+                if (len > 0) {
+                    rc = memcpy_s(new_status, len, old_status, len);
+                    securec_check(rc, "\0", "\0");
+                }
                 rc = strcpy_s(new_status + len, strlen, " waiting");
                 securec_check(rc, "\0", "\0");
                 set_ps_display(new_status, false);
@@ -299,7 +302,7 @@ void ResolveRecoveryConflictWithDatabase(Oid dbid)
      * block during InitPostgres() and then disconnect when they see the
      * database has been removed.
      */
-    while (CountDBBackends(dbid) > 0) {
+    while (CountDBActiveBackends(dbid) > 0) {
         CancelDBBackends(dbid, PROCSIG_RECOVERY_CONFLICT_DATABASE, true);
 
         /*
@@ -451,9 +454,9 @@ void CheckRecoveryConflictDeadlock(void)
      * process will continue to wait even though we have avoided deadlock.
      */
     ereport(ERROR,
-        (errcode(ERRCODE_T_R_DEADLOCK_DETECTED),
-            errmsg("canceling statement due to conflict with recovery"),
-            errdetail("User transaction caused buffer deadlock with recovery.")));
+            (errcode(ERRCODE_T_R_DEADLOCK_DETECTED),
+             errmsg("canceling statement due to conflict with recovery"),
+             errdetail("User transaction caused buffer deadlock with recovery.")));
 }
 
 /*
@@ -484,11 +487,11 @@ void CheckRecoveryConflictDeadlock(void)
  */
 void StandbyAcquireAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid)
 {
-    /* dbOid is InvalidOid when we are locking a shared relation. */
-    Assert(OidIsValid(relOid));
     xl_standby_lock* newlock = NULL;
     LOCKTAG locktag;
 
+    /* dbOid is InvalidOid when we are locking a shared relation. */
+    Assert(OidIsValid(relOid));
 #ifdef ENABLE_MULTIPLE_NODES
     /*
      * We skip to acquire standby lock in hot standby mode only for user relation
@@ -550,17 +553,17 @@ static void StandbyReleaseLocks(TransactionId xid)
             LOCKTAG locktag;
 
             ereport(trace_recovery(DEBUG4),
-                (errmsg(
-                    "releasing recovery lock: xid " XID_FMT " db %u rel %u", lock->xid, lock->dbOid, lock->relOid)));
+                    (errmsg(
+                         "releasing recovery lock: xid " XID_FMT " db %u rel %u", lock->xid, lock->dbOid, lock->relOid)));
             SET_LOCKTAG_RELATION(locktag, lock->dbOid, lock->relOid);
 
             if (!LockRelease(&locktag, AccessExclusiveLock, true))
                 ereport(LOG,
-                    (errmsg("RecoveryLockList contains entry for lock no longer recorded by lock manager: xid " XID_FMT
-                            " database %u relation %u",
-                        lock->xid,
-                        lock->dbOid,
-                        lock->relOid)));
+                        (errmsg("RecoveryLockList contains entry for lock no longer recorded by lock manager: xid " XID_FMT
+                                " database %u relation %u",
+                                lock->xid,
+                                lock->dbOid,
+                                lock->relOid)));
 
             t_thrd.storage_cxt.RecoveryLockList = list_delete_cell(t_thrd.storage_cxt.RecoveryLockList, cell, prev);
             pfree(lock);
@@ -598,22 +601,25 @@ void StandbyReleaseAllLocks(void)
     LOCKTAG locktag;
 
     ereport(trace_recovery(DEBUG2), (errmsg("release all standby locks")));
+
+    prev = NULL;
+
     for (cell = list_head(t_thrd.storage_cxt.RecoveryLockList); cell; cell = next) {
         xl_standby_lock* lock = (xl_standby_lock*)lfirst(cell);
 
         next = lnext(cell);
 
         ereport(trace_recovery(DEBUG4),
-            (errmsg("releasing recovery lock: xid " XID_FMT " db %u rel %u", lock->xid, lock->dbOid, lock->relOid)));
+                (errmsg("releasing recovery lock: xid " XID_FMT " db %u rel %u", lock->xid, lock->dbOid, lock->relOid)));
         SET_LOCKTAG_RELATION(locktag, lock->dbOid, lock->relOid);
 
         if (!LockRelease(&locktag, AccessExclusiveLock, true))
             ereport(LOG,
-                (errmsg("RecoveryLockList contains entry for lock no longer recorded by lock manager: xid " XID_FMT
-                        " database %u relation %u",
-                    lock->xid,
-                    lock->dbOid,
-                    lock->relOid)));
+                    (errmsg("RecoveryLockList contains entry for lock no longer recorded by lock manager: xid " XID_FMT
+                            " database %u relation %u",
+                            lock->xid,
+                            lock->dbOid,
+                            lock->relOid)));
 
         /*
          * When primary is killed or os core dump, we need generate xlog when
@@ -654,17 +660,17 @@ void StandbyReleaseOldLocks(TransactionId oldestRunningXid)
 
         if (remove) {
             ereport(trace_recovery(DEBUG4),
-                (errmsg(
-                    "releasing recovery lock: xid " XID_FMT " db %u rel %u", lock->xid, lock->dbOid, lock->relOid)));
+                    (errmsg(
+                         "releasing recovery lock: xid " XID_FMT " db %u rel %u", lock->xid, lock->dbOid, lock->relOid)));
             SET_LOCKTAG_RELATION(locktag, lock->dbOid, lock->relOid);
 
             if (!LockRelease(&locktag, AccessExclusiveLock, true))
                 ereport(LOG,
-                    (errmsg("RecoveryLockList contains entry for lock no longer recorded by lock manager: xid " XID_FMT
-                            " database %u relation %u",
-                        lock->xid,
-                        lock->dbOid,
-                        lock->relOid)));
+                        (errmsg("RecoveryLockList contains entry for lock no longer recorded by lock manager: xid " XID_FMT
+                                " database %u relation %u",
+                                lock->xid,
+                                lock->dbOid,
+                                lock->relOid)));
 
             t_thrd.storage_cxt.RecoveryLockList = list_delete_cell(t_thrd.storage_cxt.RecoveryLockList, cell, prev);
             pfree(lock);
@@ -680,30 +686,43 @@ bool HasStandbyLocks()
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
-/* 
+/*
  * For hot standby, maintain a list for csn commting status compensation
- * when primary dn restart after crash. 
+ * when primary dn restart after crash.
  */
 void DealCSNLogForHotStby(XLogReaderState* record, uint8 info)
 {
-    /*XLOG_STANDBY_CSN_COMMITTING and XLOG_STANDBY_CSN_ABORTED need to operate on both primary and standby. */
+    /* XLOG_STANDBY_CSN_COMMITTING and XLOG_STANDBY_CSN_ABORTED need to operate on both primary and standby. */
     if (info == XLOG_STANDBY_CSN_COMMITTING) {
         uint64* id = ((uint64 *)XLogRecGetData(record));
-        XactLockTableInsert(id[0]);
-        CSNLogSetCommitSeqNo(id[0], 0, 0, (COMMITSEQNO_COMMIT_INPROGRESS | id[1]));
-        RecordCommittingCsnInfo(id[0]);
-
+        uint32 newVersionMinSize = 3;
+        if (XLogRecGetDataLen(record) >= (newVersionMinSize * sizeof(uint64))) {
+            uint64 childrenxidnum = id[2];
+            Assert(XLogRecGetDataLen(record) >= ((newVersionMinSize + childrenxidnum) * sizeof(uint64)));
+            XactLockTableInsert(id[0]);
+            CSNLogSetCommitSeqNo(id[0], (int)childrenxidnum, &id[3], (COMMITSEQNO_COMMIT_INPROGRESS | id[1]));
+            RecordCommittingCsnInfo(id[0]);
+            for (uint64 i = 0; i < childrenxidnum; ++i) {
+                RecordCommittingCsnInfo(id[i + 3]);
+            }
+        } else {
+            XactLockTableInsert(id[0]);
+            CSNLogSetCommitSeqNo(id[0], 0, 0, (COMMITSEQNO_COMMIT_INPROGRESS | id[1]));
+            RecordCommittingCsnInfo(id[0]);
+        }
         return;
     } else {
         uint64* id = ((uint64 *)XLogRecGetData(record));
         CSNLogSetCommitSeqNo(id[0], 0, NULL, COMMITSEQNO_ABORTED);
         XactLockTableDelete(id[0]);
-        (void)remove_committed_csn_info(id[0]);
+        (void)RemoveCommittedCsnInfo(id[0]);
 
         return;
     }
 }
 #endif
+
+
 
 /*
  * --------------------------------------------------------------------
@@ -724,7 +743,6 @@ void standby_redo(XLogReaderState* record)
 
     /* Backup blocks are not used in standby records */
     Assert(!XLogRecHasAnyBlockRefs(record));
-
 #ifndef ENABLE_MULTIPLE_NODES
     if (info == XLOG_STANDBY_CSN_COMMITTING || info == XLOG_STANDBY_CSN_ABORTED) {
         DealCSNLogForHotStby(record, info);
@@ -809,21 +827,21 @@ static XLogRecPtr LogCurrentRunningXacts(RunningTransactions CurrRunningXacts)
 
     if (CurrRunningXacts->subxid_overflow)
         ereport(trace_recovery(DEBUG2),
-            (errmsg("snapshot of %d running transactions overflowed (lsn %X/%X oldest xid %lu latest complete %lu next "
-                    "xid %lu)",
-                CurrRunningXacts->xcnt, (uint32)(recptr >> 32),
-                (uint32)recptr, CurrRunningXacts->oldestRunningXid,
-                CurrRunningXacts->latestCompletedXid,
-                CurrRunningXacts->nextXid)));
+                (errmsg("snapshot of %d running transactions overflowed (lsn %X/%X oldest xid %lu latest complete %lu next "
+                        "xid %lu)",
+                        CurrRunningXacts->xcnt, (uint32)(recptr >> 32),
+                        (uint32)recptr, CurrRunningXacts->oldestRunningXid,
+                        CurrRunningXacts->latestCompletedXid,
+                        CurrRunningXacts->nextXid)));
     else
         ereport(trace_recovery(DEBUG2),
-            (errmsg(
-                "snapshot of %d+%d running transaction ids (lsn %X/%X oldest xid %lu latest complete %lu next xid %lu)",
-                CurrRunningXacts->xcnt, CurrRunningXacts->subxcnt,
-                (uint32)(recptr >> 32), (uint32)recptr,
-                CurrRunningXacts->oldestRunningXid,
-                CurrRunningXacts->latestCompletedXid,
-                CurrRunningXacts->nextXid)));
+                (errmsg(
+                     "snapshot of %d+%d running transaction ids (lsn %X/%X oldest xid %lu latest complete %lu next xid %lu)",
+                     CurrRunningXacts->xcnt, CurrRunningXacts->subxcnt,
+                     (uint32)(recptr >> 32), (uint32)recptr,
+                     CurrRunningXacts->oldestRunningXid,
+                     CurrRunningXacts->latestCompletedXid,
+                     CurrRunningXacts->nextXid)));
 
     /*
      * Ensure running_xacts information is synced to disk not too far in the
@@ -1043,60 +1061,65 @@ void LogReleaseAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid)
     LogReleaseAccessExclusiveLocks(1, &xlrec);
 }
 
+
+
 #ifndef ENABLE_MULTIPLE_NODES
-void standby_xlog_startup(void)
+void StandbyXlogStartup(void)
 {
     t_thrd.xlog_cxt.committing_csn_list = NIL;
 }
 
-void standby_xlog_cleanup(void)
+void StandbyXlogCleanup(void)
 {
     ListCell* l = NULL;
     if (log_min_messages <= DEBUG4) {
         ereport(LOG,
             (errmsg(
-                "[COMMITTING_CSN_LIST_TRACE]standby_xlog_cleanup")));
+                "StandbyXlogCleanup: committing_csn_list %p",
+                t_thrd.xlog_cxt.committing_csn_list)));
     }
 
     foreach (l, t_thrd.xlog_cxt.committing_csn_list) {
         TransactionId* action = (TransactionId*)lfirst(l);
         if (log_min_messages <= DEBUG4) {
             ereport(LOG,
-                (errmsg("[COMMITTING_CSN_LIST_TRACE]standby_xlog_cleanup: action xid:%lu", *action)));
+                (errmsg("StandbyXlogCleanup: action xid:%lu", *action)));
         }
         CSNLogSetCommitSeqNo(*action, 0, NULL, COMMITSEQNO_ABORTED);
         XactLockTableDelete(*action);
-
-        XLogBeginInsert();
-        XLogRegisterData((char *)action, sizeof(TransactionId));
-        XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_CSN_ABORTED);
+        if (g_supportHotStandby) {
+            XLogBeginInsert();
+            XLogRegisterData((char *)action, sizeof(TransactionId));
+            XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_CSN_ABORTED);
+        }
     }
 
     list_free(t_thrd.xlog_cxt.committing_csn_list);
     t_thrd.xlog_cxt.committing_csn_list = NIL;
 }
 
-bool standby_safe_restartpoint(void)
+bool StandbySafeRestartpoint(void)
 {
     if (t_thrd.xlog_cxt.committing_csn_list)
         return false;
     return true;
 }
 
-void RecordCommittingCsnInfo(TransactionId xid)
+static void RecordCommittingCsnInfo(TransactionId xid)
 {
     TransactionId* action = (TransactionId*)palloc(sizeof(TransactionId));
     if (log_min_messages <= DEBUG4) {
         ereport(LOG,
-            (errmsg("[COMMITTING_CSN_LIST_TRACE]record_committing_csn_list_info: xid:%lu",
-                xid)));
+            (errmsg("RecordCommittingCsnInfo: xid:%lu, committing_csn_list:%p",
+                xid,
+                t_thrd.xlog_cxt.committing_csn_list)));
     }
     *action = xid;
 
     t_thrd.xlog_cxt.committing_csn_list = lappend(t_thrd.xlog_cxt.committing_csn_list, action);
 }
 
-bool remove_committed_csn_info(TransactionId xid)
+bool RemoveCommittedCsnInfo(TransactionId xid)
 {
     ListCell* l = NULL;
 
@@ -1106,7 +1129,7 @@ bool remove_committed_csn_info(TransactionId xid)
         if (*action == xid) {
             if (log_min_messages <= DEBUG4) {
                 ereport(LOG,
-                    (errmsg("[COMMITTING_CSN_LIST_TRACE]remove_committed_csn_info successfully: input xid:%lu, action xid:%lu",
+                    (errmsg("RemoveCommittedCsnInfo successfully: input xid:%lu, action xid:%lu",
                         xid, *action)));
             }
 
@@ -1118,4 +1141,3 @@ bool remove_committed_csn_info(TransactionId xid)
     return false;
 }
 #endif
-

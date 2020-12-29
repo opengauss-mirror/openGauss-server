@@ -60,12 +60,14 @@
 #include <syslog.h>
 #endif
 
+#include "nodes/parsenodes.h"
 #include "access/transam.h"
 #include "access/xact.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+#include "instruments/instr_slow_query_log.h"
 #include "parser/gramparse.h"
 #include "parser/parser.h"
 #include "postmaster/postmaster.h"
@@ -94,8 +96,6 @@
 #include "tcop/stmt_retry.h"
 #include "replication/walsender.h"
 
-#include "libpq/pqmq.h"
-
 #undef _
 #define _(x) err_gettext(x)
 
@@ -104,8 +104,6 @@ static const char* err_gettext(const char* str)
        the supplied arguments. */
     __attribute__((format_arg(1)));
 
-extern bool StreamThreadAmI();
-extern bool StreamTopConsumerAmI();
 #ifndef ENABLE_LLT
 extern void clean_ec_conn();
 extern void delete_ec_ctrl();
@@ -155,10 +153,18 @@ static void write_pipe_chunks(char* data, int len, int dest);
 static void write_csvlog(ErrorData* edata);
 static void setup_formatted_log_time(void);
 static void setup_formatted_start_time(void);
+extern void send_only_message_to_frontend(const char* message, bool is_putline);
 static char* mask_Password_internal(const char* query_string);
+static char* mask_error_password(const char* query_string, int str_len);
+static void truncate_identified_by(char* query_string, int query_len);
+static char* mask_execute_direct_cmd(const char* query_string);
+static bool is_execute_cmd(const char* query_string);
+static void tolower_func(char *convert_query);
 static void mask_espaced_character(char* source_str);
-static void erase_single_quotes(char* query_string);
+static void eraseSingleQuotes(char* query_string);
 static int output_backtrace_to_log(StringInfoData* pOutBuf);
+static void write_asp_chunks(char *data, int len, bool end);
+static void write_asplog(char *data, int len, bool end);
 
 /*
  * in_error_recursion_trouble --- are we at risk of infinite error recursion?
@@ -279,9 +285,9 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
      * Now decide whether we need to process this report at all; if it's
      * warning or less and not enabled for logging, just return FALSE without
      * starting up any error logging machinery.
-     *
-     * Determine whether message is enabled for server log output 
      */
+
+    /* Determine whether message is enabled for server log output */
     if (IsPostmasterEnvironment)
         output_to_server = is_log_level_output(elevel, log_min_messages);
     else
@@ -363,6 +369,7 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
     /*
      * Okay, crank up a stack entry to store the info in.
      */
+
     if (t_thrd.log_cxt.recursion_depth++ > 0 && elevel >= ERROR) {
         /*
          * Ooops, error during error processing.  Clear ErrorContext as
@@ -391,7 +398,7 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
         force_backtrace_messages = false;
         t_thrd.log_cxt.errordata_stack_depth = -1; /* make room on stack */
 
-        /* Stack full, abort() directly instead of using erreport which goes to a deadloop */
+        /*Stack full, abort() directly instead of using erreport which goes to a deadloop*/
         t_thrd.int_cxt.ImmediateInterruptOK = false;
         abort();
     }
@@ -465,6 +472,7 @@ void errfinish(int dummy, ...)
      */
     if (StreamTopConsumerAmI() && u_sess->stream_cxt.global_obj != NULL && elevel >= ERROR) {
         producer_save_edata = u_sess->stream_cxt.global_obj->getProducerEdata();
+
         /*
          * In executing stream operator, when top consumer's elevel is greater than
          * producer's elevel, we can't update top consumer's elevel, because that operator
@@ -506,6 +514,7 @@ void errfinish(int dummy, ...)
         StringInfoData buf;
         initStringInfo(&buf);
         int ret = output_backtrace_to_log(&buf);
+
         if (0 == ret) {
             edata->backtrace_log = pstrdup(buf.data);
         }
@@ -527,10 +536,9 @@ void errfinish(int dummy, ...)
         /*
          * We do some minimal cleanup before longjmp'ing so that handlers can
          * execute in a reasonably sane state.
-         *
-         *
-         * This is just in case the error came while waiting for input
          */
+
+        /* This is just in case the error came while waiting for input */
         t_thrd.int_cxt.ImmediateInterruptOK = false;
 
         /*
@@ -542,12 +550,15 @@ void errfinish(int dummy, ...)
          */
         t_thrd.int_cxt.InterruptHoldoffCount = 0;
 
+        t_thrd.int_cxt.InterruptCountResetFlag = true;
+
         t_thrd.int_cxt.CritSectionCount = 0; /* should be unnecessary, but... */
 
         /*
          * Note that we leave CurrentMemoryContext set to ErrorContext. The
          * handler should reset it to something else soon.
          */
+
         t_thrd.log_cxt.recursion_depth--;
         PG_RE_THROW();
     }
@@ -586,15 +597,6 @@ void errfinish(int dummy, ...)
             u_sess->stream_cxt.producer_obj->reportNotice();
         }
     } else {
-        if (elevel == FATAL) {
-            if (t_thrd.msqueue_cxt.is_changed) {
-                pq_stop_redirect_to_shm_mq();
-            }
-            if (t_thrd.autonomous_cxt.handle.slot >= 0) {
-                StopBackgroundWorker();
-            }
-        }
-
         /* Emit the message to the right places */
         EmitErrorReport();
     }
@@ -1187,6 +1189,22 @@ int errhidestmt(bool hide_stmt)
 
     return 0; /* return value does not matter */
 }
+/*
+ * errhideprefix --- optionally suppress line prefix: field of log entry
+ *
+ * This should be called if the message text already includes the line prefix.
+ */
+int errhideprefix(bool hide_prefix)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    edata->hide_prefix = hide_prefix;
+
+    return 0; /* return value does not matter */
+}
 
 /*
  * errposition --- add cursor position to the current error
@@ -1650,63 +1668,6 @@ void FlushErrorStateWithoutDeleteChildrenContext(void)
 }
 
 /*
- * ThrowErrorData --- report an error described by an ErrorData structure
- *
- * This is somewhat like ReThrowError, but it allows elevels besides ERROR,
- * and the boolean flags such as output_to_server are computed via the
- * default rules rather than being copied from the given ErrorData.
- * This is primarily used to re-report errors originally reported by
- * background worker processes and then propagated (with or without
- * modification) to the backend responsible for them.
- */
-void ThrowErrorData(ErrorData *edata)
-{
-    ErrorData *newedata;
-    MemoryContext oldcontext;
-
-    if (!errstart(edata->elevel, edata->filename, edata->lineno, edata->funcname, NULL)) {
-        /* error is not to be reported at all */
-        return;
-    }
-
-    newedata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
-    t_thrd.log_cxt.recursion_depth++;
-    oldcontext =  MemoryContextSwitchTo(ErrorContext);
-
-    /* Copy the supplied fields to the error stack entry. */
-    if (edata->sqlerrcode != 0)
-        newedata->sqlerrcode = edata->sqlerrcode;
-    if (edata->message)
-        newedata->message = pstrdup(edata->message);
-    if (edata->detail)
-        newedata->detail = pstrdup(edata->detail);
-    if (edata->detail_log)
-        newedata->detail_log = pstrdup(edata->detail_log);
-    if (edata->hint)
-        newedata->hint = pstrdup(edata->hint);
-    if (edata->context)
-        newedata->context = pstrdup(edata->context);
-    /* assume message_id is not available */
-    if (newedata->filename)
-        newedata->filename = pstrdup(edata->filename);
-    if (newedata->funcname)
-        newedata->funcname = pstrdup(edata->funcname);
-    if (newedata->backtrace_log)
-        newedata->backtrace_log = pstrdup(edata->backtrace_log);
-
-    newedata->cursorpos = edata->cursorpos;
-    newedata->internalpos = edata->internalpos;
-    if (edata->internalquery)
-        newedata->internalquery = pstrdup(edata->internalquery);
-
-    MemoryContextSwitchTo(oldcontext);
-    t_thrd.log_cxt.recursion_depth--;
-
-    /* Process the error. */
-    errfinish(0);
-}
-
-/*
  * ReThrowError --- re-throw a previously copied error
  *
  * A handler can do CopyErrorData/FlushErrorState to get out of the error
@@ -1881,7 +1842,8 @@ void set_syslog_parameters(const char* ident, int facility)
         }
         if (u_sess->log_cxt.syslog_ident)
             pfree(u_sess->log_cxt.syslog_ident);
-        u_sess->log_cxt.syslog_ident = MemoryContextStrdup(u_sess->top_mem_cxt, ident);
+        u_sess->log_cxt.syslog_ident = MemoryContextStrdup(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), ident);
         /* if the strdup fails, we will cope in write_syslog() */
         u_sess->attr.attr_common.syslog_facility = facility;
     }
@@ -2030,7 +1992,7 @@ static void write_eventlog(int level, const char* line, int len)
      */
     if (GetDatabaseEncoding() != GetPlatformEncoding() && !in_error_recursion_trouble()) {
         utf16 = pgwin32_toUTF16(line, len, NULL);
-        if (utf16 != NULL) {
+        if (NULL != utf16) {
             ReportEventW(evtHandle,
                 eventlevel,
                 0,
@@ -2078,11 +2040,11 @@ static void write_console(const char* line, int len)
 
         utf16 = pgwin32_toUTF16(line, len, &utf16len);
         if (utf16 != NULL) {
-            HANDLE std_handle;
+            HANDLE stdHandle;
             DWORD written;
 
-            std_handle = GetStdHandle(STD_ERROR_HANDLE);
-            if (WriteConsoleW(std_handle, utf16, utf16len, &written, NULL)) {
+            stdHandle = GetStdHandle(STD_ERROR_HANDLE);
+            if (WriteConsoleW(stdHandle, utf16, utf16len, &written, NULL)) {
                 pfree(utf16);
                 return;
             }
@@ -2119,6 +2081,8 @@ static void setup_formatted_log_time(void)
     struct timeval tv;
     pg_time_t stamp_time;
     char msbuf[8];
+    errno_t rc = EOK;
+    pg_tm* localTime = NULL;
 
     gettimeofday(&tv, NULL);
     stamp_time = (pg_time_t)tv.tv_sec;
@@ -2128,14 +2092,18 @@ static void setup_formatted_log_time(void)
      * least with a minimal GMT value) before u_sess->attr.attr_common.Log_line_prefix can become
      * nonempty or CSV mode can be selected.
      */
+    localTime = pg_localtime(&stamp_time, log_timezone);
+    if (localTime == NULL) {
+        ereport(ERROR, (errmsg("pg_localtime must not be null!")));
+    }
     pg_strftime(t_thrd.log_cxt.formatted_log_time,
         FORMATTED_TS_LEN,
         /* leave room for milliseconds... */
         "%Y-%m-%d %H:%M:%S     %Z",
-        pg_localtime(&stamp_time, log_timezone));
+        localTime);
 
     /* 'paste' milliseconds into place... */
-    errno_t rc = sprintf_s(msbuf, sizeof(msbuf), ".%03d", (int)(tv.tv_usec / 1000));
+    rc = sprintf_s(msbuf, sizeof(msbuf), ".%03d", (int)(tv.tv_usec / 1000));
     securec_check_ss(rc, "\0", "\0");
     rc = strncpy_s(t_thrd.log_cxt.formatted_log_time + 19, FORMATTED_TS_LEN - 19, msbuf, 4);
     securec_check(rc, "\0", "\0");
@@ -2146,6 +2114,7 @@ static void setup_formatted_log_time(void)
  */
 static void setup_formatted_start_time(void)
 {
+    pg_tm* localTime = NULL;
     pg_time_t stamp_time = (pg_time_t)t_thrd.proc_cxt.MyStartTime;
 
     /*
@@ -2153,10 +2122,14 @@ static void setup_formatted_start_time(void)
      * least with a minimal GMT value) before u_sess->attr.attr_common.Log_line_prefix can become
      * nonempty or CSV mode can be selected.
      */
+    localTime = pg_localtime(&stamp_time, log_timezone);
+    if (localTime == NULL) {
+        ereport(ERROR, (errmsg("pg_localtime must not be null!")));
+    }
     pg_strftime(t_thrd.log_cxt.formatted_start_time,
         FORMATTED_TS_LEN,
         "%Y-%m-%d %H:%M:%S %Z",
-        pg_localtime(&stamp_time, log_timezone));
+        localTime);
 }
 
 /*
@@ -2166,6 +2139,7 @@ static void log_line_prefix(StringInfo buf, ErrorData* edata)
 {
     int format_len;
     int i;
+    pg_tm* localTime = NULL;
 
     t_thrd.log_cxt.error_with_nodename = false;
 
@@ -2182,11 +2156,13 @@ static void log_line_prefix(StringInfo buf, ErrorData* edata)
     }
     t_thrd.log_cxt.log_line_number++;
 
+    if (edata->hide_prefix)
+        return;
+
     if (u_sess->attr.attr_common.Log_line_prefix == NULL) {
         /* for --single, do not append query id */
-        if (IsPostmasterEnvironment) {
+        if (IsPostmasterEnvironment)
             appendStringInfo(buf, "%lu ", u_sess->debug_query_id);
-        }
         return; /* in case guc hasn't run yet */
     }
 
@@ -2246,7 +2222,11 @@ static void log_line_prefix(StringInfo buf, ErrorData* edata)
                 pg_time_t stamp_time = (pg_time_t)time(NULL);
                 char strfbuf[128];
 
-                pg_strftime(strfbuf, sizeof(strfbuf), "%Y-%m-%d %H:%M:%S %Z", pg_localtime(&stamp_time, log_timezone));
+                localTime = pg_localtime(&stamp_time, log_timezone);
+                if (localTime == NULL) {
+                    ereport(ERROR, (errmsg("pg_localtime must not be null!")));
+                }
+                pg_strftime(strfbuf, sizeof(strfbuf), "%Y-%m-%d %H:%M:%S %Z", localTime);
                 appendStringInfoString(buf, strfbuf);
             } break;
             case 's':
@@ -2318,10 +2298,10 @@ static void log_line_prefix(StringInfo buf, ErrorData* edata)
 
     /* for --single, do not append query id */
     if (IsPostmasterEnvironment)
-        appendStringInfo(buf, "%lu ", u_sess->debug_query_id);
+        appendStringInfo(buf, " %lu", u_sess->debug_query_id);
 
     /* module name information */
-    appendStringInfo(buf, "[%s] ", get_valid_module_name(edata->mod_id));
+    appendStringInfo(buf, " [%s] ", get_valid_module_name(edata->mod_id));
 }
 
 /*
@@ -2652,7 +2632,7 @@ static int output_backtrace_to_log(StringInfoData* pOutBuf)
     securec_check_ss_c(ret, "\0", "\0");
     appendStringInfoString(pOutBuf, title);
 
-    if (t_thrd.log_cxt.thd_bt_symbol == NULL) {
+    if (NULL == t_thrd.log_cxt.thd_bt_symbol) {
         appendStringInfoString(pOutBuf, "Failed to get backtrace symbols.\n");
         btLock.unLock();
         return -1;
@@ -2687,12 +2667,13 @@ static void send_message_to_server_log(ErrorData* edata)
 
     t_thrd.log_cxt.formatted_log_time[0] = '\0';
 
-    log_line_prefix(&buf, edata);
-    appendStringInfo(&buf, "%s:  ", error_severity(edata->elevel));
-
-    if (u_sess->attr.attr_common.Log_error_verbosity >= PGERROR_VERBOSE) {
-        appendStringInfo(&buf, "%s: ", unpack_sql_state(edata->sqlerrcode));
+    if (!edata->hide_prefix) {
+        log_line_prefix(&buf, edata);
+        appendStringInfo(&buf, "%s:  ", error_severity(edata->elevel));
     }
+
+    if (u_sess->attr.attr_common.Log_error_verbosity >= PGERROR_VERBOSE && !edata->hide_prefix)
+        appendStringInfo(&buf, "%s: ", unpack_sql_state(edata->sqlerrcode));
 
     if (edata->message) {
         append_with_tabs(&buf, edata->message);
@@ -2708,7 +2689,7 @@ static void send_message_to_server_log(ErrorData* edata)
 
     appendStringInfoChar(&buf, '\n');
 
-    if (u_sess->attr.attr_common.Log_error_verbosity >= PGERROR_DEFAULT) {
+    if (u_sess->attr.attr_common.Log_error_verbosity >= PGERROR_DEFAULT && !edata->hide_prefix) {
         if (edata->detail_log) {
             log_line_prefix(&buf, edata);
             appendStringInfoString(&buf, _("DETAIL:  "));
@@ -2748,7 +2729,7 @@ static void send_message_to_server_log(ErrorData* edata)
             append_with_tabs(&buf, edata->context);
             appendStringInfoChar(&buf, '\n');
         }
-        if (u_sess->attr.attr_common.Log_error_verbosity >= PGERROR_VERBOSE) {
+        if (u_sess->attr.attr_common.Log_error_verbosity >= PGERROR_VERBOSE && !edata->hide_prefix) {
             /* assume no newlines in funcname or filename... */
             if (edata->funcname && edata->filename) {
                 log_line_prefix(&buf, edata);
@@ -2769,10 +2750,19 @@ static void send_message_to_server_log(ErrorData* edata)
      */
     if (is_log_level_output(edata->elevel, u_sess->attr.attr_common.log_min_error_statement) &&
         t_thrd.postgres_cxt.debug_query_string != NULL && !edata->hide_stmt) {
-        char* mask_string = maskPassword(t_thrd.postgres_cxt.debug_query_string);
-        if (mask_string == NULL) {
-            mask_string = (char*)t_thrd.postgres_cxt.debug_query_string;
+        char* randomPlanInfo = NULL;
+        char* mask_string = NULL;
+        mask_string = maskPassword(t_thrd.postgres_cxt.debug_query_string);
+        if (edata->sqlerrcode == ERRCODE_SYNTAX_ERROR) {
+            if (mask_string != NULL) {
+                truncate_identified_by(mask_string, strlen(mask_string));
+            } else if (t_thrd.postgres_cxt.debug_query_string != NULL) {
+                mask_string = mask_error_password(t_thrd.postgres_cxt.debug_query_string, 
+                    strlen(t_thrd.postgres_cxt.debug_query_string));
+            }
         }
+        if (mask_string == NULL)
+            mask_string = (char*)t_thrd.postgres_cxt.debug_query_string;
 
         log_line_prefix(&buf, edata);
         appendStringInfoString(&buf, _("STATEMENT:  "));
@@ -2781,24 +2771,22 @@ static void send_message_to_server_log(ErrorData* edata)
          * In log injection attack scene, syntax error and espaced characters are dangerous,
          * we need mask the espaced characters here.
          */
-        if (edata->sqlerrcode == ERRCODE_SYNTAX_ERROR) {
+        if (ERRCODE_SYNTAX_ERROR == edata->sqlerrcode)
             mask_espaced_character(mask_string);
-        }
 
         append_with_tabs(&buf, mask_string);
         appendStringInfoChar(&buf, '\n');
 
         /* show random plan seed if u_sess->attr.attr_sql.plan_mode_seed is not OPTIMIZE_PLAN */
-        char* random_plan_info = get_random_plan_string();
-        if (random_plan_info != NULL) {
-            appendStringInfoString(&buf, random_plan_info);
+        randomPlanInfo = get_random_plan_string();
+        if (NULL != randomPlanInfo) {
+            appendStringInfoString(&buf, randomPlanInfo);
             appendStringInfoChar(&buf, '\n');
-            pfree(random_plan_info);
+            pfree(randomPlanInfo);
         }
 
-        if (mask_string != t_thrd.postgres_cxt.debug_query_string) {
+        if (mask_string != t_thrd.postgres_cxt.debug_query_string)
             pfree(mask_string);
-        }
     }
 
     if (edata->backtrace_log) {
@@ -2862,8 +2850,12 @@ static void send_message_to_server_log(ErrorData* edata)
          * Otherwise, just do a vanilla write to stderr.
          */
         if (t_thrd.postmaster_cxt.redirection_done && t_thrd.role != SYSLOGGER) {
-            write_pipe_chunks(buf.data, buf.len, LOG_DESTINATION_STDERR);
-        }
+            if (edata->sqlerrcode == ERRCODE_SLOW_QUERY)
+                write_local_slow_log(buf.data, buf.len, true);
+            else if (edata->sqlerrcode == ERRCODE_ACTIVE_SESSION_PROFILE)
+                write_asplog(buf.data, buf.len, true);
+            else
+                write_pipe_chunks(buf.data, buf.len, LOG_DESTINATION_STDERR);
 #ifdef WIN32
 
         /*
@@ -2873,13 +2865,11 @@ static void send_message_to_server_log(ErrorData* edata)
          * If stderr redirection is active, it was OK to write to stderr above
          * because that's really a pipe to the syslogger process.
          */
-        else if (pgwin32_is_service()) {
+        } else if (pgwin32_is_service())
             write_eventlog(edata->elevel, buf.data, buf.len);
-        }
 #endif
-        else if (t_thrd.role != SYSLOGGER) {
+        } else if (t_thrd.role != SYSLOGGER)
             write_console(buf.data, buf.len);
-        }
     }
 
     /* If in the syslogger process, try to write messages direct to file */
@@ -2911,8 +2901,11 @@ static void send_message_to_server_log(ErrorData* edata)
         pfree(buf.data);
     }
 }
-
-/* Write error report to server's log in a simple way without errstack */
+/*
+ * @Description: Write error report to server's log in a simple way without errstack
+ * @param: elevel, fmt
+ * @return: void
+ */
 void SimpleLogToServer(int elevel, bool silent, const char* fmt, ...)
 {
     if (silent == true || !is_log_level_output(elevel, log_min_messages))
@@ -2924,7 +2917,8 @@ void SimpleLogToServer(int elevel, bool silent, const char* fmt, ...)
 
     /* Initialize a mostly-dummy error frame */
     edata = &errdata;
-    errno_t rc = memset_s(edata, sizeof(ErrorData), 0, sizeof(ErrorData));
+    errno_t rc = EOK;
+    rc = memset_s(edata, sizeof(ErrorData), 0, sizeof(ErrorData));
     securec_check(rc, "", "");
     /* the default text domain is the backend's */
     edata->domain = t_thrd.log_cxt.save_format_domain ? t_thrd.log_cxt.save_format_domain : PG_TEXTDOMAIN("postgres");
@@ -2957,18 +2951,16 @@ void stream_send_message_to_server_log(void)
      * Since cancel is always driven by Coordinator, internal-cancel message
      * of stream thread can be ignored to avoid message misorder.
      */
-    if (edata->sqlerrcode == ERRCODE_QUERY_INTERNAL_CANCEL) {
+    if (ERRCODE_QUERY_INTERNAL_CANCEL == edata->sqlerrcode)
         return;
-    }
 
     t_thrd.log_cxt.recursion_depth++;
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
 
     /* Send to server log, if enabled */
-    if (edata->output_to_server && is_errmodule_enable(edata->elevel, edata->mod_id)) {
+    if (edata->output_to_server && is_errmodule_enable(edata->elevel, edata->mod_id))
         send_message_to_server_log(edata);
-    }
 
     MemoryContextSwitchTo(oldcontext);
     t_thrd.log_cxt.recursion_depth--;
@@ -2989,6 +2981,7 @@ void stream_send_message_to_consumer(void)
      * Since cancel is always driven by Coordinator, internal-cancel message
      * of stream thread can be ignored to avoid message misorder.
      */
+
     t_thrd.log_cxt.recursion_depth++;
     CHECK_STACK_DEPTH();
     oldcontext = MemoryContextSwitchTo(ErrorContext);
@@ -3031,6 +3024,7 @@ static void write_pipe_chunks(char* data, int len, int dest)
     p.proto.pid = t_thrd.proc_cxt.MyProcPid;
     p.proto.logtype = LOG_TYPE_ELOG;
     p.proto.magic = PROTO_HEADER_MAGICNUM;
+
     /* write all but the last chunk */
     while (len > LOGPIPE_MAX_PAYLOAD) {
         p.proto.is_last = (dest == LOG_DESTINATION_CSVLOG ? 'F' : 'f');
@@ -3065,10 +3059,78 @@ static void write_pipe_chunks(char* data, int len, int dest)
  */
 static void err_sendstring(StringInfo buf, const char* str)
 {
-    if (in_error_recursion_trouble()) {
+    if (in_error_recursion_trouble())
         pq_send_ascii_string(buf, str);
-    } else {
+    else
         pq_sendstring(buf, str);
+}
+
+/*
+ * Brief		: Write only message to client, is_putline is to declare the
+ * 			  caller is dbe_output.print_line or dbe_output.print
+ */
+void send_only_message_to_frontend(const char* message, bool is_putline)
+{
+
+    MemoryContext oldcontext;
+    bool alloced = false;
+
+    if (t_thrd.postgres_cxt.whereToSendOutput != DestRemote)
+        return;
+
+    /*
+     * 'N' (Notice) is for nonfatal conditions, 'E' is for errors
+     * see if the t_thrd.log_cxt.msgbuf is allocated. if so, append data to it
+     */
+    if (!t_thrd.log_cxt.msgbuf->data) {
+        oldcontext = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX));
+        pq_beginmessage(t_thrd.log_cxt.msgbuf, 'N');
+        MemoryContextSwitchTo(oldcontext);
+    } else
+        alloced = true;
+
+    if (alloced) {
+        if (PG_PROTOCOL_MAJOR(FrontendProtocol) >= 3) {
+            err_sendstring(t_thrd.log_cxt.msgbuf, message);
+            t_thrd.log_cxt.msgbuf->len -= 1;
+        } else {
+            if (NULL != message) {
+                appendStringInfoString(t_thrd.log_cxt.msgbuf, message);
+            } else {
+                appendStringInfoString(t_thrd.log_cxt.msgbuf, _("missing error text"));
+                appendStringInfoChar(t_thrd.log_cxt.msgbuf, '\n');
+            }
+        }
+    } else if (PG_PROTOCOL_MAJOR(FrontendProtocol) >= 3) {
+        /* M field is required per protocol, so always send something */
+        pq_sendbyte(t_thrd.log_cxt.msgbuf, PG_DIAG_MESSAGE_ONLY);
+        err_sendstring(t_thrd.log_cxt.msgbuf, message);
+        t_thrd.log_cxt.msgbuf->len -= 1;
+    } else {
+        /* Old style --- gin up a backwards-compatible message */
+        StringInfoData buf;
+        initStringInfo(&buf);
+
+        if (NULL != message)
+            appendStringInfoString(&buf, message);
+        else
+            appendStringInfoString(&buf, _("missing error text"));
+
+        if (is_putline) {
+            appendStringInfoChar(&buf, '\n');
+        }
+        err_sendstring(t_thrd.log_cxt.msgbuf, buf.data);
+
+        pfree_ext(buf.data);
+    }
+
+    if (is_putline) {
+        if (PG_PROTOCOL_MAJOR(FrontendProtocol) >= 3) {
+            /* add two '\0' to adapt the Protocol, which has two '\0' at the end of data */
+            pq_sendbyte(t_thrd.log_cxt.msgbuf, '\0');
+            pq_sendbyte(t_thrd.log_cxt.msgbuf, '\0');
+        }
+        pq_endmessage(t_thrd.log_cxt.msgbuf);
     }
 }
 
@@ -3077,9 +3139,9 @@ static int pg_geterrcode_byerrmsg(ErrorData* edata)
 {
     unsigned int i = 0;
     unsigned int j = 0;
-    const char* ext_name = NULL;
+    const char* szExtName = NULL;
 
-    if (edata == NULL) {
+    if (NULL == edata) {
         return 0;
     }
 
@@ -3090,13 +3152,13 @@ static int pg_geterrcode_byerrmsg(ErrorData* edata)
                 return g_mppdb_errors[i].ulSqlErrcode;
             } else if (0 == strcmp(g_mppdb_errors[i].astErrLocate[j].szFileName, edata->filename)) {
                 /* file name is valid or not */
-                ext_name = strrchr(edata->filename, '.');
-                if (ext_name == NULL) {
+                szExtName = strrchr(edata->filename, '.');
+                if (NULL == szExtName) {
                     return 0;
                 }
 
                 /* *.l file */
-                if ((*(ext_name + 1) == 'l') &&
+                if ((*(szExtName + 1) == 'l') &&
                     ((g_mppdb_errors[i].astErrLocate[j].ulLineno + 1) == (unsigned int)edata->lineno)) {
                     return g_mppdb_errors[i].ulSqlErrcode;
                 }
@@ -3137,16 +3199,17 @@ static void send_message_to_frontend(ErrorData* edata)
 
 #ifndef USE_ASSERT_CHECKING
     /* Send too much detail to client is not allowed, stored them in system log is enough. */
-    if (IS_PGXC_COORDINATOR && IsConnFromApp() && edata->elevel <= LOG) {
+    if (IS_PGXC_COORDINATOR && IsConnFromApp() && edata->elevel <= LOG)
         return;
-    }
 #endif
 
     /*
      * Since cancel is always driven by Coordinator, internal-cancel message
      * of datanode postgres thread can be ignored to avoid libcomm waitting quota in here.
      * If a single node, always send message to front.
-     *
+     */
+
+    /*
      * Since the ('N') message is ignored in old PGXC handle_response, we
      * can simply ignore the message here if not marked by handle_in_client
      * when invoking ereport.
@@ -3178,7 +3241,8 @@ static void send_message_to_frontend(ErrorData* edata)
 
         /* get mpp internal errcode */
         if (edata->elevel >= ERROR) {
-            if (edata->internalerrcode == 0 && edata->filename && edata->lineno > 0) {
+            if (0 == edata->internalerrcode && edata->filename && edata->lineno > 0) {
+#ifdef ENABLE_MOT
                 /*
                  * In case of error from MOT module we skip getting the internal error code,
                  * since fdw classes are not scanned by scanEreport.cpp.
@@ -3186,8 +3250,11 @@ static void send_message_to_frontend(ErrorData* edata)
                 if (IsMOTEngineUsed()) {
                     edata->internalerrcode = ERRCODE_SUCCESSFUL_COMPLETION;
                 } else {
+#endif
                     edata->internalerrcode = pg_geterrcode_byerrmsg(edata);
+#ifdef ENABLE_MOT
                 }
+#endif
             }
         } else {
             edata->internalerrcode = ERRCODE_SUCCESSFUL_COMPLETION;
@@ -3222,9 +3289,8 @@ static void send_message_to_frontend(ErrorData* edata)
              * We treat FATAL as ERROR when reporting error message to consumer/Coordinator.
              * So add keyword '[FATAL]' before error message.
              */
-            if (IS_PGXC_DATANODE && !IsConnFromApp() && edata->elevel == FATAL) {
+            if (IS_PGXC_DATANODE && !IsConnFromApp() && FATAL == edata->elevel)
                 appendStringInfoString(&msgbuf, _("[FATAL] "));
-            }
 
             appendStringInfoString(&msgbuf, edata->message);
             err_sendstring(&msgbuf, vbuf);
@@ -3253,6 +3319,7 @@ static void send_message_to_frontend(ErrorData* edata)
         }
 
         /* detail_log is intentionally not used here */
+
         if (edata->hint) {
             pq_sendbyte(&msgbuf, PG_DIAG_MESSAGE_HINT);
             err_sendstring(&msgbuf, edata->hint);
@@ -3282,6 +3349,7 @@ static void send_message_to_frontend(ErrorData* edata)
 
             /* mask the query whenever including sensitive information. */
             mask_string = maskPassword(edata->internalquery);
+
             /* with nothing to mask, just use the source querystring. */
             if (mask_string == NULL)
                 mask_string = edata->internalquery;
@@ -3358,8 +3426,9 @@ static void send_message_to_frontend(ErrorData* edata)
          * backend dies before getting back to the main loop ... error/notice
          * messages should not be a performance-critical path anyway, so an extra
          * flush won't hurt much ...
-         * if CN retry is enabled, we need to avoid flushing data to client before ReadyForQuery is called
          */
+
+        /* if CN retry is enabled, we need to avoid flushing data to client before ReadyForQuery is called */
         if (STMT_RETRY_ENABLED && edata->elevel < ERROR && IS_PGXC_COORDINATOR &&
             !t_thrd.log_cxt.flush_message_immediately)
             return;
@@ -3376,7 +3445,9 @@ static void send_message_to_frontend(ErrorData* edata)
 
 /*
  * Support routines for formatting error messages.
- *
+ */
+
+/*
  * expand_fmt_string --- process special format codes in a format string
  *
  * We must replace %m with the appropriate strerror string, since vsnprintf
@@ -3413,9 +3484,8 @@ static char* expand_fmt_string(const char* fmt, ErrorData* edata)
                 appendStringInfoCharMacro(&buf, '%');
                 appendStringInfoCharMacro(&buf, *cp);
             }
-        } else {
+        } else
             appendStringInfoCharMacro(&buf, *cp);
-        }
     }
 
     return buf.data;
@@ -3439,6 +3509,7 @@ static const char* useful_strerror(int errnum)
         return pgwin32_socket_strerror(errnum);
 #endif
     str = gs_strerror(errnum);
+
     /*
      * Some strerror()s return an empty string for out-of-range errno. This is
      * ANSI C spec compliant, but not exactly useful.
@@ -3517,9 +3588,8 @@ static void append_with_tabs(StringInfo buf, const char* str)
 
     while ((ch = *str++) != '\0') {
         appendStringInfoCharMacro(buf, ch);
-        if (ch == '\n') {
+        if (ch == '\n')
             appendStringInfoCharMacro(buf, '\t');
-        }
     }
 }
 
@@ -3531,6 +3601,11 @@ static void append_with_tabs(StringInfo buf, const char* str)
 void write_stderr(const char* fmt, ...)
 {
     va_list ap;
+
+    /* syslogger thread can not write log into pipe */
+    if (t_thrd.role == SYSLOGGER) {
+        return;
+    }
 
 #ifdef WIN32
     char errbuf[2048]; /* Arbitrary size? */
@@ -3550,8 +3625,8 @@ void write_stderr(const char* fmt, ...)
      * On Win32, we print to stderr if running on a console, or write to
      * eventlog if running as a service
      */
-    if (pgwin32_is_service()) {
-        /* Running as a service */
+    if (pgwin32_is_service()) /* Running as a service */
+    {
         write_eventlog(ERROR, errbuf, strlen(errbuf));
     } else {
         /* Not running as service, write to stderr */
@@ -3573,13 +3648,12 @@ void write_stderr(const char* fmt, ...)
 static bool is_log_level_output(int elevel, int log_min_level)
 {
     if (elevel == LOG || elevel == COMMERROR) {
-        if (log_min_level == LOG || log_min_level <= ERROR) {
+        if (log_min_level == LOG || log_min_level <= ERROR)
             return true;
-        }
-    } else if (elevel >= log_min_level) {
-        /* Neither is log */
-        return true;
     }
+    /* Neither is LOG */
+    else if (elevel >= log_min_level)
+        return true;
 
     return false;
 }
@@ -3601,33 +3675,35 @@ static bool is_log_level_output(int elevel, int log_min_level)
  */
 int trace_recovery(int trace_level)
 {
-    if (trace_level < LOG && trace_level >= u_sess->attr.attr_common.trace_recovery_messages) {
+    if (trace_level < LOG && trace_level >= u_sess->attr.attr_common.trace_recovery_messages)
         return LOG;
-    }
 
     return trace_level;
 }
 
 void getElevelAndSqlstate(int* eLevel, int* sqlState)
 {
-    if (eLevel == NULL || sqlState == NULL) {
+    if (NULL == eLevel || NULL == sqlState)
         return;
-    }
     *eLevel = t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth].elevel;
     *sqlState = t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth].sqlerrcode;
 }
-
 char* maskPassword(const char* query_string)
 {
     char* mask_string = NULL;
+    MemoryContext oldCxt = NULL;
 
     if (t_thrd.log_cxt.on_mask_password)
         return NULL;
 
     t_thrd.log_cxt.on_mask_password = true;
 
-    MemoryContext oldCxt = MemoryContextSwitchTo(t_thrd.mem_cxt.mask_password_mem_cxt);
-    mask_string = mask_Password_internal(query_string);
+    oldCxt = MemoryContextSwitchTo(t_thrd.mem_cxt.mask_password_mem_cxt);
+    if (is_execute_cmd(query_string)) {
+        mask_string = mask_execute_direct_cmd(query_string);
+    } else {
+        mask_string = mask_Password_internal(query_string);
+    }
     (void)MemoryContextSwitchTo(oldCxt);
     MemoryContextReset(t_thrd.mem_cxt.mask_password_mem_cxt);
 
@@ -3636,10 +3712,233 @@ char* maskPassword(const char* query_string)
     return mask_string;
 }
 
+
+static char* mask_word(char* query_string, int query_len, const char* word, int word_len, int mask_len)
+{
+    char *head_ptr, *token_ptr, *tail_ptr;
+    int head_len, token_len, tail_len;
+    errno_t rc = EOK;
+    char* mask_string = (char*)palloc0(query_len + mask_len + 1);
+    char* lower_string = (char*)palloc0(query_len + 1);
+    rc = memcpy_s(lower_string, query_len, query_string, query_len);
+    securec_check(rc, "\0", "\0");
+
+    tolower_func(lower_string);
+
+    char* word_ptr = strstr(lower_string, word);
+    if (word_ptr == NULL) {
+        pfree_ext(mask_string);
+        pfree_ext(lower_string);
+        return query_string;
+    }
+    word_ptr = query_string + (word_ptr - lower_string);
+
+    head_ptr = query_string;
+    head_len = word_ptr - query_string + word_len;
+    token_ptr = word_ptr + word_len;
+    token_len = 0;
+    for (int i = 0; i < query_len - head_len; i++) {
+        if (token_ptr[i] == ';' || isspace(token_ptr[i])) {
+            break;
+        }
+        token_len++;
+    }
+    tail_ptr = token_ptr + token_len;
+    tail_len = query_len - head_len - token_len;
+
+    rc = memcpy_s(mask_string, query_len + mask_len + 1, query_string, head_len);
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(mask_string + head_len, query_len + mask_len + 1 - head_len, '*', mask_len);
+    securec_check(rc, "\0", "\0");
+    bool is_identified_by = ((strstr(word, " identified by ") == NULL) ? false : true);
+    if (is_identified_by) {
+        mask_string[head_len + mask_len] = '\0';
+    } else {
+        rc = memcpy_s(mask_string + head_len + mask_len, query_len + 1 - head_len, tail_ptr, tail_len);
+        securec_check(rc, "\0", "\0");
+        mask_string[head_len + mask_len + tail_len] = '\0';
+    }
+
+    pfree_ext(query_string);
+    pfree_ext(lower_string);
+    return mask_string;
+}
+
+static void truncate_identified_by(char* query_string, int query_len)
+{
+    const char* iden_str = " identified by ";
+    int iden_len = strlen(iden_str);
+    char* token_ptr;
+    int token_len;
+    int head_len;
+    errno_t rc = EOK;
+    char* lower_string = (char*)palloc0(query_len + 1);
+    rc = memcpy_s(lower_string, query_len, query_string, query_len);
+    securec_check(rc, "\0", "\0");
+    tolower_func(lower_string);
+
+    char* word_ptr = strstr(lower_string, iden_str);
+    if (word_ptr == NULL) {
+        pfree_ext(lower_string);
+        return;
+    }
+
+    word_ptr = query_string + (word_ptr - lower_string);
+    token_ptr = word_ptr + iden_len;
+    head_len = word_ptr - query_string + iden_len;
+    token_len = 0;
+    for (int i = 0; i < query_len - head_len; i++) {
+        if (isspace(token_ptr[i])) {
+            break;
+        }
+        token_len++;
+    }
+    query_string[head_len + token_len] = '\0';
+    pfree_ext(lower_string);
+}
+
+static char* mask_error_password(const char* query_string, int str_len)
+{
+    char* mask_string = NULL;
+    errno_t rc = EOK;
+    const char* pass_str = " password ";
+    const char* iden_str = " identified by ";
+    int mask_len = u_sess->attr.attr_security.Password_min_length;
+
+    char* tmp_string = (char*)palloc0(str_len + 1);
+    rc = memcpy_s(tmp_string, str_len, query_string, str_len);
+    securec_check(rc, "\0", "\0");
+
+    tmp_string = mask_word(tmp_string, str_len, pass_str, strlen(pass_str), mask_len);
+    tmp_string = mask_word(tmp_string, strlen(tmp_string), iden_str, strlen(iden_str), mask_len);
+    mask_string = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), tmp_string);
+    pfree_ext(tmp_string);
+
+    return mask_string;
+} 
+
+static char* mask_execute_direct_cmd(const char* query_string)
+{
+    char* mask_string = NULL;
+    char* tmp_string = NULL;
+    char* mask_query = NULL;
+    char* parse_query = NULL;
+    char symbol = '\'';
+    const char* exe_direct = "EXECUTE DIRECT ON";
+    int query_len = 0;
+    int exe_len = 0;
+    int mask_len = 0;
+    int position = 0;
+    const int delete_position = 2;
+    errno_t rc = EOK;
+
+    query_len = strlen(query_string);
+    exe_len = strlen(exe_direct);
+    for (int i = exe_len; i < query_len; i++) {
+        position = i + 1;
+        if (query_string[i] == symbol) {
+            break;
+        }
+    }
+    /* Parsing execute direct on detail content */
+    parse_query = (char*)palloc0(query_len - position);
+    rc = memcpy_s(parse_query, (query_len - position), 
+                (query_string + position), (query_len - position - delete_position));
+    securec_check(rc, "\0", "\0");
+    rc = strcat_s(parse_query, (query_len - position), ";\0");
+    securec_check(rc, "\0", "\0");
+    mask_query = mask_Password_internal(parse_query);
+    mask_len = strlen(mask_query);
+    /* Concatenate character string */
+    tmp_string = (char*)palloc0(mask_len + 1 + position + 1);
+    rc = memcpy_s(tmp_string, (mask_len + 1 + position + 1), exe_direct, exe_len);
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s((tmp_string + exe_len), (mask_len + 1 + position + 1), 
+                (query_string + exe_len), (position - exe_len));
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s((tmp_string + position), (mask_len + 1 + position + 1), mask_query, (mask_len - 1));
+    securec_check(rc, "\0", "\0");
+    rc = strcat_s(tmp_string, (mask_len + 1 + position + 1), "';\0");
+    securec_check(rc, "\0", "\0");
+    mask_string = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), tmp_string);
+    
+    pfree_ext(parse_query);
+    pfree_ext(tmp_string);
+    return mask_string;
+}
+
+static bool is_execute_cmd(const char* query_string)
+{
+    char* format_str = NULL;
+    char* result = NULL;
+    char* encrypt = NULL;
+    char* decrypt = NULL;
+    int query_len = 0;
+    errno_t rc = EOK;
+
+    query_len = strlen(query_string);
+    format_str = (char*)palloc0(query_len + 1);
+    rc = memcpy_s(format_str, (query_len + 1), query_string, (query_len + 1));
+    securec_check(rc, "\0", "\0");
+    tolower_func(format_str);
+    result = strstr(format_str, "execute direct on");
+    if (result != NULL) {
+        encrypt = strstr(format_str, "gs_encrypt_aes128");
+        decrypt = strstr(format_str, "gs_decrypt_aes128");
+        if ((encrypt != NULL) || (decrypt != NULL)) {
+            pfree_ext(format_str);
+            return true;
+        }
+    }
+    pfree_ext(format_str);
+    return false;
+}
+static void tolower_func(char *convert_query)
+{
+    int to_lower = 32;
+    char *ret = convert_query;
+    for (int i = 0; ret[i] != '\0'; i++) {
+        if((ret[i] >= 'A')&&(ret[i] <= 'Z')) {
+            ret[i] = ret[i] + to_lower;
+        }
+    }
+}
+
+char* mask_funcs3_parameters(const char* query_string)
+{
+    char* start = NULL;
+    int len_start = 0;
+    int j = 0;
+    errno_t rc = EOK;
+    const char* funcs3Mask[] = {"accesskey=", "secretkey="};
+    int funcs3MaskNum =  sizeof(funcs3Mask) / sizeof(funcs3Mask[0]);
+    char* mask_string = MemoryContextStrdup(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), query_string);
+    for (int i = 0; i < funcs3MaskNum; i++) {
+        start = mask_string;
+        while ((start = strstr(start, funcs3Mask[i])) != NULL) {
+            start = start + strlen(funcs3Mask[i]);
+            len_start = strlen(start);
+            for (j = 0; j < len_start; j++) {
+                if (start[j] == '\0' || start[j] == ' ')
+                    break;
+            }
+            if (j > 0) {
+                rc = memset_s(start, len_start, '*', j);
+                securec_check(rc, "\0", "\0");
+            } else {
+                /* nothing to replace */
+                break;
+            }
+        }
+    }
+    return mask_string;
+}
 /*
  * Mask the password in statment CREATE ROLE, CREATE USER, ALTER ROLE, ALTER USER, CREATE GROUP
  * SET ROLE, CREATE DATABASE LINK, and some function
  */
+
 static char* mask_Password_internal(const char* query_string)
 {
     int i = 0;
@@ -3647,23 +3946,23 @@ static char* mask_Password_internal(const char* query_string)
     core_yy_extra_type yyextra;
     core_YYSTYPE yylval;
     YYLTYPE yylloc;
-    int curr_token = 59; /* initialize prev_token as ';' */
-    bool is_password = false;
+    int currToken = 59; /* initialize prevToken as ';' */
+    bool isPassword = false;
     char* mask_string = NULL;
     const char* funcs[] = {"dblink_connect"}; /* the function list need mask */
     int funcNum = sizeof(funcs) / sizeof(funcs[0]);
     int position[16] = {0};
     int length[16] = {0};
     int idx = 0;
-    bool is_create_func = false;
-    bool is_child_stmt = false;
+    bool isCreateFunc = false;
+    bool isChildStmt = false;
     errno_t rc = EOK;
     int truncateLen = 0; /* accumulate total length for each truncate */
 
     /* the functions need to mask all contents */
-    const char* fun_crypt[] = {"gs_encrypt_aes128", "gs_decrypt_aes128"};
-    int fun_crypt_num = sizeof(fun_crypt) / sizeof(fun_crypt[0]);
-    bool is_crypt_func = false;
+    const char* funCrypt[] = {"gs_encrypt_aes128", "gs_decrypt_aes128"};
+    int funCryptNum = sizeof(funCrypt) / sizeof(funCrypt[0]);
+    bool isCryptFunc = false;
     int length_crypt = 0;
     int count_crypt = 0;
     int position_crypt = 0;
@@ -3672,7 +3971,11 @@ static char* mask_Password_internal(const char* query_string)
     const char* funcs2[] = {"exec_on_extension", "exec_hadoop_sql"};
     int funcNum2 = sizeof(funcs2) / sizeof(funcs2[0]);
 
-    /* stmt type:
+    const char* funcs3[] = {"gs_extend_library"};
+    int funcNum3 = sizeof(funcs3) / sizeof(funcs3[0]);
+    int count_funcs = 0;
+
+    /*stmt type:
      * 0 - unknown type
      * 1 - create role
      * 2 - create user
@@ -3686,26 +3989,29 @@ static char* mask_Password_internal(const char* query_string)
      * 10 - create/alter server; create/alter foreign table;
      * 11 - create/alter data source
      * 12 - for funcs2
+     * 13 - for funcs3
+     * 14 - create/alter text search dictionary
+     * 15 - for funCrypt
      */
-    int cur_stmt_type = 0;
-    int prev_token[5] = {0};
+    int curStmtType = 0;
+    int prevToken[5] = {0};
 
     sigjmp_buf compile_sigjmp_buf;
-    sigjmp_buf* save_exception_stack = t_thrd.log_cxt.PG_exception_stack;
-    ErrorContextCallback* save_context_stack = t_thrd.log_cxt.error_context_stack;
-    int save_stack_depth = t_thrd.log_cxt.errordata_stack_depth;
-    int save_recursion_depth = t_thrd.log_cxt.recursion_depth;
-    int save_interrupt_holdoff_count = t_thrd.int_cxt.InterruptHoldoffCount;
-    bool save_escape_string_warning = u_sess->attr.attr_sql.escape_string_warning;
+    sigjmp_buf* saveExceptionStack = t_thrd.log_cxt.PG_exception_stack;
+    ErrorContextCallback* saveContextStack = t_thrd.log_cxt.error_context_stack;
+    int saveStackDepth = t_thrd.log_cxt.errordata_stack_depth;
+    int saveRecursionDepth = t_thrd.log_cxt.recursion_depth;
+    int saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    bool saveEscapeStringWarning = u_sess->attr.attr_sql.escape_string_warning;
     bool need_clear_yylval = false;
-    /* initialize the flex scanner */
+    /* initialize the flex scanner  */
     yyscanner = scanner_init(query_string, &yyextra, ScanKeywords, NumScanKeywords);
     yyextra.warnOnTruncateIdent = false;
     u_sess->attr.attr_sql.escape_string_warning = false;
 
-    /* set t_thrd.log_cxt.recursion_depth to 0 for avoiding MemoryContextReset called */
+    /*set t_thrd.log_cxt.recursion_depth to 0 for avoiding MemoryContextReset called*/
     t_thrd.log_cxt.recursion_depth = 0;
-    /* set t_thrd.log_cxt.error_context_stack to NULL for avoiding context callback called */
+    /*set t_thrd.log_cxt.error_context_stack to NULL for avoiding context callback called*/
     t_thrd.log_cxt.error_context_stack = NULL;
     /* replace globe JUMP point, ensurance return here if syntex error */
     t_thrd.log_cxt.PG_exception_stack = &compile_sigjmp_buf;
@@ -3713,33 +4019,38 @@ static char* mask_Password_internal(const char* query_string)
     PG_TRY();
     {
         while (1) {
-            prev_token[0] = curr_token;
-            curr_token = core_yylex(&yylval, &yylloc, yyscanner);
+            prevToken[0] = currToken;
+            currToken = core_yylex(&yylval, &yylloc, yyscanner);
+
             /*
-             * curr_token = 0 means there are no token any more mainly for non-semicolon condition.
+             * currToken = 0 means there are no token any more mainly for non-semicolon condition.
              * Just break here is enough as the query need masked have been masked, here need
              * comprehensive test validation in properly time.
              */
-            if (curr_token == 0) {
+            if (currToken == 0) {
                 break;
             }
 
             /* For function procedure and anonymous blocks condition. */
-            if (is_child_stmt) {
-                is_child_stmt = false;
-                if (curr_token == SCONST && (yylval.str != NULL) && (yylval.str[0] != '\0')) {
+            if (isChildStmt) {
+                isChildStmt = false;
+                if (currToken == SCONST && (yylval.str != NULL) && (yylval.str[0] != '\0')) {
                     /*
                      * Actually erase single quotes which was originally expected
                      * to do on IMMEDIATE branch.
                      */
-                    if (prev_token[0] == IMMEDIATE) {
-                        erase_single_quotes(yylval.str);
-                    }
+                    if (prevToken[0] == IMMEDIATE)
+                        eraseSingleQuotes(yylval.str);
 
-                    char* childStmt = mask_Password_internal(yylval.str);
+                    char* childStmt = NULL;
+                    if (curStmtType == 13) {
+                        childStmt = mask_funcs3_parameters(yylval.str);
+                    } else
+                        childStmt = mask_Password_internal(yylval.str);
                     if (childStmt != NULL) {
                         if (mask_string == NULL) {
-                            mask_string = MemoryContextStrdup(u_sess->top_mem_cxt, query_string);
+                            mask_string = MemoryContextStrdup(
+                                SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
                         }
                         if (unlikely(yyextra.literallen != (int)strlen(childStmt))) {
                             ereport(ERROR,
@@ -3760,16 +4071,16 @@ static char* mask_Password_internal(const char* query_string)
              * The token have been assigned consistent numbers according to
              * the order in gram.y(e.g. IDENT = 258 and SCONST = 260).
              */
-            if (cur_stmt_type > 0 && cur_stmt_type != 12 && (curr_token == SCONST || curr_token == IDENT)) {
+            if (curStmtType > 0 && curStmtType != 12 && curStmtType != 13 && curStmtType != 14 && curStmtType != 15 &&
+                (currToken == SCONST || currToken == IDENT)) {
                 if (unlikely(yylloc >= (int)strlen(query_string))) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("parse error on query %s.", query_string)));
                 }
                 char ch = query_string[yylloc];
                 position[idx] = yylloc;
 
-                if (ch == '\'' || ch == '\"') {
+                if (ch == '\'' || ch == '\"')
                     ++position[idx];
-                }
                 length[idx] = strlen(yylval.str);
                 ++idx;
                 /*
@@ -3777,18 +4088,20 @@ static char* mask_Password_internal(const char* query_string)
                  *  For a matched token, position[idx] is query_string's position, but mask_string is truncated,
                  *  real position of mask_string be located at (position[idx] - truncateLen).
                  */
-                if (idx == 16 || is_password) {
+                if (idx == 16 || isPassword) {
                     if (mask_string == NULL) {
-                        mask_string = MemoryContextStrdup(u_sess->top_mem_cxt, query_string);
+                        mask_string = MemoryContextStrdup(
+                            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
                     }
                     int maskLen = u_sess->attr.attr_security.Password_min_length;
                     for (i = 0; i < idx; ++i) {
-                        /* while masking password, if password is't quoted by \' or \", 
-                         * the len of password may be shorter than actual, 
-                         * we need to find the start position of password word by looking forward.
+                        /* 
+                         *  while masking password, if password is't quoted by \' or \", 
+                         *  the len of password may be shorter than actual, 
+                         *  we need to find the start position of password word by looking forward.
                          */ 
                         char wordHead = position[i] > 0 ? query_string[position[i] - 1] : '\0';
-                        if (is_password && wordHead != '\0' && wordHead != '\'' && wordHead != '\"') {
+                        if (isPassword && wordHead != '\0' && wordHead != '\'' && wordHead != '\"') {
                             while (position[i] > 0 && !isspace(wordHead) && wordHead != '\'' && wordHead != '\"') {
                                 position[i]--;
                                 wordHead = query_string[position[i] - 1];
@@ -3829,176 +4142,176 @@ static char* mask_Password_internal(const char* query_string)
                         need_clear_yylval = false;
                     }
                     idx = 0;
-                    is_password = false;
-                    if (cur_stmt_type == 10 || cur_stmt_type == 11) {
-                        cur_stmt_type = 0;
+                    isPassword = false;
+                    if (curStmtType == 10 || curStmtType == 11) {
+                        curStmtType = 0;
                     }
                 }
             }
 
-            switch (curr_token) {
+            switch (currToken) {
                 case CREATE:
                 case ALTER:
                 case SET:
                     break;
                 case ROLE:
                 case SESSION:
-                    if (cur_stmt_type > 0) {
+                    if (curStmtType > 0)
                         break;
-                    }
 
-                    if (prev_token[0] == CREATE) {
-                        cur_stmt_type = 1;
-                    } else if (prev_token[0] == ALTER) {
-                        cur_stmt_type = 3;
-                    } else if (prev_token[0] == SET) {
-                        cur_stmt_type = 6;
-                    } else if (prev_token[1] == SET && (prev_token[0] == LOCAL || prev_token[0] == SESSION)) {
-                        cur_stmt_type = 6;
-                        prev_token[1] = 0;
+                    if (prevToken[0] == CREATE) {
+                        curStmtType = 1;
+                    } else if (prevToken[0] == ALTER) {
+                        curStmtType = 3;
+                    } else if (prevToken[0] == SET) {
+                        curStmtType = 6;
+                    } else if (prevToken[1] == SET && (prevToken[0] == LOCAL || prevToken[0] == SESSION)) {
+                        curStmtType = 6;
+                        prevToken[1] = 0;
                     }
 
                     break;
                 case USER:
-                    if (cur_stmt_type > 0) {
+                    if (curStmtType > 0)
                         break;
-                    }
-                    if (prev_token[0] == CREATE) {
-                        cur_stmt_type = 2;
-                    }
-                    else if (prev_token[0] == ALTER) {
-                        cur_stmt_type = 4;
-                    }
+                    if (prevToken[0] == CREATE)
+                        curStmtType = 2;
+                    else if (prevToken[0] == ALTER)
+                        curStmtType = 4;
                     break;
                 case LOCAL:  // set local role
-                    if (prev_token[0] == SET) {
-                        prev_token[1] = SET;
-                    }
+                    if (prevToken[0] == SET)
+                        prevToken[1] = SET;
                     break;
                 case GROUP_P:
-                    if (cur_stmt_type > 0) {
+                    if (curStmtType > 0)
                         break;
-                    }
-                    if (prev_token[0] == CREATE) {
-                        cur_stmt_type = 5;
-                    }
+                    if (prevToken[0] == CREATE)
+                        curStmtType = 5;
                     break;
                 case DATABASE:
-                    if (prev_token[0] == CREATE) {
-                        prev_token[1] = CREATE;
-                    }
+                    if (prevToken[0] == CREATE)
+                        prevToken[1] = CREATE;
                     break;
                 case PASSWORD:
-                    if (prev_token[1] == SERVER && prev_token[2] == OPTIONS) {
-                        cur_stmt_type = 10;
-                        curr_token = IDENT;
-                    } else if (prev_token[1] == DATA_P && prev_token[2] == SOURCE_P && prev_token[3] == OPTIONS) {
+                    if (prevToken[1] == SERVER && prevToken[2] == OPTIONS) {
+                        curStmtType = 10;
+                        currToken = IDENT;
+                    } else if (prevToken[1] == DATA_P && prevToken[2] == SOURCE_P && prevToken[3] == OPTIONS) {
                         /* For create/alter data source: sensitive opt is 'password' */
-                        cur_stmt_type = 11;
-                        curr_token = IDENT;
+                        curStmtType = 11;
+                        currToken = IDENT;
                     }
-                    is_password = true;
+                    isPassword = true;
                     idx = 0;
                     break;
                 case BY:
-                    is_password = (cur_stmt_type > 0 && prev_token[0] == IDENTIFIED);
-                    if (is_password) {
+                    isPassword = (curStmtType > 0 && prevToken[0] == IDENTIFIED);
+                    if (isPassword)
                         idx = 0;
-                    }
                     break;
                 case REPLACE:
-                    is_password = (cur_stmt_type == 3 || cur_stmt_type == 4);
-                    if (is_password) {
+                    isPassword = (curStmtType == 3 || curStmtType == 4);
+                    if (isPassword)
                         idx = 0;
-                    }
                     break;
                 case FUNCTION:
                 case PROCEDURE:
-                    if (cur_stmt_type > 0) {
+                    if (curStmtType > 0)
                         break;
-                    }
-                    if (prev_token[0] == CREATE || prev_token[0] == REPLACE) {
-                        is_create_func = true;
-                    }
+                    if (prevToken[0] == CREATE || prevToken[0] == REPLACE)
+                        isCreateFunc = true;
                     break;
                 case DO:
-                    is_create_func = true;
-                    if (is_create_func) {
-                        is_create_func = false;
-                        is_child_stmt = true;
+                    isCreateFunc = true;
+                    if (isCreateFunc) {
+                        isCreateFunc = false;
+                        isChildStmt = true;
                     }
                     break;
                 case AS:
                 case IS:
-                    if (is_create_func) {
-                        is_create_func = false;
-                        is_child_stmt = true;
+                    if (isCreateFunc) {
+                        isCreateFunc = false;
+                        isChildStmt = true;
                     }
                     break;
                 case IMMEDIATE:
-                    if (cur_stmt_type > 0) {
+                    if (curStmtType > 0)
                         break;
-                    }
-                    if (prev_token[0] == EXECUTE) {
-                        is_child_stmt = true;
-                        erase_single_quotes(yyextra.scanbuf + yylloc);
+                    if (prevToken[0] == EXECUTE) {
+                        isChildStmt = true;
+                        eraseSingleQuotes(yyextra.scanbuf + yylloc);
                     }
                     break;
                 case 40: /* character '(' */
-                    if (is_crypt_func) {
-                        count_crypt++;
-                    }
-                    if (prev_token[0] == IDENT) {
+                    if (prevToken[0] == IDENT) {
                         /* first, check funcs[] */
                         for (i = 0; i < funcNum; ++i) {
                             if (pg_strcasecmp(yylval.str, funcs[i]) == 0) {
-                                cur_stmt_type = 8;
+                                curStmtType = 8;
                                 break;
                             }
                         }
                         /* if found, just break; */
-                        if (i < funcNum) {
+                        if (i < funcNum)
                             break;
-                        }
 
                         /* otherwise, check if it is in funcs2[] */
                         for (i = 0; i < funcNum2; i++) {
                             if (pg_strcasecmp(yylval.str, funcs2[i]) == 0) {
                                 /* for funcs2, we will mask its second parameter as child stmt. */
-                                is_child_stmt = false;
-                                prev_token[1] = 40;
-                                cur_stmt_type = 12;
+                                isChildStmt = false;
+                                prevToken[1] = 40;
+                                curStmtType = 12;
                                 break;
                             }
                         }
 
                         /* if found, just break; */
-                        if (i < funcNum2) {
+                        if (i < funcNum2)
+                            break;
+
+                        /* otherwise, check if it is in funcs3[] */
+                        for (i = 0; i < funcNum3; i++) {
+                            if (pg_strcasecmp(yylval.str, funcs3[i]) == 0) {
+                                /* for funcs3, we will mask its second parameter */
+                                isChildStmt = false;
+                                prevToken[1] = 40;
+                                curStmtType = 13;
+                                count_funcs++;
+                                break;
+                            }
+                        }
+
+                        if (i < funcNum3) {
                             break;
                         }
 
-                        /* otherwise, check if it is in fun_crypt[] */
-                        for (i = 0; i < fun_crypt_num; i++) {
-                            if (pg_strcasecmp(yylval.str, fun_crypt[i]) == 0) {
-                                /* for fun_crypt, we will mask all contents in (). */
-                                is_crypt_func = true;
-                                cur_stmt_type = 8;
-                                if (0 == count_crypt) {
-                                    count_crypt++;
+                        /* otherwise, check if it is in funCrypt[] */
+                        for (i = 0; i < funCryptNum; i++) {
+                            if (pg_strcasecmp(yylval.str, funCrypt[i]) == 0) {
+                                /* for funCrypt, we will mask all contents in (). */
+                                isCryptFunc = true;
+                                curStmtType = 15;
+                                if (count_crypt == 0) {
                                     position_crypt = yylloc + 1;
                                 }
+                                count_crypt++;
                                 break;
                             }
                         }
                     }
                     break;
                 case 41: /* character ')' */
-                    if (is_crypt_func) {
+                    if (isCryptFunc) {
                         count_crypt--;
                         if (count_crypt == 0) {
                             if (mask_string == NULL) {
-                                mask_string = MemoryContextStrdup(u_sess->top_mem_cxt, query_string);
+                                mask_string = MemoryContextStrdup(
+                                    SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
                             }
+                            
                             if (yylloc > position_crypt) {
                                 int len_mask_string = strlen(mask_string);
                                 rc = memset_s(mask_string + position_crypt,
@@ -4006,35 +4319,58 @@ static char* mask_Password_internal(const char* query_string)
                                     '*',
                                     yylloc - position_crypt);
                                 securec_check(rc, "\0", "\0");
+                                if ((mask_string[yylloc + 1] == ';') || 
+                                    (mask_string[yylloc + 1] == '\0')) {
+                                    const int maskLen = 8; /* for funCrypt, we will mask all contents in () with 8 '*' */
+                                    if (yylloc - position_crypt > maskLen) {
+                                        rc = memmove_s(mask_string + position_crypt + maskLen,
+                                            len_mask_string - position_crypt - maskLen,
+                                            &mask_string[yylloc],
+                                            len_mask_string - yylloc + 1);
+                                        securec_check(rc, "\0", "\0");
+                                    }
+                                } else {
+                                    count_crypt++;
+                                    break;
+                                }
                             }
-                            is_crypt_func = false;
+                            isCryptFunc = false;
                             length_crypt = 0;
                             position_crypt = 0;
                         }
+                        break;
                     }
-                    if (cur_stmt_type == 8) {
-                        if (mask_string == NULL) {
-                            mask_string = MemoryContextStrdup(u_sess->top_mem_cxt, query_string);
+                    
+                    if (curStmtType == 8) {
+                        if (NULL == mask_string) {
+                            mask_string = MemoryContextStrdup(
+                                SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
                         }
                         for (i = 0; i < idx; ++i) {
                             rc = memset_s(mask_string + position[i], length[i], '*', length[i]);
                             securec_check(rc, "", "");
                         }
                         idx = 0;
-                        cur_stmt_type = 0;
+                        curStmtType = 0;
                     }
-                    /* for funcs2: exec_on_extension, exec_hadoop_sql */
-                    if (cur_stmt_type == 12) {
-                        cur_stmt_type = 0;
-                        prev_token[1] = 0;
+
+                    /* for funcs2: exec_on_extension, exec_hadoop_sql
+                     * for funcs3: gs_extend_library
+                     */
+                    if (curStmtType == 12 || curStmtType == 13) {
+                        count_funcs--;
+                        if (count_funcs == 0) {
+                            curStmtType = 0;
+                            prevToken[1] = 0;
+                        }
                     }
                     break;
                 case 44: /* character ',' */
-                    /* for mask funcs2 */
-                    if (cur_stmt_type == 12) {
-                        if (prev_token[1] == 40) {
+                    /* for mask funcs2 and funcs3 */
+                    if (curStmtType == 12 || curStmtType == 13) {
+                        if (prevToken[1] == 40) {
                             /* only mask its second parameter as a child stmt. */
-                            is_child_stmt = true;
+                            isChildStmt = true;
                             break;
                         }
                     }
@@ -4045,81 +4381,125 @@ static char* mask_Password_internal(const char* query_string)
                      * and 'replace' syntax, and we do mask before. We can just finish
                      * the masking task and reset all the parameters when meet the end.
                      */
-                    cur_stmt_type = 0;
-                    is_password = false;
+                    curStmtType = 0;
+                    isPassword = false;
                     idx = 0;
                     break;
                 case FOREIGN:
-                    if (prev_token[0] == CREATE || prev_token[0] == ALTER) {
-                        prev_token[1] = FOREIGN;
+                    if (prevToken[0] == CREATE || prevToken[0] == ALTER) {
+                        prevToken[1] = FOREIGN;
                     }
                     break;
                 case TABLE:
-                    if (prev_token[1] == FOREIGN) {
-                        prev_token[2] = TABLE;
+                    if (prevToken[1] == FOREIGN) {
+                        prevToken[2] = TABLE;
                     }
                     break;
                 case SERVER:
-                    if (prev_token[0] == CREATE || prev_token[0] == ALTER) {
-                        prev_token[1] = SERVER;
+                    if (prevToken[0] == CREATE || prevToken[0] == ALTER) {
+                        prevToken[1] = SERVER;
                     }
                     break;
                 case OPTIONS:
-                    if (prev_token[1] == SERVER) {
-                        prev_token[2] = OPTIONS;
-                    } else if (prev_token[1] == FOREIGN && prev_token[2] == TABLE) {
-                        prev_token[3] = OPTIONS;
-                    } else if (prev_token[1] == DATA_P && prev_token[2] == SOURCE_P) {
-                        prev_token[3] = OPTIONS;
+                    if (prevToken[1] == SERVER) {
+                        prevToken[2] = OPTIONS;
+                    } else if (prevToken[1] == FOREIGN && prevToken[2] == TABLE) {
+                        prevToken[3] = OPTIONS;
+                    } else if (prevToken[1] == DATA_P && prevToken[2] == SOURCE_P) {
+                        prevToken[3] = OPTIONS;
+                    }
+                    break;
+                /* For create/alter text search dictionary */
+                case TEXT_P:
+                    if (prevToken[0] == CREATE || prevToken[0] == ALTER) {
+                        prevToken[1] = TEXT_P;
+                    }
+                    break;
+                case SEARCH:
+                    if (prevToken[1] == TEXT_P) {
+                        prevToken[2] = SEARCH;
+                    }
+                    break;
+                case DICTIONARY:
+                    if (prevToken[1] == TEXT_P && prevToken[2] == SEARCH) {
+                        prevToken[3] = DICTIONARY;
                     }
                     break;
                 /* For create/alter data source */
                 case DATA_P:
-                    if (prev_token[0] == CREATE || prev_token[0] == ALTER) {
-                        prev_token[1] = DATA_P;
+                    if (prevToken[0] == CREATE || prevToken[0] == ALTER) {
+                        prevToken[1] = DATA_P;
                     }
                     break;
                 case SOURCE_P:
-                    if (prev_token[1] == DATA_P) {
-                        prev_token[2] = SOURCE_P;
+                    if (prevToken[1] == DATA_P) {
+                        prevToken[2] = SOURCE_P;
                     }
                     break;
                 case IDENT:
-                    if ((prev_token[1] == SERVER && prev_token[2] == OPTIONS) ||
-                        (prev_token[1] == FOREIGN && prev_token[2] == TABLE && prev_token[3] == OPTIONS)) {
+                    if ((prevToken[1] == SERVER && prevToken[2] == OPTIONS) ||
+                        (prevToken[1] == FOREIGN && prevToken[2] == TABLE && prevToken[3] == OPTIONS)) {
                         if (pg_strcasecmp(yylval.str, "secret_access_key") == 0) {
                             /* create/alter server  */
-                            cur_stmt_type = 10;
+                            curStmtType = 10;
                         } else {
-                            cur_stmt_type = 0;
+                            curStmtType = 0;
                         }
                         idx = 0;
-                    } else if (prev_token[1] == DATA_P && prev_token[2] == SOURCE_P && prev_token[3] == OPTIONS) {
+                    } else if (prevToken[1] == DATA_P && prevToken[2] == SOURCE_P && prevToken[3] == OPTIONS) {
                         /*
                          * For create/alter data source: sensitive opts are 'username' and 'password'.
                          * 'username' is marked here, while 'password' is marked as a standard Token, not here.
                          */
                         if (pg_strcasecmp(yylval.str, "username") == 0) {
-                            cur_stmt_type = 11;
+                            curStmtType = 11;
                         } else {
-                            cur_stmt_type = 0;
+                            curStmtType = 0;
                         }
                         idx = 0;
+                    } else if (prevToken[1] == TEXT_P && prevToken[2] == SEARCH && prevToken[3] == DICTIONARY) {
+                        if (pg_strcasecmp(yylval.str, "filepath") == 0) {
+                            curStmtType = 14;
+                        } else {
+                            curStmtType = 0;
+                        }
                     }
                     break;
                 case SCONST:
                     /* create/alter server || create/alter data source: masked here */
-                    if (cur_stmt_type == 10 || cur_stmt_type == 11) {
-                        if (prev_token[0] == IDENT) {
+                    if (curStmtType == 10 || curStmtType == 11) {
+                        if (prevToken[0] == IDENT) {
                             if (mask_string == NULL) {
-                                mask_string = MemoryContextStrdup(u_sess->top_mem_cxt, query_string);
+                                mask_string = MemoryContextStrdup(
+                                    SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
                             }
 
                             rc = memset_s(mask_string + position[0], length[0], '*', length[0]);
                             securec_check(rc, "", "");
                             idx = 0;
-                            cur_stmt_type = 0;
+                            curStmtType = 0;
                         }
+                    } else if (curStmtType == 14) {
+                        if (pg_strncasecmp(yylval.str, "obs", strlen("obs")) == 0) {
+                            char* childStmt = mask_funcs3_parameters(yylval.str);
+                            if (childStmt != NULL) {
+                                if (mask_string == NULL) {
+                                    mask_string = MemoryContextStrdup(
+                                        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
+                                }
+                                if (unlikely(yyextra.literallen != (int)strlen(childStmt))) {
+                                    ereport(ERROR,
+                                        (errcode(ERRCODE_SYNTAX_ERROR),
+                                        errmsg("parse error on statement %s.", childStmt)));
+                                }
+                                rc = memcpy_s(mask_string + yylloc + 1, yyextra.literallen, childStmt, yyextra.literallen);
+                                securec_check(rc, "\0", "\0");
+                                rc = memset_s(childStmt, yyextra.literallen, 0, yyextra.literallen);
+                                securec_check(rc, "", "");
+                                pfree(childStmt);
+                            }
+                        }
+                        curStmtType = 0;
                     }
                     break;
                 default:
@@ -4129,25 +4509,25 @@ static char* mask_Password_internal(const char* query_string)
     }
     PG_CATCH();
     {
-        for (i = save_stack_depth + 1; i <= t_thrd.log_cxt.errordata_stack_depth; ++i) {
+        for (i = saveStackDepth + 1; i <= t_thrd.log_cxt.errordata_stack_depth; ++i) {
             ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
             /* Now free up subsidiary data attached to stack entry, and release it */
-            if (edata->message != NULL) {
+            if (NULL != edata->message) {
                 pfree_ext(edata->message);
             }
-            if (edata->detail != NULL) {
+            if (NULL != edata->detail) {
                 pfree_ext(edata->detail);
             }
-            if (edata->detail_log != NULL) {
+            if (NULL != edata->detail_log) {
                 pfree_ext(edata->detail_log);
             }
-            if (edata->hint != NULL) {
+            if (NULL != edata->hint) {
                 pfree_ext(edata->hint);
             }
-            if (edata->context != NULL) {
+            if (NULL != edata->context) {
                 pfree_ext(edata->context);
             }
-            if (edata->internalquery != NULL) {
+            if (NULL != edata->internalquery) {
                 pfree_ext(edata->internalquery);
             }
             t_thrd.log_cxt.errordata_stack_depth--;
@@ -4156,11 +4536,11 @@ static char* mask_Password_internal(const char* query_string)
     PG_END_TRY();
 
     /* restore the globe jump, globe jump if encounter errors in compile */
-    t_thrd.log_cxt.PG_exception_stack = save_exception_stack;
-    t_thrd.log_cxt.error_context_stack = save_context_stack;
-    t_thrd.log_cxt.recursion_depth = save_recursion_depth;
-    t_thrd.int_cxt.InterruptHoldoffCount = save_interrupt_holdoff_count;
-    u_sess->attr.attr_sql.escape_string_warning = save_escape_string_warning;
+    t_thrd.log_cxt.PG_exception_stack = saveExceptionStack;
+    t_thrd.log_cxt.error_context_stack = saveContextStack;
+    t_thrd.log_cxt.recursion_depth = saveRecursionDepth;
+    t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+    u_sess->attr.attr_sql.escape_string_warning = saveEscapeStringWarning;
 
     if (yyextra.scanbuflen > 0) {
         rc = memset_s(yyextra.scanbuf, yyextra.scanbuflen, 0, yyextra.scanbuflen);
@@ -4176,7 +4556,7 @@ static char* mask_Password_internal(const char* query_string)
     return mask_string;
 }
 
-static void erase_single_quotes(char* query_string)
+static void eraseSingleQuotes(char* query_string)
 {
     char* curr = NULL;
     int count = 0;
@@ -4243,9 +4623,51 @@ static void mask_espaced_character(char* source_str)
      * Replace all the "\n" with "*" in the string.
      */
     char* match_pos = strstr(source_str, "\n");
-    while (match_pos != NULL) {
+    while (NULL != match_pos) {
         *match_pos = '*';
         match_pos = strstr(match_pos, "\n");
     }
     return;
+}
+
+static void write_asp_chunks(char *data, int len, bool end)
+{
+    LogPipeProtoChunk p;
+    int fd = fileno(stderr);
+    int rc;
+
+    Assert(len > 0);
+
+    p.proto.nuls[0] = p.proto.nuls[1] = '\0';
+    p.proto.pid = t_thrd.proc_cxt.MyProcPid;
+    p.proto.logtype = LOG_TYPE_ASP_LOG;
+    p.proto.magic = PROTO_HEADER_MAGICNUM;
+
+    /* write all but the last chunk */
+    while (len > LOGPIPE_MAX_PAYLOAD) {
+        p.proto.is_last = 'F';
+        p.proto.len = LOGPIPE_MAX_PAYLOAD;
+        rc = memcpy_s(p.proto.data, LOGPIPE_MAX_PAYLOAD, data, LOGPIPE_MAX_PAYLOAD);
+        securec_check(rc, "\0", "\0");
+        rc = write(fd, &p, LOGPIPE_HEADER_SIZE + LOGPIPE_MAX_PAYLOAD);
+        (void) rc;
+        data += LOGPIPE_MAX_PAYLOAD;
+        len -= LOGPIPE_MAX_PAYLOAD;
+    }
+
+    /* write the last chunk */
+    p.proto.is_last = end ? 'T' : 'F';
+    p.proto.len = len;
+    rc = memcpy_s(p.proto.data, LOGPIPE_MAX_PAYLOAD, data, len);
+    securec_check(rc, "\0", "\0");
+    rc = write(fd, &p, LOGPIPE_HEADER_SIZE + len);
+    (void) rc;
+}
+static void write_asplog(char *data, int len, bool end)
+{
+    if (t_thrd.role == SYSLOGGER || !t_thrd.postmaster_cxt.redirection_done) {
+        write_syslogger_file(data, len, LOG_DESTINATION_ASPLOG);
+    } else {
+        write_asp_chunks(data, len, end);
+    }
 }

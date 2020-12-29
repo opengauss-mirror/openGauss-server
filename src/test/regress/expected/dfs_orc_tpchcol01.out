@@ -1,0 +1,74 @@
+set enable_global_stats = true;
+set current_schema = vector_engine;
+set enable_vector_engine=on;
+set enable_nestloop=off;
+explain (costs off) select
+	l_returnflag,
+	l_linestatus,
+	sum(l_quantity) as sum_qty,
+	sum(l_extendedprice) as sum_base_price,
+	sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+	sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
+	avg(l_quantity) as avg_qty,
+	avg(l_extendedprice) as avg_price,
+	avg(l_discount) as avg_disc,
+	count(*) as count_order
+from
+	lineitem
+where
+	l_shipdate <= date '1998-12-01' - interval '3 day'
+group by
+	l_returnflag,
+	l_linestatus
+order by 
+	sum_qty;
+                                                                   QUERY PLAN                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: (sum((sum(vector_engine.lineitem.l_quantity))))
+         Node/s: All datanodes
+         ->  Vector Sort
+               Sort Key: (sum((sum(vector_engine.lineitem.l_quantity))))
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: vector_engine.lineitem.l_returnflag, vector_engine.lineitem.l_linestatus
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Vector Sonic Hash Aggregate
+                                 Group By Key: vector_engine.lineitem.l_returnflag, vector_engine.lineitem.l_linestatus
+                                 ->  Vector Append
+                                       ->  Dfs Scan on lineitem
+                                             Pushdown Predicate Filter: (l_shipdate <= 'Sat Nov 28 00:00:00 1998'::timestamp without time zone)
+                                       ->  Vector Adapter
+                                             ->  Seq Scan on pg_delta_vector_engine_lineitem lineitem
+                                                   Filter: (l_shipdate <= 'Sat Nov 28 00:00:00 1998'::timestamp without time zone)
+(18 rows)
+
+select
+	l_returnflag,
+	l_linestatus,
+	sum(l_quantity) as sum_qty,
+	sum(l_extendedprice) as sum_base_price,
+	sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+	sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
+	avg(l_quantity) as avg_qty,
+	avg(l_extendedprice) as avg_price,
+	avg(l_discount) as avg_disc,
+	count(*) as count_order
+from
+	lineitem
+where
+	l_shipdate <= date '1998-12-01' - interval '3 day'
+group by
+	l_returnflag,
+	l_linestatus
+order by 
+	sum_qty;
+ l_returnflag | l_linestatus |  sum_qty  | sum_base_price | sum_disc_price  |    sum_charge     |       avg_qty       |     avg_price      |       avg_disc        | count_order 
+--------------+--------------+-----------+----------------+-----------------+-------------------+---------------------+--------------------+-----------------------+-------------
+ N            | F            |   8971.00 |    12384801.37 |   11798257.2080 |   12282485.056933 | 25.7787356321839080 | 35588.509683908046 | .04775862068965517241 |         348
+ A            | F            | 380456.00 |   532348211.65 |  505822441.4861 |  526165934.000839 | 25.5751546114546921 | 35785.709306937349 | .05008133906964237698 |       14876
+ R            | F            | 381449.00 |   534594445.35 |  507996454.4067 |  528524219.358903 | 25.5971681653469333 | 35874.006532680177 | .04982753992752650651 |       14902
+ N            | O            | 765181.00 |  1072769060.24 | 1019433269.1967 | 1060338999.761883 | 25.4661363863280860 | 35703.033921522947 | .04992811262355642826 |       30047
+(4 rows)
+

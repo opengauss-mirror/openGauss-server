@@ -44,6 +44,7 @@
 /******************************* declare macro **********************************/
 #define TARGET_EXTENTION_NAME_CPP "cpp"
 #define TARGET_EXTENTION_NAME_L "l"
+#define TARGET_EXTENTION_NAME_Y "y"
 #define ERRMSG_FORMAT_OUTPUT_FILENAME "errmsg.txt"
 #define ERRMSG_NEW_FILENAME "errmsg_new.txt"
 #define ERRMSG_OLD_FILENAME "errmsg_old.txt"
@@ -121,8 +122,7 @@ static char g_acBuf1[16384] = {0};
 static char acTmpBuf[16384] = {0};
 
 char* g_ErrCodesFile = NULL;
-char* g_ScanDir = NULL;
-char* g_ScanDir1 = NULL;
+char* g_ScanFile = NULL;
 static char* g_sCurDir = NULL;
 static char* g_sProgDir = NULL;
 static FILE* logfile;
@@ -140,7 +140,7 @@ static char* g_scGsqlerrHdfile = (char*)"gsqlerr_errmsg.h";
 /******************************* declare function prototype ****************************/
 extern void getProgdir(const char* argv0);
 extern int getStatType(char* fileName);
-extern int scanDir(char* dir);
+extern int scanDir(const char* parent, const char* input_file_path);
 extern int fileprocess(char* dir, char* szFileName);
 extern int parseEpPara(char* szLine, ERPARA_INFO_T* pstOutErPara, int funcflag);
 extern int parseEreport(char* szLine, ERPARA_INFO_T* pstOutErPara);
@@ -159,21 +159,16 @@ int outputLog(FILE* logfile, bool isCloseFd, const char* format, ...) __attribut
 /******************************* realize function ************************************/
 int main(int argc, char* argv[])
 {
-    char* scanrealpath_ptr = NULL;
-    char scanresolved_name[PATH_MAX] = {0};
-    char* scanrealpath_ptr1 = NULL;
-    char scanresolved_name1[PATH_MAX] = {0};
     char* filerealpath_ptr = NULL;
-    char fileresolved_name[PATH_MAX] = {0};
+    char fileresolved_name[FILE_NAME_MAX_LEN] = {0};
     char* dirrealpath_ptr = NULL;
-    char dirresolved_name[PATH_MAX] = {0};
+    char dirresolved_name[FILE_NAME_MAX_LEN] = {0};
     char cwd[MAXPATH] = {0};
     int lRet = 0;
     char logfilename[MAXPATH] = {0};
     time_t timer;
     struct tm* pstTmInfo = NULL;
     char acStartTime[25] = {0};
-    size_t errMsgLen = 0;
     int rc = -1;
 
     if (1 >= argc) {
@@ -225,21 +220,6 @@ int main(int argc, char* argv[])
 
     fprintf(logfile, "--start time: %s  \n", acStartTime);
 
-    /* get scan dir */
-    g_ScanDir = argv[1];
-    scanrealpath_ptr = realpath(g_ScanDir, scanresolved_name);
-    if (NULL == scanrealpath_ptr) {
-        return outputLog(NULL, false, "call resolved_path:%s get resolved_name error.\n", g_ScanDir);
-    }
-    g_ScanDir = scanrealpath_ptr;
-
-    g_ScanDir1 = argv[2];
-    scanrealpath_ptr1 = realpath(g_ScanDir1, scanresolved_name1);
-    if (NULL == scanrealpath_ptr1) {
-        return outputLog(NULL, false, "call resolved_path:%s get resolved_name error.\n", g_ScanDir1);
-    }
-    g_ScanDir1 = scanrealpath_ptr1;
-
     /* get errorcodes dir */
     g_ErrCodesFile = argv[3];
     filerealpath_ptr = realpath(g_ErrCodesFile, fileresolved_name);
@@ -249,20 +229,19 @@ int main(int argc, char* argv[])
     g_ErrCodesFile = filerealpath_ptr;
 
     /* init malloc */
-    errMsgLen = sizeof(mppdb_err_msg_t) * ERRMSG_MAX_NUM;
-    g_stErrMsg = (mppdb_err_msg_t*)malloc(errMsgLen);
+    g_stErrMsg = (mppdb_err_msg_t*)malloc(sizeof(mppdb_err_msg_t) * ERRMSG_MAX_NUM);
     if (NULL == g_stErrMsg) {
         return outputLog(logfile, true, "malloc g_stErrMsg fail.\n");
     }
-    rc = memset_s(g_stErrMsg, errMsgLen, 0, errMsgLen);
+    rc = memset_s(g_stErrMsg, sizeof(mppdb_err_msg_t) * ERRMSG_MAX_NUM, 0, sizeof(mppdb_err_msg_t) * ERRMSG_MAX_NUM);
     securec_check_c(rc, "\0", "\0");
 
-    g_stErrMsgOld = (mppdb_err_msg_t*)malloc(errMsgLen);
+    g_stErrMsgOld = (mppdb_err_msg_t*)malloc(sizeof(mppdb_err_msg_t) * ERRMSG_MAX_NUM);
     if (NULL == g_stErrMsgOld) {
         releaseMem();
         return outputLog(logfile, true, "malloc g_stErrMsgOld fail.\n");
     }
-    rc = memset_s(g_stErrMsgOld, errMsgLen, 0, errMsgLen);
+    rc = memset_s(g_stErrMsgOld, sizeof(mppdb_err_msg_t) * ERRMSG_MAX_NUM, 0, sizeof(mppdb_err_msg_t) * ERRMSG_MAX_NUM);
     securec_check_c(rc, "\0", "\0");
 
     /* read template error message from errmsg.txt */
@@ -272,17 +251,26 @@ int main(int argc, char* argv[])
         return outputLog(logfile, true, "call readErrmsgFile fail.\n");
     }
 
-    /* scan all files from root recursive */
-    lRet = scanDir(g_ScanDir);
-    if (0 != lRet) {
-        releaseMem();
-        return outputLog(logfile, true, "call scanDir scan dir:%s fail.\n", g_ScanDir);
+    /* get scan dir */
+    char *parent = realpath(argv[1], NULL);
+    if (NULL == parent) {
+        return outputLog(NULL, false, "call resolved_path:%s get resolved_name error.\n", argv[1]);
     }
-
-    lRet = scanDir(g_ScanDir1);
+    
+    char tmp_str[MAXPATH];
+    rc = sprintf_s(tmp_str, sizeof(tmp_str), "%s/%s", argv[1], argv[2]);
+    securec_check_ss_c(rc, "\0", "\0");
+    char *input_path = realpath(tmp_str, NULL);
+    if (NULL == input_path) {
+        return outputLog(NULL, false, "call resolved_path:%s/%s get resolved_name error.\n", argv[1], argv[2]);
+    }
+    /* scan all files from root recursive */
+    lRet = scanDir(parent, input_path);
+    free(parent);
+    free(input_path);
     if (0 != lRet) {
         releaseMem();
-        return outputLog(logfile, true, "call scanDir scan dir:%s fail.\n", g_ScanDir1);
+        return outputLog(logfile, true, "call scanDir scan file:%s fail.\n", input_path);
     }
 
     /* compare template error message info with current error scan from given directory  */
@@ -427,46 +415,187 @@ int getStatType(char* fileName)
     }
 }
 
-/* scan directory recursive, find *.cpp and *.l file */
-int scanDir(char* dir)
+
+typedef struct {
+    char *dir;
+    char *file;
+} FileInfo;
+
+static FileInfo *repallocFileInfo(FileInfo *file_infos, const int new_num, const int old_num)
 {
-    DIR* directory_pointer = NULL;
-    struct dirent* entry = NULL;
-    char subDirName[1024] = {0};
-    int rc = -1;
-
-    /* entry current dir */
-    (void)chdir(dir);
-    /* open dir */
-    directory_pointer = opendir(dir);
-    if (NULL == directory_pointer) {
-        return outputLog(logfile, false, "error: dir[%s] is null. \n", dir);
+    if (new_num < 0 || (size_t)new_num >= ((0x3fffffff) / sizeof(FileInfo *))) {
+        return NULL;
     }
+    FileInfo *tmps = (FileInfo *)malloc(sizeof(FileInfo) * new_num);
+    if (tmps == NULL) {
+        return NULL;
+    }
+    for (int i = 0; i < old_num; i++) {
+        tmps[i].file = file_infos[i].file;
+        tmps[i].dir = file_infos[i].dir;
+    }
+    for (int i = old_num; i < new_num; i++) {
+        tmps[i].file = NULL;
+        tmps[i].dir = NULL;
+    }
+    free(file_infos);
+    return tmps;
+}
 
-    /* scan sub directory recursive */
-    while ((entry = readdir(directory_pointer)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+static bool copyPath(FileInfo *file_info, char *path, char *file_name)
+{
+    int file_len = strlen(file_name);
+    int dir_len = strlen(path) - file_len - 1;
+    if (file_len > MAXPATH || file_len < 0) {
+        return false;
+    }
+    file_info->file = (char *)malloc(file_len + 1);
+    if (file_info->file == NULL) {
+        (void)outputLog(logfile, false, "malloc file_info of \"%s/%s\" fail\n", path, file_name);
+        return false;
+    }
+    int rc = strcpy_s(file_info->file, file_len + 1, file_name);
+    securec_check_c(rc, "\0", "\0");
+    path[dir_len] = 0;
+    if (dir_len > MAXPATH || dir_len < 0) {
+        return false;
+    }
+    file_info->dir = (char *)malloc(dir_len + 1);
+    if (file_info->dir == NULL) {
+        (void)outputLog(logfile, false, "malloc file_info of \"%s/%s\" fail\n", path, file_name);
+        return false;
+    }
+    rc = strcpy_s(file_info->dir, dir_len + 1, path);
+    securec_check_c(rc, "\0", "\0");
+    return true;
+}
+
+static bool isValidFileName(char *line, const size_t max_len)
+{   
+    size_t str_len = strlen(line);
+    if (str_len >= max_len) {
+        return false;
+    }
+    if (line[str_len - 1] != '\n') {
+        (void)outputLog(logfile, false, "format of file \"%s\" is error.\n", line);
+        return false;
+    }
+    line[str_len - 1] = 0;
+    char *suffix = strrchr(line, '.');
+    if (suffix == NULL) {
+        (void)outputLog(logfile, false, "format of file \"%s\" is error.\n", line);
+        return false;
+    }
+    /* filter *.cpp or *.l file */
+    if ((strcmp(suffix + 1, TARGET_EXTENTION_NAME_CPP)) != 0 &&
+        (strcmp(suffix + 1, TARGET_EXTENTION_NAME_L) != 0) &&
+        (strcmp(suffix + 1, TARGET_EXTENTION_NAME_Y) != 0)) {
+        return false;
+    }
+    return true;
+}
+
+static void freeFileInfos(FileInfo *file_infos, int size)
+{
+    for (int i = 0; i < size; i++) {
+        if (file_infos[i].file != NULL) {
+            free(file_infos[i].file);
+        }
+        if (file_infos[i].dir != NULL) {
+            free(file_infos[i].dir);
+        }
+    }
+    free(file_infos);
+}
+
+/**
+ * get sorted sub files
+ *
+ */
+static FileInfo *leadSortedScanFiles(const char* parent, const char *input_file_path, int *size)
+{
+    *size = 0;
+    FILE *file = fopen(input_file_path, "r");
+    if (file == NULL) {
+        (void)outputLog(logfile, false, "could not open file \"%s\" for reading", input_file_path);
+        return NULL;
+    }
+    int file_info_num = ERRMSG_MAX_NUM;
+    FileInfo *file_infos = (FileInfo *)malloc(sizeof(FileInfo) * file_info_num);
+    if (file_infos == NULL) {
+        (void)fclose(file);
+        (void)outputLog(logfile, true, "malloc file_info fail.\n");
+        return NULL;
+    }
+    int rc = memset_s(file_infos, sizeof(FileInfo) * file_info_num, 0, sizeof(FileInfo) * file_info_num);
+    securec_check_c(rc, "\0", "\0");
+    int num = 0;
+    char line[MAXPATH] = {0};
+    /* read every line from *.cpp or *.l to the buffer and parse */
+    while (fgets(line, sizeof(line), file) != NULL) {
+        /* file name is valid or not */
+        if (!isValidFileName(line, MAXPATH)) {
             continue;
         }
-
-        rc = memset_s(subDirName, sizeof(subDirName), 0, strlen(subDirName));
-        securec_check_c(rc, "\0", "\0");
-        rc = sprintf_s(subDirName, sizeof(subDirName), "%s/%s", dir, entry->d_name);
+        char path[MAXPATH];
+        int rc = sprintf_s(path, MAXPATH, "%s/%s", parent, line);
         securec_check_ss_c(rc, "\0", "\0");
-
-        if (STATE_DIR_TYPE == getStatType(subDirName)) {
-            (void)scanDir(subDirName);
-        } else if (STATE_FILE_TYPE == getStatType(subDirName)) {
-            /* open file/parse file */
-            if (0 == fileprocess(dir, entry->d_name)) {
-                fprintf(logfile, "Scan and process file:%s/%s success.\n", dir, entry->d_name);
+        char *file_name = strrchr(path, '/');
+        if (file_name == NULL) {
+            (void)outputLog(logfile, false, "format of file \"%s\" is error.\n", line);
+            continue;
+        }
+        file_name++;
+        if (num >= file_info_num) {
+            file_infos = repallocFileInfo(file_infos, file_info_num + ERRMSG_MAX_NUM, ERRMSG_MAX_NUM);
+            file_info_num = file_info_num + ERRMSG_MAX_NUM;
+            if (file_infos == NULL) {
+                (void)fclose(file);
+                return NULL;
             }
         }
+        FileInfo *file_info = file_infos + num;
+        num++;
+        if (!copyPath(file_info, path, file_name)) {
+            freeFileInfos(file_info, num);
+            (void)fclose(file);
+            return NULL;
+        }
     }
+    *size = num;
+    (void)fclose(file);
+    return file_infos;
+}
 
-    (void)closedir(directory_pointer);
-    /* return to back dir */
-    (void)chdir("..");
+/* scan directory recursive, find *.cpp and *.l file */
+int scanDir(const char* parent, const char* input_file_path)
+{   
+    int size = 0;
+    FileInfo *file_infos = leadSortedScanFiles(parent, input_file_path, &size);
+    if (file_infos == NULL) {
+        return -1;
+    }
+    /* scan sub directory recursive */
+    for (int i = 0; i < size; i++) {
+        FileInfo *file_info = file_infos + i;
+        char *file_name = file_info->file;
+        char *dir = file_info->dir;
+        /* entry current dir */
+        (void)chdir(dir);
+        char path[MAXPATH] = {0};
+        int rc = sprintf_s(path, sizeof(path), "%s/%s", dir, file_name);
+        securec_check_ss_c(rc, "\0", "\0");
+        if (STATE_FILE_TYPE != getStatType(path)) {
+            continue;
+        }
+        /* open file/parse file */
+        if (0 == fileprocess(dir, file_name)) {
+            (void)fprintf(logfile, "Scan and process file:%s/%s success.\n", dir, file_name);
+        }
+        free(file_name);
+        free(dir);
+    }
+    free(file_infos);
     return 0;
 }
 
@@ -476,12 +605,12 @@ int fileprocess(char* dir, char* szFileName)
     char* szExtName = NULL;
     FILE* file = NULL;
     int lineno = 0;
-    size_t len = 0;
+    int len = 0;
     char* pTmp = NULL;
     ERPARA_INFO_T stErPara;
     int funcflag = 0;
     int fnmacroflag = 0;
-    size_t tmplen = 0;
+    int tmplen = 0;
     errno_t rc = EOK;
 
     if ((NULL == dir) || (NULL == szFileName))
@@ -495,10 +624,10 @@ int fileprocess(char* dir, char* szFileName)
 
     /* filter *.cpp or *.l file */
     if ((0 != strcmp(szExtName + 1, TARGET_EXTENTION_NAME_CPP)) &&
-        (0 != strcmp(szExtName + 1, TARGET_EXTENTION_NAME_L))) {
+        (0 != strcmp(szExtName + 1, TARGET_EXTENTION_NAME_L)) &&
+        (strcmp(szExtName + 1, TARGET_EXTENTION_NAME_Y) != 0)) {
         return -1;
     }
-
     file = fopen(szFileName, "r");
     if (file == NULL) {
         return outputLog(logfile, false, "could not open file \"%s\" for reading", szFileName);
@@ -1467,7 +1596,7 @@ int create_header_files(int iFileType)
         fprintf(outFile,
             "	  {%d, \"%s\",\n",
             pstErrMsgItem->ulSqlErrcode,
-            (0 == strlen(pstErrMsgItem->cSqlState) ? "XX000" : pstErrMsgItem->cSqlState));
+            ((0 == strlen(pstErrMsgItem->cSqlState)) ? "XX000" : pstErrMsgItem->cSqlState));
 
         if (GAUSSDB_HEADERFILE_FLAG == iFileType) {
             fprintf(outFile, "	  { ");

@@ -23,11 +23,12 @@
 #include "knl/knl_variable.h"
 #include "postmaster/postmaster.h"
 #include "utils/memutils.h"
+#include "utils/memtrace.h"
 #include "pgxc/pgxc.h"
 
 #include "miscadmin.h"
 #include "storage/proc.h"
-#include "storage/cstore_mem_alloc.h"
+#include "storage/cstore/cstore_mem_alloc.h"
 #include "threadpool/threadpool.h"
 #include "tcop/tcopprot.h"
 #include "workload/workload.h"
@@ -57,12 +58,14 @@ MemoryContext StreamInfoContext = NULL;
  * of these contexts, refer to src/backend/utils/mmgr/README
  */
 THR_LOCAL MemoryContext ErrorContext = NULL;
-THR_LOCAL MemoryContext CacheMemoryContext = NULL;
 THR_LOCAL MemoryContext SelfMemoryContext = NULL;
 THR_LOCAL MemoryContext TopMemoryContext = NULL;
 THR_LOCAL MemoryContext AlignMemoryContext = NULL;
 
 static void MemoryContextStatsInternal(MemoryContext context, int level);
+static void FreeMemoryContextList(List* context_list);
+static void* MemoryAllocFromContext(MemoryContext context, Size size, const char* file, int line);
+
 #ifdef PGXC
 void* allocTopCxt(size_t s);
 #endif
@@ -70,6 +73,50 @@ void* allocTopCxt(size_t s);
 /*****************************************************************************
  *	  EXPORTED ROUTINES														 *
  *****************************************************************************/
+
+static inline void InsertMemoryAllocInfo(const void* pointer, MemoryContext context,
+                                         const char* file, int line, Size size)
+{
+    if (unlikely(g_instance.stat_cxt.track_memory_inited)) {
+        if ((unlikely(strncmp(context->name, "Track MemoryInfo hash", NAMEDATALEN) != 0)) &&
+            unlikely(MemoryContextShouldTrack(context->name))) {
+            /*
+             * Get lock failed means there is some thread get write lock,
+             * we could not insert track memory info now, so pass it
+             */
+            if (likely(pthread_rwlock_tryrdlock(&g_instance.stat_cxt.track_memory_lock) == 0)) {
+                InsertTrackMemoryInfo(pointer, context, file, line, size);
+                (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+            }
+        }
+    }
+}
+
+static inline void RemoveMemoryAllocInfo(const void* pointer, MemoryContext context)
+{
+    if (unlikely(g_instance.stat_cxt.track_memory_inited) &&
+        unlikely(MemoryContextShouldTrack(context->name))) {
+        /* Do not use tryrdlock because it may cause use-after-free */
+        if (likely(pthread_rwlock_rdlock(&g_instance.stat_cxt.track_memory_lock) == 0)) {
+            RemoveTrackMemoryInfo(pointer);
+            (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+        }
+    }
+}
+
+static inline void RemoveMemoryContextInfo(MemoryContext context)
+{
+    if (unlikely(g_instance.stat_cxt.track_memory_inited) &&
+        unlikely(MemoryContextShouldTrack(context->name))) {
+        /* Do not use tryrdlock because it may cause use-after-free */
+        if (likely(pthread_rwlock_rdlock(&g_instance.stat_cxt.track_memory_lock) == 0)) {
+            RemoveTrackMemoryContext(context);
+            (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+        }
+    }
+}
+    
+
 /*
  * MemoryContextInit
  *		Start up the memory-context subsystem.
@@ -92,6 +139,10 @@ void MemoryContextInit(void)
     if (TopMemoryContext != NULL) {
         return;
     }
+
+    /* init the thread memory track object */
+    t_thrd.utils_cxt.trackedMemChunks = 0;
+    t_thrd.utils_cxt.trackedBytes = 0;
 
     /*
      * Initialize t_thrd.top_mem_cxt as an AllocSetContext with slow growth rate
@@ -135,6 +186,24 @@ void MemoryContextInit(void)
         ALLOCSET_DEFAULT_MAXSIZE);
 }
 
+static inline void PreventActionOnSealedContext(MemoryContext context)
+{
+#ifdef MEMORY_CONTEXT_CHECKING
+	if(unlikely(context->is_sealed))
+		ereport(PANIC,
+		        (errcode(ERRCODE_INVALID_OPERATION),
+		         errmsg("invalid operation on memory context"),
+		         errdetail("Failed on operation on sealed context %s",  context->name)));
+#else
+	if(unlikely(context->is_sealed))
+	  ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OPERATION),
+				 errmsg("invalid operation on memory context"),
+				 errdetail("Failed on operation on sealed context %s",  context->name)));
+#endif
+
+}
+
 /*
  * MemoryContextReset
  *		Release all space allocated within a context and its descendants,
@@ -146,6 +215,8 @@ void MemoryContextInit(void)
 void MemoryContextReset(MemoryContext context)
 {
     AssertArg(MemoryContextIsValid(context));
+
+    PreventActionOnSealedContext(context);
 
     if (MemoryContextIsShared(context))
         MemoryContextLock(context);
@@ -164,6 +235,7 @@ void MemoryContextReset(MemoryContext context)
 
     /* Nothing to do if no pallocs since startup or last reset */
     if (!context->isReset) {
+        RemoveMemoryContextInfo(context);
         (*context->methods->reset)(context);
         context->isReset = true;
     }
@@ -185,6 +257,30 @@ void MemoryContextResetChildren(MemoryContext context)
         MemoryContextReset(child);
 }
 
+static inline void TopMemCxtUnSeal()
+{
+    /* Enable memory opeation on top memory context. */
+    MemoryContextUnSeal(t_thrd.top_mem_cxt);
+    if (u_sess != NULL && u_sess->top_mem_cxt != NULL) {
+        MemoryContextUnSeal(u_sess->top_mem_cxt);
+    }
+}
+
+static inline void TopMemCxtSeal()
+{
+    /* Prevent memory opeation on top memory context. */
+    MemoryContextSeal(t_thrd.top_mem_cxt);
+    if (u_sess != NULL && u_sess->top_mem_cxt != NULL) {
+        MemoryContextSeal(u_sess->top_mem_cxt);
+    }
+}
+
+static inline bool IsTopMemCxt(const MemoryContext mcxt)
+{
+    bool is_sess_top = (u_sess == NULL) ? false : (mcxt == u_sess->top_mem_cxt);
+    return (mcxt == g_instance.instance_context) || (mcxt == t_thrd.top_mem_cxt) || is_sess_top;
+}
+
 /*
  * MemoryContextDelete
  *		Delete a context and its descendants, and release all space
@@ -195,7 +291,8 @@ void MemoryContextResetChildren(MemoryContext context)
  * as well as recurse to get the children.	We must also delink the
  * node from its parent, if it has one.
  */
-void MemoryContextDeleteInternal(MemoryContext context, bool parent_locked)
+void MemoryContextDeleteInternal(MemoryContext context, bool parent_locked,
+    List* context_list)
 {
     AssertArg(MemoryContextIsValid(context));
     /* We had better not be deleting t_thrd.top_mem_cxt ... */
@@ -203,7 +300,7 @@ void MemoryContextDeleteInternal(MemoryContext context, bool parent_locked)
     /* And not CurrentMemoryContext, either */
     Assert(context != CurrentMemoryContext);
 
-    MemoryContextDeleteChildren(context);
+    MemoryContextDeleteChildren(context, context_list);
 
 #ifdef MEMORY_CONTEXT_CHECKING
     /* Memory Context Checking */
@@ -212,14 +309,15 @@ void MemoryContextDeleteInternal(MemoryContext context, bool parent_locked)
 
     MemoryContext parent = context->parent;
 
-    /*
-     *	Lock this thread's delete MemoryContext.
-     *	Because pv_session_memory_detail view will recursive MemoryContext tree.
-     *	Relate to pgstatfuncs.c:pvSessionMemoryDetail().
-     */
-    if (t_thrd.proc != NULL && t_thrd.proc->topmcxt != NULL) {
+
+    PG_TRY();
+    {
         HOLD_INTERRUPTS();
-        (void)syscalllockAcquire(&t_thrd.proc->deleMemContextMutex);
+        if (context->session_id > 0) {
+            (void)syscalllockAcquire(&u_sess->utils_cxt.deleMemContextMutex);
+        } else if (t_thrd.proc != NULL && t_thrd.proc->topmcxt != NULL) {
+            (void)syscalllockAcquire(&t_thrd.proc->deleMemContextMutex);
+        }
 
         /*
          * If the parent context is shared and is already locked by the caller,
@@ -228,43 +326,61 @@ void MemoryContextDeleteInternal(MemoryContext context, bool parent_locked)
          */
         if (parent && MemoryContextIsShared(parent) && (!parent_locked))
             MemoryContextLock(parent);
-        MemoryContextSetParent(context, NULL);
-        if (parent != NULL && MemoryContextIsShared(parent) && (parent_locked == false))
-            MemoryContextUnlock(parent);
-
-        (*context->methods->delete_context)(context);
-#ifdef ENABLE_MEMORY_CHECK
-        if (MemoryContextIsShared(context) == false)
-            pfree(context);
-#else
-        pfree(context);
-#endif
-
-        (void)syscalllockRelease(&t_thrd.proc->deleMemContextMutex);
-        RESUME_INTERRUPTS();
-    } else {
         /*
          * We delink the context from its parent before deleting it, so that if
          * there's an error we won't have deleted/busted contexts still attached
          * to the context tree.  Better a leak than a crash.
          */
-        if (parent && MemoryContextIsShared(parent) && (!parent_locked))
-            MemoryContextLock(parent);
+        TopMemCxtUnSeal();
         MemoryContextSetParent(context, NULL);
-        if (parent && MemoryContextIsShared(parent) && (!parent_locked))
+        if (parent != NULL && MemoryContextIsShared(parent) && (parent_locked == false))
             MemoryContextUnlock(parent);
 
+        RemoveMemoryContextInfo(context);
         (*context->methods->delete_context)(context);
-#ifdef ENABLE_MEMORY_CHECK
-        if (MemoryContextIsShared(context) == false)
-#endif
-            pfree(context);
+        (void)lappend2(context_list, &context->cell);
+
+        if (context->session_id > 0) {
+            (void)syscalllockRelease(&u_sess->utils_cxt.deleMemContextMutex);
+        } else if (t_thrd.proc != NULL && t_thrd.proc->topmcxt != NULL) {
+            (void)syscalllockRelease(&t_thrd.proc->deleMemContextMutex);
+        }
+        TopMemCxtSeal();
+        RESUME_INTERRUPTS();
     }
+    PG_CATCH();
+    {
+        if (context->session_id > 0) {
+            (void)syscalllockRelease(&u_sess->utils_cxt.deleMemContextMutex);
+        } else if (t_thrd.proc != NULL && t_thrd.proc->topmcxt != NULL) {
+            (void)syscalllockRelease(&t_thrd.proc->deleMemContextMutex);
+        }
+        TopMemCxtSeal();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 }
 
 void MemoryContextDelete(MemoryContext context)
 {
-    MemoryContextDeleteInternal(context, false);
+    List context_list = {T_List, 0, NULL, NULL};;
+
+    if (!IsTopMemCxt(context)) {
+        PreventActionOnSealedContext(context);
+    }
+
+    MemoryContext old_context = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+
+    MemoryContextDeleteInternal(context, false, &context_list);
+
+    (void)MemoryContextSwitchTo(old_context);
+
+    /* u_sess->top_mem_cxt may be reused by other threads, set it null before the memory it points to be freed. */
+    if (context == u_sess->top_mem_cxt) {
+        u_sess->top_mem_cxt = NULL;
+    }
+
+    FreeMemoryContextList(&context_list);
 }
 
 /*
@@ -272,9 +388,13 @@ void MemoryContextDelete(MemoryContext context)
  *		Delete all the descendants of the named context and release all
  *		space allocated therein.  The named context itself is not touched.
  */
-void MemoryContextDeleteChildren(MemoryContext context)
+void MemoryContextDeleteChildren(MemoryContext context, List* context_list)
 {
     AssertArg(MemoryContextIsValid(context));
+    List res_list = {T_List, 0, NULL, NULL};
+    if (context_list == NULL) {
+        context_list = &res_list;
+    }
 
     if (MemoryContextIsShared(context))
         MemoryContextLock(context);
@@ -284,10 +404,14 @@ void MemoryContextDeleteChildren(MemoryContext context)
      * long as there is a child.
      */
     while (context->firstchild != NULL)
-        MemoryContextDeleteInternal(context->firstchild, true);
+        MemoryContextDeleteInternal(context->firstchild, true, context_list);
 
     if (MemoryContextIsShared(context))
         MemoryContextUnlock(context);
+
+    if (context_list == &res_list) {
+        FreeMemoryContextList(&res_list);
+    }
 }
 
 /*
@@ -301,8 +425,15 @@ void MemoryContextDeleteChildren(MemoryContext context)
 void MemoryContextResetAndDeleteChildren(MemoryContext context)
 {
     AssertArg(MemoryContextIsValid(context));
+    if (!IsTopMemCxt(context)) {
+        PreventActionOnSealedContext(context);
+    }
 
-    MemoryContextDeleteChildren(context);
+    List context_list = {T_List, 0, NULL, NULL};
+    
+    MemoryContextDeleteChildren(context, &context_list);
+
+    FreeMemoryContextList(&context_list);
     MemoryContextReset(context);
 }
 
@@ -328,10 +459,12 @@ void MemoryContextSetParent(MemoryContext context, MemoryContext new_parent)
 {
     AssertArg(MemoryContextIsValid(context));
     AssertArg(context != new_parent);
+    PreventActionOnSealedContext(context);
 
     if (new_parent != NULL) {
         if (context->session_id != new_parent->session_id)
-            ereport(PANIC, (errmsg("We can not set memory context parent with different session number")));
+            ereport(PANIC,
+                (errmsg("We can not set memory context parent with different session number")));
     }
 
     /* Delink from existing parent, if any */
@@ -473,6 +606,24 @@ void MemoryContextStats(MemoryContext context)
     MemoryContextStatsInternal(context, 0);
 }
 
+void MemoryContextSeal(MemoryContext context)
+{
+	context->is_sealed = true;
+}
+
+void MemoryContextUnSeal(MemoryContext context)
+{
+	context->is_sealed = false;
+}
+
+void MemoryContextUnSealChildren(MemoryContext context)
+{
+    AssertArg(MemoryContextIsValid(context));
+	context->is_sealed = false;
+    for (MemoryContext child = context->firstchild; child != NULL; child = child->nextchild)
+        MemoryContextUnSealChildren(child);
+}
+
 static void MemoryContextStatsInternal(MemoryContext context, int level)
 {
     MemoryContext child;
@@ -494,7 +645,6 @@ static void MemoryContextStatsInternal(MemoryContext context, int level)
 void MemoryContextCheck(MemoryContext context, bool own_by_session)
 {
     MemoryContext child;
-
     AssertArg(MemoryContextIsValid(context));
 
     uint64 id = 0;
@@ -676,7 +826,7 @@ MemoryContext MemoryContextCreate(
     /* Get space for node and name */
     if (root != NULL) {
         /* Normal case: allocate the node in Root MemoryContext */
-        node = (MemoryContext)MemoryContextAllocDebug(root, needed, file, line);
+        node = (MemoryContext)MemoryAllocFromContext(root, needed, file, line);
     } else {
         /* Special case for startup: use good ol' malloc */
         node = (MemoryContext)malloc(needed);
@@ -696,8 +846,11 @@ MemoryContext MemoryContextCreate(
     node->prevchild = NULL;
     node->nextchild = NULL;
     node->isReset = true;
+    node->is_sealed = false;
     node->methods = (MemoryContextMethods*)(((char*)node) + size);
     node->name = ((char*)node) + size + sizeof(MemoryContextMethods);
+    node->cell.data.ptr_value = (void*)node;
+    node->cell.next = NULL;
     rc = strcpy_s(node->name, strlen(name) + 1, name);
     securec_check_c(rc, "\0", "\0");
     node->thread_id = gs_thread_self();
@@ -761,8 +914,8 @@ void MemoryContextCheckMaxSize(MemoryContext context, Size size, const char* fil
             ereport(ERROR,
                 (errcode(ERRCODE_OUT_OF_LOGICAL_MEMORY),
                     errmsg("memory is temporarily unavailable"),
-                    errdetail("Allocated size %lu is beyond to the memory context '%s' limitation."
-                              "The maxSize of MemoryContext is %zu.[file:%s,line:%d]",
+                    errdetail("Allocated size %ld is beyond to the memory context '%s' limitation."
+                              "The maxSize of MemoryContext is %ld.[file:%s,line:%d]",
                         (unsigned long)size,
                         context->name,
                         set->maxSpaceSize,
@@ -773,7 +926,7 @@ void MemoryContextCheckMaxSize(MemoryContext context, Size size, const char* fil
 }
 
 /* check if the session memory is beyond the limitation */
-static inline void MemoryContextCheckSessionMemory(MemoryContext context, Size size, const char* file, int line)
+void MemoryContextCheckSessionMemory(MemoryContext context, Size size, const char* file, int line)
 {
     /* libcomm permanent thread don't need to check session memory */
     if (STATEMENT_MAX_MEM && (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL) &&
@@ -796,19 +949,9 @@ static inline void MemoryContextCheckSessionMemory(MemoryContext context, Size s
     }
 }
 
-/*
- * MemoryContextAlloc
- *		Allocate space within the specified context.
- *
- * This could be turned into a macro, but we'd have to import
- * nodes/memnodes.h into postgres.h which seems a bad idea.
- */
-void* MemoryContextAllocDebug(MemoryContext context, Size size, const char* file, int line)
+static void* MemoryAllocFromContext(MemoryContext context, Size size, const char* file, int line)
 {
     void* ret = NULL;
-
-    AssertArg(MemoryContextIsValid(context));
-
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -836,7 +979,23 @@ void* MemoryContextAllocDebug(MemoryContext context, Size size, const char* file
     /* check if the session used memory is beyond the limitation */
     MemoryContextCheckSessionMemory(context, size, file, line);
 
+    InsertMemoryAllocInfo(ret, context, file, line, size);
+
     return ret;
+}
+/*
+ * MemoryContextAlloc
+ *		Allocate space within the specified context.
+ *
+ * This could be turned into a macro, but we'd have to import
+ * nodes/memnodes.h into postgres.h which seems a bad idea.
+ */
+void* MemoryContextAllocDebug(MemoryContext context, Size size, const char* file, int line)
+{
+    AssertArg(MemoryContextIsValid(context));
+
+    PreventActionOnSealedContext(context);
+    return MemoryAllocFromContext(context, size, file, line);
 }
 
 /*
@@ -851,6 +1010,8 @@ void* MemoryContextAllocZeroDebug(MemoryContext context, Size size, const char* 
     void* ret = NULL;
 
     AssertArg(MemoryContextIsValid(context));
+
+    PreventActionOnSealedContext(context);
 
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
@@ -881,6 +1042,8 @@ void* MemoryContextAllocZeroDebug(MemoryContext context, Size size, const char* 
 
     MemSetAligned(ret, 0, size);
 
+    InsertMemoryAllocInfo(ret, context, file, line, size);
+
     return ret;
 }
 
@@ -896,6 +1059,8 @@ void* MemoryContextAllocZeroAlignedDebug(MemoryContext context, Size size, const
     void* ret = NULL;
 
     AssertArg(MemoryContextIsValid(context));
+
+    PreventActionOnSealedContext(context);
 
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
@@ -926,6 +1091,8 @@ void* MemoryContextAllocZeroAlignedDebug(MemoryContext context, Size size, const
 
     MemSetLoop(ret, 0, size);
 
+    InsertMemoryAllocInfo(ret, context, file, line, size);
+
     return ret;
 }
 /*
@@ -938,6 +1105,7 @@ void* palloc_extended(Size size, int flags)
     void* ret = NULL;
 
     AssertArg(MemoryContextIsValid(CurrentMemoryContext));
+    PreventActionOnSealedContext(CurrentMemoryContext);
 
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
@@ -960,6 +1128,8 @@ void* palloc_extended(Size size, int flags)
 
     /* check if the session used memory is beyond the limitation */
     MemoryContextCheckSessionMemory(CurrentMemoryContext, size, __FILE__, __LINE__);
+
+    InsertMemoryAllocInfo(ret, CurrentMemoryContext, __FILE__, __LINE__, size);
 
     return ret;
 }
@@ -1001,6 +1171,12 @@ void pfree(void* pointer)
 #endif
 
     AssertArg(MemoryContextIsValid(context));
+    if (!IsTopMemCxt(context)) {
+        /* No prevent on top memory context as they may be sealed. */
+        PreventActionOnSealedContext(context);
+    }
+
+    RemoveMemoryAllocInfo(pointer, context);
 
     (*context->methods->free_p)(context, pointer);
 }
@@ -1039,6 +1215,8 @@ void* repalloc_noexcept_Debug(void* pointer, Size size, const char* file, int li
     /* isReset must be false already */
     Assert(!context->isReset);
 
+    RemoveMemoryAllocInfo(pointer, context);
+
     ret = (*context->methods->realloc)(context, pointer, 0, size, file, line);
 
     if (ret == NULL) {
@@ -1046,6 +1224,8 @@ void* repalloc_noexcept_Debug(void* pointer, Size size, const char* file, int li
     }
     /* check if the session used memory is beyond the limitation */
     MemoryContextCheckSessionMemory(context, size, file, line);
+
+    InsertMemoryAllocInfo(ret, context, file, line, size);
 
     return ret;
 }
@@ -1082,9 +1262,11 @@ void* repallocDebug(void* pointer, Size size, const char* file, int line)
     context = &(block->aset->header);
 #endif
     AssertArg(MemoryContextIsValid(context));
-
+    PreventActionOnSealedContext(context);
     /* isReset must be false already */
     Assert(!context->isReset);
+
+    RemoveMemoryAllocInfo(pointer, context);
 
     ret = (*context->methods->realloc)(context, pointer, 0, size, file, line);
     if (ret == NULL)
@@ -1104,6 +1286,8 @@ void* repallocDebug(void* pointer, Size size, const char* file, int line)
 
     /* check if the session used memory is beyond the limitation */
     MemoryContextCheckSessionMemory(context, size, file, line);
+
+    InsertMemoryAllocInfo(ret, context, file, line, size);
 
     return ret;
 }
@@ -1144,6 +1328,8 @@ void* MemoryContextMemalignAllocDebug(MemoryContext context, Size align, Size si
 
     /* check if the session used memory is beyond the limitation */
     MemoryContextCheckSessionMemory(context, size, file, line);
+
+    InsertMemoryAllocInfo(ret, context, file, line, size);
 
     return ret;
 }
@@ -1188,6 +1374,8 @@ void* MemoryContextAllocHugeDebug(MemoryContext context, Size size, const char* 
     /* check if the session used memory is beyond the limitation */
     MemoryContextCheckSessionMemory(context, size, file, line);
 
+    InsertMemoryAllocInfo(ret, context, file, line, size);
+
     return ret;
 }
 
@@ -1206,7 +1394,7 @@ void* repallocHugeDebug(void* pointer, Size size, const char* file, int line)
 
     if (!AllocHugeSizeIsValid(size)) {
         ereport(
-            ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid memory alloc request size %zu", size)));
+            ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid memory alloc request size %lu", size)));
     }
 
     /*
@@ -1230,6 +1418,8 @@ void* repallocHugeDebug(void* pointer, Size size, const char* file, int line)
     /* isReset must be false already */
     Assert(!context->isReset);
 
+    RemoveMemoryAllocInfo(pointer, context);
+
     ret = (*context->methods->realloc)(context, pointer, 0, size, file, line);
     if (ret == NULL)
         ereport(ERROR,
@@ -1249,6 +1439,8 @@ void* repallocHugeDebug(void* pointer, Size size, const char* file, int line)
     /* check if the session used memory is beyond the limitation */
     MemoryContextCheckSessionMemory(context, size, file, line);
 
+    InsertMemoryAllocInfo(ret, context, file, line, size);
+
     return ret;
 }
 
@@ -1266,6 +1458,8 @@ void MemoryContextMemalignFree(MemoryContext context, void* pointer)
     Assert(pointer != NULL);
     Assert(pointer == (void*)MAXALIGN(pointer));
     AssertArg(MemoryContextIsValid(context));
+
+    RemoveMemoryAllocInfo(pointer, context);
 
     (*context->methods->free_p)(context, (char*)pointer);
 }
@@ -1402,19 +1596,20 @@ Gen_Alloc genAlloc_class = {(void* (*)(void*, size_t))gen_alloc,
 void MemoryContextDestroyAtThreadExit(MemoryContext context)
 {
     MemoryContext pContext = context;
+    if (!IsTopMemCxt(context)) {
+        PreventActionOnSealedContext(context);
+    }
 
     if (pContext != NULL) {
-        // To avoid delete current context
-        //
+        /* To avoid delete current context */
         MemoryContextSwitchTo(pContext);
 
-        // Delete all its decendents
-        //
+        /* Delete all its decendents */
         Assert(!pContext->parent);
         MemoryContextDeleteChildren(pContext);
 
-        // Delete the top context itself
-        //
+        /* Delete the top context itself */
+        RemoveMemoryContextInfo(pContext);
         (*pContext->methods->delete_context)(pContext);
 
         if (pContext != t_thrd.top_mem_cxt)
@@ -1446,4 +1641,15 @@ MemoryContext MemoryContextOriginal(const char* node)
 #endif
     AssertArg(MemoryContextIsValid(context));
     return context;
+}
+
+static void FreeMemoryContextList(List* context_list)
+{
+    ListCell *cell = list_head(context_list);
+    void* context = NULL;
+    while (cell != NULL) {
+        context = lfirst(cell);
+        cell = cell->next;
+        pfree_ext(context);
+    }
 }

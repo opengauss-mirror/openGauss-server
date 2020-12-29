@@ -1,0 +1,206 @@
+--
+--FOR BLACKLIST FEATURE: WITH OIDS、INHERITS、CREATE TYPE/DOMAIN/AGGREGATE/OPERATOR/SEQUENCES is not supported.
+--
+
+set enable_stream_operator=off;
+--
+-- Test access privileges
+--
+
+-- Clean up in case a prior regression run failed
+
+-- Suppress NOTICE messages when users/groups don't exist
+SET client_min_messages TO 'warning';
+
+DROP ROLE IF EXISTS regressgroup1;
+DROP ROLE IF EXISTS regressgroup2;
+
+DROP ROLE IF EXISTS regressuser1;
+DROP ROLE IF EXISTS regressuser2;
+DROP ROLE IF EXISTS regressuser3;
+DROP ROLE IF EXISTS regressuser4;
+DROP ROLE IF EXISTS regressuser5;
+DROP ROLE IF EXISTS regressuser6;
+
+SELECT lo_unlink(oid) FROM pg_largeobject_metadata;
+ lo_unlink 
+-----------
+(0 rows)
+
+
+RESET client_min_messages;
+
+
+
+
+--test the set role in transaction.
+create role setrole_in_transaction password 'Gauss@123';
+start transaction;
+set role setrole_in_transaction password 'Gauss@123';
+rollback;
+drop role setrole_in_transaction;
+
+--
+--test user's privileges when enableSeparationOfDuty is closed
+--
+create user sysadmin_user_001 sysadmin password 'Gauss@123';
+create user sysadmin_user_002 sysadmin password 'Gauss@123';
+create user createrole_user_001 createrole password 'Gauss@123';
+create user createrole_user_002 createrole password 'Gauss@123';
+create user audit_role_user_001 auditadmin password 'Gauss@123';
+create user normalrole_user_001 password 'Gauss@123';
+create user normalrole_user_002 password 'Gauss@123';
+create resource pool test_user_pool1;
+create resource pool test_user_pool2;
+create resource pool test_user_pool3;
+create resource pool test_user_pool4;
+create resource pool test_user_pool5;
+
+--1.test sysadmin change sysadmin
+set role sysadmin_user_001 password 'Gauss@123';
+alter role sysadmin_user_002 CREATEDB;
+alter role sysadmin_user_002 CREATEROLE;
+alter role sysadmin_user_002 NOINHERIT;
+alter role sysadmin_user_002 AUDITADMIN;
+alter role sysadmin_user_002 SYSADMIN;
+alter role sysadmin_user_002 LOGIN;
+alter role sysadmin_user_002 NOREPLICATION;
+alter role sysadmin_user_002 CONNECTION LIMIT 10;
+alter role sysadmin_user_002 identified by 'Gauss@12302' replace 'Gauss@123';
+ERROR:  Permission denied.
+alter role sysadmin_user_002 valid begin '1111-11-11' valid until '2222-12-12';
+alter role sysadmin_user_002 set session_timeout = '5min';
+alter role sysadmin_user_002 ACCOUNT UNLOCK;
+alter role sysadmin_user_002 RESOURCE POOL 'test_user_pool1';
+alter role sysadmin_user_002 rename to normalrole_user_003;
+reset role;
+
+--2.test sysadmin change audit user
+set role sysadmin_user_001 password 'Gauss@123';
+alter role audit_role_user_001 CREATEDB;
+alter role audit_role_user_001 CREATEROLE;
+alter role audit_role_user_001 NOINHERIT;
+alter role audit_role_user_001 AUDITADMIN;
+alter role audit_role_user_001 SYSADMIN;
+alter role audit_role_user_001 LOGIN;
+alter role audit_role_user_001 NOREPLICATION;
+alter role audit_role_user_001 CONNECTION LIMIT 10;
+alter role audit_role_user_001 identified by 'Gauss@12302' replace 'Gauss@123';
+ERROR:  Permission denied.
+alter role audit_role_user_001 valid begin '1111-11-11' valid until '2222-12-12';
+alter role audit_role_user_001 set session_timeout = '5min';
+alter role audit_role_user_001 ACCOUNT UNLOCK;
+alter role audit_role_user_001 RESOURCE POOL 'test_user_pool2';
+alter role audit_role_user_001 rename to normalrole_user_003;
+ERROR:  role "normalrole_user_003" already exists
+reset role;
+
+--3.test sysadmin change normal user
+set role sysadmin_user_001 password 'Gauss@123';
+alter role normalrole_user_001 CREATEDB;
+alter role normalrole_user_001 CREATEROLE;
+alter role normalrole_user_001 NOINHERIT;
+alter role normalrole_user_001 AUDITADMIN;
+alter role normalrole_user_001 SYSADMIN;
+alter role normalrole_user_001 LOGIN;
+alter role normalrole_user_001 NOREPLICATION;
+alter role normalrole_user_001 CONNECTION LIMIT 10;
+alter role normalrole_user_001 identified by 'Gauss@12302' replace 'Gauss@123';
+ERROR:  Permission denied.
+alter role normalrole_user_001 valid begin '1111-11-11' valid until '2222-12-12';
+alter role normalrole_user_001 set session_timeout = '5min';
+alter role normalrole_user_001 ACCOUNT UNLOCK;
+alter role normalrole_user_001 RESOURCE POOL 'test_user_pool3';
+alter role normalrole_user_001 rename to normalrole_user_003;
+ERROR:  role "normalrole_user_003" already exists
+reset role;
+
+--4.test sysadmin change createrole user
+set role sysadmin_user_001 password 'Gauss@123';
+alter role createrole_user_001 CREATEDB;
+alter role createrole_user_001 CREATEROLE;
+alter role createrole_user_001 NOINHERIT;
+alter role createrole_user_001 AUDITADMIN;
+alter role createrole_user_001 SYSADMIN;
+alter role createrole_user_001 LOGIN;
+alter role createrole_user_001 NOREPLICATION;
+alter role createrole_user_001 CONNECTION LIMIT 10; 
+alter role createrole_user_001 identified by 'Gauss@12302' replace 'Gauss@123';
+ERROR:  Permission denied.
+alter role createrole_user_001 valid begin '1111-11-11' valid until '2222-12-12';
+alter role createrole_user_001 set session_timeout = '5min';
+alter role createrole_user_001 ACCOUNT UNLOCK;
+alter role createrole_user_001 RESOURCE POOL 'test_user_pool4';
+alter role createrole_user_001 rename to normalrole_user_003;
+ERROR:  role "normalrole_user_003" already exists
+reset role;
+
+--5.test createrole change normal user
+set role createrole_user_002 password 'Gauss@123';
+alter role normalrole_user_002 CREATEDB;
+alter role normalrole_user_002 CREATEROLE;
+ERROR:  Permission denied.
+alter role normalrole_user_002 NOINHERIT;
+alter role normalrole_user_002 AUDITADMIN;
+alter role normalrole_user_002 SYSADMIN;
+ERROR:  Permission denied.
+alter role normalrole_user_002 LOGIN;
+alter role normalrole_user_002 NOREPLICATION;
+alter role normalrole_user_002 CONNECTION LIMIT 10;
+alter role normalrole_user_002 identified by 'Gauss@12302' replace 'Gauss@123';
+alter role normalrole_user_002 valid begin '1111-11-11' valid until '2222-12-12';
+alter role normalrole_user_002 set session_timeout = '5min';
+alter role normalrole_user_002 ACCOUNT UNLOCK;
+alter role normalrole_user_002 RESOURCE POOL 'test_user_pool5';
+alter role normalrole_user_002 rename to normalrole_user_003;
+ERROR:  role "normalrole_user_003" already exists
+reset role;
+
+drop user sysadmin_user_001;
+drop user sysadmin_user_002;
+ERROR:  role "sysadmin_user_002" does not exist
+drop user createrole_user_001;
+drop user createrole_user_002;
+drop user audit_role_user_001;
+drop user normalrole_user_001;
+drop user normalrole_user_002;
+drop user normalrole_user_003 cascade;
+drop resource pool test_user_pool1;
+drop resource pool test_user_pool2;
+drop resource pool test_user_pool3;
+drop resource pool test_user_pool4;
+drop resource pool test_user_pool5;
+
+--test internal select pg_statistic by ANALYZE.
+create user role_analyze password 'gauss@123';
+set session role role_analyze PASSWORD 'gauss@123';
+create table test_analyze_priv(a int);
+analyze test_analyze_priv;
+insert into test_analyze_priv select generate_series(1, 100);
+analyze test_analyze_priv;
+execute direct on (coordinator2)'select * from pg_statistic';
+ERROR:  must be system admin or monitor admin to use EXECUTE DIRECT
+
+--pg_database is shared relation and can not be analyzed by non-superuser.
+analyze pg_database;
+WARNING:  skipping "pg_database" --- only system admin can analyze it
+
+drop table test_analyze_priv;
+reset role;
+drop user role_analyze;
+
+--test dml privilege on system catalog 
+update pg_authid set relpassword='123';
+ERROR:  permission denied: "pg_authid" is a system catalog
+insert into pg_authid values('along');
+ERROR:  permission denied: "pg_authid" is a system catalog
+delete from pg_authid;
+ERROR:  permission denied: "pg_authid" is a system catalog
+
+create user createrole_user01 with createrole password 'Gauss@123';
+set role createrole_user01 password 'Gauss@123';
+create user auditadmin_user02 with auditadmin password 'Gauss@123';
+drop user auditadmin_user02;
+reset role;
+
+drop user createrole_user01;

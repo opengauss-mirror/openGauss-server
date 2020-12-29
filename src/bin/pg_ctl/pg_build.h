@@ -3,6 +3,7 @@
 
 #include "postgres_fe.h"
 #include "libpq/libpq-fe.h"
+#include "access/xlogdefs.h"
 
 #include <locale.h>
 #include <signal.h>
@@ -10,7 +11,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "catalog/catalog.h"
 #include "replication/replicainternal.h"
 
 #define CONFIGRURE_FILE "postgresql.conf"
@@ -25,6 +25,7 @@
 #define MAX_VALUE_LEN 1024
 #define INVALID_LINES_IDX (int)(~0)
 #define MAX_CONFIG_FILE_SIZE 0xFFFFF /* max file size for configurations = 1M */
+#define MAX_QUERY_LEN 512
 
 extern char ssl_cert_file[];
 extern char ssl_key_file[];
@@ -48,7 +49,6 @@ int find_gucoption(
 void get_conninfo(const char* filename);
 
 extern PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term = 0);
-extern void CheckBuildParamters(int conn_timeout, int recv_timeout, uint32 term = 0);
 int GetLengthAndCheckReplConn(const char* ConnInfoList);
 
 extern int replconn_num;
@@ -59,5 +59,6 @@ char** readfile(const char* path);
 extern char* pg_strdup(const char* in);
 extern void pg_free(void* ptr);
 extern void get_slot_name(char* slotname, size_t len);
+extern bool libpqRotateCbmFile(PGconn* connObj, XLogRecPtr lsn);
 
 #endif /* PG_BUILD_H */

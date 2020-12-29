@@ -1,4 +1,4 @@
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "audit_system_object=45063" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "audit_system_object=45063" >/dev/null 2>&1
 DROP SCHEMA IF EXISTS create_enum CASCADE;
 NOTICE:  schema "create_enum" does not exist, skipping
 CREATE SCHEMA create_enum;
@@ -132,7 +132,7 @@ SELECT * FROM t_type1;
  1 | sad
 (1 row)
 
-CREATE TABLE t_type2(a int, b mood, c date)  partition by range(c)(partition p1 VALUES less than('2020-01-01'),partition p2 VALUES less than(maxvalue));
+CREATE TABLE t_type2(a int, b mood, c date)distribute by replication partition by range(c)(partition p1 VALUES less than('2020-01-01'),partition p2 VALUES less than(maxvalue));
 INSERT INTO t_type2 VALUES (1, 'happy', '2019-05-07');
 SELECT * FROM t_type2;
  a |   b   |            c             
@@ -242,14 +242,14 @@ DROP TABLE IF EXISTS person;
 /*ALTER TYPE*/
 ALTER TYPE mood RENAME TO mood1;
 ALTER TYPE mood1 RENAME TO mood;
-CREATE USER usr1 pASsword 'Ttest_234';
-CREATE USER usr2 pASsword 'Ttest_234';
+CREATE USER usr1 pASsword 'Gauss_234';
+CREATE USER usr2 pASsword 'Gauss_234';
 ALTER TYPE mood OWNER TO usr1;
-SET role usr2 pASsword 'Ttest_234';
+SET role usr2 pASsword 'Gauss_234';
 CREATE TABLE t1_user_test1 (sk int,a mood)WITH (orientation=row);
 ALTER TYPE mood ADD VALUE 'very happy' AFTER 'happy';
-ERROR:  must be owner of type mood
-SET role usr1 pASsword 'Ttest_234';
+ERROR:  permission denied for type mood
+SET role usr1 pASsword 'Gauss_234';
 CREATE TABLE t1_user_test2 (sk int,a mood)WITH (orientation=row);
 ALTER TYPE mood ADD VALUE 'very happy' AFTER 'happy';
 reset role;
@@ -314,6 +314,7 @@ INSERT INTO array_tab2(b[0]) VALUES('happy');
 INSERT INTO array_tab2(b[1]) VALUES('happy');
 INSERT INTO array_tab2(b[0]) VALUES('sad');
 INSERT INTO array_tab2(b[0]) VALUES('ok');
+set enable_fASt_query_shipping=false;
 SELECT * FROM array_tab2 where b>array[cASt('sad' AS mood),cASt('ok' AS mood)] ORDER BY 1,2;
  a |       b       
 ---+---------------
@@ -343,6 +344,7 @@ SELECT * FROM array_tab2 where b>array[cASt('happy' AS mood)] ORDER BY 1,2;
 (0 rows)
 
 DROP TABLE array_tab2;
+set enable_fASt_query_shipping=true;
 /*empty enumtype*/
 CREATE TYPE empty_type AS enum ();
 CREATE TABLE empty_t (a int, b empty_type);
@@ -428,4 +430,4 @@ drop cascades to function create_enum.fun_oth(create_enum.enum_oth1)
 --    type,result,database,object_name,detail_info 
 --FROM pg_query_audit('2000-01-01 00:00:00', '4000-01-01 00:00:00') 
 --WHERE type='ddl_type' AND split_part(thread_id, '@' ,1) = pg_backend_pid();
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "audit_system_object" >/dev/null
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "audit_system_object" >/dev/null 2>&1

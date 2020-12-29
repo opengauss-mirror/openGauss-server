@@ -11,7 +11,7 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
+ *-------------------------------------------------------------------------
  *
  * cgutil.h
  *    main function file for gs_cgroup utility
@@ -19,7 +19,7 @@
  * IDENTIFICATION
  *    src/bin/gs_cgroup/cgutil.h
  *
- * -------------------------------------------------------------------------
+ *-------------------------------------------------------------------------
  */
 #ifndef GSCGROUP_H
 #define GSCGROUP_H
@@ -33,7 +33,7 @@
 #define fprintf(stream, fmt, ...)                \
     do {                                         \
         if (stdout == stream) {                  \
-            fprintf(stdout, fmt, ##__VA_ARGS__); \
+            (void)fprintf(stdout, fmt, ##__VA_ARGS__); \
         } else {                                 \
             write_stderr(fmt, ##__VA_ARGS__);    \
         }                                        \
@@ -132,7 +132,7 @@ extern int cgconf_exception_is_valid(gscgroup_grp_t* grp, int);
 extern void cgconf_set_class_group(int gid);
 extern void cgconf_reset_class_group(int gid);
 extern void cgconf_set_workload_group(int wgid, int cgid);
-extern void cgconf_reset_workload_group(int wgid, int cgid);
+extern void cgconf_reset_workload_group(int wgid);
 
 extern void cgconf_set_top_workload_group(int wdgid, int clsgid);
 

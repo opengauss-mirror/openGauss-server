@@ -59,7 +59,8 @@ Datum _int_same(PG_FUNCTION_ARGS)
     ArrayType* b = PG_GETARG_ARRAYTYPE_P_COPY(1);
     int na, nb;
     int n;
-    int *da, *db;
+    int *da = NULL;
+    int *db = NULL;
     bool result = false;
 
     CHECKARRVALID(a);
@@ -199,7 +200,7 @@ Datum sort(PG_FUNCTION_ARGS)
 {
     ArrayType* a = PG_GETARG_ARRAYTYPE_P_COPY(0);
     text* dirstr = (fcinfo->nargs == 2) ? PG_GETARG_TEXT_P(1) : NULL;
-    int32 dc = (dirstr) ? VARSIZE(dirstr) - VARHDRSZ : 0;
+    int32 dc = (dirstr) ? (VARSIZE(dirstr) - VARHDRSZ) : 0;
     char* d = (dirstr) ? VARDATA(dirstr) : NULL;
     int dir = -1;
 
@@ -271,7 +272,7 @@ Datum subarray(PG_FUNCTION_ARGS)
     int32 c;
     ArrayType* result = NULL;
 
-    start = (start > 0) ? start - 1 : start;
+    start = (start > 0) ? (start - 1) : start;
 
     CHECKARRVALID(a);
     if (ARRISEMPTY(a)) {
@@ -303,8 +304,11 @@ Datum subarray(PG_FUNCTION_ARGS)
     }
 
     result = new_intArrayType(end - start);
-    if (end - start > 0)
-        memcpy(ARRPTR(result), ARRPTR(a) + start, (end - start) * sizeof(int32));
+    if (end - start > 0) {
+        int rc = memcpy_s(ARRPTR(result), (end - start) * sizeof(int32),
+                          ARRPTR(a) + start, (end - start) * sizeof(int32));
+        securec_check(rc, "\0", "\0");
+    }
     PG_FREE_IF_COPY(a, 0);
     PG_RETURN_POINTER(result);
 }

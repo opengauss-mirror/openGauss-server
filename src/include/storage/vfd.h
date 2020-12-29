@@ -37,4 +37,3 @@ typedef struct vfd {
 } Vfd;
 
 #endif /* VFD_H */
-

@@ -16,6 +16,7 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "miscadmin.h"
 #include "pgtz.h"

@@ -62,4 +62,3 @@ typedef struct knl_g_rto_context {
 extern const RTOStatsViewObj g_rtoViewArr[RTO_VIEW_COL_SIZE];
 RTOStandbyData* GetRTOStat(uint32* num);
 #endif /* RTO_STATISTIC_H */
-

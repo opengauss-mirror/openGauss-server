@@ -34,15 +34,15 @@
 /* print bbox backtrace layers */
 #define BBOX_BACKTRACE_LAYERS 100
 
-/* process short name */
-extern char* program_invocation_short_name;
+/* process name which is depended by bbox, embed application should provide it. */
+extern char* progname;
 
-#define BBOX_CORE_FILE_ADD_NAME "core"
+#define BBOX_CORE_FILE_ADD_NAME "bbox"
 #define BBOX_SNAP_FILE_ADD_NAME "snap"
 #define BBOX_TMP_FILE_ADD_NAME "bbox.tmp"
 #define BBOX_TMP_DEL_TIME_INTERVAL (60 * 60 * 24) /* remove bbox file of one day ago. */
 
-#define BBOX_DATE_TIME_CMD "date +'%Y-%m-%d_%H-%M-%S'"
+#define BBOX_DATE_TIME_CMD "date +'%Y_%m_%d_%H_%M_%S'"
 
 extern long int g_iCoreDumpBeginTime;
 

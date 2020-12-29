@@ -5,7 +5,7 @@
 set time zone 'PRC';
 --
 --
-CREATE TABLE openGauss4444444_tbl
+CREATE TABLE DTS2016112903778_tbl
 (
 D_ID int,
 D_W_ID int,
@@ -14,7 +14,7 @@ D_STREET_1 varchar(20)
 )
 with(orientation = column)
 ;
-COPY openGauss4444444_tbl FROM STDIN;
+COPY DTS2016112903778_tbl FROM STDIN;
 4	1	cayzjsdtio	wiojkmfcmp
 10	1	osmgkxgssu	qjrlstdsqgwbirqefi
 4	2	faelfr	kydmzwgnsnrdtpvuztm
@@ -116,12 +116,12 @@ COPY openGauss4444444_tbl FROM STDIN;
 2	10	ktmaswdx	fdbpzfktvsdxmcerxax
 9	10	qnrbwfhzkm	scyoylodarv
 \.
-alter table openGauss4444444_tbl add column d6 decimal(64,10) default null;
-SELECT DISTINCT d6 FROM openGauss4444444_tbl;
-DROP TABLE openGauss4444444_tbl;
+alter table DTS2016112903778_tbl add column d6 decimal(64,10) default null;
+SELECT DISTINCT d6 FROM DTS2016112903778_tbl;
+DROP TABLE DTS2016112903778_tbl;
 --
 --
-create table openGauss5555555_tbl
+create table DTS2016120906561_tbl
 (
 D_ID int, 
 D_W_ID int, 
@@ -131,7 +131,7 @@ D_STREET_1 varchar(20)
 with(orientation = column) 
 ;
 -- rows number is (56, 64), and then touch this bug
-copy openGauss5555555_tbl from STDIN;
+copy DTS2016120906561_tbl from STDIN;
 1	1	cayzjsdtio	wiojkmfcmp
 1	1	osmgkxgssu	qjrlstdsqgwbirqefi
 1	2	faelfr	kydmzwgnsnrdtpvuztm
@@ -204,6 +204,6 @@ copy openGauss5555555_tbl from STDIN;
 1	10	luwklnucd	ptgijzicsocsyquyglp
 1	1	swotbb	ogsxoekiohenrovqcr
 \.
-delete from openGauss5555555_tbl;
-alter table openGauss5555555_tbl add column d11 decimal(32,10) not null;
-drop table openGauss5555555_tbl;
+delete from DTS2016120906561_tbl;
+alter table DTS2016120906561_tbl add column d11 decimal(32,10) not null;
+drop table DTS2016120906561_tbl;

@@ -38,6 +38,7 @@
 
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/pgxc_node.h"
 #include "commands/dbcommands.h"
@@ -53,7 +54,7 @@
 #include "utils/lsyscache.h"
 #include "utils/resowner.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "lib/stringinfo.h"
 #include "libpq/pqformat.h"
 #include "libpq/auth.h"
@@ -77,6 +78,8 @@
 #include "postmaster/postmaster.h"
 #include "portability/instr_time.h"
 #include "utils/elog.h"
+#include "pgxc/execRemote.h"
+#include "distributelayer/streamCore.h"
 
 #pragma GCC diagnostic ignored "-Wunused-function"
 
@@ -95,7 +98,6 @@ extern GlobalNodeDefinition* global_node_definition;
 static volatile bool PoolerPing = false;
 
 #define PROTO_TCP 1
-#define PROTO_SCTP 2
 #define get_agent(handle) ((PoolAgent*)(handle))
 
 #define PARAMS_LEN 4096
@@ -135,7 +137,7 @@ static int agentCount = 0;
 static PoolAgent** poolAgents = NULL;
 int MaxAgentCount = 0;
 
-/* current retry count for making connection in pooler*/
+/* current retry count for making connection in pooler */
 static const int retry_cnt = 2;
 static const int E_OK = 0;
 static const int E_TO_CREATE = -1;
@@ -163,9 +165,7 @@ static int cancel_query_on_connections(
     PoolAgent* agent, int dn_count, const int* dn_list, int co_count, const int* co_list);
 static int stop_query_on_connections(PoolAgent* agent, int dn_count, const int* dn_list);
 static void agent_release_connections(PoolAgent* agent, bool force_destroy, const char* status_array = NULL);
-static void agent_reset_session(PoolAgent* agent);
-static void agent_reset_session_pooler_stateless(PoolAgent* agent);
-void release_connection(DatabasePool* dbPool, PGXCNodePoolSlot* slot, Oid node, bool force_destroy);
+void release_connection(PoolAgent* agent, PGXCNodePoolSlot** ptrSlot, Oid node, bool force_destroy);
 static void destroy_slot(PGXCNodePoolSlot* slot);
 static List* destroy_node_pool(PGXCNodePool* node_pool, List* slots);
 static int clean_connection(List* nodelist, const char* database, const char* user_name);
@@ -191,7 +191,7 @@ PoolHandle* GetPoolAgent()
 }
 
 /*
- *init the pooler agent.
+ * init the pooler agent.
  */
 void PoolManagerInitPoolerAgent()
 {
@@ -201,12 +201,16 @@ void PoolManagerInitPoolerAgent()
         PoolHandle* pool_handle = NULL;
         if (!IsConnFromGTMTool()) {
             pool_handle = GetPoolManagerHandle();
+            char* session_options_ptr = session_options();
 
             /* Pooler initialization has to be made before ressource is released */
             PoolManagerConnect(pool_handle,
                 u_sess->proc_cxt.MyProcPort->database_name,
                 u_sess->proc_cxt.MyProcPort->user_name,
-                session_options());
+                session_options_ptr);
+                if (session_options_ptr != NULL) {
+                    pfree(session_options_ptr);
+                }
         }
     }
 }
@@ -256,7 +260,7 @@ int PoolManagerInit()
     return 0;
 }
 
-static void free_user_name_pgoptions(PGXCNodePoolSlot* slot)
+void free_user_name_pgoptions(PGXCNodePoolSlot* slot)
 {
     if (slot != NULL) {
         pfree_ext(slot->user_name);
@@ -265,7 +269,7 @@ static void free_user_name_pgoptions(PGXCNodePoolSlot* slot)
     pfree_ext(slot);
 }
 
-static void reload_user_name_pgoptions(PoolGeneralInfo* info, PoolAgent* agent, PGXCNodePoolSlot* slot)
+void reload_user_name_pgoptions(PoolGeneralInfo* info, PoolAgent* agent, PGXCNodePoolSlot* slot)
 {
     MemoryContext oldcontext = MemoryContextSwitchTo(info->dbpool->mcxt);
     char* user_name = pstrdup(agent->user_name);
@@ -302,7 +306,7 @@ int node_info_check(PoolAgent* agent)
 
     if (agent->num_coord_connections != numCo || agent->num_dn_connections != numDn) {
         res = POOL_CHECK_FAILED;
-        ereport(LOG,
+        ereport(WARNING,
             (errcode(ERRCODE_WARNING),
                 errmsg("pooler: the number of cn/dn changes, old cn/dn: %d/%d, new cn/dn: %d/%d",
                     agent->num_coord_connections,
@@ -426,7 +430,7 @@ int node_info_check_pooler_stateless(PoolAgent* agent)
 
     if (agent->num_coord_connections != numCo || agent->num_dn_connections != numDn) {
         res = POOL_CHECK_FAILED;
-        ereport(LOG,
+        ereport(WARNING,
             (errcode(ERRCODE_WARNING),
                 errmsg("pooler: the number of cn/dn changes, old cn/dn: %d/%d, new cn/dn: %d/%d",
                     agent->num_coord_connections,
@@ -516,7 +520,6 @@ PoolAgent* agent_create(void)
 
     /* Allocate agent */
     agent = (PoolAgent*)palloc0_noexcept(sizeof(PoolAgent));
-
     if (agent == NULL) {
         LWLockRelease(PoolerLock);
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("agent cannot alloc memory.")));
@@ -552,72 +555,11 @@ PoolAgent* agent_create(void)
  * @Return: new session params
  * @See also:
  */
-char* make_pooler_session_params(void)
+char* MakePoolerSessionParams(PoolCommandType command_type)
 {
-    PoolAgent* agent = get_agent(u_sess->pgxc_cxt.poolHandle);
-
-    if (agent == NULL)
-        return NULL;
-
-    /* no entry to process, use old session params */
-    if (agent->params_set == 0 || list_length(agent->params_list) <= 0)
-        return agent->session_params;
-
-    StringInfoData msgbuf = {NULL, 0, 0, 0};
-
-    USE_MEMORY_CONTEXT(PoolerMemoryContext);
-
-    initStringInfo(&msgbuf);
-
-    /*Get all session params from the agent params list to rebuild message string */
-    ListCell* cell = NULL;
-    foreach (cell, agent->params_list) {
-        PG_TRY();
-        {
-            char* params = (char*)lfirst(cell);
-            char* params_query = NULL;
-            char* params_query_r = NULL;
-            char params_list[PARAMS_LEN] = {0};
-            int rc = -1;
-
-            rc = sprintf_s(params_list, sizeof(params_list), "%s", params);
-            securec_check_ss(rc, "\0", "\0");
-
-            params_query = strtok_r(params_list, "@", &params_query_r);
-
-            params_query = pstrdup(params_query_r);
-
-            appendStringInfoString(&msgbuf, params_query);
-            appendStringInfoString(&msgbuf, ";");
-
-            pfree_ext(params_query);
-        }
-        PG_CATCH();
-        {
-            pfree_ext(msgbuf.data);
-
-            REVERT_MEMORY_CONTEXT();
-
-            PG_RE_THROW();
-        }
-        PG_END_TRY();
-    }
-
-    /*
-     * If session params exists, we will destroy it.
-     * The reason for this is that the original string
-     * contains the parameters that need to be reset. In
-     * this case, we need to rebuild the message string.
-     */
-    if (agent->session_params != NULL)
-        pfree_ext(agent->session_params);
-
-    agent->session_params = msgbuf.data;
-
-    /* session params is set */
-    agent->params_set = 0;
-
-    return agent->session_params;
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return NULL;
 }
 
 /*
@@ -640,11 +582,24 @@ void unregister_pooler_session_param(const char* name)
  * @Return: -1 param is not set 0 param is set
  * @See also:
  */
-int register_pooler_session_param(const char* name, const char* queryString)
+int register_pooler_session_param(const char* name, const char* queryString, PoolCommandType command_type)
 {
     Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    return 0;
+    return -1;
+}
+
+/*
+ * @Description: delete session params
+ * @IN name: param name
+ * @Return: -1 param is invalid, 1 param is not found, 0 param is delete
+ * @See also:
+ */
+int delete_pooler_session_params(const char* name)
+{
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return -1;
 }
 
 /*
@@ -693,13 +648,13 @@ char* session_options(void)
     int i;
     char* pgoptions[] = {"DateStyle", "timezone", "geqo", "intervalstyle", "lc_monetary"};
     StringInfoData options;
-    List* value_list;
-    ListCell* l;
+    List* value_list = NIL;
+    ListCell* l = NULL;
 
     initStringInfo(&options);
 
     for (i = 0; i < sizeof(pgoptions) / sizeof(char*); i++) {
-        const char* value;
+        const char* value = NULL;
 
         appendStringInfo(&options, " -c %s=", pgoptions[i]);
 
@@ -714,13 +669,14 @@ char* session_options(void)
         char *rawString = strdup(value);
         SplitIdentifierString(rawString, ',', &value_list);
         free(rawString);
-
         foreach (l, value_list) {
             char* value = (char*)lfirst(l);
             appendStringInfoString(&options, value);
             if (lnext(l))
                 appendStringInfoChar(&options, ',');
         }
+
+        list_free_ext(value_list);
     }
 
     return options.data;
@@ -742,9 +698,9 @@ void PoolManagerConnect(PoolHandle* handle, const char* database, const char* us
     int n32;
     char msgtype = 'c';
 
-    Assert(handle);
-    Assert(database);
-    Assert(user_name);
+    if (handle == NULL || database == NULL || user_name == NULL) {
+        ereport(PANIC, (errcode(ERRCODE_CONNECTION_EXCEPTION), errmsg("pooler: connect failed, invaild argument.")));
+    }
 
     /* Save the handle */
     poolHandle = handle;
@@ -797,25 +753,22 @@ void PoolManagerReconnect(void)
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return;
 #else
-    PoolHandle* handle;
-    char* dbname;
-
-    dbname = get_database_name(MyDatabaseId);
-    if (dbname == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                    errmsg("database with OID %u does not exist",
-                        MyDatabaseId)));
-    }
+    PoolHandle* handle = NULL;
+    char* session_options_ptr = session_options();
 
     Assert(poolHandle);
 
     PoolManagerDisconnect();
     handle = GetPoolManagerHandle();
-    PoolManagerConnect(handle, dbname, GetUserNameFromId(GetUserId()), session_options());
+    PoolManagerConnect(handle, get_database_name(MyDatabaseId), GetUserNameFromId(GetUserId()), session_options_ptr);
+    if (session_options_ptr != NULL) {
+        pfree(session_options_ptr);
+    }
+
 #endif
 }
 
-int PoolManagerSetCommand(PoolCommandType command_type, const char* set_command)
+int PoolManagerSetCommand(PoolCommandType command_type, const char* set_command, const char* name)
 {
 #ifndef ENABLE_MULTIPLE_NODES
     Assert(false);
@@ -909,7 +862,7 @@ int PoolManagerSendLocalCommand(int dn_count, const int* dn_list, int co_count, 
  */
 static List* PoolCleanInvalidConnections(DatabasePool* databasePool)
 {
-    if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+    if (ENABLE_STATELESS_REUSE) {
         return NULL;
     }
 
@@ -973,8 +926,8 @@ void agent_init(PoolAgent* agent, const char* database, const char* user_name, c
     agent->coord_connections = (PGXCNodePoolSlot**)palloc0(agent->num_coord_connections * sizeof(PGXCNodePoolSlot*));
     agent->dn_connections = (PGXCNodePoolSlot**)palloc0(agent->num_dn_connections * sizeof(PGXCNodePoolSlot*));
 
-    /* user_name, pgoptions save in agent when pooler is stateless reuse mode.*/
-    if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+    /* user_name, pgoptions save in agent when pooler is stateless reuse mode. */
+    if (ENABLE_STATELESS_REUSE) {
         /* Copy the user name */
         agent->user_name = pstrdup(user_name);
 
@@ -1060,11 +1013,7 @@ void agent_destroy(PoolAgent* agent)
          * before putting back connections to pool.
          * Handle in two different methods: pooler stateless reuse mode or normal mode.
          */
-        if (g_instance.attr.attr_network.PoolerStatelessReuse) {
-            agent_reset_session_pooler_stateless(agent);
-        } else {
-            agent_reset_session(agent);
-        }
+        agent_reset_session(agent, (bool)!ENABLE_STATELESS_REUSE);
 
         /*
          * Release them all.
@@ -1188,8 +1137,8 @@ PoolConnDef* PoolManagerGetConnections(List* datanodelist, List* coordlist)
     return NULL;
 #else
     int i;
-    ListCell* nodelist_item;
-    int* fds;
+    ListCell* nodelist_item = NULL;
+    int* fds = NULL;
     int totlen = list_length(datanodelist) + list_length(coordlist);
     int nodes[totlen + 2];
 
@@ -1339,7 +1288,7 @@ bool PoolManagerCheckConnectionInfo(void)
     agent = get_agent(u_sess->pgxc_cxt.poolHandle);
 
     /* check in two different methods: pooler stateless reuse mode or normal mode. */
-    if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+    if (ENABLE_STATELESS_REUSE) {
         res = node_info_check_pooler_stateless(agent);
     } else {
         res = node_info_check(agent);
@@ -1377,7 +1326,7 @@ List* PoolCleanInvalidFreeSlot(List* invalid_slots, Oid node_oid, char* invalid_
     DatabasePool* databasePool = databasePools;
 
     while (databasePool != NULL) {
-        PGXCNodePool* nodePool;
+        PGXCNodePool* nodePool = NULL;
 
         nodePool = (PGXCNodePool*)hash_search(databasePool->nodePools, &node_oid, HASH_FIND, NULL);
         if (nodePool == NULL || nodePool->valid == false || nodePool->slot == NULL || nodePool->freeSize == 0) {
@@ -1441,12 +1390,12 @@ bool is_current_node_during_connecting(PoolAgent* agent, Oid node_oid, char node
  * if co_node_name specified, validate the pooler connections to it.
  *
  * In multi standby mode, the hostis_primary is not the flag means primary,
- *  We use node_type = 'S' for standby, 'D' for primary.
+ *	We use node_type = 'S' for standby, 'D' for primary.
  */
 InvalidBackendEntry* PoolManagerValidateConnection(bool clear, const char* co_node_name, uint32& count)
 {
     Relation rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     InvalidBackendEntry* entry = NULL;
     int i = 0, j = 0;
@@ -1463,8 +1412,8 @@ InvalidBackendEntry* PoolManagerValidateConnection(bool clear, const char* co_no
         entry[i].node_name = (char**)palloc0(g_instance.attr.attr_network.MaxPoolSize * sizeof(char*));
 
     rel = heap_open(PgxcNodeRelationId, AccessShareLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    while ((tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Form_pgxc_node node_form = (Form_pgxc_node)GETSTRUCT(tuple);
         Oid node_oid = InvalidOid;
         char* node_name = NULL;
@@ -1491,10 +1440,10 @@ InvalidBackendEntry* PoolManagerValidateConnection(bool clear, const char* co_no
                 if (poolAgents[i]->dn_conn_oids[j] == node_oid) {
                     if (poolAgents[i]->dn_connections[j] != NULL && poolAgents[i]->dn_connections[j]->conn != NULL &&
                         (!IS_PRIMARY_DATA_NODE(node_form->node_type) ||
-                            (IS_DN_MULTI_STANDYS_MODE() &&
-                                strcmp(PQhost(poolAgents[i]->dn_connections[j]->conn), invalid_host) != 0) ||
-                            (IS_DN_DUMMY_STANDYS_MODE() &&
-                                strcmp(PQhost(poolAgents[i]->dn_connections[j]->conn), invalid_host) == 0))) {
+                        (IS_DN_MULTI_STANDYS_MODE() &&
+                        strcmp(PQhost(poolAgents[i]->dn_connections[j]->conn), invalid_host) != 0) ||
+                        (IS_DN_DUMMY_STANDYS_MODE() &&
+                        strcmp(PQhost(poolAgents[i]->dn_connections[j]->conn), invalid_host) == 0))) {
                         /* Shutdown the invalid socket */
                         invalid_conn = poolAgents[i]->dn_connections[j]->conn;
                         if (invalid_conn->is_logic_conn == true) {
@@ -1583,7 +1532,7 @@ InvalidBackendEntry* PoolManagerValidateConnection(bool clear, const char* co_no
             }
         }
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     /* move all valid entry to low pos */
@@ -1624,20 +1573,6 @@ InvalidBackendEntry* PoolManagerValidateConnection(bool clear, const char* co_no
         destroy_slots(invalid_slots);
 
     return entry;
-}
-
-/*
- * @Description: release all free slots in a pool with node id
- * @IN agent: pool agent for a thread
- * @IN nodeoid: node id to release slots
- * @Return: count of slots which has been released
- * @See also:
- */
-int agent_release_free_slots(PoolAgent* agent, Oid nodeoid)
-{
-    Assert(false);
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    return 0;
 }
 
 /*
@@ -1781,10 +1716,11 @@ PGXCNodePoolSlot* alloc_slot_mem(DatabasePool* dbpool)
     PG_TRY();
     {
         slot = (PGXCNodePoolSlot*)palloc0(sizeof(PGXCNodePoolSlot));
-        if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+        if (ENABLE_STATELESS_REUSE) {
             PoolAgent* agent = get_agent(u_sess->pgxc_cxt.poolHandle);
             slot->user_name = pstrdup(agent->user_name);
             slot->pgoptions = pstrdup(agent->pgoptions);
+            slot->session_params = NULL;
         }
     }
     PG_CATCH();
@@ -1876,11 +1812,11 @@ int LibcommConnectdbParallel(
         if (info->node_mode[i] != POOL_NODE_STANDBY || IS_DN_MULTI_STANDYS_MODE()) {
             conn[i]->libcomm_addrinfo.host = nodesDef[i]->nodehost.data;
             conn[i]->libcomm_addrinfo.ctrl_port = nodesDef[i]->nodectlport;
-            conn[i]->libcomm_addrinfo.sctp_port = nodesDef[i]->nodesctpport;
+            conn[i]->libcomm_addrinfo.listen_port = nodesDef[i]->nodesctpport;
         } else {
             conn[i]->libcomm_addrinfo.host = nodesDef[i]->nodehost1.data;
             conn[i]->libcomm_addrinfo.ctrl_port = nodesDef[i]->nodectlport1;
-            conn[i]->libcomm_addrinfo.sctp_port = nodesDef[i]->nodesctpport1;
+            conn[i]->libcomm_addrinfo.listen_port = nodesDef[i]->nodesctpport1;
         }
 
         /* use for pg_stat_get_status */
@@ -1910,7 +1846,6 @@ int LibcommConnectdbParallel(
     for (i = 0; i < count; i++) {
         if (conn[i] != NULL && conn[i]->libcomm_addrinfo.gs_sock.type != GSOCK_INVALID) {
             rc = LibcommPacketSend((NODE_CONNECTION*)conn[i], 0, startpacket_list[i], packetlen_list[i]);
-
             if (rc != STATUS_OK) {
                 ereport(WARNING,
                     (errcode(ERRCODE_CONNECTION_FAILURE),
@@ -1950,8 +1885,9 @@ int LibcommConnectdbParallel(
 return_result:
 
     for (i = 0; i < count; i++) {
-        if (startpacket_list[i] != NULL)
+        if (startpacket_list[i] != NULL) {
             free(startpacket_list[i]);
+        }
         pfree_ext(nodesDef[i]);
     }
 
@@ -1972,8 +1908,8 @@ return_result:
  * @Return: 0: all connections success not 0: failed node count
  * @See also:
  */
-int create_connections_parallel
-    (PoolGeneralInfo *info, NodeRelationInfo *needCreateNodeArray, int needCreateArrayLen, int loopIndex, char* firstError)
+int create_connections_parallel(
+    PoolGeneralInfo *info, NodeRelationInfo *needCreateNodeArray, int needCreateArrayLen, int loopIndex, char* firstError)
 {
     ereport(DEBUG5, (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
                          errmsg("pooler: create_connections_parallel()")));
@@ -2000,10 +1936,10 @@ int create_connections_parallel
     int connStrSize = 0;
 
     Assert(needCreateArrayLen > 0);
-    waitCreateNode = (Oid*) palloc0(sizeof(Oid) * needCreateArrayLen);
-    indexMap = (int*) palloc0(sizeof(int) * needCreateArrayLen);
-    connectionStrs = (char**) palloc0(sizeof(char*) * needCreateArrayLen);
-    nodeCons = (PGconn**) palloc0(sizeof(PGconn*) * needCreateArrayLen);
+    waitCreateNode = (Oid*)palloc0(sizeof(Oid) * needCreateArrayLen);
+    indexMap = (int*)palloc0(sizeof(int) * needCreateArrayLen);
+    connectionStrs = (char**)palloc0(sizeof(char*) * needCreateArrayLen);
+    nodeCons = (PGconn**)palloc0(sizeof(PGconn*) * needCreateArrayLen);
     info->conndef->pgConn = nodeCons;
     info->conndef->pgConnCnt = needCreateArrayLen;
     
@@ -2059,8 +1995,8 @@ int create_connections_parallel
         }
 
         connStrSize  = strlen(node_connstr) + versionLen + 1;
-        connectionStrs[j] = (char*) palloc0(connStrSize);
-        rc = snprintf_s(connectionStrs[j], connStrSize, connStrSize-1, "%s%s", node_connstr, versionStr);
+        connectionStrs[j] = (char*)palloc0(connStrSize);
+        rc = snprintf_s(connectionStrs[j], connStrSize, connStrSize - 1, "%s%s", node_connstr, versionStr);
         securec_check_ss(rc, "\0", "\0");
         pfree_ext(node_connstr);
 
@@ -2084,7 +2020,7 @@ int create_connections_parallel
     int no_error = 0;
     WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_UNDEFINED, true);
 
-    if(info->node_type == POOL_NODE_DN && g_instance.attr.attr_storage.comm_cn_dn_logic_conn) {
+    if (info->node_type == POOL_NODE_DN && g_instance.attr.attr_storage.comm_cn_dn_logic_conn) {
         /* build logic connection use libcomm */
         no_error = LibcommConnectdbParallel(connectionStrs, waitCreateCount, nodeCons, waitCreateNode, info);
     } else {
@@ -2094,7 +2030,7 @@ int create_connections_parallel
     }
     (void)pgstat_report_waitstatus(oldStatus);
     
-    for (j = 0; j < waitCreateCount ; j++) {
+    for (j = 0; j < waitCreateCount; j++) {
         node = needCreateNodeArray[indexMap[j]].nodeIndex;
         nodeid = needCreateNodeArray[indexMap[j]].nodeList[loopIndex];
         
@@ -2109,7 +2045,7 @@ int create_connections_parallel
             nodePool = acquire_nodepool(dbpool, nodeid, info->node_type);
             if (nodePool == NULL || !nodePool->valid) {
                 LWLockRelease(PoolerLock);
-                needCreateNodeArray[i].isSucceed = false;
+                needCreateNodeArray[indexMap[j]].isSucceed = false;
                 pfree_ext(connectionStrs[j]);
                 ++failedCount;
                 ++j;
@@ -2125,24 +2061,15 @@ int create_connections_parallel
              */
             slot = alloc_slot_mem(dbpool);
             slot->xc_cancelConn = NULL;
-            slot->hava_session_params = false;
             slot->userid = InvalidOid;
 
-            if (g_instance.attr.attr_network.PoolerStatelessReuse) {
-                PoolAgent *agent = get_agent(u_sess->pgxc_cxt.poolHandle);
-
-                if (agent->session_params != NULL) {
-                    slot->hava_session_params = true;
-                } else {
-                    slot->hava_session_params = false;
-                }
-
+            if (ENABLE_STATELESS_REUSE) {
                 slot->userid = GetCurrentUserId();
             }
 
             slot->conn = nodeCons[j];
             info->conndef->pgConn[j] = NULL;
-            slot->xc_cancelConn = (NODE_CANCEL *) PQgetCancel((PGconn *)slot->conn);
+            slot->xc_cancelConn = (NODE_CANCEL*)PQgetCancel((PGconn*)slot->conn);
             needCreateNodeArray[indexMap[j]].isSucceed = true;
             info->connections[node] = slot;
             LWLockRelease(PoolerLock);
@@ -2157,13 +2084,13 @@ int create_connections_parallel
                 }
                 
                 /* if firstError space is not enough, only copy the front part */
-                if(nodeCons[j] && strlen(nodeCons[j]->errorMessage.data) >= INITIAL_EXPBUFFER_SIZE) {
+                if (nodeCons[j] && strlen(nodeCons[j]->errorMessage.data) >= INITIAL_EXPBUFFER_SIZE) {
                     nodeCons[j]->errorMessage.data[INITIAL_EXPBUFFER_SIZE - 1] = '\0';
                 }
 
                 errno_t ss_rc = EOK;
                 ss_rc = strcpy_s(firstError, INITIAL_EXPBUFFER_SIZE, err_msg);
-                securec_check(ss_rc,"\0","\0");
+                securec_check(ss_rc, "\0", "\0");
                 firstError[INITIAL_EXPBUFFER_SIZE - 1] = '\0';
             }
 
@@ -2208,7 +2135,7 @@ int get_nodeinfo_from_matric(PoolGeneralInfo *info, int needCreateArrayLen, Node
     if (needCreateNodeArray == NULL) {
         ereport(ERROR, (errcode(ERRCODE_WARNING), errmsg("pooler: Failed to "
             "get_nodeInfo_from_matric: needCreateNodeArray is null.")));
-    }    
+    }
     
     if (IS_DN_DUMMY_STANDYS_MODE() || info->node_type == POOL_NODE_CN) {
         slaveNodeNums = 1;
@@ -2222,11 +2149,10 @@ int get_nodeinfo_from_matric(PoolGeneralInfo *info, int needCreateArrayLen, Node
         }        
     } else {
         /* prune to record access nodes and avoid repeated traversal. */
-        isMatricVisited = (bool*) palloc0(sizeof(bool) * u_sess->pgxc_cxt.NumDataNodes);
+        isMatricVisited = (bool*)palloc0(sizeof(bool) * u_sess->pgxc_cxt.NumDataNodes);
         slaveNodeNums = u_sess->pgxc_cxt.NumStandbyDataNodes / u_sess->pgxc_cxt.NumDataNodes;
         /* total dn num is (slaveNodeNums + 1), we will try every node when the failure occurs. */
         tmpNodeArray = (Oid*)palloc0(sizeof(Oid) * needCreateArrayLen * (slaveNodeNums + 1));
-
         
         for (i = 0; i < needCreateArrayLen; i++) {
             needCreateNodeArray[i].nodeList = &tmpNodeArray[i * (slaveNodeNums + 1)];
@@ -2270,7 +2196,6 @@ void acquire_connection_parallel(PoolGeneralInfo* info, List* nodelist, NodeRela
     /* Save in PoolConnDef of data nodes first */
     foreach (nodelist_item, nodelist) {
         int node = lfirst_int(nodelist_item);
-
         if ((node < 0) || (is_dn && node >= u_sess->pgxc_cxt.NumDataNodes) ||
             (!is_dn && node >= u_sess->pgxc_cxt.NumCoords)) {
             ereport(ERROR,
@@ -2293,8 +2218,7 @@ void acquire_connection_parallel(PoolGeneralInfo* info, List* nodelist, NodeRela
                 /* close connection, CONNECTION_BAD means no need to send 'X' message */
                 info->connections[node]->conn->status = CONNECTION_BAD;
                 LWLockAcquire(PoolerLock, LW_SHARED);
-                release_connection(info->dbpool, info->connections[node], info->conn_oids[node], true);
-                info->connections[node] = NULL;
+                release_connection(info->agent, &(info->connections[node]), info->conn_oids[node], true);
                 LWLockRelease(PoolerLock);
             } else {
                 /* Expect not to go this branch */
@@ -2336,8 +2260,7 @@ void acquire_connection_parallel(PoolGeneralInfo* info, List* nodelist, NodeRela
                                        "test conn, retry to get one conn more for node oid: %u.",
                                     nodeid)));
 
-                        release_connection(dbpool, slot, nodeid, true);
-                        slot = NULL;
+                        release_connection(info->agent, &slot, nodeid, true);
 
                         goto retry;
                     } else {
@@ -2417,8 +2340,7 @@ int agent_send_connection_params(PoolGeneralInfo* info, int node, bool is_noexce
         if (-1 == rs) {
             LWLockAcquire(PoolerLock, LW_SHARED);
             /* can NOT update session params, destroy the slot */
-            release_connection(info->dbpool, slot, info->conn_oids[node], true);
-            info->connections[node] = NULL;
+            release_connection(info->agent, &(info->connections[node]), info->conn_oids[node], true);
             LWLockRelease(PoolerLock);
 
             if (!is_noexcept) {
@@ -2456,8 +2378,7 @@ int agent_send_connection_params(PoolGeneralInfo* info, int node, bool is_noexce
         if (-1 == rs) {
             LWLockAcquire(PoolerLock, LW_SHARED);
             /* can NOT update session params, destroy the slot */
-            release_connection(info->dbpool, slot, info->conn_oids[node], true);
-            info->connections[node] = NULL;
+            release_connection(info->agent, &(info->connections[node]), info->conn_oids[node], true);
             LWLockRelease(PoolerLock);
 
             if (!is_noexcept) {
@@ -2491,9 +2412,7 @@ int agent_send_connection_params_pooler_reuse(PoolGeneralInfo* info, int node, b
     /*
      * Update newly-acquired slot with connection parameters.
      */
-    PGXCNodePoolSlot* slot = info->connections[node];
-
-    if (info->session_params != NULL || g_instance.attr.attr_network.PoolerStatelessReuse) {
+    if (info->session_params != NULL || ENABLE_STATELESS_REUSE) {
         /*
          * In pooler stateless resue mode to send three kind connection parameters:
          * 1.reset slot connection session for remote node;
@@ -2545,13 +2464,11 @@ int agent_send_connection_params_pooler_reuse(PoolGeneralInfo* info, int node, b
 
         securec_check_ss(rc, "\0", "\0");
 
-        rs = PGXCNodeSendSetQueryPoolerStatelessReuse(slot->conn, sql);
-
+        rs = PGXCNodeSendSetQueryPoolerStatelessReuse(info->connections[node]->conn, sql);
         if (-1 == rs) {
             LWLockAcquire(PoolerLock, LW_SHARED);
             /* can NOT update connection params, destroy the slot */
-            release_connection(info->dbpool, slot, info->conn_oids[node], true);
-            info->connections[node] = NULL;
+            release_connection(info->agent, &(info->connections[node]), info->conn_oids[node], true);
             LWLockRelease(PoolerLock);
 
             if (!is_noexcept) {
@@ -2576,14 +2493,9 @@ int agent_send_connection_params_pooler_reuse(PoolGeneralInfo* info, int node, b
  */
 bool agent_check_need_send_connection_params_pooler_reuse(PGXCNodePoolSlot* slot)
 {
-    PoolAgent* agent = get_agent(u_sess->pgxc_cxt.poolHandle);
-
-    if (strcmp(slot->user_name, agent->user_name) == 0 && strcmp(slot->pgoptions, agent->pgoptions) == 0 &&
-        slot->hava_session_params == false && agent->session_params == NULL && agent->temp_namespace == NULL &&
-        slot->userid == GetCurrentUserId())
-        return false;
-
-    return true;
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return false;
 }
 
 /*
@@ -2673,13 +2585,12 @@ static int agent_send_setquery_parallel(const int* nodelist, int count, PoolGene
                 (errmsg("Send query(%s) to node %u [host:%s, port:%s] failed %s.",
                     query,
                     info->conn_oids[node],
-                    conn->pghost != NULL ? conn->pghost : "unknown",
-                    conn->pgport != NULL ? conn->pgport : "unknown",
+                    (conn->pghost != NULL) ? conn->pghost : "unknown",
+                    (conn->pgport != NULL) ? conn->pgport : "unknown",
                     PQerrorMessage(conn))));
 
             LWLockAcquire(PoolerLock, LW_SHARED);
-            release_connection(info->dbpool, info->connections[node], info->conn_oids[node], true);
-            info->connections[node] = NULL;
+            release_connection(info->agent, &(info->connections[node]), info->conn_oids[node], true);
             LWLockRelease(PoolerLock);
             ++err_count;
         }
@@ -2697,13 +2608,12 @@ static int agent_send_setquery_parallel(const int* nodelist, int count, PoolGene
                 (errmsg("Wait result for query(%s) from node %u [host:%s, port:%s] failed %s.",
                     query,
                     info->conn_oids[node],
-                    conn->pghost != NULL ? conn->pghost : "unknown",
-                    conn->pgport != NULL ? conn->pgport : "unknown",
+                    (conn->pghost != NULL) ? conn->pghost : "unknown",
+                    (conn->pgport != NULL) ? conn->pgport : "unknown",
                     PQerrorMessage(conn))));
 
             LWLockAcquire(PoolerLock, LW_SHARED);
-            release_connection(info->dbpool, info->connections[node], info->conn_oids[node], true);
-            info->connections[node] = NULL;
+            release_connection(info->agent, &(info->connections[node]), info->conn_oids[node], true);
             LWLockRelease(PoolerLock);
             ++err_count;
         }
@@ -2775,7 +2685,6 @@ void agent_send_connection_params_parallel(PoolGeneralInfo* info, List* node_lis
     /* Save in PoolConnDef of data nodes first */
     foreach (nodelist_item, node_list) {
         int node = lfirst_int(nodelist_item);
-
         if (info->connections[node] == NULL)
             continue;
 
@@ -2876,7 +2785,6 @@ void agent_send_connection_params_parallel_pooler_reuse(PoolGeneralInfo* info, L
                 }
 
                 PoolAgent* agent = get_agent(u_sess->pgxc_cxt.poolHandle);
-                slot->hava_session_params = (agent->session_params != NULL);
 
                 if (strcmp(slot->user_name, agent->user_name) != 0 || strcmp(slot->pgoptions, agent->pgoptions) != 0) {
                     reload_user_name_pgoptions(info, agent, slot);
@@ -2887,8 +2795,7 @@ void agent_send_connection_params_parallel_pooler_reuse(PoolGeneralInfo* info, L
                 if (agent_wait_send_connection_params_pooler_reuse(slot->conn) != 0) {
                     LWLockAcquire(PoolerLock, LW_SHARED);
                     /* can NOT update connection params, destroy the slot */
-                    release_connection(info->dbpool, slot, info->conn_oids[node], true);
-                    info->connections[node] = NULL;
+                    release_connection(info->agent, &(info->connections[node]), info->conn_oids[node], true);
                     LWLockRelease(PoolerLock);
 
                     ereport(LOG, (errmsg("send connection params to node %u failed.", info->conn_oids[node])));
@@ -2916,7 +2823,6 @@ void agent_send_connection_params_parallel_pooler_reuse(PoolGeneralInfo* info, L
                 }
 
                 PoolAgent* agent = get_agent(u_sess->pgxc_cxt.poolHandle);
-                slot->hava_session_params = (agent->session_params != NULL);
 
                 if (strcmp(slot->user_name, agent->user_name) != 0 || strcmp(slot->pgoptions, agent->pgoptions) != 0) {
                     reload_user_name_pgoptions(info, agent, slot);
@@ -2927,8 +2833,7 @@ void agent_send_connection_params_parallel_pooler_reuse(PoolGeneralInfo* info, L
                 if (agent_wait_send_connection_params_pooler_reuse(slot->conn) != 0) {
                     LWLockAcquire(PoolerLock, LW_SHARED);
                     /* can NOT update connection params, destroy the slot */
-                    release_connection(info->dbpool, slot, info->conn_oids[i], true);
-                    info->connections[i] = NULL;
+                    release_connection(info->agent, &(info->connections[i]), info->conn_oids[i], true);
                     LWLockRelease(PoolerLock);
 
                     ereport(LOG, (errmsg("send connection params to node %u failed.", info->conn_oids[i])));
@@ -2946,10 +2851,8 @@ void agent_send_connection_params_parallel_pooler_reuse(PoolGeneralInfo* info, L
         for (i = 0; i < info->num_connections; ++i) {
             if (!release_nodes[i])
                 continue;
-            PGXCNodePoolSlot* slot = info->connections[i];
-            if (slot != NULL) {
-                release_connection(info->dbpool, slot, info->conn_oids[i], true);
-                info->connections[i] = NULL;
+            if (info->connections[i] != NULL) {
+                release_connection(info->agent, &(info->connections[i]), info->conn_oids[i], true);
             }
         }
         LWLockRelease(PoolerLock);
@@ -2968,7 +2871,6 @@ void agent_send_connection_params_parallel_pooler_reuse(PoolGeneralInfo* info, L
     /* Save in PoolConnDef of data nodes first */
     foreach (nodelist_item, node_list) {
         int node = lfirst_int(nodelist_item);
-
         if (info->connections[node] == NULL)
             continue;
 
@@ -3015,10 +2917,44 @@ void agent_send_connection_params_parallel_pooler_reuse(PoolGeneralInfo* info, L
     }
 }
 
-void pooler_sleep_interval_time()
+int one_round_create_connection(PoolGeneralInfo* info, NodeRelationInfo *needCreateNodeArray, int needCreateArrayLen,
+    char* firstError, bool *poolValidateCancel)
 {
-    for (int i = 0; i < u_sess->attr.attr_network.PoolerConnectIntervalTime &&
-            t_thrd.startup_cxt.primary_triggered != true; i++) {
+    int slaveNodeNums = 0;
+    int circleLoopNums = 0;
+    int failedCount = 0;
+    
+    /* add the active/standby relationship table for retry connections when connect primary node failed. */
+    if (needCreateArrayLen > 0) {
+        /* only the primary node needs to be tried when PoolerConnectMaxRetries is 0. */ 
+        slaveNodeNums = get_nodeinfo_from_matric(info, needCreateArrayLen, needCreateNodeArray);
+        circleLoopNums = (u_sess->attr.attr_network.PoolerConnectMaxLoops == 0 ||
+            info->node_type == POOL_NODE_CN) ? 1 : (slaveNodeNums + 1);
+    }
+
+    /* Create data node connections parallel */
+    for (int i = 0; i < circleLoopNums; i++) {
+        failedCount = create_connections_parallel(info, needCreateNodeArray, needCreateArrayLen, i, firstError);
+        if (failedCount == 0) {
+            break;
+        }
+
+        if (g_pq_interrupt_happened == true) {
+            *poolValidateCancel = true;
+            break;
+        }
+    }
+
+    return failedCount;
+}
+
+void pooler_sleep_interval_time(bool *poolValidateCancel)
+{
+    for (int i = 0; i < u_sess->attr.attr_network.PoolerConnectIntervalTime; i++) {
+        if (g_pq_interrupt_happened == true) {
+            *poolValidateCancel = true;
+            break;
+        }
         /* sleep 1s */
         pg_usleep(1000000);
     }
@@ -3037,22 +2973,19 @@ void acquire_connections_parallel(PoolGeneralInfo* info, List* node_list)
     ereport(DEBUG5, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("pooler: acquire_connections_parallel()")));
 
     int loop = 1;
+    int i, failedCount;
     char firstError[INITIAL_EXPBUFFER_SIZE] = {0};
+    NodeRelationInfo *needCreateNodeArray = NULL;
 
     info->invalid_nodes = (int*)palloc0(sizeof(int) * info->num_connections);
     info->num_invalid_node = 0;
     info->is_retry = false;
-    int failedCount = 0;
-    int circleLoopNums;
-
+    
 retry:
-    NodeRelationInfo *needCreateNodeArray = NULL;
     int needCreateArrayLen = 0;
-    int i, slaveNodeNums;
+    bool poolValidateCancel = false;
 
-    needCreateNodeArray = (NodeRelationInfo*) palloc0(sizeof(NodeRelationInfo) * info->num_connections);
-    circleLoopNums = 0;
-    failedCount = 0;
+    needCreateNodeArray = (NodeRelationInfo*)palloc0(sizeof(NodeRelationInfo) * info->num_connections);
     info->node_mode = (PoolNodeMode*)palloc0(sizeof(PoolNodeMode) * info->num_connections);
 
     if (node_list == NULL) {
@@ -3073,23 +3006,7 @@ retry:
     /* acquire connection for the nodes in the list, get the nodes to create */
     acquire_connection_parallel(info, node_list, needCreateNodeArray, &needCreateArrayLen);
 
-    /* add the active/standby relationship table for retry connections when connect primary node failed. */
-    if (needCreateArrayLen > 0) {
-        /* only the primary node needs to be tried when PoolerConnectMaxRetries is 0.*/ 
-        slaveNodeNums = get_nodeinfo_from_matric(info, needCreateArrayLen, needCreateNodeArray);
-        circleLoopNums = (u_sess->attr.attr_network.PoolerConnectMaxLoops == 0 ||
-            info->node_type == POOL_NODE_CN) ? 1: (slaveNodeNums + 1);
-    }
-
-    /* Create data node connections parallel */
-    for (i = 0; i < circleLoopNums; i++) {
-        failedCount = create_connections_parallel(info, needCreateNodeArray, needCreateArrayLen, i, firstError);
-        if (failedCount == 0 || t_thrd.startup_cxt.primary_triggered == true) {
-            break;
-        }
-    }
-
-    /* still failed, an error will be thrown */
+    failedCount = one_round_create_connection(info, needCreateNodeArray, needCreateArrayLen, firstError, &poolValidateCancel);
     if (failedCount > 0) {
         failedCount = 0;
 
@@ -3107,12 +3024,12 @@ retry:
 
         if (loop >= u_sess->attr.attr_network.PoolerConnectMaxLoops ||
             info->node_type == POOL_NODE_CN ||
-            t_thrd.startup_cxt.primary_triggered == true) {
+            poolValidateCancel == true) {
             for (i = 0; i < needCreateArrayLen; ++i) {
                 if (needCreateNodeArray[i].isSucceed != true) {
                     ereport(WARNING, (errcode(ERRCODE_CONNECTION_FAILURE),
                         errmsg("pooler: failed to make connection to datanode[%u] for thread[%lu]."
-                            "Detail: thisLoop[%d], needConnectNums[%d], nodeIdx[%d], i[%d]",
+                            "Detail: thisLoop[%d], needConnectNums[%d], nodeIdx[%d], fragNodeIdx[%d]",
                             info->conn_oids[needCreateNodeArray[i].nodeIndex], 
                             info->pid, 
                             loop,
@@ -3125,9 +3042,9 @@ retry:
             ereport(LOG, (errmsg("pooler connect failed. Detail: maxloop[%d], thisLoop[%d], needConnectNums[%d], failedNums[%d].", 
                 u_sess->attr.attr_network.PoolerConnectMaxLoops, loop, needCreateArrayLen, failedCount)));
             
-            pooler_sleep_interval_time();
+            pooler_sleep_interval_time(&poolValidateCancel);
 
-            if (t_thrd.startup_cxt.primary_triggered != true) {
+            if (poolValidateCancel != true) {
                 loop++;
                 goto retry;
             }
@@ -3140,15 +3057,21 @@ retry:
         pfree_ext(needCreateNodeArray[0].nodeList);
         pfree_ext(needCreateNodeArray);
         
-        ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE),
-            errmsg("pooler: failed to create connections in parallel mode, Error Message: %s", firstError)));
+        if (poolValidateCancel == true) {
+            ereport(ERROR,
+                (errcode(ERRCODE_CONNECTION_FAILURE),
+                    errmsg("pooler: failed to create connections in parallel mode, due to failover, pending")));
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE),
+                errmsg("pooler: failed to create connections in parallel mode, Error Message: %s", firstError)));
+        }
     }
     
     pfree_ext(needCreateNodeArray[0].nodeList);
     pfree_ext(needCreateNodeArray);
     pfree_ext(info->node_mode);
 
-    if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+    if (ENABLE_STATELESS_REUSE) {
         /* 
          * In pooler stateless resue mode to send three kind connection parameters:
          * 1.reset slot connetction session for remote node;
@@ -3215,6 +3138,9 @@ void agent_acquire_connections_end(PoolAgent* agent)
  */
 void agent_acquire_connections_parallel(PoolAgent* agent, PoolConnDef* result, List* datanodelist, List* coordlist)
 {
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    
     ereport(DEBUG5, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("pooler: agent_acquire_connections_parallel()")));
 
     Assert(agent);
@@ -3225,7 +3151,7 @@ void agent_acquire_connections_parallel(PoolAgent* agent, PoolConnDef* result, L
     /* init connect info */
     info.pid = agent->pid;
     info.dbpool = agent->pool;
-    info.session_params = make_pooler_session_params(); /* make new session params */
+    info.session_params = MakePoolerSessionParams(POOL_CMD_GLOBAL_SET); /* make new session params */
     info.temp_namespace = agent->temp_namespace;
     info.conndef = result;
 
@@ -3339,8 +3265,7 @@ int send_local_commands(PoolAgent* agent, int dn_count, const int* dn_list, int 
                                 agent->dn_conn_oids[node],
                                 agent->local_params)));
                     LWLockAcquire(PoolerLock, LW_SHARED);
-                    release_connection(agent->pool, slot, agent->dn_conn_oids[node], true);
-                    agent->dn_connections[node] = NULL;
+                    release_connection(agent, &(agent->dn_connections[node]), agent->dn_conn_oids[node], true);
                     LWLockRelease(PoolerLock);
                     (void)pgstat_report_waitstatus(oldStatus);
                     return -1;
@@ -3376,8 +3301,7 @@ int send_local_commands(PoolAgent* agent, int dn_count, const int* dn_list, int 
                                 agent->coord_conn_oids[node],
                                 agent->local_params)));
                     LWLockAcquire(PoolerLock, LW_SHARED);
-                    release_connection(agent->pool, slot, agent->coord_conn_oids[node], true);
-                    agent->coord_connections[node] = NULL;
+                    release_connection(agent, &(agent->coord_connections[node]), agent->coord_conn_oids[node], true);
                     LWLockRelease(PoolerLock);
                     (void)pgstat_report_waitstatus(oldStatus);
                     return -1;
@@ -3393,7 +3317,6 @@ int send_local_commands(PoolAgent* agent, int dn_count, const int* dn_list, int 
     return 0;
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 // stop query on connection
 int stop_query_on_connections(PoolAgent* agent, int dn_count, const int* dn_list)
 {
@@ -3440,7 +3363,6 @@ int stop_query_on_connections(PoolAgent* agent, int dn_count, const int* dn_list
             ereport(LOG,
                 (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
                     errmsg("pooler stop connection timeout, nodeoid %u: %s", agent->dn_conn_oids[node], errbuf)));
-
         } else {
             nCount++;
         }
@@ -3449,7 +3371,6 @@ int stop_query_on_connections(PoolAgent* agent, int dn_count, const int* dn_list
 
     return nCount != nRealCount;
 }
-#endif
 
 /*
  * Cancel query
@@ -3503,7 +3424,6 @@ int cancel_query_on_connections(PoolAgent* agent, int dn_count, const int* dn_li
             ereport(LOG,
                 (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
                     errmsg("pooler cancel connection timeout, nodeoid %d: %s", agent->dn_conn_oids[node], errbuf)));
-
         } else {
             nCount++;
         }
@@ -3533,8 +3453,7 @@ int cancel_query_on_connections(PoolAgent* agent, int dn_count, const int* dn_li
         if (!bRet) {
             ereport(LOG,
                 (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
-                    errmsg("pooler cancel connection timeout, nodeoid %u: %s", agent->coord_conn_oids[node], errbuf)));
-
+                    errmsg("pooler cancel connection timeout, nodeoid %d: %s", agent->coord_conn_oids[node], errbuf)));
         } else {
             nCount++;
         }
@@ -3581,10 +3500,8 @@ int* StreamConnectNodes(libcommaddrinfo** addrArray, int connNum)
 /*
  * Return connections back to the pool
  */
-void PoolManagerReleaseConnections(const char* status_array, bool has_error)
+void PoolManagerReleaseConnections(const char* status_array, int array_size, bool has_error)
 {
-    int i = 0;
-
     ereport(DEBUG5, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("pooler: PoolManagerReleaseConnections()")));
 
 #ifdef USE_ASSERT_CHECKING
@@ -3604,20 +3521,8 @@ void PoolManagerReleaseConnections(const char* status_array, bool has_error)
     }
 
     // Deal with the situations where SET GUC commands are run within a Transaction block
-    if (g_instance.attr.attr_network.PoolerStatelessReuse && !agent->has_check_params) {
+    if (ENABLE_STATELESS_REUSE && !agent->has_check_params) {
         if (agent->session_params != NULL) {
-            for (i = 0; i < agent->num_dn_connections; i++) {
-                PGXCNodePoolSlot* slot = agent->dn_connections[i];
-                if (slot != NULL)
-                    slot->hava_session_params = true;
-            }
-
-            for (i = 0; i < agent->num_coord_connections; i++) {
-                PGXCNodePoolSlot* slot = agent->coord_connections[i];
-                if (slot != NULL)
-                    slot->hava_session_params = true;
-            }
-
             agent->has_check_params = true;
         }
     }
@@ -3650,7 +3555,6 @@ void PoolManagerReleaseConnections(const char* status_array, bool has_error)
 #endif
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 /*
  * Stop Query
  * Return 0 means all nodes got stop, otherwise not all.
@@ -3678,7 +3582,6 @@ int PoolManagerStopQuery(int dn_count, const int* dn_list)
     rs = stop_query_on_connections(agent, dn_count, dn_list);
     return rs;
 }
-#endif
 
 /*
  * Cancel Query
@@ -3726,12 +3629,17 @@ void agent_release_connections(PoolAgent* agent, bool force_destroy, const char*
 
     Assert(agent);
 
-    // example: MemoryContext oldcontext;
+    //	MemoryContext oldcontext;
     int i;
 
-    if (agent->dn_connections == NULL || agent->coord_connections == NULL) {
-        return;
+    if (agent == NULL) {
+        ereport(FATAL, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("pooler: agent_release_connections: agent is null")));
     }
+
+    if ((agent->dn_connections == NULL) && (agent->coord_connections == NULL))
+        return;
+
     /*
      * During AbortTransaction, this function is called before LWLockReleaseAll, We need
      * consider this function after LWLockReleaseAll later. But here, for safety, just do
@@ -3762,7 +3670,7 @@ void agent_release_connections(PoolAgent* agent, bool force_destroy, const char*
     /*
      * Add PoolerStatelessReuse parameter if pooler is set in stateless reuse mode.
      */
-    if (!g_instance.attr.attr_network.PoolerStatelessReuse) {
+    if (!ENABLE_STATELESS_REUSE) {
         if (((!check_connection_reuse() && (agent->session_params != NULL)) || (agent->temp_namespace != NULL)) &&
             !force_destroy && (status_array == NULL))
             return;
@@ -3785,38 +3693,31 @@ void agent_release_connections(PoolAgent* agent, bool force_destroy, const char*
          * First clean up for Datanodes
          */
         for (i = 0; i < agent->num_dn_connections; i++) {
-            PGXCNodePoolSlot* slot = agent->dn_connections[i];
-
             /*
              * Release connection.
              * If connection has temporary objects on it, destroy connection slot.
              */
             LWLockAcquire(PoolerLock, LW_SHARED);
-            if (slot != NULL)
-                release_connection(agent->pool, slot, agent->dn_conn_oids[i], force_destroy);
-            agent->dn_connections[i] = NULL;
+            if (agent->dn_connections[i] != NULL)
+                release_connection(agent, &(agent->dn_connections[i]), agent->dn_conn_oids[i], force_destroy);
             LWLockRelease(PoolerLock);
         }
         /* Then clean up for Coordinator connections */
         for (i = 0; i < agent->num_coord_connections; i++) {
-            PGXCNodePoolSlot* slot = agent->coord_connections[i];
-
             /*
              * Release connection.
              * If connection has temporary objects on it, destroy connection slot.
              */
             LWLockAcquire(PoolerLock, LW_SHARED);
-            if (slot != NULL)
-                release_connection(agent->pool, slot, agent->coord_conn_oids[i], force_destroy);
-            agent->coord_connections[i] = NULL;
+            if (agent->coord_connections[i] != NULL)
+                release_connection(agent, &(agent->coord_connections[i]), agent->coord_conn_oids[i], force_destroy);
             LWLockRelease(PoolerLock);
         }
 
         if (check_connection_reuse())
             u_sess->pgxc_cxt.PoolerResendParams = true;
-    }
-    // Release each connection by it's status
-    else {
+    } else {
+        /* Release each connection by it's status */
         bool is_force = false;
 
         /*
@@ -3824,14 +3725,12 @@ void agent_release_connections(PoolAgent* agent, bool force_destroy, const char*
          * First clean up for Datanodes
          */
         for (i = 0; i < agent->num_dn_connections; i++, status_array++) {
-            PGXCNodePoolSlot* slot = agent->dn_connections[i];
-
-            is_force = (*status_array == CONN_STATE_NORMAL ? false : true);
+            is_force = (*status_array == CONN_STATE_NORMAL) ? false : true;
 
             /*
              * Check if pooler is set in stateless reuse mode.
              */
-            if (!g_instance.attr.attr_network.PoolerStatelessReuse) {
+            if (!ENABLE_STATELESS_REUSE) {
                 if (!is_force && (agent->session_params != NULL))
                     continue;
             }
@@ -3841,22 +3740,19 @@ void agent_release_connections(PoolAgent* agent, bool force_destroy, const char*
              * If connection status is error, destroy connection slot.
              */
             LWLockAcquire(PoolerLock, LW_SHARED);
-            if (slot != NULL)
-                release_connection(agent->pool, slot, agent->dn_conn_oids[i], is_force);
-            agent->dn_connections[i] = NULL;
+            if (agent->dn_connections[i] != NULL)
+                release_connection(agent, &(agent->dn_connections[i]), agent->dn_conn_oids[i], is_force);
             LWLockRelease(PoolerLock);
         }
 
         /* Then clean up for Coordinator connections */
         for (i = 0; i < agent->num_coord_connections; i++, status_array++) {
-            PGXCNodePoolSlot* slot = agent->coord_connections[i];
-
-            is_force = (*status_array == CONN_STATE_NORMAL ? false : true);
+            is_force = (*status_array == CONN_STATE_NORMAL) ? false : true;
 
             /*
              * Check if pooler is set in stateless reuse mode.
              */
-            if (!g_instance.attr.attr_network.PoolerStatelessReuse) {
+            if (!ENABLE_STATELESS_REUSE) {
                 if (!is_force && (agent->session_params != NULL))
                     continue;
             }
@@ -3866,10 +3762,9 @@ void agent_release_connections(PoolAgent* agent, bool force_destroy, const char*
              * If connection status is error, destroy connection slot.
              */
             LWLockAcquire(PoolerLock, LW_SHARED);
-            if (slot != NULL) {
-                release_connection(agent->pool, slot, agent->coord_conn_oids[i], is_force);
+            if (agent->coord_connections[i] != NULL) {
+                release_connection(agent, &(agent->coord_connections[i]), agent->coord_conn_oids[i], is_force);
             }
-            agent->coord_connections[i] = NULL;
             LWLockRelease(PoolerLock);
         }
     }
@@ -3880,88 +3775,11 @@ void agent_release_connections(PoolAgent* agent, bool force_destroy, const char*
  * This is done before putting back to pool connections that have been
  * modified by session parameters.
  */
-void agent_reset_session(PoolAgent* agent)
+void agent_reset_session(PoolAgent* agent, bool need_reset)
 {
-    ereport(DEBUG5, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("pooler: agent_reset_session()")));
-
-    Assert(agent);
-
-    int rs;
-    char* set_command = "SET SESSION AUTHORIZATION DEFAULT;RESET ALL;";
-
-    if ((agent->session_params == NULL) && (agent->local_params == NULL))
-        return;
-
-    /* Reset connection params */
-    /* Check agent slot for each coordinator and Datanode */
-    rs = PGXCNodeSendSetParallel(agent, set_command);
-    if (rs != 0) {
-        ereport(LOG,
-            (errcode(ERRCODE_CONNECTION_EXCEPTION),
-                errmsg("pooler: Failed to send set command: %s to %d nodes", set_command, rs)));
-    }
-
-    /* Parameters are reset, so free commands */
-    LWLockAcquire(PoolerLock, LW_SHARED);
-
-    pfree_ext(agent->session_params);
-    pfree_ext(agent->local_params);
-
-    /* reset agent params_list */
-    if (agent->params_list != NIL) {
-        ListCell* item = NULL;
-        foreach (item, agent->params_list) {
-            char* params_query = NULL;
-            params_query = (char*)lfirst(item);
-            pfree_ext(params_query);
-        }
-        list_free(agent->params_list);
-    }
-    agent->params_list = NIL;
-
-    agent->params_set = 0;
-    agent->reuse = 0;
-
-    LWLockRelease(PoolerLock);
-}
-
-/*
- * Reset session parameters for given connections in the agent, But not send to server right now.
- * This is done before putting back to pool connections that have been
- * modified by session parameters.
- */
-void agent_reset_session_pooler_stateless(PoolAgent* agent)
-{
-    ereport(DEBUG5, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("pooler: agent_reset_session_pooler_stateless()")));
-
-    Assert(agent);
-
-    if ((agent->session_params == NULL) && (agent->local_params == NULL)) {
-        return;
-    }
-
-    /* Parameters are reset, so free commands */
-    LWLockAcquire(PoolerLock, LW_SHARED);
-
-    pfree_ext(agent->session_params);
-    pfree_ext(agent->local_params);
-
-    /* reset agent params_list */
-    if (agent->params_list != NIL) {
-        ListCell* item = NULL;
-        foreach (item, agent->params_list) {
-            char* params_query = NULL;
-            params_query = (char*)lfirst(item);
-            pfree_ext(params_query);
-        }
-        list_free(agent->params_list);
-    }
-    agent->params_list = NIL;
-
-    agent->params_set = 0;
-    agent->reuse = 0;
-
-    LWLockRelease(PoolerLock);
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return;
 }
 
 /*
@@ -3991,7 +3809,7 @@ DatabasePool* create_database_pool(const char* database, const char* user_name, 
     databasePool->database = pstrdup(database);
 
     /* In pooler stateless reuse mode, databasePool is stateless: user_name and pgoptions are NULL */
-    if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+    if (ENABLE_STATELESS_REUSE) {
         databasePool->user_name = NULL;
         databasePool->pgoptions = NULL;
     } else {
@@ -4121,7 +3939,7 @@ void reload_database_pools(PoolAgent* agent)
             }
 
             /* Pooler not in stateless reuse mode */
-            if (!g_instance.attr.attr_network.PoolerStatelessReuse) {
+            if (!ENABLE_STATELESS_REUSE) {
                 if (connstr_chk == NULL || strcmp(connstr_chk, nodePool->connstr) ||
                     (IS_DN_DUMMY_STANDYS_MODE() && connstr_ch1k != NULL && strcmp(connstr_ch1k, nodePool->connstr1))) {
                     /* Node has been removed or altered */
@@ -4132,8 +3950,8 @@ void reload_database_pools(PoolAgent* agent)
                                 nodePool->nodeoid,
                                 nodePool->connstr,
                                 nodePool->connstr1,
-                                connstr_chk == NULL ? "" : connstr_chk,
-                                connstr_ch1k == NULL ? "" : connstr_ch1k)));
+                                (connstr_chk == NULL) ? "" : connstr_chk,
+                                (connstr_ch1k == NULL) ? "" : connstr_ch1k)));
 
                     slots = destroy_node_pool(nodePool, slots);
                     hash_search(databasePool->nodePools, &nodePool->nodeoid, HASH_REMOVE, NULL);
@@ -4161,7 +3979,7 @@ DatabasePool* find_database_pool(const char* database, const char* user_name, co
     DatabasePool* databasePool = NULL;
 
     /* In pooler stateless reuse mode, every databasePool can reuse for all agent */
-    if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+    if (ENABLE_STATELESS_REUSE) {
         /* Scan the list */
         databasePool = databasePools;
         while (databasePool != NULL) {
@@ -4211,7 +4029,7 @@ PGXCNodePool* acquire_nodepool(DatabasePool* dbPool, Oid nodeid, PoolNodeType no
 
     LWLockAcquire(PoolerLock, LW_EXCLUSIVE);
 
-    nodePool = (PGXCNodePool *) hash_search(dbPool->nodePools, &node_oid, HASH_FIND, &found);
+    nodePool = (PGXCNodePool*)hash_search(dbPool->nodePools, &node_oid, HASH_FIND, &found);
     if (found == true) {
         MemoryContextSwitchTo(oldcontext);
         return nodePool;
@@ -4219,6 +4037,7 @@ PGXCNodePool* acquire_nodepool(DatabasePool* dbPool, Oid nodeid, PoolNodeType no
 
     nodePool = (PGXCNodePool*)hash_search(dbPool->nodePools, &node_oid, HASH_ENTER, &found);
 
+    /* memset_s(nodePool, 0, ) means nodePool->valid = false */
     size_t len = sizeof(PGXCNodePool) - sizeof(Oid);
     char* dest = (char*)nodePool;
     ss_rc = memset_s(dest + sizeof(Oid), len, 0, len);
@@ -4226,7 +4045,7 @@ PGXCNodePool* acquire_nodepool(DatabasePool* dbPool, Oid nodeid, PoolNodeType no
 
     if (!found) {
         /* nodePool is stateless in pooler stateless reuse mode */
-        if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+        if (ENABLE_STATELESS_REUSE) {
             nodePool->connstr = NULL;
             nodePool->connstr1 = NULL;
         } else {
@@ -4353,9 +4172,8 @@ int get_connection(DatabasePool* dbpool, Oid nodeid, PGXCNodePoolSlot** slot, Po
      * to avoid thread pool queueing.
      * Instead, we create new connections with cn/dn maintenance port.
      */
-    if (!u_sess->attr.attr_common.IsInplaceUpgrade &&
-        !(g_instance.attr.attr_common.enable_thread_pool &&
-            (u_sess->proc_cxt.IsInnerMaintenanceTools || IsHAPort(u_sess->proc_cxt.MyProcPort))) &&
+    if (!isInLargeUpgrade() && !(g_instance.attr.attr_common.enable_thread_pool &&
+        (u_sess->proc_cxt.IsInnerMaintenanceTools || IsHAPort(u_sess->proc_cxt.MyProcPort))) &&
         nodePool->freeSize > 0) {
         *slot = nodePool->slot[nodePool->freeSize - 1];
         nodePool->slot[nodePool->freeSize - 1] = NULL;
@@ -4375,12 +4193,12 @@ int get_connection(DatabasePool* dbpool, Oid nodeid, PGXCNodePoolSlot** slot, Po
         /* no available slot and number of slot in use reaches upper limit */
         rs = E_NO_FREE_SLOT;
         ereport(LOG,
-            (errmsg("node %u has no free slot, used/max: %d/%d",
+            (errmsg("node %d has no free slot, used/max: %d/%d",
                 nodePool->nodeoid,
                 nodePool->size,
                 g_instance.attr.attr_network.MaxPoolSize)));
     } else {
-        if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+        if (ENABLE_STATELESS_REUSE) {
             /* increase counter of node pool first, and create slot later */
             ereport(DEBUG2,
                 (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
@@ -4458,7 +4276,6 @@ static int pingNode(const char* host, const char* port, const char* dbname)
 
     if (conninfo[0]) {
         status = PQping(conninfo);
-
         if (status == PQPING_OK)
             return 0;
         else
@@ -4500,8 +4317,7 @@ retry:
             (errcode(ERRCODE_WARNING),
                 errmsg("pooler: Error in checking connection to node %u, error: %s", nodeid, strerror(errno))));
         return false;
-    } else if (result > 0) /* result > 0, there is some data */
-    {
+    } else if (result > 0) { /* result > 0, there is some data */
         ereport(LOG,
             (errcode(ERRCODE_WARNING), errmsg("pooler: Unexpected data on connection to node %u, cleaning.", nodeid)));
         return false;
@@ -4517,7 +4333,7 @@ retry:
 /*
  * release connection from specified pool and slot
  */
-void release_connection(DatabasePool* dbPool, PGXCNodePoolSlot* slot, Oid node, bool force_destroy)
+void release_connection(PoolAgent* agent, PGXCNodePoolSlot** ptrSlot, Oid node, bool force_destroy)
 {
 #ifndef ENABLE_MULTIPLE_NODES
     Assert(false);
@@ -4525,10 +4341,17 @@ void release_connection(DatabasePool* dbPool, PGXCNodePoolSlot* slot, Oid node, 
     return;
 #else
 
-    PGXCNodePool* nodePool;
+    PGXCNodePool* nodePool = NULL;
+    DatabasePool* dbPool = agent->pool;
+    PGXCNodePoolSlot* slot = *ptrSlot;
 
     Assert(dbPool);
     Assert(slot);
+
+    AutoMutexLock agentLock(&agent->lock);
+    agentLock.lock();
+    *ptrSlot = NULL;
+    agentLock.unLock();
 
     nodePool = (PGXCNodePool*)hash_search(dbPool->nodePools, &node, HASH_FIND, NULL);
     if (nodePool == NULL) {
@@ -4584,8 +4407,7 @@ void destroy_slot(PGXCNodePoolSlot* slot)
 
     pfree_ext(slot->user_name);
     pfree_ext(slot->pgoptions);
-
-    slot->hava_session_params = false;
+    pfree_ext(slot->session_params);
     slot->userid = InvalidOid;
 
     PQfreeCancel((PGcancel*)slot->xc_cancelConn);
@@ -4617,7 +4439,7 @@ List* destroy_node_pool(PGXCNodePool* node_pool, List* slots)
      * If this not the connections to the Datanodes assigned to them remain open, this will
      * consume Datanode resources.
      */
-    if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+    if (ENABLE_STATELESS_REUSE) {
         ereport(DEBUG1,
             (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
                 errmsg("pooler: About to destroy node pool, available size is %d, %d connections are in use",
@@ -4665,7 +4487,7 @@ int clean_connection(List* nodelist, const char* database, const char* user_name
         ListCell* lc = NULL;
 
         /* Clean connection by databasePool in pooler stateless reuse mode */
-        if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+        if (ENABLE_STATELESS_REUSE) {
             if (((database != NULL) && strcmp(database, databasePool->database))) {
                 /* The pool does not match to request, skip */
                 databasePool = databasePool->next;
@@ -4732,7 +4554,7 @@ int clean_connection(List* nodelist, const char* database, const char* user_name
  * Abort PIDs registered with the agents for the given database.
  * Send back to client list of PIDs signaled to watch them.
  */
-/* pooler threading change pid to ThreadId*/
+/* pooler threading change pid to ThreadId */
 ThreadId* abort_pids(int* len, ThreadId pid, const char* database, const char* user_name, bool** isthreadpool)
 {
     ereport(DEBUG5, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("pooler: abort_pids()")));
@@ -4760,7 +4582,7 @@ ThreadId* abort_pids(int* len, ThreadId pid, const char* database, const char* u
         if ((database != NULL) && strcmp(poolAgents[count]->pool->database, database) != 0)
             continue;
 
-        if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+        if (ENABLE_STATELESS_REUSE) {
             if ((user_name != NULL) && strcmp(poolAgents[count]->user_name, user_name) != 0)
                 continue;
         } else {
@@ -4796,10 +4618,12 @@ bool IsPoolHandle(void)
 char* build_node_conn_str(Oid nodeid, DatabasePool *dbPool, bool isNeedSlave)
 {
     NodeDefinition *nodeDef = NULL;
-    char *user, *pgoptions, *connstr = NULL;
-    int proto_type, port;
-    PoolAgent *agent;
-    NameData *host;
+    char *user = NULL;
+    char *pgoptions = NULL;
+    char *connstr = NULL;
+    int port;
+    PoolAgent *agent = NULL;
+    NameData *host = NULL;
     NameData nodename = {{0}};
 
     nodeDef = PgxcNodeGetDefinition(nodeid);
@@ -4808,12 +4632,6 @@ char* build_node_conn_str(Oid nodeid, DatabasePool *dbPool, bool isNeedSlave)
         return NULL;
     }
     
-    if (nodeDef->nodesctpport > 0 && (!(g_instance.attr.attr_network.comm_tcp_mode))) {
-        proto_type = PROTO_SCTP;
-    } else {
-        proto_type = PROTO_TCP;
-    }
-
     if (IS_DN_DUMMY_STANDYS_MODE() && isNeedSlave == true) {
         host = &(nodeDef->nodehost1);
         port = nodeDef->nodeport1;
@@ -4822,7 +4640,7 @@ char* build_node_conn_str(Oid nodeid, DatabasePool *dbPool, bool isNeedSlave)
         port = nodeDef->nodeport;
     }    
 
-    if (g_instance.attr.attr_network.PoolerStatelessReuse) {
+    if (ENABLE_STATELESS_REUSE) {
         agent = get_agent(u_sess->pgxc_cxt.poolHandle);
         user = agent->user_name;
         pgoptions = agent->pgoptions;
@@ -4837,11 +4655,12 @@ char* build_node_conn_str(Oid nodeid, DatabasePool *dbPool, bool isNeedSlave)
         (const char *)user,
         (const char *)pgoptions,
         (char *)(IS_PGXC_COORDINATOR ? "coordinator" : "datanode"),
-        proto_type,
+        PROTO_TCP,
         get_pgxc_nodename(nodeid, &nodename));
 
     ereport(DEBUG1, (errcode(ERRCODE_WARNING),
-        errmsg("pooler: build_node_conn_str host = %s, port = %d, database = %s, user = %s", host->data, port, dbPool->database, user),
+        errmsg("pooler: build_node_conn_str host = %s, port = %d, database = %s, user = %s",
+            host->data, port, dbPool->database, user),
             errdetail("node.....")));
                     
     pfree_ext(nodeDef);
@@ -4890,6 +4709,8 @@ void free_agent(PoolAgent* agent)
     }
     agent->params_list = NIL;
 
+    (void)pthread_mutex_destroy(&agent->lock);
+
     pfree_ext(agent);
 }
 
@@ -4933,6 +4754,13 @@ static uint32 get_current_connection_nums(Oid* cnOids, Oid* dnOids, List* cn_lis
 }
 
 int get_pool_connection_info(PoolConnectionInfo** connectionEntry)
+{
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return 0;
+}
+
+int check_connection_status(ConnectionStatus **connectionEntry)
 {
     Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();

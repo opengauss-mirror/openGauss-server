@@ -1,0 +1,442 @@
+set default_statistics_target=-2;
+SET
+--========================================================== hdfs table
+create table t1 (a int, b int, c int, d int) tablespace hdfs_ts distribute by hash(a);
+CREATE TABLE
+create table t1r (a int, b int, c int, d int) tablespace hdfs_ts distribute by replication;
+CREATE TABLE
+set cstore_insert_mode=main;
+SET
+insert into t1 values (1, 1, 1, 1);
+INSERT 0 1
+insert into t1 values (2, 1, 1, 1);
+INSERT 0 1
+insert into t1 values (3, 2, 1, 1);
+INSERT 0 1
+insert into t1 values (4, 2, 1, 1);
+INSERT 0 1
+insert into t1 values (5, 3, 2, 1);
+INSERT 0 1
+insert into t1 values (6, 3, 2, 1);
+INSERT 0 1
+insert into t1 values (7, 4, 2, 1);
+INSERT 0 1
+insert into t1 values (8, 4, 2, 1);
+INSERT 0 1
+insert into t1r select * from t1;
+INSERT 0 8
+analyze t1 ((a, c));
+ANALYZE
+analyze t1 ((b, c));
+ANALYZE
+analyze t1r ((a, c));
+ANALYZE
+analyze t1r ((b, c));
+ANALYZE
+select * from pg_ext_stats where (schemaname='public' and tablename='t1') or (schemaname='cstore' and tablename='pg_delta_public_t1') order by ext_info, tablename, inherited;
+ schemaname |     tablename      | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+------------+--------------------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ cstore     | pg_delta_public_t1 | m[1,3]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,3]   | f         |         0 |         4 |         -1 |            1 |                           |                   | 
+ public     | t1                 | m[1,3]   | t         |         0 |         4 |         -1 |            1 |                           |                   | 
+ cstore     | pg_delta_public_t1 | m[2,3]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[2,3]   | f         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ public     | t1                 | m[2,3]   | t         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+(6 rows)
+
+select * from pg_ext_stats where (schemaname='public' and tablename='t1r') or (schemaname='cstore' and tablename='pg_delta_public_t1r') order by ext_info, tablename, inherited;
+ schemaname |      tablename      | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+------------+---------------------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ cstore     | pg_delta_public_t1r | m[1,3]   | f         |         0 |         0 |          0 |            1 |                           |                   | 
+ public     | t1r                 | m[1,3]   | f         |         0 |         4 |         -1 |           -1 |                           |                   | 
+ public     | t1r                 | m[1,3]   | t         |         0 |         4 |         -1 |           -1 |                           |                   | 
+ cstore     | pg_delta_public_t1r | m[2,3]   | f         |         0 |         0 |          0 |            1 |                           |                   | 
+ public     | t1r                 | m[2,3]   | f         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ public     | t1r                 | m[2,3]   | t         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+(6 rows)
+
+alter table t1 add statistics ((a, b));
+ALTER TABLE
+alter table t1 add statistics ((b, c));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:32: WARNING:  Some of extended statistics have already been defined.
+ALTER TABLE
+alter table t1 add statistics ((a, d));
+ALTER TABLE
+alter table t1 add statistics ((b, d));
+ALTER TABLE
+alter table t1 add statistics ((b, c, d));
+ALTER TABLE
+alter table t1 add statistics ((a, b, c, d));
+ALTER TABLE
+alter table t1r add statistics ((a, b));
+ALTER TABLE
+alter table t1r add statistics ((b, c));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:39: WARNING:  Some of extended statistics have already been defined.
+ALTER TABLE
+alter table t1r add statistics ((a, d));
+ALTER TABLE
+alter table t1r add statistics ((b, d));
+ALTER TABLE
+alter table t1r add statistics ((b, c, d));
+ALTER TABLE
+alter table t1r add statistics ((a, b, c, d));
+ALTER TABLE
+select * from pg_ext_stats where (schemaname='public' and tablename='t1') or (schemaname='cstore' and tablename='pg_delta_public_t1') order by ext_info, tablename, inherited;
+ schemaname |     tablename      |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+------------+--------------------+------------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ cstore     | pg_delta_public_t1 | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,2,3,4] | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1 | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,2]     | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1 | m[1,3]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,3]     | f         |         0 |         4 |         -1 |            1 |                           |                   | 
+ public     | t1                 | m[1,3]     | t         |         0 |         4 |         -1 |            1 |                           |                   | 
+ cstore     | pg_delta_public_t1 | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,4]     | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1 | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[2,3,4]   | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1 | m[2,3]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[2,3]     | f         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ public     | t1                 | m[2,3]     | t         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ cstore     | pg_delta_public_t1 | m[2,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[2,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[2,4]     | t         |         0 |         0 |          0 |            0 |                           |                   | 
+(21 rows)
+
+select * from pg_ext_stats where (schemaname='public' and tablename='t1r') or (schemaname='cstore' and tablename='pg_delta_public_t1r') order by ext_info, tablename, inherited;
+ schemaname |      tablename      |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+------------+---------------------+------------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ cstore     | pg_delta_public_t1r | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[1,2,3,4] | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1r | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[1,2]     | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1r | m[1,3]     | f         |         0 |         0 |          0 |            1 |                           |                   | 
+ public     | t1r                 | m[1,3]     | f         |         0 |         4 |         -1 |           -1 |                           |                   | 
+ public     | t1r                 | m[1,3]     | t         |         0 |         4 |         -1 |           -1 |                           |                   | 
+ cstore     | pg_delta_public_t1r | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[1,4]     | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1r | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[2,3,4]   | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1r | m[2,3]     | f         |         0 |         0 |          0 |            1 |                           |                   | 
+ public     | t1r                 | m[2,3]     | f         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ public     | t1r                 | m[2,3]     | t         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ cstore     | pg_delta_public_t1r | m[2,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[2,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[2,4]     | t         |         0 |         0 |          0 |            0 |                           |                   | 
+(21 rows)
+
+analyze t1 ((b, d));
+ANALYZE
+analyze t1 ((c, d));
+ANALYZE
+analyze t1r ((b, d));
+ANALYZE
+analyze t1r ((c, d));
+ANALYZE
+select * from pg_ext_stats where (schemaname='public' and tablename='t1') or (schemaname='cstore' and tablename='pg_delta_public_t1') order by ext_info, tablename, inherited;
+ schemaname |     tablename      |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+------------+--------------------+------------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ cstore     | pg_delta_public_t1 | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,2,3,4] | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1 | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,2]     | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1 | m[1,3]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,3]     | f         |         0 |         4 |         -1 |            1 |                           |                   | 
+ public     | t1                 | m[1,3]     | t         |         0 |         4 |         -1 |            1 |                           |                   | 
+ cstore     | pg_delta_public_t1 | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[1,4]     | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1 | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[2,3,4]   | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1 | m[2,3]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[2,3]     | f         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ public     | t1                 | m[2,3]     | t         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ cstore     | pg_delta_public_t1 | m[2,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[2,4]     | f         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ public     | t1                 | m[2,4]     | t         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ cstore     | pg_delta_public_t1 | m[3,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1                 | m[3,4]     | f         |         0 |         4 |       -.25 |            1 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+ public     | t1                 | m[3,4]     | t         |         0 |         4 |       -.25 |            1 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+(24 rows)
+
+select * from pg_ext_stats where (schemaname='public' and tablename='t1r') or (schemaname='cstore' and tablename='pg_delta_public_t1r') order by ext_info, tablename, inherited;
+ schemaname |      tablename      |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+------------+---------------------+------------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ cstore     | pg_delta_public_t1r | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[1,2,3,4] | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1r | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[1,2]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[1,2]     | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1r | m[1,3]     | f         |         0 |         0 |          0 |            1 |                           |                   | 
+ public     | t1r                 | m[1,3]     | f         |         0 |         4 |         -1 |           -1 |                           |                   | 
+ public     | t1r                 | m[1,3]     | t         |         0 |         4 |         -1 |           -1 |                           |                   | 
+ cstore     | pg_delta_public_t1r | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[1,4]     | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[1,4]     | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1r | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                           |                   | 
+ public     | t1r                 | m[2,3,4]   | t         |         0 |         0 |          0 |            0 |                           |                   | 
+ cstore     | pg_delta_public_t1r | m[2,3]     | f         |         0 |         0 |          0 |            1 |                           |                   | 
+ public     | t1r                 | m[2,3]     | f         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ public     | t1r                 | m[2,3]     | t         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ cstore     | pg_delta_public_t1r | m[2,4]     | f         |         0 |         0 |          0 |            1 |                           |                   | 
+ public     | t1r                 | m[2,4]     | f         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ public     | t1r                 | m[2,4]     | t         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ cstore     | pg_delta_public_t1r | m[3,4]     | f         |         0 |         0 |          0 |            1 |                           |                   | 
+ public     | t1r                 | m[3,4]     | f         |         0 |         4 |       -.25 |         -.25 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+ public     | t1r                 | m[3,4]     | t         |         0 |         4 |       -.25 |         -.25 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+(24 rows)
+
+analyze t1;
+ANALYZE
+analyze t1r;
+ANALYZE
+select * from pg_ext_stats where (schemaname='public' and tablename='t1') or (schemaname='cstore' and tablename='pg_delta_public_t1') order by ext_info, tablename, inherited;
+ schemaname |     tablename      |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+------------+--------------------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ cstore     | pg_delta_public_t1 | m[1,2,3,4] | f         |         0 |         0 |          0 |            0 |                                       |                   | 
+ public     | t1                 | m[1,2,3,4] | f         |         0 |         4 |         -1 |            1 |                                       |                   | 
+ public     | t1                 | m[1,2,3,4] | t         |         0 |         4 |         -1 |            1 |                                       |                   | 
+ cstore     | pg_delta_public_t1 | m[1,2]     | f         |         0 |         0 |          0 |            0 |                                       |                   | 
+ public     | t1                 | m[1,2]     | f         |         0 |         4 |         -1 |            1 |                                       |                   | 
+ public     | t1                 | m[1,2]     | t         |         0 |         4 |         -1 |            1 |                                       |                   | 
+ cstore     | pg_delta_public_t1 | m[1,3]     | f         |         0 |         0 |          0 |            0 |                                       |                   | 
+ public     | t1                 | m[1,3]     | f         |         0 |         4 |         -1 |            1 |                                       |                   | 
+ public     | t1                 | m[1,3]     | t         |         0 |         4 |         -1 |            1 |                                       |                   | 
+ cstore     | pg_delta_public_t1 | m[1,4]     | f         |         0 |         0 |          0 |            0 |                                       |                   | 
+ public     | t1                 | m[1,4]     | f         |         0 |         4 |         -1 |            1 |                                       |                   | 
+ public     | t1                 | m[1,4]     | t         |         0 |         4 |         -1 |            1 |                                       |                   | 
+ cstore     | pg_delta_public_t1 | m[2,3,4]   | f         |         0 |         0 |          0 |            0 |                                       |                   | 
+ public     | t1                 | m[2,3,4]   | f         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ public     | t1                 | m[2,3,4]   | t         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ cstore     | pg_delta_public_t1 | m[2,3]     | f         |         0 |         0 |          0 |            0 |                                       |                   | 
+ public     | t1                 | m[2,3]     | f         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ public     | t1                 | m[2,3]     | t         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ cstore     | pg_delta_public_t1 | m[2,4]     | f         |         0 |         0 |          0 |            0 |                                       |                   | 
+ public     | t1                 | m[2,4]     | f         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ public     | t1                 | m[2,4]     | t         |         0 |         4 |        -.5 |            1 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ cstore     | pg_delta_public_t1 | m[3,4]     | f         |         0 |         0 |          0 |            0 |                                       |                   | 
+ public     | t1                 | m[3,4]     | f         |         0 |         4 |       -.25 |            1 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+ public     | t1                 | m[3,4]     | t         |         0 |         4 |       -.25 |            1 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(24 rows)
+
+select * from pg_ext_stats where (schemaname='public' and tablename='t1r') or (schemaname='cstore' and tablename='pg_delta_public_t1r') order by ext_info, tablename, inherited;
+ schemaname |      tablename      |  ext_info  | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            | most_common_freqs | histogram_bounds 
+------------+---------------------+------------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-------------------+------------------
+ cstore     | pg_delta_public_t1r | m[1,2,3,4] | f         |         0 |         0 |          0 |            1 |                                       |                   | 
+ public     | t1r                 | m[1,2,3,4] | f         |         0 |         4 |         -1 |           -1 |                                       |                   | 
+ public     | t1r                 | m[1,2,3,4] | t         |         0 |         4 |         -1 |           -1 |                                       |                   | 
+ cstore     | pg_delta_public_t1r | m[1,2]     | f         |         0 |         0 |          0 |            1 |                                       |                   | 
+ public     | t1r                 | m[1,2]     | f         |         0 |         4 |         -1 |           -1 |                                       |                   | 
+ public     | t1r                 | m[1,2]     | t         |         0 |         4 |         -1 |           -1 |                                       |                   | 
+ cstore     | pg_delta_public_t1r | m[1,3]     | f         |         0 |         0 |          0 |            1 |                                       |                   | 
+ public     | t1r                 | m[1,3]     | f         |         0 |         4 |         -1 |           -1 |                                       |                   | 
+ public     | t1r                 | m[1,3]     | t         |         0 |         4 |         -1 |           -1 |                                       |                   | 
+ cstore     | pg_delta_public_t1r | m[1,4]     | f         |         0 |         0 |          0 |            1 |                                       |                   | 
+ public     | t1r                 | m[1,4]     | f         |         0 |         4 |         -1 |           -1 |                                       |                   | 
+ public     | t1r                 | m[1,4]     | t         |         0 |         4 |         -1 |           -1 |                                       |                   | 
+ cstore     | pg_delta_public_t1r | m[2,3,4]   | f         |         0 |         0 |          0 |            1 |                                       |                   | 
+ public     | t1r                 | m[2,3,4]   | f         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ public     | t1r                 | m[2,3,4]   | t         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ cstore     | pg_delta_public_t1r | m[2,3]     | f         |         0 |         0 |          0 |            1 |                                       |                   | 
+ public     | t1r                 | m[2,3]     | f         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ public     | t1r                 | m[2,3]     | t         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,2,2}"}             | {.25,.25,.25,.25} | 
+ cstore     | pg_delta_public_t1r | m[2,4]     | f         |         0 |         0 |          0 |            1 |                                       |                   | 
+ public     | t1r                 | m[2,4]     | f         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ public     | t1r                 | m[2,4]     | t         |         0 |         4 |        -.5 |          -.5 | {"{1,2,3,4}","{1,1,1,1}"}             | {.25,.25,.25,.25} | 
+ cstore     | pg_delta_public_t1r | m[3,4]     | f         |         0 |         0 |          0 |            1 |                                       |                   | 
+ public     | t1r                 | m[3,4]     | f         |         0 |         4 |       -.25 |         -.25 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+ public     | t1r                 | m[3,4]     | t         |         0 |         4 |       -.25 |         -.25 | {"{1,2}","{1,1}"}                     | {.5,.5}           | 
+(24 rows)
+
+alter table t1 delete statistics ((a, c));
+ALTER TABLE
+alter table t1 delete statistics ((a, b));
+ALTER TABLE
+alter table t1 delete statistics ((b, c));
+ALTER TABLE
+alter table t1 delete statistics ((a, d));
+ALTER TABLE
+alter table t1 delete statistics ((b, d));
+ALTER TABLE
+alter table t1 delete statistics ((b, c, d));
+ALTER TABLE
+alter table t1 delete statistics ((a, b, c, d));
+ALTER TABLE
+alter table t1 delete statistics ((c, d));
+ALTER TABLE
+alter table t1r delete statistics ((a, c));
+ALTER TABLE
+alter table t1r delete statistics ((a, b));
+ALTER TABLE
+alter table t1r delete statistics ((b, c));
+ALTER TABLE
+alter table t1r delete statistics ((a, d));
+ALTER TABLE
+alter table t1r delete statistics ((b, d));
+ALTER TABLE
+alter table t1r delete statistics ((b, c, d));
+ALTER TABLE
+alter table t1r delete statistics ((a, b, c, d));
+ALTER TABLE
+alter table t1r delete statistics ((c, d));
+ALTER TABLE
+select * from pg_ext_stats where (schemaname='public' and tablename='t1') or (schemaname='cstore' and tablename='pg_delta_public_t1') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+select * from pg_ext_stats where (schemaname='public' and tablename='t1r') or (schemaname='cstore' and tablename='pg_delta_public_t1r') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+--========================================================== hdfs foreign table
+create foreign table ft1(a int, b int, c int, d int) 
+server hdfs_server
+options(format 'orc', foldername '/user/cyn/hadoop_data_2018061401/tablespace_secondary/postgres/public.t1') 
+distribute by roundrobin;
+CREATE FOREIGN TABLE
+create foreign table ft1r(a int, b int, c int, d int) 
+server hdfs_server
+options(format 'orc', foldername '/user/cyn/hadoop_data_2018061401/tablespace_secondary/postgres/public.t1') 
+distribute by replication;
+CREATE FOREIGN TABLE
+analyze ft1 ((a, c));
+ANALYZE
+analyze ft1 ((b, c));
+ANALYZE
+analyze ft1r ((a, c));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:98: ERROR:  Replicate foreign table is not supported by extended statistic.
+analyze ft1r ((b, c));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:99: ERROR:  Replicate foreign table is not supported by extended statistic.
+select * from pg_ext_stats where (schemaname='public' and tablename='ft1') or (schemaname='cstore' and tablename='pg_delta_public_ft1') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ public     | ft1       | m[1,3]   | f         |         0 |         4 |         -1 |           -1 |                           |                   | 
+ public     | ft1       | m[2,3]   | f         |         0 |         4 |        -.5 |           -1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+(2 rows)
+
+select * from pg_ext_stats where (schemaname='public' and tablename='ft1r') or (schemaname='cstore' and tablename='pg_delta_public_ft1r') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+alter table ft1 add statistics ((a, b));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:104: ERROR:  "ft1" is a foreign table, which does not support column constraints.
+alter table ft1 add statistics ((b, c));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:105: ERROR:  "ft1" is a foreign table, which does not support column constraints.
+alter table ft1 add statistics ((a, d));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:106: ERROR:  "ft1" is a foreign table, which does not support column constraints.
+alter table ft1 add statistics ((b, d));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:107: ERROR:  "ft1" is a foreign table, which does not support column constraints.
+alter table ft1 add statistics ((b, c, d));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:108: ERROR:  "ft1" is a foreign table, which does not support column constraints.
+alter table ft1 add statistics ((a, b, c, d));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:109: ERROR:  "ft1" is a foreign table, which does not support column constraints.
+alter table ft1r add statistics ((a, b));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:111: ERROR:  "ft1r" is a foreign table, which does not support column constraints.
+alter table ft1r add statistics ((b, c));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:112: ERROR:  "ft1r" is a foreign table, which does not support column constraints.
+alter table ft1r add statistics ((a, d));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:113: ERROR:  "ft1r" is a foreign table, which does not support column constraints.
+alter table ft1r add statistics ((b, d));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:114: ERROR:  "ft1r" is a foreign table, which does not support column constraints.
+alter table ft1r add statistics ((b, c, d));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:115: ERROR:  "ft1r" is a foreign table, which does not support column constraints.
+alter table ft1r add statistics ((a, b, c, d));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:116: ERROR:  "ft1r" is a foreign table, which does not support column constraints.
+select * from pg_ext_stats where (schemaname='public' and tablename='ft1') or (schemaname='cstore' and tablename='pg_delta_public_ft1') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ public     | ft1       | m[1,3]   | f         |         0 |         4 |         -1 |           -1 |                           |                   | 
+ public     | ft1       | m[2,3]   | f         |         0 |         4 |        -.5 |           -1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+(2 rows)
+
+select * from pg_ext_stats where (schemaname='public' and tablename='ft1r') or (schemaname='cstore' and tablename='pg_delta_public_ft1r') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+analyze ft1 ((b, d));
+ANALYZE
+analyze ft1 ((c, d));
+ANALYZE
+analyze ft1r ((b, d));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:124: ERROR:  Replicate foreign table is not supported by extended statistic.
+analyze ft1r ((c, d));
+gsql:sql/hw_es_multi_column_stats_dfs.sql:125: ERROR:  Replicate foreign table is not supported by extended statistic.
+select * from pg_ext_stats where (schemaname='public' and tablename='ft1') or (schemaname='cstore' and tablename='pg_delta_public_ft1') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ public     | ft1       | m[1,3]   | f         |         0 |         4 |         -1 |           -1 |                           |                   | 
+ public     | ft1       | m[2,3]   | f         |         0 |         4 |        -.5 |           -1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ public     | ft1       | m[2,4]   | f         |         0 |         4 |        -.5 |           -1 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ public     | ft1       | m[3,4]   | f         |         0 |         4 |       -.25 |           -1 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+(4 rows)
+
+select * from pg_ext_stats where (schemaname='public' and tablename='ft1r') or (schemaname='cstore' and tablename='pg_delta_public_ft1r') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+analyze ft1;
+ANALYZE
+analyze ft1r;
+ANALYZE
+select * from pg_ext_stats where (schemaname='public' and tablename='ft1') or (schemaname='cstore' and tablename='pg_delta_public_ft1') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+------------------
+ public     | ft1       | m[1,3]   | f         |         0 |         4 |         -1 |           -1 |                           |                   | 
+ public     | ft1       | m[2,3]   | f         |         0 |         4 |        -.5 |           -1 | {"{1,2,3,4}","{1,1,2,2}"} | {.25,.25,.25,.25} | 
+ public     | ft1       | m[2,4]   | f         |         0 |         4 |        -.5 |           -1 | {"{1,2,3,4}","{1,1,1,1}"} | {.25,.25,.25,.25} | 
+ public     | ft1       | m[3,4]   | f         |         0 |         4 |       -.25 |           -1 | {"{1,2}","{1,1}"}         | {.5,.5}           | 
+(4 rows)
+
+select * from pg_ext_stats where (schemaname='public' and tablename='ft1r') or (schemaname='cstore' and tablename='pg_delta_public_ft1r') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+drop foreign table ft1;
+DROP FOREIGN TABLE
+drop foreign table ft1r;
+DROP FOREIGN TABLE
+select * from pg_ext_stats where (schemaname='public' and tablename='ft1') or (schemaname='cstore' and tablename='pg_delta_public_ft1') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+select * from pg_ext_stats where (schemaname='public' and tablename='ft1r') or (schemaname='cstore' and tablename='pg_delta_public_ft1r') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+--========================================================== clear environment
+drop table t1;
+DROP TABLE
+drop table t1r;
+DROP TABLE
+select * from pg_ext_stats where (schemaname='public' and tablename='t1') or (schemaname='cstore' and tablename='pg_delta_public_t1') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+select * from pg_ext_stats where (schemaname='public' and tablename='t1r') or (schemaname='cstore' and tablename='pg_delta_public_t1r') order by ext_info, tablename, inherited;
+ schemaname | tablename | ext_info | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | histogram_bounds 
+------------+-----------+----------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------
+(0 rows)
+
+total time: 14194  ms

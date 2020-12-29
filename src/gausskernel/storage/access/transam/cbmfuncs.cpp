@@ -37,13 +37,13 @@
 #include "postmaster/postmaster.h"
 #include "storage/copydir.h"
 #include "storage/fd.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "utils/builtins.h"
 
-extern void* palloc_extended(Size size, int flags);
-extern void validate_xlog_location(char* str);
-static void validate_start_end_lsn(char* start_lsn_str, char* end_lsn_str, XLogRecPtr* start_lsn, XLogRecPtr* end_lsn);
-static void validate_get_lsn(char* lsn_str, XLogRecPtr* lsn_ptr);
+extern void *palloc_extended(Size size, int flags);
+extern void validate_xlog_location(char *str);
+static void validate_start_end_lsn(char *start_lsn_str, char *end_lsn_str, XLogRecPtr *start_lsn, XLogRecPtr *end_lsn);
+static void validate_get_lsn(char *lsn_str, XLogRecPtr *lsn_ptr);
 
 /*
  * Report the end LSN position of already tracked xlog by CBM
@@ -64,20 +64,34 @@ Datum pg_cbm_tracked_location(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(cstring_to_text(location));
 }
 
+/*
+ * rotate cbm file when build
+ */
+Datum pg_cbm_rotate_file(PG_FUNCTION_ARGS)
+{
+    text *lsn_arg = PG_GETARG_TEXT_P(0);
+    char *lsn_str = text_to_cstring(lsn_arg);
+    XLogRecPtr recptr;
+    validate_get_lsn(lsn_str, &recptr);
+    cbm_rotate_file(recptr);
+    PG_RETURN_NULL();
+}
+
 Datum pg_cbm_get_merged_file(PG_FUNCTION_ARGS)
 {
-    text* start_lsn_arg = PG_GETARG_TEXT_P(0);
-    text* end_lsn_arg = PG_GETARG_TEXT_P(1);
+    text *start_lsn_arg = PG_GETARG_TEXT_P(0);
+    text *end_lsn_arg = PG_GETARG_TEXT_P(1);
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        (errmsg("Must be system admin or operator admin in operation mode to get cbm merged file."))));
 
     /* At present, we only allow merging CBM files on master */
     if (RecoveryInProgress())
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("recovery is in progress"),
-                errhint("pg_cbm_get_merged_file() cannot be executed during recovery.")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
+                        errhint("pg_cbm_get_merged_file() cannot be executed during recovery.")));
 
-    char* start_lsn_str = text_to_cstring(start_lsn_arg);
-    char* end_lsn_str = text_to_cstring(end_lsn_arg);
+    char *start_lsn_str = text_to_cstring(start_lsn_arg);
+    char *end_lsn_str = text_to_cstring(end_lsn_arg);
     char merged_file_name[MAXPGPATH] = {'\0'};
     XLogRecPtr start_lsn, end_lsn;
 
@@ -85,6 +99,13 @@ Datum pg_cbm_get_merged_file(PG_FUNCTION_ARGS)
 
     pfree(start_lsn_str);
     pfree(end_lsn_str);
+
+    /* quick return if start lsn and end lsn equals */
+    if (XLByteEQ(start_lsn, end_lsn)) {
+        ereport(WARNING, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("Start lsn equals end lsn, nothing to merge.")));
+        PG_RETURN_NULL();
+    }
 
     (void)LWLockAcquire(CBMParseXlogLock, LW_SHARED);
 
@@ -95,9 +116,17 @@ Datum pg_cbm_get_merged_file(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(cstring_to_text(merged_file_name));
 }
 
+/*
+ * Normally, we return one row for each changed tblspc/db/rel/fork.
+ * However, since string length for one blocknumber output can be as long as MAX_STRLEN_PER_BLOCKNO,
+ * considering addtional one space and one comma, we may return multiple rows
+ * if total changed block number is above MAX_BLOCKNO_PER_TUPLE.
+ * In latter scenarior, drop/create/truncate information should be returned in the first row, which may
+ * need additional order by clause by user.
+ */
 Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* funcctx = NULL;
+    FuncCallContext *funcctx = NULL;
 
     if (SRF_IS_FIRSTCALL()) {
         MemoryContext oldcontext;
@@ -107,7 +136,7 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
 
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(13, false);
+        tupdesc = CreateTemplateTupleDesc(13, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "merged_start_lsn", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "merged_end_lsn", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "tablespace_oid", OIDOID, -1, 0);
@@ -124,33 +153,40 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
 
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
-        text* start_lsn_arg = PG_GETARG_TEXT_P(0);
-        text* end_lsn_arg = PG_GETARG_TEXT_P(1);
+        text *start_lsn_arg = PG_GETARG_TEXT_P(0);
+        text *end_lsn_arg = PG_GETARG_TEXT_P(1);
 
+#ifdef ENABLE_MULTIPLE_NODES
         /* At present, we only allow merging CBM files on master */
         if (RecoveryInProgress())
-            ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                    errmsg("recovery is in progress"),
-                    errhint("pg_cbm_get_changed_block() cannot be executed"
-                            "during recovery.")));
+            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
+                            errhint("pg_cbm_get_changed_block() cannot be executed"
+                                    "during recovery.")));
+#endif
 
-        char* start_lsn_str = text_to_cstring(start_lsn_arg);
-        char* end_lsn_str = text_to_cstring(end_lsn_arg);
+        char *start_lsn_str = text_to_cstring(start_lsn_arg);
+        char *end_lsn_str = text_to_cstring(end_lsn_arg);
         XLogRecPtr start_lsn, end_lsn;
+        CBMArray *cbm_array = NULL;
 
         validate_start_end_lsn(start_lsn_str, end_lsn_str, &start_lsn, &end_lsn);
 
         pfree(start_lsn_str);
         pfree(end_lsn_str);
 
+        /* quick return if start lsn and end lsn equals */
+        if (XLByteEQ(start_lsn, end_lsn)) {
+            SRF_RETURN_DONE(funcctx);
+        }
+
         (void)LWLockAcquire(CBMParseXlogLock, LW_SHARED);
 
-        funcctx->user_fctx = (void*)CBMGetMergedArray(start_lsn, end_lsn);
+        cbm_array = CBMGetMergedArray(start_lsn, end_lsn);
+        funcctx->user_fctx = (void *)SplitCBMArray(&cbm_array);
 
         LWLockRelease(CBMParseXlogLock);
 
-        funcctx->max_calls = ((CBMArray*)funcctx->user_fctx)->arrayLength;
+        funcctx->max_calls = ((CBMArray *)funcctx->user_fctx)->arrayLength;
 
         (void)MemoryContextSwitchTo(oldcontext);
     }
@@ -161,30 +197,22 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
         /* for each row */
         Datum values[13];
         bool nulls[13];
-        CBMArray* cbm_array = (CBMArray*)funcctx->user_fctx;
+        CBMArray *cbm_array = (CBMArray *)funcctx->user_fctx;
         CBMArrayEntry cur_array_entry = (cbm_array->arrayEntry)[funcctx->call_cntr];
         HeapTuple tuple;
         char start_lsn_str[MAXFNAMELEN];
         char end_lsn_str[MAXFNAMELEN];
-        char* changed_block_str = NULL;
+        char *changed_block_str = NULL;
         uint64 max_block_str_length, cur_block_str_length;
         uint32 i;
         int rc;
 
-        rc = snprintf_s(start_lsn_str,
-            MAXFNAMELEN,
-            MAXFNAMELEN - 1,
-            "%08X/%08X",
-            (uint32)(cbm_array->startLSN >> 32),
-            (uint32)cbm_array->startLSN);
+        rc = snprintf_s(start_lsn_str, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X/%08X", (uint32)(cbm_array->startLSN >> 32),
+                        (uint32)cbm_array->startLSN);
         securec_check_ss(rc, "\0", "\0");
 
-        rc = snprintf_s(end_lsn_str,
-            MAXFNAMELEN,
-            MAXFNAMELEN - 1,
-            "%08X/%08X",
-            (uint32)(cbm_array->endLSN >> 32),
-            (uint32)(cbm_array->endLSN));
+        rc = snprintf_s(end_lsn_str, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X/%08X", (uint32)(cbm_array->endLSN >> 32),
+                        (uint32)(cbm_array->endLSN));
         securec_check_ss(rc, "\0", "\0");
 
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -205,8 +233,8 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
 
         if (IsValidColForkNum(cur_array_entry.cbmTag.forkNum)) {
             char file_path[MAXPGPATH] = {'\0'};
-            CFileNode cfile_node(
-                cur_array_entry.cbmTag.rNode, ColForkNum2ColumnId(cur_array_entry.cbmTag.forkNum), MAIN_FORKNUM);
+            CFileNode cfile_node(cur_array_entry.cbmTag.rNode, ColForkNum2ColumnId(cur_array_entry.cbmTag.forkNum),
+                                 MAIN_FORKNUM);
             CUStorage cu_storage(cfile_node);
             cu_storage.GetFileName(file_path, MAXPGPATH, 0);
             file_path[strlen(file_path) - 2] = '\0';
@@ -216,30 +244,25 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
             Assert(cur_array_entry.cbmTag.forkNum == MAIN_FORKNUM ||
                    cur_array_entry.cbmTag.forkNum == VISIBILITYMAP_FORKNUM ||
                    cur_array_entry.cbmTag.forkNum == FSM_FORKNUM || cur_array_entry.cbmTag.forkNum == INIT_FORKNUM);
-            char* file_path = relpathperm(cur_array_entry.cbmTag.rNode, cur_array_entry.cbmTag.forkNum);
+            char *file_path = relpathperm(cur_array_entry.cbmTag.rNode, cur_array_entry.cbmTag.forkNum);
             values[6] = CStringGetTextDatum(file_path);
             pfree(file_path);
         } else if (cur_array_entry.cbmTag.rNode.dbNode != InvalidOid) {
-            char* db_path = GetDatabasePath(cur_array_entry.cbmTag.rNode.dbNode, cur_array_entry.cbmTag.rNode.spcNode);
+            char *db_path = GetDatabasePath(cur_array_entry.cbmTag.rNode.dbNode, cur_array_entry.cbmTag.rNode.spcNode);
             values[6] = CStringGetTextDatum(db_path);
             pfree(db_path);
         } else if (cur_array_entry.cbmTag.rNode.spcNode == GLOBALTABLESPACE_OID) {
             Assert(cur_array_entry.changeType & PAGETYPE_TRUNCATE);
 
-            char* db_path = GetDatabasePath(cur_array_entry.cbmTag.rNode.dbNode, cur_array_entry.cbmTag.rNode.spcNode);
+            char *db_path = GetDatabasePath(cur_array_entry.cbmTag.rNode.dbNode, cur_array_entry.cbmTag.rNode.spcNode);
             values[6] = CStringGetTextDatum(db_path);
             pfree(db_path);
         } else {
             int len = strlen("pg_tblspc") + 1 + OIDCHARS + 1 + strlen(g_instance.attr.attr_common.PGXCNodeName) + 1 +
                       strlen(TABLESPACE_VERSION_DIRECTORY) + 2;
-            char* tblspc_path = (char*)palloc(len);
-            rc = snprintf_s(tblspc_path,
-                len,
-                len - 1,
-                "pg_tblspc/%u/%s_%s",
-                cur_array_entry.cbmTag.rNode.spcNode,
-                TABLESPACE_VERSION_DIRECTORY,
-                g_instance.attr.attr_common.PGXCNodeName);
+            char *tblspc_path = (char *)palloc(len);
+            rc = snprintf_s(tblspc_path, len, len - 1, "pg_tblspc/%u/%s_%s", cur_array_entry.cbmTag.rNode.spcNode,
+                            TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName);
             securec_check_ss(rc, "\0", "\0");
             values[6] = CStringGetTextDatum(tblspc_path);
             pfree(tblspc_path);
@@ -257,22 +280,18 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
         values[11] = ObjectIdGetDatum(cur_array_entry.totalBlockNum);
 
         if (cur_array_entry.totalBlockNum > 0) {
-#define MAXINTSTRLEN 10
-            max_block_str_length = (MAXINTSTRLEN + 2) * cur_array_entry.totalBlockNum + 1;
-            changed_block_str =
-                (char*)palloc_extended(max_block_str_length * sizeof(char), MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+            max_block_str_length = MAX_STRLEN_PER_BLOCKNO * cur_array_entry.totalBlockNum + 1;
+            changed_block_str = (char *)palloc_extended(max_block_str_length * sizeof(char),
+                                                        MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
             if (changed_block_str == NULL)
-                ereport(ERROR,
-                    (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                        errmsg("memory is temporarily unavailable while allocate block string")));
+                ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                                errmsg("memory is temporarily unavailable while allocate block string")));
 
             cur_block_str_length = 0;
             for (i = 0; i < cur_array_entry.totalBlockNum; i++) {
-                rc = snprintf_s(changed_block_str + cur_block_str_length,
-                    max_block_str_length - cur_block_str_length,
-                    max_block_str_length - cur_block_str_length - 1,
-                    "%u, ",
-                    cur_array_entry.changedBlock[i]);
+                rc = snprintf_s(changed_block_str + cur_block_str_length, max_block_str_length - cur_block_str_length,
+                                max_block_str_length - cur_block_str_length - 1, "%u, ",
+                                cur_array_entry.changedBlock[i]);
                 securec_check_ss(rc, "\0", "\0");
 
                 cur_block_str_length += rc;
@@ -287,13 +306,13 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
         } else
             nulls[12] = true;
 
-        pfree(cur_array_entry.changedBlock);
+        pfree_ext(cur_array_entry.changedBlock);
 
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     } else {
         if (funcctx->max_calls > 0)
-            pfree(((CBMArray*)funcctx->user_fctx)->arrayEntry);
+            pfree(((CBMArray *)funcctx->user_fctx)->arrayEntry);
 
         pfree(funcctx->user_fctx);
         /* nothing left */
@@ -303,8 +322,8 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
 
 Datum pg_cbm_recycle_file(PG_FUNCTION_ARGS)
 {
-    text* target_lsn_arg = PG_GETARG_TEXT_P(0);
-    char* target_lsn_str = text_to_cstring(target_lsn_arg);
+    text *target_lsn_arg = PG_GETARG_TEXT_P(0);
+    char *target_lsn_str = text_to_cstring(target_lsn_arg);
     XLogRecPtr target_lsn, end_lsn;
     char end_lsn_str[MAXFNAMELEN];
     int rc;
@@ -327,24 +346,22 @@ Datum pg_cbm_recycle_file(PG_FUNCTION_ARGS)
 
 Datum pg_cbm_force_track(PG_FUNCTION_ARGS)
 {
-    text* target_lsn_arg = PG_GETARG_TEXT_P(0);
+    text *target_lsn_arg = PG_GETARG_TEXT_P(0);
     int time_out = PG_GETARG_INT32(1);
 
     /* At present, we only allow force track CBM files on master */
     if (RecoveryInProgress())
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("recovery is in progress"),
-                errhint("pg_cbm_force_track() cannot be executed during recovery.")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
+                        errhint("pg_cbm_force_track() cannot be executed during recovery.")));
 
     if (time_out < 0)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Negative timeout for force track cbm!")));
 
     if (!IsCBMWriterRunning())
-        ereport(
-            ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("CBM writer thread is not running!")));
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("CBM writer thread is not running!")));
 
-    char* target_lsn_str = text_to_cstring(target_lsn_arg);
+    char *target_lsn_str = text_to_cstring(target_lsn_arg);
     XLogRecPtr target_lsn, end_lsn;
     char end_lsn_str[MAXFNAMELEN];
     int rc;
@@ -363,43 +380,36 @@ Datum pg_cbm_force_track(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(cstring_to_text(end_lsn_str));
 }
 
-static void validate_start_end_lsn(char* start_lsn_str, char* end_lsn_str, XLogRecPtr* start_lsn, XLogRecPtr* end_lsn)
+static void validate_start_end_lsn(char *start_lsn_str, char *end_lsn_str, XLogRecPtr *start_lsn, XLogRecPtr *end_lsn)
 {
     XLogRecPtr cbm_tracked_lsn;
 
     validate_get_lsn(start_lsn_str, start_lsn);
     validate_get_lsn(end_lsn_str, end_lsn);
 
-    if (XLByteLE(*end_lsn, *start_lsn))
+    if (XLByteLT(*end_lsn, *start_lsn))
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("start xlog location %X/%X should be smaller than "
-                       "end xlog location %X/%X",
-                    (uint32)(*start_lsn >> 32),
-                    (uint32)(*start_lsn),
-                    (uint32)(*end_lsn >> 32),
-                    (uint32)(*end_lsn))));
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("start xlog location %X/%X should be smaller than or equal to end xlog location %X/%X",
+                (uint32)(*start_lsn >> 32), (uint32)(*start_lsn), (uint32)(*end_lsn >> 32), (uint32)(*end_lsn))));
 
     cbm_tracked_lsn = GetCBMTrackedLSN();
     if (XLByteLT(cbm_tracked_lsn, *end_lsn))
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("end xlog location %X/%X should be smaller than "
-                       "already tracked xlog location %X/%X",
-                    (uint32)(*end_lsn >> 32),
-                    (uint32)(*end_lsn),
-                    (uint32)(cbm_tracked_lsn >> 32),
-                    (uint32)cbm_tracked_lsn)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("end xlog location %X/%X should be smaller than or equal to "
+                               "already tracked xlog location %X/%X",
+                               (uint32)(*end_lsn >> 32), (uint32)(*end_lsn), (uint32)(cbm_tracked_lsn >> 32),
+                               (uint32)cbm_tracked_lsn)));
 }
 
-static void validate_get_lsn(char* lsn_str, XLogRecPtr* lsn_ptr)
+static void validate_get_lsn(char *lsn_str, XLogRecPtr *lsn_ptr)
 {
     uint32 hi = 0;
     uint32 lo = 0;
     validate_xlog_location(lsn_str);
 
     if (sscanf_s(lsn_str, "%X/%X", &hi, &lo) != 2)
-        ereport(
-            ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("could not parse xlog location \"%s\"", lsn_str)));
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("could not parse xlog location \"%s\"", lsn_str)));
     *lsn_ptr = (((uint64)hi) << 32) | lo;
 }

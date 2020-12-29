@@ -32,6 +32,7 @@
 #ifndef WIN32
 #include "pthread.h"
 #else
+#define _WINSOCKAPI_
 #include <windows.h>
 #include "pthread-win32.h"
 #endif

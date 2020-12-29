@@ -1,0 +1,212 @@
+--
+--part 
+--
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_part_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+DROP TABLE if exists PART;
+CREATE TABLE PART (
+  P_PARTKEY   BIGINT,
+  P_NAME      VARCHAR(55),
+  P_MFGR      CHAR(25),
+  P_BRAND     CHAR(10),
+  P_TYPE      VARCHAR(25),
+  P_SIZE      INTEGER,
+  P_CONTAINER   CHAR(10),
+  P_RETAILPRICE DECIMAL,
+  P_COMMENT   VARCHAR(23)
+);
+
+DROP FOREIGN TABLE if exists EXTPART;
+CREATE FOREIGN TABLE EXTPART (
+  P_PARTKEY   BIGINT,
+  P_NAME      VARCHAR(55),
+  P_MFGR      CHAR(25),
+  P_BRAND     CHAR(10),
+  P_TYPE      VARCHAR(25),
+  P_SIZE      INTEGER,
+  P_CONTAINER   CHAR(10),
+  P_RETAILPRICE DECIMAL,
+  P_COMMENT   VARCHAR(23)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_part/part',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+insert into PART select * from EXTPART;
+
+DROP FOREIGN TABLE if exists EXTPART_WRITE;
+CREATE FOREIGN TABLE EXTPART_WRITE (
+  P_PARTKEY   BIGINT,
+  P_NAME      VARCHAR(55),
+  P_MFGR      CHAR(25),
+  P_BRAND     CHAR(10),
+  P_TYPE      VARCHAR(25),
+  P_SIZE      INTEGER,
+  P_CONTAINER   CHAR(10),
+  P_RETAILPRICE DECIMAL,
+  P_COMMENT   VARCHAR(23)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_part_out/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+)
+Write Only;
+
+insert into EXTPART_WRITE select * from PART;
+
+drop foreign table if exists EXTPART_READ;
+CREATE FOREIGN TABLE EXTPART_READ
+(
+  P_PARTKEY   BIGINT,
+  P_NAME      VARCHAR(55),
+  P_MFGR      CHAR(25),
+  P_BRAND     CHAR(10),
+  P_TYPE      VARCHAR(25),
+  P_SIZE      INTEGER,
+  P_CONTAINER   CHAR(10),
+  P_RETAILPRICE DECIMAL,
+  P_COMMENT   VARCHAR(23)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_part_out/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+
+
+select count(*) from EXTPART_READ;
+
+drop table if exists PART_READ;
+CREATE TABLE PART_READ
+(
+  P_PARTKEY   BIGINT,
+  P_NAME      VARCHAR(55),
+  P_MFGR      CHAR(25),
+  P_BRAND     CHAR(10),
+  P_TYPE      VARCHAR(25),
+  P_SIZE      INTEGER,
+  P_CONTAINER   CHAR(10),
+  P_RETAILPRICE DECIMAL,
+  P_COMMENT   VARCHAR(23)
+);
+
+insert into PART_READ select * from EXTPART_READ;
+select count(*) from (select * from PART minus all select * from PART_READ);
+
+drop foreign table EXTPART_READ;
+drop foreign table EXTPART_WRITE;
+drop table PART_READ;
+drop table PART;
+drop foreign table EXTPART;
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_part_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+
+--
+--supplier
+--
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_supplier_out/ address=@obshostname@ ak=@ak@ sk=@sk@
+DROP FOREIGN TABLE if exists EXTSUPPLIER;
+CREATE FOREIGN TABLE EXTSUPPLIER (
+  S_SUPPKEY   BIGINT,
+  S_NAME      CHAR(25),
+  S_ADDRESS   VARCHAR(40),
+  S_NATIONKEY   INTEGER NOT NULL, -- references N_NATIONKEY
+  S_PHONE     CHAR(15),
+  S_ACCTBAL   DECIMAL,
+  S_COMMENT   VARCHAR(101)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_supplier/supplier',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+
+DROP TABLE if exists SUPPLIER;
+CREATE TABLE SUPPLIER (
+  S_SUPPKEY   BIGINT,
+  S_NAME      CHAR(25),
+  S_ADDRESS   VARCHAR(40),
+  S_NATIONKEY   INTEGER NOT NULL, -- references N_NATIONKEY
+  S_PHONE     CHAR(15),
+  S_ACCTBAL   DECIMAL,
+  S_COMMENT   VARCHAR(101)
+);
+insert into SUPPLIER select * from EXTSUPPLIER;
+
+
+DROP FOREIGN TABLE if exists EXTSUPPLIER_WRITE;
+CREATE FOREIGN TABLE EXTSUPPLIER_WRITE (
+  S_SUPPKEY   BIGINT,
+  S_NAME      CHAR(25),
+  S_ADDRESS   VARCHAR(40),
+  S_NATIONKEY   INTEGER NOT NULL, -- references N_NATIONKEY
+  S_PHONE     CHAR(15),
+  S_ACCTBAL   DECIMAL,
+  S_COMMENT   VARCHAR(101)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_supplier_out/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+)
+Write Only;
+insert into EXTSUPPLIER_WRITE select * from SUPPLIER;
+
+DROP FOREIGN TABLE if exists EXTSUPPLIER_READ;
+CREATE FOREIGN TABLE EXTSUPPLIER_READ (
+  S_SUPPKEY   BIGINT,
+  S_NAME      CHAR(25),
+  S_ADDRESS   VARCHAR(40),
+  S_NATIONKEY   INTEGER NOT NULL, -- references N_NATIONKEY
+  S_PHONE     CHAR(15),
+  S_ACCTBAL   DECIMAL,
+  S_COMMENT   VARCHAR(101)
+)SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/tpch_supplier_out/',
+    format 'text',
+    DELIMITER '|',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+);
+select count(*) from EXTSUPPLIER_READ;
+
+DROP TABLE if exists SUPPLIER_READ;
+CREATE TABLE SUPPLIER_READ (
+  S_SUPPKEY   BIGINT,
+  S_NAME      CHAR(25),
+  S_ADDRESS   VARCHAR(40),
+  S_NATIONKEY   INTEGER NOT NULL, -- references N_NATIONKEY
+  S_PHONE     CHAR(15),
+  S_ACCTBAL   DECIMAL,
+  S_COMMENT   VARCHAR(101)
+);
+insert into SUPPLIER_READ select * from EXTSUPPLIER_READ;
+select count(*) from (select * from SUPPLIER minus all select * from SUPPLIER_READ);
+
+drop foreign table EXTSUPPLIER_READ;
+drop foreign table EXTSUPPLIER_WRITE;
+drop table SUPPLIER_READ;
+drop table SUPPLIER;
+drop foreign table EXTSUPPLIER;
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/tpch_supplier_out/ address=@obshostname@ ak=@ak@ sk=@sk@

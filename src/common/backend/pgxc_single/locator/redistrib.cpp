@@ -21,6 +21,7 @@
 #include "access/heapam.h"
 #include "access/htup.h"
 #include "access/reloptions.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_partition_fn.h"
@@ -36,7 +37,7 @@
 #include "pgxc/pgxc.h"
 #include "pgxc/redistrib.h"
 #include "pgxc/remotecopy.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "storage/off.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
@@ -395,7 +396,7 @@ static void distrib_copy_to(RedistribState* distribState)
     /* Inform client of operation being done */
     ereport(DEBUG1,
         (errmsg("Copying data for relation \"%s.%s\"",
-            get_namespace_name(RelationGetNamespace(rel), true),
+            get_namespace_name(RelationGetNamespace(rel)),
             RelationGetRelationName(rel))));
 
     /* Begin the COPY process */
@@ -472,7 +473,7 @@ static void distrib_copy_from(RedistribState* distribState, ExecNodes* exec_node
     /* Inform client of operation being done */
     ereport(DEBUG1,
         (errmsg("Redistributing data for relation \"%s.%s\"",
-            get_namespace_name(RelationGetNamespace(rel), true),
+            get_namespace_name(RelationGetNamespace(rel)),
             RelationGetRelationName(rel))));
 
     /* Begin redistribution on remote nodes */
@@ -500,7 +501,7 @@ static void distrib_copy_from(RedistribState* distribState, ExecNodes* exec_node
         }
 
         /* Make sure the tuple is fully deconstructed */
-        slot_getallattrs(slot);
+        tableam_tslot_getallattrs(slot);
 
         /* Find value of distribution column if necessary */
         for (int i = 0; i < tupdesc->natts; i++) {
@@ -538,7 +539,7 @@ static void distrib_copy_from(RedistribState* distribState, ExecNodes* exec_node
     replicated = copyState->rel_loc->locatorType == LOCATOR_TYPE_REPLICATED;
     DataNodeCopyFinish(copyState->connections,
         u_sess->pgxc_cxt.NumDataNodes,
-        replicated ? PGXCNodeGetNodeId(t_thrd.pgxc_cxt.primary_data_node, PGXC_NODE_DATANODE) : -1,
+        replicated ? PGXCNodeGetNodeId(u_sess->pgxc_cxt.primary_data_node, PGXC_NODE_DATANODE) : -1,
         replicated ? COMBINE_TYPE_SAME : COMBINE_TYPE_SUM,
         rel);
 
@@ -567,7 +568,7 @@ static void distrib_truncate(RedistribState* distribState, ExecNodes* exec_nodes
     /* Inform client of operation being done */
     ereport(DEBUG1,
         (errmsg("Truncating data for relation \"%s.%s\"",
-            get_namespace_name(RelationGetNamespace(rel), true),
+            get_namespace_name(RelationGetNamespace(rel)),
             RelationGetRelationName(rel))));
 
     /* Initialize buffer */
@@ -575,7 +576,7 @@ static void distrib_truncate(RedistribState* distribState, ExecNodes* exec_nodes
 
     /* Build query to clean up table before redistribution */
     appendStringInfo(
-        buf, "TRUNCATE %s.%s", get_namespace_name(RelationGetNamespace(rel), true), RelationGetRelationName(rel));
+        buf, "TRUNCATE %s.%s", get_namespace_name(RelationGetNamespace(rel)), RelationGetRelationName(rel));
 
     /*
      * Lock is maintained until transaction commits,
@@ -611,7 +612,7 @@ static void distrib_reindex(RedistribState* distribState, ExecNodes* exec_nodes)
     /* Inform client of operation being done */
     ereport(DEBUG1,
         (errmsg("Reindexing relation \"%s.%s\"",
-            get_namespace_name(RelationGetNamespace(rel), true),
+            get_namespace_name(RelationGetNamespace(rel)),
             RelationGetRelationName(rel))));
 
     /* Initialize buffer */
@@ -619,7 +620,7 @@ static void distrib_reindex(RedistribState* distribState, ExecNodes* exec_nodes)
 
     /* Generate the query */
     appendStringInfo(
-        buf, "REINDEX TABLE %s.%s", get_namespace_name(RelationGetNamespace(rel), true), RelationGetRelationName(rel));
+        buf, "REINDEX TABLE %s.%s", get_namespace_name(RelationGetNamespace(rel)), RelationGetRelationName(rel));
 
     /* Execute the query */
     distrib_execute_query(buf->data, IsTempTable(relOid), exec_nodes);
@@ -655,7 +656,7 @@ static void distrib_delete_hash(RedistribState* distribState, ExecNodes* exec_no
     /* Inform client of operation being done */
     ereport(DEBUG1,
         (errmsg("Deleting necessary tuples \"%s.%s\"",
-            get_namespace_name(RelationGetNamespace(rel), true),
+            get_namespace_name(RelationGetNamespace(rel)),
             RelationGetRelationName(rel))));
 
     /* Initialize buffer */
@@ -663,7 +664,7 @@ static void distrib_delete_hash(RedistribState* distribState, ExecNodes* exec_no
 
     /* Build query to clean up table before redistribution */
     appendStringInfo(
-        buf, "DELETE FROM %s.%s", get_namespace_name(RelationGetNamespace(rel), true), RelationGetRelationName(rel));
+        buf, "DELETE FROM %s.%s", get_namespace_name(RelationGetNamespace(rel)), RelationGetRelationName(rel));
 
     /*
      * Launch the DELETE query to each node as the DELETE depends on
@@ -776,7 +777,7 @@ void FreeRedistribState(RedistribState* state)
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return;
 #else
-    ListCell* item;
+    ListCell* item = NULL;
 
     /* Leave if nothing to do */
     if (!state)
@@ -854,11 +855,9 @@ static void distrib_execute_query(const char* sql, bool is_temp, ExecNodes* exec
  */
 void get_redis_rel_ctid(const char* rel_name, const char* partition_name, RedisCtidType ctid_type, ItemPointer result)
 {
-    Relation rel = NULL;
-    Relation fake_rel = NULL;
+    Relation rel = NULL, fake_rel = NULL;
     Partition partition = NULL;
-    Oid relid = InvalidOid;
-	Oid part_oid = InvalidOid;
+    Oid relid = InvalidOid, part_oid = InvalidOid;
     ItemPointerData start_ctid, end_ctid;
     List* names = NIL;
 
@@ -1079,6 +1078,7 @@ List* AlterTableSetRedistribute(Relation rel, RedisRelAction action, char *merge
             else
                 ItemPointerSet(&start_ctid, 0, 0);
 
+            /*  end_ctid = max_ctid; */
             if (IS_PGXC_DATANODE) {
                 if (isCUFormat)
                     col_get_max_tid(rel, &end_ctid);
@@ -1142,7 +1142,11 @@ void AlterTableSetPartRelOptions(
  * @Param[OUT] *action: 0: insert; 1: delete. *rel_cn_oid: oid from CN
  * @See also:
  */
+#ifdef ENABLE_MULTIPLE_NODES
 void CheckRedistributeOption(List* options, Oid* rel_cn_oid, RedisHtlAction* action, char *merge_list_str, Relation rel)
+#else
+void CheckRedistributeOption(List* options, Oid* rel_cn_oid, RedisHtlAction* action, Relation rel)
+#endif
 {
     ListCell* opt = NULL;
     bool append_set = false;
@@ -1150,7 +1154,6 @@ void CheckRedistributeOption(List* options, Oid* rel_cn_oid, RedisHtlAction* act
 
     Assert(rel != NULL);
 
-    merge_list_str = NULL;
     foreach (opt, options) {
         DefElem* def = (DefElem*)lfirst(opt);
 
@@ -1173,8 +1176,11 @@ void CheckRedistributeOption(List* options, Oid* rel_cn_oid, RedisHtlAction* act
             append_set = true;
         } else if (pg_strcasecmp(def->defname, "rel_cn_oid") == 0) {
             *rel_cn_oid = atoi(defGetString(def));
-
             cnoid_set = true;
+#ifdef ENABLE_MULTIPLE_NODES
+        }else if (pg_strcasecmp(def->defname, "merge_list") == 0) {
+            *merge_list_str = pstrdup(defGetString(def));
+#endif
         }
     }
     if (*action == REDIS_REL_APPEND && append_set && !cnoid_set) {
@@ -1186,14 +1192,6 @@ void CheckRedistributeOption(List* options, Oid* rel_cn_oid, RedisHtlAction* act
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("Alter-Table set rel_cn_oid should have 'append_mode' set together")));
     }
-
-#ifndef ENABLE_MULTIPLE_NODES
-    if (append_set || cnoid_set) {
-        ereport(ERROR,
-            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED), 
-                errmsg("Redistribution is not supported in single node")));
-    }
-#endif
 
     return;
 }
@@ -1300,9 +1298,17 @@ uint32 RelationGetEndBlock(Relation rel)
     return 0;
 }
 
-Node* eval_redis_func_direct(Relation rel, bool is_func_get_start_ctid, bool is_func_get_end_ctid)
+Node* eval_redis_func_direct(Relation rel, bool is_func_get_start_ctid, int num_of_slice, int slice_index)
 {
     Assert(false);
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return NULL;
 }
+ItemPointer eval_redis_func_direct_slice(ItemPointer start_ctid, ItemPointer end_ctid, bool is_func_get_start_ctid, 
+         int num_of_slices, int slice_index)
+{
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return NULL;
+}
+

@@ -1,0 +1,347 @@
+/*
+ * This file is used to test Data Source & plan of EC
+ */
+----
+--- Test CREATE Data Source
+----
+CREATE DATA SOURCE llt_mppdb_1;
+CREATE DATA SOURCE llt_mppdb_2 TYPE 'MPPDB';
+CREATE DATA SOURCE llt_mppdb_3 VERSION 'V1R7C10';
+CREATE DATA SOURCE llt_mppdb_4 VERSION NULL;
+CREATE DATA SOURCE llt_mppdb_5 TYPE 'MPPDB' VERSION 'V1R7C10';
+CREATE DATA SOURCE llt_mppdb_6 TYPE 'MPPDB' VERSION NULL;
+CREATE DATA SOURCE llt_mppdb_7 TYPE 'MPPDB' VERSION 'V1R7C10' OPTIONS (dsn 'mppdb', password '');
+CREATE DATA SOURCE llt_mppdb_8 TYPE 'MPPDB' VERSION NULL OPTIONS (dsn 'mppdb', encoding '');
+CREATE DATA SOURCE llt_mppdb_9 OPTIONS (username '', dsn 'mppdb');
+-- duplicated options
+CREATE DATA SOURCE llt_mppdb_f1 OPTIONS (encoding 'utf8', encoding '');
+ERROR:  option "encoding" provided more than once
+-- invalid option
+CREATE DATA SOURCE llt_mppdb_f2 OPTIONS (url '10.10.10.10');
+ERROR:  option "url" not recognized.
+HINT:  valid options are: dsn, username, password, encoding
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME LIKE 'llt_mppdb_%';
+   srcname   | srcowner | srctype | srcversion | srcacl |      srcoptions       
+-------------+----------+---------+------------+--------+-----------------------
+ llt_mppdb_1 |       10 |         |            |        | 
+ llt_mppdb_2 |       10 | MPPDB   |            |        | 
+ llt_mppdb_3 |       10 |         | V1R7C10    |        | 
+ llt_mppdb_4 |       10 |         |            |        | 
+ llt_mppdb_5 |       10 | MPPDB   | V1R7C10    |        | 
+ llt_mppdb_6 |       10 | MPPDB   |            |        | 
+ llt_mppdb_7 |       10 | MPPDB   | V1R7C10    |        | {dsn=mppdb,password=}
+ llt_mppdb_8 |       10 | MPPDB   |            |        | {dsn=mppdb,encoding=}
+ llt_mppdb_9 |       10 |         |            |        | {username=,dsn=mppdb}
+(9 rows)
+
+DROP DATA SOURCE IF EXISTS llt_mppdb_1;
+DROP DATA SOURCE IF EXISTS llt_mppdb_2;
+DROP DATA SOURCE IF EXISTS llt_mppdb_3;
+DROP DATA SOURCE IF EXISTS llt_mppdb_4;
+DROP DATA SOURCE IF EXISTS llt_mppdb_5;
+DROP DATA SOURCE IF EXISTS llt_mppdb_6;
+DROP DATA SOURCE IF EXISTS llt_mppdb_7;
+DROP DATA SOURCE IF EXISTS llt_mppdb_8;
+DROP DATA SOURCE IF EXISTS llt_mppdb_9;
+DROP DATA SOURCE IF EXISTS llt_mppdb_f1;
+NOTICE:  data source "llt_mppdb_f1" does not exist, skipping
+DROP DATA SOURCE IF EXISTS llt_mppdb_f2;
+NOTICE:  data source "llt_mppdb_f2" does not exist, skipping
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME LIKE 'llt_mppdb_%';
+ srcname | srcowner | srctype | srcversion | srcacl | srcoptions 
+---------+----------+---------+------------+--------+------------
+(0 rows)
+
+-- test encrypted options
+CREATE DATA SOURCE llt_tst_ds_1 options (dsn 'encryptOpt');
+CREATE DATA SOURCE llt_tst_ds_2 options (encoding 'encryptOpt123');
+CREATE DATA SOURCE llt_tst_ds_3 options (dsn 'tst', username 'encryptOpt12345678901234567', password 'encryptOpt12345671234567890');
+NOTICE:  Using probably encrypted option (prefix='encryptOpt') directly and it is not recommended.
+HINT:  The DATA SOURCE object can't be used if the option is not encrypted correctly.
+SELECT srcoptions FROM pg_extension_data_source where srcname='llt_tst_ds_1';
+    srcoptions    
+------------------
+ {dsn=encryptOpt}
+(1 row)
+
+SELECT srcoptions FROM pg_extension_data_source where srcname='llt_tst_ds_2';
+        srcoptions        
+--------------------------
+ {encoding=encryptOpt123}
+(1 row)
+
+SELECT srcoptions FROM pg_extension_data_source where srcname='llt_tst_ds_3';
+                                     srcoptions                                      
+-------------------------------------------------------------------------------------
+ {dsn=tst,username=encryptOpt12345678901234567,password=encryptOpt12345671234567890}
+(1 row)
+
+DROP DATA SOURCE IF EXISTS llt_tst_ds_1;
+DROP DATA SOURCE IF EXISTS llt_tst_ds_2;
+DROP DATA SOURCE IF EXISTS llt_tst_ds_3;
+----
+--- Test DROP Data Source
+----
+CREATE DATA SOURCE llt_mppdb_11 VERSION NULL OPTIONS (dsn 'mppdb', password '');
+CREATE DATA SOURCE llt_mppdb_12 VERSION NULL OPTIONS (dsn 'mppdb', password '');
+CREATE DATA SOURCE llt_mppdb_13 VERSION NULL OPTIONS (dsn 'mppdb', password '');
+CREATE DATA SOURCE llt_mppdb_14 VERSION NULL OPTIONS (dsn 'mppdb', password '');
+CREATE DATA SOURCE llt_mppdb_15 VERSION NULL OPTIONS (dsn 'mppdb', password '');
+CREATE DATA SOURCE llt_mppdb_16 VERSION NULL OPTIONS (dsn 'mppdb', password '');
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME LIKE 'llt_mppdb_%';
+   srcname    | srcowner | srctype | srcversion | srcacl |      srcoptions       
+--------------+----------+---------+------------+--------+-----------------------
+ llt_mppdb_11 |       10 |         |            |        | {dsn=mppdb,password=}
+ llt_mppdb_12 |       10 |         |            |        | {dsn=mppdb,password=}
+ llt_mppdb_13 |       10 |         |            |        | {dsn=mppdb,password=}
+ llt_mppdb_14 |       10 |         |            |        | {dsn=mppdb,password=}
+ llt_mppdb_15 |       10 |         |            |        | {dsn=mppdb,password=}
+ llt_mppdb_16 |       10 |         |            |        | {dsn=mppdb,password=}
+(6 rows)
+
+DROP DATA SOURCE llt_mppdb_11;
+DROP DATA SOURCE llt_mppdb_12 CASCADE;
+DROP DATA SOURCE llt_mppdb_13 RESTRICT;
+DROP DATA SOURCE IF EXISTS llt_mppdb_11;
+NOTICE:  data source "llt_mppdb_11" does not exist, skipping
+DROP DATA SOURCE IF EXISTS llt_mppdb_12 CASCADE;
+NOTICE:  data source "llt_mppdb_12" does not exist, skipping
+DROP DATA SOURCE IF EXISTS llt_mppdb_13 RESTRICT;
+NOTICE:  data source "llt_mppdb_13" does not exist, skipping
+DROP DATA SOURCE IF EXISTS llt_mppdb_14;
+DROP DATA SOURCE IF EXISTS llt_mppdb_15 CASCADE;
+DROP DATA SOURCE IF EXISTS llt_mppdb_16 RESTRICT;
+DROP DATA SOURCE llt_mppdb_14;
+ERROR:  source "llt_mppdb_14" does not exist
+DROP DATA SOURCE llt_mppdb_15 CASCADE;
+ERROR:  source "llt_mppdb_15" does not exist
+DROP DATA SOURCE llt_mppdb_16 RESTRICT;
+ERROR:  source "llt_mppdb_16" does not exist
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME LIKE 'llt_mppdb_%';
+ srcname | srcowner | srctype | srcversion | srcacl | srcoptions 
+---------+----------+---------+------------+--------+------------
+(0 rows)
+
+CREATE DATA SOURCE llt_mppdb_21 TYPE 'MPPDB' VERSION 'V1R7C10';
+CREATE DATA SOURCE llt_mppdb_22 TYPE 'MPPDB' VERSION 'V1R7C10';
+CREATE DATA SOURCE llt_mppdb_23 TYPE 'MPPDB' VERSION 'V1R7C10';
+CREATE DATA SOURCE llt_mppdb_24 TYPE 'MPPDB' VERSION 'V1R7C10';
+CREATE DATA SOURCE llt_mppdb_25 TYPE 'MPPDB' VERSION 'V1R7C10';
+CREATE DATA SOURCE llt_mppdb_26 TYPE 'MPPDB' VERSION 'V1R7C10';
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME LIKE 'llt_mppdb_%';
+   srcname    | srcowner | srctype | srcversion | srcacl | srcoptions 
+--------------+----------+---------+------------+--------+------------
+ llt_mppdb_21 |       10 | MPPDB   | V1R7C10    |        | 
+ llt_mppdb_22 |       10 | MPPDB   | V1R7C10    |        | 
+ llt_mppdb_23 |       10 | MPPDB   | V1R7C10    |        | 
+ llt_mppdb_24 |       10 | MPPDB   | V1R7C10    |        | 
+ llt_mppdb_25 |       10 | MPPDB   | V1R7C10    |        | 
+ llt_mppdb_26 |       10 | MPPDB   | V1R7C10    |        | 
+(6 rows)
+
+DROP DATA SOURCE llt_mppdb_21;
+DROP DATA SOURCE llt_mppdb_22 CASCADE;
+DROP DATA SOURCE llt_mppdb_23 RESTRICT;
+DROP DATA SOURCE IF EXISTS llt_mppdb_21;
+NOTICE:  data source "llt_mppdb_21" does not exist, skipping
+DROP DATA SOURCE IF EXISTS llt_mppdb_22 CASCADE;
+NOTICE:  data source "llt_mppdb_22" does not exist, skipping
+DROP DATA SOURCE IF EXISTS llt_mppdb_23 RESTRICT;
+NOTICE:  data source "llt_mppdb_23" does not exist, skipping
+DROP DATA SOURCE IF EXISTS llt_mppdb_24;
+DROP DATA SOURCE IF EXISTS llt_mppdb_25 CASCADE;
+DROP DATA SOURCE IF EXISTS llt_mppdb_26 RESTRICT;
+DROP DATA SOURCE llt_mppdb_24;
+ERROR:  source "llt_mppdb_24" does not exist
+DROP DATA SOURCE llt_mppdb_25 CASCADE;
+ERROR:  source "llt_mppdb_25" does not exist
+DROP DATA SOURCE llt_mppdb_26 RESTRICT;
+ERROR:  source "llt_mppdb_26" does not exist
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME LIKE 'llt_mppdb_%';
+ srcname | srcowner | srctype | srcversion | srcacl | srcoptions 
+---------+----------+---------+------------+--------+------------
+(0 rows)
+
+----
+--- Test ALTER Data Source
+----
+CREATE DATA SOURCE llt_mppdb_31;
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
+   srcname    | srcowner | srctype | srcversion | srcacl | srcoptions 
+--------------+----------+---------+------------+--------+------------
+ llt_mppdb_31 |       10 |         |            |        | 
+(1 row)
+
+ALTER DATA SOURCE llt_mppdb_31 TYPE '';
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
+   srcname    | srcowner | srctype | srcversion | srcacl | srcoptions 
+--------------+----------+---------+------------+--------+------------
+ llt_mppdb_31 |       10 |         |            |        | 
+(1 row)
+
+ALTER DATA SOURCE llt_mppdb_31 VERSION 'V1R7';
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
+   srcname    | srcowner | srctype | srcversion | srcacl | srcoptions 
+--------------+----------+---------+------------+--------+------------
+ llt_mppdb_31 |       10 |         | V1R7       |        | 
+(1 row)
+
+ALTER DATA SOURCE llt_mppdb_31 TYPE 'MPPDB1' VERSION NULL;
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
+   srcname    | srcowner | srctype | srcversion | srcacl | srcoptions 
+--------------+----------+---------+------------+--------+------------
+ llt_mppdb_31 |       10 | MPPDB1  |            |        | 
+(1 row)
+
+ALTER DATA SOURCE llt_mppdb_31 TYPE 'MPPDB2' VERSION 'V1R7C10';
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
+   srcname    | srcowner | srctype | srcversion | srcacl | srcoptions 
+--------------+----------+---------+------------+--------+------------
+ llt_mppdb_31 |       10 | MPPDB2  | V1R7C10    |        | 
+(1 row)
+
+ALTER DATA SOURCE llt_mppdb_31 OPTIONS (dsn 'mppdb1', username '', encoding 'utf8');
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
+   srcname    | srcowner | srctype | srcversion | srcacl |              srcoptions              
+--------------+----------+---------+------------+--------+--------------------------------------
+ llt_mppdb_31 |       10 | MPPDB2  | V1R7C10    |        | {dsn=mppdb1,username=,encoding=utf8}
+(1 row)
+
+ALTER DATA SOURCE llt_mppdb_31 OPTIONS (SET dsn 'mppdb2', DROP username, ADD password '');
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
+   srcname    | srcowner | srctype | srcversion | srcacl |              srcoptions              
+--------------+----------+---------+------------+--------+--------------------------------------
+ llt_mppdb_31 |       10 | MPPDB2  | V1R7C10    |        | {dsn=mppdb2,encoding=utf8,password=}
+(1 row)
+
+ALTER DATA SOURCE llt_mppdb_31 TYPE 'MPPDB3' VERSION 'V1R7C20' OPTIONS (DROP encoding, username '123user', SET password '456pwd');
+SELECT * FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
+--?.*
+--?.*
+--? llt_mppdb_31 |       10 | MPPDB3  | V1R7C20    |        | {dsn=mppdb2,password=.*,username=.*}
+(1 row)
+
+-- duplicated options
+ALTER DATA SOURCE llt_mppdb_31 OPTIONS (DROP username, ADD username '456user');
+ERROR:  option "username" provided more than once
+SELECT srcname, srctype, srcversion, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
+   srcname    | srctype | srcversion | srcacl 
+--------------+---------+------------+--------
+ llt_mppdb_31 | MPPDB3  | V1R7C20    | 
+(1 row)
+
+-- invalid options
+ALTER DATA SOURCE llt_mppdb_31 OPTIONS (url '10.10.10.10');
+ERROR:  option "url" not recognized.
+HINT:  valid options are: dsn, username, password, encoding
+SELECT srcname, srctype, srcversion, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31';
+   srcname    | srctype | srcversion | srcacl 
+--------------+---------+------------+--------
+ llt_mppdb_31 | MPPDB3  | V1R7C20    | 
+(1 row)
+
+-- alter name
+ALTER DATA SOURCE llt_mppdb_31 RENAME TO llt_mppdb_31_new;
+SELECT srcname, srcowner FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31_new';
+     srcname      | srcowner 
+------------------+----------
+--? llt_mppdb_31_new |.*
+(1 row)
+
+-- alter owner 
+CREATE USER PLOKEN1 IDENTIFIED BY 'Gs@123456';
+ALTER DATA SOURCE llt_mppdb_31_new OWNER TO PLOKEN1;
+ERROR:  permission denied to change owner of data source "llt_mppdb_31_new"
+HINT:  The owner of a data source must be a system admin.
+ALTER USER PLOKEN1 WITH SYSADMIN;
+ALTER DATA SOURCE llt_mppdb_31_new OWNER TO PLOKEN1;
+SELECT srcname, srcowner FROM PG_EXTENSION_DATA_SOURCE WHERE SRCNAME='llt_mppdb_31_new';
+     srcname      | srcowner 
+------------------+----------
+--? llt_mppdb_31_new |.*
+(1 row)
+
+DROP DATA SOURCE IF EXISTS llt_mppdb_31_new CASCADE;
+DROP USER PLOKEN1;
+----
+--- Test GRANT/REVOKE Data Source
+----
+CREATE DATA SOURCE llt_mppdb_41 VERSION 'V1R7C10' OPTIONS (username '', encoding 'utf8');
+CREATE DATA SOURCE llt_mppdb_42 TYPE 'MPPDB' OPTIONS (dsn '', encoding 'utf8');
+CREATE USER PLOKEN2 IDENTIFIED BY 'Gs@123456';
+CREATE USER PLOKEN3 IDENTIFIED BY 'Gs@654321';
+-- grant invalid privileges
+GRANT SELECT ON DATA SOURCE llt_mppdb_41 TO PLOKEN2;
+ERROR:  invalid privilege type SELECT for data source
+-- grant valid privileges, here usage == all 
+GRANT USAGE ON DATA SOURCE llt_mppdb_41 TO PLOKEN2;
+GRANT ALL PRIVILEGES ON DATA SOURCE llt_mppdb_42 TO PLOKEN2;
+SELECT srcname, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE srcname='llt_mppdb_41';
+--?.*
+--?.*
+ llt_mppdb_41 | {@login_user@=U/@login_user@,ploken2=U/@login_user@}
+(1 row)
+
+SELECT srcname, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE srcname='llt_mppdb_42';
+--?.*
+--?.*
+ llt_mppdb_42 | {@login_user@=U/@login_user@,ploken2=U/@login_user@}
+(1 row)
+
+-- revoke privileges
+REVOKE USAGE ON DATA SOURCE llt_mppdb_41 FROM PLOKEN2;
+REVOKE ALL ON DATA SOURCE llt_mppdb_42 FROM PLOKEN2;
+SELECT srcname, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE srcname='llt_mppdb_41';
+--?.*
+--?.*
+ llt_mppdb_41 | {@login_user@=U/@login_user@}
+(1 row)
+
+SELECT srcname, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE srcname='llt_mppdb_42';
+--?.*
+--?.*
+ llt_mppdb_42 | {@login_user@=U/@login_user@}
+(1 row)
+
+-- change owner
+ALTER USER PLOKEN3 WITH SYSADMIN;
+ALTER DATA SOURCE llt_mppdb_42 OWNER TO PLOKEN3;
+-- grant all
+GRANT ALL ON DATA SOURCE llt_mppdb_42 TO PLOKEN3;
+GRANT ALL ON DATA SOURCE llt_mppdb_42 TO PLOKEN2;
+SELECT srcname, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE srcname='llt_mppdb_42';
+--?.*
+--?.*
+ llt_mppdb_42 | {@login_user@=U/@login_user@,ploken3=U/ploken3,ploken2=U/ploken3}
+(1 row)
+
+-- revoke usage (test all == usage)
+REVOKE USAGE ON DATA SOURCE llt_mppdb_42 FROM PLOKEN3;
+REVOKE USAGE ON DATA SOURCE llt_mppdb_42 FROM PLOKEN2;
+SELECT srcname, srcacl FROM PG_EXTENSION_DATA_SOURCE WHERE srcname='llt_mppdb_42';
+--?.*
+--?.*
+ llt_mppdb_42 | {@login_user@=U/@login_user@}
+(1 row)
+
+DROP DATA SOURCE llt_mppdb_41;
+DROP DATA SOURCE llt_mppdb_42;
+DROP USER PLOKEN2;
+DROP USER PLOKEN3;
+-- For coverity of : 
+--     GetDataSource, pg_extension_data_source_aclmask, 
+--     pg_extension_data_source_ownercheck
+create user ds_user_llt_01 identified by 'Gs@123456';
+create user ds_user_llt_02 with sysadmin identified by 'Gs@123456';
+create data source mpp_llt_01 options (dsn 'mpp_llt_01');
+create data source mpp_llt_01;
+ERROR:  data source "mpp_llt_01" already exists
+grant usage on data source mpp_llt_01 to ds_user_llt_01;
+\! @abs_bindir@/gsql -d postgres -p @portstring@  -U ds_user_llt_01 -W Gs@123456 -c "grant usage on data source mpp_llt_01 to ds_user_llt_02;"
+WARNING:  no privileges were granted for "mpp_llt_01"
+GRANT
+\! @abs_bindir@/gsql -d postgres -p @portstring@  -U ds_user_llt_01 -W Gs@123456 -c "alter data source mpp_llt_01 version '11.1';"
+ERROR:  must be owner of data source mpp_llt_01
+drop data source mpp_llt_01;
+drop user ds_user_llt_01;
+drop user ds_user_llt_02;

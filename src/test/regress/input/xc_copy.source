@@ -75,11 +75,11 @@ insert into xccopydef (id1) values (4567);
 
 select * from xccopydef order by idseq, id1, id2;
 
-copy xccopydef (id1, id2) to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copydefout.data' (format 'binary');
+copy xccopydef (id1, id2) to '@abs_builddir@/results/copydefout.data' (format 'binary');
 
 truncate xccopydef;
 
-copy xccopydef (id1, id2) from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copydefout.data' (format 'binary');
+copy xccopydef (id1, id2) from '@abs_builddir@/results/copydefout.data' (format 'binary');
 
 select * from xccopydef order by idseq, id1, id2;
 

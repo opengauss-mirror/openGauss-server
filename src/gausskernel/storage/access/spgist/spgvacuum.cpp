@@ -25,7 +25,7 @@
 #include "catalog/storage_xlog.h"
 #include "commands/vacuum.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/indexfsm.h"
 #include "storage/lmgr.h"
 #include "utils/snapmgr.h"
@@ -34,20 +34,20 @@
 typedef struct spgVacPendingItem {
     ItemPointerData tid;            /* redirection target to visit */
     bool done;                      /* have we dealt with this? */
-    struct spgVacPendingItem* next; /* list link */
+    struct spgVacPendingItem *next; /* list link */
 } spgVacPendingItem;
 
 /* Local state for vacuum operations */
 typedef struct spgBulkDeleteState {
     /* Parameters passed in to spgvacuumscan */
-    IndexVacuumInfo* info;
-    IndexBulkDeleteResult* stats;
+    IndexVacuumInfo *info;
+    IndexBulkDeleteResult *stats;
     IndexBulkDeleteCallback callback;
-    void* callback_state;
+    void *callback_state;
 
     /* Additional working state */
     SpGistState spgstate;           /* for SPGiST operations that need one */
-    spgVacPendingItem* pendingList; /* TIDs we need to (re)visit */
+    spgVacPendingItem *pendingList; /* TIDs we need to (re)visit */
     TransactionId myXmin;           /* for detecting newly-added redirects */
     BlockNumber lastFilledBlock;    /* last non-deletable block */
 } spgBulkDeleteState;
@@ -58,10 +58,10 @@ typedef struct spgBulkDeleteState {
  * Note that new items are always appended at the end of the list; this
  * ensures that scans of the list don't miss items added during the scan.
  */
-static void spgAddPendingTID(spgBulkDeleteState* bds, ItemPointer tid)
+static void spgAddPendingTID(spgBulkDeleteState *bds, ItemPointer tid)
 {
-    spgVacPendingItem* pitem = NULL;
-    spgVacPendingItem** listLink;
+    spgVacPendingItem *pitem = NULL;
+    spgVacPendingItem **listLink;
 
     /* search the list for pre-existing entry */
     listLink = &bds->pendingList;
@@ -73,7 +73,7 @@ static void spgAddPendingTID(spgBulkDeleteState* bds, ItemPointer tid)
         listLink = &pitem->next;
     }
     /* not there, so append new entry */
-    pitem = (spgVacPendingItem*)palloc(sizeof(spgVacPendingItem));
+    pitem = (spgVacPendingItem *)palloc(sizeof(spgVacPendingItem));
     pitem->tid = *tid;
     pitem->done = false;
     pitem->next = NULL;
@@ -83,10 +83,10 @@ static void spgAddPendingTID(spgBulkDeleteState* bds, ItemPointer tid)
 /*
  * Clear pendingList
  */
-static void spgClearPendingList(spgBulkDeleteState* bds)
+static void spgClearPendingList(spgBulkDeleteState *bds)
 {
-    spgVacPendingItem* pitem = NULL;
-    spgVacPendingItem* nitem = NULL;
+    spgVacPendingItem *pitem = NULL;
+    spgVacPendingItem *nitem = NULL;
 
     for (pitem = bds->pendingList; pitem != NULL; pitem = nitem) {
         nitem = pitem->next;
@@ -117,7 +117,7 @@ static void spgClearPendingList(spgBulkDeleteState* bds)
  * about live tuples; else we'd double-count those tuples, since the page
  * has been or will be visited in the sequential scan as well.
  */
-static void vacuumLeafPage(spgBulkDeleteState* bds, Relation index, Buffer buffer, bool forPending)
+static void vacuumLeafPage(spgBulkDeleteState *bds, Relation index, Buffer buffer, bool forPending)
 {
     Page page = BufferGetPage(buffer);
     spgxlogVacuumLeaf xlrec;
@@ -162,11 +162,9 @@ static void vacuumLeafPage(spgBulkDeleteState* bds, Relation index, Buffer buffe
                 /* paranoia about corrupted chain links */
                 if (lt->nextOffset < FirstOffsetNumber || lt->nextOffset > max ||
                     predecessor[lt->nextOffset] != InvalidOffsetNumber) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INDEX_CORRUPTED),
-                            errmsg("inconsistent tuple chain links in page %u of index \"%s\"",
-                                BufferGetBlockNumber(buffer),
-                                RelationGetRelationName(index))));
+                    ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                    errmsg("inconsistent tuple chain links in page %u of index \"%s\"",
+                                           BufferGetBlockNumber(buffer), RelationGetRelationName(index))));
                 }
                 predecessor[lt->nextOffset] = i;
             }
@@ -181,7 +179,7 @@ static void vacuumLeafPage(spgBulkDeleteState* bds, Relation index, Buffer buffe
              * happened since VACUUM started.
              *
              * Note: we could make a tighter test by seeing if the xid is
-             * "running" according to the active snapshot; but tqual.c doesn't
+             * "running" according to the active snapshot; but snapmgr.c doesn't
              * currently export a suitable API, and it's not entirely clear
              * that a tighter test is worth the cycles anyway.
              */
@@ -247,7 +245,7 @@ static void vacuumLeafPage(spgBulkDeleteState* bds, Relation index, Buffer buffe
             if (lt->tupstate != SPGIST_LIVE) {
                 /* all tuples in chain should be live */
                 ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("unexpected SPGiST tuple state: %d", lt->tupstate)));
+                        (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("unexpected SPGiST tuple state: %d", lt->tupstate)));
             }
 
             if (deletable[j]) {
@@ -304,17 +302,11 @@ static void vacuumLeafPage(spgBulkDeleteState* bds, Relation index, Buffer buffe
     /* Do the updates */
     START_CRIT_SECTION();
 
-    spgPageIndexMultiDelete(
-        &bds->spgstate, page, toDead, xlrec.nDead, SPGIST_DEAD, SPGIST_DEAD, InvalidBlockNumber, InvalidOffsetNumber);
+    spgPageIndexMultiDelete(&bds->spgstate, page, toDead, xlrec.nDead, SPGIST_DEAD, SPGIST_DEAD, InvalidBlockNumber,
+                            InvalidOffsetNumber);
 
-    spgPageIndexMultiDelete(&bds->spgstate,
-        page,
-        toPlaceholder,
-        xlrec.nPlaceholder,
-        SPGIST_PLACEHOLDER,
-        SPGIST_PLACEHOLDER,
-        InvalidBlockNumber,
-        InvalidOffsetNumber);
+    spgPageIndexMultiDelete(&bds->spgstate, page, toPlaceholder, xlrec.nPlaceholder, SPGIST_PLACEHOLDER,
+                            SPGIST_PLACEHOLDER, InvalidBlockNumber, InvalidOffsetNumber);
 
     /*
      * We implement the move step by swapping the item pointers of the source
@@ -333,14 +325,8 @@ static void vacuumLeafPage(spgBulkDeleteState* bds, Relation index, Buffer buffe
         *idDest = tmp;
     }
 
-    spgPageIndexMultiDelete(&bds->spgstate,
-        page,
-        moveSrc,
-        xlrec.nMove,
-        SPGIST_PLACEHOLDER,
-        SPGIST_PLACEHOLDER,
-        InvalidBlockNumber,
-        InvalidOffsetNumber);
+    spgPageIndexMultiDelete(&bds->spgstate, page, moveSrc, xlrec.nMove, SPGIST_PLACEHOLDER, SPGIST_PLACEHOLDER,
+                            InvalidBlockNumber, InvalidOffsetNumber);
 
     for (i = 0; i < xlrec.nChain; i++) {
         SpGistLeafTuple lt;
@@ -359,14 +345,14 @@ static void vacuumLeafPage(spgBulkDeleteState* bds, Relation index, Buffer buffe
 
         STORE_STATE(&bds->spgstate, xlrec.stateSrc);
 
-        XLogRegisterData((char*)&xlrec, SizeOfSpgxlogVacuumLeaf);
+        XLogRegisterData((char *)&xlrec, SizeOfSpgxlogVacuumLeaf);
         /* sizeof(xlrec) should be a multiple of sizeof(OffsetNumber) */
-        XLogRegisterData((char*)toDead, sizeof(OffsetNumber) * xlrec.nDead);
-        XLogRegisterData((char*)toPlaceholder, sizeof(OffsetNumber) * xlrec.nPlaceholder);
-        XLogRegisterData((char*)moveSrc, sizeof(OffsetNumber) * xlrec.nMove);
-        XLogRegisterData((char*)moveDest, sizeof(OffsetNumber) * xlrec.nMove);
-        XLogRegisterData((char*)chainSrc, sizeof(OffsetNumber) * xlrec.nChain);
-        XLogRegisterData((char*)chainDest, sizeof(OffsetNumber) * xlrec.nChain);
+        XLogRegisterData((char *)toDead, sizeof(OffsetNumber) * xlrec.nDead);
+        XLogRegisterData((char *)toPlaceholder, sizeof(OffsetNumber) * xlrec.nPlaceholder);
+        XLogRegisterData((char *)moveSrc, sizeof(OffsetNumber) * xlrec.nMove);
+        XLogRegisterData((char *)moveDest, sizeof(OffsetNumber) * xlrec.nMove);
+        XLogRegisterData((char *)chainSrc, sizeof(OffsetNumber) * xlrec.nChain);
+        XLogRegisterData((char *)chainDest, sizeof(OffsetNumber) * xlrec.nChain);
 
         XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
 
@@ -383,7 +369,7 @@ static void vacuumLeafPage(spgBulkDeleteState* bds, Relation index, Buffer buffe
  *
  * On the root, we just delete any dead leaf tuples; no fancy business
  */
-static void vacuumLeafRoot(spgBulkDeleteState* bds, Relation index, Buffer buffer)
+static void vacuumLeafRoot(spgBulkDeleteState *bds, Relation index, Buffer buffer)
 {
     Page page = BufferGetPage(buffer);
     spgxlogVacuumRoot xlrec;
@@ -410,8 +396,8 @@ static void vacuumLeafRoot(spgBulkDeleteState* bds, Relation index, Buffer buffe
             }
         } else {
             /* all tuples on root should be live */
-            ereport(
-                ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("unexpected SPGiST tuple state: %d", lt->tupstate)));
+            ereport(ERROR,
+                    (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("unexpected SPGiST tuple state: %d", lt->tupstate)));
         }
     }
 
@@ -435,9 +421,9 @@ static void vacuumLeafRoot(spgBulkDeleteState* bds, Relation index, Buffer buffe
         /* Prepare WAL record */
         STORE_STATE(&bds->spgstate, xlrec.stateSrc);
 
-        XLogRegisterData((char*)&xlrec, SizeOfSpgxlogVacuumRoot);
+        XLogRegisterData((char *)&xlrec, SizeOfSpgxlogVacuumRoot);
         /* sizeof(xlrec) should be a multiple of sizeof(OffsetNumber) */
-        XLogRegisterData((char*)toDelete, sizeof(OffsetNumber) * xlrec.nDelete);
+        XLogRegisterData((char *)toDelete, sizeof(OffsetNumber) * xlrec.nDelete);
 
         XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
 
@@ -547,8 +533,8 @@ static void vacuumRedirectAndPlaceholder(Relation index, Buffer buffer)
 
         XLogBeginInsert();
 
-        XLogRegisterData((char*)&xlrec, SizeOfSpgxlogVacuumRedirect);
-        XLogRegisterData((char*)itemToPlaceholder, sizeof(OffsetNumber) * xlrec.nToPlaceholder);
+        XLogRegisterData((char *)&xlrec, SizeOfSpgxlogVacuumRedirect);
+        XLogRegisterData((char *)itemToPlaceholder, sizeof(OffsetNumber) * xlrec.nToPlaceholder);
 
         XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
 
@@ -563,7 +549,7 @@ static void vacuumRedirectAndPlaceholder(Relation index, Buffer buffer)
 /*
  * Process one page during a bulkdelete scan
  */
-static void spgvacuumpage(spgBulkDeleteState* bds, BlockNumber blkno)
+static void spgvacuumpage(spgBulkDeleteState *bds, BlockNumber blkno)
 {
     Relation index = bds->info->index;
     Buffer buffer;
@@ -629,11 +615,11 @@ static void spgvacuumpage(spgBulkDeleteState* bds, BlockNumber blkno)
 /*
  * Process the pending-TID list between pages of the main scan
  */
-static void spgprocesspending(spgBulkDeleteState* bds)
+static void spgprocesspending(spgBulkDeleteState *bds)
 {
     Relation index = bds->info->index;
-    spgVacPendingItem* pitem = NULL;
-    spgVacPendingItem* nitem = NULL;
+    spgVacPendingItem *pitem = NULL;
+    spgVacPendingItem *nitem = NULL;
     BlockNumber blkno;
     Buffer buffer;
     Page page;
@@ -657,8 +643,8 @@ static void spgprocesspending(spgBulkDeleteState* bds)
             if (SpGistBlockIsRoot(blkno)) {
                 /* this should definitely not happen */
                 ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("redirection leads to root page of index \"%s\"", RelationGetRelationName(index))));
+                        (errcode(ERRCODE_INDEX_CORRUPTED),
+                         errmsg("redirection leads to root page of index \"%s\"", RelationGetRelationName(index))));
             }
 
             /* deal with any deletable tuples */
@@ -710,9 +696,8 @@ static void spgprocesspending(spgBulkDeleteState* bds)
                         /* transfer attention to redirect point */
                         spgAddPendingTID(bds, &((SpGistDeadTuple)innerTuple)->pointer);
                     } else {
-                        ereport(ERROR,
-                            (errcode(ERRCODE_INDEX_CORRUPTED),
-                                errmsg("unexpected SPGiST tuple state: %d", innerTuple->tupstate)));
+                        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                        errmsg("unexpected SPGiST tuple state: %d", innerTuple->tupstate)));
                     }
 
                     nitem->done = true;
@@ -729,7 +714,7 @@ static void spgprocesspending(spgBulkDeleteState* bds)
 /*
  * Perform a bulkdelete scan
  */
-static void spgvacuumscan(spgBulkDeleteState* bds)
+static void spgvacuumscan(spgBulkDeleteState *bds)
 {
     Relation index = bds->info->index;
     bool needLock = false;
@@ -738,7 +723,10 @@ static void spgvacuumscan(spgBulkDeleteState* bds)
     /* Finish setting up spgBulkDeleteState */
     initSpGistState(&bds->spgstate, index);
     bds->pendingList = NULL;
-    bds->myXmin = GetActiveSnapshot()->xmin;
+    Snapshot snapshot = GetActiveSnapshot();
+    if (snapshot) {
+        bds->myXmin = snapshot->xmin;
+    }
     bds->lastFilledBlock = SPGIST_LAST_FIXED_BLKNO;
 
     /*
@@ -826,20 +814,21 @@ static void spgvacuumscan(spgBulkDeleteState* bds)
  */
 Datum spgbulkdelete(PG_FUNCTION_ARGS)
 {
-    IndexVacuumInfo* info = (IndexVacuumInfo*)PG_GETARG_POINTER(0);
-    IndexBulkDeleteResult* stats = (IndexBulkDeleteResult*)PG_GETARG_POINTER(1);
+    IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
+    IndexBulkDeleteResult *stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     IndexBulkDeleteCallback callback = (IndexBulkDeleteCallback)PG_GETARG_POINTER(2);
-    void* callback_state = (void*)PG_GETARG_POINTER(3);
+    void *callback_state = (void *)PG_GETARG_POINTER(3);
     spgBulkDeleteState bds;
 
     /* allocate stats if first time through, else re-use existing struct */
     if (stats == NULL) {
-        stats = (IndexBulkDeleteResult*)palloc0(sizeof(IndexBulkDeleteResult));
+        stats = (IndexBulkDeleteResult *)palloc0(sizeof(IndexBulkDeleteResult));
     }
     bds.info = info;
     bds.stats = stats;
     bds.callback = callback;
     bds.callback_state = callback_state;
+    bds.myXmin = FirstNormalTransactionId;
 
     spgvacuumscan(&bds);
 
@@ -859,8 +848,8 @@ static bool dummy_callback(ItemPointer itemptr, void* state, Oid partOid = Inval
  */
 Datum spgvacuumcleanup(PG_FUNCTION_ARGS)
 {
-    IndexVacuumInfo* info = (IndexVacuumInfo*)PG_GETARG_POINTER(0);
-    IndexBulkDeleteResult* stats = (IndexBulkDeleteResult*)PG_GETARG_POINTER(1);
+    IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
+    IndexBulkDeleteResult *stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     Relation index = info->index;
     spgBulkDeleteState bds;
 
@@ -876,11 +865,12 @@ Datum spgvacuumcleanup(PG_FUNCTION_ARGS)
      * and in any case will provide stats.
      */
     if (stats == NULL) {
-        stats = (IndexBulkDeleteResult*)palloc0(sizeof(IndexBulkDeleteResult));
+        stats = (IndexBulkDeleteResult *)palloc0(sizeof(IndexBulkDeleteResult));
         bds.info = info;
         bds.stats = stats;
         bds.callback = dummy_callback;
         bds.callback_state = NULL;
+        bds.myXmin = FirstNormalTransactionId;
 
         spgvacuumscan(&bds);
     }

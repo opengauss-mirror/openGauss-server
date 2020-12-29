@@ -17,20 +17,24 @@
 
 #include "access/tupdesc.h"
 #include "nodes/params.h"
+#include "utils/atomic.h"
 #ifdef PGXC
 #include "pgxc/locator.h"
+#include "nodes/plannodes.h"
 #endif
 
+#ifdef ENABLE_MOT
 // forward declaration for MOT JitContext
 namespace JitExec
 {
     struct JitContext;
 }
-
+#endif
 
 #define CACHEDPLANSOURCE_MAGIC 195726186
 #define CACHEDPLAN_MAGIC 953717834
 
+#ifdef ENABLE_MOT
 /* different storage engine types that might be used by a query */
 typedef enum {
     SE_TYPE_UNSPECIFIED = 0,    /* unspecified storage engine */
@@ -38,34 +42,187 @@ typedef enum {
     SE_TYPE_PAGE_BASED,         /* Page Based storage engine */
     SE_TYPE_MIXED               /* Mixed (MOT & Page Based) storage engines */
 } StorageEngineType;
+#endif
 
 /* possible values for plan_cache_mode */
 typedef enum {
-    PLAN_CACHE_MODE_AUTO,
-    PLAN_CACHE_MODE_FORCE_GENERIC_PLAN,
-    PLAN_CACHE_MODE_FORCE_CUSTOM_PLAN
+	PLAN_CACHE_MODE_AUTO,
+	PLAN_CACHE_MODE_FORCE_GENERIC_PLAN,
+	PLAN_CACHE_MODE_FORCE_CUSTOM_PLAN
 } PlanCacheMode;
+
+typedef enum {
+    GPC_PRIVATE,
+    GPC_SHARED,
+    GPC_CPLAN,  // generate cplan
+    GPC_UNSHARED,   // not satisfied share condition, like stream plan
+} GPCSourceKind;
+
+typedef enum {
+    GPC_SHARE_IN_LOCAL_SAVE_PLAN_LIST,
+    GPC_SHARE_IN_LOCAL_UNGPC_PLAN_LIST,  // contains GPC_PRIVATE, GPC_UNSHARED and GPC_CPLAN plancache
+    GPC_SHARE_IN_PREPARE_STATEMENT,
+    GPC_SHARE_IN_SHARE_TABLE,
+    GPC_SHARE_IN_SHARE_TABLE_INVALID_LIST,
+} GPCSourceSharedLoc;
+
+typedef enum {
+	GPC_VALID,
+    GPC_INVALID,
+} GPCSourceSharedStatus;
+
+class GPCPlanStatus
+{
+public:
+    GPCPlanStatus() {
+        m_kind = GPC_PRIVATE;
+        m_location = GPC_SHARE_IN_PREPARE_STATEMENT;
+        m_status = GPC_VALID;
+        m_refcount = 0;
+    }
+
+    inline void ShareInit()
+    {
+        m_kind = GPC_SHARED;
+        m_location = GPC_SHARE_IN_PREPARE_STATEMENT;
+        m_status = GPC_VALID;
+        m_refcount = 0;
+    }
+    // NOTE: can not reset to GPC_PRIVATE
+    inline void SetKind(GPCSourceKind kind)
+    {
+        Assert(kind != GPC_PRIVATE);
+        pg_memory_barrier();
+        m_kind = kind;
+    }
+    inline void SetLoc(GPCSourceSharedLoc location)
+    {
+        pg_memory_barrier();
+        m_location = location;
+    }
+
+    inline void SetStatus(GPCSourceSharedStatus status)
+    {
+        pg_memory_barrier();
+        m_status = status;
+    }
+
+    inline bool IsPrivatePlan()
+    {
+        pg_memory_barrier();
+        return m_kind == GPC_PRIVATE;
+    }
+
+    inline bool IsSharePlan()
+    {
+        pg_memory_barrier();
+        return m_kind == GPC_SHARED;
+    }
+
+    inline bool IsUnSharedPlan()
+    {
+        pg_memory_barrier();
+        return m_kind == GPC_UNSHARED;
+    }
+
+    inline bool IsUnShareCplan()
+    {
+        pg_memory_barrier();
+        return m_kind == GPC_CPLAN;
+    }
+
+    inline bool InSavePlanList(GPCSourceKind kind)
+    {
+        pg_memory_barrier();
+        return m_kind == kind && m_location == GPC_SHARE_IN_LOCAL_SAVE_PLAN_LIST;
+    }
+
+    inline bool InUngpcPlanList()
+    {
+        pg_memory_barrier();
+        return (m_kind != GPC_SHARED) && m_location == GPC_SHARE_IN_LOCAL_UNGPC_PLAN_LIST;
+    }
+
+    inline bool InPrepareStmt()
+    {
+        pg_memory_barrier();
+        return m_location == GPC_SHARE_IN_PREPARE_STATEMENT;
+    }
+
+    inline bool InShareTable()
+    {
+        pg_memory_barrier();
+        return m_kind == GPC_SHARED && (m_location == GPC_SHARE_IN_SHARE_TABLE || m_location == GPC_SHARE_IN_SHARE_TABLE_INVALID_LIST);
+    }
+
+    inline bool InShareTableInvalidList()
+    {
+        pg_memory_barrier();
+        return (m_kind == GPC_SHARED && m_location == GPC_SHARE_IN_SHARE_TABLE_INVALID_LIST);
+    }
+
+    inline bool IsValid()
+    {
+        pg_memory_barrier();
+        return m_status == GPC_VALID;
+    }
+
+    inline bool NeedDropSharedGPC()
+    {
+        Assert (m_kind == GPC_SHARED);
+        pg_memory_barrier();
+        return m_location == GPC_SHARE_IN_SHARE_TABLE && m_status == GPC_INVALID;
+    }
+
+    inline void AddRefcount()
+    {
+        pg_atomic_fetch_add_u32((volatile uint32*)&m_refcount, 1);
+    }
+
+    inline void SubRefCount()
+    {
+        pg_atomic_fetch_sub_u32((volatile uint32*)&m_refcount, 1);
+    }
+
+    inline bool RefCountZero()
+    {
+        /* if is same as 0 then set 0 and return true, if is different then do nothing and return false */
+        uint32 expect = 0;
+        return pg_atomic_compare_exchange_u32((volatile uint32*)&m_refcount, &expect, 0);
+    }
+
+    inline int GetRefCount()
+    {
+    	return m_refcount;
+    }
+
+    inline bool CheckRefCount()
+    {
+        /* m_refcount can not less than 0 */
+        int val = (int)pg_atomic_fetch_add_u32((volatile uint32*)&m_refcount, 0);
+        return val >= 0;
+    }
+
+private:
+    volatile GPCSourceKind 	      m_kind;
+    volatile GPCSourceSharedLoc    m_location;
+    volatile GPCSourceSharedStatus m_status;
+    volatile int    m_refcount;
+};
 
 typedef struct GPCSource
 {
-    /* the purpose of the falg is_share is to record whether the plancache can be shared between different sessions, 
-     * the plancaches which were saved in the HTAB m_global_plan_cache hold their flag to be true,
-     * others which are in the middle of the transction hold their flag to be false;
-     */
-    bool is_share; 
-    bool is_insert;
-    bool is_valid;
-
-    uint32 query_string_len;
-    uint32 query_hash_code;
-
-    struct GPCEntry *entry;
-    struct GPCEnv *env;
-
-    int refcount;
-
-    bool in_revalidate;
+    GPCPlanStatus status;
+    struct GPCKey*  key;   //remember when we generate the plan.
 } GPCSource;
+
+typedef struct SPISign
+{
+    uint32 spi_key;    /* hash value of PLpgSQL_function's fn_hashkey */
+    Oid func_oid;
+    uint32 spi_id;     /* spi idx to PLpgSQL_expr, same as plansource's spi_id */
+    int plansource_id; /* plansource idx in spiplan's plancache_list */
+} SPISign;
 
 /*
  * CachedPlanSource (which might better have been called CachedQuery)
@@ -152,8 +309,10 @@ typedef struct CachedPlanSource {
     bool is_saved;    /* has CachedPlanSource been "saved"? */
     bool is_valid;    /* is the query_list currently valid? */
     bool is_oneshot;  /* is it a "oneshot" plan? */
+#ifdef ENABLE_MOT
     StorageEngineType storageEngineType;    /* which storage engine is used*/
     JitExec::JitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
+#endif
     int generation;   /* increments each time we create a plan */
     /* If CachedPlanSource has been saved, it is a member of a global list */
     struct CachedPlanSource* next_saved; /* list link, if so */
@@ -163,6 +322,8 @@ typedef struct CachedPlanSource {
     int num_custom_plans;     /* number of plans included in total */
 
     GPCSource   gpc;            /* share plan cache */
+    SPISign spi_signature;
+    bool is_support_gplan;    /* true if generate gplan */
 #ifdef PGXC
     char* stmt_name;          /* If set, this is a copy of prepared stmt name */
     bool stream_enabled;      /* true if the plan is made with stream operator enabled */
@@ -198,8 +359,10 @@ typedef struct CachedPlan {
     bool is_saved;            /* is CachedPlan in a long-lived context? */
     bool is_valid;            /* is the stmt_list currently valid? */
     bool is_oneshot;          /* is it a "oneshot" plan? */
+#ifdef ENABLE_MOT
     StorageEngineType storageEngineType;    /* which storage engine is used*/
     JitExec::JitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
+#endif
     bool dependsOnRole;       /* is plan specific to that role? */
     Oid planRoleId;           /* Role ID the plan was created for */
     TransactionId saved_xmin; /* if valid, replan when TransactionXmin
@@ -209,7 +372,14 @@ typedef struct CachedPlan {
     bool single_shard_stmt;  /* single shard stmt? */
     MemoryContext context;    /* context containing this CachedPlan */
 
-    bool        is_share;       /* is it gpc share plan? */
+    volatile int global_refcount;
+    volatile bool is_share;       /* is it gpc share plan? */
+    int dn_stmt_num;          /* datanode statment num */
+    inline bool isShared()
+    {
+        pg_memory_barrier();
+        return is_share;
+    }
 } CachedPlan;
 
 extern void InitPlanCache(void);
@@ -219,7 +389,8 @@ extern CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* quer
 #ifdef PGXC
     const char* stmt_name,
 #endif
-    const char* commandTag);
+    const char* commandTag,
+    bool enable_spi_gpc = false);
 extern CachedPlanSource* CreateOneShotCachedPlan(
     Node* raw_parse_tree, const char* query_string, const char* commandTag);
 extern void CompleteCachedPlan(CachedPlanSource* plansource, List* querytree_list, MemoryContext querytree_context,
@@ -240,6 +411,7 @@ extern List* CachedPlanGetTargetList(CachedPlanSource* plansource);
 extern CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParams, bool useResOwner);
 extern void ReleaseCachedPlan(CachedPlan* plan, bool useResOwner);
 extern void DropCachedPlanInternal(CachedPlanSource* plansource);
+extern List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp = false);
 
 extern void CheckRelDependency(CachedPlanSource *plansource, Oid relid);
 extern void CheckInvalItemDependency(CachedPlanSource *plansource, int cacheid, uint32 hashvalue);

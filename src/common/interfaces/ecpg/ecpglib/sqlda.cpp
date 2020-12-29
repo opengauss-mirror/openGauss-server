@@ -131,7 +131,8 @@ static long sqlda_common_total_size(const PGresult* res, int row, enum COMPAT_MO
             case ECPGt_unsigned_char:
             case ECPGt_string:
             default: {
-                long datalen = strlen(PQgetvalue(res, row, i) == NULL ? "" : PQgetvalue(res, row, i)) + 1;
+                char* value = PQgetvalue(res, row, i);
+                long datalen = (value == NULL) ? 1 : (strlen(value) + 1);
 
                 ecpg_sqlda_align_add_size(offset, sizeof(int), datalen, &offset, &next_offset);
                 break;

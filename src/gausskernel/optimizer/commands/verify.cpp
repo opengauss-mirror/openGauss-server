@@ -1,19 +1,8 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2005, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * verify.cpp
  *    Check if the data file is damaged for anlayse verify commands.
@@ -33,6 +22,7 @@
 #include "access/cstore_rewrite.h"
 #include "access/dfs/dfs_insert.h"
 #include "access/genam.h"
+#include "access/tableam.h"
 #include "access/heapam.h"
 #include "access/reloptions.h"
 #include "access/transam.h"
@@ -50,7 +40,7 @@
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #include "pgxc/redistrib.h"
@@ -103,7 +93,7 @@ static const Oid MainCatalogRelid[] = {RelationRelationId,
 static void reportVerifyTableInfo(Oid relid)
 {
     ereport(NOTICE,
-        (errmsg("table \"%s.%s\" was verified", get_namespace_name(get_rel_namespace(relid), true), get_rel_name(relid))));
+        (errmsg("table \"%s.%s\" was verified", get_namespace_name(get_rel_namespace(relid)), get_rel_name(relid))));
 }
 
 /*
@@ -118,7 +108,8 @@ static void reportVerifyTableInfo(Oid relid)
 static bool CheckVerifyPermission(Relation rel, Oid relid, bool isDatabaseMode)
 {
     /* check the permissions to verify */
-    if (!(pg_class_ownercheck(relid, GetUserId()) ||
+    AclResult aclresult = pg_class_aclcheck(relid, GetUserId(), ACL_VACUUM);
+    if (aclresult != ACLCHECK_OK && !(pg_class_ownercheck(relid, GetUserId()) ||
             (pg_database_ownercheck(u_sess->proc_cxt.MyDatabaseId, GetUserId()) && !rel->rd_rel->relisshared))) {
         /* ignore system tables, inheritors */
         if (isDatabaseMode && (relid < FirstNormalObjectId || IsInheritor(relid))) {
@@ -254,12 +245,12 @@ static void generateQuery(VacuumStmt* stmt, StringInfoData* tmpQueryString, Rela
     if ((unsigned int)stmt->options & VACOPT_FAST) {
         appendStringInfo(tmpQueryString,
             "ANALYSE VERIFY FAST %s.%s CASCADE",
-            get_namespace_name(RelationGetNamespace(rel), true),
+            get_namespace_name(RelationGetNamespace(rel)),
             RelationGetRelationName(rel));
     } else if ((unsigned int)stmt->options & VACOPT_COMPLETE) {
         appendStringInfo(tmpQueryString,
             "ANALYSE VERIFY COMPLETE %s.%s CASCADE",
-            get_namespace_name(RelationGetNamespace(rel), true),
+            get_namespace_name(RelationGetNamespace(rel)),
             RelationGetRelationName(rel));
     }
 }
@@ -386,7 +377,7 @@ void DoGlobalVerifyDatabase(VacuumStmt* stmt, const char* queryString, bool sent
         PushActiveSnapshot(GetTransactionSnapshot());
 
         Relation rel = relation_open(relid, AccessShareLock);
-        if (RelationIsForeignTable(rel) || RelationIsDfsStore(rel)) {
+        if (RelationIsForeignTable(rel) || RelationIsStream(rel) || RelationIsDfsStore(rel)) {
             ereport(LOG, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The hdfs table does not support verify.")));
             canVerify = false;
         }
@@ -537,6 +528,16 @@ void DoVerifyTableOtherNode(VacuumStmt* stmt, bool sentToRemote)
     foreach (cur, oidList) {
         Oid relid = lfirst_oid(cur);
         Relation rel = relation_open(relid, AccessShareLock);
+        if (STMT_RETRY_ENABLED) {
+        // do noting for now, if query retry is on, just to skip validateTempRelation here
+        } else if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP && !validateTempNamespace(rel->rd_rel->relnamespace)) {
+            relation_close(rel, AccessShareLock);
+            ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                    errmsg("Temp table's data is invalid because datanode %s restart. "
+                       "Quit your session to clean invalid temp tables.", 
+                       g_instance.attr.attr_common.PGXCNodeName)));
+        }
 
         if (isDatabase) {
             /* check the permissions to verify */
@@ -620,12 +621,12 @@ void DoVerifyTableOtherNode(VacuumStmt* stmt, bool sentToRemote)
  */
 static void CheckVerifyRelation(Relation rel)
 {
-    if (RelationIsView(rel) || RelationIsSequnce(rel)) {
+    if (RelationIsView(rel) || RelationIsSequnce(rel) || RelationIsContquery(rel)) {
         relation_close(rel, AccessShareLock);
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Non-table objects do not support verify.")));
     }
 
-    if (RelationIsForeignTable(rel) || RelationIsDfsStore(rel)) {
+    if (RelationIsForeignTable(rel) || RelationIsStream(rel) || RelationIsDfsStore(rel)) {
         relation_close(rel, AccessShareLock);
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The hdfs table does not support verify.")));
     }
@@ -684,7 +685,7 @@ static bool IsInternalObject(Form_pg_class classtuple)
 static List* GetVerifyRelidList(VacuumStmt* stmt)
 {
     Relation relationRelation;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     List* oidList = NIL;
     List* oidTempList = NIL;
@@ -697,8 +698,8 @@ static List* GetVerifyRelidList(VacuumStmt* stmt)
          * indirectly by reindex_relation).
          */
         relationRelation = heap_open(RelationRelationId, AccessShareLock);
-        scan = heap_beginscan(relationRelation, SnapshotNow, 0, NULL);
-        while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+        scan = tableam_scan_begin(relationRelation, GetActiveSnapshot(), 0, NULL);
+        while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             Form_pg_class classtuple = (Form_pg_class)GETSTRUCT(tuple);
             if (classtuple->relkind != RELKIND_RELATION) {
                 continue;
@@ -731,7 +732,7 @@ static List* GetVerifyRelidList(VacuumStmt* stmt)
         /* add each ordinary relation to the oidList in order to check system first, then check the ordinary table. */
         oidList = list_concat(oidList, oidTempList);
 
-        heap_endscan(scan);
+        tableam_scan_end(scan);
         heap_close(relationRelation, AccessShareLock);
     }
     return oidList;
@@ -935,7 +936,7 @@ static void VerifyPartRel(VacuumStmt* stmt, Relation rel, Oid partOid, bool isRo
                     errmsg("Partition table verification failed. The node is %s, invalid page|CU of relation %s.%s. "
                            "The partition name is %s, partition Oid is %u.",
                         g_instance.attr.attr_common.PGXCNodeName,
-                        get_namespace_name(RelationGetNamespace(rel), true),
+                        get_namespace_name(RelationGetNamespace(rel)),
                         RelationGetRelationName(rel),
                         PartitionGetPartitionName(part),
                         partOid),
@@ -1006,7 +1007,7 @@ static void VerifyPartIndexRel(VacuumStmt* stmt, Relation rel, Relation partitio
 
     ScanKeyInit(&partKey, Anum_pg_partition_indextblid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(partOid));
 
-    partScan = systable_beginscan(pgPartitionRel, PartitionIndexTableIdIndexId, true, SnapshotNow, 1, &partKey);
+    partScan = systable_beginscan(pgPartitionRel, PartitionIndexTableIdIndexId, true, GetActiveSnapshot(), 1, &partKey);
 
     while ((partTuple = systable_getnext(partScan)) != NULL) {
         partForm = (Form_pg_partition)GETSTRUCT(partTuple);
@@ -1099,7 +1100,7 @@ static void VerifyIndexRel(VacuumStmt* stmt, Relation indexRel, VerifyDesc* chec
                 (errcode(ERRCODE_INDEX_CORRUPTED),
                     errmsg("Index verification failed. The node is %s, the index rel is %s.%s. please reindex it.",
                         g_instance.attr.attr_common.PGXCNodeName,
-                        get_namespace_name(RelationGetNamespace(indexRel), true),
+                        get_namespace_name(RelationGetNamespace(indexRel)),
                         RelationGetRelationName(indexRel)),
                     handle_in_client(true)));
         } else {
@@ -1182,7 +1183,7 @@ static void VerifyRowRel(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc
         ereport(FATAL,
             (errcode(ERRCODE_DATA_CORRUPTED),
                 errmsg("The important catalog table %s.%s corrupts, the node is %s, please fix it.",
-                    get_namespace_name(RelationGetNamespace(rel), true),
+                    get_namespace_name(RelationGetNamespace(rel)),
                     RelationGetRelationName(rel),
                     g_instance.attr.attr_common.PGXCNodeName),
                 handle_in_client(true)));
@@ -1202,6 +1203,11 @@ static void VerifyRowRel(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc
  */
 static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
 {
+    if (unlikely(rel == NULL)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("invalid rel value.")));
+    }
+
     if (RELATION_IS_GLOBAL_TEMP(rel) && !gtt_storage_attached(RelationGetRelid(rel))) {
         return true;
     }
@@ -1212,6 +1218,8 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
     Page page = (Page)buf;
     ForkNumber forkNum = MAIN_FORKNUM;
     bool isValidRelationPage = true;
+
+    char* namespace_name = get_namespace_name(RelationGetNamespace(rel));
 
     RelationOpenSmgr(rel);
     SMgrRelation src = rel->rd_smgr;
@@ -1239,10 +1247,10 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
                            "The node is %s, invalid page in block %u of relation %s.%s, the file is %s.",
                         g_instance.attr.attr_common.PGXCNodeName,
                         blkno,
-                        get_namespace_name(RelationGetNamespace(rel), true),
+                        namespace_name,
                         RelationGetRelationName(rel),
                         relpathbackend(src->smgr_rnode.node, src->smgr_rnode.backend, forkNum)),
-                    handle_in_client(true)));
+                        handle_in_client(true)));
         }
     }
 
@@ -1265,7 +1273,7 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
         return true;
     }
 
-    HeapScanDesc scandesc;
+    TableScanDesc scandesc;
     HeapTuple tuple;
     TupleDesc tupleDesc;
     Datum* values = NULL;
@@ -1294,13 +1302,13 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
         values = (Datum*)palloc(numberOfAttributes * sizeof(Datum));
         nulls = (bool*)palloc(numberOfAttributes * sizeof(bool));
 
-        scandesc = heap_beginscan(rel, SnapshotNow, 0, NULL);
+        scandesc = tableam_scan_begin(rel, GetActiveSnapshot(), 0, NULL);
 
     NEXT_TUPLE:
         CHECK_FOR_INTERRUPTS();
         tuple = heapGetNextForVerify(scandesc, ForwardScanDirection, isValidRelationPageComplete);
         if (tuple == NULL) {
-            heap_endscan(scandesc);
+            tableam_scan_end(scandesc);
             pfree_ext(values);
             pfree_ext(nulls);
 
@@ -1315,12 +1323,12 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
                  * otherwise call heap_deform_cmprs_tuple().
                  */
                 if (!HEAP_TUPLE_IS_COMPRESSED(tuple->t_data)) {
-                    heap_deform_tuple(tuple, tupleDesc, values, nulls);
+                    tableam_tops_deform_tuple(tuple, tupleDesc, values, nulls);
                 } else {
                     Page page = BufferGetPage(scandesc->rs_cbuf);
                     Assert(page != NULL);
                     Assert(PageIsCompressed(page));
-                    heap_deform_cmprs_tuple(tuple, tupleDesc, values, nulls, (char*)getPageDict(page));
+                    tableam_tops_deform_cmprs_tuple(tuple, tupleDesc, values, nulls, (char*)getPageDict(page));
                 }
             }
             PG_CATCH();
@@ -1342,7 +1350,7 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
                         errmsg("Tuple verification failed on complete mode."
                                "The node is %s, invalid page of relation %s.%s, the file is %s.",
                             g_instance.attr.attr_common.PGXCNodeName,
-                            get_namespace_name(RelationGetNamespace(rel), true),
+                            get_namespace_name(RelationGetNamespace(rel)),
                             RelationGetRelationName(rel),
                             relpathperm(rel->rd_node, forkNum)),
                         handle_in_client(true)));
@@ -1364,7 +1372,7 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
                     errmsg("Page verification failed on complete mode."
                            "The node is %s, invalid page of relation %s.%s, the file is %s.",
                         g_instance.attr.attr_common.PGXCNodeName,
-                        get_namespace_name(RelationGetNamespace(rel), true),
+                        get_namespace_name(RelationGetNamespace(rel)),
                         RelationGetRelationName(rel),
                         relpathperm(rel->rd_node, forkNum)),
                     handle_in_client(true)));
@@ -1442,7 +1450,7 @@ static void reportColVerifyFailed(Relation rel, bool isdesc, bool iscomplete, Bl
                 errmsg("The main table are not detected because cudesc verification failed. The node is %s,"
                        "the main relation is %s.%s. Please check its cudesc|cudesc_toast|cudesc_index table.",
                     g_instance.attr.attr_common.PGXCNodeName,
-                    get_namespace_name(RelationGetNamespace(rel), true),
+                    get_namespace_name(RelationGetNamespace(rel)),
                     RelationGetRelationName(rel)),
                 handle_in_client(true)));
         return;
@@ -1455,7 +1463,7 @@ static void reportColVerifyFailed(Relation rel, bool isdesc, bool iscomplete, Bl
                        " of relation %s.%s, the column is %d, the file is %s.",
                     g_instance.attr.attr_common.PGXCNodeName,
                     cuId,
-                    get_namespace_name(RelationGetNamespace(rel), true),
+                    get_namespace_name(RelationGetNamespace(rel)),
                     RelationGetRelationName(rel),
                     col,
                     relpathperm(rel->rd_node, MAIN_FORKNUM)),
@@ -1465,7 +1473,7 @@ static void reportColVerifyFailed(Relation rel, bool isdesc, bool iscomplete, Bl
             (errcode(ERRCODE_DATA_CORRUPTED),
                 errmsg("CU verification failed. The node is %s, invalid CU of relation %s.%s, the file is %s.",
                     g_instance.attr.attr_common.PGXCNodeName,
-                    get_namespace_name(RelationGetNamespace(rel), true),
+                    get_namespace_name(RelationGetNamespace(rel)),
                     RelationGetRelationName(rel),
                     relpathperm(rel->rd_node, MAIN_FORKNUM)),
                 handle_in_client(true)));
@@ -1602,7 +1610,7 @@ static void VerifyColRelFast(Relation rel)
         colIdx[i] = attrs[i]->attnum;
     }
 
-    scan = CStoreBeginScan(rel, tupleDesc->natts, colIdx, SnapshotNow, true);
+    scan = CStoreBeginScan(rel, tupleDesc->natts, colIdx, GetActiveSnapshot(), true);
 
     tmpBatchCUData->Init(tupleDesc->natts);
     do {
@@ -1630,7 +1638,7 @@ static void VerifyColRelFast(Relation rel)
                 ereport(WARNING,
                         (errcode(ERRCODE_OUT_OF_LOGICAL_MEMORY),
                             errmsg("memory is temporarily unavailable on relation %s.%s, please retry verify.",
-                                get_namespace_name(RelationGetNamespace(rel), true), RelationGetRelationName(rel))));
+                                get_namespace_name(RelationGetNamespace(rel)), RelationGetRelationName(rel))));
             }
             FlushErrorState();
         }
@@ -1690,9 +1698,9 @@ static void VerifyColRelComplete(Relation rel)
         colIdx[i] = attrs[i]->attnum;
     }
 
-    CStoreScanDesc cstoreScanDesc = CStoreBeginScan(rel, attrNum, colIdx, SnapshotNow, false);
+    CStoreScanDesc cstoreScanDesc = CStoreBeginScan(rel, attrNum, colIdx, GetActiveSnapshot(), false);
     CStore* cstore = cstoreScanDesc->m_CStore;
-    uint32 maxCuId = cstore->GetMaxCUID(rel->rd_rel->relcudescrelid, rel->rd_att, SnapshotNow);
+    uint32 maxCuId = cstore->GetMaxCUID(rel->rd_rel->relcudescrelid, rel->rd_att, GetActiveSnapshot());
 
     /* check the all CU and check the CU of each column. */
     for (cuId = FirstCUID + 1; cuId <= maxCuId; cuId++) {
@@ -1702,7 +1710,7 @@ static void VerifyColRelComplete(Relation rel)
                 continue;
             }
 
-            bool found = cstore->GetCUDesc(col, cuId, &cuDesc, SnapshotNow);
+            bool found = cstore->GetCUDesc(col, cuId, &cuDesc, GetActiveSnapshot());
             if (found && cuDesc.cu_size != 0) {
                 PG_TRY();
                 {
@@ -1722,7 +1730,7 @@ static void VerifyColRelComplete(Relation rel)
                         ereport(WARNING,
                                 (errcode(ERRCODE_OUT_OF_LOGICAL_MEMORY),
                                     errmsg("memory is temporarily unavailable on relation %s.%s, please retry verify.",
-                                        get_namespace_name(RelationGetNamespace(rel), true), RelationGetRelationName(rel))));
+                                        get_namespace_name(RelationGetNamespace(rel)), RelationGetRelationName(rel))));
                     }
                     FlushErrorState();
                     VerifyAbortCU();

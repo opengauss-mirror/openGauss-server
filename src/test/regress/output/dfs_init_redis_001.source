@@ -1,0 +1,5 @@
+--create normal tablespace
+\! rm -rf @abs_srcdir@/dfs_init_redis_001/hdfs_ts
+drop tablespace if exists hdfs_ts;
+NOTICE:  Tablespace "hdfs_ts" does not exist, skipping.
+create  tablespace hdfs_ts location '@abs_srcdir@/dfs_init_redis_001/hdfs_ts' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/dfs_init_redis_001/@hdfsstoreplus@_ts');

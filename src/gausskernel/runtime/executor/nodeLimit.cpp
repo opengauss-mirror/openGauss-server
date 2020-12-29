@@ -25,7 +25,7 @@
 #include "executor/nodeLimit.h"
 #include "nodes/nodeFuncs.h"
 
-static int64 compute_tuples_needed(LimitState *node);
+static void pass_down_bound(LimitState* node, PlanState* child_node);
 
 /* ----------------------------------------------------------------
  *		ExecLimit
@@ -60,7 +60,7 @@ TupleTableSlot* ExecLimit(LimitState* node) /* return: a tuple or NULL */
              */
             recompute_limits(node);
 
-            /* FALL THRU */
+            /* fall through */
         case LIMIT_RESCAN:
 
             /*
@@ -273,26 +273,61 @@ void recompute_limits(LimitState* node)
     /* Set state-machine state */
     node->lstate = LIMIT_RESCAN;
 
-    /*
-     * Notify child node about limit.  Note: think not to "optimize" by
-     * skipping ExecSetTupleBound if compute_tuples_needed returns < 0.  We
-     * must update the child node anyway, in case this is a rescan and the
-     * previous time we got a different result.
-     */
-    ExecSetTupleBound(compute_tuples_needed(node), outerPlanState(node));
+    /* Notify child node about limit, if useful */
+    pass_down_bound(node, outerPlanState(node));
 }
 
 /*
- * Compute the maximum number of tuples needed to satisfy this Limit node.
- * Return a negative value if there is not a determinable limit.
+ * If we have a COUNT, and our input is a Sort node, notify it that it can
+ * use bounded sort.  Also, if our input is a MergeAppend, we can apply the
+ * same bound to any Sorts that are direct children of the MergeAppend,
+ * since the MergeAppend surely need read no more than that many tuples from
+ * any one input.  We also have to be prepared to look through a Result,
+ * since the planner might stick one atop MergeAppend for projection purposes.
+ *
+ * This is a bit of a kluge, but we don't have any more-abstract way of
+ * communicating between the two nodes; and it doesn't seem worth trying
+ * to invent one without some more examples of special communication needs.
+ *
+ * Note: it is the responsibility of nodeSort.c to react properly to
+ * changes of these parameters.  If we ever do redesign this, it'd be a
+ * good idea to integrate this signaling with the parameter-change mechanism.
  */
-static int64 compute_tuples_needed(LimitState *node)
+static void pass_down_bound(LimitState* node, PlanState* child_node)
 {
-    if (node->noCount) {
-        return -1;
+    if (IsA(child_node, SortState) || IsA(child_node, VecSortState)) {
+        SortState* sortState = (SortState*)child_node;
+        int64 tuples_needed = node->count + node->offset;
+
+        /* negative test checks for overflow in sum */
+        if (node->noCount || tuples_needed < 0) {
+            /* make sure flag gets reset if needed upon rescan */
+            sortState->bounded = false;
+        } else {
+            sortState->bounded = true;
+            sortState->bound = tuples_needed;
+        }
+    } else if (IsA(child_node, MergeAppendState)) {
+        MergeAppendState* maState = (MergeAppendState*)child_node;
+        int i;
+
+        for (i = 0; i < maState->ms_nplans; i++)
+            pass_down_bound(node, maState->mergeplans[i]);
+    } else if (IsA(child_node, ResultState) || IsA(child_node, VecResultState)) {
+        /*
+         * An extra consideration here is that if the Result is projecting a
+         * targetlist that contains any SRFs, we can't assume that every input
+         * tuple generates an output tuple, so a Sort underneath might need to
+         * return more than N tuples to satisfy LIMIT N. So we cannot use
+         * bounded sort.
+         *
+         * If Result supported qual checking, we'd have to punt on seeing a
+         * qual, too.  Note that having a resconstantqual is not a
+         * showstopper: if that fails we're not getting any rows at all.
+         */
+        if (outerPlanState(child_node) && !expression_returns_set((Node*)child_node->plan->targetlist))
+            pass_down_bound(node, outerPlanState(child_node));
     }
-    /* Note: if this overflows, we'll return a negative value, which is OK */
-    return node->count + node->offset;
 }
 
 /* ----------------------------------------------------------------
@@ -348,12 +383,22 @@ LimitState* ExecInitLimit(Limit* node, EState* estate, int eflags)
      * limit nodes do no projections, so initialize projection info for this
      * node appropriately
      */
-    ExecAssignResultTypeFromTL(&limit_state->ps);
+    ExecAssignResultTypeFromTL(
+            &limit_state->ps,
+            ExecGetResultType(outerPlanState(limit_state))->tdTableAmType);
+
     limit_state->ps.ps_ProjInfo = NULL;
 
     return limit_state;
 }
 
+/* ----------------------------------------------------------------
+ *		ExecEndLimit
+ *
+ *		This shuts down the subplan and frees resources allocated
+ *		to this node.
+ * ----------------------------------------------------------------
+ */
 void ExecEndLimit(LimitState* node)
 {
     ExecFreeExprContext(&node->ps);

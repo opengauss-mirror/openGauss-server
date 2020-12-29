@@ -1,6 +1,5 @@
 /*
- * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
- * Portions Copyright (c) 2007-2011, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -12,12 +11,12 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
- * ---------------------------------------------------------------------------------------
+ *---------------------------------------------------------------------------------------
  *
  *  parser.h
  *
  * IDENTIFICATION
- *        src/include/storage/parser.h
+ *        src/bin/gds/parser.h
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -81,8 +80,10 @@ public:
 
     ~LineBuffer()
     {
-        if (m_buf != NULL)
+        if (m_buf != NULL) {
             free(m_buf);
+            m_buf = NULL;
+        }
     }
 
 #ifdef OBS_SERVER
@@ -137,7 +138,7 @@ public:
 
     inline int GetCompletedRowLen()
     {
-        return (int)(m_cur_line - m_buf);
+        return m_cur_line - m_buf;
     }
 
     inline int GetCurRowLen()
@@ -178,7 +179,7 @@ public:
 #ifdef GDS_SERVER
 
     int PackData(evbuffer* dest, bool isFlush);
-    /* Send a overloaded buffer crossing multi packages.
+    /*Send a overloaded buffer crossing multi packages.
      * For supporting this scenrio some changes occur:
      * (1) If a un-completed segment of line is sent, which uses speficied 0 line number to indicate;
      * (2) If a un-completed segment of line is sent, wich length is the current segment length.
@@ -248,17 +249,24 @@ public:
 
     ~Source()
     {
-        if (m_fd != NULL)
+        if (m_fd != NULL) {
             fclose(m_fd);
+            m_fd = NULL;
+        }
 
 #ifndef WIN32
-        if (m_fifo != -1)
+        if (m_fifo != -1) {
             close(m_fifo);
+            m_fifo = -1;
+        }
 #endif
         if (m_writeBuf != NULL) {
             free(m_writeBuf);
             m_writeBuf = NULL;
         }
+
+        SourceRead = NULL;
+        SourceNext = NULL;
     }
 #ifdef GDS_SERVER
     void SourceWrite(evbuffer* buffer, size_t len);
@@ -354,7 +362,7 @@ typedef ParserResult (*ParserWriteLineProc)(Parser* self, struct evbuffer& buf, 
 typedef void (*ParserDestroyProc)(Parser* self);
 
 struct Parser {
-    ParserInitProc init;          /* initialize */
+    ParserInitProc init;          /*initialize*/
     ParserReadLineProc readlines; /* read one line */
     ParserWriteLineProc writelines;
     ParserDestroyProc destroy;
@@ -374,6 +382,7 @@ struct Parser {
 };
 
 struct ReadableParser : public Parser {
+
     /**
      * @brief Record Buffer.
      *

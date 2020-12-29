@@ -1,0 +1,165 @@
+--for LLT
+--test gsql outer help
+\! @abs_bindir@/gs_initdb --help
+gs_initdb initializes a PostgreSQL database cluster.
+
+Usage:
+  gs_initdb [OPTION]... [DATADIR]
+
+Options:
+  -A, --auth=METHOD         default authentication method for local connections
+      --auth-host=METHOD    default authentication method for local TCP/IP connections
+      --auth-local=METHOD   default authentication method for local-socket connections
+ [-D, --pgdata=]DATADIR     location for this database cluster
+      --nodename=NODENAME   name of Postgres-XC node initialized
+  -E, --encoding=ENCODING   set default encoding for new databases
+      --locale=LOCALE       set default locale for new databases
+      --lc-collate=, --lc-ctype=, --lc-messages=LOCALE
+      --lc-monetary=, --lc-numeric=, --lc-time=LOCALE
+                            set default locale in the respective category for
+                            new databases (default taken from environment)
+      --no-locale           equivalent to --locale=C
+      --pwfile=FILE         read password for the new system admin from file
+  -T, --text-search-config=CFG
+                            default text search configuration
+  -U, --username=NAME       database system admin name
+  -W, --pwprompt            prompt for a password for the new system admin
+  -w, --pwpasswd=PASSWD     get password from command line for the new system admin
+  -C, --enpwdfiledir=DIR    get encrypted password of AES128 from cipher and rand file
+  -X, --xlogdir=XLOGDIR     location for the transaction log directory
+  -S, --security            remove normal user's privilege on public schema in security mode
+
+Less commonly used options:
+  -d, --debug               generate lots of debugging output
+  -L DIRECTORY              where to find the input files
+  -n, --noclean             do not clean up after errors
+  -s, --show                show internal settings
+
+Other options:
+  -V, --version             output version information, then exit
+  -?, --help                show this help, then exit
+
+If the data directory is not specified, the environment variable PGDATA
+is used.
+
+Report bugs to <pgsql-bugs@postgresql.org>.
+\! @abs_bindir@/gs_initdb -S -D @testtablespace@/test --nodename coorn1 -U test_initdb -w test@123 >> @abs_bindir@/test_initdb.log 2>&1
+\! cat @abs_bindir@/test_initdb.log | grep ok
+creating directory @testtablespace@/test ... ok
+creating subdirectories ... ok
+creating configuration files ... ok
+creating template1 database in @testtablespace@/test/base/1 ... ok
+initializing pg_authid ... ok
+setting password ... ok
+initializing dependencies ... ok
+loading PL/pgSQL server-side language ... ok
+creating system views ... ok
+creating cluster information ... ok
+loading system objects' descriptions ... ok
+creating collations ... ok
+creating conversions ... ok
+creating dictionaries ... ok
+setting privileges on built-in objects ... ok
+creating information schema ... ok
+loading foreign-data wrapper for distfs access ... ok
+loading foreign-data wrapper for hdfs access ... ok
+loading hstore extension ... ok
+update system tables ... ok
+vacuuming database template1 ... ok
+copying template1 to template0 ... ok
+copying template1 to postgres ... ok
+freezing database template0 ... ok
+freezing database template1 ... ok
+freezing database postgres ... ok
+\! rm -f @abs_bindir@/test_initdb.log
+\! mkdir -p @testtablespace@/test2
+\! mkdir -p @testtablespace@/test2/pg_location
+\! @abs_bindir@/gs_initdb -S -D @testtablespace@/test2 --nodename coorn2 -U test_initdb -w test@123 --locale=LOCALE  --lc-collate=C --lc-ctype==C --lc-messages=LOCALE --encoding=UTF-8 >> @abs_bindir@/test_initdb2.log 2>&1
+\! cat @abs_bindir@/test_initdb2.log | grep ok
+ok
+creating subdirectories ... ok
+creating configuration files ... ok
+creating template1 database in @testtablespace@/test2/base/1 ... ok
+initializing pg_authid ... ok
+setting password ... ok
+initializing dependencies ... ok
+loading PL/pgSQL server-side language ... ok
+creating system views ... ok
+creating cluster information ... ok
+loading system objects' descriptions ... ok
+creating collations ... ok
+creating conversions ... ok
+creating dictionaries ... ok
+setting privileges on built-in objects ... ok
+creating information schema ... ok
+loading foreign-data wrapper for distfs access ... ok
+loading foreign-data wrapper for hdfs access ... ok
+loading hstore extension ... ok
+update system tables ... ok
+vacuuming database template1 ... ok
+copying template1 to template0 ... ok
+copying template1 to postgres ... ok
+freezing database template0 ... ok
+freezing database template1 ... ok
+freezing database postgres ... ok
+\! rm -f @abs_bindir@/test_initdb2.log
+\! rm -rf @testtablespace@/test2
+\! mkdir -p @testtablespace@/test3
+\! mkdir -p @testtablespace@/test3/pg_location
+\! mkdir -p @testtablespace@/test3/test_path
+\! @abs_bindir@/gs_initdb -S -D @testtablespace@/test3 --nodename coorn3 -U test_initdb -w test@123 >> /dev/null 2>&1
+\! rm -rf @testtablespace@/test3
+\! mkdir -p @testtablespace@/test4
+\! mkdir -p @testtablespace@/test4/pg_location
+\! mkdir -p @testtablespace@/test4/pg_location/full_upgrade_bak
+\! @abs_bindir@/gs_initdb -S -D @testtablespace@/test4 --nodename coorn4 -U test_initdb -w test@123 -w test@123 --lc-monetary='C' --lc-numeric='C' --lc-time='C' --auth-host='ident' --auth-local='peer' -T CFG >> @abs_bindir@/test_initdb4.log 2>&1
+\! cat @abs_bindir@/test_initdb4.log | grep ok
+ok
+creating subdirectories ... ok
+creating configuration files ... ok
+creating template1 database in @testtablespace@/test4/base/1 ... ok
+initializing pg_authid ... ok
+setting password ... ok
+initializing dependencies ... ok
+loading PL/pgSQL server-side language ... ok
+creating system views ... ok
+creating cluster information ... ok
+loading system objects' descriptions ... ok
+creating collations ... ok
+creating conversions ... ok
+creating dictionaries ... ok
+setting privileges on built-in objects ... ok
+creating information schema ... ok
+loading foreign-data wrapper for distfs access ... ok
+loading foreign-data wrapper for hdfs access ... ok
+loading hstore extension ... ok
+update system tables ... ok
+vacuuming database template1 ... ok
+copying template1 to template0 ... ok
+copying template1 to postgres ... ok
+freezing database template0 ... ok
+freezing database template1 ... ok
+freezing database postgres ... ok
+\! rm -f @abs_bindir@/test_initdb4.log
+\! rm -rf @testtablespace@/test4
+\! mkdir -p @testtablespace@/test5
+\! mkdir -p @testtablespace@/test5/pg_location
+\! mkdir -p @testtablespace@/test5/pg_location/test_path
+\! mkdir -p @testtablespace@/test5/pg_location/full_upgrade_bak
+\! mkdir -p @testtablespace@/test5/pg_location/full_upgrade_bak/test
+\! @abs_bindir@/gs_initdb -S -D @testtablespace@/test5 --nodename coorn5 -U test_initdb -w test@123 >> /dev/null 2>&1
+\! rm -rf @testtablespace@/test5
+\! mkdir -p @testtablespace@/test6
+\! mkdir -p @testtablespace@/pg_xlog
+\! @abs_bindir@/gs_initdb -S -D @testtablespace@/test6 --nodename coorn6 -U test_initdb -w test@123 -X @testtablespace@/pg_xlog >> /dev/null 2>&1
+\! rm -rf @testtablespace@/test6
+\! rm -rf @testtablespace@/pg_xlog
+\! mkdir -p @testtablespace@/test7
+\! @abs_bindir@/gs_initdb -S -D @testtablespace@/test7 --nodename coorn7 -U test_initdb -w test@123 -X @testtablespace@/test7 -d >> /dev/null 2>&1
+\! rm -rf @testtablespace@/test7
+\! mkdir -p @testtablespace@/test8
+\! touch @testtablespace@/passwd.txt
+\! echo "test@123" > @testtablespace@/passwd.txt
+\! @abs_bindir@/gs_initdb -S -A trust --auth-host='ident' --auth-local='peer' --auth-host='ident' --auth-local='peer' -D @testtablespace@/test8 --nodename coorn8 -U test_initdb --pwfile=@testtablespace@/passwd.txt >> /dev/null 2>&1
+\! rm -rf @testtablespace@/passwd.txt
+\! rm -rf @testtablespace@/test8

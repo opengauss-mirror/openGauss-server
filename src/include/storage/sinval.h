@@ -111,6 +111,14 @@ typedef struct {
     RelFileNodeOld rnode; /* spcNode, dbNode, relNode */
 } SharedInvalHbktSmgrMsg;
 
+#define SHAREDINVALFUNC_ID (-7)
+
+typedef struct {
+    int8 id;           /* type field --- must be first */
+    Oid dbId;   /* database ID */
+    Oid funcOid; /* function ID */
+} SharedInvalFuncMsg;
+
 typedef union SharedInvalidationMessage {
     int8 id; /* type field --- must be first */
     SharedInvalCatcacheMsg cc;
@@ -120,6 +128,7 @@ typedef union SharedInvalidationMessage {
     SharedInvalSmgrMsg sm;
     SharedInvalHbktSmgrMsg hbksm;
     SharedInvalRelmapMsg rm;
+    SharedInvalFuncMsg fm;
 } SharedInvalidationMessage;
 
 /* Counter of messages processed; don't worry about overflow. */
@@ -144,4 +153,3 @@ extern void ProcessCommittedInvalidationMessages(
     SharedInvalidationMessage* msgs, int nmsgs, bool RelcacheInitFileInval, Oid dbid, Oid tsid);
 extern void LocalExecuteInvalidationMessage(SharedInvalidationMessage* msg);
 #endif /* SINVAL_H */
-

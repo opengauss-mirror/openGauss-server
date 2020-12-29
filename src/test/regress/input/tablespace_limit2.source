@@ -1,29 +1,29 @@
 -- test MAXSIZE
-create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '';
-create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000';
-create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000K';
-create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000M';
-create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000G';
-create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000T';
-create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000P';
-create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000J';
-create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_a' maxsize '3000';
-create tablespace test_spc1 location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_b' maxsize '3000K';
-create tablespace test_spc2 location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_c' maxsize '3000M';
-create tablespace test_spc3 location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_d' maxsize '3000G';
-create tablespace test_spc4 location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_e' maxsize '3000T';
-create tablespace test_spc5 location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_f' maxsize '3000P';
+create tablespace test_spc location '@abs_srcdir@/data/test_maxsize' maxsize '';
+create tablespace test_spc location '@abs_srcdir@/data/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000';
+create tablespace test_spc location '@abs_srcdir@/data/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000K';
+create tablespace test_spc location '@abs_srcdir@/data/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000M';
+create tablespace test_spc location '@abs_srcdir@/data/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000G';
+create tablespace test_spc location '@abs_srcdir@/data/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000T';
+create tablespace test_spc location '@abs_srcdir@/data/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000P';
+create tablespace test_spc location '@abs_srcdir@/data/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000J';
+create tablespace test_spc location '@abs_srcdir@/data/test_maxsize_a' maxsize '3000';
+create tablespace test_spc1 location '@abs_srcdir@/data/test_maxsize_b' maxsize '3000K';
+create tablespace test_spc2 location '@abs_srcdir@/data/test_maxsize_c' maxsize '3000M';
+create tablespace test_spc3 location '@abs_srcdir@/data/test_maxsize_d' maxsize '3000G';
+create tablespace test_spc4 location '@abs_srcdir@/data/test_maxsize_e' maxsize '3000T';
+create tablespace test_spc5 location '@abs_srcdir@/data/test_maxsize_f' maxsize '3000P';
 DROP TABLESPACE IF EXISTS test_spc1;
 DROP TABLESPACE IF EXISTS test_spc2;
 DROP TABLESPACE IF EXISTS test_spc3;
 DROP TABLESPACE IF EXISTS test_spc4;
 DROP TABLESPACE IF EXISTS test_spc5;
-\! rmdir @abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_a
-\! rmdir @abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_b
-\! rmdir @abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_c
-\! rmdir @abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_d
-\! rmdir @abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_e
-\! rmdir @abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_f
+\! rmdir @abs_srcdir@/data/test_maxsize_a
+\! rmdir @abs_srcdir@/data/test_maxsize_b
+\! rmdir @abs_srcdir@/data/test_maxsize_c
+\! rmdir @abs_srcdir@/data/test_maxsize_d
+\! rmdir @abs_srcdir@/data/test_maxsize_e
+\! rmdir @abs_srcdir@/data/test_maxsize_f
 
 -- problem: quota is disable when small uint64 - big uint64
 create tablespace test_tblspc_10 location '@abs_srcdir@/tmp_check/test_tblspc_10' MAXSIZE '20 M';
@@ -59,7 +59,7 @@ CREATE TABLE test_case_10
   c_varbit varbit(10),
   c_oid oid
 )
-tablespace test_tblspc_10  ;
+tablespace test_tblspc_10 distribute by replication;
 CREATE TABLE test_case_11
 (
   c_hashid int,
@@ -92,7 +92,7 @@ CREATE TABLE test_case_11
   c_varbit varbit(10),
   c_oid oid
 );
-COPY test_case_11 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_alter_change_plus_update.dat';
+COPY test_case_11 FROM '@abs_srcdir@/data/cstore_alter_change_plus_update.dat';
 INSERT INTO test_case_10 SELECT * FROM test_case_11;
 DROP TABLE test_case_10;
 DROP TABLE test_case_11;
@@ -102,10 +102,10 @@ DROP TABLESPACE test_tblspc_10;
 ---
 create tablespace tblspc_privilege location '@abs_srcdir@/tmp_check/test_tblspc_privilege';
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\db";
-create user user_tablespc_normal password 'Ttest@123';
-\! @abs_bindir@/gsql -d postgres -U user_tablespc_normal -W 'Ttest@123' -p @portstring@ -c "\db";
-create user user_tablespc_sysadmin sysadmin password 'Ttest@123';
-\! @abs_bindir@/gsql -d postgres -U user_tablespc_sysadmin -W 'Ttest@123' -p @portstring@ -c "\db";
+create user user_tablespc_normal password 'Gauss@123';
+\! @abs_bindir@/gsql -d postgres -U user_tablespc_normal -W 'Gauss@123' -p @portstring@ -c "\db";
+create user user_tablespc_sysadmin sysadmin password 'Gauss@123';
+\! @abs_bindir@/gsql -d postgres -U user_tablespc_sysadmin -W 'Gauss@123' -p @portstring@ -c "\db";
 drop user user_tablespc_normal;
 drop user user_tablespc_sysadmin;
 drop tablespace tblspc_privilege;

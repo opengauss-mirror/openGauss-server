@@ -125,7 +125,6 @@ VectorBatch* ExecVecScan(ScanState* node, ExecVecScanAccessMtd accessMtd, /* fun
 
         batch = exec_vec_scan_fetch(node, accessMtd, recheckMtd);
         /* Response to the stop query flag. */
-        
         if (BatchIsNull(batch) || unlikely(true == executorEarlyStop())) {
             return NULL;
         }

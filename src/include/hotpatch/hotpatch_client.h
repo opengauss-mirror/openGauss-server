@@ -33,7 +33,6 @@ typedef void (*LogFunc)(const char*, ...) __attribute__((format(printf, 1, 2)));
 
 void hotpatch_patch_state_to_string(unsigned int state, char* state_string, int length_state_string);
 extern int hotpatch_check(const char* path, const char* command, bool* is_list);
-extern void hotpatch_process_list(const char* return_string, int string_length, const char* data_dir, int dir_length,
+extern void hotpatch_process_list(const char* return_string, int string_length, const char* data_dir, size_t dir_length,
     void (*canonicalize_path)(char*), LogFunc log_func);
 #endif
-

@@ -36,9 +36,11 @@ int pqsigsetmask(int mask);
 #endif /* not HAVE_SIGPROCMASK */
 
 typedef void (*pqsigfunc)(int);
+typedef void (*sa_sigaction_t)(int, siginfo_t *, void *);
 
 extern void pqinitmask(void);
 
 extern pqsigfunc pqsignal(int signo, pqsigfunc func);
+extern int install_signal(int signo, sa_sigaction_t func);
 
 #endif /* PQSIGNAL_H */

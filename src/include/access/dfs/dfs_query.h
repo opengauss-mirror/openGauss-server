@@ -23,8 +23,8 @@
  * ---------------------------------------------------------------------------------------
  */
 
-#ifndef DFS_QUERY_H_
-#define DFS_QUERY_H_
+#ifndef DFS_QUERY_H
+#define DFS_QUERY_H
 
 #include "orc/Exceptions.hh"
 #include "access/dfs/dfs_am.h"
@@ -41,87 +41,8 @@
 #include "utils/numeric_gs.h"
 #include "utils/lsyscache.h"
 
-#ifndef MIN
-#define MIN(A, B) ((B) < (A) ? (B) : (A))
-#endif
-
 #define DFS_PRIVATE_ITEM "DfsPrivateItem"
 #define DFS_NUMERIC64_MAX_PRECISION 18
-
-/* MACROS which help to catch and print the exception. */
-#define DFS_TRY()                                          \
-    bool saveStatus = t_thrd.int_cxt.ImmediateInterruptOK; \
-    t_thrd.int_cxt.ImmediateInterruptOK = false;           \
-    bool errOccur = false;                                 \
-    int errNo = ERRCODE_SYSTEM_ERROR;                      \
-    StringInfo errMsg = makeStringInfo();                  \
-    StringInfo errDetail = makeStringInfo();               \
-    try
-#define DFS_CATCH()                                                                                \
-    catch (abi::__forced_unwind &)                                                                 \
-    {                                                                                              \
-        throw;                                                                                     \
-    }                                                                                              \
-    catch (orc::OrcException & ex)                                                                 \
-    {                                                                                              \
-        errOccur = true;                                                                           \
-        errNo = ex.getErrNo();                                                                     \
-        try {                                                                                      \
-            appendStringInfo(errMsg, "%s", ex.what());                                             \
-            appendStringInfo(errDetail, "%s", ex.msg().c_str());                                   \
-        } catch (abi::__forced_unwind &) {                                                         \
-            throw;                                                                                 \
-        } catch (...) {                                                                            \
-        }                                                                                          \
-    }                                                                                              \
-    catch (std::exception & ex)                                                                    \
-    {                                                                                              \
-        errOccur = true;                                                                           \
-        try {                                                                                      \
-            appendStringInfo(errMsg, "%s", ex.what());                                             \
-        } catch (abi::__forced_unwind &) {                                                         \
-            throw;                                                                                 \
-        } catch (...) {                                                                            \
-        }                                                                                          \
-    }                                                                                              \
-    catch (...)                                                                                    \
-    {                                                                                              \
-        errOccur = true;                                                                           \
-    }                                                                                              \
-    t_thrd.int_cxt.ImmediateInterruptOK = saveStatus;                                              \
-    saveStatus = InterruptPending;                                                                 \
-    InterruptPending = false;                                                                      \
-    if (errOccur && errDetail->len > 0) {                                                          \
-        ereport(LOG, (errmodule(MOD_DFS), errmsg("Caught exceptiion for: %s.", errDetail->data))); \
-    }                                                                                              \
-    InterruptPending = saveStatus;                                                                 \
-    pfree_ext(errDetail->data);                                                                    \
-    pfree_ext(errDetail);
-
-#define DFS_ERRREPORT(msg, module)                                                             \
-    if (errOccur) {                                                                            \
-        destroy();                                                                             \
-        ereport(ERROR, (errcode(errNo), errmodule(module),                                     \
-                        errmsg(msg, errMsg->data, g_instance.attr.attr_common.PGXCNodeName))); \
-    }                                                                                          \
-    pfree_ext(errMsg->data);                                                                   \
-    pfree_ext(errMsg);
-
-#define DFS_ERRREPORT_WITHARGS(msg, module, ...)                                                            \
-    if (errOccur) {                                                                                         \
-        ereport(ERROR, (errcode(errNo), errmodule(module),                                                  \
-                        errmsg(msg, __VA_ARGS__, errMsg->data, g_instance.attr.attr_common.PGXCNodeName))); \
-    }                                                                                                       \
-    pfree_ext(errMsg->data);                                                                                \
-    pfree_ext(errMsg);
-
-#define DFS_ERRREPORT_WITHOUTARGS(msg, module)                                                 \
-    if (errOccur) {                                                                            \
-        ereport(ERROR, (errcode(errNo), errmodule(module),                                     \
-                        errmsg(msg, errMsg->data, g_instance.attr.attr_common.PGXCNodeName))); \
-    }                                                                                          \
-    pfree_ext(errMsg->data);                                                                   \
-    pfree_ext(errMsg);
 
 #ifdef ENABLE_LLVM_COMPILE
 extern bool CodeGenThreadObjectReady();
@@ -133,59 +54,6 @@ extern bool ForeignScanExprCodeGen(Expr *expr, PlanState *parent, void **jittedF
 typedef bool (*evaPredicateDouble)(double value);
 typedef bool (*evaPredicateInt)(int64_t value);
 #endif
-
-#define DEFAULT_HIVE_NULL "__HIVE_DEFAULT_PARTITION__"
-#define DEFAULT_HIVE_NULL_LENGTH 26
-
-/*
- * Check partition signature creation exception in case of the content exceeding
- * max allowed partition length
- */
-#define partition_err_msg                                                                \
-    "The length of the partition directory exceeds the current value(%d) of the option " \
-    "\"dfs_partition_directory_length\", change the option to the greater value."
-#define CHECK_PARTITION_SIGNATURE(rc, dirname) do { \
-    if (rc != 0) {                                                                                  \
-        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmodule(MOD_DFS),                        \
-                        errmsg(partition_err_msg, u_sess->attr.attr_storage.dfs_max_parsig_length), \
-                        errdetail("the path name is \"%s\".", dirname)));                           \
-    }                                                                                               \
-    securec_check(rc, "\0", "\0");                                                                  \
-} while (0)
-
-#define strpos(p, s) (strstr(p, s) != NULL ? strstr(p, s) - p : -1)
-#define basename_len(p, s) (strrchr(p, s) != NULL ? strrchr(p, s) - p : -1)
-
-#define INT_CMP_HDFS(arg1, arg2, compare) do { \
-    if ((arg1) < (arg2)) {            \
-        compare = -1;                 \
-    } else if ((arg1) > (arg2)) {     \
-        compare = 1;                  \
-    } else {                          \
-        compare = 0;                  \
-    }                                 \
-} while (0)
-
-/*
- * 1. NAN = NAN
- * 2. NAN > non-NAN
- * 3. non-NAN < NAN
- * 4. non-NAN cmp non-NAN
- * 5. arg2 will never be NAN here
- */
-#define FLOAT_CMP_HDFS(arg1, arg2, compare) do { \
-    if (isnan(arg1)) {                  \
-        compare = 1;                    \
-    } else {                            \
-        if ((arg1) > (arg2)) {          \
-            compare = 1;                \
-        } else if ((arg1) < (arg2)) {   \
-            compare = -1;               \
-        } else {                        \
-            compare = 0;                \
-        }                               \
-    }                                   \
-} while (0)
 
 /*
  * define the strategy numbers for hdfs foriegn scan. -1 is invalid,
@@ -222,422 +90,6 @@ typedef enum {
     LOW_ENCODING_CHECK = 1,
     HIGH_ENCODING_CHECK = 2
 } EncodingLevel;
-
-/*
- * The base template class for all the data type wrapper to  inherit.
- */
-template <typename T>
-class HdfsCheckWrapper : public BaseObject {
-public:
-    virtual ~HdfsCheckWrapper()
-    {
-    }
-    /*
-     * Abstract function to compare the argument and velue.
-     * @_in param argument: The target to be compared with the member value.
-     * @_in param collation: the collation of the var, it is used in function varstr_cmp.
-     * @return Return 1=eq, -1=lt, 1=gt.
-     */
-    virtual int compareT(T argument, Oid collation) = 0;
-
-    /*
-     * Set the value in the class which is converted from datum.
-     * @_in param datumValue: the datum value to be set.
-     * @_in param datumType: the data type oid of the datum.
-     * @_in param typeMod: the mod of the datum type.
-     */
-    virtual void SetValueFromDatum(Datum datumValue, Oid datumType, int32 typeMod) = 0;
-
-    /*
-     * A template function to check if the argument transfered in can be filtered. All the non-string
-     * wrapper will inherit this function for call.
-     *
-     * @_in param argument: the value transfered in to be checked
-     * @_in param strategy: the strategy used in the predicate.
-     * @_in param collation: the collation of the var, it is used in function varstr_cmp.
-     * @return True: match and not filtered; False: filtered and set isSelected to false.
-     */
-    inline bool CheckPredicate(T argument, Oid collation)
-    {
-        int cmpResult = compareT(argument, collation);
-        return HdfsCheckCompareResult(cmpResult);
-    }
-
-    /*
-     * Get the value of the wrapper.
-     * @return Return the value in the class.
-     */
-    inline const T getValue()
-    {
-        return value;
-    }
-
-    /*
-     * Get the datum of the wrapper.
-     * @return the datum value.
-     */
-    inline Datum getDatum()
-    {
-        return dValue;
-    }
-
-private:
-    /*
-     * Check the compare result depending on the strategy of the predicate pushed down.
-     *
-     * @_in param cmpResult: The result of comparision, (o=eq, -1=lt, 1=gt)
-     *
-     * @return True: indicates the value of the row and column match the preidcate pushed down; False:
-     *     indicates the value does not match the predicate and need to be filtered.
-     */
-    bool HdfsCheckCompareResult(int cmpResult);
-
-protected:
-    /* Store the real value of the wrapper with type T. */
-    T value;
-    Datum dValue;
-
-    /*
-     * The strategy of the predicate's operator, which must between HDFS_QUERY_EQ
-     *     and HDFS_QUERY_NE2.
-     */
-    HdfsQueryOperator strategy;
-    int32 typeMod;
-    Oid datumType;
-};
-
-/*
- * Check the result of comparation according to the strategy.
- */
-template <typename T>
-inline bool HdfsCheckWrapper<T>::HdfsCheckCompareResult(int cmpResult)
-{
-    bool result = false;
-    switch (strategy) {
-        case HDFS_QUERY_LT: {
-            if (0 > cmpResult)
-                result = true;
-            break;
-        }
-        case HDFS_QUERY_LTE: {
-            if (0 >= cmpResult)
-                result = true;
-            break;
-        }
-        case HDFS_QUERY_EQ: {
-            if (0 == cmpResult)
-                result = true;
-            break;
-        }
-        case HDFS_QUERY_GTE: {
-            if (0 <= cmpResult)
-                result = true;
-            break;
-        }
-        case HDFS_QUERY_GT: {
-            if (0 < cmpResult)
-                result = true;
-            break;
-        }
-        case HDFS_QUERY_NE1:
-        case HDFS_QUERY_NE2: {
-            if (0 != cmpResult)
-                result = true;
-            break;
-        }
-        case HDFS_QUERY_INVALID:
-        default: {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
-                            errmsg("Find unsupported strategy %d!", strategy)));
-        }
-    }
-
-    return result;
-}
-
-/*
- * A wrapper class of int64 type, inherit HdfsCheckWrapper. Here we do not seperate
- * int16, int 32 and int64 wrapper just because what we read from orc file directly for int16,int32 and int64
- * is int64, then it will convert to int16,int32 or int64 datum. Since the predicate need to be checked before
- * the conversion from basic type to datum, so we will compare the int64 value directly and needn't
- * Int32Wrapper and Int16Wrapper.
- */
-class Int64Wrapper : public HdfsCheckWrapper<int64> {
-public:
-    Int64Wrapper(HdfsQueryOperator _strategy)
-    {
-        strategy = _strategy;
-    }
-    virtual ~Int64Wrapper()
-    {
-    }
-    inline void SetValueFromDatum(Datum datumValue, Oid datumType, int32 typeMod)
-    {
-        dValue = datumValue;
-
-        if (INT1OID == datumType) {
-            value = DatumGetChar(datumValue);
-        } else if (INT2OID == datumType) {
-            value = DatumGetInt16(datumValue);
-        } else if (INT4OID == datumType) {
-            value = DatumGetInt32(datumValue);
-        } else if (NUMERICOID == datumType) {
-            int dscale = (unsigned int)(typeMod - VARHDRSZ) & 0xffff;
-            Numeric n = DatumGetNumeric(datumValue);
-            if (NUMERIC_IS_BI(n)) {
-                Assert(dscale == NUMERIC_BI_SCALE(n));
-                Assert(NUMERIC_IS_BI64(n));
-
-                value = NUMERIC_64VALUE(n);
-            } else
-                value = convert_short_numeric_to_int64_byscale(n, dscale);
-        } else {
-            value = DatumGetInt64(datumValue);
-        }
-    }
-
-private:
-    inline int compareT(int64 argument, Oid collation)
-    {
-        int cmp = 0;
-        INT_CMP_HDFS(argument, value, cmp);
-        return cmp;
-    }
-};
-
-/* just for decimal128, 18 < p <= 38 */
-class Int128Wrapper : public HdfsCheckWrapper<int128> {
-public:
-    Int128Wrapper(HdfsQueryOperator _strategy)
-    {
-        strategy = _strategy;
-    }
-    virtual ~Int128Wrapper()
-    {
-    }
-    inline void SetValueFromDatum(Datum datumValue, Oid datumType, int32 typeMod)
-    {
-        int dscale = (unsigned int)(typeMod - VARHDRSZ) & 0xffff;
-
-        dValue = datumValue;
-        Numeric n = DatumGetNumeric(datumValue);
-        if (NUMERIC_IS_BI(n)) {
-            Assert(dscale == NUMERIC_BI_SCALE(n));
-
-            if (NUMERIC_IS_BI128(n)) {
-                errno_t rc = EOK;
-                rc = memcpy_s(&value, sizeof(int128), (n)->choice.n_bi.n_data, sizeof(int128));
-                securec_check(rc, "\0", "\0");
-            } else
-                value = NUMERIC_64VALUE(n);
-        } else
-            convert_short_numeric_to_int128_byscale(n, dscale, value);
-    }
-
-private:
-    inline int compareT(int128 argument, Oid collation)
-    {
-        int cmp = 0;
-        INT_CMP_HDFS(argument, value, cmp);
-        return cmp;
-    }
-};
-
-/*
- * A wrapper class of bool type, inherit HdfsCheckWrapper. The actual value stored is a char here.
- */
-class BoolWrapper : public HdfsCheckWrapper<char> {
-public:
-    BoolWrapper(HdfsQueryOperator _strategy)
-    {
-        strategy = _strategy;
-    }
-    virtual ~BoolWrapper()
-    {
-    }
-    inline void SetValueFromDatum(Datum datumValue, Oid datumType, int32 typeMod)
-    {
-        dValue = datumValue;
-        value = DatumGetBool(datumValue);
-    }
-
-private:
-    inline int compareT(char argument, Oid collation)
-    {
-        int cmp = 0;
-        INT_CMP_HDFS(argument, value, cmp);
-        return cmp;
-    }
-};
-
-/*
- * A wrapper class of float8 type, inherit HdfsCheckWrapper.
- */
-class Float8Wrapper : public HdfsCheckWrapper<float8> {
-public:
-    Float8Wrapper(HdfsQueryOperator _strategy)
-    {
-        strategy = _strategy;
-    }
-    virtual ~Float8Wrapper()
-    {
-    }
-    inline void SetValueFromDatum(Datum datumValue, Oid _datumType, int32 typeMod)
-    {
-        datumType = _datumType;
-        /*
-         * For float4/8, there may be data convertion of the const value, so we
-         * need to process seperately here.
-         */
-        if (FLOAT4OID == datumType) {
-            value = (float8)DatumGetFloat4(datumValue);
-            dValue = Float8GetDatum(value);
-        } else  // float8
-        {
-            value = DatumGetFloat8(datumValue);
-            dValue = datumValue;
-        }
-    }
-
-private:
-    inline int compareT(float8 argument, Oid collation)
-    {
-        int cmp = 0;
-        FLOAT_CMP_HDFS(argument, value, cmp);
-        return cmp;
-    }
-};
-
-/*
- * A wrapper class of Timestamp type, inherit HdfsCheckWrapper. Since there is not actual Date type
- * in PG, we just need the wrapper for Timestamp here, and convert the hive date to timestamp before
- * the comparasion with predicate.
- */
-class TimestampWrapper : public HdfsCheckWrapper<Timestamp> {
-public:
-    TimestampWrapper(HdfsQueryOperator _strategy)
-    {
-        strategy = _strategy;
-    }
-    virtual ~TimestampWrapper()
-    {
-    }
-    inline void SetValueFromDatum(Datum datumValue, Oid datumType, int32 typeMod)
-    {
-        dValue = datumValue;
-
-        /*
-         * For different time types, we use different ways to convert to timestamp.
-         */
-        if (DATEOID == datumType) {
-            value = date2timestamp(DatumGetDateADT(datumValue));
-        } else if (TIMESTAMPTZOID == datumType) {
-            Datum out = DirectFunctionCall1(timestamptz_out, datumValue);
-            Datum in = DirectFunctionCall3(timestamp_in, out, ObjectIdGetDatum(InvalidOid), Int32GetDatum(typeMod));
-            value = DatumGetTimestamp(in);
-        } else {
-            value = DatumGetTimestamp(datumValue);
-        }
-    }
-
-private:
-    inline int compareT(Timestamp argument, Oid collation)
-    {
-        int cmp = 0;
-#ifdef HAVE_INT64_TIMESTAMP
-        INT_CMP_HDFS(argument, value, cmp);
-#else
-        FLOAT_CMP_HDFS(argument, value, cmp);
-#endif
-        return cmp;
-    }
-};
-
-/*
- * Since we only care about equality or not-equality, we can avoid all the
- * expense of strcoll() here, and just do bitwise comparison.
- * The caller must ensure that both src1 and src2 are valid strings with '\0' at end.
- * return 0 if the two strings are equal.
- */
-static int stringEQ(const char *src1, const char *src2)
-{
-    int result = 0;
-    int len1 = strlen(src1);
-    int len2 = strlen(src2);
-    if (len1 != len2) {
-        result = 1;
-    } else {
-        result = memcmp(src1, src2, len1);
-    }
-    return result;
-}
-
-/*
- * A wrapper class of string type includes varchar,bpchar,text because these types is actually the same for hive.
- */
-class StringWrapper : public HdfsCheckWrapper<char *> {
-public:
-    StringWrapper(HdfsQueryOperator _strategy)
-    {
-        strategy = _strategy;
-    }
-    virtual ~StringWrapper()
-    {
-    }
-    inline void SetValueFromDatum(Datum datumValue, Oid _datumType, int32 typeMod)
-    {
-        dValue = datumValue;
-        datumType = _datumType;
-
-        if (BPCHAROID == datumType) {
-            int varLen = 0;
-            char *str = TextDatumGetCString(datumValue);
-            int strLen = strlen(str);
-
-            /* variable length */
-            if (typeMod < (int32)VARHDRSZ) {
-                varLen = strLen;
-            } else /* fixed length */
-            {
-                varLen = typeMod - VARHDRSZ;
-            }
-
-            /*
-             * When the length of the var is larger than the const string's length, it needs to
-             * add some blanks in the tail.
-             */
-            if (varLen >= strLen) {
-                Datum bpchar = DirectFunctionCall3(bpcharin, CStringGetDatum(str), ObjectIdGetDatum(InvalidOid),
-                                                   Int32GetDatum(typeMod));
-                value = TextDatumGetCString(bpchar);
-            } else {
-                value = str;
-            }
-        } else {
-            value = TextDatumGetCString(datumValue);
-        }
-    }
-
-private:
-    inline int compareT(char *argument, Oid collation)
-    {
-        int cmp = 0;
-        if (HDFS_QUERY_EQ == strategy || HDFS_QUERY_NE1 == strategy || HDFS_QUERY_NE2 == strategy) {
-            cmp = stringEQ(argument, value);
-        } else {
-            cmp = varstr_cmp(argument, strlen(argument), value, strlen(value), collation);
-        }
-        return cmp;
-    }
-};
-
-/*
- * This wrapper is only used for HdfsPredicateCheckNull, and there is need to store any value here. We don't
- * remove it because Null check is processed specially and  keeping a special empty wrapper for null can
- * make it less confused.
- */
-class NullWrapper {
-};
 
 /*
  * A template class which stores the info from the expression. This predicate will be pushed down to orc reader and
@@ -818,90 +270,6 @@ bool HdfsPredicateCheckValueDoubleForLlvm(baseType &value, List *&scanClauses)
 }
 #endif
 
-/*
- * Function to check if a value of basic type can match the clauses list pushed down. Here we do not
- * check the length of scanClauses, and the caller need ensure it.
- *
- * @_in param value: The value to be checked, can not be NULL (it will handled by HdfsPredicateCheckNull).
- * @_in param scanClauses: Clauses which can be pushed down to orc reader.
- *
- * @return True: means the value match the predicate pushed down, so we can not prunning it,
- *     False: means the value does not match the predicate pushed down, so skip it.
- */
-template <typename wrapper, typename baseType>
-bool HdfsPredicateCheckValue(baseType &value, List *&scanClauses)
-{
-    ListCell *lc = NULL;
-    HdfsScanPredicate<wrapper, baseType> *predicate = NULL;
-
-    foreach (lc, scanClauses) {
-        predicate = (HdfsScanPredicate<wrapper, baseType> *)lfirst(lc);
-
-        if (true == predicate->m_keepFalse) {
-            return false;
-        } else if (HDFS_QUERY_ISNULL == predicate->m_strategy) {
-            return false;
-        } else if (HDFS_QUERY_ISNOTNULL == predicate->m_strategy) {
-            continue;
-        } else if (!predicate->HdfsPredicateCheckOne(value)) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-/*
- * Function to check if a null value can match the clauses list pushed down.
- *
- * @_in param scanClauses: Clauses which can be pushed down for the partition and orc reader.
- *
- * @return True: means the value match the predicate pushed down, so we can not prunning it,
- *     False: means the value does not match the predicate pushed down, so skip it.
- */
-template <typename T>
-bool HdfsPredicateCheckNull(List *scanClauses)
-{
-    ListCell *lc = NULL;
-    HdfsScanPredicate<T, void *> *predicate = NULL;
-
-    if (0 == list_length(scanClauses))
-        return true;
-
-    foreach (lc, scanClauses) {
-        predicate = (HdfsScanPredicate<T, void *> *)lfirst(lc);
-        if (true == predicate->m_keepFalse) {
-            return false;
-        } else if (HDFS_QUERY_ISNULL == predicate->m_strategy) {
-            continue;
-        } else {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-/**
- * @Description: Check the column value by predicates.
- * @in isNull, Whether the column is null value.
- * @in value, If the column is not null, it presents the column value.
- * @in predicateList, The pushdown predicates on this column.
- * @return If the column value satisfies the predicates, return true, otherwise
- * return false.
- */
-template <typename wrapper, typename baseType>
-bool HdfsPredicateCheck(bool isNull, baseType value, List *predicateList)
-{
-    bool filtered = false;
-    if (isNull) {
-        filtered = HdfsPredicateCheckNull<NullWrapper>(predicateList);
-    } else {
-        filtered = HdfsPredicateCheckValue<wrapper, baseType>(value, predicateList);
-    }
-
-    return filtered;
-}
 
 /**
  * @Description: Identify the qual which could be pushed down to
@@ -983,7 +351,7 @@ Node *BuildNullTestConstraint(Var *variable, NullTestType type);
  * @_in param isNull: Whether the value is null.
  * @return Return the constraint.
  */
-Node *BuildConstraintConst(Expr *equalExpr, Datum value, bool isNull);
+void BuildConstraintConst(Expr *equalExpr, Datum value, bool isNull);
 
 /*
  * Fetch the Var according to the column no from the columnList, used in partition filter.
@@ -1024,7 +392,7 @@ DfsPrivateItem *MakeDfsPrivateItem(List *columnList, List *targetList, List *res
 /*
  * Parse the fileNames string from the split List.
  * @_in_out param splitList: point to the original split List, which may contain multiple files.
- * @_in param currentFileName: point to the first file.
+ * @_in param currentFileName: point to the first file or the only file '/user/demai/file1.orc' (new buffer).
  * @return Return the split parsed from the list.
  */
 SplitInfo *ParseFileSplitList(List **splitList, char **currentFileName);
@@ -1084,13 +452,7 @@ void CalculateWeightByColumns(PlannerInfo *root, List *hdfsQualColumn, List *hdf
  *input param @ColType: Oid of column data type;
  *input param @ColName: column name.
  */
-void OrcCheckDataType(TypeName *typName, char *ColName, char *fileType = NULL);
-
-/*
- * Fill up the structure: readerState which can not be NULL.
- */
-void FillReaderState(dfs::reader::ReaderState *readerState, ScanState *ss, DfsPrivateItem *item,
-                     Snapshot snapshot = NULL);
+void DFSCheckDataType(TypeName *typName, char* ColName, int format);
 
 /*
  * brief: Check foldername, filenames, hdfscfgpath format. The rules are the followings:
@@ -1195,6 +557,7 @@ bool IsVarNode(Node *node);
  * @Notes: Only the column of the pushed down data type can reach here.
  */
 bool defColSatisfyPredicates(bool isNull, Datum value, Var *col_var, List *predicate_list);
+bool IsParamConst(Node *node);
 
 /**
  * @Description: Convert the string according to the database encoding and original encoding.
@@ -1217,4 +580,4 @@ BlockNumber getPageCountForFt(void *additionalData);
                         errmsg("could not open relation with OID %u", foreignTableId))); \
 } while (0)
 
-#endif /* ORC_QUERY_H_ */
+#endif /* DFS_QUERY_H */

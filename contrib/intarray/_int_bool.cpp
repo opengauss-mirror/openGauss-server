@@ -60,8 +60,9 @@ static int4 gettoken(WORKSTATE* state, int4* val)
 
     innn = 0;
     while (1) {
-        if (innn >= sizeof(nnn))
+        if (innn >= sizeof(nnn)) {
             return ERR; /* buffer overrun => syntax error */
+        }
         switch (state->state) {
             case WAITOPERAND:
                 innn = 0;
@@ -483,9 +484,11 @@ typedef struct {
 
 static void infix(INFIX* in, bool first)
 {
+    int rc = EOK;
     if (in->curpol->type == VAL) {
         RESIZEBUF(in, 11);
-        sprintf(in->cur, "%d", in->curpol->val);
+        rc = sprintf_s(in->cur, in->buflen, "%d", in->curpol->val);
+        securec_check_ss(rc, "\0", "\0");
         in->cur = strchr(in->cur, '\0');
         in->curpol--;
     } else if (in->curpol->val == (int4)'!') {
@@ -499,13 +502,15 @@ static void infix(INFIX* in, bool first)
         if (in->curpol->type == OPR) {
             isopr = true;
             RESIZEBUF(in, 2);
-            sprintf(in->cur, "( ");
+            rc = sprintf_s(in->cur, in->buflen, "( ");
+            securec_check_ss(rc, "\0", "\0");
             in->cur = strchr(in->cur, '\0');
         }
         infix(in, isopr);
         if (isopr) {
             RESIZEBUF(in, 2);
-            sprintf(in->cur, " )");
+            rc = sprintf_s(in->cur, in->buflen, " )");
+            securec_check_ss(rc, "\0", "\0");
             in->cur = strchr(in->cur, '\0');
         }
     } else {
@@ -515,7 +520,8 @@ static void infix(INFIX* in, bool first)
         in->curpol--;
         if (op == (int4)'|' && !first) {
             RESIZEBUF(in, 2);
-            sprintf(in->cur, "( ");
+            rc = sprintf_s(in->cur, in->buflen, "( ");
+            securec_check_ss(rc, "\0", "\0");
             in->cur = strchr(in->cur, '\0');
         }
 
@@ -532,13 +538,15 @@ static void infix(INFIX* in, bool first)
 
         /* print operator & right operand */
         RESIZEBUF(in, 3 + (nrm.cur - nrm.buf));
-        sprintf(in->cur, " %c %s", op, nrm.buf);
+        rc = sprintf_s(in->cur, in->buflen, " %c %s", op, nrm.buf);
+        securec_check_ss(rc, "\0", "\0");
         in->cur = strchr(in->cur, '\0');
         pfree(nrm.buf);
 
         if (op == (int4)'|' && !first) {
             RESIZEBUF(in, 2);
-            sprintf(in->cur, " )");
+            rc = sprintf_s(in->cur, in->buflen, " )");
+            securec_check_ss(rc, "\0", "\0");
             in->cur = strchr(in->cur, '\0');
         }
     }

@@ -119,22 +119,22 @@ tables for these structures:</p>
 <li>ShmemIndex - lookup shared memory addresses using structure
 names</li>
 
-<li><a href="../../include/storage/buf_internals.h">Buffer
+<li><a href="../../include/storage/buf/buf_internals.h">Buffer
 Descriptor</a> - control header for buffer cache block</li>
 
-<li><a href="../../include/storage/buf_internals.h">Buffer
+<li><a href="../../include/storage/buf/buf_internals.h">Buffer
 Block</a> - data/index buffer cache block</li>
 
 <li>Shared Buffer Lookup Table - lookup of buffer cache block
 addresses using table name and block number( <a
-href="../../include/storage/buf_internals.h">BufferTag</a>)</li>
+href="../../include/storage/buf/buf_internals.h">BufferTag</a>)</li>
 
 <li>Lock Manager Tables (lock hash) - the <a
-href="../../include/storage/lock.h">LOCK</a> structure, looked up
-using a <a href="../../include/storage/lock.h">LOCKTAG</a>.
+href="../../include/storage/lock/lock.h">LOCK</a> structure, looked up
+using a <a href="../../include/storage/lock/lock.h">LOCKTAG</a>.
 A LOCK structure exists for each lockable object that is currently
 locked by any backend.  Also, there is a subsidiary <a
-href="../../include/storage/lock.h">PROCLOCK</a> structure for each
+href="../../include/storage/lock/lock.h">PROCLOCK</a> structure for each
 backend currently interested in a given LOCK</li>
 
 <li><a href="../../include/storage/proc.h">PGPROC Structures</a> -

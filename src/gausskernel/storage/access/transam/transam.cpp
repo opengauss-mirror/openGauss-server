@@ -64,6 +64,7 @@ CommitSeqNo TransactionIdGetCommitSeqNo(TransactionId transactionId, bool isComm
     XLogRecPtr lsn;
     CommitSeqNo result;
     TransactionId xid = InvalidTransactionId;
+    int retry_times = 0;
 
     /*
      * Before going to the commit log manager, check our single item cache to
@@ -80,15 +81,14 @@ CommitSeqNo TransactionIdGetCommitSeqNo(TransactionId transactionId, bool isComm
      */
     if (!TransactionIdIsNormal(transactionId)) {
         t_thrd.xact_cxt.latestFetchCSNXid = InvalidTransactionId;
-        if (TransactionIdEquals(transactionId, BootstrapTransactionId)) {
-            return COMMITSEQNO_FROZEN;
-        }
-        if (TransactionIdEquals(transactionId, FrozenTransactionId)) {
+        if (TransactionIdEquals(transactionId, BootstrapTransactionId) ||
+            TransactionIdEquals(transactionId, FrozenTransactionId)) {
             return COMMITSEQNO_FROZEN;
         }
         return COMMITSEQNO_ABORTED;
     }
 
+RETRY:
     /*
      * If the XID is older than RecentGlobalXmin, check the clog. Otherwise
      * check the csnlog.
@@ -116,24 +116,38 @@ CommitSeqNo TransactionIdGetCommitSeqNo(TransactionId transactionId, bool isComm
             }
         }
     } else {
-        if (isNest) {
-            result = CSNLogGetNestCommitSeqNo(transactionId);
-        } else {
-            result = CSNLogGetCommitSeqNo(transactionId);
+        uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+        /*
+         * In gtm-lite mode, recentGlobalXmin acrroding to oldest csn, it can be updated when we read csn log.
+         * Make sure that we restore the right hold interrupt count and release
+         * all lock about csn log(control lock and page lock).
+         * just retry one times, if we try to read csn log again, meaning any other problem happen, ereport as usual.
+         */
+        PG_TRY();
+        {
+            result = isNest ? CSNLogGetNestCommitSeqNo(transactionId) : CSNLogGetCommitSeqNo(transactionId);
         }
+        PG_CATCH();
+        {
+            if (GTM_LITE_MODE && retry_times == 0) {
+                t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+                FlushErrorState();
+                ereport(LOG, (errmsg("recentGlobalXmin has been updated, csn log may be truncated, try clog, xid"
+                                     " %lu recentLocalXmin %lu.",
+                                     xid, t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin)));
+                retry_times++;
+                goto RETRY;
+            } else {
+                PG_RE_THROW();
+            }
+        }
+        PG_END_TRY();
     }
-
     ereport(DEBUG1,
-        (errmsg("Get CSN xid %lu cur_xid %lu xid %lu result %lu iscommit %d, recentLocalXmin %lu, isMvcc :%d, "
-                "RecentXmin: %lu",
-            transactionId,
-            GetCurrentTransactionIdIfAny(),
-            xid,
-            result,
-            isCommit,
-            t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin,
-            isMvcc,
-            u_sess->utils_cxt.RecentXmin)));
+            (errmsg("Get CSN xid %lu cur_xid %lu xid %lu result %lu iscommit %d, recentLocalXmin %lu, isMvcc :%d, "
+                    "RecentXmin: %lu",
+                    transactionId, GetCurrentTransactionIdIfAny(), xid, result, isCommit,
+                    t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin, isMvcc, u_sess->utils_cxt.RecentXmin)));
 
     /*
      * Cache it, but DO NOT cache status for unfinished transactions!
@@ -229,7 +243,7 @@ static CommitSeqNo TransactionIdGetCommitSeqNoForGSClean(TransactionId transacti
 {
     CommitSeqNo result;
     TransactionId xid;
-    bool missGlobalXmin = false;
+    bool miss_global_xmin = false;
 
     /*
      * If the XID is older than RecentGlobalXmin, check the clog. Otherwise
@@ -237,25 +251,24 @@ static CommitSeqNo TransactionIdGetCommitSeqNoForGSClean(TransactionId transacti
      */
     Assert(TransactionIdIsNormal(transactionId));
     xid = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin);
-    if (!TransactionIdIsValid(xid)) { /* means initilized by start up */
+    if (!TransactionIdIsValid(xid)) {
         /* Fetch the newest global xmin from gtm and use it. */
-        TransactionId gtmGlobalXmin = InvalidTransactionId;
+        TransactionId gtm_gloabl_xmin = InvalidTransactionId;
         if (GTM_MODE) {
-            gtmGlobalXmin = GetGTMGlobalXmin();
-            ereport(LOG,
-                (errmsg("For gs_clean, fetch the recent global xmin %lu if"
-                        "it is not fetched before.",
-                    gtmGlobalXmin)));
-            TransactionId localXmin = t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin;
-            if (TransactionIdPrecedes(localXmin, gtmGlobalXmin)) {
-                gtmGlobalXmin = localXmin;
+            gtm_gloabl_xmin = GetGTMGlobalXmin();
+            ereport(LOG, (errmsg("For gs_clean, fetch the recent global xmin %lu if"
+                                 "it is not fetched before.",
+                                 gtm_gloabl_xmin)));
+            TransactionId local_xmin = t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin;
+            if (TransactionIdPrecedes(local_xmin, gtm_gloabl_xmin)) {
+                gtm_gloabl_xmin = local_xmin;
             }
         }
 
-        if (TransactionIdIsValid(gtmGlobalXmin)) {
-            (void)pg_atomic_compare_exchange_u64(
-                &t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin, &xid, gtmGlobalXmin);
-            xid = gtmGlobalXmin;
+        if (TransactionIdIsValid(gtm_gloabl_xmin)) {
+            (void)pg_atomic_compare_exchange_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin, &xid,
+                                                 gtm_gloabl_xmin);
+            xid = gtm_gloabl_xmin;
         } else {
             /*
              * When fail to get the newest global xmin from gtm, just use the
@@ -264,13 +277,13 @@ static CommitSeqNo TransactionIdGetCommitSeqNoForGSClean(TransactionId transacti
             xid = t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin;
             ereport(DEBUG1, (errmsg("For gs_clean, fetch the recent global xmin %lu from recent local xmin.", xid)));
             if (GTM_MODE)
-                missGlobalXmin = true;
+                miss_global_xmin = true;
         }
     }
 
     Assert(TransactionIdIsValid(xid));
     if (TransactionIdPrecedes(transactionId, xid)) {
-        if (missGlobalXmin) {
+        if (miss_global_xmin) {
             /*
              * when we have no global xmin, we can not return 2 in gtm cluster
              * for gs_clean may use 2 to commit other prepare transactions
@@ -577,8 +590,8 @@ bool LatestFetchCSNDidAbort(TransactionId transactionId) /* true if given transa
  * (and so it's not named TransactionIdDidComplete, which would be the
  * appropriate name for a function that worked that way).  The intended
  * use is just to short-circuit TransactionIdIsInProgress calls when doing
- * repeated tqual.c checks for the same XID.  If this isn't extremely fast
- * then it will be counterproductive.
+ * repeated heapam_visibility.c checks for the same XID.  If this isn't 
+ * extremely fast then it will be counterproductive.
  *
  * Note:
  *		Assumes transaction identifier is valid.
@@ -604,7 +617,7 @@ bool TransactionIdIsKnownCompleted(TransactionId transactionId)
  * This commit operation is not guaranteed to be atomic, but if not, subxids
  * are correctly marked subcommit first.
  */
-void TransactionIdCommitTree(TransactionId xid, int nxids, TransactionId* xids, uint64 csn)
+void TransactionIdCommitTree(TransactionId xid, int nxids, TransactionId *xids, uint64 csn)
 {
     TransactionIdAsyncCommitTree(xid, nxids, xids, InvalidXLogRecPtr, csn);
 }
@@ -613,7 +626,7 @@ void TransactionIdCommitTree(TransactionId xid, int nxids, TransactionId* xids, 
  * TransactionIdAsyncCommitTree
  *		Same as above, but for async commits.  The commit record LSN is needed.
  */
-void TransactionIdAsyncCommitTree(TransactionId xid, int nxids, TransactionId* xids, XLogRecPtr lsn, uint64 csn)
+void TransactionIdAsyncCommitTree(TransactionId xid, int nxids, TransactionId *xids, XLogRecPtr lsn, uint64 csn)
 {
     /* update the Clog */
     CLogSetTreeStatus(xid, nxids, xids, CLOG_XID_STATUS_COMMITTED, lsn);
@@ -624,16 +637,10 @@ void TransactionIdAsyncCommitTree(TransactionId xid, int nxids, TransactionId* x
         if (csn > 0)
             CSNLogSetCommitSeqNo(xid, nxids, xids, csn);
     } else {
+        /* Set the true csn here just after the clog is set. */
         UpdateCSNLogAtTransactionEND(xid, nxids, xids, csn, true);
     }
 }
-
-#ifndef ENABLE_MULTIPLE_NODES
-CommitSeqNo getNextCSN()
-{
-    return pg_atomic_fetch_add_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo, 1);
-}
-#endif
 
 /*
  * TransactionIdAbortTree
@@ -645,23 +652,11 @@ CommitSeqNo getNextCSN()
  * We don't need to worry about the non-atomic behavior, since any onlookers
  * will consider all the xacts as not-yet-committed anyway.
  */
-void TransactionIdAbortTree(TransactionId xid, int nxids, TransactionId* xids)
+void TransactionIdAbortTree(TransactionId xid, int nxids, TransactionId *xids)
 {
     CLogSetTreeStatus(xid, nxids, xids, CLOG_XID_STATUS_ABORTED, InvalidXLogRecPtr);
 
     CSNLogSetCommitSeqNo(xid, nxids, xids, COMMITSEQNO_ABORTED);
-
-    /*
-     * TransactionIdLatest --- get latest XID among a main xact and its children
-     */
-
-    /*
-     * In practice it is highly likely that the xids[] array is sorted, and so
-     * we could save some cycles by just taking the last child XID, but this
-     * probably isn't so performance-critical that it's worth depending on
-     * that assumption.  But just to show we're not totally stupid, scan the
-     * array back-to-front to avoid useless assignments.
-     */
 }
 
 /*
@@ -727,7 +722,7 @@ bool TransactionIdLogicallyPrecedes(TransactionId id1, TransactionId id2)
  * Note that this treats a a crashed transaction as still in-progress,
  * until it falls off the xmin horizon.
  */
-TransactionIdStatus TransactionIdGetStatus(TransactionId transactionId, bool isCommit)
+TransactionIdStatus TransactionIdGetStatus(TransactionId transactionId)
 {
     CommitSeqNo csn;
 

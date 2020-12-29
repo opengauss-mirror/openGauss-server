@@ -29,4 +29,3 @@ extern void WaitForDataSync(void);
 extern void DataSyncRepReleaseWaiters(void);
 
 #endif /* _DATASYNCREP_H */
-

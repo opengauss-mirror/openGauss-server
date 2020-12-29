@@ -1,0 +1,547 @@
+--test excutor result in this text
+----first, test foreign scan result
+------bulid foreign table
+Drop server if exists hdfs_server cascade;
+NOTICE:  server "hdfs_server" does not exist, skipping
+-- CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (type 'hdfs', address '10.67.128.30:25000,10.67.128.34:25000',HDFSCFGPATH '/home/hanfeng/FI_client/hadoop_client/HDFS/hadoop/etc/hadoop');
+set enable_constraint_optimization = on;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+drop foreign table nation;
+ERROR:  foreign table "nation" does not exist
+create foreign table nation  (
+ N_NATIONKEY INT4 ,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 ,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/nation_parquet/')
+distribute by roundrobin;
+--------obtain this result when N_REGIONKEY is not defined informational constraint 
+select n_regionkey from nation where n_regionkey = 4 order by n_regionkey;
+ n_regionkey 
+-------------
+           4
+           4
+           4
+           4
+           4
+(5 rows)
+
+--------obtain this result when N_REGIONKEY is defined informational constraint 
+alter foreign table nation add constraint primary_key_n_regionkey primary key (n_regionkey) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "primary_key_n_regionkey" for foreign table "nation"
+----------test, when enable_hdfs_predicate_pushdown is on, enable_vector_engine is off.
+set enable_hdfs_predicate_pushdown =on;
+set enable_vector_engine = on;
+select n_regionkey from nation where n_regionkey = 4 order by n_regionkey;
+ n_regionkey 
+-------------
+           4
+(1 row)
+
+----------test, when enable_hdfs_predicate_pushdown is on, enable_vector_engine is on.
+set enable_hdfs_predicate_pushdown =on;
+set enable_vector_engine = off;
+select n_regionkey from nation where n_regionkey = 4 order by n_regionkey;
+ n_regionkey 
+-------------
+           4
+(1 row)
+
+----------test, when enable_hdfs_predicate_pushdown is off, enable_vector_engine is on.
+set enable_hdfs_predicate_pushdown =off;
+set enable_vector_engine = on;
+select n_regionkey from nation where n_regionkey = 4 order by n_regionkey;
+ n_regionkey 
+-------------
+           4
+(1 row)
+
+----------test, when enable_hdfs_predicate_pushdown is off, enable_vector_engine is off.
+set enable_hdfs_predicate_pushdown =off;
+set enable_vector_engine = off;
+select n_regionkey from nation where n_regionkey = 4 order by n_regionkey;
+ n_regionkey 
+-------------
+           4
+(1 row)
+
+----second,test join scan
+drop foreign table region;
+ERROR:  foreign table "region" does not exist
+create foreign table region  (
+ R_REGIONKEY  int,
+ R_NAME TEXT,
+ R_COMMENT TEXT
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/region_parquet')
+distribute by roundrobin;
+drop foreign table nation;
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 ,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/nation_parquet/')
+distribute by roundrobin;
+--*************************************
+------test inner join
+------get the following result when do not using informatinal constraint
+select region.r_regionkey from region, nation where region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+ r_regionkey 
+-------------
+           0
+           0
+           0
+           0
+           0
+           1
+           1
+           1
+           1
+           1
+           2
+           2
+           2
+           2
+           2
+           3
+           3
+           3
+           3
+           3
+           4
+           4
+           4
+           4
+           4
+(25 rows)
+
+-------get the following result when using informational constraint
+alter foreign table nation add constraint primary_key_n_regionkey primary key(n_regionkey) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "primary_key_n_regionkey" for foreign table "nation"
+---------test nestloop , enable_vector_engine is on.
+set enable_nestloop = on;
+set enable_mergejoin = off;
+set enable_hashjoin = off;
+set enable_vector_engine = on;
+select region.r_regionkey from region, nation where region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+ r_regionkey 
+-------------
+           0
+           1
+           2
+           3
+           4
+(5 rows)
+
+---------test nestloop , enable_vector_engine is off.
+set enable_nestloop = on;
+set enable_mergejoin = off;
+set enable_hashjoin = off;
+set enable_vector_engine = off;
+select region.r_regionkey from region, nation where region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+ r_regionkey 
+-------------
+           0
+           1
+           2
+           3
+           4
+(5 rows)
+
+--*************************************
+------test left join
+--------get the following result when do not using informational constraint
+alter foreign table nation drop constraint primary_key_n_regionkey ;
+select region.r_regionkey from region left join  nation on region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+ r_regionkey 
+-------------
+           0
+           0
+           0
+           0
+           0
+           1
+           1
+           1
+           1
+           1
+           2
+           2
+           2
+           2
+           2
+           3
+           3
+           3
+           3
+           3
+           4
+           4
+           4
+           4
+           4
+(25 rows)
+
+--------get the following result when using informational constraint
+alter foreign table nation add constraint primary_key_n_regionkey primary key(n_regionkey) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "primary_key_n_regionkey" for foreign table "nation"
+---------test left nestloop , enable_vector_engine is on.
+set enable_nestloop = on;
+set enable_mergejoin = off;
+set enable_hashjoin = off;
+set enable_vector_engine = on;
+explain (costs off) select region.r_regionkey from region left join  nation on region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sort
+               Sort Key: region.r_regionkey
+               ->  Vector Nest Loop Left Join
+                     Join Filter(Informational Constraint Optimization): (region.r_regionkey = nation.n_regionkey)
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: hdfs
+                                 Parquet File: /user/hive/warehouse/mppdb.db/region_parquet
+                     ->  Vector Materialize
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 ->  Vector Foreign Scan on nation
+                                       Server Type: hdfs
+                                       Parquet File: /user/hive/warehouse/mppdb.db/nation_parquet/
+(15 rows)
+
+select region.r_regionkey from region left join  nation on region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+ r_regionkey 
+-------------
+           0
+           1
+           2
+           3
+           4
+(5 rows)
+
+---------test left nestloop , enable_vector_engine is off.
+set enable_nestloop = on;
+set enable_mergejoin = off;
+set enable_hashjoin = off;
+set enable_vector_engine = off;
+explain (costs off) select region.r_regionkey from region left join  nation on region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Sort
+         Sort Key: region.r_regionkey
+         ->  Nested Loop Left Join
+               Join Filter(Informational Constraint Optimization): (region.r_regionkey = nation.n_regionkey)
+               ->  Streaming(type: REDISTRIBUTE)
+                     ->  Foreign Scan on region
+                           Server Type: hdfs
+                           Parquet File: /user/hive/warehouse/mppdb.db/region_parquet
+               ->  Materialize
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Foreign Scan on nation
+                                 Server Type: hdfs
+                                 Parquet File: /user/hive/warehouse/mppdb.db/nation_parquet/
+(14 rows)
+
+select region.r_regionkey from region left join  nation on region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+ r_regionkey 
+-------------
+           0
+           1
+           2
+           3
+           4
+(5 rows)
+
+--*************************************
+------test right join
+--------get the following result when do not using informational constraint
+alter foreign table nation drop constraint primary_key_n_regionkey ;
+select region.r_regionkey, nation.n_regionkey from nation right join region on region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+ r_regionkey | n_regionkey 
+-------------+-------------
+           0 |           0
+           0 |           0
+           0 |           0
+           0 |           0
+           0 |           0
+           1 |           1
+           1 |           1
+           1 |           1
+           1 |           1
+           1 |           1
+           2 |           2
+           2 |           2
+           2 |           2
+           2 |           2
+           2 |           2
+           3 |           3
+           3 |           3
+           3 |           3
+           3 |           3
+           3 |           3
+           4 |           4
+           4 |           4
+           4 |           4
+           4 |           4
+           4 |           4
+(25 rows)
+
+--------get the following result when using informational constraint
+alter foreign table nation add constraint primary_key_n_regionkey primary key(n_regionkey) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "primary_key_n_regionkey" for foreign table "nation"
+---------test left nestloop , enable_vector_engine is on.
+set enable_nestloop = on;
+set enable_mergejoin = off;
+set enable_hashjoin = off;
+set enable_vector_engine = on;
+explain (costs off) select region.r_regionkey from nation right join region on region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sort
+               Sort Key: region.r_regionkey
+               ->  Vector Nest Loop Left Join
+                     Join Filter(Informational Constraint Optimization): (region.r_regionkey = nation.n_regionkey)
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: hdfs
+                                 Parquet File: /user/hive/warehouse/mppdb.db/region_parquet
+                     ->  Vector Materialize
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 ->  Vector Foreign Scan on nation
+                                       Server Type: hdfs
+                                       Parquet File: /user/hive/warehouse/mppdb.db/nation_parquet/
+(15 rows)
+
+select region.r_regionkey, nation.n_regionkey from nation right join region on region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+ r_regionkey | n_regionkey 
+-------------+-------------
+           0 |           0
+           1 |           1
+           2 |           2
+           3 |           3
+           4 |           4
+(5 rows)
+
+---------test right nestloop , enable_vector_engine is off.
+set enable_nestloop = on;
+set enable_mergejoin = off;
+set enable_hashjoin = off;
+set enable_vector_engine = off;
+explain (costs off) select region.r_regionkey from nation right join region on region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Sort
+         Sort Key: region.r_regionkey
+         ->  Nested Loop Left Join
+               Join Filter(Informational Constraint Optimization): (region.r_regionkey = nation.n_regionkey)
+               ->  Streaming(type: REDISTRIBUTE)
+                     ->  Foreign Scan on region
+                           Server Type: hdfs
+                           Parquet File: /user/hive/warehouse/mppdb.db/region_parquet
+               ->  Materialize
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Foreign Scan on nation
+                                 Server Type: hdfs
+                                 Parquet File: /user/hive/warehouse/mppdb.db/nation_parquet/
+(14 rows)
+
+select region.r_regionkey, nation.n_regionkey from nation right join region on region.r_regionkey = nation.n_regionkey order by region.r_regionkey;
+ r_regionkey | n_regionkey 
+-------------+-------------
+           0 |           0
+           1 |           1
+           2 |           2
+           3 |           3
+           4 |           4
+(5 rows)
+
+-- third, test NOT IN
+set enable_hashjoin = on;
+set enable_nestloop = on;
+set enable_mergejoin = on;
+--------get the following result when do not using informational constraint
+alter foreign table nation drop constraint primary_key_n_regionkey ;
+set enable_vector_engine = off;
+explain (costs off) select * from region where R_REGIONKEY not in (select N_REGIONKEY from nation ) order by 1;
+                                                               QUERY PLAN                                                               
+----------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Sort
+         Sort Key: region.r_regionkey
+         ->  Nested Loop Anti Join
+               Join Filter: ((region.r_regionkey = nation.n_regionkey) OR (region.r_regionkey IS NULL) OR (nation.n_regionkey IS NULL))
+               ->  Foreign Scan on region
+                     Server Type: hdfs
+                     Parquet File: /user/hive/warehouse/mppdb.db/region_parquet
+               ->  Materialize
+                     ->  Streaming(type: BROADCAST)
+                           ->  Foreign Scan on nation
+                                 Server Type: hdfs
+                                 Parquet File: /user/hive/warehouse/mppdb.db/nation_parquet/
+(13 rows)
+
+set enable_vector_engine = on;
+explain (costs off) select * from region where R_REGIONKEY not in (select N_REGIONKEY from nation ) order by 1;
+                                                                  QUERY PLAN                                                                  
+----------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sort
+               Sort Key: region.r_regionkey
+               ->  Vector Nest Loop Anti Join
+                     Join Filter: ((region.r_regionkey = nation.n_regionkey) OR (region.r_regionkey IS NULL) OR (nation.n_regionkey IS NULL))
+                     ->  Vector Foreign Scan on region
+                           Server Type: hdfs
+                           Parquet File: /user/hive/warehouse/mppdb.db/region_parquet
+                     ->  Vector Materialize
+                           ->  Vector Streaming(type: BROADCAST)
+                                 ->  Vector Foreign Scan on nation
+                                       Server Type: hdfs
+                                       Parquet File: /user/hive/warehouse/mppdb.db/nation_parquet/
+(14 rows)
+
+--------get the following result when using informational constraint
+alter foreign table nation add constraint primary_key_n_regionkey primary key(n_regionkey) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "primary_key_n_regionkey" for foreign table "nation"
+alter foreign table region add constraint primary_key_r_regionkey primary key(r_regionkey) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "primary_key_r_regionkey" for foreign table "region"
+set enable_vector_engine = off;
+explain (costs off) select * from region where R_REGIONKEY not in (select N_REGIONKEY from nation ) order by 1;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Sort
+         Sort Key: region.r_regionkey
+         ->  Hash Right Anti Join
+               Hash Cond: (nation.n_regionkey = region.r_regionkey)
+               ->  Streaming(type: REDISTRIBUTE)
+                     ->  Foreign Scan on nation
+                           Server Type: hdfs
+                           Parquet File: /user/hive/warehouse/mppdb.db/nation_parquet/
+               ->  Hash
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Foreign Scan on region
+                                 Server Type: hdfs
+                                 Parquet File: /user/hive/warehouse/mppdb.db/region_parquet
+(14 rows)
+
+set enable_vector_engine = on;
+explain (costs off) select * from region where R_REGIONKEY not in (select N_REGIONKEY from nation ) order by 1;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sort
+               Sort Key: region.r_regionkey
+               ->  Vector Hash Right Anti Join
+                     Hash Cond: (nation.n_regionkey = region.r_regionkey)
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  Vector Foreign Scan on nation
+                                 Server Type: hdfs
+                                 Parquet File: /user/hive/warehouse/mppdb.db/nation_parquet/
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: hdfs
+                                 Parquet File: /user/hive/warehouse/mppdb.db/region_parquet
+(14 rows)
+
+--test group by 
+---------get the following result when do not using informational constraint
+alter foreign table nation drop constraint primary_key_n_regionkey; 
+alter foreign table region drop constraint primary_key_r_regionkey;
+explain (costs off) select region.r_regionkey from region, nation where region.r_regionkey = nation.n_regionkey group by region.r_regionkey order by 1; 
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: region.r_regionkey
+         ->  Vector Hash Aggregate
+               Group By Key: region.r_regionkey
+               ->  Vector Streaming (type: GATHER)
+                     ->  Vector Hash Aggregate
+                           Group By Key: region.r_regionkey
+                           ->  Vector Hash Join
+                                 Hash Cond: (region.r_regionkey = nation.n_regionkey)
+                                 ->  Vector Streaming(type: BROADCAST)
+                                       ->  Vector Foreign Scan on region
+                                             Server Type: hdfs
+                                             Parquet File: /user/hive/warehouse/mppdb.db/region_parquet
+                                 ->  Vector Foreign Scan on nation
+                                       Server Type: hdfs
+                                       Parquet File: /user/hive/warehouse/mppdb.db/nation_parquet/
+(17 rows)
+
+--------get the following result when using informational constraint
+alter foreign table region add constraint primary_key_r_regionkey primary key(r_regionkey) not enforced;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "primary_key_r_regionkey" for foreign table "region"
+------this case will do not optimization
+explain (costs off) select region.r_regionkey from region, nation where region.r_regionkey = nation.n_regionkey group by region.r_regionkey order by 1; 
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: region.r_regionkey
+         ->  Vector Hash Aggregate
+               Group By Key: region.r_regionkey
+               ->  Vector Streaming (type: GATHER)
+                     ->  Vector Hash Aggregate
+                           Group By Key: region.r_regionkey
+                           ->  Vector Hash Join
+                                 Hash Cond: (region.r_regionkey = nation.n_regionkey)
+                                 ->  Vector Streaming(type: BROADCAST)
+                                       ->  Vector Foreign Scan on region
+                                             Server Type: hdfs
+                                             Parquet File: /user/hive/warehouse/mppdb.db/region_parquet
+                                 ->  Vector Foreign Scan on nation
+                                       Server Type: hdfs
+                                       Parquet File: /user/hive/warehouse/mppdb.db/nation_parquet/
+(17 rows)
+
+--add llt
+drop foreign table bool_skip_1;
+ERROR:  foreign table "bool_skip_1" does not exist
+create foreign table bool_skip_1(i int primary key not enforced, a smallint, b bool, c float4, d decimal(10,5))
+server hdfs_server
+options(format 'parquet', foldername '/user/hive/warehouse/bool_skip_1_parquet')
+distribute by roundrobin;
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "bool_skip_1_pkey" for foreign table "bool_skip_1"
+analyze bool_skip_1;
+set enable_hdfs_predicate_pushdown =on;
+select * from bool_skip_1 where b is null and i=15000 and i<15020 order by 1,2,3,4,5;
+   i   | a | b | c  |   d    
+-------+---+---+----+--------
+ 15000 | 5 |   | .5 | .80000
+(1 row)
+
+create foreign table tab_query_1 ( 
+ c_id1 int,
+ c_id2 varchar(2),
+ constraint tab_query_1_cons  unique(c_id1) not enforced ENABLE QUERY OPTIMIZATION
+ )
+server hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/tab_query_1_parquet')
+distribute by roundrobin;
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "tab_query_1_cons" for foreign table "tab_query_1"
+select c_id1 from tab_query_1 group by c_id1 order by 1;
+ c_id1 
+-------
+     1
+     2
+      
+(3 rows)
+
+drop foreign table tab_query_1;
+drop server if exists hdfs_server cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to foreign table region
+drop cascades to foreign table nation
+drop cascades to foreign table bool_skip_1
+set enable_constraint_optimization = off;

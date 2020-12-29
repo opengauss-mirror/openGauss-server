@@ -151,7 +151,7 @@ from tenk1
 group by ten order by ten;
 
 -- window and aggregate with GROUP BY expression (9.2 bug)
-explain (costs off, nodes off)
+explain (costs off)
 select first_value(max(x)) over (), y
   from (select unique1 as x, ten+four as y from tenk1) ss
   group by y;

@@ -73,6 +73,7 @@ TupleTableSlot* ExecSort(SortState* node)
         /* init unique sort state at the first time */
         UpdateUniqueSQLSortStats(NULL, &start_time);
 
+
         SO1_printf("ExecSort: %s\n", "sorting subplan");
 
         /*
@@ -89,9 +90,17 @@ TupleTableSlot* ExecSort(SortState* node)
         outer_node = outerPlanState(node);
         tup_desc = ExecGetResultType(outer_node);
 
-        tuple_sortstate = tuplesort_begin_heap(tup_desc, plan_node->numCols, plan_node->sortColIdx,
-            plan_node->sortOperators, plan_node->collations, plan_node->nullsFirst, sort_mem, NULL,
-            node->randomAccess, max_mem, plan_node->plan.plan_node_id, SET_DOP(plan_node->plan.dop));
+        tuple_sortstate = tuplesort_begin_heap(tup_desc,
+            plan_node->numCols,
+            plan_node->sortColIdx,
+            plan_node->sortOperators,
+            plan_node->collations,
+            plan_node->nullsFirst,
+            sort_mem,
+            node->randomAccess,
+            max_mem,
+            plan_node->plan.plan_node_id,
+            SET_DOP(plan_node->plan.dop));
 
         if (node->bounded) {
             tuplesort_set_bound(tuple_sortstate, node->bound);
@@ -128,8 +137,11 @@ TupleTableSlot* ExecSort(SortState* node)
         /* Finish scanning the subplan, it's safe to early free the memory of lefttree */
         ExecEarlyFree(outerPlanState(node));
 
-        EARLY_FREE_LOG(elog(LOG,"Early Free: Before completing the sort at node %d, memory used %d MB.",
-            plan_node->plan.plan_node_id, getSessionMemoryUsageMB()));
+        EARLY_FREE_LOG(elog(LOG,
+            "Early Free: Before completing the sort "
+            "at node %d, memory used %d MB.",
+            plan_node->plan.plan_node_id,
+            getSessionMemoryUsageMB()));
 
         /*
          * Complete the sort.
@@ -161,8 +173,10 @@ TupleTableSlot* ExecSort(SortState* node)
             plan_state->instrument->width = (int)tuplesort_get_avgwidth(tuple_sortstate);
             plan_state->instrument->sysBusy = tuplesort_get_busy_status(tuple_sortstate);
             plan_state->instrument->spreadNum = tuplesort_get_spread_num(tuple_sortstate);
-            tuplesort_get_stats(tuple_sortstate, &(plan_state->instrument->sorthashinfo.sortMethodId),
-                &(plan_state->instrument->sorthashinfo.spaceTypeId), &(plan_state->instrument->sorthashinfo.spaceUsed));
+            tuplesort_get_stats(tuple_sortstate,
+                &(plan_state->instrument->sorthashinfo.sortMethodId),
+                &(plan_state->instrument->sorthashinfo.spaceTypeId),
+                &(plan_state->instrument->sorthashinfo.spaceUsed));
         }
         SO1_printf("ExecSort: %s\n", "sorting done");
         (void)pgstat_report_waitstatus(old_status);
@@ -236,9 +250,15 @@ SortState* ExecInitSort(Sort* node, EState* estate, int eflags)
      * initialize tuple type.  no need to initialize projection info because
      * this node doesn't do projections.
      */
-    ExecAssignResultTypeFromTL(&sortstate->ss.ps);
     ExecAssignScanTypeFromOuterPlan(&sortstate->ss);
+
+    ExecAssignResultTypeFromTL(
+            &sortstate->ss.ps,
+            sortstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+
     sortstate->ss.ps.ps_ProjInfo = NULL;
+
+    Assert(sortstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
 
     SO1_printf("ExecInitSort: %s\n", "sort node initialized");
 
@@ -369,8 +389,10 @@ void ExecReScanSort(SortState* node)
     if (node->ss.ps.lefttree->chgParam != NULL || node->bounded != node->bounded_Done ||
         node->bound != node->bound_Done || !node->randomAccess) {
         node->sort_Done = false;
-        tuplesort_end((Tuplesortstate*)node->tuplesortstate);
-        node->tuplesortstate = NULL;
+        if (node->tuplesortstate != NULL) {
+            tuplesort_end((Tuplesortstate*)node->tuplesortstate);
+            node->tuplesortstate = NULL;
+        }
 
         /*
          * if chgParam of subnode is not null then plan will be re-scanned by
@@ -381,8 +403,10 @@ void ExecReScanSort(SortState* node)
     } else {
         if (node->ss.ps.plan->ispwj && need_switch_partition) {
             node->sort_Done = false;
-            tuplesort_end((Tuplesortstate*)node->tuplesortstate);
-            node->tuplesortstate = NULL;
+            if (node->tuplesortstate != NULL) {
+                tuplesort_end((Tuplesortstate*)node->tuplesortstate);
+                node->tuplesortstate = NULL;
+            }
 
             /*
              * if chgParam of subnode is not null then plan will be re-scanned by

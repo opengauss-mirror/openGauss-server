@@ -86,17 +86,11 @@ Datum lo_open(PG_FUNCTION_ARGS)
             errdetail("The feature is not currently supported")));
 #endif
 
-#if FSDB
-    ereport(DEBUG4, (errmsg("lo_open(%u,%d)", lobjId, mode)));
-#endif
-
     CreateFSContext();
 
     lobjDesc = inv_open(lobjId, mode, u_sess->libpq_cxt.fscxt);
+
     if (lobjDesc == NULL) { /* lookup failed */
-#if FSDB
-        ereport(DEBUG4, (errmsg("could not open large object %u", lobjId)));
-#endif
         PG_RETURN_INT32(-1);
     }
 
@@ -118,10 +112,6 @@ Datum lo_close(PG_FUNCTION_ARGS)
 
     if (fd < 0 || fd >= u_sess->libpq_cxt.cookies_size || u_sess->libpq_cxt.cookies[fd] == NULL)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("invalid large-object descriptor: %d", fd)));
-
-#if FSDB
-    ereport(DEBUG4, (errmsg("lo_close(%d)", fd)));
-#endif
 
     inv_close(u_sess->libpq_cxt.cookies[fd]);
 

@@ -31,6 +31,9 @@
 #include "access/cstore_am.h"
 #include "pgxc/execRemote.h"
 #include "access/cstoreskey.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/common/data_row.h"
+#endif
 
 typedef ScalarVector* (*vecqual_func)(ExprContext* econtext);
 
@@ -169,6 +172,7 @@ typedef struct VecToRowState {
     Datum* m_ttsvalues;            // column values of the active batch
     bool* m_ttsisnull;             // indicator if one column value is null
 
+    int part_id;
     DevectorizeFun* devectorizeFunRuntime;
 
 } VecToRowState;
@@ -209,7 +213,7 @@ typedef struct CStoreScanRunTimeKeyInfo {
 typedef struct CStoreScanState : ScanState {
     Relation ss_currentDeltaRelation;
     Relation ss_partition_parent;
-    HeapScanDesc ss_currentDeltaScanDesc;
+    TableScanDesc ss_currentDeltaScanDesc;
     bool ss_deltaScan;
     bool ss_deltaScanEnd;
 
@@ -244,32 +248,36 @@ typedef struct DfsScanState : ScanState {
     List* m_splitList;
 } DfsScanState;
 
+class TimeRange;
+class TagFilters;
+class TsStoreSearch;
+
 typedef struct TsStoreScanState : ScanState {
-    Relation ss_currentDeltaRelation;
+    /* Determined by upper layer */
+    int top_key_func_arg;
+    bool is_simple_scan;
+    bool has_sort;
+    int limit;                       // If is limit n
+    AttrNumber sort_by_time_colidx;  // If is sort by tstime limit n
+#ifdef ENABLE_MULTIPLE_NODES
+    TagRows* tag_rows;
+#endif
+    bool only_scan_tag;             // series function
+    /* regular member */
+    VectorBatch* scanBatch;          // batch to work on
+    VectorBatch* currentBatch;       // output batch
     Relation ss_partition_parent;
-    HeapScanDesc ss_currentDeltaScanDesc;
-    bool ss_deltaScan;
-    bool ss_deltaScanEnd;
-
-    VectorBatch* m_pScanBatch;     // batch to work on
-    VectorBatch* m_pCurrentBatch;  // output batch
-    CStoreScanRunTimeKeyInfo* m_pScanRunTimeKeys;
-    int m_ScanRunTimeKeysNum;
-    bool m_ScanRunTimeKeysReady;
-
-    CStore* m_CStore;
-    /*Optimizer Information*/
-    CStoreScanKey csss_ScanKeys;  // support pushing predicate down to cstore scan.
-    int csss_NumScanKeys;
-
-    // Optimization for access pattern
-    //
-    bool m_fSimpleMap;     // if it is simple without need to invoke projection code
-    bool m_fUseColumnRef;  // Use column reference without copy to return data
-
     vecqual_func jitted_vecqual;
+    /* ts special */
+    TsStoreSearch* ts_store_search;
+    int tag_id_num;
+    bool only_const_col;
+    bool early_stop;
+    bool tags_scan_done;            // cu data has not been finished
+    TimeRange* time_range;          // time range
+    int scaned_tuples;
+    bool first_scan;
 
-    bool m_isReplicaTable; /* If it is a replication table? */
 } TsStoreScanState;
 
 class Batchsortstate;

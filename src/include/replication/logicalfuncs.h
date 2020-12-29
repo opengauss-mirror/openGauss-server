@@ -25,7 +25,6 @@ extern Datum pg_logical_slot_get_binary_changes(PG_FUNCTION_ARGS);
 extern Datum pg_logical_slot_peek_changes(PG_FUNCTION_ARGS);
 extern Datum pg_logical_slot_peek_binary_changes(PG_FUNCTION_ARGS);
 extern Datum pg_logical_peek_changes(PG_FUNCTION_ARGS);
-extern void check_permissions(void);
+extern void check_permissions(bool for_backup = false);
 
 #endif
-

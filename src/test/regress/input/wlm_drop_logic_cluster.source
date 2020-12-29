@@ -1,0 +1,52 @@
+CREATE DATABASE wlm_drop_logic_cluster;
+\c wlm_drop_logic_cluster
+set resource_track_duration=0;
+set query_band='wlm_drop_logic_cluster_test';
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_drop_logic_cluster -c "CREATE NODE GROUP vc1 WITH (datanode1,datanode2) VCGROUP;" > /dev/null 2>&1
+CREATE USER vc1 password 'gauss@123' node group vc1 vcadmin;
+CREATE USER u1 password 'gauss@123' node group vc1;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_drop_logic_cluster -c "CREATE TABLE test(name text);"
+--output
+DECLARE
+sql_stmt VARCHAR2(500);
+my_cursor REFCURSOR;
+username text;
+schemaname  text;
+tablename text;
+relkind  CHAR;
+BEGIN
+sql_stmt := 'select rolname from  pg_authid join pgxc_group on pg_authid.rolnodegroup=pgxc_group.oid where pgxc_group.group_kind=''v'' and pgxc_group.group_name=''vc1'' ';
+OPEN my_cursor FOR EXECUTE sql_stmt;
+FETCH FROM my_cursor INTO username;
+WHILE my_cursor % FOUND LOOP
+INSERT INTO test values (username);
+EXECUTE IMMEDIATE 'DROP OWNED BY '||username||' CASCADE';
+FETCH FROM my_cursor INTO username;
+END LOOP;
+CLOSE my_cursor;
+sql_stmt := 'SELECT n.nspname AS schemaname, c.relname AS tablename, c.relkind AS relkind FROM pg_class c LEFT JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pgxc_class x ON x.pcrelid = c.oid WHERE x.pgroup=''vc1'' ';
+OPEN my_cursor FOR EXECUTE sql_stmt;
+FETCH FROM my_cursor INTO schemaname, tablename, relkind;
+WHILE my_cursor % FOUND LOOP
+IF relkind = 'f' THEN
+EXECUTE IMMEDIATE 'DROP FOREIGN TABLE '||schemaname||'.'||tablename||' CASCADE';
+ELSE
+EXECUTE IMMEDIATE 'DROP TABLE '||schemaname||'.'||tablename||' CASCADE';
+END IF;
+FETCH FROM my_cursor INTO schemaname, tablename, relkind;
+END LOOP;
+CLOSE my_cursor;
+END;
+/
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_drop_logic_cluster -c "select count(*) from (SELECT n.nspname AS schemaname, c.relname AS tablename, c.relkind AS relkind FROM pg_class c LEFT JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pgxc_class x ON x.pcrelid = c.oid WHERE x.pgroup='vc1');"
+--output
+DROP USER u1;
+DROP USER vc1 CASCADE;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_drop_logic_cluster -c "select rolname from pg_authid join pgxc_group on pg_authid.rolnodegroup=pgxc_group.oid where pgxc_group.group_kind='v' and pgxc_group.group_name='vc1';"
+--output
+drop node group vc1;
+drop node group elastic_group;
+\c postgres
+drop database wlm_drop_logic_cluster;
+\c regression
+--end of file

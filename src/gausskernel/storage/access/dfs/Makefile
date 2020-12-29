@@ -17,7 +17,7 @@
 #     Makefile for the access methods module
 # 
 # IDENTIFICATION
-#        src/gausskernel/storage/access/dfs/Makefile
+#     src/gausskernel/storage/access/dfs/Makefile
 # 
 # ---------------------------------------------------------------------------------------
 
@@ -27,6 +27,10 @@ include $(top_builddir)/src/Makefile.global
 
 SUBDIRS = orc text csv parquet
 
+ifeq ($(enable_multiple_nodes), yes)
+SUBDIRS += carbondata
+endif
+
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"
      ifneq "$(shell which g++ |grep hutaf_llt |wc -l)" "1"
@@ -34,6 +38,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
      endif
   endif
 endif
-OBJS = dfs_uri.o dfs_am.o dfs_delete.o dfs_insert.o dfs_parinsert.o dfs_query.o dfs_update.o dfsdesc.o  dfs_stream_factory.o common_parser.o common_reader.o
+OBJS = dfs_uri.o dfs_am.o dfs_delete.o dfs_insert.o dfs_parinsert.o dfs_query.o dfs_query_check.o dfs_query_reader.o dfs_update.o dfsdesc.o  dfs_stream_factory.o common_parser.o common_reader.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

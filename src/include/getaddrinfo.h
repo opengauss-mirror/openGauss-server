@@ -26,6 +26,7 @@
 #include <netdb.h>
 
 /* Various macros that ought to be in <netdb.h>, but might not be */
+
 #ifndef EAI_FAIL
 #ifndef WIN32
 #define EAI_BADFLAGS (-1)
@@ -152,4 +153,3 @@ extern int getnameinfo(
 #endif /* HAVE_GETADDRINFO */
 
 #endif /* GETADDRINFO_H */
-

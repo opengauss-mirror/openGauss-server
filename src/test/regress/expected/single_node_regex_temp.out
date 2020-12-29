@@ -102,7 +102,7 @@ SELECT regexp_matches('1' || chr(10) || '2' || chr(10) || '3' || chr(10) || '4' 
  {""}
 (5 rows)
 
-create database tpcds dbcompatibility 'c';
+create database tpcds dbcompatibility 'C';
 \c tpcds
 select regexp_matches('foo/bar/baz',
                       '^([^/]+?)(?:/([^/]+?))(?:/([^/]+?))?$', '');

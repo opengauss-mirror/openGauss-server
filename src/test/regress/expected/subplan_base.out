@@ -33,7 +33,7 @@ explain (costs off) select a1 from t_subplan1 as t1 where t1.a1 = (select t2.a2 
 (8 rows)
 
 -- 1. initplan
-explain (costs off, nodes off)
+explain (costs off)
 select case when (select count(*)
                   from t_subplan2
                   where a2 between 1 and 20) > 15
@@ -112,7 +112,7 @@ where a1 = 5 or a1 = 6
  11.5000000000000000 | 4.7727272727272727
 (2 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select  a1, count(*) cnt
  from t_subplan1
  ,t_subplan2
@@ -175,7 +175,7 @@ select  a1, count(*) cnt
  15 |   1
 (10 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select  a1, count(*) cnt
  from t_subplan1
  ,t_subplan2
@@ -264,7 +264,7 @@ select  a1, count(*) cnt
 (32 rows)
 
 -- 2. subplan
-explain (costs off, nodes off)
+explain (costs off)
 with t as
 (select d1
 ,d2
@@ -333,7 +333,7 @@ limit 10;
     49
 (9 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 with t as
 (select d1
 ,d2
@@ -413,7 +413,7 @@ limit 10;
     49
 (9 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 with t as
 (select d1
 ,d2
@@ -492,7 +492,7 @@ limit 10;
     49
 (9 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select * from t_subplan1 t1
 where
  exists (select * from t_subplan2 t2
@@ -592,7 +592,7 @@ order by 1,2,3,4;
 
 ;
 -- 3. initplan & subplan
-explain (costs off, nodes off)
+explain (costs off)
 select  a1, count(*) cnt
  from t_subplan1
  ,t_subplan2
@@ -660,7 +660,7 @@ select  a1, count(*) cnt
 (5 rows)
 
  
-explain (costs off, nodes off)
+explain (costs off)
 select  a1, count(*) cnt
  from t_subplan1
  ,t_subplan2
@@ -731,7 +731,7 @@ select  a1, count(*) cnt
  31 |   1
 (5 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select  a1, count(*) cnt
  from t_subplan1
  ,t_subplan2
@@ -805,7 +805,7 @@ select  a1, count(*) cnt
  32 |   1
 (7 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select  a1, count(*) cnt
  from t_subplan1
  ,t_subplan2
@@ -874,7 +874,7 @@ select  a1, count(*) cnt
 (10 rows)
 
 -- setop
-explain (costs off, nodes off)
+explain (costs off)
 select * from t_subplan1 where a1 in (select a2 from t_subplan2 where b2=b1 intersect select c2 from t_subplan2) order by 1, 2 limit 5;
                               QUERY PLAN                              
 ----------------------------------------------------------------------
@@ -903,7 +903,7 @@ select * from t_subplan1 where a1 in (select a2 from t_subplan2 where b2=b1 inte
   5 |  5 |  5 |  5
 (5 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select * from t_subplan1 where a1 in (select a2 from t_subplan2 where b2=b1 union all select c2 from t_subplan2) order by 1, 2 limit 5;
                            QUERY PLAN                           
 ----------------------------------------------------------------
@@ -930,7 +930,7 @@ select * from t_subplan1 where a1 in (select a2 from t_subplan2 where b2=b1 unio
   2 |  2 |  2 |  2
 (5 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select * from t_subplan1 where a1 in (select a2 from t_subplan2 where b2=b1 union all select c2 from t_subplan2 where d2=c1) order by 1, 2 limit 5;
                            QUERY PLAN                           
 ----------------------------------------------------------------
@@ -966,7 +966,7 @@ insert into t_subplan3 values(1, 20);
 insert into t_subplan3 values(27, 27);
 insert into t_subplan4 values(1, 20);
 insert into t_subplan4 values(27, 27);
-explain (costs off, nodes off)
+explain (costs off)
 delete t_subplan3 where b3=(select max(b2) from t_subplan2);
                    QUERY PLAN                   
 ------------------------------------------------
@@ -988,7 +988,7 @@ select * from t_subplan3;
   1 | 20
 (1 row)
 
-explain (costs off, nodes off)
+explain (costs off)
 update t_subplan4 set b4=(select a2 from t_subplan2 where a2=40);
            QUERY PLAN           
 --------------------------------
@@ -1007,7 +1007,7 @@ select * from t_subplan4;
  27 | 40
 (2 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select max(a3) from t_subplan3 where (a3, b3)=(select a3, b3 from t_subplan3) and a3=1;
                                       QUERY PLAN                                      
 --------------------------------------------------------------------------------------
@@ -1036,7 +1036,7 @@ select max(a3) from t_subplan3 where (a3, b3)=(select a3, b3 from t_subplan3) an
 (1 row)
 
 delete from t_subplan4 where a4=27;
-explain (costs off, nodes off)
+explain (costs off)
 select max(a4) from t_subplan4 where (a4, b4)=(select a4, b4 from t_subplan4) and a4=1;
                                  QUERY PLAN                                  
 -----------------------------------------------------------------------------
@@ -1057,7 +1057,7 @@ select max(a4) from t_subplan4 where (a4, b4)=(select a4, b4 from t_subplan4) an
    1
 (1 row)
 
-explain (costs off, nodes off)
+explain (costs off)
 select * from t_subplan2 where (b2, c2) = (select b3, a3+7 from t_subplan3) or (b2, d2) = (select b4/2, a4+2 from t_subplan4) order by 1, 2, 3, 4;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
@@ -1081,7 +1081,7 @@ select * from t_subplan2 where (b2, c2) = (select b3, a3+7 from t_subplan3) or (
  20 | 20 |  8 |  2
 (2 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 with recursive abc as (select * from t_subplan2)
 update t_subplan3 set b3=(select max(b2) from t_subplan2) from abc where abc.b2=b3;
                       QUERY PLAN                      
@@ -1104,7 +1104,7 @@ update t_subplan3 set b3=(select max(b2) from t_subplan2) from abc where abc.b2=
 
 with recursive abc as (select * from t_subplan2)
 update t_subplan3 set b3=(select max(b2) from t_subplan2) from abc where abc.b2=b3;
-explain (costs off, nodes off)
+explain (costs off)
 SELECT ((SELECT PG_DATABASE_SIZE((SELECT OID FROM PG_DATABASE WHERE upper(DATNAME)='POSTGRES'))) = (SELECT PG_DATABASE_SIZE((SELECT OID FROM PG_DATABASE WHERE upper(DATNAME)='REGRESSION'))));
                                QUERY PLAN                                
 -------------------------------------------------------------------------
@@ -1132,7 +1132,7 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for tab
 create table t2(a int, b int);
 insert into t1 select generate_series(1, 10), generate_series(1, 10);
 insert into t2 values(1, 5), (2, 15);
-explain (costs off, nodes off)
+explain (costs off)
 with abc as (select a, b from t2)
 update t1 set b=(select b from t2 where a=2) from abc where abc.a=1 and abc.a=t1.a;
                       QUERY PLAN                      
@@ -1170,7 +1170,7 @@ select * from t1 order by 1,2;
  10 | 10
 (10 rows)
 
-explain (costs off, nodes off)
+explain (costs off)
 select * from t2 where a <= all (select a from t2);
           QUERY PLAN          
 ------------------------------
@@ -1187,7 +1187,7 @@ select * from t2 where a <= all (select a from t2);
  1 | 5
 (1 row)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select c1, d1 from t_subplan1
 where exists(select b from t2 where a>=2)
 group by c1, d1 order by c1+1 desc, 2 desc limit 5;
@@ -1223,7 +1223,7 @@ group by c1, d1 order by c1+1 desc, 2 desc limit 5;
  12 |  1
 (5 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan2 where
  exists (select d1 from t_subplan1 where d1<8 and
   exists (select b1 from t_subplan1 where c1<20 and
@@ -1301,7 +1301,7 @@ order by a2, b2, c2, d2 limit 10;
  15 | 15 |  3 |  6
 (10 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan2 where
  exists( select max(a1),count(b1),c2 from t_subplan1 group by rollup(c2,c2) having c2>2 and c2 is not null)
 order by a2,b2,c2,d2 limit 10;
@@ -1344,7 +1344,7 @@ order by a2,b2,c2,d2 limit 10;
 (10 rows)
 
 -- test any, all, rowcompare, array sublink
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan1 where a1 in (select count(c2) from t_subplan2) or d1=0 order by 1,2,3,4;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
@@ -1383,7 +1383,7 @@ select * from t_subplan1 where a1 in (select count(c2) from t_subplan2) or d1=0 
  96 | 16 |  5 |  0
 (17 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan1 where a1 in (select count(c2) from t_subplan2 where c1>d2 minus all select d1 from t_subplan2) or d1=0 order by 1,2,3,4;
                                                                                                  QUERY PLAN                                                                                                 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1432,7 +1432,7 @@ select * from t_subplan1 where a1 in (select count(c2) from t_subplan2 where c1>
  96 | 16 |  5 |  0
 (17 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan1 where a1 in (select count(c2)::int from t_subplan2 where c1>d2 union all select d1 from t_subplan2) or d1=0 order by 1,2,3,4 limit 5;
                                                                                                  QUERY PLAN                                                                                                 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1467,7 +1467,7 @@ select * from t_subplan1 where a1 in (select count(c2)::int from t_subplan2 wher
   5 |  5 |  5 |  5
 (5 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select b1, count(*) from t_subplan1
 where c1 = all (select b2 from t_subplan2 where b2>4)
 or d1 != all (select c2 from t_subplan2 where c2>10)
@@ -1513,7 +1513,7 @@ group by b1 order by 1, 2 limit 5;
 (5 rows)
 
  
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select b1, count(*) from t_subplan1
 where c1 = any (select b2 from t_subplan2 where b2>4)
 or d1 != any (select c2 from t_subplan2 where c2>10)
@@ -1564,7 +1564,7 @@ group by b1 order by 1, 2 limit 5;
 (5 rows)
 
  
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan1 where (10,15)<=(select b1, min(b2) from t_subplan2 group by b1) order by a1, b1, c1, d1;
                                  QUERY PLAN                                 
 ----------------------------------------------------------------------------
@@ -1632,7 +1632,7 @@ select * from t_subplan1 where (10,15)<=(select b1, min(b2) from t_subplan2 grou
  97 | 17 |  6 |  1
 (45 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan1 where (b1,c1) < (select a2, b2 from t_subplan2 where b2=4 and a2=4) order by a1, b1, c1, d1;
                                  QUERY PLAN                                 
 ----------------------------------------------------------------------------
@@ -1673,7 +1673,7 @@ select * from t_subplan1 where (b1,c1) < (select a2, b2 from t_subplan2 where b2
  83 |  3 |  5 |  5
 (20 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan1 where array(select max(b2) from t_subplan2 group by b1)=array(select min(b2) from t_subplan2 group by b1);
                                   QUERY PLAN                                  
 ------------------------------------------------------------------------------
@@ -1699,7 +1699,7 @@ select * from t_subplan1 where array(select max(b2) from t_subplan2 group by b1)
 ----+----+----+----
 (0 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array(select max(b2) from t_subplan2 group by b1) from t_subplan1 order by a1, b1, c1, d1;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
@@ -1821,7 +1821,7 @@ select array(select max(b2) from t_subplan2 group by b1) from t_subplan1 order b
  {27}
 (100 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select array(select a1 from t_subplan1 where t_subplan1.b1=t_subplan2.b2 order by 1) from t_subplan2 order by a2, b2, c2, d2;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
@@ -1895,7 +1895,7 @@ select array(select a1 from t_subplan1 where t_subplan1.b1=t_subplan2.b2 order b
 (50 rows)
 
 -- test cte sublink
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select (with cte(foo) as (select a1) select foo from cte) from t_subplan1 order by 1 limit 3;
                          QUERY PLAN                         
 ------------------------------------------------------------
@@ -1922,7 +1922,7 @@ select (with cte(foo) as (select a1) select foo from cte) from t_subplan1 order 
    1
 (3 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select (with cte(foo) as (select a1 from dual) select foo from cte) from t_subplan1 order by 1 limit 3;
                          QUERY PLAN                         
 ------------------------------------------------------------
@@ -1951,7 +1951,7 @@ select (with cte(foo) as (select a1 from dual) select foo from cte) from t_subpl
    1
 (3 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select (with cte(foo) as (values(b1)) values((select foo from cte))) from t_subplan1 order by 1 limit 3;
                          QUERY PLAN                         
 ------------------------------------------------------------
@@ -1981,7 +1981,7 @@ select (with cte(foo) as (values(b1)) values((select foo from cte))) from t_subp
        0
 (3 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select (with cte(foo) as (select avg(a1) from t_subplan1) select foo from cte) from t_subplan1 order by 1 limit 3;
                                                                                          QUERY PLAN                                                                                         
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2007,7 +2007,7 @@ select (with cte(foo) as (select avg(a1) from t_subplan1) select foo from cte) f
  47.5600000000000000
 (3 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select foo from cte) from t_subplan1 order by 1 limit 3;
                                     QUERY PLAN                                    
 ----------------------------------------------------------------------------------
@@ -2036,7 +2036,7 @@ select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select f
    0
 (3 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select foo+t_subplan1.c1 from cte) from t_subplan1 order by 1 limit 3; 
                                     QUERY PLAN                                    
 ----------------------------------------------------------------------------------
@@ -2065,7 +2065,7 @@ select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select f
         2
 (3 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) values((select foo from cte))) from t_subplan1 order by 1 limit 3;
                                     QUERY PLAN                                    
 ----------------------------------------------------------------------------------
@@ -2097,7 +2097,7 @@ select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) values((
        0
 (3 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select (with cte(foo) as (values(b1)) select foo from cte) from t_subplan1 order by 1 limit 3;
                          QUERY PLAN                         
 ------------------------------------------------------------
@@ -2124,7 +2124,7 @@ select (with cte(foo) as (values(b1)) select foo from cte) from t_subplan1 order
    0
 (3 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select (select b1 from (values((select b1 from t_subplan2 limit 1), (select a1 from t_subplan2 limit 1))) as t(c,d)) from t_subplan1 order by 1 limit 3; 
                                     QUERY PLAN                                    
 ----------------------------------------------------------------------------------
@@ -2159,7 +2159,7 @@ select (select b1 from (values((select b1 from t_subplan2 limit 1), (select a1 f
 (3 rows)
 
 -- test cte sublink applied in different subquery level
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
  select count(*) from (select 'abc', count(d2) from tmp))
  order by 1,2,3,4;
@@ -2199,7 +2199,7 @@ select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 wher
  92 | 12 |  1 |  2
 (8 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan1 where a1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
  select count(*) from (select 'abc', d2 from tmp))
  order by 1,2,3,4;
@@ -2231,7 +2231,7 @@ select * from t_subplan1 where a1 = (with tmp as (select d2 from t_subplan2 wher
   2 |  2 |  2 |  2
 (2 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
  select count(*) from (select 'abc', count(d2) from tmp tmp1
  where d2>(select count(*) from tmp tmp2 where tmp2.d2=tmp1.d2)))
@@ -2280,7 +2280,7 @@ select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 wher
  92 | 12 |  1 |  2
 (8 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
  select count(*) from (select 'abc', d2 from tmp tmp1
  where d2>(select count(*) from tmp tmp2 where tmp2.d2=tmp1.d2)))
@@ -2327,7 +2327,7 @@ select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 wher
  91 | 11 |  0 |  1
 (8 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan1 left join
 (select a2, b2, (select b1 from t_subplan1 limit 1) c2 from t_subplan2)
 on b2=b1 and a1 not in (null)
@@ -2375,7 +2375,7 @@ inner join t_subplan1 t3 on t3.a1=t_subplan1.c1 where t3.a1=0 order by 1,2,3,4 l
  65 |  5 |  0 |  5 |    |    |    |  0 | 18 |  7 |  2
 (5 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select count(*) from t_subplan2 group by a2,b2 order by (a2,b2) > some(select min(a1), length(trim(b2)) from t_subplan1), 1;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
@@ -2409,7 +2409,7 @@ select count(*) from t_subplan2 group by a2,b2 order by (a2,b2) > some(select mi
      1
 (10 rows)
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 select * from t_subplan2 where (select 200 from t_subplan1 group by 1 limit 1) not in (select a1 from t_subplan1 order by 1)
 order by 1,2,3,4 limit 5;
                                        QUERY PLAN                                       
@@ -2452,7 +2452,7 @@ order by 1,2,3,4 limit 5;
 (5 rows)
 
 -- update
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 update t_subplan2 set d2 = t1.b from (select max(a1) b from t_subplan1 group by c1 not in (select a1*0-1 from t_subplan1)) t1;
                                                 QUERY PLAN                                                
 ----------------------------------------------------------------------------------------------------------

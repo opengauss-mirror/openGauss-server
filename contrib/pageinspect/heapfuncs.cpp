@@ -104,7 +104,7 @@ Datum heap_page_items(PG_FUNCTION_ARGS)
         fctx->max_calls = PageGetMaxOffsetNumber(inter_call_data->page);
         fctx->user_fctx = inter_call_data;
 
-        (void)MemoryContextSwitchTo(mctx);
+        MemoryContextSwitchTo(mctx);
     }
 
     fctx = SRF_PERCALL_SETUP();

@@ -43,7 +43,7 @@
 #include "utils/rel_gs.h"
 
 #include "commands/dbcommands.h"
-#include "lz4.h"
+
 /*
  * During XLOG replay, we may see XLOG records for incremental updates of
  * pages that no longer exist, because their relation was later dropped or
@@ -66,18 +66,16 @@ typedef struct xl_invalid_page {
 } xl_invalid_page;
 
 /* Report a reference to an invalid page */
-static void report_invalid_page(int elevel, const RelFileNode& node, ForkNumber forkno, BlockNumber blkno, bool present)
+static void report_invalid_page(int elevel, const RelFileNode &node, ForkNumber forkno, BlockNumber blkno, bool present)
 {
-    char* path = relpathperm(node, forkno);
+    char *path = relpathperm(node, forkno);
 
     if (present)
-        ereport(elevel,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("page %u of relation %s is uninitialized", blkno, path)));
+        ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                         errmsg("page %u of relation %s is uninitialized", blkno, path)));
     else
-        ereport(elevel,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("page %u of relation %s does not exist", blkno, path)));
+        ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                         errmsg("page %u of relation %s does not exist", blkno, path)));
     pfree(path);
 }
 
@@ -99,19 +97,16 @@ void closeXLogRead()
 #endif
 
     if (close(t_thrd.xlog_cxt.sendFile))
-        ereport(PANIC,
-            (errcode_for_file_access(),
-                errmsg("could not close log file %u, segment %lu: %m",
-                    t_thrd.xlog_cxt.sendId,
-                    t_thrd.xlog_cxt.sendSegNo)));
+        ereport(PANIC, (errcode_for_file_access(), errmsg("could not close log file %u, segment %lu: %m",
+                                                          t_thrd.xlog_cxt.sendId, t_thrd.xlog_cxt.sendSegNo)));
     t_thrd.xlog_cxt.sendFile = -1;
 }
 
 /* Log a reference to an invalid page */
-void log_invalid_page(const RelFileNode& node, ForkNumber forkno, BlockNumber blkno, bool present)
+void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber blkno, bool present)
 {
     xl_invalid_page_key key;
-    xl_invalid_page* hentry = NULL;
+    xl_invalid_page *hentry = NULL;
     bool found = false;
     errno_t errorno = EOK;
 
@@ -142,7 +137,6 @@ void log_invalid_page(const RelFileNode& node, ForkNumber forkno, BlockNumber bl
             ctl.hcxt = g_instance.comm_cxt.predo_cxt.parallelRedoCtx;
             flag |= HASH_SHRCTX;
         }
-        /* init hash table with size of 100 */
         t_thrd.xlog_cxt.invalid_page_tab = hash_create("XLOG invalid-page table", 100, &ctl, flag);
     }
 
@@ -150,7 +144,7 @@ void log_invalid_page(const RelFileNode& node, ForkNumber forkno, BlockNumber bl
     key.node = node;
     key.forkno = forkno;
     key.blkno = blkno;
-    hentry = (xl_invalid_page*)hash_search(t_thrd.xlog_cxt.invalid_page_tab, (void*)&key, HASH_ENTER, &found);
+    hentry = (xl_invalid_page *)hash_search(t_thrd.xlog_cxt.invalid_page_tab, (void *)&key, HASH_ENTER, &found);
 
     if (!found) {
         /* hash_search already filled in the key */
@@ -165,10 +159,10 @@ void log_invalid_page(const RelFileNode& node, ForkNumber forkno, BlockNumber bl
 }
 
 /* Forget any invalid pages >= minblkno, because they've been dropped */
-static void forget_invalid_pages(const RelFileNode& node, ForkNumber forkno, BlockNumber minblkno)
+static void forget_invalid_pages(const RelFileNode &node, ForkNumber forkno, BlockNumber minblkno)
 {
     HASH_SEQ_STATUS status;
-    xl_invalid_page* hentry = NULL;
+    xl_invalid_page *hentry = NULL;
 
     if (t_thrd.xlog_cxt.invalid_page_tab == NULL)
         return; /* nothing to do */
@@ -180,18 +174,18 @@ static void forget_invalid_pages(const RelFileNode& node, ForkNumber forkno, Blo
 
     hash_seq_init(&status, t_thrd.xlog_cxt.invalid_page_tab);
 
-    while ((hentry = (xl_invalid_page*)hash_seq_search(&status)) != NULL) {
-        if (RelFileNodeEquals(hentry->key.node, node) && hentry->key.forkno == forkno &&
+    while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
+        if (BucketRelFileNodeEquals(node, hentry->key.node) && hentry->key.forkno == forkno &&
             hentry->key.blkno >= minblkno) {
             if (log_min_messages <= DEBUG2 || client_min_messages <= DEBUG2) {
-                char* path = relpathperm(hentry->key.node, forkno);
+                char *path = relpathperm(hentry->key.node, forkno);
 
                 ereport(DEBUG2, (errmsg("page %u of relation %s has been dropped", hentry->key.blkno, path)));
 
                 pfree(path);
             }
 
-            if (hash_search(t_thrd.xlog_cxt.invalid_page_tab, (void*)&hentry->key, HASH_REMOVE, NULL) == NULL)
+            if (hash_search(t_thrd.xlog_cxt.invalid_page_tab, (void *)&hentry->key, HASH_REMOVE, NULL) == NULL)
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hash table corrupted")));
         }
     }
@@ -205,7 +199,7 @@ static void forget_invalid_pages(const RelFileNode& node, ForkNumber forkno, Blo
 static void forget_invalid_pages_db(Oid dbid)
 {
     HASH_SEQ_STATUS status;
-    xl_invalid_page* hentry = NULL;
+    xl_invalid_page *hentry = NULL;
 
     if (t_thrd.xlog_cxt.invalid_page_tab == NULL)
         return; /* nothing to do */
@@ -216,16 +210,16 @@ static void forget_invalid_pages_db(Oid dbid)
 
     hash_seq_init(&status, t_thrd.xlog_cxt.invalid_page_tab);
 
-    while ((hentry = (xl_invalid_page*)hash_seq_search(&status)) != NULL) {
+    while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
         if (hentry->key.node.dbNode == dbid) {
             if (log_min_messages <= DEBUG2 || client_min_messages <= DEBUG2) {
-                char* path = relpathperm(hentry->key.node, hentry->key.forkno);
+                char *path = relpathperm(hentry->key.node, hentry->key.forkno);
 
                 ereport(DEBUG2, (errmsg("page %u of relation %s has been dropped", hentry->key.blkno, path)));
                 pfree(path);
             }
 
-            if (hash_search(t_thrd.xlog_cxt.invalid_page_tab, (void*)&hentry->key, HASH_REMOVE, NULL) == NULL)
+            if (hash_search(t_thrd.xlog_cxt.invalid_page_tab, (void *)&hentry->key, HASH_REMOVE, NULL) == NULL)
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hash table corrupted")));
         }
     }
@@ -235,21 +229,42 @@ static void forget_invalid_pages_db(Oid dbid)
     }
 }
 
+void PrintInvalidPage()
+{
+    if (t_thrd.xlog_cxt.invalid_page_tab != NULL && hash_get_num_entries(t_thrd.xlog_cxt.invalid_page_tab) > 0) {
+        HASH_SEQ_STATUS status;
+        xl_invalid_page *hentry = NULL;
+        hash_seq_init(&status, t_thrd.xlog_cxt.invalid_page_tab);
+        while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
+            report_invalid_page(LOG, hentry->key.node, hentry->key.forkno, hentry->key.blkno, hentry->present);
+        }
+    }
+}
+
 /* Are there any unresolved references to invalid pages? */
 bool XLogHaveInvalidPages(void)
 {
-    if (t_thrd.xlog_cxt.invalid_page_tab != NULL && hash_get_num_entries(t_thrd.xlog_cxt.invalid_page_tab) > 0)
+    if (t_thrd.xlog_cxt.invalid_page_tab != NULL && hash_get_num_entries(t_thrd.xlog_cxt.invalid_page_tab) > 0) {
+#ifdef USE_ASSERT_CHECKING
+        int printLevel = WARNING;
+#else
+        int printLevel = DEBUG1;
+#endif
+        if (log_min_messages <= printLevel) {
+            PrintInvalidPage();
+        }
         return true;
+    }
     return false;
 }
 
 typedef struct InvalidPagesState {
-    HTAB* invalid_page_tab;
+    HTAB *invalid_page_tab;
 } InvalidPagesState;
 
-void* XLogGetInvalidPages()
+void *XLogGetInvalidPages()
 {
-    InvalidPagesState* state = (InvalidPagesState*)palloc(sizeof(InvalidPagesState));
+    InvalidPagesState *state = (InvalidPagesState *)palloc(sizeof(InvalidPagesState));
     state->invalid_page_tab = t_thrd.xlog_cxt.invalid_page_tab;
     t_thrd.xlog_cxt.invalid_page_tab = NULL;
     return state;
@@ -258,7 +273,7 @@ void* XLogGetInvalidPages()
 static bool XLogCheckInvalidPages_ForSingle(void)
 {
     HASH_SEQ_STATUS status;
-    xl_invalid_page* hentry = NULL;
+    xl_invalid_page *hentry = NULL;
     bool foundone = false;
 
     if (t_thrd.xlog_cxt.invalid_page_tab == NULL)
@@ -274,8 +289,9 @@ static bool XLogCheckInvalidPages_ForSingle(void)
      * Our strategy is to emit WARNING messages for all remaining entries and
      * only PANIC after we've dumped all the available info.
      */
-    while ((hentry = (xl_invalid_page*)hash_seq_search(&status)) != NULL) {
+    while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
         report_invalid_page(WARNING, hentry->key.node, hentry->key.forkno, hentry->key.blkno, hentry->present);
+        t_thrd.xlog_cxt.invaildPageCnt++;
         foundone = true;
     }
 
@@ -289,13 +305,13 @@ static bool XLogCheckInvalidPages_ForSingle(void)
     return foundone;
 }
 
-static void CollectInvalidPagesStates(uint32* nstates_ptr, InvalidPagesState*** state_array_ptr)
+static void CollectInvalidPagesStates(uint32 *nstates_ptr, InvalidPagesState ***state_array_ptr)
 {
     *nstates_ptr = GetRedoWorkerCount();
-    *state_array_ptr = (InvalidPagesState**)GetXLogInvalidPagesFromWorkers();
+    *state_array_ptr = (InvalidPagesState **)GetXLogInvalidPagesFromWorkers();
 
     ereport(LOG,
-        (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("CollectInvalidPagesStates: nstates:%u", *nstates_ptr)));
+            (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("CollectInvalidPagesStates: nstates:%u", *nstates_ptr)));
     return;
 }
 
@@ -303,7 +319,11 @@ static void CollectInvalidPagesStates(uint32* nstates_ptr, InvalidPagesState*** 
 void XLogCheckInvalidPages(void)
 {
     bool foundone = false;
-
+    if (t_thrd.xlog_cxt.forceFinishHappened) {
+        ereport(WARNING,
+                (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                 errmsg("[REDO_LOG_TRACE]XLogCheckInvalidPages happen:%u", t_thrd.xlog_cxt.forceFinishHappened)));
+    }
     if (IsMultiThreadRedoRunning()) {
         MemoryContext old = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
         /* for parallel redo, trxn thread also may have invalidpages */
@@ -311,14 +331,16 @@ void XLogCheckInvalidPages(void)
 
         if (GetRedoWorkerCount() > 0) {
             uint32 nstates;
-            InvalidPagesState** state_array = NULL;
+            InvalidPagesState **state_array = NULL;
             HASH_SEQ_STATUS status;
-            xl_invalid_page* hentry = NULL;
+            xl_invalid_page *hentry = NULL;
 
             CollectInvalidPagesStates(&nstates, &state_array);
 
             for (uint32 i = 0; ((i < nstates) && (state_array != NULL)); i++) {
-                if (state_array[i]->invalid_page_tab == NULL)
+                if (state_array[i] == NULL) {
+                    continue;
+                } else if (state_array[i]->invalid_page_tab == NULL)
                     continue; /* nothing to do */
 
                 hash_seq_init(&status, state_array[i]->invalid_page_tab);
@@ -327,9 +349,10 @@ void XLogCheckInvalidPages(void)
                  * Our strategy is to emit WARNING messages for all remaining entries and
                  * only PANIC after we've dumped all the available info.
                  */
-                while ((hentry = (xl_invalid_page*)hash_seq_search(&status)) != NULL) {
-                    report_invalid_page(
-                        WARNING, hentry->key.node, hentry->key.forkno, hentry->key.blkno, hentry->present);
+                while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
+                    report_invalid_page(WARNING, hentry->key.node, hentry->key.forkno, hentry->key.blkno,
+                                        hentry->present);
+                    t_thrd.xlog_cxt.invaildPageCnt++;
                     foundone = true;
                 }
                 hash_destroy(state_array[i]->invalid_page_tab);
@@ -340,11 +363,21 @@ void XLogCheckInvalidPages(void)
         foundone = XLogCheckInvalidPages_ForSingle();
     }
 
-    if (foundone)
-        ereport(PANIC,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]WAL contains references to invalid pages")));
+    if (foundone) {
+        /* can't use t_thrd.xlog_cxt.isIgoreCleanup to judge here, because of scenario: */
+        /* after XLogCheckInvalidPages finishes with isIgoreCleanup on, then DN crash and restart, */
+        /* and then we get here again with isIgoreCleanup off, we have to ignore again. */
+        if (!force_finish_enabled()) {
+            ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                            errmsg("[REDO_LOG_TRACE]WAL contains references to invalid pages, count:%u",
+                                   t_thrd.xlog_cxt.invaildPageCnt)));
+        } else {
+            ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                              errmsg("[REDO_LOG_TRACE]WAL contains references to invalid pages, "
+                                     "and invalid pages are ignored, happen:%u, count:%u",
+                                     t_thrd.xlog_cxt.forceFinishHappened, t_thrd.xlog_cxt.invaildPageCnt)));
+        }
+    }
 }
 
 /*
@@ -385,24 +418,17 @@ void XLogCheckInvalidPages(void)
  * that appear in XLOG, rather than possibly ignoring them as already
  * applied, but that's not a huge drawback.
  */
-XLogRedoAction XLogReadBufferForRedo(XLogReaderState* record, uint8 block_id, RedoBufferInfo* bufferinfo)
+XLogRedoAction XLogReadBufferForRedo(XLogReaderState *record, uint8 block_id, RedoBufferInfo *bufferinfo)
 {
     return XLogReadBufferForRedoExtended(record, block_id, RBM_NORMAL, false, bufferinfo);
 }
 
-#ifdef SAL_DFV_STORE
-XLogRedoAction XLogReadFsmBufferForRedo(XLogReaderState* record, uint8 block_id, Buffer* buf)
-{
-    return BLK_NOTFOUND;
-}
-#endif
 /*
  * Pin and lock a buffer referenced by a WAL record, for the purpose of
  * re-initializing it.
  */
-void XLogInitBufferForRedo(XLogReaderState* record, uint8 block_id, RedoBufferInfo* bufferinfo)
+void XLogInitBufferForRedo(XLogReaderState *record, uint8 block_id, RedoBufferInfo *bufferinfo)
 {
-
     XLogReadBufferForRedoExtended(record, block_id, RBM_ZERO_AND_LOCK, false, bufferinfo);
 }
 
@@ -421,8 +447,8 @@ void XLogInitBufferForRedo(XLogReaderState* record, uint8 block_id, RedoBufferIn
  * If 'get_cleanup_lock' is true, a "cleanup lock" is acquired on the buffer
  * using LockBufferForCleanup(), instead of a regular exclusive lock.
  */
-XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag* redoblock, ReadBufferMode mode, bool get_cleanup_lock,
-    RedoBufferInfo* redobufferinfo, XLogRecPtr xloglsn, ReadBufferMethod readmethod)
+XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBufferMode mode, 
+    bool get_cleanup_lock, RedoBufferInfo *redobufferinfo, XLogRecPtr xloglsn, ReadBufferMethod readmethod)
 {
     bool pageisvalid = false;
     Page page;
@@ -469,8 +495,10 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag* redoblock, ReadBu
     }
     return BLK_NOTFOUND;
 }
-XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState* record, uint8 block_id, ReadBufferMode mode,
-    bool get_cleanup_lock, RedoBufferInfo* bufferinfo, ReadBufferMethod readmethod)
+
+XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record, uint8 block_id, ReadBufferMode mode,
+                                             bool get_cleanup_lock, RedoBufferInfo *bufferinfo,
+                                             ReadBufferMethod readmethod)
 {
     bool zeromode = false;
     bool willinit = false;
@@ -493,46 +521,28 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState* record, uint8 bloc
         ereport(PANIC, (errmsg("block with WILL_INIT flag in WAL record must be zeroed by redo routine")));
     if (!willinit && zeromode)
         ereport(PANIC,
-            (errmsg("block to be initialized in redo routine must be marked with WILL_INIT flag in the WAL record")));
+                (errmsg(
+                    "block to be initialized in redo routine must be marked with WILL_INIT flag in the WAL record")));
 
     xloghasblockimage = XLogRecHasBlockImage(record, block_id);
     if (xloghasblockimage) {
         mode = get_cleanup_lock ? RBM_ZERO_AND_CLEANUP_LOCK : RBM_ZERO_AND_LOCK;
     }
-    redoaction =
-        XLogReadBufferForRedoBlockExtend(&blockinfo, mode, get_cleanup_lock, bufferinfo, record->EndRecPtr, readmethod);
+    redoaction = XLogReadBufferForRedoBlockExtend(&blockinfo, mode, get_cleanup_lock, bufferinfo, record->EndRecPtr,
+                                                  readmethod);
     if (redoaction == BLK_NOTFOUND) {
         return BLK_NOTFOUND;
     }
     /* If it's a full-page image, restore it. */
     if (xloghasblockimage) {
-        char* imagedata;
-        DecodedBkpBlock* bkpb = NULL;
-        char tmp[BLCKSZ];
+        char *imagedata;
         uint16 hole_offset;
         uint16 hole_length;
         imagedata = XLogRecGetBlockImage(record, block_id, &hole_offset, &hole_length);
         if (NULL == imagedata)
-            ereport(ERROR,
-                (errcode(ERRCODE_DATA_EXCEPTION),
-                    errmsg("XLogReadBufferForRedoExtended failed to restore block image")));
-
-        bkpb = &record->blocks[block_id];
-        if (bkpb->is_compressed) {
-            /* If a backup block image is compressed, decompress it */
-            if (LZ4_decompress_safe(imagedata, tmp, bkpb->bimg_len, BLCKSZ - bkpb->hole_length) < 0) {
-                report_invalid_record(record, "invalid compressed image at %X/%X, block %d",
-                                      (uint32) (record->ReadRecPtr >> 32),
-                                      (uint32) record->ReadRecPtr,
-                                      block_id);
-                ereport(ERROR,
-                    (errcode(ERRCODE_DATA_EXCEPTION),
-                        errmsg("XLogReadBufferForRedoExtended failed to decompress a block image")));
-            }
-            imagedata = tmp;
-        }
-
-        RestoreBlockImage(imagedata, hole_offset, hole_length, (char*)bufferinfo->pageinfo.page);
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                            errmsg("XLogReadBufferForRedoExtended failed to restore block image")));
+        RestoreBlockImage(imagedata, hole_offset, hole_length, (char *)bufferinfo->pageinfo.page);
         XlogUpdateFullPageWriteLsn(bufferinfo->pageinfo.page, bufferinfo->lsn);
         PageSetJustAfterFullPageWrite(bufferinfo->pageinfo.page);
         if (readmethod == WITH_NORMAL_CACHE) {
@@ -553,8 +563,8 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState* record, uint8 bloc
     }
     return redoaction;
 }
-Buffer XLogReadBufferExtendedWithLocalBuffer(
-    RelFileNode rnode, ForkNumber forknum, BlockNumber blkno, ReadBufferMode mode)
+Buffer XLogReadBufferExtendedWithLocalBuffer(RelFileNode rnode, ForkNumber forknum, BlockNumber blkno,
+                                             ReadBufferMode mode)
 {
     BlockNumber lastblock;
     Buffer buffer;
@@ -611,8 +621,8 @@ Buffer XLogReadBufferExtendedWithLocalBuffer(
     return buffer;
 }
 
-Buffer XLogReadBufferExtendedWithoutBuffer(
-    RelFileNode rnode, ForkNumber forknum, BlockNumber blkno, ReadBufferMode mode)
+Buffer XLogReadBufferExtendedWithoutBuffer(RelFileNode rnode, ForkNumber forknum, BlockNumber blkno,
+                                           ReadBufferMode mode)
 {
     BlockNumber lastblock;
     Page page;
@@ -664,7 +674,6 @@ Buffer XLogReadBufferExtendedWithoutBuffer(
 
     XLogRedoBufferGetPageFunc(buffer, &page);
     if (mode == RBM_NORMAL) {
-
         if (PageIsNew(page)) {
             Assert(!PageIsLogical(page));
             XLogRedoBufferReleaseFunc(buffer);
@@ -703,7 +712,7 @@ Buffer XLogReadBufferExtendedWithoutBuffer(
  * they will be invisible to tools that that need to know which pages are
  * modified.
  */
-Buffer XLogReadBufferExtended(const RelFileNode& rnode, ForkNumber forknum, BlockNumber blkno, ReadBufferMode mode)
+Buffer XLogReadBufferExtended(const RelFileNode &rnode, ForkNumber forknum, BlockNumber blkno, ReadBufferMode mode)
 {
     BlockNumber lastblock;
     Buffer buffer;
@@ -796,7 +805,7 @@ typedef struct {
     FormData_pg_class pgc;
 } FakeRelCacheEntryData;
 
-typedef FakeRelCacheEntryData* FakeRelCacheEntry;
+typedef FakeRelCacheEntryData *FakeRelCacheEntry;
 
 /*
  * Create a fake relation cache entry for a physical relation
@@ -810,15 +819,15 @@ typedef FakeRelCacheEntryData* FakeRelCacheEntry;
  *
  * Caller must free the returned entry with FreeFakeRelcacheEntry().
  */
-Relation CreateFakeRelcacheEntry(const RelFileNode& rnode)
+Relation CreateFakeRelcacheEntry(const RelFileNode &rnode)
 {
     return CreateCUReplicationRelation(rnode,
-        /* We will never be working with temp rels during recovery */
-        InvalidBackendId,
-        /* It must be a permanent table if we're in recovery. */
-        RELPERSISTENCE_PERMANENT,
-        /* fill relation name following */
-        NULL);
+                                       /* We will never be working with temp rels during recovery */
+                                       InvalidBackendId,
+                                       /* It must be a permanent table if we're in recovery. */
+                                       RELPERSISTENCE_PERMANENT,
+                                       /* fill relation name following */
+                                       NULL);
 }
 
 /* Create a fake relation for CU replication.
@@ -830,7 +839,7 @@ Relation CreateFakeRelcacheEntry(const RelFileNode& rnode)
  * and relfilenode.
  * For COPY FROM and BULK INSERT, current heap relation is used for data replication.
  */
-Relation CreateCUReplicationRelation(const RelFileNode& rnode, int BackendId, char relpersistence, const char* relname)
+Relation CreateCUReplicationRelation(const RelFileNode &rnode, int BackendId, char relpersistence, const char *relname)
 {
     FakeRelCacheEntry fakeentry = NULL;
     Relation rel = NULL;
@@ -859,8 +868,8 @@ Relation CreateCUReplicationRelation(const RelFileNode& rnode, int BackendId, ch
         securec_check_c(rc, "\0", "\0");
     } else {
         /* We don't know the name of the relation; use relfilenode instead */
-        int rc = sprintf_s(
-            RelationGetRelationName(rel), NAMEDATALEN, "%u/%u/%u", rnode.spcNode, rnode.dbNode, rnode.relNode);
+        int rc = sprintf_s(RelationGetRelationName(rel), NAMEDATALEN, "%u/%u/%u", rnode.spcNode, rnode.dbNode,
+                           rnode.relNode);
         securec_check_ss(rc, "\0", "\0");
     }
 
@@ -908,9 +917,9 @@ void XlogDropRowReation(RelFileNode rnode)
     smgrclosenode(rbnode);
 }
 
-void XLogForgetDDLRedo(XLogRecParseState* redoblockstate)
+void XLogForgetDDLRedo(XLogRecParseState *redoblockstate)
 {
-    XLogBlockDdlParse* ddlrecparse = &(redoblockstate->blockparse.extra_rec.blockddlrec);
+    XLogBlockDdlParse *ddlrecparse = &(redoblockstate->blockparse.extra_rec.blockddlrec);
     if (ddlrecparse->blockddltype == BLOCK_DDL_DROP_RELNODE) {
         if (redoblockstate->blockparse.blockhead.forknum <= MAX_FORKNUM) {
             RelFileNode relNode;
@@ -926,8 +935,8 @@ void XLogForgetDDLRedo(XLogRecParseState* redoblockstate)
         relNode.dbNode = redoblockstate->blockparse.blockhead.dbNode;
         relNode.relNode = redoblockstate->blockparse.blockhead.relNode;
         relNode.bucketNode = redoblockstate->blockparse.blockhead.bucketNode;
-        XLogTruncateRelation(
-            relNode, redoblockstate->blockparse.blockhead.forknum, redoblockstate->blockparse.blockhead.blkno);
+        XLogTruncateRelation(relNode, redoblockstate->blockparse.blockhead.forknum,
+                             redoblockstate->blockparse.blockhead.blkno);
     }
 }
 
@@ -937,31 +946,31 @@ void XLogForgetDDLRedo(XLogRecParseState* redoblockstate)
  * This is called when the relation is about to be deleted; we need to remove
  * any open "invalid-page" records for the relation.
  */
-void XLogDropRelation(const RelFileNode& rnode, ForkNumber forknum)
+void XLogDropRelation(const RelFileNode &rnode, ForkNumber forknum)
 {
     forget_invalid_pages(rnode, forknum, 0);
 }
 
-bool IsDataBaseDrop(XLogReaderState* record)
+bool IsDataBaseDrop(XLogReaderState *record)
 {
     return (XLogRecGetRmid(record) == RM_DBASE_ID && (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == XLOG_DBASE_DROP);
 }
 
-bool IsDataBaseCreate(XLogReaderState* record)
+bool IsDataBaseCreate(XLogReaderState *record)
 {
     return (XLogRecGetRmid(record) == RM_DBASE_ID && (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == XLOG_DBASE_CREATE);
 }
 
-bool IsTableSpaceDrop(XLogReaderState* record)
+bool IsTableSpaceDrop(XLogReaderState *record)
 {
     return (XLogRecGetRmid(record) == RM_TBLSPC_ID && (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == XLOG_TBLSPC_DROP);
 }
 
-bool IsTableSpaceCreate(XLogReaderState* record)
+bool IsTableSpaceCreate(XLogReaderState *record)
 {
     return (XLogRecGetRmid(record) == RM_TBLSPC_ID &&
             ((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == XLOG_TBLSPC_CREATE ||
-                (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == XLOG_TBLSPC_RELATIVE_CREATE));
+             (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == XLOG_TBLSPC_RELATIVE_CREATE));
 }
 
 /*
@@ -987,7 +996,7 @@ void XLogDropDatabase(Oid dbid)
  *
  * We need to clean up any open "invalid-page" records for the dropped pages.
  */
-void XLogTruncateRelation(XLogReaderState* record, const RelFileNode& rnode, ForkNumber forkNum, BlockNumber nblocks)
+void XLogTruncateRelation(XLogReaderState *record, const RelFileNode &rnode, ForkNumber forkNum, BlockNumber nblocks)
 {
     forget_invalid_pages(rnode, forkNum, nblocks);
 }
@@ -1006,9 +1015,9 @@ void XLogTruncateRelation(RelFileNode rnode, ForkNumber forkNum, BlockNumber nbl
  * in walsender.c but for small differences (such as lack of ereport() in
  * front-end). Probably these should be merged at some point.
  */
-static void XLogRead(char* buf, TimeLineID tli, XLogRecPtr startptr, Size count)
+static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 {
-    char* p = NULL;
+    char *p = NULL;
     XLogRecPtr recptr;
     Size nbytes;
     errno_t errorno = EOK;
@@ -1034,21 +1043,17 @@ static void XLogRead(char* buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 
             XLByteToSeg(recptr, t_thrd.xlog_cxt.sendSegNo);
 
-            errorno = snprintf_s(path,
-                MAXPGPATH,
-                MAXPGPATH - 1,
-                XLOGDIR "/%08X%08X%08X",
-                tli,
-                (uint32)((t_thrd.xlog_cxt.sendSegNo) / XLogSegmentsPerXLogId),
-                (uint32)((t_thrd.xlog_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+            errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
+                                 (uint32)((t_thrd.xlog_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                                 (uint32)((t_thrd.xlog_cxt.sendSegNo) % XLogSegmentsPerXLogId));
             securec_check_ss(errorno, "", "");
 
             t_thrd.xlog_cxt.sendFile = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
 
             if (t_thrd.xlog_cxt.sendFile < 0) {
                 if (errno == ENOENT)
-                    ereport(ERROR,
-                        (errcode_for_file_access(), errmsg("requested WAL segment %s has already been removed", path)));
+                    ereport(ERROR, (errcode_for_file_access(),
+                                    errmsg("requested WAL segment %s has already been removed", path)));
                 else
                     ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", path)));
             }
@@ -1061,18 +1066,14 @@ static void XLogRead(char* buf, TimeLineID tli, XLogRecPtr startptr, Size count)
             if (lseek(t_thrd.xlog_cxt.sendFile, (off_t)startoff, SEEK_SET) < 0) {
                 char path[MAXPGPATH];
 
-                errorno = snprintf_s(path,
-                    MAXPGPATH,
-                    MAXPGPATH - 1,
-                    XLOGDIR "/%08X%08X%08X",
-                    tli,
-                    (uint32)((t_thrd.xlog_cxt.sendSegNo) / XLogSegmentsPerXLogId),
-                    (uint32)((t_thrd.xlog_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+                errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
+                                     (uint32)((t_thrd.xlog_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                                     (uint32)((t_thrd.xlog_cxt.sendSegNo) % XLogSegmentsPerXLogId));
                 securec_check_ss(errorno, "", "");
-
-                ereport(ERROR,
-                    (errcode_for_file_access(),
-                        errmsg("could not seek in log segment %s to offset %u: %m", path, startoff)));
+                (void)close(t_thrd.xlog_cxt.sendFile);
+                t_thrd.xlog_cxt.sendFile = -1;
+                ereport(ERROR, (errcode_for_file_access(),
+                                errmsg("could not seek in log segment %s to offset %u: %m", path, startoff)));
             }
             t_thrd.xlog_cxt.sendOff = startoff;
         }
@@ -1089,22 +1090,16 @@ static void XLogRead(char* buf, TimeLineID tli, XLogRecPtr startptr, Size count)
         if (readbytes <= 0) {
             char path[MAXPGPATH];
 
-            errorno = snprintf_s(path,
-                MAXPGPATH,
-                MAXPGPATH - 1,
-                XLOGDIR "/%08X%08X%08X",
-                tli,
-                (uint32)((t_thrd.xlog_cxt.sendSegNo) / XLogSegmentsPerXLogId),
-                (uint32)((t_thrd.xlog_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+            errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
+                                 (uint32)((t_thrd.xlog_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                                 (uint32)((t_thrd.xlog_cxt.sendSegNo) % XLogSegmentsPerXLogId));
             securec_check_ss(errorno, "", "");
 
-            ereport(ERROR,
-                (errcode_for_file_access(),
-                    errmsg("could not read from log segment %s, offset %u, length %d, readbytes %d: %m",
-                        path,
-                        t_thrd.xlog_cxt.sendOff,
-                        segbytes,
-                        readbytes)));
+            (void)close(t_thrd.xlog_cxt.sendFile);
+            t_thrd.xlog_cxt.sendFile = -1;
+            ereport(ERROR, (errcode_for_file_access(),
+                            errmsg("could not read from log segment %s, offset %u, length %d, readbytes %d: %m", path,
+                                   t_thrd.xlog_cxt.sendOff, segbytes, readbytes)));
         }
 
         /* Update state for read */
@@ -1127,8 +1122,8 @@ static void XLogRead(char* buf, TimeLineID tli, XLogRecPtr startptr, Size count)
  * exists for normal backends, so we have to do a check/sleep/repeat style of
  * loop for now.
  */
-int read_local_xlog_page(XLogReaderState* state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
-    char* cur_page, TimeLineID* pageTLI)
+int read_local_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
+                         char *cur_page, TimeLineID *pageTLI)
 {
     XLogRecPtr read_upto, loc, loc_page;
     int count;

@@ -30,7 +30,7 @@
 #define HP_ERR (-1)
 const int g_max_length_time = 64;
 const int g_max_length_act = 16;
-const int g_max_length_path = 4096;
+const int g_max_length_path = 512;
 const int g_max_length_std_path = 4096;
 const int g_first_err = 0x1000;
 const int g_lock_file_size = 1024;
@@ -41,19 +41,7 @@ const int g_length_list = 4;
 const int g_max_length_line = 128;
 const int g_rev_bytes_info = 3;
 
-#define PATCH_MODULE_GAUSSDB (0)
-#define PATCH_MODULE_GTM (1)
-
 #define MAX_LENGTH_RETURN_STRING (1024)
-
-typedef enum HP_NODE_TYPE {
-    HP_NODE_GAUSSDB,
-    HP_NODE_GTM,
-    HP_NODE_CMAGENT,
-    HP_NODE_CMSERVER,
-    HP_NODE_OMMONITOR,
-    HP_NODE_MAX,
-} HP_NODE_TYPE_T;
 
 typedef enum HP_STATE {
     HP_STATE_UNKNOW,
@@ -103,6 +91,8 @@ typedef enum HP_ERROR_CODE {
     HP_ERROR_PATCH_NUMBER_ERROR,
     HP_ERROR_PATCH_INFO_ERROR,
     HP_ERROR_CM_DATADIR_NULL,
+    HP_ERROR_REG_LOG_CALLBACK_ERROR,
+    HP_ERROR_REG_PAGESIZE_CALLBACK_ERROR,
     HP_ERROR_COMMON_ERROR_MAX,
 } HP_ERROR_CODE_T;
 
@@ -133,7 +123,7 @@ typedef struct PATCH_INFO {
 
 typedef void (*HOTPATCH_LOG_FUNC)(unsigned int level, const char* fmt);
 
-extern int hotpatch_init(int node_type, const char* default_dir, HOTPATCH_LOG_FUNC log_func);
+extern int hotpatch_init(const char* default_dir, HOTPATCH_LOG_FUNC log_func);
 extern int exec_hotpatch_command(const char* filename, const char* action, char* output_string, size_t string_length);
 void patch_err_info_handler(int error_code, char* out_string, size_t string_length);
 char* strip_path_from_pathname(const char* name_withpath);

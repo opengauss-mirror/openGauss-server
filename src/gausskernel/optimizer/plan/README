@@ -119,7 +119,7 @@ Opened issues.
 5. I need in advice: if subquery introduced with NOT IN doesn't return
    any tuples then qualification is failed, yes ?
 6. Regression tests !!!!!!!!!!!!!!!!!!!!
-   (Could we use data/queries from B' crash.me ?
+   (Could we use data/queries from B db' crash.me ?
     Copyright-ed ? Could they give us rights ?)
 7. Performance.
    - Should be good when subquery is transformed into InitPlan.

@@ -29,52 +29,53 @@
 char *
 slurpFile(const char *datadir, const char *path, size_t *filesize, bool safe, fio_location location)
 {
-	int		 fd;
-	char	   *buffer;
-	struct stat statbuf;
-	char		fullpath[MAXPGPATH];
-	int		 len;
+    int         fd;
+    char       *buffer;
+    struct stat statbuf;
+    char        fullpath[MAXPGPATH];
+    int         len;
 
-	join_path_components(fullpath, datadir, path);
+    join_path_components(fullpath, datadir, path);
 
-	if ((fd = fio_open(fullpath, O_RDONLY | PG_BINARY, location)) == -1)
-	{
-		if (safe)
-			return NULL;
-		else
-			elog(ERROR, "Could not open file \"%s\" for reading: %s",
-					fullpath, strerror(errno));
-	}
+    if ((fd = fio_open(fullpath, O_RDONLY | PG_BINARY, location)) == -1)
+    {
+        if (safe)
+            return NULL;
+        else
+            elog(ERROR, "Could not open file \"%s\" for reading: %s",
+                    fullpath, strerror(errno));
+    }
 
-	if (fio_stat(fullpath, &statbuf, true, location) < 0)
-	{
-		if (safe)
-			return NULL;
-		else
-			elog(ERROR, "Could not stat file \"%s\": %s",
-				fullpath, strerror(errno));
-	}
+    if (fio_stat(fullpath, &statbuf, true, location) < 0)
+    {
+        if (safe)
+            return NULL;
+        else
+            elog(ERROR, "Could not stat file \"%s\": %s",
+                fullpath, strerror(errno));
+    }
 
-	len = statbuf.st_size;
-	buffer = (char *)pg_malloc(len + 1);
+    len = statbuf.st_size;
+    buffer = (char *)pg_malloc(len + 1);
 
-	if (fio_read(fd, buffer, len) != len)
-	{
-		if (safe)
-			return NULL;
-		else
-			elog(ERROR, "Could not read file \"%s\": %s\n",
-				fullpath, strerror(errno));
-	}
+    if (fio_read(fd, buffer, len) != len)
+    {
+        if (safe) {
+            pg_free(buffer);
+            return NULL;
+        } else
+            elog(ERROR, "Could not read file \"%s\": %s\n",
+                fullpath, strerror(errno));
+    }
 
-	fio_close(fd);
+    fio_close(fd);
 
-	/* Zero-terminate the buffer. */
-	buffer[len] = '\0';
+    /* Zero-terminate the buffer. */
+    buffer[len] = '\0';
 
-	if (filesize)
-		*filesize = len;
-	return buffer;
+    if (filesize)
+        *filesize = len;
+    return buffer;
 }
 
 /*
@@ -83,28 +84,30 @@ slurpFile(const char *datadir, const char *path, size_t *filesize, bool safe, fi
 char *
 fetchFile(PGconn *conn, const char *filename, size_t *filesize)
 {
-	PGresult   *res;
-	char	   *result;
-	const char *params[1];
-	int			len;
+    PGresult   *res;
+    char       *result;
+    const char *params[1];
+    int            len;
+    errno_t rc = 0;
 
-	params[0] = filename;
-	res = pgut_execute_extended(conn, "SELECT pg_catalog.pg_read_binary_file($1)",
-								1, params, false, false);
+    params[0] = filename;
+    res = pgut_execute_extended(conn, "SELECT pg_catalog.pg_read_binary_file($1)",
+                                1, params, false, false);
 
-	/* sanity check the result set */
-	if (PQntuples(res) != 1 || PQgetisnull(res, 0, 0))
-		elog(ERROR, "unexpected result set while fetching remote file \"%s\"",
-			 filename);
+    /* sanity check the result set */
+    if (PQntuples(res) != 1 || PQgetisnull(res, 0, 0))
+        elog(ERROR, "unexpected result set while fetching remote file \"%s\"",
+             filename);
 
-	/* Read result to local variables */
-	len = PQgetlength(res, 0, 0);
-	result = (char *)pg_malloc(len + 1);
-	memcpy(result, PQgetvalue(res, 0, 0), len);
-	result[len] = '\0';
+    /* Read result to local variables */
+    len = PQgetlength(res, 0, 0);
+    result = (char *)pg_malloc(len + 1);
+    rc = memcpy_s(result, len + 1,PQgetvalue(res, 0, 0), len);
+    securec_check_c(rc, "\0", "\0");
+    result[len] = '\0';
 
-	PQclear(res);
-	*filesize = len;
+    PQclear(res);
+    *filesize = len;
 
-	return result;
+    return result;
 }

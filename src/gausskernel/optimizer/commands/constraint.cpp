@@ -21,7 +21,7 @@
 #include "utils/builtins.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 /*
  * unique_key_recheck - trigger function to do a deferred uniqueness check.
@@ -49,7 +49,8 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
     TupleTableSlot* slot = NULL;
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
-
+    Relation fakeRel = NULL;
+    int2 bucketid;
     /*
      * Make sure this is being called as an AFTER ROW trigger.	Note:
      * translatable error strings are shared with ri_triggers.c, so resist the
@@ -98,8 +99,13 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
      * it's possible the index entry has also been marked dead, and even
      * removed.
      */
-    tmptid = new_row->t_self;
-    if (!heap_hot_search(&tmptid, trigdata->tg_relation, SnapshotSelf, NULL)) {
+    tmptid   = new_row->t_self;
+    bucketid = new_row->t_bucketId;
+
+    fakeRel = (bucketid == InvalidBktId) ? trigdata->tg_relation : 
+                         bucketGetRelation(trigdata->tg_relation, NULL, bucketid);
+
+    if (!heap_hot_search(&tmptid, fakeRel, SnapshotSelf, NULL)) {
         /*
          * All rows in the HOT chain are dead, so skip the check.
          */
@@ -111,14 +117,13 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
      * to update it.  (This protects against possible changes of the index
      * schema, not against concurrent updates.)
      */
-    indexRel = index_open(
-        trigdata->tg_trigger->tgconstrindid, RowExclusiveLock, RelationGetBktid(trigdata->tg_relation));
+    indexRel = index_open(trigdata->tg_trigger->tgconstrindid, RowExclusiveLock, bucketid);
     indexInfo = BuildIndexInfo(indexRel);
 
     /*
      * The heap tuple must be put into a slot for FormIndexDatum.
      */
-    slot = MakeSingleTupleTableSlot(RelationGetDescr(trigdata->tg_relation));
+    slot = MakeSingleTupleTableSlot(RelationGetDescr(fakeRel));
 
     (void)ExecStoreTuple(new_row, slot, InvalidBuffer, false);
 
@@ -127,7 +132,7 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
      * EState to evaluate them.  We need it for exclusion constraints too,
      * even if they are just on simple columns.
      */
-    if (indexInfo != NULL && (indexInfo->ii_Expressions != NIL || indexInfo->ii_ExclusionOps != NULL)) {
+    if (indexInfo->ii_Expressions != NIL || indexInfo->ii_ExclusionOps != NULL) {
         estate = CreateExecutorState();
         econtext = GetPerTupleExprContext(estate);
         econtext->ecxt_scantuple = slot;
@@ -156,7 +161,7 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
          * correct even if t_self is now dead, because that is the TID the
          * index will know about.
          */
-        (void)index_insert(indexRel, values, isnull, &(new_row->t_self), trigdata->tg_relation, UNIQUE_CHECK_EXISTING);
+        index_insert(indexRel, values, isnull, &(new_row->t_self), fakeRel, UNIQUE_CHECK_EXISTING);
     } else {
         /*
          * For exclusion constraints we just do the normal check, but now it's
@@ -165,7 +170,7 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
          * the child is a conflict.
          */
         (void)check_exclusion_constraint(
-            trigdata->tg_relation, indexRel, indexInfo, &tmptid, values, isnull, estate, false, false);
+            fakeRel, indexRel, indexInfo, &tmptid, values, isnull, estate, false, false);
     }
 
     /*
@@ -178,6 +183,10 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
     ExecDropSingleTupleTableSlot(slot);
 
     index_close(indexRel, RowExclusiveLock);
+
+    if (bucketid != InvalidBktId) {
+        bucketCloseRelation(fakeRel);
+    }
 
     return PointerGetDatum(NULL);
 }

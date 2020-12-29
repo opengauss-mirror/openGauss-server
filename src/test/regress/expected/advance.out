@@ -1,0 +1,40 @@
+SET synchronous_commit = on;
+ -- fail because of an already existing slot
+execute direct on (datanode1)'SELECT ''init'' FROM pg_create_logical_replication_slot(''regression_slot'', ''test_decoding'');';
+ ?column? 
+----------
+ init
+(1 row)
+
+CREATE TABLE replication_example(id SERIAL PRIMARY KEY, somedata int, text varchar(120));
+NOTICE:  CREATE TABLE will create implicit sequence "replication_example_id_seq" for serial column "replication_example.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "replication_example_pkey" for table "replication_example"
+BEGIN;
+INSERT INTO replication_example(somedata, text) VALUES (1, 1);
+INSERT INTO replication_example(somedata, text) VALUES (1, 2);
+COMMIT;
+execute direct on (datanode1)'SELECT * FROM pg_replication_slot_advance(''regression_slot'', NULL);';
+    slot_name    |  end_lsn  
+-----------------+-----------
+ regression_slot | 0/2c521e8
+(1 row)
+
+INSERT INTO replication_example(somedata, text) VALUES (1, 4);
+INSERT INTO replication_example(somedata, text) VALUES (1, 5);
+execute direct on (datanode1)'SELECT * FROM pg_logical_slot_get_changes(''regression_slot'', NULL, NULL);';
+ location  |  xid  |                                                  data                                                   
+-----------+-------+---------------------------------------------------------------------------------------------------------
+ 0/2C521E8 | 10216 | BEGIN 10216
+ 0/2C521E8 | 10216 | table public.replication_example: INSERT: id[integer]:3 somedata[integer]:1 text[character varying]:'4'
+ 0/2C522B0 | 10216 | COMMIT 10216
+ 0/2C522B0 | 10217 | BEGIN 10217
+ 0/2C522B0 | 10217 | table public.replication_example: INSERT: id[integer]:4 somedata[integer]:1 text[character varying]:'5'
+ 0/2C52378 | 10217 | COMMIT 10217
+(6 rows)
+
+execute direct on (datanode1)'SELECT pg_drop_replication_slot(''regression_slot'');';
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+

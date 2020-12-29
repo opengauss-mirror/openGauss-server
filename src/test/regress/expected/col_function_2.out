@@ -17,7 +17,7 @@ IMMUTABLE
 CALLED ON NULL INPUT
 SECURITY INVOKER
 COST 100;
-explain (verbose, costs off, nodes off) select * from test_function_immutable();
+explain (verbose, costs off) select * from test_function_immutable();
                 QUERY PLAN                
 ------------------------------------------
  Function Scan on test_function_immutable
@@ -48,7 +48,7 @@ VOLATILE
 CALLED ON NULL INPUT
 SECURITY INVOKER
 COST 100;
-explain (verbose on, costs off, nodes off) select * from test_function_volatile();
+explain (verbose on, costs off) select * from test_function_volatile();
                               QUERY PLAN                              
 ----------------------------------------------------------------------
  Function Scan on vector_distribute_function_2.test_function_volatile
@@ -62,7 +62,7 @@ select * from test_function_volatile();
                       3
 (1 row)
 
-explain (verbose on, costs off, nodes off) select test_function_volatile();
+explain (verbose on, costs off) select test_function_volatile();
              QUERY PLAN             
 ------------------------------------
  Result

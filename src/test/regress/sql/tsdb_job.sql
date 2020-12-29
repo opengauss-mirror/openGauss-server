@@ -7,7 +7,7 @@ create table dcs_cpu(
 	server_ip text not null,
 	iowait real,
 	time_string timestamp
-)
+)distribute by hash(server_ip)
 PARTITION BY RANGE(time_string)
 (
 partition p2 values less than('2020-06-28 00:00:00'),
@@ -23,7 +23,7 @@ create table dcs_cpu2(
 	server_ip text not null,
 	iowait real,
 	time_string timestamptz
-)
+)distribute by hash(server_ip)
 PARTITION BY RANGE(time_string)
 (
 partition p2 values less than('2020-06-28 00:00:00'),

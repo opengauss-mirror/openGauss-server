@@ -21,9 +21,11 @@
 #include "catalog/pg_type.h"
 #include "commands/createas.h"
 #include "commands/prepare.h"
+#include "executor/lightProxy.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "opfusion/opfusion.h"
+#include "optimizer/bucketpruning.h"
 #include "parser/analyze.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_collate.h"
@@ -35,6 +37,8 @@
 #include "utils/builtins.h"
 #include "utils/dynahash.h"
 #include "utils/globalplancache.h"
+#include "utils/globalplancore.h"
+#include "utils/globalpreparestmt.h"
 #include "utils/snapmgr.h"
 #include "utils/timestamp.h"
 #ifdef PGXC
@@ -46,7 +50,7 @@
 #endif
 
 void InitQueryHashTable(void);
-static ParamListInfo EvaluateParams(PreparedStatement* pstmt, List* params, const char* queryString, EState* estate);
+static ParamListInfo EvaluateParams(PreparedStatement *pstmt, List* params, const char* queryString, EState* estate);
 static Datum build_regtype_array(const Oid* param_types, int num_params);
 
 extern void destroy_handles();
@@ -84,6 +88,7 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
 
     /* Transform list of TypeNames to array of type OIDs */
     nargs = list_length(stmt->argtypes);
+
     if (nargs) {
         ParseState* pstate = NULL;
         ListCell* l = NULL;
@@ -114,7 +119,16 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
      * Because parse analysis scribbles on the raw querytree, we must make a
      * copy to ensure we don't modify the passed-in tree.
      */
+#ifdef ENABLE_MULTIPLE_NODES
+    query = parse_analyze_varparams((Node*)copyObject(stmt->query), queryString, &argtypes, &nargs);
+#else
     query = parse_analyze_varparams((Node*)copyObject(stmt->query), queryString, &argtypes, &nargs, NULL);
+#endif
+
+    if (ENABLE_CN_GPC && plansource->gpc.status.IsSharePlan() && contains_temp_tables(query->rtable)) {
+        /* temp table unsupport shared */
+        plansource->gpc.status.SetKind(GPC_UNSHARED);
+    }
 
     /*
      * Check that all parameter types were determined.
@@ -183,7 +197,7 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
 void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* queryString, ParamListInfo params,
     DestReceiver* dest, char* completionTag)
 {
-    PreparedStatement* entry = NULL;
+    PreparedStatement *entry = NULL;
     CachedPlan* cplan = NULL;
     List* plan_list = NIL;
     ParamListInfo paramLI = NULL;
@@ -195,7 +209,7 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     CachedPlanSource* psrc = NULL;
 
     /* Look it up in the hash table */
-    entry = FetchPreparedStatement(stmt->name, true);
+    entry = FetchPreparedStatement(stmt->name, true, true);
     psrc = entry->plansource;
 
     /* Shouldn't find a non-fixed-result cached plan */
@@ -223,6 +237,11 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
         ((OpFusion*)psrc->opFusionObj)->useOuterParameter(paramLI);
         ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
 
+        CachedPlanSource* cps = ((OpFusion*)psrc->opFusionObj)->m_psrc;
+        if (cps != NULL && cps->gplan) {
+            setCachedPlanBucketId(cps->gplan, paramLI);
+        }
+
         if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, false)) {
             return;
         }
@@ -240,6 +259,20 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     /* Replan if needed, and increment plan refcount for portal */
     cplan = GetCachedPlan(entry->plansource, paramLI, false);
     plan_list = cplan->stmt_list;
+
+    /* 
+    * Now we can define the portal.
+    *
+    * DO NOT put any code that could possibly throw an error between the
+    * above GetCachedPlan call and here.
+    */
+    PortalDefineQuery(portal, NULL, query_string, entry->plansource->commandTag, plan_list, cplan);
+
+    /* incase change shared plan in execute stage */
+    if (ENABLE_GPC) {
+        plan_list = CopyLocalStmt(portal->cplan->stmt_list);
+        portal->stmts = plan_list;
+    }
 
     /*
      * For CREATE TABLE ... AS EXECUTE, we must verify that the prepared
@@ -276,8 +309,8 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
         eflags = 0;
         count = FETCH_ALL;
     }
-
-    if (IS_PGXC_DATANODE && psrc->cplan == NULL && psrc->is_checked_opfusion == false) {
+    bool checkSQLBypass = IS_PGXC_DATANODE && (psrc->cplan == NULL) && (psrc->is_checked_opfusion == false);
+    if (checkSQLBypass) {
         psrc->opFusionObj =
             OpFusion::FusionFactory(OpFusion::getFusionType(cplan, paramLI, NULL), psrc->context, psrc, NULL, paramLI);
         psrc->is_checked_opfusion = true;
@@ -292,8 +325,6 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
             Assert(0);
         }
     }
-
-    PortalDefineQuery(portal, NULL, query_string, entry->plansource->commandTag, plan_list, cplan);
 
     /*
      * Run the portal as appropriate.
@@ -322,7 +353,7 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
  * CreateQueryDesc(), which allows the executor to make use of the parameters
  * during query execution.
  */
-static ParamListInfo EvaluateParams(PreparedStatement* pstmt, List* params, const char* queryString, EState* estate)
+static ParamListInfo EvaluateParams(PreparedStatement *pstmt, List* params, const char* queryString, EState* estate)
 {
     Oid* param_types = pstmt->plansource->param_types;
     int num_params = pstmt->plansource->num_params;
@@ -375,6 +406,7 @@ static ParamListInfo EvaluateParams(PreparedStatement* pstmt, List* params, cons
 
         expr = coerce_to_target_type(
             pstate, expr, given_type_id, expected_type_id, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+
         if (expr == NULL)
             ereport(ERROR,
                 (errcode(ERRCODE_DATATYPE_MISMATCH),
@@ -402,7 +434,6 @@ static ParamListInfo EvaluateParams(PreparedStatement* pstmt, List* params, cons
     paramLI->parserSetupArg = NULL;
     paramLI->params_need_process = false;
     paramLI->numParams = num_params;
-    paramLI->paramMask = NULL;
 
     i = 0;
     foreach (l, exprstates) {
@@ -455,7 +486,8 @@ void InitQueryHashTable(void)
  * Assign the statement name for all the RemoteQueries in the plan tree, so
  * they use Datanode statements
  */
-int SetRemoteStatementName(Plan* plan, const char* stmt_name, int num_params, Oid* param_types, int n)
+int SetRemoteStatementName(Plan* plan, const char* stmt_name, int num_params, Oid* param_types, int n,
+                                      bool isBuildingCustomPlan, bool is_plan_shared)
 {
     /* If no plan simply return */
     if (plan == NULL)
@@ -472,7 +504,7 @@ int SetRemoteStatementName(Plan* plan, const char* stmt_name, int num_params, Oi
         char name[NAMEDATALEN];
 
         /* Nothing to do if parameters are already set for this query */
-        if (remotequery->rq_num_params != 0)
+        if (remotequery->rq_num_params != 0 && !is_plan_shared)
             return 0;
 
         if (stmt_name != NULL) {
@@ -507,36 +539,59 @@ int SetRemoteStatementName(Plan* plan, const char* stmt_name, int num_params, Oi
             /* If it already exists, that means this plan has just been revalidated. */
             if (!exists) {
                 entry = (DatanodeStatement*)hash_search(u_sess->pcache_cxt.datanode_queries, name, HASH_ENTER, NULL);
+                CN_GPC_LOG("entry datanodequery", 0, name);
                 entry->current_nodes_number = 0;
-                entry->dns_node_indices = NULL;
                 entry->dns_node_indices = (int*)MemoryContextAllocZero(
                     u_sess->pcache_cxt.datanode_queries->hcxt, u_sess->pgxc_cxt.NumDataNodes * sizeof(int));
+                entry->last_used_time = (instr_time*)MemoryContextAllocZero(
+                    u_sess->pcache_cxt.datanode_queries->hcxt, u_sess->pgxc_cxt.NumDataNodes * sizeof(instr_time));
                 entry->max_nodes_number = u_sess->pgxc_cxt.NumDataNodes;
             }
-
-            remotequery->statement = pstrdup(name);
+            if (!is_plan_shared) {
+                remotequery->statement = pstrdup(name);
+                remotequery->stmt_idx = n - 1;
+            }
+#ifdef USE_ASSERT_CHECKING
+            else {
+                /* check same msg */
+                Assert (remotequery->stmt_idx == n - 1);
+            }
+#endif
         } else if (remotequery->statement)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Passing parameters in PREPARE statement is not supported")));
-
-        remotequery->rq_num_params = num_params;
-        remotequery->rq_param_types = param_types;
+        if (!is_plan_shared) {
+            remotequery->rq_num_params = num_params;
+            remotequery->rq_param_types = param_types;
+            remotequery->isCustomPlan = isBuildingCustomPlan;
+        }
+#ifdef USE_ASSERT_CHECKING
+        else {
+            /* check same param msg */
+            Assert (remotequery->rq_num_params == num_params);
+            for (int i = 0; i < num_params; i++) {
+                Assert (remotequery->rq_param_types[i] == param_types[i]);
+            }
+        }
+#endif
     } else if (IsA(plan, ModifyTable)) {
         ModifyTable* mt_plan = (ModifyTable*)plan;
         /* For ModifyTable plan recurse into each of the plans underneath */
         ListCell* l = NULL;
         foreach (l, mt_plan->plans) {
             Plan* temp_plan = (Plan*)lfirst(l);
-            n = SetRemoteStatementName(temp_plan, stmt_name, num_params, param_types, n);
+            n = SetRemoteStatementName(temp_plan, stmt_name, num_params, param_types, n, isBuildingCustomPlan);
         }
     }
 
     if (innerPlan(plan))
-        n = SetRemoteStatementName(innerPlan(plan), stmt_name, num_params, param_types, n);
+        n = SetRemoteStatementName(innerPlan(plan), stmt_name, num_params, param_types, n,
+                                   isBuildingCustomPlan, is_plan_shared);
 
     if (outerPlan(plan))
-        n = SetRemoteStatementName(outerPlan(plan), stmt_name, num_params, param_types, n);
+        n = SetRemoteStatementName(outerPlan(plan), stmt_name, num_params, param_types, n,
+                                   isBuildingCustomPlan, is_plan_shared);
 
     return n;
 }
@@ -555,17 +610,59 @@ DatanodeStatement* light_set_datanode_queries(const char* stmt_name)
 
     /* if not exists, add it */
     if (entry == NULL) {
+        CN_GPC_LOG("entry lp datanodequery", 0, stmt_name);
         entry = (DatanodeStatement*)hash_search(u_sess->pcache_cxt.datanode_queries, stmt_name, HASH_ENTER, NULL);
         entry->current_nodes_number = 0;
-        entry->dns_node_indices = NULL;
         entry->dns_node_indices = (int*)MemoryContextAllocZero(
             u_sess->pcache_cxt.datanode_queries->hcxt, u_sess->pgxc_cxt.NumDataNodes * sizeof(int));
+        entry->last_used_time = (instr_time*)MemoryContextAllocZero(
+            u_sess->pcache_cxt.datanode_queries->hcxt, u_sess->pgxc_cxt.NumDataNodes * sizeof(instr_time));
         entry->max_nodes_number = u_sess->pgxc_cxt.NumDataNodes;
     }
 
     return entry;
 }
 #endif
+
+void StorePreparedStatementCNGPC(const char *stmt_name, CachedPlanSource *plansource, bool from_sql, bool is_share)
+{
+    TimestampTz cur_ts = GetCurrentStatementStartTimestamp();
+    bool found = false;
+
+    /* Initialize the hash table, if necessary */
+    if (unlikely(!u_sess->pcache_cxt.prepared_queries))
+        InitQueryHashTable();
+
+    /* Add entry to hash table */
+    PreparedStatement* entry = (PreparedStatement*)hash_search(u_sess->pcache_cxt.prepared_queries, stmt_name,
+                                                               HASH_ENTER, &found);
+    CN_GPC_LOG("entry preparedstatement", plansource, stmt_name);
+
+    /* Shouldn't get a duplicate entry */
+    if (found) {
+        if (is_share) {
+            Assert(plansource->gpc.status.InShareTable());
+            CN_GPC_LOG("duplicate prepared statement, sub refcount", plansource, 0);
+            plansource->gpc.status.SubRefCount();
+        }
+        ereport(ERROR,
+            (errcode(ERRCODE_DUPLICATE_PSTATEMENT), errmsg("prepared statement \"%s\" already exists", stmt_name)));
+    }
+    /* Fill in the hash table entry */
+    entry->plansource = plansource;
+    entry->from_sql = from_sql;
+    entry->prepare_time = cur_ts;
+    entry->has_prepare_dn_stmt = false;
+    Assert (entry->plansource->magic == CACHEDPLANSOURCE_MAGIC);
+
+    /* Now it's safe to move the CachedPlanSource to permanent memory */
+    if (!is_share) {
+        Assert(IsA((plansource)->raw_parse_tree, TransactionStmt) ||
+               !plansource->is_support_gplan || plansource->gpc.status.IsSharePlan());
+        plansource->gpc.status.SetLoc(GPC_SHARE_IN_LOCAL_SAVE_PLAN_LIST);
+        SaveCachedPlan(plansource);
+    }
+}
 
 /*
  * Store all the data pertaining to a query in the hash table using
@@ -576,10 +673,13 @@ DatanodeStatement* light_set_datanode_queries(const char* stmt_name)
 void StorePreparedStatement(const char* stmt_name, CachedPlanSource* plansource, bool from_sql)
 {
     if (ENABLE_DN_GPC) {
-        GPC->PrepareStore(stmt_name, plansource, from_sql);
-        return ;
+        g_instance.prepare_cache->Store(stmt_name, plansource, from_sql, false);
+        return;
     }
-
+    if (ENABLE_CN_GPC) {
+        StorePreparedStatementCNGPC(stmt_name, plansource, from_sql, false);
+        return;
+    }
     PreparedStatement* entry = NULL;
     TimestampTz cur_ts = GetCurrentStatementStartTimestamp();
     bool found = false;
@@ -605,6 +705,46 @@ void StorePreparedStatement(const char* stmt_name, CachedPlanSource* plansource,
     SaveCachedPlan(plansource);
 }
 
+static void FetchPreparedStatementCNGPC(PreparedStatement* entry, const char* stmt_name)
+{
+    Assert (entry->plansource->magic == CACHEDPLANSOURCE_MAGIC);
+    /* check if need recreate */
+    if (g_instance.plan_cache->CheckRecreateCachePlan(entry)) {
+        entry->has_prepare_dn_stmt = false;
+        g_instance.plan_cache->RecreateCachePlan(entry, stmt_name);
+    }
+#ifdef ENABLE_MULTIPLE_NODES
+    Assert (entry->plansource->lightProxyObj == NULL);
+    /* add datanode statment for current sess if is shared plan.
+       If it's CN light plancache. We will add datanode statment in execute stage. */
+    if (entry->plansource->gpc.status.InShareTable() && entry->has_prepare_dn_stmt == false) {
+        bool is_named_prepare = IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
+                                entry->stmt_name && entry->stmt_name[0] != '\0';
+        bool is_lp = entry->plansource->single_exec_node != NULL &&
+                     entry->plansource->gplan == NULL && entry->plansource->cplan == NULL;
+        if (is_named_prepare && !is_lp && entry->plansource->gplan) {
+            int n = 0;
+            ListCell* lc = NULL;
+            MemoryContext old_cxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+            foreach (lc, entry->plansource->gplan->stmt_list) {
+                Node* st = NULL;
+                PlannedStmt* ps = NULL;
+                st = (Node*)lfirst(lc);
+                if (IsA(st, PlannedStmt)) {
+                    ps = (PlannedStmt*)st;
+                    n = SetRemoteStatementName(ps->planTree, entry->stmt_name, entry->plansource->num_params,
+                                               entry->plansource->param_types, n, false, true);
+                }
+            }
+            CN_GPC_LOG("set datanode statment for shared plan", entry->plansource, stmt_name);
+            Assert (entry->plansource->gplan->dn_stmt_num == n);
+            (void)MemoryContextSwitchTo(old_cxt);
+        }
+        entry->has_prepare_dn_stmt = true;
+    }
+#endif
+}
+
 /*
  * Lookup an existing query in the hash table. If the query does not
  * actually exist, throw ereport(ERROR) or return NULL per second parameter.
@@ -612,27 +752,24 @@ void StorePreparedStatement(const char* stmt_name, CachedPlanSource* plansource,
  * Note: this does not force the referenced plancache entry to be valid,
  * since not all callers care.
  */
-PreparedStatement* FetchPreparedStatement(const char* stmt_name, bool throwError)
+PreparedStatement* FetchPreparedStatement(const char* stmt_name, bool throwError, bool need_valid)
 {
     if (ENABLE_DN_GPC) {
-        PreparedStatement *entry = GPC->PrepareFetch(stmt_name, throwError);
-        if (entry == NULL && throwError)
+        PreparedStatement *entry = g_instance.prepare_cache->Fetch(stmt_name, throwError);
+        if (entry == NULL && throwError) {
             ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
                      errmsg("prepared statement \"%s\" does not exist",
                             stmt_name)));
-
-        if (u_sess->pcache_cxt.gpc_in_ddl == true ||
-            (entry->plansource->gpc.entry != NULL && entry->plansource->gpc.entry->is_valid == false) ||
-            entry->plansource->dependsOnRole == true ||
-            (entry->plansource->gplan != NULL && TransactionIdIsValid(entry->plansource->gplan->saved_xmin))) {
-            GPC->RecreateCachePlan(entry);
+        }
+        if (g_instance.plan_cache->CheckRecreateCachePlan(entry)) {
+        	g_instance.plan_cache->RecreateCachePlan(entry, stmt_name);
         }
 
         return entry;
     }
 
-    PreparedStatement* entry = NULL;
+    PreparedStatement *entry = NULL;
 
     /*
      * If the hash table hasn't been initialized, it can't be storing
@@ -647,6 +784,9 @@ PreparedStatement* FetchPreparedStatement(const char* stmt_name, bool throwError
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_PSTATEMENT), errmsg("prepared statement \"%s\" does not exist", stmt_name)));
 
+    if (ENABLE_CN_GPC && entry != NULL && need_valid) {
+        FetchPreparedStatementCNGPC(entry, stmt_name);
+    }
     return entry;
 }
 
@@ -671,7 +811,7 @@ bool HaveActiveCoordinatorPreparedStatement(const char* stmt_name)
  *
  * Note: the result is created or copied into current memory context.
  */
-TupleDesc FetchPreparedStatementResultDesc(PreparedStatement* stmt)
+TupleDesc FetchPreparedStatementResultDesc(PreparedStatement *stmt)
 {
     /*
      * Since we don't allow prepared statements' result tupdescs to change,
@@ -693,7 +833,7 @@ TupleDesc FetchPreparedStatementResultDesc(PreparedStatement* stmt)
  * Describe Statement on an EXECUTE command, we don't worry too much about
  * efficiency.
  */
-List* FetchPreparedStatementTargetList(PreparedStatement* stmt)
+List* FetchPreparedStatementTargetList(PreparedStatement *stmt)
 {
     List* tlist = NIL;
 
@@ -708,7 +848,7 @@ List* FetchPreparedStatementTargetList(PreparedStatement* stmt)
  * Implements the 'DEALLOCATE' utility statement: deletes the
  * specified plan from storage.
  */
-void DeallocateQuery(const DeallocateStmt* stmt)
+void DeallocateQuery(DeallocateStmt* stmt)
 {
     if (stmt->name)
         DropPreparedStatement(stmt->name, true);
@@ -724,21 +864,58 @@ void DeallocateQuery(const DeallocateStmt* stmt)
 void DropPreparedStatement(const char* stmt_name, bool showError)
 {
     if (ENABLE_DN_GPC) {
-        GPC->PrepareDrop(stmt_name, showError);
+        g_instance.prepare_cache->Drop(stmt_name, showError);
         return ;
     }
 
-    PreparedStatement* entry = NULL;
+    PreparedStatement *entry = NULL;
 
     /* Find the query's hash table entry; raise error if wanted */
-    entry = FetchPreparedStatement(stmt_name, showError);
+    entry = FetchPreparedStatement(stmt_name, showError, false);
+    ResourceOwner originalOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+
+
+    if (NULL == originalOwner) {
+        /*
+         * make sure ResourceOwner is not null, since it may acess catalog
+         * when the pooler tries to create new connections
+         */
+        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "DropPreparedStatement",
+            MEMORY_CONTEXT_OPTIMIZER);
+    }
+
+
     if (entry != NULL) {
         /* Release the plancache entry */
-        DropCachedPlan(entry->plansource);
-
+        Assert (entry->plansource->magic == CACHEDPLANSOURCE_MAGIC);
+        if (ENABLE_CN_GPC)
+            GPCDropLPIfNecessary(entry->stmt_name, true, true, NULL);
+        if (entry->plansource->gpc.status.InShareTable()) {
+            CN_GPC_LOG("prepare remove success", 0, entry->plansource->stmt_name);
+#ifdef ENABLE_MULTIPLE_NODES
+            if (entry->plansource->gplan)
+                GPCCleanDatanodeStatement(entry->plansource->gplan->dn_stmt_num, entry->stmt_name);
+#endif
+            entry->plansource->gpc.status.SubRefCount();
+        } else {
+            CN_GPC_LOG("prepare remove private", entry->plansource, entry->stmt_name);
+            DropCachedPlan(entry->plansource);
+            CN_GPC_LOG("prepare remove private succ", 0, entry->stmt_name);
+        }
+        CN_GPC_LOG("remove prepare statment", 0, entry->stmt_name);
         /* Now we can remove the hash table entry */
         hash_search(u_sess->pcache_cxt.prepared_queries, entry->stmt_name, HASH_REMOVE, NULL);
     }
+
+    if (NULL == originalOwner && t_thrd.utils_cxt.CurrentResourceOwner) {
+        ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
+        ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_LOCKS, false, true);
+        ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, true);
+
+        ResourceOwner tempOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+        t_thrd.utils_cxt.CurrentResourceOwner = originalOwner;
+        ResourceOwnerDelete(tempOwner);
+    } 
 }
 
 /*
@@ -747,8 +924,13 @@ void DropPreparedStatement(const char* stmt_name, bool showError)
 void DropAllPreparedStatements(void)
 {
     HASH_SEQ_STATUS seq;
-    PreparedStatement* entry = NULL;
+    PreparedStatement *entry = NULL;
     ResourceOwner originalOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+
+    if (ENABLE_DN_GPC) {
+        Assert (u_sess->pcache_cxt.prepared_queries == NULL);
+        return;
+    }
 
     /* nothing cached */
     if (!u_sess->pcache_cxt.prepared_queries)
@@ -771,12 +953,14 @@ void DropAllPreparedStatements(void)
          * make sure ResourceOwner is not null, since it may acess catalog
          * when the pooler tries to create new connections
          */
-        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "DropAllPreparedStatements");
+        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "DropAllPreparedStatements",
+            MEMORY_CONTEXT_OPTIMIZER);
     }
 
     bool failflag_dropcachedplan = false;
     ErrorData* edata = NULL;
     MemoryContext oldcontext = CurrentMemoryContext;
+    bool isSharedPlan = false;
 
     /* walk over cache */
     hash_seq_init(&seq, u_sess->pcache_cxt.prepared_queries);
@@ -784,7 +968,21 @@ void DropAllPreparedStatements(void)
         PG_TRY();
         {
             /* Release the plancache entry */
-            DropCachedPlan(entry->plansource);
+            Assert (entry->plansource->magic == CACHEDPLANSOURCE_MAGIC);
+            isSharedPlan = entry->plansource->gpc.status.InShareTable();
+#ifdef ENABLE_MULTIPLE_NODES
+            if (ENABLE_CN_GPC)
+                GPCDropLPIfNecessary(entry->stmt_name, true, true, NULL);
+            /* for gpc, in case has error, only send drop preparestatement to dn here, sub refcount later */
+            if (isSharedPlan && entry->plansource->gplan != NULL) {
+                GPCCleanDatanodeStatement(entry->plansource->gplan->dn_stmt_num, entry->stmt_name);
+            }
+#endif
+            if (!isSharedPlan) {
+                CN_GPC_LOG("prepare remove private", entry->plansource, entry->stmt_name);
+                DropCachedPlan(entry->plansource);
+                CN_GPC_LOG("prepare remove private succ", 0, entry->stmt_name);
+            }
         }
         PG_CATCH();
         {
@@ -801,11 +999,17 @@ void DropAllPreparedStatements(void)
             FreeErrorData(edata);
         }
         PG_END_TRY();
+        if (isSharedPlan) {
+            CN_GPC_LOG("prepare remove ", entry->plansource, entry->plansource->stmt_name);
+            /* sub refcount savely */
+            entry->plansource->gpc.status.SubRefCount();
+        }
 
         /* Now we can remove the hash table entry */
         hash_search(u_sess->pcache_cxt.prepared_queries, entry->stmt_name, HASH_REMOVE, NULL);
     }
     ReleaseTempResourceOwner();
+    CN_GPC_LOG("remove prepare statment all", 0, 0);
 
     if (failflag_dropcachedplan) {
         /* destory connections to other node to cleanup all cached statements */
@@ -822,13 +1026,21 @@ void DropAllPreparedStatements(void)
 void HandlePreparedStatementsForReload(void)
 {
     HASH_SEQ_STATUS seq;
-    PreparedStatement* entry = NULL;
+    PreparedStatement *entry = NULL;
     ErrorData* edata = NULL;
 
     /* nothing cached */
     if (!u_sess->pcache_cxt.prepared_queries)
         return;
 
+    if (ENABLE_CN_GPC) {
+        u_sess->cn_session_abort_count++;
+        if (unlikely(u_sess->cn_session_abort_count >= PG_UINT16_MAX)) {
+            ereport(WARNING, (errmodule(MOD_GPC), errcode(ERRCODE_LOG), errmsg("GPC's cn abort count overflow and reset to 0")));
+            u_sess->cn_session_abort_count = 0;
+        }
+    }
+    GPC_LOG("pool reload", 0, 0);
     MemoryContext oldcontext = CurrentMemoryContext;
     /* walk over cache */
     hash_seq_init(&seq, u_sess->pcache_cxt.prepared_queries);
@@ -839,7 +1051,12 @@ void HandlePreparedStatementsForReload(void)
         PG_TRY();
         {
             /* clean CachedPlanSource */
-            DropCachedPlanInternal(entry->plansource);
+            if (entry->plansource->gpc.status.IsSharePlan()) {
+                g_instance.plan_cache->InvalidPlanSourceForReload(entry->plansource, entry->stmt_name);
+            } else {
+                DropCachedPlanInternal(entry->plansource);
+            }
+            entry->has_prepare_dn_stmt = false;
         }
         PG_CATCH();
         {
@@ -852,6 +1069,7 @@ void HandlePreparedStatementsForReload(void)
                     errcode(ERRCODE_INTERNAL_ERROR),
                     errmsg("failed to drop internal cached plan when reload prepared statements: %s", edata->message)));
             FreeErrorData(edata);
+            entry->has_prepare_dn_stmt = false;
         }
         PG_END_TRY();
     }
@@ -884,6 +1102,17 @@ void HandlePreparedStatementsForRetry(void)
      */
     ResetPlanCache();
 
+    if (ENABLE_CN_GPC) {
+        /* set plansource to invalid like ungpc */
+        HASH_SEQ_STATUS seq;
+        PreparedStatement* entry = NULL;
+        hash_seq_init(&seq, u_sess->pcache_cxt.prepared_queries);
+        while ((entry = (PreparedStatement*)hash_seq_search(&seq)) != NULL) {
+            if (entry->plansource->gpc.status.IsSharePlan())
+                g_instance.plan_cache->InvalidPlanSourceForCNretry(entry->plansource);
+        }
+    }
+
     ereport(DEBUG2, (errmodule(MOD_OPT), errmsg("Invalid all prepared statements for retry")));
 }
 
@@ -899,7 +1128,7 @@ void HandlePreparedStatementsForRetry(void)
 void ExplainExecuteQuery(
     ExecuteStmt* execstmt, IntoClause* into, ExplainState* es, const char* queryString, ParamListInfo params)
 {
-    PreparedStatement* entry = NULL;
+    PreparedStatement *entry = NULL;
     const char* query_string = NULL;
     CachedPlan* cplan = NULL;
     List* plan_list = NIL;
@@ -908,7 +1137,8 @@ void ExplainExecuteQuery(
     EState* estate = NULL;
 
     /* Look it up in the hash table */
-    entry = FetchPreparedStatement(execstmt->name, true);
+    entry = FetchPreparedStatement(execstmt->name, true, true);
+
     /* Shouldn't find a non-fixed-result cached plan */
     if (!entry->plansource->fixed_result)
         ereport(ERROR,
@@ -936,9 +1166,21 @@ void ExplainExecuteQuery(
         paramLI->params_need_process = true;
     }
 
+    u_sess->attr.attr_sql.explain_allow_multinode = true;
+
     cplan = GetCachedPlan(entry->plansource, paramLI, true);
 
-    plan_list = cplan->stmt_list;
+    /* use shared plan here, add refcount */
+    if (cplan->isShared())
+        (void)pg_atomic_fetch_add_u32((volatile uint32*)&cplan->global_refcount, 1);
+
+    u_sess->attr.attr_sql.explain_allow_multinode = false;
+
+    if (ENABLE_GPC) {
+        plan_list = CopyLocalStmt(cplan->stmt_list);
+    } else {
+        plan_list = cplan->stmt_list;
+    }
 
     es->is_explain_gplan = false;
     if (entry->plansource->cplan == NULL)
@@ -957,14 +1199,15 @@ void ExplainExecuteQuery(
         }
 
         if (IsA(pstmt, PlannedStmt))
-            ExplainOnePlan(pstmt, into, es, query_string, paramLI);
+            ExplainOnePlan(pstmt, into, es, query_string, None_Receiver, paramLI);
         else
             ExplainOneUtility((Node*)pstmt, into, es, query_string, paramLI);
 
         pstmt->instrument_option = instrument_option;
 
-        /* No need for CommandCounterIncrement, as ExplainOnePlan did it.
-         * Separate plans with an appropriate separator */
+        /* No need for CommandCounterIncrement, as ExplainOnePlan did it */
+
+        /* Separate plans with an appropriate separator */
         if (lnext(p) != NULL)
             ExplainSeparatePlans(es);
     }
@@ -1006,7 +1249,7 @@ Datum pg_prepared_statement(PG_FUNCTION_ARGS)
      * build tupdesc for result tuples. This must match the definition of the
      * pg_prepared_statements view in system_views.sql
      */
-    tupdesc = CreateTemplateTupleDesc(5, false);
+    tupdesc = CreateTemplateTupleDesc(5, false, TAM_HEAP);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "statement", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "prepare_time", TIMESTAMPTZOID, -1, 0);
@@ -1026,7 +1269,7 @@ Datum pg_prepared_statement(PG_FUNCTION_ARGS)
     /* hash table might be uninitialized */
     if (u_sess->pcache_cxt.prepared_queries) {
         HASH_SEQ_STATUS hash_seq;
-        PreparedStatement* prep_stmt = NULL;
+        PreparedStatement *prep_stmt = NULL;
 
         hash_seq_init(&hash_seq, u_sess->pcache_cxt.prepared_queries);
         while ((prep_stmt = (PreparedStatement*)hash_seq_search(&hash_seq)) != NULL) {
@@ -1115,15 +1358,14 @@ void DropDatanodeStatement(const char* stmt_name)
         for (i = 0; i < entry->current_nodes_number; i++)
             nodelist = lappend_int(nodelist, entry->dns_node_indices[i]);
 
+        CN_GPC_LOG("drop datanode statment", NULL, entry->stmt_name);
         /* Okay to remove it */
         (void*)hash_search(u_sess->pcache_cxt.datanode_queries, entry->stmt_name, HASH_REMOVE, NULL);
 
         entry->current_nodes_number = 0;
         entry->max_nodes_number = 0;
-        if (entry->dns_node_indices) {
-            pfree_ext(entry->dns_node_indices);
-            entry->dns_node_indices = NULL;
-        }
+        pfree_ext(entry->dns_node_indices);
+        pfree_ext(entry->last_used_time);
 
         ExecCloseRemoteStatement(stmt_name, nodelist);
     }
@@ -1153,6 +1395,16 @@ void DeActiveAllDataNodeStatements(void)
             Assert(tmp_num <= u_sess->pgxc_cxt.NumDataNodes);
             errorno = memset_s(entry->dns_node_indices, tmp_num * sizeof(int), 0, tmp_num * sizeof(int));
             securec_check_c(errorno, "\0", "\0");
+            errorno = memset_s(entry->last_used_time, tmp_num * sizeof(instr_time), 0, tmp_num * sizeof(instr_time));
+            securec_check_c(errorno, "\0", "\0");
+        }
+    }
+    /* count datanode_queries release times for GPC, as part of cn session message for send to DN later */
+    if (ENABLE_CN_GPC) {
+        u_sess->cn_session_abort_count++;
+        if (unlikely(u_sess->cn_session_abort_count >= PG_UINT16_MAX)) {
+            ereport(WARNING, (errmodule(MOD_GPC), errcode(ERRCODE_LOG), errmsg("GPC's cn abort count overflow and reset to 0")));
+            u_sess->cn_session_abort_count = 0;
         }
     }
 }
@@ -1196,11 +1448,27 @@ bool ActivateDatanodeStatementOnNode(const char* stmt_name, int noid)
 
     /* find the statement in cache */
     entry = FetchDatanodeStatement(stmt_name, true);
+    instr_time cur_time;
+    INSTR_TIME_SET_CURRENT(cur_time);
 
-    /* see if statement already active on the node */
-    for (i = 0; i < entry->current_nodes_number; i++) {
-        if (entry->dns_node_indices[i] == noid)
-            return true;
+    if (ENABLE_CN_GPC) {
+        /* see if statement already active on the node, update used time for using statement */
+        for (i = 0; i < entry->current_nodes_number; i++) {
+            if (entry->dns_node_indices[i] == noid) {
+                if (NEED_SEND_PARSE_AGAIN(entry->last_used_time[i], cur_time)) {
+                    entry->last_used_time[i] = cur_time;
+                    return false;
+                }
+                entry->last_used_time[i] = cur_time;
+                return true;
+            }
+        }
+    } else {
+        /* see if statement already active on the node */
+        for (i = 0; i < entry->current_nodes_number; i++) {
+            if (entry->dns_node_indices[i] == noid)
+                return true;
+        }
     }
 
     /* After cluster expansion, must expand entry->dns_node_indices array too */
@@ -1215,6 +1483,15 @@ bool ActivateDatanodeStatementOnNode(const char* stmt_name, int noid)
         securec_check(errorno, "\0", "\0");
         pfree_ext(entry->dns_node_indices);
         entry->dns_node_indices = new_dns_node_indices;
+        instr_time* new_last_used_time = (instr_time*)MemoryContextAllocZero(
+            u_sess->pcache_cxt.datanode_queries->hcxt, entry->max_nodes_number * 2 * sizeof(instr_time));
+        errorno = memcpy_s(new_last_used_time,
+            entry->max_nodes_number * 2 * sizeof(instr_time),
+            entry->last_used_time,
+            entry->max_nodes_number * sizeof(instr_time));
+        securec_check(errorno, "\0", "\0");
+        pfree_ext(entry->last_used_time);
+        entry->last_used_time = new_last_used_time;
         entry->max_nodes_number = entry->max_nodes_number * 2;
         elog(LOG,
             "expand node ids array for active datanode statements "
@@ -1223,10 +1500,31 @@ bool ActivateDatanodeStatementOnNode(const char* stmt_name, int noid)
     }
 
     /* statement is not active on the specified node append item to the list */
-    entry->dns_node_indices[entry->current_nodes_number++] = noid;
+    entry->dns_node_indices[entry->current_nodes_number] = noid;
+    entry->last_used_time[entry->current_nodes_number++] = cur_time;
 
     return false;
 }
+
+char* get_datanode_statement_name(const char* stmt_name, int n)
+{
+    char name[NAMEDATALEN];
+    errno_t rc = strncpy_s(name, NAMEDATALEN, stmt_name, NAMEDATALEN - 1);
+    securec_check(rc, "\0", "\0");
+    if (n) {
+        name[NAMEDATALEN - 1] = '\0';
+        char modifier[NAMEDATALEN];
+        int ss_rc = -1;
+        ss_rc = sprintf_s(modifier, NAMEDATALEN, "__%d", n);
+        securec_check_ss(ss_rc, "\0", "\0");
+        name[NAMEDATALEN - strlen(modifier) - 1] = '\0';
+        ss_rc = -1;
+        ss_rc = strcat_s(name, NAMEDATALEN, modifier);
+        securec_check(ss_rc, "\0", "\0");
+    }
+    return pstrdup(name);
+}
+
 #endif
 
 /*
@@ -1238,16 +1536,16 @@ bool ActivateDatanodeStatementOnNode(const char* stmt_name, int noid)
  * 		True : need to do rePrepare proc before executing execute stmt.
  *		False: could execute stmt directly.
  */
-bool needRecompileQuery(const ExecuteStmt* stmt)
+bool needRecompileQuery(ExecuteStmt* stmt)
 {
     bool ret_val = false;
-    PreparedStatement* entry = NULL;
+    PreparedStatement *entry = NULL;
     CachedPlanSource* plansource = NULL;
 
     /* Look it up in the hash table */
-    entry = FetchPreparedStatement(stmt->name, true);
+    entry = FetchPreparedStatement(stmt->name, true, false);
 
-    /* Find if there is query that has been enabled auto truncation. */
+    /* Find if there is query that has been enabled auto truncation.*/
     plansource = entry->plansource;
 
     ret_val = checkRecompileCondition(plansource);
@@ -1263,9 +1561,9 @@ bool needRecompileQuery(const ExecuteStmt* stmt)
  * output result:
  * 				void
  */
-void RePrepareQuery(const ExecuteStmt* stmt)
+void RePrepareQuery(ExecuteStmt* stmt)
 {
-    PreparedStatement* entry = NULL;
+    PreparedStatement *entry = NULL;
     char* query_string = NULL;
     uint32 query_length;
     errno_t err;
@@ -1275,9 +1573,9 @@ void RePrepareQuery(const ExecuteStmt* stmt)
     ListCell* stmtlist_item = NULL;
 
     /* Look it up in the hash table */
-    entry = FetchPreparedStatement(stmt->name, true);
+    entry = FetchPreparedStatement(stmt->name, true, false);
 
-    /* copy the original query text. */
+    /* copy the original query text.*/
     query_length = strlen(entry->plansource->query_string);
     query_string = (char*)palloc(query_length + 1);
     err = strcpy_s(query_string, query_length + 1, entry->plansource->query_string);
@@ -1325,14 +1623,18 @@ void RePrepareQuery(const ExecuteStmt* stmt)
  * output result:
  * There are four scenario:
  * td_compatible_truncation | Query->tdTruncCastStatus | return
- *             True            TRUNC_CAST_QUERY          False, means the insert stmt has set auto truncation according,
- * here do not need recompile. True            NOT_CAST_BECAUSEOF_GUC    True, we should recompile to make sure the char
- * and varchar truncation enabled. False           TRUNC_CAST_QUERY          True, we should recompile to make sure turn
- * off auto truncation function for char and varchar type data. False           NOT_CAST_BECAUSEOF_GUC    False, means
- * we did not use auto truncation function before, no need to re-compile. True/False      UNINVOLVED_QUERY False,
- * uninvolved query always false.Don't need re-generate plan.
+ *             True            TRUNC_CAST_QUERY          False, means the insert stmt has set auto truncation
+ *                                                        according, here do not need recompile.
+ *             True            NOT_CAST_BECAUSEOF_GUC    True, we should recompile to make sure the char and
+ *                                                        varchar truncation enabled.
+ *             False           TRUNC_CAST_QUERY          True, we should recompile to make sure turn off auto
+ *                                                        truncation function for char and varchar type data. 
+ *             False           NOT_CAST_BECAUSEOF_GUC    False, means we did not use auto truncation function
+ *                                                        before, no need to re-compile. 
+ *             True/False      UNINVOLVED_QUERY          False, uninvolved query always false.
+ *                                                        Don't need re-generate plan.
  */
-bool checkRecompileCondition(const CachedPlanSource* plansource)
+bool checkRecompileCondition(CachedPlanSource* plansource)
 {
     ListCell* l = NULL;
     foreach (l, plansource->query_list) {

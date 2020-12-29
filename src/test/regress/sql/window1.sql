@@ -387,25 +387,25 @@ create table stream_cost_table(a int, b int, c regproc);
 insert into stream_cost_table select generate_series(1, 1000), generate_series(1, 1000) % 50, 'sin';
 analyze stream_cost_table;
 --window function for redistribute and broadcast
-explain (verbose on, costs off, nodes off) select avg(a::numeric(7, 2)) over(partition by b) from stream_cost_table; 
-explain (verbose on, costs off, nodes off) select avg(a::numeric(7, 2)) over(partition by c) from stream_cost_table;
+explain (verbose on, costs off) select avg(a::numeric(7, 2)) over(partition by b) from stream_cost_table; 
+explain (verbose on, costs off) select avg(a::numeric(7, 2)) over(partition by c) from stream_cost_table;
 --group stream for redistribute and broadcast
 set enable_hashagg=off; 
-explain (verbose on, nodes off, costs off) select a from stream_cost_table union (select b from stream_cost_table t group by t.b);
-explain (verbose on, nodes off, costs off) select a from stream_cost_table union (select c from stream_cost_table t group by t.c);
+explain (verbose on, costs off) select a from stream_cost_table union (select b from stream_cost_table t group by t.b);
+explain (verbose on, costs off) select a from stream_cost_table union (select c from stream_cost_table t group by t.c);
 --distinct stream for redistribute and broadcast
-explain (verbose on, nodes off, costs off) select a from stream_cost_table union (select distinct(b) from stream_cost_table);
-explain (verbose on, nodes off, costs off) select a from stream_cost_table union (select distinct(c) from stream_cost_table);
+explain (verbose on, costs off) select a from stream_cost_table union (select distinct(b) from stream_cost_table);
+explain (verbose on, costs off) select a from stream_cost_table union (select distinct(c) from stream_cost_table);
 --agg stream for redistribute and broadcast
 set enable_hashagg=on; 
-explain (verbose on, nodes off, costs off) select sum(x) from (select 1, sum(a) x from stream_cost_table group by 1);
-explain (verbose on, nodes off, costs off) select sum(b) from stream_cost_table union (select sum(b) from stream_cost_table);  
+explain (verbose on, costs off) select sum(x) from (select 1, sum(a) x from stream_cost_table group by 1);
+explain (verbose on, costs off) select sum(b) from stream_cost_table union (select sum(b) from stream_cost_table);  
 
 drop table stream_cost_table;
 
 --test expression and windowagg
 set enable_hashagg=off;
 create table t_window(a int primary key, b int);
-explain (verbose on, nodes off, costs off) select a, sum(b)*b, rank() over (partition by a) from t_window group by 1;
-explain (verbose on, nodes off, costs off) select b, sum(a)*coalesce(a,0), rank() over (partition by b+1) from t_window group by 1, coalesce(a,0);
+explain (verbose on, costs off) select a, sum(b)*b, rank() over (partition by a) from t_window group by 1;
+explain (verbose on, costs off) select b, sum(a)*coalesce(a,0), rank() over (partition by b+1) from t_window group by 1, coalesce(a,0);
 drop table t_window;

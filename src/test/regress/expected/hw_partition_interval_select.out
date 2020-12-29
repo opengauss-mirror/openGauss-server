@@ -25,7 +25,7 @@ select * from interval_tab1 where logdate < '2020-4-7 0:0:0';
 ---------+---------+----------+-----------
 (0 rows)
 
-explain (costs off, verbose on, nodes off) select * from interval_tab1 where logdate < '2020-4-7 0:0:0';
+explain (costs off, verbose on) select * from interval_tab1 where logdate < '2020-4-7 0:0:0';
                                             QUERY PLAN                                             
 ---------------------------------------------------------------------------------------------------
  Partition Iterator
@@ -44,7 +44,7 @@ select * from interval_tab1 where logdate > '2020-4-6';
        1 | Wed Apr 08 02:00:00 2020 |        1 |         1
 (2 rows)
 
-explain (costs off, verbose on, nodes off) select * from interval_tab1 where logdate > '2020-4-6';
+explain (costs off, verbose on) select * from interval_tab1 where logdate > '2020-4-6';
                                             QUERY PLAN                                             
 ---------------------------------------------------------------------------------------------------
  Partition Iterator
@@ -130,7 +130,7 @@ select * from interval_tab1 where logdate > '2020-4-6 0:0:0' and logdate <= '202
        1 | Thu Apr 09 00:00:00 2020 |        1 |         1
 (4 rows)
 
-explain (costs off, verbose on, nodes off)  select * from interval_tab1 where logdate >= '2020-4-10 0:0:0';
+explain (costs off, verbose on)  select * from interval_tab1 where logdate >= '2020-4-10 0:0:0';
                                              QUERY PLAN                                             
 ----------------------------------------------------------------------------------------------------
  Partition Iterator

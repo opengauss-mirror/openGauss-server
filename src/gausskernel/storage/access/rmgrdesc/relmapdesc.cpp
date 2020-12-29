@@ -18,16 +18,15 @@
 
 #include "utils/relmapper.h"
 
-void relmap_desc(StringInfo buf, XLogReaderState* record)
+void relmap_desc(StringInfo buf, XLogReaderState *record)
 {
-    char* rec = XLogRecGetData(record);
+    char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     if (info == XLOG_RELMAP_UPDATE) {
-        xl_relmap_update* xlrec = (xl_relmap_update*)rec;
+        xl_relmap_update *xlrec = (xl_relmap_update *)rec;
 
-        appendStringInfo(
-            buf, "update relmap: database %u tablespace %u size %d", xlrec->dbid, xlrec->tsid, xlrec->nbytes);
+        appendStringInfo(buf, "update relmap: database %u tablespace %u size %d", xlrec->dbid, xlrec->tsid,
+                         xlrec->nbytes);
     } else
         appendStringInfo(buf, "UNKNOWN");
 }
-

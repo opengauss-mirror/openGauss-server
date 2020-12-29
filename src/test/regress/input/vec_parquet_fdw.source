@@ -1,0 +1,186 @@
+--
+-- Test parquet foreign data wrapper.
+--
+
+-- Settings to make the result deterministic
+SET datestyle = "ISO, YMD";
+
+-- validator tests
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+CREATE FOREIGN TABLE test_validator_filename_missing (a int) 
+	SERVER hdfs_server distribute by roundrobin; -- ERROR
+
+CREATE FOREIGN TABLE test_validator_invalid_option (a int) 
+	SERVER hdfs_server 
+	OPTIONS(format 'parquet', filenames 'bigrow.parquet', bad_option_name '1') distribute by roundrobin; -- ERROR
+
+CREATE FOREIGN TABLE test_validator_tooMany_option (a int) 
+	SERVER hdfs_server 
+	OPTIONS(format 'parquet', filenames 'bigrow.parquet', foldername '/user/hdfs') distribute by roundrobin; -- ERROR
+
+drop foreign table test_validator_filename_missing;
+drop foreign table test_validator_invalid_option;
+drop foreign table test_validator_tooMany_option;
+
+DROP FOREIGN TABLE IF EXISTS lineitem_twoStripes;
+Create foreign table lineitem_twoStripes (
+ L_ORDERKEY BIGINT NOT NULL
+ , L_PARTKEY BIGINT NOT NULL
+ , L_SUPPKEY BIGINT NOT NULL
+ , L_LINENUMBER BIGINT NOT NULL
+ , L_QUANTITY DECIMAL(15,2) NOT NULL
+ , L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL
+ , L_DISCOUNT DECIMAL(15,2) NOT NULL
+ , L_TAX DECIMAL(15,2) NOT NULL
+ , L_RETURNFLAG CHAR(1) NOT NULL
+ , L_LINESTATUS CHAR(1) NOT NULL
+ , L_SHIPDATE DATE NOT NULL
+ , L_COMMITDATE DATE NOT NULL
+ , L_RECEIPTDATE DATE NOT NULL
+ , L_SHIPINSTRUCT CHAR(25) NOT NULL
+ , L_SHIPMODE CHAR(10) NOT NULL
+ , L_COMMENT VARCHAR(44) NOT NULL
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', filenames '/user/hive/warehouse/mppdb.db/lineitem_parquet/000000_0,/user/hive/warehouse/mppdb.db/lineitem_parquet/000001_0') distribute by roundrobin;
+
+SELECT L_SHIPDATE FROM lineitem_twoStripes WHERE L_orderkey BETWEEN 509050 AND 509070 order by l_shipdate;
+
+select L_TAX from lineitem_twoStripes where L_LINESTATUS = 'V';
+
+select L_LINESTATUS from lineitem_twoStripes where L_RETURNFLAG = 'N' order by 1 desc offset 1000 limit 20;
+
+SELECT count(L_SHIPDATE) FROM lineitem_twoStripes WHERE L_orderkey BETWEEN 509050 AND 509070;
+
+drop foreign table lineitem_twoStripes;
+
+DROP FOREIGN TABLE IF EXISTS lineitem;
+Create foreign table lineitem (
+ L_ORDERKEY BIGINT NOT NULL
+ , L_PARTKEY BIGINT NOT NULL
+ , L_SUPPKEY BIGINT NOT NULL
+ , L_LINENUMBER BIGINT NOT NULL
+ , L_QUANTITY DECIMAL(15,2) NOT NULL
+ , L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL
+ , L_DISCOUNT DECIMAL(15,2) NOT NULL
+ , L_TAX DECIMAL(15,2) NOT NULL
+ , L_RETURNFLAG CHAR(1) NOT NULL
+ , L_LINESTATUS CHAR(1) NOT NULL
+ , L_SHIPDATE DATE NOT NULL
+ , L_COMMITDATE DATE NOT NULL
+ , L_RECEIPTDATE DATE NOT NULL
+ , L_SHIPINSTRUCT CHAR(25) NOT NULL
+ , L_SHIPMODE CHAR(10) NOT NULL
+ , L_COMMENT VARCHAR(44) NOT NULL
+)
+SERVER hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/lineitem_parquet')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS customer;
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/customer_parquet')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS orders;
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/orders_parquet')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS part;
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT, 
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/part_parquet')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS supplier;
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/supplier_parquet')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS partsupp;
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/partsupp_parquet')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS nation;
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/nation_parquet')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS region;
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/region_parquet')
+distribute by roundrobin;
+
+-- there are bugs for the following three queries. cause EOF error from datanode
+SELECT L_shipdate FROM lineitem WHERE L_orderkey between 2125190 and 2125200 order by l_shipdate;
+SELECT count(L_shipdate) FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+SELECT *  from lineitem WHERE L_orderkey between 2125190 and 2125200 order by l_orderkey, l_partkey;
+
+create foreign table bool_skip_1(i int, a smallint, b bool, c float4, d decimal(10,5))
+server hdfs_server
+options(format 'parquet', foldername '/user/hive/warehouse/bool_skip_1_parquet')
+distribute by roundrobin;
+select * from bool_skip_1 where b is null and i>15000 and i<15020 order by 1,2,3,4,5;
+DROP FOREIGN TABLE IF EXISTS bool_skip_1 CASCADE;
+
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+DROP SERVER hdfs_server CASCADE;

@@ -45,6 +45,7 @@ typedef enum {
 extern bool AutoVacuumingActive(void);
 extern bool IsAutoVacuumLauncherProcess(void);
 extern bool IsAutoVacuumWorkerProcess(void);
+extern bool IsFromAutoVacWoker(void);
 extern AutoVacOpts* extract_autovac_opts(HeapTuple tup, TupleDesc pg_class_desc);
 
 #define IsAnyAutoVacuumProcess() (IsAutoVacuumLauncherProcess() || IsAutoVacuumWorkerProcess())

@@ -40,8 +40,10 @@ static Oid lookup_agg_function(List* fnName, int nargs, Oid* input_types, Oid* r
 
 /*
  * AggregateCreate
+ * aggKind, aggregation function kind, 'n' for normal aggregation, 'o' for ordered set aggregation.
  */
-void AggregateCreate(const char* aggName, Oid aggNamespace, Oid* aggArgTypes, int numArgs, List* aggtransfnName,
+void AggregateCreate(const char* aggName, Oid aggNamespace, char aggKind, Oid* aggArgTypes, int numArgs, 
+                     List* aggtransfnName,
 #ifdef PGXC
     List* aggcollectfnName,
 #endif
@@ -102,7 +104,8 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, Oid* aggArgTypes, in
 
 #ifdef PGXC
 
-    if (aggTransType == INTERNALOID && pg_strcasecmp(aggName, "listagg") != 0)
+    if (aggTransType == INTERNALOID && pg_strcasecmp(aggName, "listagg") != 0 && pg_strcasecmp(aggName, "median") != 0
+        && pg_strcasecmp(aggName, "mode") != 0)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("unsafe use of pseudo-type \"internal\""),
@@ -290,7 +293,7 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, Oid* aggArgTypes, in
      */
     procOid = ProcedureCreate(aggName,
         aggNamespace,
-        false,                                /* a db compatible*/
+        false,                                /* A db compatible*/
         false,                                /* no replacement */
         false,                                /* doesn't return a set */
         finaltype,                            /* returnType */
@@ -299,7 +302,8 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, Oid* aggArgTypes, in
         InvalidOid,                           /* no validator */
         "aggregate_dummy",                    /* placeholder proc */
         NULL,                                 /* probin */
-        PROKIND_AGGREGATE,                    /* prokind */
+        true,                                 /* isAgg */
+        false,                                /* isWindowFunc */
         false,                                /* security invoker (currently not
                                                * definable for agg) */
         false,                                /* isLeakProof */
@@ -317,7 +321,8 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, Oid* aggArgTypes, in
         NULL,                                 /* default value postion array */
         false,
         false,
-        false);
+        false,
+        false);                               /* default value for proisprocedure */
 
     /*
      * Okay to create the pg_aggregate entry.
@@ -346,7 +351,8 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, Oid* aggArgTypes, in
     else
         nulls[Anum_pg_aggregate_agginitcollect - 1] = true;
 #endif
-    values[Anum_pg_aggregate_aggkind - 1] = CharGetDatum(AGGKIND_DEFAULT);
+    /* handle ordered set aggregate with no direct args. */
+    values[Anum_pg_aggregate_aggkind - 1] = CharGetDatum(aggKind);
     values[Anum_pg_aggregate_aggnumdirectargs - 1] = Int8GetDatum(AGGNUMDIRECTARGS_DEFAULT);
 
     aggdesc = heap_open(AggregateRelationId, RowExclusiveLock);

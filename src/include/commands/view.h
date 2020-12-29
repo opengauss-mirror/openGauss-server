@@ -16,8 +16,8 @@
 
 #include "nodes/parsenodes.h"
 
-extern void DefineView(ViewStmt* stmt, const char* queryString, bool isFirstNode = true);
+extern Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote = true, bool isFirstNode = true);
 extern bool IsViewTemp(ViewStmt* stmt, const char* queryString);
-extern void StoreViewQuery(Oid viewOid, Query* viewParse, bool replace);
+extern void StoreViewQuery(Oid viewOid, Query *viewParse, bool replace);
 
 #endif /* VIEW_H */

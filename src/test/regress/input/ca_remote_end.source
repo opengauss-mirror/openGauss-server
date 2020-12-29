@@ -1,0 +1,5 @@
+drop server agg_server_remote cascade;
+
+drop database test;
+drop user test;
+drop user test2;

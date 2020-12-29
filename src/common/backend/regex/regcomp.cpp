@@ -1112,7 +1112,7 @@ static void parseqatom(struct vars* v, int stopper, /* EOS or ')' */
          */
         dupnfa(v->nfa, atom->begin, atom->end, s, atom->begin);
         Assert(m >= 1 && m != INFINITY && n >= 1);
-        repeat(v, s, atom->begin, m - 1, (n == INFINITY) ? n : n - 1);
+        repeat(v, s, atom->begin, m - 1, (n == INFINITY) ? n : (n - 1));
         f = COMBINE(qprefer, atom->flags);
         t = subre(v, '.', f, s, atom->end); /* prefix and atom */
         NOERR();
@@ -1730,7 +1730,7 @@ static void cleanst(struct vars* v)
 
 /*
  * nfatree - turn a subRE subtree into a tree of compacted NFAs
- * fï¼šfor debug output
+ * f£ºfor debug output
  * return optimize results from top node
  */
 static long nfatree(struct vars* v, struct subre* t, FILE* f)

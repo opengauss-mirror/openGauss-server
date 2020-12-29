@@ -640,9 +640,9 @@ drop table pbe_prunning_tmp;
 drop table pbe_prunning_000;
 
 SET enable_pbe_optimization to false;
-create table t_openGauss6666666 (id int,name text);
-insert into t_openGauss6666666 values (1,'a'),(2,'b'),(3,'c'), (4,'d'),(5,'e');
-prepare a as select * from t_openGauss6666666 where id=$1;
+create table t_DTS2017082304009 (id int,name text);
+insert into t_DTS2017082304009 values (1,'a'),(2,'b'),(3,'c'), (4,'d'),(5,'e');
+prepare a as select * from t_DTS2017082304009 where id=$1;
 execute a (1);
 execute a (2);
 execute a (3);
@@ -650,7 +650,7 @@ execute a (4);
 execute a (5);
 execute a (1);
 deallocate a;
-drop table t_openGauss6666666;
+drop table t_DTS2017082304009;
 
 -- Bugfix for FQS multi-table join
 create table t1(id1 int, id2 int, num int);
@@ -770,11 +770,11 @@ drop table t1_xc_fqs;
 drop table t2_xc_fqs;
 
 set enable_pbe_optimization to true;
-create table openGauss9999999_t1 (id int, num int);
-insert into openGauss9999999_t1 values (1,1),(20,20);
-explain analyze create table openGauss9999999_t2 as select * from openGauss9999999_t1;
-drop table openGauss9999999_t2;
-drop table openGauss9999999_t1;
+create table DTS2018081308755_t1 (id int, num int);
+insert into DTS2018081308755_t1 values (1,1),(20,20);
+explain analyze create table DTS2018081308755_t2 as select * from DTS2018081308755_t1;
+drop table DTS2018081308755_t2;
+drop table DTS2018081308755_t1;
 
 create table cs_his(segment1 varchar(15), period_name varchar(15), currency_code varchar(15), frequency_code varchar(15), segment3 varchar(15), segment3_desc varchar(200), end_balance_dr numeric, end_balance_cr numeric) with (orientation=column);
 create table bs_his(row_desc varchar(800),row_id numeric,amount1 numeric, amount2 numeric, period_name varchar(80), frequency_code varchar(80), currency_code varchar(80), segment1 varchar(80)) with (orientation=column);

@@ -64,10 +64,10 @@ SELECT p1.oid, p1.proname
 FROM pg_proc as p1
 WHERE prosrc IS NULL OR prosrc = '' OR prosrc = '-';
 
--- prokind = 'w' shouldn't be set together with proretset
+-- proiswindow shouldn't be set together with proisagg or proretset
 SELECT p1.oid, p1.proname
 FROM pg_proc AS p1
-WHERE prokind = 'w' AND proretset;
+WHERE proiswindow AND (proisagg OR proretset);
 
 -- pronargdefaults should be 0 iff proargdefaults is null
 SELECT p1.oid, p1.proname
@@ -108,9 +108,9 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid < p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    (p1.prokind != 'a' OR p2.prokind != 'a') AND
+    (p1.proisagg = false OR p2.proisagg = false) AND
     (p1.prolang != p2.prolang OR
-     (p1.prokind = 'a') != (p2.prokind = 'a') OR
+     p1.proisagg != p2.proisagg OR
      p1.prosecdef != p2.prosecdef OR
      p1.proisstrict != p2.proisstrict OR
      p1.proretset != p2.proretset OR
@@ -133,7 +133,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     p1.prosrc NOT LIKE E'range\\_constructor_' AND
     p2.prosrc NOT LIKE E'range\\_constructor_' AND
     (p1.prorettype < p2.prorettype)
@@ -144,7 +144,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     p1.prosrc NOT LIKE E'range\\_constructor_' AND
     p2.prosrc NOT LIKE E'range\\_constructor_' AND
     (p1.proargtypes[0] < p2.proargtypes[0])
@@ -155,7 +155,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     p1.prosrc NOT LIKE E'range\\_constructor_' AND
     p2.prosrc NOT LIKE E'range\\_constructor_' AND
     (p1.proargtypes[1] < p2.proargtypes[1])
@@ -166,7 +166,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     (p1.proargtypes[2] < p2.proargtypes[2])
 ORDER BY 1, 2;
 
@@ -175,7 +175,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     (p1.proargtypes[3] < p2.proargtypes[3])
 ORDER BY 1, 2;
 
@@ -184,7 +184,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     (p1.proargtypes[4] < p2.proargtypes[4])
 ORDER BY 1, 2;
 
@@ -193,7 +193,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     (p1.proargtypes[5] < p2.proargtypes[5])
 ORDER BY 1, 2;
 
@@ -202,7 +202,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     (p1.proargtypes[6] < p2.proargtypes[6])
 ORDER BY 1, 2;
 
@@ -211,7 +211,7 @@ FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid != p2.oid AND
     p1.prosrc = p2.prosrc AND
     p1.prolang = 12 AND p2.prolang = 12 AND
-    p1.prokind != 'a' AND p2.prokind != 'a' AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
     (p1.proargtypes[7] < p2.proargtypes[7])
 ORDER BY 1, 2;
 
@@ -340,3 +340,11 @@ WHERE c.castfunc = p.oid AND
 
 -- As of 9.1, this finds the cast from pg_node_tree to text, which we
 -- intentionally do not provide a reverse pathway for.
+
+SELECT castsource::regtype, casttarget::regtype, castfunc, castcontext
+FROM pg_cast c
+WHERE c.castmethod = 'b' AND
+    NOT EXISTS (SELECT 1 FROM pg_cast k
+                WHERE k.castmethod = 'b' AND
+                    k.castsource = c.casttarget AND
+                    k.casttarget = c.castsource) order by 1,2,3,4;

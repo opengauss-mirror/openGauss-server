@@ -1,8 +1,6 @@
-/*
 select * from pv_session_memory_detail limit 2;
 select * from pv_session_memory_context limit 2;
 select * from pv_thread_memory_context limit 2;
-*/
 select * from DBE_PERF.local_threadpool_status limit 2;
 select * from DBE_PERF.global_threadpool_status limit 2;
 select * from pg_stat_activity order by sessionid limit 2;

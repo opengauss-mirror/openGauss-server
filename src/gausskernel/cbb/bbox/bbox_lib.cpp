@@ -190,7 +190,10 @@ s32 bbox_mkdir(const char* pszDir)
     char* p = NULL;
     s32 len;
 
-    bbox_snprintf(szDirName, sizeof(szDirName), "%s", pszDir);
+    if (bbox_snprintf(szDirName, sizeof(szDirName), "%s", pszDir) <= 0) {
+        return RET_ERR;
+    }
+
     len = bbox_strnlen(szDirName, sizeof(szDirName));
     if (szDirName[len - 1] == '/') {
         if (len == 1) {

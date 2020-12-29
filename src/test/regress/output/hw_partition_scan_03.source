@@ -1,0 +1,2648 @@
+--- case 2: ordinary table + partitioned table
+--prepare
+CREATE TABLE partition_scan_stu_info5(SN INT, NAME NAME)
+PARTITION BY RANGE (SN)
+(
+	PARTITION P1_partition_scan_stu_info5 VALUES LESS THAN(10),
+	PARTITION P2_partition_scan_stu_info5 VALUES LESS THAN(20),
+	PARTITION P3_partition_scan_stu_info5 VALUES LESS THAN(30),
+	PARTITION P4_partition_scan_stu_info5 VALUES LESS THAN(40)
+);
+CREATE TABLE partition_scan_stu_info6(SN INT, PHONE NAME);
+CREATE UNIQUE INDEX index_on_partition_scan_stu_info5 ON partition_scan_stu_info5 (SN) LOCAL;
+CREATE UNIQUE INDEX index_on_partition_scan_stu_info6 ON partition_scan_stu_info6 (SN);
+INSERT INTO partition_scan_stu_info5 VALUES (1,'DFM');
+INSERT INTO partition_scan_stu_info5 VALUES (11,'CHAO');
+INSERT INTO partition_scan_stu_info5 VALUES (21,'ZJR');
+INSERT INTO partition_scan_stu_info5 VALUES (31,'JYH');
+INSERT INTO partition_scan_stu_info6 VALUES (1,'15478523126');
+INSERT INTO partition_scan_stu_info6 VALUES (11,'15236997586');
+INSERT INTO partition_scan_stu_info6 VALUES (21,'15936985364');
+INSERT INTO partition_scan_stu_info6 VALUES (31,'15873285556');
+SELECT * FROM partition_scan_stu_info5 order by 1, 2;
+ sn | name 
+----+------
+  1 | DFM
+ 11 | CHAO
+ 21 | ZJR
+ 31 | JYH
+(4 rows)
+
+SELECT * FROM partition_scan_stu_info6 order by 1, 2;
+ sn |    phone    
+----+-------------
+  1 | 15478523126
+ 11 | 15236997586
+ 21 | 15936985364
+ 31 | 15873285556
+(4 rows)
+
+--
+----hashjoin + seqscan
+--
+SET enable_seqscan = ON;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = OFF;
+SET enable_mergejoin = OFF;
+SET enable_hashjoin = ON;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Streaming(type: BROADCAST)
+                     ->  Seq Scan on partition_scan_stu_info6
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Seq Scan on partition_scan_stu_info6
+(12 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Left Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Seq Scan on partition_scan_stu_info6
+(12 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Left Join
+               Hash Cond: (partition_scan_stu_info6.sn = partition_scan_stu_info5.sn)
+               ->  Seq Scan on partition_scan_stu_info6
+               ->  Hash
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on partition_scan_stu_info5
+                                 Selected Partitions:  1..4
+(12 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Full Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Seq Scan on partition_scan_stu_info6
+(12 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Right Join
+         Hash Cond: (partition_scan_stu_info6.sn = partition_scan_stu_info5.sn)
+         ->  Seq Scan on partition_scan_stu_info6
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 0
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Filter: (sn > 40)
+                           Selected Partitions:  NONE
+(10 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info6.sn = partition_scan_stu_info5.sn)
+         ->  Seq Scan on partition_scan_stu_info6
+               Filter: (sn > 40)
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 0
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Filter: (sn > 40)
+                           Selected Partitions:  NONE
+(11 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info6.sn = partition_scan_stu_info5.sn)
+         ->  Seq Scan on partition_scan_stu_info6
+               Filter: (sn > 40)
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 0
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Filter: (sn > 40)
+                           Selected Partitions:  NONE
+(11 rows)
+
+-- rsult of cross join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+----hashjoin + indexscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = ON;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = OFF;
+SET enable_mergejoin = OFF;
+SET enable_hashjoin = ON;
+--
+---- explain cross join
+--
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Streaming(type: BROADCAST)
+                     ->  Seq Scan on partition_scan_stu_info6
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Left Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Right Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Full Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               Index Cond: (partition_scan_stu_info5.sn = sn)
+(9 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Hash
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (sn > 40)
+(11 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Hash
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (sn > 40)
+(11 rows)
+
+-- rsult of cross join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               Index Cond: (partition_scan_stu_info5.sn = sn)
+(9 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Hash
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (sn > 40)
+(11 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Hash
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (sn > 40)
+(11 rows)
+
+-- result of no partition to join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+--hashjoin + indexonlyscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = ON;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = OFF;
+SET enable_mergejoin = OFF;
+SET enable_hashjoin = ON;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Streaming(type: BROADCAST)
+                     ->  Seq Scan on partition_scan_stu_info6
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Left Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Right Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Full Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Right Join
+         Hash Cond: (partition_scan_stu_info6.sn = partition_scan_stu_info5.sn)
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 0
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Index Cond: (sn > 40)
+                           Selected Partitions:  NONE
+(10 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Hash
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (sn > 40)
+(11 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Hash
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (sn > 40)
+(11 rows)
+
+-- rsult of cross join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+---- hashjoin + bitmapscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = ON;
+SET enable_tidscan = OFF;
+SET enable_mergejoin = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = OFF;
+SET enable_hashjoin = ON;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Streaming(type: BROADCAST)
+                     ->  Seq Scan on partition_scan_stu_info6
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Bitmap Heap Scan on partition_scan_stu_info6
+                     Recheck Cond: (sn = partition_scan_stu_info5.sn)
+                     ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                           Index Cond: (sn = partition_scan_stu_info5.sn)
+(13 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop Left Join
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Bitmap Heap Scan on partition_scan_stu_info6
+                     Recheck Cond: (partition_scan_stu_info5.sn = sn)
+                     ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                           Index Cond: (partition_scan_stu_info5.sn = sn)
+(13 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop Left Join
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_scan_stu_info5
+                           Recheck Cond: (sn = partition_scan_stu_info6.sn)
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_partition_scan_stu_info5
+                                 Index Cond: (sn = partition_scan_stu_info6.sn)
+(13 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Full Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on partition_scan_stu_info5
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_partition_scan_stu_info5
+                           Index Cond: (sn > 40)
+         ->  Bitmap Heap Scan on partition_scan_stu_info6
+               Recheck Cond: (partition_scan_stu_info5.sn = sn)
+               ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                     Index Cond: (partition_scan_stu_info5.sn = sn)
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info6.sn = partition_scan_stu_info5.sn)
+         ->  Bitmap Heap Scan on partition_scan_stu_info6
+               Recheck Cond: (sn > 40)
+               ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                     Index Cond: (sn > 40)
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 0
+                     ->  Partitioned Bitmap Heap Scan on partition_scan_stu_info5
+                           Recheck Cond: (sn > 40)
+                           Selected Partitions:  NONE
+                           ->  Partitioned Bitmap Index Scan on index_on_partition_scan_stu_info5
+                                 Index Cond: (sn > 40)
+(15 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info6.sn = partition_scan_stu_info5.sn)
+         ->  Bitmap Heap Scan on partition_scan_stu_info6
+               Recheck Cond: (sn > 40)
+               ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                     Index Cond: (sn > 40)
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 0
+                     ->  Partitioned Bitmap Heap Scan on partition_scan_stu_info5
+                           Recheck Cond: (sn > 40)
+                           Selected Partitions:  NONE
+                           ->  Partitioned Bitmap Index Scan on index_on_partition_scan_stu_info5
+                                 Index Cond: (sn > 40)
+(15 rows)
+
+-- rsult of cross join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on partition_scan_stu_info5
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_partition_scan_stu_info5
+                           Index Cond: (sn > 40)
+         ->  Bitmap Heap Scan on partition_scan_stu_info6
+               Recheck Cond: (partition_scan_stu_info5.sn = sn)
+               ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                     Index Cond: (partition_scan_stu_info5.sn = sn)
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info6.sn = partition_scan_stu_info5.sn)
+         ->  Bitmap Heap Scan on partition_scan_stu_info6
+               Recheck Cond: (sn > 40)
+               ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                     Index Cond: (sn > 40)
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 0
+                     ->  Partitioned Bitmap Heap Scan on partition_scan_stu_info5
+                           Recheck Cond: (sn > 40)
+                           Selected Partitions:  NONE
+                           ->  Partitioned Bitmap Index Scan on index_on_partition_scan_stu_info5
+                                 Index Cond: (sn > 40)
+(15 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info6.sn = partition_scan_stu_info5.sn)
+         ->  Bitmap Heap Scan on partition_scan_stu_info6
+               Recheck Cond: (sn > 40)
+               ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                     Index Cond: (sn > 40)
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 0
+                     ->  Partitioned Bitmap Heap Scan on partition_scan_stu_info5
+                           Recheck Cond: (sn > 40)
+                           Selected Partitions:  NONE
+                           ->  Partitioned Bitmap Index Scan on index_on_partition_scan_stu_info5
+                                 Index Cond: (sn > 40)
+(15 rows)
+
+-- result of no partition to join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+---- hashjoin + tidscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = ON;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = OFF;
+SET enable_mergejoin = OFF;
+SET enable_hashjoin = ON;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Streaming(type: BROADCAST)
+                     ->  Seq Scan on partition_scan_stu_info6
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Left Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Right Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Full Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(12 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Right Join
+         Hash Cond: (partition_scan_stu_info6.sn = partition_scan_stu_info5.sn)
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 0
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Index Cond: (sn > 40)
+                           Selected Partitions:  NONE
+(10 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Hash
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (sn > 40)
+(11 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Hash
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (sn > 40)
+(11 rows)
+
+-- rsult of cross join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+----nestloop + seqscan
+--
+SET enable_seqscan = ON;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = OFF;
+SET enable_hashjoin = OFF;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Streaming(type: BROADCAST)
+                     ->  Seq Scan on partition_scan_stu_info6
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop
+               Join Filter: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Seq Scan on partition_scan_stu_info6
+(11 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop Left Join
+               Join Filter: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Seq Scan on partition_scan_stu_info6
+(11 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop Left Join
+               Join Filter: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Seq Scan on partition_scan_stu_info6
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+(11 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Hash Full Join
+               Hash Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Hash
+                     ->  Seq Scan on partition_scan_stu_info6
+(12 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop Left Join
+         Join Filter: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Seq Scan on partition_scan_stu_info6
+(9 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Seq Scan on partition_scan_stu_info6
+               Filter: (sn > 40)
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+(10 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Seq Scan on partition_scan_stu_info6
+               Filter: (sn > 40)
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Filter: (sn > 40)
+                     Selected Partitions:  NONE
+(10 rows)
+
+-- rsult of cross join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+----nestloop + indexscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = ON;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = OFF;
+SET enable_hashjoin = OFF;
+--
+---- explain cross join
+--
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Streaming(type: BROADCAST)
+                     ->  Seq Scan on partition_scan_stu_info6
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (sn = partition_scan_stu_info5.sn)
+(11 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop Left Join
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (partition_scan_stu_info5.sn = sn)
+(11 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop Left Join
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Index Cond: (sn = partition_scan_stu_info6.sn)
+                           Selected Partitions:  1..4
+(11 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Merge Full Join
+               Merge Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(11 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               Index Cond: (partition_scan_stu_info5.sn = sn)
+(9 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               Index Cond: ((sn = partition_scan_stu_info5.sn) AND (sn > 40))
+(9 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               Index Cond: ((sn = partition_scan_stu_info5.sn) AND (sn > 40))
+(9 rows)
+
+-- rsult of cross join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+--nestloop + indexonlyscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = ON;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = OFF;
+SET enable_hashjoin = OFF;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Streaming(type: BROADCAST)
+                     ->  Seq Scan on partition_scan_stu_info6
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (sn = partition_scan_stu_info5.sn)
+(11 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop Left Join
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (partition_scan_stu_info5.sn = sn)
+(11 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop Left Join
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Index Cond: (sn = partition_scan_stu_info6.sn)
+                           Selected Partitions:  1..4
+(11 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Merge Full Join
+               Merge Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(11 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               Index Cond: (partition_scan_stu_info5.sn = sn)
+(9 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               Index Cond: ((sn = partition_scan_stu_info5.sn) AND (sn > 40))
+(9 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               Index Cond: ((sn = partition_scan_stu_info5.sn) AND (sn > 40))
+(9 rows)
+
+-- rsult of cross join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+---- nestloop + bitmapscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = ON;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = OFF;
+SET enable_hashjoin = OFF;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Streaming(type: BROADCAST)
+                     ->  Seq Scan on partition_scan_stu_info6
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Bitmap Heap Scan on partition_scan_stu_info6
+                     Recheck Cond: (sn = partition_scan_stu_info5.sn)
+                     ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                           Index Cond: (sn = partition_scan_stu_info5.sn)
+(13 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop Left Join
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Bitmap Heap Scan on partition_scan_stu_info6
+                     Recheck Cond: (partition_scan_stu_info5.sn = sn)
+                     ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                           Index Cond: (partition_scan_stu_info5.sn = sn)
+(13 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop Left Join
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_scan_stu_info5
+                           Recheck Cond: (sn = partition_scan_stu_info6.sn)
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_partition_scan_stu_info5
+                                 Index Cond: (sn = partition_scan_stu_info6.sn)
+(13 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Merge Full Join
+               Merge Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(11 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on partition_scan_stu_info5
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_partition_scan_stu_info5
+                           Index Cond: (sn > 40)
+         ->  Bitmap Heap Scan on partition_scan_stu_info6
+               Recheck Cond: (partition_scan_stu_info5.sn = sn)
+               ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                     Index Cond: (partition_scan_stu_info5.sn = sn)
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on partition_scan_stu_info5
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_partition_scan_stu_info5
+                           Index Cond: (sn > 40)
+         ->  Bitmap Heap Scan on partition_scan_stu_info6
+               Recheck Cond: ((sn = partition_scan_stu_info5.sn) AND (sn > 40))
+               ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                     Index Cond: ((sn = partition_scan_stu_info5.sn) AND (sn > 40))
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Bitmap Heap Scan on partition_scan_stu_info5
+                     Recheck Cond: (sn > 40)
+                     Selected Partitions:  NONE
+                     ->  Partitioned Bitmap Index Scan on index_on_partition_scan_stu_info5
+                           Index Cond: (sn > 40)
+         ->  Bitmap Heap Scan on partition_scan_stu_info6
+               Recheck Cond: ((sn = partition_scan_stu_info5.sn) AND (sn > 40))
+               ->  Bitmap Index Scan on index_on_partition_scan_stu_info6
+                     Index Cond: ((sn = partition_scan_stu_info5.sn) AND (sn > 40))
+(13 rows)
+
+-- rsult of cross join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+---- nestloop + tidscan
+--
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = ON;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = ON;
+SET enable_mergejoin = OFF;
+SET enable_hashjoin = OFF;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Streaming(type: BROADCAST)
+                     ->  Seq Scan on partition_scan_stu_info6
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (sn = partition_scan_stu_info5.sn)
+(11 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop Left Join
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+                     Index Cond: (partition_scan_stu_info5.sn = sn)
+(11 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Nested Loop Left Join
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Index Cond: (sn = partition_scan_stu_info6.sn)
+                           Selected Partitions:  1..4
+(11 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Merge Full Join
+               Merge Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                           Selected Partitions:  1..4
+               ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+(11 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop Left Join
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               Index Cond: (partition_scan_stu_info5.sn = sn)
+(9 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               Index Cond: ((sn = partition_scan_stu_info5.sn) AND (sn > 40))
+(9 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 0
+               ->  Partitioned Index Scan using index_on_partition_scan_stu_info5 on partition_scan_stu_info5
+                     Index Cond: (sn > 40)
+                     Selected Partitions:  NONE
+         ->  Index Scan using index_on_partition_scan_stu_info6 on partition_scan_stu_info6
+               Index Cond: ((sn = partition_scan_stu_info5.sn) AND (sn > 40))
+(9 rows)
+
+-- rsult of cross join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+--
+----mergejoin + seqscan
+--
+SET enable_seqscan = ON;
+SET enable_indexscan = OFF;
+SET enable_indexonlyscan = OFF;
+SET enable_bitmapscan = OFF;
+SET enable_tidscan = OFF;
+SET enable_sort = ON;
+SET enable_material = OFF;
+SET enable_nestloop = OFF;
+SET enable_mergejoin = ON;
+SET enable_hashjoin = OFF;
+-- explain cross join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_scan_stu_info5
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Streaming(type: BROADCAST)
+                     ->  Seq Scan on partition_scan_stu_info6
+(9 rows)
+
+-- explain inner join 
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Merge Join
+               Merge Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Sort
+                     Sort Key: partition_scan_stu_info5.sn
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on partition_scan_stu_info5
+                                 Selected Partitions:  1..4
+               ->  Sort
+                     Sort Key: partition_scan_stu_info6.sn
+                     ->  Seq Scan on partition_scan_stu_info6
+(15 rows)
+
+-- explain left outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Merge Left Join
+               Merge Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Sort
+                     Sort Key: partition_scan_stu_info5.sn
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on partition_scan_stu_info5
+                                 Selected Partitions:  1..4
+               ->  Sort
+                     Sort Key: partition_scan_stu_info6.sn
+                     ->  Seq Scan on partition_scan_stu_info6
+(15 rows)
+
+-- explain right outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Merge Left Join
+               Merge Cond: (partition_scan_stu_info6.sn = partition_scan_stu_info5.sn)
+               ->  Sort
+                     Sort Key: partition_scan_stu_info6.sn
+                     ->  Seq Scan on partition_scan_stu_info6
+               ->  Sort
+                     Sort Key: partition_scan_stu_info5.sn
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on partition_scan_stu_info5
+                                 Selected Partitions:  1..4
+(15 rows)
+
+-- explain full outer join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+   ->  Sort
+         Sort Key: partition_scan_stu_info5.sn, partition_scan_stu_info5.name
+         ->  Merge Full Join
+               Merge Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+               ->  Sort
+                     Sort Key: partition_scan_stu_info5.sn
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on partition_scan_stu_info5
+                                 Selected Partitions:  1..4
+               ->  Sort
+                     Sort Key: partition_scan_stu_info6.sn
+                     ->  Seq Scan on partition_scan_stu_info6
+(15 rows)
+
+-- explain for no partition to join
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40; 
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Left Join
+         Merge Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Sort
+               Sort Key: partition_scan_stu_info5.sn
+               ->  Partition Iterator
+                     Iterations: 0
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Filter: (sn > 40)
+                           Selected Partitions:  NONE
+         ->  Sort
+               Sort Key: partition_scan_stu_info6.sn
+               ->  Seq Scan on partition_scan_stu_info6
+(13 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Sort
+               Sort Key: partition_scan_stu_info5.sn
+               ->  Partition Iterator
+                     Iterations: 0
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Filter: (sn > 40)
+                           Selected Partitions:  NONE
+         ->  Sort
+               Sort Key: partition_scan_stu_info6.sn
+               ->  Seq Scan on partition_scan_stu_info6
+                     Filter: (sn > 40)
+(14 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_scan_stu_info5.sn = partition_scan_stu_info6.sn)
+         ->  Sort
+               Sort Key: partition_scan_stu_info5.sn
+               ->  Partition Iterator
+                     Iterations: 0
+                     ->  Partitioned Seq Scan on partition_scan_stu_info5
+                           Filter: (sn > 40)
+                           Selected Partitions:  NONE
+         ->  Sort
+               Sort Key: partition_scan_stu_info6.sn
+               ->  Seq Scan on partition_scan_stu_info6
+                     Filter: (sn > 40)
+(14 rows)
+
+-- rsult of cross join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 CROSS JOIN partition_scan_stu_info6 order by 1, 2;
+ name |    phone    
+------+-------------
+ CHAO | 15236997586
+ CHAO | 15478523126
+ CHAO | 15873285556
+ CHAO | 15936985364
+ DFM  | 15236997586
+ DFM  | 15478523126
+ DFM  | 15873285556
+ DFM  | 15936985364
+ JYH  | 15236997586
+ JYH  | 15478523126
+ JYH  | 15873285556
+ JYH  | 15936985364
+ ZJR  | 15236997586
+ ZJR  | 15478523126
+ ZJR  | 15873285556
+ ZJR  | 15936985364
+(16 rows)
+
+-- rsult of inner joi
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 INNER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of left join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of right join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 RIGHT OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- rsult of FULL join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 FULL OUTER JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) ORDER BY partition_scan_stu_info5.SN, partition_scan_stu_info5.NAME, partition_scan_stu_info5.NAME;
+ name |    phone    
+------+-------------
+ DFM  | 15478523126
+ CHAO | 15236997586
+ ZJR  | 15936985364
+ JYH  | 15873285556
+(4 rows)
+
+-- result of no partition to join
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+SELECT partition_scan_stu_info5.NAME, partition_scan_stu_info6.PHONE FROM partition_scan_stu_info5 LEFT JOIN partition_scan_stu_info6 ON (partition_scan_stu_info5.SN = partition_scan_stu_info6.SN) WHERE partition_scan_stu_info6.SN > 40 AND partition_scan_stu_info5.SN > 40;
+ name | phone 
+------+-------
+(0 rows)
+
+-- clean up
+DROP TABLE partition_scan_stu_info5;
+DROP TABLE partition_scan_stu_info6;

@@ -70,4 +70,3 @@ extern int GetRemoteReadMode();
 extern void OutputMsgforRPC(int elevel, const char* fmt, ...) __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
 
 #endif /* REMOTE_ADAPTER_H */
-

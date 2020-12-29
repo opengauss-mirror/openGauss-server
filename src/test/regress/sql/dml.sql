@@ -21,27 +21,27 @@ analyze distribute_source_replication_01;
 analyze distribute_source_hash_02;
 ---------------------------- distribute insert -------------------------------------
 --hash source matchs target distribute keys
-explain (verbose on, costs off, nodes off) insert into distribute_target_hash_01 select * from distribute_source_hash_01;
+explain (verbose on, costs off) insert into distribute_target_hash_01 select * from distribute_source_hash_01;
 insert into distribute_target_hash_01 select * from distribute_source_hash_01;
 
 -- hash source doesn't match target distribute keys
-explain (verbose on, costs off, nodes off) insert into distribute_target_hash_02 select * from distribute_source_hash_01;
+explain (verbose on, costs off) insert into distribute_target_hash_02 select * from distribute_source_hash_01;
 insert into distribute_target_hash_02 select * from distribute_source_hash_01;
 
 -- replicate target, hashed source
-explain (verbose on, costs off, nodes off) insert into distribute_target_replication_01 select * from distribute_source_hash_01;
+explain (verbose on, costs off) insert into distribute_target_replication_01 select * from distribute_source_hash_01;
 insert into distribute_target_replication_01 select * from distribute_source_hash_01;
 
 -- replicate source, hashed target
-explain (verbose on, costs off, nodes off) insert into distribute_target_hash_01 select * from distribute_source_replication_01;
+explain (verbose on, costs off) insert into distribute_target_hash_01 select * from distribute_source_replication_01;
 insert into distribute_target_hash_02 select * from distribute_source_replication_01;
 
 -- replicate source, replicate target
-explain (verbose on, costs off, nodes off) insert into distribute_target_replication_01 select * from distribute_source_replication_01;
+explain (verbose on, costs off) insert into distribute_target_replication_01 select * from distribute_source_replication_01;
 insert into distribute_target_replication_01 select * from distribute_source_replication_01;
 
 -- join source
-explain (verbose on, costs off, nodes off) insert into distribute_target_hash_01 select t1.c1, t1.c2, t1.c3 from distribute_source_hash_01 t1 join distribute_source_hash_02 t2 on t1.c2=t2.c1 where t2.c2=500;
+explain (verbose on, costs off) insert into distribute_target_hash_01 select t1.c1, t1.c2, t1.c3 from distribute_source_hash_01 t1 join distribute_source_hash_02 t2 on t1.c2=t2.c1 where t2.c2=500;
 insert into distribute_target_hash_01 select t1.c1, t1.c2, t1.c3 from distribute_source_hash_01 t1 join distribute_source_hash_02 t2 on t1.c2=t2.c1 where t2.c2=500;
 
 create table distribute_table_01
@@ -93,15 +93,15 @@ insert into distribute_table_02 select * from distribute_table_01;
 insert into distribute_partition_table_02 select * from distribute_partition_table_01;
 
 ---------------------------- distribute update -------------------------------------
-explain (verbose on, costs off, nodes off) update distribute_target_hash_02 set c2 = c2 + 10 where c1 > 500;
-explain (verbose on, costs off, nodes off) update distribute_target_replication_01 set c2 = c2 + 10 where c2 > 500;
-explain (verbose on, costs off, nodes off) update distribute_target_hash_01 t1  set t1.c2 = t1.c2 + 10 from distribute_source_hash_01 S1
+explain (verbose on, costs off) update distribute_target_hash_02 set c2 = c2 + 10 where c1 > 500;
+explain (verbose on, costs off) update distribute_target_replication_01 set c2 = c2 + 10 where c2 > 500;
+explain (verbose on, costs off) update distribute_target_hash_01 t1  set t1.c2 = t1.c2 + 10 from distribute_source_hash_01 S1
 	where t1.c1 = s1.c2 and s1.c1 < 100;
-explain (verbose on, costs off, nodes off) update distribute_target_hash_01 t1 set (t1.c2, t1.c3) = (t1.c2 + 10 , ' ') from distribute_source_hash_01 s1
+explain (verbose on, costs off) update distribute_target_hash_01 t1 set (t1.c2, t1.c3) = (t1.c2 + 10 , ' ') from distribute_source_hash_01 s1
 	where t1.c1 = s1.c2 and s1.c1 > 600;   
-explain (verbose on, costs off, nodes off) update distribute_target_hash_01 t1  set t1.c2 = t1.c2 + 10 from distribute_source_hash_01 S1
+explain (verbose on, costs off) update distribute_target_hash_01 t1  set t1.c2 = t1.c2 + 10 from distribute_source_hash_01 S1
 	where t1.c2 = s1.c1 and s1.c1 = 100;
-explain (verbose on, costs off, nodes off) update distribute_target_hash_01 t1  set t1.c2 = t1.c2 + 10
+explain (verbose on, costs off) update distribute_target_hash_01 t1  set t1.c2 = t1.c2 + 10
 	from distribute_source_hash_01 S1, distribute_source_hash_01 S2
 	where t1.c1 = s1.c2 + s2.c2 and s1.c1 < 100 and s1.c1 = s2.c1;
 update distribute_target_hash_01 set c1 = c1 + 10 where c1 > 500;
@@ -118,14 +118,14 @@ update distribute_target_hash_01 t1  set t1.c2 = t1.c2 + 10
 	where t1.c1 = s1.c2 + s2.c2 and s1.c1 < 100 and s1.c1 = s2.c1;
 
 -------------------------- distribute delete -------------------------------------
-explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01;
-explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 WHERE c1 = 400;
-explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 WHERE c1 < 50;
-explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 WHERE c1 in (select c2 from distribute_source_hash_01 where c1 < 50);
-explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 WHERE c3 in (select c2 from distribute_source_hash_01);
-explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where distribute_target_hash_01.c1=distribute_source_hash_01.c2 and distribute_source_hash_01.c1 < 200;
-explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where distribute_target_hash_01.c1=distribute_source_hash_01.c2 and distribute_target_hash_01.c1=distribute_source_hash_01.c2 and distribute_source_hash_01.c1 < 200;
-explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where distribute_target_hash_01.c2=distribute_source_hash_01.c1 and distribute_source_hash_01.c1 = 200;
+explain (verbose on, costs off) DELETE FROM distribute_target_hash_01;
+explain (verbose on, costs off) DELETE FROM distribute_target_hash_01 WHERE c1 = 400;
+explain (verbose on, costs off) DELETE FROM distribute_target_hash_01 WHERE c1 < 50;
+explain (verbose on, costs off) DELETE FROM distribute_target_hash_01 WHERE c1 in (select c2 from distribute_source_hash_01 where c1 < 50);
+explain (verbose on, costs off) DELETE FROM distribute_target_hash_01 WHERE c3 in (select c2 from distribute_source_hash_01);
+explain (verbose on, costs off) DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where distribute_target_hash_01.c1=distribute_source_hash_01.c2 and distribute_source_hash_01.c1 < 200;
+explain (verbose on, costs off) DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where distribute_target_hash_01.c1=distribute_source_hash_01.c2 and distribute_target_hash_01.c1=distribute_source_hash_01.c2 and distribute_source_hash_01.c1 < 200;
+explain (verbose on, costs off) DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where distribute_target_hash_01.c2=distribute_source_hash_01.c1 and distribute_source_hash_01.c1 = 200;
 DELETE FROM distribute_target_hash_01;
 DELETE FROM distribute_target_hash_01 WHERE c1 = 400;
 DELETE FROM distribute_target_hash_01 WHERE c1 < 50;
@@ -137,8 +137,8 @@ DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where dist
 
 --added for llt
 --test tid scan for replication
-explain (verbose on, costs off, nodes off)  select * from  distribute_source_replication_01 where ctid='(0,1)';
-explain (verbose on, costs off, nodes off) select * from pg_class  where ctid='(0,1)';
+explain (verbose on, costs off)  select * from  distribute_source_replication_01 where ctid='(0,1)';
+explain (verbose on, costs off) select * from pg_class  where ctid='(0,1)';
 
 
  --test _outValuesScan
@@ -148,7 +148,7 @@ VALUES (1, 'one'), (2, 'two'), (3, 'three');
 
 create table stream_UI_diskey1(b1 int);
 insert into stream_UI_diskey1 select generate_series(1,100) from src;
-explain (verbose on, costs off, nodes off) insert into stream_UI_diskey1 select b1 + 100 from stream_UI_diskey1;
+explain (verbose on, costs off) insert into stream_UI_diskey1 select b1 + 100 from stream_UI_diskey1;
 insert into stream_UI_diskey1 select b1 + 100 from stream_UI_diskey1;
 select count(*) from stream_UI_diskey1 where b1 = 100;
 select count(*) from stream_UI_diskey1 where b1+1 = 1+ 110;
@@ -187,10 +187,10 @@ drop table insert_tb2;
 
 create table insert_tb1 (a int, b int, c int);
 create table insert_tb2 (a int, b int, c int);
-explain (costs off, verbose on, nodes off) insert into insert_tb1  select * from insert_tb2;
-explain (costs off, verbose on, nodes off) insert into insert_tb1 (a, b, c) select b, a, c from insert_tb2;
-explain (costs off, verbose on, nodes off) insert into insert_tb1 (b, a, c) select b, a, c from insert_tb2;
-explain (costs off, verbose on, nodes off) insert into insert_tb2 select * from insert_tb1;
+explain (costs off, verbose on) insert into insert_tb1  select * from insert_tb2;
+explain (costs off, verbose on) insert into insert_tb1 (a, b, c) select b, a, c from insert_tb2;
+explain (costs off, verbose on) insert into insert_tb1 (b, a, c) select b, a, c from insert_tb2;
+explain (costs off, verbose on) insert into insert_tb2 select * from insert_tb1;
 drop table insert_tb1;
 drop table insert_tb2;
 

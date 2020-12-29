@@ -1,0 +1,20 @@
+CREATE DATABASE testdb;
+\c testdb
+set resource_track_duration=0;
+set query_band='testdb_test';
+\! @abs_bindir@/gsql -r -p @portstring@ -d testdb -c "set xc_maintenance_mode = on;"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d testdb -c "set transaction_read_only = off;"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d testdb -c "create table t1 (a int);"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d testdb -c "set xc_maintenance_mode = on;"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d testdb -c "set transaction_read_only = off;"
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d testdb -c "create table t2 (a int);"
+--output
+\c postgres
+drop database testdb;
+\c regression
+--end of file

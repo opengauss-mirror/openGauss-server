@@ -905,7 +905,6 @@ list_delete_name(List *list, const char* name)
 	ListCell   *prev = NULL;
 	check_list_invariants(list);
 
-	prev = NULL;
     foreach(cell, list) {
         DefElem    *def = (DefElem *)lfirst(cell);
         if (pg_strcasecmp(def->defname, name) == 0) {
@@ -936,7 +935,6 @@ List* list_delete_first(List* list)
     return list_delete_cell(list, list_head(list), NULL);
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 /* delete the first element of the list without freeing the list */
 List* list_delete_first_nofree(List* list)
 {
@@ -957,7 +955,6 @@ List* list_delete_first_nofree(List* list)
 
     return list;
 }
-#endif
 
 /*
  * Generate the union of two lists. This is calculated by copying
@@ -1548,7 +1545,7 @@ ListCell* list_head(const List* l)
     return l ? l->head : NULL;
 }
 
-ListCell* list_tail(List* l)
+ListCell* list_tail(const List* l)
 {
     return l ? l->tail : NULL;
 }
@@ -1557,44 +1554,18 @@ int list_length(const List* l)
 {
     return l ? l->length : 0;
 }
-#endif /* ! USE_INLINE */
 
-/*
- * Sort a list using qsort. A sorted list is built but the cells of the
- * original list are re-used.  The comparator function receives arguments of
- * type ListCell **
- */
-List* list_qsort(const List *list, list_qsort_comparator cmp)
+DListCell* dlist_head_cell(const DList* l)
 {
-    ListCell   *cell = NULL;
-    int         i;
-    int         len = list_length(list);
-    ListCell  **list_arr = NULL;
-    List       *new_list = NIL;
-
-    if (len == 0)
-        return NIL;
-
-    i = 0;
-    list_arr = (ListCell**)palloc(sizeof(ListCell *) * len);
-    foreach(cell, list)
-        list_arr[i++] = cell;
-
-    qsort(list_arr, len, sizeof(ListCell *), cmp);
-
-    new_list = (List *) palloc(sizeof(List));
-    new_list->type = list->type;
-    new_list->length = len;
-    new_list->head = list_arr[0];
-    new_list->tail = list_arr[len - 1];
-
-    for (i = 0; i < len - 1; i++)
-        list_arr[i]->next = list_arr[i + 1];
-
-    list_arr[len - 1]->next = NULL;
-    pfree(list_arr);
-    return new_list;
+    return l ? l->head : NULL;
 }
+
+DListCell* dlist_tail_cell(DList* l)
+{
+    return l ? l->tail : NULL;
+}
+
+#endif /* ! USE_INLINE */
 
 /*
  * Temporary compatibility functions
@@ -1806,3 +1777,4 @@ List* list_insert_nth_oid(List* list, int pos, Oid datum)
     check_list_invariants(list);
     return list;
 }
+

@@ -189,7 +189,7 @@ void InitArchiveFmt_Tar(ArchiveHandle* AH)
          * other
          */
 
-        ctx->hasSeek = (int)checkSeek(ctx->tarFH);
+        ctx->hasSeek = checkSeek(ctx->tarFH);
 
         if (AH->compression < 0 || AH->compression > 9)
             AH->compression = Z_DEFAULT_COMPRESSION;
@@ -222,7 +222,7 @@ void InitArchiveFmt_Tar(ArchiveHandle* AH)
          */
         ctx->tarFHpos = 0;
 
-        ctx->hasSeek = (int)checkSeek(ctx->tarFH);
+        ctx->hasSeek = checkSeek(ctx->tarFH);
 
         /*
          * Forcibly unmark the header as read since we use the lookahead
@@ -946,7 +946,6 @@ static int tarPrintf(ArchiveHandle* AH, TAR_MEMBER* th, const char* fmt, ...)
     va_list ap;
     size_t bSize = strlen(fmt) + 256; /* Should be enough */
     int cnt = -1;
-    int rc = 0;
 
     /*
      * This is paranoid: deal with the possibility that vsnprintf is willing
@@ -966,8 +965,7 @@ static int tarPrintf(ArchiveHandle* AH, TAR_MEMBER* th, const char* fmt, ...)
         bSize *= 2;
         p = (char*)pg_malloc(bSize);
         (void)va_start(ap, fmt);
-        cnt = vsnprintf_s(p, bSize, bSize - 1, fmt, ap);
-        securec_check_ss_c(rc, "", "");
+        cnt = vsnprintf(p, bSize, fmt, ap);
         va_end(ap);
     }
     cnt = tarWrite(p, cnt, th);
@@ -1283,7 +1281,7 @@ static void _tarWriteHeader(TAR_MEMBER* th)
     errno_t rc = 0;
     int nRet = 0;
 
-    rc = memset_s(h, sizeof(h), 0, sizeof(h));
+    rc = memset_s(h, sizeof(h) / sizeof(char), 0, sizeof(h) / sizeof(char));
     securec_check_c(rc, "\0", "\0");
 
     nRet = snprintf_s(&h[0], sizeof(h) / sizeof(char), sizeof(h) / sizeof(char) - 1, "%.99s", th->targetFile);

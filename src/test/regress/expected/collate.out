@@ -600,7 +600,7 @@ SELECT collation for ((SELECT b FROM collate_test1 LIMIT 1));
  "C"
 (1 row)
 
-explain (verbose, costs off, nodes off) SELECT collation for ((SELECT b FROM collate_test1 LIMIT 1));
+explain (verbose, costs off) SELECT collation for ((SELECT b FROM collate_test1 LIMIT 1));
                       QUERY PLAN                       
 -------------------------------------------------------
  Result

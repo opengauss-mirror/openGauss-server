@@ -35,29 +35,29 @@
 #define IS_INVALID_MODE(mode) ((mode) == MODE_INVALID)
 
 typedef struct DistImportExecutionState : public CopyStateData {
-    List *source;  /* data input source */
-    List *options; /* merged COPY options, excluding filename */
+    List* source;  /* data input source */
+    List* options; /* merged COPY options, excluding filename */
     int rejectLimit;
     Relation errLogRel;
     Datum beginTime;
-    List *elogger;
+    List* elogger;
     bool isLogRemote;
     bool needSaveError;
 } DistImportExecutionState;
 
 typedef struct DistImportPlanState {
-    char *filename;
-    List *source;      /* data input source */
-    List *options;     /* merged  options, excluding filename */
+    char* filename;
+    List* source;      /* data input source */
+    List* options;     /* merged  options, excluding filename */
     BlockNumber pages; /* estimate of file's physical size */
     double ntuples;    /* estimate of number of rows in file */
     int rejectLimit;
-    char *errorName;
+    char* errorName;
     ImportMode mode;
     bool writeOnly;
     int fileEncoding;
     bool doLogRemote;
-    char *remoteName;
+    char* remoteName;
 
     // explicit constructor
     DistImportPlanState()
@@ -80,21 +80,21 @@ typedef struct DistImportPlanState {
 extern void ProcessDistImportOptions(DistImportPlanState *planstate, List *options, bool isPropagateToFE,
                                      bool isValidate = false);
 
-extern void distImportGetRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
-extern void distImportGetPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
-extern ForeignScan *distImportGetPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid,
-                                      ForeignPath *best_path, List *tlist, List *scan_clauses);
+extern void distImportGetRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid);
+extern void distImportGetPaths(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid);
+extern ForeignScan* distImportGetPlan(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid,
+    ForeignPath* best_path, List* tlist, List* scan_clauses);
 
-extern void distImportExplain(ForeignScanState *node, ExplainState *es);
+extern void distImportExplain(ForeignScanState* node, ExplainState* es);
 
-extern void distImportBegin(ForeignScanState *node, int eflags);
+extern void distImportBegin(ForeignScanState* node, int eflags);
 
-extern TupleTableSlot *distExecImport(ForeignScanState *node);
+extern TupleTableSlot* distExecImport(ForeignScanState* node);
 
-extern void distImportEnd(ForeignScanState *node);
+extern void distImportEnd(ForeignScanState* node);
 
-extern void distReImport(ForeignScanState *node);
+extern void distReImport(ForeignScanState* node);
 
-extern void getOBSOptions(ObsCopyOptions *obs_copy_options, List *options);
+extern void getOBSOptions(ObsCopyOptions* obs_copy_options, List* options);
 
 #endif

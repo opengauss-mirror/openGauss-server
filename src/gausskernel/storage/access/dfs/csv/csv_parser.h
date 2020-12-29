@@ -21,7 +21,6 @@
  * -------------------------------------------------------------------------
  */
 
-
 #ifndef CSV_PARSER_H
 #define CSV_PARSER_H
 
@@ -37,7 +36,6 @@
 #include "mb/pg_wchar.h"
 
 namespace dfs {
-
 class CsvParserImpl : public BaseParser {
 public:
     CsvParserImpl() : m_options(NULL), read_in_quote(false), prev_char_is_escape(false){};
@@ -58,7 +56,7 @@ public:
 
 private:
     template <bool skip_data>
-    ParserResult splitLine(LineBuffer *line_buf);
+    int splitLine(LineBuffer *line_buf);
 
     template <bool muti_byte_delim>
     int splitFields(char *buf, int len, char **raw_fields, int max_fields);
@@ -69,6 +67,5 @@ private:
     bool read_in_quote;
     bool prev_char_is_escape;
 };
-
 }  // namespace dfs
 #endif /* CSV_PARSER_H */

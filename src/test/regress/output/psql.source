@@ -124,7 +124,7 @@ CREATE OR REPLACE FUNCTION pg_catalog.pg_table_size(regclass)
  STRICT NOT FENCED NOT SHIPPABLE
 AS $function$pg_table_size$function$
 --show user info
-create user gaussuser password 'ttest@123';
+create user gaussuser password 'gauss@123';
 \du gaussuser
            List of roles
  Role name | Attributes | Member of 
@@ -140,7 +140,7 @@ create sequence seq_test start 1 increment 2 owned by tbl_seq.col1;
     Column     |  Type   |        Value        
 ---------------+---------+---------------------
  sequence_name | name    | seq_test
- last_value    | bigint  | 1
+ last_value    | bigint  | -1
  start_value   | bigint  | 1
  increment_by  | bigint  | 2
  max_value     | bigint  | 9223372036854775807
@@ -149,7 +149,7 @@ create sequence seq_test start 1 increment 2 owned by tbl_seq.col1;
  log_cnt       | bigint  | 0
  is_cycled     | boolean | f
  is_called     | boolean | f
- uuid          | bigint  | 0
+--? uuid          | bigint  | .*
 Owned by: public.tbl_seq.col1
 
 \! echo -n 'JJ	123'	\.| @abs_bindir@/gsql -X -d postgres -p @portstring@ -c "create table gsql_c_copy(name varchar2(10),age integer);copy gsql_c_copy from STDIN;"
@@ -365,6 +365,8 @@ set enable_nestloop=on;
 --------+---------+-----------+---------+--------------+-------------
  id     | integer |           | plain   |              | 
 Has OIDs: no
+Distribute By: HASH(id)
+Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 \d+ gsql_parallel_test
@@ -373,6 +375,8 @@ Options: orientation=row, compression=no
 --------+---------+-----------+---------+--------------+-------------
  id     | integer |           | plain   |              | 
 Has OIDs: no
+Distribute By: HASH(id)
+Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 \parallel
@@ -441,6 +445,8 @@ select relname,reloptions from pg_class where relname like 'test_d_command_tbl%'
 Indexes:
     "test_d_command_tbl1_idx" btree (id) TABLESPACE pg_default
 Has OIDs: no
+Distribute By: HASH(id)
+Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 \d+ test_d_command_tbl2
@@ -449,6 +455,8 @@ Options: orientation=row, compression=no
 --------+---------+-----------+---------+--------------+-------------
  id     | integer |           | plain   |              | 
 Has OIDs: no
+Distribute By: HASH(id)
+Location Nodes: ALL DATANODES
 Options: orientation=column, compression=low
 
 \d+ test_d_command_tbl3
@@ -457,6 +465,8 @@ Options: orientation=column, compression=low
 --------+---------+-----------+---------+--------------+-------------
  id     | integer |           | plain   |              | 
 Has OIDs: no
+Distribute By: HASH(id)
+Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 \d+ test_d_command_tbl4
@@ -465,13 +475,15 @@ Options: orientation=row, compression=no
 --------+---------+-----------+---------+--------------+-------------
  id     | integer |           | plain   |              | 
 Has OIDs: no
+Distribute By: HASH(id)
+Location Nodes: ALL DATANODES
 Options: orientation=row, compression=yes
 
 \di test_d_command_tbl1_idx
-                                 List of relations
- Schema |          Name           | Type  |  Owner  |        Table        | Storage 
---------+-------------------------+-------+---------+---------------------+---------
- public | test_d_command_tbl1_idx | index | tester2 | test_d_command_tbl1 | 
+--?.*
+--?.*
+--?.*
+--?.*
 (1 row)
 
 drop table test_d_command_tbl1,test_d_command_tbl2,test_d_command_tbl3,test_d_command_tbl4;
@@ -504,6 +516,8 @@ Number of partition: 3 (View pg_partition to check each partition range.)
 Range partition by(id2)
 Number of partition: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
+Distribute By: HASH(id)
+Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 \d+ test_d_command_part2
@@ -515,6 +529,8 @@ Options: orientation=row, compression=no
 Range partition by(id, id2)
 Number of partition: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
+Distribute By: HASH(id)
+Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 drop table test_d_command_part1;
@@ -556,13 +572,13 @@ drop table test_d_command_part2;
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_parallel.sql
 Parallel is on with scale 2.
 Parallel is off.
-gsql:@abs_srcdir@/./tmp_check/install@abs_bindir@/gsql_parallel.sql:4: ERROR:  
+--?.*gsql_parallel.sql:4: ERROR:  
 GAUSS-00068: column "ab" does not exist
 SQLSTATE: 42703
 LINE 1: select ab;
                ^
 CONTEXT:  referenced column: ab
---?LOCATION:  transformColumnRef, parse_expr.cpp:.*
+--?.*
 --?.*
 \! rm @abs_bindir@/gsql_parser.sql
 \! rm @abs_bindir@/gsql_parallel.sql
@@ -961,7 +977,7 @@ ERROR: Failed to check environment value: invalid token ";".
              300
 (300 rows)
 
---?
+--?.*
 \! echo '\setenv SHELL "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
 \! echo '\!'	>> @abs_bindir@/gsql_ut.sql
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
@@ -998,8 +1014,8 @@ select * from generate_series(1, 20);
 select * from dual;
 \o
 \copyright
-openGauss Database Management System
-Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.
+GaussDB Kernel Database Management System
+Copyright (c) Huawei Technologies Co., Ltd. 2018. All rights reserved.
 
 \! rm -f @abs_bindir@/gsql_ut.sql
 -- end of test for ut.
@@ -1007,6 +1023,4 @@ Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.
 \set ON_ERROR_STOP 'on'
 start transaction;
 \parallel
-insert into gsql_parallel_test select generate_series(1,10);
-insert into gsql_parallel_test select generate_series(1,10);
-\parallel
+Parallel within transaction is not supported

@@ -11,7 +11,7 @@ INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
 INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
 INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
 CREATE TABLE alter_addcols_92 ( a int , c int, b varchar(50) not null);
-INSERT INTO alter_addcols_92 VALUES (generate_series(1,10), 2, 'zzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzz');
+INSERT INTO alter_addcols_92 VALUES (generate_series(1,10), 2, 'zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang');
 INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
 INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
 INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
@@ -32,16 +32,16 @@ ALTER TABLE alter_addcols_93 ALTER COLUMN b SET DATA TYPE varchar(48);
 SELECT DISTINCT * FROM alter_addcols_93 order by a,c;
  a  | c |                       b                       
 ----+---+-----------------------------------------------
-  1 | 2 | zzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzz
-  2 | 2 | zzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzz
-  3 | 2 | zzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzz
-  4 | 2 | zzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzz
-  5 | 2 | zzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzz
-  6 | 2 | zzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzz
-  7 | 2 | zzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzz
-  8 | 2 | zzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzz
-  9 | 2 | zzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzz
- 10 | 2 | zzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzz
+  1 | 2 | zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang
+  2 | 2 | zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang
+  3 | 2 | zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang
+  4 | 2 | zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang
+  5 | 2 | zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang
+  6 | 2 | zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang
+  7 | 2 | zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang
+  8 | 2 | zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang
+  9 | 2 | zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang
+ 10 | 2 | zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang
 (10 rows)
 
 -- test: estate var must be global

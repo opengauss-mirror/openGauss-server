@@ -130,7 +130,7 @@ RBTree* rb_create(Size node_size, rb_comparator comparator, rb_combiner combiner
 }
 
 /* Copy the additional data fields from one RBNode to another */
-static inline void rb_copy_data(const RBTree* rb, RBNode* dest, const RBNode* src)
+static inline void rb_copy_data(RBTree* rb, RBNode* dest, const RBNode* src)
 {
     errno_t rc = EOK;
 

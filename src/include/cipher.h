@@ -63,6 +63,7 @@ typedef unsigned char GS_UCHAR;
 #define ITERATE_TIMES 10000
 #define MAC_ITERATE_TIMES 10000
 #define MAC_LEN 20
+#define MIN_KEY_LEN 8
 #define MAX_KEY_LEN 16
 #define AK_LEN 512
 #define SK_LEN 512
@@ -70,7 +71,14 @@ typedef unsigned char GS_UCHAR;
 #define SK_VALID_CHRS AK_VALID_CHRS
 #define DEK_SAMPLE_STRING "TRANS_ENCRYPT_SAMPLE_STRING"
 
-typedef enum { UNKNOWN_KEY_MODE, SERVER_MODE, CLIENT_MODE, OBS_MODE, SOURCE_MODE } KeyMode;
+typedef enum {
+    UNKNOWN_KEY_MODE,
+    SERVER_MODE,
+    CLIENT_MODE,
+    OBS_MODE,
+    SOURCE_MODE,
+    GDS_MODE
+} KeyMode;
 
 typedef struct {
     GS_UCHAR cipherkey[CIPHER_LEN + 1];   /* cipher text vector */
@@ -87,7 +95,9 @@ typedef struct {
 typedef enum {
     OBS_CLOUD_TYPE = 0,     /* on cloud obs cipher for encrypt and decrypt ak/sk */
     INITDB_NOCLOUDOBS_TYPE, /* non-cloud obs use the cipher same as initdb */
-    SSL_TYPE                /* gds ssl and gsql ssl connection cipher*/
+    GSQL_SSL_TYPE,          /* gsql ssl connection cipher */
+    GDS_SSL_TYPE,           /* gds ssl connection cipher */
+    CIPHER_TYPE_MAX         /* The max number of types should be at the end */
 } CipherType;
 
 extern void gen_cipher_rand_files(
@@ -99,7 +109,7 @@ extern bool EncryptInputKey(GS_UCHAR* pucPlainText, GS_UCHAR* initrand, GS_UCHAR
     GS_UCHAR* encryptVector, GS_UCHAR* pucCipherText, GS_UINT32* pulCLen);
 extern bool ReadContentFromFile(const char* filename, void* content, size_t csize);
 extern bool check_certificate_signature_algrithm(const SSL_CTX* SSL_context);
-extern long check_certificate_time(const SSL_CTX* SSL_context);
+extern long check_certificate_time(const SSL_CTX* SSL_context, const int alarm_days);
 extern bool CipherFileIsValid(CipherkeyFile* cipher);
 extern bool RandFileIsValid(RandkeyFile* randfile);
 extern void ClearCipherKeyFile(CipherkeyFile* cipher_file_content);
@@ -109,7 +119,7 @@ extern bool DecryptInputKey(GS_UCHAR* pucCipherText, GS_UINT32 ulCLen, GS_UCHAR*
 
 extern bool getTransEncryptKeyString(GS_UCHAR** cipherKey, GS_UCHAR** rndm);
 extern bool getAkSkForTransEncrypt(char* ak, int akbuflen, char* sk, int skbuflen);
-extern bool getKeyVectorFromCipherFile(char* cipherkeyfile, const char* cipherrndfile, GS_UCHAR* key, GS_UCHAR* vector);
+extern bool getKeyVectorFromCipherFile(const char* cipherkeyfile, const char* cipherrndfile, GS_UCHAR* key, GS_UCHAR* vector);
 extern bool encryptStringByAES128Speed(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, GS_UCHAR* RandSalt,
     GS_UCHAR* CipherText, GS_UINT32* CipherLen);
 extern char* getGaussHome();

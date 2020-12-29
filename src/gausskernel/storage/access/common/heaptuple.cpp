@@ -64,9 +64,10 @@
 #endif
 #include "access/sysattr.h"
 #include "access/tuptoaster.h"
+#include "access/tableam.h"
 #include "catalog/pg_proc.h"
 #include "executor/tuptable.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/pagecompress.h"
 #include "utils/memutils.h"
 #include "utils/elog.h"
@@ -94,14 +95,14 @@
  * heap_compute_data_size
  *		Determine size of the data area of a tuple to be constructed
  */
-Size heap_compute_data_size(TupleDesc tuple_desc, Datum* values, const bool* isnull)
+Size heap_compute_data_size(TupleDesc tupleDesc, Datum *values, const bool *isnull)
 {
     Size data_length = 0;
     int i;
-    int attribute_num = tuple_desc->natts;
-    Form_pg_attribute* att = tuple_desc->attrs;
+    int numberOfAttributes = tupleDesc->natts;
+    Form_pg_attribute *att = tupleDesc->attrs;
 
-    for (i = 0; i < attribute_num; i++) {
+    for (i = 0; i < numberOfAttributes; i++) {
         Datum val;
 
         if (isnull[i]) {
@@ -134,19 +135,19 @@ Size heap_compute_data_size(TupleDesc tuple_desc, Datum* values, const bool* isn
  *
  * NOTE: it is now REQUIRED that the caller have pre-zeroed the data area.
  */
-void heap_fill_tuple(
-    TupleDesc tuple_desc, Datum* values, const bool* isnull, char* data, Size data_size, uint16* infomask, bits8* bit)
+void heap_fill_tuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, char *data, Size data_size,
+                     uint16 *infomask, bits8 *bit)
 {
-    bits8* bitP = NULL;
+    bits8 *bitP = NULL;
     uint32 bitmask;
     int i;
-    int attribute_num = tuple_desc->natts;
-    Form_pg_attribute* att = tuple_desc->attrs;
+    int numberOfAttributes = tupleDesc->natts;
+    Form_pg_attribute *att = tupleDesc->attrs;
     errno_t rc = EOK;
-    char* begin = data;
+    char *begin = data;
 
 #ifdef USE_ASSERT_CHECKING
-    char* start = data;
+    char *start = data;
 #endif
 
     if (bit != NULL) {
@@ -160,7 +161,7 @@ void heap_fill_tuple(
 
     *infomask &= ~(HEAP_HASNULL | HEAP_HASVARWIDTH | HEAP_HASEXTERNAL);
 
-    for (i = 0; i < attribute_num; i++) {
+    for (i = 0; i < numberOfAttributes; i++) {
         Size data_length;
         Size remain_length = data_size - (size_t)(data - begin);
 
@@ -187,7 +188,7 @@ void heap_fill_tuple(
          */
         if (att[i]->attbyval) {
             /* pass-by-value */
-            data = (char*)att_align_nominal(data, att[i]->attalign);
+            data = (char *)att_align_nominal(data, att[i]->attalign);
             store_att_byval(data, values[i], att[i]->attlen);
             data_length = att[i]->attlen;
         } else if (att[i]->attlen == -1) {
@@ -216,7 +217,7 @@ void heap_fill_tuple(
                 }
             } else {
                 /* full 4-byte header varlena */
-                data = (char*)att_align_nominal(data, att[i]->attalign);
+                data = (char *)att_align_nominal(data, att[i]->attalign);
                 data_length = VARSIZE(val);
                 rc = memcpy_s(data, remain_length, val, data_length);
                 securec_check(rc, "\0", "\0");
@@ -230,7 +231,7 @@ void heap_fill_tuple(
             securec_check(rc, "\0", "\0");
         } else {
             /* fixed-length pass-by-reference */
-            data = (char*)att_align_nominal(data, att[i]->attalign);
+            data = (char *)att_align_nominal(data, att[i]->attalign);
             Assert(att[i]->attlen > 0);
             data_length = att[i]->attlen;
             rc = memcpy_s(data, remain_length, DatumGetPointer(values[i]), data_length);
@@ -251,9 +252,9 @@ void heap_fill_tuple(
  *		heap_attisnull	- returns TRUE iff tuple attribute is not present
  * ----------------
  */
-bool heap_attisnull(HeapTuple tup, int attnum, TupleDesc tup_desc)
+bool heap_attisnull(HeapTuple tup, int attnum, TupleDesc tupDesc)
 {
-    if (attnum > (int)HeapTupleHeaderGetNatts(tup->t_data, tup_desc)) {
+    if (attnum > (int)HeapTupleHeaderGetNatts(tup->t_data, tupDesc)) {
         return true;
     }
 
@@ -289,14 +290,14 @@ bool heap_attisnull(HeapTuple tup, int attnum, TupleDesc tup_desc)
 /* get init default value from tupleDesc.
  * attrinitdefvals of tupleDesc come from the attrinitdefval of pg_attribute
  */
-Datum heapGetInitDefVal(int att_num, TupleDesc tuple_desc, bool* is_null)
+Datum heapGetInitDefVal(int attNum, TupleDesc tupleDesc, bool *isNull)
 {
-    *is_null = true;
+    *isNull = true;
 
-    if (tuple_desc->initdefvals != NULL) {
-        *is_null = tuple_desc->initdefvals[att_num - 1].isNull;
-        if (!(*is_null)) {
-            return fetchatt(tuple_desc->attrs[att_num - 1], tuple_desc->initdefvals[att_num - 1].datum);
+    if (tupleDesc->initdefvals != NULL) {
+        *isNull = tupleDesc->initdefvals[attNum - 1].isNull;
+        if (!(*isNull)) {
+            return fetchatt(tupleDesc->attrs[attNum - 1], tupleDesc->initdefvals[attNum - 1].datum);
         }
     }
 
@@ -307,12 +308,12 @@ Datum heapGetInitDefVal(int att_num, TupleDesc tuple_desc, bool* is_null)
  * The function is for ordinary relation table, not for system table such as pg_class etc,
  * because attribute number of tuple is equal to that of tupledesc for ever.
  */
-bool relationAttIsNull(HeapTuple tup, int att_num, TupleDesc tuple_desc)
+bool relationAttIsNull(HeapTuple tup, int attNum, TupleDesc tupleDesc)
 {
-    if (att_num > (int)HeapTupleHeaderGetNatts(tup->t_data, tuple_desc)) {
-        return (tuple_desc->initdefvals == NULL) ? true : tuple_desc->initdefvals[att_num - 1].isNull;
+    if (attNum > (int)HeapTupleHeaderGetNatts(tup->t_data, tupleDesc)) {
+        return (tupleDesc->initdefvals == NULL) ? true : tupleDesc->initdefvals[attNum - 1].isNull;
     }
-    return heap_attisnull(tup, att_num, tuple_desc);
+    return heap_attisnull(tup, attNum, tupleDesc);
 }
 
 /* ----------------
@@ -338,12 +339,12 @@ bool relationAttIsNull(HeapTuple tup, int att_num, TupleDesc tuple_desc)
  *		tuples.
  * ----------------
  */
-Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tuple_desc)
+Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
 {
     HeapTupleHeader tup = tuple->t_data;
-    Form_pg_attribute* att = tuple_desc->attrs;
-    char* tp = NULL;         /* ptr to data part of tuple */
-    bits8* bp = tup->t_bits; /* ptr to null bitmap in tuple */
+    Form_pg_attribute *att = tupleDesc->attrs;
+    char *tp = NULL;         /* ptr to data part of tuple */
+    bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
     bool slow = false;       /* do we have to walk attrs? */
     int off;                 /* current offset within data */
 
@@ -367,7 +368,7 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tuple_desc)
      *     are almost in system table level, for example pg_class and so on. so that it's NOT
      *     recommended that users' table functions call fastgetattr() and nocachegetattr();
      */
-    Assert(attnum <= HeapTupleHeaderGetNatts(tup, tuple_desc));
+    Assert(attnum <= HeapTupleHeaderGetNatts(tup, tupleDesc));
     attnum--;
 
     if (!HeapTupleNoNulls(tuple)) {
@@ -395,7 +396,7 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tuple_desc)
         }
     }
 
-    tp = (char*)tup + tup->t_hoff;
+    tp = (char *)tup + tup->t_hoff;
 
     if (!slow) {
         /*
@@ -424,7 +425,7 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tuple_desc)
     }
 
     if (!slow) {
-        uint32 natts = tuple_desc->natts;
+        uint32 natts = tupleDesc->natts;
         uint32 j = 1;
 
         /*
@@ -476,7 +477,7 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tuple_desc)
          */
         off = 0;
         for (i = 0;; i++) { /* loop exit is at "break" */
-            Assert(i < (uint32)tuple_desc->natts);
+            Assert(i < (uint32)tupleDesc->natts);
             if (HeapTupleHasNulls(tuple) && att_isnull(i, bp)) {
                 usecache = false;
                 continue; /* this cannot be the target att */
@@ -531,7 +532,7 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tuple_desc)
  * has already determined that the attnum refers to a system attribute.
  * ----------------
  */
-Datum heap_getsysattr(HeapTuple tup, int attnum, TupleDesc tuple_desc, bool* isnull)
+Datum heap_getsysattr(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool *isnull)
 {
     Datum result;
 
@@ -603,7 +604,7 @@ Datum heap_getsysattr(HeapTuple tup, int attnum, TupleDesc tuple_desc, bool* isn
  */
 HeapTuple heap_copytuple(HeapTuple tuple)
 {
-    HeapTuple new_tuple;
+    HeapTuple newTuple;
     errno_t rc = EOK;
 
     if (!HeapTupleIsValid(tuple) || tuple->t_data == NULL) {
@@ -611,19 +612,19 @@ HeapTuple heap_copytuple(HeapTuple tuple)
     }
 
     Assert(!HEAP_TUPLE_IS_COMPRESSED(tuple->t_data));
-    new_tuple = (HeapTuple)palloc(HEAPTUPLESIZE + tuple->t_len);
-    new_tuple->t_len = tuple->t_len;
-    new_tuple->t_self = tuple->t_self;
-    new_tuple->t_tableOid = tuple->t_tableOid;
-    new_tuple->t_bucketId = tuple->t_bucketId;
-    HeapTupleCopyBase(new_tuple, tuple);
+	newTuple = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE + tuple->t_len);
+    newTuple->t_len = tuple->t_len;
+    newTuple->t_self = tuple->t_self;
+    newTuple->t_tableOid = tuple->t_tableOid;
+    newTuple->t_bucketId = tuple->t_bucketId;
+    HeapTupleCopyBase(newTuple, tuple);
 #ifdef PGXC
-    new_tuple->t_xc_node_id = tuple->t_xc_node_id;
+    newTuple->t_xc_node_id = tuple->t_xc_node_id;
 #endif
-    new_tuple->t_data = (HeapTupleHeader)((char*)new_tuple + HEAPTUPLESIZE);
-    rc = memcpy_s((char*)new_tuple->t_data, tuple->t_len, (char*)tuple->t_data, tuple->t_len);
+    newTuple->t_data = (HeapTupleHeader)((char *)newTuple + HEAPTUPLESIZE);
+    rc = memcpy_s((char *)newTuple->t_data, tuple->t_len, (char *)tuple->t_data, tuple->t_len);
     securec_check(rc, "\0", "\0");
-    return new_tuple;
+    return newTuple;
 }
 
 /* ----------------
@@ -662,7 +663,7 @@ void heap_copytuple_with_tuple(HeapTuple src, HeapTuple dest)
     dest->t_xc_node_id = src->t_xc_node_id;
 #endif
     dest->t_data = (HeapTupleHeader)palloc(src->t_len);
-    rc = memcpy_s((char*)dest->t_data, src->t_len, (char*)src->t_data, src->t_len);
+    rc = memcpy_s((char *)dest->t_data, src->t_len, (char *)src->t_data, src->t_len);
     securec_check(rc, "\0", "\0");
 }
 
@@ -673,21 +674,20 @@ void heap_copytuple_with_tuple(HeapTuple src, HeapTuple dest)
  *
  * The result is allocated in the current memory context.
  */
-HeapTuple heap_form_tuple(TupleDesc tuple_descriptor, Datum* values, bool* isnull)
+HeapTuple heap_form_tuple(TupleDesc tupleDescriptor, Datum *values, bool *isnull)
 {
     HeapTuple tuple;    /* return tuple */
     HeapTupleHeader td; /* tuple data */
     Size len, data_len;
     int hoff;
     bool hasnull = false;
-    Form_pg_attribute* att = tuple_descriptor->attrs;
-    int attribute_num = tuple_descriptor->natts;
+    Form_pg_attribute *att = tupleDescriptor->attrs;
+    int numberOfAttributes = tupleDescriptor->natts;
     int i;
 
-    if (attribute_num > MaxTupleAttributeNumber) {
-        ereport(ERROR,
-            (errcode(ERRCODE_TOO_MANY_COLUMNS),
-                errmsg("number of columns (%d) exceeds limit (%d)", attribute_num, MaxTupleAttributeNumber)));
+    if (numberOfAttributes > MaxTupleAttributeNumber) {
+        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("number of columns (%d) exceeds limit (%d)",
+                                                                  numberOfAttributes, MaxTupleAttributeNumber)));
     }
 
     /*
@@ -701,11 +701,11 @@ HeapTuple heap_form_tuple(TupleDesc tuple_descriptor, Datum* values, bool* isnul
      * if an attribute is already toasted, it must have been sent to disk
      * already and so cannot contain toasted attributes.
      */
-    for (i = 0; i < attribute_num; i++) {
+    for (i = 0; i < numberOfAttributes; i++) {
         if (isnull[i]) {
             hasnull = true;
         } else if (att[i]->attlen == -1 && att[i]->attalign == 'd' && att[i]->attndims == 0 &&
-            !VARATT_IS_EXTENDED(DatumGetPointer(values[i]))) {
+                   !VARATT_IS_EXTENDED(DatumGetPointer(values[i]))) {
             values[i] = toast_flatten_tuple_attribute(values[i], att[i]->atttypid, att[i]->atttypmod);
         }
     }
@@ -716,16 +716,16 @@ HeapTuple heap_form_tuple(TupleDesc tuple_descriptor, Datum* values, bool* isnul
     len = offsetof(HeapTupleHeaderData, t_bits);
 
     if (hasnull) {
-        len += BITMAPLEN(attribute_num);
+        len += BITMAPLEN(numberOfAttributes);
     }
 
-    if (tuple_descriptor->tdhasoid) {
+    if (tupleDescriptor->tdhasoid) {
         len += sizeof(Oid);
     }
 
     hoff = len = MAXALIGN(len); /* align user data safely */
 
-    data_len = heap_compute_data_size(tuple_descriptor, values, isnull);
+    data_len = heap_compute_data_size(tupleDescriptor, values, isnull);
 
     len += data_len;
 
@@ -733,8 +733,8 @@ HeapTuple heap_form_tuple(TupleDesc tuple_descriptor, Datum* values, bool* isnul
      * Allocate and zero the space needed.	Note that the tuple body and
      * HeapTupleData management structure are allocated in one chunk.
      */
-    tuple = (HeapTuple)palloc0(HEAPTUPLESIZE + len);
-    tuple->t_data = td = (HeapTupleHeader)((char*)tuple + HEAPTUPLESIZE);
+	tuple = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE + len);
+    tuple->t_data = td = (HeapTupleHeader)((char *)tuple + HEAPTUPLESIZE);
 
     /*
      * And fill in the information.  Note we fill the Datum fields even though
@@ -750,19 +750,19 @@ HeapTuple heap_form_tuple(TupleDesc tuple_descriptor, Datum* values, bool* isnul
 #endif
 
     HeapTupleHeaderSetDatumLength(td, len);
-    HeapTupleHeaderSetTypeId(td, tuple_descriptor->tdtypeid);
-    HeapTupleHeaderSetTypMod(td, tuple_descriptor->tdtypmod);
+    HeapTupleHeaderSetTypeId(td, tupleDescriptor->tdtypeid);
+    HeapTupleHeaderSetTypMod(td, tupleDescriptor->tdtypmod);
 
-    HeapTupleHeaderSetNatts(td, attribute_num);
+    HeapTupleHeaderSetNatts(td, numberOfAttributes);
     td->t_hoff = hoff;
 
     /* else leave infomask = 0 */
-    if (tuple_descriptor->tdhasoid) {
+    if (tupleDescriptor->tdhasoid) {
         td->t_infomask = HEAP_HASOID;
     }
 
-    heap_fill_tuple(
-        tuple_descriptor, values, isnull, (char*)td + hoff, data_len, &td->t_infomask, (hasnull ? td->t_bits : NULL));
+    heap_fill_tuple(tupleDescriptor, values, isnull, (char *)td + hoff, data_len, &td->t_infomask,
+                    (hasnull ? td->t_bits : NULL));
 
     return tuple;
 }
@@ -779,20 +779,20 @@ HeapTuple heap_form_tuple(TupleDesc tuple_descriptor, Datum* values, bool* isnul
  * This is deprecated and should not be used in new code, but we keep it
  * around for use by old add-on modules.
  */
-HeapTuple heap_formtuple(TupleDesc tuple_descriptor, Datum* values, const char* nulls)
+HeapTuple heap_formtuple(TupleDesc tupleDescriptor, Datum *values, const char *nulls)
 {
     HeapTuple tuple; /* return tuple */
-    int attribute_num = tuple_descriptor->natts;
-    bool* bool_nulls = (bool*)palloc(attribute_num * sizeof(bool));
+    int numberOfAttributes = tupleDescriptor->natts;
+    bool *boolNulls = (bool *)palloc(numberOfAttributes * sizeof(bool));
     int i;
 
-    for (i = 0; i < attribute_num; i++) {
-        bool_nulls[i] = (nulls[i] == 'n');
+    for (i = 0; i < numberOfAttributes; i++) {
+        boolNulls[i] = (nulls[i] == 'n');
     }
 
-    tuple = heap_form_tuple(tuple_descriptor, values, bool_nulls);
+    tuple = heap_form_tuple(tupleDescriptor, values, boolNulls);
 
-    pfree(bool_nulls);
+    pfree(boolNulls);
 
     return tuple;
 }
@@ -808,14 +808,14 @@ HeapTuple heap_formtuple(TupleDesc tuple_descriptor, Datum* values, const char* 
  *
  * The result is allocated in the current memory context.
  */
-HeapTuple heap_modify_tuple(
-    HeapTuple tuple, TupleDesc tuple_desc, Datum* repl_values, const bool* null_repl, const bool* do_replace)
+HeapTuple heap_modify_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *replValues, const bool *replIsnull,
+                            const bool *doReplace)
 {
-    int attrubute_num = tuple_desc->natts;
+    int numberOfAttributes = tupleDesc->natts;
     int attoff;
-    Datum* values = NULL;
-    bool* isnull = NULL;
-    HeapTuple new_tuple;
+    Datum *values = NULL;
+    bool *isnull = NULL;
+    HeapTuple newTuple;
 
     /*
      * allocate and fill values and isnull arrays from either the tuple or the
@@ -828,22 +828,22 @@ HeapTuple heap_modify_tuple(
      * O(N^2) if there are many non-replaced columns, so it seems better to
      * err on the side of linear cost.
      */
-    values = (Datum*)palloc(attrubute_num * sizeof(Datum));
-    isnull = (bool*)palloc(attrubute_num * sizeof(bool));
+    values = (Datum *)palloc(numberOfAttributes * sizeof(Datum));
+    isnull = (bool *)palloc(numberOfAttributes * sizeof(bool));
 
-    heap_deform_tuple(tuple, tuple_desc, values, isnull);
+    heap_deform_tuple(tuple, tupleDesc, values, isnull);
 
-    for (attoff = 0; attoff < attrubute_num; attoff++) {
-        if (do_replace[attoff]) {
-            values[attoff] = repl_values[attoff];
-            isnull[attoff] = null_repl[attoff];
+    for (attoff = 0; attoff < numberOfAttributes; attoff++) {
+        if (doReplace[attoff]) {
+            values[attoff] = replValues[attoff];
+            isnull[attoff] = replIsnull[attoff];
         }
     }
 
     /*
      * create a new tuple from the values and isnull arrays
      */
-    new_tuple = heap_form_tuple(tuple_desc, values, isnull);
+    newTuple = heap_form_tuple(tupleDesc, values, isnull);
 
     pfree(values);
     pfree(isnull);
@@ -852,19 +852,19 @@ HeapTuple heap_modify_tuple(
      * copy the identification info of the old tuple: t_ctid, t_self, and OID
      * (if any)
      */
-    new_tuple->t_data->t_ctid = tuple->t_data->t_ctid;
-    new_tuple->t_self = tuple->t_self;
-    new_tuple->t_tableOid = tuple->t_tableOid;
-    new_tuple->t_bucketId = tuple->t_bucketId;
-    HeapTupleCopyBase(new_tuple, tuple);
+    newTuple->t_data->t_ctid = tuple->t_data->t_ctid;
+    newTuple->t_self = tuple->t_self;
+    newTuple->t_tableOid = tuple->t_tableOid;
+    newTuple->t_bucketId = tuple->t_bucketId;
+    HeapTupleCopyBase(newTuple, tuple);
 #ifdef PGXC
-    new_tuple->t_xc_node_id = tuple->t_xc_node_id;
+    newTuple->t_xc_node_id = tuple->t_xc_node_id;
 #endif
-    if (tuple_desc->tdhasoid) {
-        HeapTupleSetOid(new_tuple, HeapTupleGetOid(tuple));
+    if (tupleDesc->tdhasoid) {
+        HeapTupleSetOid(newTuple, HeapTupleGetOid(tuple));
     }
 
-    return new_tuple;
+    return newTuple;
 }
 
 /*
@@ -878,24 +878,24 @@ HeapTuple heap_modify_tuple(
  * This is deprecated and should not be used in new code, but we keep it
  * around for use by old add-on modules.
  */
-HeapTuple heap_modifytuple(
-    HeapTuple tuple, TupleDesc tuple_desc, Datum* repl_values, const char* repl_nulls, const char* repl_actions)
+HeapTuple heap_modifytuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *replValues, const char *replNulls,
+                           const char *replActions)
 {
     HeapTuple result;
-    int attrubute_num = tuple_desc->natts;
-    bool* bool_nulls = (bool*)palloc(attrubute_num * sizeof(bool));
-    bool* bool_actions = (bool*)palloc(attrubute_num * sizeof(bool));
+    int numberOfAttributes = tupleDesc->natts;
+    bool *boolNulls = (bool *)palloc(numberOfAttributes * sizeof(bool));
+    bool *boolActions = (bool *)palloc(numberOfAttributes * sizeof(bool));
     int attnum;
 
-    for (attnum = 0; attnum < attrubute_num; attnum++) {
-        bool_nulls[attnum] = (repl_nulls[attnum] == 'n');
-        bool_actions[attnum] = (repl_actions[attnum] == 'r');
+    for (attnum = 0; attnum < numberOfAttributes; attnum++) {
+        boolNulls[attnum] = (replNulls[attnum] == 'n');
+        boolActions[attnum] = (replActions[attnum] == 'r');
     }
 
-    result = heap_modify_tuple(tuple, tuple_desc, repl_values, bool_nulls, bool_actions);
+    result = heap_modify_tuple(tuple, tupleDesc, replValues, boolNulls, boolActions);
 
-    pfree(bool_nulls);
-    pfree(bool_actions);
+    pfree(boolNulls);
+    pfree(boolActions);
 
     return result;
 }
@@ -917,21 +917,21 @@ HeapTuple heap_modifytuple(
  *		heap_getattr; the loop will become O(N^2) as soon as any
  *		noncacheable attribute offsets are involved.
  */
-void heap_deform_tuple(HeapTuple tuple, TupleDesc tuple_desc, Datum* values, bool* isnull)
+void heap_deform_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull)
 {
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
-    Form_pg_attribute* att = tuple_desc->attrs;
-    uint32 tdesc_natts = tuple_desc->natts;
+    Form_pg_attribute *att = tupleDesc->attrs;
+    uint32 tdesc_natts = tupleDesc->natts;
     uint32 natts; /* number of atts to extract */
     uint32 attnum;
-    char* tp = NULL;         /* ptr to tuple data */
+    char *tp = NULL;         /* ptr to tuple data */
     long off;                /* offset in tuple data */
-    bits8* bp = tup->t_bits; /* ptr to null bitmap in tuple */
+    bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
     bool slow = false;       /* can we use/set attcacheoff? */
 
     Assert(!HEAP_TUPLE_IS_COMPRESSED(tup));
-    natts = HeapTupleHeaderGetNatts(tup, tuple_desc);
+    natts = HeapTupleHeaderGetNatts(tup, tupleDesc);
 
     /*
      * In inheritance situations, it is possible that the given tuple actually
@@ -940,12 +940,11 @@ void heap_deform_tuple(HeapTuple tuple, TupleDesc tuple_desc, Datum* values, boo
      */
     natts = Min(natts, tdesc_natts);
     if (natts > MaxTupleAttributeNumber) {
-        ereport(ERROR,
-            (errcode(ERRCODE_TOO_MANY_COLUMNS),
-                errmsg("number of columns (%u) exceeds limit (%d)", natts, MaxTupleAttributeNumber)));
+        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                        errmsg("number of columns (%u) exceeds limit (%d)", natts, MaxTupleAttributeNumber)));
     }
 
-    tp = (char*)tup + tup->t_hoff;
+    tp = (char *)tup + tup->t_hoff;
 
     off = 0;
 
@@ -1003,7 +1002,7 @@ void heap_deform_tuple(HeapTuple tuple, TupleDesc tuple_desc, Datum* values, boo
          * example code: values[attnum] = (Datum) 0;
          * example code: isnull[attnum] = true;
          */
-        values[attnum] = heapGetInitDefVal(attnum + 1, tuple_desc, &isnull[attnum]);
+        values[attnum] = heapGetInitDefVal(attnum + 1, tupleDesc, &isnull[attnum]);
     }
 }
 
@@ -1029,22 +1028,22 @@ void heap_deform_tuple(HeapTuple tuple, TupleDesc tuple_desc, Datum* values, boo
  * This is deprecated and should not be used in new code, but we keep it
  * around for use by old add-on modules.
  */
-void heap_deformtuple(HeapTuple tuple, TupleDesc tuple_desc, Datum* values, char* nulls)
+void heap_deformtuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, char *nulls)
 {
-    int natts = tuple_desc->natts;
-    bool* bool_nulls = (bool*)palloc(natts * sizeof(bool));
+    int natts = tupleDesc->natts;
+    bool *boolNulls = (bool *)palloc(natts * sizeof(bool));
     int attnum;
 
-    heap_deform_tuple(tuple, tuple_desc, values, bool_nulls);
+    heap_deform_tuple(tuple, tupleDesc, values, boolNulls);
 
     for (attnum = 0; attnum < natts; attnum++) {
-        nulls[attnum] = (bool_nulls[attnum] ? 'n' : ' ');
+        nulls[attnum] = (boolNulls[attnum] ? 'n' : ' ');
     }
 
-    pfree(bool_nulls);
+    pfree(boolNulls);
 }
 
-static void slot_deform_cmprs_tuple(TupleTableSlot* slot, uint32 natts);
+static void slot_deform_cmprs_tuple(TupleTableSlot *slot, uint32 natts);
 
 /*
  * slot_deform_tuple
@@ -1057,19 +1056,20 @@ static void slot_deform_cmprs_tuple(TupleTableSlot* slot, uint32 natts);
  *		re-computing information about previously extracted attributes.
  *		slot->tts_nvalid is the number of attributes already extracted.
  */
-static void slot_deform_tuple(TupleTableSlot* slot, uint32 natts)
+static void slot_deform_tuple(TupleTableSlot *slot, uint32 natts)
 {
-    HeapTuple tuple = slot->tts_tuple;
-    TupleDesc tuple_desc = slot->tts_tupleDescriptor;
-    Datum* values = slot->tts_values;
-    bool* isnull = slot->tts_isnull;
+    HeapTuple tuple = (HeapTuple)slot->tts_tuple;
+    Assert(tuple->tupTableType == HEAP_TUPLE);
+    TupleDesc tupleDesc = slot->tts_tupleDescriptor;
+    Datum *values = slot->tts_values;
+    bool *isnull = slot->tts_isnull;
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
-    Form_pg_attribute* att = tuple_desc->attrs;
+    Form_pg_attribute *att = tupleDesc->attrs;
     uint32 attnum;
-    char* tp = NULL;         /* ptr to tuple data */
+    char *tp = NULL;         /* ptr to tuple data */
     long off;                /* offset in tuple data */
-    bits8* bp = tup->t_bits; /* ptr to null bitmap in tuple */
+    bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
     bool slow = false;       /* can we use/set attcacheoff? */
 
     /*
@@ -1087,7 +1087,7 @@ static void slot_deform_tuple(TupleTableSlot* slot, uint32 natts)
         slow = slot->tts_slow;
     }
 
-    tp = (char*)tup + tup->t_hoff;
+    tp = (char *)tup + tup->t_hoff;
 
     for (; attnum < natts; attnum++) {
         Form_pg_attribute thisatt = att[attnum];
@@ -1143,18 +1143,78 @@ static void slot_deform_tuple(TupleTableSlot* slot, uint32 natts)
 }
 
 #ifdef PGXC
+
+/*
+ * slot_extract_anyarray_from_buff
+ *  Extract one row anyarray data from the buffer message into slot tts_value.
+ *  'need_transform_anyarray':
+ *    When buffer->data is from remote CN/DN, remote CN/DN use printtup -> anyarray_out
+ *    output just string not varattrib to this CN, so the content is string, not varattrib.but if
+ *    buffer->data is from local, the content shoud be varattrib. so we must handle the data in different way.
+ *    when call from parallel remote process, the 'need_transform_anyarray' is true, and we use 'anyarray_in' transform
+ *    string to array. because in parallel remote proess, we just use this data for printtup-> array_out to output.
+ *    and in printtup, it handle the tts_values with attr in tts_values, so it is OK.
+ *    the remote query(not parallel), put slot in tup, but when printtup, it use info in slot not tup. even data in tup
+ *    is not correct, it can print correct.
+ *  index means attribute index.
+ *  buff is the input message buff.
+ *  len is length of anyarray in buff.
+ */
+static void slot_extract_anyarray_from_buff(TupleTableSlot *slot, int index, const StringInfo buffer, int len,
+                                            bool need_transform_anyarray)
+{
+    char *pstr = NULL;
+    Datum array_datum;
+    Size data_length;
+    errno_t rc = EOK;
+    Form_pg_attribute *att = slot->tts_tupleDescriptor->attrs;
+    int attnum = slot->tts_tupleDescriptor->natts;
+
+    if (index >= attnum) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("index is not correct")));
+    }
+
+    /* If from remote cn, the datatype in buffer is string, not varattrib, so we should not use it as varattrib */
+    if ((att[index]->attlen == -1) && (!need_transform_anyarray)) {
+        data_length = VARSIZE_ANY(buffer->data);
+        if (data_length <= (Size)((uint32)len + 1)) {
+            data_length = len + 1;
+        }
+    } else {
+        data_length = len + 1;
+    }
+
+    if (data_length > MaxAllocSize) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("data length is not correct")));
+    }
+    pstr = (char *)palloc0(data_length);
+    rc = memcpy_s(pstr, len + 1, buffer->data, len);
+    securec_check(rc, "", "");
+    pstr[len] = '\0';
+    array_datum = (Datum)pstr;
+    if (need_transform_anyarray) {
+        array_datum = OidFunctionCall3Coll(ANYARRAYINFUNCOID, InvalidOid, CStringGetDatum(pstr),
+                                           UInt32GetDatum(CSTRINGOID),
+                                           Int32GetDatum(slot->tts_tupleDescriptor->tdtypmod));
+        pfree_ext(pstr);
+    }
+    slot->tts_values[index] = array_datum;
+
+    return;
+}
+
 /*
  * slot_deform_datarow
  * 		Extract data from the DataRow message into Datum/isnull arrays.
  * 		We always extract all atributes, as specified in tts_tupleDescriptor,
  * 		because there is no easy way to find random attribute in the DataRow.
  */
-static void slot_deform_datarow(TupleTableSlot* slot)
+static void slot_deform_datarow(TupleTableSlot *slot, bool need_transform_anyarray)
 {
     int attnum;
     int i;
     int col_count;
-    char* cur = slot->tts_dataRow;
+    char *cur = slot->tts_dataRow;
     StringInfo buffer;
     uint16 n16;
     uint32 n32;
@@ -1165,7 +1225,7 @@ static void slot_deform_datarow(TupleTableSlot* slot)
         return;
     }
 
-    Form_pg_attribute* att = slot->tts_tupleDescriptor->attrs;
+    Form_pg_attribute *att = slot->tts_tupleDescriptor->attrs;
     attnum = slot->tts_tupleDescriptor->natts;
 
     /* fastpath: exit if values already extracted */
@@ -1212,30 +1272,15 @@ static void slot_deform_datarow(TupleTableSlot* slot)
             cur += len;
             if (att[i]->atttypid == ANYARRAYOID) {
                 /* For anyarray, it need more information to handle it, so leave it, just copy */
-                char* pstr = NULL;
-                if (att[i]->attlen == -1) {
-                    Size data_length = VARSIZE_ANY(buffer->data);
-                    if (data_length > (Size)((uint32)len + 1)) {
-                        pstr = (char*)palloc0(data_length);
-                    } else {
-                        pstr = (char*)palloc0(len + 1);
-                    }
-                } else {
-                    pstr = (char*)palloc0(len + 1);
-                }
-                rc = memcpy_s(pstr, len + 1, buffer->data, len);
-                securec_check(rc, "", "");
-                pstr[len] = '\0';
-                slot->tts_values[i] = (Datum)pstr;
+                slot_extract_anyarray_from_buff(slot, i, buffer, len, need_transform_anyarray);
             } else {
-                /* for abstimein, transfer str to time in select has some problem, so distinguish 
+                /* for abstimein, transfer str to time in select has some problem, so distinguish
                  * insert and select for ABSTIMEIN to avoid problem */
                 t_thrd.time_cxt.is_abstimeout_in = true;
 
-                slot->tts_values[i] = InputFunctionCall(slot->tts_attinmeta->attinfuncs + i,
-                    buffer->data,
-                    slot->tts_attinmeta->attioparams[i],
-                    slot->tts_attinmeta->atttypmods[i]);
+                slot->tts_values[i] = InputFunctionCall(slot->tts_attinmeta->attinfuncs + i, buffer->data,
+                                                        slot->tts_attinmeta->attioparams[i],
+                                                        slot->tts_attinmeta->atttypmods[i]);
                 t_thrd.time_cxt.is_abstimeout_in = false;
             }
             slot->tts_isnull[i] = false;
@@ -1253,7 +1298,7 @@ static void slot_deform_datarow(TupleTableSlot* slot)
 #endif
 
 /*
- * slot_getattr
+ * heap_slot_getattr
  *		This function fetches an attribute of the slot's current tuple.
  *		It is functionally equivalent to heap_getattr, but fetches of
  *		multiple attributes of the same tuple will be optimized better,
@@ -1263,11 +1308,20 @@ static void slot_deform_datarow(TupleTableSlot* slot)
  *		A difference from raw heap_getattr is that attnums beyond the
  *		slot's tupdesc's last attribute will be considered NULL even
  *		when the physical tuple is longer than the tupdesc.
+ *
+ *		@param slot: TableTuple slot from this attribute is extracted
+ *		@param attnum: index of the atribute to be extracted.
+ *		@param isnull: set to true, if the attribute is NULL.
  */
-Datum slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull)
+Datum heap_slot_getattr(TupleTableSlot *slot, int attnum, bool *isnull, bool need_transform_anyarray)
 {
-    HeapTuple tuple = slot->tts_tuple;
-    TupleDesc tuple_desc = slot->tts_tupleDescriptor;
+    /* sanity checks */
+    Assert(slot != NULL);
+    Assert(slot->tts_tupleDescriptor != NULL);
+    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+
+    HeapTuple tuple = (HeapTuple)slot->tts_tuple;
+    TupleDesc tupleDesc = slot->tts_tupleDescriptor;
     HeapTupleHeader tup;
 
     /*
@@ -1276,15 +1330,15 @@ Datum slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull)
     if (attnum <= 0) {
         /* internal error */
         if (tuple == NULL) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract system attribute from virtual tuple")));
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("cannot extract system attribute from virtual tuple")));
         }
         /* internal error */
         if (tuple == &(slot->tts_minhdr)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract system attribute from minimal tuple")));
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("cannot extract system attribute from minimal tuple")));
         }
-        return heap_getsysattr(tuple, attnum, tuple_desc, isnull);
+        return heap_getsysattr(tuple, attnum, tupleDesc, isnull);
     }
 
     /*
@@ -1298,7 +1352,7 @@ Datum slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull)
     /*
      * return NULL if attnum is out of range according to the tupdesc
      */
-    if (attnum > tuple_desc->natts) {
+    if (attnum > tupleDesc->natts) {
         *isnull = true;
         return (Datum)0;
     }
@@ -1306,7 +1360,7 @@ Datum slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull)
 #ifdef PGXC
     /* If it is a data row tuple extract all and return requested */
     if (slot->tts_dataRow) {
-        slot_deform_datarow(slot);
+        slot_deform_datarow(slot, need_transform_anyarray);
         *isnull = slot->tts_isnull[attnum - 1];
         return slot->tts_values[attnum - 1];
     }
@@ -1318,8 +1372,8 @@ Datum slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull)
      */
     /* internal error */
     if (tuple == NULL) {
-        ereport(
-            ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
     }
 
     /*
@@ -1330,13 +1384,13 @@ Datum slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull)
      * than the tupdesc.)
      */
     tup = tuple->t_data;
-    if (attnum > (int)HeapTupleHeaderGetNatts(tup, tuple_desc)) {
+    if (attnum > (int)HeapTupleHeaderGetNatts(tup, tupleDesc)) {
         /* get init default value from tupleDesc.
          * The original Code is:
          * example code: *isnull = true;
          * example code: return (Datum) 0;
          */
-        return heapGetInitDefVal(attnum, tuple_desc, isnull);
+        return heapGetInitDefVal(attnum, tupleDesc, isnull);
     }
 
     /*
@@ -1352,7 +1406,7 @@ Datum slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull)
      * This case should not happen in normal use, but it could happen if we
      * are executing a plan cached before the column was dropped.
      */
-    if (tuple_desc->attrs[attnum - 1]->attisdropped) {
+    if (tupleDesc->attrs[attnum - 1]->attisdropped) {
         *isnull = true;
         return (Datum)0;
     }
@@ -1360,7 +1414,7 @@ Datum slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull)
     /*
      * Extract the attribute, along with any preceding attributes.
      */
-    if (HEAP_TUPLE_IS_COMPRESSED(slot->tts_tuple->t_data)) {
+    if (HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)((HeapTuple)slot->tts_tuple))->t_data)) {
         slot_deform_cmprs_tuple(slot, attnum);
     } else {
         slot_deform_tuple(slot, attnum);
@@ -1374,13 +1428,17 @@ Datum slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull)
 }
 
 /*
- * slot_getallattrs
+ * heap_slot_getallattrs
  *		This function forces all the entries of the slot's Datum/isnull
  *		arrays to be valid.  The caller may then extract data directly
- *		from those arrays instead of using slot_getattr.
+ *		from those arrays instead of using heap_slot_getattr.
+ *
+ *		@param slot: TableTuple slot from this attributes are extracted
  */
-void slot_getallattrs(TupleTableSlot* slot)
+void heap_slot_getallattrs(TupleTableSlot *slot, bool need_transform_anyarray)
 {
+    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+
     int tdesc_natts = slot->tts_tupleDescriptor->natts;
     int attnum;
     HeapTuple tuple;
@@ -1393,7 +1451,7 @@ void slot_getallattrs(TupleTableSlot* slot)
 #ifdef PGXC
     /* Handle the DataRow tuple case */
     if (slot->tts_dataRow) {
-        slot_deform_datarow(slot);
+        slot_deform_datarow(slot, need_transform_anyarray);
         return;
     }
 #endif
@@ -1402,11 +1460,11 @@ void slot_getallattrs(TupleTableSlot* slot)
      * otherwise we had better have a physical tuple (tts_nvalid should equal
      * natts in all virtual-tuple cases)
      */
-    tuple = slot->tts_tuple;
+    tuple = (HeapTuple)slot->tts_tuple;
     /* internal error */
     if (tuple == NULL) {
-        ereport(
-            ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
     }
 
     /*
@@ -1415,7 +1473,7 @@ void slot_getallattrs(TupleTableSlot* slot)
     attnum = HeapTupleHeaderGetNatts(tuple->t_data, slot->tts_tupleDescriptor);
     attnum = Min(attnum, tdesc_natts);
 
-    if (HEAP_TUPLE_IS_COMPRESSED(slot->tts_tuple->t_data)) {
+    if (HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)slot->tts_tuple)->t_data)) {
         slot_deform_cmprs_tuple(slot, attnum);
     } else {
         slot_deform_tuple(slot, attnum);
@@ -1437,12 +1495,17 @@ void slot_getallattrs(TupleTableSlot* slot)
 }
 
 /*
- * slot_getsomeattrs
+ * heap_slot_getsomeattrs
  *		This function forces the entries of the slot's Datum/isnull
  *		arrays to be valid at least up through the attnum'th entry.
+ *
+ *		@param slot:input Tuple Table slot from which attributes are extracted.
+ *		@param attnum: index until which slots attributes are extracted.
  */
-void slot_getsomeattrs(TupleTableSlot* slot, int attnum)
+void heap_slot_getsomeattrs(TupleTableSlot *slot, int attnum)
 {
+    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+
     HeapTuple tuple;
     int attno;
 
@@ -1454,7 +1517,7 @@ void slot_getsomeattrs(TupleTableSlot* slot, int attnum)
 #ifdef PGXC
     /* Handle the DataRow tuple case */
     if (slot->tts_dataRow) {
-        slot_deform_datarow(slot);
+        slot_deform_datarow(slot, false);
         return;
     }
 #endif
@@ -1468,11 +1531,11 @@ void slot_getsomeattrs(TupleTableSlot* slot, int attnum)
      * otherwise we had better have a physical tuple (tts_nvalid should equal
      * natts in all virtual-tuple cases)
      */
-    tuple = slot->tts_tuple;
+    tuple = (HeapTuple)slot->tts_tuple;
     /* internal error */
     if (tuple == NULL) {
-        ereport(
-            ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
     }
 
     /*
@@ -1481,7 +1544,7 @@ void slot_getsomeattrs(TupleTableSlot* slot, int attnum)
     attno = HeapTupleHeaderGetNatts(tuple->t_data, slot->tts_tupleDescriptor);
     attno = Min(attno, attnum);
 
-    if (HEAP_TUPLE_IS_COMPRESSED(slot->tts_tuple->t_data)) {
+    if (HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)((HeapTuple)slot->tts_tuple))->t_data)) {
         slot_deform_cmprs_tuple(slot, attno);
     } else {
         slot_deform_tuple(slot, attno);
@@ -1503,14 +1566,19 @@ void slot_getsomeattrs(TupleTableSlot* slot, int attnum)
 }
 
 /*
- * slot_attisnull
+ * heap_slot_attisnull
  *		Detect whether an attribute of the slot is null, without
  *		actually fetching it.
+ *
+ *	 @param slot: Tabletuple slot
+ *	 @para attnum: attribute index that should be checked for null value.
  */
-bool slot_attisnull(TupleTableSlot* slot, int attnum)
+bool heap_slot_attisnull(TupleTableSlot *slot, int attnum)
 {
-    HeapTuple tuple = slot->tts_tuple;
-    TupleDesc tuple_desc = slot->tts_tupleDescriptor;
+    HeapTuple tuple = (HeapTuple)slot->tts_tuple;
+    TupleDesc tupleDesc = slot->tts_tupleDescriptor;
+
+    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
 
     /*
      * system attributes are handled by heap_attisnull
@@ -1518,14 +1586,14 @@ bool slot_attisnull(TupleTableSlot* slot, int attnum)
     if (attnum <= 0) {
         /* internal error */
         if (tuple == NULL) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract system attribute from virtual tuple")));
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("cannot extract system attribute from virtual tuple")));
         }
 
         /* internal error */
         if (tuple == &(slot->tts_minhdr)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract system attribute from minimal tuple")));
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("cannot extract system attribute from minimal tuple")));
         }
         return heap_attisnull(tuple, attnum, NULL);
     }
@@ -1540,14 +1608,14 @@ bool slot_attisnull(TupleTableSlot* slot, int attnum)
     /*
      * return NULL if attnum is out of range according to the tupdesc
      */
-    if (attnum > tuple_desc->natts) {
+    if (attnum > tupleDesc->natts) {
         return true;
     }
 
 #ifdef PGXC
     /* If it is a data row tuple extract all and return requested */
     if (slot->tts_dataRow) {
-        slot_deform_datarow(slot);
+        slot_deform_datarow(slot, false);
         return slot->tts_isnull[attnum - 1];
     }
 #endif
@@ -1558,8 +1626,8 @@ bool slot_attisnull(TupleTableSlot* slot, int attnum)
      */
     /* internal error */
     if (tuple == NULL) {
-        ereport(
-            ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
     }
 
     /* and let the tuple tell it */
@@ -1567,7 +1635,7 @@ bool slot_attisnull(TupleTableSlot* slot, int attnum)
      * The original Code is:
      * return heap_attisnull(tuple, attnum, tupleDesc);
      */
-    return relationAttIsNull(tuple, attnum, tuple_desc);
+    return relationAttIsNull(tuple, attnum, tupleDesc);
 }
 
 /*
@@ -1589,20 +1657,19 @@ void heap_freetuple(HeapTuple htup)
  *
  * The result is allocated in the current memory context.
  */
-MinimalTuple heap_form_minimal_tuple(TupleDesc tuple_descriptor, Datum* values, const bool* isnull, MinimalTuple in_tuple)
+MinimalTuple heap_form_minimal_tuple(TupleDesc tupleDescriptor, Datum *values, const bool *isnull, MinimalTuple inTuple)
 {
     MinimalTuple tuple; /* return tuple */
     Size len, data_len;
     int hoff;
     bool hasnull = false;
-    Form_pg_attribute* att = tuple_descriptor->attrs;
-    int attrubute_num = tuple_descriptor->natts;
+    Form_pg_attribute *att = tupleDescriptor->attrs;
+    int numberOfAttributes = tupleDescriptor->natts;
     int i;
 
-    if (attrubute_num > MaxTupleAttributeNumber) {
-        ereport(ERROR,
-            (errcode(ERRCODE_TOO_MANY_COLUMNS),
-                errmsg("number of columns (%d) exceeds limit (%d)", attrubute_num, MaxTupleAttributeNumber)));
+    if (numberOfAttributes > MaxTupleAttributeNumber) {
+        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("number of columns (%d) exceeds limit (%d)",
+                                                                  numberOfAttributes, MaxTupleAttributeNumber)));
     }
 
     /*
@@ -1616,11 +1683,11 @@ MinimalTuple heap_form_minimal_tuple(TupleDesc tuple_descriptor, Datum* values, 
      * if an attribute is already toasted, it must have been sent to disk
      * already and so cannot contain toasted attributes.
      */
-    for (i = 0; i < attrubute_num; i++) {
+    for (i = 0; i < numberOfAttributes; i++) {
         if (isnull[i]) {
             hasnull = true;
         } else if (att[i]->attlen == -1 && att[i]->attalign == 'd' && att[i]->attndims == 0 &&
-                 !VARATT_IS_EXTENDED(values[i])) {
+                   !VARATT_IS_EXTENDED(values[i])) {
             values[i] = toast_flatten_tuple_attribute(values[i], att[i]->atttypid, att[i]->atttypmod);
         }
     }
@@ -1631,53 +1698,48 @@ MinimalTuple heap_form_minimal_tuple(TupleDesc tuple_descriptor, Datum* values, 
     len = offsetof(MinimalTupleData, t_bits);
 
     if (hasnull) {
-        len += BITMAPLEN(attrubute_num);
+        len += BITMAPLEN(numberOfAttributes);
     }
 
-    if (tuple_descriptor->tdhasoid) {
+    if (tupleDescriptor->tdhasoid) {
         len += sizeof(Oid);
     }
 
     hoff = len = MAXALIGN(len); /* align user data safely */
 
-    data_len = heap_compute_data_size(tuple_descriptor, values, isnull);
+    data_len = heap_compute_data_size(tupleDescriptor, values, isnull);
 
     len += data_len;
 
     /*
      * Allocate and zero the space needed.
      */
-    if (in_tuple == NULL) {
+    if (inTuple == NULL) {
         tuple = (MinimalTuple)palloc0(len);
     } else {
-        if (in_tuple->t_len < len) {
-            pfree(in_tuple);
-            in_tuple = NULL;
+        if (inTuple->t_len < len) {
+            pfree(inTuple);
+            inTuple = NULL;
             tuple = (MinimalTuple)palloc0(len);
         } else {
-            errno_t rc = memset_s(in_tuple, in_tuple->t_len, 0, in_tuple->t_len);
+            errno_t rc = memset_s(inTuple, inTuple->t_len, 0, inTuple->t_len);
             securec_check(rc, "\0", "\0");
-            tuple = in_tuple;
+            tuple = inTuple;
         }
     }
     /*
      * And fill in the information.
      */
     tuple->t_len = len;
-    HeapTupleHeaderSetNatts(tuple, attrubute_num);
+    HeapTupleHeaderSetNatts(tuple, numberOfAttributes);
     tuple->t_hoff = hoff + MINIMAL_TUPLE_OFFSET;
     /* else leave infomask = 0 */
-    if (tuple_descriptor->tdhasoid) {
+    if (tupleDescriptor->tdhasoid) {
         tuple->t_infomask = HEAP_HASOID;
     }
 
-    heap_fill_tuple(tuple_descriptor,
-        values,
-        isnull,
-        (char*)tuple + hoff,
-        data_len,
-        &tuple->t_infomask,
-        (hasnull ? tuple->t_bits : NULL));
+    heap_fill_tuple(tupleDescriptor, values, isnull, (char *)tuple + hoff, data_len, &tuple->t_infomask,
+                    (hasnull ? tuple->t_bits : NULL));
 
     return tuple;
 }
@@ -1722,7 +1784,7 @@ HeapTuple heap_tuple_from_minimal_tuple(MinimalTuple mtup)
     uint32 len = mtup->t_len + MINIMAL_TUPLE_OFFSET;
     errno_t rc = EOK;
 
-    result = (HeapTuple)palloc(HEAPTUPLESIZE + len);
+	result = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE + len);
     result->t_len = len;
     ItemPointerSetInvalid(&(result->t_self));
     result->t_tableOid = InvalidOid;
@@ -1731,11 +1793,11 @@ HeapTuple heap_tuple_from_minimal_tuple(MinimalTuple mtup)
 #ifdef PGXC
     result->t_xc_node_id = 0;
 #endif
-    result->t_data = (HeapTupleHeader)((char*)result + HEAPTUPLESIZE);
-    rc = memcpy_s((char*)result->t_data + MINIMAL_TUPLE_OFFSET, mtup->t_len, mtup, mtup->t_len);
+    result->t_data = (HeapTupleHeader)((char *)result + HEAPTUPLESIZE);
+    rc = memcpy_s((char *)result->t_data + MINIMAL_TUPLE_OFFSET, mtup->t_len, mtup, mtup->t_len);
     securec_check(rc, "\0", "\0");
-    rc = memset_s(
-        result->t_data, offsetof(HeapTupleHeaderData, t_infomask2), 0, offsetof(HeapTupleHeaderData, t_infomask2));
+    rc = memset_s(result->t_data, offsetof(HeapTupleHeaderData, t_infomask2), 0,
+                  offsetof(HeapTupleHeaderData, t_infomask2));
     securec_check(rc, "\0", "\0");
     return result;
 }
@@ -1756,7 +1818,7 @@ MinimalTuple minimal_tuple_from_heap_tuple(HeapTuple htup)
     Assert(htup->t_len > MINIMAL_TUPLE_OFFSET);
     len = htup->t_len - MINIMAL_TUPLE_OFFSET;
     result = (MinimalTuple)palloc(len);
-    rc = memcpy_s(result, len, (char*)htup->t_data + MINIMAL_TUPLE_OFFSET, len);
+    rc = memcpy_s(result, len, (char *)htup->t_data + MINIMAL_TUPLE_OFFSET, len);
     securec_check(rc, "\0", "\0");
     result->t_len = len;
     return result;
@@ -1770,16 +1832,15 @@ MinimalTuple minimal_tuple_from_heap_tuple(HeapTuple htup)
  * heap_compute_cmprs_data_size
  *		Determine size of the data area of a compressed tuple to be constructed
  */
-static Size heap_compute_cmprs_data_size(TupleDesc tuple_desc, FormCmprTupleData* cmprs_info)
+static Size heap_compute_cmprs_data_size(TupleDesc tupleDesc, FormCmprTupleData *cmprsInfo)
 {
     Size data_length = 0;
     int i;
-    int attribute_num = tuple_desc->natts;
-    Form_pg_attribute* att = tuple_desc->attrs;
-    if (attribute_num > MaxTupleAttributeNumber) {
-        ereport(ERROR,
-            (errcode(ERRCODE_TOO_MANY_COLUMNS),
-                errmsg("number of columns (%d) exceeds limit (%d)", attribute_num, MaxTupleAttributeNumber)));
+    int numberOfAttributes = tupleDesc->natts;
+    Form_pg_attribute *att = tupleDesc->attrs;
+    if (numberOfAttributes > MaxTupleAttributeNumber) {
+        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("number of columns (%d) exceeds limit (%d)",
+                                                                  numberOfAttributes, MaxTupleAttributeNumber)));
     }
 
     /*
@@ -1789,22 +1850,22 @@ static Size heap_compute_cmprs_data_size(TupleDesc tuple_desc, FormCmprTupleData
      * (3) It's bytes-alligned factor that results in computing space in order, first compression-map,
      *     then fields step by step !
      */
-    data_length += BITMAPLEN(attribute_num);
+    data_length += BITMAPLEN(numberOfAttributes);
 
-    for (i = 0; i < attribute_num; i++) {
+    for (i = 0; i < numberOfAttributes; i++) {
         /* NULLs first: no compression, no storage. */
-        if (cmprs_info->isnulls[i]) {
+        if (cmprsInfo->isnulls[i]) {
             continue;
         }
 
         /* compression second: specail value, special size, and special alligned. */
-        if (cmprs_info->compressed[i]) {
-            data_length += cmprs_info->valsize[i];
+        if (cmprsInfo->compressed[i]) {
+            data_length += cmprsInfo->valsize[i];
             continue;
         }
 
         /* the normal field is the last */
-        Datum val = cmprs_info->values[i];
+        Datum val = cmprsInfo->values[i];
 
         if (ATT_IS_PACKABLE(att[i]) && VARATT_CAN_MAKE_SHORT(DatumGetPointer(val))) {
             /*
@@ -1822,9 +1883,9 @@ static Size heap_compute_cmprs_data_size(TupleDesc tuple_desc, FormCmprTupleData
 }
 
 /* fill bitmap according to flags[nflag] */
-static void heap_fill_bitmap(char* buf, const bool* flags, int nflag)
+static void heap_fill_bitmap(char *buf, const bool *flags, int nflag)
 {
-    char* byteBuf = (buf - 1);
+    char *byteBuf = (buf - 1);
     uint32 bitmask = HIGHBIT;
     int cnt;
 
@@ -1862,22 +1923,22 @@ static void heap_fill_bitmap(char* buf, const bool* flags, int nflag)
  *
  * NOTE: it is now REQUIRED that the caller have pre-zeroed the data area.
  */
-static void heap_fill_cmprs_tuple(
-    TupleDesc tuple_desc, FormCmprTupleData* cmprs_info, char* data, Size data_size, uint16* infomask, bits8* bit)
+static void heap_fill_cmprs_tuple(TupleDesc tupleDesc, FormCmprTupleData *cmprsInfo, char *data, Size data_size,
+                                  uint16 *infomask, bits8 *bit)
 {
-    bits8* bitP = NULL;
+    bits8 *bitP = NULL;
     uint32 bitmask;
     int i;
-    int attrubute_num = tuple_desc->natts;
+    int numberOfAttributes = tupleDesc->natts;
     errno_t retno = EOK;
-    Form_pg_attribute* att = tuple_desc->attrs;
-    char* start = data;
+    Form_pg_attribute *att = tupleDesc->attrs;
+    char *start = data;
 
     /* compression-bitmap MUST be put firstly.
      * refer to heap_compute_cmprs_data_size()
      */
-    heap_fill_bitmap(data, cmprs_info->compressed, attrubute_num);
-    data += (int16)BITMAPLEN(attrubute_num);
+    heap_fill_bitmap(data, cmprsInfo->compressed, numberOfAttributes);
+    data += (int16)BITMAPLEN(numberOfAttributes);
 
     if (bit != NULL) {
         bitP = &bit[-1];
@@ -1890,7 +1951,7 @@ static void heap_fill_cmprs_tuple(
 
     *infomask &= ~(HEAP_HASNULL | HEAP_HASVARWIDTH | HEAP_HASEXTERNAL | HEAP_COMPRESSED);
 
-    for (i = 0; i < attrubute_num; i++) {
+    for (i = 0; i < numberOfAttributes; i++) {
         Size data_length;
         Size remian_length = data_size - (size_t)(data - start);
 
@@ -1904,7 +1965,7 @@ static void heap_fill_cmprs_tuple(
                 bitmask = 1;
             }
 
-            if (cmprs_info->isnulls[i]) {
+            if (cmprsInfo->isnulls[i]) {
                 *infomask |= HEAP_HASNULL;
                 continue;
             }
@@ -1913,15 +1974,15 @@ static void heap_fill_cmprs_tuple(
         }
 
         /* compression second: specail value, special size, and special alligned. */
-        if (cmprs_info->compressed[i]) {
+        if (cmprsInfo->compressed[i]) {
             /* Important: compressed value is passed by pointer (char*) */
-            Assert(!cmprs_info->isnulls[i]);
-            if (cmprs_info->valsize[i] != 0) {
-                Assert(cmprs_info->valsize[i] > 0);
-                Pointer val = DatumGetPointer(cmprs_info->values[i]);
-                retno = memcpy_s(data, remian_length, val, cmprs_info->valsize[i]);
+            Assert(!cmprsInfo->isnulls[i]);
+            if (cmprsInfo->valsize[i] != 0) {
+                Assert(cmprsInfo->valsize[i] > 0);
+                Pointer val = DatumGetPointer(cmprsInfo->values[i]);
+                retno = memcpy_s(data, remian_length, val, cmprsInfo->valsize[i]);
                 securec_check(retno, "\0", "\0");
-                data += cmprs_info->valsize[i];
+                data += cmprsInfo->valsize[i];
             }
             *infomask |= HEAP_COMPRESSED;
 
@@ -1940,12 +2001,12 @@ static void heap_fill_cmprs_tuple(
          */
         if (att[i]->attbyval) {
             /* pass-by-value */
-            data = (char*)att_align_nominal(data, att[i]->attalign);
-            store_att_byval(data, cmprs_info->values[i], att[i]->attlen);
+            data = (char *)att_align_nominal(data, att[i]->attalign);
+            store_att_byval(data, cmprsInfo->values[i], att[i]->attlen);
             data_length = att[i]->attlen;
         } else if (att[i]->attlen == -1) {
             /* varlena */
-            Pointer val = DatumGetPointer(cmprs_info->values[i]);
+            Pointer val = DatumGetPointer(cmprsInfo->values[i]);
 
             *infomask |= HEAP_HASVARWIDTH;
             if (VARATT_IS_EXTERNAL(val)) {
@@ -1967,7 +2028,7 @@ static void heap_fill_cmprs_tuple(
                 securec_check(retno, "\0", "\0");
             } else {
                 /* full 4-byte header varlena */
-                data = (char*)att_align_nominal(data, att[i]->attalign);
+                data = (char *)att_align_nominal(data, att[i]->attalign);
                 data_length = VARSIZE(val);
                 retno = memcpy_s(data, remian_length, val, data_length);
                 securec_check(retno, "\0", "\0");
@@ -1976,15 +2037,15 @@ static void heap_fill_cmprs_tuple(
             /* cstring ... never needs alignment */
             *infomask |= HEAP_HASVARWIDTH;
             Assert(att[i]->attalign == 'c');
-            data_length = strlen(DatumGetCString(cmprs_info->values[i])) + 1;
-            retno = memcpy_s(data, remian_length, DatumGetPointer(cmprs_info->values[i]), data_length);
+            data_length = strlen(DatumGetCString(cmprsInfo->values[i])) + 1;
+            retno = memcpy_s(data, remian_length, DatumGetPointer(cmprsInfo->values[i]), data_length);
             securec_check(retno, "\0", "\0");
         } else {
             /* fixed-length pass-by-reference */
-            data = (char*)att_align_nominal(data, att[i]->attalign);
+            data = (char *)att_align_nominal(data, att[i]->attalign);
             Assert(att[i]->attlen > 0);
             data_length = att[i]->attlen;
-            retno = memcpy_s(data, remian_length, DatumGetPointer(cmprs_info->values[i]), data_length);
+            retno = memcpy_s(data, remian_length, DatumGetPointer(cmprsInfo->values[i]), data_length);
             securec_check(retno, "\0", "\0");
         }
 
@@ -1994,44 +2055,44 @@ static void heap_fill_cmprs_tuple(
     Assert((size_t)(data - start) == data_size);
 }
 
-Datum nocache_cmprs_get_attr(HeapTuple tuple, unsigned int attnum, TupleDesc tuple_desc, char* cmprs_info)
+Datum nocache_cmprs_get_attr(HeapTuple tuple, unsigned int attnum, TupleDesc tupleDesc, char *cmprsInfo)
 {
     HeapTupleHeader tup = tuple->t_data;
-    Form_pg_attribute* att = tuple_desc->attrs;
-    char* tp = NULL;         /* ptr to data part of tuple */
-    bits8* bp = tup->t_bits; /* ptr to null bitmap in tuple */
-    bits8* cmprs_bitmap = NULL;
+    Form_pg_attribute *att = tupleDesc->attrs;
+    char *tp = NULL;         /* ptr to data part of tuple */
+    bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
+    bits8 *cmprsBitmap = NULL;
     int off = 0; /* current offset within data */
     uint32 i = 0;
 
-    Assert(HEAP_TUPLE_IS_COMPRESSED(tup) && (cmprs_info != NULL));
-    Assert(attnum <= HeapTupleHeaderGetNatts(tup, tuple_desc));
-    Assert(tuple_desc->natts >= (int)HeapTupleHeaderGetNatts(tup, tuple_desc));
+    Assert(HEAP_TUPLE_IS_COMPRESSED(tup) && (cmprsInfo != NULL));
+    Assert(attnum <= HeapTupleHeaderGetNatts(tup, tupleDesc));
+    Assert(tupleDesc->natts >= (int)HeapTupleHeaderGetNatts(tup, tupleDesc));
 
     attnum--;
-    tp = (char*)tup + tup->t_hoff;
-    cmprs_bitmap = (bits8*)tp;
-    off = BITMAPLEN(HeapTupleHeaderGetNatts(tup, tuple_desc));
+    tp = (char *)tup + tup->t_hoff;
+    cmprsBitmap = (bits8 *)tp;
+    off = BITMAPLEN(HeapTupleHeaderGetNatts(tup, tupleDesc));
 
-    int cmprs_off = 0; /* pointer to the start of compression meta */
-    void* meta_info = NULL;
+    int cmprsOff = 0; /* pointer to the start of compression meta */
+    void *metaInfo = NULL;
     char mode = 0;
 
     for (i = 0;; i++) { /* loop exit is at "break" */
-        Assert(i < HeapTupleHeaderGetNatts(tup, tuple_desc));
+        Assert(i < HeapTupleHeaderGetNatts(tup, tupleDesc));
 
         /* first parse compression metaInfo data of this attr */
-        int meta_size = 0;
-        meta_info = PageCompress::FetchAttrCmprMeta(cmprs_info + cmprs_off, att[i]->attlen, &meta_size, &mode);
-        cmprs_off += meta_size;
+        int metaSize = 0;
+        metaInfo = PageCompress::FetchAttrCmprMeta(cmprsInfo + cmprsOff, att[i]->attlen, &metaSize, &mode);
+        cmprsOff += metaSize;
 
         if (HeapTupleHasNulls(tuple) && att_isnull(i, bp)) {
             continue; /* this cannot be the target att */
         }
 
-        if (isAttrCompressed(i, cmprs_bitmap)) {
+        if (isAttrCompressed(i, cmprsBitmap)) {
             if (attnum != i) {
-                off += PageCompress::GetAttrCmprValSize(mode, att[i]->attlen, meta_info, tp + off);
+                off += PageCompress::GetAttrCmprValSize(mode, att[i]->attlen, metaInfo, tp + off);
                 continue;
             }
 
@@ -2052,10 +2113,10 @@ Datum nocache_cmprs_get_attr(HeapTuple tuple, unsigned int attnum, TupleDesc tup
     }
 
     Assert(attnum == i);
-    if (isAttrCompressed(attnum, cmprs_bitmap)) {
+    if (isAttrCompressed(attnum, cmprsBitmap)) {
         int attsize = 0;
-        Datum attr_val =
-            PageCompress::UncompressOneAttr(mode, meta_info, att[i]->atttypid, att[i]->attlen, tp + off, &attsize);
+        Datum attr_val = PageCompress::UncompressOneAttr(mode, metaInfo, att[i]->atttypid, att[i]->attlen, tp + off,
+                                                         &attsize);
         return attr_val;
     }
     return fetchatt(att[attnum], tp + off);
@@ -2067,193 +2128,193 @@ Datum nocache_cmprs_get_attr(HeapTuple tuple, unsigned int attnum, TupleDesc tup
  * Note that toast tuple will not be compressed, so please be carefull.
  */
 template <bool hasnulls>
-static HeapTuple HeapUncompressTup(HeapTuple src_tuple, TupleDesc tuple_desc, char* cmprs_info, HeapTuple dest_tuple)
+static HeapTuple HeapUncompressTup(HeapTuple srcTuple, TupleDesc tupleDesc, char *cmprsInfo, HeapTuple destTuple)
 {
-    Assert(src_tuple && tuple_desc && cmprs_info);
+    Assert(srcTuple && tupleDesc && cmprsInfo);
 
-    HeapTupleHeader src_tup = src_tuple->t_data;
-    Form_pg_attribute* att = tuple_desc->attrs;
-    uint32 tdesc_natts = tuple_desc->natts;
+    HeapTupleHeader srcTup = srcTuple->t_data;
+    Form_pg_attribute *att = tupleDesc->attrs;
+    uint32 tdesc_natts = tupleDesc->natts;
     uint32 natts; /* number of atts to extract */
-    uint32 attr_idx;
-    char* src_tup_data = NULL;             /* ptr to srcTuple data */
-    long src_off;                         /* offset in srcTuple data */
-    bits8* src_null_bits = src_tup->t_bits; /* ptr to null bitmap in srcTuple */
-    bits8* cmprs_bitmap = NULL;           /* pointer to compression bitmap in srcTuple */
+    uint32 attrIdx;
+    char *srcTupData = NULL;             /* ptr to srcTuple data */
+    long srcOff;                         /* offset in srcTuple data */
+    bits8 *srcNullBits = srcTup->t_bits; /* ptr to null bitmap in srcTuple */
+    bits8 *cmprsBitmap = NULL;           /* pointer to compression bitmap in srcTuple */
 #ifdef USE_ASSERT_CHECKING
-    uint16 test_infomask = tuple_desc->tdhasoid ? HEAP_HASOID : 0;
+    uint16 testInfomask = tupleDesc->tdhasoid ? HEAP_HASOID : 0;
 #endif
 
-    Assert(HEAP_TUPLE_IS_COMPRESSED(src_tuple->t_data) && (cmprs_info != NULL));
+    Assert(HEAP_TUPLE_IS_COMPRESSED(srcTuple->t_data) && (cmprsInfo != NULL));
 
     /*
      * In inheritance situations, it is possible that the given srcTuple actually
      * has more fields than the caller is expecting.  Don't run srcOff the end of
      * the caller's arrays.
      */
-    Assert(tdesc_natts >= HeapTupleHeaderGetNatts(src_tup, tuple_desc));
-    natts = Min(HeapTupleHeaderGetNatts(src_tup, tuple_desc), tdesc_natts);
-    src_tup_data = (char*)src_tup + src_tup->t_hoff;
-    cmprs_bitmap = (bits8*)src_tup_data;
-    src_off = BITMAPLEN(natts);
+    Assert(tdesc_natts >= HeapTupleHeaderGetNatts(srcTup, tupleDesc));
+    natts = Min(HeapTupleHeaderGetNatts(srcTup, tupleDesc), tdesc_natts);
+    srcTupData = (char *)srcTup + srcTup->t_hoff;
+    cmprsBitmap = (bits8 *)srcTupData;
+    srcOff = BITMAPLEN(natts);
 
     errno_t retno = EOK;
-    int cmprs_off = 0; /* pointer to the start of compression meta */
-    void* meta_info = NULL;
+    int cmprsOff = 0; /* pointer to the start of compression meta */
+    void *metaInfo = NULL;
     char mode = 0;
 
     /* Dest srcTuple header size */
-    int hoff = src_tup->t_hoff;
-    int dest_data_length = 0;
+    int hoff = srcTup->t_hoff;
+    int destDataLength = 0;
 
-    if (dest_tuple == NULL) {
-        dest_tuple = (HeapTuple)palloc0(MaxHeapTupleSize + HEAPTUPLESIZE);
-        dest_tuple->t_data = (HeapTupleHeader)((char*)dest_tuple + HEAPTUPLESIZE);
+    if (destTuple == NULL) {
+	    destTuple = (HeapTuple)heaptup_alloc(MaxHeapTupleSize + HEAPTUPLESIZE);
+        destTuple->t_data = (HeapTupleHeader)((char *)destTuple + HEAPTUPLESIZE);
     }
 
-    Assert(dest_tuple->t_data != NULL);
-    HeapTupleHeader dest_tup = dest_tuple->t_data;
-    Assert(((size_t)MAXALIGN(dest_tup)) == (size_t)dest_tup);
+    Assert(destTuple->t_data != NULL);
+    HeapTupleHeader destTup = destTuple->t_data;
+    Assert(((size_t)MAXALIGN(destTup)) == (size_t)destTup);
 
-    bits8* dest_null_bits = dest_tup->t_bits;
-    char* dest_tup_data = (char*)dest_tup + hoff;
+    bits8 *destNullBits = destTup->t_bits;
+    char *destTupData = (char *)destTup + hoff;
     Datum val = 0;
 
     /* Copy null bitmap */
     if (hasnulls) {
-        retno = memcpy_s(dest_null_bits, BITMAPLEN(natts), src_null_bits, BITMAPLEN(natts));
+        retno = memcpy_s(destNullBits, BITMAPLEN(natts), srcNullBits, BITMAPLEN(natts));
         securec_check(retno, "\0", "\0");
 #ifdef USE_ASSERT_CHECKING
-        test_infomask |= HEAP_HASNULL;
+        testInfomask |= HEAP_HASNULL;
 #endif
     }
 
-    for (attr_idx = 0; attr_idx < natts; ++attr_idx) {
-        Form_pg_attribute thisatt = att[attr_idx];
+    for (attrIdx = 0; attrIdx < natts; ++attrIdx) {
+        Form_pg_attribute thisatt = att[attrIdx];
         /* parse compression metaInfo data of this attr */
-        int meta_size = 0;
-        meta_info = PageCompress::FetchAttrCmprMeta(cmprs_info + cmprs_off, thisatt->attlen, &meta_size, &mode);
-        cmprs_off += meta_size;
+        int metaSize = 0;
+        metaInfo = PageCompress::FetchAttrCmprMeta(cmprsInfo + cmprsOff, thisatt->attlen, &metaSize, &mode);
+        cmprsOff += metaSize;
 
         /* IMPORTANT: NULLs first, row-compression second, and the normal fields the last; */
-        if (hasnulls && att_isnull(attr_idx, src_null_bits)) {
+        if (hasnulls && att_isnull(attrIdx, srcNullBits)) {
             continue;
         }
 
-        if (isAttrCompressed(attr_idx, cmprs_bitmap)) {
+        if (isAttrCompressed(attrIdx, cmprsBitmap)) {
             int attsize = 0;
 
             if (PageCompress::NeedExternalBuf(mode)) {
 #ifdef USE_ASSERT_CHECKING
-                test_infomask |= HEAP_HASVARWIDTH;
+                testInfomask |= HEAP_HASVARWIDTH;
 #endif
 
-                dest_data_length = PageCompress::UncompressOneAttr(
-                    mode, thisatt->attalign, thisatt->attlen, meta_info, src_tup_data + src_off, &attsize, dest_tup_data);
+                destDataLength = PageCompress::UncompressOneAttr(mode, thisatt->attalign, thisatt->attlen, metaInfo,
+                                                                 srcTupData + srcOff, &attsize, destTupData);
                 /* attsize is the size of compressed value. */
-                src_off = src_off + attsize;
+                srcOff = srcOff + attsize;
                 /* both datum size and padding size are included in destDataLength. */
-                Assert(dest_data_length > 0);
-                dest_tup_data += dest_data_length;
+                Assert(destDataLength > 0);
+                destTupData += destDataLength;
                 continue;
             } else {
-                val = PageCompress::UncompressOneAttr(
-                    mode, meta_info, thisatt->atttypid, thisatt->attlen, src_tup_data + src_off, &attsize);
-                src_off = src_off + attsize; /* attsize is the size of compressed value. */
+                val = PageCompress::UncompressOneAttr(mode, metaInfo, thisatt->atttypid, thisatt->attlen,
+                                                      srcTupData + srcOff, &attsize);
+                srcOff = srcOff + attsize; /* attsize is the size of compressed value. */
             }
         } else {
             if (thisatt->attlen == -1) {
-                src_off = att_align_pointer(src_off, thisatt->attalign, -1, src_tup_data + src_off);
+                srcOff = att_align_pointer(srcOff, thisatt->attalign, -1, srcTupData + srcOff);
             } else {
                 /* not varlena, so safe to use att_align_nominal */
-                src_off = att_align_nominal(src_off, thisatt->attalign);
+                srcOff = att_align_nominal(srcOff, thisatt->attalign);
             }
 
-            val = fetchatt(thisatt, src_tup_data + src_off);
-            src_off = att_addlength_pointer(src_off, thisatt->attlen, src_tup_data + src_off);
+            val = fetchatt(thisatt, srcTupData + srcOff);
+            srcOff = att_addlength_pointer(srcOff, thisatt->attlen, srcTupData + srcOff);
         }
 
         /* Now we fill dest srcTuple with the val */
         if (thisatt->attbyval) {
             /* pass-by-value */
-            dest_tup_data = (char*)att_align_nominal(dest_tup_data, thisatt->attalign);
-            store_att_byval(dest_tup_data, val, thisatt->attlen);
-            dest_data_length = thisatt->attlen;
+            destTupData = (char *)att_align_nominal(destTupData, thisatt->attalign);
+            store_att_byval(destTupData, val, thisatt->attlen);
+            destDataLength = thisatt->attlen;
         } else if (thisatt->attlen == -1) {
             /* varlena */
-            Pointer tmp_val = DatumGetPointer(val);
+            Pointer tmpVal = DatumGetPointer(val);
 #ifdef USE_ASSERT_CHECKING
-            test_infomask |= HEAP_HASVARWIDTH;
+            testInfomask |= HEAP_HASVARWIDTH;
 #endif
 
-            if (VARATT_IS_EXTERNAL(tmp_val)) {
+            if (VARATT_IS_EXTERNAL(tmpVal)) {
                 /* no alignment, since it's short by definition */
-                dest_data_length = VARSIZE_EXTERNAL(tmp_val);
-                retno = memcpy_s(dest_tup_data, dest_data_length, tmp_val, dest_data_length);
+                destDataLength = VARSIZE_EXTERNAL(tmpVal);
+                retno = memcpy_s(destTupData, destDataLength, tmpVal, destDataLength);
                 securec_check(retno, "\0", "\0");
-            } else if (VARATT_IS_SHORT(tmp_val)) {
+            } else if (VARATT_IS_SHORT(tmpVal)) {
                 /* no alignment for short varlenas */
-                dest_data_length = VARSIZE_SHORT(tmp_val);
-                retno = memcpy_s(dest_tup_data, dest_data_length, tmp_val, dest_data_length);
+                destDataLength = VARSIZE_SHORT(tmpVal);
+                retno = memcpy_s(destTupData, destDataLength, tmpVal, destDataLength);
                 securec_check(retno, "\0", "\0");
-            } else if (VARLENA_ATT_IS_PACKABLE(thisatt) && VARATT_CAN_MAKE_SHORT(tmp_val)) {
+            } else if (VARLENA_ATT_IS_PACKABLE(thisatt) && VARATT_CAN_MAKE_SHORT(tmpVal)) {
                 /* convert to short varlena -- no alignment */
-                dest_data_length = VARATT_CONVERTED_SHORT_SIZE(tmp_val);
-                SET_VARSIZE_SHORT(dest_tup_data, dest_data_length);
-                retno = memcpy_s(dest_tup_data + 1, dest_data_length - 1, VARDATA(tmp_val), dest_data_length - 1);
+                destDataLength = VARATT_CONVERTED_SHORT_SIZE(tmpVal);
+                SET_VARSIZE_SHORT(destTupData, destDataLength);
+                retno = memcpy_s(destTupData + 1, destDataLength - 1, VARDATA(tmpVal), destDataLength - 1);
                 securec_check(retno, "\0", "\0");
             } else {
                 /*
                  * Memset padding bytes, because att_align_pointer will judge
                  * padding bytes whether zero. Please refer to att_align_pointer
                  */
-                *dest_tup_data = 0;
+                *destTupData = 0;
 
                 /* full 4-byte header varlena */
-                dest_tup_data = (char*)att_align_nominal(dest_tup_data, thisatt->attalign);
-                dest_data_length = VARSIZE(tmp_val);
-                retno = memcpy_s(dest_tup_data, dest_data_length, tmp_val, dest_data_length);
+                destTupData = (char *)att_align_nominal(destTupData, thisatt->attalign);
+                destDataLength = VARSIZE(tmpVal);
+                retno = memcpy_s(destTupData, destDataLength, tmpVal, destDataLength);
                 securec_check(retno, "\0", "\0");
             }
         } else if (thisatt->attlen == -2) {
 #ifdef USE_ASSERT_CHECKING
-            test_infomask |= HEAP_HASVARWIDTH;
+            testInfomask |= HEAP_HASVARWIDTH;
 #endif
             Assert(thisatt->attalign == 'c');
-            dest_data_length = strlen(DatumGetCString(val)) + 1;
-            retno = memcpy_s(dest_tup_data, dest_data_length, DatumGetPointer(val), dest_data_length);
+            destDataLength = strlen(DatumGetCString(val)) + 1;
+            retno = memcpy_s(destTupData, destDataLength, DatumGetPointer(val), destDataLength);
             securec_check(retno, "\0", "\0");
         } else {
             /* fixed-length pass-by-reference */
-            dest_tup_data = (char*)att_align_nominal(dest_tup_data, thisatt->attalign);
+            destTupData = (char *)att_align_nominal(destTupData, thisatt->attalign);
             Assert(thisatt->attlen > 0);
-            dest_data_length = thisatt->attlen;
-            retno = memcpy_s(dest_tup_data, dest_data_length, DatumGetPointer(val), dest_data_length);
+            destDataLength = thisatt->attlen;
+            retno = memcpy_s(destTupData, destDataLength, DatumGetPointer(val), destDataLength);
             securec_check(retno, "\0", "\0");
         }
-        dest_tup_data += dest_data_length;
+        destTupData += destDataLength;
     }
 
     /* complete destTuple other info excluding t_data */
-    dest_tuple->t_len = (uint32)(dest_tup_data - (char*)dest_tup);
-    dest_tuple->t_self = src_tuple->t_self;
-    dest_tuple->t_tableOid = src_tuple->t_tableOid;
-    dest_tuple->t_bucketId = src_tuple->t_bucketId;
+    destTuple->t_len = (uint32)(destTupData - (char *)destTup);
+    destTuple->t_self = srcTuple->t_self;
+    destTuple->t_tableOid = srcTuple->t_tableOid;
+    destTuple->t_bucketId = srcTuple->t_bucketId;
 #ifdef PGXC
-    dest_tuple->t_xc_node_id = src_tuple->t_xc_node_id;
+    destTuple->t_xc_node_id = srcTuple->t_xc_node_id;
 #endif
 
     /* complete destTup header info excluding data part */
-    COPY_TUPLE_HEADERINFO(dest_tup, src_tup);
-    HEAP_TUPLE_CLEAR_COMPRESSED(dest_tuple->t_data);
-    Assert(test_infomask == (dest_tup->t_infomask & 0x0F));
+    COPY_TUPLE_HEADERINFO(destTup, srcTup);
+    HEAP_TUPLE_CLEAR_COMPRESSED(destTuple->t_data);
+    Assert(testInfomask == (destTup->t_infomask & 0x0F));
 
-    dest_tup->t_hoff = hoff;
-    if (tuple_desc->tdhasoid) {
-        HeapTupleHeaderSetOid(dest_tup, HeapTupleGetOid(src_tuple));
+    destTup->t_hoff = hoff;
+    if (tupleDesc->tdhasoid) {
+        HeapTupleHeaderSetOid(destTup, HeapTupleGetOid(srcTuple));
     }
 
-    return dest_tuple;
+    return destTuple;
 }
 
 /* the same to HeapUncompressTup() function which is a faster and
@@ -2261,40 +2322,40 @@ static HeapTuple HeapUncompressTup(HeapTuple src_tuple, TupleDesc tuple_desc, ch
  * we highly recommand that you would not using HeapUncompressTup2()
  * only when alter-table-instant happens.
  */
-static HeapTuple HeapUncompressTup2(HeapTuple tuple, TupleDesc tuple_desc, Page dictPage)
+static HeapTuple HeapUncompressTup2(HeapTuple tuple, TupleDesc tupleDesc, Page dictPage)
 {
     Assert(HeapTupleIsValid(tuple) && (tuple->t_data != NULL));
     Assert(HEAP_TUPLE_IS_COMPRESSED(tuple->t_data));
-    Assert((tuple_desc != NULL) && (dictPage != NULL));
+    Assert((tupleDesc != NULL) && (dictPage != NULL));
 
-    Datum* values = (Datum*)palloc(sizeof(Datum) * tuple_desc->natts);
-    bool* isnulls = (bool*)palloc(sizeof(bool) * tuple_desc->natts);
+    Datum *values = (Datum *)palloc(sizeof(Datum) * tupleDesc->natts);
+    bool *isnulls = (bool *)palloc(sizeof(bool) * tupleDesc->natts);
 
-    heap_deform_cmprs_tuple(tuple, tuple_desc, values, isnulls, dictPage);
-    HeapTuple new_tuple = heap_form_tuple(tuple_desc, values, isnulls);
+    heap_deform_cmprs_tuple(tuple, tupleDesc, values, isnulls, dictPage);
+    HeapTuple newTuple = heap_form_tuple(tupleDesc, values, isnulls);
 
     /* don't copy tuple->t_len, that has been set in heap_form_tuple */
-    new_tuple->t_self = tuple->t_self;
-    new_tuple->t_tableOid = tuple->t_tableOid;
-    new_tuple->t_bucketId = tuple->t_bucketId;
+    newTuple->t_self = tuple->t_self;
+    newTuple->t_tableOid = tuple->t_tableOid;
+    newTuple->t_bucketId = tuple->t_bucketId;
 #ifdef PGXC
-    new_tuple->t_xc_node_id = tuple->t_xc_node_id;
+    newTuple->t_xc_node_id = tuple->t_xc_node_id;
 #endif
-    if (tuple_desc->tdhasoid) {
-        HeapTupleSetOid(new_tuple, HeapTupleGetOid(tuple));
+    if (tupleDesc->tdhasoid) {
+        HeapTupleSetOid(newTuple, HeapTupleGetOid(tuple));
     }
 
-    Assert(!HEAP_TUPLE_IS_COMPRESSED(new_tuple->t_data));
-    COPY_TUPLE_HEADER_XACT_INFO(new_tuple, tuple);
+    Assert(!HEAP_TUPLE_IS_COMPRESSED(newTuple->t_data));
+    COPY_TUPLE_HEADER_XACT_INFO(newTuple, tuple);
 
     pfree_ext(isnulls);
     pfree_ext(values);
-    return new_tuple;
+    return newTuple;
 }
 
-HeapTuple test_HeapUncompressTup2(HeapTuple tuple, TupleDesc tuple_desc, Page dictPage)
+HeapTuple test_HeapUncompressTup2(HeapTuple tuple, TupleDesc tupleDesc, Page dictPage)
 {
-    return HeapUncompressTup2(tuple, tuple_desc, dictPage);
+    return HeapUncompressTup2(tuple, tupleDesc, dictPage);
 }
 
 /*
@@ -2303,7 +2364,7 @@ HeapTuple test_HeapUncompressTup2(HeapTuple tuple, TupleDesc tuple_desc, Page di
  *
  * The result is allocated in the current memory context.
  */
-HeapTuple heap_form_cmprs_tuple(TupleDesc tuple_descriptor, FormCmprTupleData* cmprs_info)
+HeapTuple heap_form_cmprs_tuple(TupleDesc tupleDescriptor, FormCmprTupleData *cmprsInfo)
 {
     HeapTuple tuple;    /* return tuple */
     HeapTupleHeader td; /* tuple data */
@@ -2313,14 +2374,13 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tuple_descriptor, FormCmprTupleData* c
 #ifdef USE_ASSERT_CHECKING
     bool hascmpr = false;
 #endif
-    Form_pg_attribute* att = tuple_descriptor->attrs;
-    int attribute_num = tuple_descriptor->natts;
+    Form_pg_attribute *att = tupleDescriptor->attrs;
+    int numberOfAttributes = tupleDescriptor->natts;
     int i;
 
-    if (attribute_num > MaxTupleAttributeNumber) {
-        ereport(ERROR,
-            (errcode(ERRCODE_TOO_MANY_COLUMNS),
-                errmsg("number of columns (%d) exceeds limit (%d)", attribute_num, MaxTupleAttributeNumber)));
+    if (numberOfAttributes > MaxTupleAttributeNumber) {
+        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("number of columns (%d) exceeds limit (%d)",
+                                                                  numberOfAttributes, MaxTupleAttributeNumber)));
     }
 
     /*
@@ -2334,19 +2394,20 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tuple_descriptor, FormCmprTupleData* c
      * if an attribute is already toasted, it must have been sent to disk
      * already and so cannot contain toasted attributes.
      */
-    for (i = 0; i < attribute_num; i++) {
-        if (cmprs_info->isnulls[i]) {
+    for (i = 0; i < numberOfAttributes; i++) {
+        if (cmprsInfo->isnulls[i]) {
             hasnull = true;
+            continue;
         }
 
-        if (cmprs_info->compressed[i]) {
+        if (cmprsInfo->compressed[i]) {
 #ifdef USE_ASSERT_CHECKING
             hascmpr = true;
 #endif
         } else if (att[i]->attlen == -1 && att[i]->attalign == 'd' && att[i]->attndims == 0 &&
-                   !VARATT_IS_EXTENDED(DatumGetPointer(cmprs_info->values[i]))) {
-            cmprs_info->values[i] =
-                toast_flatten_tuple_attribute(cmprs_info->values[i], att[i]->atttypid, att[i]->atttypmod);
+                   !VARATT_IS_EXTENDED(DatumGetPointer(cmprsInfo->values[i]))) {
+            cmprsInfo->values[i] = toast_flatten_tuple_attribute(cmprsInfo->values[i], att[i]->atttypid,
+                                                                 att[i]->atttypmod);
         }
     }
     Assert(hascmpr == true);
@@ -2357,16 +2418,16 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tuple_descriptor, FormCmprTupleData* c
     len = offsetof(HeapTupleHeaderData, t_bits);
 
     if (hasnull) {
-        len += BITMAPLEN(attribute_num);
+        len += BITMAPLEN(numberOfAttributes);
     }
 
-    if (tuple_descriptor->tdhasoid) {
+    if (tupleDescriptor->tdhasoid) {
         len += sizeof(Oid);
     }
 
     hoff = len = MAXALIGN(len); /* align user data safely */
 
-    data_len = heap_compute_cmprs_data_size(tuple_descriptor, cmprs_info);
+    data_len = heap_compute_cmprs_data_size(tupleDescriptor, cmprsInfo);
 
     len += data_len;
 
@@ -2374,8 +2435,8 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tuple_descriptor, FormCmprTupleData* c
      * Allocate and zero the space needed.	Note that the tuple body and
      * HeapTupleData management structure are allocated in one chunk.
      */
-    tuple = (HeapTuple)palloc0(HEAPTUPLESIZE + len);
-    tuple->t_data = td = (HeapTupleHeader)((char*)tuple + HEAPTUPLESIZE);
+	tuple = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE + len);
+    tuple->t_data = td = (HeapTupleHeader)((char *)tuple + HEAPTUPLESIZE);
 
     /*
      * And fill in the information.  Note we fill the Datum fields even though
@@ -2391,21 +2452,21 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tuple_descriptor, FormCmprTupleData* c
 #endif
 
     HeapTupleHeaderSetDatumLength(td, len);
-    HeapTupleHeaderSetTypeId(td, tuple_descriptor->tdtypeid);
-    HeapTupleHeaderSetTypMod(td, tuple_descriptor->tdtypmod);
+    HeapTupleHeaderSetTypeId(td, tupleDescriptor->tdtypeid);
+    HeapTupleHeaderSetTypMod(td, tupleDescriptor->tdtypmod);
 
-    HeapTupleHeaderSetNatts(td, attribute_num);
+    HeapTupleHeaderSetNatts(td, numberOfAttributes);
     td->t_hoff = hoff;
 
     /* else leave infomask = 0 */
-    if (tuple_descriptor->tdhasoid) {
+    if (tupleDescriptor->tdhasoid) {
         td->t_infomask = HEAP_HASOID;
     }
 
-    heap_fill_cmprs_tuple(
-        tuple_descriptor, cmprs_info, (char*)td + hoff, data_len, &td->t_infomask, (hasnull ? td->t_bits : NULL));
+    heap_fill_cmprs_tuple(tupleDescriptor, cmprsInfo, (char *)td + hoff, data_len, &td->t_infomask,
+                          (hasnull ? td->t_bits : NULL));
     Assert(HEAP_TUPLE_IS_COMPRESSED(td));
-    Assert(attribute_num == (int)HeapTupleHeaderGetNatts(td, tuple_descriptor));
+    Assert(numberOfAttributes == (int)HeapTupleHeaderGetNatts(td, tupleDescriptor));
 
     return tuple;
 }
@@ -2428,45 +2489,44 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tuple_descriptor, FormCmprTupleData* c
  *		heap_getattr; the loop will become O(N^2) as soon as any
  *		noncacheable attribute offsets are involved.
  */
-void heap_deform_cmprs_tuple(HeapTuple tuple, TupleDesc tuple_desc, Datum* values, bool* isnull, char* cmprs_info)
+void heap_deform_cmprs_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, char *cmprsInfo)
 {
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
-    Form_pg_attribute* att = tuple_desc->attrs;
-    uint32 tdesc_natts = tuple_desc->natts;
+    Form_pg_attribute *att = tupleDesc->attrs;
+    uint32 tdesc_natts = tupleDesc->natts;
     uint32 natts; /* number of atts to extract */
     uint32 attnum;
-    char* tp = NULL;           /* ptr to tuple data */
+    char *tp = NULL;           /* ptr to tuple data */
     long off;                  /* offset in tuple data */
-    bits8* bp = tup->t_bits;   /* ptr to null bitmap in tuple */
-    bits8* cmprs_bitmap = NULL; /* pointer to compression bitmap in tuple */
+    bits8 *bp = tup->t_bits;   /* ptr to null bitmap in tuple */
+    bits8 *cmprsBitmap = NULL; /* pointer to compression bitmap in tuple */
 
-    Assert(HEAP_TUPLE_IS_COMPRESSED(tuple->t_data) && (cmprs_info != NULL));
+    Assert(HEAP_TUPLE_IS_COMPRESSED(tuple->t_data) && (cmprsInfo != NULL));
 
     /*
      * In inheritance situations, it is possible that the given tuple actually
      * has more fields than the caller is expecting.  Don't run off the end of
      * the caller's arrays.
      */
-    natts = Min(HeapTupleHeaderGetNatts(tup, tuple_desc), tdesc_natts);
-    tp = (char*)tup + tup->t_hoff;
-    cmprs_bitmap = (bits8*)tp;
+    natts = Min(HeapTupleHeaderGetNatts(tup, tupleDesc), tdesc_natts);
+    tp = (char *)tup + tup->t_hoff;
+    cmprsBitmap = (bits8 *)tp;
     off = BITMAPLEN(natts);
     if (natts > MaxTupleAttributeNumber) {
-        ereport(ERROR,
-            (errcode(ERRCODE_TOO_MANY_COLUMNS),
-                errmsg("number of columns (%u) exceeds limit (%d)", natts, MaxTupleAttributeNumber)));
+        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                        errmsg("number of columns (%u) exceeds limit (%d)", natts, MaxTupleAttributeNumber)));
     }
 
-    int cmprs_off = 0; /* pointer to the start of compression meta */
-    void* meta_info = NULL;
+    int cmprsOff = 0; /* pointer to the start of compression meta */
+    void *metaInfo = NULL;
     char mode = 0;
 
     for (attnum = 0; attnum < natts; attnum++) {
         /* parse compression metaInfo data of this attr */
-        int meta_size = 0;
-        meta_info = PageCompress::FetchAttrCmprMeta(cmprs_info + cmprs_off, att[attnum]->attlen, &meta_size, &mode);
-        cmprs_off += meta_size;
+        int metaSize = 0;
+        metaInfo = PageCompress::FetchAttrCmprMeta(cmprsInfo + cmprsOff, att[attnum]->attlen, &metaSize, &mode);
+        cmprsOff += metaSize;
 
         /* IMPORTANT: NULLs first, row-compression second, and the normal fields the last; */
         if (hasnulls && att_isnull(attnum, bp)) {
@@ -2477,10 +2537,10 @@ void heap_deform_cmprs_tuple(HeapTuple tuple, TupleDesc tuple_desc, Datum* value
 
         isnull[attnum] = false;
 
-        if (isAttrCompressed(attnum, cmprs_bitmap)) {
+        if (isAttrCompressed(attnum, cmprsBitmap)) {
             int attsize = 0;
-            values[attnum] = PageCompress::UncompressOneAttr(
-                mode, meta_info, att[attnum]->atttypid, att[attnum]->attlen, tp + off, &attsize);
+            values[attnum] = PageCompress::UncompressOneAttr(mode, metaInfo, att[attnum]->atttypid, att[attnum]->attlen,
+                                                             tp + off, &attsize);
             off = off + attsize; /* attsize is the size of compressed value. */
 
             continue;
@@ -2508,97 +2568,96 @@ void heap_deform_cmprs_tuple(HeapTuple tuple, TupleDesc tuple_desc, Datum* value
          * example code: values[attnum] = (Datum) 0;
          * example code: isnull[attnum] = true;
          */
-        values[attnum] = heapGetInitDefVal(attnum + 1, tuple_desc, &isnull[attnum]);
+        values[attnum] = heapGetInitDefVal(attnum + 1, tupleDesc, &isnull[attnum]);
     }
 }
 
-void heap_deform_tuple2(HeapTuple tuple, TupleDesc tuple_desc, Datum* values, bool* isnull, Buffer buffer)
+void heap_deform_tuple2(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, Buffer buffer)
 {
     Assert((tuple != NULL) && (tuple->t_data != NULL));
     if (!HEAP_TUPLE_IS_COMPRESSED(tuple->t_data)) {
-        heap_deform_tuple(tuple, tuple_desc, values, isnull);
+        heap_deform_tuple(tuple, tupleDesc, values, isnull);
         return;
     }
 
     Assert(BufferIsValid(buffer));
     Page page = BufferGetPage(buffer);
     Assert((page != NULL) && (PageIsCompressed(page)));
-    heap_deform_cmprs_tuple(tuple, tuple_desc, values, isnull, (char*)getPageDict(page));
+    heap_deform_cmprs_tuple(tuple, tupleDesc, values, isnull, (char *)getPageDict(page));
 }
 
 /* deform the passed heap tuple.
  * call heap_deform_tuple() if it's not compressed,
  * otherwise call heap_deform_cmprs_tuple().
  */
-void heap_deform_tuple3(HeapTuple tuple, TupleDesc tuple_desc, Datum* values, bool* isnull, Page page)
+void heap_deform_tuple3(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool *isnull, Page page)
 {
     Assert((tuple != NULL) && (tuple->t_data != NULL));
     if (!HEAP_TUPLE_IS_COMPRESSED(tuple->t_data)) {
-        heap_deform_tuple(tuple, tuple_desc, values, isnull);
+        heap_deform_tuple(tuple, tupleDesc, values, isnull);
         return;
     }
 
     Assert((page != NULL) && (PageIsCompressed(page)));
-    heap_deform_cmprs_tuple(tuple, tuple_desc, values, isnull, (char*)getPageDict(page));
+    heap_deform_cmprs_tuple(tuple, tupleDesc, values, isnull, (char *)getPageDict(page));
 }
 
 /* decompress one tuple and return a copy of uncompressed tuple */
-HeapTuple heapCopyCompressedTuple(HeapTuple tuple, TupleDesc tuple_desc, Page page, HeapTuple dest_tup)
+HeapTuple heapCopyCompressedTuple(HeapTuple tuple, TupleDesc tupleDesc, Page page, HeapTuple destTup)
 {
-    HeapTuple new_tuple = NULL;
+    HeapTuple newTuple = NULL;
     Assert(HeapTupleIsValid(tuple) && (tuple->t_data != NULL));
     Assert(HEAP_TUPLE_IS_COMPRESSED(tuple->t_data));
-    Assert((tuple_desc != NULL) && (page != NULL));
+    Assert((tupleDesc != NULL) && (page != NULL));
 
     /* we have to handle alter-table-instant case, because
      * HeapUncompressTup() don't think about that case
      * and now is difficult to handle this problem.
      */
-    if (tuple_desc->initdefvals && tuple_desc->natts > (int)HeapTupleHeaderGetNatts(tuple->t_data, tuple_desc)) {
-        new_tuple = HeapUncompressTup2(tuple, tuple_desc, (Page)getPageDict(page));
-        if (dest_tup) {
+    if (tupleDesc->initdefvals && tupleDesc->natts > (int)HeapTupleHeaderGetNatts(tuple->t_data, tupleDesc)) {
+        newTuple = HeapUncompressTup2(tuple, tupleDesc, (Page)getPageDict(page));
+        if (destTup) {
             errno_t retno = EOK;
-            Assert(MAXALIGN(new_tuple->t_len) <= MaxHeapTupleSize);
+            Assert(MAXALIGN(newTuple->t_len) <= MaxHeapTupleSize);
 
             /* copy the new tuple into existing space. */
-            dest_tup->t_len = new_tuple->t_len;
-            dest_tup->t_self = new_tuple->t_self;
-            dest_tup->t_tableOid = new_tuple->t_tableOid;
-            dest_tup->t_bucketId = new_tuple->t_bucketId;
-            dest_tup->t_xc_node_id = new_tuple->t_xc_node_id;
-            dest_tup->t_data = (HeapTupleHeader)((char*)dest_tup + HEAPTUPLESIZE);
-            retno = memcpy_s(dest_tup->t_data, dest_tup->t_len, new_tuple->t_data, new_tuple->t_len);
+            destTup->t_len = newTuple->t_len;
+            destTup->t_self = newTuple->t_self;
+            destTup->t_tableOid = newTuple->t_tableOid;
+            destTup->t_bucketId = newTuple->t_bucketId;
+            destTup->t_xc_node_id = newTuple->t_xc_node_id;
+            retno = memcpy_s(destTup->t_data, destTup->t_len, newTuple->t_data, newTuple->t_len);
             securec_check(retno, "\0", "\0");
 
             /* release unused space and make *newTuple* point to *destTup*. */
-            heap_freetuple(new_tuple);
-            new_tuple = dest_tup;
+            heap_freetuple(newTuple);
+            newTuple = destTup;
         }
     } else {
         if (!HeapTupleHasNulls(tuple)) {
-            new_tuple = HeapUncompressTup<false>(tuple, tuple_desc, (char*)getPageDict(page), dest_tup);
+            newTuple = HeapUncompressTup<false>(tuple, tupleDesc, (char *)getPageDict(page), destTup);
         } else {
-            new_tuple = HeapUncompressTup<true>(tuple, tuple_desc, (char*)getPageDict(page), dest_tup);
+            newTuple = HeapUncompressTup<true>(tuple, tupleDesc, (char *)getPageDict(page), destTup);
         }
     }
 
-    return new_tuple;
+    return newTuple;
 }
 
 /* copy new tuple from given tuple, and fill the
  * default value for all the new and added attrubutes.
  */
-static HeapTuple HeapCopyInitdefvalTup(HeapTuple tuple, TupleDesc tup_desc)
+static HeapTuple HeapCopyInitdefvalTup(HeapTuple tuple, TupleDesc tupDesc)
 {
     /* malloc and set doReplace[] to be false. */
-    bool* do_replace = (bool*)palloc0(tup_desc->natts * sizeof(bool));
+    bool *doReplace = (bool *)palloc0(tupDesc->natts * sizeof(bool));
 
     /* rebuild heapTuple */
-    HeapTuple new_tuple = heap_modify_tuple(tuple, tup_desc, NULL, NULL, do_replace);
-    COPY_TUPLE_HEADER_XACT_INFO(new_tuple, tuple);
+    HeapTuple newTuple = heap_modify_tuple(tuple, tupDesc, NULL, NULL, doReplace);
+    COPY_TUPLE_HEADER_XACT_INFO(newTuple, tuple);
 
-    pfree_ext(do_replace);
-    return new_tuple;
+    pfree_ext(doReplace);
+    return newTuple;
 }
 
 /* ---------------------------------------------------------------------
@@ -2608,21 +2667,20 @@ static HeapTuple HeapCopyInitdefvalTup(HeapTuple tuple, TupleDesc tup_desc)
  *
  * ---------------------------------------------------------------------
  */
-HeapTuple heapCopyTuple(HeapTuple tuple, TupleDesc tup_desc, Page page)
+HeapTuple heapCopyTuple(HeapTuple tuple, TupleDesc tupDesc, Page page)
 {
     if (!HeapTupleIsValid(tuple) || tuple->t_data == NULL) {
-        ereport(WARNING,
-            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                (errmsg("tuple copy failed, because tuple is invalid or tuple data is null "))));
+        ereport(WARNING, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                          (errmsg("tuple copy failed, because tuple is invalid or tuple data is null "))));
         return NULL;
     }
 
     if (HEAP_TUPLE_IS_COMPRESSED(tuple->t_data)) {
-        return heapCopyCompressedTuple(tuple, tup_desc, page);
+        return heapCopyCompressedTuple(tuple, tupDesc, page);
     }
 
-    if (tup_desc->initdefvals && tup_desc->natts > (int)HeapTupleHeaderGetNatts(tuple->t_data, tup_desc)) {
-        return HeapCopyInitdefvalTup(tuple, tup_desc);
+    if (tupDesc->initdefvals && tupDesc->natts > (int)HeapTupleHeaderGetNatts(tuple->t_data, tupDesc)) {
+        return HeapCopyInitdefvalTup(tuple, tupDesc);
     }
 
     return heap_copytuple(tuple);
@@ -2635,7 +2693,7 @@ HeapTuple heapCopyTuple(HeapTuple tuple, TupleDesc tup_desc, Page page)
  * The result is allocated in the current memory context.
  * wrapper for uncompressed/compressed tuple.
  */
-MinimalTuple heapFormMinimalTuple(HeapTuple tuple, TupleDesc tuple_desc, Page page)
+MinimalTuple heapFormMinimalTuple(HeapTuple tuple, TupleDesc tupleDesc, Page page)
 {
     bool tupIsCompressed = HEAP_TUPLE_IS_COMPRESSED(tuple->t_data);
     Assert(!tupIsCompressed || (page != NULL));
@@ -2647,15 +2705,15 @@ MinimalTuple heapFormMinimalTuple(HeapTuple tuple, TupleDesc tuple_desc, Page pa
      * so deform the tuple and form a new one.
      */
     if (tupIsCompressed ||
-        (tuple_desc->initdefvals != NULL && tuple_desc->natts > (int)HeapTupleHeaderGetNatts(tuple->t_data, tuple_desc))) {
-        Datum* values = (Datum*)palloc(tuple_desc->natts * sizeof(Datum));
-        bool* is_null = (bool*)palloc(tuple_desc->natts * sizeof(bool));
+        (tupleDesc->initdefvals != NULL && tupleDesc->natts > (int)HeapTupleHeaderGetNatts(tuple->t_data, tupleDesc))) {
+        Datum *values = (Datum *)palloc(tupleDesc->natts * sizeof(Datum));
+        bool *isNull = (bool *)palloc(tupleDesc->natts * sizeof(bool));
 
-        heap_deform_tuple3(tuple, tuple_desc, values, is_null, (tupIsCompressed ? page : NULL));
-        MinimalTuple result = heap_form_minimal_tuple(tuple_desc, values, is_null);
+        heap_deform_tuple3(tuple, tupleDesc, values, isNull, (tupIsCompressed ? page : NULL));
+        MinimalTuple result = heap_form_minimal_tuple(tupleDesc, values, isNull);
 
         pfree_ext(values);
-        pfree_ext(is_null);
+        pfree_ext(isNull);
         return result;
     }
 
@@ -2664,24 +2722,24 @@ MinimalTuple heapFormMinimalTuple(HeapTuple tuple, TupleDesc tuple_desc, Page pa
 }
 
 /* a copy of slot_deform_tuple for compressied tuple */
-static void slot_deform_cmprs_tuple(TupleTableSlot* slot, uint32 natts)
+static void slot_deform_cmprs_tuple(TupleTableSlot *slot, uint32 natts)
 {
-    HeapTuple tuple = slot->tts_tuple;
-    TupleDesc tuple_desc = slot->tts_tupleDescriptor;
-    Datum* values = slot->tts_values;
-    bool* isnull = slot->tts_isnull;
+    HeapTuple tuple = (HeapTuple)slot->tts_tuple;
+    TupleDesc tupleDesc = slot->tts_tupleDescriptor;
+    Datum *values = slot->tts_values;
+    bool *isnull = slot->tts_isnull;
     HeapTupleHeader tup = tuple->t_data;
     bool hasnulls = HeapTupleHasNulls(tuple);
-    Form_pg_attribute* att = tuple_desc->attrs;
+    Form_pg_attribute *att = tupleDesc->attrs;
     uint32 attnum;
-    char* tp = NULL;         /* ptr to tuple data */
+    char *tp = NULL;         /* ptr to tuple data */
     long off;                /* offset in tuple data */
-    bits8* bp = tup->t_bits; /* ptr to null bitmap in tuple */
+    bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
 
-    bits8* cmprs_bitmap = NULL;
-    char* cmprs_info = NULL;
-    void* meta_info = NULL;
-    int cmprs_off = 0;
+    bits8 *cmprsBitmap = NULL;
+    char *cmprsInfo = NULL;
+    void *metaInfo = NULL;
+    int cmprsOff = 0;
     char mode = 0;
 
     Assert(HEAP_TUPLE_IS_COMPRESSED(tup));
@@ -2696,27 +2754,27 @@ static void slot_deform_cmprs_tuple(TupleTableSlot* slot, uint32 natts)
     attnum = slot->tts_nvalid;
     if (attnum == 0) {
         /* Start from the first attribute */
-        Assert(tuple_desc->natts >= (int)HeapTupleHeaderGetNatts(tup, tuple_desc));
-        off = BITMAPLEN(HeapTupleHeaderGetNatts(tup, tuple_desc));
-        cmprs_off = 0;
+        Assert(tupleDesc->natts >= (int)HeapTupleHeaderGetNatts(tup, tupleDesc));
+        off = BITMAPLEN(HeapTupleHeaderGetNatts(tup, tupleDesc));
+        cmprsOff = 0;
     } else {
         /* Restore state from previous execution */
         off = slot->tts_off;
-        cmprs_off = slot->tts_meta_off;
+        cmprsOff = slot->tts_meta_off;
     }
 
-    tp = (char*)tup + tup->t_hoff;
-    cmprs_bitmap = (bits8*)tp;
+    tp = (char *)tup + tup->t_hoff;
+    cmprsBitmap = (bits8 *)tp;
 
     Page page = BufferGetPage(slot->tts_buffer);
     Assert((page != NULL) && PageIsCompressed(page));
-    cmprs_info = (char*)getPageDict(page);
+    cmprsInfo = (char *)getPageDict(page);
 
     /* parse compression metaInfo data of this attr */
-    int meta_size = 0;
+    int metaSize = 0;
     for (; attnum < natts; attnum++) {
-        meta_info = PageCompress::FetchAttrCmprMeta(cmprs_info + cmprs_off, att[attnum]->attlen, &meta_size, &mode);
-        cmprs_off += meta_size;
+        metaInfo = PageCompress::FetchAttrCmprMeta(cmprsInfo + cmprsOff, att[attnum]->attlen, &metaSize, &mode);
+        cmprsOff += metaSize;
 
         if (hasnulls && att_isnull(attnum, bp)) {
             values[attnum] = (Datum)0;
@@ -2726,10 +2784,10 @@ static void slot_deform_cmprs_tuple(TupleTableSlot* slot, uint32 natts)
 
         isnull[attnum] = false;
 
-        if (isAttrCompressed(attnum, cmprs_bitmap)) {
+        if (isAttrCompressed(attnum, cmprsBitmap)) {
             int attsize = 0;
-            values[attnum] = PageCompress::UncompressOneAttr(
-                mode, meta_info, att[attnum]->atttypid, att[attnum]->attlen, tp + off, &attsize);
+            values[attnum] = PageCompress::UncompressOneAttr(mode, metaInfo, att[attnum]->atttypid, att[attnum]->attlen,
+                                                             tp + off, &attsize);
             off = off + attsize; /* attsize is the size of compressed value. */
 
             continue;
@@ -2752,9 +2810,419 @@ static void slot_deform_cmprs_tuple(TupleTableSlot* slot, uint32 natts)
      */
     slot->tts_nvalid = attnum;
     slot->tts_off = off;
-    slot->tts_meta_off = cmprs_off;
+    slot->tts_meta_off = cmprsOff;
     slot->tts_slow = true;
 }
+
+/*
+ * Clears the contents of the table slot that contains heap table tuple data.
+ */
+void heap_slot_clear(TupleTableSlot *slot)
+{
+    /*
+     * sanity checks
+     */
+    Assert(slot != NULL);
+    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+
+    /*
+     * Free any old physical tuple belonging to the slot.
+     */
+    if (slot->tts_shouldFree) {
+        heap_freetuple((HeapTuple)slot->tts_tuple);
+        slot->tts_tuple = NULL;
+        slot->tts_shouldFree = false;
+    }
+
+    if (slot->tts_shouldFreeMin) {
+        heap_free_minimal_tuple(slot->tts_mintuple);
+        slot->tts_shouldFreeMin = false;
+    }
+}
+
+/*
+ * Make the contents of the heap table's slot contents solely depend on the slot(make them a local copy),
+ *  and not on underlying external resources like another memory context, buffers etc.
+ *
+ * @pram slot: slot to be materialized.
+ */
+void heap_slot_materialize(TupleTableSlot *slot)
+{
+    /*
+     * sanity checks
+     */
+    Assert(slot != NULL);
+    Assert(!slot->tts_isempty);
+    Assert(slot->tts_tupleDescriptor != NULL);
+
+    /*
+     * If we have a regular physical tuple, and it's locally palloc'd, we have
+     * nothing to do.
+     */
+    if (slot->tts_tuple && slot->tts_shouldFree && !HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)slot->tts_tuple)->t_data))
+        return ;
+
+    /*
+     * Otherwise, copy or build a physical tuple, and store it into the slot.
+     *
+     * We may be called in a context that is shorter-lived than the tuple
+     * slot, but we have to ensure that the materialized tuple will survive
+     * anyway.
+     */
+    MemoryContext old_context = MemoryContextSwitchTo(slot->tts_mcxt);
+    slot->tts_tuple = heap_slot_copy_heap_tuple(slot);
+    slot->tts_shouldFree = true;
+    MemoryContextSwitchTo(old_context);
+
+    /*
+     * Drop the pin on the referenced buffer, if there is one.
+     */
+    if (BufferIsValid(slot->tts_buffer)) {
+        ReleaseBuffer(slot->tts_buffer);
+    }
+
+    slot->tts_buffer = InvalidBuffer;
+
+    /*
+     * Mark extracted state invalid.  This is important because the slot is
+     * not supposed to depend any more on the previous external data; we
+     * mustn't leave any dangling pass-by-reference datums in tts_values.
+     * However, we have not actually invalidated any such datums, if there
+     * happen to be any previously fetched from the slot.  (Note in particular
+     * that we have not pfree'd tts_mintuple, if there is one.)
+     */
+    slot->tts_nvalid = 0;
+
+    /*
+     * On the same principle of not depending on previous remote storage,
+     * forget the mintuple if it's not local storage.  (If it is local
+     * storage, we must not pfree it now, since callers might have already
+     * fetched datum pointers referencing it.)
+     */
+    if (!slot->tts_shouldFreeMin) {
+        slot->tts_mintuple = NULL;
+    }
+#ifdef PGXC
+    if (!slot->tts_shouldFreeRow) {
+        slot->tts_dataRow = NULL;
+        slot->tts_dataLen = -1;
+    }
+#endif
+}
+
+/*
+ * Return a minimal tuple "owned" by the slot. It is slot's responsibility
+ * to free the memory consumed by the minimal tuple. If the slot can not
+ * "own" a minimal tuple, it should not implement this callback and should
+ * set it as NULL.
+ *
+ * @param slot: slot from minimal tuple to fetch.
+ * @return slot's minimal tuple.
+ *
+ */
+MinimalTuple heap_slot_get_minimal_tuple(TupleTableSlot *slot) {
+    /*
+     * sanity checks
+     */
+    Assert(slot != NULL);
+    Assert(!slot->tts_isempty);
+    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+
+    /*
+     * If we have a minimal physical tuple (local or not) then just return it.
+     */
+    if (slot->tts_mintuple != NULL) {
+        return slot->tts_mintuple;
+    }
+    /*
+     * Otherwise, copy or build a minimal tuple, and store it into the slot.
+     *
+     * We may be called in a context that is shorter-lived than the tuple
+     * slot, but we have to ensure that the materialized tuple will survive
+     * anyway.
+     */
+    MemoryContext old_context = MemoryContextSwitchTo(slot->tts_mcxt);
+    slot->tts_mintuple = heap_slot_copy_minimal_tuple(slot);
+    slot->tts_shouldFreeMin = true;
+    MemoryContextSwitchTo(old_context);
+
+    /*
+     * Note: we may now have a situation where we have a local minimal tuple
+     * attached to a virtual or non-local physical tuple.  There seems no harm
+     * in that at the moment, but if any materializes, we should change this
+     * function to force the slot into minimal-tuple-only state.
+     */
+    return slot->tts_mintuple;
+}
+
+/*
+ * Return a copy of heap table minimal tuple representing the contents of the slot.
+ * The copy needs to be palloc'd in the current memory context. The slot
+ * itself is expected to remain unaffected. It is *not* expected to have
+ * meaningful "system columns" in the copy. The copy is not be "owned" by
+ * the slot i.e. the caller has to take responsibility to free memory
+ * consumed by the slot.
+ *
+ * @param slot: slot from which minimal tuple to be copied.
+ * @return slot's tuple minimal tuple copy
+ */
+MinimalTuple heap_slot_copy_minimal_tuple(TupleTableSlot *slot)
+{
+    /*
+     * sanity checks.
+     */
+    Assert(slot != NULL);
+    Assert(!slot->tts_isempty);
+    Assert(slot->tts_tupleDescriptor != NULL);
+    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+
+    /*
+     * If we have a physical tuple then just copy it.  Prefer to copy
+     * tts_mintuple since that's a tad cheaper.
+     */
+    if (slot->tts_mintuple) {
+        return heap_copy_minimal_tuple(slot->tts_mintuple);
+    } else if (slot->tts_tuple != NULL ) {
+        return heapFormMinimalTuple((HeapTuple)slot->tts_tuple,
+                slot->tts_tupleDescriptor,
+                (BufferIsValid(slot->tts_buffer) ? BufferGetPage(slot->tts_buffer) : NULL));
+    }
+
+#ifdef PGXC
+
+/*
+ * Ensure values are extracted from data row to the Datum array
+ */
+    if (slot->tts_dataRow != NULL) {
+        heap_slot_getallattrs(slot);
+    }
+
+#endif
+
+    /*
+     * Otherwise we need to build the heaps minimum tuple from the Datum array.
+     */
+    return heap_form_minimal_tuple(slot->tts_tupleDescriptor, slot->tts_values, slot->tts_isnull);
+}
+
+/*
+ * Stores heaps minimal tuple in the TupleTableSlot. Release the current slots buffer and Free's any slot's
+ * minimal and heap tuple.
+ *
+ * @param mtup: minimal tuple to be stored.
+ * @param slot: slot to store tuple.
+ * @param: should_free true if clear the slot's tuple contents by pfree_ext() during  ExecClearTuple.
+ */
+void heap_slot_store_minimal_tuple(MinimalTuple mtup, TupleTableSlot *slot, bool shouldFree)
+{
+    /*
+     * sanity checks
+     */
+    Assert(mtup != NULL);
+    Assert(slot != NULL);
+    Assert(slot->tts_tupleDescriptor != NULL);
+    Assert(slot->tts_tupslotTableAm == TAM_HEAP);
+
+    /*
+     * Free any old physical tuple belonging to the slot.
+     */
+    if (slot->tts_shouldFree && (HeapTuple)slot->tts_tuple != NULL) {
+        heap_freetuple((HeapTuple)slot->tts_tuple);
+        slot->tts_tuple = NULL;
+    }
+    if (slot->tts_shouldFreeMin) {
+        heap_free_minimal_tuple(slot->tts_mintuple);
+    }
+
+#ifdef PGXC
+if (slot->tts_shouldFreeRow) {
+    pfree_ext(slot->tts_dataRow);
+}
+slot->tts_shouldFreeRow = false;
+slot->tts_dataRow = NULL;
+slot->tts_dataLen = -1;
+#endif
+
+/*
+ * Drop the pin on the referenced buffer, if there is one.
+ */
+if (BufferIsValid(slot->tts_buffer)) {
+    ReleaseBuffer(slot->tts_buffer);
+}
+slot->tts_buffer = InvalidBuffer;
+
+    /*
+     * Store the new tuple into the specified slot.
+     */
+    slot->tts_isempty = false;
+    slot->tts_shouldFree = false;
+    slot->tts_shouldFreeMin = shouldFree;
+    slot->tts_tuple = &slot->tts_minhdr;
+    slot->tts_mintuple = mtup;
+
+    slot->tts_minhdr.tupTableType = HEAP_TUPLE;
+    slot->tts_minhdr.t_len = mtup->t_len + MINIMAL_TUPLE_OFFSET;
+    slot->tts_minhdr.t_data = (HeapTupleHeader)((char*)mtup - MINIMAL_TUPLE_OFFSET);
+
+    /* no need to set t_self or t_tableOid since we won't allow access */
+    /* Mark extracted state invalid */
+    slot->tts_nvalid = 0;
+}
+
+/*
+ * Returns a heap tuple "owned" by the slot. It is the slot's responsibility to free the memory
+ * associated with this tuple. If the slot cannot own the tuple constructed or returned, it should
+ * not implement this method, and should return NULL.
+ *
+ * @param slot: slot from tuple to fetch.
+ * @return slot's tuple.
+ */
+HeapTuple heap_slot_get_heap_tuple(TupleTableSlot* slot)
+{
+    /*
+     * sanity checks
+     */
+    Assert(slot != NULL);
+    Assert(!slot->tts_isempty);
+    Assert(slot->tts_tupleDescriptor != NULL);
+
+    /*
+     * If we have a regular physical tuple then just return it.
+     */
+    if (TTS_HAS_PHYSICAL_TUPLE(slot)) {
+        return (HeapTuple)slot->tts_tuple;
+    }
+    /*
+     * Otherwise materialize the slot...
+     */
+    heap_slot_materialize(slot);
+
+    return (HeapTuple)slot->tts_tuple;
+}
+
+/*
+ * Return a copy of heap tuple representing the contents of the slot. The
+ * copy needs to be palloc'd in the current memory context. The slot
+ * itself is expected to remain unaffected. It is *not* expected to have
+ * meaningful "system columns" in the copy. The copy is not be "owned" by
+ * the slot i.e. the caller has to take responsibility to free memory
+ * consumed by the slot.
+ *
+ * @param slot: slot from which tuple to be copied.
+ * @return slot's tuple copy
+ */
+HeapTuple heap_slot_copy_heap_tuple(TupleTableSlot *slot)
+{
+    /*
+     * sanity checks
+     */
+    Assert(slot != NULL);
+    Assert(!slot->tts_isempty);
+    Assert(slot->tts_tupleDescriptor != NULL);
+
+    /*
+     * If we have a physical tuple (either format) then just copy it.
+     */
+    if (TTS_HAS_PHYSICAL_TUPLE(slot)) {
+        return heapCopyTuple((HeapTuple)slot->tts_tuple,
+            slot->tts_tupleDescriptor,
+            (BufferIsValid(slot->tts_buffer) ? BufferGetPage(slot->tts_buffer) : NULL));
+    }
+    if (slot->tts_mintuple != NULL) {
+        return heap_tuple_from_minimal_tuple(slot->tts_mintuple);
+    }
+#ifdef PGXC
+    /*
+     * Ensure values are extracted from data row to the Datum array
+     */
+    if (slot->tts_dataRow != NULL) {
+        heap_slot_getallattrs(slot);
+    }
+#endif
+    /*
+     * Otherwise we need to build a tuple from the Datum array.
+     */
+    return heap_form_tuple(slot->tts_tupleDescriptor, slot->tts_values, slot->tts_isnull);
+}
+
+/*
+ * Stores heaps physical tuple in the TupleTableSlot. Release the current slots buffer and Free's any slot's
+ * minimal and heap tuple.
+ *
+ * @param tuple: tuple to be stored.
+ * @param slot: slot to store tuple.
+ * @param: should_free true if clear the slot's tuple contents by pfree_ext() during  ExecClearTuple.
+ */
+void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer buffer, bool should_free)
+{
+    /*
+     * sanity checks
+     */
+    Assert(tuple != NULL);
+    Assert(slot != NULL);
+    Assert(slot->tts_tupleDescriptor != NULL);
+    /* passing shouldFree=true for a tuple on a disk page is not sane */
+    Assert(BufferIsValid(buffer) ? (!should_free) : true);
+    Assert(!HEAP_TUPLE_IS_COMPRESSED(tuple->t_data) || BufferIsValid(buffer));
+
+    /*
+     * Free any old physical tuple belonging to the slot.
+     */
+    if (slot->tts_shouldFree && (HeapTuple)slot->tts_tuple != NULL) {
+        heap_freetuple((HeapTuple)slot->tts_tuple);
+        slot->tts_tuple = NULL;
+    }
+    if (slot->tts_shouldFreeMin) {
+        heap_free_minimal_tuple(slot->tts_mintuple);
+    }
+#ifdef PGXC
+    if (slot->tts_shouldFreeRow) {
+        pfree_ext(slot->tts_dataRow);
+    }
+    slot->tts_shouldFreeRow = false;
+    slot->tts_dataRow = NULL;
+    slot->tts_dataLen = -1;
+
+    // Row uncompression use slot->tts_per_tuple_mcxt in some case, So we need
+    // reset memory context. this memory context is introduced by PGXC and it only used
+    // in function 'slot_deform_datarow'.  PGXC also do reset in function 'FetchTuple'.
+    // So it is safe
+    //
+    ResetSlotPerTupleContext(slot);
+#endif
+
+    /*
+     * Store the new tuple into the specified slot.
+     */
+    slot->tts_isempty = false;
+    slot->tts_shouldFree = should_free;
+    slot->tts_shouldFreeMin = false;
+    slot->tts_tuple = tuple;
+    slot->tts_mintuple = NULL;
+
+    /* Mark extracted state invalid */
+    slot->tts_nvalid = 0;
+
+    /*
+     * If tuple is on a disk page, keep the page pinned as long as we hold a
+     * pointer into it.  We assume the caller already has such a pin.
+     *
+     * This is coded to optimize the case where the slot previously held a
+     * tuple on the same disk page: in that case releasing and re-acquiring
+     * the pin is a waste of cycles.  This is a common situation during
+     * seqscans, so it's worth troubling over.
+     */
+    if (slot->tts_buffer != buffer) {
+        if (BufferIsValid(slot->tts_buffer)) {
+            ReleaseBuffer(slot->tts_buffer);
+        }
+        slot->tts_buffer = buffer;
+        if (BufferIsValid(buffer)) {
+            IncrBufferRefCount(buffer);
+        }
+    }
+}
+
 
 /*
  * Checks whether a dead tuple can be retained

@@ -30,6 +30,10 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 
+/*****************************************************************************
+ *	 USER I/O ROUTINES (none)												 *
+ *****************************************************************************/
+
 /*
  *		namein	- converts "..." to internal representation
  *
@@ -44,10 +48,11 @@ Datum namein(PG_FUNCTION_ARGS)
     int len;
 
     len = strlen(s);
+
     /* Truncate oversize input */
-    if (len >= NAMEDATALEN) {
+    if (len >= NAMEDATALEN)
         len = pg_mbcliplen(s, len, NAMEDATALEN - 1);
-    }
+
     /* We use palloc0 here to ensure result is zero-padded */
     result = (Name)palloc0(NAMEDATALEN);
     errno_t ss_rc = memcpy_s(NameStr(*result), NAMEDATALEN, s, len);
@@ -77,12 +82,11 @@ Datum namerecv(PG_FUNCTION_ARGS)
     int nbytes;
 
     str = pq_getmsgtext(buf, buf->len - buf->cursor, &nbytes);
-    if (nbytes >= NAMEDATALEN) {
+    if (nbytes >= NAMEDATALEN)
         ereport(ERROR,
             (errcode(ERRCODE_NAME_TOO_LONG),
                 errmsg("identifier too long"),
                 errdetail("Identifier must be less than %d characters.", NAMEDATALEN)));
-    }
     result = (NameData*)palloc0(NAMEDATALEN);
     errno_t ss_rc = memcpy_s(result, NAMEDATALEN, str, nbytes);
     securec_check(ss_rc, "\0", "\0");
@@ -102,6 +106,10 @@ Datum namesend(PG_FUNCTION_ARGS)
     pq_sendtext(&buf, NameStr(*s), strlen(NameStr(*s)));
     PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
+
+/*****************************************************************************
+ *	 PUBLIC ROUTINES														 *
+ *****************************************************************************/
 
 /*
  *		nameeq	- returns 1 iff arguments are equal
@@ -186,24 +194,20 @@ int namecmp(Name n1, Name n2)
 
 int namestrcpy(Name name, const char* str)
 {
-    if (!name || !str) {
+    if (!name || !str)
         return -1;
-    }
     StrNCpy(NameStr(*name), str, NAMEDATALEN);
     return 0;
 }
 
 int namestrcmp(Name name, const char* str)
 {
-    if (name == NULL && str == NULL) {
+    if (name == NULL && str == NULL)
         return 0;
-    }
-    if (name == NULL) {
+    if (name == NULL)
         return -1; /* NULL < anything */
-    }
-    if (str == NULL) {
+    if (str == NULL)
         return 1; /* NULL < anything */
-    }
     return strncmp(NameStr(*name), str, NAMEDATALEN);
 }
 
@@ -234,14 +238,12 @@ Datum current_schema(PG_FUNCTION_ARGS)
     List* search_path = fetch_search_path(false);
     char* nspname = NULL;
 
-    if (search_path == NIL) {
+    if (search_path == NIL)
         PG_RETURN_NULL();
-    }
     nspname = get_namespace_name(linitial_oid(search_path));
     list_free_ext(search_path);
-    if (nspname == NULL) {
+    if (nspname == NULL)
         PG_RETURN_NULL(); /* recently-deleted namespace? */
-    }
     PG_RETURN_DATUM(DirectFunctionCall1(namein, CStringGetDatum(nspname)));
 }
 
@@ -259,8 +261,8 @@ Datum current_schemas(PG_FUNCTION_ARGS)
         char* nspname = NULL;
 
         nspname = get_namespace_name(lfirst_oid(l));
-        /* watch out for deleted namespace */
-        if (nspname != NULL) {
+        if (nspname != NULL) /* watch out for deleted namespace */
+        {
             names[i] = DirectFunctionCall1(namein, CStringGetDatum(nspname));
             i++;
         }

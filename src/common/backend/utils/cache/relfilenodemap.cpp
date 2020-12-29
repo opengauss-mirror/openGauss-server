@@ -32,7 +32,7 @@
 #include "utils/rel.h"
 #include "utils/relfilenodemap.h"
 #include "utils/relmapper.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 /* built first time through in InitializeRelfilenodeMap */
 ScanKeyData relfilenode_skey[2];

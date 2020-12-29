@@ -62,19 +62,19 @@ SELECT * FROM uncmprs ORDER BY id;
 
 DROP TABLE uncmprs;
 -- case 3:  Given compress/COMPRESS
-CREATE TABLE cmprs(id int, name text) compress;
+CREATE TABLE cmprs(id int, name text) ;
 SELECT relcmprs FROM pg_class WHERE relname='cmprs';
  relcmprs 
 ----------
- 2
+ 1
 (1 row)
 
 DROP TABLE cmprs;
-CREATE TABLE cmprs(id int, name text) COMPRESS;
+CREATE TABLE cmprs(id int, name text) ;
 SELECT relcmprs FROM pg_class WHERE relname='cmprs';
  relcmprs 
 ----------
- 2
+ 1
 (1 row)
 
 INSERT INTO cmprs VALUES(1, 'Cat');
@@ -119,11 +119,11 @@ DROP TABLE cmprs CASCADE;
 NOTICE:  drop cascades to view myview
 -- ****************** ALTER TABLE ********************
 -- case 1: COMPRESS -> NOCOMPRESS -> COMPRESS
-CREATE TABLE compresstbl(id int, name text, addr text) COMPRESS;
+CREATE TABLE compresstbl(id int, name text, addr text) ;
 SELECT relcmprs FROM pg_class WHERE relname='compresstbl';
  relcmprs 
 ----------
- 2
+ 1
 (1 row)
 
 -- 	case 1.1: COMPRESS -> NOCOMPRESS
@@ -206,11 +206,11 @@ CREATE TABLE cmpr_methods
 	d varchar(100) numstr,
 	e date nocompress,
 	f timestamp
-) COMPRESS;
+) ;
 SELECT relcmprs FROM pg_class WHERE relname='cmpr_methods';
  relcmprs 
 ----------
- 2
+ 1
 (1 row)
 
 SELECT attcmprmode FROM pg_attribute WHERE attname = 'id' AND attrelid=(SELECT oid FROM pg_class WHERE relname='cmpr_methods');
@@ -264,7 +264,6 @@ create table rp
 	c1 int,
 	c2 int
 )
-COMPRESS
 partition by range (c1)
 (
 	partition p0 values less than (50),
@@ -283,7 +282,7 @@ INSERT INTO rp VALUES(149, 50);
 SELECT relcmprs FROM pg_class WHERE relname='rp';
  relcmprs 
 ----------
- 2
+ 1
 (1 row)
 
 SELECT * FROM rp ORDER BY c1;
@@ -309,11 +308,11 @@ SELECT relcmprs FROM pg_class WHERE relname='rp';
 
 DROP TABLE rp;
 -- test infterface pg_relation_with_compression()
-create table row_tbl ( a int , b int ) compress;
+create table row_tbl ( a int , b int ) ;
 select pg_relation_with_compression('row_tbl');
  pg_relation_with_compression 
 ------------------------------
- t
+ f
 (1 row)
 
 alter table row_tbl set nocompress;

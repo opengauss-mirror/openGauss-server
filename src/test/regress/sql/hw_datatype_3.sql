@@ -16,7 +16,7 @@ INSERT INTO SMALLDATETIME_TBL VALUES ('tomorrow');
 INSERT INTO SMALLDATETIME_TBL VALUES ('tomorrow EST');
 INSERT INTO SMALLDATETIME_TBL VALUES ('tomorrow zulu');
 SELECT * FROM SMALLDATETIME_TBL;
-EXPLAIN (VERBOSE on, COSTS on, NODES on) SELECT count(*) AS One FROM SMALLDATETIME_TBL WHERE d1 = smalldatetime  'today';
+EXPLAIN (VERBOSE on, COSTS on) SELECT count(*) AS One FROM SMALLDATETIME_TBL WHERE d1 = smalldatetime  'today';
 SELECT count(*) AS One FROM SMALLDATETIME_TBL WHERE d1 = smalldatetime  'today';
 SELECT count(*) AS Three FROM SMALLDATETIME_TBL WHERE d1 = smalldatetime  'tomorrow';
 SELECT count(*) AS One FROM SMALLDATETIME_TBL WHERE d1 = smalldatetime  'yesterday';

@@ -1,0 +1,679 @@
+--
+---- test merge partitions update global index 
+--
+--drop table and index
+drop index if exists local_merge_table_index1;
+NOTICE:  index "local_merge_table_index1" does not exist, skipping
+drop index if exists global_merge_table_index1;
+NOTICE:  index "global_merge_table_index1" does not exist, skipping
+drop index if exists global_merge_table_index2;
+NOTICE:  index "global_merge_table_index2" does not exist, skipping
+drop table if exists merge_table;
+NOTICE:  table "merge_table" does not exist, skipping
+create table merge_table
+(
+    INV_DATE_SK               integer               not null,
+    INV_ITEM_SK               integer               not null,
+    INV_WAREHOUSE_SK          integer               not null,
+    INV_QUANTITY_ON_HAND      integer
+)
+partition by range(inv_date_sk)
+(
+    partition p1 values less than(10000),
+    partition p2 values less than(20000),
+    partition p3 values less than(30000),
+    partition p4 values less than(40000),
+    partition p5 values less than(50000),
+    partition p6 values less than(60000),
+    partition p7 values less than(maxvalue)
+);
+--succeed
+insert into merge_table values (generate_series(1,100000), generate_series(1,100000), generate_series(1,100000));
+--succeed 
+create index local_merge_table_index1 on merge_table(INV_DATE_SK) local;
+create index global_merge_table_index1 on merge_table(INV_ITEM_SK) global;
+create index global_merge_table_index2 on merge_table(INV_WAREHOUSE_SK) global;
+explain (costs off) select count(*) from merge_table where INV_DATE_SK < 10000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Bitmap Heap Scan on merge_table
+               Recheck Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1
+               ->  Partitioned Bitmap Index Scan on local_merge_table_index1
+                     Index Cond: (inv_date_sk < 10000)
+                     Selected Partitions:  1
+(9 rows)
+
+select count(*) from merge_table where INV_DATE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_DATE_SK < 20000; 
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on merge_table
+               Recheck Cond: (inv_date_sk < 20000)
+               Selected Partitions:  1..2
+               ->  Partitioned Bitmap Index Scan on local_merge_table_index1
+                     Index Cond: (inv_date_sk < 20000)
+                     Selected Partitions:  1..2
+(9 rows)
+
+select count(*) from merge_table where INV_DATE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_ITEM_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on merge_table
+         Recheck Cond: (inv_item_sk < 10000)
+         ->  Bitmap Index Scan on global_merge_table_index1
+               Index Cond: (inv_item_sk < 10000)
+(5 rows)
+
+select count(*) from merge_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_ITEM_SK < 20000; 
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on merge_table
+         Recheck Cond: (inv_item_sk < 20000)
+         ->  Bitmap Index Scan on global_merge_table_index1
+               Index Cond: (inv_item_sk < 20000)
+(5 rows)
+
+select count(*) from merge_table where INV_ITEM_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_WAREHOUSE_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on merge_table
+         Recheck Cond: (inv_warehouse_sk < 10000)
+         ->  Bitmap Index Scan on global_merge_table_index2
+               Index Cond: (inv_warehouse_sk < 10000)
+(5 rows)
+
+select count(*) from merge_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_WAREHOUSE_SK < 20000; 
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on merge_table
+         Recheck Cond: (inv_warehouse_sk < 20000)
+         ->  Bitmap Index Scan on global_merge_table_index2
+               Index Cond: (inv_warehouse_sk < 20000)
+(5 rows)
+
+select count(*) from merge_table where INV_WAREHOUSE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'merge_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}    |      9999
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}    |      9999
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}    |      9999
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |     40001
+(24 rows)
+
+alter table merge_table merge partitions p1, p2 into partition p0 update global index;
+explain (costs off) select count(*) from merge_table where INV_DATE_SK < 10000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Bitmap Heap Scan on merge_table
+               Recheck Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1
+               ->  Partitioned Bitmap Index Scan on local_merge_table_index1
+                     Index Cond: (inv_date_sk < 10000)
+                     Selected Partitions:  1
+(9 rows)
+
+select count(*) from merge_table where INV_DATE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_DATE_SK < 20000; 
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Bitmap Heap Scan on merge_table
+               Recheck Cond: (inv_date_sk < 20000)
+               Selected Partitions:  1
+               ->  Partitioned Bitmap Index Scan on local_merge_table_index1
+                     Index Cond: (inv_date_sk < 20000)
+                     Selected Partitions:  1
+(9 rows)
+
+select count(*) from merge_table where INV_DATE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_ITEM_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on merge_table
+         Recheck Cond: (inv_item_sk < 10000)
+         ->  Bitmap Index Scan on global_merge_table_index1
+               Index Cond: (inv_item_sk < 10000)
+(5 rows)
+
+select count(*) from merge_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_ITEM_SK < 20000; 
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on merge_table
+         Recheck Cond: (inv_item_sk < 20000)
+         ->  Bitmap Index Scan on global_merge_table_index1
+               Index Cond: (inv_item_sk < 20000)
+(5 rows)
+
+select count(*) from merge_table where INV_ITEM_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_WAREHOUSE_SK < 10000;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on merge_table
+         Recheck Cond: (inv_warehouse_sk < 10000)
+         ->  Bitmap Index Scan on global_merge_table_index2
+               Index Cond: (inv_warehouse_sk < 10000)
+(5 rows)
+
+select count(*) from merge_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_WAREHOUSE_SK < 20000; 
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on merge_table
+         Recheck Cond: (inv_warehouse_sk < 20000)
+         ->  Bitmap Index Scan on global_merge_table_index2
+               Index Cond: (inv_warehouse_sk < 20000)
+(5 rows)
+
+select count(*) from merge_table where INV_WAREHOUSE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'merge_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |     40001
+(21 rows)
+
+alter table merge_table merge partitions p3, p4, p5 into partition p5 update global index;
+explain (costs off) select count(*) from merge_table where INV_DATE_SK < 10000;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Bitmap Heap Scan on merge_table
+               Recheck Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1
+               ->  Partitioned Bitmap Index Scan on local_merge_table_index1
+                     Index Cond: (inv_date_sk < 10000)
+                     Selected Partitions:  1
+(9 rows)
+
+select count(*) from merge_table where INV_DATE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_DATE_SK < 20000; 
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Bitmap Heap Scan on merge_table
+               Recheck Cond: (inv_date_sk < 20000)
+               Selected Partitions:  1
+               ->  Partitioned Bitmap Index Scan on local_merge_table_index1
+                     Index Cond: (inv_date_sk < 20000)
+                     Selected Partitions:  1
+(9 rows)
+
+select count(*) from merge_table where INV_DATE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_ITEM_SK < 10000;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on merge_table
+               Filter: (inv_item_sk < 10000)
+               Selected Partitions:  1..4
+(6 rows)
+
+select count(*) from merge_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_ITEM_SK < 20000; 
+                   QUERY PLAN                    
+-------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on merge_table
+               Filter: (inv_item_sk < 20000)
+               Selected Partitions:  1..4
+(6 rows)
+
+select count(*) from merge_table where INV_ITEM_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_WAREHOUSE_SK < 10000;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on merge_table
+               Filter: (inv_warehouse_sk < 10000)
+               Selected Partitions:  1..4
+(6 rows)
+
+select count(*) from merge_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_WAREHOUSE_SK < 20000; 
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Seq Scan on merge_table
+               Filter: (inv_warehouse_sk < 20000)
+               Selected Partitions:  1..4
+(6 rows)
+
+select count(*) from merge_table where INV_WAREHOUSE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'merge_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |         0
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |         0
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |         0
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |     40001
+(15 rows)
+
+vacuum analyze;
+explain (costs off) select count(*) from merge_table where INV_DATE_SK < 10000;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Only Scan using local_merge_table_index1 on merge_table
+               Index Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1
+(6 rows)
+
+select count(*) from merge_table where INV_DATE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_DATE_SK < 20000; 
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Only Scan using local_merge_table_index1 on merge_table
+               Index Cond: (inv_date_sk < 20000)
+               Selected Partitions:  1
+(6 rows)
+
+select count(*) from merge_table where INV_DATE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_ITEM_SK < 10000;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_merge_table_index1 on merge_table
+         Index Cond: (inv_item_sk < 10000)
+(3 rows)
+
+select count(*) from merge_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_ITEM_SK < 20000; 
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_merge_table_index1 on merge_table
+         Index Cond: (inv_item_sk < 20000)
+(3 rows)
+
+select count(*) from merge_table where INV_ITEM_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_WAREHOUSE_SK < 10000;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_merge_table_index2 on merge_table
+         Index Cond: (inv_warehouse_sk < 10000)
+(3 rows)
+
+select count(*) from merge_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_WAREHOUSE_SK < 20000; 
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_merge_table_index2 on merge_table
+         Index Cond: (inv_warehouse_sk < 20000)
+(3 rows)
+
+select count(*) from merge_table where INV_WAREHOUSE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'merge_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     19999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     19999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     19999
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     30000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     30000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     30000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |     40001
+(15 rows)
+
+alter table merge_table merge partitions p6, p7 into partition p7;
+explain (costs off) select count(*) from merge_table where INV_DATE_SK < 10000;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Only Scan using local_merge_table_index1 on merge_table
+               Index Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1
+(6 rows)
+
+select count(*) from merge_table where INV_DATE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_DATE_SK < 20000; 
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Only Scan using local_merge_table_index1 on merge_table
+               Index Cond: (inv_date_sk < 20000)
+               Selected Partitions:  1
+(6 rows)
+
+select count(*) from merge_table where INV_DATE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_ITEM_SK < 10000;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 3
+         ->  Partitioned Seq Scan on merge_table
+               Filter: (inv_item_sk < 10000)
+               Selected Partitions:  1..3
+(6 rows)
+
+select count(*) from merge_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_ITEM_SK < 20000; 
+                   QUERY PLAN                    
+-------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 3
+         ->  Partitioned Seq Scan on merge_table
+               Filter: (inv_item_sk < 20000)
+               Selected Partitions:  1..3
+(6 rows)
+
+select count(*) from merge_table where INV_ITEM_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_WAREHOUSE_SK < 10000;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 3
+         ->  Partitioned Seq Scan on merge_table
+               Filter: (inv_warehouse_sk < 10000)
+               Selected Partitions:  1..3
+(6 rows)
+
+select count(*) from merge_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from merge_table where INV_WAREHOUSE_SK < 20000; 
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 3
+         ->  Partitioned Seq Scan on merge_table
+               Filter: (inv_warehouse_sk < 20000)
+               Selected Partitions:  1..3
+(6 rows)
+
+select count(*) from merge_table where INV_WAREHOUSE_SK < 20000;
+ count 
+-------
+ 19999
+(1 row)
+
+select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'merge_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ merge_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     19999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     19999
+ p0          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |     19999
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     30000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     30000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     30000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |         0
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |         0
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {NULL}     |         0
+(12 rows)
+
+--clean
+drop index if exists local_merge_table_index1;
+drop index if exists global_merge_table_index1;
+drop index if exists global_merge_table_index2;
+drop table if exists merge_table;

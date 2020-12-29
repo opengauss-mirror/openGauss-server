@@ -4,6 +4,7 @@
  *	  POSTGRES heap tuple definitions.
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -17,9 +18,9 @@
 #include "access/tupdesc.h"
 #include "access/tupmacs.h"
 #include "access/xlogreader.h"
-#include "storage/buf.h"
-#include "storage/bufpage.h"
-#include "storage/itemptr.h"
+#include "storage/buf/buf.h"
+#include "storage/buf/bufpage.h"
+#include "storage/item/itemptr.h"
 #include "storage/relfilenode.h"
 #include "utils/relcache.h"
 
@@ -278,8 +279,7 @@ typedef HeapTupleHeaderData* HeapTupleHeader;
     (ShortTransactionIdToNormal(          \
         PageIs8BXidHeapVersion(page) ? ((HeapPageHeader)(page))->pd_xid_base : 0, (tup)->t_choice.t_heap.t_xmin))
 #define HeapTupleHeaderGetRawXmax(page, tup) HeapTupleHeaderGetXmax(page, tup)
-
-#define HeapTupleHeaderXminCommitted(tup) ((tup)->t_infomask & HEAP_XMIN_COMMITTED)
+#define HeapTupleGetRawXmin(tup) (ShortTransactionIdToNormal((tup)->t_xid_base, (tup)->t_data->t_choice.t_heap.t_xmin))
 
 #define HeapTupleHeaderXminInvalid(tup) \
     (((tup)->t_infomask & (HEAP_XMIN_COMMITTED | HEAP_XMIN_INVALID)) == HEAP_XMIN_INVALID)
@@ -294,6 +294,12 @@ typedef HeapTupleHeaderData* HeapTupleHeader;
 
 #define HeapTupleHeaderSetXminFrozen(tup) \
     (AssertMacro(!HeapTupleHeaderXminInvalid(tup)), ((tup)->t_infomask |= HEAP_XMIN_FROZEN))
+
+#define HeapTupleGetRawXmax(tup)                                                                    \
+    (ShortTransactionIdToNormal(                                                                    \
+        ((tup)->t_data->t_infomask & HEAP_XMAX_IS_MULTI ? (tup)->t_multi_base: (tup)->t_xid_base),  \
+        ((tup)->t_data->t_choice.t_heap.t_xmax)                                                     \
+    ))
 
 #define HeapTupleHeaderGetXmax(page, tup)                                                                          \
     (ShortTransactionIdToNormal(((tup)->t_infomask & HEAP_XMAX_IS_MULTI)                                           \
@@ -582,6 +588,8 @@ typedef MinimalTupleData* MinimalTuple;
  * should be explicitly set invalid in manufactured tuples.
  */
 typedef struct HeapTupleData {
+    uint1 tupTableType = HEAP_TUPLE;
+    int2   t_bucketId;
     uint32 t_len;           /* length of *t_data */
     ItemPointerData t_self; /* SelfItemPointer */
     Oid t_tableOid;         /* table the tuple came from */
@@ -591,18 +599,16 @@ typedef struct HeapTupleData {
     uint32 t_xc_node_id; /* Data node the tuple came from */
 #endif
     HeapTupleHeader t_data; /* -> tuple header and data */
-    int2   t_bucketId;
 } HeapTupleData;
 
 typedef HeapTupleData* HeapTuple;
+typedef void* Tuple;
 
-
-#define HeapTupleGetRawXmin(tup) (ShortTransactionIdToNormal((tup)->t_xid_base, (tup)->t_data->t_choice.t_heap.t_xmin))
-
-static inline TransactionId HeapTupleGetRawXmax(HeapTuple tup)
+inline HeapTuple heaptup_alloc(Size size)
 {
-    TransactionId baseXid = (tup->t_data->t_infomask & HEAP_XMAX_IS_MULTI) ? tup->t_multi_base : tup->t_xid_base;
-    return ShortTransactionIdToNormal(baseXid, tup->t_data->t_choice.t_heap.t_xmax);
+    HeapTuple tup = (HeapTuple)palloc0(size);
+    tup->tupTableType = HEAP_TUPLE;
+    return tup;
 }
 
 #define HEAPTUPLESIZE MAXALIGN(sizeof(HeapTupleData))

@@ -186,7 +186,7 @@ void OBSStream::Close()
     }
 }
 
-void initOBSModeState(CopyState cstate, const char* objectPath, List* totalTask)
+void initOBSModeState(CopyState cstate, const char* objectpath, List* totalTask)
 {
     cstate->copy_dest = COPY_OBS;
 
@@ -198,7 +198,7 @@ void initOBSModeState(CopyState cstate, const char* objectPath, List* totalTask)
     if (cstate->writelineFunc) {
         if (IS_PGXC_COORDINATOR) {
             // check export path is empty
-            List* obs_file_list = list_obs_bucket_objects(objectPath,
+            List* obs_file_list = list_obs_bucket_objects(objectpath,
                 cstate->obs_copy_options.encrypt,
                 cstate->obs_copy_options.access_key,
                 cstate->obs_copy_options.secret_access_key);
@@ -206,19 +206,19 @@ void initOBSModeState(CopyState cstate, const char* objectPath, List* totalTask)
             if (list_length(obs_file_list) > 1)
                 ereport(ERROR,
                     (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                        errmsg("Write-Only table's output directory %s is not empty", objectPath)));
+                        errmsg("Write-Only table's output directory %s is not empty", objectpath)));
 
-            /* if the output path is not created manually on S3 website, we should check it is a path or object */
+            /* if the output path is not created manually on S3 website, we should check it is a path or object*/
             if (list_length(obs_file_list) == 1) {
                 Value* tempObjStr = (Value*)lfirst(list_head(obs_file_list));
                 /*
-                 * tempObjStr->val.str starts with 'gsobs',  objectPath starts with 'obs',
+                 *tempObjStr->val.str starts with 'gsobs',  objectpath starts with 'obs',
                  * therefore it should begin to compare from the second character of tempObjStr->val.str.
                  */
-                if (strcmp(tempObjStr->val.str + OFFSETNUM, objectPath) != 0) {
+                if (strcmp(tempObjStr->val.str + OFFSETNUM, objectpath) != 0) {
                     ereport(ERROR,
                         (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                            errmsg("Write-Only table's output directory %s is not empty", objectPath)));
+                            errmsg("Write-Only table's output directory %s is not empty", objectpath)));
                 }
             }
             return;
@@ -233,7 +233,7 @@ void initOBSModeState(CopyState cstate, const char* objectPath, List* totalTask)
              * will assign actual segno
              */
             StringInfo filename = makeStringInfo();
-            appendStringInfo(filename, "%s%s", objectPath, RelationGetRelationName(cstate->rel));
+            appendStringInfo(filename, "%s%s", objectpath, RelationGetRelationName(cstate->rel));
             segment->filename = pstrdup((const char*)filename->data);
 
             cstate->taskList = lappend(cstate->taskList, segment);
@@ -294,7 +294,7 @@ void endOBSModeBulkLoad(CopyState cstate)
  */
 bool CopyGetNextLineFromOBS(CopyState cstate)
 {
-    OBSStream *stream = dynamic_cast<OBSStream*>(cstate->io_stream);
+    OBSStream* stream = dynamic_cast<OBSStream*>(cstate->io_stream);
     int result = 0;
 
     if (stream == NULL) {
@@ -346,6 +346,7 @@ retry1:
         goto retry1;
     }
 
+    Assert(cstate->line_buf.len >= 2);
     if (cstate->line_buf.data[cstate->line_buf.len - 2] == '\r') {
         /* process \r\n to \n */
         cstate->line_buf.data[cstate->line_buf.len - 2] = '\n';
@@ -485,10 +486,8 @@ void OBSStream::Flush()
     BufFileClose(m_buffile);
     m_buffile = NULL;
 
-    if (handler != NULL) {
-        DestroyObsReadWriteHandler(handler, false);
-        handler = NULL;
-    }
+    DestroyObsReadWriteHandler(handler, false);
+    handler = NULL;
 }
 
 void OBSStream::set_parser_chunksize(uint32_t chunksize)
@@ -502,7 +501,7 @@ void OBSStream::set_source_obs_copy_options(ObsCopyOptions* options)
     return;
 }
 
-const ObsCopyOptions* OBSStream::get_obs_copy_options() const
+const ObsCopyOptions* OBSStream::get_obs_copy_options()
 {
     return m_obs_options;
 }

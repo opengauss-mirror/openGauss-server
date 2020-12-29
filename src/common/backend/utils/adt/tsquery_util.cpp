@@ -31,9 +31,9 @@ QTNode* QT2QTN(QueryItem* in, char* operand)
         node->child = (QTNode**)palloc0(sizeof(QTNode*) * 2);
         node->child[0] = QT2QTN(in + 1, operand);
         node->sign = node->child[0]->sign;
-        if (in->qoperator.oper == OP_NOT) {
+        if (in->qoperator.oper == OP_NOT)
             node->nchild = 1;
-        } else {
+        else {
             node->nchild = 2;
             node->child[1] = QT2QTN(in + in->qoperator.left, operand);
             node->sign |= node->child[1]->sign;
@@ -48,29 +48,25 @@ QTNode* QT2QTN(QueryItem* in, char* operand)
 
 void QTNFree(QTNode* in)
 {
-    if (in == NULL) {
+    if (in == NULL)
         return;
-    }
 
     /* since this function recurses, it could be driven to stack overflow. */
     check_stack_depth();
 
-    if (in->valnode && in->valnode->type == QI_VAL && in->word && (in->flags & QTN_WORDFREE) != 0) {
+    if (in->valnode && in->valnode->type == QI_VAL && in->word && (in->flags & QTN_WORDFREE) != 0)
         pfree_ext(in->word);
-    }
 
     if (in->child) {
         if (in->valnode) {
             if (in->valnode->type == QI_OPR && in->nchild > 0) {
                 int i;
 
-                for (i = 0; i < in->nchild; i++) {
+                for (i = 0; i < in->nchild; i++)
                     QTNFree(in->child[i]);
-                }
             }
-            if (in->flags & QTN_NEEDFREE) {
+            if (in->flags & QTN_NEEDFREE)
                 pfree_ext(in->valnode);
-            }
         }
         pfree_ext(in->child);
     }
@@ -83,30 +79,25 @@ int QTNodeCompare(QTNode* an, QTNode* bn)
     /* since this function recurses, it could be driven to stack overflow. */
     check_stack_depth();
 
-    if (an->valnode->type != bn->valnode->type) {
+    if (an->valnode->type != bn->valnode->type)
         return (an->valnode->type > bn->valnode->type) ? -1 : 1;
-    }
 
     if (an->valnode->type == QI_OPR) {
         QueryOperator* ao = &an->valnode->qoperator;
         QueryOperator* bo = &bn->valnode->qoperator;
 
-        if (ao->oper != bo->oper) {
+        if (ao->oper != bo->oper)
             return (ao->oper > bo->oper) ? -1 : 1;
-        }
 
-        if (an->nchild != bn->nchild) {
+        if (an->nchild != bn->nchild)
             return (an->nchild > bn->nchild) ? -1 : 1;
-        }
 
         {
             int i, res;
 
-            for (i = 0; i < an->nchild; i++) {
-                if ((res = QTNodeCompare(an->child[i], bn->child[i])) != 0) {
+            for (i = 0; i < an->nchild; i++)
+                if ((res = QTNodeCompare(an->child[i], bn->child[i])) != 0)
                     return res;
-                }
-            }
         }
         return 0;
     } else if (an->valnode->type == QI_VAL) {
@@ -137,25 +128,21 @@ void QTNSort(QTNode* in)
     /* since this function recurses, it could be driven to stack overflow. */
     check_stack_depth();
 
-    if (in->valnode->type != QI_OPR) {
+    if (in->valnode->type != QI_OPR)
         return;
-    }
 
-    for (i = 0; i < in->nchild; i++) {
+    for (i = 0; i < in->nchild; i++)
         QTNSort(in->child[i]);
-    }
-    if (in->nchild > 1) {
+    if (in->nchild > 1)
         qsort((void*)in->child, in->nchild, sizeof(QTNode*), cmpQTN);
-    }
 }
 
 bool QTNEq(QTNode* a, QTNode* b)
 {
     uint32 sign = a->sign & b->sign;
 
-    if (!(sign == a->sign && sign == b->sign)) {
-        return false;
-    }
+    if (!(sign == a->sign && sign == b->sign))
+        return 0;
 
     return (QTNodeCompare(a, b) == 0) ? true : false;
 }
@@ -174,13 +161,11 @@ void QTNTernary(QTNode* in)
     /* since this function recurses, it could be driven to stack overflow. */
     check_stack_depth();
 
-    if (in->valnode->type != QI_OPR) {
+    if (in->valnode->type != QI_OPR)
         return;
-    }
 
-    for (i = 0; i < in->nchild; i++) {
+    for (i = 0; i < in->nchild; i++)
         QTNTernary(in->child[i]);
-    }
 
     for (i = 0; i < in->nchild; i++) {
         QTNode* cc = in->child[i];
@@ -205,9 +190,8 @@ void QTNTernary(QTNode* in)
 
             i += cc->nchild - 1;
 
-            if (cc->flags & QTN_NEEDFREE) {
+            if (cc->flags & QTN_NEEDFREE)
                 pfree_ext(cc->valnode);
-            }
             pfree_ext(cc);
         }
     }
@@ -224,17 +208,14 @@ void QTNBinary(QTNode* in)
     /* since this function recurses, it could be driven to stack overflow. */
     check_stack_depth();
 
-    if (in->valnode->type != QI_OPR) {
+    if (in->valnode->type != QI_OPR)
         return;
-    }
 
-    for (i = 0; i < in->nchild; i++) {
+    for (i = 0; i < in->nchild; i++)
         QTNBinary(in->child[i]);
-    }
 
-    if (in->nchild <= 2) {
+    if (in->nchild <= 2)
         return;
-    }
 
     while (in->nchild > 2) {
         QTNode* nn = (QTNode*)palloc0(sizeof(QTNode));
@@ -271,9 +252,8 @@ static void cntsize(QTNode* in, int* sumlen, int* nnode)
     if (in->valnode->type == QI_OPR) {
         int i;
 
-        for (i = 0; i < in->nchild; i++) {
+        for (i = 0; i < in->nchild; i++)
             cntsize(in->child[i], sumlen, nnode);
-        }
     } else {
         *sumlen += in->valnode->qoperand.length + 1;
     }
@@ -330,15 +310,13 @@ TSQuery QTN2QT(QTNode* in)
 {
     TSQuery out;
     int len;
-    int sumlen = 0;
-    int nnode = 0;
+    int sumlen = 0, nnode = 0;
     QTN2QTState state;
 
     cntsize(in, &sumlen, &nnode);
 
-    if (TSQUERY_TOO_BIG(nnode, sumlen)) {
+    if (TSQUERY_TOO_BIG(nnode, sumlen))
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("tsquery is too large")));
-    }
     len = COMPUTESIZE(nnode, sumlen);
 
     out = (TSQuery)palloc0(len);
@@ -356,7 +334,6 @@ TSQuery QTN2QT(QTNode* in)
 QTNode* QTNCopy(QTNode* in)
 {
     QTNode* out = NULL;
-    errno_t rc;
 
     /* since this function recurses, it could be driven to stack overflow. */
     check_stack_depth();
@@ -370,7 +347,7 @@ QTNode* QTNCopy(QTNode* in)
 
     if (in->valnode->type == QI_VAL) {
         out->word = (char*)palloc(in->valnode->qoperand.length + 1);
-        rc = memcpy_s(out->word, in->valnode->qoperand.length, in->word, in->valnode->qoperand.length);
+        errno_t rc = memcpy_s(out->word, in->valnode->qoperand.length, in->word, in->valnode->qoperand.length);
         securec_check(rc, "\0", "\0");
         out->word[in->valnode->qoperand.length] = '\0';
         out->flags |= QTN_WORDFREE;
@@ -379,9 +356,8 @@ QTNode* QTNCopy(QTNode* in)
 
         out->child = (QTNode**)palloc(sizeof(QTNode*) * in->nchild);
 
-        for (i = 0; i < in->nchild; i++) {
+        for (i = 0; i < in->nchild; i++)
             out->child[i] = QTNCopy(in->child[i]);
-        }
     }
 
     return out;
@@ -397,8 +373,7 @@ void QTNClearFlags(QTNode* in, uint32 flags)
     if (in->valnode->type != QI_VAL) {
         int i;
 
-        for (i = 0; i < in->nchild; i++) {
+        for (i = 0; i < in->nchild; i++)
             QTNClearFlags(in->child[i], flags);
-        }
     }
 }

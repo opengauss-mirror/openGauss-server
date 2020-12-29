@@ -422,6 +422,7 @@ SELECT q1 FROM int8_tbl EXCEPT SELECT q2 FROM int8_tbl ORDER BY q2 LIMIT 1;
 ERROR:  column "q2" does not exist
 LINE 1: ... int8_tbl EXCEPT SELECT q2 FROM int8_tbl ORDER BY q2 LIMIT 1...
                                                              ^
+HINT:  There is a column named "q2" in table "*SELECT* 2", but it cannot be referenced from this part of the query.
 -- But this should work:
 SELECT q1 FROM int8_tbl EXCEPT (((SELECT q2 FROM int8_tbl ORDER BY q2 LIMIT 1))) ORDER BY 1;
         q1        
@@ -656,15 +657,15 @@ explain (costs off)
 select * from
   (select * from t3 a union all select * from t3 b) ss
   join int4_tbl on f1 = expensivefunc(x);
-                   QUERY PLAN                    
--------------------------------------------------
- Hash Join
-    Hash Cond: (expensivefunc(a.x) = int4_tbl.f1)
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on int4_tbl
    ->  Append
-         ->  Seq Scan on t3 a
-         ->  Seq Scan on t3 b
-   ->  Hash
-         ->  Seq Scan on int4_tbl
+         ->  Index Scan using t3i on t3 a
+               Index Cond: (expensivefunc(x) = int4_tbl.f1)
+         ->  Index Scan using t3i on t3 b
+               Index Cond: (expensivefunc(x) = int4_tbl.f1)
 (7 rows)
 
 select * from

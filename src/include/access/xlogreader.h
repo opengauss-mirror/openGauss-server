@@ -2,6 +2,7 @@
  * 
  * xlogreader.h
  *        Definitions for the generic XLog reading facility
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 2013-2015, PostgreSQL Global Development Group 
  *
  * 
@@ -79,7 +80,7 @@ extern bool DecodeXLogRecord(XLogReaderState* state, XLogRecord* record, char** 
 #define XLogRecHasBlockRef(decoder, block_id) ((decoder)->blocks[block_id].in_use)
 #define XLogRecHasBlockImage(decoder, block_id) ((decoder)->blocks[block_id].has_image)
 
-extern void RestoreBlockImage(char* bkp_image, uint16 hole_offset, uint16 hole_length, char* page);
+extern void RestoreBlockImage(const char* bkp_image, uint16 hole_offset, uint16 hole_length, char* page);
 extern char* XLogRecGetBlockData(XLogReaderState* record, uint8 block_id, Size* len);
 extern bool allocate_recordbuf(XLogReaderState* state, uint32 reclength);
 extern bool XlogFileIsExisted(const char* workingPath, XLogRecPtr inputLsn, TimeLineID timeLine);
@@ -97,4 +98,3 @@ bool ValidXLogRecordHeader(
 bool ValidXLogRecord(XLogReaderState* state, XLogRecord* record, XLogRecPtr recptr);
 
 #endif /* XLOGREADER_H */
-

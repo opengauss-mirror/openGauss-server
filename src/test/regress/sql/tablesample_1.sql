@@ -45,7 +45,7 @@ select count(*) from test_tablesample_col tablesample bernoulli (100);
 select count(*) from test_tablesample_col tablesample bernoulli (100) repeatable (0);
 select count(*) from test_tablesample_col tablesample bernoulli (100) repeatable (2.3);
 select count(*) from test_tablesample_col tablesample hybrid (50, 50) repeatable (50);
-explain (verbose on, costs off, nodes off) 
+explain (verbose on, costs off) 
   select id from test_tablesample_col tablesample bernoulli (50) repeatable (2);
 
 
@@ -62,7 +62,7 @@ select count(*) from test_tablesample_col_rep tablesample bernoulli (100);
 select count(*) from test_tablesample_col_rep tablesample bernoulli (100) repeatable (0);
 select count(*) from test_tablesample_col_rep tablesample bernoulli (100) repeatable (2.3);
 select count(*) from test_tablesample_col_rep tablesample hybrid (100, 50) repeatable (50);
-explain (verbose on, costs off, nodes off) 
+explain (verbose on, costs off) 
   select id from test_tablesample_col_rep tablesample bernoulli (50) repeatable (2);
 
 
@@ -79,7 +79,7 @@ select count(*) from test_tablesample_col_part tablesample bernoulli (100);
 select count(*) from test_tablesample_col_part tablesample bernoulli (100) repeatable (0);
 select count(*) from test_tablesample_col_part tablesample bernoulli (100) repeatable (2.3);
 select count(*) from test_tablesample_col_part tablesample hybrid (100, 50) repeatable (50);
-explain (verbose on, costs off, nodes off) 
+explain (verbose on, costs off) 
   select id from test_tablesample_col_part tablesample bernoulli (50) repeatable (2);
 
 reset search_path;

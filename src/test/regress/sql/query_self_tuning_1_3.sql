@@ -9,7 +9,7 @@ set resource_track_level=operator;
  */
 
 /* Test data skew */select count(*) from  t13 group by xc_node_id order by 1;
-/* Test data skew */explain (analyze on ,verbose off ,costs off ,cpu off, detail off, nodes off, num_nodes off, buffers off, timing off) 
+/* Test data skew */explain (analyze on ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off) 
 select count(*), c1 from t13 group by 2 order by 2;
 
 select query, query_plan, warning from pgxc_wlm_session_history where query like '%Test data skew%' order by 3,2,1;

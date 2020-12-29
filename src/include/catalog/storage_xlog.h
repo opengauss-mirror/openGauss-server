@@ -16,7 +16,7 @@
 
 #include "access/xlogreader.h"
 #include "lib/stringinfo.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
 
 /*
@@ -40,12 +40,12 @@ typedef struct xl_smgr_truncate {
 	RelFileNodeOld rnode;
 } xl_smgr_truncate;
 
-extern void log_smgrcreate(RelFileNode *rnode, ForkNumber forkNum);
+extern void log_smgrcreate(RelFileNode *rnode, ForkNumber forkNum, const oidvector* bucketlist = NULL);
 
 extern void smgr_redo(XLogReaderState *record);
 extern void smgr_desc(StringInfo buf, XLogReaderState *record);
-extern void smgr_redo_create(RelFileNode rnode, ForkNumber forkNum);
-extern void XLogBlockSmgrRedoTruncate(RelFileNode rnode, BlockNumber blkno, XLogRecPtr lsn);
+extern void smgr_redo_create(RelFileNode rnode, ForkNumber forkNum, char *data);
+extern void xlog_block_smgr_redo_truncate(RelFileNode rnode, BlockNumber blkno, XLogRecPtr lsn);
 
 #endif   /* STORAGE_XLOG_H */
 

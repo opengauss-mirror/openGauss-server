@@ -67,6 +67,7 @@
 #ifndef DEST_H
 #define DEST_H
 
+#ifndef FRONTEND_PARSER
 #include "executor/tuptable.h"
 
 /* buffer size to use for command completion tags */
@@ -91,7 +92,6 @@ typedef enum {
     DestIntoRel,         /* results sent to relation (SELECT INTO) */
     DestCopyOut,         /* results sent to COPY TO code */
     DestSQLFunction,     /* results sent to SQL-language func mgr */
-    DestTransientRel,    /* results sent to transient relation */
     DestSPITupleAnalyze, /* results sent to SPI manager when analyze for table sample */
 
     DestTupleBroadCast,         /* results send to consumer thread in a broadcast way */
@@ -109,7 +109,7 @@ typedef enum {
     DestBatchLocalRoundRobin,   /* results send to consumer thread in a local roundrobin way */
 
     DestBatchHybrid,
-    DestTupleQueue              /* results sent to tuple queue */
+    DestTransientRel            /* results sent to transient relation */
 
 } CommandDest;
 
@@ -145,6 +145,8 @@ struct _DestReceiver {
 
     /* send sample tuple to coordinator for analyze */
     bool forAnalyzeSampleTuple;
+
+    MemoryContext tmpContext;
 };
 
 extern DestReceiver* None_Receiver; /* permanent receiver for DestNone */
@@ -163,4 +165,5 @@ extern void NullCommand(CommandDest dest);
 extern void ReadyForQuery(CommandDest dest);
 extern void ReadyForQuery_noblock(CommandDest dest, int timeout);
 
+#endif /* !FRONTEND_PARSER */
 #endif /* DEST_H */

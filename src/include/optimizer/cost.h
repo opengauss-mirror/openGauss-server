@@ -51,8 +51,6 @@
 #define LOCAL_RECEIVE_KDATA_COST 1.3 /* The receive cost for local stream */
 #define DEFAULT_SMP_THREAD_COST 1000 /* The cost for add a new thread */
 #define DEFAULT_STREAM_MULTIPLE 1.0
-#define DEFAULT_PARALLEL_TUPLE_COST 0.05
-#define DEFAULT_PARALLEL_SETUP_COST 1000.0
 
 #define DEFAULT_EFFECTIVE_CACHE_SIZE 16384 /* measured in pages */
 
@@ -86,8 +84,10 @@ extern void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, Par
 extern void cost_samplescan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info);
 extern void cost_cstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
 extern void cost_dfsscan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
+#ifdef ENABLE_MULTIPLE_NODES
 extern void cost_tsstorescan(Path *path, PlannerInfo *root, RelOptInfo *baserel);
-extern void cost_index(IndexPath* path, PlannerInfo* root, double loop_count, bool partial_path);
+#endif   /* ENABLE_MULTIPLE_NODES */
+extern void cost_index(IndexPath* path, PlannerInfo* root, double loop_count);
 extern void cost_bitmap_heap_scan(
     Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info, Path* bitmapqual, double loop_count);
 extern void cost_bitmap_and_node(BitmapAndPath* path, PlannerInfo* root);
@@ -96,7 +96,7 @@ extern void cost_bitmap_tree_node(Path* path, Cost* cost, Selectivity* selec);
 extern void cost_tidscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, List* tidquals);
 extern void cost_subqueryscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info);
 extern void cost_functionscan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
-extern void cost_valuesscan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
+extern void cost_valuesscan(Path* path, PlannerInfo* root, RelOptInfo* baserels);
 #ifdef PGXC
 extern void cost_remotequery(RemoteQueryPath* rqpath, PlannerInfo* root, RelOptInfo* rel);
 #endif
@@ -105,7 +105,6 @@ extern void cost_recursive_union(Plan* runion, Plan* nrterm, Plan* rterm);
 extern void cost_sort(Path* path, List* pathkeys, Cost input_cost, double tuples, int width, Cost comparison_cost,
     int sort_mem, double limit_tuples, bool col_store, int dop = 1, OpMemInfo* mem_info = NULL,
     bool index_sort = false);
-extern void cost_append(AppendPath *path);
 extern void cost_merge_append(Path* path, PlannerInfo* root, List* pathkeys, int n_streams, Cost input_startup_cost,
     Cost input_total_cost, double tuples);
 extern void cost_material(Path* path, Cost input_startup_cost, Cost input_total_cost, double tuples, int width);
@@ -127,14 +126,12 @@ extern void initial_cost_mergejoin(PlannerInfo* root, JoinCostWorkspace* workspa
 extern void final_cost_mergejoin(
     PlannerInfo* root, MergePath* path, JoinCostWorkspace* workspace, SpecialJoinInfo* sjinfo, bool hasalternative);
 extern void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, JoinType jointype, List* hashclauses,
-    Path* outer_path, Path* inner_path, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, int dop,
-    bool parallel_hash);
+    Path* outer_path, Path* inner_path, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, int dop);
 extern void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorkspace* workspace,
     SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, bool hasalternative, int dop);
 extern void cost_rescan(PlannerInfo* root, Path* path, Cost* rescan_startup_cost, /* output parameters */
     Cost* rescan_total_cost, OpMemInfo* mem_info);
 extern Cost cost_rescan_material(double rows, int width, OpMemInfo* mem_info, bool vectorized, int dop);
-extern void cost_gather(GatherPath *path, RelOptInfo *baserel, ParamPathInfo *param_info);
 extern void cost_subplan(PlannerInfo* root, SubPlan* subplan, Plan* plan);
 extern void cost_qual_eval(QualCost* cost, List* quals, PlannerInfo* root);
 extern void cost_qual_eval_node(QualCost* cost, Node* qual, PlannerInfo* root);
@@ -166,7 +163,7 @@ extern void set_rel_width(PlannerInfo* root, RelOptInfo* rel);
 extern void restore_hashjoin_cost(Path* path);
 extern void finalize_dml_cost(ModifyTable* plan);
 extern void copy_mem_info(OpMemInfo* dest, OpMemInfo* src);
-extern int columnar_get_col_width(Oid typid, int width, bool aligned = false);
+extern int columnar_get_col_width(int typid, int width, bool aligned = false);
 extern int get_path_actual_total_width(Path* path, bool vectorized, OpType type, int newcol = 0);
 
 extern void bernoulli_samplescangetsamplesize(PlannerInfo* root, RelOptInfo* baserel, List* paramexprs);
@@ -179,8 +176,6 @@ extern double estimate_hash_num_distinct(PlannerInfo* root, List* hashkey, Path*
     double local_ndistinct, double global_ndistinct, bool* usesinglestats);
 extern RelOptInfo* find_join_input_rel(PlannerInfo* root, Relids relids);
 extern double compute_sort_disk_cost(double input_bytes, double sort_mem_bytes);
-extern double compute_bitmap_pages(PlannerInfo *root, RelOptInfo *baserel,
-    Path *bitmapqual, double loop_count, Cost *cost, double *tuple, bool ispartitionedindex);
 
 extern double approx_tuple_count(PlannerInfo* root, JoinPath* path, List* quals);
 extern void set_rel_path_rows(Path* path, RelOptInfo* rel, ParamPathInfo* param_info);
@@ -193,7 +188,18 @@ extern double relation_byte_size(
     double tuples, int width, bool vectorized, bool aligned = true, bool issort = true, bool indexsort = false);
 extern MergeScanSelCache* cached_scansel(PlannerInfo* root, RestrictInfo* rinfo, PathKey* pathkey);
 
+extern double apply_random_page_cost_mod(double rand_page_cost, double seq_page_cost, int num_of_page);
+
 #define ES_DEBUG_LEVEL DEBUG2 /* debug level for extended statistic in optimizor */
+
+#define RANDOM_PAGE_COST(use_mod, rand_cost, seq_cost, pages) (use_mod ? \
+            apply_random_page_cost_mod(rand_cost, seq_cost, pages) : rand_cost)
+
+/* Logistic function */
+#define LOGISTIC_FUNC(variable, threshold, max_func_value, min_func_value, slope_factor) \
+            ((variable > threshold && variable > 0) ? max_func_value : \
+            2 * (max_func_value - min_func_value) / (1 + exp(-1 * slope_factor * variable)) \
+            - (max_func_value - 2 * min_func_value))
 
 enum es_type { ES_EMPTY = 0, ES_EQSEL = 1, ES_EQJOINSEL, ES_GROUPBY, ES_COMPUTEBUCKETSIZE };
 
@@ -210,6 +216,33 @@ struct es_bucketsize {
     double right_mcvfreq;
     List* left_hashkeys;
     List* right_hashkeys;
+};
+
+struct es_candidate {
+    es_type tag;
+    Bitmapset* relids;
+    Bitmapset* left_relids; /* for eqsel and groupby clause, only use left_XXX */
+    Bitmapset* right_relids;
+    Bitmapset* left_attnums;
+    Bitmapset* right_attnums;
+    float4 left_stadistinct; /* will be transfer to absolute value */
+    float4 right_stadistinct;
+    double left_first_mcvfreq; /* frequency of fist mcv, to calculate skew or bucket size */
+    double right_first_mcvfreq;
+    RelOptInfo* left_rel;
+    RelOptInfo* right_rel;
+    RangeTblEntry* left_rte;
+    RangeTblEntry* right_rte;
+    List* clause_group;
+    List* clause_map;
+    ExtendedStats* left_extended_stats;
+    ExtendedStats* right_extended_stats;   /* read from pg_statistic, where distinct value
+                                            * could be negative. (-1 means unique.)
+                                            */
+    List* pseudo_clause_list;              /* save the clause build by equivalence class and
+                                            * the original clause.
+                                            */
+    bool has_null_clause;                  /* if "is null" used in the clauses */
 };
 
 /*
@@ -233,33 +266,6 @@ public:
         Var* right_var;
     };
 
-    struct es_candidate {
-        es_type tag;
-        Bitmapset* relids;
-        Bitmapset* left_relids; /* for eqsel and groupby clause, only use left_XXX */
-        Bitmapset* right_relids;
-        Bitmapset* left_attnums;
-        Bitmapset* right_attnums;
-        float4 left_stadistinct; /* will be transfer to absolute value */
-        float4 right_stadistinct;
-        double left_first_mcvfreq; /* frequency of fist mcv, to calculate skew or bucket size */
-        double right_first_mcvfreq;
-        RelOptInfo* left_rel;
-        RelOptInfo* right_rel;
-        RangeTblEntry* left_rte;
-        RangeTblEntry* right_rte;
-        List* clause_group;
-        List* clause_map;
-        ExtendedStats* left_extended_stats;
-        ExtendedStats* right_extended_stats;   /* read from pg_statistic, where distinct value
-                                                * could be negative. (-1 means unique.)
-                                                */
-        List* pseudo_clause_list;              /* save the clause build by equivalence class and
-                                                * the original clause.
-                                                */
-        bool has_null_clause;                  /* if "is null" used in the clauses */
-    };
-
     ES_SELECTIVITY();
     virtual ~ES_SELECTIVITY();
     Selectivity calculate_selectivity(PlannerInfo* root_input, List* clauses_input, SpecialJoinInfo* sjinfo_input,
@@ -271,13 +277,18 @@ public:
 
 private:
     bool add_attnum(RestrictInfo* clause, es_candidate* temp) const;
+    void add_attnum_for_eqsel(es_candidate* temp, int attnum, Node* arg) const;
     void add_clause_map(es_candidate* es, int left_attnum, int right_attnum, Node* left_arg, Node* right_arg) const;
     bool build_es_candidate(RestrictInfo* clause, es_type type);
+    bool build_es_candidate_for_eqsel(es_candidate* es, Node* var, int attnum, bool left, RestrictInfo* clause);
     void build_pseudo_varinfo(es_candidate* es, STATS_EST_TYPE eType);
     void cal_bucket_size(es_candidate* es, es_bucketsize* bucket) const;
     Selectivity cal_eqsel(es_candidate* es);
+    Selectivity cal_eqjoinsel(es_candidate* es, JoinType jointype);
     Selectivity cal_eqjoinsel_inner(es_candidate* es);
     Selectivity cal_eqjoinsel_semi(es_candidate* es, RelOptInfo* inner_rel, bool inner_on_left);
+    void cal_stadistinct_eqsel(es_candidate* es);
+    bool cal_stadistinct_eqjoinsel(es_candidate* es);
     void clear_extended_stats(ExtendedStats* extended_stats) const;
     void clear_extended_stats_list(List* stats_list) const;
     ExtendedStats* copy_stats_ptr(ListCell* l) const;
@@ -303,12 +314,14 @@ private:
     void recheck_candidate_list();
     void remove_candidate(es_candidate* es);
     void remove_attnum(es_candidate* es, int dump_attnum);
+    void remove_members_without_es_stats(int max_matched, int num_members, es_candidate* es);
     void replace_clause(Datum* old_clause, Datum* new_clause) const;
     void report_no_stats(Oid relid_oid, Bitmapset* attnums) const;
     void save_selectivity(
         es_candidate* es, double left_join_ratio, double right_join_ratio, bool save_semi_join = false);
     void set_up_attnum_order(es_candidate* es, int* attnum_order, bool left) const;
     bool try_equivalence_class(es_candidate* es);
+    void setup_es(es_candidate* es, es_type type, RestrictInfo* clause);
 };
 
 #endif /* COST_H */

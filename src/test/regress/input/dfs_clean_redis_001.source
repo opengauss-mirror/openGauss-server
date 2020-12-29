@@ -1,0 +1,3 @@
+\d+
+drop tablespace if exists hdfs_ts;
+\! rm -rf @abs_srcdir@/dfs_init_redis_001

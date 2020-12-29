@@ -83,11 +83,6 @@ static PID_TYPE ecpg_start_test(
     snprintf(inprg, sizeof(inprg), "%s/%s", inputdir, testname);
 
     testname_dash = strdup(testname);
-    if (testname_dash == NULL) {
-        fprintf(stderr, "out of memory\n");
-        exit(1);
-    }
-
     replace_string(testname_dash, "/", "-");
     snprintf(expectfile_stdout, sizeof(expectfile_stdout), "%s/expected/%s.stdout", outputdir, testname_dash);
     snprintf(expectfile_stderr, sizeof(expectfile_stderr), "%s/expected/%s.stderr", outputdir, testname_dash);
@@ -98,25 +93,10 @@ static PID_TYPE ecpg_start_test(
      * not occupy more space than the replaced one.
      */
     outfile_stdout = strdup(expectfile_stdout);
-    if (outfile_stdout == NULL) {
-        fprintf(stderr, "out of memory\n");
-        exit(1);
-    }
-
     replace_string(outfile_stdout, "/expected/", "/results/");
     outfile_stderr = strdup(expectfile_stderr);
-    if (outfile_stderr == NULL) {
-        fprintf(stderr, "out of memory\n");
-        exit(1);
-    }
-
     replace_string(outfile_stderr, "/expected/", "/results/");
     outfile_source = strdup(expectfile_source);
-    if (outfile_source == NULL) {
-        fprintf(stderr, "out of memory\n");
-        exit(1);
-    }
-
     replace_string(outfile_source, "/expected/", "/results/");
 
     add_stringlist_item(resultfiles, outfile_stdout);

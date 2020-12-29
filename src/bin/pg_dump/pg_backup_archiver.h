@@ -392,6 +392,7 @@ extern void encryptSimpleFile(
 
 extern bool getAESLabelFile(const char* dirName, const char* labelName, const char* fMode);
 extern bool checkAndCreateDir(const char* dirName);
+extern bool CheckIfStandby(struct Archive *fout);
 
 #endif
 

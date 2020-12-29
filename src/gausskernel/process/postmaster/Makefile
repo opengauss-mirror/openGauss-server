@@ -22,7 +22,7 @@ subdir = src/gausskernel/process/postmaster
 top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
 
-override CPPFLAGS := -I$(LIBOPENSSL_INCLUDE_PATH) $(CPPFLAGS)
+override CPPFLAGS := -I$(LIBOPENSSL_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) $(CPPFLAGS)
 
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"
@@ -32,9 +32,9 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 OBJS = autovacuum.o bgwriter.o fork_process.o pgarch.o pgstat.o postmaster.o gaussdb_version.o\
-	startup.o syslogger.o walwriter.o walwriterauxiliary.o checkpointer.o pgaudit.o alarmchecker.o bgworker.o\
+	startup.o syslogger.o walwriter.o checkpointer.o pgaudit.o alarmchecker.o \
 	twophasecleaner.o aiocompleter.o fencedudf.o lwlockmonitor.o cbmwriter.o remoteservice.o pagewriter.o\
-	$(top_builddir)/src/lib/config/libconfig.a
+	barrier_creator.o $(top_builddir)/src/lib/config/libconfig.a
 
 include $(top_srcdir)/src/gausskernel/common.mk
 

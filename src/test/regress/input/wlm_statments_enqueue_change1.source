@@ -1,0 +1,81 @@
+--create resource pool success.
+CREATE RESOURCE POOL respool_temp15;
+CREATE RESOURCE POOL respool_temp15;
+ALTER RESOURCE POOL respool_temp15;
+ALTER RESOURCE POOL xxx;
+CREATE RESOURCE POOL respool_temp16 WITH (MEM_PERCENT=10);
+CREATE RESOURCE POOL respool_temp14 WITH (CPU_AFFINITY=10);
+CREATE RESOURCE POOL respool_temp17 WITH (XXX=10);
+CREATE RESOURCE POOL respool_temp17 WITH (active_statements=-10);
+CREATE RESOURCE POOL respool_temp17 WITH (active_statements=1,active_statements=2);
+CREATE RESOURCE POOL respool_temp17 WITH (max_dop=-1);
+CREATE RESOURCE POOL respool_temp17 WITH (max_dop=1,max_dop=2);
+CREATE RESOURCE POOL respool_temp17 WITH (memory_limit='1.5GB');
+CREATE RESOURCE POOL respool_temp17 WITH (memory_limit='1GB',memory_limit='2GB');
+CREATE RESOURCE POOL respool_temp17;
+CREATE WORKLOAD GROUP group_temp15;
+CREATE WORKLOAD GROUP group_temp15;
+CREATE WORKLOAD GROUP WLGROUP_15 USING RESOURCE POOL "xxx";
+CREATE WORKLOAD GROUP group_temp16 WITH (ACT_STATEMENTS=-1);
+CREATE WORKLOAD GROUP group_temp16 WITH (xxx=-1);
+CREATE WORKLOAD GROUP group_temp16 WITH (ACT_STATEMENTS=1,ACT_STATEMENTS=2);
+ALTER WORKLOAD GROUP group_temp15;
+ALTER WORKLOAD GROUP xxx;
+ALTER WORKLOAD GROUP group_temp15 USING RESOURCE POOL respool_temp15;
+CREATE APP WORKLOAD GROUP MAPPING app1;
+CREATE APP WORKLOAD GROUP MAPPING pgxc;
+CREATE APP WORKLOAD GROUP MAPPING app1;
+ALTER APP WORKLOAD GROUP MAPPING app1;
+ALTER APP WORKLOAD GROUP MAPPING xxx;
+ALTER APP WORKLOAD GROUP MAPPING app1 WITH (WORKLOAD_GPNAME='group_temp15');
+CREATE APP WORKLOAD GROUP MAPPING app2 WITH (WORKLOAD_GPNAME='xxx');
+CREATE APP WORKLOAD GROUP MAPPING app2 WITH (WORKLOAD_GPNAME='group_temp15',WORKLOAD_GPNAME='group_temp16');
+CREATE APP WORKLOAD GROUP MAPPING app2 WITH (xxx='xxx');
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "ALTER RESOURCE POOL respool_temp16 WITH (control_group=\"class1:wg1\");" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "ALTER RESOURCE POOL respool_temp17 WITH (control_group=\"Rush\");" > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -c -S class1 -G wg1 -g 20 > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "set cgroup_name=\"class1:Rush\";select * from pg_resource_pool;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "set cgroup_name=\"class1:wg1\";select * from pg_resource_pool;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "ALTER RESOURCE POOL respool_temp17 WITH (control_group=\"class1:wg1\");" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "set cgroup_name=\"High\"; CREATE RESOURCE POOL respool_temp18; set cgroup_name=\"Low\"; DROP RESOURCE POOL respool_temp18;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "set cgroup_name=\"class2:Rush\";select * from pg_resource_pool;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "set cgroup_name=\"class1:wg2\";select * from pg_resource_pool;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "set cgroup_name=\"rush1\";select * from pg_resource_pool;select * from pg_workload_group;" > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -d -S class1 -G wg1 -g 20 > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -d -S class1 -G wg1 -g 20 > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -d -S class1 > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -d -S class1 > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pg_session_wlmstat;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pg_wlm_statistics;" > /dev/null 2>&1
+--create data tables.
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pg_control_group_config;" > /dev/null 2>&1
+
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -c -N class1 -F 20 > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -c -N class1 -d > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_wlm_switch_cgroup(1234567890, 'class1:wg2');" > /dev/null 2>&1
+
+select * from pg_shared_memctx_detail('ProcessMemory');
+select * from pg_shared_memctx_detail('');
+select * from pg_shared_memctx_detail('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+
+select * from pg_stat_get_mem_mbytes_reserved(-1);
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_stat_get_mem_mbytes_reserved(threadid) from pg_session_wlmstat;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_wlm_get_session_info(123456);" > /dev/null 2>&1
+
+select * from gs_wlm_session_info;
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_wlm_cgroup_info;" > /dev/null 2>&1
+
+--drop resource pool success.
+DROP WORKLOAD GROUP group_temp15;
+DROP APP WORKLOAD GROUP MAPPING app1;
+DROP WORKLOAD GROUP group_temp15;
+DROP RESOURCE POOL respool_temp15;
+DROP RESOURCE POOL xxx;
+DROP RESOURCE POOL IF EXISTS xxx;
+DROP WORKLOAD GROUP xxx;
+DROP WORKLOAD GROUP IF EXISTS xxx;
+DROP APP WORKLOAD GROUP MAPPING xxx;
+DROP APP WORKLOAD GROUP MAPPING IF EXISTS xxx;
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "DROP RESOURCE POOL respool_temp16;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "DROP RESOURCE POOL respool_temp17;" > /dev/null 2>&1

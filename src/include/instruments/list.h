@@ -27,7 +27,7 @@
 #define LIST_H
 #include "c.h"
 #include "lib/stringinfo.h"
-/* top dn info */
+/* top dn info*/
 typedef struct WLMTopDnInfo {
     char nodeName[NAMEDATALEN];
     int64 data;

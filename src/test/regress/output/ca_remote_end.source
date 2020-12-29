@@ -1,0 +1,12 @@
+drop server agg_server_remote cascade;
+NOTICE:  drop cascades to 7 other objects
+DETAIL:  drop cascades to foreign table aggtable1
+drop cascades to foreign table implicit_cast
+drop cascades to foreign table lineitem
+drop cascades to foreign table household_demographics
+drop cascades to foreign table multdistr_02
+drop cascades to foreign table multdistr_05
+drop cascades to foreign table multdistr_07
+drop database test;
+drop user test;
+drop user test2;

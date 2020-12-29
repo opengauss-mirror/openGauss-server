@@ -1,0 +1,35 @@
+\! chmod 600 @abs_srcdir@/sslcert/*
+\! cp @abs_srcdir@/sslcert/server.*  @abs_srcdir@/tmp_check/coordinator1 
+\! cp @abs_srcdir@/sslcert/cacert.pem  @abs_srcdir@/tmp_check/coordinator1
+\! export PGSSLMODE=verify-ca
+\! export PGSSLROOTCERT=@abs_srcdir@/sslcert/cacert.pem
+\! @abs_bindir@/gs_guc set -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c ssl=on >/dev/null 2>&1
+\! @abs_bindir@/gs_guc set -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "ssl_ca_file='cacert.pem'" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc set -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "ssl_cert_file='server.crt'" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc set -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "ssl_key_file='server.key'" >/dev/null 2>&1
+\! sed -i 's#host.*all.*all.*127.0.0.1/32.*#hostssl    all             all             127.0.0.1/32               sha256#g' @abs_srcdir@/tmp_check/coordinator1/pg_hba.conf
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator > /dev/null 
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator > /dev/null
+\! sleep 5
+\! @abs_bindir@/gsql -d postgres -r -m -h 127.0.0.1 -p @portstring@ -W gauss@123 -c 'show ssl'
+ ssl 
+-----
+ on
+(1 row)
+
+\! rm -rf @abs_srcdir@/tmp_check/coordinator1/server.*
+\! rm -rf @abs_srcdir@/tmp_check/coordinator1/cacert.pem
+\! @abs_bindir@/gs_guc set -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c  ssl=off >/dev/null 2>&1
+\! sed -i 's/^ssl_ca_file/#&/' @abs_srcdir@/tmp_check/coordinator1/postgresql.conf
+\! sed -i 's/^ssl_cert_file/#&/' @abs_srcdir@/tmp_check/coordinator1/postgresql.conf
+\! sed -i 's/^ssl_key_file/#&/' @abs_srcdir@/tmp_check/coordinator1/postgresql.conf
+\! sed -i 's#hostssl.*all.*all.*127.0.0.1/32.*sha256#host    all             all             127.0.0.1/32            sha256#g' @abs_srcdir@/tmp_check/coordinator1/pg_hba.conf
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator > /dev/null
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator > /dev/null
+\! sleep 5
+\! @abs_bindir@/gsql -d postgres -h 127.0.0.1 -p @portstring@ -W gauss@123 -c 'show ssl'
+ ssl 
+-----
+ off
+(1 row)
+

@@ -4,6 +4,7 @@
  *	  POSTGRES heap access method input/output definitions.
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -17,7 +18,7 @@
 #include "access/heapam.h"
 #include "access/htup.h"
 #include "utils/relcache.h"
-#include "storage/buf.h"
+#include "storage/buf/buf.h"
 
 /*
  * state for bulk inserts --- private to heapam.c and hio.c
@@ -36,5 +37,6 @@ extern void RelationPutHeapTuple(Relation relation, Buffer buffer, HeapTuple tup
 extern Buffer RelationGetBufferForTuple(Relation relation, Size len, Buffer otherBuffer, int options,
     BulkInsertState bistate, Buffer* vmbuffer, Buffer* vmbuffer_other, BlockNumber end_rel_block);
 extern Buffer RelationGetNewBufferForBulkInsert(Relation relation, Size len, Size dictSize, BulkInsertState bistate);
+extern void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate);
 
 #endif /* HIO_H */

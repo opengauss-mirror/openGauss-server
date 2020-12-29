@@ -18,13 +18,14 @@
 #include "c.h"
 
 #include "access/xlogdefs.h"
-
+#include "libpq/libpq-fe.h"
 #include "filemap.h"
 
 #define NAMEDATALEN 64
 
 /* save the source slot_name */
 extern char source_slot_name[NAMEDATALEN];
+extern PGconn* conn;
 
 /*
  * Common interface. Calls the copy or libpq method depending on global
@@ -49,7 +50,7 @@ typedef void (*process_file_callback_t)(const char* path, file_type_t type, size
 extern BuildErrorCode traverse_datadir(const char* datadir, process_file_callback_t callback);
 
 extern void get_source_slotname(void);
-extern BuildErrorCode backupFileMap(filemap_t* map, const char* lastoff);
+extern BuildErrorCode backupFileMap(filemap_t* map);
 
 extern bool checkDummyStandbyConnection(void);
 

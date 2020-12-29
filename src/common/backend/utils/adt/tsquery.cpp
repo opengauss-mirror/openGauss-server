@@ -98,7 +98,7 @@ static char* get_modifiers(const char* buf, int16* weight, bool* prefix)
 /*
  * token types for parsing
  */
-enum ts_tokentype { PT_END = 0, PT_ERR = 1, PT_VAL = 2, PT_OPR = 3, PT_OPEN = 4, PT_CLOSE = 5 };
+typedef enum { PT_END = 0, PT_ERR = 1, PT_VAL = 2, PT_OPR = 3, PT_OPEN = 4, PT_CLOSE = 5 } ts_tokentype;
 
 /*
  * get token from query string
@@ -117,7 +117,8 @@ static ts_tokentype gettoken_query(
             case WAITFIRSTOPERAND:
             case WAITOPERAND:
                 if (t_iseq(state->buf, '!')) {
-                    (state->buf)++; /* can safely ++, t_iseq guarantee that pg_mblen()==1 */
+                    (state->buf)++; /* can safely ++, t_iseq guarantee
+                                     * that pg_mblen()==1 */
                     *opera = OP_NOT;
                     state->state = WAITOPERAND;
                     return PT_OPR;
@@ -197,6 +198,7 @@ void pushOperator(TSQueryParserState state, int8 oper)
     tmp->type = QI_OPR;
     tmp->oper = oper;
     /* left is filled in later with findoprnd */
+
     state->polstr = lcons(tmp, state->polstr);
 }
 
@@ -280,51 +282,51 @@ void pushStop(TSQueryParserState state)
  *
  * See parse_tsquery for explanation of pushval.
  */
-static void makepol(TSQueryParserState state, PushFunction push_val, Datum opaque)
+static void makepol(TSQueryParserState state, PushFunction pushval, Datum opaque)
 {
     int8 opera = 0;
     ts_tokentype type;
-    int len_val = 0;
-    char* str_val = NULL;
-    int8 op_stack[STACKDEPTH];
-    int len_stack = 0;
+    int lenval = 0;
+    char* strval = NULL;
+    int8 opstack[STACKDEPTH];
+    int lenstack = 0;
     int16 weight = 0;
     bool prefix = false;
 
     /* since this function recurses, it could be driven to stack overflow */
     check_stack_depth();
 
-    while ((type = gettoken_query(state, &opera, &len_val, &str_val, &weight, &prefix)) != PT_END) {
+    while ((type = gettoken_query(state, &opera, &lenval, &strval, &weight, &prefix)) != PT_END) {
         switch (type) {
             case PT_VAL:
-                push_val(opaque, state, str_val, len_val, weight, prefix);
-                while (len_stack && (op_stack[len_stack - 1] == OP_AND || op_stack[len_stack - 1] == OP_NOT)) {
-                    len_stack--;
-                    pushOperator(state, op_stack[len_stack]);
+                pushval(opaque, state, strval, lenval, weight, prefix);
+                while (lenstack && (opstack[lenstack - 1] == OP_AND || opstack[lenstack - 1] == OP_NOT)) {
+                    lenstack--;
+                    pushOperator(state, opstack[lenstack]);
                 }
                 break;
             case PT_OPR:
-                if (len_stack && opera == OP_OR)
+                if (lenstack && opera == OP_OR)
                     pushOperator(state, OP_OR);
                 else {
-                    if (len_stack == STACKDEPTH) /* internal error */
+                    if (lenstack == STACKDEPTH) /* internal error */
                         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("tsquery stack too small")));
-                    op_stack[len_stack] = opera;
-                    len_stack++;
+                    opstack[lenstack] = opera;
+                    lenstack++;
                 }
                 break;
             case PT_OPEN:
-                makepol(state, push_val, opaque);
+                makepol(state, pushval, opaque);
 
-                while (len_stack && (op_stack[len_stack - 1] == OP_AND || op_stack[len_stack - 1] == OP_NOT)) {
-                    len_stack--;
-                    pushOperator(state, op_stack[len_stack]);
+                while (lenstack && (opstack[lenstack - 1] == OP_AND || opstack[lenstack - 1] == OP_NOT)) {
+                    lenstack--;
+                    pushOperator(state, opstack[lenstack]);
                 }
                 break;
             case PT_CLOSE:
-                while (len_stack) {
-                    len_stack--;
-                    pushOperator(state, op_stack[len_stack]);
+                while (lenstack) {
+                    lenstack--;
+                    pushOperator(state, opstack[lenstack]);
                 };
                 return;
             case PT_ERR:
@@ -333,9 +335,9 @@ static void makepol(TSQueryParserState state, PushFunction push_val, Datum opaqu
                     ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("syntax error in tsquery: \"%s\"", state->buffer)));
         }
     }
-    while (len_stack) {
-        len_stack--;
-        pushOperator(state, op_stack[len_stack]);
+    while (lenstack) {
+        lenstack--;
+        pushOperator(state, opstack[lenstack]);
     }
 }
 
@@ -347,8 +349,9 @@ static void findoprnd_recurse(QueryItem* ptr, uint32* pos, int nnodes)
     if (*pos >= (uint32)nnodes)
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("malformed tsquery: operand not found")));
 
-    if (ptr[*pos].type == QI_VAL || ptr[*pos].type == QI_VALSTOP) {
-        /* need to handle VALSTOP here, they haven't been cleaned away yet. */
+    if (ptr[*pos].type == QI_VAL || ptr[*pos].type == QI_VALSTOP) /* need to handle VALSTOP here, they
+                                                                   * haven't been cleaned away yet. */
+    {
         (*pos)++;
     } else {
         Assert(ptr[*pos].type == QI_OPR);
@@ -400,19 +403,19 @@ static void findoprnd(QueryItem* ptr, int size)
  * The returned query might contain QI_STOPVAL nodes. The caller is responsible
  * for cleaning them up (with clean_fakeval)
  */
-TSQuery parse_tsquery(char* buf, PushFunction push_val, Datum opaque, bool is_plain)
+TSQuery parse_tsquery(char* buf, PushFunction pushval, Datum opaque, bool isplain)
 {
-    struct TSQueryParserStateData state = {};
+    struct TSQueryParserStateData state;
     int i;
     TSQuery query;
-    int common_len;
+    int commonlen;
     QueryItem* ptr = NULL;
     ListCell* cell = NULL;
 
     /* init state */
     state.buffer = buf;
     state.buf = buf;
-    state.state = (is_plain) ? WAITSINGLEOPERAND : WAITFIRSTOPERAND;
+    state.state = (isplain) ? WAITSINGLEOPERAND : WAITFIRSTOPERAND;
     state.count = 0;
     state.polstr = NIL;
 
@@ -426,7 +429,7 @@ TSQuery parse_tsquery(char* buf, PushFunction push_val, Datum opaque, bool is_pl
     *(state.curop) = '\0';
 
     /* parse query & make polish notation (postfix, but in reverse order) */
-    makepol(&state, push_val, opaque);
+    makepol(&state, pushval, opaque);
 
     close_tsvector_parser(state.valstate);
 
@@ -440,14 +443,14 @@ TSQuery parse_tsquery(char* buf, PushFunction push_val, Datum opaque, bool is_pl
 
     if (TSQUERY_TOO_BIG(list_length(state.polstr), state.sumlen))
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("tsquery is too large")));
-    common_len = COMPUTESIZE(list_length(state.polstr), state.sumlen);
+    commonlen = COMPUTESIZE(list_length(state.polstr), state.sumlen);
 
     /* Pack the QueryItems in the final TSQuery struct to return to caller */
-    query = (TSQuery)palloc0(common_len);
-    SET_VARSIZE(query, common_len);
+    query = (TSQuery)palloc0(commonlen);
+    SET_VARSIZE(query, commonlen);
     query->size = list_length(state.polstr);
     ptr = GETQUERY(query);
-    int prt_len = common_len - HDRSIZETQ;
+    int prt_len = commonlen - HDRSIZETQ;
 
     /* Copy QueryItems to TSQuery */
     i = 0;
@@ -778,6 +781,7 @@ Datum tsqueryrecv(PG_FUNCTION_ARGS)
             val_len = strlen(val);
 
             /* Sanity checks */
+
             if (weight > 0xF)
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_ARGUMENT_FOR_LOG), errmsg("invalid tsquery: invalid weight bitmap")));
@@ -792,6 +796,7 @@ Datum tsqueryrecv(PG_FUNCTION_ARGS)
                         errmsg("invalid tsquery: total operand length exceeded")));
 
             /* Looks valid. */
+
             INIT_CRC32(valcrc);
             COMP_CRC32(valcrc, val, val_len);
             FIN_CRC32(valcrc);
@@ -830,10 +835,13 @@ Datum tsqueryrecv(PG_FUNCTION_ARGS)
     }
 
     /* Enlarge buffer to make room for the operand values. */
-    query = (TSQuery)repalloc(query, len + datalen);
+    query = (TSQuery)repalloc(query, (Size)len + (Size)datalen);
     item = GETQUERY(query);
     ptr = GETOPERAND(query);
-    AssertEreport(len == (int)HDRSIZETQ + (int)(((TSQuery)(query))->size * sizeof(QueryItem)), MOD_OPT, "");
+    if (len != (int)HDRSIZETQ + (int)(((TSQuery)(query))->size * sizeof(QueryItem))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid len: %d", len)));
+    }
     int ptr_len = datalen;
 
     /*
@@ -883,6 +891,7 @@ Datum tsquerytree(PG_FUNCTION_ARGS)
     }
 
     q = clean_NOT(GETQUERY(query), &len);
+
     if (q == NULL) {
         res = cstring_to_text("T");
     } else {

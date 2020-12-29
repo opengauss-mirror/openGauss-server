@@ -13,7 +13,7 @@ CREATE TABLE catalog_page
     cp_type                   varchar(100)                 
 ) 
  ;
-COPY catalog_page FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/catalog_page.txt' DELIMITER as ',' NULL as '' ;
+COPY catalog_page FROM '@abs_srcdir@/data/catalog_page.txt' DELIMITER as ',' NULL as '' ;
 CREATE TABLE promotion
 (
     p_promo_sk                integer               not null,
@@ -37,7 +37,7 @@ CREATE TABLE promotion
     p_discount_active         char(1)                       
 ) 
  ;
-COPY promotion FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/promotion.txt' DELIMITER as ',' NULL as '' ;
+COPY promotion FROM '@abs_srcdir@/data/promotion.txt' DELIMITER as ',' NULL as '' ;
  
 ANALYZE catalog_page;
 ANALYZE promotion;
@@ -157,7 +157,7 @@ i_manager_a integer ,
 i_product_b char(50)
 )with(orientation='column')
  ;
-copy hdfs_pro_cursor_002_tmp from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/item1.data' DELIMITER as ',' NULL as '' ;
+copy hdfs_pro_cursor_002_tmp from '@abs_srcdir@/data/item1.data' DELIMITER as ',' NULL as '' ;
 set default_storage_nodegroup = gp_8;
 create table hdfs_pro_cursor_002_1 (like hdfs_pro_cursor_002_tmp);
 reset default_storage_nodegroup;

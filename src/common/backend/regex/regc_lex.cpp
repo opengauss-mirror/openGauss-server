@@ -326,8 +326,9 @@ static int next(struct vars* v)
     chr c;
 
     /* errors yield an infinite sequence of failures */
-    if (ISERR())
+    if (ISERR()) {
         return 0; /* the error has set nexttype to EOS */
+    }
 
     /* remember flavor of last token */
     v->lasttype = v->nexttype;

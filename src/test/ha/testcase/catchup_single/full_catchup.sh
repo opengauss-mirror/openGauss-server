@@ -21,7 +21,7 @@ else
 	exit 1
 fi
 stop_dummystandby
-gs_guc reload -D $data_dir/datanode1 -c "wait_dummy_time=1"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "wait_dummy_time=1"
 #use full catchup if we don't have dummy now
 start_standby
 sleep 10
@@ -59,7 +59,7 @@ else
 	echo "$failed_keyword"
 	exit 1
 fi
-gs_guc reload -D $data_dir/datanode1 -c "wait_dummy_time=300"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "wait_dummy_time=300"
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test1;"
 }
 

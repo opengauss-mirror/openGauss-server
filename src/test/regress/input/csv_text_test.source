@@ -1,0 +1,42 @@
+--hdfs表支持复制表
+CREATE SERVER hdfs_server_test FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server hdfs_server_test
+options(
+format 'csv',
+header 'true',
+delimiter '|',
+foldername '/gaussdbcheck/csv_test/',
+checkencoding 'high',
+--totalrows '200',
+encoding 'utf-8'
+) with err_table 
+distribute by replication;
+
+--hdfsde csv\text支持分区表
+drop foreign table part_lineitem_00;
+Create foreign table part_lineitem_00 (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT,
+ part int)
+SERVER hdfs_server_test OPTIONS(format 'csv', foldername '/user/hive/warehouse/mppdb_small.db/lineitem_small_part_csv/')
+distribute by roundrobin
+partition by (part);
+
+select * from part_lineitem_00 order by 1, 2, 3, 4;
+
+drop server hdfs_server_test cascade;

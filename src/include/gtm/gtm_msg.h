@@ -3,6 +3,7 @@
  * gtm_msg.h
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2009, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
@@ -37,8 +38,8 @@ typedef enum GTM_MessageType {
     MSG_BKUP_TXN_BEGIN,                 /* Backup of MSG_TXN_BEGIN */
     MSG_TXN_BEGIN_GETGXID,              /* Start a new transaction and get GXID */
     MSG_BKUP_TXN_BEGIN_GETGXID,         /* Backup of MSG_TXN_BEGIN_GETGXID */
-    MSG_BKUP_GTM_CONTROL_FILE_GXID,     /* Backup of gtm control file gxid */
-    MSG_BKUP_GTM_CONTROL_FILE_TIMELINE, /* Backup of gtm control file timeline */
+    MSG_BKUP_GTM_CONTROL_FILE_GXID,     /*Backup of gtm control file gxid */
+    MSG_BKUP_GTM_CONTROL_FILE_TIMELINE, /*Backup of gtm control file timeline */
     MSG_TXN_BEGIN_GETGXID_MULTI,        /* Start multiple new transactions and get GXIDs */
     MSG_BKUP_TXN_BEGIN_GETGXID_MULTI,   /* Backup of MSG_TXN_BEGIN_GETGXID_MULTI */
     MSG_TXN_START_PREPARED,             /* Begins to prepare a transation for commit */
@@ -63,7 +64,7 @@ typedef enum GTM_MessageType {
     MSG_BKUP_TXN_GET_GXID,
     MSG_TXN_GET_NEXT_GXID,   /* Get next GXID */
     MSG_TXN_GET_NEXT_CSN,    /* Get next CSN without commit */
-    MSG_TXN_GET_TIMELINE,    /* Get gtm timeline */
+    MSG_TXN_GET_TIMELINE,    /* Get gtm timeline*/
     MSG_TXN_GET_GLOBAL_XMIN, /* Get global xmin */
     MSG_TXN_GXID_LIST,
     MSG_SET_VACUUM_FLAG,
@@ -75,8 +76,8 @@ typedef enum GTM_MessageType {
     MSG_SEQUENCE_GET_NEXT_UUID, /* Get sequuid for issuring sequence */
     MSG_SEQUENCE_UUID,          /* Create UUID matched with seqKey */
     MSG_BKUP_SEQUENCE_UUID,     /* Backup of MSG_SEQUENCE_UUID */
-    MSG_BKUP_GTM_UUID,          /* Backup of gtm control file seq_uuid */
-    MSG_SEQUENCE_INIT,          /* Initialize a new global sequence =41 */
+    MSG_BKUP_GTM_UUID,          /* Backup of gtm control file seq_uuid*/
+    MSG_SEQUENCE_INIT,          /* Initialize a new global sequence =41*/
     MSG_BKUP_SEQUENCE_INIT,     /* Backup of MSG_SEQUENCE_INIT */
     MSG_SEQUENCE_GET_NEXT,      /* Get the next sequence value of sequence */
     MSG_BKUP_SEQUENCE_GET_NEXT, /* Backup of MSG_SEQUENCE_GET_NEXT */
@@ -86,7 +87,7 @@ typedef enum GTM_MessageType {
     MSG_SEQUENCE_RESET,         /* Reset the sequence */
     MSG_BKUP_SEQUENCE_RESET,    /* Backup of MSG_SEQUENCE_RESET */
 
-    MSG_SEQUENCE_CLOSE,                    /* Close a previously inited sequence 50 */
+    MSG_SEQUENCE_CLOSE,                    /* Close a previously inited sequence 50*/
     MSG_BKUP_SEQUENCE_CLOSE,               /* Backup of MSG_SEQUENCE_CLOSE */
     MSG_SEQUENCE_RENAME,                   /* Rename a sequence */
     MSG_BKUP_SEQUENCE_RENAME,              /* Backup of MSG_SEQUENCE_RENAME */
@@ -95,15 +96,15 @@ typedef enum GTM_MessageType {
     MSG_SEQUENCE_LIST,                     /* Get a list of sequences */
     MSG_TXN_GET_STATUS,                    /* Get status of a given transaction */
     MSG_TXN_GET_ALL_PREPARED,              /* Get information about all outstanding
-                               * prepared transactions */
+                                            * prepared transactions */
     MSG_TXN_BEGIN_GETGXID_AUTOVACUUM,      /* Start a new transaction and get GXID for autovacuum */
     MSG_BKUP_TXN_BEGIN_GETGXID_AUTOVACUUM, /* Backup of MSG_TXN_BEGIN_GETGXID_AUTOVACUUM */
     MSG_DATA_FLUSH,                        /* flush pending data */
     MSG_BACKEND_DISCONNECT,                /* tell GTM that the backend diconnected from the proxy */
     MSG_BARRIER,                           /* Tell the barrier was issued */
     MSG_BKUP_BARRIER,                      /* Backup barrier to standby */
-    MSG_BEGIN_SWITCHOVER,                  /* Tell primary GTM to do switchover */
-    MSG_END_SWITCHOVER,                    /* Tell primary GTM to do switchover */
+    MSG_BEGIN_SWITCHOVER,                  /*Tell primary GTM to do switchover*/
+    MSG_END_SWITCHOVER,                    /*Tell primary GTM to do switchover*/
     MSG_QUERY_GTM_STATUS,
     MSG_SET_GTM_SYNCMODE,
     MSG_CHECK_REMOTE_ROLE,
@@ -114,18 +115,18 @@ typedef enum GTM_MessageType {
     MSG_BKUP_TXN_WORKLOAD_RESERVE_MEM, /*  Backup of MSG_TXN_WORKLOAD_RESERVE_MEM */
     MSG_TXN_WORKLOAD_RELEASE_MEM,      /* return to WLM the memory reserved after execution is done */
     MSG_BKUP_TXN_WORKLOAD_RELEASE_MEM, /* Backup of MSG_TXN_WORKLOAD_RELEASE_MEM */
-    MSG_WLM_RESOURCEPOOL_CREATE,       /* create resource pool on gtm */
-    MSG_WLM_RESOURCEPOOL_UPDATE,       /* update resource pool on gtm */
-    MSG_WLM_RESOURCEPOOL_DELETE,       /* delete resource pool on gtm */
-    MSG_WLM_RESOURCEPOOL_INIT,         /* initialize resource pool list on gtm */
+    MSG_WLM_RESOURCEPOOL_CREATE,       /*create resource pool on gtm*/
+    MSG_WLM_RESOURCEPOOL_UPDATE,       /*update resource pool on gtm*/
+    MSG_WLM_RESOURCEPOOL_DELETE,       /*delete resource pool on gtm*/
+    MSG_WLM_RESOURCEPOOL_INIT,         /*initialize resource pool list on gtm*/
     MSG_CHECK_NEXT_GXID,
-    MSG_BKUP_GTM_CONTROL_FILE_SEQUENCE, /* Backup of gtm control file sequence */
+    MSG_BKUP_GTM_CONTROL_FILE_SEQUENCE, /*Backup of gtm control file sequence*/
 
     MSG_HOTPATCH,
 
-    MSG_TXN_GET_NEXT_CSN_LITE, /* gtm-lite commit csn */
-    MSG_SNAPSHOT_GET_LITE,     /* Get a GTMLite global snapshot */
-    MSG_GET_GTM_LITE_STATUS,   /* Get the status of gtm lite */
+    MSG_TXN_GET_NEXT_CSN_LITE,          /* gtm-lite commit csn */
+    MSG_SNAPSHOT_GET_LITE,              /* Get a GTMLite global snapshot */
+    MSG_GET_GTM_LITE_STATUS,            /* Get the status of gtm lite */
     /*
      * Must be at the end
      */
@@ -166,10 +167,10 @@ typedef enum GTM_ResultType {
     TXN_WORKLOAD_INIT_RESULT,
     TXN_WORKLOAD_RESERVE_MEM_RESULT,
     TXN_WORKLOAD_RELEASE_MEM_RESULT,
-    WLM_RESOURCEPOOL_CREATE_RESULT, /* create resource pool on gtm */
-    WLM_RESOURCEPOOL_UPDATE_RESULT, /* update resource pool on gtm */
-    WLM_RESOURCEPOOL_DELETE_RESULT, /* delete resource pool on gtm */
-    WLM_RESOURCEPOOL_INIT_RESULT,   /* initialize resource pool list on gtm */
+    WLM_RESOURCEPOOL_CREATE_RESULT, /*create resource pool on gtm*/
+    WLM_RESOURCEPOOL_UPDATE_RESULT, /*update resource pool on gtm*/
+    WLM_RESOURCEPOOL_DELETE_RESULT, /*delete resource pool on gtm*/
+    WLM_RESOURCEPOOL_INIT_RESULT,   /*initialize resource pool list on gtm*/
 
     TXN_GXID_LIST_RESULT,
     SNAPSHOT_GET_RESULT,

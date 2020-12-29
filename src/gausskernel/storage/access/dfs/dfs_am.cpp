@@ -14,18 +14,23 @@
  *
  *  dfs_am.cpp
  *
- *
  * IDENTIFICATION
- *        src/gausskernel/storage/access/dfs/dfs_am.cpp
+ *    src/gausskernel/storage/access/dfs/dfs_am.cpp
  *
  * ---------------------------------------------------------------------------------------
  */
 
 #include "orc/orc_rw.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "carbondata/carbondata_reader.h"
+#endif
 #include "parquet/parquet_reader.h"
+#include "access/dfs/dfs_common.h"
 #include "access/dfs/dfs_query.h"
+#include "access/dfs/dfs_query_reader.h"
 #include "access/heapam.h"
 #include "access/genam.h"
+#include "access/tableam.h"
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
@@ -43,7 +48,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "dfs_adaptor.h"
 #include "executor/executor.h"
 
@@ -71,8 +76,8 @@ void CleanupDfsHandlers(bool isTop)
         next = lnext(cell);
         if (handler->getCurrentTransactionLevel() == level || isTop) {
             t_thrd.dfs_cxt.pending_free_reader_list = list_delete_ptr(t_thrd.dfs_cxt.pending_free_reader_list, handler);
-            ereport(DEBUG1, (errmodule(MOD_DFS),
-                             errmsg("Cleanup DFS read handler for table %s", handler->getRelName())));
+            ereport(DEBUG1,
+                    (errmodule(MOD_DFS), errmsg("Cleanup DFS read handler for table %s", handler->getRelName())));
             DELETE_EX(handler);
         }
     }
@@ -89,8 +94,7 @@ void CleanupDfsHandlers(bool isTop)
         if (handler->getCurrentTransactionLevel() == level || isTop) {
             t_thrd.dfs_cxt.pending_free_writer_list = list_delete_ptr(t_thrd.dfs_cxt.pending_free_writer_list, handler);
             ereport(DEBUG1,
-                (errmodule(MOD_DFS),
-                    errmsg("Cleanup DFS write handler for table %s", handler->getRelName())));
+                    (errmodule(MOD_DFS), errmsg("Cleanup DFS write handler for table %s", handler->getRelName())));
             DELETE_EX(handler);
         }
     }
@@ -566,9 +570,22 @@ void ReaderImpl::begin(dfs::DFSConnector *conn, FileType type)
             reader->begin();
             break;
         }
+#ifdef ENABLE_MULTIPLE_NODES
+        case CARBONDATA: {
+            reader = New(readerState->persistCtx) CarbondataReader(readerState, conn);
+            reader->begin();
+            break;
+        }
+#endif
         default: {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
-                            errmsg("Only ORC/PARQUET/CSV/TEXT is supported for now.")));
+                            errmsg(
+#ifdef ENABLE_MULTIPLE_NODES
+                                "Only ORC/PARQUET/CARBONDATA/CSV/TEXT is supported for now."
+#else
+                                "Only ORC/PARQUET/CSV/TEXT is supported for now."
+#endif
+            )));
         }
     }
 
@@ -630,6 +647,7 @@ void ReaderImpl::nextTuple(TupleTableSlot *tuple)
 
 void ReaderImpl::nextBatch(VectorBatch *batch)
 {
+    Assert(batch != NULL);
     batch->Reset(true);
     ResetSystemVector(batch);
     do {
@@ -1029,7 +1047,7 @@ void ReaderImpl::initBatchForRowReader(TupleTableSlot *tuple)
                 break;
             }
             default: {
-                scalarToDatumFunc[i] = convertScalarToDatumT<0>;
+                scalarToDatumFunc[i] = convertScalarToDatumT<-2>;
                 break;
             }
         }
@@ -1319,10 +1337,12 @@ bool ReaderImpl::loadNextFile()
 
         readerState->currentSplit = ParseFileSplitList(&readerState->splitList, &currentFileName);
         if (!isForeignTable) {
+            if (currentFileName == NULL) {
+                continue;
+            }
             char *substr = strrchr(currentFileName, '.');
-            if (unlikely(substr == nullptr)) {
-                ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmodule(MOD_DFS),
-                    errmsg("Invalid file name:%s", currentFileName)));
+            if (substr == NULL) {
+                ereport(ERROR, (errmodule(MOD_DFS), errmsg("Failed to get currentFileName !")));
             }
             readerState->currentFileID = pg_strtoint32(substr + 1);
         } else {
@@ -1362,10 +1382,8 @@ void ReaderImpl::setDescByFilePath(char *filePath)
     } else {
         fileName = strrchr(filePath, '/');
     }
-
-    if (unlikely(fileName == nullptr)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmodule(MOD_DFS),
-            errmsg("Invalid file path:%s", filePath)));
+    if (fileName == NULL) {
+        ereport(ERROR, (errmodule(MOD_DFS), errmsg("setDescByFilePath cannot find filename")));
     }
 
     /* Search in the desc table by the fileName. */
@@ -1373,14 +1391,15 @@ void ReaderImpl::setDescByFilePath(char *filePath)
                 CStringGetTextDatum(fileName + 1));
     Relation descHeapRel = heap_open(descOid, AccessShareLock);
     TupleDesc descTupDesc = RelationGetDescr(descHeapRel);
-    HeapScanDesc descScan = heap_beginscan(descHeapRel, readerState->snapshot, 1, Key);
+    TableScanDesc descScan = tableam_scan_begin(descHeapRel, readerState->snapshot, 1, Key);
+
     HeapTuple tup = NULL;
-    if ((tup = heap_getnext(descScan, ForwardScanDirection)) != NULL) {
+    if ((tup = (HeapTuple) tableam_scan_getnexttuple(descScan, ForwardScanDirection)) != NULL) {
         DFSDescHandler handler(1, RelationGetNumberOfAttributes(rel), rel);
         handler.TupleToDfsDesc(tup, descTupDesc, dfsDesc);
     }
 
-    heap_endscan(descScan);
+    tableam_scan_end(descScan);
     heap_close(descHeapRel, AccessShareLock);
 }
 
@@ -1556,7 +1575,7 @@ Reader *createOrcReader(ReaderState *readerState, dfs::DFSConnector *conn, bool 
      * Register the read handler to pending free list, the pending reader list
      * allocated in Executor context
      */
-    AutoContextSwitch newMemCnxt(t_thrd.top_mem_cxt);
+    AutoContextSwitch newMemCnxt(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
     t_thrd.dfs_cxt.pending_free_reader_list = lappend(t_thrd.dfs_cxt.pending_free_reader_list, reader);
     return reader;
 }
@@ -1578,10 +1597,34 @@ Reader *createParquetReader(ReaderState *readerState, dfs::DFSConnector *conn, b
      * Register the read handler to pending free list, the pending reader list
      * allocated in Executor context
      */
-    AutoContextSwitch newMemCnxt(TopMemoryContext);
+    AutoContextSwitch newMemCnxt(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
     t_thrd.dfs_cxt.pending_free_reader_list = lappend(t_thrd.dfs_cxt.pending_free_reader_list, reader);
     return reader;
 }
+
+#ifdef ENABLE_MULTIPLE_NODES
+/*
+ * @Description: The factory function to create a reader for Carbondata file.
+ * @IN readerState: the state information for reading
+ * @IN conn: the connector to dfs
+ * @IN skipSysCol: skip reading system columns if true
+ * @Return: the reader pointer
+ * @See also:
+ */
+Reader *createCarbondataReader(ReaderState *readerState, dfs::DFSConnector *conn, bool skipSysCol)
+{
+    Reader *reader = New(readerState->persistCtx) ReaderImpl(readerState, skipSysCol, GetCurrentTransactionNestLevel());
+    reader->begin(conn, CARBONDATA);
+
+    /*
+     * Register the read handler to pending free list, the pending reader list
+     * allocated in Executor context
+     */
+    AutoContextSwitch newMemCnxt(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+    t_thrd.dfs_cxt.pending_free_reader_list = lappend(t_thrd.dfs_cxt.pending_free_reader_list, reader);
+    return reader;
+}
+#endif
 
 /*
  * @Description: The factory function to create a reader for TEXT file.
@@ -1600,7 +1643,7 @@ Reader *createTextReader(ReaderState *readerState, dfs::DFSConnector *conn, bool
      * Register the read handler to pending free list, the pending reader list
      * allocated in Executor context
      */
-    AutoContextSwitch newMemCnxt(t_thrd.top_mem_cxt);
+    AutoContextSwitch newMemCnxt(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
     t_thrd.dfs_cxt.pending_free_reader_list = lappend(t_thrd.dfs_cxt.pending_free_reader_list, reader);
     return reader;
 }
@@ -1622,7 +1665,7 @@ Reader *createCsvReader(ReaderState *readerState, dfs::DFSConnector *conn, bool 
      * Register the read handler to pending free list, the pending reader list
      * allocated in Executor context
      */
-    AutoContextSwitch newMemCnxt(t_thrd.top_mem_cxt);
+    AutoContextSwitch newMemCnxt(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
     t_thrd.dfs_cxt.pending_free_reader_list = lappend(t_thrd.dfs_cxt.pending_free_reader_list, reader);
     return reader;
 }
@@ -2081,7 +2124,7 @@ Writer *createOrcWriter(MemoryContext context, Relation rel, Relation DestRel, I
      * Register the write handler to pending free list , the pending writer list
      * allocated in ModifyTable context
      */
-    AutoContextSwitch newMemCnxt(t_thrd.top_mem_cxt);
+    AutoContextSwitch newMemCnxt(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
     t_thrd.dfs_cxt.pending_free_writer_list = lappend(t_thrd.dfs_cxt.pending_free_writer_list, writer);
 
     return writer;

@@ -1,0 +1,32 @@
+test: mot/single_tpcc_queries 
+test: mot/single_basic_sql 
+test: mot/single_merge_compatible mot/single_merge_explain mot/single_merge_explain_pretty mot/single_merge_privilege 
+test: mot/single_hw_alter_session 
+test: mot/single_boolean mot/single_char mot/single_varchar mot/single_text mot/single_int2 mot/single_int4 mot/single_int8 mot/single_float4 mot/single_float8 mot/single_numeric mot/single_node_timestamp mot/single_node_timestamptz mot/single_node_date
+test: mot/single_numerology 
+test: mot/single_namespace 
+test: mot/single_analyze_dropdb 
+test: mot/single_abort
+test: mot/single_alter_foreign_table
+test: mot/single_alter_view
+test: mot/single_analyze
+test: mot/single_begin
+test: mot/single_close
+test: mot/single_comment
+test: mot/single_commit
+test: mot/single_copy
+test: mot/single_create_trigger
+test: mot/single_create_view
+test: mot/single_declare
+test: mot/single_delete
+test: mot/single_end
+test: mot/single_fetch
+test: mot/single_reindex
+test: mot/single_release_savepoint
+test: mot/single_returning
+test: mot/single_rollback
+test: mot/single_rollback_to_savepoint
+test: mot/single_update
+test: mot/single_supported_unsupported_types
+test: mot/single_relation_size
+test: mot/single_join_cross_engine_check

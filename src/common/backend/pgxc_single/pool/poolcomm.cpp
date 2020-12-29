@@ -18,15 +18,17 @@
 #include <sys/un.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include <errno.h>
 #include <stddef.h>
 #include "c.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include "pgxc/poolcomm.h"
+#include "pgxc/pool_comm.h"
 #include "storage/ipc.h"
 #include "utils/elog.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 
 static int pool_recvbuf(PoolPort* port);
 static int pool_discardbytes(PoolPort* port, size_t len);
@@ -225,7 +227,6 @@ int pool_getmessage(PoolPort* port, StringInfo s, int maxlen)
     }
 
     len = ntohl(len);
-
     if (len < 4 || (maxlen > 0 && len > maxlen)) {
         ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid message length")));
         return EOF;
@@ -346,7 +347,10 @@ static int pool_recvbuf(PoolPort* port)
     for (;;) {
         int r;
 
+        PGSTAT_INIT_TIME_RECORD();
+        PGSTAT_START_TIME_RECORD();
         r = recv(Socket(*port), port->RecvBuffer + port->RecvLength, POOL_BUFFER_SIZE - port->RecvLength, 0);
+        END_NET_RECV_INFO(r);
 
         if (r < 0) {
             if (errno == EINTR) {
@@ -413,7 +417,10 @@ int pool_flush(PoolPort* port)
     while (bufptr < bufend) {
         int r;
         errno = 0;
+        PGSTAT_INIT_TIME_RECORD();
+        PGSTAT_START_TIME_RECORD();
         r = send(Socket(*port), bufptr, bufend - bufptr, 0);
+        END_NET_SEND_INFO(r);
 
         if (r <= 0) {
             if (errno == EINTR) {
@@ -603,7 +610,6 @@ int pool_internal_sendconnDefs(int u_sock, PoolConnDef* connDef, int count)
 
 int pool_internal_recvconnDefs(int u_sock, PoolConnDef* connDef, int count)
 {
-
 // free buffer and struct cmsghdr memory
 //
 #define FREE_BC_MEM()        \
@@ -751,12 +757,12 @@ int pool_sendconnDefs(PoolPort* port, PoolConnDef* connDef, int count)
 {
     int ret;
     int i = 0;
-    int n_send_times = count % MAX_FDS_NUM == 0 ? count / MAX_FDS_NUM : count / MAX_FDS_NUM + 1;
+    int n_send_times = (count % MAX_FDS_NUM == 0) ? (count / MAX_FDS_NUM) : (count / MAX_FDS_NUM + 1);
     int u_sock = Socket(*port);
     PoolConnDef inner_connDef;
     inner_connDef.fds = connDef->fds;
     inner_connDef.connInfos = connDef->connInfos;
-    int inner_cnt = count > MAX_FDS_NUM ? MAX_FDS_NUM : count;
+    int inner_cnt = (count > MAX_FDS_NUM) ? MAX_FDS_NUM : count;
 
     n_send_times = (n_send_times == 0) ? 1 : n_send_times;
 
@@ -798,12 +804,12 @@ int pool_recvconnDefs(PoolPort* port, PoolConnDef* connDef, int count)
     int ret;
     int i = 0;
     errno_t ss_rc;
-    int n_recv_times = count % MAX_FDS_NUM == 0 ? count / MAX_FDS_NUM : count / MAX_FDS_NUM + 1;
+    int n_recv_times = (count % MAX_FDS_NUM == 0) ? (count / MAX_FDS_NUM) : (count / MAX_FDS_NUM + 1);
     int u_sock = Socket(*port);
     PoolConnDef inner_connDef;
     inner_connDef.fds = connDef->fds;
     inner_connDef.connInfos = connDef->connInfos;
-    int inner_cnt = count > MAX_FDS_NUM ? MAX_FDS_NUM : count;
+    int inner_cnt = (count > MAX_FDS_NUM) ? MAX_FDS_NUM : count;
     bool b_failed = false;
     n_recv_times = (n_recv_times == 0) ? 1 : n_recv_times;
 
@@ -877,7 +883,10 @@ int pool_sendres(PoolPort* port, int res)
     n32 = htonl(res);
     int rcs = memcpy_s(buf + 1, sizeof(uint), &n32, 4);
     securec_check(rcs, "\0", "\0");
+    PGSTAT_INIT_TIME_RECORD();
+    PGSTAT_START_TIME_RECORD();
     int ret = send(Socket(*port), &buf, SEND_RES_BUFFER_SIZE, 0);
+    END_NET_SEND_INFO(ret);
     if (ret != SEND_RES_BUFFER_SIZE) {
         if (ret < 0) {
             ereport(ERROR, (errcode_for_socket_access(), errmsg("pooler failed to send res: %m")));
@@ -900,7 +909,10 @@ int pool_recvres(PoolPort* port)
     uint n32;
     char buf[SEND_RES_BUFFER_SIZE];
 
+    PGSTAT_INIT_TIME_RECORD();
+    PGSTAT_START_TIME_RECORD();
     r = recv(Socket(*port), &buf, SEND_RES_BUFFER_SIZE, 0);
+    END_NET_RECV_INFO(r);
     if (r < 0) {
         /*
          * Report broken connection
@@ -949,7 +961,10 @@ int pool_recvpids(PoolPort* port, ThreadId** pids)
      * Buffer size is upper bounded by the maximum number of connections,
      * as in the pooler each connection has one Pooler Agent.
      */
+    PGSTAT_INIT_TIME_RECORD();
+    PGSTAT_START_TIME_RECORD();
     r = recv(Socket(*port), &buf, SEND_PID_BUFFER_SIZE, 0);
+    END_NET_RECV_INFO(r);
     if (r < 0) {
         /*
          * Report broken connection
@@ -1042,7 +1057,10 @@ int pool_sendpids(PoolPort* port, ThreadId* pids, int count)
         ss_rc = memcpy_s(buf + 5 + i * THREADID_LEN, THREADID_LEN, pidBuf, THREADID_LEN);
         securec_check(ss_rc, "\0", "\0");
     }
+    PGSTAT_INIT_TIME_RECORD();
+    PGSTAT_START_TIME_RECORD();
     int ret = send(Socket(*port), &buf, SEND_PID_BUFFER_SIZE, 0);
+    END_NET_SEND_INFO(ret);
     if (ret != (ssize_t)SEND_PID_BUFFER_SIZE) {
         if (ret < 0) {
             ereport(ERROR, (errcode_for_socket_access(), errmsg("pooler failed to send pids: %m")));

@@ -281,7 +281,7 @@ void SonicIntTemplateDatumArray<T>::putIntValArray(T* val, int nrows)
     int loopRows;
 
     bool needExpand = (uint32)nrows > (m_atomSize - m_atomIdx);
-    loopRows = needExpand ? m_atomSize - m_atomIdx : nrows;
+    loopRows = needExpand ? (m_atomSize - m_atomIdx) : nrows;
 
     if (loopRows > 0) {
         putIntVal(val, loopRows);

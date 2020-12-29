@@ -7,5 +7,6 @@ create unlogged table data_redis.pg_delete_delta_12345
 	dnrelid int,
 	block_number bigint,
 	block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset);
 ALTER TABLE tx SET (append_mode=on,rel_cn_oid=12345);

@@ -1,0 +1,222 @@
+set current_schema = 'text_csv_foreign_schema';
+---- create required databases with different encoding for compatibility test.
+CREATE DATABASE DB_ASCII_BULKLOAD_COMPATIBILITY_TEST WITH ENCODING 'SQL_ASCII' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+CREATE DATABASE DB_LATIN1_BULKLOAD_COMPATIBILITY_TEST WITH ENCODING 'Latin1' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+CREATE DATABASE DB_GBK_BULKLOAD_COMPATIBILITY_TEST WITH ENCODING 'GBK' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+CREATE DATABASE DB_EUCJIS2004_BULKLOAD_COMPATIBILITY_TEST WITH ENCODING 'EUCJIS2004' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+CREATE DATABASE TD_FORMAT_DB DBCOMPATIBILITY 'TD' template template0 lc_ctype 'C' lc_collate 'C';
+----
+---- load with bulkload compatible_illegal_chars
+----
+----smartcare case
+CREATE TABLE SC_INVALID_ENCODING_TEST (
+   batchno              numeric(12,0)                  null,
+   starttime            numeric(18,0)                  null,
+   rat                  numeric(1,0)                   null,
+   apn                  varchar(64)                    null,
+   prot_category        numeric(5,0)                   null,
+   prot_type            numeric(5,0)                   null,
+   host                 varchar(64)                    null,
+   l4_ul_throughput     numeric(20,0)                  null,
+   l4_dw_throughput     numeric(20,0)                  null,
+   l4_ul_packets        numeric(18,0)                  null,
+   l4_dw_packets        numeric(18,0)                  null,
+   tcpconncount         numeric(10,0)                  null,
+   tcpconnsucccount     numeric(10,0)                  null,
+   carrier_id           numeric(5,0)                   null,
+   tcp_rtt              numeric(20,0)                  null,
+   app_id               numeric(18,0)                  null
+   )   
+with(orientation=column, compression=low)
+distribute by hash(carrier_id,app_id);
+CREATE FOREIGN TABLE EXT_SC_INVALID_ENCODING_TEST (
+   batchno              numeric(12,0)                  null,
+   starttime            numeric(18,0)                  null,
+   rat                  numeric(1,0)                   null,
+   apn                  varchar(64)                    null,
+   prot_category        numeric(5,0)                   null,
+   prot_type            numeric(5,0)                   null,
+   host                 varchar(64)                    null,
+   l4_ul_throughput     numeric(20,0)                  null,
+   l4_dw_throughput     numeric(20,0)                  null,
+   l4_ul_packets        numeric(18,0)                  null,
+   l4_dw_packets        numeric(18,0)                  null,
+   tcpconncount         numeric(10,0)                  null,
+   tcpconnsucccount     numeric(10,0)                  null,
+   carrier_id           numeric(5,0)                   null,
+   tcp_rtt              numeric(20,0)                  null,
+   app_id               numeric(18,0)                  null
+)SERVER obs_server OPTIONS(format 'text', location 'obs://@obsbucket@/csv_text_query_test/bulkload_compatible_illegal_chars_test_data/smartcare_test.data/', encoding 'sql_ascii', delimiter '|',  checkencoding 'low', ignore_extra_data 'true') distribute by roundrobin;
+INSERT INTO SC_INVALID_ENCODING_TEST SELECT * FROM EXT_SC_INVALID_ENCODING_TEST;
+SELECT * FROM SC_INVALID_ENCODING_TEST;
+DROP TABLE SC_INVALID_ENCODING_TEST;
+DROP FOREIGN TABLE EXT_SC_INVALID_ENCODING_TEST;
+----invalid chars for server_encoding=UTF8
+----(1)local2utf8 test
+----(1.1)only char type test
+CREATE TABLE COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE (
+		COL1_CHAR		CHAR(100) NOT NULL,
+		COL2_VARCHAR	VARCHAR(100) NOT NULL,
+		COL3_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL4_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL5_CLOB		CLOB NOT NULL,
+		COL6_TEXT		TEXT NOT NULL
+);
+----(1.1.1)for text format
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE (
+		COL1_CHAR		CHAR(100) NOT NULL,
+		COL2_VARCHAR	VARCHAR(100) NOT NULL,
+		COL3_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL4_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL5_CLOB		CLOB NOT NULL,
+		COL6_TEXT		TEXT NOT NULL
+)SERVER obs_server OPTIONS(format 'text', location 'obs://@obsbucket@/csv_text_query_test/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_text_format.data/', encoding 'utf8', delimiter '|',  checkencoding 'low') distribute by roundrobin;
+INSERT INTO COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+SELECT TRIM(COL1_CHAR), TRIM(COL2_VARCHAR), TRIM(COL3_VARCHAR2), TRIM(COL4_NVARCHAR2), COL5_CLOB, COL6_TEXT FROM COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE ORDER BY TRIM(COL1_CHAR);
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE OPTIONS (SET checkencoding 'high');
+SELECT TRIM(COL1_CHAR), TRIM(COL2_VARCHAR), TRIM(COL3_VARCHAR2), TRIM(COL4_NVARCHAR2), COL5_CLOB, COL6_TEXT FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE ORDER BY TRIM(COL1_CHAR);
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+TRUNCATE COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+----(1.1.2)for csv format
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE (
+		COL1_CHAR		CHAR(100) NOT NULL,
+		COL2_VARCHAR	VARCHAR(100) NOT NULL,
+		COL3_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL4_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL5_CLOB		CLOB NOT NULL,
+		COL6_TEXT		TEXT NOT NULL
+)SERVER obs_server OPTIONS(format 'csv', location 'obs://@obsbucket@/csv_text_query_test/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_csv_format.data/', encoding 'utf8', delimiter '|',  checkencoding 'low') distribute by roundrobin;
+INSERT INTO COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+SELECT TRIM(COL1_CHAR), TRIM(COL2_VARCHAR), TRIM(COL3_VARCHAR2), TRIM(COL4_NVARCHAR2), COL5_CLOB, COL6_TEXT FROM COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE ORDER BY TRIM(COL1_CHAR);
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE OPTIONS (SET checkencoding 'high');
+SELECT TRIM(COL1_CHAR), TRIM(COL2_VARCHAR), TRIM(COL3_VARCHAR2), TRIM(COL4_NVARCHAR2), COL5_CLOB, COL6_TEXT FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE ORDER BY TRIM(COL1_CHAR);
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+TRUNCATE COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE;
+
+----(1.2)mixed type test
+CREATE TABLE COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		COL1_INT		BIGINT NOT NULL,
+		COL2_CHAR		CHAR(100) NOT NULL,
+		COL3_VARCHAR	VARCHAR(100) NOT NULL,
+		COL4_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL5_RAW		RAW NOT NULL,	
+		COL6_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL7_CLOB		CLOB NOT NULL,
+		COL8_TEXT		TEXT NOT NULL,
+		COL9_TIMESTAMP	TIMESTAMP NOT NULL
+);
+----(1.2.1)for text format
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		COL1_INT		BIGINT NOT NULL,
+		COL2_CHAR		CHAR(100) NOT NULL,
+		COL3_VARCHAR	VARCHAR(100) NOT NULL,
+		COL4_VARCHAR2	VARCHAR2(100) NOT NULL,
+		COL5_RAW		RAW NOT NULL,	
+		COL6_NVARCHAR2	NVARCHAR2(100) NOT NULL,
+		COL7_CLOB		CLOB NOT NULL,
+		COL8_TEXT		TEXT NOT NULL,
+		COL9_TIMESTAMP	TIMESTAMP NOT NULL
+)SERVER obs_server OPTIONS(format 'text', location 'obs://@obsbucket@/csv_text_query_test/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_text_format.data/', delimiter '|',  checkencoding 'low', encoding 'utf-8')with err_cic_test distribute by roundrobin;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+INSERT INTO COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+SELECT COUNT(*) FROM err_cic_test;
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+----(1.2.1.1)gbk2utf8
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER obs_server OPTIONS(format 'text', encoding 'gbk', location 'obs://@obsbucket@/csv_text_query_test/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_text_format_gbk.data/', delimiter '|',  checkencoding 'low')with err_cic_test distribute by roundrobin;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET checkencoding 'high');
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE order by 1, 2 limit 1;
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+----(1.2.1.2)utf82gbk
+\c DB_GBK_BULKLOAD_COMPATIBILITY_TEST;
+drop server if exists  obs_server cascade;
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER obs_server OPTIONS(format 'text', encoding 'utf8', location 'obs://@obsbucket@/csv_text_query_test/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_text_format_gbk.data/', delimiter '|',  checkencoding 'low')with err_cic_test distribute by roundrobin;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET checkencoding 'high');
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE order by 1, 2 limit 1;
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+\c regression;
+----(1.2.1.3)latin12utf8
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER obs_server OPTIONS(format 'text', encoding 'latin1', location 'obs://@obsbucket@/csv_text_query_test/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_text_format_latin1.data/', delimiter '|',  checkencoding 'low')with err_cic_test distribute by roundrobin;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET checkencoding 'high');
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE order by 1, 2 limit 1;
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+----(1.2.1.4)utf82latin1
+\c DB_LATIN1_BULKLOAD_COMPATIBILITY_TEST;
+drop server if exists  obs_server cascade;
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+SHOW server_encoding;
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER obs_server OPTIONS(format 'text', encoding 'utf8', location 'obs://@obsbucket@/csv_text_query_test/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_text_format_latin1.data/', delimiter '|',  checkencoding 'low')with err_cic_test distribute by roundrobin;
+SELECT COUNT(*) FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET checkencoding 'high');
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE order by 1, 2 limit 1;
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+----(1.2.1.5)mic2latin1
+SHOW server_encoding;
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE (
+		C_BIGINT BIGINT,
+		C_CHAR_1 CHAR(100),
+		C_CHAR_2 CHAR(100),
+		C_VARCHAR VARCHAR(1024),
+		C_TEXT TEXT,
+		C_CLOB CLOB,
+		C_DP1 DOUBLE PRECISION,
+		C_DP2 DOUBLE PRECISION
+)SERVER obs_server OPTIONS(format 'text', encoding 'MULE_INTERNAL', location 'obs://@obsbucket@/csv_text_query_test/bulkload_compatible_illegal_chars_test_data/invalid_char_for_mixed_type_text_format_mic.data/', delimiter '|',  checkencoding 'low')with err_cic_test distribute by roundrobin;
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE order by 1, 2 limit 1;
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE OPTIONS(SET checkencoding 'high');
+SELECT * FROM EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE order by 1, 2 limit 1;
+DROP FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_MIXED_TYPE;
+drop foreign table readbuffer_direct_fill_linebuffer;
+CREATE FOREIGN TABLE readbuffer_direct_fill_linebuffer ( str varchar)SERVER  obs_server OPTIONS(format 'csv', location 'obs://@obsbucket@/csv_text_query_test/llt/oneline_fullbuffer/', encoding 'utf8', delimiter '|',  checkencoding 'low') distribute by roundrobin;
+select count(*) from readbuffer_direct_fill_linebuffer where str like '111%';

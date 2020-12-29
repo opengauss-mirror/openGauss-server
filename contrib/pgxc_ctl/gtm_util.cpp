@@ -19,9 +19,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-/*
-#include "gtm/gtm_c.h"
-*/
 #include "gtm/gtm_client.h"
 #include "gtm/libpq-fe.h"
 #include "utils.h"

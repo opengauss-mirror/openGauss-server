@@ -95,6 +95,23 @@ select node_name from pgxc_node order by node_name;
  datanode9
 (13 rows)
 
+execute direct on (coordinator2) 'select node_name from pgxc_node order by node_name;';
+  node_name   
+--------------
+ coordinator1
+ coordinator2
+ datanode10
+ datanode11
+ datanode12
+ datanode2
+ datanode3
+ datanode4
+ datanode5
+ datanode6
+ datanode7
+ datanode8
+ datanode9
+(13 rows)
 
 ABORT;
 select node_name from pgxc_node order by node_name;
@@ -117,7 +134,25 @@ select node_name from pgxc_node order by node_name;
  datanode9
 (15 rows)
 
-
+execute direct on (coordinator2) 'select node_name from pgxc_node order by node_name;';
+  node_name   
+--------------
+ coordinator1
+ coordinator2
+ coordinator3
+ datanode1
+ datanode10
+ datanode11
+ datanode12
+ datanode2
+ datanode3
+ datanode4
+ datanode5
+ datanode6
+ datanode7
+ datanode8
+ datanode9
+(15 rows)
 
 -- drop node with
 DROP NODE coordinator3 with;
@@ -155,7 +190,25 @@ select node_name from pgxc_node order by node_name;
  datanode9
 (13 rows)
 
-
+execute direct on (coordinator2) 'select node_name from pgxc_node order by node_name;';
+  node_name   
+--------------
+ coordinator1
+ coordinator2
+ coordinator3
+ datanode1
+ datanode10
+ datanode11
+ datanode12
+ datanode2
+ datanode3
+ datanode4
+ datanode5
+ datanode6
+ datanode7
+ datanode8
+ datanode9
+(15 rows)
 
 ABORT;
 START TRANSACTION;
@@ -179,6 +232,23 @@ select node_name from pgxc_node order by node_name;
  datanode9
 (13 rows)
 
+execute direct on (coordinator2) 'select node_name from pgxc_node order by node_name;';
+  node_name   
+--------------
+ coordinator1
+ coordinator2
+ datanode10
+ datanode11
+ datanode12
+ datanode2
+ datanode3
+ datanode4
+ datanode5
+ datanode6
+ datanode7
+ datanode8
+ datanode9
+(13 rows)
 
 ABORT;
 select node_name from pgxc_node order by node_name;
@@ -201,4 +271,71 @@ select node_name from pgxc_node order by node_name;
  datanode9
 (15 rows)
 
+execute direct on (coordinator2) 'select node_name from pgxc_node order by node_name;';
+  node_name   
+--------------
+ coordinator1
+ coordinator2
+ coordinator3
+ datanode1
+ datanode10
+ datanode11
+ datanode12
+ datanode2
+ datanode3
+ datanode4
+ datanode5
+ datanode6
+ datanode7
+ datanode8
+ datanode9
+(15 rows)
 
+create table DTS2018120706312_t1 (id int, num int) distribute by replication;
+execute direct on (coordinator1) 'select * from pgxc_node_str()';
+ pgxc_node_str 
+---------------
+ coordinator1
+(1 row)
+
+execute direct on (coordinator2) 'select * from pgxc_node_str()';
+ pgxc_node_str 
+---------------
+ coordinator2
+(1 row)
+
+execute direct on (datanode1) 'select * from pgxc_node_str()';
+ pgxc_node_str 
+---------------
+ datanode1
+(1 row)
+
+execute direct on (coordinator1) 'select * from DTS2018120706312_t1';
+ERROR:  EXECUTE DIRECT cannot execute SELECT query with normal table on coordinator
+execute direct on (coordinator2) 'select * from DTS2018120706312_t1';
+ERROR:  EXECUTE DIRECT cannot execute SELECT query with normal table on coordinator
+execute direct on (datanode1) 'select * from DTS2018120706312_t1';
+ id | num 
+----+-----
+(0 rows)
+
+execute direct on (coordinator1) 'execute direct on (coordinator1) ''select * from DTS2018120706312_t1''';
+ERROR:  EXECUTE DIRECT cannot execute recursively
+execute direct on (coordinator2) 'execute direct on (coordinator1) ''select * from DTS2018120706312_t1''';
+ERROR:  EXECUTE DIRECT cannot execute recursively
+execute direct on (datanode1) 'execute direct on (coordinator1) ''select * from DTS2018120706312_t1''';
+ERROR:  EXECUTE DIRECT cannot execute recursively
+execute direct on (coordinator1) 'execute direct on (datanode1) ''select * from DTS2018120706312_t1''';
+ERROR:  EXECUTE DIRECT cannot execute recursively
+execute direct on (coordinator2) 'execute direct on (datanode1) ''select * from DTS2018120706312_t1''';
+ERROR:  EXECUTE DIRECT cannot execute recursively
+execute direct on (datanode1) 'execute direct on (datanode1) ''select * from DTS2018120706312_t1''';
+ERROR:  EXECUTE DIRECT cannot execute recursively
+execute direct on (coordinator1)'select count(*) from gs_wlm_operator_info';
+ERROR:  relation "gs_wlm_operator_info" does not exist
+HINT:  please use database "postgres"
+execute direct on (coordinator2)'select count(*) from gs_wlm_operator_info';
+ERROR:  relation "gs_wlm_operator_info" does not exist
+HINT:  please use database "postgres"
+drop table DTS2018120706312_t1;
+execute direct on (datanode1) '';

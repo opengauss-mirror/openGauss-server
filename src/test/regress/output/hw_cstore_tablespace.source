@@ -1,9 +1,9 @@
-\! rm -fr '@abs_srcdir@/testtablespace/hw_cstore_tablespace'
-\! mkdir '@abs_srcdir@/testtablespace/hw_cstore_tablespace'
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace' MAXSIZE 'UNLIMITEDxxx';
+\! rm -fr '@testtablespace@/hw_cstore_tablespace'
+\! mkdir '@testtablespace@/hw_cstore_tablespace'
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace' MAXSIZE 'UNLIMITEDxxx';
 ERROR:  Invalid value for tablespace maxsize: "UNLIMITEDxxx"
 HINT:  Unknown tablespace size
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 create table cst1 (a int, b float, c text) with(orientation=column) tablespace hw_cstore_tablespace;
 drop table cst1;
 -- drop tablespace hw_cstore_tablespace;
@@ -29,7 +29,7 @@ CREATE TABLE set_tblspc_lineitem
   --, primary key (L_ORDERKEY, L_LINENUMBER)
 )
 with (orientation = column) tablespace hw_cstore_tablespace;
-COPY set_tblspc_lineitem FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem_index.data' DELIMITER '|';
+COPY set_tblspc_lineitem FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
 create index idx3_set_tblspc_lineitem on set_tblspc_lineitem(L_LINENUMBER, L_SHIPDATE) tablespace hw_cstore_tablespace;
 -- 1.1 SET TABLESPACE for column table
 ALTER TABLE set_tblspc_lineitem SET TABLESPACE pg_default;
@@ -43,7 +43,7 @@ SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESP
 (1 row)
 
 drop tablespace hw_cstore_tablespace;
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 -- 1.4 Set Tablespace + Add column + Set datatype
 ALTER TABLE set_tblspc_lineitem ADD COLUMN c18 int default 100, ALTER COLUMN L_DISCOUNT SET DATA TYPE char(32), SET TABLESPACE hw_cstore_tablespace;
 drop tablespace hw_cstore_tablespace;
@@ -56,7 +56,7 @@ SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESP
 (1 row)
 
 drop tablespace hw_cstore_tablespace;
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 -- 1.5 DROP/SET not null
 alter table set_tblspc_lineitem alter column L_PARTKEY drop not  null;
 ERROR:  Un-support feature
@@ -75,7 +75,7 @@ SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESP
 (1 row)
 
 drop tablespace hw_cstore_tablespace;
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 -- 1.7 rollback
 START TRANSACTION;
 ALTER TABLE set_tblspc_lineitem SET TABLESPACE hw_cstore_tablespace;
@@ -88,7 +88,7 @@ SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESP
 (1 row)
 
 drop tablespace hw_cstore_tablespace;
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 START TRANSACTION;
 ALTER TABLE set_tblspc_lineitem ADD COLUMN c19 int default 1000, SET TABLESPACE hw_cstore_tablespace;
 CHECKPOINT;
@@ -100,7 +100,7 @@ SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESP
 (1 row)
 
 drop tablespace hw_cstore_tablespace;
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 START TRANSACTION;
 ALTER INDEX idx3_set_tblspc_lineitem SET TABLESPACE hw_cstore_tablespace;
 CHECKPOINT;
@@ -112,7 +112,7 @@ SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESP
 (1 row)
 
 drop tablespace hw_cstore_tablespace;
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 -- 1.8 test drop table
 ALTER TABLE idx3_set_tblspc_lineitem SET TABLESPACE hw_cstore_tablespace;
 drop table set_tblspc_lineitem;
@@ -123,7 +123,7 @@ SELECT COUNT(*) FROM pg_class WHERE reltablespace = ( SELECT OID FROM PG_TABLESP
 (1 row)
 
 drop tablespace hw_cstore_tablespace;
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 -- 2. Column Partitioned Table + Index Table
 CREATE TABLE set_tblspc_lineitem2
 (
@@ -153,7 +153,7 @@ partition p2 values less than(200000),
 partition p3 values less than(300000),
 partition p4 values less than (100000000)
 );
-COPY set_tblspc_lineitem2 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem_index.data' DELIMITER '|';
+COPY set_tblspc_lineitem2 FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
 create index idx3_set_tblspc_lineitem2 on set_tblspc_lineitem2(L_LINENUMBER) local;
 -- 2.1 SET TABLESPACE for partitioned table (heap)
 ALTER TABLE set_tblspc_lineitem2 SET TABLESPACE hw_cstore_tablespace;
@@ -181,7 +181,7 @@ SELECT COUNT(*) FROM pg_partition WHERE reltablespace = ( SELECT OID FROM PG_TAB
 (1 row)
 
 drop tablespace hw_cstore_tablespace;
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 -- 2.3 SET TABLESPACE for partitioned table (index)
 ALTER INDEX idx3_set_tblspc_lineitem2 SET TABLESPACE pg_default;
 ERROR:  can not set tablespace for partitioned relation
@@ -204,7 +204,7 @@ SELECT COUNT(*) FROM pg_partition WHERE reltablespace = ( SELECT OID FROM PG_TAB
 (1 row)
 
 drop tablespace hw_cstore_tablespace;
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 -- 2.5 rollback
 START TRANSACTION;
 ALTER TABLE set_tblspc_lineitem2 MOVE PARTITION p1 TABLESPACE hw_cstore_tablespace;
@@ -223,7 +223,7 @@ SELECT COUNT(*) FROM pg_partition WHERE reltablespace = ( SELECT OID FROM PG_TAB
 (1 row)
 
 drop tablespace hw_cstore_tablespace;
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 START TRANSACTION;
 ALTER INDEX idx3_set_tblspc_lineitem2 MOVE PARTITION p1_l_linenumber_idx TABLESPACE  hw_cstore_tablespace;
 CHECKPOINT;
@@ -241,7 +241,7 @@ SELECT COUNT(*) FROM pg_partition WHERE reltablespace = ( SELECT OID FROM PG_TAB
 (1 row)
 
 drop tablespace hw_cstore_tablespace;
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 -- 2.6 drop table
 ALTER TABLE set_tblspc_lineitem2 MOVE PARTITION p1 TABLESPACE hw_cstore_tablespace;
 ALTER INDEX idx3_set_tblspc_lineitem2 MOVE PARTITION p1_l_linenumber_idx TABLESPACE  hw_cstore_tablespace;
@@ -259,7 +259,7 @@ SELECT COUNT(*) FROM pg_partition WHERE reltablespace = ( SELECT OID FROM PG_TAB
 (1 row)
 
 drop tablespace hw_cstore_tablespace;
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 -- 3 test internal mask
 create table t_hw_cstore_tablespace(c_int int,c_tsvector tsvector,c_tsquery tsquery);
 create index idx_1t_hw_cstore_tablespace on t_hw_cstore_tablespace using gist(c_tsvector);
@@ -288,7 +288,7 @@ CREATE TABLE set_tblspc_lineitem3
   --, primary key (L_ORDERKEY, L_LINENUMBER)
 )
 with (orientation = column) tablespace hw_cstore_tablespace;
-COPY set_tblspc_lineitem3 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem_index.data' DELIMITER '|';
+COPY set_tblspc_lineitem3 FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
 create index idx3_set_tblspc_lineitem3 on set_tblspc_lineitem3(L_LINENUMBER) tablespace hw_cstore_tablespace;
 ALTER TABLE set_tblspc_lineitem3 SET TABLESPACE pg_default;
 ALTER index idx3_set_tblspc_lineitem3 SET TABLESPACE pg_default;
@@ -302,7 +302,7 @@ drop tablespace hw_cstore_tablespace;
 drop table set_tblspc_lineitem3;
 -- 5. test relfilenode.spcNode
 -- 5.1 test partitioned table
-create tablespace hw_cstore_tablespace location '@abs_srcdir@/testtablespace/hw_cstore_tablespace';
+create tablespace hw_cstore_tablespace location '@testtablespace@/hw_cstore_tablespace';
 CREATE TABLE test_cstore_tablespace01(id int, info text) with(orientation=column)
 partition by range(id)
 (
@@ -395,7 +395,7 @@ CREATE TEMP TABLE set_tblspc_temp_lineitem1
   --, primary key (L_ORDERKEY, L_LINENUMBER)
 )
 with (orientation = row) tablespace hw_cstore_tablespace;
-COPY set_tblspc_temp_lineitem1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem_index.data' DELIMITER '|';
+COPY set_tblspc_temp_lineitem1 FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
 ALTER TABLE set_tblspc_temp_lineitem1 SET TABLESPACE pg_default;
 SELECT reltablespace FROM pg_class WHERE relname = 'set_tblspc_temp_lineitem1'; -- 0
  reltablespace 

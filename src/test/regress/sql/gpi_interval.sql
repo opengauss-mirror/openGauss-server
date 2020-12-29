@@ -62,7 +62,7 @@ insert into gpi_partition_global_index_interval values(7,5,'2020-06-01');
 insert into gpi_partition_global_index_interval values(1,4,'2020-07-01');
 --succeed
 
-explain (costs off, nodes off) select * from gpi_partition_global_index_interval where c1 = 7 order by 1, 2;
+explain (costs off) select * from gpi_partition_global_index_interval where c1 = 7 order by 1, 2;
 select * from gpi_partition_global_index_interval where c1 = 7 order by 1, 2;
 
 --to select all index object
@@ -205,19 +205,19 @@ insert into interval_partition_table_004 values(5,1,'2020-05-01');
 insert into interval_partition_table_004 values(7,2,'2020-06-01');
 insert into interval_partition_table_004 values(1,3,'2020-07-01');
 
-explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
+explain (costs off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
 
 SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
 
 delete from interval_partition_table_004 where c1 = 1;
 
-explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
+explain (costs off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
 
 SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
 
 update interval_partition_table_004 set c1 = 100 where c1 = 7;
 
-explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 100;
+explain (costs off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 100;
 
 SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 100;
 
@@ -231,7 +231,7 @@ reindex table interval_partition_table_004;
 
 cluster;
 
-explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
+explain (costs off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
 
 SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
 
@@ -269,13 +269,11 @@ DELETE from interval_partition_table_004 where c1 = 6;
 ANALYZE interval_partition_table_004;
 \parallel off
 
-explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
+explain (costs off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
 SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
 VACUUM full interval_partition_table_004;
-set enable_seqscan = off;
-explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
+explain (costs off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
 SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
-reset enable_seqscan;
 
 --drop table and index
 drop index if exists ip_index_global;

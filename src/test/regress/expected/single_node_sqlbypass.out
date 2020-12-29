@@ -2,8 +2,6 @@ set enable_seqscan=off;
 set enable_bitmapscan=off;
 set enable_material=off;
 set enable_beta_opfusion=on;
-set enable_beta_nestloop_fusion=on;
-set max_parallel_workers_per_gather=0;
 drop table if exists t1;
 NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 numeric, c3 numeric, c4 int, colreal real);
@@ -101,6 +99,7 @@ explain (verbose on, costs off) select sum(c1) from t1 where c2=1 limit 1;
                Index Cond: (t1.c2 = 1::numeric)
 (7 rows)
 
+
 -- agg fusion
 drop index idx2;
 -- index t1(c2): indexonlyscan
@@ -121,6 +120,7 @@ select sum(c2) from t1 where c2=3;
    6
 (1 row)
 
+
 -- index t1(c2): indexscan
 explain (verbose on, costs off) select sum(c3) from t1 where c2=3;
                 QUERY PLAN                
@@ -138,6 +138,7 @@ select sum(c3) from t1 where c2=3;
 -----
    4
 (1 row)
+
 
 -- index t1(c3, c2): indexonlyscan
 drop index idx1;
@@ -186,6 +187,7 @@ explain (verbose on, costs off) select sum(c2) from t1 where c2=3;
          Index Cond: (t1.c2 = 3::numeric)
 (6 rows)
 
+
 select sum(c3) from t1 where c3=3;
  sum 
 -----
@@ -210,6 +212,7 @@ select sum(c2) from t1 where c2=3;
    6
 (1 row)
 
+
 -- sort fusion
 explain (verbose on, costs off) select c3 from t1 where c3 < 10 order by c2;
                   QUERY PLAN                   
@@ -231,6 +234,7 @@ select c3 from t1 where c3 < 10 order by c2;
   3
   3
 (4 rows)
+
 
 -- nestloop fusion
 drop table if exists tn1, tn2;
@@ -352,11 +356,10 @@ select tn2.c1, tn1.c1 from tn1,tn2 where tn1.c2 <20 and tn2.c2 <20;
  17 |  7
 (9 rows)
 
+
 drop table if exists t1, t2;
 drop table if exists tn1, tn2;
 reset enable_seqscan;
 reset enable_bitmapscan;
 reset enable_material;
 reset enable_beta_opfusion;
-reset enable_beta_nestloop_fusion;
-reset max_parallel_workers_per_gather;

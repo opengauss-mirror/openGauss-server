@@ -27,8 +27,11 @@
 
 #include "mb/pg_wchar.h"
 
+#ifndef WIN32
 extern THR_LOCAL PGDLLIMPORT bool IsUnderPostmaster;
-
+#else
+extern THR_LOCAL bool IsUnderPostmaster;
+#endif
 /*
  * This table needs to recognize all the CODESET spellings for supported
  * backend encodings, as well as frontend-only encodings where possible
@@ -279,7 +282,7 @@ int pg_get_encoding_from_locale(const char* ctype, bool write_message)
 #ifdef FRONTEND
         save = strdup(save);
 #else
-        save = MemoryContextStrdup(u_sess->top_mem_cxt, save);
+        save = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), save);
 #endif
         if (save == NULL) {
             return -1; /* out of memory; unlikely */
@@ -294,15 +297,18 @@ int pg_get_encoding_from_locale(const char* ctype, bool write_message)
 #endif
             return -1; /* bogus ctype passed in? */
         }
-
+#ifndef WIN32
         sys = gs_nl_langinfo_r(CODESET);
         if (sys != NULL) {
 #ifdef FRONTEND
             sys = strdup(sys);
 #else
-            sys = MemoryContextStrdup(u_sess->top_mem_cxt, sys);
+            sys = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), sys);
 #endif
         }
+#else
+        sys = win32_langinfo(name);
+#endif
 
         (void)gs_setlocale_r(LC_CTYPE, save);
 #ifdef FRONTEND
@@ -321,15 +327,18 @@ int pg_get_encoding_from_locale(const char* ctype, bool write_message)
         if (pg_strcasecmp(ctype, "C") == 0 || pg_strcasecmp(ctype, "POSIX") == 0) {
             return PG_SQL_ASCII;
         }
-
+#ifndef WIN32
         sys = gs_nl_langinfo_r(CODESET);
         if (sys != NULL) {
 #ifdef FRONTEND
             sys = strdup(sys);
 #else
-            sys = MemoryContextStrdup(u_sess->top_mem_cxt, sys);
+            sys = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), sys);
 #endif
         }
+#else
+        sys = win32_langinfo(ctype);
+#endif
     }
 
     if (sys == NULL) {

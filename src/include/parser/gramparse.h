@@ -18,7 +18,6 @@
 #ifndef GRAMPARSE_H
 #define GRAMPARSE_H
 
-#include "nodes/parsenodes.h"
 #include "parser/scanner.h"
 
 /*
@@ -26,11 +25,16 @@
  * is what #defines YYLTYPE.
  */
 
+#ifndef FRONTEND_PARSER
 #ifdef PARSE_HINT_h
 #include "parser/hint_gram.hpp"
 #else
 #include "parser/gram.hpp"
 #endif
+#else
+#include "nodes/value.h"
+#include "frontend_parser/gram.hpp"
+#endif /* FRONTEND_PARSER */
 
 /* When dealing with DECLARE foo CURSOR case, we must look ahead 2 token after DECLARE to meet CURSOR */
 #define MAX_LOOKAHEAD_NUM 2
@@ -58,6 +62,29 @@ typedef struct base_yy_extra_type {
      */
     List* parsetree; /* final parse result is delivered here */
 } base_yy_extra_type;
+
+#ifdef FRONTEND_PARSER
+typedef struct fe_base_yy_extra_type {
+    /*
+     * Fields used by the core scanner.
+     */
+    fe_core_yy_extra_type core_yy_extra;
+
+    /*
+     * State variables for base_yylex().
+     */
+    int lookahead_num;                                /* lookahead num. Currently can be:0,1,2 */
+    int lookahead_token[MAX_LOOKAHEAD_NUM];           /* token lookahead type */
+    core_YYSTYPE lookahead_yylval[MAX_LOOKAHEAD_NUM]; /* yylval for lookahead token */
+    YYLTYPE lookahead_yylloc[MAX_LOOKAHEAD_NUM];      /* yylloc for lookahead token */
+
+    /*
+     * State variables that belong to the grammar.
+     */
+    List *parsetree; /* final parse result is delivered here */
+} fe_base_yy_extra_type;
+
+#endif /* FRONTEND_PARSER */
 
 typedef struct hint_yy_extra_type {
     /*
@@ -118,12 +145,20 @@ extern int yyparse(yyscan_t yyscanner);
  */
 #define pg_yyget_extra(yyscanner) (*((base_yy_extra_type**)(yyscanner)))
 
+#ifdef FRONTEND_PARSER
+#define fe_pg_yyget_extra(yyscanner) (*((fe_base_yy_extra_type **) (yyscanner)))
+#endif /* FRONTEND_PARSER */
+
 /* from parser.c */
 extern int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner);
 
 /* from gram.y */
 extern void parser_init(base_yy_extra_type* yyext);
 extern int base_yyparse(core_yyscan_t yyscanner);
+
+#ifdef FRONTEND_PARSER
+extern void fe_parser_init(fe_base_yy_extra_type *yyext);
+#endif /* FRONTEND_PARSER */
 
 #endif
 

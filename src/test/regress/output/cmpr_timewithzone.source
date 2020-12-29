@@ -43,10 +43,10 @@ CREATE TABLE cmpr_time_with_zone_01(
         c_tw_9 TIME WITH TIME ZONE NOT NULL,
         c_tw_10 TIME WITH TIME ZONE NOT NULL,
         c_tw_11 TIME WITH TIME ZONE NOT NULL,
-        c_tw_12 TIME WITH TIME ZONE NOT NULL) COMPRESS;
+        c_tw_12 TIME WITH TIME ZONE NOT NULL) ;
 CREATE INDEX INDEX_COMPRESS_020_1 ON cmpr_time_with_zone_01(c_tw_11) WHERE c_tw_11='15:04:04';
 CREATE INDEX INDEX_COMPRESS_020_2 ON cmpr_time_with_zone_01(c_tw_8,c_tw_9,c_tw_10);
 --I4. 给目标表中批插数据
-COPY cmpr_time_with_zone_00 TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_time_with_zone.out';
-COPY cmpr_time_with_zone_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_time_with_zone.out';
-\! rm -rf @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_time_with_zone.out
+COPY cmpr_time_with_zone_00 TO '@abs_srcdir@/data/cmpr_time_with_zone.out';
+COPY cmpr_time_with_zone_01 FROM '@abs_srcdir@/data/cmpr_time_with_zone.out';
+\! rm -rf @abs_srcdir@/data/cmpr_time_with_zone.out

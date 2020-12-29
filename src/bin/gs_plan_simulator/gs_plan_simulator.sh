@@ -29,7 +29,6 @@ node_group=""
 mode=""
 port=$PGPORT
 user=""
-passwd=""
 dir=""
 tables=""
 ishdfs="no"
@@ -150,7 +149,7 @@ function report_warning()
 # function to handle gsql execution
 function gsql_c_run()
 {
-	# $1 SQLConnect in the form of gsql -d <database> -p <portnumber> -U <username> -W <password>
+	# $1 SQLConnect in the form of gsql -d <database> -p <portnumber> -U <username> 
 	# $2 sql command
 	# $3 0: >, 1: >>
 	# $4 file to dump results. 
@@ -186,7 +185,7 @@ function gsql_c_run()
 
 function gsql_f_run()
 {
-	# $1 SQLConnect in the form of gsql -d <database> -p <portnumber> -U <username> -W <password>
+	# $1 SQLConnect in the form of gsql -d <database> -p <portnumber> -U <username> 
 	# $2 sql file
 	# $3 0: >, 1: >>
 	# $4 file to dump results. 
@@ -438,11 +437,6 @@ function construct_command()
 		dump_conect+=" -U ""$user"
 	fi
 
-	if [ -n "$passwd" ]; then
-		sql_conect+=" -W ""$passwd"
-		dump_conect+=" -W ""$passwd"
-	fi
-
 	sql_conect_pg="$sql_conect"" -d postgres"
 
 	if [ -n "$dbname" ]; then
@@ -467,9 +461,6 @@ function parse_para()
 				;;
 			U)
 				user="$OPTARG"
-				;;
-			W)
-				passwd="$OPTARG"
 				;;
 			E)
 				enable_extended_statistic="$OPTARG"

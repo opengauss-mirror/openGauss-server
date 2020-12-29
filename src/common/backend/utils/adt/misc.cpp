@@ -19,7 +19,6 @@
 #include <signal.h>
 #include <dirent.h>
 #include <math.h>
-#include <unistd.h>
 
 #include "catalog/catalog.h"
 #include "catalog/pg_tablespace.h"
@@ -39,6 +38,7 @@
 #include "storage/procarray.h"
 #include "utils/lsyscache.h"
 #include "tcop/tcopprot.h"
+#include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/timestamp.h"
 #include "gssignal/gs_signal.h"
@@ -51,6 +51,7 @@ extern void cancel_backend(Oid pid);
 #define atooid(x) ((Oid)strtoul((x), NULL, 10))
 
 /*
+ * current_database()
  *	Expose the current database to the user
  */
 Datum current_database(PG_FUNCTION_ARGS)
@@ -58,24 +59,23 @@ Datum current_database(PG_FUNCTION_ARGS)
     Name db;
 
     db = (Name)palloc(NAMEDATALEN);
-    char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
 
-    (void)namestrcpy(db, dbname ? dbname : "null");
+    namestrcpy(db, get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true));
     PG_RETURN_NAME(db);
 }
 
 /*
+ * current_query()
  *	Expose the current query to the user (useful in stored procedures)
  *	We might want to use ActivePortal->sourceText someday.
  */
 Datum current_query(PG_FUNCTION_ARGS)
 {
     /* there is no easy way to access the more concise 'query_string' */
-    if (t_thrd.postgres_cxt.debug_query_string) {
+    if (t_thrd.postgres_cxt.debug_query_string)
         PG_RETURN_TEXT_P(cstring_to_text(t_thrd.postgres_cxt.debug_query_string));
-    } else {
+    else
         PG_RETURN_NULL();
-    }
 }
 
 /*
@@ -110,9 +110,11 @@ static int pg_signal_backend(ThreadId pid, int sig)
          * anyway, that it might end on its own first is not a problem.
          */
         proc = BackendPidGetProc(pid);
-        if (proc == NULL || proc->roleId != GetUserId()) {
+
+        if (proc == NULL ||
+            (!pg_database_ownercheck(proc->databaseId, u_sess->misc_cxt.CurrentUserId) &&
+             proc->roleId != GetUserId()))
             return SIGNAL_BACKEND_NOPERMISSION;
-        }
     }
 
     if (!IsBackendPid(pid)) {
@@ -143,18 +145,19 @@ static int pg_signal_backend(ThreadId pid, int sig)
 
 uint64 get_query_id_beentry(ThreadId  tid)
 {
-    int i;
-    int n = pgstat_fetch_stat_numbackends();
+    PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
 
-    for (i = 1; i <= n; i++) {
-        PgBackendStatus *beentry = pgstat_fetch_stat_beentry(i);
+    while (node != NULL) {
+        PgBackendStatus *beentry = node->data;
 
         if (beentry != NULL) {
             if (beentry->st_procpid == tid) {
                 return beentry->st_queryid;
             }
         }
+        node = node->next;
     }
+
     return 0;
 }
 
@@ -171,18 +174,17 @@ Datum pg_cancel_backend(PG_FUNCTION_ARGS)
      * It is forbidden to kill backend in the online expansion to protect
      * the lock session from being interrupted by external applications.
      */
-    if (u_sess->attr.attr_sql.enable_online_ddl_waitlock && !u_sess->attr.attr_common.xc_maintenance_mode) {
+    if (u_sess->attr.attr_sql.enable_online_ddl_waitlock && !u_sess->attr.attr_common.xc_maintenance_mode)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("kill backend is prohibited during online expansion."))));
-    }
 
     r = pg_signal_backend(tid, SIGINT);
-    if (r == SIGNAL_BACKEND_NOPERMISSION) {
+
+    if (r == SIGNAL_BACKEND_NOPERMISSION)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 (errmsg("must be system admin or have the same role to cancel queries running in other server "
                         "processes"))));
-    }
 
     if (t_thrd.proc && t_thrd.proc->workingVersionNum >= 92060) {
         uint64 query_id = get_query_id_beentry(tid);
@@ -207,37 +209,15 @@ Datum pg_cancel_invalid_query(PG_FUNCTION_ARGS)
                 (errmsg("must be system admin to cancel invalid queries running in all server processes"))));
         PG_RETURN_BOOL(false);
     } else {
-        pgstat_cancel_invalid_gtm_conn();
+        if (GTM_LITE_MODE) {
+            proc_cancel_invalid_gtm_lite_conn();
+        } else {
+            pgstat_cancel_invalid_gtm_conn();
+        }
         PG_RETURN_BOOL(true);
     }
 #endif
 }
-
-// Report a fatal error. This is called just for test after threading.
-//
-Datum report_fatal(PG_FUNCTION_ARGS)
-{
-    ereport(FATAL, (errmsg("this is a test.")));
-    PG_RETURN_BOOL(true);
-}
-
-// Signal a server thread. This is called just for test after threading.
-//
-Datum signal_backend(PG_FUNCTION_ARGS)
-{
-
-    if (!superuser()) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                (errmsg("must be system admin to send signal to thread"))));
-        PG_RETURN_BOOL(false);
-    } else if (gs_signal_send(PG_GETARG_INT64(0), PG_GETARG_INT32(1))) {
-        ereport(WARNING, (errmsg("failed to send signal to thread.")));
-        PG_RETURN_BOOL(false);
-    }
-    PG_RETURN_BOOL(true);
-}
-
 
 static int kill_backend(ThreadId tid)
 {
@@ -245,19 +225,17 @@ static int kill_backend(ThreadId tid)
      * It is forbidden to kill backend in the online expansion to protect
      * the lock session from being interrupted by external applications.
      */
-    if (u_sess->attr.attr_sql.enable_online_ddl_waitlock && !u_sess->attr.attr_common.xc_maintenance_mode) {
+    if (u_sess->attr.attr_sql.enable_online_ddl_waitlock && !u_sess->attr.attr_common.xc_maintenance_mode)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("kill backend is prohibited during online expansion."))));
-    }
 
     int r = pg_signal_backend(tid, SIGTERM);
-    if (r == SIGNAL_BACKEND_NOPERMISSION) {
+    if (r == SIGNAL_BACKEND_NOPERMISSION)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 (errmsg("must be system admin or have the same role to terminate other backend"))));
-    }
     
-    if (t_thrd.proc != NULL) {
+    if (t_thrd.proc && t_thrd.proc->workingVersionNum >= 92060) {
         uint64 query_id = get_query_id_beentry(tid);
         (void)gs_close_all_stream_by_debug_id(query_id);
     }
@@ -299,17 +277,12 @@ Datum pg_terminate_session(PG_FUNCTION_ARGS)
  */
 Datum pg_wlm_jump_queue(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
-
     ThreadId tid = PG_GETARG_INT64(0);
 
-    if (g_instance.wlm_cxt->dynamic_workload_inited) {
+    if (g_instance.wlm_cxt->dynamic_workload_inited)
         dywlm_client_jump_queue(&g_instance.wlm_cxt->MyDefaultNodeGroup.climgr, tid);
-    } else {
+    else
         WLMJumpQueue(&g_instance.wlm_cxt->MyDefaultNodeGroup.parctl, tid);
-    }
 
     PG_RETURN_BOOL(true);
 }
@@ -320,10 +293,6 @@ Datum pg_wlm_jump_queue(PG_FUNCTION_ARGS)
  */
 Datum gs_wlm_switch_cgroup(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
-
     uint64 sess_id = PG_GETARG_INT64(0);
     char* cgroup = PG_GETARG_CSTRING(1);
 
@@ -333,21 +302,18 @@ Datum gs_wlm_switch_cgroup(PG_FUNCTION_ARGS)
         ereport(WARNING, (errmsg("Cannot switch control group in thread pool mode.")));
     } else if (g_instance.wlm_cxt->gscgroup_init_done > 0) {
         /* Only superuser or the owner of the query can change the control group. */
-        if (IS_PGXC_COORDINATOR && !superuser()) {
+        if (IS_PGXC_COORDINATOR && !superuser())
             ereport(ERROR,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     errmsg("the user have no right to "
                            "change cgroup for session [%lu]!",
                         sess_id)));
-        }
 
         /* If the connection is not from coordinator, data node cannot changed cgroup itself. */
-        if (IS_PGXC_COORDINATOR || IsConnFromCoord()) {
+        if (IS_PGXC_COORDINATOR || IsConnFromCoord())
             ret = WLMAjustCGroupByCNSessid(&g_instance.wlm_cxt->MyDefaultNodeGroup, sess_id, cgroup);
-        }
-    } else {
+    } else
         ereport(WARNING, (errmsg("Switch failed because of cgroup without initialization.")));
-    }
 
     PG_RETURN_BOOL(ret);
 }
@@ -358,12 +324,12 @@ Datum gs_wlm_switch_cgroup(PG_FUNCTION_ARGS)
  */
 Datum gs_wlm_node_recover(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
-
-    bool is_force = PG_GETARG_BOOL(0);
+    bool isForce = PG_GETARG_BOOL(0);
     int count = 0;
+    if (!superuser()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        errmsg("must be superuser account to recover node for wlm")));
+    }
 
     while (!WLMIsInfoInit()) {
         CHECK_FOR_INTERRUPTS();
@@ -378,7 +344,7 @@ Datum gs_wlm_node_recover(PG_FUNCTION_ARGS)
     if (!g_instance.wlm_cxt->dynamic_workload_inited) {
         ereport(NOTICE, (errmsg("dynamic workload disable, need not recover.")));
     } else {
-        dywlm_node_recover(is_force);
+        dywlm_node_recover(isForce);
     }
 
     PG_RETURN_BOOL(true);
@@ -390,17 +356,18 @@ Datum gs_wlm_node_recover(PG_FUNCTION_ARGS)
  */
 Datum gs_wlm_node_clean(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
-
     char* nodename = PG_GETARG_CSTRING(0);
+
     bool ret = false;
+    if (!superuser()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        errmsg("must be superuser account to clean node for wlm")));
+    }
 
     if (!g_instance.wlm_cxt->dynamic_workload_inited) {
         ereport(NOTICE, (errmsg("dynamic workload disable, need not clean.")));
     } else {
-        dywlm_server_clean(nodename);
+        (void)dywlm_server_clean(nodename);
         ret = true;
     }
 
@@ -413,9 +380,10 @@ Datum gs_wlm_node_clean(PG_FUNCTION_ARGS)
  */
 Datum gs_wlm_rebuild_user_resource_pool(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "gs_wlm_rebuild_user_resource_pool");
+    }
 
     /* rebuild user resource pool hash table */
     if (!BuildUserRPHash())
@@ -435,10 +403,6 @@ Datum gs_wlm_rebuild_user_resource_pool(PG_FUNCTION_ARGS)
  */
 Datum gs_wlm_readjust_user_space(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
-
     Oid roleid = PG_GETARG_OID(0);
 
     int count = 0;
@@ -466,10 +430,6 @@ Datum gs_wlm_readjust_user_space(PG_FUNCTION_ARGS)
  */
 Datum gs_wlm_readjust_user_space_through_username(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
-
     char* username = PG_GETARG_CSTRING(0);
     int count = 0;
 
@@ -498,13 +458,8 @@ Datum gs_wlm_readjust_user_space_through_username(PG_FUNCTION_ARGS)
  */
 Datum gs_wlm_readjust_user_space_with_reset_flag(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
-
     char* username = PG_GETARG_CSTRING(0);
-    bool is_reset = PG_GETARG_BOOL(1);
-
+    bool isReset = PG_GETARG_BOOL(1);
     int count = 0;
 
     while (!WLMIsInfoInit()) {
@@ -517,7 +472,7 @@ Datum gs_wlm_readjust_user_space_with_reset_flag(PG_FUNCTION_ARGS)
     }
 
     /* verify all user space */
-    WLMReadjustUserSpaceByNameWithResetFlag(username, is_reset);
+    WLMReadjustUserSpaceByNameWithResetFlag(username, isReset);
 
     PG_RETURN_TEXT_P(cstring_to_text("Exec Success"));
 }
@@ -532,9 +487,15 @@ Datum gs_get_role_name(PG_FUNCTION_ARGS)
 
     char rolname[NAMEDATALEN] = {0};
 
-    if (OidIsValid(roleid)) {
-        (void)GetRoleName(roleid, rolname, sizeof(rolname));
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to get role name"),
+                errhint("Must be system admin or monitor admin can get role name.")));
     }
+
+    if (OidIsValid(roleid))
+        (void)GetRoleName(roleid, rolname, sizeof(rolname));
 
     PG_RETURN_TEXT_P(cstring_to_text(rolname));
 }
@@ -544,10 +505,9 @@ Datum gs_get_role_name(PG_FUNCTION_ARGS)
  */
 Datum pg_reload_conf(PG_FUNCTION_ARGS)
 {
-    if (!superuser()) {
+    if (!superuser())
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be system admin to signal the postmaster"))));
-    }
 
     if (gs_signal_send(PostmasterPid, SIGHUP)) {
         ereport(WARNING, (errmsg("failed to send signal to postmaster: %m")));
@@ -562,9 +522,8 @@ Datum pg_reload_conf(PG_FUNCTION_ARGS)
  */
 Datum pg_rotate_logfile(PG_FUNCTION_ARGS)
 {
-    if (!superuser()) {
+    if (!superuser())
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be system admin to rotate log files"))));
-    }
 
     if (!g_instance.attr.attr_common.Logging_collector) {
         ereport(WARNING, (errmsg("rotation not possible because log collection not active")));
@@ -575,9 +534,8 @@ Datum pg_rotate_logfile(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(true);
 }
 
-/*
- * Function to find out which databases make use of a tablespace 
- */
+/* Function to find out which databases make use of a tablespace */
+
 typedef struct {
     char* location;
     DIR* dirdesc;
@@ -592,7 +550,7 @@ Datum pg_tablespace_databases(PG_FUNCTION_ARGS)
 
     if (SRF_IS_FIRSTCALL()) {
         MemoryContext oldcontext;
-        Oid table_space_oid = PG_GETARG_OID(0);
+        Oid tablespaceOid = PG_GETARG_OID(0);
 
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
@@ -611,36 +569,34 @@ Datum pg_tablespace_databases(PG_FUNCTION_ARGS)
         location_len = 9 + 1 + OIDCHARS + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1 fctx->location =
                            (char*)palloc(location_len);
 #endif
-        if (table_space_oid == GLOBALTABLESPACE_OID) {
+        if (tablespaceOid == GLOBALTABLESPACE_OID) {
             fctx->dirdesc = NULL;
             ereport(WARNING, (errmsg("global tablespace never has databases")));
         } else {
-            if (table_space_oid == DEFAULTTABLESPACE_OID) {
+            if (tablespaceOid == DEFAULTTABLESPACE_OID)
                 ss_rc = sprintf_s(fctx->location, location_len, "base");
-            } else {
+            else
 #ifdef PGXC
                 /* Postgres-XC tablespaces also include node name in path */
                 ss_rc = sprintf_s(fctx->location,
                     location_len,
                     "pg_tblspc/%u/%s_%s",
-                    table_space_oid,
+                    tablespaceOid,
                     TABLESPACE_VERSION_DIRECTORY,
                     g_instance.attr.attr_common.PGXCNodeName);
 #else
                 ss_rc = sprintf_s(
-                    fctx->location, location_len, "pg_tblspc/%u/%s", table_space_oid, TABLESPACE_VERSION_DIRECTORY);
+                    fctx->location, location_len, "pg_tblspc/%u/%s", tablespaceOid, TABLESPACE_VERSION_DIRECTORY);
 #endif
-            }
             securec_check_ss(ss_rc, "\0", "\0");
             fctx->dirdesc = AllocateDir(fctx->location);
 
             if (fctx->dirdesc == NULL) {
                 /* the only expected error is ENOENT */
-                if (errno != ENOENT) {
+                if (errno != ENOENT)
                     ereport(ERROR,
                         (errcode_for_file_access(), errmsg("could not open directory \"%s\": %m", fctx->location)));
-                }
-                ereport(WARNING, (errmsg("%u is not a tablespace OID", table_space_oid)));
+                ereport(WARNING, (errmsg("%u is not a tablespace OID", tablespaceOid)));
             }
         }
         funcctx->user_fctx = fctx;
@@ -650,9 +606,8 @@ Datum pg_tablespace_databases(PG_FUNCTION_ARGS)
     funcctx = SRF_PERCALL_SETUP();
     fctx = (ts_db_fctx*)funcctx->user_fctx;
 
-    if (fctx->dirdesc == NULL) { /* not a tablespace */
+    if (fctx->dirdesc == NULL) /* not a tablespace */
         SRF_RETURN_DONE(funcctx);
-    }
 
     while ((de = ReadDir(fctx->dirdesc, fctx->location)) != NULL) {
         char* subdir = NULL;
@@ -660,11 +615,11 @@ Datum pg_tablespace_databases(PG_FUNCTION_ARGS)
         Oid datOid = atooid(de->d_name);
 
         /* this test skips . and .., but is awfully weak */
-        if (!datOid) {
+        if (!datOid)
             continue;
-        }
 
         /* if database subdir is empty, don't report tablespace as used */
+
         /* size = path length + dir sep char + file name + terminator */
         int sub_len = strlen(fctx->location) + 1 + strlen(de->d_name) + 1;
         subdir = (char*)palloc(sub_len);
@@ -672,16 +627,14 @@ Datum pg_tablespace_databases(PG_FUNCTION_ARGS)
         securec_check_ss(ss_rc, "\0", "\0");
         dirdesc = AllocateDir(subdir);
         while ((de = ReadDir(dirdesc, subdir)) != NULL) {
-            if (strcmp(de->d_name, ".") != 0 && strcmp(de->d_name, "..") != 0) {
+            if (strcmp(de->d_name, ".") != 0 && strcmp(de->d_name, "..") != 0)
                 break;
-            }
         }
         FreeDir(dirdesc);
         pfree_ext(subdir);
 
-        if (de == NULL) {
+        if (de == NULL)
             continue; /* indeed, nothing in it */
-        }
 
         SRF_RETURN_NEXT(funcctx, ObjectIdGetDatum(datOid));
     }
@@ -695,27 +648,24 @@ Datum pg_tablespace_databases(PG_FUNCTION_ARGS)
  */
 Datum pg_tablespace_location(PG_FUNCTION_ARGS)
 {
-    Oid table_space_oid = PG_GETARG_OID(0);
-    char source_path[MAXPGPATH];
-    char target_path[MAXPGPATH];
-    ssize_t rllen;
-
-    if (!superuser()) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("permission denied."))));
-    }
+    Oid tablespaceOid = PG_GETARG_OID(0);
+    char sourcepath[MAXPGPATH];
+    char targetpath[MAXPGPATH];
+    int rllen;
 
     /*
      * It's useful to apply this function to pg_class.reltablespace, wherein
      * zero means "the database's default tablespace".	So, rather than
      * throwing an error for zero, we choose to assume that's what is meant.
      */
-    table_space_oid = ConvertToRelfilenodeTblspcOid(table_space_oid);
+    tablespaceOid = ConvertToRelfilenodeTblspcOid(tablespaceOid);
+
     /*
      * Return empty string for the cluster's default tablespaces. If the
      * currrent user is not superuser, we should not expose the absolute
      * path to the client.
      */
-    if (table_space_oid == DEFAULTTABLESPACE_OID || table_space_oid == GLOBALTABLESPACE_OID || !superuser()) {
+    if (tablespaceOid == DEFAULTTABLESPACE_OID || tablespaceOid == GLOBALTABLESPACE_OID || !superuser()) {
         PG_RETURN_TEXT_P(cstring_to_text(""));
     }
 
@@ -724,35 +674,34 @@ Datum pg_tablespace_location(PG_FUNCTION_ARGS)
      * Find the location of the tablespace by reading the symbolic link that
      * is in pg_tblspc/<oid>.
      */
-    errno_t ss_rc = snprintf_s(source_path, sizeof(source_path), sizeof(source_path) - 1, "pg_tblspc/%u", table_space_oid);
+    errno_t ss_rc = snprintf_s(sourcepath, sizeof(sourcepath), sizeof(sourcepath) - 1, "pg_tblspc/%u", tablespaceOid);
     securec_check_ss(ss_rc, "\0", "\0");
 
-    rllen = readlink(source_path, target_path, sizeof(target_path));
-    if (rllen < 0) {
+    rllen = readlink(sourcepath, targetpath, sizeof(targetpath));
+    if (rllen < 0)
         ereport(
-            ERROR, (errcode(ERRCODE_FILE_READ_FAILED), errmsg("could not read symbolic link \"%s\": %m", source_path)));
-    } else if ((unsigned int)(rllen) >= sizeof(target_path)) {
-        ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("symbolic link \"%s\" target is too long", source_path)));
-    }
-    target_path[rllen] = '\0';
+            ERROR, (errcode(ERRCODE_FILE_READ_FAILED), errmsg("could not read symbolic link \"%s\": %m", sourcepath)));
+    else if ((unsigned int)(rllen) >= sizeof(targetpath))
+        ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("symbolic link \"%s\" target is too long", sourcepath)));
+    targetpath[rllen] = '\0';
 
     /* relative location will contain t_thrd.proc_cxt.DataDir */
-    size_t dataDirLength = strlen(t_thrd.proc_cxt.DataDir);
-    if (0 == strncmp(target_path, t_thrd.proc_cxt.DataDir, dataDirLength) && (size_t)rllen > dataDirLength &&
-        target_path[dataDirLength] == '/') {
+   size_t dataDirLength = strlen(t_thrd.proc_cxt.DataDir);
+    if (0 == strncmp(targetpath, t_thrd.proc_cxt.DataDir, dataDirLength) && (size_t)rllen > dataDirLength &&
+        targetpath[dataDirLength] == '/') {
         /*
          * The position is  not '/' when skip t_thrd.proc_cxt.DataDir. the relative location can't start from '/'
          * We only need get the relative location, so remove the common prefix
          */
         int pos = (t_thrd.proc_cxt.DataDir[strlen(t_thrd.proc_cxt.DataDir)] == '/')
-            ? strlen(t_thrd.proc_cxt.DataDir)
-            : strlen(t_thrd.proc_cxt.DataDir) + 1;
+                      ? strlen(t_thrd.proc_cxt.DataDir)
+                      : (strlen(t_thrd.proc_cxt.DataDir) + 1);
         pos += strlen(PG_LOCATION_DIR) + 1;
-        errno_t rc = memmove_s(target_path, MAXPGPATH, target_path + pos, strlen(target_path) - pos);
+        errno_t rc = memmove_s(targetpath, MAXPGPATH, targetpath + pos, strlen(targetpath) - pos);
         securec_check(rc, "\0", "\0");
-        target_path[strlen(target_path) - pos] = '\0';
+        targetpath[strlen(targetpath) - pos] = '\0';
     }
-    PG_RETURN_TEXT_P(cstring_to_text(target_path));
+    PG_RETURN_TEXT_P(cstring_to_text(targetpath));
 #else
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("tablespaces are not supported on this platform")));
     PG_RETURN_NULL();
@@ -793,13 +742,12 @@ Datum pg_sleep(PG_FUNCTION_ARGS)
 
         CHECK_FOR_INTERRUPTS();
         delay = endtime - GetNowFloat();
-        if (delay >= 1.0) {
+        if (delay >= 1.0)
             pg_usleep(1000000L);
-        } else if (delay > 0.0) {
+        else if (delay > 0.0)
             pg_usleep((long)ceil(delay * 1000000.0));
-        } else {
+        else
             break;
-        }
     }
 
     PG_RETURN_VOID();
@@ -807,9 +755,8 @@ Datum pg_sleep(PG_FUNCTION_ARGS)
 
 Datum pg_get_nodename(PG_FUNCTION_ARGS)
 {
-    if (g_instance.attr.attr_common.PGXCNodeName == NULL) {
+    if (g_instance.attr.attr_common.PGXCNodeName == NULL)
         g_instance.attr.attr_common.PGXCNodeName = "Error Node";
-    }
 
     PG_RETURN_TEXT_P(cstring_to_text(g_instance.attr.attr_common.PGXCNodeName));
 }
@@ -826,7 +773,7 @@ Datum pg_get_keywords(PG_FUNCTION_ARGS)
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(3, false);
+        tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "word", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "catcode", CHAROID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "catdesc", TEXTOID, -1, 0);
@@ -837,6 +784,7 @@ Datum pg_get_keywords(PG_FUNCTION_ARGS)
     }
 
     funcctx = SRF_PERCALL_SETUP();
+
     if (funcctx->call_cntr < (unsigned int)(NumScanKeywords)) {
         char* values[3];
         HeapTuple tuple;
@@ -893,19 +841,16 @@ Datum pg_collation_for(PG_FUNCTION_ARGS)
     Oid collid;
 
     typeId = get_fn_expr_argtype(fcinfo->flinfo, 0);
-    if (!typeId) {
+    if (!typeId)
         PG_RETURN_NULL();
-    }
-    if (!type_is_collatable(typeId) && typeId != UNKNOWNOID) {
+    if (!type_is_collatable(typeId) && typeId != UNKNOWNOID)
         ereport(ERROR,
             (errcode(ERRCODE_DATATYPE_MISMATCH),
                 errmsg("collations are not supported by type %s", format_type_be(typeId))));
-    }
 
     collid = PG_GET_COLLATION();
-    if (!collid) {
+    if (!collid)
         PG_RETURN_NULL();
-    }
     PG_RETURN_TEXT_P(cstring_to_text(generate_collation_name(collid)));
 }
 
@@ -984,6 +929,7 @@ void cancel_backend(Oid pid)
     int sig_return = 0;
 
     sig_return = pg_signal_backend(pid, SIGINT);
+
     if (sig_return == SIGNAL_BACKEND_NOPERMISSION) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),

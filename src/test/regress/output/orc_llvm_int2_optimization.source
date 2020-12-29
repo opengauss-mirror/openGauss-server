@@ -1,0 +1,443 @@
+drop foreign table if exists t_smallint;
+NOTICE:  foreign table "t_smallint" does not exist, skipping
+Create foreign table t_smallint (c_smallint int2) SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/t_smallint_orc') distribute by roundrobin;
+--test "=" operator
+set enable_codegen = off;
+select * from t_smallint where  2 = c_smallint;
+ c_smallint 
+------------
+          2
+(1 row)
+
+set enable_codegen = on;
+select * from t_smallint where  2 = c_smallint;
+ c_smallint 
+------------
+          2
+(1 row)
+
+select * from t_smallint where  2::int2 = c_smallint;
+ c_smallint 
+------------
+          2
+(1 row)
+
+select * from t_smallint where  2::int8 = c_smallint;
+ c_smallint 
+------------
+          2
+(1 row)
+
+set enable_codegen = off;
+select * from t_smallint where  c_smallint = 2;
+ c_smallint 
+------------
+          2
+(1 row)
+
+set enable_codegen = on;
+select * from t_smallint where  c_smallint = 2 ;
+ c_smallint 
+------------
+          2
+(1 row)
+
+--test ">" operator
+set enable_codegen = off;
+select * from t_smallint where  2 > c_smallint;
+ c_smallint 
+------------
+          1
+          1
+(2 rows)
+
+set enable_codegen = on;
+select * from t_smallint where  2 > c_smallint;
+ c_smallint 
+------------
+          1
+          1
+(2 rows)
+
+set enable_codegen = off;
+select * from t_smallint where  c_smallint > 2;
+ c_smallint 
+------------
+          3
+          5
+          8
+(3 rows)
+
+set enable_codegen = on;
+select * from t_smallint where  c_smallint > 2 ;
+ c_smallint 
+------------
+          3
+          5
+          8
+(3 rows)
+
+select * from t_smallint where  c_smallint > 2::int2;
+ c_smallint 
+------------
+          3
+          5
+          8
+(3 rows)
+
+select * from t_smallint where  c_smallint > 2::int8;
+ c_smallint 
+------------
+          3
+          5
+          8
+(3 rows)
+
+--test ">=" operator
+set enable_codegen = off;
+select * from t_smallint where  2 >= c_smallint;
+ c_smallint 
+------------
+          1
+          1
+          2
+(3 rows)
+
+set enable_codegen = on;
+select * from t_smallint where  2 >= c_smallint;
+ c_smallint 
+------------
+          1
+          1
+          2
+(3 rows)
+
+set enable_codegen = off;
+select * from t_smallint where  c_smallint >= 2;
+ c_smallint 
+------------
+          2
+          3
+          5
+          8
+(4 rows)
+
+set enable_codegen = on;
+select * from t_smallint where  c_smallint >= 2 ;
+ c_smallint 
+------------
+          2
+          3
+          5
+          8
+(4 rows)
+
+select * from t_smallint where  c_smallint >= 2::int2;
+ c_smallint 
+------------
+          2
+          3
+          5
+          8
+(4 rows)
+
+select * from t_smallint where  c_smallint >= 2::int8;
+ c_smallint 
+------------
+          2
+          3
+          5
+          8
+(4 rows)
+
+--test "<" operator
+set enable_codegen = off;
+select * from t_smallint where  2 < c_smallint;
+ c_smallint 
+------------
+          3
+          5
+          8
+(3 rows)
+
+set enable_codegen = on;
+select * from t_smallint where  2 < c_smallint;
+ c_smallint 
+------------
+          3
+          5
+          8
+(3 rows)
+
+set enable_codegen = off;
+select * from t_smallint where  c_smallint < 2;
+ c_smallint 
+------------
+          1
+          1
+(2 rows)
+
+set enable_codegen = on;
+select * from t_smallint where  c_smallint < 2 ;
+ c_smallint 
+------------
+          1
+          1
+(2 rows)
+
+select * from t_smallint where  c_smallint < 2::int2 ;
+ c_smallint 
+------------
+          1
+          1
+(2 rows)
+
+select * from t_smallint where  c_smallint < 2::int8 ;
+ c_smallint 
+------------
+          1
+          1
+(2 rows)
+
+--test "<=" operator
+set enable_codegen = off;
+select * from t_smallint where  2 <= c_smallint;
+ c_smallint 
+------------
+          2
+          3
+          5
+          8
+(4 rows)
+
+set enable_codegen = on;
+select * from t_smallint where  2 <= c_smallint;
+ c_smallint 
+------------
+          2
+          3
+          5
+          8
+(4 rows)
+
+set enable_codegen = off;
+select * from t_smallint where  c_smallint <= 2;
+ c_smallint 
+------------
+          1
+          1
+          2
+(3 rows)
+
+set enable_codegen = on;
+select * from t_smallint where  c_smallint <= 2 ;
+ c_smallint 
+------------
+          1
+          1
+          2
+(3 rows)
+
+select * from t_smallint where  c_smallint <= 2::int2 ;
+ c_smallint 
+------------
+          1
+          1
+          2
+(3 rows)
+
+select * from t_smallint where  c_smallint <= 2::int8 ;
+ c_smallint 
+------------
+          1
+          1
+          2
+(3 rows)
+
+--test "<>" operator
+set enable_codegen = off;
+select * from t_smallint where  2 <> c_smallint;
+ c_smallint 
+------------
+          1
+          1
+          3
+          5
+          8
+(5 rows)
+
+set enable_codegen = on;
+select * from t_smallint where  2 <> c_smallint;
+ c_smallint 
+------------
+          1
+          1
+          3
+          5
+          8
+(5 rows)
+
+set enable_codegen = off;
+select * from t_smallint where  c_smallint <> 2;
+ c_smallint 
+------------
+          1
+          1
+          3
+          5
+          8
+(5 rows)
+
+set enable_codegen = on;
+select * from t_smallint where  c_smallint <> 2 ;
+ c_smallint 
+------------
+          1
+          1
+          3
+          5
+          8
+(5 rows)
+
+select * from t_smallint where  c_smallint <> 2::int2 ;
+ c_smallint 
+------------
+          1
+          1
+          3
+          5
+          8
+(5 rows)
+
+select * from t_smallint where  c_smallint <> 2::int8 ;
+ c_smallint 
+------------
+          1
+          1
+          3
+          5
+          8
+(5 rows)
+
+--test "!=" operator
+set enable_codegen = off;
+select * from t_smallint where  2 != c_smallint;
+ c_smallint 
+------------
+          1
+          1
+          3
+          5
+          8
+(5 rows)
+
+set enable_codegen = on;
+select * from t_smallint where  2 != c_smallint;
+ c_smallint 
+------------
+          1
+          1
+          3
+          5
+          8
+(5 rows)
+
+set enable_codegen = off;
+select * from t_smallint where  c_smallint != 2;
+ c_smallint 
+------------
+          1
+          1
+          3
+          5
+          8
+(5 rows)
+
+set enable_codegen = on;
+select * from t_smallint where  c_smallint != 2 ;
+ c_smallint 
+------------
+          1
+          1
+          3
+          5
+          8
+(5 rows)
+
+select * from t_smallint where  c_smallint != 2::int2 ;
+ c_smallint 
+------------
+          1
+          1
+          3
+          5
+          8
+(5 rows)
+
+select * from t_smallint where  c_smallint != 2::int8 ;
+ c_smallint 
+------------
+          1
+          1
+          3
+          5
+          8
+(5 rows)
+
+--
+drop foreign table append_03 ;
+ERROR:  foreign table "append_03" does not exist
+create foreign table append_03 (
+  col_tinyint       int,
+  col_smallint      smallint,
+  col_int        integer,
+  col_bigint       bigint,
+  col_numeric       numeric,
+  col_double       double precision,
+  col_decimal          decimal,
+  col_varchar        varchar,
+  col_char       char(30),
+  col_nvarchar2      varchar(150),
+  col_text       text,
+  col_timestamptz   timestamp,
+  col_timestamp   timestamp,
+  col_interval      char(50),
+  col_date          timestamp
+)  server hdfs_server
+OPTIONS ( FORMAT 'orc',FOLDERNAME '/user/hive/warehouse/setop.db/append_03_orc')
+DISTRIBUTE BY roundrobin;
+select count(*) from append_03 t3 where t3.col_int = 5 and extract(hour from t3.col_interval) <= 19;
+ count 
+-------
+     3
+(1 row)
+
+--add llt
+explain performance select * from t_smallint where  c_smallint != 2;
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+

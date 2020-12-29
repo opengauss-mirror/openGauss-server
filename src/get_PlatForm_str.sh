@@ -1,27 +1,14 @@
 #!/bin/bash
-#Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+# *************************************************************************
+# Copyright: (c) Huawei Technologies Co., Ltd. 2019. All rights reserved
 #
-#openGauss is licensed under Mulan PSL v2.
-#You can use this software according to the terms and conditions of the Mulan PSL v2.
-#You may obtain a copy of Mulan PSL v2 at:
-#
-#          http://license.coscl.org.cn/MulanPSL2
-#
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-# See the Mulan PSL v2 for more details.
-#-------------------------------------------------------------------------
-#
-# get_PlatForm_str.sh
-#    Acording plat form, get the string info, like "redhat6.4_x86_64".
-#    return:  $plat_form_str : we support the platform and put out $plat_form_str
+# description: Acording plat form, get the string info, like "redhat6.4_x86_64".
+# return:  $plat_form_str : we support the platform and put out $plat_form_str
 #          "Failed" : the plat form, not supported
+# date: 2015-8-22
+# version: 1.0
 #
-# IDENTIFICATION
-#    src/get_PlatForm_str.sh
-#
-#-------------------------------------------------------------------------
+# *************************************************************************
 set -e
 
 ##############################################################################################
@@ -36,9 +23,9 @@ then
 elif [ -f "/etc/openEuler-release" ]
 then
 	kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
-elif [ -f "/etc/os-release" ]
+elif [ -f "/etc/centos-release" ]
 then
-	kernel=$(source /etc/os-release; echo $ID)
+	kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
 else
 	kernel=$(lsb_release -d | awk -F ' ' '{print $2}'| tr A-Z a-z)
 fi
@@ -62,15 +49,6 @@ plat_form_str=""
 if [ "$kernel"x = "red"x ]
 then
 	plat_form_str=redhat6.4_"$cpu_bit"
-fi
-
-##################################################################################
-# asianux platform
-# the result form like this: asianux7.6_x86_64
-##################################################################################
-if [ "$kernel"x = "asianux"x ]
-then
-        plat_form_str=asianux_"$cpu_bit"
 fi
 
 ##################################################################################
@@ -144,14 +122,6 @@ then
     plat_form_str=openeuler_"$cpu_bit"
 fi
 
-##################################################################################
-# neokylin platform
-# the result form like this: neokylin_aarch64
-##################################################################################
-if [ "$kernel"x = "neokylin"x ]
-then
-    plat_form_str=neokylin_"$cpu_bit"
-fi
 
 ##################################################################################
 #

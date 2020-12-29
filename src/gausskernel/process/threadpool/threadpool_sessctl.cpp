@@ -37,6 +37,7 @@
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "postmaster/postmaster.h"
+#include "pgstat.h"
 #include "pgxc/pgxc.h"
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
@@ -47,6 +48,7 @@
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
+#include "utils/acl.h"
 #include "executor/executor.h"
 
 ThreadPoolSessControl::ThreadPoolSessControl(MemoryContext context)
@@ -58,22 +60,20 @@ ThreadPoolSessControl::ThreadPoolSessControl(MemoryContext context)
     m_activeSessionCount = 0;
     m_maxActiveSessionCount = GLOBAL_MAX_SESSION_NUM;
     m_maxReserveSessionCount = GLOBAL_RESERVE_SESSION_NUM;
-    m_activelist = NULL;
-    m_freelist = NULL;
+    DLInitList(&m_activelist);
+    DLInitList(&m_freelist);
     m_base = (knl_sess_control*)palloc0(sizeof(knl_sess_control) * m_maxActiveSessionCount);
     for (int i = 0; i < m_maxActiveSessionCount; i++) {
         m_base[i].idx = (m_maxReserveSessionCount + i);
         m_base[i].lock = 0;
-        m_base[i].next = m_freelist;
-        m_freelist = &m_base[i];
+        DLInitElem(&m_base[i].elem, &m_base[i]);
+        DLAddHead(&m_freelist, &m_base[i].elem);
     }
 }
 
 ThreadPoolSessControl::~ThreadPoolSessControl()
 {
     pfree_ext(m_base);
-    m_freelist = NULL;
-    m_activelist = NULL;
     m_context = NULL;
 }
 
@@ -89,19 +89,24 @@ knl_session_context* ThreadPoolSessControl::CreateSession(Port* port)
         return NULL;
     }
 
-    MemoryContext old_cxt = MemoryContextSwitchTo(sc->top_mem_cxt);
+    MemoryContext old_cxt = MemoryContextSwitchTo(sc->mcxt_group->GetMemCxtGroup(MEMORY_CONTEXT_DEFAULT));
     sc->proc_cxt.MyProcPort = (Port*)palloc0(sizeof(Port));
-    (void)MemoryContextSwitchTo(old_cxt);
+    MemoryContextSwitchTo(old_cxt);
     int rc = memcpy_s(sc->proc_cxt.MyProcPort, sizeof(Port), port, sizeof(Port));
     securec_check(rc, "\0", "\0");
 
     if (AllocateSlot(sc)) {
-        sc->stat_cxt.trackedBytes = u_sess->stat_cxt.trackedBytes;
-        sc->stat_cxt.trackedMemChunks = u_sess->stat_cxt.trackedMemChunks;
+        sc->stat_cxt.trackedBytes += u_sess->stat_cxt.trackedBytes;
+        sc->stat_cxt.trackedMemChunks += u_sess->stat_cxt.trackedMemChunks;
         u_sess->stat_cxt.trackedBytes = 0;
         u_sess->stat_cxt.trackedMemChunks = 0;
         return sc;
     } else {
+        u_sess->stat_cxt.trackedBytes += sc->stat_cxt.trackedBytes;
+        u_sess->stat_cxt.trackedMemChunks += sc->stat_cxt.trackedMemChunks;
+        // sc->top_mem_cxt has been sealed in create_session_context
+        MemoryContextUnSeal(sc->top_mem_cxt);
+        MemoryContextDeleteChildren(sc->top_mem_cxt);
         MemoryContextDelete(sc->top_mem_cxt);
         pfree(sc);
         return NULL;
@@ -127,20 +132,13 @@ knl_sess_control* ThreadPoolSessControl::AllocateSlot(knl_session_context* sc)
                 m_maxActiveSessionCount)));
         return NULL;
     }
-    Assert(m_freelist != NULL);
+    Assert(DLListLength(&m_freelist) != 0);
 
     /* remove from free list */
-    knl_sess_control* ctrl = m_freelist;
-    m_freelist = ctrl->next;
-    /* add to active list */
-    ctrl->prev = NULL;
-    ctrl->next = m_activelist;
-    if (m_activelist != NULL) {
-        m_activelist->prev = ctrl;
-    }
-    m_activelist = ctrl;
+    knl_sess_control* ctrl = (knl_sess_control*)DLE_VAL(DLRemHead(&m_freelist));
     ctrl->sess = sc;
     sc->session_ctr_index = ctrl->idx;
+    DLAddHead(&m_activelist, &ctrl->elem);
     m_activeSessionCount++;
     alock.unLock();
 
@@ -155,23 +153,11 @@ void ThreadPoolSessControl::FreeSlot(int ctrl_index)
 
     AutoMutexLock alock(&m_sessCtrlock);
     alock.lock();
-    /* remove from active list. */
-    knl_sess_control *ctrl, *prev, *next;
-    ctrl = &m_base[ctrl_index - m_maxReserveSessionCount];
-    prev = ctrl->prev;
-    next = ctrl->next;
-    if (prev == NULL) {
-        m_activelist = next;
-    } else {
-        prev->next = next;
-    }
-    if (next != NULL) {
-        next->prev = prev;
-    }
 
-    /* return to free list. */
-    ctrl->next = m_freelist;
-    m_freelist = ctrl;
+    knl_sess_control *ctrl = &m_base[ctrl_index - m_maxReserveSessionCount];
+    Assert(ctrl->elem.dle_list == &m_activelist);
+    DLRemove(&ctrl->elem);
+    DLAddHead(&m_freelist, &ctrl->elem);
 
     m_activeSessionCount--;
     volatile sig_atomic_t* plock = &ctrl->lock;
@@ -197,13 +183,32 @@ void ThreadPoolSessControl::MarkAllSessionClose()
     /* Mark all session to be closed. */
     AutoMutexLock alock(&m_sessCtrlock);
     alock.lock();
-    knl_sess_control* ctrl = m_activelist;
-    while (ctrl != NULL) {
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = DLGetHead(&m_activelist);
+    while (elem != NULL) {
+        ctrl= (knl_sess_control*)DLE_VAL(elem);
         ctrl->sess->status = KNL_SESS_CLOSE;
         CloseClientSocket(ctrl->sess, false);
-        ctrl = ctrl->next;
+        elem = DLGetSucc(elem);
     }
     alock.unLock();
+}
+
+void ThreadPoolSessControl::CheckPermissionForSendSignal(knl_session_context* sess)
+{
+    /* User id is invalid only when sometimes dealing with cancel signal. Because that permission is ensured
+      by random cancel key, so we don't have to check the permission again. */
+    if (!OidIsValid(u_sess->misc_cxt.CurrentUserId)) {
+        return;
+    }
+    /* Only superuser , DB owner and user himself have the permission to send singal. */
+    if (!superuser() && !pg_database_ownercheck(sess->proc_cxt.MyDatabaseId, u_sess->misc_cxt.CurrentUserId)) {
+        if (sess->proc_cxt.MyRoleId != GetUserId()) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    (errmsg("must be system admin, db owner or have the same role to terminate other backend"))));
+        }
+    }
 }
 
 int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
@@ -217,18 +222,8 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
 
     knl_sess_control* ctrl = &m_base[ctrl_index - m_maxReserveSessionCount];
     knl_session_context* sess = ctrl->sess;
-    knl_session_context* sessBuff = u_sess;
-    u_sess = sess;
-    /* check permission */
-    if (!superuser()) {
-        if (sess->proc_cxt.MyRoleId != GetUserId()) {
-            u_sess = sessBuff;
-            ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                    (errmsg("must be system admin or have the same role to terminate other backend"))));
-        }
-    }
-    u_sess = sessBuff;
+    /* Check user permission, and we dont have user id for cancel request. */
+    CheckPermissionForSendSignal(sess);
     volatile sig_atomic_t* plock = &ctrl->lock;
     sig_atomic_t val;
     do {
@@ -313,18 +308,21 @@ int ThreadPoolSessControl::CountDBSessions(Oid dbId)
     AutoMutexLock alock(&m_sessCtrlock);
     alock.lock();
 
-    knl_sess_control* ctrl = m_activelist;
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = DLGetHead(&m_activelist);
     int count = 0;
 
-    while (ctrl != NULL) {
+    while (elem != NULL) {
+        ctrl= (knl_sess_control*)DLE_VAL(elem);
         if (ctrl->sess->proc_cxt.MyDatabaseId == dbId) {
             count++;
             if (strcmp(ctrl->sess->attr.attr_common.application_name, "WDRXdb") == 0) {
                 ThreadPoolSessControl::SendSignal(ctrl->idx, SIGTERM);
+                ThreadPoolSessControl::SendSignal(ctrl->idx, SIGUSR2);
             }
         }
 
-        ctrl = ctrl->next;
+        elem = DLGetSucc(elem);
     }
 
     alock.unLock();
@@ -337,11 +335,12 @@ void ThreadPoolSessControl::SigHupHandler()
     AutoMutexLock alock(&m_sessCtrlock);
     alock.lock();
 
-    knl_sess_control* ctrl = m_activelist;
-
-    while (ctrl != NULL) {
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = DLGetHead(&m_activelist);
+    while (elem != NULL) {
+        ctrl= (knl_sess_control*)DLE_VAL(elem);
         ctrl->sess->sig_cxt.got_SIGHUP = true;
-        ctrl = ctrl->next;
+        elem = DLGetSucc(elem);
     }
     alock.unLock();
 }
@@ -355,163 +354,105 @@ void ThreadPoolSessControl::HandlePoolerReload()
     AutoMutexLock alock(&m_sessCtrlock);
     alock.lock();
 
-    knl_sess_control* ctrl = m_activelist;
-
-    while (ctrl != NULL) {
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = DLGetHead(&m_activelist);
+    while (elem != NULL) {
+        ctrl= (knl_sess_control*)DLE_VAL(elem);
         ctrl->sess->sig_cxt.got_PoolReload = true;
         ctrl->sess->sig_cxt.cp_PoolReload = true;
-        ctrl = ctrl->next;
+        elem = DLGetSucc(elem);
     }
     alock.unLock();
-}
-
-void ThreadPoolSessControl::createSessTempSmallCxtGroup(knl_session_context* sess, SessionMemoryDetailPad* data) const
-{
-    /* create temp context for grouping all small size memory context */
-    errno_t rc;
-    SessionMemoryDetail* sessionMemoryDetail = (SessionMemoryDetail*)palloc0(sizeof(SessionMemoryDetail));
-    if (data->sessionMemoryDetail == NULL) {
-        data->sessionMemoryDetail = sessionMemoryDetail;
-    } else {
-        sessionMemoryDetail->next = data->sessionMemoryDetail->next;
-        data->sessionMemoryDetail->next = sessionMemoryDetail;
-    }
-
-    rc = strncpy_s(sessionMemoryDetail->contextName,
-        MEMORY_CONTEXT_NAME_LEN,
-        "TempSmallContextGroup",
-        MEMORY_CONTEXT_NAME_LEN - 1);
-    securec_check(rc, "\0", "\0");
-    sessionMemoryDetail->contextName[MEMORY_CONTEXT_NAME_LEN - 1] = '\0';
-
-    sessionMemoryDetail->sessId = sess->session_id;
-    sessionMemoryDetail->threadId = sess->attachPid;
-    sessionMemoryDetail->sessStartTime = timestamptz_to_time_t(sess->proc_cxt.MyProcPort->SessionStartTime);
-    sessionMemoryDetail->level = 0;
-    sessionMemoryDetail->totalSize = 0;
-    sessionMemoryDetail->freeSize = 0;
-    sessionMemoryDetail->usedSize = 0;
-
-    data->nelements++;
 }
 
 void ThreadPoolSessControl::calculateSessMemCxtStats(
-    knl_session_context* sess, const MemoryContext context, SessionMemoryDetailPad* data, int groupcnt)
+    knl_session_context* sess, const MemoryContext context, Tuplestorestate* tupStore, TupleDesc tupDesc)
 {
     AllocSetContext* set = (AllocSetContext*)context;
-    SessionMemoryDetail* sessionMemoryDetail = NULL;
-    errno_t rc = 0;
 
-    /* Add it into small contxt group */
-    if (sess != NULL && groupcnt >= 0 && set->totalSpace <= ALLOCSET_DEFAULT_INITSIZE) {
-        sessionMemoryDetail = data->sessionMemoryDetail;
-
-        sessionMemoryDetail->totalSize += set->totalSpace;
-        sessionMemoryDetail->freeSize += set->freeSpace;
-
-        if (sessionMemoryDetail->totalSize < sessionMemoryDetail->freeSize) {
-            sessionMemoryDetail->totalSize = sessionMemoryDetail->freeSize;
-        }
-
-        /* obviously, total space must larger than free space */
-        Assert(sessionMemoryDetail->totalSize >= sessionMemoryDetail->freeSize);
-
-        /* memory context number is recorded in usedSize */
-        sessionMemoryDetail->usedSize++;
-
-        return;
-    }
-
-    sessionMemoryDetail = (SessionMemoryDetail*)palloc0(sizeof(SessionMemoryDetail));
-    sessionMemoryDetail->next = data->sessionMemoryDetail->next;
-    data->sessionMemoryDetail->next = sessionMemoryDetail;
-    rc = strncpy_s(
-            sessionMemoryDetail->contextName, MEMORY_CONTEXT_NAME_LEN, context->name, MEMORY_CONTEXT_NAME_LEN - 1);
-    securec_check(rc, "\0", "\0");
-    sessionMemoryDetail->contextName[MEMORY_CONTEXT_NAME_LEN - 1] = '\0';
-
-    sessionMemoryDetail->level = context->level;
-    if (context->level > 0 && context->parent != NULL) {
-        rc = strncpy_s(sessionMemoryDetail->parent,
-                       MEMORY_CONTEXT_NAME_LEN,
-                       context->parent->name,
-                       MEMORY_CONTEXT_NAME_LEN - 1);
-        securec_check(rc, "\0", "\0");
-        sessionMemoryDetail->parent[MEMORY_CONTEXT_NAME_LEN - 1] = '\0';
-    }
-    sessionMemoryDetail->totalSize = set->totalSpace;
-    sessionMemoryDetail->freeSize = set->freeSpace;
-    if (sessionMemoryDetail->totalSize < sessionMemoryDetail->freeSize) {
-        sessionMemoryDetail->totalSize = sessionMemoryDetail->freeSize;
-    }
-
-    /* obviously, total space must larger than free space */
-    Assert(sessionMemoryDetail->totalSize >= sessionMemoryDetail->freeSize);
-    sessionMemoryDetail->usedSize = sessionMemoryDetail->totalSize - sessionMemoryDetail->freeSize;
+    char sessId[SESSION_ID_LEN] = {0};
+    ThreadId threadId = 0;
+    pg_time_t sessStartTime = 0;
+    uint64 sessionId = 0;
 
     if (sess != NULL) {
-        sessionMemoryDetail->sessId = sess->session_id;
-        sessionMemoryDetail->threadId = sess->attachPid;
-        sessionMemoryDetail->sessStartTime = timestamptz_to_time_t(sess->proc_cxt.MyProcPort->SessionStartTime);
+        sessionId = sess->session_id;
+        threadId = sess->attachPid;
+        sessStartTime = timestamptz_to_time_t(sess->proc_cxt.MyProcPort->SessionStartTime);
     }
-    data->nelements++;
+    getSessionID(sessId, sessStartTime, sessionId);
+
+    /* build one tuple and save it in tuplestore. */
+    Datum values[NUM_SESSION_MEMORY_DETAIL_ELEM] = {0};
+    bool nulls[NUM_SESSION_MEMORY_DETAIL_ELEM] = {false};
+
+    values[0] = CStringGetTextDatum(sessId);
+    values[1] = Int64GetDatum(threadId);
+
+    values[2] = CStringGetTextDatum(pstrdup(context->name));
+    values[3] = Int16GetDatum(context->level);
+    if (context->level > 0 && context->parent != NULL)
+        values[4] = CStringGetTextDatum(pstrdup(context->parent->name));
+    else
+        nulls[4] = true;
+    values[5] = Int64GetDatum(set->totalSpace);
+    values[6] = Int64GetDatum(set->freeSpace);
+    values[7] = Int64GetDatum(set->totalSpace - set->freeSpace);
+
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
 }
 
 void ThreadPoolSessControl::recursiveSessMemCxt(
-    knl_session_context* sess, const MemoryContext context, SessionMemoryDetailPad* data, int groupcnt)
+    knl_session_context* sess, const MemoryContext context, Tuplestorestate* tupStore, TupleDesc tupDesc)
 {
-    MemoryContext child;
-
     /* calculate MemoryContext Stats */
-    calculateSessMemCxtStats(sess, context, data, groupcnt);
+    calculateSessMemCxtStats(sess, context, tupStore, tupDesc);
 
     /* recursive MemoryContext's child */
-    for (child = context->firstchild; child != NULL; child = child->nextchild) {
-        recursiveSessMemCxt(sess, child, data, groupcnt);
+    for (MemoryContext child = context->firstchild; child != NULL; child = child->nextchild) {
+        recursiveSessMemCxt(sess, child, tupStore, tupDesc);
     }
 }
 
-void ThreadPoolSessControl::getSessMemCxts(SessionMemoryDetailPad* data)
+void ThreadPoolSessControl::getSessionMemoryDetail(Tuplestorestate* tupStore,
+    TupleDesc tupDesc, knl_sess_control** sess)
 {
-    HOLD_INTERRUPTS();
-
     AutoMutexLock alock(&m_sessCtrlock);
-    alock.lock();
-    knl_sess_control* sess_ctrl = m_activelist;
-    while (sess_ctrl != NULL) {
-        /* memory already reach the max size, just return */
-        if (data->nelements == (uint32)TOTAL_MEMORY_CONTEXT_CHILD_NUM) {
-            break;
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = NULL;
+
+    PG_TRY();
+    {
+        HOLD_INTERRUPTS();
+        alock.lock();
+
+        /* collect all the Memory Context status, put in data */
+        elem = DLGetHead(&m_activelist);
+
+        while (elem != NULL) {
+            ctrl = (knl_sess_control*)DLE_VAL(elem);
+            *sess = ctrl;
+            if (ctrl->sess) {
+                (void)syscalllockAcquire(&ctrl->sess->utils_cxt.deleMemContextMutex);
+                recursiveSessMemCxt(ctrl->sess, ctrl->sess->top_mem_cxt, tupStore, tupDesc);
+                (void)syscalllockRelease(&ctrl->sess->utils_cxt.deleMemContextMutex);
+            }
+            elem = DLGetSucc(elem);
         }
+        alock.unLock();
 
-        if (sess_ctrl->sess) {
-            createSessTempSmallCxtGroup(sess_ctrl->sess, data);
-            recursiveSessMemCxt(sess_ctrl->sess, sess_ctrl->sess->top_mem_cxt, data, data->nelements - 1);
+        RESUME_INTERRUPTS();
+    }
+    PG_CATCH();
+    {
+        if (*sess != NULL) {
+            ctrl = *sess;
+            (void)syscalllockRelease(&ctrl->sess->utils_cxt.deleMemContextMutex);
         }
-        sess_ctrl = sess_ctrl->next;
+        alock.unLock();
+        PG_RE_THROW();
     }
-    alock.unLock();
-
-    RESUME_INTERRUPTS();
-}
-
-SessionMemoryDetail* ThreadPoolSessControl::getSessionMemoryDetail(uint32* num)
-{
-    SessionMemoryDetailPad* data = NULL;
-    SessionMemoryDetail* return_detail_array = NULL;
-
-    data = (SessionMemoryDetailPad*)palloc0(sizeof(SessionMemoryDetailPad));
-    *num = 0;
-
-    /* collect all the Memory Context status,put in data */
-    getSessMemCxts(data);
-
-    if (data->nelements > 0) {
-        *num = data->nelements;
-        return_detail_array = data->sessionMemoryDetail;
-    }
-
-    return return_detail_array;
+    PG_END_TRY();
 }
 
 knl_session_context* ThreadPoolSessControl::GetSessionByIdx(int idx)
@@ -532,7 +473,99 @@ int ThreadPoolSessControl::FindCtrlIdxBySessId(uint64 id)
         }
     }
 
-    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid session id")));
+    ereport(LOG, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid session id")));
 
     return -1;
+}
+void ThreadPoolSessControl::CheckSessionTimeout()
+{
+    AutoMutexLock alock(&m_sessCtrlock);
+    alock.lock();
+    int cidx;
+    TimestampTz now = GetCurrentTimestamp();
+    for (cidx = 0; cidx < m_maxActiveSessionCount; cidx++) {
+        knl_sess_control* ctrl = &m_base[cidx];
+        knl_session_context* sess = ctrl->sess;
+        if (sess != NULL && sess->attr.attr_common.SessionTimeout != 0) {
+            if (sess->storage_cxt.session_timeout_active) {
+                if (now >= sess->storage_cxt.session_fin_time) {
+#ifdef HAVE_INT64_TIMESTAMP
+                    elog(LOG, "close session : %lu due to session timeout : %d, max finish time is %ld. But now is:%ld",
+                         sess->session_id, sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
+#else
+                    elog(LOG, "close session : %lu due to session timeout : %d, max finish time is %lf. But now is:%lf",
+                         sess->session_id, sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
+#endif
+                    CloseClientSocket(sess, false);
+                }
+            }
+        }
+    }
+    alock.unLock();
+}
+
+TransactionId ThreadPoolSessControl::ListAllSessionGttFrozenxids(int maxSize,
+    ThreadId *pids, TransactionId *xids, int *n)
+{
+    TransactionId result = InvalidTransactionId;
+    int           i = 0;
+
+    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
+        return 0;
+    }
+
+    if (maxSize > 0) {
+        Assert(pids);
+        Assert(xids);
+        Assert(n);
+        *n = 0;
+    }
+
+    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
+        return InvalidTransactionId;
+    }
+
+    if (RecoveryInProgress()) {
+        return InvalidTransactionId;
+    }
+
+    AutoMutexLock alock(&m_sessCtrlock);
+    alock.lock();
+    knl_sess_control *ctl = nullptr;
+    knl_session_context *session = nullptr;
+    Dlelem* elem = DLGetHead(&m_activelist);
+    while (elem != nullptr) {
+        ctl = (knl_sess_control*)DLE_VAL(elem);
+        session = ctl->sess;
+        if (session->proc_cxt.MyDatabaseId == u_sess->proc_cxt.MyDatabaseId &&
+            TransactionIdIsNormal(session->gtt_ctx.gtt_session_frozenxid)) {
+            if (result == InvalidTransactionId) {
+                result = session->gtt_ctx.gtt_session_frozenxid;
+            } else if (TransactionIdPrecedes(session->gtt_ctx.gtt_session_frozenxid, result)) {
+                result = session->gtt_ctx.gtt_session_frozenxid;
+            }
+
+            if (maxSize > 0) {
+                pids[i] = session->attachPid;
+                xids[i] = session->gtt_ctx.gtt_session_frozenxid;
+                i++;
+            }
+        }
+        elem = DLGetSucc(elem);
+    }
+    alock.unLock();
+
+    if (maxSize > 0) {
+        *n = i;
+    }
+    return result;
+}
+
+bool ThreadPoolSessControl::IsActiveListEmpty()
+{
+    AutoMutexLock alock(&m_sessCtrlock);
+    alock.lock();
+    bool res = (m_activelist.dll_len == 0);
+    alock.unLock();
+    return res;
 }

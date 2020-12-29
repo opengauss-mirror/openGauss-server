@@ -1,0 +1,2 @@
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS 
+(address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@', type 'hdfs');

@@ -36,10 +36,11 @@
 #include "common/config/cm_config.h"
 #include <limits.h>
 #include <fcntl.h>
-#include <math.h>
 
 const int CLUSTER_CONFIG_SUCCESS = 0;
 const int CLUSTER_CONFIG_ERROR = 1;
+#define LOOP_COUNT 3
+#define MAX_REALPATH_LEN 4096
 #define DOUBLE_PRECISE 0.000000001
 #define MAX_HOST_NAME_LENGTH 255
 #define LARGE_INSTANCE_NUM 2
@@ -137,6 +138,8 @@ extern char* g_lcname;
 
 /* status which perform remote connection */
 extern bool g_remote_connection_signal;
+/* result which perform remote command */
+extern unsigned int g_remote_command_result;
 
 /* storage the name which perform remote connection failed */
 extern nodeInfo* g_incorrect_nodeInfo;
@@ -174,23 +177,6 @@ const int MB_PER_GB = 1024;
 #define MIN_PER_H 60
 #define MIN_PER_D (60 * 24)
 #define H_PER_D 24
-
-/* the number of the unit type */
-const int UNIT_TYPE = 8;
-/* 
- * transform unit matrix
- * Elements in each line represent the transform value between this unit and another unit when a unit is basic unit.
-*/
-const int g_unit_transform[UNIT_TYPE][UNIT_TYPE] = { 
-    {1, KB_PER_MB, KB_PER_GB, 0, 0, 0, 0, 0},                /* the transform value based on KB */
-    {0, 1, MB_PER_GB, 0, 0, 0, 0, 0},                        /* the transform value based on MB */
-    {0, 0, 1, 0, 0, 0, 0, 0},                                /* the transform value based on GB */
-    {0, 0, 0, 1, MS_PER_S, MS_PER_MIN, MS_PER_H, MS_PER_D},  /* the transform value based on ms */
-    {0, 0, 0, 0, 1, S_PER_MIN, S_PER_H, S_PER_D},            /* the transform value based on s */
-    {0, 0, 0, 0, 0, 1, MIN_PER_H, MIN_PER_D},                /* the transform value based on min */
-    {0, 0, 0, 0, 0, 0, 1, H_PER_D},                          /* the transform value based on h */
-    {0, 0, 0, 0, 0, 0, 0, 1}                                 /* the transform value based on d */
-    };
 
 /* execute result */
 #define SUCCESS 0
@@ -284,10 +270,7 @@ void get_instance_configfile(const char* datadir);
 char* get_ctl_command_type();
 void* pg_malloc(size_t size);
 void* pg_malloc_zero(size_t size);
-template <typename T>
-static int parse_value(
-    const char* paraname, const UnitType unitval, const UnitType new_unitval, const char* endptr, T* tmp_val);
-#ifdef __cplusplus 
+#ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
 
@@ -298,10 +281,6 @@ uint32 get_local_num_datanode();
 bool is_local_nodeid(uint32 nodeid);
 bool is_local_node(char* nodename);
 int32 get_nodeidx_by_name(char* nodename);
-void get_local_cordinator_dbpath(char* dbpath, const uint32 dbpathlen);
-void get_local_gtm_dbpath(char* dbpath, const uint32 dbpathlen);
-int get_local_datanode_dbpath(uint32 slot, char* dbpath, const uint32 dbpathlen);
-void get_local_cm_dbpath(char* dbpath, const uint32 dbpathlen);
 int get_local_dbpath_by_instancename(const char* instancename, int* type, char* dbpath);
 int init_gauss_cluster_config(void);
 
@@ -347,18 +326,14 @@ int check_parameter_value(
     const char* paraname, GucParaType type, char* guc_list_value, const char* guc_list_unit, const char* value);
 int check_parameter_name(char** guc_opt, int type);
 bool check_parameter_is_valid(int type);
-static int check_int_overflow(
-    const char* paraname, const UnitType unitval, const UnitType tmp_unitval, int64 tmp_int_val);
-static int check_double_overflow(
-    const char* paraname, const double val, const bool inf_is_valid, const bool zero_is_valid);
-int parse_int_value(const char* paraname, const char* value, const char* guc_list_unit, int64* result_int);
-int parse_double_value(const char* paraname, const char* value, const char* guc_list_unit, double* result_double);
+int parse_value(const char* paraname, const char* value, const char* guc_list_unit, int64* result_int,
+    double* result_double, bool isInt);
 int get_guc_minmax_value(const char* guc_list_val, struct guc_minmax_value& value_list);
 int check_int_real_type_value(
     const char* paraname, const char* guc_list_value, const char* guc_list_unit, const char* value, bool isInt);
 int check_enum_type_value(const char* paraname, char* guc_list_value, const char* value);
 int check_bool_type_value(const char* value);
-int check_string_type_value(const char* value);
+int check_string_type_value(const char* paraname, const char* value);
 
 void do_command_for_cn_gtm(int type, char* indatadir, bool isCoordinator);
 void do_command_for_dn(int type, char* indatadir);
@@ -376,11 +351,13 @@ void do_all_nodes_instance_local_in_serial(const char* instance_name, const char
 void do_all_nodes_instance_local_in_parallel(const char* instance_name, const char* indatadir);
 char** get_guc_line_info(const char** line);
 static char* GetEnvStr(const char* env);
-static void executePopenCommandsParallel(const char* cmd, char* nodename);
-static void readPopenOutputParallel(bool if_for_all_instance);
+static void executePopenCommandsParallel(const char* cmd, int idx, bool is_local_node);
+static void readPopenOutputParallel(const char* cmd, bool if_for_all_instance);
 static void SleepInMilliSec(uint32_t sleepMs);
-/*
- ******************************************************************************
+static void init_global_command();
+static void reset_global_command();
+static void do_all_nodes_instance_local_in_parallel_loop(const char* instance_name, const char* indatadir);
+/*******************************************************************************
  Function    : xstrdup
  Description :
  Input       :
@@ -438,7 +415,11 @@ const char* get_instance_type()
             break;
         }
         case INSTANCE_DATANODE: {
+#ifdef ENABLE_MULTIPLE_NODES
             type = "-Z datanode";
+#else
+            type = "";
+#endif
             break;
         }
         case INSTANCE_CMSERVER: {
@@ -519,7 +500,7 @@ char* modify_parameter_value(const char* value, bool localMode)
 static char* form_commandline_options(const char* instance_name, const char* indatadir, bool local_mode)
 {
     char* buffer = NULL;
-    int buflen;
+    int buflen = 0;
     int curlen = 0;
     int i = 0;
     int nRet = 0;
@@ -561,24 +542,19 @@ static char* form_commandline_options(const char* instance_name, const char* ind
     buffer = (char*)pg_malloc_zero(buflen);
 
     /* SET / RESET [--cordinator --datanode --gtm  ] */
-#ifdef ENABLE_MULTIPLE_NODES
     curlen = snprintf_s(
         buffer, buflen, buflen - 1, "gs_guc %s %s ", get_ctl_command_type(), get_instance_type());
-#else
-    curlen = snprintf_s(
-        buffer, buflen, buflen - 1, "gs_guc %s ", get_ctl_command_type());
-#endif
 
     securec_check_ss_c(curlen, buffer, "\0");
     if (nodetype == INSTANCE_CMAGENT ||
-        nodetype == INSTANCE_CMSERVER){
+        nodetype == INSTANCE_CMSERVER) {
         nRet = snprintf_s(buffer + curlen, (buflen - curlen), (buflen - curlen - 1), "-D \"cm_instance_data_path\"");
-    }else{
+    } else {
         /* -I or -D */
-        if (NULL != instance_name){
+        if (NULL != instance_name) {
             nRet = snprintf_s(buffer + curlen , (buflen - curlen), (buflen - curlen - 1), "-I %s",
                               instance_name);
-        }else{
+        } else {
             nRet = snprintf_s(buffer + curlen, (buflen - curlen), (buflen - curlen - 1), "-D \"%s\"",
                               indatadir);
         }
@@ -644,8 +620,8 @@ static char* form_commandline_options(const char* instance_name, const char* ind
 */
 uint32 get_nodeidx_by_HA(const char* HAIp, uint32 HAPort)
 {
-    uint32 i;
-    uint32 j;
+    uint32 i = 0;
+    uint32 j = 0;
 
     for (i = 0; i < g_node_num; i++) {
         for (j = 0; j < g_node[i].datanodeCount; j++) {
@@ -670,8 +646,8 @@ uint32 get_nodeidx_by_HA(const char* HAIp, uint32 HAPort)
 */
 uint32 get_instance_id(const char* dataPath, const char* HAIp, uint32 HAPort)
 {
-    uint32 i;
-    uint32 nodeidx;
+    uint32 i = 0;
+    uint32 nodeidx = 0;
 
     nodeidx = get_nodeidx_by_HA(HAIp, HAPort);
     for (i = 0; i < g_node[nodeidx].datanodeCount; i++) {
@@ -691,8 +667,8 @@ HAPort - HA port : level - the instance level Output      : None Return      : T
 */
 bool is_instance_level_correct(const char* dataPath, const char* HAIp, uint32 HAPort, uint32 level)
 {
-    uint32 i;
-    uint32 nodeidx;
+    uint32 i = 0;
+    uint32 nodeidx = 0;
     /*get node idx by HA information */
     nodeidx = get_nodeidx_by_HA(HAIp, HAPort);
     for (i = 0; i < g_node[nodeidx].datanodeCount; i++) {
@@ -724,6 +700,11 @@ char* GetPgxcNodeNameForMasterDnInstance(int32 nodeidx, int32 instanceidx)
 
     ret = snprintf_s(pgxcNodeName, MAXPGPATH, MAXPGPATH - 1, "dn_%u", g_node[nodeidx].datanode[instanceidx].datanodeId);
     securec_check_ss_c(ret, "\0", "\0");
+
+    if (g_dn_replication_num == 0) {
+        write_stderr("ERROR: Failed to get dn instance in the partition.\n");
+        exit(1);
+    }
 
     for (uint32 dnId = 0; dnId < g_dn_replication_num - 1; dnId++) {
         char tmp_command[MAXPGPATH] = {0};
@@ -853,10 +834,10 @@ bool CheckInstanceNameForSinglePrimaryMutilStandby(int32 nodeidx, const char* in
 bool validate_instance_name_for_DN(int32 nodeidx, const char* instance_name)
 {
     bool isCorrect = false;
-    uint32 i;
+    uint32 i = 0;
     uint32 instance_id = 0;
     char temp_instance_name[MAXPGPATH];
-    int rc;
+    int rc = 0;
 
     rc = memset_s(temp_instance_name, MAXPGPATH, '\0', MAXPGPATH);
     securec_check_c(rc, "\0", "\0");
@@ -996,7 +977,7 @@ int validate_remote_instance_name(char* nodename, int type, char* instance_name)
 */
 int validate_nodename(char* nodename)
 {
-    int32 nodeidx;
+    int32 nodeidx = 0;
     /* makesure the node name is correct */
     if ((NULL != nodename) && (0 != strncmp(nodename, "all", sizeof("all")))) {
         nodeidx = get_nodeidx_by_name(nodename);
@@ -1061,9 +1042,8 @@ int validate_node_instance_name(char* nodename, int type, char* instance_name)
     securec_check_c(rc, "\0", "\0");
 
     /* Verify that the node name is correct */
-    if (0 != validate_nodename(nodename)) {
+    if (0 != validate_nodename(nodename))
         return 1;
-    }        
 
     if ((NULL == nodename) && (NULL != instance_name)) {
         /* -I instance_name*/
@@ -1086,9 +1066,8 @@ int validate_node_instance_name(char* nodename, int type, char* instance_name)
         }
 
         /* -N nodename -I instance_name*/
-        if (0 != check_instance_name(nodename, type, instance_name)) {
+        if (0 != check_instance_name(nodename, type, instance_name))
             return 1;
-        }            
     }
 
     return 0;
@@ -1114,14 +1093,14 @@ int validate_cluster_guc_options(char* nodename, int type, char* instance_name, 
         }
     }
 
-    if ((NULL == instance_name) && (NULL == indatadir)){
-        if (type == INSTANCE_CMAGENT || type == INSTANCE_CMSERVER){
+    if ((NULL == instance_name) && (NULL == indatadir)) {
+        if (type == INSTANCE_CMAGENT || type == INSTANCE_CMSERVER) {
             write_stderr("ERROR: -I all are mandatory for executing gs_guc.\n");
-        }else{
+        } else {
             write_stderr("ERROR: -D or -I are mandatory for executing gs_guc.\n");
         }
         return 1;
-    }else if ((NULL != instance_name) && (NULL != indatadir)){
+    } else if ((NULL != instance_name) && (NULL != indatadir)) {
         write_stderr("ERROR: -D or -I only need one for executing gs_guc.\n");
         return 1;
     }
@@ -1201,7 +1180,7 @@ void check_env_value(const char* input_env_value)
         "!",
         "\n",
         NULL};
-    int i;
+    int i = 0;
 
     for (i = 0; danger_character_list[i] != NULL; i++) {
         if (strstr(input_env_value, danger_character_list[i]) != NULL) {
@@ -1225,11 +1204,10 @@ void check_env_value(const char* input_env_value)
 bool get_env_value(const char* env_var, char* output_env_value, size_t env_var_value_len)
 {
     char* env_value = NULL;
-    errno_t rc;
+    errno_t rc = 0;
 
-    if (NULL == env_var) {
+    if (NULL == env_var)
         return false;
-    }        
 
     env_value = getenv(env_var);
     if ((NULL == env_value) || ('\0' == env_value[0])) {
@@ -1248,16 +1226,36 @@ bool get_env_value(const char* env_var, char* output_env_value, size_t env_var_v
     return true;
 }
 
+/*
+ ******************************************************************************
+ Function    : checkPath
+ Description :
+ Input       : fileName
+ Output      : None
+ Return      : None
+ ******************************************************************************
+*/
+int checkPath(const char* fileName)
+{
+    char* retVal = NULL;
+    char realFileName[MAX_REALPATH_LEN + 1] = {0};
+    retVal = realpath(fileName, realFileName);
+    if (NULL == retVal) {
+        write_stderr(_("realpath(%s) failed : %s!\n"), fileName, gs_strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
 static bool has_static_config()
 {
     char path[MAXPGPATH];
     char gausshome[MAXPGPATH] = {0};
-    int nRet;
+    int nRet = 0;
     struct stat statbuf;
 
-    if (!get_env_value("GAUSSHOME", gausshome, sizeof(gausshome) / sizeof(char))) {
+    if (!get_env_value("GAUSSHOME", gausshome, sizeof(gausshome) / sizeof(char)))
         return false;
-    }        
 
     check_env_value(gausshome);
     if (NULL != g_lcname) {
@@ -1266,6 +1264,10 @@ static bool has_static_config()
         nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausshome, STATIC_CONFIG_FILE);
     }
     securec_check_ss_c(nRet, "\0", "\0");
+
+    if (checkPath(path) != 0) {
+        return false;
+    }
 
     if (lstat(path, &statbuf) == 0) {
         return true;
@@ -1288,14 +1290,16 @@ static bool has_static_config()
 */
 void process_cluster_guc_option(char* nodename, int type, char* instance_name, char* indatadir)
 {
-    uint32 idx;
+    uint32 idx = 0;
     int instance_nums = 0;
     int nRet = 0;
     char local_name[MAX_HOST_NAME_LENGTH];
     int malloc_num = 1;
     char *cmpath = NULL;
-    /*init g_remote_connection_signal*/
+    /* init g_remote_connection_signal */
     g_remote_connection_signal = true;
+    /* init g_remote_command_result */
+    g_remote_command_result = 0;
 
     g_real_gucInfo = (gucInfo*)pg_malloc(sizeof(gucInfo));
     g_expect_gucInfo = (gucInfo*)pg_malloc(sizeof(gucInfo));
@@ -1321,7 +1325,6 @@ void process_cluster_guc_option(char* nodename, int type, char* instance_name, c
         malloc_num = 1;
     } else {
         /* get current cluster information from cluster_staic_config */
-        g_dn_replication_num = 0;
         if (0 != init_gauss_cluster_config())
             return;
 
@@ -1387,21 +1390,20 @@ void process_cluster_guc_option(char* nodename, int type, char* instance_name, c
     /* when nodename=NULL, it means only do setting for local node */
     if (NULL == nodename)
     {
-        if ((INSTANCE_CMSERVER == type) || (INSTANCE_CMAGENT== type)){
+        if ((INSTANCE_CMSERVER == type) || (INSTANCE_CMAGENT == type)) {
             cmpath = get_cm_real_path(type);
             do_local_instance(type, instance_name, cmpath);
             GS_FREE(cmpath);
-        }else{
+        } else {
             do_local_instance(type, instance_name, indatadir);
         }
     }
     else
     {
-        if (0 == strncmp(nodename, "all", sizeof("all"))) {
+        if (0 == strncmp(nodename, "all", sizeof("all")))
             do_all_nodes_instance(instance_name, indatadir);
-        } else {
+        else
             do_remote_instance(nodename, instance_name, indatadir);
-        }            
     }
 }
 
@@ -1413,19 +1415,20 @@ void process_cluster_guc_option(char* nodename, int type, char* instance_name, c
  *     255     : Connection failed
  */
 void
-printExecErrorMesg(int ret, char *nodename)
+printExecErrorMesg(const char* fcmd, const char *nodename)
 {
-    if (WEXITSTATUS(ret) == 1){
-        write_stderr(_("ERROR: Failed to execute gs_guc on node \"%s\", "
-                       "please get more details from current node path \"$GAUSSLOG/bin/gs_guc\".\n"), nodename);
-    }else if (WEXITSTATUS(ret) == 127){
-        write_stderr(_("ERROR: Failed to execute gs_guc on node \"%s\", "
-                       "please ensure that gs_guc exists.\n"), nodename);
-    }else if (WEXITSTATUS(ret) == 255){
-        write_stderr(_("ERROR: Failed to connect node \"%s\".\n"), nodename);
+    if (g_remote_command_result == 127) {
+        write_stderr(_("ERROR: Failed to execute gs_guc command: %s on node \"%s\", error code is %u, "
+                "please ensure that gs_guc exists.\n"), fcmd, nodename, g_remote_command_result);
+    } else if (g_remote_command_result == 255) {
+        write_stderr(_("ERROR: Failed to execute gs_guc command: %s on node \"%s\", error code is %u, "
+                "Failed to connect node \"%s\".\n"), fcmd, nodename, g_remote_command_result, nodename);
+    } else if (g_remote_command_result != 0) {
+        write_stderr(_("ERROR: Failed to execute gs_guc command: %s on node \"%s\", error code is %u, "
+                "please get more details from current node path \"$GAUSSLOG/bin/gs_guc\".\n"),
+                fcmd, nodename, g_remote_command_result);
     }
 }
-
 
 /*
  ******************************************************************************
@@ -1445,7 +1448,7 @@ bool is_changed_default_value_failed(int type, char* datadir, char* param_name_s
     char local_inst_name[MAX_INSTANCENAME_LEN] = {0};
     char log_dir[MAX_VALUE_LEN] = {0};
     int32 retval;
-    int nRet;
+    int nRet = 0;
 
     /* get local instance name by data path */
     retval = get_local_instancename_by_dbpath(datadir, local_inst_name);
@@ -1506,7 +1509,7 @@ bool check_AZ_value(const char* AZValue)
 */
 char* parse_AZ_result(char* AZStr, const char* data_dir)
 {
-    int nRet;
+    int nRet = 0;
     char* vptr = NULL;
     char* vouter_ptr = NULL;
     char* p = NULL;
@@ -1705,7 +1708,11 @@ int get_nodename_number_from_nodelist(const char* namelist)
 {
     char* ptr = NULL;
     char* outer_ptr = NULL;
+#ifdef ENABLE_MULTIPLE_NODES
     char delims[] = ",";
+#else
+    char delims[] = "_";
+#endif
     size_t len = 0;
     int count = 0;
     char* buffer = NULL;
@@ -1762,9 +1769,9 @@ char* get_AZ_value(const char* value, const char* data_dir)
         return NULL;
     }
 
-    nRet = memset_s(preStr, sizeof(preStr), '\0', sizeof(preStr));
+    nRet = memset_s(preStr, sizeof(preStr) / sizeof(char), '\0', sizeof(preStr) / sizeof(char));
     securec_check_c(nRet, "\0", "\0");
-    nRet = memset_s(level, sizeof(level), '\0', sizeof(level));
+    nRet = memset_s(level, sizeof(level) / sizeof(char), '\0', sizeof(level) / sizeof(char));
     securec_check_c(nRet, "\0", "\0");
 
     /* the value including ''', so skip it */
@@ -1785,11 +1792,11 @@ char* get_AZ_value(const char* value, const char* data_dir)
     // skip the space
     while (isspace((unsigned char)*p))
         p++;
-    
-    if (strlen(p) == 0 || 0 == strcmp(p, "*")) {
-        len = strlen(emptyvalue) + strlen(p) + 1;
+
+    if (strlen(p) == 0) {
+        len = strlen(emptyvalue) + 1;
         result = (char*)pg_malloc_zero(len * sizeof(char));
-        nRet = snprintf_s(result, len, len - 1, "'%s'", p);
+        nRet = snprintf_s(result, len, len - 1, "%s", emptyvalue);
         securec_check_ss_c(nRet, "\0", "\0");
         return result;
     }
@@ -1802,13 +1809,13 @@ char* get_AZ_value(const char* value, const char* data_dir)
     // Assign values to preStr
     /* FIRST branch */
     if (0 == strncmp(p, "FIRST ", strlen("FIRST "))) {
-        nRet = strncpy_s(preStr, sizeof(preStr), "FIRST ", strlen("FIRST "));
+        nRet = strncpy_s(preStr, sizeof(preStr) / sizeof(char), "FIRST ", strlen("FIRST "));
         securec_check_c(nRet, "\0", "\0");
         p = p + strlen("FIRST ");
     }
     /* ANY branch */
     else {
-        nRet = strncpy_s(preStr, sizeof(preStr), "ANY ", strlen("ANY "));
+        nRet = strncpy_s(preStr, sizeof(preStr) / sizeof(char), "ANY ", strlen("ANY "));
         securec_check_c(nRet, "\0", "\0");
         p = p + strlen("ANY ");
     }
@@ -1872,23 +1879,26 @@ char* get_AZ_value(const char* value, const char* data_dir)
     if (NULL == nodenameList) {
         // try dn
         nodenameList = get_nodename_list_by_AZ(az1, data_dir);
+        if (nodenameList == NULL) {
+            goto failed;
+        }
 
         vptr = strtok_r(q, delims, &vouter_ptr);
-        while (NULL != vptr) {
+        while (vptr != NULL) {
             p = vptr;
-            //p like this: dn_6001, dn_6002...
+            // p like this:   dn_6001,  dn_6002...
             while (isspace((unsigned char)*p))
                 p++;
         
-            if(NULL == strstr(nodenameList, p)) {
+            if (strstr(nodenameList, p) == NULL) {
                 goto failed;
             }
             vptr = strtok_r(NULL, delims, &vouter_ptr);
         }
 
         len = strlen(nodenameList);
-        nRet = snprintf_s(nodenameList, len + 1, len, q);
-
+        nRet = snprintf_s(nodenameList, len + 1, len, "%s", q);
+    
     } else if ('\0' == nodenameList[0]) {
         (void)write_stderr("ERROR: There is no standby node name. Please make sure the value of "
                            "synchronous_standby_names is correct.\n");
@@ -1898,8 +1908,9 @@ char* get_AZ_value(const char* value, const char* data_dir)
     // X must less than node name numbers
     count = get_nodename_number_from_nodelist(nodenameList);
     if (atoi(level) > count) {
-        (void)write_stderr("ERROR: The sync number must less or equals to the number of standby node names. Please "
-                           "make sure the value of synchronous_standby_names is correct.\n");
+        (void)write_stderr("ERROR: The sync number(%d) must less or equals to the number of standby node names(%d). "
+                           "Please make sure the value of synchronous_standby_names is correct.\n", 
+                           atoi(level), count);
         GS_FREE(nodenameList);
         return NULL;
     }
@@ -1989,10 +2000,8 @@ int do_local_para_value_change(int type, char* datadir)
         }
     }
 
-    if (is_failed) {
+    if (is_failed)
         return FAILURE;
-    }
-        
     return SUCCESS;
 }
 
@@ -2003,14 +2012,12 @@ int do_local_guc_command(int type, char* temp_datadir)
          * When do check, do_local_para_value_change is not be used.
          */
         if ((type != INSTANCE_CMAGENT) && (type != INSTANCE_CMSERVER)) {
-            if ((CHECK_CONF_COMMAND != ctl_command) && (FAILURE == do_local_para_value_change(type, temp_datadir))) {
+            if ((CHECK_CONF_COMMAND != ctl_command) && (FAILURE == do_local_para_value_change(type, temp_datadir)))
                 return FAILURE;
-            }                
         }
 
-        if (0 != process_guc_command(temp_datadir)) {
+        if (0 != process_guc_command(temp_datadir))
             return FAILURE;
-        }            
     }
     return SUCCESS;
 }
@@ -2033,27 +2040,26 @@ void do_command_in_local_node(int type, char* indatadir)
     if (NULL == indatadir) {
         char* envvar = NULL;
         // datadir = /* get the it from PGDATA */
-        if ((INSTANCE_COORDINATOR == type) || (INSTANCE_DATANODE == type)) {
+        if ((INSTANCE_COORDINATOR == type) || (INSTANCE_DATANODE == type))
             envvar = "PGDATA";
-        } else if (INSTANCE_GTM == type) {
+        else if (INSTANCE_GTM == type)
             envvar = "GTMDATA";
-        } else {
+        else
             return;
-        }            
 
-        if (!get_env_value(envvar, datadir, sizeof(datadir) / sizeof(char))) {
+        if (!get_env_value(envvar, datadir, sizeof(datadir) / sizeof(char)))
             return;
-        }            
         if (NULL != datadir) {
             check_env_value(datadir);
         }
         /* process the PGDATA / GTMDATA */
+        (void)checkPath(datadir);
         save_expect_instance_info(datadir);
-        if (FAILURE == do_local_guc_command(type, datadir)) {
+        if (FAILURE == do_local_guc_command(type, datadir))
             return;
-        }            
     } else {
         /* process the -D option */
+        (void)checkPath(indatadir);
         save_expect_instance_info(indatadir);
         if (FAILURE == do_local_guc_command(type, indatadir))
             return;
@@ -2072,19 +2078,18 @@ void do_command_in_local_node(int type, char* indatadir)
 */
 void do_command_with_all_option(int type, char* indatadir)
 {
-    if (node_type_number == LARGE_INSTANCE_NUM) {
+    if (node_type_number == LARGE_INSTANCE_NUM)
         do_command_for_cndn(type, indatadir);
-    } else if (type == INSTANCE_COORDINATOR) {
+    else if (type == INSTANCE_COORDINATOR)
         do_command_for_cn_gtm(type, indatadir, true);
-    } else if (type == INSTANCE_GTM) {
+    else if (type == INSTANCE_GTM)
         do_command_for_cn_gtm(type, indatadir, false);
-    } else if (type == INSTANCE_DATANODE) {
+    else if (type == INSTANCE_DATANODE)
         do_command_for_dn(type, indatadir);
-    } else if ((type == INSTANCE_CMAGENT) || (type == INSTANCE_CMSERVER)) {
+    else if ((type == INSTANCE_CMAGENT) || (type == INSTANCE_CMSERVER))
         do_command_for_cm(type, indatadir);
-    } else {
+    else
         return;
-    }        
 }
 
 /*
@@ -2101,17 +2106,17 @@ void do_command_with_all_option(int type, char* indatadir)
 void do_command_for_cn_gtm(int type, char* indatadir, bool isCoordinator)
 {
     char temp_datadir[MAXPGPATH] = {0};
+    errno_t rc = 0;
 
-    if (isCoordinator) {
-        get_local_cordinator_dbpath(temp_datadir, sizeof(temp_datadir) / sizeof(char));
-    } else {
-        get_local_gtm_dbpath(temp_datadir, sizeof(temp_datadir) / sizeof(char));
-    }        
+    if (isCoordinator)
+        rc = memcpy_s(temp_datadir, sizeof(temp_datadir) / sizeof(char), g_currentNode->DataPath, sizeof(temp_datadir) / sizeof(char));
+    else
+        rc = memcpy_s(temp_datadir, sizeof(temp_datadir) / sizeof(char), g_currentNode->gtmLocalDataPath, sizeof(temp_datadir) / sizeof(char));
+    securec_check_c(rc, "\0", "\0");
 
     save_expect_instance_info(temp_datadir);
-    if (FAILURE == do_local_guc_command(type, temp_datadir)) {
+    if (FAILURE == do_local_guc_command(type, temp_datadir))
         return;
-    }        
 }
 
 /*
@@ -2128,14 +2133,21 @@ void do_command_for_dn(int type, char* indatadir)
 {
     char temp_datadir[MAXPGPATH] = {0};
     uint32 i = 0;
+    errno_t rc = 0;
 
     for (i = 0; i < get_local_num_datanode(); i++) {
-        get_local_datanode_dbpath(i, temp_datadir, sizeof(temp_datadir) / sizeof(char));
+        if (i < g_currentNode->datanodeCount) {
+            rc = memcpy_s(temp_datadir, sizeof(temp_datadir) / sizeof(char), g_currentNode->datanode[i].datanodeLocalDataPath, sizeof(temp_datadir) / sizeof(char));
+            securec_check_c(rc, "\0", "\0");
+        }
         save_expect_instance_info(temp_datadir);
     }
 
     for (i = 0; i < get_local_num_datanode(); i++) {
-        get_local_datanode_dbpath(i, temp_datadir, sizeof(temp_datadir) / sizeof(char));
+        if (i < g_currentNode->datanodeCount) {
+            rc = memcpy_s(temp_datadir, sizeof(temp_datadir) / sizeof(char), g_currentNode->datanode[i].datanodeLocalDataPath, sizeof(temp_datadir) / sizeof(char));
+            securec_check_c(rc, "\0", "\0");
+        }
         if (FAILURE == do_local_guc_command(type, temp_datadir))
             return;
     }
@@ -2157,23 +2169,26 @@ do_command_for_cm(int type, char* indatadir)
     char temp_datadir[MAXPGPATH] = {0};
     char cm_dir[MAXPGPATH] = {0};
     int  nRet = 0;
+    errno_t rc = 0;
 
-    get_local_cm_dbpath(cm_dir, sizeof(cm_dir)/sizeof(char));
-    if(cm_dir[0] == '\0'){
+    rc = memcpy_s(cm_dir, sizeof(cm_dir)/sizeof(char), g_currentNode->cmDataPath, sizeof(cm_dir)/sizeof(char));
+    securec_check_c(rc, "\0", "\0");
+
+    if (cm_dir[0] == '\0') {
         write_stderr("Failed to get cm base datapath from static config file.");
         return;
     }
 
-    if (type == INSTANCE_CMAGENT){
+    if (type == INSTANCE_CMAGENT) {
         nRet = snprintf_s(temp_datadir, sizeof(temp_datadir)/sizeof(char),
                 sizeof(temp_datadir)/sizeof(char) -1, "%s/cm_agent", cm_dir);
         securec_check_ss_c(nRet, "\0", "\0");
-    }else{
-        if (g_currentNode->cmServerLevel == 1){
+    } else {
+        if (g_currentNode->cmServerLevel == 1) {
             nRet = snprintf_s(temp_datadir, sizeof(temp_datadir)/sizeof(char),
                     sizeof(temp_datadir)/sizeof(char) -1, "%s/cm_server", cm_dir);
             securec_check_ss_c(nRet, "\0", "\0");
-        }else{
+        } else {
             /* There is no cmserver instance on the node */
             return;
         }
@@ -2225,21 +2240,21 @@ char *
 get_cm_real_path(int type)
 {
     char *cmpath = NULL;
-    if (INSTANCE_CMSERVER == type){
-        if(1 == g_node[g_local_node_idx].cmServerLevel && g_node[g_local_node_idx].cmDataPath[0] != '\0'){
+    if (INSTANCE_CMSERVER == type) {
+        if (1 == g_node[g_local_node_idx].cmServerLevel && g_node[g_local_node_idx].cmDataPath[0] != '\0') {
             cmpath = xstrdup(g_node[g_local_node_idx].cmDataPath);
-        }else{
+        } else {
             write_stderr("ERROR: Failed to get cmserver instance path.\n");
             exit(1);
         }
-    }else if (INSTANCE_CMAGENT == type){
-        if(g_node[g_local_node_idx].cmDataPath[0] != '\0'){
+    } else if (INSTANCE_CMAGENT == type) {
+        if (g_node[g_local_node_idx].cmDataPath[0] != '\0') {
             cmpath = xstrdup(g_node[g_local_node_idx].cmDataPath);
-        }else{
+        } else {
             write_stderr("ERROR: Failed to get cmagent instance path.\n");
             exit(1);
         }
-    }else{
+    } else {
         write_stderr("ERROR: the instance type is incorrect.\n");
         exit(1);
     }
@@ -2281,12 +2296,12 @@ void
 do_local_instance(int type, char* instance_name, char* indatadir)
 {
     /* process the command in local node---Only specify -D parameter, -N and -I are NULL */
-    if (NULL == instance_name){
+    if (NULL == instance_name) {
         do_command_in_local_node(type, indatadir);
-    }else if (0 == strncmp(instance_name, "all", sizeof("all"))){
+    } else if (0 == strncmp(instance_name, "all", sizeof("all"))) {
         /* process the -I all option ---specify -D parameter, -I is "all",  -N is NULL */
         do_command_with_all_option(type, indatadir);
-    }else{
+    } else {
         /* process the -I instance_name option. This branch CMA && CMS can not be reached */
         do_command_with_instance_name_option(type, instance_name);
     }
@@ -2373,7 +2388,7 @@ void do_all_nodes_instance_local(const char* instance_name, const char* indatadi
     if (CHECK_CONF_COMMAND == ctl_command) {
         do_all_nodes_instance_local_in_serial(instance_name, indatadir);
     } else {
-        do_all_nodes_instance_local_in_parallel(instance_name, indatadir);
+        do_all_nodes_instance_local_in_parallel_loop(instance_name, indatadir);
     }
 }
 
@@ -2391,30 +2406,88 @@ void do_all_nodes_instance_local_in_serial(const char* instance_name, const char
     }
 }
 
-void do_all_nodes_instance_local_in_parallel(const char* instance_name, const char* indatadir)
+static void init_global_command()
 {
-    char* command = form_commandline_options(instance_name, indatadir, true);
-    uint32 idx = 0;
+    int i;
     int rc = 0;
-    char* nodename = NULL;
-    char* buffer = NULL;
-    int buflen = 0;
-    bool if_for_all_instance = true;
+    PARALLEL_COMMAND_S* curr_cxt = NULL;
 
     g_max_commands_parallel = get_num_nodes();
     g_parallel_command_cxt = (PARALLEL_COMMAND_S*)pg_malloc(g_max_commands_parallel * sizeof(PARALLEL_COMMAND_S));
-    g_cur_commands_parallel = 0;
+
     rc = memset_s(g_parallel_command_cxt,
         g_max_commands_parallel * sizeof(PARALLEL_COMMAND_S),
         '\0',
         g_max_commands_parallel * sizeof(PARALLEL_COMMAND_S));
     securec_check_c(rc, "\0", "\0");
+	
+    g_cur_commands_parallel = 0;
+    for (i = 0; i < g_max_commands_parallel; i++) {
+        curr_cxt = &g_parallel_command_cxt[i];
+        curr_cxt->cur_buf_loc = 0;
+        rc = memset_s(curr_cxt->readbuf, sizeof(curr_cxt->readbuf), '\0', sizeof(curr_cxt->readbuf));
+        securec_check_c(rc, "\0", "\0");
+
+        curr_cxt->pfp = NULL;
+        curr_cxt->nodename = xstrdup(getnodename((uint32)i));
+    }
+}
+
+static void reset_global_command()
+{
+    int i;
+    for (i = 0; i < (int)g_incorrect_nodeInfo->num; i++) {
+        GS_FREE(g_incorrect_nodeInfo->nodename_array[i]);
+    }
+    g_incorrect_nodeInfo->num = 0;
+    g_cur_commands_parallel = 0;
+}
+static void do_all_nodes_instance_local_in_parallel_loop(const char* instance_name, const char* indatadir)
+{
+    int i;
+    init_global_command();
+    write_stderr("Begin to perform the total nodes: %d.\n", g_max_commands_parallel);
+    for (i = 0; i < LOOP_COUNT; i++) {
+        do_all_nodes_instance_local_in_parallel(instance_name, indatadir);
+        if (g_incorrect_nodeInfo->num == 0 || i == LOOP_COUNT - 1) {
+            break;
+        }
+
+        write_stderr("Retry to perform the failed nodes: %d.\n", (int32)g_incorrect_nodeInfo->num);
+        reset_global_command();
+        (void)SleepInMilliSec(100);
+    }
+
+    for (i = 0; i < g_max_commands_parallel; i++) {
+        GS_FREE(g_parallel_command_cxt[i].nodename);
+    }
+    GS_FREE(g_parallel_command_cxt);
+
+    if (g_incorrect_nodeInfo->num == 0) {
+        (void)write_stderr("ALL: Success to perform gs_guc!\n\n");
+    }
+    else {
+        (void)write_stderr("ALL: Failure to perform gs_guc!\n\n");
+        exit(1);
+    }
+}
+
+void do_all_nodes_instance_local_in_parallel(const char* instance_name, const char* indatadir)
+{
+    int idx = 0;
+    char* nodename = NULL;
+    int buf_len = 0;
+    bool if_for_all_instance = true;
+    int open_count = 0;
+    bool is_local_node = false;
+    char* command_local = form_commandline_options(instance_name, indatadir, true);
+    char* command_remote = form_commandline_options(instance_name, indatadir, false);
 
     if ((instance_name != NULL) && (strncmp(instance_name, "all", sizeof("all")) != 0)) {
         if_for_all_instance = false;
     }
 
-    for (idx = 0; idx < (uint32)g_max_commands_parallel; idx++) {
+    for (idx = 0; idx < g_max_commands_parallel; idx++) {
         if (if_for_all_instance == false && validate_instance_name_for_DN(idx, instance_name) == false) {
             continue;
         }
@@ -2425,96 +2498,141 @@ void do_all_nodes_instance_local_in_parallel(const char* instance_name, const ch
         if ((nodetype == INSTANCE_CMSERVER && 1 != g_node[idx].cmServerLevel) ||
             (nodetype == INSTANCE_GTM && 1 != g_node[idx].gtm) ||
             (nodetype == INSTANCE_COORDINATOR && 1 != g_node[idx].coordinate) ||
-            (nodetype == INSTANCE_DATANODE && 0 == g_node[idx].datanodeCount))
-        {
+            (nodetype == INSTANCE_DATANODE && 0 == g_node[idx].datanodeCount)) {
             continue;
         }
-        nodename = getnodename(idx);
-        buflen = strlen(command) + strlen(nodename) + 5;
-        buffer = (char*)pg_malloc_zero(buflen);
-        rc = snprintf_s(buffer, buflen, buflen - 1, "%s -N %s", command, nodename);
-        securec_check_ss_c(rc, buffer, "\0");
+        if (NULL == g_parallel_command_cxt[idx].nodename) {
+            continue;
+        }
+        open_count++;
+        nodename = g_parallel_command_cxt[idx].nodename;
 
-        (void)executePopenCommandsParallel(buffer, nodename);
-
-        GS_FREE(buffer);
+        buf_len = (strlen(g_local_node_name) > strlen(nodename)) ? strlen(g_local_node_name) : strlen(nodename);
+        is_local_node = (0 == strncmp(g_local_node_name, nodename, buf_len)) ? true : false;
+        is_local_node ? executePopenCommandsParallel(command_local, idx, is_local_node) :
+            executePopenCommandsParallel(command_remote, idx, is_local_node);
     }
+    write_stderr("Popen count is %d, Popen success count is %d, Popen failure count is %d.\n",
+        open_count, g_cur_commands_parallel, (int)g_incorrect_nodeInfo->num);
 
-    (void)readPopenOutputParallel(if_for_all_instance);
+    readPopenOutputParallel(command_local, if_for_all_instance);
 
-    GS_FREE(g_parallel_command_cxt);
-    GS_FREE(command);
+    GS_FREE(command_local);
+    GS_FREE(command_remote);
 }
 
 /*
  * Execute commands in parallel
  */
-static void executePopenCommandsParallel(const char* cmd, char* nodename)
+static void executePopenCommandsParallel(const char* cmd, int idx, bool is_local_node)
 {
     int rc = 0;
     PARALLEL_COMMAND_S* curr_cxt = NULL;
+    char* fcmd = NULL;
+    char* mpprvFile = NULL;
+    int nRet = 0;
+    size_t len_fcmd = 0;
+    char* nodename = NULL;
+    /* the temp directory that storage gs_guc result information */
+    char gausshome[MAXPGPATH] = {0};
 
-    curr_cxt = &g_parallel_command_cxt[g_cur_commands_parallel];
-    g_cur_commands_parallel++;
+    curr_cxt = &g_parallel_command_cxt[idx];
+    nodename = g_parallel_command_cxt[idx].nodename;
 
     curr_cxt->cur_buf_loc = 0;
     rc = memset_s(curr_cxt->readbuf, sizeof(curr_cxt->readbuf), '\0', sizeof(curr_cxt->readbuf));
     securec_check_c(rc, "\0", "\0");
+    len_fcmd = strlen(cmd) + strlen(nodename) + NAMEDATALEN + MAXPGPATH;
 
-    curr_cxt->pfp = popen(cmd, "r");
-    curr_cxt->nodename = nodename;
+    if (!get_env_value("GAUSSHOME", gausshome, sizeof(gausshome) / sizeof(char))) {
+        return;
+    }
+    check_env_value(gausshome);
 
+    mpprvFile = GetEnvStr("MPPDB_ENV_SEPARATE_PATH");
+    /* execute gs_guc commands by 'ssh' */
+    if (mpprvFile == NULL) {
+        fcmd = (char*)pg_malloc_zero(len_fcmd);
+        nRet = is_local_node ? snprintf_s(fcmd, len_fcmd, len_fcmd - 1, "%s 2>&1", cmd) :
+            snprintf_s(fcmd, len_fcmd, len_fcmd - 1, "pssh -s -H %s \"%s\" 2>&1", nodename, cmd);
+    } else {
+        if (MAXPGPATH <= strlen(mpprvFile)) {
+            write_stderr("ERROR: The value of environment variable \"MPPDB_ENV_SEPARATE_PATH\" is too long.");
+            GS_FREE(mpprvFile);
+            return;
+        }
+        check_env_value(mpprvFile);
+        len_fcmd = len_fcmd + (int)strlen(mpprvFile);
+        fcmd = (char*)pg_malloc_zero(len_fcmd);
+        nRet = is_local_node ? snprintf_s(fcmd, len_fcmd, len_fcmd - 1, "source %s; %s 2>&1", mpprvFile, cmd) :
+            snprintf_s(fcmd, len_fcmd, len_fcmd - 1, "pssh -s -H %s \"source %s; %s\" 2>&1", nodename, mpprvFile, cmd);
+    }
+    securec_check_ss_c(nRet, fcmd, "\0");
+
+    curr_cxt->pfp = popen(fcmd, "r");
+    GS_FREE(fcmd);
+    GS_FREE(mpprvFile);
+    
     if (NULL != curr_cxt->pfp) {
+        g_cur_commands_parallel++;
         uint32 flags;
         int fd = fileno(curr_cxt->pfp);
         flags = fcntl(fd, F_GETFL, 0);
         flags |= O_NONBLOCK;
         (void)fcntl(fd, F_SETFL, flags);
     }
+    else {
+        g_incorrect_nodeInfo->nodename_array[g_incorrect_nodeInfo->num++] = xstrdup(curr_cxt->nodename);
+    }
+    return;
 }
 
 /*
  * read popen output parallel
  */
-static void readPopenOutputParallel(bool if_for_all_instance)
+static void readPopenOutputParallel(const char* cmd, bool if_for_all_instance)
 {
     int rc = 0;
     int idx = 0;
     bool read_pending = true;
     char* result = NULL;
     PARALLEL_COMMAND_S* curr_cxt = g_parallel_command_cxt;
-    bool error_in_execution = false;
     int i = 0;
     char* endsp = NULL;
     int successNumber = 0;
     int failedNumber = 0;
     int instance_nums = 0;
+    uint32 ret = 0;
 
     if (nodetype == INSTANCE_COORDINATOR) {
         instance_nums = get_all_coordinator_num();
-        write_stderr("Begin to perform gs_guc for all coordinators.\n");
+        write_stderr("Begin to perform gs_guc for coordinators.\n");
     } else if (nodetype == INSTANCE_DATANODE) {
         instance_nums = get_all_datanode_num();
-        write_stderr("Begin to perform gs_guc for all datanodes.\n");
-    } else if (nodetype == INSTANCE_CMSERVER){
+        write_stderr("Begin to perform gs_guc for datanodes.\n");
+    } else if (nodetype == INSTANCE_CMSERVER) {
         instance_nums = get_all_cmserver_num();
-        write_stderr("Begin to perform gs_guc for all cm_servers.\n");
-    } else if (nodetype == INSTANCE_CMAGENT){
+        write_stderr("Begin to perform gs_guc for cm_servers.\n");
+    } else if (nodetype == INSTANCE_CMAGENT) {
         instance_nums = get_all_cmagent_num();
-        write_stderr("Begin to perform gs_guc for all cm_agents.\n");
+        write_stderr("Begin to perform gs_guc for cm_agents.\n");
     } else {
         instance_nums = get_all_gtm_num();
-        write_stderr("Begin to perform gs_guc for all gtms.\n");
+        write_stderr("Begin to perform gs_guc for gtms.\n");
     }
 
     result = (char*)pg_malloc_zero(MAX_P_READ_BUF + 1);
     while (true == read_pending) {
         read_pending = false;
-        for (idx = 0; idx < g_cur_commands_parallel; idx++) {
+        for (idx = 0; idx < g_max_commands_parallel; idx++) {
             curr_cxt = g_parallel_command_cxt + idx;
             /* pipe closed, stop to read pipe */
-            if (NULL == curr_cxt->pfp)
+            if (NULL == curr_cxt->pfp) {
                 continue;
+            }
+            if (NULL == curr_cxt->nodename) {
+                continue;
+            }
 
             errno = 0;
             /* successful get some results from pipe, read again */
@@ -2542,23 +2660,42 @@ static void readPopenOutputParallel(bool if_for_all_instance)
                     if (NULL != curr_cxt->pfp) {
                         curr_cxt->retvalue = pclose(curr_cxt->pfp);
                         curr_cxt->pfp = NULL;
+                        GS_FREE(curr_cxt->nodename);
+                        curr_cxt->nodename = NULL;
+                    }
+                }
+                endsp = strstr(result, "Failure to perform gs_guc");
+                if (NULL != endsp) {
+                    failedNumber++;
+                    g_incorrect_nodeInfo->nodename_array[g_incorrect_nodeInfo->num++] = xstrdup(curr_cxt->nodename);
+                    if (NULL != curr_cxt->pfp) {
+                        curr_cxt->retvalue = pclose(curr_cxt->pfp);
+                        curr_cxt->pfp = NULL;
+                        ret = (uint32)curr_cxt->retvalue;
+                        g_remote_command_result = WEXITSTATUS(ret);
+                        printExecErrorMesg(cmd, curr_cxt->nodename);
                     }
                 }
             }
             /* no results currently, read again */
             else if (errno == EAGAIN) {
                 read_pending = true;
+                (void)SleepInMilliSec(100);
                 continue;
             }
             /* failed to get results from pipe, exit */
             else {
                 curr_cxt->retvalue = pclose(curr_cxt->pfp);
                 curr_cxt->pfp = NULL;
-
+                failedNumber++;
+                g_incorrect_nodeInfo->nodename_array[g_incorrect_nodeInfo->num++] = xstrdup(curr_cxt->nodename);
                 if (curr_cxt->retvalue != 0) {
-                    error_in_execution = true;
-                    failedNumber++;
-                    g_incorrect_nodeInfo->nodename_array[g_incorrect_nodeInfo->num++] = xstrdup(curr_cxt->nodename);
+                    ret = (uint32)curr_cxt->retvalue;
+                    g_remote_command_result = WEXITSTATUS(ret);
+                    printExecErrorMesg(cmd, curr_cxt->nodename);
+                }
+                else {
+                    (void)write_stderr("Exception: Failed to get the result from the node %s.\n", curr_cxt->nodename);
                 }
             }
         }
@@ -2566,12 +2703,18 @@ static void readPopenOutputParallel(bool if_for_all_instance)
         if ((successNumber + failedNumber - g_cur_commands_parallel) >= 0) {
             break;
         }
+        if (!read_pending) {
+            (void)write_stderr("Exception: There are some nodes not executed. %d %d %d\n",
+                successNumber, failedNumber, g_cur_commands_parallel);
+        }
         (void)SleepInMilliSec(100);
     }
+    (void)write_stderr("Command count is %d, Command success count is %d, Command failure count is %d.\n",
+        g_cur_commands_parallel, successNumber, failedNumber);
 
     /*an error happend, close all commands and exit */
-    if (error_in_execution) {
-        for (idx = 0; idx < g_cur_commands_parallel; idx++) {
+    if (0 != failedNumber) {
+        for (idx = 0; idx < g_max_commands_parallel; idx++) {
             curr_cxt = g_parallel_command_cxt + idx;
             if (NULL == curr_cxt->pfp) {
                 continue;
@@ -2585,7 +2728,7 @@ static void readPopenOutputParallel(bool if_for_all_instance)
 
         if (if_for_all_instance == false) {
             (void)write_stderr("\nTotal nodes: %d. Effective nodes: %d. Failed nodes: %u.\n",
-                g_max_commands_parallel,
+                g_cur_commands_parallel,
                 successNumber + failedNumber,
                 g_incorrect_nodeInfo->num);
         } else {
@@ -2596,21 +2739,19 @@ static void readPopenOutputParallel(bool if_for_all_instance)
         for (i = 0; i < (int32)g_incorrect_nodeInfo->num; i++) {
             (void)write_stderr("    [%s]\n", g_incorrect_nodeInfo->nodename_array[i]);
         }
-        (void)write_stderr("Failure to perform gs_guc!\n\n");
-        exit(1);
     }
-    /*set DN command '-N all -I instance_name' return total nodes, effective nodes and failied node*/
-    if (if_for_all_instance == false) {
-        (void)write_stderr("\nTotal nodes: %d. Effective nodes: %d. Failed nodes: %u.\n",
-            g_max_commands_parallel,
-            successNumber + failedNumber,
-            g_incorrect_nodeInfo->num);
-    } else {
-        (void)write_stderr("\nTotal instances: %d. Failed instances: 0.\n", instance_nums);
-    }
-    (void)write_stderr("Success to perform gs_guc!\n\n");
-    g_cur_commands_parallel = 0;
     GS_FREE(result);
+    /*set DN command '-N all -I instance_name' return total nodes, effective nodes and failied node*/
+    if (g_incorrect_nodeInfo->num == 0) {
+        if (if_for_all_instance == false) {
+            (void)write_stderr("\nTotal nodes: %d. Effective nodes: %d. Failed nodes: %u.\n",
+                g_max_commands_parallel,
+                successNumber + failedNumber,
+                g_incorrect_nodeInfo->num);
+        } else {
+            (void)write_stderr("\nTotal instances: %d. Failed instances: 0.\n", instance_nums);
+        }
+    }
 }
 
 static void SleepInMilliSec(uint32_t sleepMs)
@@ -2698,10 +2839,8 @@ int execute_guc_command_in_remote_node(int idx, char* command)
     int pid = 0;
     time_t tick;
 
-    if (!get_env_value("GAUSSHOME", gausshome, sizeof(gausshome) / sizeof(char))) {
+    if (!get_env_value("GAUSSHOME", gausshome, sizeof(gausshome) / sizeof(char)))
         return 1;
-    }
-        
     check_env_value(gausshome);
     /* get the ssh log directory */
     pid = getpid();
@@ -2753,24 +2892,22 @@ int execute_guc_command_in_remote_node(int idx, char* command)
     }
     securec_check_ss_c(nRet, fcmd, "\0");
     ret = (uint32)gs_system(fcmd);
-    printExecErrorMesg(ret, nodename);
+    g_remote_command_result = WEXITSTATUS(ret);
+    printExecErrorMesg(fcmd, nodename);
     GS_FREE(fcmd);
     GS_FREE(mpprvFile);
 
-    if (WEXITSTATUS(ret) == 255 || WEXITSTATUS(ret) == 127) {
+    if (g_remote_command_result == 255 || g_remote_command_result == 127) {
         g_remote_connection_signal = false;
-
         g_incorrect_nodeInfo->nodename_array[g_incorrect_nodeInfo->num++] = xstrdup(nodename);
-
         remove_tmp_dir(sshlogpathdir);
-
         return 1;
     }
 
-    if (WEXITSTATUS(ret) == 1){
+    if (g_remote_command_result == 1) {
         /* save expect instance information into global parameter */
         save_remote_instance_info(result_file, nodename, command, g_expect_gucInfo, false);
-    }else{
+    } else {
         /* save expect and real instance information into global parameter */
         save_remote_instance_info(result_file, nodename, command, g_expect_gucInfo, false);
         save_remote_instance_info(result_file, nodename, command, g_real_gucInfo, true);
@@ -2851,16 +2988,12 @@ void save_parameter_info(char* buffer, gucInfo* guc_info)
      */
     /* get the second ':' position */
     p1 = strstr(buffer, ":");
-    if (NULL == p1) {
+    if (NULL == p1)
         return;
-    }
-        
     p1++;
     p = strstr(p1, ":");
-    if (NULL == p) {
+    if (NULL == p)
         return;
-    }
-        
     p++;
 
     /**skip the space and goto the begining of parameter position*/
@@ -2922,12 +3055,10 @@ void save_remote_instance_info(
         exit(1);
     }
 
-    if (isRealGucInfo) {
+    if (isRealGucInfo)
         keywords = get_keywords(command);
-    } else {
+    else
         keywords = xstrdup("expected ");
-    }
-        
     if (NULL == keywords) {
         write_stderr(_("Failed to get key words.\n"));
         exit(1);
@@ -2940,8 +3071,7 @@ void save_remote_instance_info(
             is_found = false;
             if ((int)strlen(p) > MAX_VALUE_LEN) {
                 (void)write_stderr(_("ERROR: The content of line is too long. Please check and make sure it is "
-                                     "correct.\nThe content is \"%s\".\n"),
-                    p);
+                                     "correct.\nThe content is \"%s\".\n"), p);
                 exit(1);
             }
 
@@ -2954,8 +3084,12 @@ void save_remote_instance_info(
              *     expected guc information: NodeName: max_connections=NULL: [$PATH]
              *     gs_guc check: NodeName: pamameter=value: [$PATH]
              */
-            while (*p && !(*p == '\n' || *p == '['))
+            while (*p && !(*p == '\n' || *p == '[')) {
+                if (*p == '\'') {
+                    while (*(++p) && !(*p == '\n' || *p == '\''));
+                }
                 p++;
+            }
 
             if (*p == '[') {
                 is_found = true;
@@ -2976,7 +3110,7 @@ void save_remote_instance_info(
                     continue;
 
                 /*the gs_guc result information is "[gucconfig]\n", so remove ']\n' first.*/
-                nRet = strncpy_s(gucfile, sizeof(gucfile), p, ((int)strlen(p) - 2));
+                nRet = strncpy_s(gucfile, sizeof(gucfile) / sizeof(char), p, ((int)strlen(p) - 2));
                 securec_check_c(nRet, "\0", "\0");
                 if (CHECK_CONF_COMMAND == ctl_command) {
                     guc_info->nodename_array[guc_info->nodename_num++] = xstrdup(nodename);
@@ -3076,9 +3210,8 @@ char** get_guc_line_info(const char** optlines)
 
         q = p;
 
-        if (*p == '#' || *p == '[') {
+        if (*p == '#' || *p == '[')
             continue;
-        }            
 
         for (j = 0; j < config_param_number; j++) {
             nRet = memset_s(tmp_paraname, MAX_PARAM_LEN, '\0', MAX_PARAM_LEN);
@@ -3088,9 +3221,8 @@ char** get_guc_line_info(const char** optlines)
             securec_check_ss_c(nRet, "\0", "\0");
 
             paramlen = strnlen(new_paraname, MAX_PARAM_LEN);
-            if (0 != strncmp(p, new_paraname, paramlen)) {
+            if (0 != strncmp(p, new_paraname, paramlen))
                 continue;
-            }                
 
             nRet = snprintf_s(guc_opt[j], MAX_LINE_LEN, MAX_LINE_LEN - 1, "%s", q);
             securec_check_ss_c(nRet, "\0", "\0");
@@ -3109,19 +3241,18 @@ char** get_guc_line_info(const char** optlines)
 */
 GucParaType get_guc_type(const char* type)
 {
-    if (0 == strncmp(type, "bool", strlen("bool"))) {
+    if (0 == strncmp(type, "bool", strlen("bool")))
         return GUC_PARA_BOOL;
-    } else if (0 == strncmp(type, "real", strlen("real"))) {
+    else if (0 == strncmp(type, "real", strlen("real")))
         return GUC_PARA_REAL;
-    } else if (0 == strncmp(type, "int", strlen("int"))) {
+    else if (0 == strncmp(type, "int", strlen("int")))
         return GUC_PARA_INT;
-    } else if (0 == strncmp(type, "enum", strlen("enum"))) {
+    else if (0 == strncmp(type, "enum", strlen("enum")))
         return GUC_PARA_ENUM;
-    } else if (0 == strncmp(type, "string", strlen("string"))) {
+    else if (0 == strncmp(type, "string", strlen("string")))
         return GUC_PARA_STRING;
-    } else {
+    else
         return GUC_PARA_ERROR;
-    }        
 }
 
 /*
@@ -3133,25 +3264,24 @@ GucParaType get_guc_type(const char* type)
 */
 UnitType get_guc_unit(const char* unit)
 {
-    if (0 == strncmp(unit, "kB", strlen("kB"))) {
+    if (0 == strncmp(unit, "kB", strlen("kB")))
         return UNIT_KB;
-    } else if (0 == strncmp(unit, "MB", strlen("MB"))) {
+    else if (0 == strncmp(unit, "MB", strlen("MB")))
         return UNIT_MB;
-    } else if (0 == strncmp(unit, "GB", strlen("GB"))) {
+    else if (0 == strncmp(unit, "GB", strlen("GB")))
         return UNIT_GB;
-    } else if (0 == strncmp(unit, "ms", strlen("ms"))) {
+    else if (0 == strncmp(unit, "ms", strlen("ms")))
         return UNIT_MS;
-    } else if (0 == strncmp(unit, "s", strlen("s"))) {
+    else if (0 == strncmp(unit, "s", strlen("s")))
         return UNIT_S;
-    } else if (0 == strncmp(unit, "min", strlen("min"))) {
+    else if (0 == strncmp(unit, "min", strlen("min")))
         return UNIT_MIN;
-    } else if (0 == strncmp(unit, "h", strlen("h"))) {
+    else if (0 == strncmp(unit, "h", strlen("h")))
         return UNIT_H;
-    } else if (0 == strncmp(unit, "d", strlen("d"))) {
+    else if (0 == strncmp(unit, "d", strlen("d")))
         return UNIT_D;
-    } else {
+    else
         return UNIT_ERROR;
-    }        
 }
 
 /*
@@ -3265,11 +3395,10 @@ int check_parameter_name(char** guc_opt, int type)
     int i = 0;
     bool is_failed = false;
 
-    if (false == check_parameter_is_valid(type)) {
+    if (false == check_parameter_is_valid(type))
         return FAILURE;
-    } else {
+    else
         return SUCCESS;
-    }        
 
     for (i = 0; i < config_param_number; i++) {
         if (NULL == guc_opt[i] || '\0' == guc_opt[i][0]) {
@@ -3277,15 +3406,13 @@ int check_parameter_name(char** guc_opt, int type)
             (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect. Please check if the parameters are "
                                "within the required range.\n",
                 config_param[i]);
-            break;
         }
     }
 
-    if (is_failed) {
+    if (is_failed)
         return FAILURE;
-    } else {
+    else
         return SUCCESS;
-    }        
 }
 /*
  ************************************************************************************
@@ -3325,10 +3452,6 @@ bool check_cn_dn_parameter_is_valid()
                                    "cluster support parameters.\n",
                     config_param[para_num]);
                 all_valid = false;
-            } else if (strncmp(tmp, "enableseparationofduty", strlen("enableseparationofduty")) == 0) {
-                /* for enableSeparationOfDuty, we give warning */
-                (void)write_stderr("WARNING: please take care of the actual privileges of the users "
-                                   "while changing enableSeparationOfDuty.\n");
             }
         } else {
             for (int i = 0; i < cndn_param_number; i++) {
@@ -3339,19 +3462,13 @@ bool check_cn_dn_parameter_is_valid()
                 }
             }
             if (is_valid == false) {
-#ifdef ENABLE_MULTIPLE_NODES
                 (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect. It is not within the CN/DN "
                                    "support parameters or it is a read only parameter.\n",
                     config_param[para_num]);
-#else
-                (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect. It is not within the single node "
-                                   "support parameters or it is a read only parameter.\n",
-                    config_param[para_num]);
-#endif
                 all_valid = false;
             } else if (strncmp(tmp, "enableseparationofduty", strlen("enableseparationofduty")) == 0) {
                 /* for enableSeparationOfDuty, we give warning */
-                (void)write_stderr("WARNING: please take care of the actual privileges of the users "
+                (void)write_stderr("WARNING: please take care of the actual privileges of the users " 
                                    "while changing enableSeparationOfDuty.\n");
             }
 #ifndef USE_ASSERT_CHECKING
@@ -3524,6 +3641,7 @@ bool is_parameter_value_error(const char* guc_opt_str, char* config_value_str, c
     int len = 0;
     bool is_failed = false;
     char newvalue[MAX_VALUE_LEN];
+    char* ch_position = NULL;
 
     /* init a struct guc_config_enum_entry that storage guc information */
     guc_variable_list.type = GUC_PARA_ERROR;
@@ -3551,6 +3669,20 @@ bool is_parameter_value_error(const char* guc_opt_str, char* config_value_str, c
         nRet = memset_s(newvalue, MAX_VALUE_LEN, '\0', MAX_VALUE_LEN);
         securec_check_c(nRet, "\0", "\0");
         len = (int)strlen(config_value_str);
+
+	if (guc_variable_list.type == GUC_PARA_ENUM) {
+            ch_position = strchr(config_value_str,',');
+            if (ch_position != NULL) {  
+                if (!((config_value_str[0] == '\'' || config_value_str[0] == '"') &&
+                    config_value_str[0] == config_value_str[len - 1])) {
+                    (void)write_stderr("ERROR: The value \"%s\" for parameter \"%s\" is incorrect. Please do it like this "
+                                       "\"parameter = \'value\'\".\n",
+                    config_value_str,
+                    config_param_str);
+                    exit(1);
+                }
+	    } 
+        }
 
         if (guc_variable_list.type == GUC_PARA_INT || guc_variable_list.type == GUC_PARA_REAL ||
             guc_variable_list.type == GUC_PARA_ENUM || guc_variable_list.type == GUC_PARA_BOOL) {
@@ -3608,9 +3740,8 @@ int check_parameter(int type)
     guc_opt = get_guc_option();
 
     /* First we must makesure that the guc information list is correct */
-    if (NULL == guc_opt) {
+    if (NULL == guc_opt)
         return FAILURE;
-    }        
 
     if (FAILURE == check_parameter_name(guc_opt, type)) {
         /* free guc_opt */
@@ -3634,11 +3765,10 @@ int check_parameter(int type)
     }
     GS_FREE(guc_opt);
 
-    if (is_failed) {
+    if (is_failed)
         return FAILURE;
-    } else {
+    else
         return SUCCESS;
-    }        
 }
 
 /*
@@ -3657,19 +3787,19 @@ int check_parameter(int type)
 int check_parameter_value(
     const char* paraname, GucParaType type, char* guc_list_value, const char* guc_list_unit, const char* value)
 {
-    if (type == GUC_PARA_INT) {
+    if (type == GUC_PARA_INT)
         return check_int_real_type_value(paraname, guc_list_value, guc_list_unit, value, true);
-    } else if (type == GUC_PARA_REAL) {
+    else if (type == GUC_PARA_REAL)
         return check_int_real_type_value(paraname, guc_list_value, guc_list_unit, value, false);
-    } else if (type == GUC_PARA_ENUM) {
+    else if (type == GUC_PARA_ENUM)
         return check_enum_type_value(paraname, guc_list_value, value);
-    } else if (type == GUC_PARA_BOOL) {
+    else if (type == GUC_PARA_BOOL)
         return check_bool_type_value(value);
-    } else if (type == GUC_PARA_STRING) {
-        return check_string_type_value(value);
-    } else {
+    else if (type == GUC_PARA_STRING) {
+        return check_string_type_value(paraname, value);
+    }
+    else
         return FAILURE;
-    }        
 }
 
 /*
@@ -3794,8 +3924,8 @@ int check_int_value(const char* paraname, const struct guc_minmax_value& value_l
     bool is_in_list = false;
     bool is_exists_alpha = false;
     /* makesure the min/max value from guc config list file is correct */
-    if ((FAILURE == parse_int_value(paraname, value_list.min_val_str, NULL, &int_min_val)) ||
-        (FAILURE == parse_int_value(paraname, value_list.max_val_str, NULL, &int_max_val))) {
+    if ((FAILURE == parse_value(paraname, value_list.min_val_str, NULL, &int_min_val, NULL, true)) ||
+        (FAILURE == parse_value(paraname, value_list.max_val_str, NULL, &int_max_val, NULL, true))) {
         (void)write_stderr("ERROR: The minmax value of parameter \"%s\" requires an integer value.\n", paraname);
         return FAILURE;
     }
@@ -3852,8 +3982,8 @@ int check_real_value(const char* paraname, const struct guc_minmax_value& value_
     double double_min_val, double double_max_val)
 {
     /* makesure the min/max value from guc config list file is correct */
-    if ((FAILURE == parse_double_value(paraname, value_list.min_val_str, NULL, &double_min_val)) ||
-        (FAILURE == parse_double_value(paraname, value_list.max_val_str, NULL, &double_max_val))) {
+    if ((FAILURE == parse_value(paraname, value_list.min_val_str, NULL, NULL, &double_min_val, false)) ||
+        (FAILURE == parse_value(paraname, value_list.max_val_str, NULL, NULL, &double_max_val, false))) {
         (void)write_stderr("ERROR: The minmax value of parameter \"%s\" requires a numeric value.\n", paraname);
         return FAILURE;
     }
@@ -3901,125 +4031,73 @@ int check_int_real_type_value(
     securec_check_c(nRet, "\0", "\0");
 
     /* parse int_newval/double_newval value*/
-    if (isInt) {
-        if (FAILURE == parse_int_value(paraname, value, guc_list_unit, &int_newval)) {
+    if (FAILURE == parse_value(paraname, value, guc_list_unit, &int_newval, &double_newval, isInt)) {
+        if (isInt)
             (void)write_stderr("ERROR: The parameter \"%s\" requires an integer value.\n", paraname);
-            return FAILURE;
-        } 
-    } else {
-        if (FAILURE == parse_double_value(paraname, value, guc_list_unit, &double_newval)) {
+        else
             (void)write_stderr("ERROR: The parameter \"%s\" requires a numeric value.\n", paraname);
-            return FAILURE;
-        }
+        return FAILURE;
     }
 
     /* get min/max value from guc config file */
-    if (FAILURE == get_guc_minmax_value(guc_list_value, value_list)) {
+    if (FAILURE == get_guc_minmax_value(guc_list_value, value_list))
         return FAILURE;
-    }        
 
     if ('\0' == value_list.min_val_str[0] || '\0' == value_list.max_val_str[0]) {
         (void)write_stderr("ERROR: The minmax information for parameter \"%s\" is incorrect.\n", paraname);
         return FAILURE;
     }
 
-    if (isInt) {
+    if (isInt)
         return check_int_value(paraname, value_list, value, int_newval, int_min_val, int_max_val);
-    } else {
+    else
         return check_real_value(paraname, value_list, double_newval, double_min_val, double_max_val);
-    }        
 }
 
 /*
  ************************************************************************************
- Function: check_int_overflow
- Desc    : check to see if a int val has underflowed or overflowed for parameter.
-           paraname          parameter name
-           unitval           the unit of parameter from guc config file
-           new_unitval       the unit of parameter
-           new_int_val       the value of parameter
- Return  : SUCCESS
-           FAILURE
- ************************************************************************************
-*/
-static int check_int_overflow(
-    const char* paraname, const UnitType unitval, const UnitType new_unitval, int64 new_int_val)
-{   
-    int per_unit_transfer = INT_MIN;
-
-    /* the transformation value */
-    per_unit_transfer = g_unit_transform[unitval][new_unitval];
-        
-    if (new_int_val > (LLONG_MAX / per_unit_transfer) || new_int_val < (LLONG_MIN / per_unit_transfer)) {
-        (void)write_stderr("ERROR: An overflow occurs for this parameter \"%s\".\n", paraname);
-        return FAILURE;
-    }
-
-    return SUCCESS;
-}
-
-/*
- ************************************************************************************
- Function: check_double_overflow
- Desc    : check to see if a double val has underflowed or overflowed for parameter.
-           paraname          parameter name
-           val               the value of parameter after calculation
-           inf_is_valid      infinity is valid
-           zero_is_valid     zero is valid
- Return  : SUCCESS
-           FAILURE
- ************************************************************************************
-*/
-static int check_double_overflow(
-    const char* paraname, const double val, const bool inf_is_valid, const bool zero_is_valid)
-{
-    if (isinf(val) && !(inf_is_valid)) {                                                                        
-        (void)write_stderr("ERROR: An overflow occurs for this parameter \"%s\".\n", paraname);                
-        return FAILURE;
-    }  
-
-    if ((val) == 0.0 && !(zero_is_valid)) {                                                                     
-        (void)write_stderr("ERROR: An overflow occurs for this parameter \"%s\".\n", paraname);                
-        return FAILURE;
-    }
-        
-    return SUCCESS; 
-}
-
-/*
- ************************************************************************************
- Function: parse_int_value
- Desc    : parese int value from guc config file.
+ Function: parse_value
+ Desc    : parese value from guc config file.
            paraname          parameter name
            value             parameter value
            guc_list_unit     the unit of parameter from guc config file
            result_int        the parse result about int
+           result_double        the parse result about double
+           isInt                  true is int, false is real
  Return  : SUCCESS
            FAILURE
  ************************************************************************************
 */
-int parse_int_value(const char* paraname, const char* value, const char* guc_list_unit, int64* result_int)
+int parse_value(const char* paraname, const char* value, const char* guc_list_unit, int64* result_int,
+    double* result_double, bool isInt)
 {
     int64 int_val = INT_MIN;
-    int64 tmp_int_val;
+    double double_val;
+    long double tmp_double_val;
     char* endptr = NULL;
+    UnitType unitval = UNIT_ERROR;
     bool contain_space = false;
-    UnitType int_unitval = UNIT_ERROR;
-    UnitType new_int_unitval = UNIT_ERROR;
-    
 
-    if (NULL != result_int) {
+    if (NULL != result_int)
         *result_int = 0;
-    }
-    
+    if (NULL != result_double)
+        *result_double = 0;
+
     errno = 0;
-    /* transform value into long int */
-    int_val = strtoll(value, &endptr, 0);
-    if (endptr == value || errno == ERANGE) {
-        return FAILURE;
+    if (isInt) {
+        /* transform value into long int */
+        int_val = strtoll(value, &endptr, 0);
+        if (endptr == value || errno == ERANGE)
+            return FAILURE;
+        tmp_double_val = (long double)int_val;
+    } else {
+        /* transform value into double */
+        double_val = strtod(value, &endptr);
+        if (endptr == value || errno == ERANGE)
+            return FAILURE;
+        tmp_double_val = (long double)double_val;
     }
-	
-    tmp_int_val = int_val;
+
     /* skill the blank */
     while (isspace((unsigned char)*endptr)) {
         endptr++;
@@ -4028,115 +4106,152 @@ int parse_int_value(const char* paraname, const char* value, const char* guc_lis
 
     if ('\0' != *endptr) {
         /* if unit is NULL, it means the value is incorrect */
-        if (NULL == guc_list_unit || '\0' == guc_list_unit[0]) {
+        if (NULL == guc_list_unit || '\0' == guc_list_unit[0])
             return FAILURE;
-        }            
 
         if (contain_space) {
             (void)write_stderr("ERROR: There should not hava space between value and unit.\n");
             return FAILURE;
         }
 
-        /* the unit of parameter from guc config file */
-        int_unitval = get_guc_unit(guc_list_unit);
-        /* the unit of real parameter */
-        new_int_unitval = get_guc_unit(endptr);
-
-        /* get_guc_unit */
-        if (FAILURE == parse_value(paraname, int_unitval, new_int_unitval, endptr, &int_val)) {
+        unitval = get_guc_unit(guc_list_unit);
+        if (UNIT_ERROR == unitval) {
+            (void)write_stderr("ERROR: Invalid units for this parameter \"%s\".\n", paraname);
             return FAILURE;
-        }
-        
-        /* overflow processing */
-        if (FAILURE == check_int_overflow(paraname, int_unitval, new_int_unitval, tmp_int_val)) {
+        } else if (UNIT_KB == unitval) {
+            if (strncmp(endptr, "kB", 2) == 0) {
+                endptr += 2;
+            } else if (strncmp(endptr, "MB", 2) == 0) {
+                endptr += 2;
+                tmp_double_val *= KB_PER_MB;
+            } else if (strncmp(endptr, "GB", 2) == 0) {
+                endptr += 2;
+                tmp_double_val *= KB_PER_GB;
+            } else {
+                (void)write_stderr(
+                    "ERROR: Valid units for this parameter \"%s\" are \"kB\", \"MB\" and \"GB\".\n", paraname);
+                return FAILURE;
+            }
+        } else if (UNIT_MB == unitval) {
+            if (strncmp(endptr, "MB", 2) == 0) {
+                endptr += 2;
+            } else if (strncmp(endptr, "GB", 2) == 0) {
+                endptr += 2;
+                tmp_double_val *= MB_PER_GB;
+            } else {
+                (void)write_stderr("ERROR: Valid units for this parameter \"%s\" are \"MB\" and \"GB\".\n", paraname);
+                return FAILURE;
+            }
+        } else if (UNIT_GB == unitval) {
+            if (strncmp(endptr, "GB", 2) == 0) {
+                endptr += 2;
+            } else {
+                (void)write_stderr("ERROR: Valid units for this parameter \"%s\" is \"GB\".\n", paraname);
+                return FAILURE;
+            }
+        } else if (UNIT_MS == unitval) {
+            if (strncmp(endptr, "ms", 2) == 0) {
+                endptr += 2;
+            } else if (strncmp(endptr, "s", 1) == 0) {
+                endptr += 1;
+                tmp_double_val *= MS_PER_S;
+            } else if (strncmp(endptr, "min", 3) == 0) {
+                endptr += 3;
+                tmp_double_val *= MS_PER_MIN;
+            } else if (strncmp(endptr, "h", 1) == 0) {
+                endptr += 1;
+                tmp_double_val *= MS_PER_H;
+            } else if (strncmp(endptr, "d", 1) == 0) {
+                endptr += 1;
+                tmp_double_val *= MS_PER_D;
+            } else {
+                (void)write_stderr(
+                    "ERROR: Valid units for this parameter \"%s\" are \"ms\", \"s\", \"min\", \"h\", and \"d\".\n",
+                    paraname);
+                return FAILURE;
+            }
+        } else if (UNIT_S == unitval) {
+            if (strncmp(endptr, "s", 1) == 0) {
+                endptr += 1;
+            } else if (strncmp(endptr, "min", 3) == 0) {
+                endptr += 3;
+                tmp_double_val *= S_PER_MIN;
+            } else if (strncmp(endptr, "h", 1) == 0) {
+                endptr += 1;
+                tmp_double_val *= S_PER_H;
+            } else if (strncmp(endptr, "d", 1) == 0) {
+                endptr += 1;
+                tmp_double_val *= S_PER_D;
+            } else {
+                (void)write_stderr(
+                    "ERROR: Valid units for this parameter \"%s\" are \"s\", \"min\", \"h\", and \"d\".\n", paraname);
+                return FAILURE;
+            }
+        } else if (UNIT_MIN == unitval) {
+            if (strncmp(endptr, "min", 3) == 0) {
+                endptr += 3;
+            } else if (strncmp(endptr, "h", 1) == 0) {
+                endptr += 1;
+                tmp_double_val *= MIN_PER_H;
+            } else if (strncmp(endptr, "d", 1) == 0) {
+                endptr += 1;
+                tmp_double_val *= MIN_PER_D;
+            } else {
+                (void)write_stderr(
+                    "ERROR: Valid units for this parameter \"%s\" are \"min\", \"h\", and \"d\".\n", paraname);
+                return FAILURE;
+            }
+        } else if (UNIT_H == unitval) {
+            if (strncmp(endptr, "h", 1) == 0) {
+                endptr += 1;
+            } else if (strncmp(endptr, "d", 1) == 0) {
+                endptr += 1;
+                tmp_double_val *= H_PER_D;
+            } else {
+                (void)write_stderr(
+                    "ERROR: Valid units for this parameter \"%s\" are \"min\", \"h\", and \"d\".\n", paraname);
+                return FAILURE;
+            }
+        } else if (UNIT_D == unitval) {
+            if (strncmp(endptr, "d", 1) == 0) {
+                endptr += 1;
+            } else {
+                (void)write_stderr("ERROR: Valid units for this parameter \"%s\" is \"d\".\n", paraname);
+                return FAILURE;
+            }
+        } else {
             return FAILURE;
         }
     }
 
-    if (NULL != result_int) {
-        *result_int = int_val;
-    } 
+    while (isspace((unsigned char)*endptr))
+        endptr++;
+
+    if (*endptr != '\0')
+        return FAILURE;
+
+    if (isInt) {
+        if (tmp_double_val > LLONG_MAX || tmp_double_val < LLONG_MIN)
+            return FAILURE;
+        if (NULL != result_int)
+            *result_int = (int64)tmp_double_val;
+    } else {
+        if (NULL != result_double)
+            *result_double = (double)tmp_double_val;
+    }
 
     return SUCCESS;
 }
 
-/*
- ************************************************************************************
- Function: parse_double_value
- Desc    : parese double value from guc config file.
-           paraname          parameter name
-           value             parameter value
-           guc_list_unit     the unit of parameter from guc config file
-           result_double     the parse result about double
+/*************************************************************************************
+ Function: check_enum_type_value
+ Desc    : check the parameter value of enum type.
+ Input   : paraname               parameter name
+           guc_list_value         the string from config file
+           value                  parameter value
  Return  : SUCCESS
            FAILURE
- ************************************************************************************
-*/
-int parse_double_value(const char* paraname, const char* value, const char* guc_list_unit, double* result_double)
-{
-    double double_val;
-    double tmp_double_val;
-    char* endptr = NULL;
-    bool contain_space = false;
-    UnitType double_unitval = UNIT_ERROR;
-    UnitType new_double_unitval = UNIT_ERROR;
-    int per_unit_transfer = INT_MIN;
-
-    if (NULL != result_double) {
-        *result_double = 0;
-    } 
-
-    errno = 0;
-    /* transform value into double */
-    double_val = strtod(value, &endptr);
-    if (endptr == value || errno == ERANGE) {
-        return FAILURE;
-    }
-
-    tmp_double_val = double_val;
-    /* skill the blank */
-    while (isspace((unsigned char)*endptr)) {
-        endptr++;
-        contain_space = true;
-    }
-
-    if ('\0' != *endptr) {
-        /* if unit is NULL, it means the value is incorrect */
-        if (NULL == guc_list_unit || '\0' == guc_list_unit[0]) {
-            return FAILURE;
-        }            
-
-        if (contain_space) {
-            (void)write_stderr("ERROR: There should not hava space between value and unit.\n");
-            return FAILURE;
-        }
-
-        /* the unit of parameter from guc config file */
-        double_unitval = get_guc_unit(guc_list_unit);
-        /* the unit of real parameter */
-        new_double_unitval = get_guc_unit(endptr);
-        /* the transformation value */
-        per_unit_transfer = g_unit_transform[double_unitval][new_double_unitval];
-    
-        /* get_guc_unit */
-        if (FAILURE == parse_value(paraname, double_unitval, new_double_unitval, endptr, &double_val)) {
-            return FAILURE;
-        }
-
-        /* overflow processing */
-        if (FAILURE == check_double_overflow(paraname, double_val, isinf(tmp_double_val) || 
-            isinf((double)per_unit_transfer), tmp_double_val == 0 || (double)per_unit_transfer == 0)) {
-            return FAILURE;   
-        }
-    }
-
-    if (NULL != result_double) {
-        *result_double = double_val;
-    } 
-
-    return SUCCESS;
-}
-
+ *************************************************************************************/
 int is_value_in_range(const char* guc_list_value, const char* value)
 {
     char* ptr = NULL;
@@ -4152,26 +4267,14 @@ int is_value_in_range(const char* guc_list_value, const char* value)
 
     ptr = strtok_r(guc_val, delims, &outer_ptr);
     while (NULL != ptr) {
-        if (0 == strcmp(ptr, value)) {
+        if (0 == strcmp(ptr, value))
             return SUCCESS;
-        } else {
+        else
             ptr = strtok_r(NULL, delims, &outer_ptr);
-        }
     }
     return FAILURE;
 }
 
-/*
- ************************************************************************************
- Function: check_enum_type_value
- Desc    : check the parameter value of enum type.
- Input   : paraname               parameter name
-           guc_list_value         the string from config file
-           value                  parameter value
- Return  : SUCCESS
-           FAILURE
- ************************************************************************************
-*/
 int check_enum_type_value(const char* paraname, char* guc_list_value, const char* value)
 {
     char guc_val[MAX_VALUE_LEN] = {0};
@@ -4195,11 +4298,7 @@ int check_enum_type_value(const char* paraname, char* guc_list_value, const char
     }
 
     make_string_tolower(value, tmp_paraname, sizeof(tmp_paraname) / sizeof(char));
-    if (tmp_paraname != NULL && strlen(tmp_paraname) > 0) {
-        vptr = strtok_r(tmp_paraname, delims, &vouter_ptr);
-    } else {
-        vptr = "";
-    }
+    vptr = strtok_r(tmp_paraname, delims, &vouter_ptr);
     while (NULL != vptr) {
         p = vptr;
         while (isspace((unsigned char)*p))
@@ -4231,25 +4330,100 @@ int check_bool_type_value(const char* value)
     /* the length of value list */
     int list_nums = lengthof(guc_bool_valuelist);
 
-    if (is_string_in_list(value, guc_bool_valuelist, list_nums)) {
+    if (is_string_in_list(value, guc_bool_valuelist, list_nums))
         return SUCCESS;
-    } else {
+    else
         return FAILURE;
-    }        
 }
 
-/*
- ************************************************************************************
+static bool check_datestyle_gs_guc(const char* paraname, const char* value)
+{
+    // datestyleList should be consistent with check_datestyle() in variable.cpp
+    const char* dateStyleList = "iso,sql,postgres,german";
+    const char* dateOrderList = "ymd,dmy,euro,european,mdy,us,noneuro,noneuropean,default";
+
+    char* rawstring = NULL;
+    const char delims[] = ",";
+    char* vptr = NULL;
+    char* vouter_ptr = NULL;
+    char* p = NULL;
+    bool  hasDateStyle = false;
+    bool  hasDateOrder = false;
+    bool  hasConflict = false;
+    char* pname = xstrdup(paraname);
+
+    make_string_tolower(paraname, pname, (int)strlen(pname));
+    if (strcmp(pname, "datestyle") != 0) {
+        // not datestyle, do not change result
+        free(pname);
+        return true;
+    }
+
+    /* Need a modifiable copy of string */
+    rawstring = xstrdup(value);
+    make_string_tolower(value, rawstring, (int)strlen(rawstring));
+    // remove last '\'' or space
+    p = rawstring + strlen(rawstring) - 1;
+    while (isspace((unsigned char)*p) || *p == '\'') {
+        *p = '\0';
+        p--;
+    }
+
+    vptr = strtok_r(rawstring, delims, &vouter_ptr);
+    while (vptr != NULL) {
+        p = vptr;
+        while (isspace((unsigned char)*p) || *p == '\'')
+            p++;
+        if (is_value_in_range(dateStyleList, p) == SUCCESS) {
+            if (!hasDateStyle) {
+                hasDateStyle = true;
+            } else {
+                hasConflict = true;
+                break;
+            }
+            vptr = strtok_r(NULL, delims, &vouter_ptr);
+        } else if (is_value_in_range(dateOrderList, p) == SUCCESS) {
+            if (!hasDateOrder) {
+                hasDateOrder = true;
+            } else {
+                hasConflict = true;
+                break;
+            }
+            vptr = strtok_r(NULL, delims, &vouter_ptr);
+        } else {
+            write_stderr("ERROR: The value \"%s\" is invalid for parameter datestyle.\n", value);
+            free(rawstring);
+            free(pname);
+            return false;
+        }
+    }
+
+    free(rawstring);
+    free(pname);
+    if (hasConflict) {
+        write_stderr("ERROR: The value \"%s\" have conflict options for parameter datestyle.\n", value);
+    }
+    return hasConflict ? false : true;
+}
+
+/*************************************************************************************
  Function: check_string_type_value
  Desc    : check the paraname value of string type.
            GUC_PARA_STRING  -     length(str) > 0
  Return  : SUCCESS
            FAILURE
- ************************************************************************************
-*/
-int check_string_type_value(const char* value)
+ *************************************************************************************/
+int check_string_type_value(const char* paraname, const char* value)
 {
-    return ((int)strlen(value) > 0) ? SUCCESS : FAILURE;
+    bool result = ((int)strlen(value) > 0) ? true : false;
+    /*
+     * For now, we only check value for datestyle.
+     * If we want to check more value, it is better to use hooks.
+     */
+    if (result && paraname != NULL) {
+        result = check_datestyle_gs_guc(paraname, value);
+    }
+    return result ? SUCCESS : FAILURE;
 }
 
 /*
@@ -4265,10 +4439,8 @@ static char* GetEnvStr(const char* env)
     errno_t rc = 0;
     if (temp != NULL) {
         size_t len = strlen(temp);
-        if (len == 0 || len > MAXPGPATH) {
+        if (0 == len)
             return NULL;
-        }
-            
         tmpvar = (char*)malloc(len + 1);
         if (tmpvar != NULL) {
             rc = strcpy_s(tmpvar, len + 1, temp);
@@ -4282,136 +4454,3 @@ static char* GetEnvStr(const char* env)
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
-
-/*
- ************************************************************************************
- Function: parse_value
- Desc    : parese value from guc config file.
-           paraname          parameter name
-           unitval           the unit of parameter from guc config file
-           new_unitval       the unit of parameter
-           endptr            the address of parameter value
-           tmp_val           the temporary value of parameter value
- Return  : SUCCESS
-           FAILURE
- ************************************************************************************
-*/
-template <typename T>
-static int parse_value(
-    const char* paraname, const UnitType unitval, const UnitType new_unitval, const char* endptr, T* tmp_val)
-{   
-    switch (unitval) {
-        case UNIT_ERROR: {
-            (void)write_stderr("ERROR: Invalid units for this parameter \"%s\".\n", paraname);
-            return FAILURE;
-        } 
-        case UNIT_KB: {
-            if (new_unitval == UNIT_KB || new_unitval == UNIT_MB || new_unitval == UNIT_GB) {
-                endptr += 2;
-                *tmp_val *= g_unit_transform[UNIT_KB][new_unitval];
-            } else {
-                (void)write_stderr(
-                    "ERROR: Valid units for this parameter \"%s\" are \"kB\", \"MB\" and \"GB\".\n", paraname);
-                return FAILURE;
-            }
-            break;
-        }
-        case UNIT_MB: {
-            if (new_unitval == UNIT_MB || new_unitval == UNIT_GB) {
-                endptr += 2;
-                *tmp_val *= g_unit_transform[UNIT_MB][new_unitval];
-            } else {
-                (void)write_stderr(
-                    "ERROR: Valid units for this parameter \"%s\" are \"MB\" and \"GB\".\n", paraname);
-                return FAILURE;
-            }
-            break;
-        }
-        case UNIT_GB: {
-            if (new_unitval == UNIT_GB) {
-                endptr += 2;
-            } else {
-                (void)write_stderr("ERROR: Valid units for this parameter \"%s\" is \"GB\".\n", paraname);
-                return FAILURE;
-            }
-            break;
-        }
-        case UNIT_MS: {
-            if (new_unitval == UNIT_MS) {
-                endptr += 2;
-            } else if (new_unitval == UNIT_S || new_unitval == UNIT_H || new_unitval == UNIT_D) {
-                endptr += 1;
-                *tmp_val *= g_unit_transform[UNIT_MS][new_unitval];
-            } else if (new_unitval == UNIT_MIN) {
-                endptr += 3;
-                *tmp_val *= g_unit_transform[UNIT_MS][new_unitval];
-            } else {
-                (void)write_stderr(
-                    "ERROR: Valid units for this parameter \"%s\" are \"ms\", \"s\", \"min\", \"h\", and \"d\".\n",
-                    paraname);
-                return FAILURE;
-            }
-            break;
-        }
-        case UNIT_S: {
-            if (new_unitval == UNIT_S || new_unitval == UNIT_H || new_unitval == UNIT_D) {
-                endptr += 1;
-                *tmp_val *= g_unit_transform[UNIT_S][new_unitval];
-            } else if (new_unitval == UNIT_MIN) {
-                endptr += 3;
-                *tmp_val *= g_unit_transform[UNIT_S][new_unitval];
-            } else {
-                (void)write_stderr(
-                    "ERROR: Valid units for this parameter \"%s\" are \"s\", \"min\", \"h\", and \"d\".\n", 
-                    paraname);
-                return FAILURE;
-            }
-            break;
-        } 
-        case UNIT_MIN: {
-            if (new_unitval == UNIT_H || new_unitval == UNIT_D) {
-                endptr += 1;
-                *tmp_val *= g_unit_transform[UNIT_MIN][new_unitval];
-            } else if (new_unitval == UNIT_MIN) {
-                endptr += 3;
-            } else {
-                (void)write_stderr(
-                    "ERROR: Valid units for this parameter \"%s\" are \"min\", \"h\", and \"d\".\n", paraname);
-                return FAILURE;
-            }
-            break;
-        } 
-        case UNIT_H:{
-            if (new_unitval == UNIT_H || new_unitval == UNIT_D) {
-                endptr += 1;
-                *tmp_val *= g_unit_transform[UNIT_H][new_unitval];
-            } else {
-                (void)write_stderr(
-                    "ERROR: Valid units for this parameter \"%s\" are \"min\", \"h\", and \"d\".\n", paraname);
-                return FAILURE;
-            }
-            break;
-        } 
-        case UNIT_D:{
-            if (new_unitval == UNIT_D) {
-                endptr += 1;
-            } else {
-                (void)write_stderr("ERROR: Valid units for this parameter \"%s\" is \"d\".\n", paraname);
-                return FAILURE;
-            }
-            break;
-        } 
-        default: {
-            return FAILURE;
-        }
-    }
-
-    while (isspace((unsigned char)*endptr))
-        endptr++;
-
-    if (*endptr != '\0') {
-        return FAILURE;
-    }  
-
-    return SUCCESS;
-}  

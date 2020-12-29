@@ -1,0 +1,95 @@
+---do redistribute
+set session_timeout = 0; 
+select count(*) from tbl_insert_during_redis;
+select count(*) from tbl_insert_copy_during_redis;
+select count(*) from tbl_insert_rep_during_redis;
+select count(*) from tbl_insert_during_redis_cp;
+select count(*) from tbl_insert_rep_during_redis_cp;
+select count(*) from tbl_update_during_redis;
+select count(*) from tbl_update_rep_during_redis;
+select count(*) from tbl_delete_during_redis;
+select count(*) from tbl_delete_rep_during_redis;
+select count(*) from tbl_base_during_redis;
+select count(*) from tbl_base_rep_during_redis;
+select count(*) from tbl_update_multiple_during_redis;
+select count(*) from tbl_insert_001;
+select count(*) from tbl_insert_002;
+select count(*) from tbl_insert_003;
+select count(*) from tbl_insert_004;
+
+\d test_row_like_default
+\d test_col_like_default
+\d test_row_partition_like_default
+\d test_col_partition_like_default
+
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis  -r -u $USER -d regression -s 6 -f -c -i @abs_srcdir@/sql -m insert -p $PGPORT -A Gaussdba@Mpp -P @abs_srcdir@/data/priority 2>@abs_srcdir@/tmp_check/redis_081.log ; echo $?
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis  -r -u $USER -d regression -s 6 -f -c -i @abs_srcdir@/sql -m insert -p $PGPORT -x @abs_srcdir@/data/exclude 2>>@abs_srcdir@/tmp_check/redis_081.log ; echo $?
+select * from redis_stage_detail order by table_name, stage;
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis  -r -u $USER -d regression -f -c -i @abs_srcdir@/sql -m insert -p $PGPORT 2>>@abs_srcdir@/tmp_check/redis_081.log ; echo $?
+update pgxc_group set in_redistribution = 'n';
+
+select * from redis_stage_detail order by table_name, stage;
+
+select count(*) from tbl_insert_during_redis;
+select count(*) from tbl_insert_copy_during_redis;
+select count(*) from tbl_insert_rep_during_redis;
+select count(*) from tbl_insert_during_redis_cp;
+select count(*) from tbl_insert_rep_during_redis_cp;
+select count(*) from tbl_update_during_redis;
+select count(*) from tbl_update_rep_during_redis;
+select count(*) from tbl_delete_during_redis;
+select count(*) from tbl_delete_rep_during_redis;
+select count(*) from tbl_base_during_redis;
+select count(*) from tbl_base_rep_during_redis;
+select count(*) from tbl_update_multiple_during_redis;
+select count(*) from tbl_insert_001;
+select count(*) from tbl_insert_002;
+select count(*) from tbl_insert_003;
+select count(*) from tbl_insert_004;
+
+\d test_row_like_default
+\d test_col_like_default
+\d test_row_partition_like_default
+\d test_col_partition_like_default
+
+drop table test_row_like_default cascade;
+drop table test_col_like_default cascade;
+drop table test_row_partition_like_default cascade;
+drop table test_col_partition_like_default cascade;
+
+drop foreign table fx;
+
+DROP TABLE IF EXISTS redis_status CASCADE;
+DROP TABLE IF EXISTS redis_progress_detail CASCADE;
+drop table redis_stage_detail;
+drop table tbl_insert_during_redis;
+drop table tbl_insert_copy_during_redis;
+drop table tbl_insert_rep_during_redis;
+drop table tbl_insert_during_redis_cp;
+drop table tbl_insert_rep_during_redis_cp;
+drop table tbl_update_during_redis;
+drop table tbl_update_rep_during_redis;
+drop table tbl_delete_during_redis;
+drop table tbl_delete_rep_during_redis;
+drop table tbl_base_during_redis;
+drop table tbl_base_rep_during_redis;
+drop table tbl_update_multiple_during_redis;
+drop table tbl_insert_001;
+drop table tbl_insert_002;
+drop table tbl_insert_003;
+drop table tbl_insert_004;
+
+select * from tbl_insert_row_during_redis order by c1;
+select * from tbl_insert_row_replication_during_redis order by c1;
+select * from tbl_insert_partition_during_redis order by c1;
+select * from tbl_insert_partition_replication_during_redis order by c1;
+select * from tbl_insert_column_during_redis order by c1;
+select * from tbl_insert_column_replication_during_redis order by c1;
+
+drop table tbl_priority;
+drop table tbl_insert_row_during_redis;
+drop table tbl_insert_row_replication_during_redis;
+drop table tbl_insert_partition_during_redis;
+drop table tbl_insert_partition_replication_during_redis;
+drop table tbl_insert_column_during_redis;
+drop table tbl_insert_column_replication_during_redis;

@@ -57,7 +57,7 @@ def build_db_info(args):
             db_info = json.load(fd)
             if not {'db_name', 'db_user', 'host', 'host_user',
                     'port', 'ssh_port'}.issubset(db_info):
-                print('ERROR: Lack of information in json file, please refer to the file share/client.json.template.',
+                print('ERROR: Lack of information in json file, please refer to the file share/server.json.template.',
                       file=sys.stderr, flush=True)
                 return
     else:
@@ -116,7 +116,7 @@ def get_argv_parser():
     parser.add_argument('-f', '--db-config-file',
                         help='You can pass a path of configuration file otherwise you should '
                              'enter database information by command arguments manually. '
-                             'Please see the template file share/client.json.template.')
+                             'Please see the template file share/server.json.template.')
     parser.add_argument('-x', '--tuner-config-file', default=tuner_config_file,
                         help='This is the path of the core configuration file of the X-Tuner. '
                              'You can specify the path of the new configuration file. '

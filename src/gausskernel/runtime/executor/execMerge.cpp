@@ -24,6 +24,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "executor/executor.h"
 #include "executor/nodeModifyTable.h"
 #include "executor/execMerge.h"
@@ -32,7 +33,7 @@
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
 static void ExecMergeNotMatched(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot);
 static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot, JunkFilter* junkfilter,
@@ -209,7 +210,8 @@ static TupleTableSlot* ExtractConstraintTuple(
             Assert(0);
     }
 
-    tempTuple = heap_form_tuple(tupDesc, values, isnull);
+    Assert(constrSlot->tts_tupleDescriptor->tdTableAmType == originTupleDesc->tdTableAmType);
+    tempTuple = (HeapTuple)tableam_tops_form_tuple(tupDesc, values, isnull, HEAP_TUPLE);
     (void)ExecStoreTuple(tempTuple, constrSlot, InvalidBuffer, false);
 
     return constrSlot;
@@ -250,12 +252,12 @@ TupleTableSlot* ExtractScanTuple(ModifyTableState* mtstate, TupleTableSlot* slot
             continue;
         }
 
-        values[index] = slot->tts_values[startIdx];
-        isnull[index] = slot->tts_isnull[startIdx];
+        Assert(startIdx < slot->tts_tupleDescriptor->natts);
+        values[index] = tableam_tslot_getattr(slot, startIdx + 1, &isnull[index]);
         startIdx++;
     }
 
-    tempTuple = heap_form_tuple(tupDesc, values, isnull);
+    tempTuple = (HeapTuple)tableam_tops_form_tuple(tupDesc, values, isnull, HEAP_TUPLE);
     (void)ExecStoreTuple(tempTuple, scanSlot, InvalidBuffer, false);
 
     return scanSlot;
@@ -391,7 +393,7 @@ static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTab
 
         slot = ExecMergeProjQual(mtstate, mergeMatchedActionStates, econtext, slot, slot, estate);
 
-        if (slot != NULL)
+        if (slot != NULL) {
             (void)ExecUpdate(tupleid,
                              oldPartitionOid,
                              bucketid,
@@ -402,7 +404,7 @@ static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTab
                              mtstate,
                              mtstate->canSetTag,
                              partKeyUpdated);
-
+        }
         if (action->commandType == CMD_UPDATE /* && tuple_updated*/)
             InstrCountFiltered2(&mtstate->ps, 1);
 
@@ -561,7 +563,7 @@ void ExecInitMerge(ModifyTableState* mtstate, EState* estate, ResultRelInfo* res
         action_state->whenqual = ExecInitExpr((Expr*)action->qual, &mtstate->ps);
 
         /* create target slot for this action's projection */
-        tupDesc = ExecTypeFromTL((List*)action->targetList, false, true);
+        tupDesc = ExecTypeFromTL((List*)action->targetList, false, true, relationDesc->tdTableAmType);
         action_state->tupDesc = tupDesc;
 
         if (IS_PGXC_DATANODE && CMD_UPDATE == action->commandType) {

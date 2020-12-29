@@ -28,6 +28,7 @@
 #undef unlink
 #endif
 
+#include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
 
@@ -35,6 +36,7 @@
 #ifndef __CYGWIN__
 #include <winioctl.h>
 #else
+#define _WINSOCKAPI_
 #include <windows.h>
 #include <w32api/winioctl.h>
 #endif
@@ -72,7 +74,7 @@ static void* fe_palloc(Size size)
 #ifdef FRONTEND
     res = malloc(size);
 #else
-    res = MemoryContextAlloc(u_sess->top_mem_cxt, size);
+    res = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), size);
 #endif
     if (res == NULL) {
         fprintf(stderr, _("out of memory\n"));
@@ -88,7 +90,7 @@ static char* fe_pstrdup(const char* string)
 #ifdef FRONTEND
     res = strdup(string);
 #else
-    res = MemoryContextStrdup(u_sess->top_mem_cxt, string);
+    res = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), string);
 #endif
     if (res == NULL) {
         fprintf(stderr, _("out of memory\n"));
@@ -130,10 +132,11 @@ int pgrename(const char* from, const char* to)
      * and blocking other backends.
      */
 #if defined(WIN32) && !defined(__CYGWIN__)
-    while (!MoveFileEx(from, to, MOVEFILE_REPLACE_EXISTING)) {
+    while (!MoveFileEx(from, to, MOVEFILE_REPLACE_EXISTING))
 #else
-    while (rename(from, to) < 0) {
+    while (rename(from, to) < 0)
 #endif
+    {
 #if defined(WIN32) && !defined(__CYGWIN__)
         DWORD err = GetLastError();
 

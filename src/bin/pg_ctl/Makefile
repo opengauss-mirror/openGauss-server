@@ -16,10 +16,9 @@ subdir = src/bin/pg_ctl
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
-override CPPFLAGS := -I$(libpq_srcdir) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) $(CPPFLAGS) -DHAVE_LIBZ -DFRONTEND -I$(top_builddir)/src/bin/pg_rewind
+override CPPFLAGS := -I$(libpq_srcdir) -I$(ZLIB_INCLUDE_PATH) $(CPPFLAGS) -DHAVE_LIBZ -DFRONTEND -I$(top_builddir)/src/bin/pg_rewind
 
-LDFLAGS += -L$(LZ4_LIB_PATH)
-LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss -llz4
+LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
 
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"
@@ -28,9 +27,16 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
+
+ifeq ($(enable_mot), yes)
 OBJS=	pg_ctl.o  pg_build.o fetchmot.o backup.o receivelog.o streamutil.o xlogreader.o xlogreader_common.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a $(top_builddir)/src/lib/build_query/libbuildquery.a \
              $(top_builddir)/src/bin/pg_rewind/pg_rewind.a $(top_builddir)/src/lib/pgcommon/libpgcommon.a \
              $(top_builddir)/src/lib/hotpatch/client/libhotpatchclient.a
+else
+OBJS=	pg_ctl.o  pg_build.o backup.o receivelog.o streamutil.o xlogreader.o xlogreader_common.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a $(top_builddir)/src/lib/build_query/libbuildquery.a \
+             $(top_builddir)/src/bin/pg_rewind/pg_rewind.a $(top_builddir)/src/lib/pgcommon/libpgcommon.a \
+             $(top_builddir)/src/lib/hotpatch/client/libhotpatchclient.a
+endif
 
 all: gs_ctl
 
@@ -39,7 +45,7 @@ gs_ctl: $(OBJS) | submake-libpq submake-libpgport
 
 ctla: $(OBJS)
 	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o lib$@.so
-	mv lib$@.so $(top_builddir)/src/test/ut/lib
+	mv lib$@.so $(top_builddir)/src/distribute/test/ut/lib
 
 xlogreader.cpp: % : $(top_srcdir)/src/gausskernel/storage/access/transam/%
 	rm -f $@ && $(LN_S) $< .

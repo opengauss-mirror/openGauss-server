@@ -29,7 +29,7 @@ msgstr "執行 \"%s --help\" 取得更多資訊。\n"
 
 #: createdb.c:131 createlang.c:108 createuser.c:162 dropdb.c:98 droplang.c:107
 #: dropuser.c:96 clusterdb.c:117 vacuumdb.c:140 reindexdb.c:127
-#, c-format
+#, c-formatf
 msgid "%s: too many command-line arguments (first is \"%s\")\n"
 msgstr "%s: 命令列參數過多(第一個是 \"%s\")\n"
 

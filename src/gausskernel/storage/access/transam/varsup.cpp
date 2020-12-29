@@ -19,6 +19,7 @@
 #include "access/csnlog.h"
 #include "access/subtrans.h"
 #include "access/transam.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "commands/dbcommands.h"
@@ -48,9 +49,8 @@ void SetNextTransactionId(TransactionId xid, bool updateLatestCompletedXid)
 {
     if (TransactionIdIsNormal(t_thrd.xact_cxt.next_xid) && module_logging_is_on(MOD_TRANS_XACT))
         ereport(LOG,
-            (errmodule(MOD_TRANS_XACT),
-                errmsg(
-                    "[from \"g\" msg]setting xid = " XID_FMT ", old_value = " XID_FMT, xid, t_thrd.xact_cxt.next_xid)));
+                (errmodule(MOD_TRANS_XACT), errmsg("[from \"g\" msg]setting xid = " XID_FMT ", old_value = " XID_FMT,
+                                                   xid, t_thrd.xact_cxt.next_xid)));
     /* cannot update latesetCompletedXid when we are gtm free mode */
     if (GTM_MODE && updateLatestCompletedXid && TransactionIdIsNormal(t_thrd.xact_cxt.next_xid)) {
         if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, t_thrd.xact_cxt.next_xid)) {
@@ -69,7 +69,7 @@ void SetNextTransactionId(TransactionId xid, bool updateLatestCompletedXid)
      * could be examining my subxids info concurrently. Note we are assuming that
      * TransactionId and int fetch/store are atomic.
      */
-    volatile PGXACT* mypgxact = t_thrd.pgxact;
+    volatile PGXACT *mypgxact = t_thrd.pgxact;
     mypgxact->next_xid = t_thrd.xact_cxt.next_xid;
 }
 
@@ -114,17 +114,8 @@ TransactionId GetNewTransactionId(bool isSubXact)
      */
     volatile TransactionId xid;
 #ifdef PGXC
-    bool incrementXid = true;
+    bool increment_xid = true;
 #endif
-
-    /*
-     * Workers synchronize transaction state at the beginning of each parallel
-     * operation, so we can't account for new XIDs after that point.
-     */
-    if (IsInParallelMode()) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("cannot assign TransactionIds during a parallel operation")));
-    }
 
     /*
      * During bootstrap initialization, we return the special bootstrap
@@ -138,8 +129,8 @@ TransactionId GetNewTransactionId(bool isSubXact)
 
     /* safety check, we should never get this far in a HS slave */
     if (RecoveryInProgress())
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TRANSACTION_INITIATION), errmsg("cannot assign TransactionIds during recovery")));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_INITIATION),
+                        errmsg("cannot assign TransactionIds during recovery")));
 
     if (GTM_MODE) {
 #ifdef PGXC
@@ -180,24 +171,21 @@ TransactionId GetNewTransactionId(bool isSubXact)
                     ereport(DEBUG1, (errmsg("Assigned new transaction ID from GTM = %lu", xid)));
 
                 if (!TransactionIdFollowsOrEquals(xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
-                    incrementXid = false;
-                    ereport(DEBUG1,
-                        (errmsg("xid (%lu) was less than ShmemVariableCache->nextXid (%lu)",
-                            xid,
-                            t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+                    increment_xid = false;
+                    ereport(DEBUG1, (errmsg("xid (%lu) was less than ShmemVariableCache->nextXid (%lu)", xid,
+                                            t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
                 } else
                     t_thrd.xact_cxt.ShmemVariableCache->nextXid = xid;
             } else {
                 if (IsInitdb || g_instance.status > NoShutdown) {
                     xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
-                    ereport(LOG,
-                        (errmsg("Shutdown or Initdb get local xid: %lu", t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+                    ereport(LOG, (errmsg("Shutdown or Initdb get local xid: %lu",
+                                         t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
                 } else {
                     /* release lwlock before ereport. */
                     LWLockRelease(XidGenLock);
-                    ereport(ERROR,
-                        (errcode(ERRCODE_CONNECTION_EXCEPTION),
-                            errmsg("Can not connect to gtm when getting gxid, there is a connection error.")));
+                    ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION),
+                                    errmsg("Can not connect to gtm when getting gxid, there is a connection error.")));
                 }
             }
         } else if (IS_PGXC_DATANODE || IsConnFromCoord()) {
@@ -219,7 +207,12 @@ TransactionId GetNewTransactionId(bool isSubXact)
                  * In normal processing(not initdb), if CN does not push down `GXID',
                  * try and get gxid directly from GTM
                  */
-                Assert(isSubXact == false);
+                if (isSubXact) {
+                    LWLockRelease(XidGenLock);
+                    ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                                    errmsg("GTM Mode: remote node sub xact can not get gxid directly from gtm")));
+                }
+
                 ereport(DEBUG1, (errmsg("Force get XID from GTM")));
                 t_thrd.xact_cxt.next_xid = (TransactionId)GetNewGxidGTM(s, isSubXact);
                 if (!TransactionIdIsValid(t_thrd.xact_cxt.next_xid)) {
@@ -227,14 +220,20 @@ TransactionId GetNewTransactionId(bool isSubXact)
                         ereport(LOG, (errmsg("Can not get a vaild gxid from GTM")));
                     else {
                         LWLockRelease(XidGenLock);
-                        ereport(
-                            ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Can not get a vaild gxid from GTM")));
+                        ereport(ERROR,
+                                (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Can not get a vaild gxid from GTM")));
                     }
                 }
             }
 
             if (TransactionIdIsValid(t_thrd.xact_cxt.next_xid)) {
                 xid = t_thrd.xact_cxt.next_xid;
+                /* check the next_xid cn passed down in GTM Mode, it should be larger than parent xid */
+                if (isSubXact && TransactionIdFollowsOrEquals(GetParentTransactionIdIfAny(s), xid)) {
+                    LWLockRelease(XidGenLock);
+                    ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                                    errmsg("GTM Mode: remote node sub xact xid should be larger than parent xid.")));
+                }
                 ereport(DEBUG1, (errmsg("TransactionId = %lu", t_thrd.xact_cxt.next_xid)));
                 t_thrd.xact_cxt.next_xid = InvalidTransactionId; /* reset */
                 if (!TransactionIdFollowsOrEquals(xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
@@ -243,28 +242,22 @@ TransactionId GetNewTransactionId(bool isSubXact)
                      * We later do not want to bother incrementing the value
                      * in shared memory though.
                      */
-                    incrementXid = false;
-                    ereport(DEBUG1,
-                        (errmsg("xid (%lu) does not follow ShmemVariableCache->nextXid (%lu)",
-                            xid,
-                            t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+                    increment_xid = false;
+                    ereport(DEBUG1, (errmsg("xid (%lu) does not follow ShmemVariableCache->nextXid (%lu)", xid,
+                                            t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
                 } else
                     t_thrd.xact_cxt.ShmemVariableCache->nextXid = xid;
             } else {
                 /* Fallback to default */
                 if (IsInitdb || (g_instance.status > NoShutdown) || useLocalXid) {
                     xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
-                    ereport(LOG,
-                        (errmsg("Falling back to local Xid. Was = %lu, now is = %lu",
-                            t_thrd.xact_cxt.next_xid,
-                            t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+                    ereport(LOG, (errmsg("Falling back to local Xid. Was = %lu, now is = %lu", t_thrd.xact_cxt.next_xid,
+                                         t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
                 } else {
                     LWLockRelease(XidGenLock);
-                    ereport(ERROR,
-                        (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
-                            errmsg("Falling back to local Xid. Was = %lu, now is = %lu",
-                                t_thrd.xact_cxt.next_xid,
-                                t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+                    ereport(ERROR, (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
+                                    errmsg("Falling back to local Xid. Was = %lu, now is = %lu",
+                                           t_thrd.xact_cxt.next_xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
                 }
             }
         }
@@ -340,7 +333,7 @@ TransactionId GetNewTransactionId(bool isSubXact)
          * theory, but it is required to keep nextXid close to the gxid
          * especially when vacuumfreeze is run using a standalone backend.
          */
-        if (incrementXid || !IsPostmasterEnvironment) {
+        if (increment_xid || !IsPostmasterEnvironment) {
             t_thrd.xact_cxt.ShmemVariableCache->nextXid = xid;
             TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
         }
@@ -389,8 +382,8 @@ TransactionId GetNewTransactionId(bool isSubXact)
          * nxids before filling the array entry.  Note we are assuming that
          * TransactionId and int fetch/store are atomic.
          */
-        volatile PGPROC* myproc = t_thrd.proc;
-        volatile PGXACT* mypgxact = t_thrd.pgxact;
+        volatile PGPROC *myproc = t_thrd.proc;
+        volatile PGXACT *mypgxact = t_thrd.pgxact;
 
         if (!isSubXact) {
             if (GTM_MODE)
@@ -406,7 +399,7 @@ TransactionId GetNewTransactionId(bool isSubXact)
                     /* Init memory */
                     HOLD_INTERRUPTS();
                     MemoryContext oldContext = MemoryContextSwitchTo(ProcSubXidCacheContext);
-                    myproc->subxids.xids = (TransactionId*)palloc(sizeof(TransactionId) * PGPROC_INIT_CACHED_SUBXIDS);
+                    myproc->subxids.xids = (TransactionId *)palloc(sizeof(TransactionId) * PGPROC_INIT_CACHED_SUBXIDS);
                     myproc->subxids.maxNumber = PGPROC_INIT_CACHED_SUBXIDS;
                     (void)MemoryContextSwitchTo(oldContext);
                     RESUME_INTERRUPTS();
@@ -414,8 +407,8 @@ TransactionId GetNewTransactionId(bool isSubXact)
                     int maxNumber = myproc->subxids.maxNumber * 2;
                     /* Realloc, use subxidsLock to protect subxids */
                     (void)LWLockAcquire(myproc->subxidsLock, LW_EXCLUSIVE);
-                    myproc->subxids.xids =
-                        (TransactionId*)repalloc(myproc->subxids.xids, sizeof(TransactionId) * maxNumber);
+                    myproc->subxids.xids = (TransactionId *)repalloc(myproc->subxids.xids,
+                                                                     sizeof(TransactionId) * maxNumber);
                     myproc->subxids.maxNumber = maxNumber;
                     LWLockRelease(myproc->subxidsLock);
                 }
@@ -427,11 +420,9 @@ TransactionId GetNewTransactionId(bool isSubXact)
     }
     /* when we use local snapshot, latestcomplete xid is very important for us. CHECK this here */
     if (!GTM_MODE && TransactionIdFollowsOrEquals(t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, xid))
-        ereport(PANIC,
-            (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                errmsg("GTM-FREE-MODE: latestCompletedXid %lu larger than next alloc xid %lu.",
-                    t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid,
-                    xid)));
+        ereport(PANIC, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                        errmsg("GTM-FREE-MODE: latestCompletedXid %lu larger than next alloc xid %lu.",
+                               t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, xid)));
 
     LWLockRelease(XidGenLock);
     return xid;
@@ -645,7 +636,7 @@ Datum pg_check_xidlimit(PG_FUNCTION_ARGS)
  */
 Datum pg_get_xidlimit(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* funcctx = NULL;
+    FuncCallContext *funcctx = NULL;
     bool firstcall = false;
 
     if (SRF_IS_FIRSTCALL()) {
@@ -662,7 +653,7 @@ Datum pg_get_xidlimit(PG_FUNCTION_ARGS)
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* build tupdesc for result tuples */
-        tupdesc = CreateTemplateTupleDesc(7, false);
+        tupdesc = CreateTemplateTupleDesc(7, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "nextXid", XIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "oldestXid", XIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "xidVacLimit", XIDOID, -1, 0);
@@ -716,7 +707,7 @@ Datum pg_get_xidlimit(PG_FUNCTION_ARGS)
 Datum pg_get_variable_info(PG_FUNCTION_ARGS)
 {
 #define VARIABLE_INFO_ATTRS 11
-    FuncCallContext* funcctx = NULL;
+    FuncCallContext *funcctx = NULL;
 
     if (SRF_IS_FIRSTCALL()) {
         TupleDesc tupdesc;
@@ -731,7 +722,7 @@ Datum pg_get_variable_info(PG_FUNCTION_ARGS)
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* Build tupdesc for result tuples */
-        tupdesc = CreateTemplateTupleDesc(VARIABLE_INFO_ATTRS, false);
+        tupdesc = CreateTemplateTupleDesc(VARIABLE_INFO_ATTRS, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "nodeName", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "nextOid", OIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "nextXid", XIDOID, -1, 0);
@@ -794,7 +785,7 @@ const unsigned NODE_XID_CSN_VIEW_COL_NUM = 3;
 TupleDesc get_xid_csn_view_frist_row()
 {
     TupleDesc tupdesc = NULL;
-    tupdesc = CreateTemplateTupleDesc(NODE_XID_CSN_VIEW_COL_NUM, false);
+    tupdesc = CreateTemplateTupleDesc(NODE_XID_CSN_VIEW_COL_NUM, false, TAM_HEAP);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "node_name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "next_xid", XIDOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "next_csn", XIDOID, -1, 0);
@@ -802,7 +793,7 @@ TupleDesc get_xid_csn_view_frist_row()
 }
 
 /* Fetch the local nextXid and nextCSN values */
-HeapTuple fetch_local_xid_csn_view_values(FuncCallContext* funcctx)
+HeapTuple fetch_local_xid_csn_view_values(FuncCallContext *funcctx)
 {
     Datum values[NODE_XID_CSN_VIEW_COL_NUM];
     bool nulls[NODE_XID_CSN_VIEW_COL_NUM] = {false};
@@ -820,27 +811,30 @@ HeapTuple fetch_local_xid_csn_view_values(FuncCallContext* funcctx)
 }
 
 /* Fetch the remote nextXid and nextCSN values */
-HeapTuple fetch_remote_view_values(FuncCallContext* funcctx, unsigned col_num)
+HeapTuple fetch_remote_view_values(FuncCallContext *funcctx, unsigned col_num)
 {
     HeapTuple tuple = NULL;
     if (col_num == 0) {
         return tuple;
     }
     Datum values[col_num];
-    bool nulls[col_num] = {false};
-    Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
-    TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
+    bool nulls[col_num];
+    Tuplestorestate *tupstore = ((TableDistributionInfo *)funcctx->user_fctx)->state->tupstore;
+    TupleTableSlot *slot = ((TableDistributionInfo *)funcctx->user_fctx)->slot;
+
+    errno_t rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
 
     if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-        FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
+        FreeParallelFunctionState(((TableDistributionInfo *)funcctx->user_fctx)->state);
         ExecDropSingleTupleTableSlot(slot);
-        pfree(funcctx->user_fctx);
+        pfree_ext(funcctx->user_fctx);
         funcctx->user_fctx = NULL;
         return tuple;
     }
 
     for (unsigned int i = 0; i < col_num; i++) {
-        values[i] = slot_getattr(slot, i + 1, &nulls[i]);
+        values[i] = tableam_tslot_getattr(slot, i + 1, &nulls[i]);
     }
     tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
     (void)ExecClearTuple(slot);
@@ -850,7 +844,7 @@ HeapTuple fetch_remote_view_values(FuncCallContext* funcctx, unsigned col_num)
 /* Get nextXid and nextCommitSeqNo of all nodes and provide a view */
 Datum gs_get_next_xid_csn(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* funcctx = NULL;
+    FuncCallContext *funcctx = NULL;
     /* get the first row of this view */
     if (SRF_IS_FIRSTCALL()) {
         funcctx = SRF_FIRSTCALL_INIT();

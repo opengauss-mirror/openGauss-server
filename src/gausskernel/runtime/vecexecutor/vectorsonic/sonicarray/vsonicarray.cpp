@@ -73,9 +73,7 @@ int getDataMinLen(Oid type_oid, int type_mod)
         case CASHOID:
         case FLOAT8OID:
         case INT8OID:
-#ifdef ENABLE_MULTIPLE_NODES
         case HLL_HASHVAL_OID:
-#endif
         case INTERNALOID:
         case SMALLDATETIMEOID:
         case TIDOID:
@@ -95,7 +93,7 @@ int getDataMinLen(Oid type_oid, int type_mod)
                 Assert(type_mod > VARHDRSZ);
                 return type_mod - VARHDRSZ;
             }
-            /* FALLTHROUGH */
+            /* fall through */
         default:
             /* variable length data type */
             return -1;
@@ -114,33 +112,38 @@ int getDataMinLen(Oid type_oid, int type_mod)
  * @in attr - Form_pg_attribute info.
  * @in do_not_compress - if true and attr is not intXXX, goto StackEncoding.
  */
+
+void getDataDescTypeId(DatumDesc* desc, int type_size)
+{
+    switch (type_size) {
+        case 1:
+            desc->typeId = INT1OID;
+            break;
+        case 2:
+            desc->typeId = INT2OID;
+            break;
+        case 4:
+            desc->typeId = INT4OID;
+            break;
+        case 8:
+            desc->typeId = INT8OID;
+            break;
+        default:
+            Assert(false);
+            ereport(ERROR,
+                (errmodule(MOD_VEC_EXECUTOR),
+                    errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("[SonicHash] Unsupport sonic data desc size %d without tuple desc", type_size)));
+            /* keep complier quiet */
+            break;
+    }
+}
+
 void getDataDesc(DatumDesc* desc, int type_size, Form_pg_attribute attr, bool do_not_compress)
 {
     /* we do not have tuple desc, the only support type is 1,2,4,8 int type. */
     if (attr == NULL) {
-        switch (type_size) {
-            case 1:
-                desc->typeId = INT1OID;
-                break;
-            case 2:
-                desc->typeId = INT2OID;
-                break;
-            case 4:
-                desc->typeId = INT4OID;
-                break;
-            case 8:
-                desc->typeId = INT8OID;
-                break;
-            default:
-                Assert(false);
-                ereport(ERROR,
-                    (errmodule(MOD_VEC_EXECUTOR),
-                        errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("[SonicHash] Unsupport sonic data desc size %d without tuple desc", type_size)));
-                /* keep complier quiet */
-                break;
-        }
-
+        getDataDescTypeId(desc, type_size);
         desc->typeSize = type_size;
         desc->typeMod = -1;
         desc->dataType = SONIC_INT_TYPE;
@@ -271,7 +274,7 @@ void SonicDatumArray::putArray(ScalarValue* vals, uint8* flag, int rows)
     int loop_rows;
 
     bool need_expand = (uint32)rows > (m_atomSize - m_atomIdx);
-    loop_rows = need_expand ? m_atomSize - m_atomIdx : rows;
+    loop_rows = need_expand ? (m_atomSize - m_atomIdx) : rows;
 
     if (loop_rows > 0) {
         /* set with checking flag */

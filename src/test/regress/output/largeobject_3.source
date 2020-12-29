@@ -232,18 +232,18 @@ SELECT lo_close(fd) FROM lotest_stash_values;
 (0 rows)
 
 END;
-SELECT lo_export(loid, '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/lotest.txt') FROM lotest_stash_values;
+SELECT lo_export(loid, '@abs_builddir@/results/lotest.txt') FROM lotest_stash_values;
  lo_export 
 -----------
 (0 rows)
 
-COPY lotest_stash_values TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/lotest.txt';
-\lo_import '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/lotest.txt'
+COPY lotest_stash_values TO '@abs_builddir@/results/lotest.txt';
+\lo_import '@abs_builddir@/results/lotest.txt'
 ERROR:  Postgres-XC does not support large object yet
 DETAIL:  The feature is not currently supported
 \set newloid :LASTOID
 -- just make sure \lo_export does not barf
-\lo_export :newloid '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/lotest2.txt'
+\lo_export :newloid '@abs_builddir@/results/lotest2.txt'
 ERROR:  Postgres-XC does not support large object yet
 DETAIL:  The feature is not currently supported
 -- This is a hack to test that export/import are reversible

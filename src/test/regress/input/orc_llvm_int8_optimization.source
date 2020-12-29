@@ -1,0 +1,85 @@
+--Test LLVM optimization operator about int8 data type
+drop foreign table if exists t_bigint;
+Create foreign table t_bigint (c_bigint int8) SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/t_bigint_orc') distribute by roundrobin;
+
+--test "=" operator
+set enable_codegen = off;
+select * from t_bigint where  2 = c_bigint;
+set enable_codegen = on;
+select * from t_bigint where  2 = c_bigint;
+set enable_codegen = off;
+select * from t_bigint where  c_bigint = 2;
+set enable_codegen = on;
+select * from t_bigint where  c_bigint = 2 ;
+select * from t_bigint where  c_bigint = 2::int2 ;
+select * from t_bigint where  c_bigint = 2::int8 ;
+--test ">" operator
+set enable_codegen = off;
+select * from t_bigint where  2 > c_bigint;
+set enable_codegen = on;
+select * from t_bigint where  2 > c_bigint;
+set enable_codegen = off;
+select * from t_bigint where  c_bigint > 2;
+set enable_codegen = on;
+select * from t_bigint where  c_bigint > 2 ;
+select * from t_bigint where  c_bigint > 2::int2 ;
+select * from t_bigint where  c_bigint > 2::int8 ;
+--test ">=" operator
+set enable_codegen = off;
+select * from t_bigint where  2 >= c_bigint;
+set enable_codegen = on;
+select * from t_bigint where  2 >= c_bigint;
+set enable_codegen = off;
+select * from t_bigint where  c_bigint >= 2;
+set enable_codegen = on;
+select * from t_bigint where  c_bigint >= 2 ;
+select * from t_bigint where  c_bigint >= 2::int2 ;
+select * from t_bigint where  c_bigint >= 2::int8 ;
+--test "<" operator
+set enable_codegen = off;
+select * from t_bigint where  2 < c_bigint;
+set enable_codegen = on;
+select * from t_bigint where  2 < c_bigint;
+set enable_codegen = off;
+select * from t_bigint where  c_bigint < 2;
+set enable_codegen = on;
+select * from t_bigint where  c_bigint < 2 ;
+select * from t_bigint where  c_bigint < 2::int2 ;
+select * from t_bigint where  c_bigint < 2::int8 ;
+--test "<=" operator
+set enable_codegen = off;
+select * from t_bigint where  2 <= c_bigint;
+set enable_codegen = on;
+select * from t_bigint where  2 <= c_bigint;
+set enable_codegen = off;
+select * from t_bigint where  c_bigint <= 2;
+set enable_codegen = on;
+select * from t_bigint where  c_bigint <= 2 ;
+select * from t_bigint where  c_bigint <= 2::int2 ;
+select * from t_bigint where  c_bigint <= 2::int8 ;
+--test "<>" operator
+set enable_codegen = off;
+select * from t_bigint where  2 <> c_bigint;
+set enable_codegen = on;
+select * from t_bigint where  2 <> c_bigint;
+set enable_codegen = off;
+select * from t_bigint where  c_bigint <> 2;
+set enable_codegen = on;
+select * from t_bigint where  c_bigint <> 2 ;
+select * from t_bigint where  c_bigint <> 2::int2 ;
+select * from t_bigint where  c_bigint <> 2::int8 ;
+--test "!=" operator
+set enable_codegen = off;
+select * from t_bigint where  2 != c_bigint;
+set enable_codegen = on;
+select * from t_bigint where  2 != c_bigint;
+set enable_codegen = off;
+select * from t_bigint where  c_bigint != 2;
+set enable_codegen = on;
+select * from t_bigint where  c_bigint != 2 ;
+--add llt
+explain performance select * from t_bigint where  c_bigint != 2 ;
+
+
+
+

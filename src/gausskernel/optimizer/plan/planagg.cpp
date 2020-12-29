@@ -47,10 +47,12 @@
 #include "utils/syscache.h"
 #include "pgxc/pgxc.h"
 #include "optimizer/streamplan.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/optimizer/planner.h"
+#endif
 
 static bool find_minmax_aggs_walker(Node* node, List** context);
 static bool build_minmax_path(PlannerInfo* root, MinMaxAggInfo* mminfo, Oid eqop, Oid sortop, bool nulls_first);
-static void minmax_qp_callback(PlannerInfo *root, void *extra);
 static Plan* make_agg_subplan(PlannerInfo* root, MinMaxAggInfo* mminfo);
 static Node* replace_aggs_with_params_mutator(Node* node, PlannerInfo* root);
 static Oid fetch_agg_sort_op(Oid aggfnoid);
@@ -406,7 +408,7 @@ static bool build_minmax_path(PlannerInfo* root, MinMaxAggInfo* mminfo, Oid eqop
     double dNumGroups[2] = {1, 1};
     Cost path_cost;
     double path_fraction;
-    errno_t errorno;
+    errno_t errorno = EOK;
 
     /* ----------
      * Generate modified query of the form
@@ -426,6 +428,7 @@ static bool build_minmax_path(PlannerInfo* root, MinMaxAggInfo* mminfo, Oid eqop
     AssertEreport(subroot->join_info_list == NIL,
         MOD_OPT,
         "join info list is not null when building an index path at a given MIN/MAX aggregate.");
+    Assert(subroot->lateral_info_list == NIL);
     /* and we haven't created PlaceHolderInfos, either */
     AssertEreport(subroot->placeholder_list == NIL,
         MOD_OPT,
@@ -469,10 +472,21 @@ static bool build_minmax_path(PlannerInfo* root, MinMaxAggInfo* mminfo, Oid eqop
         (Node*)makeConst(INT8OID, -1, InvalidOid, sizeof(int64), Int64GetDatum(1), false, FLOAT8PASSBYVAL);
 
     /*
+     * Set up requested pathkeys.
+     */
+    subroot->group_pathkeys = NIL;
+    subroot->window_pathkeys = NIL;
+    subroot->distinct_pathkeys = NIL;
+
+    subroot->sort_pathkeys = make_pathkeys_for_sortclauses(subroot, parse->sortClause, parse->targetList, false);
+
+    subroot->query_pathkeys = subroot->sort_pathkeys;
+
+    /*
      * Generate the best paths for this query, telling query_planner that we
      * have LIMIT 1.
      */
-    query_planner(subroot, parse->targetList, 1.0, 1.0, minmax_qp_callback, NULL, &cheapest_path, &sorted_path, dNumGroups);
+    query_planner(subroot, parse->targetList, 1.0, 1.0, &cheapest_path, &sorted_path, dNumGroups);
 
     /*
      * Fail if no presorted path.  However, if query_planner determines that
@@ -506,25 +520,6 @@ static bool build_minmax_path(PlannerInfo* root, MinMaxAggInfo* mminfo, Oid eqop
     mminfo->pathcost = path_cost;
 
     return true;
-}
-
-/*
- * Compute query_pathkeys and other pathkeys during plan generation
- */
-static void
-minmax_qp_callback(PlannerInfo *root, void *extra)
-{
-    root->group_pathkeys = NIL;
-    root->window_pathkeys = NIL;
-    root->distinct_pathkeys = NIL;
-
-    root->sort_pathkeys =
-        make_pathkeys_for_sortclauses(root,
-                root->parse->sortClause,
-                root->parse->targetList,
-                true);
-
-    root->query_pathkeys = root->sort_pathkeys;
 }
 
 /*
@@ -622,6 +617,12 @@ static Plan* make_agg_subplan(PlannerInfo* root, MinMaxAggInfo* mminfo)
     }
 #endif
 
+#ifdef ENABLE_MULTIPLE_NODES
+    if (g_instance.attr.attr_common.enable_tsdb) {
+        plan = tsdb_modifier(root, plan->targetlist, plan, subroot);
+    }
+#endif
+
     /*
      * Convert the plan into an InitPlan, and make a Param for its result.
      */
@@ -701,7 +702,7 @@ bool check_agg_optimizable(Aggref* aggref, int16* strategy)
     TargetEntry* curTarget = NULL;
     Oid opfamily = InvalidOid;
     Oid opcintype = InvalidOid;
-    Oid aggsortop;
+    Oid aggsortop = InvalidOid;
 
     /* not a MIN/MAX aggregate. */
     if (list_length(aggref->args) != 1 || aggref->aggorder != NIL) {

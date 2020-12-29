@@ -23,39 +23,39 @@ insert into single_node_mod_tab values (1, 2), (5, 6);
 select * from tab1_rep, tab2_rep where tab1_rep.val = tab2_rep.val and
 										tab1_rep.val2 = tab2_rep.val2 and
 										tab1_rep.val > 1 and tab1_rep.val < 4;
-explain (costs off, num_nodes on, nodes off, verbose on) select * from tab1_rep, tab2_rep where tab1_rep.val = tab2_rep.val and
+explain (costs off, verbose on) select * from tab1_rep, tab2_rep where tab1_rep.val = tab2_rep.val and
 										tab1_rep.val2 = tab2_rep.val2 and
 										tab1_rep.val > 3 and tab1_rep.val < 5;
 select * from tab1_rep natural join tab2_rep 
 			where tab2_rep.val > 2 and tab2_rep.val < 5;
-explain (costs off, num_nodes on, nodes off, verbose on) select * from tab1_rep natural join tab2_rep
+explain (costs off, verbose on) select * from tab1_rep natural join tab2_rep
 			where tab2_rep.val > 2 and tab2_rep.val < 5;
 select * from tab1_rep join tab2_rep using (val, val2) join tab3_rep using (val, val2)
 									where tab1_rep.val > 0 and tab2_rep.val < 3; 
-explain (costs off, num_nodes on, nodes off, verbose on) select * from tab1_rep join tab2_rep using (val, val2) join tab3_rep using (val, val2)
+explain (costs off, verbose on) select * from tab1_rep join tab2_rep using (val, val2) join tab3_rep using (val, val2)
 							where tab1_rep.val > 0 and tab2_rep.val < 3; 
 select * from tab1_rep natural join tab2_rep natural join tab3_rep
 			where tab1_rep.val > 0 and tab2_rep.val < 3;
-explain (costs off, num_nodes on, nodes off, verbose on) select * from tab1_rep natural join tab2_rep natural join tab3_rep
+explain (costs off, verbose on) select * from tab1_rep natural join tab2_rep natural join tab3_rep
 			where tab1_rep.val > 0 and tab2_rep.val < 3;
 -- make sure in Joins which are shippable and involve only one node, aggregates
 -- are shipped to
 select avg(tab1_rep.val) from tab1_rep natural join tab2_rep natural join tab3_rep
 			where tab1_rep.val > 0 and tab2_rep.val < 3;
-explain (costs off, num_nodes on, nodes off, verbose on) select avg(tab1_rep.val) from tab1_rep natural join tab2_rep natural join tab3_rep
+explain (costs off, verbose on) select avg(tab1_rep.val) from tab1_rep natural join tab2_rep natural join tab3_rep
 			where tab1_rep.val > 0 and tab2_rep.val < 3;
 -- the two replicated tables being joined do not have any node in common, the
 -- query is not shippable
 select * from tab3_rep natural join tab4_rep
 			where tab3_rep.val > 2 and tab4_rep.val < 5;
-explain (costs off, num_nodes on, nodes off, verbose on) select * from tab3_rep natural join tab4_rep
+explain (costs off, verbose on) select * from tab3_rep natural join tab4_rep
 			where tab3_rep.val > 2 and tab4_rep.val < 5;
 -- Join involving one distributed and one replicated table, with replicated
 -- table existing on all nodes where distributed table exists. should be
 -- shippable
 select * from tab1_mod natural join tab1_rep
 			where tab1_mod.val > 2 and tab1_rep.val < 4;
-explain (costs off, verbose on, nodes off) select * from tab1_mod natural join tab1_rep
+explain (costs off, verbose on) select * from tab1_mod natural join tab1_rep
 			where tab1_mod.val > 2 and tab1_rep.val < 4;
 
 -- Join involving one distributed and one replicated table, with replicated
@@ -63,13 +63,13 @@ explain (costs off, verbose on, nodes off) select * from tab1_mod natural join t
 -- should not be shippable
 select * from tab1_mod natural join tab4_rep
 			where tab1_mod.val > 2 and tab4_rep.val < 4;
-explain (costs off, verbose on, nodes off) select * from tab1_mod natural join tab4_rep
+explain (costs off, verbose on) select * from tab1_mod natural join tab4_rep
 			where tab1_mod.val > 2 and tab4_rep.val < 4;
 
 -- Join involving two distributed tables, never shipped
 select * from tab1_mod natural join tab2_mod
 			where tab1_mod.val > 2 and tab2_mod.val < 4;
-explain (costs off, verbose on, nodes off) select * from tab1_mod natural join tab2_mod
+explain (costs off, verbose on) select * from tab1_mod natural join tab2_mod
 			where tab1_mod.val > 2 and tab2_mod.val < 4;
 
 -- Join involving a distributed table and two replicated tables, such that the
@@ -77,32 +77,32 @@ explain (costs off, verbose on, nodes off) select * from tab1_mod natural join t
 -- permutations
 select * from tab2_rep natural join tab4_rep natural join tab2_mod
 			where tab2_rep.val > 2 and tab4_rep.val < 4;
-explain (costs off, verbose on, nodes off) select * from tab2_rep natural join tab4_rep natural join tab2_mod
+explain (costs off, verbose on) select * from tab2_rep natural join tab4_rep natural join tab2_mod
 			where tab2_rep.val > 2 and tab4_rep.val < 4;
 select * from tab4_rep natural join tab2_rep natural join tab2_mod
 			where tab2_rep.val > 2 and tab4_rep.val < 4;
-explain (costs off, verbose on, nodes off) select * from tab4_rep natural join tab2_rep natural join tab2_mod
+explain (costs off, verbose on) select * from tab4_rep natural join tab2_rep natural join tab2_mod
 			where tab2_rep.val > 2 and tab4_rep.val < 4;
 select * from tab2_rep natural join tab2_mod natural join tab4_rep
 			where tab2_rep.val > 2 and tab4_rep.val < 4;
-explain (costs off, verbose on, nodes off) select * from tab2_rep natural join tab2_mod natural join tab4_rep
+explain (costs off, verbose on) select * from tab2_rep natural join tab2_mod natural join tab4_rep
 			where tab2_rep.val > 2 and tab4_rep.val < 4;
 
 -- qualifications on distributed tables
 -- In case of 2,3,4 datanodes following join should get shipped completely
 select * from tab1_mod natural join tab4_rep where tab1_mod.val = 1 order by tab1_mod.val2;
-explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_mod natural join tab4_rep where tab1_mod.val = 1 order by tab1_mod.val2;
+explain (costs off, verbose on) select * from tab1_mod natural join tab4_rep where tab1_mod.val = 1 order by tab1_mod.val2;
 -- following join between distributed tables should get FQSed because both of
 -- them reduce to a single node
 select * from tab1_mod join tab2_mod using (val2)
 		where tab1_mod.val = 1 and tab2_mod.val = 2 order by tab1_mod.val2;
-explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_mod join tab2_mod using (val2)
+explain (costs off, verbose on) select * from tab1_mod join tab2_mod using (val2)
 		where tab1_mod.val = 1 and tab2_mod.val = 2 order by tab1_mod.val;
 
 -- JOIN involving the distributed table with equi-JOIN on the distributed column
 -- with same kind of distribution on same nodes.
 select * from tab1_mod, tab3_mod where tab1_mod.val = tab3_mod.val and tab1_mod.val = 1;
-explain (costs off, verbose on, nodes off) select * from tab1_mod, tab3_mod
+explain (costs off, verbose on) select * from tab1_mod, tab3_mod
 			where tab1_mod.val = tab3_mod.val and tab1_mod.val = 1;
 
 -- JOIN between relations which are results of subqueries should obey same rules
@@ -111,14 +111,14 @@ explain (costs off, verbose on, nodes off) select * from tab1_mod, tab3_mod
 select * from (select * from tab1_rep) t1 natural join (select * from tab2_rep) t2
 			where t1.val > 1 and t1.val < 4
 			order by t1.val, t1.val2;
-explain (costs off, verbose on, nodes off, num_nodes on)
+explain (costs off, verbose on)
 	select * from (select * from tab1_rep) t1 natural join (select * from tab2_rep) t2
 				where t1.val > 1 and t1.val < 4
 				order by t1.val, t1.val2;
 select * from (select avg(val2), val from tab1_rep group by val) t1 natural join
 				(select avg(val2), val from tab2_rep group by val) t2
 			order by 1, 2;
-explain (costs off, verbose on, nodes off, num_nodes on)
+explain (costs off, verbose on)
 	select * from (select avg(val2), val from tab1_rep group by val) t1 natural join
 					(select avg(val2), val from tab2_rep group by val) t2
 				order by 1, 2;
@@ -126,7 +126,7 @@ explain (costs off, verbose on, nodes off, num_nodes on)
 select * from (select avg(val2), val from tab1_mod group by val) t1 natural join
 				(select avg(val2), val from tab1_rep group by val) t2
 			where t1.val = 3;
-explain (costs off, verbose on, nodes off)
+explain (costs off, verbose on)
 	select * from (select avg(val2), val from tab1_mod group by val) t1 natural join
 					(select avg(val2), val from tab1_rep group by val) t2
 				where t1.val = 3;
@@ -134,7 +134,7 @@ explain (costs off, verbose on, nodes off)
 select * from (select avg(val2), val from tab1_mod group by val) t1 natural join
 				(select avg(val2), val from tab3_mod group by val) t2
 			where t1.val = 3;
-explain (costs off, verbose on, nodes off)
+explain (costs off, verbose on)
 	select * from (select avg(val2), val from tab1_mod group by val) t1 natural join
 					(select avg(val2), val from tab3_mod group by val) t2
 			where t1.val = 3;
@@ -147,7 +147,7 @@ insert into tab2_rep values (3000, 4000);
 select * from tab1_rep left join tab2_rep on (tab1_rep.val = tab2_rep.val and tab1_rep.val2 = tab2_rep.val2)
 			where tab2_rep.val = tab2_rep.val2 or tab2_rep.val is null
 			order by tab1_rep.val, tab1_rep.val2;
-explain (costs off, verbose on, nodes off)
+explain (costs off, verbose on)
 select * from tab1_rep left join tab2_rep on (tab1_rep.val = tab2_rep.val and tab1_rep.val2 = tab2_rep.val2)
 			where tab1_rep.val = tab1_rep.val2 or tab2_rep.val is null
 			order by tab1_rep.val, tab1_rep.val2;
@@ -155,7 +155,7 @@ select * from tab1_rep left join tab2_rep on (tab1_rep.val = tab2_rep.val and ta
 select * from tab1_rep full join tab2_rep on (tab1_rep.val < tab2_rep.val and tab1_rep.val2 = tab2_rep.val2) 
 					where tab1_rep.val > 5 or tab2_rep.val > 5
 					order by tab1_rep.val, tab2_rep.val, tab1_rep.val2, tab2_rep.val2;
-explain (costs off, verbose on, nodes off)
+explain (costs off, verbose on)
 select * from tab1_rep full join tab2_rep on (tab1_rep.val < tab2_rep.val and tab1_rep.val2 = tab2_rep.val2)
 					where tab1_rep.val > 5 or tab2_rep.val > 5
 					order by tab1_rep.val, tab2_rep.val, tab1_rep.val2, tab2_rep.val2;
@@ -167,7 +167,7 @@ insert into tab3_mod values (3000, 4000);
 select * from tab1_mod left join tab3_mod on (tab1_mod.val = tab3_mod.val and tab1_mod.val2 = tab3_mod.val2)
 			where tab3_mod.val = tab3_mod.val2 or tab3_mod.val is null
 			order by tab1_mod.val, tab1_mod.val2;
-explain (costs off, verbose on, nodes off)
+explain (costs off, verbose on)
 select * from tab1_mod left join tab3_mod on (tab1_mod.val = tab3_mod.val and tab1_mod.val2 = tab3_mod.val2)
 			where tab3_mod.val = tab3_mod.val2 or tab3_mod.val is null
 			order by  tab1_mod.val, tab1_mod.val2;
@@ -175,7 +175,7 @@ select * from tab1_mod left join tab3_mod on (tab1_mod.val = tab3_mod.val and ta
 select * from tab1_mod left join tab3_mod using (val2)
 			where (tab1_mod.val = tab1_mod.val2 and tab3_mod.val = tab3_mod.val2) or tab3_mod.val is null
 			order by tab1_mod.val, tab1_mod.val2, tab3_mod.val2;
-explain (costs off, verbose on, nodes off)
+explain (costs off, verbose on)
 select * from tab1_mod left join tab3_mod using (val2)
 			where (tab1_mod.val = tab1_mod.val2 and tab3_mod.val = tab3_mod.val2) or tab3_mod.val is null
 			order by  tab1_mod.val, tab1_mod.val2, tab3_mod.val2;
@@ -185,35 +185,35 @@ select * from tab1_mod left join tab3_mod using (val2)
 select * from tab1_mod left join tab1_rep on (tab1_mod.val < tab1_rep.val and tab1_mod.val2 = tab1_rep.val2)
 			where tab1_mod.val >= 5
 			order by tab1_mod.val, tab1_mod.val2, tab1_rep.val, tab1_rep.val2;
-explain (costs off, verbose on, nodes off)
+explain (costs off, verbose on)
 select * from tab1_mod left join tab1_rep on (tab1_mod.val < tab1_rep.val and tab1_mod.val2 = tab1_rep.val2)
 			where tab1_mod.val >= 5
 			order by tab1_mod.val, tab1_mod.val2, tab1_rep.val, tab1_rep.val2;
 -- OUTER side is replicated and inner is distributed, join is not shippable,
 -- just check the EXPLAIN outputs.
-explain (costs off, verbose on, nodes off)
+explain (costs off, verbose on)
 select * from tab1_mod right join tab1_rep on (tab1_mod.val > tab1_rep.val and tab1_mod.val2 = tab1_rep.val2)
 			where tab1_rep.val >= 5;
-explain (costs off, verbose on, nodes off)
+explain (costs off, verbose on)
 select * from tab1_rep left join tab1_mod on (tab1_mod.val > tab1_rep.val and tab1_mod.val2 = tab1_rep.val2)
 			where tab1_rep.val >= 5;
 -- Any join involving a distributed and replicated node each located on a single
 -- and same node should be shippable
 select * from single_node_rep_tab natural full outer join single_node_mod_tab order by val, val2;
-explain (costs off, verbose on, nodes off)
+explain (costs off, verbose on)
 select * from single_node_rep_tab natural full outer join single_node_mod_tab order by val, val2;
 
 -- DMLs involving JOINs are not FQSed
 -- We need to just make sure that FQS is not kicking in. But the JOINs can still
 -- be reduced by JOIN reduction optimization. Turn this optimization off so as
 -- to generate plans independent of number of nodes in the cluster.
-explain (costs off, verbose on, nodes off) update tab1_mod set val2 = 1000 from tab2_mod 
+explain (costs off, verbose on) update tab1_mod set val2 = 1000 from tab2_mod 
 		where tab1_mod.val = tab2_mod.val and tab1_mod. val2 = tab2_mod.val2;
-explain (costs off, verbose on, nodes off) delete from tab1_mod using tab2_mod
+explain (costs off, verbose on) delete from tab1_mod using tab2_mod
 		where tab1_mod.val = tab2_mod.val and tab1_mod.val2 = tab2_mod.val2;
-explain (costs off, verbose on, nodes off) update tab1_rep set val2 = 1000 from tab2_rep
+explain (costs off, verbose on) update tab1_rep set val2 = 1000 from tab2_rep
 		where tab1_rep.val = tab2_rep.val and tab1_rep.val2 = tab2_rep.val2;
-explain (costs off, verbose on, nodes off) delete from tab1_rep using tab2_rep 
+explain (costs off, verbose on) delete from tab1_rep using tab2_rep 
 		where tab1_rep.val = tab2_rep.val and tab1_rep.val2 = tab2_rep.val2;
 
 drop table tab1_rep;
@@ -231,7 +231,7 @@ drop table single_node_rep_tab;
 create table t1 (a int, b int, c int, d int);
 create table rt1 (a int, b int, c int, d int);
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 SELECT a
 FROM rt1
 WHERE EXISTS (
@@ -243,7 +243,7 @@ WHERE EXISTS (
 SELECT 1
 );
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 SELECT *
 FROM t1
 LEFT OUTER JOIN (
@@ -263,7 +263,7 @@ SELECT 1
 )
 ) dt ON 1 = 1;
 
-explain (costs off, nodes off, verbose on)
+explain (costs off, verbose on)
 SELECT *
 FROM t1
 LEFT OUTER JOIN (

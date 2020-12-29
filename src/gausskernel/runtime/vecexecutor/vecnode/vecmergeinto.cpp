@@ -38,7 +38,7 @@
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "vecexecutor/vecexecutor.h"
 #include "vecexecutor/vecmergeinto.h"
 #include "vecexecutor/vecmodifytable.h"
@@ -170,18 +170,16 @@ void ExecVecMerge(VecModifyTableState* mtstate)
     Relation data_dest_rel = InvalidRelation;
     PlanState* sub_plan_state = NULL;
     JunkFilter* junkfilter = NULL;
-    PlanState* remoterelstate = NULL;
+    PlanState* remote_rel_state = NULL;
     PlanState* saved_result_remote_rel = NULL;
     errno_t rc = EOK;
 
     /* Preload local variables */
-    
     result_rel_info = mtstate->resultRelInfo + mtstate->mt_whichplan;
     sub_plan_state = mtstate->mt_plans[mtstate->mt_whichplan];
 
     /* Initialize remote plan state */
-    
-    remoterelstate = mtstate->mt_remoterels[mtstate->mt_whichplan];
+    remote_rel_state = mtstate->mt_remoterels[mtstate->mt_whichplan];
 
     junkfilter = result_rel_info->ri_junkFilter;
     result_relation_desc = result_rel_info->ri_RelationDesc;
@@ -198,7 +196,7 @@ void ExecVecMerge(VecModifyTableState* mtstate)
     saved_result_remote_rel = estate->es_result_remoterel;
 
     estate->es_result_relation_info = result_rel_info;
-    estate->es_result_remoterel = remoterelstate;
+    estate->es_result_remoterel = remote_rel_state;
 
     /*
      * And get the correct action lists.
@@ -211,15 +209,8 @@ void ExecVecMerge(VecModifyTableState* mtstate)
 
         matched_action = (MergeActionState*)linitial(merge_matched_action_states);
         result_rel_info->ri_junkFilter = matched_action->junkfilter;
-        batch_opt_update = CreateOperatorObject(CMD_UPDATE,
-            is_partitioned,
-            result_relation_desc,
-            result_rel_info,
-            estate,
-            matched_action->tupDesc,
-            &args,
-            &data_dest_rel,
-            mtstate);
+        batch_opt_update = CreateOperatorObject(CMD_UPDATE, is_partitioned, result_relation_desc, result_rel_info,
+            estate, matched_action->tupDesc, &args, &data_dest_rel, mtstate);
         result_rel_info->ri_junkFilter = saved_junkfilter;
     }
 
@@ -227,15 +218,8 @@ void ExecVecMerge(VecModifyTableState* mtstate)
         TupleDesc tup_desc = NULL;
         not_matched_action = (MergeActionState*)linitial(merge_not_matched_action_states);
         tup_desc = ExecGetResultType(sub_plan_state);
-        batch_opt_insert = CreateOperatorObject(CMD_INSERT,
-            is_partitioned,
-            result_relation_desc,
-            result_rel_info,
-            estate,
-            tup_desc,
-            &args,
-            &data_dest_rel,
-            mtstate);
+        batch_opt_insert = CreateOperatorObject(CMD_INSERT, is_partitioned, result_relation_desc, result_rel_info,
+            estate, tup_desc, &args, &data_dest_rel, mtstate);
 
         insert_batch = New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, tup_desc);
     }
@@ -323,8 +307,7 @@ void ExecVecMerge(VecModifyTableState* mtstate)
                         mtstate, (DfsUpdate*)batch_opt_update, result_batch, estate, mtstate->canSetTag, update_options);
                 } else {
                     Assert(false);
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_OPERATION),
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
                             errmsg("\"UPDATE\" is not supported by the type of relation.")));
                 }
 
@@ -362,24 +345,15 @@ void ExecVecMerge(VecModifyTableState* mtstate)
                 } else {
                     if (RelationIsCUFormat(result_relation_desc)) {
                         (void*)ExecVecInsert<CStoreInsert>(mtstate,
-                            (CStoreInsert*)batch_opt_insert,
-                            result_batch,
-                            plan_batch,
-                            estate,
-                            mtstate->canSetTag,
-                            insert_options);
+                            (CStoreInsert*)batch_opt_insert, result_batch, plan_batch,
+                            estate, mtstate->canSetTag, insert_options);
                     } else if (RelationIsPAXFormat(result_relation_desc)) {
                         (void*)ExecVecInsert<DfsInsertInter>(mtstate,
-                            (DfsInsertInter*)batch_opt_insert,
-                            result_batch,
-                            plan_batch,
-                            estate,
-                            mtstate->canSetTag,
-                            insert_options);
+                            (DfsInsertInter*)batch_opt_insert, result_batch, plan_batch,
+                            estate,  mtstate->canSetTag, insert_options);
                     } else {
                         Assert(false);
-                        ereport(ERROR,
-                            (errcode(ERRCODE_INVALID_OPERATION),
+                        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
                                 errmsg("\"INSERT\" is not supported by the type of relation.")));
                     }
                 }
@@ -456,7 +430,6 @@ void ExecInitVecMerge(ModifyTableState* mtstate, EState* estate, ResultRelInfo* 
     econtext = mtstate->ps.ps_ExprContext;
 
     /* initialize slot for merge actions */
-    
     Assert(mtstate->mt_mergeproj == NULL);
     mtstate->mt_mergeproj = ExecInitExtraTupleSlot(mtstate->ps.state);
 

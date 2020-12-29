@@ -24,7 +24,6 @@
  *
  * ---------------------------------------------------------------------------------------
  */
-
 #ifdef __USE_NUMA
 #include <numa.h>
 #endif
@@ -73,6 +72,7 @@ ThreadPoolControler::ThreadPoolControler()
     m_threadPoolContext = NULL;
     m_sessCtrl = NULL;
     m_groups = NULL;
+    m_scheduler = NULL;
     m_groupNum = 1;
     m_threadNum = 0;
     m_maxPoolSize = 0;
@@ -80,6 +80,8 @@ ThreadPoolControler::ThreadPoolControler()
 
 ThreadPoolControler::~ThreadPoolControler()
 {
+    delete m_scheduler;
+    delete m_sessCtrl;
     MemoryContextDelete(m_threadPoolContext);
     m_threadPoolContext = NULL;
     m_groups = NULL;
@@ -88,6 +90,7 @@ ThreadPoolControler::~ThreadPoolControler()
 
 void ThreadPoolControler::Init(bool enableNumaDistribute)
 {
+
     m_threadPoolContext = AllocSetContextCreate(g_instance.instance_context,
         "ThreadPoolContext",
         ALLOCSET_DEFAULT_MINSIZE,
@@ -97,44 +100,53 @@ void ThreadPoolControler::Init(bool enableNumaDistribute)
 
     AutoContextSwitch memSwitch(m_threadPoolContext);
 
-    bool bind_cpu = CheckCpuBind();
-    int group_thread_num = 0;
-    int max_thread_num = 0;
-    int numa_id = 0;
-
     m_groups = (ThreadPoolGroup**)palloc(sizeof(ThreadPoolGroup*) * m_groupNum);
     m_sessCtrl = New(CurrentMemoryContext) ThreadPoolSessControl(CurrentMemoryContext);
 
+    bool bindCpu = CheckCpuBind();
+    int maxThreadNum = 0;
+    int expectThreadNum = 0;
+    int maxStreamNum = 0;
+    int numaId = 0;
+    int cpuNum = 0;
+    int *cpuArr = NULL;
+
     for (int i = 0; i < m_groupNum; i++) {
-        if (bind_cpu) {
-            while (m_cpuInfo.cpuArrSize[numa_id] == 0)
-                numa_id++;
+        if (bindCpu) {
+            while (m_cpuInfo.cpuArrSize[numaId] == 0)
+                numaId++;
 
             /*
-             * Invoke numa_set_preferred before starting worker thread to make 
+             * Invoke numa_set_preferred before starting worker thread to make
              * more memory allocation local to worker thread.
              */
 #ifdef __USE_NUMA
             if (enableNumaDistribute) {
-                numa_set_preferred(numa_id);
+                numa_set_preferred(numaId);
             }
 #endif
-            Assert(numa_id < m_cpuInfo.totalNumaNum);
-            group_thread_num = (int)round(
-                (double)m_threadNum * ((double)m_cpuInfo.cpuArrSize[numa_id] / (double)m_cpuInfo.activeCpuNum));
-            max_thread_num = (int)round(
-                (double)m_maxPoolSize * ((double)m_cpuInfo.cpuArrSize[numa_id] / (double)m_cpuInfo.activeCpuNum));
-            m_groups[i] = New(CurrentMemoryContext)
-                        ThreadPoolGroup(max_thread_num, group_thread_num, i, numa_id,
-                        m_cpuInfo.cpuArrSize[numa_id], m_cpuInfo.cpuArr[numa_id]);
-            numa_id++;
+
+            Assert(numaId < m_cpuInfo.totalNumaNum);
+            expectThreadNum = (int)round(
+                (double)m_threadNum * ((double)m_cpuInfo.cpuArrSize[numaId] / (double)m_cpuInfo.activeCpuNum));
+            maxThreadNum = (int)round(
+                (double)m_maxPoolSize * ((double)m_cpuInfo.cpuArrSize[numaId] / (double)m_cpuInfo.activeCpuNum));
+            maxStreamNum = (int)round(
+                (double)m_maxPoolSize * ((double)m_cpuInfo.cpuArrSize[numaId] / (double)m_cpuInfo.activeCpuNum));
+            cpuNum = m_cpuInfo.cpuArrSize[numaId];
+            cpuArr = m_cpuInfo.cpuArr[numaId];
+
+            numaId++;
         } else {
-            group_thread_num = m_threadNum / m_groupNum;
-            max_thread_num = m_maxPoolSize / m_groupNum;
-            m_groups[i] = New(CurrentMemoryContext)
-                        ThreadPoolGroup(max_thread_num, group_thread_num, i, -1, 0, NULL);
+            expectThreadNum = m_threadNum / m_groupNum;
+            maxThreadNum = m_maxPoolSize / m_groupNum;
+            maxStreamNum = m_maxPoolSize / m_groupNum;
+            numaId = -1;
         }
-        m_groups[i]->init(enableNumaDistribute);
+
+        m_groups[i] = New(CurrentMemoryContext)ThreadPoolGroup(maxThreadNum, expectThreadNum,
+                                                    maxStreamNum, i, numaId, cpuNum, cpuArr);
+        m_groups[i]->Init(enableNumaDistribute);
     }
 
     for (int i = 0; i < m_groupNum; i++) {
@@ -190,19 +202,19 @@ void ThreadPoolControler::ParseAttr()
     if (IS_NULL_STR(attr))
         return;
 
-    char* p_token = NULL;
-    char* p_save = NULL;
-    const char* p_delimiter = ",";
+    char* ptoken = NULL;
+    char* psave = NULL;
+    const char* pdelimiter = ",";
 
     /* Get thread num */
-    p_token = TrimStr(strtok_r(attr, p_delimiter, &p_save));
-    if (!IS_NULL_STR(p_token))
-        m_attr.threadNum = pg_strtoint32(p_token);
+    ptoken = TrimStr(strtok_r(attr, pdelimiter, &psave));
+    if (!IS_NULL_STR(ptoken))
+        m_attr.threadNum = pg_strtoint32(ptoken);
 
     /* Ger group num */
-    p_token = TrimStr(strtok_r(NULL, p_delimiter, &p_save));
-    if (!IS_NULL_STR(p_token))
-        m_attr.groupNum = pg_strtoint32(p_token);
+    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
+    if (!IS_NULL_STR(ptoken))
+        m_attr.groupNum = pg_strtoint32(ptoken);
 
     if (m_attr.threadNum < 0 || m_attr.threadNum > MAX_THREAD_POOL_SIZE)
         INVALID_ATTR_ERROR(
@@ -212,7 +224,7 @@ void ThreadPoolControler::ParseAttr()
             errdetail("Current group num %d is out of range [%d, %d].", m_attr.groupNum, 0, MAX_THREAD_POOL_GROUPS));
 
     /* Get attach cpu */
-    m_attr.bindCpu = TrimStr(p_save);
+    m_attr.bindCpu = TrimStr(psave);
     ParseBindCpu();
 }
 
@@ -223,39 +235,40 @@ void ThreadPoolControler::ParseBindCpu()
         return;
     }
 
-    char* s_cpu = pstrdup(m_attr.bindCpu);
-    char* p_token = NULL;
-    char* p_save = NULL;
-    const char* p_delimiter = ":";
-    int bind_Num = 0;
+    char* scpu = pstrdup(m_attr.bindCpu);
+    char* ptoken = NULL;
+    char* psave = NULL;
+    const char* pdelimiter = ":";
+    int bindNum = 0;
 
-    if (s_cpu[0] != '(' || s_cpu[strlen(s_cpu) - 1] != ')')
+    if (scpu[0] != '(' || scpu[strlen(scpu) - 1] != ')')
         INVALID_ATTR_ERROR("Use '(' ')' to indicate cpu bind info.");
 
-    s_cpu++;
-    s_cpu[strlen(s_cpu) - 1] = '\0';
+    scpu++;
+    scpu[strlen(scpu) - 1] = '\0';
 
-    p_token = TrimStr(strtok_r(s_cpu, p_delimiter, &p_save));
-    p_token = pg_strtolower(p_token);
-    if (strncmp("nobind", p_token, strlen("nobind")) == 0) {
+    ptoken = TrimStr(strtok_r(scpu, pdelimiter, &psave));
+    ptoken = pg_strtolower(ptoken);
+
+    if (strncmp("nobind", ptoken, strlen("nobind")) == 0) {
         m_cpuInfo.bindType = NO_CPU_BIND;
         return;
-    } else if (strncmp("allbind", p_token, strlen("allbind")) == 0) {
+    } else if (strncmp("allbind", ptoken, strlen("allbind")) == 0) {
         m_cpuInfo.bindType = ALL_CPU_BIND;
         return;
-    } else if (strncmp("cpubind", p_token, strlen("cpubind")) == 0) {
+    } else if (strncmp("cpubind", ptoken, strlen("cpubind")) == 0) {
         m_cpuInfo.bindType = CPU_BIND;
         m_cpuInfo.isBindCpuArr = (bool*)palloc0(sizeof(bool) * m_cpuInfo.totalCpuNum);
-        bind_Num = ParseRangeStr(p_save, m_cpuInfo.isBindCpuArr, m_cpuInfo.totalCpuNum, "cpubind");
-    } else if (strncmp("nodebind", p_token, strlen("nodebind")) == 0) {
+        bindNum = ParseRangeStr(psave, m_cpuInfo.isBindCpuArr, m_cpuInfo.totalCpuNum, "cpubind");
+    } else if (strncmp("nodebind", ptoken, strlen("nodebind")) == 0) {
         m_cpuInfo.bindType = NODE_BIND;
         m_cpuInfo.isBindNumaArr = (bool*)palloc0(sizeof(bool) * m_cpuInfo.totalCpuNum);
-        bind_Num = ParseRangeStr(p_save, m_cpuInfo.isBindNumaArr, m_cpuInfo.totalNumaNum, "nodebind");
+        bindNum = ParseRangeStr(psave, m_cpuInfo.isBindNumaArr, m_cpuInfo.totalNumaNum, "nodebind");
     } else {
         INVALID_ATTR_ERROR(errdetail("Only 'nobind', 'allbind', 'cpubind', and 'nodebind' are valid attribute."));
     }
 
-    if (bind_Num == 0)
+    if (bindNum == 0)
         INVALID_ATTR_ERROR(
             errdetail("Can not find valid CPU for thread binding, there are two possible reasons:\n"
                          "1. These CPUs are not active, use lscpu to check On-line CPU(s) list.\n"
@@ -263,57 +276,57 @@ void ThreadPoolControler::ParseBindCpu()
                          "use taskset -pc to check process CPU bind info.\n"));
 }
 
-int ThreadPoolControler::ParseRangeStr(char* attr, bool* arr, int total_num, char* bind_type)
+int ThreadPoolControler::ParseRangeStr(char* attr, bool* arr, int totalNum, char* bindtype)
 {
-    char* p_token = NULL;
-    char* p_save = NULL;
-    const char* p_delimiter = ",";
-    int ret_Num = 0;
+    char* ptoken = NULL;
+    char* psave = NULL;
+    const char* pdelimiter = ",";
+    int retNum = 0;
 
-    p_token = TrimStr(strtok_r(attr, p_delimiter, &p_save));
+    ptoken = TrimStr(strtok_r(attr, pdelimiter, &psave));
 
-    while (!IS_NULL_STR(p_token)) {
+    while (!IS_NULL_STR(ptoken)) {
         char* pt = NULL;
         char* ps = NULL;
         const char* pd = "-";
-        int start_id = -1;
-        int end_id = -1;
+        int startid = -1;
+        int endid = -1;
 
-        pt = TrimStr(strtok_r(p_token, pd, &ps));
+        pt = TrimStr(strtok_r(ptoken, pd, &ps));
         if (!IS_NULL_STR(pt))
-            start_id = pg_strtoint32(pt);
+            startid = pg_strtoint32(pt);
         if (!IS_NULL_STR(ps))
-            end_id = pg_strtoint32(ps);
+            endid = pg_strtoint32(ps);
 
-        if (start_id < 0 && end_id < 0)
+        if (startid < 0 && endid < 0)
             INVALID_ATTR_ERROR(errdetail("Can not parse attribute %s", pt));
-        if (start_id >= total_num)
+        if (startid >= totalNum)
             INVALID_ATTR_ERROR(
-                errdetail("The %s attribute %d is out of valid range [%d, %d]", bind_type, start_id, 0, total_num - 1));
-        if (end_id >= total_num)
+                errdetail("The %s attribute %d is out of valid range [%d, %d]", bindtype, startid, 0, totalNum - 1));
+        if (endid >= totalNum)
             INVALID_ATTR_ERROR(
-                errdetail("The %s attribute %d is out of valid range [%d, %d]", bind_type, end_id, 0, total_num - 1));
+                errdetail("The %s attribute %d is out of valid range [%d, %d]", bindtype, endid, 0, totalNum - 1));
 
-        if (end_id == -1) {
-            ret_Num += arr[start_id] ? 0 : 1;
-            arr[start_id] = true;
+        if (endid == -1) {
+            retNum += arr[startid] ? 0 : 1;
+            arr[startid] = true;
         } else {
-            if (start_id > end_id) {
-                int tmpid = start_id;
-                start_id = end_id;
-                end_id = tmpid;
+            if (startid > endid) {
+                int tmpid = startid;
+                startid = endid;
+                endid = tmpid;
             }
 
-            for (int i = start_id; i <= end_id; i++) {
-                ret_Num += arr[start_id] ? 0 : 1;
+            for (int i = startid; i <= endid; i++) {
+                retNum += arr[startid] ? 0 : 1;
                 arr[i] = true;
             }
         }
 
-        p_token = TrimStr(strtok_r(NULL, p_delimiter, &p_save));
+        ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
     }
 
-    return ret_Num;
+    return retNum;
 }
 
 void ThreadPoolControler::GetMcsCpuInfo()
@@ -376,31 +389,32 @@ void ThreadPoolControler::GetSysCpuInfo()
 
     /* use lscpu to get active cpu info */
     fp = popen("lscpu -b -e=cpu,node", "r");
+
     if (fp == NULL) {
         ereport(WARNING, (errmsg("Unable to use 'lscpu' to read CPU info.")));
         return;
     }
 
-    char* p_token = NULL;
-    char* p_save = NULL;
-    const char* p_delimiter = " ";
-    int cpu_id = 0;
-    int numa_id = 0;
+    char* ptoken = NULL;
+    char* psave = NULL;
+    const char* pdelimiter = " ";
+    int cpuid = 0;
+    int numaid = 0;
     /* try to read the header. */
     if (fgets(buf, sizeof(buf), fp) != NULL) {
         m_cpuInfo.activeCpuNum = 0;
         while (fgets(buf, sizeof(buf), fp) != NULL) {
-            p_token = strtok_r(buf, p_delimiter, &p_save);
-            if (!IS_NULL_STR(p_token))
-                cpu_id = pg_strtoint32(p_token);
+            ptoken = strtok_r(buf, pdelimiter, &psave);
+            if (!IS_NULL_STR(ptoken))
+                cpuid = pg_strtoint32(ptoken);
 
-            p_token = strtok_r(NULL, p_delimiter, &p_save);
-            if (!IS_NULL_STR(p_token))
-                numa_id = pg_strtoint32(p_token);
+            ptoken = strtok_r(NULL, pdelimiter, &psave);
+            if (!IS_NULL_STR(ptoken))
+                numaid = pg_strtoint32(ptoken);
 
-            if (IsActiveCpu(cpu_id, numa_id)) {
-                m_cpuInfo.cpuArr[numa_id][m_cpuInfo.cpuArrSize[numa_id]] = cpu_id;
-                m_cpuInfo.cpuArrSize[numa_id]++;
+            if (IsActiveCpu(cpuid, numaid)) {
+                m_cpuInfo.cpuArr[numaid][m_cpuInfo.cpuArrSize[numaid]] = cpuid;
+                m_cpuInfo.cpuArrSize[numaid]++;
                 m_cpuInfo.activeCpuNum++;
             }
         }
@@ -451,16 +465,16 @@ void ThreadPoolControler::GetCpuAndNumaNum()
     }
 }
 
-bool ThreadPoolControler::IsActiveCpu(int cpu_id, int numa_id)
+bool ThreadPoolControler::IsActiveCpu(int cpuid, int numaid)
 {
     switch (m_cpuInfo.bindType) {
         case NO_CPU_BIND:
         case ALL_CPU_BIND:
-            return (m_cpuInfo.isMcsCpuArr[cpu_id] && CPU_ISSET(cpu_id, &m_cpuset));
+            return (m_cpuInfo.isMcsCpuArr[cpuid] && CPU_ISSET(cpuid, &m_cpuset));
         case NODE_BIND:
-            return (m_cpuInfo.isBindNumaArr[numa_id] && m_cpuInfo.isMcsCpuArr[cpu_id] && CPU_ISSET(cpu_id, &m_cpuset));
+            return (m_cpuInfo.isBindNumaArr[numaid] && m_cpuInfo.isMcsCpuArr[cpuid] && CPU_ISSET(cpuid, &m_cpuset));
         case CPU_BIND:
-            return (m_cpuInfo.isBindCpuArr[cpu_id] && m_cpuInfo.isMcsCpuArr[cpu_id] && CPU_ISSET(cpu_id, &m_cpuset));
+            return (m_cpuInfo.isBindCpuArr[cpuid] && m_cpuInfo.isMcsCpuArr[cpuid] && CPU_ISSET(cpuid, &m_cpuset));
     }
     return false;
 }
@@ -490,7 +504,7 @@ bool ThreadPoolControler::CheckNumaDistribute(int numaNodeNum) const
             (errmsg("allbind should be used to replace nobind in thread_pool_attr when NUMA is activated.")));
         return false;
     }
-
+    
     if (!CheckCpuBind()) {
         return false;
     }
@@ -517,13 +531,6 @@ CPUBindType ThreadPoolControler::GetCpuBindType() const
     return m_cpuInfo.bindType;
 }
 
-void ThreadPoolControler::ReBindStreamThread(ThreadId tid) const
-{
-    int ret = pthread_setaffinity_np(tid, sizeof(cpu_set_t), &m_cpuset);
-    if (ret != 0)
-        ereport(WARNING, (errmsg("Fail to bind stream thread. Error No: %d", ret)));
-}
-
 void ThreadPoolControler::SetGroupAndThreadNum()
 {
     if (m_attr.groupNum == 0) {
@@ -543,6 +550,7 @@ void ThreadPoolControler::SetGroupAndThreadNum()
     } else {
         m_threadNum = m_attr.threadNum;
     }
+
     ConstrainThreadNum();
 }
 
@@ -554,7 +562,7 @@ void ThreadPoolControler::ConstrainThreadNum()
         ereport(LOG, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
                       errmsg("Thread pool size %d should not be larger than max_connections %d, "
                              "so reduce thread pool size to max_connections",
-                            m_threadNum, g_instance.attr.attr_network.MaxConnections)));
+                      m_threadNum, g_instance.attr.attr_network.MaxConnections)));
     }
     
     m_maxPoolSize = Min(MAX_THREAD_POOL_SIZE, g_instance.attr.attr_network.MaxConnections);
@@ -589,20 +597,24 @@ void ThreadPoolControler::CloseAllSessions()
     }
 
     /* Check until all groups have closed their sessions. */
-    bool all_close = false;
-    while (!all_close) {
-        all_close = true;
+    bool allclose = false;
+    while (!allclose) {
+        if (m_sessCtrl->IsActiveListEmpty()) {
+            break;
+        }
+
+        allclose = true;
         for (int i = 0; i < m_groupNum; i++) {
-            all_close = (m_groups[i]->AllSessionClosed() && all_close);
+            allclose = (m_groups[i]->AllSessionClosed() && allclose);
         }
         pg_usleep(100);
     }
 }
 
-void ThreadPoolControler::ShutDownWorker(bool forceWait)
+void ThreadPoolControler::ShutDownThreads(bool forceWait)
 {
     for (int i = 0; i < m_groupNum; i++) {
-        m_groups[i]->ShutdownWorker();
+        m_groups[i]->ShutDownThreads();
     }
 
     if (forceWait) {
@@ -618,10 +630,43 @@ void ThreadPoolControler::ShutDownWorker(bool forceWait)
     }
 }
 
+void ThreadPoolControler::ShutDownListeners(bool forceWait)
+{
+    for (int i = 0; i < m_groupNum; i++) {
+        m_groups[i]->GetListener()->ShutDown();
+    }
+    if (forceWait) {
+        bool allshut = false;
+        while (!allshut) {
+            allshut = true;
+            for (int i = 0; i < m_groupNum; i++) {
+                allshut = (m_groups[i]->GetListener()->GetThreadId() == 0) && allshut;
+            }
+            pg_usleep(100);
+        }
+    }
+}
+
+void ThreadPoolControler::ShutDownScheduler(bool forceWait)
+{
+    m_scheduler->ShutDown();
+    if (forceWait) {
+        bool allshut = false;
+        while (!allshut) {
+            allshut = m_scheduler->HasShutDown();
+            pg_usleep(100);
+        }
+    }
+}
+
 void ThreadPoolControler::AddWorkerIfNecessary()
 {
     for (int i = 0; i < m_groupNum; i++)
         m_groups[i]->AddWorkerIfNecessary();
+    if (m_scheduler->HasShutDown()) {
+        m_scheduler->StartUp();
+        m_scheduler->SetShutDown(false);
+    }
 }
 
 ThreadPoolGroup* ThreadPoolControler::FindThreadGroupWithLeastSession()

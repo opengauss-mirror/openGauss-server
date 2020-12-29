@@ -99,6 +99,7 @@
 #include "executor/nodeMergejoin.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "executor/nodeHashjoin.h"
 
 /*
  * Runtime data for each mergejoin clause
@@ -651,9 +652,12 @@ TupleTableSlot* ExecMergeJoin(MergeJoinState* node)
                          * If one side of MergeJoin returns 0 tuple and no need to
                          * generate a fake join tuple with nulls, we should deinit
                          * the consumer under MergeJoin earlier.
+                         * It should be noticed that we can not do early deinit 
+                         * within predpush.
                          */
-                        ExecEarlyDeinitConsumer((PlanState*)node);
-
+                        if (((PlanState*)node) != NULL && !CheckParamWalker((PlanState*)node)) {
+                            ExecEarlyDeinitConsumer((PlanState*)node);
+                        }
                         /* Otherwise we're done. */
                         goto done;
                     default:
@@ -715,8 +719,12 @@ TupleTableSlot* ExecMergeJoin(MergeJoinState* node)
                          * If one side of MergeJoin returns 0 tuple and no need to
                          * generate a fake join tuple with nulls, we should deinit
                          * the consumer under MergeJoin earlier.
+                         * It should be noticed that we can not do early deinit 
+                         * within predpush.
                          */
-                        ExecEarlyDeinitConsumer((PlanState*)node);
+                        if (((PlanState*)node) != NULL && !CheckParamWalker((PlanState*)node)) {
+                            ExecEarlyDeinitConsumer((PlanState*)node);
+                        }
 
                         /* Otherwise we're done. */
                         goto done;
@@ -1139,7 +1147,11 @@ TupleTableSlot* ExecMergeJoin(MergeJoinState* node)
 
                 if (compare_result == 0) {
                     ExecMarkPos(inner_plan);
-
+                    if (node->mj_InnerTupleSlot == NULL) {
+                        ereport(ERROR,
+                                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                                 errmsg("mj_InnerTupleSlot cannot be NULL")));
+                    }
                     MarkInnerTuple(node->mj_InnerTupleSlot, node);
 
                     node->mj_JoinState = EXEC_MJ_JOINTUPLES;
@@ -1509,8 +1521,11 @@ MergeJoinState* ExecInitMergeJoin(MergeJoin* node, EState* estate, int eflags)
 
     /*
      * initialize tuple type and projection info
+     * result table tuple slot for merge join contains virtual tuple, so the
+     * default tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&merge_state->js.ps);
+    ExecAssignResultTypeFromTL(&merge_state->js.ps, TAM_HEAP);
+
     ExecAssignProjectionInfo(&merge_state->js.ps, NULL);
 
     /*

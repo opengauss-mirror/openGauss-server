@@ -1687,7 +1687,7 @@ create index patest2i on patest2(id);
 analyze patest0;
 analyze patest1;
 analyze patest2;
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 select * from patest0 join (select f1 from int4_tbl where f1 >= 0 order by f1 limit 1) ss on id = f1;
                             QUERY PLAN                             
 -------------------------------------------------------------------
@@ -1713,7 +1713,7 @@ select * from patest0 join (select f1 from int4_tbl where f1 >= 0 order by f1 li
 (3 rows)
 
 drop index patest2i;
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 select * from patest0 join (select f1 from int4_tbl where f1 >= 0 order by f1 limit 1) ss on id = f1;
                             QUERY PLAN                             
 -------------------------------------------------------------------
@@ -1768,7 +1768,7 @@ insert into matest2 (name) values ('Test 4');
 insert into matest3 (name) values ('Test 5');
 insert into matest3 (name) values ('Test 6');
 set enable_indexscan = off;  -- force use of seqscan/sort, so no merge
-explain (verbose, costs off, nodes off) select * from matest0 order by 1-id;
+explain (verbose, costs off) select * from matest0 order by 1-id;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
  Sort
@@ -1804,7 +1804,7 @@ select * from matest0 order by 1-id;
 
 reset enable_indexscan;
 set enable_seqscan = off;  -- plan with fewest seqscans should be merge
-explain (verbose, costs off, nodes off) select * from matest0 order by 1-id;
+explain (verbose, costs off) select * from matest0 order by 1-id;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
  Sort
@@ -1851,7 +1851,7 @@ set enable_seqscan = off;
 set enable_indexscan = on;
 set enable_bitmapscan = off;
 -- Check handling of duplicated, constant, or volatile targetlist items
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 SELECT thousand, tenthous FROM tenk1
 UNION ALL
 SELECT thousand, thousand FROM tenk1
@@ -1866,7 +1866,7 @@ ORDER BY thousand, tenthous;
                ->  Data Node Scan on tenk1 "_REMOTE_TABLE_QUERY_"
 (6 rows)
 
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 SELECT thousand, tenthous, thousand+tenthous AS x FROM tenk1
 UNION ALL
 SELECT 42, 42, hundred FROM tenk1
@@ -1881,7 +1881,7 @@ ORDER BY thousand, tenthous;
                ->  Data Node Scan on tenk1 "_REMOTE_TABLE_QUERY_"
 (6 rows)
 
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 SELECT thousand, tenthous FROM tenk1
 UNION ALL
 SELECT thousand, random()::integer FROM tenk1
@@ -1897,7 +1897,7 @@ ORDER BY thousand, tenthous;
 (6 rows)
 
 -- Check min/max aggregate optimization
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 SELECT min(x) FROM
   (SELECT unique1 AS x FROM tenk1 a
    UNION ALL
@@ -1910,7 +1910,7 @@ SELECT min(x) FROM
          ->  Data Node Scan on tenk1 "_REMOTE_TABLE_QUERY_"
 (4 rows)
 
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 SELECT min(y) FROM
   (SELECT unique1 AS x, unique1 AS y FROM tenk1 a
    UNION ALL
@@ -1924,7 +1924,7 @@ SELECT min(y) FROM
 (4 rows)
 
 -- XXX planner doesn't recognize that index on unique2 is sufficiently sorted
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 SELECT x, y FROM
   (SELECT thousand AS x, tenthous AS y FROM tenk1 a
    UNION ALL

@@ -19,7 +19,6 @@
 #include <signal.h>
 #include <unistd.h>
 
-#include "access/parallel.h"
 #include "commands/async.h"
 #include "miscadmin.h"
 #include "storage/latch.h"
@@ -28,7 +27,7 @@
 #include "tcop/tcopprot.h"
 #include "threadpool/threadpool.h"
 #ifdef PGXC
-#include "pgxc/poolutils.h"
+    #include "pgxc/poolutils.h"
 #endif
 #include "gssignal/gs_signal.h"
 
@@ -64,10 +63,7 @@ typedef struct ProcSignalSlot {
  * possible auxiliary process type.  (This scheme assumes there is not
  * more than one of any auxiliary process type at a time.)
  */
-#define NumProcSignalSlots \
-    (g_instance.shmem_cxt.MaxBackends + NUM_AUXPROCTYPES + MAX_RECOVERY_THREAD_NUM + \
-        MAX_PAGE_WRITER_THREAD_NUM + MAX_BG_WRITER_THREAD_NUM - 1 + \
-            g_instance.shmem_cxt.ThreadPoolGroupNum)
+#define NumProcSignalSlots (g_instance.shmem_cxt.MaxBackends + NUM_AUXILIARY_PROCS)
 
 static ProcSignalSlot* g_libcomm_proc_signal_slots = NULL;
 bool CheckProcSignal(ProcSignalReason reason);
@@ -121,14 +117,14 @@ void ProcSignalInit(int pss_idx)
     /* sanity check */
     if (slot->pss_pid != 0)
         ereport(LOG,
-            (errmsg(
-                "process %lu taking over ProcSignal slot %d, but it's not empty", t_thrd.proc_cxt.MyProcPid, pss_idx)));
+                (errmsg(
+                     "process %lu taking over ProcSignal slot %d, but it's not empty", t_thrd.proc_cxt.MyProcPid, pss_idx)));
 
     /* Clear out any leftover signal reasons */
     errno_t rc = memset_s((void*)slot->pss_signalFlags,
-        NUM_PROCSIGNALS * sizeof(sig_atomic_t),
-        0,
-        NUM_PROCSIGNALS * sizeof(sig_atomic_t));
+                          NUM_PROCSIGNALS * sizeof(sig_atomic_t),
+                          0,
+                          NUM_PROCSIGNALS * sizeof(sig_atomic_t));
     securec_check(rc, "\0", "\0");
 
     /* Mark slot with my PID */
@@ -162,10 +158,10 @@ static void CleanupProcSignalState(int status, Datum arg)
          * infinite loop trying to exit
          */
         ereport(LOG,
-            (errmsg("thread %lu releasing ProcSignal slot %d, but it contains %lu",
-                t_thrd.proc_cxt.MyProcPid,
-                pss_idx,
-                slot->pss_pid)));
+                (errmsg("thread %lu releasing ProcSignal slot %d, but it contains %lu",
+                        t_thrd.proc_cxt.MyProcPid,
+                        pss_idx,
+                        slot->pss_pid)));
         return; /* XXX better to zero the slot anyway? */
     }
 
@@ -274,9 +270,6 @@ void procsignal_sigusr1_handler(SIGNAL_ARGS)
     if (CheckProcSignal(PROCSIG_NOTIFY_INTERRUPT))
         HandleNotifyInterrupt();
 
-    if (CheckProcSignal(PROCSIG_PARALLEL_MESSAGE))
-        HandleParallelMessageInterrupt();
-
 #ifdef PGXC
 
     if (CheckProcSignal(PROCSIG_PGXCPOOL_RELOAD))
@@ -311,7 +304,6 @@ void procsignal_sigusr1_handler(SIGNAL_ARGS)
     if (CheckProcSignal(PROCSIG_RECOVERY_CONFLICT_BUFFERPIN))
         RecoveryConflictInterrupt(PROCSIG_RECOVERY_CONFLICT_BUFFERPIN);
 
-    SetLatch(&t_thrd.proc->procLatch);
     latch_sigusr1_handler();
 
     errno = save_errno;

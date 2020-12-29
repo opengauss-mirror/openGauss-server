@@ -1,0 +1,19 @@
+create table test_online(a int, b int, c serial) tablespace hdfs_ts;
+insert into test_online select v ,v*10, v*100 from generate_series(1, 20) as v; 
+alter table test_online drop column b;
+select * from test_online order by 1;
+
+
+create table test_online_like(like test_online INCLUDING STORAGE INCLUDING DISTRIBUTION) tablespace hdfs_ts;
+\d+ test_online
+\d+ test_online_like
+select attname, atttypid, attnum from pg_attribute where attrelid='test_online'::regclass order by 1,2,3;
+select attname, atttypid, attnum from pg_attribute where attrelid='test_online_like'::regclass order by 1,2,3;
+
+select gs_switch_relfilenode(E'test_online','test_online_like');
+
+select * from test_online_like order by 1;
+
+drop table test_online cascade;
+drop table test_online_like cascade;
+

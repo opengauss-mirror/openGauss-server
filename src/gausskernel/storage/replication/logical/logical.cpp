@@ -50,20 +50,20 @@
 #include "utils/memutils.h"
 /* data for errcontext callback */
 typedef struct LogicalErrorCallbackState {
-    LogicalDecodingContext* ctx;
-    const char* callback_name;
+    LogicalDecodingContext *ctx;
+    const char *callback_name;
     XLogRecPtr report_location;
 } LogicalErrorCallbackState;
 
 /* wrappers around output plugin callbacks */
-static void output_plugin_error_callback(void* arg);
-static void startup_cb_wrapper(LogicalDecodingContext* ctx, OutputPluginOptions* opt, bool is_init);
-static void shutdown_cb_wrapper(LogicalDecodingContext* ctx);
-static void begin_cb_wrapper(ReorderBuffer* cache, ReorderBufferTXN* txn);
-static void commit_cb_wrapper(ReorderBuffer* cache, ReorderBufferTXN* txn, XLogRecPtr commit_lsn);
-static void change_cb_wrapper(
-    ReorderBuffer* cache, ReorderBufferTXN* txn, Relation relation, ReorderBufferChange* change);
-static void LoadOutputPlugin(OutputPluginCallbacks* callbacks, const char* plugin);
+static void output_plugin_error_callback(void *arg);
+static void startup_cb_wrapper(LogicalDecodingContext *ctx, OutputPluginOptions *opt, bool is_init);
+static void shutdown_cb_wrapper(LogicalDecodingContext *ctx);
+static void begin_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn);
+static void commit_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr commit_lsn);
+static void change_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, Relation relation,
+                              ReorderBufferChange *change);
+static void LoadOutputPlugin(OutputPluginCallbacks *callbacks, const char *plugin);
 
 /*
  * Make sure the current settings & environment are capable of doing logical
@@ -73,14 +73,12 @@ void CheckLogicalDecodingRequirements(Oid databaseId)
 {
     CheckSlotRequirements();
     if (g_instance.attr.attr_storage.wal_level < WAL_LEVEL_LOGICAL)
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("logical decoding requires wal_level >= logical")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("logical decoding requires wal_level >= logical")));
 
     if (databaseId == InvalidOid)
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("logical decoding requires a database connection")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("logical decoding requires a database connection")));
 
     /* ----
      * description: We got to change that someday soon...
@@ -101,24 +99,23 @@ void CheckLogicalDecodingRequirements(Oid databaseId)
  * Helper function for CreateInitialDecodingContext() and
  * CreateDecodingContext() performing common tasks.
  */
-static LogicalDecodingContext* StartupDecodingContext(List* output_plugin_options, XLogRecPtr start_lsn,
-    TransactionId xmin_horizon, bool need_full_snapshot, bool fast_forward, XLogPageReadCB read_page,
-    LogicalOutputPluginWriterPrepareWrite prepare_write, LogicalOutputPluginWriterWrite do_write)
+static LogicalDecodingContext *StartupDecodingContext(List *output_plugin_options, XLogRecPtr start_lsn,
+                                                      TransactionId xmin_horizon, bool need_full_snapshot,
+                                                      bool fast_forward, XLogPageReadCB read_page,
+                                                      LogicalOutputPluginWriterPrepareWrite prepare_write,
+                                                      LogicalOutputPluginWriterWrite do_write)
 {
-    ReplicationSlot* slot = NULL;
+    ReplicationSlot *slot = NULL;
     MemoryContext context, old_context;
-    LogicalDecodingContext* ctx = NULL;
+    LogicalDecodingContext *ctx = NULL;
 
     /* shorter lines... */
     slot = t_thrd.slot_cxt.MyReplicationSlot;
 
-    context = AllocSetContextCreate(CurrentMemoryContext,
-        "Changeset Extraction Context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    context = AllocSetContextCreate(CurrentMemoryContext, "Changeset Extraction Context", ALLOCSET_DEFAULT_MINSIZE,
+                                    ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     old_context = MemoryContextSwitchTo(context);
-    ctx = (LogicalDecodingContext*)palloc0(sizeof(LogicalDecodingContext));
+    ctx = (LogicalDecodingContext *)palloc0(sizeof(LogicalDecodingContext));
 
     ctx->context = context;
 
@@ -140,9 +137,8 @@ static LogicalDecodingContext* StartupDecodingContext(List* output_plugin_option
 
     ctx->reader = XLogReaderAllocate(read_page, ctx);
     if (unlikely(ctx->reader == NULL))
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                errmsg("memory is temporarily unavailable while allocate xlog reader")));
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                        errmsg("memory is temporarily unavailable while allocate xlog reader")));
 
     ctx->reader->private_data = ctx;
 
@@ -183,13 +179,14 @@ static LogicalDecodingContext* StartupDecodingContext(List* output_plugin_option
  * Returns an initialized decoding context after calling the output plugin's
  * startup function.
  */
-LogicalDecodingContext* CreateInitDecodingContext(const char* plugin, List* output_plugin_options,
-    bool need_full_snapshot, XLogPageReadCB read_page, LogicalOutputPluginWriterPrepareWrite prepare_write,
-    LogicalOutputPluginWriterWrite do_write)
+LogicalDecodingContext *CreateInitDecodingContext(const char *plugin, List *output_plugin_options,
+                                                  bool need_full_snapshot, XLogPageReadCB read_page,
+                                                  LogicalOutputPluginWriterPrepareWrite prepare_write,
+                                                  LogicalOutputPluginWriterWrite do_write)
 {
     TransactionId xmin_horizon = InvalidTransactionId;
-    ReplicationSlot* slot = NULL;
-    LogicalDecodingContext* ctx = NULL;
+    ReplicationSlot *slot = NULL;
+    LogicalDecodingContext *ctx = NULL;
     MemoryContext old_context = NULL;
     int rc = 0;
 
@@ -198,30 +195,25 @@ LogicalDecodingContext* CreateInitDecodingContext(const char* plugin, List* outp
 
     /* first some sanity checks that are unlikely to be violated */
     if (slot == NULL)
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("cannot perform logical decoding without a acquired slot")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("cannot perform logical decoding without a acquired slot")));
 
     if (plugin == NULL)
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("cannot initialize logical decoding without a specified plugin")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("cannot initialize logical decoding without a specified plugin")));
 
     /* Make sure the passed slot is suitable. These are user facing errors. */
     if (slot->data.database == InvalidOid)
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("cannot use physical replication slot created for logical decoding")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("cannot use physical replication slot created for logical decoding")));
 
     if (slot->data.database != u_sess->proc_cxt.MyDatabaseId)
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("replication slot \"%s\" was not created in this database", NameStr(slot->data.name))));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("replication slot \"%s\" was not created in this database", NameStr(slot->data.name))));
 
     if (IsTransactionState() && GetTopTransactionIdIfAny() != InvalidTransactionId)
-        ereport(ERROR,
-            (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
-                errmsg("cannot create logical replication slot in transaction that has performed writes")));
+        ereport(ERROR, (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
+                        errmsg("cannot create logical replication slot in transaction that has performed writes")));
 
     /* register output plugin name with slot */
     SpinLockAcquire(&slot->mutex);
@@ -254,7 +246,7 @@ LogicalDecodingContext* CreateInitDecodingContext(const char* plugin, List* outp
             flushptr = LogStandbySnapshot();
 
             /* and make sure it's fsynced to disk */
-            XLogWaitFlush(flushptr);
+            XLogFlush(flushptr);
         } else
             slot->data.restart_lsn = GetRedoRecPtr();
 
@@ -315,8 +307,8 @@ LogicalDecodingContext* CreateInitDecodingContext(const char* plugin, List* outp
     ReplicationSlotMarkDirty();
     ReplicationSlotSave();
 
-    ctx = StartupDecodingContext(
-        NIL, InvalidXLogRecPtr, xmin_horizon, need_full_snapshot, true, read_page, prepare_write, do_write);
+    ctx = StartupDecodingContext(NIL, InvalidXLogRecPtr, xmin_horizon, need_full_snapshot, true, read_page,
+                                 prepare_write, do_write);
 
     /* call output plugin initialization callback */
     old_context = MemoryContextSwitchTo(ctx->context);
@@ -343,12 +335,13 @@ LogicalDecodingContext* CreateInitDecodingContext(const char* plugin, List* outp
  * Returns an initialized decoding context after calling the output plugin's
  * startup function.
  */
-LogicalDecodingContext* CreateDecodingContext(XLogRecPtr start_lsn, List* output_plugin_options, bool fast_forward,
-    XLogPageReadCB read_page, LogicalOutputPluginWriterPrepareWrite prepare_write,
-    LogicalOutputPluginWriterWrite do_write)
+LogicalDecodingContext *CreateDecodingContext(XLogRecPtr start_lsn, List *output_plugin_options, bool fast_forward,
+                                              XLogPageReadCB read_page,
+                                              LogicalOutputPluginWriterPrepareWrite prepare_write,
+                                              LogicalOutputPluginWriterWrite do_write)
 {
-    LogicalDecodingContext* ctx = NULL;
-    ReplicationSlot* slot = NULL;
+    LogicalDecodingContext *ctx = NULL;
+    ReplicationSlot *slot = NULL;
     MemoryContext old_context = NULL;
 
     /* shorter lines... */
@@ -356,20 +349,18 @@ LogicalDecodingContext* CreateDecodingContext(XLogRecPtr start_lsn, List* output
 
     /* first some sanity checks that are unlikely to be violated */
     if (slot == NULL)
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("cannot perform logical decoding without a acquired slot")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("cannot perform logical decoding without a acquired slot")));
 
     /* make sure the passed slot is suitable, these are user facing errors */
     if (slot->data.database == InvalidOid)
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                (errmsg("cannot use physical replication slot for logical decoding"))));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        (errmsg("cannot use physical replication slot for logical decoding"))));
 
     if (slot->data.database != u_sess->proc_cxt.MyDatabaseId)
         ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                (errmsg("replication slot \"%s\" was not created in this database", NameStr(slot->data.name)))));
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 (errmsg("replication slot \"%s\" was not created in this database", NameStr(slot->data.name)))));
 
     if (XLByteEQ(start_lsn, InvalidXLogRecPtr)) {
         /* continue from last position */
@@ -384,24 +375,15 @@ LogicalDecodingContext* CreateDecodingContext(XLogRecPtr start_lsn, List* output
          * synchronous replication.
          */
         if (!RecoveryInProgress())
-            ereport(DEBUG1,
-                (errmsg("cannot stream from %X/%X, minimum is %X/%X, forwarding",
-                    (uint32)(start_lsn >> 32),
-                    uint32(start_lsn),
-                    (uint32)(slot->data.confirmed_flush >> 32),
-                    (uint32)slot->data.confirmed_flush)));
+            ereport(DEBUG1, (errmsg("cannot stream from %X/%X, minimum is %X/%X, forwarding", (uint32)(start_lsn >> 32),
+                                    uint32(start_lsn), (uint32)(slot->data.confirmed_flush >> 32),
+                                    (uint32)slot->data.confirmed_flush)));
 
         start_lsn = slot->data.confirmed_flush;
     }
 
-    ctx = StartupDecodingContext(output_plugin_options,
-        start_lsn,
-        InvalidTransactionId,
-        false,
-        fast_forward,
-        read_page,
-        prepare_write,
-        do_write);
+    ctx = StartupDecodingContext(output_plugin_options, start_lsn, InvalidTransactionId, false, fast_forward, read_page,
+                                 prepare_write, do_write);
 
     /* call output plugin initialization callback */
     old_context = MemoryContextSwitchTo(ctx->context);
@@ -410,13 +392,10 @@ LogicalDecodingContext* CreateDecodingContext(XLogRecPtr start_lsn, List* output
     (void)MemoryContextSwitchTo(old_context);
 
     if (!RecoveryInProgress())
-        ereport(LOG,
-            (errmsg("starting logical decoding for slot %s", NameStr(slot->data.name)),
-                errdetail("streaming transactions committing after %X/%X, reading WAL from %X/%X",
-                    (uint32)(slot->data.confirmed_flush >> 32),
-                    (uint32)slot->data.confirmed_flush,
-                    (uint32)(slot->data.restart_lsn >> 32),
-                    (uint32)slot->data.restart_lsn)));
+        ereport(LOG, (errmsg("starting logical decoding for slot %s", NameStr(slot->data.name)),
+                      errdetail("streaming transactions committing after %X/%X, reading WAL from %X/%X",
+                                (uint32)(slot->data.confirmed_flush >> 32), (uint32)slot->data.confirmed_flush,
+                                (uint32)(slot->data.restart_lsn >> 32), (uint32)slot->data.restart_lsn)));
 
     return ctx;
 }
@@ -424,7 +403,7 @@ LogicalDecodingContext* CreateDecodingContext(XLogRecPtr start_lsn, List* output
 /*
  * Returns true if an consistent initial decoding snapshot has been built.
  */
-bool DecodingContextReady(LogicalDecodingContext* ctx)
+bool DecodingContextReady(LogicalDecodingContext *ctx)
 {
     return SnapBuildCurrentState(ctx->snapshot_builder) == SNAPBUILD_CONSISTENT;
 }
@@ -432,33 +411,28 @@ bool DecodingContextReady(LogicalDecodingContext* ctx)
 /*
  * Read from the decoding slot, until it is ready to start extracting changes.
  */
-void DecodingContextFindStartpoint(LogicalDecodingContext* ctx)
+void DecodingContextFindStartpoint(LogicalDecodingContext *ctx)
 {
     XLogRecPtr startptr;
 
     /* Initialize from where to start reading WAL. */
     startptr = ctx->slot->data.restart_lsn;
     if (!RecoveryInProgress()) {
-        ereport(DEBUG1,
-            (errmsg("searching for logical decoding starting point, starting at %X/%X",
-                (uint32)(ctx->slot->data.restart_lsn >> 32),
-                (uint32)ctx->slot->data.restart_lsn)));
+        ereport(DEBUG1, (errmsg("searching for logical decoding starting point, starting at %X/%X",
+                                (uint32)(ctx->slot->data.restart_lsn >> 32), (uint32)ctx->slot->data.restart_lsn)));
     }
 
     /* Wait for a consistent starting point */
     for (;;) {
-        XLogRecord* record = 0;
-        char* err = NULL;
+        XLogRecord *record = 0;
+        char *err = NULL;
 
         /* the read_page callback waits for new WAL */
         record = XLogReadRecord(ctx->reader, startptr, &err);
         if (err != NULL)
-            ereport(ERROR,
-                (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                    errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",
-                        (uint32)(ctx->reader->EndRecPtr >> 32),
-                        (uint32)ctx->reader->EndRecPtr,
-                        err)));
+            ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                            errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",
+                                   (uint32)(ctx->reader->EndRecPtr >> 32), (uint32)ctx->reader->EndRecPtr, err)));
 
         Assert(record);
 
@@ -479,7 +453,7 @@ void DecodingContextFindStartpoint(LogicalDecodingContext* ctx)
  * Free a previously allocated decoding context, invoking the shutdown
  * callback if necessary.
  */
-void FreeDecodingContext(LogicalDecodingContext* ctx)
+void FreeDecodingContext(LogicalDecodingContext *ctx)
 {
     if (ctx->callbacks.shutdown_cb != NULL)
         shutdown_cb_wrapper(ctx);
@@ -493,12 +467,11 @@ void FreeDecodingContext(LogicalDecodingContext* ctx)
 /*
  * Prepare a write using the context's output routine.
  */
-void OutputPluginPrepareWrite(struct LogicalDecodingContext* ctx, bool last_write)
+void OutputPluginPrepareWrite(struct LogicalDecodingContext *ctx, bool last_write)
 {
     if (!ctx->accept_writes)
-        ereport(ERROR,
-            (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                errmsg("writes are only accepted in commit, begin and change callbacks")));
+        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                        errmsg("writes are only accepted in commit, begin and change callbacks")));
 
     ctx->prepare_write(ctx, ctx->write_location, ctx->write_xid, last_write);
     ctx->prepared_write = true;
@@ -507,12 +480,11 @@ void OutputPluginPrepareWrite(struct LogicalDecodingContext* ctx, bool last_writ
 /*
  * Perform a write using the context's output routine.
  */
-void OutputPluginWrite(struct LogicalDecodingContext* ctx, bool last_write)
+void OutputPluginWrite(struct LogicalDecodingContext *ctx, bool last_write)
 {
     if (!ctx->prepared_write)
-        ereport(ERROR,
-            (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                errmsg("OutputPluginPrepareWrite needs to be called before OutputPluginWrite")));
+        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                        errmsg("OutputPluginPrepareWrite needs to be called before OutputPluginWrite")));
 
     ctx->write(ctx, ctx->write_location, ctx->write_xid, last_write);
     ctx->prepared_write = false;
@@ -522,51 +494,45 @@ void OutputPluginWrite(struct LogicalDecodingContext* ctx, bool last_write)
  * Load the output plugin, lookup its output plugin init function, and check
  * that it provides the required callbacks.
  */
-static void LoadOutputPlugin(OutputPluginCallbacks* callbacks, const char* plugin)
+static void LoadOutputPlugin(OutputPluginCallbacks *callbacks, const char *plugin)
 {
     LogicalOutputPluginInit plugin_init;
     CFunInfo tmpCF = load_external_function(plugin, "_PG_output_plugin_init", false, false);
     plugin_init = (LogicalOutputPluginInit)tmpCF.user_fn;
 
     if (plugin_init == NULL)
-        ereport(ERROR,
-            (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                errmsg("output plugins have to declare the _PG_output_plugin_init symbol")));
+        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                        errmsg("output plugins have to declare the _PG_output_plugin_init symbol")));
 
     /* ask the output plugin to fill the callback struct */
     plugin_init(callbacks);
 
     if (callbacks->begin_cb == NULL)
-        ereport(
-            ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a begin callback")));
+        ereport(ERROR,
+                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a begin callback")));
     if (callbacks->change_cb == NULL)
         ereport(ERROR,
-            (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a change callback")));
+                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a change callback")));
     if (callbacks->commit_cb == NULL)
         ereport(ERROR,
-            (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a commit callback")));
+                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a commit callback")));
 }
 
-static void output_plugin_error_callback(void* arg)
+static void output_plugin_error_callback(void *arg)
 {
-    LogicalErrorCallbackState* state = (LogicalErrorCallbackState*)arg;
+    LogicalErrorCallbackState *state = (LogicalErrorCallbackState *)arg;
     /* not all callbacks have an associated LSN  */
     if (!XLByteEQ(state->report_location, InvalidXLogRecPtr)) {
         (void)errcontext("slot \"%s\", output plugin \"%s\", in the %s callback, associated LSN %X/%X",
-            NameStr(state->ctx->slot->data.name),
-            NameStr(state->ctx->slot->data.plugin),
-            state->callback_name,
-            (uint32)(state->report_location >> 32),
-            (uint32)state->report_location);
+                         NameStr(state->ctx->slot->data.name), NameStr(state->ctx->slot->data.plugin),
+                         state->callback_name, (uint32)(state->report_location >> 32), (uint32)state->report_location);
     } else {
-        (void)errcontext("slot \"%s\", output plugin \"%s\", in the %s callback",
-            NameStr(state->ctx->slot->data.name),
-            NameStr(state->ctx->slot->data.plugin),
-            state->callback_name);
+        (void)errcontext("slot \"%s\", output plugin \"%s\", in the %s callback", NameStr(state->ctx->slot->data.name),
+                         NameStr(state->ctx->slot->data.plugin), state->callback_name);
     }
 }
 
-static void startup_cb_wrapper(LogicalDecodingContext* ctx, OutputPluginOptions* opt, bool is_init)
+static void startup_cb_wrapper(LogicalDecodingContext *ctx, OutputPluginOptions *opt, bool is_init)
 {
     LogicalErrorCallbackState state;
     ErrorContextCallback errcallback;
@@ -577,7 +543,7 @@ static void startup_cb_wrapper(LogicalDecodingContext* ctx, OutputPluginOptions*
     state.callback_name = "startup";
     state.report_location = InvalidXLogRecPtr;
     errcallback.callback = output_plugin_error_callback;
-    errcallback.arg = (void*)&state;
+    errcallback.arg = (void *)&state;
     errcallback.previous = t_thrd.log_cxt.error_context_stack;
     t_thrd.log_cxt.error_context_stack = &errcallback;
 
@@ -591,7 +557,7 @@ static void startup_cb_wrapper(LogicalDecodingContext* ctx, OutputPluginOptions*
     t_thrd.log_cxt.error_context_stack = errcallback.previous;
 }
 
-static void shutdown_cb_wrapper(LogicalDecodingContext* ctx)
+static void shutdown_cb_wrapper(LogicalDecodingContext *ctx)
 {
     LogicalErrorCallbackState state;
     ErrorContextCallback errcallback;
@@ -602,7 +568,7 @@ static void shutdown_cb_wrapper(LogicalDecodingContext* ctx)
     state.callback_name = "shutdown";
     state.report_location = InvalidXLogRecPtr;
     errcallback.callback = output_plugin_error_callback;
-    errcallback.arg = (void*)&state;
+    errcallback.arg = (void *)&state;
     errcallback.previous = t_thrd.log_cxt.error_context_stack;
     t_thrd.log_cxt.error_context_stack = &errcallback;
 
@@ -620,9 +586,9 @@ static void shutdown_cb_wrapper(LogicalDecodingContext* ctx)
  * Callbacks for ReorderBuffer which add in some more information and then call
  * output_plugin.h plugins.
  */
-static void begin_cb_wrapper(ReorderBuffer* cache, ReorderBufferTXN* txn)
+static void begin_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn)
 {
-    LogicalDecodingContext* ctx = (LogicalDecodingContext*)cache->private_data;
+    LogicalDecodingContext *ctx = (LogicalDecodingContext *)cache->private_data;
     LogicalErrorCallbackState state;
     ErrorContextCallback errcallback;
 
@@ -633,7 +599,7 @@ static void begin_cb_wrapper(ReorderBuffer* cache, ReorderBufferTXN* txn)
     state.callback_name = "begin";
     state.report_location = txn->first_lsn;
     errcallback.callback = output_plugin_error_callback;
-    errcallback.arg = (void*)&state;
+    errcallback.arg = (void *)&state;
     errcallback.previous = t_thrd.log_cxt.error_context_stack;
     t_thrd.log_cxt.error_context_stack = &errcallback;
 
@@ -649,9 +615,9 @@ static void begin_cb_wrapper(ReorderBuffer* cache, ReorderBufferTXN* txn)
     t_thrd.log_cxt.error_context_stack = errcallback.previous;
 }
 
-static void commit_cb_wrapper(ReorderBuffer* cache, ReorderBufferTXN* txn, XLogRecPtr commit_lsn)
+static void commit_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr commit_lsn)
 {
-    LogicalDecodingContext* ctx = (LogicalDecodingContext*)cache->private_data;
+    LogicalDecodingContext *ctx = (LogicalDecodingContext *)cache->private_data;
     LogicalErrorCallbackState state;
     ErrorContextCallback errcallback;
 
@@ -662,7 +628,7 @@ static void commit_cb_wrapper(ReorderBuffer* cache, ReorderBufferTXN* txn, XLogR
     state.callback_name = "commit";
     state.report_location = txn->final_lsn; /* beginning of commit record */
     errcallback.callback = output_plugin_error_callback;
-    errcallback.arg = (void*)&state;
+    errcallback.arg = (void *)&state;
     errcallback.previous = t_thrd.log_cxt.error_context_stack;
     t_thrd.log_cxt.error_context_stack = &errcallback;
 
@@ -678,10 +644,10 @@ static void commit_cb_wrapper(ReorderBuffer* cache, ReorderBufferTXN* txn, XLogR
     t_thrd.log_cxt.error_context_stack = errcallback.previous;
 }
 
-static void change_cb_wrapper(
-    ReorderBuffer* cache, ReorderBufferTXN* txn, Relation relation, ReorderBufferChange* change)
+static void change_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, Relation relation,
+                              ReorderBufferChange *change)
 {
-    LogicalDecodingContext* ctx = (LogicalDecodingContext*)cache->private_data;
+    LogicalDecodingContext *ctx = (LogicalDecodingContext *)cache->private_data;
     LogicalErrorCallbackState state;
     ErrorContextCallback errcallback;
     Assert(!ctx->fast_forward);
@@ -691,7 +657,7 @@ static void change_cb_wrapper(
     state.callback_name = "change";
     state.report_location = change->lsn;
     errcallback.callback = output_plugin_error_callback;
-    errcallback.arg = (void*)&state;
+    errcallback.arg = (void *)&state;
     errcallback.previous = t_thrd.log_cxt.error_context_stack;
     t_thrd.log_cxt.error_context_stack = &errcallback;
 
@@ -712,7 +678,7 @@ static void change_cb_wrapper(
     t_thrd.log_cxt.error_context_stack = errcallback.previous;
 }
 
-bool filter_by_origin_cb_wrapper(LogicalDecodingContext* ctx, RepOriginId origin_id)
+bool filter_by_origin_cb_wrapper(LogicalDecodingContext *ctx, RepOriginId origin_id)
 {
     LogicalErrorCallbackState state;
     ErrorContextCallback errcallback;
@@ -723,7 +689,7 @@ bool filter_by_origin_cb_wrapper(LogicalDecodingContext* ctx, RepOriginId origin
     state.callback_name = "shutdown";
     state.report_location = InvalidXLogRecPtr;
     errcallback.callback = output_plugin_error_callback;
-    errcallback.arg = (void*)&state;
+    errcallback.arg = (void *)&state;
     errcallback.previous = t_thrd.log_cxt.error_context_stack;
     t_thrd.log_cxt.error_context_stack = &errcallback;
 
@@ -750,7 +716,7 @@ bool filter_by_origin_cb_wrapper(LogicalDecodingContext* ctx, RepOriginId origin
 void LogicalIncreaseXminForSlot(XLogRecPtr current_lsn, TransactionId xmin)
 {
     bool updated_xmin = false;
-    ReplicationSlot* slot = NULL;
+    ReplicationSlot *slot = NULL;
 
     slot = t_thrd.slot_cxt.MyReplicationSlot;
 
@@ -799,7 +765,7 @@ void LogicalIncreaseXminForSlot(XLogRecPtr current_lsn, TransactionId xmin)
 void LogicalIncreaseRestartDecodingForSlot(XLogRecPtr current_lsn, XLogRecPtr restart_lsn)
 {
     bool updated_lsn = false;
-    ReplicationSlot* slot = NULL;
+    ReplicationSlot *slot = NULL;
 
     slot = t_thrd.slot_cxt.MyReplicationSlot;
 
@@ -831,27 +797,19 @@ void LogicalIncreaseRestartDecodingForSlot(XLogRecPtr current_lsn, XLogRecPtr re
         slot->candidate_restart_valid = current_lsn;
         slot->candidate_restart_lsn = restart_lsn;
         if (!RecoveryInProgress())
-            ereport(DEBUG1,
-                (errmsg("got new restart lsn %X/%X at %X/%X",
-                    (uint32)(restart_lsn >> 32),
-                    (uint32)restart_lsn,
-                    (uint32)(current_lsn >> 32),
-                    (uint32)current_lsn)));
+            ereport(DEBUG1, (errmsg("got new restart lsn %X/%X at %X/%X", (uint32)(restart_lsn >> 32),
+                                    (uint32)restart_lsn, (uint32)(current_lsn >> 32), (uint32)current_lsn)));
     } else {
         if (!RecoveryInProgress())
-            ereport(DEBUG1,
+            ereport(
+                DEBUG1,
                 (errmsg("failed to increase restart lsn: proposed %X/%X, after %X/%X, current candidate %X/%X, current "
                         "after %X/%X, flushed up to %X/%X",
-                    (uint32)(restart_lsn >> 32),
-                    (uint32)restart_lsn,
-                    (uint32)(current_lsn >> 32),
-                    (uint32)current_lsn,
-                    (uint32)(slot->candidate_restart_lsn >> 32),
-                    (uint32)slot->candidate_restart_lsn,
-                    (uint32)(slot->candidate_restart_valid >> 32),
-                    (uint32)slot->candidate_restart_valid,
-                    (uint32)(slot->data.confirmed_flush >> 32),
-                    (uint32)slot->data.confirmed_flush)));
+                        (uint32)(restart_lsn >> 32), (uint32)restart_lsn, (uint32)(current_lsn >> 32),
+                        (uint32)current_lsn, (uint32)(slot->candidate_restart_lsn >> 32),
+                        (uint32)slot->candidate_restart_lsn, (uint32)(slot->candidate_restart_valid >> 32),
+                        (uint32)slot->candidate_restart_valid, (uint32)(slot->data.confirmed_flush >> 32),
+                        (uint32)slot->data.confirmed_flush)));
     }
     SpinLockRelease(&slot->mutex);
 
@@ -874,7 +832,7 @@ void LogicalConfirmReceivedLocation(XLogRecPtr lsn)
         bool updated_restart = false;
 
         /* use volatile pointer to prevent code rearrangement */
-        ReplicationSlot* slot = t_thrd.slot_cxt.MyReplicationSlot;
+        ReplicationSlot *slot = t_thrd.slot_cxt.MyReplicationSlot;
 
         SpinLockAcquire(&slot->mutex);
 
@@ -935,7 +893,7 @@ void LogicalConfirmReceivedLocation(XLogRecPtr lsn)
             ReplicationSlotsComputeRequiredLSN(NULL);
         }
     } else {
-        volatile ReplicationSlot* slot = t_thrd.slot_cxt.MyReplicationSlot;
+        volatile ReplicationSlot *slot = t_thrd.slot_cxt.MyReplicationSlot;
 
         SpinLockAcquire(&slot->mutex);
         slot->data.confirmed_flush = lsn;

@@ -163,7 +163,7 @@ static Buffer _hash_getovflpage(Relation rel, Buffer metabuf)
     BlockNumber blkno;
     uint32 orig_firstfree;
     uint32 splitnum;
-    uint32* freep = NULL;
+    uint32 *freep = NULL;
     uint32 max_ovflpg;
     uint32 bit;
     uint32 first_page;
@@ -359,7 +359,7 @@ BlockNumber _hash_freeovflpage(Relation rel, Buffer ovflbuf, BufferAccessStrateg
     HashPageOpaque ovflopaque;
     Page ovflpage;
     Page mappage;
-    uint32* freep = NULL;
+    uint32 *freep = NULL;
     uint32 ovflbitno;
     int32 bitmappage, bitmapbit;
     Bucket bucket PG_USED_FOR_ASSERTS_ONLY;
@@ -388,8 +388,8 @@ BlockNumber _hash_freeovflpage(Relation rel, Buffer ovflbuf, BufferAccessStrateg
      * entire bucket.
      */
     if (BlockNumberIsValid(prevblkno)) {
-        Buffer prevbuf =
-            _hash_getbuf_with_strategy(rel, prevblkno, HASH_WRITE, LH_BUCKET_PAGE | LH_OVERFLOW_PAGE, bstrategy);
+        Buffer prevbuf = _hash_getbuf_with_strategy(rel, prevblkno, HASH_WRITE, LH_BUCKET_PAGE | LH_OVERFLOW_PAGE,
+                                                    bstrategy);
         Page prevpage = BufferGetPage(prevbuf);
         HashPageOpaque prevopaque = (HashPageOpaque)PageGetSpecialPointer(prevpage);
 
@@ -463,7 +463,7 @@ void _hash_initbitmap(Relation rel, HashMetaPage metap, BlockNumber blkno, ForkN
     Buffer buf;
     Page pg;
     HashPageOpaque op;
-    uint32* freep = NULL;
+    uint32 *freep = NULL;
 
     /*
      * It is okay to write-lock the new bitmap page while holding metapage
@@ -497,9 +497,8 @@ void _hash_initbitmap(Relation rel, HashMetaPage metap, BlockNumber blkno, ForkN
     /* add the new bitmap page to the metapage's list of bitmaps */
     /* metapage already has a write lock */
     if (metap->hashm_nmaps >= HASH_MAX_BITMAPS)
-        ereport(ERROR,
-            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                errmsg("out of overflow pages in hash index \"%s\"", RelationGetRelationName(rel))));
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("out of overflow pages in hash index \"%s\"", RelationGetRelationName(rel))));
 
     metap->hashm_mapp[metap->hashm_nmaps] = blkno;
 

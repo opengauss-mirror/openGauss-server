@@ -23,5 +23,8 @@ extern void SetRelationRuleStatus(Oid relationId, bool relHasRules, bool relIsBe
 
 extern Oid get_rewrite_oid(Oid relid, const char* rulename, bool missing_ok);
 extern Oid get_rewrite_oid_without_relid(const char* rulename, Oid* relid, bool missing_ok);
+extern char* get_rewrite_rulename(Oid ruleid, bool missing_ok);
+extern bool rel_has_rule(Oid relid, char ev_type);
+
 
 #endif /* REWRITESUPPORT_H */

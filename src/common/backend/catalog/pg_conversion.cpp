@@ -30,7 +30,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 /*
  * ConversionCreate
@@ -141,7 +141,7 @@ void RemoveConversionById(Oid conversionOid)
 {
     Relation rel = NULL;
     HeapTuple tuple = NULL;
-    HeapScanDesc scan = NULL;
+    TableScanDesc scan = NULL;
     ScanKeyData scanKeyData;
 
     ScanKeyInit(&scanKeyData, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(conversionOid));

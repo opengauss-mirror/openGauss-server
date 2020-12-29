@@ -11,8 +11,8 @@
 
 #include "catalog/pg_type.h"
 #include "funcapi.h"
-#include "storage/buf_internals.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/buf_internals.h"
+#include "storage/buf/bufmgr.h"
 
 #define NUM_BUFFERCACHE_PAGES_ELEM 9
 

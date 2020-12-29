@@ -116,7 +116,10 @@ VecUniqueState* ExecInitVecUnique(VecUnique* node, EState* estate, int eflags)
 
     // unique nodes do no projections, so initialize projection info for this
     // node appropriately
-    ExecAssignResultTypeFromTL(&uniquestate->ps);
+    ExecAssignResultTypeFromTL(
+            &uniquestate->ps,
+            ExecGetResultType(outerPlanState(uniquestate))->tdTableAmType);
+
     uniquestate->ps.ps_ProjInfo = NULL;
 
     // Precompute fmgr lookup data for inner loop

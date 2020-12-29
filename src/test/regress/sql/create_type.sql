@@ -130,10 +130,3 @@ BEGIN
 END;
 /
 
-CREATE ROLE test_role WITH PASSWORD 'Huawei@123';
-CREATE TYPE test_type as (id int);
-ALTER TYPE test_type OWNER TO test_role;
-ALTER TYPE test_type OWNER TO CURRENT_USER;
-ALTER TYPE test_type OWNER TO SESSION_USER;
-DROP TYPE test_type;
-DROP ROLE test_role;

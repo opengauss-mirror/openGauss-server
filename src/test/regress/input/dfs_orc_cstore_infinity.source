@@ -1,0 +1,15 @@
+set enable_global_stats = true;
+set enable_vector_engine=on;
+-- problem:
+-- special value infinity test
+CREATE TABLE cstore_infinity
+(
+	a INT4, 
+	b float4, 
+	c float8,
+	g double precision,
+	h real
+) with (orientation = orc) tablespace hdfs_ts  DISTRIBUTE BY HASH(a);
+COPY cstore_infinity FROM '/@abs_srcdir@/data/cstore_infinity.data' delimiter '|';
+SELECT * FROM cstore_infinity order by a,b,g;
+DROP TABLE cstore_infinity;

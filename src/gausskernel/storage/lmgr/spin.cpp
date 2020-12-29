@@ -26,7 +26,7 @@
 
 #include "miscadmin.h"
 #include "replication/walsender.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "storage/spin.h"
 
 #ifdef HAVE_SPINLOCKS

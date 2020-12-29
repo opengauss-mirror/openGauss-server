@@ -27,8 +27,7 @@ Datum array_push(PG_FUNCTION_ARGS)
     ArrayType* v = NULL;
     Datum newelem;
     bool isNull = false;
-    int* dimv = NULL;
-    int* lb = NULL;
+    int *dimv = NULL, *lb = NULL;
     ArrayType* result = NULL;
     int indx;
     Oid element_type;
@@ -81,12 +80,14 @@ Datum array_push(PG_FUNCTION_ARGS)
 
         if (arg0_elemid != InvalidOid) {
             /* append newelem */
-            int ub = dimv[0] + lb[0] - 1;
-
-            indx = ub + 1;
-            /* overflow? */
-            if (indx < ub)
+            if (dimv[0] > 0 && lb[0] > 0 && (INT_MAX - dimv[0] < lb[0])) {
                 ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("integer out of range")));
+            }
+            if (dimv[0] < 0 && lb[0] < 0 && (INT_MAX + dimv[0] < 0 - lb[0])) {
+                ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("integer out of range")));
+            }
+            int ub = dimv[0] + lb[0] - 1;
+            indx = ub + 1;
         } else {
             /* prepend newelem */
             indx = lb[0] - 1;
@@ -139,23 +140,14 @@ Datum array_push(PG_FUNCTION_ARGS)
  */
 Datum array_cat(PG_FUNCTION_ARGS)
 {
-    ArrayType* v1 = NULL;
-    ArrayType* v2 = NULL;
+    ArrayType *v1 = NULL, *v2 = NULL;
     ArrayType* result = NULL;
-    int* dims = NULL;
-    int* lbs = NULL;
-    int ndims, nitems, ndatabytes, nbytes;
-    int* dims1 = NULL;
-    int* lbs1 = NULL;
-    int ndims1, nitems1, ndatabytes1;
-    int* dims2 = NULL;
-    int* lbs2 = NULL;
-    int ndims2, nitems2, ndatabytes2;
+    int *dims = NULL, *lbs = NULL, ndims, nitems, ndatabytes, nbytes;
+    int *dims1 = NULL, *lbs1 = NULL, ndims1, nitems1, ndatabytes1;
+    int *dims2 = NULL, *lbs2 = NULL, ndims2, nitems2, ndatabytes2;
     int i;
-    char* dat1 = NULL;
-    char* dat2 = NULL;
-    bits8* bitmap1 = NULL;
-    bits8* bitmap2 = NULL;
+    char *dat1 = NULL, *dat2 = NULL;
+    bits8 *bitmap1 = NULL, *bitmap2 = NULL;
     Oid element_type;
     Oid element_type1;
     Oid element_type2;
@@ -176,11 +168,12 @@ Datum array_cat(PG_FUNCTION_ARGS)
 
     v1 = PG_GETARG_ARRAYTYPE_P(0);
     v2 = PG_GETARG_ARRAYTYPE_P(1);
+
     element_type1 = ARR_ELEMTYPE(v1);
     element_type2 = ARR_ELEMTYPE(v2);
 
     /* Check we have matching element types */
-    if (element_type1 != element_type2) {
+    if (element_type1 != element_type2)
         ereport(ERROR,
             (errcode(ERRCODE_DATATYPE_MISMATCH),
                 errmsg("cannot concatenate incompatible arrays"),
@@ -188,7 +181,6 @@ Datum array_cat(PG_FUNCTION_ARGS)
                           "compatible for concatenation.",
                     format_type_be(element_type1),
                     format_type_be(element_type2))));
-    }
 
     /* OK, use it */
     element_type = element_type1;
@@ -249,7 +241,12 @@ Datum array_cat(PG_FUNCTION_ARGS)
         ndims = ndims1;
         dims = (int*)palloc(ndims * sizeof(int));
         lbs = (int*)palloc(ndims * sizeof(int));
-
+        /* dims1[0] is elements nums of dimension 1 in the left array */
+        if (unlikely(INT_MAX - dims1[0] < dims2[0])) {
+            ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                    errmsg("cannot accpect arrays with dimensions out of range")));
+        }
         dims[0] = dims1[0] + dims2[0];
         lbs[0] = lbs1[0];
 

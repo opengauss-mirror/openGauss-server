@@ -1235,7 +1235,7 @@ void InitGlobalVecFuncMap()
     hash_ctl.keysize = sizeof(Oid);
     hash_ctl.entrysize = sizeof(VecFuncCacheEntry);
     hash_ctl.hash = oid_hash;
-    hash_ctl.hcxt = CurrentMemoryContext;
+    hash_ctl.hcxt = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR);
     g_instance.vec_func_hash = hash_create("VecFuncHash", 4096, &hash_ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
     int nvecfunction = (sizeof(vec_func_table) / sizeof(VecFuncCacheEntry));
     for (i = 0; i < nvecfunction; i++) {

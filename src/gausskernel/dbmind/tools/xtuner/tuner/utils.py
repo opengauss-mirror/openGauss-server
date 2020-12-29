@@ -22,6 +22,9 @@ WHITE_FMT = "\033[37;1m{}\033[0m"
 
 
 class cached_property:
+    """
+    A decorator for caching properties in classes.
+    """
     def __init__(self, func):
         self.func = func
 
@@ -35,20 +38,30 @@ class cached_property:
 
 
 def clip(val, lower, upper):
+    """
+    Given an interval, the value outside the interval is clipped to the interval edges.
+    :param val: The value to clip.
+    :param lower: Minimum value.
+    :param upper: Maximum value.
+    :return: Clipped value.
+    """
     val = max(lower, val, key=lambda x: float(x))
     val = min(upper, val, key=lambda x: float(x))
     return val
 
 
-def construct_header(header='', padding='-'):
+def construct_dividing_line(title='', padding='-'):
+    """
+    Return a dividing line.
+    """
     try:
         term_width = os.get_terminal_size().columns
     except OSError:
         term_width = 120
 
-    side_width = max(0, (term_width - len(header)) // 2 - 1)
+    side_width = max(0, (term_width - len(title)) // 2 - 1)
 
-    if header == '':
+    if title == '':
         return padding * term_width
     else:
-        return padding * side_width + ' ' + header + ' ' + padding * side_width
+        return padding * side_width + ' ' + title + ' ' + padding * side_width

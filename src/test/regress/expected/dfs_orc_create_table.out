@@ -1,0 +1,425 @@
+--
+-- CREATE_TABLE
+--
+--
+-- CLASS DEFINITIONS
+--
+CREATE TABLE hobbies_r (
+	name		text,
+	person 		text
+);
+CREATE TABLE equipment_r (
+	name 		text,
+	hobby		text
+);
+CREATE TABLE onek (
+	unique1		int4,
+	unique2		int4,
+	two			int4,
+	four		int4,
+	ten			int4,
+	twenty		int4,
+	hundred		int4,
+	thousand	int4,
+	twothousand	int4,
+	fivethous	int4,
+	tenthous	int4,
+	odd			int4,
+	even		int4,
+	stringu1	name,
+	stringu2	name,
+	string4		name
+);
+CREATE TABLE tenk1 (
+	unique1		int4,
+	unique2		int4,
+	two			int4,
+	four		int4,
+	ten			int4,
+	twenty		int4,
+	hundred		int4,
+	thousand	int4,
+	twothousand	int4,
+	fivethous	int4,
+	tenthous	int4,
+	odd			int4,
+	even		int4,
+	stringu1	name,
+	stringu2	name,
+	string4		name
+) WITH OIDS;
+CREATE TABLE tenk2 (
+	unique1 	int4,
+	unique2 	int4,
+	two 	 	int4,
+	four 		int4,
+	ten			int4,
+	twenty 		int4,
+	hundred 	int4,
+	thousand 	int4,
+	twothousand int4,
+	fivethous 	int4,
+	tenthous	int4,
+	odd			int4,
+	even		int4,
+	stringu1	name,
+	stringu2	name,
+	string4		name
+);
+CREATE TABLE person (
+	name 		text,
+	age			int4,
+	location 	point
+);
+CREATE TABLE emp (
+	salary 		int4,
+	manager 	name
+) INHERITS (person) WITH OIDS;
+CREATE TABLE student (
+	gpa 		float8
+) INHERITS (person);
+CREATE TABLE stud_emp (
+	percent 	int4
+) INHERITS (emp, student);
+NOTICE:  merging multiple inherited definitions of column "name"
+NOTICE:  merging multiple inherited definitions of column "age"
+NOTICE:  merging multiple inherited definitions of column "location"
+CREATE TABLE dept (
+	dname		name,
+	mgrname 	text
+);
+CREATE TABLE slow_emp4000 (
+	home_base	 box
+);
+CREATE TABLE fast_emp4000 (
+	home_base	 box
+);
+CREATE TABLE road (
+	name		text,
+	thepath 	path
+);
+CREATE TABLE ihighway () INHERITS (road);
+CREATE TABLE shighway (
+	surface		text
+) INHERITS (road);
+CREATE TABLE real_city (
+	pop			int4,
+	cname		text,
+	outline 	path
+);
+--
+-- test the "star" operators a bit more thoroughly -- this time,
+-- throw in lots of NULL fields...
+--
+-- a is the type root
+-- b and c inherit from a (one-level single inheritance)
+-- d inherits from b and c (two-level multiple inheritance)
+-- e inherits from c (two-level single inheritance)
+-- f inherits from e (three-level single inheritance)
+--
+CREATE TABLE a_star (
+	class		char,
+	a 			int4
+);
+CREATE TABLE b_star (
+	b 			text
+) INHERITS (a_star);
+CREATE TABLE c_star (
+	c 			name
+) INHERITS (a_star);
+CREATE TABLE d_star (
+	d 			float8
+) INHERITS (b_star, c_star);
+NOTICE:  merging multiple inherited definitions of column "class"
+NOTICE:  merging multiple inherited definitions of column "a"
+CREATE TABLE e_star (
+	e 			int2
+) INHERITS (c_star);
+CREATE TABLE f_star (
+	f 			polygon
+) INHERITS (e_star);
+CREATE TABLE aggtest (
+	a 			int2,
+	b			float4
+);
+CREATE TABLE hash_i4_heap (
+	seqno 		int4,
+	random 		int4
+);
+CREATE TABLE hash_name_heap (
+	seqno 		int4,
+	random 		name
+);
+CREATE TABLE hash_txt_heap (
+	seqno 		int4,
+	random 		text
+);
+-- PGXC: Here replication is used to ensure correct index creation
+-- when a non-shippable expression is used.
+-- PGXCTODO: this should be removed once global constraints are supported
+CREATE TABLE hash_f8_heap (
+	seqno		int4,
+	random 		float8
+) DISTRIBUTE BY REPLICATION;
+-- don't include the hash_ovfl_heap stuff in the distribution
+-- the data set is too large for what it's worth
+--
+-- CREATE TABLE hash_ovfl_heap (
+--	x			int4,
+--	y			int4
+-- );
+CREATE TABLE bt_i4_heap (
+	seqno 		int4,
+	random 		int4
+);
+CREATE TABLE bt_name_heap (
+	seqno 		name,
+	random 		int4
+);
+CREATE TABLE bt_txt_heap (
+	seqno 		text,
+	random 		int4
+);
+CREATE TABLE bt_f8_heap (
+	seqno 		float8,
+	random 		int4
+);
+CREATE TABLE array_op_test (
+	seqno		int4,
+	i			int4[],
+	t			text[]
+);
+CREATE TABLE array_index_op_test (
+	seqno		int4,
+	i			int4[],
+	t			text[]
+);
+CREATE TABLE IF NOT EXISTS test_tsvector(
+	t text,
+	a tsvector
+) distribute by replication;
+CREATE TABLE IF NOT EXISTS test_tsvector(
+	t text
+);
+NOTICE:  relation "test_tsvector" already exists, skipping
+CREATE UNLOGGED TABLE unlogged1 (a int primary key);			-- OK
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "unlogged1_pkey" for table "unlogged1"
+INSERT INTO unlogged1 VALUES (42);
+CREATE UNLOGGED TABLE public.unlogged2 (a int primary key);		-- also OK
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "unlogged2_pkey" for table "unlogged2"
+SET enforce_two_phase_commit TO off;
+CREATE UNLOGGED TABLE pg_temp.unlogged3 (a int primary key);	-- not OK
+ERROR:  only temporary relations may be created in temporary schemas
+CREATE TABLE pg_temp.implicitly_temp (a int primary key);		-- OK
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "implicitly_temp_pkey" for table "implicitly_temp"
+CREATE TEMP TABLE explicitly_temp (a int primary key);			-- also OK
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "explicitly_temp_pkey" for table "explicitly_temp"
+CREATE TEMP TABLE pg_temp.doubly_temp (a int primary key);		-- also OK
+ERROR:  temporary tables cannot specify a schema name
+CREATE TEMP TABLE public.temp_to_perm (a int primary key);		-- not OK
+ERROR:  temporary tables cannot specify a schema name
+DROP TABLE unlogged1, public.unlogged2;
+--
+-- CREATE TABLE AS TEST CASE: Expect the column typemod info is not lost on DN
+--
+CREATE TABLE hw_create_as_test1(C_CHAR CHAR(102400));
+CREATE TABLE hw_create_as_test2(C_CHAR) as SELECT C_CHAR FROM hw_create_as_test1;
+CREATE TABLE hw_create_as_test3 (C_CHAR CHAR(102400));
+ALTER TABLE hw_create_as_test3 INHERIT hw_create_as_test2;
+execute direct on (datanode1) 'select a.attname, a.atttypmod from  pg_attribute as a, pg_class as c where attrelid=c.oid and c.relname= ''hw_create_as_test2'' ';
+  attname   | atttypmod 
+------------+-----------
+ xc_node_id |        -1
+ tableoid   |        -1
+ cmax       |        -1
+ xmax       |        -1
+ cmin       |        -1
+ xmin       |        -1
+ ctid       |        -1
+ c_char     |    102404
+(8 rows)
+
+DROP TABLE hw_create_as_test2;
+ERROR:  cannot drop table hw_create_as_test2 because other objects depend on it
+DETAIL:  table hw_create_as_test3 depends on table hw_create_as_test2
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP TABLE hw_create_as_test3;
+DROP TABLE hw_create_as_test1;
+CREATE TABLE hw_create_as_test1(C_INT int);
+CREATE TABLE hw_create_as_test2(C_INT) as SELECT C_INT FROM hw_create_as_test1;
+ERROR:  relation "hw_create_as_test2" already exists
+CREATE TABLE hw_create_as_test3 (C_INT int);
+ALTER TABLE hw_create_as_test3 INHERIT hw_create_as_test2;
+ERROR:  child table is missing column "c_char"
+execute direct on (datanode1) 'select a.attname, a.atttypmod from  pg_attribute as a, pg_class as c where attrelid=c.oid and c.relname= ''hw_create_as_test2'' ';
+  attname   | atttypmod 
+------------+-----------
+ xc_node_id |        -1
+ tableoid   |        -1
+ cmax       |        -1
+ xmax       |        -1
+ cmin       |        -1
+ xmin       |        -1
+ ctid       |        -1
+ c_char     |    102404
+(8 rows)
+
+DROP TABLE hw_create_as_test3;
+DROP TABLE hw_create_as_test2;
+DROP TABLE hw_create_as_test1;
+CREATE TABLE hw_create_as_test1(COL1 numeric(10,2));
+CREATE TABLE hw_create_as_test2(COL1) as SELECT COL1 FROM hw_create_as_test1;
+CREATE TABLE hw_create_as_test3 (COL1 numeric(10,2));
+ALTER TABLE hw_create_as_test3 INHERIT hw_create_as_test2;
+execute direct on (datanode1) 'select a.attname, a.atttypmod from  pg_attribute as a, pg_class as c where attrelid=c.oid and c.relname= ''hw_create_as_test2'' ';
+  attname   | atttypmod 
+------------+-----------
+ xc_node_id |        -1
+ tableoid   |        -1
+ cmax       |        -1
+ xmax       |        -1
+ cmin       |        -1
+ xmin       |        -1
+ ctid       |        -1
+ col1       |    655366
+(8 rows)
+
+DROP TABLE hw_create_as_test3;
+DROP TABLE hw_create_as_test2;
+DROP TABLE hw_create_as_test1;
+CREATE TABLE hw_create_as_test1(COL1 timestamp(1));
+CREATE TABLE hw_create_as_test2(COL1) as SELECT COL1 FROM hw_create_as_test1;
+CREATE TABLE hw_create_as_test3 (COL1 timestamp(1));
+ALTER TABLE hw_create_as_test3 INHERIT hw_create_as_test2;
+execute direct on (datanode1) 'select a.attname, a.atttypmod from  pg_attribute as a, pg_class as c where attrelid=c.oid and c.relname= ''hw_create_as_test2'' ';
+  attname   | atttypmod 
+------------+-----------
+ xc_node_id |        -1
+ tableoid   |        -1
+ cmax       |        -1
+ xmax       |        -1
+ cmin       |        -1
+ xmin       |        -1
+ ctid       |        -1
+ col1       |         1
+(8 rows)
+
+DROP TABLE hw_create_as_test3;
+DROP TABLE hw_create_as_test2;
+DROP TABLE hw_create_as_test1;
+CREATE TABLE hw_create_as_test1(COL1 int[2][2]);
+CREATE TABLE hw_create_as_test2(COL1) as SELECT COL1 FROM hw_create_as_test1;
+CREATE TABLE hw_create_as_test3 (COL1 int[2][2]);
+ALTER TABLE hw_create_as_test3 INHERIT hw_create_as_test2;
+execute direct on (datanode1) 'select a.attname, a.atttypmod from  pg_attribute as a, pg_class as c where attrelid=c.oid and c.relname= ''hw_create_as_test2'' ';
+  attname   | atttypmod 
+------------+-----------
+ xc_node_id |        -1
+ tableoid   |        -1
+ cmax       |        -1
+ xmax       |        -1
+ cmin       |        -1
+ xmin       |        -1
+ ctid       |        -1
+ col1       |        -1
+(8 rows)
+
+DROP TABLE hw_create_as_test3;
+DROP TABLE hw_create_as_test2;
+DROP TABLE hw_create_as_test1;
+create table hw_create_as_test1(col1 int);
+insert into hw_create_as_test1 values(1);
+insert into hw_create_as_test1 values(2);
+create table hw_create_as_test2 as select * from hw_create_as_test1 with no data;
+select count(*) from hw_create_as_test2;
+ count 
+-------
+     0
+(1 row)
+
+explain (analyze on, costs off) create table hw_create_as_test3 as select * from hw_create_as_test1 with no data;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Streaming (type: GATHER) (Actual time: never executed)
+   Node/s: All datanodes
+   ->  Insert on hw_create_as_test3 (Actual time: never executed)
+         ->  Result (Actual time: never executed)
+               One-Time Filter: false
+               ->  Seq Scan on hw_create_as_test1 (Actual time: never executed)
+--? Total runtime:.*
+(7 rows)
+
+drop table hw_create_as_test1;
+drop table hw_create_as_test2;
+drop table hw_create_as_test3;
+CREATE TABLE hw_create_as_test1(COL1 int);
+insert into hw_create_as_test1 values(1);
+insert into hw_create_as_test1 values(2);
+CREATE TABLE hw_create_as_test2 as SELECT '001' col1, COL1 col2 FROM hw_create_as_test1;
+select * from hw_create_as_test2 order by 1, 2;
+ col1 | col2 
+------+------
+ 001  |    1
+ 001  |    2
+(2 rows)
+
+execute direct on (datanode1) 'select a.attname, a.attnum, a.atttypid, a.atttypmod from  pg_attribute as a, pg_class as c where attrelid=c.oid and c.relname= ''hw_create_as_test2'' order by 2 ';
+  attname   | attnum | atttypid | atttypmod 
+------------+--------+----------+-----------
+ xc_node_id |     -8 |       23 |        -1
+ tableoid   |     -7 |       26 |        -1
+ cmax       |     -6 |       29 |        -1
+ xmax       |     -5 |       28 |        -1
+ cmin       |     -4 |       29 |        -1
+ xmin       |     -3 |       28 |        -1
+ ctid       |     -1 |       27 |        -1
+ col1       |      1 |       25 |        -1
+ col2       |      2 |       23 |        -1
+(9 rows)
+
+DROP TABLE hw_create_as_test2;
+DROP TABLE hw_create_as_test1;
+-- Zero column table is not supported any more.
+CREATE TABLE zero_column_table_test1() DISTRIBUTE BY REPLICATION;
+ERROR:  must have at least one column
+CREATE TABLE zero_column_table_test2() DISTRIBUTE BY ROUNDROBIN;
+ERROR:  must have at least one column
+CREATE TABLE zero_column_table_test3(a INT) DISTRIBUTE BY REPLICATION;
+ALTER TABLE zero_column_table_test3 DROP COLUMN a;
+ERROR:  must have at least one column
+DROP TABLE zero_column_table_test3;
+CREATE FOREIGN TABLE zero_column_table_test4() SERVER gsmpp_server OPTIONS(format 'csv', location 'gsfs://127.0.0.1:8900/lineitem.data', delimiter '|', mode 'normal');
+ERROR:  must have at least one column
+CREATE FOREIGN TABLE zero_column_table_test5(a INT) SERVER gsmpp_server OPTIONS(format 'csv', location 'gsfs://127.0.0.1:8900/lineitem.data', delimiter '|', mode 'normal');
+ALTER FOREIGN TABLE zero_column_table_test5 DROP COLUMN a;
+ERROR:  Un-support feature
+DETAIL:  target table is a foreign table
+DROP FOREIGN TABLE zero_column_table_test5;
+SET ENABLE_COLSTORE=ON;
+CREATE TABLE zero_column_table_test6();
+ERROR:  must have at least one column
+CREATE TABLE zero_column_table_test7() DISTRIBUTE BY ROUNDROBIN;
+ERROR:  must have at least one column
+CREATE TABLE zero_column_table_test8(a INT);
+ALTER TABLE zero_column_table_test8 DROP COLUMN a;
+ERROR:  Un-support feature
+DETAIL:  column-store relation doesnt't support this ALTER yet
+DROP TABLE zero_column_table_test8;
+RESET ENABLE_COLSTORE;
+-- test unreserved keywords for table name
+CREATE TABLE app(a int);
+CREATE TABLE movement(a int);
+CREATE TABLE pool(a int);
+CREATE TABLE profile(a int);
+CREATE TABLE resource(a int);
+CREATE TABLE store(a int);
+CREATE TABLE than(a int);
+CREATE TABLE workload(a int);
+DROP TABLE app;
+DROP TABLE movement;
+DROP TABLE pool;
+DROP TABLE profile;
+DROP TABLE resource;
+DROP TABLE store;
+DROP TABLE than;
+DROP TABLE workload;

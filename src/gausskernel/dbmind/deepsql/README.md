@@ -1,6 +1,6 @@
 ## Introduction
 
-This module contains xgboost, gdbt, prophet, recommendation system, agglomerative, This module is compatible with openGauss, postgresql, and greenplum.
+This module contains xgboost, gdbt, prophet, agglomerative, This module is compatible with openGauss, postgresql, and greenplum.
 
 
 
@@ -20,15 +20,6 @@ pip install fbprophet==0.4
 pip install pandas
 pip install scikit-learn
 pip install xgboost
-```
-
- 3) if you use deep leaning
-
-```
-pip install dill
-pip install scipy==1.2.1
-pip install tensorflow==1.14
-pip install keras==2.2.4
 ```
 
 

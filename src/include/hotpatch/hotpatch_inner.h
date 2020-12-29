@@ -46,4 +46,3 @@ typedef enum TIME_USAGE {
     TIME_STRING_FOR_DISPLAY,
 } TIME_USAGE_T;
 #endif
-

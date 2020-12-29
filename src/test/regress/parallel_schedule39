@@ -1,0 +1,24 @@
+# ----------
+# src/test/regress/parallel_scheduleTableAm
+#
+# Tests for TableAm refacatoring.
+# ----------
+
+
+# ----------
+# # These test the changes on ExecCopySlotMinimalTuple, ExecFetchSlotMinimalTuple, ExecStoreMinimalTuple in the executor component.
+# # and the new api introduced in Table am
+# 1. void (*store_minimal_tuple) (MinimalTuple mtup, TupleTableSlot *slot, bool shouldFree);
+# 2. MinimalTuple (*get_minimal_tuple) (TupleTableSlot *slot);
+# 3. MinimalTuple (*copy_minimal_tuple) (TupleTableSlot *slot);
+# # ----------
+
+test: tableAm_minTuple 
+test: AM_relops
+test: AMHeap_basic
+test: AMHeap_copy
+test: AMHeap_dml_operate
+test: AMHeap_logical_scan
+test: AMHeap_sampling_scan
+test: AMHeap_scan
+

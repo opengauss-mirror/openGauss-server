@@ -15,6 +15,8 @@
 
 #include "lib/stringinfo.h"
 
+#define MAX_ARG_SIZE 107374182
+
 extern int HandleFunctionRequest(StringInfo msgBuf);
 
 #endif /* FASTPATH_H */

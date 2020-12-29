@@ -17,8 +17,8 @@ select * from nu_tab order by a;
 select * from nu_tab where a = 123.456;
 select * from nu_tab where 789.412 = a;
 
-explain (costs false, num_nodes true, nodes false) select * from nu_tab where a = 123.456;
-explain (costs false, num_nodes true, nodes false) select * from nu_tab where 789.412 = a;
+explain (costs false) select * from nu_tab where a = 123.456;
+explain (costs false) select * from nu_tab where 789.412 = a;
 
 
 create table tx_tab(a text);
@@ -31,8 +31,8 @@ select * from tx_tab where a = 'Did the quick brown fox jump over the lazy dog?'
 select * from tx_tab where 'hello world' = a;
 select * from tx_tab where 'Did the quick brown fox jump over the lazy dog?' = a;
 
-explain (costs false, num_nodes true, nodes false) select * from tx_tab where a = 'hello world';
-explain (costs false, num_nodes true, nodes false) select * from tx_tab where a = 'Did the quick brown fox jump over the lazy dog?';
+explain (costs false) select * from tx_tab where a = 'hello world';
+explain (costs false) select * from tx_tab where a = 'Did the quick brown fox jump over the lazy dog?';
 
 
 
@@ -46,10 +46,10 @@ select * from vc_tab where a = 'A quick brown fox';
 -- This test a bug in examine_conditions_walker where a = constant is optimized but constant = a was not
 select * from vc_tab where 'A quick brown fox' = a;
 
-explain (costs false, num_nodes true, nodes false) select * from vc_tab where a = 'abcdefghijklmnopqrstuvwxyz';
-explain (costs false, num_nodes true, nodes false) select * from vc_tab where a = 'A quick brown fox';
+explain (costs false) select * from vc_tab where a = 'abcdefghijklmnopqrstuvwxyz';
+explain (costs false) select * from vc_tab where a = 'A quick brown fox';
 -- This test a bug in examine_conditions_walker where a = constant is optimized but constant = a was not
-explain (costs false, num_nodes true, nodes false) select * from vc_tab where 'A quick brown fox' = a;
+explain (costs false) select * from vc_tab where 'A quick brown fox' = a;
 
 
 
@@ -117,8 +117,8 @@ select * from i4_tab where a = 2147483647;
 select * from i4_tab where 65530 = a;
 select * from i4_tab where 2147483647 = a;
 
-explain (costs false, num_nodes true, nodes false) select * from i4_tab where 65530 = a;
-explain (costs false, num_nodes true, nodes false) select * from i4_tab where a = 2147483647;
+explain (costs false) select * from i4_tab where 65530 = a;
+explain (costs false) select * from i4_tab where a = 2147483647;
 
 
 create table bo_tab(a bool);

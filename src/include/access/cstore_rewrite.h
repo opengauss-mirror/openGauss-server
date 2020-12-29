@@ -41,11 +41,11 @@
 #include "commands/vacuum.h"
 #include "executor/executor.h"
 #include "nodes/execnodes.h"
-#include "storage/cstore_compress.h"
+#include "storage/cstore/cstore_compress.h"
 #include "storage/custorage.h"
 #include "utils/fmgroids.h"
 #include "utils/memutils.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
 #define MAX_CSTORE_MERGE_PARTITIONS 31
 

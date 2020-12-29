@@ -25,6 +25,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/sysattr.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
@@ -37,7 +38,7 @@
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #ifdef PGXC
 #include "pgxc/nodemgr.h"
 #include "pgxc/pgxc.h"
@@ -50,7 +51,7 @@
  * Description	: only absolute path is allowed, and three phases to check path legality
  * Notes		:
  */
-static void directory_path_check(char* dirpath)
+static void directory_path_check(CreateDirectoryStmt* stmt, char* dirpath)
 {
     /* Three phases to check path legality */
     /* Step 1: check if the directory path name has any special forbidden characters or sensitive words,it should be
@@ -137,9 +138,9 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
     /* unix-ify the offered path, and strip any trailing slashes */
     location = pstrdup(stmt->location);
     canonicalize_path(location);
-    directory_path_check(location);
+    directory_path_check(stmt, location);
 
-    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
     securec_check(rc, "\0", "\0");
     rc = memset_s(values, sizeof(values), (Datum)0, sizeof(values));
     securec_check(rc, "\0", "\0");
@@ -169,11 +170,11 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
                 ereport(ERROR,
                     (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for directory %u", targetoid)));
             }
-            tup = heap_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
+            tup = (HeapTuple) tableam_tops_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
             simple_heap_update(rel, &tup->t_self, tup);
 
             ReleaseSysCache(oldtup);
-            heap_freetuple_ext(tup);
+            tableam_tops_free_tuple(tup);
             pfree(location);
             heap_close(rel, RowExclusiveLock);
         } else {
@@ -188,7 +189,7 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
         tup = heap_form_tuple(rel->rd_att, values, nulls);
         directoryId = simple_heap_insert(rel, tup);
         CatalogUpdateIndexes(rel, tup);
-        heap_freetuple_ext(tup);
+        tableam_tops_free_tuple(tup);
 
         /* Record dependency on owner */
         recordDependencyOnOwner(PgDirectoryRelationId, directoryId, ownerId);
@@ -205,7 +206,7 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
  */
 void DropPgDirectory(DropDirectoryStmt* stmt)
 {
-    HeapScanDesc scandesc = NULL;
+    TableScanDesc scandesc = NULL;
     Relation rel;
     HeapTuple tuple = NULL;
     ScanKeyData entry[1];
@@ -230,8 +231,8 @@ void DropPgDirectory(DropDirectoryStmt* stmt)
         BTEqualStrategyNumber,
         F_NAMEEQ,
         CStringGetDatum(stmt->directoryname));
-    scandesc = heap_beginscan(rel, SnapshotNow, 1, entry);
-    tuple = heap_getnext(scandesc, ForwardScanDirection);
+    scandesc = tableam_scan_begin(rel, SnapshotNow, 1, entry);
+    tuple = (HeapTuple)  tableam_scan_getnexttuple(scandesc, ForwardScanDirection);
     if (HeapTupleIsValid(tuple))
         directoryId = HeapTupleGetOid(tuple);
     else
@@ -242,10 +243,10 @@ void DropPgDirectory(DropDirectoryStmt* stmt)
         simple_heap_delete(rel, &tuple->t_self);
         /* Remove dependency on owner. */
         deleteSharedDependencyRecordsFor(PgDirectoryRelationId, directoryId, 0);
-        heap_endscan(scandesc);
+        tableam_scan_end(scandesc);
         heap_close(rel, RowExclusiveLock);
     } else {
-        heap_endscan(scandesc);
+        tableam_scan_end(scandesc);
         heap_close(rel, RowExclusiveLock);
         if (!stmt->missing_ok)
             ereport(ERROR,
@@ -265,7 +266,7 @@ Oid get_directory_oid(const char* directoryname, bool missing_ok)
 {
     Oid result = InvalidOid;
     Relation rel;
-    HeapScanDesc scandesc = NULL;
+    TableScanDesc scandesc = NULL;
     HeapTuple tuple = NULL;
     ScanKeyData entry[1];
 
@@ -274,15 +275,15 @@ Oid get_directory_oid(const char* directoryname, bool missing_ok)
 
     ScanKeyInit(
         &entry[0], Anum_pg_directory_directory_name, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(directoryname));
-    scandesc = heap_beginscan(rel, SnapshotNow, 1, entry);
-    tuple = heap_getnext(scandesc, ForwardScanDirection);
+    scandesc = tableam_scan_begin(rel, SnapshotNow, 1, entry);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scandesc, ForwardScanDirection);
     /* We assume that there can be at most one matching tuple */
     if (HeapTupleIsValid(tuple))
         result = HeapTupleGetOid(tuple);
     else
         result = InvalidOid;
 
-    heap_endscan(scandesc);
+    tableam_scan_end(scandesc);
     heap_close(rel, AccessShareLock);
 
     if (!OidIsValid(result) && !missing_ok)
@@ -300,7 +301,7 @@ char* get_directory_name(Oid dir_oid)
 {
     char* result = NULL;
     Relation rel;
-    HeapScanDesc scandesc = NULL;
+    TableScanDesc scandesc = NULL;
     HeapTuple tuple = NULL;
     ScanKeyData entry[1];
 
@@ -308,15 +309,15 @@ char* get_directory_name(Oid dir_oid)
     rel = heap_open(PgDirectoryRelationId, AccessShareLock);
 
     ScanKeyInit(&entry[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(dir_oid));
-    scandesc = heap_beginscan(rel, SnapshotNow, 1, entry);
-    tuple = heap_getnext(scandesc, ForwardScanDirection);
+    scandesc = tableam_scan_begin(rel, SnapshotNow, 1, entry);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scandesc, ForwardScanDirection);
     /* We assume that there can be at most one matching tuple */
     if (HeapTupleIsValid(tuple))
         result = pstrdup(NameStr(((Form_pg_directory)GETSTRUCT(tuple))->dirname));
     else
         result = NULL;
 
-    heap_endscan(scandesc);
+    tableam_scan_end(scandesc);
     heap_close(rel, AccessShareLock);
 
     return result;
@@ -411,9 +412,9 @@ void AlterDirectoryOwner(const char* dirname, Oid newOwnerId)
                     errmsg("permission denied to change owner of directory"),
                     errhint("new owner must be superuser to alter a directory.")));
 
-        rc = memset_s(repl_null, sizeof(repl_null), 0, sizeof(repl_null));
+        rc = memset_s(repl_null, sizeof(repl_null), false, sizeof(repl_null));
         securec_check(rc, "\0", "\0");
-        rc = memset_s(repl_repl, sizeof(repl_repl), 0, sizeof(repl_repl));
+        rc = memset_s(repl_repl, sizeof(repl_repl), false, sizeof(repl_repl));
         securec_check(rc, "\0", "\0");
 
         repl_repl[Anum_pg_directory_owner - 1] = true;
@@ -423,18 +424,18 @@ void AlterDirectoryOwner(const char* dirname, Oid newOwnerId)
          * Determine the modified ACL for the new owner.  This is only
          * necessary when the ACL is non-null.
          */
-        aclDatum = heap_getattr(tuple, Anum_pg_directory_directory_acl, RelationGetDescr(rel), &isNull);
+        aclDatum = tableam_tops_tuple_getattr(tuple, Anum_pg_directory_directory_acl, RelationGetDescr(rel), &isNull);
         if (!isNull) {
             newAcl = aclnewowner(DatumGetAclP(aclDatum), dirForm->owner, newOwnerId);
             repl_repl[Anum_pg_directory_directory_acl - 1] = true;
             repl_val[Anum_pg_directory_directory_acl - 1] = PointerGetDatum(newAcl);
         }
 
-        newtuple = heap_modify_tuple(tuple, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
+        newtuple = (HeapTuple) tableam_tops_modify_tuple(tuple, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
         simple_heap_update(rel, &newtuple->t_self, newtuple);
         CatalogUpdateIndexes(rel, newtuple);
 
-        heap_freetuple_ext(newtuple);
+        tableam_tops_free_tuple(newtuple);
 
         /* Update owner dependency reference */
         changeDependencyOnOwner(PgDirectoryRelationId, HeapTupleGetOid(tuple), newOwnerId);

@@ -24,12 +24,22 @@
 #include "print.h"
 #include "variables.h"
 
+#ifdef HAVE_CE
+#include "client_logic_processor/values_processor.h"
+#endif /* HAVE_CE */
+
 #ifdef PGXC
 #define LOCATOR_TYPE_REPLICATED 'R'
 #define LOCATOR_TYPE_HASH 'H'
 #define LOCATOR_TYPE_RROBIN 'N'
 #define LOCATOR_TYPE_MODULO 'M'
+#define LOCATOR_TYPE_LIST 'L'
+#define LOCATOR_TYPE_RANGE 'G'
 #endif /* PGXC */
+
+#ifdef HAVE_CE
+#define DECRYPT_PADDING_SIZE 48
+#endif /* HAVE_CE */
 
 #define MOT_FDW "mot_fdw"
 #define MOT_FDW_SERVER "mot_server"
@@ -46,12 +56,16 @@ static void printACLColumn(PQExpBuffer buf, const char* colname);
 static bool listOneExtensionContents(const char* extname, const char* oid);
 static bool describeInformationConstraint(const char* oid, printTableContent* cont, PQExpBufferData buf);
 static bool* generateTranslateColumns(int n, int truesz, int* trues);
+
 #define freeTranslateColumns(x) \
     do {                        \
         if ((x) != NULL)        \
             free(x);            \
         (x) = NULL;             \
     } while (0)
+
+const char* ORIENTATION_TIMESERIES = "timeseries";
+const char* TS_PSEUDO_DIST_COLUMN = "ts_pseudo_distcol";
 
 /* ----------------
  * Handlers for various slash commands displaying some sort of list
@@ -101,7 +115,7 @@ bool describeAggregates(const char* pattern, bool verbose, bool showSystem)
         "  pg_catalog.obj_description(p.oid, 'pg_proc') as \"%s\"\n"
         "FROM pg_catalog.pg_proc p\n"
         "     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace\n"
-        "WHERE p.prokind = 'a'\n",
+        "WHERE p.proisagg\n",
         gettext_noop("Description"));
 
     if (!showSystem && (pattern == NULL))
@@ -125,8 +139,6 @@ bool describeAggregates(const char* pattern, bool verbose, bool showSystem)
     termPQExpBuffer(&buf);
     if (res == NULL)
         return false;
-
-    CHECK_TUPLE_NUM(res);
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of aggregate functions");
@@ -193,8 +205,6 @@ bool describeTablespaces(const char* pattern, bool verbose)
     termPQExpBuffer(&buf);
     if (res == NULL)
         return false;
-
-    CHECK_TUPLE_NUM(res);
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of tablespaces");
@@ -264,8 +274,8 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
             "  pg_catalog.pg_get_function_result(p.oid) as \"%s\",\n"
             "  pg_catalog.pg_get_function_arguments(p.oid) as \"%s\",\n"
             " CASE\n"
-            "  WHEN p.prokind = 'a' THEN '%s'\n"
-            "  WHEN p.prokind = 'w' THEN '%s'\n"
+            "  WHEN p.proisagg THEN '%s'\n"
+            "  WHEN p.proiswindow THEN '%s'\n"
             "  WHEN p.prorettype = 'pg_catalog.trigger'::pg_catalog.regtype THEN '%s'\n"
             "  ELSE '%s'\n"
             "END as \"%s\"",
@@ -311,7 +321,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
             "    ), ', ')\n"
             "  END AS \"%s\",\n"
             "  CASE\n"
-            "    WHEN p.prokind = 'a' THEN '%s'\n"
+            "    WHEN p.proisagg THEN '%s'\n"
             "    WHEN p.prorettype = 'pg_catalog.trigger'::pg_catalog.regtype THEN '%s'\n"
             "    ELSE '%s'\n"
             "  END AS \"%s\"",
@@ -328,7 +338,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
             "  pg_catalog.format_type(p.prorettype, NULL) as \"%s\",\n"
             "  pg_catalog.oidvectortypes(p.proargtypes) as \"%s\",\n"
             "  CASE\n"
-            "    WHEN p.prokind = 'a' THEN '%s'\n"
+            "    WHEN p.proisagg THEN '%s'\n"
             "    WHEN p.prorettype = 'pg_catalog.trigger'::pg_catalog.regtype THEN '%s'\n"
             "    ELSE '%s'\n"
             "  END AS \"%s\"",
@@ -364,6 +374,8 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
 
     appendPQExpBuffer(&buf, " ,\n propackage as \"%s\"\n", gettext_noop("propackage"));
 
+    appendPQExpBuffer(&buf, " ,\n prokind as \"%s\"\n", gettext_noop("prokind"));
+
     appendPQExpBuffer(&buf,
         "\nFROM pg_catalog.pg_proc p"
         "\n     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace\n");
@@ -384,7 +396,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
                 appendPQExpBuffer(&buf, "WHERE ");
                 have_where = true;
             }
-            appendPQExpBuffer(&buf, "p.prokind != 'a'\n");
+            appendPQExpBuffer(&buf, "NOT p.proisagg\n");
         }
         if (!showTrigger) {
             if (have_where) {
@@ -402,7 +414,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
                 appendPQExpBuffer(&buf, "WHERE ");
                 have_where = true;
             }
-            appendPQExpBuffer(&buf, "p.prokind != 'w'\n");
+            appendPQExpBuffer(&buf, "NOT p.proiswindow\n");
         }
     } else {
         bool needs_or = false;
@@ -411,7 +423,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
         have_where = true;
         /* Note: at least one of these must be true ... */
         if (showAggregate) {
-            appendPQExpBuffer(&buf, "p.prokind = 'a'\n");
+            appendPQExpBuffer(&buf, "p.proisagg\n");
             needs_or = true;
         }
         if (showTrigger) {
@@ -425,7 +437,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
             if (needs_or) {
                 appendPQExpBuffer(&buf, "       OR ");
             }
-            appendPQExpBuffer(&buf, "p.prokind = 'w'\n");
+            appendPQExpBuffer(&buf, "p.proiswindow\n");
             needs_or = true;
         }
         appendPQExpBuffer(&buf, "      )\n");
@@ -454,8 +466,6 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
     if (res == NULL) {
         return false;
     }
-
-    CHECK_TUPLE_NUM(res);
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of functions");
@@ -571,8 +581,6 @@ bool describeTypes(const char* pattern, bool verbose, bool showSystem)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of data types");
     myopt.translate_header = true;
@@ -645,8 +653,6 @@ bool describeOperators(const char* pattern, bool showSystem)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of operators");
     myopt.translate_header = true;
@@ -707,8 +713,6 @@ bool listAllDbs(bool verbose)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of databases");
     myopt.translate_header = true;
@@ -739,9 +743,8 @@ bool permissionsList(const char* pattern)
     printfPQExpBuffer(&buf,
         "SELECT n.nspname as \"%s\",\n"
         "  c.relname as \"%s\",\n"
-        "  CASE c.relkind"
-        " WHEN 'r' THEN '%s' WHEN 'v' THEN '%s' WHEN 'm' THEN '%s' WHEN 'S' THEN '%s' WHEN 'f' THEN '%s'"
-        " END as \"%s\",\n"
+        "  CASE c.relkind WHEN 'r' THEN '%s' WHEN 'v' THEN '%s' WHEN 'm' THEN '%s'"
+        "  WHEN 'S' THEN '%s' WHEN 'f' THEN '%s' END as \"%s\",\n"
         "  ",
         gettext_noop("Schema"),
         gettext_noop("Name"),
@@ -782,7 +785,10 @@ bool permissionsList(const char* pattern)
         "n.nspname",
         "c.relname",
         NULL,
-        "n.nspname !~ '^pg_' AND pg_catalog.pg_table_is_visible(c.oid)");
+        "n.nspname !~ '^pg_'"
+        " AND c.relname not like 'matviewmap_%%'"
+        " AND c.relname not like 'mlog_%%'"
+        " AND pg_catalog.pg_table_is_visible(c.oid)");
 
     appendPQExpBuffer(&buf, "ORDER BY 1, 2;");
 
@@ -791,8 +797,6 @@ bool permissionsList(const char* pattern)
         termPQExpBuffer(&buf);
         return false;
     }
-
-    CHECK_TUPLE_NUM(res);
 
     myopt.nullPrint = NULL;
     printfPQExpBuffer(&buf, _("Access privileges"));
@@ -867,8 +871,6 @@ bool listDefaultACLs(const char* pattern)
         termPQExpBuffer(&buf);
         return false;
     }
-
-    CHECK_TUPLE_NUM(res);
 
     myopt.nullPrint = NULL;
     printfPQExpBuffer(&buf, _("Default access privileges"));
@@ -1071,8 +1073,6 @@ bool objectDescription(const char* pattern, bool showSystem)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("Object descriptions");
     myopt.translate_header = true;
@@ -1201,6 +1201,37 @@ static bool describeInformationConstraint(const char* oid, printTableContent* co
     return true;
 }
 
+static inline bool IsListRangeDistType(const char* distType)
+{
+    return ((strncmp(distType, "RANGE", sizeof("RANGE")) == 0) ||
+        (strncmp(distType, "LIST", sizeof("LIST")) == 0));
+}
+
+static void PrintTableSliceInfo(char relKind, const char* distType, const char* oid, printTableContent* cont, 
+    PQExpBuffer buf)
+{
+    int tuples;
+    PGresult* tmpResult = NULL;
+
+    if ((relKind == RELKIND_RELATION) && IsListRangeDistType(distType)) {
+        printfPQExpBuffer(buf,
+            "SELECT DISTINCT relname\n"
+            "FROM pgxc_slice\n"
+            "WHERE relid = '%s' AND type = 's'",
+            oid);
+
+        tmpResult = PSQLexec(buf->data, false);
+        tuples = PQntuples(tmpResult);
+        PQclear(tmpResult);
+
+        printfPQExpBuffer(buf, _("Number of slice: %d (View pgxc_slice to check each slice.)"), tuples);
+        printTableAddFooter(cont, buf->data);
+    }
+
+    return;
+}
+
+
 /*
  * describeOneTableDetails (for \d)
  *
@@ -1215,18 +1246,21 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     printTableOpt myopt = pset.popt.topt;
     printTableContent cont;
     bool printTableInitialized = false;
+    bool hasFullEncryptFeature = false;
     int i;
     char* view_def = NULL;
     char* headers[9];
     char** seq_values = NULL;
     char** modifiers = NULL;
     char** ptr;
+    PQExpBufferData fullEncryptBuffer;
     PQExpBufferData title;
     PQExpBufferData tmpbuf;
     /* this is used for partition table */
     PQExpBufferData tmp_part_buf;
     int cols;
     int numrows = 0;
+    int exprForNum = 128;
     struct {
         int16 checks;
         char relkind;
@@ -1264,6 +1298,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     initPQExpBuffer(&title);
     initPQExpBuffer(&tmpbuf);
     initPQExpBuffer(&tmp_part_buf);
+    initPQExpBuffer(&fullEncryptBuffer);
 
     /* Get general table info */
     if (pset.sversion >= 90100) {
@@ -1337,7 +1372,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         goto error_return;
 
     /* Did we get anything? */
-    if (PQntuples(res) <= 0) {
+    if (PQntuples(res) == 0) {
         if (!pset.quiet)
             fprintf(stderr, _("Did not find any relation with OID %s.\n"), oid);
         goto error_return;
@@ -1349,10 +1384,10 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     tableinfo.hasrules = strcmp(PQgetvalue(res, 0, 3), "t") == 0;
     tableinfo.hastriggers = strcmp(PQgetvalue(res, 0, 4), "t") == 0;
     tableinfo.hasoids = strcmp(PQgetvalue(res, 0, 5), "t") == 0;
-    tableinfo.reloptions = (pset.sversion >= 80200) ? pg_strdup(PQgetvalue(res, 0, 6)) : NULL;
+    tableinfo.reloptions = (pset.sversion >= 80200) ? strdup(PQgetvalue(res, 0, 6)) : NULL;
     tableinfo.tablespace = (pset.sversion >= 80000) ? atooid(PQgetvalue(res, 0, 7)) : 0;
     tableinfo.reloftype =
-        (pset.sversion >= 90000 && strcmp(PQgetvalue(res, 0, 8), "") != 0) ? pg_strdup(PQgetvalue(res, 0, 8)) : NULL;
+        (pset.sversion >= 90000 && strcmp(PQgetvalue(res, 0, 8), "") != 0) ? strdup(PQgetvalue(res, 0, 8)) : NULL;
     tableinfo.relpersistence = (pset.sversion >= 90100) ? *(PQgetvalue(res, 0, 9)) : '\0';
     tableinfo.hasPartialClusterKey = (pset.sversion >= 90100) ? (0 == strcmp(PQgetvalue(res, 0, 10), "t")) : false;
     tableinfo.relreplident =
@@ -1372,7 +1407,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         appendPQExpBuffer(&buf, ".%s;", fmtId(relationname));
 
         res = PSQLexec(buf.data, false);
-        if (PQntuples(res) <= 0) {
+        if (NULL == res) {
             goto error_return;
         }
 
@@ -1387,19 +1422,40 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         res = NULL;
     }
 
+    /* Check full encryption feature */
+    printfPQExpBuffer(&fullEncryptBuffer,
+        "SELECT * FROM pg_catalog.pg_class WHERE relname = 'gs_encrypted_columns' AND relnamespace = 11;");
+    res = PSQLexec(fullEncryptBuffer.data, false);
+    if (res == NULL) {
+        goto error_return;
+    }
+
+    /* Full encryption feature not supported yet. */
+    if (PQntuples(res) > 0) {
+        hasFullEncryptFeature = true;
+    }
+    PQclear(res);
+    res = NULL;
+
     /*
      * Get column info
      *
      * You need to modify value of "firstvcol" which will be defined below if
      * you are adding column(s) preceding to verbose-only columns.
      */
+#ifdef HAVE_CE
+    if (hasFullEncryptFeature) {
+        exprForNum += DECRYPT_PADDING_SIZE; /* Extral padding for decrypt part */
+    }
+#endif
+
     printfPQExpBuffer(&buf, "SELECT a.attname,");
     appendPQExpBuffer(&buf,
         "\n  pg_catalog.format_type(a.atttypid, a.atttypmod),"
-        "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin, d.adrelid) for 128)"
+        "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin, d.adrelid) for %d)"
         "\n   FROM pg_catalog.pg_attrdef d"
         "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef),"
-        "\n  a.attnotnull, a.attnum,");
+        "\n  a.attnotnull, a.attnum,", exprForNum);
     if (pset.sversion >= 90100) {
         appendPQExpBuffer(&buf,
             "\n  (SELECT c.collname FROM pg_catalog.pg_collation c, pg_catalog.pg_type t\n"
@@ -1422,6 +1478,23 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     } else {
         appendPQExpBuffer(&buf, ",\n  NULL AS attfdwoptions");
     }
+#ifdef HAVE_CE
+    if (hasFullEncryptFeature && pset.sversion >= 90100) {
+        appendPQExpBuffer(&buf,
+            ",\n (SELECT pg_catalog.format_type (a.atttypmod, g.data_type_original_mod) AS clientlogic_original_type "
+            "FROM  gs_encrypted_columns g WHERE g.column_name = a.attname  AND g.rel_id = %s",
+            oid);
+        appendPQExpBuffer(&buf, "group by g.data_type_original_oid, g.data_type_original_mod)");
+        appendPQExpBuffer(&buf,
+            ",\n(SELECT g.data_type_original_oid AS clientlogic_original_type_oid FROM  gs_encrypted_columns g WHERE "
+            "g.column_name = a.attname  AND g.rel_id = %s",
+            oid);
+        appendPQExpBuffer(&buf, "group by g.data_type_original_oid, g.data_type_original_mod)");
+    } else if (hasFullEncryptFeature) {
+        appendPQExpBuffer(&buf, "\n  NULL AS clientlogic_original_type");
+        appendPQExpBuffer(&buf, ",\n NULL AS clientlogic_original_type_oid");
+    }
+#endif
     if (verbose) {
         appendPQExpBuffer(&buf, ",\n  a.attstorage");
         appendPQExpBuffer(
@@ -1429,20 +1502,22 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 
         /*
          * In 9.0+, we have column comments for: relations, views, composite
-         * types, and foreign tables (c.f. CommentObject() in comment.c).
+         * types, foreign tables (c.f. CommentObject() in comment.c), and materialized view.
          */
         if (tableinfo.relkind == 'r' || tableinfo.relkind == 'v' || tableinfo.relkind == 'f' ||
-            tableinfo.relkind == 'c' || tableinfo.relkind == 'm')
+            tableinfo.relkind == 'c' || tableinfo.relkind == 'm' || tableinfo.relkind == 'e' || 
+            tableinfo.relkind == 'o') {
             appendPQExpBuffer(&buf, ", pg_catalog.col_description(a.attrelid, a.attnum)");
+        }
+        appendPQExpBuffer(&buf, ",\n  a.attkvtype");
     }
-
     appendPQExpBuffer(&buf, "\nFROM pg_catalog.pg_attribute a");
-    appendPQExpBuffer(&buf,
-        "\nWHERE a.attrelid = '%s' AND a.attnum > 0 AND NOT a.attisdropped AND a.attname <> 'tableoid'", oid);
+    appendPQExpBuffer(&buf, "\nWHERE a.attrelid = '%s' AND a.attnum > 0 AND NOT a.attisdropped AND "
+                            "a.attkvtype != 4 AND a.attname <> 'tableoid'", oid);
     appendPQExpBuffer(&buf, "\nORDER BY a.attnum;");
 
     res = PSQLexec(buf.data, false);
-    if (res == NULL || PQntuples(res) < 0) {
+    if (NULL == res) {
         goto error_return;
     }
     numrows = PQntuples(res);
@@ -1458,12 +1533,6 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         case 'v':
             printfPQExpBuffer(&title, _("View \"%s.%s\""), schemaname, relationname);
             break;
-        case 'm':
-           if (tableinfo.relpersistence == 'u')
-                printfPQExpBuffer(&title, _("Unlogged materialized view \"%s.%s\""), schemaname, relationname);
-           else
-                printfPQExpBuffer(&title, _("Materialized view \"%s.%s\""), schemaname, relationname);
-           break;
         case 'S':
             printfPQExpBuffer(&title, _("Sequence \"%s.%s\""), schemaname, relationname);
             break;
@@ -1487,6 +1556,15 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         case 'f':
             printfPQExpBuffer(&title, _("Foreign table \"%s.%s\""), schemaname, relationname);
             break;
+        case 'm':
+            printfPQExpBuffer(&title, _("Materialized view \"%s.%s\""), schemaname, relationname);
+            break;
+        case 'e':
+            printfPQExpBuffer(&title, _("Stream \"%s.%s\""), schemaname, relationname);
+            break;
+        case 'o':
+            printfPQExpBuffer(&title, _("Contview \"%s.%s\""), schemaname, relationname);
+            break;
         default:
             /* untranslated unknown relkind */
             printfPQExpBuffer(&title, "?%c? \"%s.%s\"", tableinfo.relkind, schemaname, relationname);
@@ -1498,8 +1576,9 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     headers[1] = gettext_noop("Type");
     cols = 2;
 
-    if (tableinfo.relkind == 'r' || tableinfo.relkind == 'v' || tableinfo.relkind == 'f' ||
-        tableinfo.relkind == 'c' || tableinfo.relkind == 'm') {
+    if (tableinfo.relkind == 'r' || tableinfo.relkind == 'v' || tableinfo.relkind == 'f' 
+        || tableinfo.relkind == 'c' || tableinfo.relkind == 'm' || tableinfo.relkind == 'e' 
+        || tableinfo.relkind == 'o') {
         show_modifiers = true;
         headers[cols++] = gettext_noop("Modifiers");
         modifiers = (char**)pg_malloc_zero((unsigned long)(numrows + 1) * sizeof(*modifiers));
@@ -1511,17 +1590,21 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I')
         headers[cols++] = gettext_noop("Definition");
 
-    if (tableinfo.relkind == 'f' && pset.sversion >= 90200)
+    if ((tableinfo.relkind == 'f' || tableinfo.relkind == 'e') && pset.sversion >= 90200)
         headers[cols++] = gettext_noop("FDW Options");
 
     if (verbose) {
         headers[cols++] = gettext_noop("Storage");
-        if (tableinfo.relkind == 'r' || tableinfo.relkind == 'f' || tableinfo.relkind == 'm')
+        if (tableinfo.relkind == 'r' || tableinfo.relkind == 'f' || tableinfo.relkind == 'm' ||
+            tableinfo.relkind == 'e')
             headers[cols++] = gettext_noop("Stats target");
         /* Column comments, if the relkind supports this feature. */
         if (tableinfo.relkind == 'r' || tableinfo.relkind == 'v' || tableinfo.relkind == 'c' ||
-            tableinfo.relkind == 'f' || tableinfo.relkind == 'm')
+            tableinfo.relkind == 'f' || tableinfo.relkind == 'm' || tableinfo.relkind == 'e' ||
+            tableinfo.relkind == 'o')
             headers[cols++] = gettext_noop("Description");
+        if ((tableinfo.relkind == 'r' || tableinfo.relkind == 'm') && strstr(tableinfo.reloptions, ORIENTATION_TIMESERIES))
+            headers[cols++] = gettext_noop("KV Type");
     }
 
     printTableInit(&cont, &myopt, title.data, cols, numrows);
@@ -1530,8 +1613,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     for (i = 0; i < cols; i++)
         printTableAddHeader(&cont, headers[i], true, 'l');
 
-    /* Check if table is a view or materialized view */
-    if ((tableinfo.relkind == 'v' || tableinfo.relkind == 'm') && verbose) {
+    /* Check if table is a view */
+    if ((tableinfo.relkind == 'v' || tableinfo.relkind == 'o') && verbose) {
         PGresult* result = NULL;
 
         printfPQExpBuffer(&buf, "SELECT pg_catalog.pg_get_viewdef('%s'::pg_catalog.oid, true);", oid);
@@ -1551,7 +1634,18 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         printTableAddCell(&cont, PQgetvalue(res, i, 0), false, false);
 
         /* Type */
+#ifdef HAVE_CE
+        if (hasFullEncryptFeature &&
+            strncmp(PQgetvalue(res, i, 1),
+                    "byteawithoutorderwithequalcol",
+                    sizeof("byteawithoutorderwithequalcol") - 1) == 0) {
+            printTableAddCell(&cont, PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type")), false, false);
+        } else {
+            printTableAddCell(&cont, PQgetvalue(res, i, 1), false, false);
+        }
+#else
         printTableAddCell(&cont, PQgetvalue(res, i, 1), false, false);
+#endif /* HAVE_CE */
 
         /* Modifiers: collate, not null, default */
         if (show_modifiers) {
@@ -1571,12 +1665,31 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 
             /* handle "default" here */
             /* (note: above we cut off the 'default' string at 128) */
-            if (strlen(PQgetvalue(res, i, 2)) != 0) {
-                if (tmpbuf.len > 0)
-                    appendPQExpBufferStr(&tmpbuf, " ");
-                /* translator: default values of column definitions */
-                appendPQExpBuffer(&tmpbuf, _("default %s"), PQgetvalue(res, i, 2));
+            char *default_value = PQgetvalue(res, i, 2);
+            if (strlen(default_value) != 0) {
+#ifdef HAVE_CE
+            if (hasFullEncryptFeature &&
+                strlen(PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type"))) > 0) {
+                size_t plainTextSize = 0;
+                unsigned char *plaintext = NULL;
+                int original_type_id = atoi(PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type_oid")));
+                ValuesProcessor::deprocess_value(pset.db, (unsigned char *)default_value, strlen(default_value),
+                    original_type_id, 0, &plaintext, plainTextSize, true);
+                default_value = (char *)plaintext;
             }
+#endif
+            if (tmpbuf.len > 0) {
+                appendPQExpBufferStr(&tmpbuf, " ");
+            }
+            /* translator: default values of column definitions */
+            appendPQExpBuffer(&tmpbuf, _("default %s"), default_value);
+            }
+#ifdef HAVE_CE
+            if (hasFullEncryptFeature &&
+                strlen(PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type"))) > 0) {
+                appendPQExpBufferStr(&tmpbuf, _(" encrypted"));
+            } 
+#endif /* HAVE_CE */
 
             modifiers[i] = pg_strdup(tmpbuf.data);
             printTableAddCell(&cont, modifiers[i], false, false);
@@ -1591,12 +1704,16 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             printTableAddCell(&cont, PQgetvalue(res, i, 6), false, false);
 
         /* FDW options for foreign table column, only for 9.2 or later */
-        if (tableinfo.relkind == 'f' && pset.sversion >= 90200)
+        if ((tableinfo.relkind == 'f' || tableinfo.relkind == 'e') && pset.sversion >= 90200)
             printTableAddCell(&cont, PQgetvalue(res, i, 7), false, false);
 
         /* Storage and Description */
         if (verbose) {
+#ifdef HAVE_CE
+            const int firstvcol = (hasFullEncryptFeature ? 10 : 8);
+#else
             const int firstvcol = 8;
+#endif
             char* storage = PQgetvalue(res, i, firstvcol);
 
             /* these strings are literal in our syntax, so not translated. */
@@ -1610,14 +1727,27 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                 false);
 
             /* Statistics target, if the relkind supports this feature */
-            if (tableinfo.relkind == 'r' || tableinfo.relkind == 'f' || tableinfo.relkind == 'm') {
+            if (tableinfo.relkind == 'r' || tableinfo.relkind == 'f' || tableinfo.relkind == 'm' || 
+                tableinfo.relkind == 'e') {
                 printTableAddCell(&cont, PQgetvalue(res, i, firstvcol + 1), false, false);
             }
 
             /* Column comments, if the relkind supports this feature. */
             if (tableinfo.relkind == 'r' || tableinfo.relkind == 'v' || tableinfo.relkind == 'c' ||
-                tableinfo.relkind == 'f' || tableinfo.relkind == 'm')
+                tableinfo.relkind == 'f' || tableinfo.relkind == 'm' || tableinfo.relkind == 'e' ||
+                tableinfo.relkind == 'o')
                 printTableAddCell(&cont, PQgetvalue(res, i, firstvcol + 2), false, false);
+
+            /* For timeseries table, 1,2,3 stands for column type: ATT_KV_TAG, ATT_KV_FIELD, ATT_KV_TIMETAG,
+             * see parsenodes.h
+             */
+            if ((tableinfo.relkind == 'r' || tableinfo.relkind == 'm') && strstr(tableinfo.reloptions, ORIENTATION_TIMESERIES)) {
+                char* kvtype = PQgetvalue(res, i, firstvcol + 3);
+                printTableAddCell(&cont, (char*)((kvtype[0] == '1' ? "kvtag" : (kvtype[0] == '2'
+                    ? "kvfield" : (kvtype[0] == '3' ?  "kvtime" : (kvtype[0] == '4' ? "kvhide" : "none"))))),
+                    false,
+                    false);
+            }
         }
     }
 
@@ -1710,7 +1840,39 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         }
 
         PQclear(result);
+    } else if (view_def != NULL) {
+        PGresult* result = NULL;
 
+        /* Footer information about a view */
+        printTableAddFooter(&cont, _("View definition:"));
+        printTableAddFooter(&cont, view_def);
+
+        /* print rules */
+        if (tableinfo.hasrules) {
+            printfPQExpBuffer(&buf,
+                "SELECT r.rulename, trim(trailing ';' from pg_catalog.pg_get_ruledef(r.oid, true))\n"
+                "FROM pg_catalog.pg_rewrite r\n"
+                "WHERE r.ev_class = '%s' AND r.rulename != '_RETURN' ORDER BY 1;",
+                oid);
+            result = PSQLexec(buf.data, false);
+            if (result == NULL)
+                goto error_return;
+
+            if (PQntuples(result) > 0) {
+                printTableAddFooter(&cont, _("Rules:"));
+                for (i = 0; i < PQntuples(result); i++) {
+                    const char* ruledef = NULL;
+
+                    /* Everything after "CREATE RULE" is echoed verbatim */
+                    ruledef = PQgetvalue(result, i, 1);
+                    ruledef += 12;
+
+                    printfPQExpBuffer(&buf, " %s", ruledef);
+                    printTableAddFooter(&cont, buf.data);
+                }
+            }
+            PQclear(result);
+        }
     } else if (tableinfo.relkind == 'S') {
         /* Footer information about a sequence */
         PGresult* result = NULL;
@@ -1746,7 +1908,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
          * don't print anything.
          */
         PQclear(result);
-    } else if (tableinfo.relkind == 'r' || tableinfo.relkind == 'f' || tableinfo.relkind == 'm') {
+    } else if (tableinfo.relkind == 'r' || tableinfo.relkind == 'f' || tableinfo.relkind == 'm' || 
+               tableinfo.relkind == 'e') {
         /* Footer information about a table */
         PGresult* result = NULL;
         int tuples = 0;
@@ -1846,7 +2009,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             PQclear(result);
         }
 
-        if (tableinfo.relkind == RELKIND_FOREIGN_TABLE) {
+        if (tableinfo.relkind == RELKIND_FOREIGN_TABLE || tableinfo.relkind == RELKIND_STREAM) {
             /* Print foreign table Information Constraint.*/
             if (!describeInformationConstraint(oid, &cont, buf)) {
                 goto error_return;
@@ -1964,20 +2127,12 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 
         /* print any row-level policies */
         if (has_rlspolicy) {
-            printfPQExpBuffer(&buf, "SELECT pol.polname,");
-            appendPQExpBufferStr(&buf, " pol.polpermissive,\n");
-            appendPQExpBuffer(&buf,
-                "  CASE WHEN pol.polroles = '{0}' THEN NULL ELSE pg_catalog.array_to_string(array(select rolname from "
-                "pg_catalog.pg_roles where oid = any (pol.polroles) order by 1),',') END,\n"
-                "  pg_catalog.pg_get_expr(pol.polqual, pol.polrelid),\n"
-                "  CASE pol.polcmd\n"
-                "    WHEN 'r' THEN 'SELECT'\n"
-                "    WHEN 'a' THEN 'INSERT'\n"
-                "    WHEN 'w' THEN 'UPDATE'\n"
-                "    WHEN 'd' THEN 'DELETE'\n"
-                "    END AS cmd\n"
-                "FROM pg_catalog.pg_rlspolicy pol\n"
-                "WHERE pol.polrelid = '%s' ORDER BY 1;",
+            printfPQExpBuffer(&buf,
+                "SELECT pol.policyname, pol.policypermissive, trim(pol.policyroles::text, '{}'), pol.policyqual, pol.policycmd\n"
+                "FROM pg_catalog.pg_rlspolicies pol\n"
+                "LEFT JOIN pg_catalog.pg_namespace N on (N.nspname = pol.schemaname)\n"
+                "LEFT JOIN pg_catalog.pg_class C on (pol.tablename = C.relname and C.relnamespace = N.oid)\n"
+                "WHERE C.oid = '%s' ORDER BY 1;",
                 oid);
 
             result = PSQLexec(buf.data, false);
@@ -1998,7 +2153,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             for (i = 0; i < tuples; i++) {
                 printfPQExpBuffer(&buf, "    POLICY \"%s\"", PQgetvalue(result, i, 0));
 
-                if (*(PQgetvalue(result, i, 1)) == 'f')
+                if (*(PQgetvalue(result, i, 1)) == 'R')
                     appendPQExpBufferStr(&buf, " AS RESTRICTIVE");
 
                 if (!PQgetisnull(result, i, 4))
@@ -2018,7 +2173,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         }
 
         /* print rules */
-        if (tableinfo.hasrules && tableinfo.relkind != 'm') {
+        if (tableinfo.hasrules) {
             if (pset.sversion >= 80300) {
                 printfPQExpBuffer(&buf,
                     "SELECT r.rulename, trim(trailing ';' from pg_catalog.pg_get_ruledef(r.oid, true)), "
@@ -2102,39 +2257,6 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                         printfPQExpBuffer(&buf, "    %s", ruledef);
                         printTableAddFooter(&cont, buf.data);
                     }
-                }
-            }
-            PQclear(result);
-        }
-    }
-
-    if (view_def != NULL) {
-        PGresult *result = NULL;
-
-        /* Footer information about a view */
-        printTableAddFooter(&cont, _("View definition:"));
-        printTableAddFooter(&cont, view_def);
-
-        /* print rules */
-        if (tableinfo.hasrules) {
-            printfPQExpBuffer(&buf,
-                "SELECT r.rulename, trim(trailing ';' from pg_catalog.pg_get_ruledef(r.oid, true))\n"
-                "FROM pg_catalog.pg_rewrite r\n"
-                "WHERE r.ev_class = '%s' AND r.rulename != '_RETURN' ORDER BY 1;",
-                oid);
-            result = PSQLexec(buf.data, false);
-            if (result == NULL)
-                goto error_return;
-            if (PQntuples(result) > 0) {
-                printTableAddFooter(&cont, _("Rules:"));
-                for (i = 0; i < PQntuples(result); i++) {
-                    const char *ruledef = NULL;
-
-                    /* Everything after "CREATE RULE" is echoed verbatim */
-                    ruledef = PQgetvalue(result, i, 1);
-                    ruledef += 12;
-                    printfPQExpBuffer(&buf, " %s", ruledef);
-                    printTableAddFooter(&cont, buf.data);
                 }
             }
             PQclear(result);
@@ -2265,7 +2387,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     /*
      * Finish printing the footer information about a table.
      */
-    if (tableinfo.relkind == 'r' || tableinfo.relkind == 'f' || tableinfo.relkind == 'm') {
+    if (tableinfo.relkind == 'r' || tableinfo.relkind == 'f' || tableinfo.relkind == 'm' ||
+        tableinfo.relkind == 'e') {
         PGresult* result = NULL;
         int tuples;
 
@@ -2274,10 +2397,10 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
          * as in-memory uses FDW API while serves like a regular relation but
          * not a foreign table.
          */
-         bool is_mot_table = false;
+        bool is_mot_table = false;
 
         /* print foreign server name */
-        if (tableinfo.relkind == 'f') {
+        if (tableinfo.relkind == 'f' || tableinfo.relkind == 'e') {
             char* ftoptions = NULL;
             char* write_only = NULL;
             char* server_name = NULL;
@@ -2437,7 +2560,10 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                 printfPQExpBuffer(&tmp_part_buf, "%s(", "Interval partition by");
             else if (strcmp(partition_type, "v") == 0)
                 printfPQExpBuffer(&tmp_part_buf, "%s(", "Value partition by");
-
+            else if (strcmp(partition_type, "l") == 0)
+                printfPQExpBuffer(&tmp_part_buf, "%s(", "List partition by");
+            else if (strcmp(partition_type, "h") == 0)
+                printfPQExpBuffer(&tmp_part_buf, "%s(", "Hash partition by");
             /* 3. Get partition key name through partition key postition and pg_attribute. */
             printfPQExpBuffer(&buf,
                 "SELECT attname\n"
@@ -2451,20 +2577,15 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 
             key_position = strtok_s(partition_key, separator_symbol, &next_key);
             while (key_position != NULL) {
-                char* partKey = PQgetvalue(tmp_result, atoi(key_position) - 1, 0);
-                if (partKey == NULL) {
-                    PQclear(tmp_result);
-                    goto error_return;
-                }
                 /*
                  * When there are multiple partition key, we use comma to separate them
                  * and show.
                  */
                 if (!first_flag) {
-                    appendPQExpBuffer(&tmp_part_buf, "%s", partKey);
+                    appendPQExpBuffer(&tmp_part_buf, "%s", PQgetvalue(tmp_result, atoi(key_position) - 1, 0));
                     first_flag = true;
                 } else {
-                    appendPQExpBuffer(&tmp_part_buf, ", %s", partKey);
+                    appendPQExpBuffer(&tmp_part_buf, ", %s", PQgetvalue(tmp_result, atoi(key_position) - 1, 0));
                 }
                 key_position = strtok_s(NULL, separator_symbol, &next_key);
             }
@@ -2498,8 +2619,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             printTableAddFooter(&cont, buf.data);
         }
 
-        /* OIDs, if verbose and not a materialized view */
-        if (verbose && tableinfo.relkind != 'm') {
+        /* OIDs, if verbose */
+        if (verbose) {
             const char* s = _("Has OIDs");
 
             printfPQExpBuffer(&buf, "%s: %s", s, (tableinfo.hasoids ? _("yes") : _("no")));
@@ -2511,7 +2632,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 #ifdef PGXC
         bool is_relkind_relation = true;
         /* print distribution information */
-        if (verbose && (tableinfo.relkind == RELKIND_RELATION || tableinfo.relkind == RELKIND_FOREIGN_TABLE)) {
+        if (verbose && (tableinfo.relkind == RELKIND_RELATION || tableinfo.relkind == RELKIND_FOREIGN_TABLE ||
+            tableinfo.relkind == RELKIND_STREAM)) {
             bool under_information_schema = false;
 
             /* In information_schema, if table created in initdb, treat it as a catalog table, else treat it as a
@@ -2538,6 +2660,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                 under_information_schema) {
                 printfPQExpBuffer(&buf,
                     "select CASE pclocatortype \n"
+                    "WHEN '%c' THEN 'RANGE' \n"
+                    "WHEN '%c' THEN 'LIST' \n"
                     "WHEN '%c' THEN 'ROUND ROBIN' \n"
                     "WHEN '%c' THEN 'REPLICATION' \n"
                     "WHEN '%c' THEN 'HASH' \n"
@@ -2552,6 +2676,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                     "from pgxc_class, (SELECT count(*) AS dn_cn FROM pg_catalog.pgxc_node WHERE node_type = 'D') as nc "
                     "\n"
                     " where pcrelid = '%s'",
+                    LOCATOR_TYPE_RANGE,
+                    LOCATOR_TYPE_LIST,
                     LOCATOR_TYPE_RROBIN,
                     LOCATOR_TYPE_REPLICATED,
                     LOCATOR_TYPE_HASH,
@@ -2562,6 +2688,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             } else {
                 printfPQExpBuffer(&buf,
                     "select CASE pclocatortype \n"
+                    "WHEN '%c' THEN 'RANGE' \n"
+                    "WHEN '%c' THEN 'LIST' \n"
                     "WHEN '%c' THEN 'ROUND ROBIN' \n"
                     "WHEN '%c' THEN 'REPLICATION' \n"
                     "WHEN '%c' THEN 'HASH' \n"
@@ -2575,6 +2703,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                     "from pgxc_class, (SELECT count(*) AS dn_cn FROM pg_catalog.pgxc_node WHERE node_type = 'D') as nc "
                     "\n"
                     " where pcrelid = '%s'",
+                    LOCATOR_TYPE_RANGE,
+                    LOCATOR_TYPE_LIST,
                     LOCATOR_TYPE_RROBIN,
                     LOCATOR_TYPE_REPLICATED,
                     LOCATOR_TYPE_HASH,
@@ -2602,7 +2732,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                 char* distribute_type = PQgetvalue(result, 0, 0);
 
                 if ((RELKIND_RELATION == tableinfo.relkind || is_mot_table) &&
-                    (strncmp(distribute_type, "HASH", sizeof("HASH")) == 0)) {
+                    ((strncmp(distribute_type, "HASH", sizeof("HASH")) == 0) ||
+                    IsListRangeDistType(distribute_type))) {
                     /* The distribute_type is RROBIN for hdfs foreign relation,
                      * and there is no distribute key for gds foreign relation. */
                     printfPQExpBuffer(&buf, "%s: %s", dist_by, distribute_type);
@@ -2613,6 +2744,9 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                     printfPQExpBuffer(&buf, "%s: %s", dist_by, distribute_type);
                     printTableAddFooter(&cont, buf.data);
                 }
+
+                /* Print slice info for list/range distributed table */
+                PrintTableSliceInfo(tableinfo.relkind, distribute_type, oid, &cont, &buf);
 
                 /* Print location nodes info */
                 printfPQExpBuffer(&buf, "%s: %s", loc_nodes, PQgetvalue(result, 0, (is_relkind_relation ? 2 : 1)));
@@ -2647,6 +2781,7 @@ error_return:
     termPQExpBuffer(&title);
     termPQExpBuffer(&tmpbuf);
     termPQExpBuffer(&tmp_part_buf);
+    termPQExpBuffer(&fullEncryptBuffer);
 
     /* free tableinfo.reloptions and tableinfo.reloftype */
     if (tableinfo.reloptions != NULL)
@@ -2685,6 +2820,15 @@ error_return:
     return retval;
 }
 
+#ifdef ENABLE_UT
+void ut_test_add_tablespace_footer()
+{
+    printTableContent cont;
+    Oid tablespace = 1;
+    add_tablespace_footer(&cont, 'i', tablespace, true);
+}
+#endif
+
 /*
  * Add a tablespace description to a footer.  If 'newline' is true, it is added
  * in a new line; otherwise it's appended to the current value of the last
@@ -2693,7 +2837,7 @@ error_return:
 static void add_tablespace_footer(printTableContent* const cont, char relkind, Oid tablespace, const bool newline)
 {
     /* relkinds for which we support tablespaces */
-    if (relkind == 'r' || relkind == 'm' || relkind == 'i') {
+    if (relkind == 'r' || relkind == 'i') {
         /*
          * We ignore the database default tablespace so that users not using
          * tablespaces don't need to know about them.  This case also covers
@@ -2776,17 +2920,15 @@ bool describeRoles(const char* pattern, bool verbose)
         }
         if (pset.sversion >= 90100) {
             appendPQExpBufferStr(&buf, "\n, r.rolreplication");
-        }
-        /* add audit admin privilege */
-
-        if (pset.sversion >= 90100) {
+            /* add audit admin privilege */
             appendPQExpBufferStr(&buf, "\n, r.rolauditadmin");
-        }
-        if (pset.sversion >= 90100) {
             appendPQExpBufferStr(&buf, "\n, r.rolsystemadmin");
-        }
-        if (pset.sversion >= 90100) {
+            /* add monitor admin, operator admin and policy admin privilege */
+            appendPQExpBufferStr(&buf, "\n, r.rolmonitoradmin");
+            appendPQExpBufferStr(&buf, "\n, r.roloperatoradmin");
+            appendPQExpBufferStr(&buf, "\n, r.rolpolicyadmin");
             appendPQExpBufferStr(&buf, "\n, r.roluseft");
+            appendPQExpBufferStr(&buf, "\n, r.rolkind");
         }
         appendPQExpBufferStr(&buf, "\nFROM pg_catalog.pg_roles r\n");
 
@@ -2813,12 +2955,7 @@ bool describeRoles(const char* pattern, bool verbose)
         return false;
     }
     nrows = PQntuples(res);
-    if (unlikely(nrows) < 0) {
-        termPQExpBuffer(&buf);
-        PQclear(res);
-        return false;
-    }
-    attr = (char**)pg_malloc_zero((unsigned long)(nrows + 1) * sizeof(*attr));
+    attr = (char**)pg_malloc_zero((nrows + 1) * sizeof(*attr));
 
     printTableInit(&cont, &myopt, _("List of roles"), ncols, nrows);
 
@@ -2857,17 +2994,32 @@ bool describeRoles(const char* pattern, bool verbose)
                 add_role_attribute(&buf, _("Replication"));
 
         /*  add audit admin privilege */
-        if (pset.sversion >= 90100)
+        if (pset.sversion >= 90100) {
             if (strcmp(PQgetvalue(res, i, (verbose ? 12 : 11)), "t") == 0)
                 add_role_attribute(&buf, _("Administer audit"));
 
-        if (pset.sversion >= 90100)
             if (!isInitalCreator && strcmp(PQgetvalue(res, i, (verbose ? 13 : 12)), "t") == 0)
                 add_role_attribute(&buf, _("Sysadmin"));
 
-        if (pset.sversion >= 90100)
             if (strcmp(PQgetvalue(res, i, (verbose ? 14 : 13)), "t") == 0)
+                add_role_attribute(&buf, _("Monitoradmin"));
+
+            if (strcmp(PQgetvalue(res, i, (verbose ? 15 : 14)), "t") == 0)
+                add_role_attribute(&buf, _("Operatoradmin"));
+
+            if (strcmp(PQgetvalue(res, i, (verbose ? 16 : 15)), "t") == 0)
+                add_role_attribute(&buf, _("Policyadmin"));
+
+            if (strcmp(PQgetvalue(res, i, (verbose ? 17 : 16)), "t") == 0)
                 add_role_attribute(&buf, _("UseFT"));
+
+            if (strcmp(PQgetvalue(res, i, (verbose ? 18 : 17)), "p") == 0)
+                add_role_attribute(&buf, _("Persistence"));
+            if (strcmp(PQgetvalue(res, i, (verbose ? 18 : 17)), "i") == 0)
+                add_role_attribute(&buf, _("Independent"));
+            if (strcmp(PQgetvalue(res, i, (verbose ? 18 : 17)), "v") == 0)
+                add_role_attribute(&buf, _("Vcadmin"));
+        }
 
         conns = atoi(PQgetvalue(res, i, 6));
         if (conns >= 0) {
@@ -2920,6 +3072,17 @@ bool describeRoles(const char* pattern, bool verbose)
     return true;
 }
 
+#ifdef ENABLE_UT
+// with PSQLexec returns NULL
+void ut_test_describeRoles()
+{
+    const char* pattern = "pattern";
+    bool verbose = true;
+
+    describeRoles(pattern, verbose);
+}
+#endif
+
 static void add_role_attribute(PQExpBuffer buf, const char* const str)
 {
     if (buf->len > 0)
@@ -2958,12 +3121,10 @@ bool listDbRoleSettings(const char* pattern, const char* pattern2)
     }
 
     res = PSQLexec(buf.data, false);
-    termPQExpBuffer(&buf);
-    if (res == NULL) {
+    if (NULL == res) {
+        termPQExpBuffer(&buf);
         return false;
     }
-
-    CHECK_TUPLE_NUM(res);
 
     if (PQntuples(res) == 0 && !pset.quiet) {
         if (pattern != NULL)
@@ -2979,6 +3140,7 @@ bool listDbRoleSettings(const char* pattern, const char* pattern2)
     }
 
     PQclear(res);
+    termPQExpBuffer(&buf);
     return true;
 }
 
@@ -2991,7 +3153,6 @@ bool listDbRoleSettings(const char* pattern, const char* pattern2)
  * t - tables
  * i - indexes
  * v - views
- * m - materialized views
  * s - sequences
  * E - foreign table (Note: different from 'f', the relkind value)
  * (any order of the above is fine)
@@ -3002,9 +3163,11 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
     bool showTables = strchr(tabtypes, 't') != NULL;
     bool showIndexes = strchr(tabtypes, 'i') != NULL;
     bool showViews = strchr(tabtypes, 'v') != NULL;
-    bool showMatViews = strchr(tabtypes, 'm') != NULL;
+    bool showMatviews = strchr(tabtypes, 'm') != NULL;
     bool showSeq = strchr(tabtypes, 's') != NULL;
     bool showForeign = strchr(tabtypes, 'E') != NULL;
+    bool showStream = strchr(tabtypes, 'e') != NULL;
+    bool showContquery = strchr(tabtypes, 'o') != NULL;
 
     PQExpBufferData buf;
     PGresult* res = NULL;
@@ -3012,8 +3175,8 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
     bool* translate_columns = NULL;
     int trues[] = {2};
 
-    if (!(showTables || showIndexes || showViews || showMatViews || showSeq || showForeign)) {
-        showTables = showViews = showMatViews = showSeq = showForeign = true;
+    if (!(showTables || showIndexes || showViews || showMatviews || showSeq || showForeign)) {
+        showTables = showViews = showMatviews = showSeq = showForeign = true;
     }
 
     initPQExpBuffer(&buf);
@@ -3025,27 +3188,22 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
     printfPQExpBuffer(&buf,
         "SELECT n.nspname as \"%s\",\n"
         "  c.relname as \"%s\",\n"
-        "  CASE c.relkind"
-        " WHEN 'r' THEN '%s'"
-        " WHEN 'v' THEN '%s'"
-        " WHEN 'm' THEN '%s'"
-        " WHEN 'i' THEN '%s'"
-        " WHEN 'I' THEN '%s'"
-        " WHEN 'S' THEN '%s'"
-        " WHEN 's' THEN '%s'"
-        " WHEN 'f' THEN '%s'"
-        " END as \"%s\",\n"
+        "  CASE c.relkind WHEN 'r' THEN '%s' WHEN 'v' THEN '%s' WHEN 'i' THEN '%s' WHEN 'I' THEN '%s' "
+        "WHEN 'S' THEN '%s' WHEN 's' THEN '%s' WHEN 'f' THEN '%s' WHEN 'm' THEN '%s'  WHEN 'e' THEN '%s' "
+        "WHEN 'o' THEN '%s' END as \"%s\",\n"
         "  pg_catalog.pg_get_userbyid(c.relowner) as \"%s\"",
         gettext_noop("Schema"),
         gettext_noop("Name"),
         gettext_noop("table"),
         gettext_noop("view"),
-        gettext_noop("materialized view"),
         gettext_noop("index"),
         gettext_noop("global partition index"),
         gettext_noop("sequence"),
         gettext_noop("special"),
         gettext_noop("foreign table"),
+        gettext_noop("materialized view"),
+        gettext_noop("stream"),
+        gettext_noop("contview"),
         gettext_noop("Type"),
         gettext_noop("Owner"));
 
@@ -3087,7 +3245,7 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
         appendPQExpBuffer(&buf, "'r',");
     if (showViews)
         appendPQExpBuffer(&buf, "'v',");
-    if (showMatViews)
+    if (showMatviews)
         appendPQExpBuffer(&buf, "'m',");
     if (showIndexes)
         appendPQExpBuffer(&buf, "'i','I',");
@@ -3098,7 +3256,10 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
                                           * 8.1 */
     if (showForeign)
         appendPQExpBuffer(&buf, "'f',");
-
+    if (showStream)
+        appendPQExpBuffer(&buf, "'e',");
+    if (showContquery)
+        appendPQExpBuffer(&buf, "'o',");
     appendPQExpBuffer(&buf, "''"); /* dummy */
     appendPQExpBuffer(&buf, ")\n");
 
@@ -3115,6 +3276,9 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
      */
     appendPQExpBuffer(&buf, "      AND n.nspname !~ '^pg_toast'\n");
 
+    appendPQExpBuffer(&buf, "      AND c.relname not like 'matviewmap_%%'\n");
+    appendPQExpBuffer(&buf, "      AND c.relname not like 'mlog_%%'\n");
+
     (void)processSQLNamePattern(
         pset.db, &buf, pattern, true, false, "n.nspname", "c.relname", NULL, "pg_catalog.pg_table_is_visible(c.oid)");
 
@@ -3124,8 +3288,6 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
     termPQExpBuffer(&buf);
     if (res == NULL)
         return false;
-
-    CHECK_TUPLE_NUM(res);
 
     if (PQntuples(res) == 0 && !pset.quiet) {
         if (pattern != NULL)
@@ -3201,8 +3363,6 @@ bool listLanguages(const char* pattern, bool verbose, bool showSystem)
     termPQExpBuffer(&buf);
     if (res == NULL)
         return false;
-
-    CHECK_TUPLE_NUM(res);
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of languages");
@@ -3289,8 +3449,6 @@ bool listDomains(const char* pattern, bool verbose, bool showSystem)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of domains");
     myopt.translate_header = true;
@@ -3371,8 +3529,6 @@ bool listConversions(const char* pattern, bool verbose, bool showSystem)
     termPQExpBuffer(&buf);
     if (res == NULL)
         return false;
-
-    CHECK_TUPLE_NUM(res);
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of conversions");
@@ -3485,8 +3641,6 @@ bool listCasts(const char* pattern, bool verbose)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of casts");
     myopt.translate_header = true;
@@ -3573,8 +3727,6 @@ bool listCollations(const char* pattern, bool verbose, bool showSystem)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of collations");
     myopt.translate_header = true;
@@ -3599,6 +3751,7 @@ bool listSchemas(const char* pattern, bool verbose, bool showSystem)
     PQExpBufferData buf;
     PGresult* res = NULL;
     printQueryOpt myopt = pset.popt;
+    const char* username = session_username();
 
     initPQExpBuffer(&buf);
     printfPQExpBuffer(&buf,
@@ -3622,14 +3775,16 @@ bool listSchemas(const char* pattern, bool verbose, bool showSystem)
     (void)processSQLNamePattern(
         pset.db, &buf, pattern, !showSystem && (pattern == NULL), false, NULL, "n.nspname", NULL, NULL);
 
+    if (!is_superuser()) {
+        appendPQExpBuffer(&buf, " AND pg_catalog.pg_get_userbyid(n.nspowner) = \'%s\' \n", username);
+    }
+
     appendPQExpBuffer(&buf, "ORDER BY 1;");
 
     res = PSQLexec(buf.data, false);
     termPQExpBuffer(&buf);
     if (res == NULL)
         return false;
-
-    CHECK_TUPLE_NUM(res);
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of schemas");
@@ -3693,8 +3848,6 @@ bool listTSParsers(const char* pattern, bool verbose)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of text search parsers");
     myopt.translate_header = true;
@@ -3745,7 +3898,7 @@ static bool listTSParsersVerbose(const char* pattern)
     if (res == NULL)
         return false;
 
-    if (PQntuples(res) <= 0) {
+    if (PQntuples(res) == 0) {
         if (!pset.quiet)
             fprintf(stderr, _("Did not find any text search parser named \"%s\".\n"), pattern);
         PQclear(res);
@@ -3836,8 +3989,6 @@ static bool describeOneTSParser(const char* oid, const char* nspname, const char
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     if (nspname != NULL) {
         ret = sprintf_s(title, sizeof(title), _("Text search parser \"%s.%s\""), nspname, prsname);
@@ -3873,8 +4024,6 @@ static bool describeOneTSParser(const char* oid, const char* nspname, const char
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     if (nspname != NULL) {
         ret = sprintf_s(title, sizeof(title), _("Token types for parser \"%s.%s\""), nspname, prsname);
@@ -3896,6 +4045,16 @@ static bool describeOneTSParser(const char* oid, const char* nspname, const char
     PQclear(res);
     return true;
 }
+
+#ifdef ENABLE_UT
+void ut_test_describeOneTSParser()
+{
+    const char* oid = "123";
+    const char* nspname = NULL;
+    const char* prsname = "abc";
+    describeOneTSParser(oid, nspname, prsname);
+}
+#endif
 
 /*
  * \dFd
@@ -3958,8 +4117,6 @@ bool listTSDictionaries(const char* pattern, bool verbose)
     termPQExpBuffer(&buf);
     if (res == NULL)
         return false;
-
-    CHECK_TUPLE_NUM(res);
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of text search dictionaries");
@@ -4036,8 +4193,6 @@ bool listTSTemplates(const char* pattern, bool verbose)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of text search templates");
     myopt.translate_header = true;
@@ -4100,8 +4255,6 @@ bool listTSConfigs(const char* pattern, bool verbose)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of text search configurations");
     myopt.translate_header = true;
@@ -4148,7 +4301,7 @@ static bool listTSConfigsVerbose(const char* pattern)
     if (res == NULL)
         return false;
 
-    if (PQntuples(res) <= 0) {
+    if (PQntuples(res) == 0) {
         if (!pset.quiet)
             fprintf(stderr, _("Did not find any text search configuration named \"%s\".\n"), pattern);
         PQclear(res);
@@ -4218,8 +4371,6 @@ static bool describeOneTSConfig(
     termPQExpBuffer(&buf);
     if (res == NULL)
         return false;
-
-    CHECK_TUPLE_NUM(res);
 
     initPQExpBuffer(&title);
 
@@ -4310,8 +4461,6 @@ bool listForeignDataWrappers(const char* pattern, bool verbose)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of foreign-data wrappers");
     myopt.translate_header = true;
@@ -4390,8 +4539,6 @@ bool listForeignServers(const char* pattern, bool verbose)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of foreign servers");
     myopt.translate_header = true;
@@ -4449,8 +4596,6 @@ bool listUserMappings(const char* pattern, bool verbose)
     termPQExpBuffer(&buf);
     if (res == NULL)
         return false;
-
-    CHECK_TUPLE_NUM(res);
 
     myopt.nullPrint = NULL;
     myopt.title = _("List of user mappings");
@@ -4528,8 +4673,6 @@ bool listForeignTables(const char* pattern, bool verbose)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of foreign tables");
     myopt.translate_header = true;
@@ -4581,8 +4724,6 @@ bool listExtensions(const char* pattern)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of installed extensions");
     myopt.translate_header = true;
@@ -4626,7 +4767,7 @@ bool listExtensionContents(const char* pattern)
     if (res == NULL)
         return false;
 
-    if (PQntuples(res) <= 0) {
+    if (PQntuples(res) == 0) {
         if (!pset.quiet) {
             if (NULL != pattern)
                 fprintf(stderr, _("Did not find any extension named \"%s\".\n"), pattern);
@@ -4680,8 +4821,6 @@ static bool listOneExtensionContents(const char* extname, const char* oid)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     err = sprintf_s(title, sizeof(title), _("Objects in extension \"%s\""), extname);
     check_sprintf_s(err);
@@ -4693,6 +4832,16 @@ static bool listOneExtensionContents(const char* extname, const char* oid)
     PQclear(res);
     return true;
 }
+
+#ifdef ENABLE_UT
+void ut_test_listOneExtensionContents()
+{
+    const char* extname = "abc";
+    const char* oid = "123";
+
+    listOneExtensionContents(extname, oid);
+}
+#endif
 
 /*
  * printACLColumn
@@ -4750,8 +4899,6 @@ bool listDataSource(const char* pattern, bool verbose)
     if (res == NULL)
         return false;
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.nullPrint = NULL;
     myopt.title = _("List of Data Source");
     myopt.translate_header = true;
@@ -4770,21 +4917,19 @@ bool listDataSource(const char* pattern, bool verbose)
 static bool* generateTranslateColumns(int n, int truesz, int* trues)
 {
     bool* arr = NULL;
-    size_t arrlen;
 
     if (n <= 0) {
         return NULL;
     }
 
-    arrlen = sizeof(bool) * (unsigned long)n;
-    arr = (bool*)malloc(arrlen);
+    arr = (bool*)malloc(sizeof(bool) * n);
 
     if (arr == NULL) {
         psql_error("failed to malloc in generateTranslateColumns: %s\n", strerror(errno));
         return NULL;
     }
 
-    check_memset_s(memset_s(arr, arrlen, 0, arrlen));
+    check_memset_s(memset_s(arr, n * sizeof(bool), 0, n * sizeof(bool)));
 
     for (int i = 0; i < truesz; i++) {
         if (trues[i] < n) {

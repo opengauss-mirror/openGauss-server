@@ -118,8 +118,8 @@ create index bitmap_03_2 on vector_bitmap_engine.vector_bitmap_table_03(col_int1
 create index psort_index_05_char on vector_bitmap_engine.vector_bitmap_table_05(wd_varchar) local;
 \parallel off
 \parallel on 2
-copy vector_bitmap_engine.row_bitmap_table_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_bitmap_data1.txt' delimiter as ' ';
-copy vector_bitmap_engine.row_bitmap_table_02 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_bitmap_data2.txt' delimiter as ' ';
+copy vector_bitmap_engine.row_bitmap_table_01 from '@abs_srcdir@/data/vec_bitmap_data1.txt' delimiter as ' ';
+copy vector_bitmap_engine.row_bitmap_table_02 from '@abs_srcdir@/data/vec_bitmap_data2.txt' delimiter as ' ';
 \parallel off
 \parallel on 2
 insert into vector_bitmap_engine.vector_bitmap_table_01 select * from vector_bitmap_engine.row_bitmap_table_01;

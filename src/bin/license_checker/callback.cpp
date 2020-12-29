@@ -118,7 +118,7 @@ LIC_ULONG OS_StartTimer(LIC_ULONG* pTmHandler, LIC_ULONG ulLength, LIC_SYS_T_STR
     if (ulType != LIC_TIMER_TYPE_REL)
         return LIC_ERROR;
 
-    struct itimerval tick;
+    struct itimerval tick = {0};
     signal(SIGALRM, (void (*)(int))pTmCallBack);
     errno_t ss_rc = 0;
     ss_rc = memset_s(&tick, sizeof(tick), 0x0, sizeof(tick));
@@ -147,7 +147,7 @@ LIC_ULONG OS_StartTimer(LIC_ULONG* pTmHandler, LIC_ULONG ulLength, LIC_SYS_T_STR
 /************************************************************************/
 LIC_ULONG OS_StopTimer(LIC_ULONG ulTmHandler)
 {
-    struct itimerval tick;
+    struct itimerval tick = {0};
     errno_t ss_rc = 0;
     ss_rc = memset_s(&tick, sizeof(tick), 0x0, sizeof(tick));
     securec_check_c(ss_rc, "\0", "\0");

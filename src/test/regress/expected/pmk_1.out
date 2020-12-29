@@ -1,0 +1,144 @@
+----test pv_os_run_info view
+select count(*)>=0 from pv_os_run_info; 
+ ?column? 
+----------
+ t
+(1 row)
+
+----test pv_session_memory_detail view
+select count(*)>=0 from pv_session_memory_detail;
+ ?column? 
+----------
+ t
+(1 row)
+
+----test pg_shared_memory_detail view
+select count(*)>=0 from pg_shared_memory_detail;
+ ?column? 
+----------
+ t
+(1 row)
+
+----test pv_session_time view
+select SCHEMANAME,VIEWNAME, DEFINITION from pg_views where viewname ='pv_session_time';
+ schemaname |    viewname     |                                      definition                                      
+------------+-----------------+--------------------------------------------------------------------------------------
+ pg_catalog | pv_session_time | SELECT  * FROM pv_session_time() pv_session_time(sessid, stat_id, stat_name, value);
+(1 row)
+
+select * from pv_session_time where 1=2;
+ sessid | stat_id | stat_name | value 
+--------+---------+-----------+-------
+(0 rows)
+
+select count(*) from (select * from pv_session_time limit 1);
+ count 
+-------
+     1
+(1 row)
+
+----test pv_file_stat view
+select SCHEMANAME,VIEWNAME, DEFINITION from pg_views where viewname ='pv_file_stat';
+ schemaname |   viewname   |                                                                                      definition                                                                                      
+------------+--------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ pg_catalog | pv_file_stat | SELECT  * FROM pg_stat_get_file_stat() pg_stat_get_file_stat(filenum, dbid, spcid, phyrds, phywrts, phyblkrd, phyblkwrt, readtim, writetim, avgiotim, lstiotim, miniotim, maxiowtm);
+(1 row)
+
+select count(*)>=0 from pv_file_stat; 
+ ?column? 
+----------
+ t
+(1 row)
+
+----test pv_redo_stat view
+select SCHEMANAME,VIEWNAME, DEFINITION from pg_views where viewname ='pv_redo_stat';
+ schemaname |   viewname   |                                                             definition                                                              
+------------+--------------+-------------------------------------------------------------------------------------------------------------------------------------
+ pg_catalog | pv_redo_stat | SELECT  * FROM pg_stat_get_redo_stat() pg_stat_get_redo_stat(phywrts, phyblkwrt, writetim, avgiotim, lstiotim, miniotim, maxiowtm);
+(1 row)
+
+----test pv_session_stat view
+select SCHEMANAME,VIEWNAME, DEFINITION from pg_views where viewname ='pv_session_stat';
+ schemaname |    viewname     |                                          definition                                          
+------------+-----------------+----------------------------------------------------------------------------------------------
+ pg_catalog | pv_session_stat | SELECT  * FROM pv_session_stat() pv_session_stat(sessid, statid, statname, statunit, value);
+(1 row)
+
+select * from pv_session_stat where 1=2;
+ sessid | statid | statname | statunit | value 
+--------+--------+----------+----------+-------
+(0 rows)
+
+select * from pv_session_stat where statid = -1;
+ sessid | statid | statname | statunit | value 
+--------+--------+----------+----------+-------
+(0 rows)
+
+select * from pv_session_memory where 1=2;
+ sessid | init_mem | used_mem | peak_mem 
+--------+----------+----------+----------
+(0 rows)
+
+select count(*)>=0 from pv_session_memory;
+ ?column? 
+----------
+ t
+(1 row)
+
+select * from pv_total_memory_detail where 1=2;
+ nodename | memorytype | memorymbytes 
+----------+------------+--------------
+(0 rows)
+
+select count(*) from (select * from pv_total_memory_detail limit 1);
+ count 
+-------
+     1
+(1 row)
+
+----test total_cpu function
+select total_cpu()>0;
+ ?column? 
+----------
+ t
+(1 row)
+
+----test get_hostname function
+select get_hostname()>'0';
+ ?column? 
+----------
+ t
+(1 row)
+
+----test total_memory function
+select total_memory()>0;
+ ?column? 
+----------
+ t
+(1 row)
+
+----test sessionid2pid function
+select sessionid2pid('123.321');
+ sessionid2pid 
+---------------
+           321
+(1 row)
+
+----test pv_session_memctx_detail
+select pv_session_memctx_detail(0, '');
+ERROR:  invalid thread id 0 for it is 0 or postmaster pid.
+CONTEXT:  referenced column: pv_session_memctx_detail
+select pv_session_memctx_detail(1, '');
+ pv_session_memctx_detail 
+--------------------------
+ t
+(1 row)
+
+create table qazxsw(pid bigint);
+insert into qazxsw select pg_backend_pid();
+select pv_session_memctx_detail(pid, 'TopMemoryContext') from qazxsw;
+ pv_session_memctx_detail 
+--------------------------
+ t
+(1 row)
+

@@ -1,0 +1,9 @@
+-- clean up environment
+Drop server if exists hdfs_server cascade;
+NOTICE:  drop cascades to 6 other objects
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*

@@ -453,6 +453,7 @@ DATA(insert OID = 790 (  money	   PGNSP PGUID	 8 FLOAT8PASSBYVAL b N f t \054 0 
 DESCR("monetary amounts, $d,ddd.cc");
 #define CASHOID 790
 DATA(insert OID = 791 (  _money    PGNSP PGUID	-1 f b A f t \054 0  790 0 array_in array_out array_recv array_send - - array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define CASHARRAYOID 791
 
 /* OIDS 800 - 899 */
 DATA(insert OID = 829 ( macaddr    PGNSP PGUID	6 f b U f t \054 0 0 1040 macaddr_in macaddr_out macaddr_recv macaddr_send - - - i p f 0 -1 0 0 _null_ _null_ _null_ ));
@@ -479,6 +480,7 @@ DATA(insert OID = 1003 (  _name		 PGNSP PGUID -1 f b A f t \054 0	19 0 array_in 
 DATA(insert OID = 1005 (  _int2		 PGNSP PGUID -1 f b A f t \054 0	21 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 #define INT2ARRAYOID 1005
 DATA(insert OID = 5546 (  _int1		 PGNSP PGUID -1 f b A f t \054 0	5545 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define INT1ARRAYOID 5546
 DATA(insert OID = 1006 (  _int2vector PGNSP PGUID -1 f b A f t \054 0	22 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 1007 (  _int4		 PGNSP PGUID -1 f b A f t \054 0	23 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 #define INT4ARRAYOID 1007
@@ -492,6 +494,7 @@ DATA(insert OID = 1029 (  _xid32	 PGNSP PGUID -1 f b A f t \054 0	31 0 array_in 
 DATA(insert OID = 1012 (  _cid		 PGNSP PGUID -1 f b A f t \054 0	29 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 1013 (  _oidvector PGNSP PGUID -1 f b A f t \054 0	30 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 1014 (  _bpchar	 PGNSP PGUID -1 f b A f t \054 0 1042 0 array_in array_out array_recv array_send bpchartypmodin bpchartypmodout array_typanalyze i x f 0 -1 0 100 _null_ _null_ _null_ ));
+#define BPCHARARRAYOID  1014
 DATA(insert OID = 1015 (  _varchar	 PGNSP PGUID -1 f b A f t \054 0 1043 0 array_in array_out array_recv array_send varchartypmodin varchartypmodout array_typanalyze i x f 0 -1 0 100 _null_ _null_ _null_ ));
 #define VARCHARARRAYOID	1015
 DATA(insert OID = 1016 (  _int8		 PGNSP PGUID -1 f b A f t \054 0	20 0 array_in array_out array_recv array_send - - array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
@@ -505,7 +508,9 @@ DATA(insert OID = 1021 (  _float4	 PGNSP PGUID -1 f b A f t \054 0 700 0 array_i
 DATA(insert OID = 1022 (  _float8	 PGNSP PGUID -1 f b A f t \054 0 701 0 array_in array_out array_recv array_send - - array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
 #define FLOAT8ARRAYOID 1022
 DATA(insert OID = 1023 (  _abstime	 PGNSP PGUID -1 f b A f t \054 0 702 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define ABSTIMEARRAYOID 1023
 DATA(insert OID = 1024 (  _reltime	 PGNSP PGUID -1 f b A f t \054 0 703 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define RELTIMEARRAYOID 1024
 DATA(insert OID = 1025 (  _tinterval PGNSP PGUID -1 f b A f t \054 0 704 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 #define ARRAYTINTERVALOID 1025
 DATA(insert OID = 1027 (  _polygon	 PGNSP PGUID -1 f b A f t \054 0 604 0 array_in array_out array_recv array_send - - array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
@@ -516,7 +521,9 @@ DATA(insert OID = 1034 (  _aclitem	 PGNSP PGUID -1 f b A f t \054 0 1033 0 array
 #define ACLITEMARRAYOID		1034
 DATA(insert OID = 1040 (  _macaddr	 PGNSP PGUID -1 f b A f t \054 0  829 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 1041 (  _inet		 PGNSP PGUID -1 f b A f t \054 0  869 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define INETARRAYOID    1041
 DATA(insert OID = 651  (  _cidr		 PGNSP PGUID -1 f b A f t \054 0  650 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define CIDRARRAYOID    651
 DATA(insert OID = 1263 (  _cstring	 PGNSP PGUID -1 f b A f t \054 0 2275 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 #define CSTRINGARRAYOID		1263
 
@@ -531,6 +538,7 @@ DATA(insert OID = 3969 ( nvarchar2	 PGNSP PGUID -1 f b S f t \054 0	0 3968 nvarc
 DESCR("nvarchar2(length), non-blank-padded string, variable storage length");
 #define NVARCHAR2OID		3969
 DATA(insert OID = 3968 ( _nvarchar2	 PGNSP PGUID -1 f b A f t \054 0 3969 0 array_in array_out array_recv array_send nvarchar2typmodin nvarchar2typmodout array_typanalyze i x f 0 -1 0 100 _null_ _null_ _null_ ));
+#define NVARCHAR2ARRAYOID   3968
 
 DATA(insert OID = 1082 ( date		 PGNSP PGUID	4 t b D f t \054 0	0 1182 date_in date_out date_recv date_send - - - i p f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("date");
@@ -574,10 +582,12 @@ DATA(insert OID = 1560 ( bit		 PGNSP PGUID -1 f b V f t \054 0	0 1561 bit_in bit
 DESCR("fixed-length bit string");
 #define BITOID	 1560
 DATA(insert OID = 1561 ( _bit		 PGNSP PGUID -1 f b A f t \054 0	1560 0 array_in array_out array_recv array_send bittypmodin bittypmodout array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define BITARRAYOID     1561
 DATA(insert OID = 1562 ( varbit		 PGNSP PGUID -1 f b V t t \054 0	0 1563 varbit_in varbit_out varbit_recv varbit_send varbittypmodin varbittypmodout - i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("variable-length bit string");
 #define VARBITOID	  1562
 DATA(insert OID = 1563 ( _varbit	 PGNSP PGUID -1 f b A f t \054 0	1562 0 array_in array_out array_recv array_send varbittypmodin varbittypmodout array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define VARBITARRAYOID  1563
 
 /* OIDS 1600 - 1699 */
 
@@ -721,7 +731,39 @@ DATA(insert OID = 9003 ( smalldatetime   PGNSP PGUID    8 FLOAT8PASSBYVAL b D f 
 DESCR("date and time");
 #define SMALLDATETIMEOID        9003
 DATA(insert OID = 9005 ( _smalldatetime  PGNSP PGUID    -1 f b A f t \054 0 9003 0 array_in array_out array_recv array_send timestamptypmodin timestamptypmodout array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define SMALLDATETIMEARRAYOID   9005
+DATA(insert OID = 4301 ( hll   PGNSP PGUID   -1 f b U f t \054 0  0 4302 hll_in hll_out hll_recv hll_send hll_typmod_in hll_typmod_out - i e f 0 -1 0 0 _null_ _null_ _null_ ));
+#define HLL_OID	4301
+DESCR("hypper log log type");
+DATA(insert OID = 4302 ( _hll   PGNSP PGUID   -1 f p P f t \054 0 4301 0  array_in array_out array_recv array_send hll_typmod_in hll_typmod_out array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("hypper log log array");
+#define HLL_ARRAYOID    4302
+DATA(insert OID = 4303 ( hll_hashval   PGNSP PGUID  8 t p P f t \054 0  0 4304 hll_hashval_in hll_hashval_out - - - - - d p f 0 -1 0 0 _null_ _null_ _null_ ));
+#define HLL_HASHVAL_OID	4303
+DESCR("hypper log log hashval");
+DATA(insert OID = 4304 ( _hll_hashval   PGNSP PGUID  -1 f p P f t \054 0 4303 0 array_in array_out array_recv array_send - - array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("hypper log log hashval array");
+#define HLL_HASHVAL_ARRAYOID    4304
+DATA(insert OID = 4370 ( hll_trans_type  PGNSP PGUID  -1 f p P f t \054 0  0 4371 hll_trans_in hll_trans_out hll_trans_recv hll_trans_send -  - - i e f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("hypper log log internal type");
+DATA(insert OID = 4371 ( _hll_trans_type  PGNSP PGUID  -1 f p P f t \054 0  4370 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("hypper log log internal type");
 
+DATA(insert OID = 4402 ( byteawithoutorderwithequalcol   PGNSP PGUID -1 f b U f t \054 0 0 1001 byteawithoutorderwithequalcolin byteawithoutorderwithequalcolout byteawithoutorderwithequalcolrecv byteawithoutorderwithequalcolsend byteawithoutorderwithequalcoltypmodin byteawithoutorderwithequalcoltypmodout - i x f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("encrypted data variable-length string, binary values escaped");
+#define BYTEAWITHOUTORDERWITHEQUALCOLOID		4402
+
+DATA(insert OID = 4403 ( byteawithoutordercol   PGNSP PGUID -1 f b U f t \054 0 0 1001 byteawithoutordercolin byteawithoutordercolout byteawithoutordercolrecv byteawithoutordercolsend byteawithoutorderwithequalcoltypmodin byteawithoutorderwithequalcoltypmodout - i x f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("encrypted data variable-length string, binary values escaped");
+#define BYTEAWITHOUTORDERCOLOID		4403
+
+DATA(insert OID = 4404 ( _byteawithoutorderwithequalcol   PGNSP PGUID -1 f b A f t \054 0 0 1001 array_in array_out array_recv array_send byteawithoutorderwithequalcoltypmodin byteawithoutorderwithequalcoltypmodout array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("encrypted data variable-length string, binary values escaped");
+#define BYTEAWITHOUTORDERWITHEQUALCOLARRAYOID   4404
+
+DATA(insert OID = 4405 ( _byteawithoutordercol   PGNSP PGUID -1 f b A f t \054 0 0 1001 array_in array_out array_recv array_send byteawithoutorderwithequalcoltypmodin byteawithoutorderwithequalcoltypmodout array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("encrypted data variable-length string, binary values escaped");
+#define BYTEAWITHOUTORDERCOLARRAYOID    4405
 
 /*
  * macros
@@ -757,5 +799,8 @@ DATA(insert OID = 9005 ( _smalldatetime  PGNSP PGUID    -1 f b A f t \054 0 9003
 	 (typid) == ANYNONARRAYOID || \
 	 (typid) == ANYENUMOID || \
 	 (typid) == ANYRANGEOID)
+#define IsClientLogicType(typid) \
+((typid) == BYTEAWITHOUTORDERCOLOID || \
+(typid) == BYTEAWITHOUTORDERWITHEQUALCOLOID)
 
 #endif   /* PG_TYPE_H */

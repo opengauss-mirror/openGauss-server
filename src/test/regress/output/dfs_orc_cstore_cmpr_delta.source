@@ -1,0 +1,44 @@
+set enable_global_stats = true;
+set enable_vector_engine=on;
+-- Problem:
+-- delta compression is applied to signed integer, which valid type is int8, int16, int32 and int64.
+-- DATABASE datatype is unknown to delta compression, for example float4/float8/timestamp is how to stored in db.
+-- my design mixes the two concepts, so data corupt happens.
+CREATE TABLE colcmpr_delta_00
+(
+	distkey INT4,
+	totalPositive INT4,
+	smallPosNegat INT4,
+	bigPosiNegati INT4
+) with (orientation = orc) tablespace hdfs_ts  DISTRIBUTE BY HASH(distkey);
+COPY colcmpr_delta_00 FROM '@abs_srcdir@/data/colcmpr_delta_00.data' delimiter '|';
+SELECT * FROM colcmpr_delta_00;
+ distkey | totalpositive | smallposnegat | bigposinegati 
+---------+---------------+---------------+---------------
+       1 |             1 |             2 |             0
+       1 |             2 |           -23 |           100
+       1 |             3 |           200 |           123
+       1 |            10 |             1 |    2147483647
+       1 |            11 |           200 |             3
+       1 |            12 |          -302 |          -100
+       1 |            13 |           322 |          -200
+       1 |            14 |             1 |           123
+       1 |            20 |             2 |   -2147483647
+       1 |            21 |           100 |             0
+       1 |            22 |          -200 |           100
+       1 |            23 |           -23 |           -23
+       1 |            24 |            -4 |           123
+       1 |            30 |            -1 |   -2147483648
+       1 |            31 |           900 |           900
+       1 |            32 |           123 |           123
+(16 rows)
+
+DROP TABLE colcmpr_delta_00;
+-- problem: macaddr datatype test, whose size is 6 bytes
+-- TODO: support this datatype
+CREATE TABLE cstore_cmpr_delta_macaddr
+(
+	distkey INT4,
+	a1 macaddr
+) with ( orientation = orc, compression = zlib ) tablespace hdfs_ts distribute by hash(distkey);
+ERROR:  type "macaddr" is not supported in DFS ORC format column store

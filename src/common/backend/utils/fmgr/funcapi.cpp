@@ -820,8 +820,8 @@ int get_func_arg_info(HeapTuple procTup, Oid** p_argtypes, char*** p_argnames, c
             ereport(ERROR, (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("proallargtypes is not a 1-D Oid array")));
         }
 
-        *p_argmodes = (char*)palloc(numargs);
-        errno_t ret = memcpy_s(*p_argmodes, numargs, ARR_DATA_PTR(arr), numargs);
+        *p_argmodes = (char*)palloc(numargs * sizeof(char));
+        errno_t ret = memcpy_s(*p_argmodes, numargs * sizeof(char), ARR_DATA_PTR(arr), numargs * sizeof(char));
         securec_check(ret, "\0", "\0");
     }
 
@@ -1081,13 +1081,16 @@ TupleDesc build_function_result_tupdesc_d(Datum proallargtypes, Datum proargmode
     arr = DatumGetArrayTypeP(proallargtypes); /* ensure not toasted */
     numargs = ARR_DIMS(arr)[0];
 
-    if (ARR_NDIM(arr) != 1 || numargs < 0 || ARR_HASNULL(arr) || ARR_ELEMTYPE(arr) != OIDOID) {
+    bool isOidOidArray = ARR_NDIM(arr) != 1 || numargs < 0 || ARR_HASNULL(arr) || ARR_ELEMTYPE(arr) != OIDOID;
+    if (isOidOidArray) {
         ereport(ERROR, (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("proallargtypes is not a 1-D Oid array")));
     }
     argtypes = (Oid*)ARR_DATA_PTR(arr);
     arr = DatumGetArrayTypeP(proargmodes); /* ensure not toasted */
 
-    if (ARR_NDIM(arr) != 1 || ARR_DIMS(arr)[0] != numargs || ARR_HASNULL(arr) || ARR_ELEMTYPE(arr) != CHAROID) {
+    bool isCharOidArray = ARR_NDIM(arr) != 1 || ARR_DIMS(arr)[0] != numargs || ARR_HASNULL(arr) ||
+        ARR_ELEMTYPE(arr) != CHAROID;
+    if (isCharOidArray) {
         ereport(ERROR, (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("proallargtypes is not a 1-D Oid array")));
     }
 
@@ -1145,7 +1148,11 @@ TupleDesc build_function_result_tupdesc_d(Datum proallargtypes, Datum proargmode
         return NULL;
     }
 
-    desc = CreateTemplateTupleDesc(numoutargs, false);
+    /*
+     * functions use default heap tuple operations like heap_form_tuple, and they are
+     * accessed via tam type in tuple descriptor.
+     */
+    desc = CreateTemplateTupleDesc(numoutargs, false, TAM_HEAP);
     for (i = 0; i < numoutargs; i++) {
         TupleDescInitEntry(desc, i + 1, outargnames[i], outargtypes[i], -1, 0);
     }
@@ -1246,7 +1253,7 @@ TupleDesc TypeGetTupleDesc(Oid typeoid, List* colaliases)
 
         /* OK, get the column alias */
         attname = strVal(linitial(colaliases));
-        tupdesc = CreateTemplateTupleDesc(1, false);
+        tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, attname, typeoid, -1, 0);
     } else if (functypclass == TYPEFUNC_RECORD) {
         /* XXX can't support this because typmod wasn't passed in ... */

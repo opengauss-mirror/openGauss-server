@@ -27,7 +27,7 @@
 #define BATCH_REDO_H
 
 #include "c.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
 #include "lib/dllist.h"
 #include "utils/hsearch.h"
@@ -46,7 +46,7 @@ namespace extreme_rto {
 #define INIT_REDO_ITEM_TAG(a, xx_rnode, xx_forkNum, xx_blockNum) \
     ((a).rNode = (xx_rnode), (a).forkNum = (xx_forkNum), (a).blockNum = (xx_blockNum))
 
-#define InvalidRelFileNode ((RelFileNode){0, 0, 0})
+#define InvalidRelFileNode ((RelFileNode){ 0, 0, 0 })
 
 /*
  * Note: if there are any pad bytes in the struct, INIT_RedoItemTag have
@@ -60,14 +60,15 @@ typedef struct redoitemtag {
 
 typedef struct redoitemhashentry {
     RedoItemTag redoItemTag;
-    XLogRecParseState* head;
-    XLogRecParseState* tail;
+    XLogRecParseState *head;
+    XLogRecParseState *tail;
     int redoItemNum;
 } RedoItemHashEntry;
 
-extern void PRPrintRedoItemHashTab(HTAB* redoItemHash);
-extern HTAB* PRRedoItemHashInitialize(MemoryContext context);
-extern void PRTrackChangeBlock(XLogRecParseState* recordblockstate, HTAB* redoItemHash);
+extern void PRPrintRedoItemHashTab(HTAB *redoItemHash);
+extern HTAB *PRRedoItemHashInitialize(MemoryContext context);
+extern  void PRTrackClearBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash);
+extern void PRTrackAddBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash);
 
 }  // namespace extreme_rto
 #endif /* BATCH_REDO_H */

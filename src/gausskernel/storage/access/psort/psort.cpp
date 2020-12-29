@@ -16,7 +16,7 @@
  * psort.cpp
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/access/psort/psort.cpp
+ *    src/gausskernel/storage/access/psort/psort.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -29,38 +29,39 @@
 #include "access/dfs/dfs_am.h"
 #include "access/reloptions.h"
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "catalog/index.h"
 #include "miscadmin.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
-FORCE_INLINE void ProjectToIndexVector(VectorBatch* scanBatch, VectorBatch* outBatch, IndexInfo* indexInfo);
-FORCE_INLINE double InsertToPsort(
-    VectorBatch* scanBatch, VectorBatch* outBatch, IndexInfo* indexInfo, CStoreInsert* cstoreInsert, double& scanRows);
+FORCE_INLINE void ProjectToIndexVector(VectorBatch *scanBatch, VectorBatch *outBatch, IndexInfo *indexInfo);
+FORCE_INLINE double InsertToPsort(VectorBatch *scanBatch, VectorBatch *outBatch, IndexInfo *indexInfo,
+                                  CStoreInsert *cstoreInsert, double &scanRows);
 Datum psortbuild(PG_FUNCTION_ARGS)
 {
     Relation heapRel = (Relation)PG_GETARG_POINTER(0);
     Relation indexRel = (Relation)PG_GETARG_POINTER(1);
-    IndexInfo* indexInfo = (IndexInfo*)PG_GETARG_POINTER(2);
+    IndexInfo *indexInfo = (IndexInfo *)PG_GETARG_POINTER(2);
 
     double scanRows = 0;
     double insRows = 0;
 
     // 1. perpare for heap scan
     Snapshot snapshot;
-    DfsScanState* dfsScanState = NULL;
+    DfsScanState *dfsScanState = NULL;
     CStoreScanDesc scanstate = NULL;
-    VectorBatch* vecScanBatch = NULL;
+    VectorBatch *vecScanBatch = NULL;
     MemInfoArg memInfo;
 
     // Now we use snapshotNow for check tuple visibility
-    //
+    // 
     snapshot = SnapshotNow;
 
     // columns for cstore scan
     int heapScanNumIndexAttrs = indexInfo->ii_NumIndexAttrs + 1;
-    AttrNumber* heapScanAttrNumbers = (AttrNumber*)palloc(sizeof(AttrNumber) * (size_t)heapScanNumIndexAttrs);
+    AttrNumber *heapScanAttrNumbers = (AttrNumber *)palloc(sizeof(AttrNumber) * heapScanNumIndexAttrs);
     for (int i = 0; i < indexInfo->ii_NumIndexAttrs; i++) {
         heapScanAttrNumbers[i] = indexInfo->ii_KeyAttrNumbers[i];
     }
@@ -80,8 +81,8 @@ Datum psortbuild(PG_FUNCTION_ARGS)
     memInfo.canSpreadmaxMem = indexInfo->ii_desc.query_mem[1];
     memInfo.MemSort = indexInfo->ii_desc.query_mem[0];
     memInfo.partitionNum = 1;
-    CStoreInsert* cstoreInsert = New(CurrentMemoryContext) CStoreInsert(psortRel, args, false, NULL, &memInfo);
-    VectorBatch* vecOutBatch = New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, psortRel->rd_att);
+    CStoreInsert *cstoreInsert = New(CurrentMemoryContext) CStoreInsert(psortRel, args, false, NULL, &memInfo);
+    VectorBatch *vecOutBatch = New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, psortRel->rd_att);
 
     // 3. scan heap
     if (RelationIsDfsStore(heapRel)) {
@@ -103,7 +104,7 @@ Datum psortbuild(PG_FUNCTION_ARGS)
 
     // 6. end insert
     cstoreInsert->SetEndFlag();
-    cstoreInsert->BatchInsert((VectorBatch*)NULL, HEAP_INSERT_FROZEN);
+    cstoreInsert->BatchInsert((VectorBatch*)NULL, TABLE_INSERT_FROZEN);
 
     // 7. end scan
     if (RelationIsDfsStore(heapRel)) {
@@ -119,7 +120,7 @@ Datum psortbuild(PG_FUNCTION_ARGS)
     relation_close(psortRel, NoLock);
 
     // 8. set return value
-    IndexBuildResult* result = (IndexBuildResult*)palloc(sizeof(IndexBuildResult));
+    IndexBuildResult *result = (IndexBuildResult *)palloc(sizeof(IndexBuildResult));
     result->heap_tuples = scanRows;
     result->index_tuples = insRows;
 
@@ -136,7 +137,7 @@ Datum psortoptions(PG_FUNCTION_ARGS)
     Datum indexRelOptions = PG_GETARG_DATUM(0);
     bool validate = PG_GETARG_BOOL(1);
 
-    bytea* filledOption = default_reloptions(indexRelOptions, validate, RELOPT_KIND_PSORT);
+    bytea *filledOption = default_reloptions(indexRelOptions, validate, RELOPT_KIND_PSORT);
     if (filledOption != NULL)
         PG_RETURN_BYTEA_P(filledOption);
 
@@ -153,11 +154,11 @@ Datum psortgetbitmap(PG_FUNCTION_ARGS)
     PG_RETURN_NULL();
 }
 
-inline void ProjectToIndexVector(VectorBatch* scanBatch, VectorBatch* outBatch, IndexInfo* indexInfo)
+inline void ProjectToIndexVector(VectorBatch *scanBatch, VectorBatch *outBatch, IndexInfo *indexInfo)
 {
     Assert(scanBatch && outBatch && indexInfo);
     int numAttrs = indexInfo->ii_NumIndexAttrs;
-    AttrNumber* attrNumbers = indexInfo->ii_KeyAttrNumbers;
+    AttrNumber *attrNumbers = indexInfo->ii_KeyAttrNumbers;
     Assert(outBatch->m_cols == (numAttrs + 1));
 
     // index column
@@ -186,8 +187,8 @@ inline void ProjectToIndexVector(VectorBatch* scanBatch, VectorBatch* outBatch, 
  * @Return: the number of rows of the current outBatch
  * @See also:
  */
-inline double InsertToPsort(
-    VectorBatch* scanBatch, VectorBatch* outBatch, IndexInfo* indexInfo, CStoreInsert* cstoreInsert, double& scanRows)
+inline double InsertToPsort(VectorBatch *scanBatch, VectorBatch *outBatch, IndexInfo *indexInfo,
+                            CStoreInsert *cstoreInsert, double &scanRows)
 {
     if (!BatchIsNull(scanBatch)) {
         scanRows += scanBatch->m_rows;
@@ -196,11 +197,10 @@ inline double InsertToPsort(
         ProjectToIndexVector(scanBatch, outBatch, indexInfo);
 
         // posrt insert
-        cstoreInsert->BatchInsert(outBatch, HEAP_INSERT_FROZEN);
+        cstoreInsert->BatchInsert(outBatch, TABLE_INSERT_FROZEN);
 
         return outBatch->m_rows;
     }
 
     return 0;
 }
-

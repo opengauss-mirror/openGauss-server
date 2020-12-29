@@ -558,12 +558,12 @@ static Oid get_other_operator(List* otherOp, Oid otherLeftTypeId, Oid otherRight
 
     aclresult = pg_namespace_aclcheck(otherNamespace, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(otherNamespace, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(otherNamespace));
 
     if (isalter) {
         aclresult = pg_namespace_aclcheck(otherNamespace, oprowner, ACL_CREATE);
         if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(otherNamespace, true));
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(otherNamespace));
     }
 
     other_oid = OperatorShellMake(otherName, otherNamespace, otherLeftTypeId, otherRightTypeId);

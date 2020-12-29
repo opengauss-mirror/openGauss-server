@@ -1,0 +1,35 @@
+create table source_table(c1 int, c2 int);
+insert into source_table values(generate_series(1,10000),generate_series(1,30));
+
+create table t4_col (c1 int, c2 int) with(orientation = column);
+CREATE TABLE t4_col_like (LIKE t4_col INCLUDING STORAGE INCLUDING RELOPTIONS INCLUDING DISTRIBUTION INCLUDING CONSTRAINTS,nodeid int,tupleblocknum bigint,tupleoffset int);
+
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_start_ctid(text,name) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_get_redis_rel_start_ctid' LANGUAGE C STABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_end_ctid(text,name) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_get_redis_rel_end_ctid' LANGUAGE C STABLE not fenced;
+
+ALTER TABLE t4_col SET(append_mode=on, rel_cn_oid=12345);
+
+-- test empty table
+select count(*) from t4_col where ctid between pg_get_redis_rel_start_ctid('t4_col', NULL) and pg_get_redis_rel_end_ctid('t4_col', NULL);
+
+-- 1st load 
+insert into t4_col select * from source_table;
+insert into t4_col select * from t4_col;
+insert into t4_col select * from t4_col;
+insert into t4_col select * from t4_col;
+insert into t4_col select * from t4_col;
+
+ALTER TABLE t4_col SET(append_mode=on, rel_cn_oid=12345);
+
+select count(*) from t4_col;
+
+--explain (costs off) select count(*) from t4_col where ctid between pg_get_redis_rel_start_ctid('t4_col', NULL) and pg_get_redis_rel_end_ctid('t4_col', NULL);
+
+select count(*) from t4_col where ctid between pg_get_redis_rel_start_ctid('t4_col', NULL) and pg_get_redis_rel_end_ctid('t4_col', NULL);
+
+
+
+
+drop table t4_col;
+drop table t4_col_like;
+drop table source_table;

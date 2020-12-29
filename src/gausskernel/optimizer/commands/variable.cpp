@@ -19,7 +19,6 @@
 
 #include <ctype.h>
 
-#include "access/parallel.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "catalog/pg_authid.h"
@@ -120,7 +119,7 @@ bool check_datestyle(char** newval, void** extra, GucSource source)
             const char* datastyle = NULL;
 
             datastyle = GetConfigOptionResetString("datestyle");
-            subval = MemoryContextStrdup(u_sess->top_mem_cxt, datastyle);
+            subval = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), datastyle);
             if (subval == NULL) {
                 ok = false;
                 break;
@@ -159,7 +158,7 @@ bool check_datestyle(char** newval, void** extra, GucSource source)
     errno_t rc = 0;
     const uint32 result_len = 32;
 
-    result = (char*)MemoryContextAlloc(u_sess->top_mem_cxt, result_len);
+    result = (char*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), result_len);
     if (result == NULL)
         return false;
 
@@ -202,7 +201,8 @@ bool check_datestyle(char** newval, void** extra, GucSource source)
     /*
      * Set up the "extra" struct actually used by assign_datestyle.
      */
-    myextra = (int*)MemoryContextAlloc(u_sess->top_mem_cxt, 2 * sizeof(int));
+    myextra =
+        (int*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), 2 * sizeof(int));
     if (myextra == NULL)
         return false;
     myextra[0] = newDateStyle;
@@ -353,7 +353,8 @@ bool check_timezone(char** newval, void** extra, GucSource source)
         const uint32 result_len = 64;
         errno_t rc = 0;
 
-        result = (char*)MemoryContextAlloc(u_sess->top_mem_cxt, top_mem_cxt_size);
+        result = (char*)MemoryContextAlloc(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), top_mem_cxt_size);
         if (result == NULL)
             return false;
         rc = snprintf_s(
@@ -366,7 +367,8 @@ bool check_timezone(char** newval, void** extra, GucSource source)
     /*
      * Pass back data for assign_timezone to use
      */
-    *extra = MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(timezone_extra));
+    *extra =
+        MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(timezone_extra));
     if (!*extra) {
         return false;
     }
@@ -454,7 +456,7 @@ bool check_log_timezone(char** newval, void** extra, GucSource source)
     /*
      * Pass back data for assign_log_timezone to use
      */
-    *extra = MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(pg_tz*));
+    *extra = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(pg_tz*));
     if (!*extra) {
         return false;
     }
@@ -503,8 +505,7 @@ const char* show_log_timezone(void)
  */
 bool check_transaction_read_only(bool* newval, void** extra, GucSource source)
 {
-    if (*newval == false && u_sess->attr.attr_common.XactReadOnly && IsTransactionState() &&
-        !t_thrd.bgworker_cxt.InitializingParallelWorker) {
+    if (*newval == false && u_sess->attr.attr_common.XactReadOnly && IsTransactionState()) {
         /* Can't go to r/w mode inside a r/o transaction */
         if (IsSubTransaction()) {
             GUC_check_errcode(ERRCODE_ACTIVE_SQL_TRANSACTION);
@@ -525,6 +526,21 @@ bool check_transaction_read_only(bool* newval, void** extra, GucSource source)
         }
     }
 
+    return true;
+}
+
+/*
+ * SET DEFAULT_TRANSACTION_READ_ONLY
+ *
+ * Do not set default_transaction_read_only to false during a big in-place upgrade.
+ */
+bool check_default_transaction_read_only(bool* newval, void** extra, GucSource source)
+{
+    if (*newval == false && u_sess->attr.attr_common.upgrade_mode == 1) {
+        ereport(WARNING,
+                (errmsg("default_transaction_read_only GUC can not be set to false during inplace upgrade. Set to true.")));
+        *newval = true;
+    }
     return true;
 }
 
@@ -581,7 +597,7 @@ bool check_XactIsoLevel(char** newval, void** extra, GucSource source)
         }
     }
 
-    *extra = MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(int));
+    *extra = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(int));
     if (!*extra) {
         return false;
     }
@@ -648,7 +664,7 @@ bool check_transaction_deferrable(bool* newval, void** extra, GucSource source)
  */
 bool check_random_seed(double* newval, void** extra, GucSource source)
 {
-    *extra = MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(int));
+    *extra = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(int));
     if (!*extra) {
         return false;
     }
@@ -692,9 +708,7 @@ bool check_client_encoding(char** newval, void** extra, GucSource source)
 {
     int encoding;
     const char* canonical_name = NULL;
-    if (t_thrd.autonomous_cxt.check_client_encoding_hook) {
-        t_thrd.autonomous_cxt.check_client_encoding_hook();
-    }
+
     /* Look up the encoding by name */
     encoding = pg_valid_client_encoding(*newval);
     if (encoding < 0) {
@@ -743,7 +757,7 @@ bool check_client_encoding(char** newval, void** extra, GucSource source)
      */
     if (strcmp(*newval, canonical_name) != 0 && strcmp(*newval, "UNICODE") != 0) {
         pfree(*newval);
-        *newval = MemoryContextStrdup(u_sess->top_mem_cxt, canonical_name);
+        *newval = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), canonical_name);
         if (!*newval) {
             return false;
         }
@@ -752,7 +766,7 @@ bool check_client_encoding(char** newval, void** extra, GucSource source)
     /*
      * Save the encoding's ID in *extra, for use by assign_client_encoding.
      */
-    *extra = MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(int));
+    *extra = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(int));
     if (!*extra) {
         return false;
     }
@@ -763,29 +777,10 @@ bool check_client_encoding(char** newval, void** extra, GucSource source)
 
 void assign_client_encoding(const char* newval, void* extra)
 {
-    int encoding = *((int*)extra);
-
-    /*
-     * Parallel workers send data to the leader, not the client.  They always
-     * send data using the database encoding.
-     */
-    if (IsParallelWorker()) {
-        /*
-         * During parallel worker startup, we want to accept the leader's
-         * client_encoding setting so that anyone who looks at the value in
-         * the worker sees the same value that they would see in the leader.
-         */
-        if (t_thrd.bgworker_cxt.InitializingParallelWorker)
-            return;
-
-        /*
-         * A change other than during startup, for example due to a SET clause
-         * attached to a function definition, should be rejected, as there is
-         * nothing we can do inside the worker to make it take effect.
-         */
-        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-            errmsg("cannot change client_encoding during a parallel operation")));
+    if (extra == NULL) {
+        return;
     }
+    int encoding = *((int*)extra);
 
     /* We do not expect an error if PrepareClientEncoding succeeded */
     if (SetClientEncoding(encoding) < 0)
@@ -834,7 +829,8 @@ bool check_session_authorization(char** newval, void** extra, GucSource source)
     ReleaseSysCache(roleTup);
 
     /* Set up "extra" struct for assign_session_authorization to use */
-    myextra = (role_auth_extra*)MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(role_auth_extra));
+    myextra = (role_auth_extra*)MemoryContextAlloc(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(role_auth_extra));
     if (myextra == NULL)
         return false;
     myextra->roleid = roleid;
@@ -919,11 +915,9 @@ bool check_role(char** newval, void** extra, GucSource source)
         }
 
         /*
-         * Verify that session user is allowed to become this role, but skip
-         * this in parallel mode, where we must blindly recreate the parallel
-         * leader's state.
+         * Verify that session user is allowed to become this role
          */
-        if (!t_thrd.bgworker_cxt.InitializingParallelWorker && !is_member_of_role(GetSessionUserId(), roleid)) {
+        if (!is_member_of_role(GetSessionUserId(), roleid)) {
             GUC_check_errcode(ERRCODE_INSUFFICIENT_PRIVILEGE);
             GUC_check_errmsg("permission denied to set role \"%s\"", *newval);
             return false;
@@ -931,7 +925,8 @@ bool check_role(char** newval, void** extra, GucSource source)
     }
 
     /* Set up "extra" struct for assign_role to use */
-    myextra = (role_auth_extra*)MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(role_auth_extra));
+    myextra = (role_auth_extra*)MemoryContextAlloc(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(role_auth_extra));
     if (myextra == NULL)
         return false;
     myextra->roleid = roleid;
@@ -974,13 +969,3 @@ const char* show_role(void)
     return u_sess->attr.attr_common.role_string ? u_sess->attr.attr_common.role_string : "none";
 }
 
-extern char g_bbox_dump_path[];
-
-const char* show_bbox_dump_path(void)
-{
-    const char* path = g_bbox_dump_path;
-    if (path != NULL)
-        return path;
-
-    return "";
-}

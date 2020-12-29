@@ -67,10 +67,18 @@ extern const char* check_client_env(const char* input_env_value);
     do {                                                                                                \
         int rc = 0;                                                                                     \
         const char* unixSocketDir = NULL;                                                               \
+        const char* pghost = gs_getenv_r("PGHOST");                                                     \
+        if (check_client_env(pghost) == NULL) {                                                         \
+            pghost = NULL;                                                                              \
+        }                                                                                               \
         if (sockdir != NULL && (*sockdir) != '\0') {                                                    \
             unixSocketDir = sockdir;                                                                    \
         } else {                                                                                        \
-            unixSocketDir = DEFAULT_PGSOCKET_DIR;                                                       \
+            if (pghost != NULL && (*pghost) != '\0') {                                                  \
+                unixSocketDir = pghost;                                                                 \
+            } else {                                                                                    \
+                unixSocketDir = DEFAULT_PGSOCKET_DIR;                                                   \
+            }                                                                                           \
         }                                                                                               \
         rc = snprintf_s(path, sizeof(path), sizeof(path) - 1, "%s/.s.PGSQL.%d", unixSocketDir, (port)); \
         securec_check_ss_c(rc, "\0", "\0");                                                             \
@@ -217,29 +225,6 @@ typedef struct CancelRequestPacket {
  * secure channel.
  */
 #define NEGOTIATE_SSL_CODE PG_PROTOCOL(1234, 5679)
-
-/*
- * A client can also start by sending stream connection request, to get a
- * stream connection.
- */
-#define CONNECT_STREAM_CODE PG_PROTOCOL(1234, 5680)
-
-typedef struct ConnectStreamPacket {
-    /* Note that each field is stored in network byte order! */
-    MsgType connectStreamCode; /* code to identify a connect request */
-    uint32 plan_node_id;       /* Plan node id of  the destination stream */
-    uint64 query_id;           /* an id for per query, also the id the destination stream belongs to */
-    uint32 smpIdentifier;
-    Oid node_oid;                          /* send self node id to remote nodes */
-    char node_name[FLEXIBLE_ARRAY_MEMBER]; /* send self node name to remote nodes */
-} ConnectStreamPacket;
-
-typedef struct ConnPack {
-    uint32 packetlen;
-    ConnectStreamPacket cp;
-} ConnPack;
-
-void PqCommMethods_init();
 
 /*
  * A client can also start by sending stop query request

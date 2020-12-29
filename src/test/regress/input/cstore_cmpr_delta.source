@@ -10,7 +10,7 @@ CREATE TABLE colcmpr_delta_00
 	smallPosNegat INT4,
 	bigPosiNegati INT4
 ) with (orientation = column)  ;
-COPY colcmpr_delta_00 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_delta_00.data' delimiter '|';
+COPY colcmpr_delta_00 FROM '@abs_srcdir@/data/colcmpr_delta_00.data' delimiter '|';
 SELECT * FROM colcmpr_delta_00;
 DROP TABLE colcmpr_delta_00;
 -- problem: macaddr datatype test, whose size is 6 bytes

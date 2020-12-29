@@ -1,0 +1,32 @@
+--for LLT
+--test license_checker tool 
+\! @abs_bindir@/license_checker 
+------------------------------
+Usage:
+@abs_bindir@/license_checker License-file
+------------------------------
+\! @abs_bindir@/license_checker test_license.dat
+[2000000000] File test_license.dat Open Failed
+\! @abs_bindir@/license_checker @abs_bindir@/license.dat 
+License File Type: LIC_LICENSE_KEY_TYPE_DEMO.
+License DeadLine Type: LIC_LICENSE_KEY_DEADLINE_FIXED.
+License file general information:
+File CopyRight : Huawei Technologies Co., Ltd.
+All rights reserved.
+
+File Create Time : 2015-11-05 14:55:04
+File Creator : Huawei Technologies Co., Ltd.
+File Format Version : 2.00
+Product Version : V100R002
+Product Name : FusionInsight
+File Serial Number : LIC201511053U6T60
+Grace Day : 60
+License Type : 1
+License file customer information:
+Country : English
+Custom : RD of Huawei Technologies Co., Ltd.
+Office : ShenZhen
+Esn : GAUSSMPPDB
+License Deadline Time: 2016-01-15
+Data Node Num: 4096
+[1000000000] License checked Success!

@@ -374,6 +374,12 @@ ALTER SYSTEM KILL SESSION 'session_sid, serial' [ IMMEDIATE ];
 ]]></MainSentence>
   </Command>
 
+  <Command id="ALTER SYSTEM SET" desc="set a high-level(postmaster, sighup and backend) GUC.">
+    <MainSentence id="SYN"><![CDATA[
+ALTER SYSTEM SET { GUC_name } TO { GUC_value };
+]]></MainSentence>
+  </Command>
+
   <Command id="ALTER TABLE" desc="change the definition of a table">
     <MainSentence id="ALTER TABLE ACTION"><![CDATA[
 ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
@@ -1106,7 +1112,9 @@ CREATE TABLE [ IF NOT EXISTS ] partition_table_name
 PARTITION BY { 
 	{VALUES (partition_key)} | 
 	{RANGE (partition_key) ( partition_less_than_item [, ... ] )} |
-	{RANGE (partition_key) ( partition_start_end_item [, ... ] )}
+	{RANGE (partition_key) ( partition_start_end_item [, ... ] )} |
+    {LIST (partition_key) ( PARTITION partition_name VALUES (partition_value [, ... ] ) [, ... ] )} |
+    {HASH (partition_key) ( PARTITION partition_name [, ... ] )}
 } [ { ENABLE | DISABLE } ROW MOVEMENT ];
 ]]></MainSentence>
     <SubSentence id="column_constraint"><![CDATA[
@@ -1233,7 +1241,7 @@ DECLARE cursor_name
 [ WITH [ RECURSIVE ] with_query [, ...] ]
 DELETE FROM [ ONLY ] table_name [ * ] [ [ AS ] alias ]
     [ USING using_list ]
-    [ WHERE condition | WHERE CURRENT OF cursor_name ]
+    [ WHERE condition | WHERE CURRENT OF cursor_name ] [ LIMIT row_count ]
     [ RETURNING { * | { output_expr [ [ AS ] output_name ] } [, ...] } ];
 ]]></MainSentence>
   </Command>

@@ -1,0 +1,58 @@
+CREATE DATABASE wlm_test_convert_rollback;
+\c wlm_test_convert_rollback
+set resource_track_duration=0;
+set query_band='wlm_test_convert_rollback_test';
+create user vc1 password 'gauss@123';
+CREATE USER u1 password 'gauss@123';
+CREATE USER u2 password 'gauss@123';
+CREATE USER u3 password 'gauss@123';
+GRANT u1 TO vc1;
+GRANT u2 TO vc1;
+GRANT u3 TO vc1;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_convert_rollback -c "create table t1 (a int);"
+CREATE TABLE
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_convert_rollback -c "create table t2 (a int);"
+CREATE TABLE
+--output
+GRANT all on t1 TO u3;
+set xc_maintenance_mode=on;
+begin;
+alter node group group1 set vcgroup rename to group2;
+alter user vc1 node group group1;
+commit;
+set xc_maintenance_mode=on;alter node group group1 set table group vc1;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_convert_rollback -c "select group_name from pgxc_group where group_name = 'group1' and group_kind = 'v';"
+ group_name 
+------------
+ group1
+(1 row)
+
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_convert_rollback -c "set xc_maintenance_mode=on;begin;alter node group group1 rename to vc1;alter node group group2 rename to group1;commit;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_convert_rollback -c "select group_name from pgxc_group where group_name = 'group1' and group_kind = 'i';"
+ group_name 
+------------
+ group1
+(1 row)
+
+--output
+set xc_maintenance_mode=on;alter node group vc1 set table group group1;
+set xc_maintenance_mode=on;begin;alter node group group1 set not vcgroup;drop node group vc1;commit;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_test_convert_rollback -c "select count(*) from pgxc_group;"
+ count 
+-------
+     1
+(1 row)
+
+--output
+drop table if exists t1;
+drop table if exists t2;
+drop user vc1 cascade;
+drop user u1 cascade;
+drop user u2 cascade;
+drop user u3 cascade;
+\c postgres
+drop database wlm_test_convert_rollback;
+\c regression
+--end of file

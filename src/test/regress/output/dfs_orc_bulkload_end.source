@@ -1,0 +1,4 @@
+set enable_global_stats = true;
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 34
+\! sleep 5
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1

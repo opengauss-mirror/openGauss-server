@@ -1,0 +1,637 @@
+/*
+################################################################################
+# TESTCASE NAME : plan_table
+# COMPONENT(S)  : plan_table功能测试
+################################################################################
+*/
+--I1.建表
+create schema pt_test;
+set current_schema = pt_test;
+--S1.建立数据源表
+create table src(a int) with(autovacuum_enabled = off);
+insert into src values(1);
+create table t1(a int);
+insert into t1 select generate_series(1,199) from src;
+--S2.建立倾斜表，并插入数据
+create table pt_t1(a integer, b int, c int)with(autovacuum_enabled = off) distribute by hash (c);
+insert into pt_t1 select generate_series(1,5), generate_series(1,10), generate_series(1,100) from src;
+insert into pt_t1 select 12, 12, generate_series(100,1000) from src;
+create table pt_t2(a int, b int, c int)with(autovacuum_enabled = off) distribute by hash (c);
+insert into pt_t2 select * from pt_t1;
+insert into pt_t2 select 12, 12, generate_series(100,1000) from src;
+create table pt_t3(a int, b int, c int)with(autovacuum_enabled = off) distribute by hash (c);
+insert into pt_t3 select * from pt_t1;
+--S3.创建测试用户
+DROP USER IF EXISTS user2 CASCADE;
+NOTICE:  role "user2" does not exist, skipping
+CREATE USER user2 PASSWORD 'GAUSS@123';
+--S3.Grant权限
+grant select on ALL TABLES IN SCHEMA pt_test to public;
+set explain_perf_mode = pretty;
+--I2.计划存储
+--S1.打印计划
+explain(verbose on, costs off) 
+with tmp(a,b) as
+(
+   select count(s.a) as sa, s.b as sb from pt_t3 s, pt_t2 t2 where s.a = t2.a group by sb
+)
+select count(*) from pt_t1 t1, tmp where t1.b = tmp.b;
+WARNING:  Statistics in some tables or columns(pt_test.pt_t1.c, pt_test.pt_t1.b, pt_test.pt_t3.c, pt_test.pt_t3.a, pt_test.pt_t3.b, pt_test.pt_t2.c, pt_test.pt_t2.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+  1 | ->  Aggregate
+  2 |    ->  Streaming (type: GATHER)
+  3 |       ->  Aggregate
+--?  4 |          ->  Hash Join.*
+  5 |             ->  Streaming(type: REDISTRIBUTE)
+  6 |                ->  Seq Scan on pt_test.pt_t1 t1
+  7 |             ->  Hash
+  8 |                ->  Subquery Scan on tmp
+  9 |                   ->  HashAggregate
+ 10 |                      ->  Streaming(type: REDISTRIBUTE)
+--? 11 |                         ->  Hash Join.*
+ 12 |                            ->  Streaming(type: REDISTRIBUTE)
+ 13 |                               ->  Seq Scan on pt_test.pt_t3 s
+ 14 |                            ->  Hash
+ 15 |                               ->  Streaming(type: REDISTRIBUTE)
+ 16 |                                  ->  Seq Scan on pt_test.pt_t2 t2
+(16 rows)
+
+--?.*
+--?.*
+--?   4 --Hash Join.*
+         Hash Cond: (t1.b = tmp.b)
+--?  11 --Hash Join.*
+         Hash Cond: (s.a = t2.a)
+(4 rows)
+
+--?.*
+--?.*
+   1 --Aggregate
+         Output: pg_catalog.count(*)
+   2 --Streaming (type: GATHER)
+         Output: (count(*))
+         Node/s: All datanodes
+   3 --Aggregate
+         Output: count(*)
+--?   4 --Hash Join.*
+   5 --Streaming(type: REDISTRIBUTE)
+         Output: t1.b
+         Distribute Key: t1.b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+   6 --Seq Scan on pt_test.pt_t1 t1
+         Output: t1.b
+         Distribute Key: t1.c
+   7 --Hash
+         Output: tmp.b
+   8 --Subquery Scan on tmp
+         Output: tmp.b
+   9 --HashAggregate
+         Output: count(s.a), s.b
+         Group By Key: s.b
+  10 --Streaming(type: REDISTRIBUTE)
+         Output: s.b, s.a
+         Distribute Key: s.b
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+--?  11 --Hash Join.*
+         Output: s.b, s.a
+  12 --Streaming(type: REDISTRIBUTE)
+         Output: s.b, s.a
+         Distribute Key: s.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+  13 --Seq Scan on pt_test.pt_t3 s
+         Output: s.b, s.a
+         Distribute Key: s.c
+  14 --Hash
+         Output: t2.a
+  15 --Streaming(type: REDISTRIBUTE)
+         Output: t2.a
+         Distribute Key: t2.a
+         Spawn on: All datanodes
+         Consumer Nodes: All datanodes
+  16 --Seq Scan on pt_test.pt_t2 t2
+         Output: t2.a
+         Distribute Key: t2.c
+(48 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--S2.执行explain plan (无statement_id)
+explain plan for
+with tmp(a,b) as
+(
+   select count(s.a) as sa, s.b as sb from pt_t3 s, pt_t2 t2 where s.a = t2.a group by sb
+)
+select count(*) from pt_t1 t1, tmp where t1.b = tmp.b;
+--S3.查看plan_table
+--查看总表数据
+select * from plan_table_data order by plan_id, id;
+--?         session_id         | user_id | statement_id | plan_id  | id |   operation   |   options    | object_name | object_type | object_owner |     projection      
+--?
+--?         .*              |      10 |              |   .*     |  1 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?         .*              |      10 |              |   .*     |  2 | STREAMING     | GATHER       |             |             |              | .*
+--?         .*              |      10 |              |   .*     |  3 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?         .*              |      10 |              |   .*     |  4 | HASH JOIN     | INNER        |             |             |              | 
+--?         .*              |      10 |              |   .*     |  5 | STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+--?         .*              |      10 |              |   .*     |  6 | TABLE ACCESS  | SEQ SCAN     |  pt_t1      | TABLE       | pt_test      | t1.b
+--?         .*              |      10 |              |   .*     |  7 | HASH          |              |             |             |              | tmp.b
+--?         .*              |      10 |              |   .*     |  8 | SUBQUERY SCAN |              |  tmp        | SUBQUERY    |              | tmp.b
+--?         .*              |      10 |              |   .*     |  9 | AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+--?         .*              |      10 |              |   .*     | 10 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?         .*              |      10 |              |   .*     | 11 | HASH JOIN     | INNER        |             |             |              | s.b, s.a
+--?         .*              |      10 |              |   .*     | 12 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?         .*              |      10 |              |   .*     | 13 | TABLE ACCESS  | SEQ SCAN     |  pt_t3      | TABLE       | pt_test      | s.b, s.a
+--?         .*              |      10 |              |   .*     | 14 | HASH          |              |             |             |              | t2.a
+--?         .*              |      10 |              |   .*     | 15 | STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+--?         .*              |      10 |              |   .*     | 16 | TABLE ACCESS  | SEQ SCAN     |  pt_t2      | TABLE       | pt_test      | t2.a
+(16 rows)
+
+--查看plan_table数据，条目与总表一致
+select * from plan_table order by plan_id, id;
+--? statement_id | plan_id  | id |   operation   |   options    | object_name | object_type | object_owner |     projection      
+--?
+--?           |    .*    |  1 |AGGREGATE     | PLAIN        |             |             |              | .*
+--?           |    .*    |  2 |STREAMING     | GATHER       |             |             |              | .*
+--?           |    .*    |  3 |AGGREGATE     | PLAIN        |             |             |              | .*
+--?           |    .*    |  4 |HASH JOIN     | INNER        |             |             |              | 
+--?           |    .*    |  5 |STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+--?           |    .*    |  6 |TABLE ACCESS  | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.b
+--?           |    .*    |  7 |HASH          |              |             |             |              | tmp.b
+--?           |    .*    |  8 |SUBQUERY SCAN |              | tmp         | SUBQUERY    |              | tmp.b
+--?           |    .*    |  9 |AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+--?           |    .*    | 10 |STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?           |    .*    | 11 |HASH JOIN     | INNER        |             |             |              | s.b, s.a
+--?           |    .*    | 12 |STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?           |    .*    | 13 |TABLE ACCESS  | SEQ SCAN     | pt_t3       | TABLE       | pt_test      | s.b, s.a
+--?           |    .*    | 14 |HASH          |              |             |             |              | t2.a
+--?           |    .*    | 15 |STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+--?           |    .*    | 16 |TABLE ACCESS  | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | t2.a
+(16 rows)
+
+--S4.执行explain plan (设置statement_id)
+explain plan set statement_id='test statement_id' for
+with tmp(a,b) as
+(
+   select count(s.a) as sa, s.b as sb from pt_t3 s, pt_t2 t2 where s.a = t2.a group by sb
+)
+select count(*) from pt_t1 t1, tmp where t1.b = tmp.b;
+--S5.查看plan_table
+--查看总表数据
+select * from plan_table_data order by plan_id, id;
+--?        session_id         | user_id |   statement_id    | plan_id  | id |   operation   |   options    | object_name | object_type | object_owner |     projection      
+--?
+--?           .*            |      10 |                   |   .*     |  1 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?           .*            |      10 |                   |   .*     |  2 | STREAMING     | GATHER       |             |             |              | .*
+--?           .*            |      10 |                   |   .*     |  3 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?           .*            |      10 |                   |   .*     |  4 | HASH JOIN     | INNER        |             |             |              | 
+--?           .*            |      10 |                   |   .*     |  5 | STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+--?           .*            |      10 |                   |   .*     |  6 | TABLE ACCESS  | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.b
+--?           .*            |      10 |                   |   .*     |  7 | HASH          |              |             |             |              | tmp.b
+--?           .*            |      10 |                   |   .*     |  8 | SUBQUERY SCAN |              | tmp         | SUBQUERY    |              | tmp.b
+--?           .*            |      10 |                   |   .*     |  9 | AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+--?           .*            |      10 |                   |   .*     | 10 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?           .*            |      10 |                   |   .*     | 11 | HASH JOIN     | INNER        |             |             |              | s.b, s.a
+--?           .*            |      10 |                   |   .*     | 12 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?           .*            |      10 |                   |   .*     | 13 | TABLE ACCESS  | SEQ SCAN     | pt_t3       | TABLE       | pt_test      | s.b, s.a
+--?           .*            |      10 |                   |   .*     | 14 | HASH          |              |             |             |              | t2.a
+--?           .*            |      10 |                   |   .*     | 15 | STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+--?           .*            |      10 |                   |   .*     | 16 | TABLE ACCESS  | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | t2.a
+--?           .*            |      10 | test statement_id |   .*     |  1 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?           .*            |      10 | test statement_id |   .*     |  2 | STREAMING     | GATHER       |             |             |              | .*
+--?           .*            |      10 | test statement_id |   .*     |  3 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?           .*            |      10 | test statement_id |   .*     |  4 | HASH JOIN     | INNER        |             |             |              | 
+--?           .*            |      10 | test statement_id |   .*     |  5 | STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+--?           .*            |      10 | test statement_id |   .*     |  6 | TABLE ACCESS  | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.b
+--?           .*            |      10 | test statement_id |   .*     |  7 | HASH          |              |             |             |              | tmp.b
+--?           .*            |      10 | test statement_id |   .*     |  8 | SUBQUERY SCAN |              | tmp         | SUBQUERY    |              | tmp.b
+--?           .*            |      10 | test statement_id |   .*     |  9 | AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+--?           .*            |      10 | test statement_id |   .*     | 10 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?           .*            |      10 | test statement_id |   .*     | 11 | HASH JOIN     | INNER        |             |             |              | s.b, s.a
+--?           .*            |      10 | test statement_id |   .*     | 12 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?           .*            |      10 | test statement_id |   .*     | 13 | TABLE ACCESS  | SEQ SCAN     | pt_t3       | TABLE       | pt_test      | s.b, s.a
+--?           .*            |      10 | test statement_id |   .*     | 14 | HASH          |              |             |             |              | t2.a
+--?           .*            |      10 | test statement_id |   .*     | 15 | STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+--?           .*            |      10 | test statement_id |   .*     | 16 | TABLE ACCESS  | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | t2.a
+(32 rows)
+
+--查看plan_table数据,带过滤
+select * from plan_table where statement_id='test statement_id' order by plan_id, id;
+--?   statement_id    | plan_id  | id |   operation   |   options    | object_name | object_type | object_owner |     projection      
+--?
+--? test statement_id |    .*     |  1 |AGGREGATE     | PLAIN        |             |             |              | .*
+--? test statement_id |    .*     |  2 |STREAMING     | GATHER       |             |             |              | .*
+--? test statement_id |    .*     |  3 |AGGREGATE     | PLAIN        |             |             |              | .*
+--? test statement_id |    .*     |  4 |HASH JOIN     | INNER        |             |             |              | 
+--? test statement_id |    .*     |  5 |STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+--? test statement_id |    .*     |  6 |TABLE ACCESS  | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.b
+--? test statement_id |    .*     |  7 |HASH          |              |             |             |              | tmp.b
+--? test statement_id |    .*     |  8 |SUBQUERY SCAN |              | tmp         | SUBQUERY    |              | tmp.b
+--? test statement_id |    .*     |  9 |AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+--? test statement_id |    .*     | 10 |STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--? test statement_id |    .*     | 11 |HASH JOIN     | INNER        |             |             |              | s.b, s.a
+--? test statement_id |    .*     | 12 |STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--? test statement_id |    .*     | 13 |TABLE ACCESS  | SEQ SCAN     | pt_t3       | TABLE       | pt_test      | s.b, s.a
+--? test statement_id |    .*     | 14 |HASH          |              |             |             |              | t2.a
+--? test statement_id |    .*     | 15 |STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+--? test statement_id |    .*     | 16 |TABLE ACCESS  | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | t2.a
+(16 rows)
+
+--I3.数据手动删除
+--S1.带where条件
+delete from plan_table where statement_id='test statement_id';
+--S2.查看plan_table, 删除成功
+select * from plan_table_data order by plan_id, id;
+--?        session_id         | user_id | statement_id | plan_id  | id |   operation   |   options    | object_name | object_type | object_owner |     projection      
+--?
+--?         .*              |      10 |              |     .*   |  1 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?         .*              |      10 |              |     .*   |  2 | STREAMING     | GATHER       |             |             |              | .*
+--?         .*              |      10 |              |     .*   |  3 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?         .*              |      10 |              |     .*   |  4 | HASH JOIN     | INNER        |             |             |              | 
+--?         .*              |      10 |              |     .*   |  5 | STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+--?         .*              |      10 |              |     .*   |  6 | TABLE ACCESS  | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.b
+--?         .*              |      10 |              |     .*   |  7 | HASH          |              |             |             |              | tmp.b
+--?         .*              |      10 |              |     .*   |  8 | SUBQUERY SCAN |              | tmp         | SUBQUERY    |              | tmp.b
+--?         .*              |      10 |              |     .*   |  9 | AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+--?         .*              |      10 |              |     .*   | 10 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?         .*              |      10 |              |     .*   | 11 | HASH JOIN     | INNER        |             |             |              | s.b, s.a
+--?         .*              |      10 |              |     .*   | 12 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?         .*              |      10 |              |     .*   | 13 | TABLE ACCESS  | SEQ SCAN     | pt_t3       | TABLE       | pt_test      | s.b, s.a
+--?         .*              |      10 |              |     .*   | 14 | HASH          |              |             |             |              | t2.a
+--?         .*              |      10 |              |     .*   | 15 | STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+--?         .*              |      10 |              |     .*   | 16 | TABLE ACCESS  | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | t2.a
+(16 rows)
+
+select * from plan_table order by plan_id, id;
+--? statement_id | plan_id  | id |   operation   |   options    | object_name | object_type | object_owner |     projection      
+--?
+--?           |     .*   |  1 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?           |     .*   |  2 | STREAMING     | GATHER       |             |             |              | .*
+--?           |     .*   |  3 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?           |     .*   |  4 | HASH JOIN     | INNER        |             |             |              | 
+--?           |     .*   |  5 | STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+--?           |     .*   |  6 | TABLE ACCESS  | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.b
+--?           |     .*   |  7 | HASH          |              |             |             |              | tmp.b
+--?           |     .*   |  8 | SUBQUERY SCAN |              | tmp         | SUBQUERY    |              | tmp.b
+--?           |     .*   |  9 | AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+--?           |     .*   | 10 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?           |     .*   | 11 | HASH JOIN     | INNER        |             |             |              | s.b, s.a
+--?           |     .*   | 12 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?           |     .*   | 13 | TABLE ACCESS  | SEQ SCAN     | pt_t3       | TABLE       | pt_test      | s.b, s.a
+--?           |     .*   | 14 | HASH          |              |             |             |              | t2.a
+--?           |     .*   | 15 | STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+--?           |     .*   | 16 | TABLE ACCESS  | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | t2.a
+(16 rows)
+
+--S3.不带where条件
+delete from plan_table;
+--S2.查看plan_table，显示删除成功
+select * from plan_table_data order by plan_id, id;
+ session_id | user_id | statement_id | plan_id | id | operation | options | object_name | object_type | object_owner | projection 
+------------+---------+--------------+---------+----+-----------+---------+-------------+-------------+--------------+------------
+(0 rows)
+
+select * from plan_table order by plan_id, id;
+ statement_id | plan_id | id | operation | options | object_name | object_type | object_owner | projection 
+--------------+---------+----+-----------+---------+-------------+-------------+--------------+------------
+(0 rows)
+
+--I4.用户访问权限控制
+--S1.超级用户对plan_table_data表的权限
+-- select Y
+select * from plan_table_data order by plan_id, id;
+ session_id | user_id | statement_id | plan_id | id | operation | options | object_name | object_type | object_owner | projection 
+------------+---------+--------------+---------+----+-----------+---------+-------------+-------------+--------------+------------
+(0 rows)
+
+-- insert Y
+insert into plan_table_data(session_id,user_id,id) values('111',10,11);
+-- update Y
+update plan_table_data set user_id=1423;
+-- delete Y
+delete from plan_table_data;
+-- drop N
+drop table plan_table_data;
+ERROR:  permission denied: "plan_table_data" is a system catalog
+--S2.超级用户对plan_table视图的权限
+-- select Y
+select * from plan_table order by plan_id, id;
+ statement_id | plan_id | id | operation | options | object_name | object_type | object_owner | projection 
+--------------+---------+----+-----------+---------+-------------+-------------+--------------+------------
+(0 rows)
+
+-- insert N
+insert into plan_table(id) values(11);
+ERROR:  cannot insert into view "plan_table"
+HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
+-- update N
+update plan_table set id=1423;
+ERROR:  cannot update view "plan_table"
+HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
+-- delete Y
+delete from plan_table;
+-- drop N
+drop VIEW plan_table;
+ERROR:  permission denied: "plan_table" is a system catalog
+--S3.普通用户对plan_table_data表的权限
+SET SESSION SESSION AUTHORIZATION user2 PASSWORD 'GAUSS@123';
+-- select N
+select * from plan_table_data order by plan_id, id;
+ERROR:  permission denied for relation plan_table_data
+-- insert N 
+insert into plan_table_data(session_id,user_id,id) values('111',10,11);
+ERROR:  permission denied for relation plan_table_data
+-- update N
+update plan_table_data set user_id=1423;
+ERROR:  permission denied for relation plan_table_data
+-- delete N
+delete from plan_table_data;
+ERROR:  permission denied for relation plan_table_data
+-- drop N
+drop table plan_table_data;
+ERROR:  must be owner of relation plan_table_data
+--S4.普通用户对plan_table视图的权限
+-- select Y
+select * from plan_table order by plan_id, id;
+ statement_id | plan_id | id | operation | options | object_name | object_type | object_owner | projection 
+--------------+---------+----+-----------+---------+-------------+-------------+--------------+------------
+(0 rows)
+
+-- insert N
+insert into plan_table(id) values(11);
+ERROR:  permission denied for relation plan_table
+-- update N
+update plan_table set id=1423;
+ERROR:  permission denied for relation plan_table
+-- delete Y
+delete from plan_table;
+-- drop N
+drop VIEW plan_table;
+ERROR:  must be owner of relation plan_table
+--S5.对普通用户赋super权后，对plan_table_data的访问：
+RESET SESSION AUTHORIZATION;
+GRANT ALL PRIVILEGES to user2;
+SET SESSION SESSION AUTHORIZATION user2 PASSWORD 'GAUSS@123';
+-- select Y
+select * from plan_table_data order by plan_id, id;
+ session_id | user_id | statement_id | plan_id | id | operation | options | object_name | object_type | object_owner | projection 
+------------+---------+--------------+---------+----+-----------+---------+-------------+-------------+--------------+------------
+(0 rows)
+
+-- insert N
+insert into plan_table_data(session_id,user_id,id) values('111',10,11);
+ERROR:  permission denied for relation plan_table_data
+-- update N
+update plan_table_data set user_id=1423;
+ERROR:  permission denied for relation plan_table_data
+-- delete Y
+delete from plan_table_data;
+-- drop N
+drop table plan_table_data;
+ERROR:  permission denied: "plan_table_data" is a system catalog
+--I5.用户隔离
+--S1.用户2执行
+explain plan set statement_id='user2' for
+with tmp(a,b) as
+(
+   select count(s.a) as sa, s.b as sb from pt_t3 s, pt_t2 t2 where s.a = t2.a group by sb
+)
+select count(*) from pt_t1 t1, tmp where t1.b = tmp.b;
+--S2.查看plan_table
+select * from plan_table_data order by plan_id, id;
+--?        session_id         | user_id | statement_id | plan_id  | id |   operation   |   options    | object_name | object_type | object_owner |     projection      
+--?
+--?         .*             |   .*    | user2        |   .*     |  1 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?         .*             |   .*    | user2        |   .*     |  2 | STREAMING     | GATHER       |             |             |              | .*
+--?         .*             |   .*    | user2        |   .*     |  3 | AGGREGATE     | PLAIN        |             |             |              | .*
+--?         .*             |   .*    | user2        |   .*     |  4 | HASH JOIN     | INNER        |             |             |              | 
+--?         .*             |   .*    | user2        |   .*     |  5 | STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+--?         .*             |   .*    | user2        |   .*     |  6 | TABLE ACCESS  | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.b
+--?         .*             |   .*    | user2        |   .*     |  7 | HASH          |              |             |             |              | tmp.b
+--?         .*             |   .*    | user2        |   .*     |  8 | SUBQUERY SCAN |              | tmp         | SUBQUERY    |              | tmp.b
+--?         .*             |   .*    | user2        |   .*     |  9 | AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+--?         .*             |   .*    | user2        |   .*     | 10 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?         .*             |   .*    | user2        |   .*     | 11 | HASH JOIN     | INNER        |             |             |              | s.b, s.a
+--?         .*             |   .*    | user2        |   .*     | 12 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--?         .*             |   .*    | user2        |   .*     | 13 | TABLE ACCESS  | SEQ SCAN     | pt_t3       | TABLE       | pt_test      | s.b, s.a
+--?         .*             |   .*    | user2        |   .*     | 14 | HASH          |              |             |             |              | t2.a
+--?         .*             |   .*    | user2        |   .*     | 15 | STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+--?         .*             |   .*    | user2        |   .*     | 16 | TABLE ACCESS  | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | t2.a
+(16 rows)
+
+select * from plan_table order by plan_id, id;
+--? statement_id | plan_id  | id |   operation   |   options    | object_name | object_type | object_owner |     projection      
+--?
+--? user2        | .*       |  1 |AGGREGATE     | PLAIN        |             |             |              | .*
+--? user2        | .*       |  2 |STREAMING     | GATHER       |             |             |              | .*
+--? user2        | .*       |  3 |AGGREGATE     | PLAIN        |             |             |              | .*
+--? user2        | .*       |  4 |HASH JOIN     | INNER        |             |             |              | 
+--? user2        | .*       |  5 |STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+--? user2        | .*       |  6 |TABLE ACCESS  | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.b
+--? user2        | .*       |  7 |HASH          |              |             |             |              | tmp.b
+--? user2        | .*       |  8 |SUBQUERY SCAN |              | tmp         | SUBQUERY    |              | tmp.b
+--? user2        | .*       |  9 |AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+--? user2        | .*       | 10 |STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--? user2        | .*       | 11 |HASH JOIN     | INNER        |             |             |              | s.b, s.a
+--? user2        | .*       | 12 |STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+--? user2        | .*       | 13 |TABLE ACCESS  | SEQ SCAN     | pt_t3       | TABLE       | pt_test      | s.b, s.a
+--? user2        | .*       | 14 |HASH          |              |             |             |              | t2.a
+--? user2        | .*       | 15 |STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+--? user2        | .*       | 16 |TABLE ACCESS  | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | t2.a
+(16 rows)
+
+--S3.切换session为用户1，数据不进行清理
+RESET SESSION AUTHORIZATION;
+--S4.查看plan_table
+--plan_table_data中仍然有user1的数据
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table_data order by plan_id, id;
+ statement_id | id |   operation   |   options    | object_name | object_type | object_owner |     projection      
+--------------+----+---------------+--------------+-------------+-------------+--------------+---------------------
+ user2        |  1 | AGGREGATE     | PLAIN        |             |             |              | pg_catalog.count(*)
+ user2        |  2 | STREAMING     | GATHER       |             |             |              | (count(*))
+ user2        |  3 | AGGREGATE     | PLAIN        |             |             |              | count(*)
+ user2        |  4 | HASH JOIN     | INNER        |             |             |              | 
+ user2        |  5 | STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+ user2        |  6 | TABLE ACCESS  | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.b
+ user2        |  7 | HASH          |              |             |             |              | tmp.b
+ user2        |  8 | SUBQUERY SCAN |              | tmp         | SUBQUERY    |              | tmp.b
+ user2        |  9 | AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+ user2        | 10 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+ user2        | 11 | HASH JOIN     | INNER        |             |             |              | s.b, s.a
+ user2        | 12 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+ user2        | 13 | TABLE ACCESS  | SEQ SCAN     | pt_t3       | TABLE       | pt_test      | s.b, s.a
+ user2        | 14 | HASH          |              |             |             |              | t2.a
+ user2        | 15 | STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+ user2        | 16 | TABLE ACCESS  | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | t2.a
+(16 rows)
+
+--plan_table中无数据
+select * from plan_table order by plan_id, id;
+ statement_id | plan_id | id | operation | options | object_name | object_type | object_owner | projection 
+--------------+---------+----+-----------+---------+-------------+-------------+--------------+------------
+(0 rows)
+
+--S5.切换自己，不会清零数据
+explain plan set statement_id='user1' for
+with tmp(a,b) as
+(
+   select count(s.a) as sa, s.b as sb from pt_t3 s, pt_t2 t2 where s.a = t2.a group by sb
+)
+select count(*) from pt_t1 t1, tmp where t1.b = tmp.b;
+RESET SESSION AUTHORIZATION;
+--plan_table_data中有user1的数据
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table_data order by plan_id, id;
+ statement_id | id |   operation   |   options    | object_name | object_type | object_owner |     projection      
+--------------+----+---------------+--------------+-------------+-------------+--------------+---------------------
+ user2        |  1 | AGGREGATE     | PLAIN        |             |             |              | pg_catalog.count(*)
+ user2        |  2 | STREAMING     | GATHER       |             |             |              | (count(*))
+ user2        |  3 | AGGREGATE     | PLAIN        |             |             |              | count(*)
+ user2        |  4 | HASH JOIN     | INNER        |             |             |              | 
+ user2        |  5 | STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+ user2        |  6 | TABLE ACCESS  | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.b
+ user2        |  7 | HASH          |              |             |             |              | tmp.b
+ user2        |  8 | SUBQUERY SCAN |              | tmp         | SUBQUERY    |              | tmp.b
+ user2        |  9 | AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+ user2        | 10 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+ user2        | 11 | HASH JOIN     | INNER        |             |             |              | s.b, s.a
+ user2        | 12 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+ user2        | 13 | TABLE ACCESS  | SEQ SCAN     | pt_t3       | TABLE       | pt_test      | s.b, s.a
+ user2        | 14 | HASH          |              |             |             |              | t2.a
+ user2        | 15 | STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+ user2        | 16 | TABLE ACCESS  | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | t2.a
+ user1        |  1 | AGGREGATE     | PLAIN        |             |             |              | pg_catalog.count(*)
+ user1        |  2 | STREAMING     | GATHER       |             |             |              | (count(*))
+ user1        |  3 | AGGREGATE     | PLAIN        |             |             |              | count(*)
+ user1        |  4 | HASH JOIN     | INNER        |             |             |              | 
+ user1        |  5 | STREAMING     | REDISTRIBUTE |             |             |              | t1.b
+ user1        |  6 | TABLE ACCESS  | SEQ SCAN     | pt_t1       | TABLE       | pt_test      | t1.b
+ user1        |  7 | HASH          |              |             |             |              | tmp.b
+ user1        |  8 | SUBQUERY SCAN |              | tmp         | SUBQUERY    |              | tmp.b
+ user1        |  9 | AGGREGATE     | HASHED       |             |             |              | count(s.a), s.b
+ user1        | 10 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+ user1        | 11 | HASH JOIN     | INNER        |             |             |              | s.b, s.a
+ user1        | 12 | STREAMING     | REDISTRIBUTE |             |             |              | s.b, s.a
+ user1        | 13 | TABLE ACCESS  | SEQ SCAN     | pt_t3       | TABLE       | pt_test      | s.b, s.a
+ user1        | 14 | HASH          |              |             |             |              | t2.a
+ user1        | 15 | STREAMING     | REDISTRIBUTE |             |             |              | t2.a
+ user1        | 16 | TABLE ACCESS  | SEQ SCAN     | pt_t2       | TABLE       | pt_test      | t2.a
+(32 rows)
+
+--I6.下推测试
+--S1.fast query shipping
+delete from plan_table;
+----------------------------
+ on
+(1 row)
+
+--S2.explain query
+explain select * from pt_t1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Data Node Scan  (cost=0.00..0.00 rows=0 width=0)
+   Node/s: All datanodes
+(2 rows)
+
+--s3.explain plan
+explain plan for select * from pt_t1;
+----------------------------
+ on
+(1 row)
+
+--s4.可以收集object
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+ statement_id | id |  operation   | options  | object_name | object_type | object_owner | projection 
+--------------+----+--------------+----------+-------------+-------------+--------------+------------
+              |  1 | STREAMING    | GATHER   |             |             |              | a, b, c
+              |  2 | TABLE ACCESS | SEQ SCAN | pt_t1       | TABLE       | pt_test      | a, b, c
+(2 rows)
+
+delete from plan_table;
+--I7.不能下推测试
+--s1.explain
+explain select current_user from pt_t1,pt_t2;
+ id |              operation               | E-rows | E-memory | E-width | E-costs 
+----+--------------------------------------+--------+----------+---------+---------
+  1 | ->  Streaming (type: GATHER)         |  14400 |          |       0 | 608.01
+  2 |    ->  Nested Loop (3,5)             |  14400 |          |       0 | 120.51
+  3 |       ->  Streaming(type: BROADCAST) |   1440 |          |       0 | 62.72
+  4 |          ->  Seq Scan on pt_t1       |    120 |          |       0 | 23.23
+  5 |       ->  Materialize                |    120 |          |       0 | 23.34
+  6 |          ->  Seq Scan on pt_t2       |    120 |          |       0 | 23.23
+(6 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+--s2.explain plan 
+explain plan for select current_user from pt_t1,pt_t2;
+--s3.无法收集object
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+--? statement_id | id |  operation   |  options  | object_name | object_type | object_owner |        projection         
+--?
+--?.*
+--?.*
+              |  3 | STREAMING    | BROADCAST |             |             |              | pt_t1.a, pt_t1.b, pt_t1.c
+              |  4 | TABLE ACCESS | SEQ SCAN  | pt_t1       | TABLE       | pt_test      | pt_t1.a, pt_t1.b, pt_t1.c
+              |  5 | MATERIALIZE  |           |             |             |              | pt_t2.a, pt_t2.b, pt_t2.c
+              |  6 | TABLE ACCESS | SEQ SCAN  | pt_t2       | TABLE       | pt_test      | pt_t2.a, pt_t2.b, pt_t2.c
+(6 rows)
+
+delete from plan_table;
+--I8.join算子options测试
+--cartesian
+explain plan for select * from pt_t1,pt_t2;
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+ statement_id | id |  operation   |  options  | object_name | object_type | object_owner |                      projection                      
+--------------+----+--------------+-----------+-------------+-------------+--------------+------------------------------------------------------
+              |  1 | STREAMING    | GATHER    |             |             |              | pt_t1.a, pt_t1.b, pt_t1.c, pt_t2.a, pt_t2.b, pt_t2.c
+              |  2 | NESTED LOOPS | CARTESIAN |             |             |              | pt_t1.a, pt_t1.b, pt_t1.c, pt_t2.a, pt_t2.b, pt_t2.c
+              |  3 | STREAMING    | BROADCAST |             |             |              | pt_t1.a, pt_t1.b, pt_t1.c
+              |  4 | TABLE ACCESS | SEQ SCAN  | pt_t1       | TABLE       | pt_test      | pt_t1.a, pt_t1.b, pt_t1.c
+              |  5 | MATERIALIZE  |           |             |             |              | pt_t2.a, pt_t2.b, pt_t2.c
+              |  6 | TABLE ACCESS | SEQ SCAN  | pt_t2       | TABLE       | pt_test      | pt_t2.a, pt_t2.b, pt_t2.c
+(6 rows)
+
+delete from plan_table;
+--cartesian
+explain plan for select * from pt_t1,pt_t2 where pt_t1.a>50;
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+ statement_id | id |  operation   |  options  | object_name | object_type | object_owner |                      projection                      
+--------------+----+--------------+-----------+-------------+-------------+--------------+------------------------------------------------------
+              |  1 | STREAMING    | GATHER    |             |             |              | pt_t1.a, pt_t1.b, pt_t1.c, pt_t2.a, pt_t2.b, pt_t2.c
+              |  2 | NESTED LOOPS | CARTESIAN |             |             |              | pt_t1.a, pt_t1.b, pt_t1.c, pt_t2.a, pt_t2.b, pt_t2.c
+              |  3 | STREAMING    | BROADCAST |             |             |              | pt_t1.a, pt_t1.b, pt_t1.c
+              |  4 | TABLE ACCESS | SEQ SCAN  | pt_t1       | TABLE       | pt_test      | pt_t1.a, pt_t1.b, pt_t1.c
+              |  5 | MATERIALIZE  |           |             |             |              | pt_t2.a, pt_t2.b, pt_t2.c
+              |  6 | TABLE ACCESS | SEQ SCAN  | pt_t2       | TABLE       | pt_test      | pt_t2.a, pt_t2.b, pt_t2.c
+(6 rows)
+
+delete from plan_table;
+--not cartesian
+explain plan for select * from pt_t1,pt_t2 where pt_t1.a>pt_t2.a;
+select statement_id,id,operation,options,object_name,object_type,object_owner,projection from plan_table order by plan_id, id;
+ statement_id | id |  operation   |  options  | object_name | object_type | object_owner |                      projection                      
+--------------+----+--------------+-----------+-------------+-------------+--------------+------------------------------------------------------
+              |  1 | STREAMING    | GATHER    |             |             |              | pt_t1.a, pt_t1.b, pt_t1.c, pt_t2.a, pt_t2.b, pt_t2.c
+              |  2 | NESTED LOOPS | INNER     |             |             |              | pt_t1.a, pt_t1.b, pt_t1.c, pt_t2.a, pt_t2.b, pt_t2.c
+              |  3 | STREAMING    | BROADCAST |             |             |              | pt_t1.a, pt_t1.b, pt_t1.c
+              |  4 | TABLE ACCESS | SEQ SCAN  | pt_t1       | TABLE       | pt_test      | pt_t1.a, pt_t1.b, pt_t1.c
+              |  5 | MATERIALIZE  |           |             |             |              | pt_t2.a, pt_t2.b, pt_t2.c
+              |  6 | TABLE ACCESS | SEQ SCAN  | pt_t2       | TABLE       | pt_test      | pt_t2.a, pt_t2.b, pt_t2.c
+(6 rows)
+
+delete from plan_table;
+--clean
+DROP USER user2 CASCADE;

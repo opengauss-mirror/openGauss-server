@@ -16,8 +16,9 @@
 #define PQFORMAT_H
 
 #include "cm/stringinfo.h"
+#include "cm/cm_msg.h"
 
 extern const char* pq_get_msg_type(CM_StringInfo msg, int datalen);
 extern const char* pq_getmsgbytes(CM_StringInfo msg, int datalen);
-
+extern const char* pq_getmsgbytes(CM_Result* msg, int datalen);
 #endif

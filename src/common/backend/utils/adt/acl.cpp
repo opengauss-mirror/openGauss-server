@@ -29,6 +29,7 @@
 #include "commands/tablespace.h"
 #include "foreign/foreign.h"
 #include "funcapi.h"
+#include "libpq/auth.h"
 #include "miscadmin.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -37,21 +38,16 @@
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 
-typedef struct {
-    const char* name;
-    AclMode value;
-} priv_map;
-
 static const char* getid(const char* s, char* n);
 static void putid(char* p, const char* s);
 static Acl* allocacl(int n);
 void check_acl(const Acl* acl);
 static const char* aclparse(const char* s, AclItem* aip);
 static bool aclitem_match(const AclItem* a1, const AclItem* a2);
-static int aclitem_comparator(const void* arg1, const void* arg2);
+static int aclitemComparator(const void* arg1, const void* arg2);
 static void check_circularity(const Acl* old_acl, const AclItem* mod_aip, Oid ownerId);
 static Acl* recursive_revoke(Acl* acl, Oid grantee, AclMode revoke_privs, Oid ownerId, DropBehavior behavior);
-static int oid_comparator(const void* arg1, const void* arg2);
+static int oidComparator(const void* arg1, const void* arg2);
 
 static AclMode convert_priv_string(text* priv_type_text);
 static AclMode convert_any_priv_string(text* priv_type_text, const priv_map* privileges);
@@ -82,8 +78,63 @@ static AclMode convert_directory_priv_string(text* priv_dir_text);
 static AclMode convert_role_priv_string(text* priv_type_text);
 static AclResult pg_role_aclcheck(Oid role_oid, Oid roleid, AclMode mode);
 
-static void role_membership_cache_call_back(Datum arg, int cacheid, uint32 hashvalue);
+static void RoleMembershipCacheCallback(Datum arg, int cacheid, uint32 hashvalue);
 static Oid get_role_oid_or_public(const char* rolname);
+
+static List * roles_has_privs_of(Oid roleid);
+static Oid convert_cmk_name(text *keyname);
+static Oid convert_column_key_name(text *keyname);
+static AclMode convert_cmk_priv_string(text *priv_type_text);
+static AclMode convert_cek_priv_string(text *priv_type_text);
+
+const struct AclAction {
+    char action; 
+    AclMode read;
+} acl_action[] = {
+    {ACL_INSERT_CHR, ACL_INSERT},
+    {ACL_SELECT_CHR, ACL_SELECT},
+    {ACL_UPDATE_CHR, ACL_UPDATE},
+    {ACL_DELETE_CHR, ACL_DELETE},
+    {ACL_TRUNCATE_CHR, ACL_TRUNCATE},
+    {ACL_REFERENCES_CHR, ACL_REFERENCES},
+    {ACL_TRIGGER_CHR, ACL_TRIGGER},
+    {ACL_EXECUTE_CHR, ACL_EXECUTE},
+    {ACL_USAGE_CHR, ACL_USAGE},
+    {ACL_CREATE_CHR, ACL_CREATE},
+    {ACL_CREATE_TEMP_CHR, ACL_CREATE_TEMP},
+    {ACL_CONNECT_CHR, ACL_CONNECT},
+    {ACL_COMPUTE_CHR, ACL_COMPUTE},
+    {ACL_READ_CHR, ACL_READ},
+    {ACL_WRITE_CHR, ACL_WRITE},
+    {ACL_ALTER_CHR, ACL_ALTER},
+    {ACL_DROP_CHR, ACL_DROP},
+    {ACL_COMMENT_CHR, ACL_COMMENT},
+    {ACL_INDEX_CHR, ACL_INDEX},
+    {ACL_VACUUM_CHR, ACL_VACUUM},
+};
+
+const struct AclObjType {
+    GrantObjectType objtype;
+    AclMode world_default;
+    AclMode owner_default;
+} acl_obj_type[] = {
+    {ACL_OBJECT_COLUMN, ACL_NO_RIGHTS, ACL_NO_RIGHTS},
+    {ACL_OBJECT_SEQUENCE, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_SEQUENCE},
+    {ACL_OBJECT_DATABASE, (ACL_CREATE_TEMP | ACL_CONNECT), ACL_ALL_RIGHTS_DATABASE},
+    {ACL_OBJECT_FUNCTION, ACL_EXECUTE, ACL_ALL_RIGHTS_FUNCTION},
+    {ACL_OBJECT_LARGEOBJECT, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_LARGEOBJECT},
+    {ACL_OBJECT_NAMESPACE, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_NAMESPACE},
+    {ACL_OBJECT_NODEGROUP, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_NODEGROUP},
+    {ACL_OBJECT_TABLESPACE, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_TABLESPACE},
+    {ACL_OBJECT_FDW, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_FDW},
+    {ACL_OBJECT_FOREIGN_SERVER, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_FOREIGN_SERVER},
+    {ACL_OBJECT_DATA_SOURCE, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_DATA_SOURCE},
+    {ACL_OBJECT_GLOBAL_SETTING, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_KEY},
+    {ACL_OBJECT_COLUMN_SETTING, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_KEY},
+    {ACL_OBJECT_DOMAIN, ACL_USAGE, ACL_ALL_RIGHTS_TYPE},
+    {ACL_OBJECT_TYPE, ACL_USAGE, ACL_ALL_RIGHTS_TYPE},
+    {ACL_OBJECT_DIRECTORY, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_DIRECTORY},
+};
 
 /*
  * getid
@@ -102,11 +153,10 @@ static const char* getid(const char* s, char* n)
     int len = 0;
     bool in_quotes = false;
 
-    Assert(s && n);
-
     while (isspace((unsigned char)*s)) {
         s++;
     }
+
     /* This code had better match what putid() does, below */
     for (; *s != '\0' && (isalnum((unsigned char)*s) || *s == '_' || *s == '"' || in_quotes); s++) {
         if (*s == '"') {
@@ -120,12 +170,12 @@ static const char* getid(const char* s, char* n)
         }
 
         /* Add the character to the string */
-        if (len >= NAMEDATALEN - 1) {
+        if (len >= NAMEDATALEN - 1)
             ereport(ERROR,
                 (errcode(ERRCODE_NAME_TOO_LONG),
                     errmsg("identifier too long"),
                     errdetail("Identifier must be less than %d characters.", NAMEDATALEN)));
-        }
+
         n[len++] = *s;
     }
     n[len] = '\0';
@@ -152,19 +202,16 @@ static void putid(char* p, const char* s)
             break;
         }
     }
-    if (!safe) {
+    if (!safe)
         *p++ = '"';
-    }
     for (src = s; *src; src++) {
         /* A double quote character in a username is encoded as "" */
-        if (*src == '"') {
+        if (*src == '"')
             *p++ = '"';
-        }
         *p++ = *src;
     }
-    if (!safe) {
+    if (!safe)
         *p++ = '"';
-    }
     *p = '\0';
 }
 
@@ -193,6 +240,19 @@ static const char* aclparse(const char* s, AclItem* aip)
     AclMode privs, goption, read;
     char name[NAMEDATALEN] = {0};
     char name2[NAMEDATALEN] = {0};
+    bool ddlChar = false;
+    bool dmlChar = false;
+    bool actionType = false;
+
+    if (s == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), 
+            errmsg("ACL string cannot be NULL.")));
+    }
+
+    if (aip == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), 
+            errmsg("ACL item cannot be NULL.")));
+    }
 
 #ifdef ACLDEBUG
     elog(LOG, "aclparse: input = \"%s\"", s);
@@ -219,56 +279,36 @@ static const char* aclparse(const char* s, AclItem* aip)
     privs = goption = ACL_NO_RIGHTS;
 
     for (++s, read = 0; isalpha((unsigned char)*s) || *s == '*'; s++) {
-        switch (*s) {
-            case '*':
-                goption |= read;
-                break;
-            case ACL_INSERT_CHR:
-                read = ACL_INSERT;
-                break;
-            case ACL_SELECT_CHR:
-                read = ACL_SELECT;
-                break;
-            case ACL_UPDATE_CHR:
-                read = ACL_UPDATE;
-                break;
-            case ACL_DELETE_CHR:
-                read = ACL_DELETE;
-                break;
-            case ACL_TRUNCATE_CHR:
-                read = ACL_TRUNCATE;
-                break;
-            case ACL_REFERENCES_CHR:
-                read = ACL_REFERENCES;
-                break;
-            case ACL_TRIGGER_CHR:
-                read = ACL_TRIGGER;
-                break;
-            case ACL_EXECUTE_CHR:
-                read = ACL_EXECUTE;
-                break;
-            case ACL_USAGE_CHR:
-                read = ACL_USAGE;
-                break;
-            case ACL_CREATE_CHR:
-                read = ACL_CREATE;
-                break;
-            case ACL_CREATE_TEMP_CHR:
-                read = ACL_CREATE_TEMP;
-                break;
-            case ACL_CONNECT_CHR:
-                read = ACL_CONNECT;
-                break;
-            case ACL_COMPUTE_CHR:
-                read = ACL_COMPUTE;
-                break;
-            case 'R': /* ignore old RULE privileges */
-                read = 0;
-                break;
-            default:
+        if (*s == '*') {
+            goption |= read;
+        } else {
+            for (size_t idx = 0; idx < (sizeof(acl_action) / sizeof(acl_action[0])); idx++) {
+                if (acl_action[idx].action == *s) {
+                    actionType = true;
+                    read = acl_action[idx].read;
+                    break;
+                }
+            }
+            if (actionType) {
+                actionType = false;
+            } else {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                        errmsg("invalid mode character: must be one of \"%s\"", ACL_ALL_RIGHTS_STR)));
+                        errmsg("invalid mode character: must be one of \"%s\" or \"%s\"",
+                            ACL_ALL_RIGHTS_STR, ACL_ALL_DDL_RIGHTS_STR)));
+            }
+        }
+
+        if (ACLMODE_FOR_DDL(read)) {
+            ddlChar = true;
+        } else {
+            dmlChar = true;
+        }
+        if (dmlChar && ddlChar) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                        errmsg("not support: characters should belong to \"%s\" or \"%s\"",
+                            ACL_ALL_RIGHTS_STR, ACL_ALL_DDL_RIGHTS_STR)));
         }
 
         privs |= read;
@@ -294,6 +334,7 @@ static const char* aclparse(const char* s, AclItem* aip)
             (errcode(ERRCODE_INVALID_GRANTOR), errmsg("defaulting grantor to user ID %u", BOOTSTRAP_SUPERUSERID)));
     }
 
+    goption = REMOVE_DDL_FLAG(goption);
     ACLITEM_SET_PRIVS_GOPTIONS(*aip, privs, goption);
 
 #ifdef ACLDEBUG
@@ -315,7 +356,7 @@ static Acl* allocacl(int n)
     Acl* new_acl = NULL;
     Size size;
 
-    if (n < 0 || n > (PG_INT32_MAX - (int)ARR_OVERHEAD_NONULLS(1)) / (int)sizeof(aclitem)) {
+    if (n < 0 || n > (MAX_INT32 - (int)ARR_OVERHEAD_NONULLS(1)) / (int)sizeof(aclitem)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid size: %d", n)));
     }
     size = ACL_N_SIZE(n);
@@ -435,7 +476,7 @@ Acl* aclmerge(const Acl* left_acl, const Acl* right_acl, Oid ownerId)
 void aclitemsort(Acl* acl)
 {
     if (acl != NULL && ACL_NUM(acl) > 1)
-        qsort(ACL_DAT(acl), ACL_NUM(acl), sizeof(AclItem), aclitem_comparator);
+        qsort(ACL_DAT(acl), ACL_NUM(acl), sizeof(AclItem), aclitemComparator);
 }
 
 /*
@@ -495,8 +536,9 @@ Datum aclitemin(PG_FUNCTION_ARGS)
 
     aip = (AclItem*)palloc(sizeof(AclItem));
     s = aclparse(s, aip);
-    while (isspace((unsigned char)*s))
+    while (isspace((unsigned char)*s)) {
         ++s;
+    }
     if (*s)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
@@ -522,7 +564,11 @@ Datum aclitemout(PG_FUNCTION_ARGS)
     unsigned i;
     errno_t errorno = EOK;
 
-    out = (char*)palloc(strlen("=/") + 2 * N_ACL_RIGHTS + 2 * (2 * NAMEDATALEN + 2) + 1);
+    if (ACLMODE_FOR_DDL(aip->ai_privs)) {
+        out = (char*)palloc(strlen("=/") + 2 * N_ACL_DDL_RIGHTS + 2 * (2 * NAMEDATALEN + 2) + 1);
+    } else {
+        out = (char*)palloc(strlen("=/") + 2 * N_ACL_RIGHTS + 2 * (2 * NAMEDATALEN + 2) + 1);
+    }
 
     p = out;
     *p = '\0';
@@ -539,17 +585,25 @@ Datum aclitemout(PG_FUNCTION_ARGS)
             securec_check_ss(errorno, "\0", "\0");
         }
     }
-    while (*p) {
+    while (*p)
         ++p;
-    }
 
     *p++ = '=';
 
-    for (i = 0; i < N_ACL_RIGHTS; ++i) {
-        if (ACLITEM_GET_PRIVS(*aip) & (1 << i))
-            *p++ = ACL_ALL_RIGHTS_STR[i];
-        if (ACLITEM_GET_GOPTIONS(*aip) & (1 << i))
-            *p++ = '*';
+    if (ACLMODE_FOR_DDL(aip->ai_privs)) {
+        for (i = 0; i < N_ACL_DDL_RIGHTS; ++i) {
+            if (ACLITEM_GET_PRIVS(*aip) & (1 << i))
+                *p++ = ACL_ALL_DDL_RIGHTS_STR[i];
+            if (ACLITEM_GET_GOPTIONS(*aip) & (1 << i))
+                *p++ = '*';
+        }
+    } else {
+        for (i = 0; i < N_ACL_RIGHTS; ++i) {
+            if (ACLITEM_GET_PRIVS(*aip) & (1 << i))
+                *p++ = ACL_ALL_RIGHTS_STR[i];
+            if (ACLITEM_GET_GOPTIONS(*aip) & (1 << i))
+                *p++ = '*';
+        }
     }
 
     *p++ = '/';
@@ -561,8 +615,13 @@ Datum aclitemout(PG_FUNCTION_ARGS)
         ReleaseSysCache(htup);
     } else {
         /* Generate numeric OID if we don't find an entry */
-        errorno =
-            sprintf_s(p, strlen("=/") + (2 * N_ACL_RIGHTS + 2 * (2 * NAMEDATALEN + 2) + 1), "%u", aip->ai_grantor);
+        if (ACLMODE_FOR_DDL(aip->ai_privs)) {
+            errorno = sprintf_s(p, strlen("=/") + (2 * N_ACL_DDL_RIGHTS + 2 * (2 * NAMEDATALEN + 2) + 1),
+                "%u", aip->ai_grantor);
+        } else {
+            errorno = sprintf_s(p, strlen("=/") + (2 * N_ACL_RIGHTS + 2 * (2 * NAMEDATALEN + 2) + 1),
+                "%u", aip->ai_grantor);
+        }
         securec_check_ss(errorno, "\0", "\0");
     }
 
@@ -572,18 +631,19 @@ Datum aclitemout(PG_FUNCTION_ARGS)
 /*
  * aclitem_match
  *		Two AclItems are considered to match iff they have the same
- *		grantee and grantor; the privileges are ignored.
+ *		grantee and grantor and they represent the same type privileges.
  */
 static bool aclitem_match(const AclItem* a1, const AclItem* a2)
 {
-    return a1->ai_grantee == a2->ai_grantee && a1->ai_grantor == a2->ai_grantor;
+    return a1->ai_grantee == a2->ai_grantee && a1->ai_grantor == a2->ai_grantor &&
+        ACLMODE_FOR_DDL(a1->ai_privs) == ACLMODE_FOR_DDL(a2->ai_privs);
 }
 
 /*
- * aclitem_comparator
+ * aclitemComparator
  *		qsort comparison function for AclItems
  */
-static int aclitem_comparator(const void* arg1, const void* arg2)
+static int aclitemComparator(const void* arg1, const void* arg2)
 {
     const AclItem* a1 = (const AclItem*)arg1;
     const AclItem* a2 = (const AclItem*)arg2;
@@ -645,83 +705,34 @@ Acl* acldefault(GrantObjectType objtype, Oid ownerId, Oid objId)
     AclMode world_default;
     AclMode owner_default;
     int nacl;
+    bool type_flag = false;
     Acl* acl = NULL;
     AclItem* aip = NULL;
 
-    switch (objtype) {
-        case ACL_OBJECT_COLUMN:
-            /* by default, columns have no extra privileges */
-            world_default = ACL_NO_RIGHTS;
-            owner_default = ACL_NO_RIGHTS;
-            break;
-        case ACL_OBJECT_RELATION:
-            world_default = ACL_NO_RIGHTS;
-            owner_default = u_sess->attr.attr_common.IsInplaceUpgrade ? ACL_NO_RIGHTS : ACL_ALL_RIGHTS_RELATION;
-            break;
-        case ACL_OBJECT_SEQUENCE:
-            world_default = ACL_NO_RIGHTS;
-            owner_default = ACL_ALL_RIGHTS_SEQUENCE;
-            break;
-        case ACL_OBJECT_DATABASE:
-            /* for backwards compatibility, grant some rights by default */
-            world_default = ACL_CREATE_TEMP | ACL_CONNECT;
-            owner_default = ACL_ALL_RIGHTS_DATABASE;
-            break;
-        case ACL_OBJECT_FUNCTION:
-            /* Grant EXECUTE by default, for now */
-            world_default = ACL_EXECUTE;
-            owner_default = ACL_ALL_RIGHTS_FUNCTION;
-            break;
-        case ACL_OBJECT_LANGUAGE:
-            /* Grant USAGE by default, for now */
-            if (is_trust_language(objId))
-                world_default = ACL_USAGE;
-            else
-                world_default = ACL_NO_RIGHTS;
-            owner_default = ACL_ALL_RIGHTS_LANGUAGE;
-            break;
-        case ACL_OBJECT_LARGEOBJECT:
-            world_default = ACL_NO_RIGHTS;
-            owner_default = ACL_ALL_RIGHTS_LARGEOBJECT;
-            break;
-        case ACL_OBJECT_NAMESPACE:
-            world_default = ACL_NO_RIGHTS;
-            owner_default = ACL_ALL_RIGHTS_NAMESPACE;
-            break;
-        case ACL_OBJECT_NODEGROUP:
-            world_default = ACL_NO_RIGHTS;
-            owner_default = ACL_ALL_RIGHTS_NODEGROUP;
-            break;
-        case ACL_OBJECT_TABLESPACE:
-            world_default = ACL_NO_RIGHTS;
-            owner_default = ACL_ALL_RIGHTS_TABLESPACE;
-            break;
-        case ACL_OBJECT_FDW:
-            world_default = ACL_NO_RIGHTS;
-            owner_default = ACL_ALL_RIGHTS_FDW;
-            break;
-        case ACL_OBJECT_FOREIGN_SERVER:
-            world_default = ACL_NO_RIGHTS;
-            owner_default = ACL_ALL_RIGHTS_FOREIGN_SERVER;
-            break;
-        case ACL_OBJECT_DATA_SOURCE:
-            world_default = ACL_NO_RIGHTS;
-            owner_default = ACL_ALL_RIGHTS_DATA_SOURCE;
-            break;
-        case ACL_OBJECT_DOMAIN:
-        case ACL_OBJECT_TYPE:
+    if (objtype == ACL_OBJECT_LANGUAGE) {
+        /* Grant USAGE by default, for now */
+        if (is_trust_language(objId))
             world_default = ACL_USAGE;
-            owner_default = ACL_ALL_RIGHTS_TYPE;
-            break;
-        case ACL_OBJECT_DIRECTORY:
+        else
             world_default = ACL_NO_RIGHTS;
-            owner_default = ACL_ALL_RIGHTS_DIRECTORY;
-            break;
-        default:
+        owner_default = ACL_ALL_RIGHTS_LANGUAGE;
+    } else if (objtype == ACL_OBJECT_RELATION) {
+        world_default = ACL_NO_RIGHTS;
+        owner_default = u_sess->attr.attr_common.IsInplaceUpgrade ? ACL_NO_RIGHTS : ACL_ALL_RIGHTS_RELATION;
+    } else {
+        for (size_t idx = 0; idx < sizeof(acl_obj_type) / sizeof(acl_obj_type[0]); idx++) {
+            if (acl_obj_type[idx].objtype == objtype) {
+                world_default = acl_obj_type[idx].world_default;
+                owner_default = acl_obj_type[idx].owner_default;
+                type_flag = true;
+                break;
+            }
+        }
+        if (!type_flag) {
             ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized objtype: %d", (int)objtype)));
             world_default = ACL_NO_RIGHTS; /* keep compiler quiet */
             owner_default = ACL_NO_RIGHTS;
-            break;
+        }
     }
 
     nacl = 0;
@@ -810,6 +821,12 @@ Datum acldefault_sql(PG_FUNCTION_ARGS)
         case 'G':
             objtype = ACL_OBJECT_NODEGROUP;
             break;
+        case 'K':
+            objtype = ACL_OBJECT_GLOBAL_SETTING;
+            break;
+        case 'k':
+            objtype = ACL_OBJECT_COLUMN_SETTING;
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized objtype abbreviation: %c", objtypec)));
@@ -837,16 +854,17 @@ Datum acldefault_sql(PG_FUNCTION_ARGS)
 Acl* aclupdate(const Acl* old_acl, const AclItem* mod_aip, int modechg, Oid ownerId, DropBehavior behavior)
 {
     Acl* new_acl = NULL;
-    AclItem* old_aip = NULL;
-    AclItem* new_aip = NULL;
+    AclItem *old_aip = NULL, *new_aip = NULL;
     AclMode old_rights, old_goptions, new_rights, new_goptions;
     int dst, num;
+
+    bool is_ddl_privileges = ACLMODE_FOR_DDL(mod_aip->ai_privs);
 
     /* Caller probably already checked old_acl, but be safe */
     check_acl(old_acl);
 
     /* If granting grant options, check for circularity */
-    if (modechg != ACL_MODECHG_DEL && ACLITEM_GET_GOPTIONS(*mod_aip) != ACL_NO_RIGHTS)
+    if (modechg != ACL_MODECHG_DEL && REMOVE_DDL_FLAG(ACLITEM_GET_GOPTIONS(*mod_aip)) != ACL_NO_RIGHTS)
         check_circularity(old_acl, mod_aip, ownerId);
 
     num = ACL_NUM(old_acl);
@@ -858,6 +876,7 @@ Acl* aclupdate(const Acl* old_acl, const AclItem* mod_aip, int modechg, Oid owne
      * since we actually return a copy); otherwise, insert the new entry at
      * the end.
      */
+
     for (dst = 0; dst < num; ++dst) {
         if (aclitem_match(mod_aip, old_aip + dst)) {
             /* found a match, so modify existing item */
@@ -897,6 +916,10 @@ Acl* aclupdate(const Acl* old_acl, const AclItem* mod_aip, int modechg, Oid owne
             break;
         case ACL_MODECHG_DEL:
             ACLITEM_SET_RIGHTS(new_aip[dst], old_rights & ~ACLITEM_GET_RIGHTS(*mod_aip));
+            /* add ddl privileges flag to Aclitem */
+            if (is_ddl_privileges) {
+                new_aip[dst].ai_privs = ADD_DDL_FLAG(new_aip[dst].ai_privs);
+            }
             break;
         case ACL_MODECHG_EQL:
             ACLITEM_SET_RIGHTS(new_aip[dst], ACLITEM_GET_RIGHTS(*mod_aip));
@@ -911,7 +934,7 @@ Acl* aclupdate(const Acl* old_acl, const AclItem* mod_aip, int modechg, Oid owne
     /*
      * If the adjusted entry has no permissions, delete it from the list.
      */
-    if (new_rights == ACL_NO_RIGHTS) {
+    if (REMOVE_DDL_FLAG(new_rights) == ACL_NO_RIGHTS) {
         errno_t errorno = EOK;
         errorno = memmove_s(
             new_aip + dst, (num - dst - 1) * sizeof(AclItem) + 1, new_aip + dst + 1, (num - dst - 1) * sizeof(AclItem));
@@ -927,7 +950,12 @@ Acl* aclupdate(const Acl* old_acl, const AclItem* mod_aip, int modechg, Oid owne
      */
     if ((old_goptions & ~new_goptions) != 0) {
         Assert(mod_aip->ai_grantee != ACL_ID_PUBLIC);
-        new_acl = recursive_revoke(new_acl, mod_aip->ai_grantee, (old_goptions & ~new_goptions), ownerId, behavior);
+        if (is_ddl_privileges) {
+            new_acl = recursive_revoke(new_acl, mod_aip->ai_grantee, ADD_DDL_FLAG(old_goptions & ~new_goptions),
+                ownerId, behavior);
+        } else {
+            new_acl = recursive_revoke(new_acl, mod_aip->ai_grantee, (old_goptions & ~new_goptions), ownerId, behavior);
+        }
     }
 
     return new_acl;
@@ -1049,6 +1077,7 @@ static void check_circularity(const Acl* old_acl, const AclItem* mod_aip, Oid ow
     AclItem* aip = NULL;
     int i, num;
     AclMode own_privs;
+    bool is_ddl_privileges = ACLMODE_FOR_DDL(mod_aip->ai_privs);
 
     check_acl(old_acl);
 
@@ -1073,7 +1102,8 @@ cc_restart:
     num = ACL_NUM(acl);
     aip = ACL_DAT(acl);
     for (i = 0; i < num; i++) {
-        if (aip[i].ai_grantee == mod_aip->ai_grantee && ACLITEM_GET_GOPTIONS(aip[i]) != ACL_NO_RIGHTS) {
+        if (aip[i].ai_grantee == mod_aip->ai_grantee && ACLITEM_GET_GOPTIONS(aip[i]) != ACL_NO_RIGHTS 
+            && is_ddl_privileges == ACLMODE_FOR_DDL(aip[i].ai_privs)) {
             Acl* new_acl = NULL;
 
             /* We'll actually zap ordinary privs too, but no matter */
@@ -1087,8 +1117,13 @@ cc_restart:
     }
 
     /* Now we can compute grantor's independently-derived privileges */
-    own_privs =
-        aclmask(acl, mod_aip->ai_grantor, ownerId, ACL_GRANT_OPTION_FOR(ACLITEM_GET_GOPTIONS(*mod_aip)), ACLMASK_ALL);
+    AclMode mask;
+    if (is_ddl_privileges) {
+        mask = ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(ACLITEM_GET_GOPTIONS(*mod_aip)));
+    } else {
+        mask = ACL_GRANT_OPTION_FOR(ACLITEM_GET_GOPTIONS(*mod_aip));
+    }
+    own_privs = aclmask(acl, mod_aip->ai_grantor, ownerId, mask, ACLMASK_ALL);
     own_privs = ACL_OPTION_TO_PRIVS(own_privs);
 
     if ((ACLITEM_GET_GOPTIONS(*mod_aip) & ~own_privs) != 0)
@@ -1126,8 +1161,17 @@ static Acl* recursive_revoke(Acl* acl, Oid grantee, AclMode revoke_privs, Oid ow
     if (grantee == ownerId)
         return acl;
 
+    bool is_ddl_privileges = ACLMODE_FOR_DDL(revoke_privs);
+    /* remove ddl privileges flag from Aclitem */
+    revoke_privs = REMOVE_DDL_FLAG(revoke_privs);
+
     /* The grantee might still have some grant options via another grantor */
-    still_has = aclmask(acl, grantee, ownerId, ACL_GRANT_OPTION_FOR(revoke_privs), ACLMASK_ALL);
+    if (is_ddl_privileges) {
+        still_has = aclmask(acl, grantee, ownerId, ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(revoke_privs)), ACLMASK_ALL);
+    } else {
+        still_has = aclmask(acl, grantee, ownerId, ACL_GRANT_OPTION_FOR(revoke_privs), ACLMASK_ALL);
+    }
+    
     revoke_privs &= ~ACL_OPTION_TO_PRIVS(still_has);
     if (revoke_privs == ACL_NO_RIGHTS)
         return acl;
@@ -1136,7 +1180,9 @@ restart:
     num = ACL_NUM(acl);
     aip = ACL_DAT(acl);
     for (i = 0; i < num; i++) {
-        if (aip[i].ai_grantor == grantee && (ACLITEM_GET_PRIVS(aip[i]) & revoke_privs) != 0) {
+        if (aip[i].ai_grantor == grantee &&
+            (REMOVE_DDL_FLAG(ACLITEM_GET_PRIVS(aip[i])) & revoke_privs) != 0 &&
+            is_ddl_privileges == ACLMODE_FOR_DDL(aip[i].ai_privs)) {
             AclItem mod_acl;
             Acl* new_acl = NULL;
 
@@ -1150,6 +1196,11 @@ restart:
             mod_acl.ai_grantee = aip[i].ai_grantee;
             ACLITEM_SET_PRIVS_GOPTIONS(mod_acl, revoke_privs, revoke_privs);
 
+            /* add ddl privileges flag to Aclitem */
+            if (is_ddl_privileges) {
+                mod_acl.ai_privs = ADD_DDL_FLAG(mod_acl.ai_privs);
+            }
+
             new_acl = aclupdate(acl, &mod_acl, ACL_MODECHG_DEL, ownerId, behavior);
 
             pfree_ext(acl);
@@ -1160,6 +1211,21 @@ restart:
     }
 
     return acl;
+}
+/*
+ * When 'how' = ACLMASK_ALL, see if all of a set of privileges are held,
+ * return true if result == mask.
+ *
+ * When 'how' = ACLMASK_ANY, see if any of a set of privileges are held,
+ * return true if result != 0.
+ */
+static bool MaskMatchHow(AclMode mask, AclMode result, AclMaskHow how)
+{
+    if (how == ACLMASK_ALL) {
+        return result == mask;
+    } else {
+        return result != 0;
+    }
 }
 
 /*
@@ -1200,6 +1266,9 @@ AclMode aclmask(const Acl* acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHo
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("null ACL")));
 
     check_acl(acl);
+    bool is_ddl_privileges = ACLMODE_FOR_DDL(mask);
+    /* remove ddl privileges flag from Aclitem */
+    mask = REMOVE_DDL_FLAG(mask);
 
     /* Quick exit for mask == 0 */
     if (mask == 0)
@@ -1210,7 +1279,7 @@ AclMode aclmask(const Acl* acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHo
     /* Owner always implicitly has all grant options */
     if ((mask & ACLITEM_ALL_GOPTION_BITS) && has_privs_of_role(roleid, ownerId)) {
         result = mask & ACLITEM_ALL_GOPTION_BITS;
-        if ((how == ACLMASK_ALL) ? (result == mask) : (result != 0))
+        if (MaskMatchHow(mask, result, how))
             return result;
     }
 
@@ -1223,9 +1292,10 @@ AclMode aclmask(const Acl* acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHo
     for (i = 0; i < num; i++) {
         AclItem* aidata = &aidat[i];
 
-        if (aidata->ai_grantee == ACL_ID_PUBLIC || aidata->ai_grantee == roleid) {
+        if ((aidata->ai_grantee == ACL_ID_PUBLIC || aidata->ai_grantee == roleid) &&
+            is_ddl_privileges == ACLMODE_FOR_DDL(aidata->ai_privs)) {
             result |= aidata->ai_privs & mask;
-            if ((how == ACLMASK_ALL) ? (result == mask) : (result != 0))
+            if (MaskMatchHow(mask, result, how))
                 return result;
         }
     }
@@ -1244,9 +1314,10 @@ AclMode aclmask(const Acl* acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHo
         if (aidata->ai_grantee == ACL_ID_PUBLIC || aidata->ai_grantee == roleid)
             continue; /* already checked it */
 
-        if ((aidata->ai_privs & remaining) && has_privs_of_role(roleid, aidata->ai_grantee)) {
+        if ((aidata->ai_privs & remaining) && has_privs_of_role(roleid, aidata->ai_grantee) &&
+            is_ddl_privileges == ACLMODE_FOR_DDL(aidata->ai_privs)) {
             result |= aidata->ai_privs & mask;
-            if ((how == ACLMASK_ALL) ? (result == mask) : (result != 0))
+            if (MaskMatchHow(mask, result, how))
                 return result;
             remaining = mask & ~result;
         }
@@ -1254,6 +1325,93 @@ AclMode aclmask(const Acl* acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHo
 
     return result;
 }
+
+
+/*
+ * Does member have the privileges of role (directly or indirectly)
+ * without thinking about sysadmin.
+ */
+static bool has_privs_of_role_without_sysadmin(Oid member, Oid role)
+{
+    /* Fast path for simple case */
+    if (member == role)
+        return true;
+
+    /* Initial user is part of every role, except independent role. */
+    if (member == INITIAL_USER_ID && (!is_role_independent(role)))
+        return true;
+
+    /* Find all the roles that member has the privileges of, including  multi-level recursion. */
+    return list_member_oid(roles_has_privs_of(member), role);
+}
+
+
+/*
+ * aclmask_dbe_perf --- compute bitmask of all privileges of held by roleid
+ * when related to schema dbe_perf and objects in schema dbe_perf.
+ */
+AclMode aclmask_dbe_perf(const Acl *acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHow how)
+{
+    AclMode result;
+    AclMode remaining;
+    AclItem* aidat = NULL;
+    int i, num;
+
+    if (acl == NULL)
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("null ACL")));
+    check_acl(acl);
+    bool is_ddl_privileges = ACLMODE_FOR_DDL(mask);
+    /* remove ddl privileges flag from Aclitem */
+    mask = REMOVE_DDL_FLAG(mask);
+
+    /* Quick exit for mask == 0 */
+    if (mask == 0)
+        return 0;
+
+    result = 0;
+
+    /* Owner always implicitly has all grant options */
+    if ((mask & ACLITEM_ALL_GOPTION_BITS) && has_privs_of_role_without_sysadmin(roleid, ownerId)) {
+        result = mask & ACLITEM_ALL_GOPTION_BITS;
+        if (MaskMatchHow(mask, result, how))
+            return result;
+    }
+
+    num = ACL_NUM(acl);
+    aidat = ACL_DAT(acl);
+
+    /* Check privileges granted directly to roleid or to public */
+    for (i = 0; i < num; i++) {
+        AclItem* aidata = &aidat[i];
+
+        if ((aidata->ai_grantee == ACL_ID_PUBLIC || aidata->ai_grantee == roleid) &&
+            is_ddl_privileges == ACLMODE_FOR_DDL(aidata->ai_privs)) {
+            result |= aidata->ai_privs & mask;
+            if (MaskMatchHow(mask, result, how))
+                return result;
+        }
+    }
+
+    /* Check privileges granted indirectly via role memberships. */
+    remaining = mask & ~result;
+    for (i = 0; i < num; i++) {
+        AclItem* aidata = &aidat[i];
+
+        if (aidata->ai_grantee == ACL_ID_PUBLIC || aidata->ai_grantee == roleid)
+            continue; /* already checked it */
+
+        if ((aidata->ai_privs & remaining) && has_privs_of_role_without_sysadmin(roleid, aidata->ai_grantee) && 
+            is_ddl_privileges == ACLMODE_FOR_DDL(aidata->ai_privs)) {
+            result |= aidata->ai_privs & mask;
+            if (MaskMatchHow(mask, result, how))
+                return result;
+            remaining = mask & ~result;
+        }
+    }
+
+    return result;
+}
+
 
 /*
  * aclmask_direct --- compute bitmask of all privileges held by roleid.
@@ -1275,6 +1433,9 @@ static AclMode aclmask_direct(const Acl* acl, Oid roleid, Oid ownerId, AclMode m
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("null ACL")));
 
     check_acl(acl);
+    bool is_ddl_privileges = ACLMODE_FOR_DDL(mask);
+    /* remove ddl privileges flag from Aclitem */
+    mask = REMOVE_DDL_FLAG(mask);
 
     /* Quick exit for mask == 0 */
     if (mask == 0)
@@ -1298,7 +1459,7 @@ static AclMode aclmask_direct(const Acl* acl, Oid roleid, Oid ownerId, AclMode m
     for (i = 0; i < num; i++) {
         AclItem* aidata = &aidat[i];
 
-        if (aidata->ai_grantee == roleid) {
+        if (aidata->ai_grantee == roleid && is_ddl_privileges == ACLMODE_FOR_DDL(aidata->ai_privs)) {
             result |= aidata->ai_privs & mask;
             if ((how == ACLMASK_ALL) ? (result == mask) : (result != 0))
                 return result;
@@ -1348,7 +1509,7 @@ int aclmembers(const Acl* acl, Oid** roleids)
     }
 
     /* Sort the array */
-    qsort(list, j, sizeof(Oid), oid_comparator);
+    qsort(list, j, sizeof(Oid), oidComparator);
 
     /* Remove duplicates from the array */
     k = 0;
@@ -1367,10 +1528,10 @@ int aclmembers(const Acl* acl, Oid** roleids)
 }
 
 /*
- * oid_comparator
+ * oidComparator
  *		qsort comparison function for Oids
  */
-static int oid_comparator(const void* arg1, const void* arg2)
+static int oidComparator(const void* arg1, const void* arg2)
 {
     Oid oid1 = *(const Oid*)arg1;
     Oid oid2 = *(const Oid*)arg2;
@@ -1440,36 +1601,21 @@ Datum makeaclitem(PG_FUNCTION_ARGS)
 
 static AclMode convert_priv_string(text* priv_type_text)
 {
-    char* priv_type = text_to_cstring(priv_type_text);
+    priv_map priv_map[] = {
+        {"SELECT", ACL_SELECT}, {"INSERT", ACL_INSERT}, {"UPDATE", ACL_UPDATE},
+        {"DELETE", ACL_DELETE}, {"TRUNCATE", ACL_TRUNCATE}, {"REFERENCES", ACL_REFERENCES}, {"TRIGGER", ACL_TRIGGER},
+        {"EXECUTE", ACL_EXECUTE}, {"USAGE", ACL_USAGE}, {"CREATE", ACL_CREATE}, {"TEMP", ACL_CREATE_TEMP},
+        {"TEMPORARY", ACL_CREATE_TEMP}, {"CONNECT", ACL_CONNECT}, {"COMPUTE", ACL_COMPUTE}, {"READ", ACL_READ},
+        {"WRITE", ACL_WRITE}, {"ALTER", ACL_ALTER}, {"DROP", ACL_DROP}, {"COMMENT", ACL_COMMENT}, {"INDEX", ACL_INDEX},
+        {"VACUUM", ACL_VACUUM}, {"RULE", 0} /* ignore old RULE privileges */
+    };
 
-    if (pg_strcasecmp(priv_type, "SELECT") == 0)
-        return ACL_SELECT;
-    if (pg_strcasecmp(priv_type, "INSERT") == 0)
-        return ACL_INSERT;
-    if (pg_strcasecmp(priv_type, "UPDATE") == 0)
-        return ACL_UPDATE;
-    if (pg_strcasecmp(priv_type, "DELETE") == 0)
-        return ACL_DELETE;
-    if (pg_strcasecmp(priv_type, "TRUNCATE") == 0)
-        return ACL_TRUNCATE;
-    if (pg_strcasecmp(priv_type, "REFERENCES") == 0)
-        return ACL_REFERENCES;
-    if (pg_strcasecmp(priv_type, "TRIGGER") == 0)
-        return ACL_TRIGGER;
-    if (pg_strcasecmp(priv_type, "EXECUTE") == 0)
-        return ACL_EXECUTE;
-    if (pg_strcasecmp(priv_type, "USAGE") == 0)
-        return ACL_USAGE;
-    if (pg_strcasecmp(priv_type, "CREATE") == 0)
-        return ACL_CREATE;
-    if (pg_strcasecmp(priv_type, "TEMP") == 0)
-        return ACL_CREATE_TEMP;
-    if (pg_strcasecmp(priv_type, "TEMPORARY") == 0)
-        return ACL_CREATE_TEMP;
-    if (pg_strcasecmp(priv_type, "CONNECT") == 0)
-        return ACL_CONNECT;
-    if (pg_strcasecmp(priv_type, "RULE") == 0)
-        return 0; /* ignore old RULE privileges */
+    char* priv_type = text_to_cstring(priv_type_text);
+    for (unsigned int i = 0; i < lengthof(priv_map); i++) {
+        if (pg_strcasecmp(priv_type, priv_map[i].name) == 0) {
+            return priv_map[i].value;
+        }
+    }
 
     ereport(
         ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unrecognized privilege type: \"%s\"", priv_type)));
@@ -1503,11 +1649,13 @@ static AclMode convert_any_priv_string(text* priv_type_text, const priv_map* pri
             *next_chunk++ = '\0';
 
         /* Drop leading/trailing whitespace in this chunk */
-        while (*chunk && isspace((unsigned char)*chunk))
+        while (*chunk != 0 && isspace((unsigned char)*chunk)) {
             chunk++;
+        }
         chunk_len = strlen(chunk);
-        while (chunk_len > 0 && isspace((unsigned char)chunk[chunk_len - 1]))
+        while (chunk_len > 0 && isspace((unsigned char)chunk[chunk_len - 1])) {
             chunk_len--;
+        }
         chunk[chunk_len] = '\0';
 
         /* Match to the privileges list */
@@ -1526,37 +1674,24 @@ static AclMode convert_any_priv_string(text* priv_type_text, const priv_map* pri
     return result;
 }
 
-static const char* convert_aclright_to_string(int aclright)
+static const char* convert_aclright_to_string(AclMode aclright)
 {
-    switch (aclright) {
-        case ACL_INSERT:
-            return "INSERT";
-        case ACL_SELECT:
-            return "SELECT";
-        case ACL_UPDATE:
-            return "UPDATE";
-        case ACL_DELETE:
-            return "DELETE";
-        case ACL_TRUNCATE:
-            return "TRUNCATE";
-        case ACL_REFERENCES:
-            return "REFERENCES";
-        case ACL_TRIGGER:
-            return "TRIGGER";
-        case ACL_EXECUTE:
-            return "EXECUTE";
-        case ACL_USAGE:
-            return "USAGE";
-        case ACL_CREATE:
-            return "CREATE";
-        case ACL_CREATE_TEMP:
-            return "TEMPORARY";
-        case ACL_CONNECT:
-            return "CONNECT";
-        default:
-            ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized aclright: %d", aclright)));
-            return NULL;
+    priv_map priv_map[] = {
+        {"INSERT", ACL_INSERT}, {"SELECT", ACL_SELECT}, {"UPDATE", ACL_UPDATE},
+        {"DELETE", ACL_DELETE}, {"TRUNCATE", ACL_TRUNCATE}, {"REFERENCES", ACL_REFERENCES}, {"TRIGGER", ACL_TRIGGER},
+        {"EXECUTE", ACL_EXECUTE}, {"USAGE", ACL_USAGE}, {"CREATE", ACL_CREATE}, {"TEMPORARY", ACL_CREATE_TEMP},
+        {"CONNECT", ACL_CONNECT}, {"COMPUTE", ACL_COMPUTE}, {"READ", ACL_READ}, {"WRITE", ACL_WRITE},
+        {"ALTER", ACL_ALTER}, {"DROP", ACL_DROP}, {"COMMENT", ACL_COMMENT}, {"INDEX", ACL_INDEX}, {"VACUUM", ACL_VACUUM}
+    };
+
+    for (unsigned int i = 0; i < lengthof(priv_map); i++) {
+        if (aclright == priv_map[i].value) {
+            return priv_map[i].name;
+        }
     }
+
+    ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized aclright: %d", aclright)));
+    return NULL;
 }
 
 /* ----------
@@ -1593,7 +1728,7 @@ Datum aclexplode(PG_FUNCTION_ARGS)
          * build tupdesc for result tuples (matches out parameters in pg_proc
          * entry)
          */
-        tupdesc = CreateTemplateTupleDesc(4, false);
+        tupdesc = CreateTemplateTupleDesc(4, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "grantor", OIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "grantee", OIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "privilege_type", TEXTOID, -1, 0);
@@ -1607,7 +1742,7 @@ Datum aclexplode(PG_FUNCTION_ARGS)
         idx[1] = -1; /* privilege type counter */
         funcctx->user_fctx = (void*)idx;
 
-        (void)MemoryContextSwitchTo(oldcontext);
+        MemoryContextSwitchTo(oldcontext);
     }
 
     funcctx = SRF_PERCALL_SETUP();
@@ -1638,8 +1773,12 @@ Datum aclexplode(PG_FUNCTION_ARGS)
 
             values[0] = ObjectIdGetDatum(aidata->ai_grantor);
             values[1] = ObjectIdGetDatum(aidata->ai_grantee);
+
+            if (ACLMODE_FOR_DDL(ACLITEM_GET_PRIVS(*aidata))) {
+                priv_bit = ADD_DDL_FLAG(priv_bit);
+            }
             values[2] = CStringGetTextDatum(convert_aclright_to_string(priv_bit));
-            values[3] = BoolGetDatum((ACLITEM_GET_GOPTIONS(*aidata) & priv_bit) != 0);
+            values[3] = BoolGetDatum((ACLITEM_GET_GOPTIONS(*aidata) & REMOVE_DDL_FLAG(priv_bit)) != 0);
 
             ss_rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
             securec_check(ss_rc, "\0", "\0");
@@ -1653,6 +1792,18 @@ Datum aclexplode(PG_FUNCTION_ARGS)
 
     SRF_RETURN_DONE(funcctx);
 }
+
+/*
+ * has_table_privilege variants
+ *		These are all named "has_table_privilege" at the SQL level.
+ *		They take various combinations of relation name, relation OID,
+ *		user name, user OID, or implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege, false if not.  The variants that take a relation OID
+ *		return NULL if the OID doesn't exist (rather than failing, as
+ *		they did before Postgres 8.4).
+ */
 
 /*
  * has_table_privilege_name_name
@@ -1798,6 +1949,10 @@ Datum has_table_privilege_id_id(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		Support routines for has_table_privilege family.
+ */
+
+/*
  * Given a table name expressed as a string, look it up and return Oid
  */
 static Oid convert_table_name(text* tablename)
@@ -1832,10 +1987,31 @@ static AclMode convert_table_priv_string(text* priv_type_text)
         {"TRIGGER WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_TRIGGER)},
         {"RULE", 0}, /* ignore old RULE privileges */
         {"RULE WITH GRANT OPTION", 0},
+        {"ALTER", ACL_ALTER},
+        {"ALTER WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_ALTER)))},
+        {"DROP", ACL_DROP},
+        {"DROP WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_DROP)))},
+        {"COMMENT", ACL_COMMENT},
+        {"COMMENT WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_COMMENT)))},
+        {"INDEX", ACL_INDEX},
+        {"INDEX WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_INDEX)))},
+        {"VACUUM", ACL_VACUUM},
+        {"VACUUM WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_VACUUM)))},
         {NULL, 0}};
 
     return convert_any_priv_string(priv_type_text, table_priv_map);
 }
+
+/*
+ * has_sequence_privilege variants
+ *		These are all named "has_sequence_privilege" at the SQL level.
+ *		They take various combinations of relation name, relation OID,
+ *		user name, user OID, or implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege, false if not.  The variants that take a relation OID
+ *		return NULL if the OID doesn't exist.
+ */
 
 /*
  * has_sequence_privilege_name_name
@@ -2013,10 +2189,27 @@ static AclMode convert_sequence_priv_string(text* priv_type_text)
         {"SELECT WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_SELECT)},
         {"UPDATE", ACL_UPDATE},
         {"UPDATE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_UPDATE)},
+        {"ALTER", ACL_ALTER},
+        {"ALTER WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_ALTER)))},
+        {"DROP", ACL_DROP},
+        {"DROP WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_DROP)))},
+        {"COMMENT", ACL_COMMENT},
+        {"COMMENT WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_COMMENT)))},
         {NULL, 0}};
 
     return convert_any_priv_string(priv_type_text, sequence_priv_map);
 }
+
+/*
+ * has_any_column_privilege variants
+ *		These are all named "has_any_column_privilege" at the SQL level.
+ *		They take various combinations of relation name, relation OID,
+ *		user name, user OID, or implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege for any column of the table, false if not.  The variants
+ *		that take a relation OID return NULL if the OID doesn't exist.
+ */
 
 /*
  * has_any_column_privilege_name_name
@@ -2178,6 +2371,19 @@ Datum has_any_column_privilege_id_id(PG_FUNCTION_ARGS)
 
     PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
 }
+
+/*
+ * has_column_privilege variants
+ *		These are all named "has_column_privilege" at the SQL level.
+ *		They take various combinations of relation name, relation OID,
+ *		column name, column attnum, user name, user OID, or
+ *		implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege, false if not.  The variants that take a relation OID
+ *		and an integer attnum return NULL (rather than throwing an error)
+ *		if the column doesn't exist or is dropped.
+ */
 
 /*
  * column_privilege_check: check column privileges, but don't throw an error
@@ -2532,6 +2738,10 @@ Datum has_column_privilege_id_attnum(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		Support routines for has_column_privilege family.
+ */
+
+/*
  * Given a table OID and a column name expressed as a string, look it up
  * and return the column number
  */
@@ -2564,10 +2774,22 @@ static AclMode convert_column_priv_string(text* priv_type_text)
         {"UPDATE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_UPDATE)},
         {"REFERENCES", ACL_REFERENCES},
         {"REFERENCES WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_REFERENCES)},
+        {"COMMENT", ACL_COMMENT},
+        {"COMMENT WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_COMMENT)))},
         {NULL, 0}};
 
     return convert_any_priv_string(priv_type_text, column_priv_map);
 }
+
+/*
+ * has_database_privilege variants
+ *		These are all named "has_database_privilege" at the SQL level.
+ *		They take various combinations of database name, database OID,
+ *		user name, user OID, or implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege, false if not, or NULL if object doesn't exist.
+ */
 
 /*
  * has_database_privilege_name_name
@@ -2713,6 +2935,10 @@ Datum has_database_privilege_id_id(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		Support routines for has_database_privilege family.
+ */
+
+/*
  * Given a database name expressed as a string, look it up and return Oid
  */
 static Oid convert_database_name(text* databasename)
@@ -2736,10 +2962,26 @@ static AclMode convert_database_priv_string(text* priv_type_text)
         {"TEMP WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_CREATE_TEMP)},
         {"CONNECT", ACL_CONNECT},
         {"CONNECT WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_CONNECT)},
+        {"ALTER", ACL_ALTER},
+        {"ALTER WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_ALTER)))},
+        {"DROP", ACL_DROP},
+        {"DROP WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_DROP)))},
+        {"COMMENT", ACL_COMMENT},
+        {"COMMENT WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_COMMENT)))},
         {NULL, 0}};
 
     return convert_any_priv_string(priv_type_text, database_priv_map);
 }
+
+/*
+ * has_foreign_data_wrapper_privilege variants
+ *		These are all named "has_foreign_data_wrapper_privilege" at the SQL level.
+ *		They take various combinations of foreign-data wrapper name,
+ *		fdw OID, user name, user OID, or implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege, false if not.
+ */
 
 /*
  * has_foreign_data_wrapper_privilege_name_name
@@ -2876,6 +3118,10 @@ Datum has_foreign_data_wrapper_privilege_id_id(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		Support routines for has_foreign_data_wrapper_privilege family.
+ */
+
+/*
  * Given a FDW name expressed as a string, look it up and return Oid
  */
 static Oid convert_foreign_data_wrapper_name(text* fdwname)
@@ -2896,6 +3142,16 @@ static AclMode convert_foreign_data_wrapper_priv_string(text* priv_type_text)
 
     return convert_any_priv_string(priv_type_text, foreign_data_wrapper_priv_map);
 }
+
+/*
+ * has_function_privilege variants
+ *		These are all named "has_function_privilege" at the SQL level.
+ *		They take various combinations of function name, function OID,
+ *		user name, user OID, or implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege, false if not, or NULL if object doesn't exist.
+ */
 
 /*
  * has_function_privilege_name_name
@@ -3041,6 +3297,10 @@ Datum has_function_privilege_id_id(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		Support routines for has_function_privilege family.
+ */
+
+/*
  * Given a function name expressed as a string, look it up and return Oid
  */
 static Oid convert_function_name(text* functionname)
@@ -3063,10 +3323,338 @@ static Oid convert_function_name(text* functionname)
 static AclMode convert_function_priv_string(text* priv_type_text)
 {
     static const priv_map function_priv_map[] = {
-        {"EXECUTE", ACL_EXECUTE}, {"EXECUTE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_EXECUTE)}, {NULL, 0}};
+        {"EXECUTE", ACL_EXECUTE}, {"EXECUTE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_EXECUTE)},
+        {"ALTER", ACL_ALTER},
+        {"ALTER WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_ALTER)))},
+        {"DROP", ACL_DROP},
+        {"DROP WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_DROP)))},
+        {"COMMENT", ACL_COMMENT},
+        {"COMMENT WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_COMMENT)))},
+        {NULL, 0}};
 
     return convert_any_priv_string(priv_type_text, function_priv_map);
 }
+
+/*
+ * has_cmk_privilege variants
+ * 		These are all named "has_cmk_privilege" at the SQL level.
+ * 		They take various combinations of global setting name, global setting OID,
+ * 		user name, user OID, or implicit user = current_user.
+ *
+ * 		The result is a boolean value: true if user has the indicated
+ * 		privilege, false if not, or NULL if object doesn't exist.
+ */
+
+/*
+ * has_cmk_privilege_name_name
+ * 		Check user privileges on a global setting given
+ * 		name username, text keyname, and text priv name.
+ */
+Datum has_cmk_privilege_name_name(PG_FUNCTION_ARGS)
+{
+    Name username = PG_GETARG_NAME(0);
+    text *keyname = PG_GETARG_TEXT_P(1);
+    text *priv_type_text = PG_GETARG_TEXT_P(2);
+    Oid roleid;
+    Oid keyoid;
+    AclMode mode;
+    AclResult aclresult;
+
+    roleid = get_role_oid_or_public(NameStr(*username));
+    keyoid = convert_cmk_name(keyname);
+    mode = convert_cmk_priv_string(priv_type_text);
+
+    aclresult = gs_sec_cmk_aclcheck(keyoid, roleid, mode, false);
+
+    PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
+}
+
+/*
+ * has_cmk_privilege_name
+ * 		Check user privileges on a global setting given
+ * 		text keyname and text priv name.
+ * 		current_user is assumed
+ */
+Datum has_cmk_privilege_name(PG_FUNCTION_ARGS)
+{
+    text *keyname = PG_GETARG_TEXT_P(0);
+    text *priv_type_text = PG_GETARG_TEXT_P(1);
+    Oid roleid;
+    Oid keyoid;
+    AclMode mode;
+    AclResult aclresult;
+
+    roleid = GetUserId();
+    keyoid = convert_cmk_name(keyname);
+    mode = convert_cmk_priv_string(priv_type_text);
+
+    aclresult = gs_sec_cmk_aclcheck(keyoid, roleid, mode, false);
+
+    PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
+}
+
+/*
+ * has_cmk_privilege_name_id
+ * 		Check user privileges on a global setting given
+ * 		name usename, key oid, and text priv name.
+ */
+Datum has_cmk_privilege_name_id(PG_FUNCTION_ARGS)
+{
+    Name username = PG_GETARG_NAME(0);
+    Oid keyoid = PG_GETARG_OID(1);
+    text *priv_type_text = PG_GETARG_TEXT_P(2);
+    Oid roleid;
+    AclMode mode;
+    AclResult aclresult;
+
+    roleid = get_role_oid_or_public(NameStr(*username));
+    mode = convert_cmk_priv_string(priv_type_text);
+
+    if (!SearchSysCacheExists1(GLOBALSETTINGOID, ObjectIdGetDatum(keyoid)))
+        PG_RETURN_NULL();
+
+    aclresult = gs_sec_cmk_aclcheck(keyoid, roleid, mode, false);
+
+    PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
+}
+
+/*
+ * has_cmk_privilege_id
+ * 		Check user privileges on a global setting given
+ * 		key oid, and text priv name.
+ * 		current_user is assumed
+ */
+Datum has_cmk_privilege_id(PG_FUNCTION_ARGS)
+{
+    Oid keyoid = PG_GETARG_OID(0);
+    text *priv_type_text = PG_GETARG_TEXT_P(1);
+    Oid roleid;
+    AclMode mode;
+    AclResult aclresult;
+
+    roleid = GetUserId();
+    mode = convert_cmk_priv_string(priv_type_text);
+
+    if (!SearchSysCacheExists1(GLOBALSETTINGOID, ObjectIdGetDatum(keyoid)))
+        PG_RETURN_NULL();
+
+    aclresult = gs_sec_cmk_aclcheck(keyoid, roleid, mode, false);
+
+    PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
+}
+
+/*
+ * has_cmk_privilege_id_name
+ * 		Check user privileges on a global setting given
+ * 		roleid, text keyname, and text priv name.
+ */
+Datum has_cmk_privilege_id_name(PG_FUNCTION_ARGS)
+{
+    Oid roleid = PG_GETARG_OID(0);
+    text *keyname = PG_GETARG_TEXT_P(1);
+    text *priv_type_text = PG_GETARG_TEXT_P(2);
+    Oid keyoid;
+    AclMode mode;
+    AclResult aclresult;
+
+    keyoid = convert_cmk_name(keyname);
+    mode = convert_cmk_priv_string(priv_type_text);
+
+    aclresult = gs_sec_cmk_aclcheck(keyoid, roleid, mode, false);
+
+    PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
+}
+
+/*
+ * has_cmk_privilege_id_id
+ * 		Check user privileges on a global setting given
+ * 		roleid, key oid, and text priv name.
+ */
+Datum has_cmk_privilege_id_id(PG_FUNCTION_ARGS)
+{
+    Oid roleid = PG_GETARG_OID(0);
+    Oid keyoid = PG_GETARG_OID(1);
+    text *priv_type_text = PG_GETARG_TEXT_P(2);
+    AclMode mode;
+    AclResult aclresult;
+
+    mode = convert_cmk_priv_string(priv_type_text);
+
+    if (!SearchSysCacheExists1(GLOBALSETTINGOID, ObjectIdGetDatum(keyoid)))
+        PG_RETURN_NULL();
+
+    aclresult = gs_sec_cmk_aclcheck(keyoid, roleid, mode, false);
+
+    PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
+}
+
+/*
+ * 		Support routines for has_cek_privilege family.
+ */
+/*
+ * has_cek_privilege variants
+ * 		These are all named "has_cek_privilege" at the SQL level.
+ * 		They take various combinations of key name, key OID,
+ * 		user name, user OID, or implicit user = current_user.
+ *
+ * 		The result is a boolean value: true if user has the indicated
+ * 		privilege, false if not, or NULL if object doesn't exist.
+ */
+
+/*
+ * has_cek_privilege_name_name
+ * 		Check user privileges on a column setting given
+ * 		name username, text keyname, and text priv name.
+ */
+Datum has_cek_privilege_name_name(PG_FUNCTION_ARGS)
+{
+    Name username = PG_GETARG_NAME(0);
+    text *keyname = PG_GETARG_TEXT_P(1);
+    text *priv_type_text = PG_GETARG_TEXT_P(2);
+    Oid roleid;
+    Oid keyoid;
+    AclMode mode;
+    AclResult aclresult;
+
+    roleid = get_role_oid_or_public(NameStr(*username));
+    keyoid = convert_column_key_name(keyname);
+    mode = convert_cek_priv_string(priv_type_text);
+
+    aclresult = gs_sec_cek_aclcheck(keyoid, roleid, mode, false);
+
+    PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
+}
+
+/*
+ * has_cek_privilege_name
+ * 		Check user privileges on a global setting given
+ * 		text keyname and text priv name.
+ * 		current_user is assumed
+ */
+Datum has_cek_privilege_name(PG_FUNCTION_ARGS)
+{
+    text *keyname = PG_GETARG_TEXT_P(0);
+    text *priv_type_text = PG_GETARG_TEXT_P(1);
+    Oid roleid;
+    Oid keyoid;
+    AclMode mode;
+    AclResult aclresult;
+
+    roleid = GetUserId();
+    keyoid = convert_column_key_name(keyname);
+    mode = convert_cek_priv_string(priv_type_text);
+
+    aclresult = gs_sec_cek_aclcheck(keyoid, roleid, mode, false);
+
+    PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
+}
+
+/*
+ * has_cek_privilege_name_id
+ * 		Check user privileges on a global setting given
+ * 		name usename, key oid, and text priv name.
+ */
+Datum has_cek_privilege_name_id(PG_FUNCTION_ARGS)
+{
+    Name username = PG_GETARG_NAME(0);
+    Oid keyoid = PG_GETARG_OID(1);
+    text *priv_type_text = PG_GETARG_TEXT_P(2);
+    Oid roleid;
+    AclMode mode;
+    AclResult aclresult;
+
+    roleid = get_role_oid_or_public(NameStr(*username));
+    mode = convert_cek_priv_string(priv_type_text);
+
+    if (!SearchSysCacheExists1(COLUMNSETTINGOID, ObjectIdGetDatum(keyoid))) {
+        PG_RETURN_NULL();
+    }
+
+    aclresult = gs_sec_cek_aclcheck(keyoid, roleid, mode, false);
+
+    PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
+}
+
+/*
+ * has_cek_privilege_id
+ * 		Check user privileges on a global setting given
+ * 		key oid, and text priv name.
+ * 		current_user is assumed
+ */
+Datum has_cek_privilege_id(PG_FUNCTION_ARGS)
+{
+    Oid keyoid = PG_GETARG_OID(0);
+    text *priv_type_text = PG_GETARG_TEXT_P(1);
+    Oid roleid;
+    AclMode mode;
+    AclResult aclresult;
+
+    roleid = GetUserId();
+    mode = convert_cek_priv_string(priv_type_text);
+
+    if (!SearchSysCacheExists1(COLUMNSETTINGOID, ObjectIdGetDatum(keyoid))) {
+        PG_RETURN_NULL();
+    }
+
+    aclresult = gs_sec_cek_aclcheck(keyoid, roleid, mode, false);
+
+    PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
+}
+
+/*
+ * has_cek_privilege_id_name
+ * 		Check user privileges on a global setting given
+ * 		roleid, text keyname, and text priv name.
+ */
+Datum has_cek_privilege_id_name(PG_FUNCTION_ARGS)
+{
+    Oid roleid = PG_GETARG_OID(0);
+    text *keyname = PG_GETARG_TEXT_P(1);
+    text *priv_type_text = PG_GETARG_TEXT_P(2);
+    Oid keyoid;
+    AclMode mode;
+    AclResult aclresult;
+
+    keyoid = convert_column_key_name(keyname);
+    mode = convert_cek_priv_string(priv_type_text);
+
+    aclresult = gs_sec_cek_aclcheck(keyoid, roleid, mode, false);
+
+    PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
+}
+
+/*
+ * has_cek_privilege_id_id
+ * 		Check user privileges on a global setting given
+ * 		roleid, key oid, and text priv name.
+ */
+Datum has_cek_privilege_id_id(PG_FUNCTION_ARGS)
+{
+    Oid roleid = PG_GETARG_OID(0);
+    Oid keyoid = PG_GETARG_OID(1);
+    text *priv_type_text = PG_GETARG_TEXT_P(2);
+    AclMode mode;
+    AclResult aclresult;
+
+    mode = convert_cek_priv_string(priv_type_text);
+
+    if (!SearchSysCacheExists1(COLUMNSETTINGOID, ObjectIdGetDatum(keyoid)))
+        PG_RETURN_NULL();
+
+    aclresult = gs_sec_cek_aclcheck(keyoid, roleid, mode, false);
+
+    PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
+}
+
+/*
+ * has_language_privilege variants
+ *		These are all named "has_language_privilege" at the SQL level.
+ *		They take various combinations of language name, language OID,
+ *		user name, user OID, or implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege, false if not, or NULL if object doesn't exist.
+ */
 
 /*
  * has_language_privilege_name_name
@@ -3212,6 +3800,10 @@ Datum has_language_privilege_id_id(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		Support routines for has_language_privilege family.
+ */
+
+/*
  * Given a language name expressed as a string, look it up and return Oid
  */
 static Oid convert_language_name(text* languagename)
@@ -3241,7 +3833,7 @@ static AclMode convert_language_priv_string(text* priv_type_text)
 static Oid convert_nodegroup_name(text* group_name)
 {
     char* nodegroup = text_to_cstring(group_name);
-    return get_pgxc_groupoid(nodegroup);
+    return get_pgxc_groupoid(nodegroup, false);
 }
 
 /*
@@ -3257,6 +3849,10 @@ static AclMode convert_nodegroup_priv_string(text* priv_type_text)
         {"USAGE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_USAGE)},
         {"COMPUTE", ACL_COMPUTE},
         {"COMPUTE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_COMPUTE)},
+        {"ALTER", ACL_ALTER},
+        {"ALTER WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_ALTER)))},
+        {"DROP", ACL_DROP},
+        {"DROP WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_DROP)))},
         {NULL, 0}};
 
     return convert_any_priv_string(priv_type_text, node_group_priv_map);
@@ -3271,6 +3867,9 @@ static AclMode convert_nodegroup_priv_string(text* priv_type_text)
  */
 Datum has_nodegroup_privilege_name_name(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
     Name username = PG_GETARG_NAME(0);
     text* nodegroup = PG_GETARG_TEXT_P(1);
     text* priv_type_text = PG_GETARG_TEXT_P(2);
@@ -3295,6 +3894,9 @@ Datum has_nodegroup_privilege_name_name(PG_FUNCTION_ARGS)
  */
 Datum has_nodegroup_privilege_name(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
     text* nodegroup = PG_GETARG_TEXT_P(0);
     text* priv_type_text = PG_GETARG_TEXT_P(1);
     Oid roleid;
@@ -3319,6 +3921,9 @@ Datum has_nodegroup_privilege_name(PG_FUNCTION_ARGS)
  */
 Datum has_nodegroup_privilege_name_id(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
     Name username = PG_GETARG_NAME(0);
     Oid groupoid = PG_GETARG_OID(1);
     text* priv_type_text = PG_GETARG_TEXT_P(2);
@@ -3344,6 +3949,9 @@ Datum has_nodegroup_privilege_name_id(PG_FUNCTION_ARGS)
  */
 Datum has_nodegroup_privilege_id(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
     Oid groupoid = PG_GETARG_OID(0);
     text* priv_type_text = PG_GETARG_TEXT_P(1);
     Oid roleid;
@@ -3369,6 +3977,9 @@ Datum has_nodegroup_privilege_id(PG_FUNCTION_ARGS)
  */
 Datum has_nodegroup_privilege_id_name(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
     Oid roleid = PG_GETARG_OID(0);
     text* groupname = PG_GETARG_TEXT_P(1);
     text* priv_type_text = PG_GETARG_TEXT_P(2);
@@ -3392,11 +4003,18 @@ Datum has_nodegroup_privilege_id_name(PG_FUNCTION_ARGS)
  */
 Datum has_nodegroup_privilege_id_id(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
     Oid roleid = PG_GETARG_OID(0);
     Oid groupoid = PG_GETARG_OID(1);
     text* priv_type_text = PG_GETARG_TEXT_P(2);
     AclMode mode;
     AclResult aclresult;
+
+    if (!OidIsValid(groupoid)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("node group with OID %u does not exist", groupoid)));
+    }
 
     mode = convert_nodegroup_priv_string(priv_type_text);
 
@@ -3406,6 +4024,16 @@ Datum has_nodegroup_privilege_id_id(PG_FUNCTION_ARGS)
     aclresult = pg_nodegroup_aclcheck(groupoid, roleid, mode);
     PG_RETURN_BOOL(aclresult == ACLCHECK_OK);
 }
+
+/*
+ * has_schema_privilege variants
+ *		These are all named "has_schema_privilege" at the SQL level.
+ *		They take various combinations of schema name, schema OID,
+ *		user name, user OID, or implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege, false if not, or NULL if object doesn't exist.
+ */
 
 /*
  * has_schema_privilege_name_name
@@ -3551,6 +4179,10 @@ Datum has_schema_privilege_id_id(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		Support routines for has_schema_privilege family.
+ */
+
+/*
  * Given a schema name expressed as a string, look it up and return Oid
  */
 static Oid convert_schema_name(text* schemaname)
@@ -3570,10 +4202,26 @@ static AclMode convert_schema_priv_string(text* priv_type_text)
         {"CREATE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_CREATE)},
         {"USAGE", ACL_USAGE},
         {"USAGE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_USAGE)},
+        {"ALTER", ACL_ALTER},
+        {"ALTER WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_ALTER)))},
+        {"DROP", ACL_DROP},
+        {"DROP WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_DROP)))},
+        {"COMMENT", ACL_COMMENT},
+        {"COMMENT WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_COMMENT)))},
         {NULL, 0}};
 
     return convert_any_priv_string(priv_type_text, schema_priv_map);
 }
+
+/*
+ * has_server_privilege variants
+ *		These are all named "has_server_privilege" at the SQL level.
+ *		They take various combinations of foreign server name,
+ *		server OID, user name, user OID, or implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege, false if not.
+ */
 
 /*
  * has_server_privilege_name_name
@@ -3710,6 +4358,10 @@ Datum has_server_privilege_id_id(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		Support routines for has_server_privilege family.
+ */
+
+/*
  * Given a server name expressed as a string, look it up and return Oid
  */
 static Oid convert_server_name(text* servername)
@@ -3726,10 +4378,27 @@ static Oid convert_server_name(text* servername)
 static AclMode convert_server_priv_string(text* priv_type_text)
 {
     static const priv_map server_priv_map[] = {
-        {"USAGE", ACL_USAGE}, {"USAGE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_USAGE)}, {NULL, 0}};
+        {"USAGE", ACL_USAGE}, {"USAGE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_USAGE)},
+        {"ALTER", ACL_ALTER},
+        {"ALTER WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_ALTER)))},
+        {"DROP", ACL_DROP},
+        {"DROP WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_DROP)))},
+        {"COMMENT", ACL_COMMENT},
+        {"COMMENT WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_COMMENT)))},
+        {NULL, 0}};
 
     return convert_any_priv_string(priv_type_text, server_priv_map);
 }
+
+/*
+ * has_tablespace_privilege variants
+ *		These are all named "has_tablespace_privilege" at the SQL level.
+ *		They take various combinations of tablespace name, tablespace OID,
+ *		user name, user OID, or implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege, false if not.
+ */
 
 /*
  * has_tablespace_privilege_name_name
@@ -3866,6 +4535,10 @@ Datum has_tablespace_privilege_id_id(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		Support routines for has_tablespace_privilege family.
+ */
+
+/*
  * Given a tablespace name expressed as a string, look it up and return Oid
  */
 static Oid convert_tablespace_name(text* tablespacename)
@@ -3882,10 +4555,96 @@ static Oid convert_tablespace_name(text* tablespacename)
 static AclMode convert_tablespace_priv_string(text* priv_type_text)
 {
     static const priv_map tablespace_priv_map[] = {
-        {"CREATE", ACL_CREATE}, {"CREATE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_CREATE)}, {NULL, 0}};
+        {"CREATE", ACL_CREATE}, {"CREATE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_CREATE)},
+        {"ALTER", ACL_ALTER},
+        {"ALTER WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_ALTER)))},
+        {"DROP", ACL_DROP},
+        {"DROP WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_DROP)))},
+        {"COMMENT", ACL_COMMENT},
+        {"COMMENT WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_COMMENT)))},
+        {NULL, 0}};
 
     return convert_any_priv_string(priv_type_text, tablespace_priv_map);
 }
+
+/*
+ * Given a column setting name expressed as a string, look it up and return Oid
+ */
+static Oid convert_column_key_name(text *cekname)
+{
+    char *keyname = text_to_cstring(cekname);
+    Oid oid;
+
+    oid = DatumGetObjectId(DirectFunctionCall1(columnsettingin, CStringGetDatum(keyname)));
+
+    if (!OidIsValid(oid))
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_KEY), errmsg("column encryption key \"%s\" does not exist", keyname)));
+
+    return oid;
+}
+
+/*
+ * convert_cek_priv_string
+ * 		Convert text string to AclMode value.
+ */
+static AclMode convert_cek_priv_string(text *priv_type_text)
+{
+    static const priv_map cek_priv_map[] = {
+        {"USAGE", ACL_USAGE},
+        {"USAGE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_USAGE)},
+        {"DROP", ACL_DROP},
+        {"DROP WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_DROP)},
+        {NULL, 0}
+    };
+
+    return convert_any_priv_string(priv_type_text, cek_priv_map);
+}
+
+
+/*
+ * Given a global setting name expressed as a string, look it up and return Oid
+ */
+static Oid convert_cmk_name(text *globalSettingName)
+{
+    char *keyname = text_to_cstring(globalSettingName);
+    Oid oid;
+
+    oid = DatumGetObjectId(DirectFunctionCall1(globalsettingin, CStringGetDatum(keyname)));
+
+    if (!OidIsValid(oid))
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("client master key \"%s\" does not exist", keyname)));
+
+    return oid;
+}
+
+/*
+ * convert_cmk_priv_string
+ * 		Convert text string to AclMode value.
+ */
+static AclMode convert_cmk_priv_string(text *priv_type_text)
+{
+    static const priv_map key_priv_map[] = {
+        {"USAGE", ACL_USAGE},
+        {"USAGE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_USAGE)},
+        {"DROP", ACL_DROP},
+        {"DROP WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_DROP)},
+        {NULL, 0}
+    };
+
+    return convert_any_priv_string(priv_type_text, key_priv_map);
+}
+
+/*
+ * has_type_privilege variants
+ *		These are all named "has_type_privilege" at the SQL level.
+ *		They take various combinations of type name, type OID,
+ *		user name, user OID, or implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege, false if not, or NULL if object doesn't exist.
+ */
 
 /*
  * has_type_privilege_name_name
@@ -4031,6 +4790,10 @@ Datum has_type_privilege_id_id(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		Support routines for has_type_privilege family.
+ */
+
+/*
  * Given a type name expressed as a string, look it up and return Oid
  */
 static Oid convert_type_name(text* typeName)
@@ -4053,7 +4816,14 @@ static Oid convert_type_name(text* typeName)
 static AclMode convert_type_priv_string(text* priv_type_text)
 {
     static const priv_map type_priv_map[] = {
-        {"USAGE", ACL_USAGE}, {"USAGE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_USAGE)}, {NULL, 0}};
+        {"USAGE", ACL_USAGE}, {"USAGE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_USAGE)},
+        {"ALTER", ACL_ALTER},
+        {"ALTER WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_ALTER)))},
+        {"DROP", ACL_DROP},
+        {"DROP WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_DROP)))},
+        {"COMMENT", ACL_COMMENT},
+        {"COMMENT WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_COMMENT)))},
+        {NULL, 0}};
 
     return convert_any_priv_string(priv_type_text, type_priv_map);
 }
@@ -4202,6 +4972,10 @@ Datum has_directory_privilege_id_id(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		Support routines for has_type_privilege family.
+ */
+
+/*
  * Given a directory name expressed as a string, look it up and return Oid
  */
 static Oid convert_directory_name(text* dirName)
@@ -4220,6 +4994,16 @@ static AclMode convert_directory_priv_string(text* priv_dir_text)
 
     return convert_any_priv_string(priv_dir_text, dir_priv_map);
 }
+
+/*
+ * pg_has_role variants
+ *		These are all named "pg_has_role" at the SQL level.
+ *		They take various combinations of role name, role OID,
+ *		user name, user OID, or implicit user = current_user.
+ *
+ *		The result is a boolean value: true if user has the indicated
+ *		privilege, false if not.
+ */
 
 /*
  * pg_has_role_name_name
@@ -4356,6 +5140,10 @@ Datum pg_has_role_id_id(PG_FUNCTION_ARGS)
 }
 
 /*
+ *		Support routines for pg_has_role family.
+ */
+
+/*
  * convert_role_priv_string
  *		Convert text string to AclMode value.
  *
@@ -4414,15 +5202,15 @@ void initialize_acl(void)
          * In normal mode, set a callback on any syscache invalidation of
          * pg_auth_members rows
          */
-        CacheRegisterSyscacheCallback(AUTHMEMROLEMEM, role_membership_cache_call_back, (Datum)0);
+        CacheRegisterSyscacheCallback(AUTHMEMROLEMEM, RoleMembershipCacheCallback, (Datum)0);
     }
 }
 
 /*
- * role_membership_cache_call_back
+ * RoleMembershipCacheCallback
  *		Syscache inval callback function
  */
-static void role_membership_cache_call_back(Datum arg, int cacheid, uint32 hashvalue)
+static void RoleMembershipCacheCallback(Datum arg, int cacheid, uint32 hashvalue)
 {
     /* Force membership caches to be recomputed on next use */
     u_sess->cache_cxt.cached_privs_role = InvalidOid;
@@ -4507,11 +5295,11 @@ static List* roles_has_privs_of(Oid roleid)
     }
 
     /*
-     * Copy the completed list into t_thrd.top_mem_cxt so it will persist.
+     * Copy the completed list into u_sess.mcxt_group[MEMORY_CONTEXT_SECURITY] so it will persist.
      */
-    oldctx = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+    oldctx = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY));
     new_cached_privs_roles = list_copy(roles_list);
-    (void)MemoryContextSwitchTo(oldctx);
+    MemoryContextSwitchTo(oldctx);
     list_free_ext(roles_list);
 
     /*
@@ -4581,11 +5369,11 @@ static List* roles_is_member_of(Oid roleid)
     }
 
     /*
-     * Copy the completed list into t_thrd.top_mem_cxt so it will persist.
+     * Copy the completed list into u_sess.mcxt_group[MEMORY_CONTEXT_SECURITY] so it will persist.
      */
-    oldctx = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+    oldctx = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY));
     new_cached_membership_roles = list_copy(roles_list);
-    (void)MemoryContextSwitchTo(oldctx);
+    MemoryContextSwitchTo(oldctx);
     list_free_ext(roles_list);
 
     /*
@@ -4837,27 +5625,44 @@ static int count_one_bits(AclMode mask)
  * ownerId: the role owning the object in question
  * *grantorId: receives the OID of the role to do the grant as
  * *grantOptions: receives the grant options actually held by grantorId
+ * isDbePerf: if the object in question belonging to schema dbe_perf
  *
  * If no grant options exist, we set grantorId to roleId, grantOptions to 0.
  */
 void select_best_grantor(
-    Oid roleId, AclMode privileges, const Acl* acl, Oid ownerId, Oid* grantorId, AclMode* grantOptions)
+    Oid roleId, AclMode privileges, AclMode ddlPrivileges, const Acl* acl, Oid ownerId,
+        Oid* grantorId, AclMode* grantOptions, AclMode* grantDdlOptions, bool isDbePerf)
 {
+    /* remove ddl privileges flag from Aclitem */
+    ddlPrivileges = REMOVE_DDL_FLAG(ddlPrivileges);
+
     AclMode needed_goptions = ACL_GRANT_OPTION_FOR(privileges);
+    AclMode ddl_needed_goptions = ACL_GRANT_OPTION_FOR(ddlPrivileges);
     List* roles_list = NIL;
     int nrights;
     ListCell* l = NULL;
 
     /*
-     * The object owner is always treated as having all grant options, so if
-     * roleId is the owner it's easy.  Also, if roleId is a superuser it's
-     * easy: superusers are implicitly members of every role except independent
-     * role, so they act as the object owner(except independent role's objects).
+     * The object owner is always treated as having all grant options, so if roleId is the owner it's easy.
+     * Also, if roleId is a superuser it's easy: superusers are implicitly members of every role
+     * except independent role, so they act as the object owner
+     * (except independent role's objects and objects in schema dbe_perf).
+     * For objects in schema dbe_perf, monitoradmin is always treated as having all grant options.
      */
-    if (roleId == ownerId || (superuser_arg(roleId) && !is_role_independent(ownerId))) {
-        *grantorId = ownerId;
-        *grantOptions = needed_goptions;
-        return;
+    if (isDbePerf) {
+        if (roleId == ownerId || roleId == INITIAL_USER_ID || isMonitoradmin(roleId)) {
+            *grantorId = ownerId;
+            *grantOptions = needed_goptions;
+            *grantDdlOptions = ddl_needed_goptions;
+            return;
+        }
+    } else {
+        if (roleId == ownerId || (superuser_arg(roleId) && !is_role_independent(ownerId))) {
+            *grantorId = ownerId;
+            *grantOptions = needed_goptions;
+            *grantDdlOptions = ddl_needed_goptions;
+            return;
+        }
     }
 
     /*
@@ -4871,17 +5676,21 @@ void select_best_grantor(
     /* initialize candidate result as default */
     *grantorId = roleId;
     *grantOptions = ACL_NO_RIGHTS;
+    *grantDdlOptions = ACL_NO_RIGHTS;
     nrights = 0;
 
     foreach (l, roles_list) {
         Oid otherrole = lfirst_oid(l);
         AclMode otherprivs;
+        AclMode ddl_otherprivs;
 
         otherprivs = aclmask_direct(acl, otherrole, ownerId, needed_goptions, ACLMASK_ALL);
-        if (otherprivs == needed_goptions) {
+        ddl_otherprivs = aclmask_direct(acl, otherrole, ownerId, ADD_DDL_FLAG(ddl_needed_goptions), ACLMASK_ALL);
+        if (otherprivs == needed_goptions && ddl_otherprivs == ddl_needed_goptions) {
             /* Found a suitable grantor */
             *grantorId = otherrole;
             *grantOptions = otherprivs;
+            *grantDdlOptions = ddl_otherprivs;
             return;
         }
 
@@ -4889,12 +5698,13 @@ void select_best_grantor(
          * If it has just some of the needed privileges, remember best
          * candidate.
          */
-        if (otherprivs != ACL_NO_RIGHTS) {
-            int nnewrights = count_one_bits(otherprivs);
+        if (otherprivs != ACL_NO_RIGHTS || ddl_otherprivs != ACL_NO_RIGHTS) {
+            int nnewrights = count_one_bits(otherprivs) + count_one_bits(ddl_otherprivs);
 
             if (nnewrights > nrights) {
                 *grantorId = otherrole;
                 *grantOptions = otherprivs;
+                *grantDdlOptions = ddl_otherprivs;
                 nrights = nnewrights;
             }
         }
@@ -4977,6 +5787,7 @@ bool is_role_independent(Oid roleid)
  */
 bool is_role_iamauth(Oid roleid)
 {
+
     bool isNull = true;
     Relation relation = heap_open(AuthIdRelationId, AccessShareLock);
     HeapTuple tuple = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleid));

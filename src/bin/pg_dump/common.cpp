@@ -268,10 +268,9 @@ static void flagInhTables(TableInfo* ptblinfo, int inumTables, InhInfo* inhinfo,
     TableInfo** parents;
 
     for (i = 0; i < inumTables; i++) {
-        /* Some kinds never have parents */
-        if (ptblinfo[i].relkind == RELKIND_SEQUENCE ||
-            ptblinfo[i].relkind == RELKIND_VIEW ||
-            tblinfo[i].relkind == RELKIND_MATVIEW)
+        /* Sequences, contqueries and views never have parents */
+        if (ptblinfo[i].relkind == RELKIND_SEQUENCE || ptblinfo[i].relkind == RELKIND_VIEW || 
+            ptblinfo[i].relkind == RELKIND_CONTQUERY)
             continue;
 
         /* Don't bother computing anything for non-target tables, either */
@@ -310,10 +309,9 @@ static void flagInhAttrs(TableInfo* ptblinfo, int inumTables)
         int numParents;
         TableInfo** parents;
 
-        /* Some kinds never have parents */
-        if (tbinfo->relkind == RELKIND_SEQUENCE ||
-            tbinfo->relkind == RELKIND_VIEW ||
-            tbinfo->relkind == RELKIND_MATVIEW)
+        /* Sequences, contqueries and views never have parents */
+        if (tbinfo->relkind == RELKIND_SEQUENCE || tbinfo->relkind == RELKIND_VIEW || 
+            tbinfo->relkind == RELKIND_CONTQUERY)
             continue;
 
         /* Don't bother computing anything for non-target tables, either */
@@ -717,6 +715,8 @@ static void findParentsByOid(TableInfo* self, InhInfo* inhinfo, int numInherits)
     int j = 0;
 
     int numParents = 0;
+
+    numParents = 0;
     for (i = 0; i < numInherits; i++) {
         if (inhinfo[i].inhrelid == oid)
             numParents++;

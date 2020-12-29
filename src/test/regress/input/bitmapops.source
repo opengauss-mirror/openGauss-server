@@ -13,7 +13,7 @@
 -- lossy and non-lossy pages with the minimum amount of data
 
 CREATE TABLE bmscantest (a int, b int, t text);
-copy bmscantest from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/bitmapops.data' DELIMITER as ',' NULL as '';
+copy bmscantest from '@abs_srcdir@/data/bitmapops.data' DELIMITER as ',' NULL as '';
 
 CREATE INDEX i_bmtest_a ON bmscantest(a);
 CREATE INDEX i_bmtest_b ON bmscantest(b);

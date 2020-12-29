@@ -19,7 +19,7 @@ REGRESSION_SCRIPT = conversion.sql
 
 SUBDIRS = \
 	ascii_and_mic cyrillic_and_mic euc_cn_and_mic euc_jp_and_sjis \
-	euc_kr_and_mic latin2_and_win1250 latin_and_mic \
+	euc_kr_and_mic euc_tw_and_big5 latin2_and_win1250 latin_and_mic \
 	utf8_and_ascii utf8_and_big5 utf8_and_cyrillic utf8_and_euc_cn \
 	utf8_and_euc_jp utf8_and_euc_kr utf8_and_euc_tw utf8_and_gb18030 \
 	utf8_and_gbk utf8_and_iso8859 utf8_and_iso8859_1 utf8_and_johab \
@@ -62,6 +62,12 @@ CONVERSIONS = \
 		mic_to_sjis	MULE_INTERNAL SJIS mic_to_sjis euc_jp_and_sjis \
 		euc_kr_to_mic	EUC_KR MULE_INTERNAL euc_kr_to_mic euc_kr_and_mic \
 		mic_to_euc_kr	MULE_INTERNAL EUC_KR mic_to_euc_kr euc_kr_and_mic \
+		euc_tw_to_big5	EUC_TW BIG5 euc_tw_to_big5 euc_tw_and_big5 \
+		big5_to_euc_tw	BIG5 EUC_TW big5_to_euc_tw euc_tw_and_big5 \
+		euc_tw_to_mic	EUC_TW MULE_INTERNAL euc_tw_to_mic euc_tw_and_big5 \
+		big5_to_mic	BIG5 MULE_INTERNAL big5_to_mic euc_tw_and_big5 \
+		mic_to_euc_tw	MULE_INTERNAL EUC_TW mic_to_euc_tw euc_tw_and_big5 \
+		mic_to_big5	MULE_INTERNAL BIG5 mic_to_big5 euc_tw_and_big5 \
 		iso_8859_2_to_mic	LATIN2 MULE_INTERNAL latin2_to_mic latin2_and_win1250 \
 		mic_to_iso_8859_2	MULE_INTERNAL LATIN2 mic_to_latin2 latin2_and_win1250 \
 		windows_1250_to_mic	WIN1250 MULE_INTERNAL win1250_to_mic latin2_and_win1250 \

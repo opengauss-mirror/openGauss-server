@@ -125,7 +125,7 @@ void SonicCharDatumArray::getDatumFlag(int arr_idx, int atom_idx, ScalarValue* v
     Assert(arr_idx >= 0 && arr_idx < m_arrSize);
     Assert(atom_idx >= 0 && (uint32)atom_idx < m_atomSize);
 
-    int funcid = arr_idx < m_dictArrLen ? 0 : 1;
+    int funcid = (arr_idx < m_dictArrLen) ? 0 : 1;
     RuntimeBinding(m_getDatumFlagFunc, funcid)(arr_idx, atom_idx, vals, flag);
 }
 
@@ -142,7 +142,7 @@ Datum SonicCharDatumArray::getDatum(int arr_idx, int atom_idx)
     Assert(arr_idx >= 0 && arr_idx < m_arrSize);
     Assert(atom_idx >= 0 && (uint32)atom_idx < m_atomSize);
 
-    int funcid = arr_idx < m_dictArrLen ? 0 : 1;
+    int funcid = (arr_idx < m_dictArrLen) ? 0 : 1;
     return RuntimeBinding(m_getDatumFunc, funcid)(arr_idx, atom_idx);
 }
 
@@ -518,7 +518,7 @@ void SonicCharDatumArray::rebuildFromDict()
     Datum data;
     errno_t rc;
     /* The first position in the first atom doesn't have data. */
-    int startIdx = m_arrIdx == 0 ? 1 : 0;
+    int startIdx = (m_arrIdx == 0) ? 1 : 0;
     if (startIdx == 1)
         dst += m_atomTypeSize;
 

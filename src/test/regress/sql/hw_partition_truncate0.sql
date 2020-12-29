@@ -1,0 +1,514 @@
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 int
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+insert into partition_truncate_table_0000 select generate_series(0,100), generate_series(0,100);
+alter table partition_truncate_table_0000 drop partition for (99);
+select count(*) from partition_truncate_table_0000;
+--51 rows
+truncate table partition_truncate_table_0000;
+select count(*) from partition_truncate_table_0000;
+-- 0 rows
+drop table partition_truncate_table_0000;
+
+--14--------------------------------------------------------------------
+--sytax test,   missing partition key word
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 int
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+alter table  partition_truncate_table_0000 truncate partition_truncate_table_0000_p1;
+--error,  missing partition key word
+
+--missing the partition name
+
+alter table partition_truncate_table_0000 truncate partition ;
+--error ,missing the partition name 
+
+-- /* skip the case for pgxc */
+-- /*using partition for ,  the values is out of boundary of partitioned table  , or the partition is not exist */
+--alter table partition_truncate_table_0000 truncate partition for (151);
+--alter table  partition_truncate_table_0000 truncate partition p1;
+
+drop table partition_truncate_table_0000;
+
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 int
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (200)
+);
+
+--using partition for ,  the values is out of boundary of partitioned table  , or the partition is not exist
+-- /* skip the case for pgxc */
+alter table partition_truncate_table_0000 truncate partition for (151);
+
+-- /* skip the case for pgxc */
+-- /* error ,the partiiton is not exist */
+--insert into partition_truncate_table_0000 values(152,0);
+--alter table partition_truncate_table_0000 truncate partition for (151);
+--select * from partition_truncate_table_0000 order by 1, 2;
+-- 0 row
+
+insert into partition_truncate_table_0000 values(152,0);
+select count(*) from partition_truncate_table_0000;
+-- 1 rows
+
+--multy action test
+alter table partition_truncate_table_0000 truncate partition for (151), truncate partition for (251);
+--error ,out of boundary
+
+
+alter table partition_truncate_table_0000 truncate partition for (151), truncate partition partition_truncate_table_0000_p3;
+--error  no partition p3
+
+alter table partition_truncate_table_0000 truncate partition for (151), truncate partition partition_truncate_table_0000_p1;
+--succeed
+
+select * from partition_truncate_table_0000 order by 1, 2;
+--0 row
+
+drop table partition_truncate_table_0000;
+--15--------------------------------------------------------------------
+--cross test with index add/drop partition, toast table, transaction
+
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 int
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+
+create index on partition_truncate_table_0000(c1,c2) local;
+
+insert into partition_truncate_table_0000 select generate_series(0,99),0;
+
+select count(*) from partition_truncate_table_0000;
+
+
+alter table partition_truncate_table_0000 truncate partition partition_truncate_table_0000_p0;
+select count(*) from partition_truncate_table_0000;
+--50 rows
+alter table partition_truncate_table_0000 truncate partition for (99);
+select count(*) from partition_truncate_table_0000;
+-- 0 rows
+
+-- /*skip the case for pgxc*/
+--truncate interval partition
+--insert into partition_truncate_table_0000 values (151,0);
+--alter table partition_truncate_table_0000 truncate partition for (152);
+--select count(*) from partition_truncate_table_0000;
+-- 0 rows
+
+drop table partition_truncate_table_0000;
+
+--16--------------------------------------------------------------------
+
+--partitioned table has toast table partition
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 text
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+create index on partition_truncate_table_0000(c1,c2) local;
+insert into partition_truncate_table_0000 select generate_series(0,99),0;
+
+--truncate added partition 
+alter table partition_truncate_table_0000 add partition partition_truncate_table_0000_p3 values less than (200);
+insert into partition_truncate_table_0000 values (151,0);
+alter table partition_truncate_table_0000 truncate partition for (151);
+select count(*) from partition_truncate_table_0000;
+-- 100 rows
+
+
+--drop the truncated partition
+alter table partition_truncate_table_0000 drop partition for (151);
+
+
+drop table partition_truncate_table_0000;
+
+--17--------------------------------------------------------------------
+--truncate command and create table in same transaction
+start transaction ;
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 text
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+create index on partition_truncate_table_0000(c1,c2) local;
+insert into partition_truncate_table_0000 select generate_series(0,99),0;
+
+alter table partition_truncate_table_0000 truncate partition partition_truncate_table_0000_p1;
+select count(*) from partition_truncate_table_0000;
+--50 rows
+rollback;
+select count(*) from partition_truncate_table_0000;
+--can not find the partitioned table
+
+start transaction ;
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 text
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+create index on partition_truncate_table_0000(c1,c2) local;
+insert into partition_truncate_table_0000 select generate_series(0,99),0;
+
+alter table partition_truncate_table_0000 truncate partition partition_truncate_table_0000_p1;
+select count(*) from partition_truncate_table_0000;
+--50 rows
+commit;
+select count(*) from partition_truncate_table_0000;
+--50 rows
+
+drop table partition_truncate_table_0000;
+
+--18--------------------------------------------------------------------
+--truncate partiton and drop parttion in same transaction
+
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 text
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+create index on partition_truncate_table_0000(c1,c2) local;
+insert into partition_truncate_table_0000 select generate_series(0,99),0;
+
+start transaction ;
+
+alter table partition_truncate_table_0000 truncate partition partition_truncate_table_0000_p1;
+select count(*) from partition_truncate_table_0000;
+--50 rows
+
+alter table partition_truncate_table_0000 drop partition partition_truncate_table_0000_p1;
+
+rollback;
+select count(*) from partition_truncate_table_0000;
+--100 rows
+
+start transaction ;
+
+alter table partition_truncate_table_0000 truncate partition partition_truncate_table_0000_p1;
+select count(*) from partition_truncate_table_0000;
+--50 rows
+
+alter table partition_truncate_table_0000 drop partition partition_truncate_table_0000_p1;
+
+commit ;
+select count(*) from partition_truncate_table_0000;
+--50 rows
+
+drop table partition_truncate_table_0000;
+ 
+--19--------------------------------------------------------------------
+-- fk/pk constraint
+-- create table partition_truncate_table_0000
+-- (
+-- 	c1 int unique,
+-- 	c2 text
+-- )
+-- partition by range (c1)
+-- (
+-- 	partition p0 values less than (50),
+-- 	partition p1 values less than (100),
+-- 	partition p2 values less than (150)
+-- );
+
+-- create table partition_truncate_table_00001
+-- (
+-- 	c1 int references partition_truncate_table_0000(c1),
+-- 	c2 text
+-- );
+
+-- insert into partition_truncate_table_0000 select generate_series(0,99),0;
+-- insert into partition_truncate_table_00001 select generate_series(0,99),0;
+
+-- alter table partition_truncate_table_0000 truncate partition p1;
+----error , partition_truncate_table_00001 references to partition_truncate_table_0000
+--
+-- drop table partition_truncate_table_00001;
+-- drop table partition_truncate_table_0000;
+
+--20--------------------------------------------------------------------
+--partiton for multy column
+
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 int ,
+	c3 int ,
+	c4 int
+)
+partition by range (c1,c2,c3)
+(
+	partition partition_truncate_table_0000_p0 values less than (50,20,30),
+	partition partition_truncate_table_0000_p1 values less than (100,40,50),
+	partition partition_truncate_table_0000_p2 values less than (100,100,50),
+	partition partition_truncate_table_0000_p3 values less than (150,60,200)
+);
+
+insert into partition_truncate_table_0000 select generate_series(0,149),generate_series(0,149),generate_series(0,149);
+
+select count(*) from partition_truncate_table_0000;
+--150 rows
+
+alter table partition_truncate_table_0000 truncate partition for(100);
+--error , too few column 
+--
+alter table partition_truncate_table_0000 truncate partition for(100,100,100,100);
+--error ,too manay column 
+alter table partition_truncate_table_0000 truncate partition for(100,101,100);
+--succeed
+
+select count(*) from partition_truncate_table_0000;
+--100 rows
+drop table partition_truncate_table_0000;
+
+--21--------------------------------------------------------------------
+--add partition, create a new interval partition,truncate in same transsaction
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 text
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+
+create index on partition_truncate_table_0000(c1,c2) local;
+
+-- skip the case  for pgxc
+--start transaction;
+--insert into partition_truncate_table_0000 values (201,100);
+--alter table partition_truncate_table_0000 truncate partition for(201);
+--select count(*) from partition_truncate_table_0000; 
+--rollback;
+
+select count(*) from partition_truncate_table_0000;
+--0 
+drop table partition_truncate_table_0000;
+
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 text
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+
+create index on partition_truncate_table_0000(c1,c2) local;
+
+-- skip the case  for pgxc
+--start transaction;
+--insert into partition_truncate_table_0000 values (201,100);
+--alter table partition_truncate_table_0000 truncate partition for(201);
+--select count(*) from partition_truncate_table_0000;
+--commit;
+
+select count(*) from partition_truncate_table_0000;
+--0
+drop table partition_truncate_table_0000;
+  
+
+
+
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 text
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+
+create index on partition_truncate_table_0000(c1,c2) local;
+
+start transaction;
+alter table partition_truncate_table_0000 add partition partition_truncate_table_0000_p3 values less than(200);
+insert into partition_truncate_table_0000 select generate_series(150,199);
+select count(*) from partition_truncate_table_0000;
+--50
+alter table partition_truncate_table_0000 truncate partition partition_truncate_table_0000_p3;
+select count(*) from partition_truncate_table_0000;
+-- 0 
+rollback;
+select count(*) from partition_truncate_table_0000;
+-- 0 rows
+drop table partition_truncate_table_0000;
+
+
+
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 text
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+
+create index on partition_truncate_table_0000(c1,c2) local;
+
+start transaction;
+alter table partition_truncate_table_0000 add partition partition_truncate_table_0000_p3 values less than(200);
+insert into partition_truncate_table_0000 select generate_series(150,199);
+select count(*) from partition_truncate_table_0000;
+--50 rows
+alter table partition_truncate_table_0000 truncate partition partition_truncate_table_0000_p3;
+select count(*) from partition_truncate_table_0000;
+-- 0 rows
+commit;
+select count(*) from partition_truncate_table_0000 partition (partition_truncate_table_0000_p3);
+--0
+drop table partition_truncate_table_0000;
+
+--22--------------------------------------------------------------------
+--truncate same partition in a command
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 text
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+
+insert into partition_truncate_table_0000 select generate_series(0,149);
+select count(*) from partition_truncate_table_0000;
+--150 rows
+
+alter table partition_truncate_table_0000 truncate partition partition_truncate_table_0000_p0,  truncate partition for(49);
+select count(*) from partition_truncate_table_0000;
+--100 rows
+truncate partition_truncate_table_0000;
+
+--in same transaction 
+start transaction;
+alter table partition_truncate_table_0000 add partition partition_truncate_table_0000_p3 values less than (200);
+insert into partition_truncate_table_0000 select generate_series(150,199);
+
+alter table partition_truncate_table_0000 truncate partition partition_truncate_table_0000_p3,  truncate partition for(199),truncate partition partition_truncate_table_0000_p3;
+select count(*) from partition_truncate_table_0000 partition (partition_truncate_table_0000_p3);
+--0
+rollback;
+select count(*) from partition_truncate_table_0000 partition (partition_truncate_table_0000_p3);
+--p3 not exist
+
+start transaction;
+alter table partition_truncate_table_0000 add partition partition_truncate_table_0000_p3 values less than (200);
+insert into partition_truncate_table_0000 select generate_series(150,199);
+
+alter table partition_truncate_table_0000 truncate partition partition_truncate_table_0000_p3,  truncate partition for(199),truncate partition partition_truncate_table_0000_p3;
+select count(*) from partition_truncate_table_0000 partition (partition_truncate_table_0000_p3);
+--0
+commit;
+select count(*) from partition_truncate_table_0000 partition (partition_truncate_table_0000_p3);
+--0
+
+drop table partition_truncate_table_0000;
+
+--23--------------------------------------------------------------------
+--test for truncate parititon for null, maxvalue
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 text
+)
+partition by range (c1)
+(
+	partition partition_truncate_table_0000_p0 values less than (50),
+	partition partition_truncate_table_0000_p1 values less than (100),
+	partition partition_truncate_table_0000_p2 values less than (150)
+);
+
+alter table partition_truncate_table_0000 truncate partition for (null);
+-- out of range
+alter table partition_truncate_table_0000 truncate partition for (maxvalue);
+--out  of range
+drop table partition_truncate_table_0000;
+
+
+
+create table partition_truncate_table_0000
+(
+	c1 int ,
+	c2 int ,
+	c3 int ,
+	c4 int
+)
+partition by range (c1,c2,c3)
+(
+	partition partition_truncate_table_0000_p0 values less than (50,20,30),
+	partition partition_truncate_table_0000_p1 values less than (100,40,50),
+	partition partition_truncate_table_0000_p2 values less than (100,100,50),
+	partition partition_truncate_table_0000_p3 values less than (150,60,200)
+);
+alter table partition_truncate_table_0000 truncate partition for (100,null,null);
+--succeed
+alter table partition_truncate_table_0000 truncate partition for (149,maxvalue,50);
+--succeed
+drop table partition_truncate_table_0000;

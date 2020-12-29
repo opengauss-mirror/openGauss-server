@@ -1,0 +1,29 @@
+-- prepare test enviroment for the compute pool.
+
+-- create user
+CREATE USER omm password 'Gauss@123';
+grant all privileges to omm;
+
+CREATE SERVER dummy_server FOREIGN DATA WRAPPER DFS_FDW OPTIONS (address 'localhost:@portstring@', username 'omm', password 'Gauss@123', type 'dummy');
+
+select node_name, node_type, nodeis_central from pgxc_node order by node_name;
+\! @abs_bindir@/gsql -dpostgres -p$((@portstring@+4)) -c "update pgxc_node set nodeis_central=true where node_name='coordinator2'";
+\! @abs_bindir@/gsql -dpostgres -p$((@portstring@+4)) -c 'select node_name, node_type, nodeis_central from pgxc_node order by node_name';
+
+\! @abs_bindir@/gsql -dpostgres -p$((@portstring@+4)) -c 'select pgxc_pool_reload()';
+select pgxc_pool_reload();
+select pg_sleep(10);
+
+\! touch @abs_bindir@/cp_client.conf
+\! echo "cpip=localhost" >>@abs_bindir@/cp_client.conf
+\! echo "cpport=$((@portstring@+4))" >>@abs_bindir@/cp_client.conf
+\! echo "username=omm" >>@abs_bindir@/cp_client.conf
+\! echo "password=iBwl328UuADGem9rsQ8vhmJfAWAWL1exH+Nxd5OAX3Y=" >>@abs_bindir@/cp_client.conf
+\! echo "version=1.1.1" >>@abs_bindir@/cp_client.conf
+\! echo "dnnum=20" >>@abs_bindir@/cp_client.conf
+\! echo "pl=2" >>@abs_bindir@/cp_client.conf
+
+\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | sed 's/bin.*$//g' | xargs -I{} sh -c "if [ -f {}/bin ]; then rm -f {}/bin; fi"
+\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | sed 's/bin.*$//g' | xargs -I{} mkdir -p {}/bin
+\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | sed 's/bin.*$//g' | xargs -I{} cp @abs_bindir@/cp_client.conf {}/bin
+\! @abs_bindir@/gs_encrypt hello

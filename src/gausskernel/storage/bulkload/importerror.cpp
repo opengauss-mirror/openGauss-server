@@ -24,6 +24,7 @@
 #include "utils/memutils.h"
 #include "commands/copy.h"
 #include "libpq/pqformat.h"
+#include "optimizer/streamplan.h"
 
 /* As long as it is bigger than 2*NAMEDATALEN +2 */
 #define MAX_NAME_LEN 512
@@ -130,25 +131,24 @@ void BaseError::Deserialize(StringInfo buf)
             continue;
         }
 
-        if (len < 0) {
-            ereport(ERROR, 
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
-                    errmsg("len is less than 0")));            
+        if (unlikely(len < 0)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
+                     errmsg("Found invalid error recored: negative length that is not -1.")));
         }
-        
         m_isNull[i] = false;
         if (attrs[i]->attlen > 0 && attrs[i]->attlen <= 8) {
-            if (len != m_desc->attrs[i]->attlen) {
-                ereport(ERROR, 
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
-                        errmsg("len is not equal to attrLen")));   
+            if (unlikely(len != m_desc->attrs[i]->attlen)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
+                         errmsg("Found invalid error recored: length is not the same as the attribute length.")));
             }
-            pq_copymsgbytes(buf, (char *)&m_values[i], len);
+            pq_copymsgbytes(buf, (char*)&m_values[i], len);
         } else if (attrs[i]->attlen > 8) {
-            if (len != m_desc->attrs[i]->attlen) {
-                ereport(ERROR, 
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
-                        errmsg("len is not equal to attrLen")));   
+            if (unlikely(len != m_desc->attrs[i]->attlen)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
+                         errmsg("Found invalid error recored: length is not the same as the attribute length.")));
             }
             m_values[i] = (Datum)palloc(len);
             pq_copymsgbytes(buf, DatumGetPointer(m_values[i]), len);

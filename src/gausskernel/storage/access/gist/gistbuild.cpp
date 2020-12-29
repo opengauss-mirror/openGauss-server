@@ -20,11 +20,12 @@
 
 #include "access/genam.h"
 #include "access/gist_private.h"
+#include "access/tableam.h"
 #include "access/xloginsert.h"
 #include "catalog/index.h"
 #include "miscadmin.h"
 #include "optimizer/cost.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/smgr.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -196,7 +197,7 @@ Datum gistbuild(PG_FUNCTION_ARGS)
     /*
      * Do the heap scan.
      */
-    reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, gistBuildCallback, (void *)&buildstate, NULL);
+    reltuples = tableam_index_build_scan(heap, index, indexInfo, true, gistBuildCallback, (void *)&buildstate);
 
     /*
      * If buffering was used, flush out all the tuples that are still in the
@@ -598,7 +599,7 @@ static bool gistProcessItup(GISTBuildState *buildstate, IndexTuple itup, BlockNu
         buffer = ReadBuffer(indexrel, blkno);
         LockBuffer(buffer, GIST_EXCLUSIVE);
         (void)gistbufferinginserttuples(buildstate, buffer, level, &itup, 1, InvalidOffsetNumber, parentblkno,
-                                  downlinkoffnum);
+                                        downlinkoffnum);
         /* gistbufferinginserttuples() released the buffer */
     }
 
@@ -732,7 +733,7 @@ static BlockNumber gistbufferinginserttuples(GISTBuildState *buildstate, Buffer 
 
         /* Insert them into parent. */
         (void)gistbufferinginserttuples(buildstate, parentBuffer, level + 1, downlinks, ndownlinks, downlinkoffnum,
-                                  InvalidBlockNumber, InvalidOffsetNumber);
+                                        InvalidBlockNumber, InvalidOffsetNumber);
 
         list_free_deep(splitinfo); /* we don't need this anymore */
     } else
@@ -1086,4 +1087,3 @@ Datum gistmerge(PG_FUNCTION_ARGS)
 
     PG_RETURN_POINTER(result);
 }
-

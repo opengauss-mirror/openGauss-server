@@ -15,27 +15,26 @@
 #define EXECNODES_H
 
 #include "access/genam.h"
-#include "access/heapam.h"
 #include "access/relscan.h"
 #include "bulkload/dist_fdw.h"
 #include "executor/instrument.h"
 #include "nodes/params.h"
 #include "nodes/plannodes.h"
-#include "nodes/tidbitmap.h"
 #include "storage/pagecompress.h"
 #include "utils/bloom_filter.h"
 #include "utils/reltrigger.h"
-#include "utils/sharedtuplestore.h"
 #include "utils/sortsupport.h"
 #include "utils/tuplesort.h"
 #include "utils/tuplestore.h"
 #include "vecexecutor/vectorbatch.h"
 
+#ifdef ENABLE_MOT
 // forward declaration for MOT JitContext
 namespace JitExec
 {
     struct JitContext;
 }
+#endif
 
 /* struct for utility statement mem usage */
 typedef struct UtilityDesc {
@@ -71,10 +70,9 @@ typedef struct UtilityDesc {
  *		ReadyForInserts		is it valid for inserts?
  *		Concurrent			are we doing a concurrent index build?
  *		BrokenHotChain		did we detect any broken HOT chains?
- *		ParallelWorkers		# of workers requested (excludes leader)
  *
- * ii_Concurrent, ii_BrokenHotChain, and ii_ParallelWorkers are used only
- * during index build; they're conventionally zeroed otherwise.
+ * ii_Concurrent and ii_BrokenHotChain are used only during index build;
+ * they're conventionally set to false otherwise.
  * ----------------
  */
 typedef struct IndexInfo {
@@ -96,7 +94,6 @@ typedef struct IndexInfo {
     bool ii_ReadyForInserts;
     bool ii_Concurrent;
     bool ii_BrokenHotChain;
-    int ii_ParallelWorkers;
     short ii_PgClassAttrId;
     UtilityDesc ii_desc; /* meminfo for index create */
 } IndexInfo;
@@ -313,8 +310,8 @@ typedef struct ProjectionInfo {
     List* pi_lateAceessVarNumbers;
     List* pi_maxOrmin;
     List* pi_PackTCopyVars;            /* VarList to record those columns what we need to move */
-    /* VarList to record those columns what we need to move in late read cstore scan */
-    List* pi_PackLateAccessVarNumbers;
+    List* pi_PackLateAccessVarNumbers; /*VarList to record those columns what we need to move in late read cstore
+                                          scan.*/
     bool pi_const;
     VectorBatch* pi_batch;
     vectarget_func jitted_vectarget; /* LLVM function pointer to point to the codegened targetlist expr function */
@@ -571,7 +568,9 @@ typedef struct EState {
     bool es_can_history_statistics;  /* true if can history statistics */
 
     bool isRowTriggerShippable; /* true if all row triggers are shippable. */
+#ifdef ENABLE_MOT
     JitExec::JitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
+#endif
 } EState;
 
 /*
@@ -702,8 +701,6 @@ typedef HASH_SEQ_STATUS TupleHashIterator;
  * ----------------
  */
 typedef struct ExprState ExprState;
-
-struct ParallelHashJoinState;
 
 typedef Datum (*ExprStateEvalFunc)(ExprState* expression, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 typedef ScalarVector* (*VectorExprFun)(
@@ -881,7 +878,8 @@ typedef struct ScalarArrayOpExprState {
     bool typbyval;
     char typalign;
     bool* pSel; /* selection used to fast path of ALL/ANY */
-    ScalarVector* vecConstElem;
+    ScalarVector *tmpVecLeft;
+    ScalarVector *tmpVecRight;
     ScalarVector* tmpVec;
 } ScalarArrayOpExprState;
 
@@ -1151,10 +1149,7 @@ typedef struct CoerceToDomainState {
  * corresponding Expr to link to.  Nonetheless it is part of an ExprState
  * tree, so we give it a name following the xxxState convention.
  */
-typedef enum DomainConstraintType {
-    DOM_CONSTRAINT_NOTNULL,
-    DOM_CONSTRAINT_CHECK
-} DomainConstraintType;
+typedef enum DomainConstraintType { DOM_CONSTRAINT_NOTNULL, DOM_CONSTRAINT_CHECK } DomainConstraintType;
 
 typedef struct DomainConstraintState {
     NodeTag type;
@@ -1197,7 +1192,6 @@ typedef struct PlanState {
                     * top-level plan */
 
     Instrumentation* instrument; /* Optional runtime stats for this node */
-    WorkerInstrumentation *worker_instrument; /* per-worker instrumentation */
 
     /*
      * Common structural data for all Plan types.  These links to subsidiary
@@ -1315,12 +1309,13 @@ typedef struct MergeActionState {
  *	 UpsertState information
  * ----------------
  */
-typedef struct UpsertState {
+typedef struct UpsertState
+{
 	NodeTag			type;
-	UpsertAction	us_action;                  /* Flags showing DUPLICATE UPDATE NOTHING or SOMETHING */
-	TupleTableSlot* us_existing;                /* slot to store existing target tuple in */
-	List*           us_excludedtlist;           /* the excluded pseudo relation's tlist */
-	TupleTableSlot* us_updateproj;              /* slot to update */
+	UpsertAction	us_action; 				/* Flags showing DUPLICATE UPDATE NOTHING or SOMETHING */
+	TupleTableSlot	*us_existing;			/* slot to store existing target tuple in */
+	List			*us_excludedtlist;		/* the excluded pseudo relation's tlist */
+	TupleTableSlot	*us_updateproj;			/* slot to update */
 } UpsertState;
 
 /* ----------------
@@ -1372,21 +1367,6 @@ typedef struct DistInsertSelectState {
     PageCompress* pcState;
 } DistInsertSelectState;
 
-/* Shared state for parallel-aware Append. */
-typedef struct ParallelAppendState {
-    int         plan_node_id;
-    LWLock      pa_lock;        /* mutual exclusion to choose next subplan */
-    int         pa_next_plan;   /* next plan to choose by any worker */
- 
-    /*
-     * pa_finished[i] should be true if no more workers should select subplan
-     * i.  for a non-partial plan, this should be set to true as soon as a
-     * worker selects the plan; for a partial plan, it remains false until
-     * some worker executes the plan to completion.
-     */
-    bool        pa_finished[FLEXIBLE_ARRAY_MEMBER];
-} ParallelAppendState;
-
 /* ----------------
  *	 AppendState information
  *
@@ -1399,11 +1379,7 @@ typedef struct AppendState {
     PlanState** appendplans; /* array of PlanStates for my inputs */
     int as_nplans;
     int as_whichplan;
-    ParallelAppendState *as_pstate; /* parallel coordination info */
-    Size pstate_len;  /* size of parallel coordination info */
-    bool (*choose_next_subplan)(AppendState *);
 } AppendState;
-
 
 /* ----------------
  *	 MergeAppendState information
@@ -1541,6 +1517,7 @@ typedef struct SampleScanParams {
  * ----------------
  */
 struct ScanState;
+struct SeqScanAccessor;
 
 /*
  * prototypes from functions in execScan.c
@@ -1551,7 +1528,7 @@ typedef bool(*ExecScanRecheckMtd) (ScanState *node, TupleTableSlot *slot);
 typedef struct ScanState {
     PlanState ps; /* its first field is NodeTag */
     Relation ss_currentRelation;
-    AbsTblScanDesc ss_currentScanDesc;
+    TableScanDesc ss_currentScanDesc;
     TupleTableSlot* ss_ScanTupleSlot;
     bool ss_ReScan;
     Relation ss_currentPartition;
@@ -1564,14 +1541,13 @@ typedef struct ScanState {
     bool runTimePredicatesReady;
     bool is_scan_end; /* @hdfs Mark whether iterator is over or not, if the scan uses informational constraint. */
     SeqScanAccessor* ss_scanaccessor; /* prefetch related */
-
+    int part_id;
     int startPartitionId;            /* start partition id for parallel threads. */
     int endPartitionId;              /* end partition id for parallel threads. */
-    bool isRangeScanInRedis;         /* if it is a range scan in redistribution time */
+    RangeScanInRedis rangeScanInRedis;         /* if it is a range scan in redistribution time */
     bool isSampleScan;               /* identify is it table sample scan or not. */
     SampleScanParams sampleScanInfo; /* TABLESAMPLE params include type/seed/repeatable. */
     ExecScanAccessMtd ScanNextMtd;
-    Size pscan_len; /* size of parallel heap scan descriptor */
 } ScanState;
 
 /*
@@ -1614,8 +1590,6 @@ typedef struct {
  *		RuntimeContext	   expr context for evaling runtime Skeys
  *		RelationDesc	   index relation descriptor
  *		ScanDesc		   index scan descriptor
- *
- *		pscan_len		   size of parallel index scan descriptor
  * ----------------
  */
 typedef struct IndexScanState {
@@ -1630,12 +1604,11 @@ typedef struct IndexScanState {
     bool iss_RuntimeKeysReady;
     ExprContext* iss_RuntimeContext;
     Relation iss_RelationDesc;
-    AbsIdxScanDesc iss_ScanDesc;
+    IndexScanDesc iss_ScanDesc;
     List* iss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation iss_CurrentIndexPartition;
-
-    Size iss_PscanLen;
+    int part_id;
 } IndexScanState;
 
 /* ----------------
@@ -1654,8 +1627,6 @@ typedef struct IndexScanState {
  *		ScanDesc		   index scan descriptor
  *		VMBuffer		   buffer in use for visibility map testing, if any
  *		HeapFetches		   number of tuples we were forced to fetch from heap
-
- *		ioss_PscanLen	   Size of parallel index-only scan descriptor
  * ----------------
  */
 typedef struct IndexOnlyScanState {
@@ -1670,14 +1641,13 @@ typedef struct IndexOnlyScanState {
     bool ioss_RuntimeKeysReady;
     ExprContext* ioss_RuntimeContext;
     Relation ioss_RelationDesc;
-    AbsIdxScanDesc ioss_ScanDesc;
+    IndexScanDesc ioss_ScanDesc;
     Buffer ioss_VMBuffer;
     long ioss_HeapFetches;
     List* ioss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation ioss_CurrentIndexPartition;
-
-    Size ioss_PscanLen;
+    int part_id;
 } IndexOnlyScanState;
 
 /* ----------------
@@ -1708,72 +1678,23 @@ typedef struct BitmapIndexScanState {
     bool biss_RuntimeKeysReady;
     ExprContext* biss_RuntimeContext;
     Relation biss_RelationDesc;
-    AbsIdxScanDesc biss_ScanDesc;
+    IndexScanDesc biss_ScanDesc;
     List* biss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation biss_CurrentIndexPartition;
+    int part_id;
 } BitmapIndexScanState;
 
 /* ----------------
- * 	 SharedBitmapState information
+ *	 BitmapHeapScanState information
  *
- * 		BM_INITIAL		TIDBitmap creation is not yet started, so first worker
- * 						to see this state will set the state to BM_INPROGRESS
- * 						and that process will be responsible for creating
- * 						TIDBitmap.
- * 		BM_INPROGRESS	TIDBitmap creation is in progress; workers need to
- * 						sleep until it's finished.
- * 		BM_FINISHED		TIDBitmap creation is done, so now all workers can
- * 						proceed to iterate over TIDBitmap.
- * ----------------
- */
-typedef enum {
-    BM_INITIAL,
-    BM_INPROGRESS,
-    BM_FINISHED
-} SharedBitmapState;
-
-/* ----------------
- * 	 ParallelBitmapHeapState information
- * 		tbmiterator				iterator for scanning current pages
- * 		prefetch_iterator		iterator for prefetching ahead of current page
- * 		mutex					mutual exclusion for the prefetching variable
- * 								and state
- * 		prefetch_pages			# pages prefetch iterator is ahead of current
- * 		prefetch_target			current target prefetch distance
- * 		state					current state of the TIDBitmap
- * 		cv						conditional wait variable
- * 		phs_snapshot_data		snapshot data shared to workers
- * ----------------
- */
-typedef struct ParallelBitmapHeapState {
-    TBMSharedIteratorState *tbmiterator;
-    TBMSharedIteratorState *prefetch_iterator;
-    Size pscan_len;
-    int prefetch_pages;
-    int prefetch_target;
-    int plan_node_id;
-    SharedBitmapState state;
-    pthread_mutex_t cv_mtx;
-    pthread_cond_t cv;
-    char phs_snapshot_data[FLEXIBLE_ARRAY_MEMBER];
-} ParallelBitmapHeapState;
-
-/* ----------------
- * 	 BitmapHeapScanState information
- *
- * 		bitmapqualorig	   execution state for bitmapqualorig expressions
- * 		tbm				   bitmap obtained from child index scan(s)
- * 		tbmiterator		   iterator for scanning current pages
- * 		tbmres			   current-page data
- * 		prefetch_iterator  iterator for prefetching ahead of current page
- * 		prefetch_pages	   # pages prefetch iterator is ahead of current
- * 		prefetch_target    target prefetch distance
- *		pscan_len		   size of the shared memory for parallel bitmap
- *		initialized		   is node is ready to iterate
- *		shared_tbmiterator	   shared iterator
- *		shared_prefetch_iterator shared iterator for prefetching
- *		pstate			   shared state for parallel bitmap scan
+ *		bitmapqualorig	   execution state for bitmapqualorig expressions
+ *		tbm				   bitmap obtained from child index scan(s)
+ *		tbmiterator		   iterator for scanning current pages
+ *		tbmres			   current-page data
+ *		prefetch_iterator  iterator for prefetching ahead of current page
+ *		prefetch_pages	   # pages prefetch iterator is ahead of current
+ *		prefetch_target    target prefetch distance
  * ----------------
  */
 typedef struct BitmapHeapScanState {
@@ -1786,11 +1707,7 @@ typedef struct BitmapHeapScanState {
     int prefetch_pages;
     int prefetch_target;
     GPIScanDesc gpi_scan;  /* global partition index scan use information */
-    Size pscan_len;
-    bool initialized;
-    TBMSharedIterator *shared_tbmiterator;
-    TBMSharedIterator *shared_prefetch_iterator;
-    ParallelBitmapHeapState *pstate;
+    int part_id;
 } BitmapHeapScanState;
 
 /* ----------------
@@ -1844,12 +1761,12 @@ typedef struct SubqueryScanState {
  * ----------------
  */
 typedef struct FunctionScanState {
-    ScanState ss; /* its first field is NodeTag */
+    ScanState ss; /* Its first field is NodeTag */
     int eflags;
     TupleDesc tupdesc;
     Tuplestorestate* tuplestorestate;
     ExprState* funcexpr;
-    bool atomic;
+    bool atomic;  /* Atomic execution context, does not allow transactions */
 } FunctionScanState;
 
 /* ----------------
@@ -2171,7 +2088,6 @@ typedef struct HashJoinState {
     bool hj_OuterNotEmpty;
     bool hj_streamBothSides;
     bool hj_rebuildHashtable;
-    bool isParallel;
 } HashJoinState;
 
 /* ----------------------------------------------------------------
@@ -2376,35 +2292,6 @@ typedef struct UniqueState {
 } UniqueState;
 
 /* ----------------
- * GatherState information
- *
- * 		Gather nodes launch 1 or more parallel workers, run a subplan
- * 		in those workers, and collect the results.
- * ----------------
- */
-typedef struct GatherState {
-    PlanState ps; /* its first field is NodeTag */
-    bool initialized;
-    struct ParallelExecutorInfo *pei;
-    int nreaders;
-    int nextreader;
-    struct TupleQueueReader **reader;
-    TupleTableSlot *funnel_slot;
-    bool need_to_scan_locally;
-    int64 tuples_needed;
-} GatherState;
-
-/* ----------------
- *	 Shared memory container for per-worker hash information
- * ----------------
- */
-typedef struct SharedHashInfo {
-    int num_workers;
-    int plan_node_id; /* used to identify speicific plan */
-    Instrumentation instrument[FLEXIBLE_ARRAY_MEMBER];
-} SharedHashInfo;
-
-/* ----------------
  *	 HashState information
  * ----------------
  */
@@ -2415,12 +2302,7 @@ typedef struct HashState {
     int32 local_work_mem;    /* work_mem local for this hash join */
     int64 spill_size;
 
-    /* Parallel hash state. */
-    struct ParallelHashJoinState* parallel_state;
     /* hashkeys is same as parent's hj_InnerHashKeys */
-
-    SharedHashInfo* shared_info; /* one entry per worker */
-    Instrumentation* instrument; /* this worker's entry */
 } HashState;
 
 /* ----------------
@@ -2513,7 +2395,6 @@ struct VecLimitState : public LimitState {
     VectorBatch* subBatch;
 };
 
-
 /*
  * RownumState node: used for computing the pseudo-column ROWNUM
  */
@@ -2521,8 +2402,6 @@ typedef struct RownumState {
     ExprState  xprstate;
     PlanState* ps;   /* the value of ROWNUM depends on its parent PlanState */
 } RownumState;
-
-
 
 /* ----------------
  *		GroupingFuncExprState node
@@ -2557,6 +2436,15 @@ typedef struct GroupingIdExprState {
     } while (0)
 
 /*
+ * used by TsStoreInsert in nodeModifyTable.h and vecmodifytable.cpp
+ */
+#define FLUSH_DATA_TSDB(obj, type)                              \
+    do{                                                     \
+        ((type*)obj)->BatchInsert((VectorBatch*)NULL, 0);   \
+        ((type*)obj)->end_batch_insert();           \
+        ((type*)obj)->Destroy();                          \
+    }while(0)
+/*
  * record the first tuple time used by INSERT, UPDATE and DELETE in ExecModifyTable and ExecVecModifyTable
  */
 #define record_first_time()                                     \
@@ -2567,19 +2455,7 @@ typedef struct GroupingIdExprState {
         }                                                       \
     } while (0)
 
-static inline
-TupleTableSlot* ExecMakeTupleSlot(HeapTuple tuple, HeapScanDesc heapScan, TupleTableSlot* slot)
-{
-    if (tuple != NULL) {
-        Assert(heapScan != NULL);
-        return ExecStoreTuple(tuple, /* tuple to store */
-            slot, /* slot to store in */
-            heapScan->rs_cbuf, /* buffer associated with this tuple */
-            false); /* don't pfree this pointer */
-    }
-
-    return ExecClearTuple(slot);
-}
+extern TupleTableSlot* ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTableSlot* slot, TableAmType tableAm);
 
 /*
  * When the global partition index is used for bitmap scanning,
@@ -2591,7 +2467,7 @@ inline bool BitmapNodeNeedSwitchPartRel(BitmapHeapScanState* node)
     return tbm_is_global(node->tbm) && GPIScanCheckPartOid(node->gpi_scan, node->tbmres->partitionOid);
 }
 
-extern bool reset_scan_qual(Relation currHeapRel, ScanState *node);
+extern RangeScanInRedis reset_scan_qual(Relation currHeapRel, ScanState *node);
 
 #endif /* EXECNODES_H */
 

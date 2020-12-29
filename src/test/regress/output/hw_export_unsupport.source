@@ -1,0 +1,126 @@
+--Export unsupport
+---
+CREATE foreign TABLE EXPORT_LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+server gsmpp_server
+options(location '@abs_srcdir@/results/' , delimiter '|') write only;
+CREATE FOREIGN TABLE EXPORT1(c1 int) server gsmpp_server options(location '@abs_srcdir@/results', delimiter '|') write only;
+CREATE FOREIGN TABLE EXPORT2(c1 int) server gsmpp_server options(location '@abs_srcdir@/data/export_test.dat', delimiter '|', mode 'shared');
+DROP TABLE IF EXISTS LINEITEM;
+NOTICE:  table "lineitem" does not exist, skipping
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY        BIGINT
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+  , CHECK (L_PARTKEY > 10)
+)
+distribute by hash(L_ORDERKEY);
+EXPLAIN INSERT INTO EXPORT_LINEITEM SELECT * FROM LINEITEM LIMIT 10;
+ERROR:  Un-support feature
+DETAIL:  subquery contains LIMIT clause
+EXPLAIN INSERT INTO EXPORT_LINEITEM SELECT * FROM LINEITEM OFFSET 10;
+ERROR:  Un-support feature
+DETAIL:  subquery contains LIMIT clause
+EXPLAIN INSERT INTO EXPORT_LINEITEM SELECT * FROM LINEITEM ORDER BY L_ORDERKEY;
+ERROR:  Un-support feature
+DETAIL:  subquery contains SORT clause
+EXPLAIN INSERT INTO EXPORT1 SELECT count(*) FROM LINEITEM;
+ERROR:  Un-support feature
+DETAIL:  subquery contains aggregation
+EXPLAIN INSERT INTO EXPORT1 SELECT RANK() OVER(PARTITION BY L_ORDERKEY ORDER BY L_ORDERKEY) FROM LINEITEM;
+ERROR:  Un-support feature
+DETAIL:  subquery contains window function
+EXPLAIN INSERT INTO EXPORT1 SELECT DISTINCT L_ORDERKEY FROM LINEITEM;
+ERROR:  Un-support feature
+DETAIL:  subquery contains DISTINCT clause
+EXPLAIN INSERT INTO EXPORT_LINEITEM SELECT * FROM LINEITEM UNION SELECT * FROM LINEITEM;
+ERROR:  Un-support feature
+DETAIL:  subquery can not contain more than one relation
+EXPLAIN INSERT INTO EXPORT1 SELECT 1+2;
+ERROR:  Un-support feature
+DETAIL:  subquery can not contain more than one relation
+EXPLAIN INSERT INTO EXPORT1 VALUES(5),(6);
+ERROR:  Un-support feature
+DETAIL:  only subquery is supported
+EXPLAIN INSERT INTO EXPORT1 SELECT * FROM EXPORT2;
+ERROR:  Un-support feature
+DETAIL:  range table of subquery should be a normal relation
+EXPLAIN INSERT INTO EXPORT1 SELECT L_ORDERKEY FROM LINEITEM GROUP BY L_ORDERKEY;
+ERROR:  Un-support feature
+DETAIL:  subquery contains aggregation
+EXPLAIN (costs off) INSERT INTO EXPORT_LINEITEM SELECT * FROM LINEITEM WHERE L_ORDERKEY > 1000;
+                QUERY PLAN                 
+-------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Insert on export_lineitem
+         ->  Seq Scan on lineitem
+               Filter: (l_orderkey > 1000)
+(5 rows)
+
+EXPLAIN INSERT INTO EXPORT_LINEITEM SELECT (SELECT AVG(L_ORDERKEY) FROM LINEITEM) FROM LINEITEM WHERE L_ORDERKEY > 1000;
+ERROR:  Un-support feature
+DETAIL:  subquery contains other subqueries
+EXPLAIN INSERT INTO EXPORT_LINEITEM SELECT * FROM LINEITEM WHERE L_ORDERKEY > (SELECT L_PARTKEY FROM LINEITEM);
+ERROR:  Un-support feature
+DETAIL:  subquery contains other subqueries
+EXPLAIN INSERT INTO EXPORT_LINEITEM SELECT * FROM LINEITEM WHERE L_ORDERKEY > (SELECT AVG(L_ORDERKEY) FROM LINEITEM L2 WHERE L2.L_PARTKEY=LINEITEM.L_PARTKEY);
+ERROR:  Un-support feature
+DETAIL:  subquery contains other subqueries
+EXPLAIN INSERT INTO EXPORT_LINEITEM VALUES(1, 100, 1, 1, 1, 1, 1, 1, '1', '1', '2014-09-18', '2014-09-18', '2014-09-18', 'hello world', 'lover', 'kaka');
+ERROR:  Un-support feature
+DETAIL:  insert statement is an INSERT INTO VALUES(...)
+EXPLAIN WITH TMP AS (SELECT * FROM LINEITEM LIMIT 10) INSERT INTO EXPORT_LINEITEM SELECT * FROM TMP;
+ERROR:  Un-support feature
+DETAIL:  range table of subquery should be a normal relation
+DROP TABLE LINEITEM;
+DROP FOREIGN TABLE EXPORT_LINEITEM;
+DROP FOREIGN TABLE EXPORT1;
+DROP FOREIGN TABLE EXPORT2;
+-- unsupport location
+DROP FOREIGN TABLE IF EXISTS hw_export_invalid_location;
+NOTICE:  foreign table "hw_export_invalid_location" does not exist, skipping
+CREATE FOREIGN TABLE hw_export_invalid_location
+(
+C_CHAR_3 CHAR(16),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
+)
+SERVER Gsmpp_server
+Options(Location '@abs_srcdir@/data/parallel_export/|/|///',
+Format 'Text')
+Write Only;
+ERROR:  location "///" is invalid

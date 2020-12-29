@@ -1,0 +1,463 @@
+set check_implicit_conversions=on;
+-- 1. gin, gist index
+-- just tsvector is supported by gin, gist, and just <, <=, =, <>, >=, >, || are supported
+-- by gin, gist, so no implicit conversions for gin, gist index.
+drop table if exists tginst;
+NOTICE:  table "tginst" does not exist, skipping
+create table if not exists tginst(c1 int, c2 tsvector, c3 tsvector) distribute by hash(c1);
+create index on tginst using gin(c2);
+create index on tginst using gist(c3);
+explain (verbose on, costs off) select c2 from tginst where c2='hello world'::tsvector;
+WARNING:  Statistics in some tables or columns(public.tginst.c1, public.tginst.c2) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: c2
+   Node/s: All datanodes
+   ->  Seq Scan on public.tginst
+         Output: c2
+         Distribute Key: c1
+         Filter: (tginst.c2 = '''hello'' ''world'''::tsvector)
+(7 rows)
+
+explain (verbose on, costs off) select c3 from tginst where c3='hello world'::tsvector;
+WARNING:  Statistics in some tables or columns(public.tginst.c1, public.tginst.c3) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: c3
+   Node/s: All datanodes
+   ->  Seq Scan on public.tginst
+         Output: c3
+         Distribute Key: c1
+         Filter: (tginst.c3 = '''hello'' ''world'''::tsvector)
+(7 rows)
+
+drop table if exists tginst;
+-- 2. table type
+-- 2.1 col table
+drop table if exists tcol;
+NOTICE:  table "tcol" does not exist, skipping
+create table tcol (c1 varchar, c2 varchar) with (orientation=column) distribute by hash(c1);
+create index on tcol(c1);
+explain (verbose on, costs off) select * from tcol where c1 = 10;
+ERROR:  There is no optional index path for index column: "tcol"."c1".
+Please check for potential performance problem.
+explain (verbose on, costs off) select * from tcol where c1 = 10::varchar;
+WARNING:  Statistics in some tables or columns(public.tcol.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                      QUERY PLAN                      
+------------------------------------------------------
+ Row Adapter
+   Output: c1, c2
+   ->  Vector Streaming (type: GATHER)
+         Output: c1, c2
+         Node/s: datanode7
+         ->  CStore Scan on public.tcol
+               Output: c1, c2
+               Distribute Key: c1
+               Filter: ((tcol.c1)::text = '10'::text)
+(9 rows)
+
+explain (verbose on, costs off) select * from tcol where c1::bigint = 10;
+WARNING:  Statistics in some tables or columns(public.tcol.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                   QUERY PLAN                   
+------------------------------------------------
+ Row Adapter
+   Output: c1, c2
+   ->  Vector Streaming (type: GATHER)
+         Output: c1, c2
+         Node/s: All datanodes
+         ->  CStore Scan on public.tcol
+               Output: c1, c2
+               Distribute Key: c1
+               Filter: ((tcol.c1)::bigint = 10)
+(9 rows)
+
+explain (verbose on, costs off, analyze on) select * from tcol where c1 = 10;
+ERROR:  There is no optional index path for index column: "tcol"."c1".
+Please check for potential performance problem.
+drop table if exists tcol;
+-- 2.2 row table
+drop table if exists trow;
+NOTICE:  table "trow" does not exist, skipping
+create table trow (c1 varchar, c2 varchar) distribute by hash(c1);
+create index on trow(c1);
+explain (verbose on, costs off) select * from trow where c1 = 10;
+ERROR:  There is no optional index path for index column: "trow"."c1".
+Please check for potential performance problem.
+explain (verbose on, costs off) select * from trow where c1 = 10::varchar;
+WARNING:  Statistics in some tables or columns(public.trow.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                     QUERY PLAN                     
+----------------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2
+   Node/s: datanode7
+   ->  Index Scan using trow_c1_idx on public.trow
+         Output: c1, c2
+         Distribute Key: c1
+         Index Cond: ((trow.c1)::text = '10'::text)
+(7 rows)
+
+explain (verbose on, costs off) select * from trow where c1::bigint = 10;
+WARNING:  Statistics in some tables or columns(public.trow.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                QUERY PLAN                
+------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2
+   Node/s: All datanodes
+   ->  Seq Scan on public.trow
+         Output: c1, c2
+         Distribute Key: c1
+         Filter: ((trow.c1)::bigint = 10)
+(7 rows)
+
+drop table if exists trow;
+-- 2.3 temp table
+drop table if exists ttemp;
+NOTICE:  table "ttemp" does not exist, skipping
+create temp table ttemp (c1 varchar, c2 varchar) distribute by hash(c1);
+create index on ttemp(c1);
+explain (verbose on, costs off) select * from ttemp where c1 = 10;
+ERROR:  There is no optional index path for index column: "ttemp"."c1".
+Please check for potential performance problem.
+explain (verbose on, costs off) select * from ttemp where c1 = 10::varchar;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+ Streaming (type: GATHER)
+   Output: c1, c2
+   Node/s: datanode7
+--?.*
+         Output: c1, c2
+         Distribute Key: c1
+         Index Cond: ((ttemp.c1)::text = '10'::text)
+(7 rows)
+
+explain (verbose on, costs off) select * from ttemp where c1::bigint = 10;
+--?.*
+HINT:  Do analyze for them in order to generate optimized plan.
+--?.*
+--?.*
+ Streaming (type: GATHER)
+   Output: c1, c2
+   Node/s: All datanodes
+--?.*
+         Output: c1, c2
+         Distribute Key: c1
+         Filter: ((ttemp.c1)::bigint = 10)
+(7 rows)
+
+drop table if exists ttemp;
+-- 3. multi column index
+drop table if exists tmulcol;
+NOTICE:  table "tmulcol" does not exist, skipping
+create table tmulcol(c1 varchar, c2 varchar, c3 varchar) distribute by hash(c1);
+create index on tmulcol(c1, c2, c3);
+explain (verbose on, costs off) select * from tmulcol where c1=10;
+ERROR:  There is no optional index path for index column: "tmulcol"."c1".
+Please check for potential performance problem.
+explain (verbose on, costs off) select * from tmulcol where c2=10;
+ERROR:  There is no optional index path for index column: "tmulcol"."c2".
+Please check for potential performance problem.
+explain (verbose on, costs off) select * from tmulcol where c3=10;
+ERROR:  There is no optional index path for index column: "tmulcol"."c3".
+Please check for potential performance problem.
+explain (verbose on, costs off) select * from tmulcol where c1=10::varchar;
+WARNING:  Statistics in some tables or columns(public.tmulcol.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2, c3
+   Node/s: datanode7
+   ->  Index Only Scan using tmulcol_c1_c2_c3_idx on public.tmulcol
+         Output: c1, c2, c3
+         Distribute Key: c1
+         Index Cond: (tmulcol.c1 = '10'::text)
+(7 rows)
+
+explain (verbose on, costs off) select * from tmulcol where c2=10::varchar;
+WARNING:  Statistics in some tables or columns(public.tmulcol.c1, public.tmulcol.c2) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2, c3
+   Node/s: All datanodes
+   ->  Index Only Scan using tmulcol_c1_c2_c3_idx on public.tmulcol
+         Output: c1, c2, c3
+         Distribute Key: c1
+         Index Cond: (tmulcol.c2 = '10'::text)
+(7 rows)
+
+explain (verbose on, costs off) select * from tmulcol where c3=10::varchar;
+WARNING:  Statistics in some tables or columns(public.tmulcol.c1, public.tmulcol.c3) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2, c3
+   Node/s: All datanodes
+   ->  Index Only Scan using tmulcol_c1_c2_c3_idx on public.tmulcol
+         Output: c1, c2, c3
+         Distribute Key: c1
+         Index Cond: (tmulcol.c3 = '10'::text)
+(7 rows)
+
+explain (verbose on, costs off) select * from tmulcol where c1::bigint=10;
+WARNING:  Statistics in some tables or columns(public.tmulcol.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                 QUERY PLAN                  
+---------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2, c3
+   Node/s: All datanodes
+   ->  Seq Scan on public.tmulcol
+         Output: c1, c2, c3
+         Distribute Key: c1
+         Filter: ((tmulcol.c1)::bigint = 10)
+(7 rows)
+
+explain (verbose on, costs off) select * from tmulcol where c2::bigint=10;
+WARNING:  Statistics in some tables or columns(public.tmulcol.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                 QUERY PLAN                  
+---------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2, c3
+   Node/s: All datanodes
+   ->  Seq Scan on public.tmulcol
+         Output: c1, c2, c3
+         Distribute Key: c1
+         Filter: ((tmulcol.c2)::bigint = 10)
+(7 rows)
+
+explain (verbose on, costs off) select * from tmulcol where c3::bigint=10;
+WARNING:  Statistics in some tables or columns(public.tmulcol.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                 QUERY PLAN                  
+---------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2, c3
+   Node/s: All datanodes
+   ->  Seq Scan on public.tmulcol
+         Output: c1, c2, c3
+         Distribute Key: c1
+         Filter: ((tmulcol.c3)::bigint = 10)
+(7 rows)
+
+drop table if exists tmulcol;
+-- 4. express index
+drop table if exists texpr;
+NOTICE:  table "texpr" does not exist, skipping
+create table texpr(c1 varchar, c2 varchar, c3 varchar) distribute by hash(c1);
+create index on texpr(substr(c1, 1, 4));
+explain (verbose on, costs off) select * from texpr where substr(c1, 1, 4) = 10;
+WARNING:  Statistics in some tables or columns(public.texpr.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2, c3
+   Node/s: All datanodes
+   ->  Seq Scan on public.texpr
+         Output: c1, c2, c3
+         Distribute Key: c1
+         Filter: ((substr((texpr.c1)::text, 1, 4))::bigint = 10)
+(7 rows)
+
+explain (verbose on, costs off) select * from texpr where substr(c1, 1, 4) = 10::varchar;
+WARNING:  Statistics in some tables or columns(public.texpr.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2, c3
+   Node/s: All datanodes
+   ->  Bitmap Heap Scan on public.texpr
+         Output: c1, c2, c3
+         Distribute Key: c1
+         Recheck Cond: (substr((texpr.c1)::text, 1, 4) = '10'::text)
+         ->  Bitmap Index Scan on texpr_substr_idx
+               Index Cond: (substr((texpr.c1)::text, 1, 4) = '10'::text)
+(9 rows)
+
+explain (verbose on, costs off) select * from texpr where substr(c1, 1, 4)::bigint = 10;
+WARNING:  Statistics in some tables or columns(public.texpr.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2, c3
+   Node/s: All datanodes
+   ->  Seq Scan on public.texpr
+         Output: c1, c2, c3
+         Distribute Key: c1
+         Filter: ((substr((texpr.c1)::text, 1, 4))::bigint = 10)
+(7 rows)
+
+drop table if exists texpr;
+-- 5. type category
+drop table if exists ttypecategory;
+NOTICE:  table "ttypecategory" does not exist, skipping
+create table ttypecategory(c1 varchar, c2 varchar) distribute by hash(c1);
+create index on ttypecategory(c1);
+explain (verbose on, costs off) select * from ttypecategory where c1 = true;
+ERROR:  There is no optional index path for index column: "ttypecategory"."c1".
+Please check for potential performance problem.
+explain (verbose on, costs off) select * from ttypecategory where c1 = true::varchar;
+WARNING:  Statistics in some tables or columns(public.ttypecategory.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2
+   Node/s: datanode5
+   ->  Index Scan using ttypecategory_c1_idx on public.ttypecategory
+         Output: c1, c2
+         Distribute Key: c1
+         Index Cond: ((ttypecategory.c1)::text = 'true'::text)
+(7 rows)
+
+explain (verbose on, costs off) select * from ttypecategory where c1::boolean = true;
+WARNING:  Statistics in some tables or columns(public.ttypecategory.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                 QUERY PLAN                  
+---------------------------------------------
+ Streaming (type: GATHER)
+   Output: c1, c2
+   Node/s: All datanodes
+   ->  Seq Scan on public.ttypecategory
+         Output: c1, c2
+         Distribute Key: c1
+         Filter: (ttypecategory.c1)::boolean
+(7 rows)
+
+drop table if exists ttypecategory;
+-- 6. sub query
+drop table if exists tsubquery1;
+NOTICE:  table "tsubquery1" does not exist, skipping
+drop table if exists tsubquery2;
+NOTICE:  table "tsubquery2" does not exist, skipping
+create table tsubquery1(c1 int, c2 varchar, c3 varchar) distribute by hash(c1);
+create table tsubquery2(c1 varchar, c2 varchar) distribute by hash(c1);
+explain (verbose on, costs off) select * from tsubquery1 where c1 in (select c1 from tsubquery2 where tsubquery1.c1=tsubquery2.c1);
+WARNING:  Statistics in some tables or columns(public.tsubquery2.c1, public.tsubquery1.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: tsubquery1.c1, tsubquery1.c2, tsubquery1.c3
+   Node/s: All datanodes
+   ->  Seq Scan on public.tsubquery1
+         Output: tsubquery1.c1, tsubquery1.c2, tsubquery1.c3
+         Distribute Key: tsubquery1.c1
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Result
+                 Output: tsubquery2.c1
+                 Filter: (tsubquery1.c1 = (tsubquery2.c1)::bigint)
+                 ->  Materialize
+                       Output: tsubquery2.c1
+                       ->  Streaming(type: BROADCAST)
+                             Output: tsubquery2.c1
+                             Spawn on: All datanodes
+                             Consumer Nodes: All datanodes
+                             ->  Seq Scan on public.tsubquery2
+                                   Output: tsubquery2.c1
+                                   Distribute Key: tsubquery2.c1
+(20 rows)
+
+explain (verbose on, costs off) select * from tsubquery2 where c1 in (select c1 from tsubquery1 where tsubquery1.c1=tsubquery2.c1);
+WARNING:  Statistics in some tables or columns(public.tsubquery1.c1, public.tsubquery2.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: tsubquery2.c1, tsubquery2.c2
+   Node/s: All datanodes
+   ->  Seq Scan on public.tsubquery2
+         Output: tsubquery2.c1, tsubquery2.c2
+         Distribute Key: tsubquery2.c1
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Result
+                 Output: tsubquery1.c1
+                 Filter: (tsubquery1.c1 = (tsubquery2.c1)::bigint)
+                 ->  Materialize
+                       Output: tsubquery1.c1
+                       ->  Streaming(type: BROADCAST)
+                             Output: tsubquery1.c1
+                             Spawn on: All datanodes
+                             Consumer Nodes: All datanodes
+                             ->  Seq Scan on public.tsubquery1
+                                   Output: tsubquery1.c1
+                                   Distribute Key: tsubquery1.c1
+(20 rows)
+
+drop table if exists tsubquery1;
+drop table if exists tsubquery2;
+-- 7. insert_update
+drop table if exists tidk;
+NOTICE:  table "tidk" does not exist, skipping
+CREATE TEMPORARY TABLE tidk (
+    col1 INT,
+    col2 TEXT PRIMARY KEY,
+    col3 VARCHAR DEFAULT '1',
+    col4 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    col5 INTEGER(10, 5) DEFAULT RANDOM()
+) DISTRIBUTE BY hash(col2);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tidk_pkey" for table "tidk"
+INSERT INTO tidk VALUES (1, 1) ON DUPLICATE KEY UPDATE col1 = 30;
+ERROR:  There is no optional index path for index column: "tidk"."col2".
+Please check for potential performance problem.
+drop table if exists tidk;
+-- 8. transaction
+drop table if exists ttrans;
+NOTICE:  table "ttrans" does not exist, skipping
+create table ttrans (c1 varchar, c2 varchar) distribute by hash(c1);
+create index on ttrans(c1);
+start transaction;
+select * from ttrans where c1 = 10;
+ERROR:  There is no optional index path for index column: "ttrans"."c1".
+Please check for potential performance problem.
+commit;
+drop table if exists ttrans;
+-- 9. insert / delete / update
+drop table if exists tiud;
+NOTICE:  table "tiud" does not exist, skipping
+create table tiud(c1 varchar, c2 varchar) distribute by hash(c1);
+create index on tiud(c1);
+insert into tiud select * from tiud where c1=10;
+ERROR:  There is no optional index path for index column: "tiud"."c1".
+Please check for potential performance problem.
+delete from tiud where c1 = 10;
+ERROR:  There is no optional index path for index column: "tiud"."c1".
+Please check for potential performance problem.
+update tiud set c2=10 where c1=10;
+ERROR:  There is no optional index path for index column: "tiud"."c1".
+Please check for potential performance problem.
+drop table if exists ttrans;
+NOTICE:  table "ttrans" does not exist, skipping
+drop table if exists ttmp1;
+NOTICE:  table "ttmp1" does not exist, skipping
+create table ttmp1(c1 tinyint) distribute by hash(c1);
+create index on ttmp1(c1);
+set check_implicit_conversions=on;
+select count(*) from ttmp1 where c1=1;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from ttmp1 where c1=1;
+ERROR:  There is no optional index path for index column: "ttmp1"."c1".
+Please check for potential performance problem.
+reset check_implicit_conversions;

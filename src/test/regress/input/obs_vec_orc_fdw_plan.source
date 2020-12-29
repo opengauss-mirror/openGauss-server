@@ -1,0 +1,254 @@
+--test orc foreign data wrapper.
+--
+
+-- Settings to make the result deterministic
+SET datestyle = "ISO, YMD";
+set enable_hdfs_predicate_pushdown=false;
+
+--Unit 1. test plan without distributed clause
+DROP FOREIGN TABLE IF EXISTS lineitem;
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (address '@obshostname@', type 'obs', access_key '@ak@', secret_access_key '@sk@');
+create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/lineitem_orc11_two_64stripe/000000_0/,/@obsbucket@/obsorccheck/mppdb.db/lineitem_orc11_two_64stripe/000001_0/') distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS nation;
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/000000_0/') distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS region;
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/000000_0/') distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS part;
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT,
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/part_orc11_64stripe/000000_0/') distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS supplier;
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/supplier_orc11_64stripe/000000_0/') distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS partsupp;
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/partsupp_orc11_64stripe/000000_0/') distribute by roundrobin;
+
+explain (verbose, costs off, nodes off) SELECT L_SHIPDATE FROM lineitem WHERE L_orderkey BETWEEN 509050 AND 509070;
+
+explain (verbose, costs off, nodes off) SELECT count(L_SHIPDATE) FROM lineitem WHERE L_orderkey BETWEEN 509050 AND 509070;
+
+explain (verbose, costs off, nodes off) select n_name, r_name from nation join region on n_regionkey=r_regionkey;
+
+explain (verbose, costs off, nodes off)
+select
+  s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+from
+  nation n join region r
+on
+  n.n_regionkey = r.r_regionkey and n.n_name = 'FRANCE'
+join
+  supplier s
+on
+  s.s_nationkey = n.n_nationkey
+join
+  partsupp ps
+on
+  s.s_suppkey = ps.ps_suppkey
+join
+  part p
+on
+  p.p_partkey = ps.ps_partkey and p.p_size = 15 and p.p_type like '%BRASS';
+
+--Test Unit 2: distributed foreign table
+DROP FOREIGN TABLE IF EXISTS lineitem;
+Create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/lineitem_orc11_64stripe/') distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS customer;
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/000000_0/') distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS orders;
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/orders_orc11_64stripe/')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS part;
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT, 
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/part_orc11_64stripe/000000_0/') distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS supplier;
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/supplier_orc11_64stripe/000000_0/') distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS partsupp;
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/partsupp_orc11_64stripe/000000_0/') distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS nation;
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/000000_0/') distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS region;
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/000000_0/') distribute by roundrobin;
+
+-- there are bugs for the following three queries. cause EOF error from datanode
+explain (verbose, costs off, nodes off) SELECT L_shipdate FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+explain (verbose, costs off, nodes off) SELECT count(L_shipdate) FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+
+-- TPCH - Q1
+explain (verbose, costs off, nodes off) SELECT 
+  L_RETURNFLAG, L_LINESTATUS, SUM(L_QUANTITY), SUM(L_EXTENDEDPRICE), SUM(L_EXTENDEDPRICE*(1-L_DISCOUNT)), SUM(L_EXTENDEDPRICE*(1-L_DISCOUNT)*(1+L_TAX)), AVG(L_QUANTITY), AVG(L_EXTENDEDPRICE), AVG(L_DISCOUNT), COUNT(1) 
+FROM 
+  lineitem 
+WHERE 
+  L_SHIPDATE<='1998-09-02' 
+GROUP BY L_RETURNFLAG, L_LINESTATUS 
+ORDER BY L_RETURNFLAG, L_LINESTATUS;
+
+--TPCH - Q2
+explain (verbose, costs off, nodes off) select 
+  s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment 
+from 
+  nation n join region r 
+on 
+  n.n_regionkey = r.r_regionkey and n.n_name = 'FRANCE' 
+join 
+  supplier s 
+on 
+  s.s_nationkey = n.n_nationkey 
+join 
+  partsupp ps 
+on  
+  s.s_suppkey = ps.ps_suppkey 
+join 
+  part p 
+on 
+  p.p_partkey = ps.ps_partkey and p.p_size = 15 and p.p_type like '%BRASS';
+
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+DROP SERVER obs_server CASCADE;

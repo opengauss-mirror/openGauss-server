@@ -21,8 +21,11 @@
 #include "knl/knl_variable.h"
 #include "replication/dataqueuedefs.h"
 #include "replication/replicainternal.h"
+#include "replication/libpqwalreceiver.h"
+#include "replication/obswalreceiver.h"
 #include "storage/latch.h"
 #include "storage/spin.h"
+#include "pgxc/barrier.h"
 
 /*
  * MAXCONNINFO: maximum size of a connection string.
@@ -35,6 +38,10 @@
 
 #define DUMMY_STANDBY_DATADIR "base/dummy_standby"
 
+#define CHECK_MSG_SIZE(msglen, structType, errmsg)\
+    if (msglen != sizeof(structType)) \
+        ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), \
+            errmsg_internal(errmsg)));
 /* Can we allow the standby to accept replication connection from another standby? */
 #define AllowCascadeReplication() \
     (g_instance.attr.attr_storage.EnableHotStandby && g_instance.attr.attr_storage.max_wal_senders > 0)
@@ -78,8 +85,7 @@ typedef struct WalRcvCtlBlock {
     char walReceiverBuffer[FLEXIBLE_ARRAY_MEMBER];
 } WalRcvCtlBlock;
 
-typedef enum { REPCONNTARGET_DEFAULT, REPCONNTARGET_PRIMARY,
-    REPCONNTARGET_DUMMYSTANDBY, REPCONNTARGET_STANDBY } ReplConnTarget;
+typedef enum { REPCONNTARGET_DEFAULT, REPCONNTARGET_PRIMARY, REPCONNTARGET_DUMMYSTANDBY, REPCONNTARGET_STANDBY, REPCONNTARGET_OBS } ReplConnTarget;
 
 /* Shared memory area for management of walreceiver process */
 typedef struct WalRcvData {
@@ -97,7 +103,7 @@ typedef struct WalRcvData {
 
     ServerMode peer_role;
     bool isRuning;
-    /* walsender and walreceiver xlog locations */
+    /*walsender and walreceiver xlog locations*/
     XLogRecPtr sender_sent_location;
     XLogRecPtr sender_write_location;
     XLogRecPtr sender_flush_location;
@@ -180,13 +186,28 @@ typedef struct WalRcvData {
 
     Latch* walrcvWriterLatch;
     WalRcvCtlBlock* walRcvCtlBlock;
-
     slock_t mutex; /* locks shared variables shown above */
+    slock_t exitLock;
+    char recoveryTargetBarrierId[MAX_BARRIER_ID_LENGTH];
+    char recoveryStopBarrierId[MAX_BARRIER_ID_LENGTH];
+    char lastRecoveredBarrierId[MAX_BARRIER_ID_LENGTH];
+    XLogRecPtr lastRecoveredBarrierLSN;
+    Latch* obsArchLatch;
 } WalRcvData;
+
+typedef struct WalReceiverFunc {
+    bool (*walrcv_connect)(char* conninfo, XLogRecPtr* startpoint, char* slotname, int channel_identifier);
+    bool (*walrcv_receive)(int timeout, unsigned char* type, char** buffer, int* len);
+    void (*walrcv_send)(const char *buffer, int nbytes);
+    void (*walrcv_disconnect)();
+} WalReceiverFunc;
+
+extern const WalReceiverFunc WalReceiverFuncTable[];
 
 extern XLogRecPtr latestValidRecord;
 extern pg_crc32 latestRecordCrc;
 
+extern const char *g_reserve_param[RESERVE_SIZE];
 extern bool ws_dummy_data_writer_use_file;
 extern THR_LOCAL uint32 ws_dummy_data_read_file_num;
 
@@ -195,7 +216,7 @@ extern void WalReceiverMain(void);
 extern void walrcvWriterMain(void);
 
 /* prototypes for functions in walrcvwriter.cpp */
-extern int WalDataRcvWrite();
+extern int WalDataRcvWrite(void);
 
 extern void WSDataRcvCheck(char* data_buf, Size nbytes);
 
@@ -209,14 +230,13 @@ extern void RequestXLogStreaming(
     XLogRecPtr* recptr, const char* conninfo, ReplConnTarget conn_target, const char* slotname);
 extern StringInfo get_rcv_slot_name(void);
 extern XLogRecPtr GetWalRcvWriteRecPtr(XLogRecPtr* latestChunkStart);
+extern XLogRecPtr GetWalStartPtr();
 extern bool WalRcvAllReplayIsDone();
 extern bool WalRcvIsDone();
 extern int GetReplicationApplyDelay(void);
 extern int GetReplicationTransferLatency(void);
 extern int GetWalRcvDummyStandbySyncPercent(void);
 extern void SetWalRcvDummyStandbySyncPercent(int percent);
-extern XLogRecPtr GetWalRcvWriteLsn(XLogRecPtr* latestChunkStart);
-
 extern void CloseWSDataFileOnDummyStandby(void);
 extern void InitWSDataNumOnDummyStandby(void);
 
@@ -244,5 +264,21 @@ extern void WalRcvSetPercentCountStartLsn(XLogRecPtr startLsn);
 extern void clean_failover_host_conninfo_for_dummy(void);
 extern void set_failover_host_conninfo_for_dummy(const char *remote_host, int remote_port);
 extern void get_failover_host_conninfo_for_dummy(int *repl);
-#endif /* _WALRECEIVER_H */
+extern void set_wal_rcv_write_rec_ptr(XLogRecPtr rec_ptr);
+extern void setObsArchLatch(const Latch* latch);
 
+
+static inline void WalRcvCtlAcquireExitLock(void)
+{
+    /* use volatile pointer to prevent code rearrangement */
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    SpinLockAcquire(&walrcv->exitLock);
+}
+
+static inline void WalRcvCtlReleaseExitLock(void)
+{
+    /* use volatile pointer to prevent code rearrangement */
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    SpinLockRelease(&walrcv->exitLock);
+}
+#endif /* _WALRECEIVER_H */

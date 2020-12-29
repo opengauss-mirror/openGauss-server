@@ -1,0 +1,269 @@
+--
+----Prepare
+--
+drop table if exists t1;
+drop table if exists t2;
+drop table if exists t3;
+
+create table t1 (a int2, b int4, c int8);
+create table t2 (a int2, b int4, c int8);
+create table t3 (a int2, b int4, c int8);
+
+copy t1 from '@abs_srcdir@/data/quality_derive1.data';
+copy t2 from '@abs_srcdir@/data/quality_derive2.data';
+copy t3 from '@abs_srcdir@/data/quality_derive3.data';
+
+analyze t1;
+analyze t2;
+analyze t3;
+
+--
+----Inner Join
+--
+--T_Var
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b = t2.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from (select t1.* from t1 inner join t2 on t1.b = t2.b) t where t.b < 50 order by 1, 2, 3;
+select * from (select t1.* from t1 inner join t2 on t1.b = t2.b) t where t.b < 50 order by 1, 2, 3;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where t2.b = 2 or t2.b = 3 order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b = t2.b where t2.b = 2 or t2.b = 3 order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where t2.b in (2, 3) order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b = t2.b where t2.b in (2, 3) order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b+ t1.a = t2.b where t1.b + t1.a < 50 order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b+ t1.a = t2.b where t1.b + t1.a < 50 order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t2.b = t3.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t2.b = t3.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where t1.b < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where t1.b < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where t1.b in (8, 84, 80, 24, 48) order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where t1.b in (8, 84, 80, 24, 48) order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where t2.b = 2 or t2.b = 3 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where t2.b = 2 or t2.b = 3 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) < 50 order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) < 50 order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from (select t1.* from t1 inner join t2 on t1.b = t2.b) t where abs(t.b) < 50 order by 1, 2, 3;
+select * from (select t1.* from t1 inner join t2 on t1.b = t2.b) t where abs(t.b) < 50 order by 1, 2, 3;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) = 71 or abs(t2.b) = 39 order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) = 71 or abs(t2.b) = 39 order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) in (71, 39) order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) in (71, 39) order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b+ t1.a = t2.b where abs(t1.b + t1.a) < 50 order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b+ t1.a = t2.b where abs(t1.b + t1.a) < 50 order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t2.b = t3.b where abs(t2.b) < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t2.b = t3.b where abs(t2.b) < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where abs(t1.b) < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where abs(t1.b) < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where abs(t2.b) < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where abs(t2.b) < 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where abs(t1.b) in (8, 24, 48, 52, 84) order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = 2*t2.b inner join t3 on t2.b = 2*t3.b where abs(t1.b) in (8, 24, 48, 52, 84) order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) = 71 order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b = t2.b where abs(t2.b) = 71 order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from (select t2.* from t1 inner join t2 on t1.b = t2.b) t where abs(t.b) = 71 order by 1, 2, 3;
+select * from (select t2.* from t1 inner join t2 on t1.b = t2.b) t where abs(t.b) = 71 order by 1, 2, 3;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b::float = t2.b where abs(t2.b::float) = 71 order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b::float = t2.b where abs(t2.b::float) = 71 order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where to_timestamp(t2.b, 'SSSSS') > '0001-01-01 00:00:50 BC' order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b = t2.b where to_timestamp(t2.b, 'SSSSS') > '0001-01-01 00:00:50 BC' order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where greatest(t2.b, 10) = 10 order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b = t2.b where greatest(t2.b, 10) = 10 order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where greatest(t2.b, 20) = 20 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where greatest(t2.b, 20) = 20 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where least(t2.b, 50) = 50 order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b = t2.b where least(t2.b, 50) = 50 order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where least(t2.b, 50) = 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where least(t2.b, 50) = 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b where dsqrt(t2.b) = 6 order by 1, 2, 3, 4, 5, 6;
+select * from t1 inner join t2 on t1.b = t2.b where dsqrt(t2.b) = 6 order by 1, 2, 3, 4, 5, 6;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where floor(dsqrt(t2.b)) = 6 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = t2.b inner join t3 on t3.b = t2.b where floor(dsqrt(t2.b)) = 6 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b  and t1.b > 3 right join t3 on t3.b = t2.b order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = t2.b  and t1.b > 3 right join t3 on t3.b = t2.b order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+explain (verbose on, costs off)
+select * from t1 inner join t2 on t1.b = t2.b  and t1.b > 3 left join t3 on t3.c = t2.c order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 inner join t2 on t1.b = t2.b  and t1.b > 3 left join t3 on t3.c = t2.c order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+--
+----Outer Join
+--
+--SUCESS
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6;
+select * from t1 left join t2 on t1.b = t2.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6;
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 right join t2 on t1.b = t2.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6;
+select * from t1 right join t2 on t1.b = t2.b where t2.b < 50 order by 1, 2, 3, 4, 5, 6;
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b where t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+select * from t1 left join t2 on t1.b = t2.b where t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+
+--SUCESS
+explain (verbose on, costs off)
+select * from t1 right join t2 on t1.b = t2.b where t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+select * from t1 right join t2 on t1.b = t2.b where t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b and t2.b < 10 order by 1, 2, 3, 4, 5, 6;
+select * from t1 left join t2 on t1.b = t2.b and t2.b < 10 order by 1, 2, 3, 4, 5, 6;
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 right join t2 on t1.b = t2.b and t2.b < 10 order by 1, 2, 3, 4, 5, 6;
+select * from t1 right join t2 on t1.b = t2.b and t2.b < 10 order by 1, 2, 3, 4, 5, 6;
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b and t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+select * from t1 left join t2 on t1.b = t2.b and t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 right join t2 on t1.b = t2.b and t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+select * from t1 right join t2 on t1.b = t2.b and t1.b < 10 order by 1, 2, 3, 4, 5, 6;
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b left join t3 on t2.b = t3.b where t1.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 left join t2 on t1.b = t2.b left join t3 on t2.b = t3.b where t1.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+--SUCESS
+explain (verbose on, costs off)
+select * from t1 right join t2 on t1.b = t2.b right join t3 on t2.b = t3.b where t1.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 right join t2 on t1.b = t2.b right join t3 on t2.b = t3.b where t1.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+--FAILED
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b left join t3 on t2.b = t3.b where t2.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 left join t2 on t1.b = t2.b left join t3 on t2.b = t3.b where t2.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+-- SUCESS
+explain (verbose on, costs off)
+select * from t1 left join t2 on t1.b = t2.b left join t3 on t2.b = t3.b where t3.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 left join t2 on t1.b = t2.b left join t3 on t2.b = t3.b where t3.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+-- FAILED
+explain (verbose on, costs off)
+select * from t1 right join t2 on t1.b = t2.b right join t3 on t2.b = t3.b where t3.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+select * from t1 right join t2 on t1.b = t2.b right join t3 on t2.b = t3.b where t3.b > 50 order by 1, 2, 3, 4, 5, 6, 7, 8, 9;
+
+--
+---- muti-equality clause
+--
+explain (verbose on, costs off)
+select count(*) from t1 inner join t2 on t1.a::int=t2.a and t1.a::int=t2.b where t2.b<10;
+
+explain (verbose on, costs off)
+select count(*) from t1 inner join t2 on t1.a=t2.a and t1.a=t2.b where t2.b<10;
+--
+--- Clean up
+--
+drop table t1;
+drop table t2;
+drop table t3;
+
+--
+----Prepare
+--
+create table t1(id bigint, name varchar2);
+insert into t1 values(1,'apple');
+insert into t1 values(2,'banana');
+insert into t1 values(3,'coconut');
+
+create table t2(name varchar2, price number);
+insert into t2 values('apple',1.99);
+insert into t2 values('banana',0.99);
+insert into t2 values('coconut',0.5);
+
+analyze t1;
+analyze t2;
+
+explain (verbose on, costs off)
+select t1.id,t1.name,t2.price from t1 join t2 on t1.name=t2.name where t1.name='apple';
+ 
+explain (verbose on, costs off)
+select t1.id,t1.name,t2.price from t1 join t2 on t1.name=t2.name where t1.name!='apple';
+ 
+explain (verbose on, costs off)
+select t1.id,t1.name,t2.price from t1 join t2 on t1.name=t2.name where t1.name>'apple';
+ 
+explain (verbose on, costs off)
+select t1.id,t1.name,t2.price from t1 join t2 on t1.name=t2.name where t1.name<'apple';
+ 
+explain (verbose on, costs off)
+select t1.id,t1.name,t2.price from t1 join t2 on t1.name=t2.name where t1.name like 'a%';
+ 
+explain (verbose on, costs off)
+select t1.id,t1.name,t2.price from t1 join t2 on t1.name=t2.name where substr(t1.name,1,2) in ('ap','co');
+
+--
+--- Clean up
+--
+drop table t1;
+drop table t2;

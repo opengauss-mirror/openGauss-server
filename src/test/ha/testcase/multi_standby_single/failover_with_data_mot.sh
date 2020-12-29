@@ -12,7 +12,7 @@ query_primary
 #create table
 gsql -d $db -p $dn1_primary_port -c "DROP FOREIGN TABLE if exists cstore_copy_t1; create FOREIGN table cstore_copy_t1(c1 int2, c2 int4, c3 int8, c4 char(10), c5 varchar(12),c6 numeric(10,2)) SERVER mot_server;"
 
-gsql -d $db -p $dn1_primary_port -c "copy cstore_copy_t1 from '$g_data_path/datanode1/pg_copydir/cstore_copy_t1.data' delimiter '|';"
+gsql -d $db -p $dn1_primary_port -c "copy cstore_copy_t1 from '$scripts_dir/data/cstore_copy_t1.data' delimiter '|';"
 
 #test the copy results on dn1_primary
 if [ $(gsql -d $db -p $dn1_primary_port -c "select count(1) from cstore_copy_t1;" | grep `expr 1 \* $cstore_rawdata_lines` |wc -l) -eq 1 ]; then
@@ -28,7 +28,7 @@ kill_standby
 
 
 #copy data(25M) to primary
-gsql -d $db -p $dn1_primary_port -c "copy cstore_copy_t1 from '$g_data_path/datanode1/pg_copydir/cstore_copy_t1.data' delimiter '|';"
+gsql -d $db -p $dn1_primary_port -c "copy cstore_copy_t1 from '$scripts_dir/data/cstore_copy_t1.data' delimiter '|';"
 
 
 #kill the primary_node_name
@@ -60,7 +60,7 @@ sleep 2
 echo `date`
 
 #sh testcase/multi_standby/datareplica_cstore_failover.sh
-gs_ctl build -D $data_dir/datanode1_standby 
+gs_ctl build -D $data_dir/datanode1_standby -Z single_node
 
 echo "after build----"
 

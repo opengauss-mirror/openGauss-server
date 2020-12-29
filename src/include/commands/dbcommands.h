@@ -58,6 +58,8 @@ extern void AlterDatabaseOwner(const char* dbname, Oid newOwnerId);
 
 extern Oid get_database_oid(const char* dbname, bool missingok);
 extern char* get_database_name(Oid dbid);
+extern char* get_and_check_db_name(Oid dbid, bool is_ereport = false);
+extern bool have_createdb_privilege(void);
 
 extern void dbase_redo(XLogReaderState* rptr);
 extern void dbase_desc(StringInfo buf, XLogReaderState* record);
@@ -75,4 +77,3 @@ extern void PreCleanAndCheckConns(const char* dbname, bool missing_ok);
 extern List* HDFSTablespaceDirExistDatabase(Oid db_id);
 
 #endif /* DBCOMMANDS_H */
-

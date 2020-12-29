@@ -1,0 +1,15 @@
+--not really to use.
+create table redistable."redis_table_10801_table_with_ blank"(c1 int, c2 text);
+create table redistable."redis_table_10802_table_with_\slash"(c1 int, c2 text);
+create table redistable."redis_table_10803_table_with_\ slash_blank"(c1 int, c2 text);
+create table redistable."redis_table_10804_table_with_looooooooooooooooooooooooooooooongname"(c1 int, c2 text);
+NOTICE:  identifier "redis_table_10804_table_with_looooooooooooooooooooooooooooooongname" will be truncated to "redis_table_10804_table_with_looooooooooooooooooooooooooooooong"
+create table redistable."redis_table_10805_table_with_'single_quote'"(c1 int, c2 text);
+create table redistable."redis_table_10806_table_with_""double_quote"""(c1 int, c2 text);
+create table redistable."redis_table_10807_table_with_'single_quote'_and_loooooooooooongname"(c1 int, c2 text);
+NOTICE:  identifier "redis_table_10807_table_with_'single_quote'_and_loooooooooooongname" will be truncated to "redis_table_10807_table_with_'single_quote'_and_loooooooooooong"
+create table redistable."redis_table_10808_table_with_""double_quote""_and_loooooooooooongname"(c1 int, c2 text);
+NOTICE:  identifier "redis_table_10808_table_with_"double_quote"_and_loooooooooooongname" will be truncated to "redis_table_10808_table_with_"double_quote"_and_loooooooooooong"
+create table redistable."redis_table_10809_table_with_$dollar$"(c1 int, c2 text);
+create table redistable."redis_table_10810_table_with_$$dollar_dollar$$"(c1 int, c2 text);
+create table redistable.todrop(c1 int,c2 text);

@@ -81,18 +81,18 @@ typedef struct UserData {
     bool is_dirty;             /* userinfo is dirty, temorarily used in BuildUserInfoHash*/
     unsigned char adjust;      /* adjust space flag */
     unsigned char keepdata;    /* keep memory size */
-    uint64 totalspace;         /* user used total space */
-    uint64 global_totalspace;  /* user used total space on all cns and dns in bytes*/
-    uint64 reAdjustPermSpace;  /* for wlm_readjust_user_space */
-    uint64 spacelimit;         /* user space limit in bytes*/
+    int64 totalspace;         /* user used total space */
+    int64 global_totalspace;  /* user used total space on all cns and dns in bytes*/
+    int64 reAdjustPermSpace;  /* for wlm_readjust_user_space */
+    int64 spacelimit;         /* user space limit in bytes*/
     bool spaceUpdate;          /* user used total space or temp space updated ? */
-    uint64 tmpSpace;           /* user used temp space in bytes */
-    uint64 globalTmpSpace;     /* user used temp space on all cns and dns in bytes */
-    uint64 reAdjustTmpSpace;   /* for wlm_readjust_user_space */
-    uint64 tmpSpaceLimit;      /* user temp space limit in bytes */
-    uint64 spillSpace;         /* user used spill space in bytes */
-    uint64 globalSpillSpace;   /* user used spill space on all cns and dns in bytes */
-    uint64 spillSpaceLimit;    /* user spill space limit in bytes */
+    int64 tmpSpace;           /* user used temp space in bytes */
+    int64 globalTmpSpace;     /* user used temp space on all cns and dns in bytes */
+    int64 reAdjustTmpSpace;   /* for wlm_readjust_user_space */
+    int64 tmpSpaceLimit;      /* user temp space limit in bytes */
+    int64 spillSpace;         /* user used spill space in bytes */
+    int64 globalSpillSpace;   /* user used spill space on all cns and dns in bytes */
+    int64 spillSpaceLimit;    /* user spill space limit in bytes */
     Oid rpoid;                 /* resource pool in htab */
     int memsize;               /* user used memory */
     int usedCpuCnt;            /* average used CPU counts */
@@ -112,9 +112,22 @@ typedef struct UserData {
         if (this->userid == *userid)
             return 0;
 
-        return this->userid < *userid ? 1 : -1;
+        return ((this->userid < *userid) ? 1 : -1);
     }
 } UserData;
+
+/* used for BuildUserInfoHash function, avoid dead lock */
+typedef struct TmpUserData {
+    Oid             userid;             /* user id */
+    Oid             puid;               /* parent id */
+    bool            is_super;           /* user is admin user */
+    bool            is_dirty;           /* userinfo is dirty, temorarily used in BuildUserInfoHash*/
+    int64          spacelimit;         /* user space limit in bytes*/
+    int64          tmpSpaceLimit;      /* user temp space limit in bytes */
+    int64          spillSpaceLimit;    /* user spill space limit in bytes */
+    Oid             rpoid;              /* resource pool in htab */
+    ResourcePool   *respool;            /* resource pool in htab */
+} TmpUserData;
 
 typedef struct UserResourceData {
     Oid userid;               /* user oid */
@@ -122,12 +135,12 @@ typedef struct UserResourceData {
     int used_memory;          /* user used memory */
     int total_cpuset;         /* user total cpuset */
     int used_cpuset;          /* user used cpuset */
-    uint64 total_space;       /* user total space limit */
-    uint64 used_space;        /* user used space */
-    uint64 total_temp_space;  /* user total temp space limit */
-    uint64 used_temp_space;   /* user used temp space */
-    uint64 total_spill_space; /* user total spill space limit */
-    uint64 used_spill_space;  /* user used spill space */
+    int64 total_space;       /* user total space limit */
+    int64 used_space;        /* user used space */
+    int64 total_temp_space;  /* user total temp space limit */
+    int64 used_temp_space;   /* user used temp space */
+    int64 total_spill_space; /* user total spill space limit */
+    int64 used_spill_space;  /* user used spill space */
 
     /* io collect information for user */
     int mincurr_iops; /* user min current iops */
@@ -465,18 +478,18 @@ extern void DropAppWorkloadGroupMapping(DropAppWorkloadGroupMappingStmt* stmt);
 extern bool UsersInOneGroup(UserData* user1, UserData* user2);
 extern void CheckUserRelation(Oid roleid, Oid parentid, Oid rpoid, bool isDefault, int issuper);
 extern int UserGetChildRoles(Oid roleid, DropRoleStmt* stmt);
-extern void GetUserDataFromCatalog(Oid userid, Oid* rpoid, Oid* parentid, bool* issuper, uint64* spacelimit,
-    uint64* tmpspacelimit, uint64* spillspacelimit, char* groupname = NULL, int lenNgroup = 0);
+extern void GetUserDataFromCatalog(Oid userid, Oid* rpoid, Oid* parentid, bool* issuper, int64* spacelimit,
+    int64* tmpspacelimit, int64* spillspacelimit, char* groupname = NULL, int lenNgroup = 0);
 extern bool GetUserChildlistFromCatalog(Oid userid, List** childlist, bool findall);
 extern UserResourceData* GetUserResourceData(const char* username);
-extern void CheckUserSpaceLimit(Oid roleid, Oid parentid, uint64 spacelimit, uint64 tmpspacelimit,
-    uint64 spillspacelimit, bool is_default, bool changed, bool tmpchanged, bool spillchanged);
+extern void CheckUserSpaceLimit(Oid roleid, Oid parentid, int64 spacelimit, int64 tmpspacelimit,
+    int64 spillspacelimit, bool is_default, bool changed, bool tmpchanged, bool spillchanged);
 extern ResourcePool* GetRespoolFromHTab(Oid rpoid, bool is_noexcept = true);
 extern void perm_space_increase(Oid ownerID, uint64 size, DataSpaceType type);
 extern void perm_space_decrease(Oid ownerID, uint64 size, DataSpaceType type);
 extern void perm_space_value_reset(void);
-extern bool SearchUsedSpace(Oid userID, uint64* permSpace, uint64* tempSpace);
-extern void UpdateUsedSpace(Oid userID, uint64 permSpace, uint64 tempSpace);
+extern bool SearchUsedSpace(Oid userID, int64* permSpace, int64* tempSpace);
+extern void UpdateUsedSpace(Oid userID, int64 permSpace, int64 tempSpace);
 
 extern void CheckUserInfoHash();
 extern void UpdateWlmCatalogInfoHash(void);

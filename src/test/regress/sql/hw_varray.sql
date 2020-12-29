@@ -98,7 +98,7 @@ DECLARE
 	TYPE array_integer is varray(1024) of integer;
 	arrint array_integer :=array_integer();
 BEGIN
-	--compatible with A DB, support "extend" without parameter
+	--compatible with A db, support "extend" without parameter
 	arrint.extend;
 	--assign value with assign operator
 	FOR I IN 1..1024 LOOP
@@ -286,7 +286,7 @@ DECLARE
 	TYPE array_integer is varray(1024) of integer;
 	arrint array_integer :=array_integer();
 BEGIN
-	--compatible with A DB, support "extend" without parameter
+	--compatible with A db, support "extend" without parameter
 	arrint.extend;
 	--assign value with assign operator
 	FOR I IN 1..1024 LOOP

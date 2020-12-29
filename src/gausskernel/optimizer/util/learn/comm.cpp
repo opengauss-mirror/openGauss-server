@@ -44,7 +44,7 @@
 
 #include "cipher.h"
 #include "fmgr.h"
-#include "gtm/stringinfo.h"
+#include "lib/stringinfo.h"
 #include "miscadmin.h"
 #include "nodes/pg_list.h"
 #include "optimizer/comm.h"
@@ -112,8 +112,12 @@ AiConn* MakeAiConnHandle()
  * @out: received data is saved in conn->rec_buf
  * @return: the number of bytes received
  */
-static size_t WriteData(void* buffer, size_t size, size_t nmemb, void* userp)
+static size_t WriteData(const void* buffer, size_t size, size_t nmemb, void* userp)
 {
+    if (nmemb == 0) {
+        ereport(ERROR, (errmodule(MOD_OPT_AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("nmemb should not be zero.")));
+    }
     AiConn* conn = (AiConn*)userp;
     if (unlikely(size >= PG_INT32_MAX / nmemb)) {
         ereport(ERROR, (errmodule(MOD_OPT_AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -153,16 +157,16 @@ static size_t WriteData(void* buffer, size_t size, size_t nmemb, void* userp)
     return segsize;
 }
 
-static bool ReadKeyContentFromFile( const char* cipherkeyfile, const char* randfile,
-    CipherkeyFile* cipher_file_content, RandkeyFile* rand_file_content)
+static bool ReadKeyContentFromFile(const char* cipherkeyfile, const char* randfile,
+    CipherkeyFile* cipherFileContent, RandkeyFile* randFileContent)
 {
-        if (!ReadContentFromFile(cipherkeyfile, cipher_file_content, sizeof(CipherkeyFile)) ||
-            !ReadContentFromFile(randfile, rand_file_content, sizeof(RandkeyFile))) {
+        if (!ReadContentFromFile(cipherkeyfile, cipherFileContent, sizeof(CipherkeyFile)) ||
+            !ReadContentFromFile(randfile, randFileContent, sizeof(RandkeyFile))) {
             ereport(DEBUG1, (errmodule(MOD_OPT_AI), 
                              errmsg("Read data source cipher file or random parameter file failed.")));
             return false;
         }
-        if (!CipherFileIsValid(cipher_file_content) || !RandFileIsValid(rand_file_content)) {
+        if (!CipherFileIsValid(cipherFileContent) || !RandFileIsValid(randFileContent)) {
             ereport(DEBUG1, (errmodule(MOD_OPT_AI), 
                              errmsg("Data source cipher file or random parameter file is invalid.")));
             return false;
@@ -172,7 +176,7 @@ static bool ReadKeyContentFromFile( const char* cipherkeyfile, const char* randf
 
 /* decrypt the cipher text to plain text */
 static bool DecryptInputKey(GS_UCHAR* pucCipherText, GS_UINT32 ulCLen, GS_UCHAR* initrand, GS_UCHAR* initVector,
-    GS_UCHAR* decryptVector, GS_UCHAR* pucPlainText, GS_UINT32* pulPLen, GS_UCHAR* decrypt_key)
+    GS_UCHAR* decryptVector, GS_UCHAR* pucPlainText, GS_UINT32* pulPLen, GS_UCHAR* decryptKey)
 {
     GS_UINT32 retval = 0;
     errno_t rc = EOK;
@@ -190,17 +194,17 @@ static bool DecryptInputKey(GS_UCHAR* pucCipherText, GS_UINT32 ulCLen, GS_UCHAR*
         ITERATE_TIMES,
         EVP_sha256(),
         RANDOM_LEN,
-        decrypt_key);
+        decryptKey);
     if (retval != 1) {
-        rc = memset_s(decrypt_key, RANDOM_LEN, 0, RANDOM_LEN);
+        rc = memset_s(decryptKey, RANDOM_LEN, 0, RANDOM_LEN);
         securec_check_c(rc, "\0", "\0");
         ereport(DEBUG1, (errmodule(MOD_OPT_AI), errmsg("Generate the derived key failed.")));
         return false;
     }
 
-    /*decrypt the cipher*/
+    /* decrypt the cipher */
     retval = CRYPT_decrypt(NID_aes_128_cbc,
-        decrypt_key,
+        decryptKey,
         RANDOM_LEN,
         decryptVector,
         RANDOM_LEN,
@@ -209,13 +213,13 @@ static bool DecryptInputKey(GS_UCHAR* pucCipherText, GS_UINT32 ulCLen, GS_UCHAR*
         pucPlainText,
         pulPLen);
     if (retval != 0) {
-        rc = memset_s(decrypt_key, RANDOM_LEN, 0, RANDOM_LEN);
+        rc = memset_s(decryptKey, RANDOM_LEN, 0, RANDOM_LEN);
         securec_check_c(rc, "\0", "\0");
         ereport(DEBUG1, (errmodule(MOD_OPT_AI), errmsg("Decrypt cipher text to plain text failed.")));
         return false;
     }
 
-    rc = memset_s(decrypt_key, RANDOM_LEN, 0, RANDOM_LEN);
+    rc = memset_s(decryptKey, RANDOM_LEN, 0, RANDOM_LEN);
     securec_check_c(rc, "\0", "\0");
     return true;
 }
@@ -225,10 +229,10 @@ static GS_UCHAR* DecodeClientKey(StringInfo cahome)
     GS_UINT32 plainlen = 0;
     char cipherkeyfile[MAXPGPATH] = {0x00};
     char randfile[MAXPGPATH] = {0x00};
-    RandkeyFile rand_file_content;
-    CipherkeyFile cipher_file_content;
+    RandkeyFile randFileContent;
+    CipherkeyFile cipherFileContent;
     GS_UCHAR *plainpwd = (GS_UCHAR*)palloc((size_t)(CIPHER_LEN + 1));
-    GS_UCHAR decrypt_key[RANDOM_LEN] = {0};
+    GS_UCHAR decryptKey[RANDOM_LEN] = {0};
     int ret;
     errno_t rc;
 
@@ -242,33 +246,33 @@ static GS_UCHAR* DecodeClientKey(StringInfo cahome)
     /* first,read the cipher file and rand file to buffer */
     if (!ReadKeyContentFromFile(cipherkeyfile,
                                 randfile,
-                                &cipher_file_content,
-                                &rand_file_content)) {
-        ClearCipherKeyFile(&cipher_file_content);
-        ClearRandKeyFile(&rand_file_content);
+                                &cipherFileContent,
+                                &randFileContent)) {
+        ClearCipherKeyFile(&cipherFileContent);
+        ClearRandKeyFile(&randFileContent);
         pfree(plainpwd);
         ereport(ERROR, (errmodule(MOD_OPT_AI), errmsg("Read from key file failed.")));
         return plainpwd;
     }
-    if (!DecryptInputKey(cipher_file_content.cipherkey, 
-                         CIPHER_LEN, rand_file_content.randkey, 
-                         cipher_file_content.key_salt,
-                         cipher_file_content.vector_salt,
+    if (!DecryptInputKey(cipherFileContent.cipherkey, 
+                         CIPHER_LEN, randFileContent.randkey, 
+                         cipherFileContent.key_salt,
+                         cipherFileContent.vector_salt,
                          plainpwd,
                          &plainlen,
-                         decrypt_key)) {
-        ClearCipherKeyFile(&cipher_file_content);
-        ClearRandKeyFile(&rand_file_content);
+                         decryptKey)) {
+        ClearCipherKeyFile(&cipherFileContent);
+        ClearRandKeyFile(&randFileContent);
         pfree(plainpwd);
         ereport(ERROR, (errmodule(MOD_OPT_AI), errmsg("decrypt input key failed.")));
         return plainpwd;
         } 
-    ClearCipherKeyFile(&cipher_file_content);
-    ClearRandKeyFile(&rand_file_content);
+    ClearCipherKeyFile(&cipherFileContent);
+    ClearRandKeyFile(&randFileContent);
     return plainpwd;
 }
 
-static inline void GetCurlClientCerts(AiConn* connHandle)
+static void GetCurlClientCerts(AiConn* connHandle)
 {
     char* gausshome = getGaussHome();
     GS_UCHAR *plainpwd = NULL;
@@ -316,10 +320,10 @@ void SetOptForCurl(AiConn* connHandle, AiEngineConnInfo* conninfo, int timeout)
 {
     struct curl_httppost* post = NULL;
     struct curl_httppost* last = NULL;
-    const int PREFIX_STRING_LEN = strlen("https://:/");
+    const int prefixStringLen = strlen("https://:/");
 
     if (conninfo->url == NULL) {
-        int urlLen = PREFIX_STRING_LEN;
+        int urlLen = prefixStringLen;
         urlLen += strlen(conninfo->host) + strlen(conninfo->port) + strlen(conninfo->request_api) + 1;
         conninfo->url = (char*)palloc0(urlLen);
         int rc =
@@ -391,9 +395,9 @@ bool TryConnectRemoteServer(AiEngineConnInfo* conninfo, char** buf)
 {
     AiConn* connHandle = NULL;
     bool immediateInterruptOKOld = t_thrd.int_cxt.ImmediateInterruptOK;
-    // set TIMEOUT as 1 second, retry 2 times
-    const int TIMEOUT = 1;
-    const int RETRY_TIMES = 2;
+    // set timeout as 1 second, retry 2 times
+    const int timeout = 1;
+    const int retryTimes = 2;
     CURLcode ret;
     int loopCount = 0;
 
@@ -412,7 +416,7 @@ bool TryConnectRemoteServer(AiEngineConnInfo* conninfo, char** buf)
             DestoryAiHandle(connHandle);
             return false;
         }
-        SetOptForCurl(connHandle, conninfo, TIMEOUT);
+        SetOptForCurl(connHandle, conninfo, timeout);
 
         do {
             ret = curl_easy_perform(connHandle->curl);
@@ -421,7 +425,7 @@ bool TryConnectRemoteServer(AiEngineConnInfo* conninfo, char** buf)
             }
             // sleep 0.5 second
             pg_usleep(G_ONE_SECOND_TO_MICRO_SECOND / 2);
-            if (loopCount++ >= RETRY_TIMES) {
+            if (loopCount++ >= retryTimes) {
                 ereport(DEBUG1,
                     (errmsg("connect to ai engine failed, "
                             "error code is: %s.",
@@ -530,11 +534,11 @@ static bool RegMatch(const char* pattern, const char* src)
     // compare src string with regular expression defined by pattern
     regex_t reg;
     regmatch_t pmatch[1];
-    const size_t N_MATCH = 1;
+    const size_t nMatch = 1;
     int cflags = REG_EXTENDED;
     int status;
     regcomp(&reg, pattern, cflags);
-    status = regexec(&reg, src, N_MATCH, pmatch, 0);
+    status = regexec(&reg, src, nMatch, pmatch, 0);
     if (status == REG_NOMATCH) {
         return false;
     }

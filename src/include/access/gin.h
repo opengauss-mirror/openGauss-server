@@ -12,7 +12,7 @@
 
 #include "access/xlogreader.h"
 #include "lib/stringinfo.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "utils/relcache.h"
 
 /*

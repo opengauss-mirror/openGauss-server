@@ -1463,12 +1463,6 @@ WITH t AS (
 SELECT * FROM t;
  a  
 ----
- 42
-(1 row)
-
-SELECT * FROM y order by 1;
- a  
-----
   0
   1
   2
@@ -1476,15 +1470,19 @@ SELECT * FROM y order by 1;
   4
   5
   6
-  7
-  8
-  9
  11
+  7
  12
+  8
  13
+  9
  14
- 42
-(15 rows)
+(14 rows)
+
+SELECT * FROM y order by 1;
+ a 
+---
+(0 rows)
 
 DROP RULE y_rule ON y;
 -- check merging of outer CTE with CTE in a rule action
@@ -1517,20 +1515,17 @@ INSERT INTO bug6051 SELECT * FROM t1;
 SELECT * FROM bug6051 ORDER BY 1;
  i 
 ---
-(0 rows)
-
-SELECT * FROM bug6051_2 ORDER BY 1;
- i 
----
  1
  2
  3
 (3 rows)
 
+SELECT * FROM bug6051_2 ORDER BY 1;
+ i 
+---
+(0 rows)
+
 -- a truly recursive CTE in the same list
-DROP TABLE y;
-CREATE TABLE y (a INTEGER PRIMARY KEY INITIALLY DEFERRED);
-NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "y_pkey" for table "y"
 WITH RECURSIVE t(a) AS (
 	SELECT 0
 		UNION ALL
@@ -1895,14 +1890,18 @@ WITH t AS (
 	INSERT INTO y VALUES(0)
 )
 VALUES(FALSE);
-ERROR:  conditional DO INSTEAD rules are not supported for data-modifying statements in WITH
+ column1 
+---------
+ f
+(1 row)
+
 DROP RULE y_rule ON y;
 -- check cte replace when pulling up
 -- case 1: exists/any sublink
 create table t_cte(a int, b int);
 insert into t_cte select generate_series(1,5), generate_series(1,5);
 analyze t_cte;
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with x as
 (select a, b from t_cte)
 select 1 from t_cte t
@@ -1939,7 +1938,7 @@ where exists
 (5 rows)
 
 -- case 2: not exists/any sublink
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with x as
 (select a, b from t_cte)
 select 1 from t_cte t 
@@ -1969,7 +1968,7 @@ where t.a not in
 (0 rows)
 
 -- case 3: expr sublink 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with x as
 (select a, b from t_cte)
 select 1 from t_cte t 
@@ -2005,7 +2004,7 @@ where t.a >
 (0 rows)
 
 -- case 4: exists/any/expr sublink in OR clause
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with x as
 (select a, b from t_cte)
 select 1 from t_cte t 
@@ -2068,7 +2067,7 @@ or t.a >
 (5 rows)
 
 -- case 5: non-pull up sublink 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with x as
 (select a, b from t_cte)
 select 1 from t_cte t 
@@ -2098,7 +2097,7 @@ where t.a not in
 (0 rows)
 
 -- case 6: pullup simplequery
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with x as
 (select a,b from t_cte)
 select sum(b) from
@@ -2131,7 +2130,7 @@ select sum(b) from
 (1 row)
 
 -- case 7: same cte alias in different level
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with x as
 (select a,b from t_cte)
 select sum(b) from
@@ -2184,7 +2183,7 @@ select sum(b) from
 (1 row)
 
 -- case 8: cte replace during pull up
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select 1 from t_cte t1 where a = (with tmp as (select b from t_cte t2 where t2.b=t1.a)
 select count(b) from tmp tmp1
 where b>(select count(*) from tmp tmp2 where tmp2.b=tmp1.b))+1;
@@ -2221,7 +2220,7 @@ where b>(select count(*) from tmp tmp2 where tmp2.b=tmp1.b))+1;
 (2 rows)
 
 -- case 9: two level simple sub-query
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with x as
 (select a,b from t_cte)
 select sum(b) from
@@ -2271,7 +2270,7 @@ select sum(b) from
 (1 row)
 
 -- case 10: cte with same alias referenced by other cte
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with x as (select a,b from t_cte),
 x2 as (select * from x)
 select * from x x1
@@ -2320,7 +2319,7 @@ order by 1,2;
 (5 rows)
 
 -- case 11: correlated cte with same alias referenced by other cte
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select * from t_cte t1
 where exists (
  with x as (select a,b from t_cte t2 where t1.a=t2.a),
@@ -2377,7 +2376,7 @@ order by 1,2;
 (5 rows)
 
 -- case 12: cte referencing correlated cte referenced in different level 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select * from t_cte t1
 where exists (
  with x as (select a,b from t_cte t2 where t1.a=t2.a),
@@ -2434,7 +2433,7 @@ order by 1,2;
 (5 rows)
 
 -- case 13: cte used in set op
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select * from t_cte t1
 where exists (
  with x as (select a,b from t_cte t2 where t1.a=t2.a),
@@ -2500,7 +2499,7 @@ order by 1,2;
  5 | 5
 (5 rows)
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select * from t_cte t1
 where exists (
  with x as (select a,b from t_cte t2 where t1.a=t2.a),
@@ -2566,7 +2565,7 @@ order by 1,2;
  5 | 5
 (5 rows)
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select * from t_cte t1
 where exists (
  with x as (select a,b from t_cte t2 where t1.a=t2.a),
@@ -2635,7 +2634,7 @@ order by 1,2;
  5 | 5
 (5 rows)
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select * from t_cte t1
 where exists (
  with x as (select a,b from t_cte t2 where t1.a=t2.a),
@@ -2701,7 +2700,7 @@ order by 1,2;
 (0 rows)
 
 -- case 14: cte referencing cte with same alias
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with tmp as (select a from t_cte)
 select * from tmp t1 where exists
 (with tmp as (select a*2 a from tmp)
@@ -2739,7 +2738,7 @@ order by 1;
  4
 (2 rows)
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with tmp as (select a from t_cte)
 select sum(a) from
 (with tmp as (select a*2 a from tmp)
@@ -2778,7 +2777,7 @@ where exists
   30
 (1 row)
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with tmp as (select a from t_cte)
 select sum(a) from
 (with tmp2 as (select a+2 a from tmp),
@@ -2824,7 +2823,7 @@ select sum(a) from
   50
 (1 row)
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with tmp as (select a from t_cte) 
 select sum(a) from 
 (with tmp2 as (select a+2 a from tmp t1
@@ -2881,7 +2880,7 @@ select sum(a) from
   50
 (1 row)
 
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 with tmp as
 (select * from t_cte)
 select *

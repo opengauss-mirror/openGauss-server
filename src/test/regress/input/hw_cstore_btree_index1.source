@@ -1,0 +1,311 @@
+
+----
+---case 4: different data type with index
+----
+create table row_index_tbl(
+  id1 int1
+ ,id2 int2
+ ,id4 int4
+ ,id8 int8
+ ,int1 int
+ ,bint bigint
+ ,f1   float
+ ,flag char
+ ,name1 varchar(20)
+ ,name2 varchar2(20)
+ ,name3 nvarchar2(20)
+ ,name4 text
+ ,name5 bytea
+ ,time1 date
+ ,time2 timetz
+ ,time3 time
+ ,num1 float8
+ ,num2 decimal
+ ,serial1 int 
+ ,interval1 interval
+ ,interval2 tinterval) distribute by hash(id2);
+
+insert into row_index_tbl values(10,400,2000,40000,1,111111,1.1,'a','aa','bb','cc','dd','ff','1996-02-12','1984-2-6 01:00:30+8','02:05:36',30.12,0.03,2147483647,'2 day 13:34:56','["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]');
+insert into row_index_tbl values(20,300,3000,10000,2,222222,2.2,'b','ee','cc','dd','aa','hh','1998-03-24','1986-2-6 03:00:30+8','04:36:25',20.15,0.06,-2147483647,'1 day 18:34:56','["May 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]');
+insert into row_index_tbl values(30,200,4000,30000,3,333333,3.3,'c','cc','bb','aa','ee','gg','1997-05-26','1987-2-6 08:00:30+8','06:36:18',34.36,0.07,2136483647,'18 day 14:34:56','["Feb 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]');
+insert into row_index_tbl values(40,100,1000,20000,4,444444,4.4,'d','cc','bb','aa','ee','dd','1992-01-30','1989-2-6 06:00:30+8','08:21:56',25.12,0.05,-2136483647,'7 day 16:34:56','["epoch" "Mon May 1 00:30:30 1995"]');
+
+create table cstore_index_tbl(
+  id1 int1
+ ,id2 int2
+ ,id4 int4
+ ,id8 int8
+ ,int1 int
+ ,bint bigint
+ ,f1   float
+ ,flag char
+ ,name1 varchar(20)
+ ,name2 varchar2(20)
+ ,name3 nvarchar2(20)
+ ,name4 text
+ ,name5 bytea
+ ,time1 date
+ ,time2 timetz
+ ,time3 time
+ ,num1 float8
+ ,num2 decimal
+ ,serial1 int
+ ,interval1 interval
+ ,interval2 tinterval)with(orientation=column) distribute by hash(id2);
+
+insert into cstore_index_tbl select * from row_index_tbl;
+select ctid from cstore_index_tbl order by 1;
+
+create index idx_int1 on cstore_index_tbl using btree(id1);
+create index idx_int2 on cstore_index_tbl using btree(id2);
+create index idx_int4 on cstore_index_tbl using btree(id4);
+create index idx_int8 on cstore_index_tbl using btree(id8);
+create index idx_int on cstore_index_tbl using btree(int1);
+create index idx_bigint on cstore_index_tbl using btree(bint);
+create index idx_float on cstore_index_tbl using btree(flag);
+create index idx_varchar on cstore_index_tbl using btree(name1);
+create index idx_varchar2 on cstore_index_tbl using btree(name2);
+create index idx_nvarchar2 on cstore_index_tbl using btree(name3);
+create index idx_text on cstore_index_tbl using btree(name4);
+create index idx_date on cstore_index_tbl using btree(time1);
+create index idx_timetz on cstore_index_tbl using btree(time2);
+create index idx_time on cstore_index_tbl using btree(time3);
+create index idx_float8 on cstore_index_tbl using btree(num1);
+create index idx_decimal on cstore_index_tbl using btree(num2);
+create index idx_serial on cstore_index_tbl using btree(serial1);
+create index idx_interval on cstore_index_tbl using btree(interval1);
+create index idx_tinterval on cstore_index_tbl using btree(interval2);
+
+create index idx_id4_name1 on cstore_index_tbl using btree(id4,name1);
+create index idx_id4_name2 on cstore_index_tbl using btree(id4,name2);
+create index idx_id4_name3 on cstore_index_tbl using btree(id4,name3);
+create index idx_id4_name4 on cstore_index_tbl using btree(id4,name4);
+create index idx_bint_flag on cstore_index_tbl using btree(bint,flag);
+create index idx_int1_time on cstore_index_tbl using btree(int1,time3);
+create index idx_time1_name2 on cstore_index_tbl using btree(time1,name2);
+create index idx_id4_time2 on cstore_index_tbl using btree(id4,time2);
+create index idx_num1_time2 on cstore_index_tbl using btree(num1,time2);
+create index idx_id4_num2 on cstore_index_tbl using btree(id4,num2);
+create index idx_name1_name2 on cstore_index_tbl using btree(name1,name2);
+create index idx_time1_interval1 on cstore_index_tbl using btree(time1,interval1);
+
+set enable_seqscan=off;
+
+explain (verbose on, costs off) select * from cstore_index_tbl where id2 > 100;
+select * from cstore_index_tbl where id2 > 100 order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where id4 > 1000;
+select * from cstore_index_tbl where id4 > 1000 order by id4;
+explain (verbose on, costs off) select * from cstore_index_tbl where id8 > 10000;
+select * from cstore_index_tbl where id8 > 10000 order by id8;
+explain (verbose on, costs off) select * from cstore_index_tbl where name1 > 'aa';
+select * from cstore_index_tbl where name1 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where name2 > 'aa';
+select * from cstore_index_tbl where name2 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where name3 > 'aa';
+select * from cstore_index_tbl where name3 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where name4 > 'aa';
+select * from cstore_index_tbl where name4 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where time1 > '1992-01-30';
+select * from cstore_index_tbl where time1 > '1992-01-30' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where time2 > '1984-2-6 01:00:30+8';
+select * from cstore_index_tbl where time2 > '1984-2-6 01:00:30+8' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where num1 > 20.20;
+select * from cstore_index_tbl where num1 > 20.20 order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where num2 > 0.05;
+select * from cstore_index_tbl where num2 > 0.05 order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where serial1 > -2136483647;
+select * from cstore_index_tbl where serial1 > -2136483647 order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where interval1 > '1 day 18:34:56';
+select * from cstore_index_tbl where interval1 > '1 day 18:34:56' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where interval2 > '["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]';
+select * from cstore_index_tbl where interval2 > '["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]' order by id2;
+
+explain (verbose on, costs off) select * from cstore_index_tbl where id2 > 100 and name1 > 'aa';
+select * from cstore_index_tbl where id2 > 100 and name1 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where id4 > 1000 and name2 > 'aa';
+select * from cstore_index_tbl where id4 > 1000 and name2 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where num1 > 20.5 and name3 > 'aa';
+select * from cstore_index_tbl where num1 > 20.5 and name3 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where id4 > 1000 and time1 > '1992-01-30';
+select * from cstore_index_tbl where id4 > 1000 and time1 > '1992-01-30' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where flag > 'a' and time3 < '08:21:53' order by id2;
+select * from cstore_index_tbl where flag > 'a' and time3 < '08:21:53' order by id2;
+
+explain (verbose on, costs off) select * from cstore_index_tbl where name1 > 'aa' and name2 > 'bb';
+select * from cstore_index_tbl where name1 > 'aa' and name2 > 'bb' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where time1 > '1996-02-12' and interval1 < '2 day 13:34:56';
+select * from cstore_index_tbl where time1 > '1996-02-12' and interval1 < '2 day 13:34:56' order by id2;
+
+----
+---case 5: mix indexed and un-indexed(use the table in case 6)
+----
+drop index idx_int1;
+drop index idx_int4;
+drop index idx_int8;
+drop index idx_int;
+drop index idx_bigint;
+drop index idx_float;
+drop index idx_varchar;
+drop index idx_varchar2;
+drop index idx_nvarchar2;
+drop index idx_text;
+drop index idx_date;
+drop index idx_timetz;
+drop index idx_time;
+drop index idx_float8;
+drop index idx_decimal;
+drop index idx_serial;
+drop index idx_interval;
+drop index idx_tinterval;
+drop index idx_id4_name1;
+drop index idx_id4_name2;
+drop index idx_id4_name3;
+drop index idx_id4_name4;
+drop index idx_time1_name2;
+drop index idx_id4_time2;
+drop index idx_num1_time2;
+drop index idx_id4_num2;
+drop index idx_name1_name2;
+drop index idx_time1_interval1;
+drop index idx_bint_flag;
+
+set enable_seqscan=off;
+
+explain (verbose on, costs off) select * from cstore_index_tbl where id2 >100  and name1 < 'dd' and num1=30.12;
+select * from cstore_index_tbl where id2 >100  and name1 < 'dd' and num1=30.12;
+drop index idx_int2;
+drop table row_index_tbl;
+drop table cstore_index_tbl;
+
+-----
+--- case 6: truncate and delete cstore relation with index
+-----
+create table IDEX_PARTITION_TABLE_001(COL_INT int) with(orientation=column);
+CREATE INDEX STORAGE_IDEX_PARTITION_IDEX_001 ON IDEX_PARTITION_TABLE_001 using btree(COL_INT);
+insert into IDEX_PARTITION_TABLE_001 values(1000);
+truncate table IDEX_PARTITION_TABLE_001;
+select * from IDEX_PARTITION_TABLE_001;
+
+insert into IDEX_PARTITION_TABLE_001 values(1000);
+delete from IDEX_PARTITION_TABLE_001 where col_int=1000;
+select * from IDEX_PARTITION_TABLE_001 where col_int=1000;
+
+drop table IDEX_PARTITION_TABLE_001;
+
+----
+--- case 7: two indexes with the same column
+----
+create table row_index_tbl(c1 int,c2 int,c3 int) distribute by hash(c1);
+
+insert into row_index_tbl values(0,1,2);
+insert into row_index_tbl values(3,4,5);
+insert into row_index_tbl values(6,7,8);
+insert into row_index_tbl values(9,10,11);
+
+create table cstore_index_tbl(c1 int,c2 int,c3 int) with (orientation = column) distribute by hash(c1);
+insert into cstore_index_tbl select * from row_index_tbl;
+
+create index idx_c2 on cstore_index_tbl using btree(c2);
+
+explain (verbose on, costs off) SELECT c2  FROM cstore_index_tbl WHERE c2 > 2 and  c2 < 9;
+SELECT c2  FROM cstore_index_tbl WHERE c2 > 2 and  c2 < 9 order by c2;
+drop table row_index_tbl;
+drop table cstore_index_tbl;
+
+
+----
+--- case 9: index scan with partition number be zero
+----
+CREATE TABLE COMPRESS_TABLE_INDEX(
+c_int_1 BIGINT,
+c_char_1 CHAR(50),
+c_int_2 BIGINT,
+c_dec_1 DECIMAL(10,4),
+c_char_2 CHAR(50),
+c_text_1 text,
+c_date_1 DATE,
+c_date_2 DATE,
+c_text_2 text,
+c_dec_2 DECIMAL(10,4)) with(orientation=column)
+PARTITION BY RANGE(c_date_1)
+(
+    PARTITION COMPRESS_TABLE_INTEVAL_1  VALUES LESS THAN('2012-8-23')
+);
+
+CREATE INDEX INDEX_COMPRESS_1 ON COMPRESS_TABLE_INDEX using btree(C_INT_2) LOCAL;
+CREATE INDEX INDEX_COMPRESS_2 ON COMPRESS_TABLE_INDEX using btree(C_DATE_1) LOCAL;
+CREATE INDEX INDEX_COMPRESS_3 ON COMPRESS_TABLE_INDEX using btree(C_INT_1) LOCAL;
+
+SELECT COUNT(*) FROM COMPRESS_TABLE_INDEX WHERE C_DATE_1>='2012-09-01' AND C_DATE_1<'2012-9-20';
+drop table COMPRESS_TABLE_INDEX;
+
+----
+--- case 10:index scan with qual push down
+----
+set datestyle to iso;
+SET IntervalStyle to postgres;
+set time zone PRC;
+CREATE TABLE PARTITION_SELECT_PICT_TABLE(
+C_CHAR_3 CHAR(102400),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE)
+DISTRIBUTE BY HASH(C_CHAR_3)
+partition by range (C_CHAR_3,C_VARCHAR_3,C_INT,C_TS_WITHOUT)
+(
+        partition PARTITION_SELECT_PICT_1 values less than ('DEFGHIJ', 'defghij', 444, '2000-04-04 04:04:04'),
+        partition PARTITION_SELECT_PICT_2 values less than ('GHIJKLM', 'ghijklm', 777, '2000-07-07 07:07:07'),
+        partition PARTITION_SELECT_PICT_3 values less than ('MJKLMNO', 'ijklmno', 999, '2000-09-09 09:09:09')
+);
+
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('ABCDEFG','abcdefg',111,111.1,'2000-01-01 01:01:01');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('BCDEFGH','bcdefgh',222,222.2,'2000-02-02 02:02:02');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('CDEFGHI','cdefghi',333,333.3,'2000-03-03 03:03:03');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('DEFGHIJ','defghij',444,444.4,'2000-04-04 04:04:04');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('EFGHIJK','efghijk',555,555.5,'2000-05-05 05:05:05');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('FGHIJKL','fghijkl',666,666.6,'2000-06-06 06:06:06');
+
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('ABCDEFG',null,111,111.1,'2000-01-01 01:01:01');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('ABCDEFG',null,null,null,null);
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('ABCDEFG','abcdefg',null,111.1,'2000-01-01 01:01:01');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('BCDEFGH','bcdefgh',null,null,'2000-02-02 02:02:02');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('BCDEFGH',null,222,null,'2000-02-02 02:02:02');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('CDEFGHI','cdefghi',333,null,'2000-03-03 03:03:03');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('EFGHIJK',null,null,555.5,'2000-05-05 05:05:05');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('FGHIJKL','fghijkl',null,null,null);
+
+insert into PARTITION_SELECT_PICT_TABLE VALUES('A'||generate_series(1,5),'a'||generate_series(1,5),generate_series(1,5),cast( generate_series(1,5)||'.111' as numeric(10,5)),cast('2000-01-'||generate_series(1,5)||' 12:12:12' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('B'||generate_series(101,103),'b'||generate_series(101,103),generate_series(101,103),cast(generate_series(101,103)||'.111' as numeric(10,5)),cast('2000-02-'||generate_series(1,3)||' 12:12:12' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('C'||generate_series(201,205),'c'||generate_series(201,205),generate_series(201,205),cast(generate_series(201,205)||'.111' as numeric(10,5)),cast('2000-03-'||generate_series(1,5)||' 12:12:12' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('D'||generate_series(301,303),'d'||generate_series(301,303),generate_series(301,303),cast(generate_series(301,303)||'.111' as numeric(10,5)),cast('2000-04-'||generate_series(1,3)||' 12:12:12' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('DE'||generate_series(401,405),'de'||generate_series(401,405),generate_series(401,405),cast(generate_series(401,405)||'.111' as numeric(10,5)),cast('2000-05-'||generate_series(1,5)||' 12:12:12' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('E'||generate_series(501,504),'e'||generate_series(501,504),generate_series(501,504),cast( generate_series(501,504)||'.222' as numeric(10,5)),cast('2000-01-'||generate_series(1,4)||' 13:13:13' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('F'||generate_series(601,603),'f'||generate_series(601,603),generate_series(601,603),cast(generate_series(601,603)||'.222' as numeric(10,5)),cast('2000-02-'||generate_series(1,3)||' 13:13:13' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('G'||generate_series(701,705),'g'||generate_series(701,705),generate_series(701,705),cast(generate_series(701,705)||'.222' as numeric(10,5)),cast('2000-03-'||generate_series(1,5)||' 13:13:13' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('GH'||generate_series(801,803),'gh'||generate_series(801,803),generate_series(801,803),cast(generate_series(801,803)||'.222' as numeric(10,5)),cast('2000-04-'||generate_series(1,3)||' 13:13:13' as TIMESTAMP WITHOUT TIME ZONE));
+
+
+CREATE TABLE VECTOR_PARTITION_SELECT_PICT_TABLE(
+C_CHAR_3 CHAR(102400),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE) with (orientation = column)
+DISTRIBUTE BY HASH(C_CHAR_3)
+partition by range (C_CHAR_3,C_VARCHAR_3,C_INT,C_TS_WITHOUT)
+(
+        partition PARTITION_SELECT_PICT_1 values less than ('DEFGHIJ', 'defghij', 444, '2000-04-04 04:04:04'),
+        partition PARTITION_SELECT_PICT_2 values less than ('GHIJKLM', 'ghijklm', 777, '2000-07-07 07:07:07'),
+        partition PARTITION_SELECT_PICT_3 values less than ('MJKLMNO', 'ijklmno', 999, '2000-09-09 09:09:09')
+);
+
+insert into VECTOR_PARTITION_SELECT_PICT_TABLE select * from PARTITION_SELECT_PICT_TABLE;
+
+create index PARTITION_SELECT_PICT_INDEX_1 ON VECTOR_PARTITION_SELECT_PICT_TABLE using btree(C_CHAR_3,C_VARCHAR_3,C_INT,C_NUMERIC,C_TS_WITHOUT) local(PARTITION PARTITION_SELECT_PICT_1, PARTITION PARTITION_SELECT_PICT_2, PARTITION PARTITION_SELECT_PICT_3);
+create index PARTITION_SELECT_PICT_INDEX_2 ON VECTOR_PARTITION_SELECT_PICT_TABLE using btree(C_CHAR_3,C_VARCHAR_3,C_INT,C_TS_WITHOUT) local(PARTITION PARTITION_SELECT_PICT_1, PARTITION PARTITION_SELECT_PICT_2, PARTITION PARTITION_SELECT_PICT_3);
+create index PARTITION_SELECT_PICT_INDEX_3 ON VECTOR_PARTITION_SELECT_PICT_TABLE using btree(C_CHAR_3,C_INT,C_TS_WITHOUT) local(PARTITION PARTITION_SELECT_PICT_1, PARTITION PARTITION_SELECT_PICT_2, PARTITION PARTITION_SELECT_PICT_3);
+
+SELECT trim(C_CHAR_3) , trim(C_VARCHAR_3) , C_INT , C_NUMERIC , C_TS_WITHOUT , lower(trim(C_CHAR_3)) , initcap(trim(C_VARCHAR_3)) , abs(C_INT) , abs(C_NUMERIC) , extract(year from C_TS_WITHOUT) FROM VECTOR_PARTITION_SELECT_PICT_TABLE partition(PARTITION_SELECT_PICT_1) where 'a' not like C_VARCHAR_3 and 1000 != C_INT and C_NUMERIC is not null and (C_TS_WITHOUT >= '2000-01-01 01:01:01' and C_TS_WITHOUT <= '2000-09-09 09:09:09') ORDER BY 1 , 2 , 3 , 4 , 5 ;
+drop table PARTITION_SELECT_PICT_TABLE;
+drop table VECTOR_PARTITION_SELECT_PICT_TABLE;

@@ -1,0 +1,155 @@
+create table hl_test002(a int,b varchar2(15), c varchar2(15)); 
+insert into hl_test002 values(1,'gauss,ap', 'xue,dong,pu'); 
+insert into hl_test002 values(1,'gauss,ap', NULL); 
+insert into hl_test002 values(1,'xue,dong,pu', 'gauss,ap,db'); 
+insert into hl_test002 values(1,'xue,dong,pu', NULL); 
+insert into hl_test002 values(2,'xi,an', 'wang,,rui'); 
+insert into hl_test002 values(2,'xi,an', NULL); 
+insert into hl_test002 values(2,'wang,,rui', 'xi,an'); 
+insert into hl_test002 values(2,'wang,,rui', NULL);
+create table hl_test001(a int,b varchar2(15), c varchar2(15)) with (ORIENTATION = COLUMN); 
+insert into hl_test001 select * from hl_test002;
+select a,b,c,regexp_split_to_table(b,E',') from hl_test001 order by 1, 2, 3, 4;
+ a |      b      |      c      | regexp_split_to_table 
+---+-------------+-------------+-----------------------
+ 1 | gauss,ap    | xue,dong,pu | ap
+ 1 | gauss,ap    | xue,dong,pu | gauss
+ 1 | gauss,ap    |             | ap
+ 1 | gauss,ap    |             | gauss
+ 1 | xue,dong,pu | gauss,ap,db | dong
+ 1 | xue,dong,pu | gauss,ap,db | pu
+ 1 | xue,dong,pu | gauss,ap,db | xue
+ 1 | xue,dong,pu |             | dong
+ 1 | xue,dong,pu |             | pu
+ 1 | xue,dong,pu |             | xue
+ 2 | wang,,rui   | xi,an       | 
+ 2 | wang,,rui   | xi,an       | rui
+ 2 | wang,,rui   | xi,an       | wang
+ 2 | wang,,rui   |             | 
+ 2 | wang,,rui   |             | rui
+ 2 | wang,,rui   |             | wang
+ 2 | xi,an       | wang,,rui   | an
+ 2 | xi,an       | wang,,rui   | xi
+ 2 | xi,an       |             | an
+ 2 | xi,an       |             | xi
+(20 rows)
+
+select a,b,c,regexp_split_to_table(b,NULL) from hl_test001 order by 1, 2, 3, 4;
+ a | b | c | regexp_split_to_table 
+---+---+---+-----------------------
+(0 rows)
+
+select a,b,c,regexp_split_to_table(b,E','), regexp_split_to_table(c,E',') from hl_test001 order by 1, 2, 3, 4, 5;
+ a |      b      |      c      | regexp_split_to_table | regexp_split_to_table 
+---+-------------+-------------+-----------------------+-----------------------
+ 1 | gauss,ap    | xue,dong,pu | ap                    | dong
+ 1 | gauss,ap    | xue,dong,pu | ap                    | pu
+ 1 | gauss,ap    | xue,dong,pu | ap                    | xue
+ 1 | gauss,ap    | xue,dong,pu | gauss                 | dong
+ 1 | gauss,ap    | xue,dong,pu | gauss                 | pu
+ 1 | gauss,ap    | xue,dong,pu | gauss                 | xue
+ 1 | xue,dong,pu | gauss,ap,db | dong                  | ap
+ 1 | xue,dong,pu | gauss,ap,db | pu                    | db
+ 1 | xue,dong,pu | gauss,ap,db | xue                   | gauss
+ 2 | wang,,rui   | xi,an       |                       | an
+ 2 | wang,,rui   | xi,an       |                       | xi
+ 2 | wang,,rui   | xi,an       | rui                   | an
+ 2 | wang,,rui   | xi,an       | rui                   | xi
+ 2 | wang,,rui   | xi,an       | wang                  | an
+ 2 | wang,,rui   | xi,an       | wang                  | xi
+ 2 | xi,an       | wang,,rui   | an                    | 
+ 2 | xi,an       | wang,,rui   | an                    | rui
+ 2 | xi,an       | wang,,rui   | an                    | wang
+ 2 | xi,an       | wang,,rui   | xi                    | 
+ 2 | xi,an       | wang,,rui   | xi                    | rui
+ 2 | xi,an       | wang,,rui   | xi                    | wang
+(21 rows)
+
+select regexp_split_to_table(b,E','), generate_series(1, 3) from hl_test001;
+ERROR:  set-return function not supported in vector eninge
+CONTEXT:  referenced column: generate_series
+select a,b,c,regexp_split_to_table(regexp_split_to_table(b,E','), E'u') from hl_test001 order by 1, 2, 3, 4;
+ a |      b      |      c      | regexp_split_to_table 
+---+-------------+-------------+-----------------------
+ 1 | gauss,ap    | xue,dong,pu | ap
+ 1 | gauss,ap    | xue,dong,pu | ga
+ 1 | gauss,ap    | xue,dong,pu | ss
+ 1 | gauss,ap    |             | ap
+ 1 | gauss,ap    |             | ga
+ 1 | gauss,ap    |             | ss
+ 1 | xue,dong,pu | gauss,ap,db | 
+ 1 | xue,dong,pu | gauss,ap,db | dong
+ 1 | xue,dong,pu | gauss,ap,db | e
+ 1 | xue,dong,pu | gauss,ap,db | p
+ 1 | xue,dong,pu | gauss,ap,db | x
+ 1 | xue,dong,pu |             | 
+ 1 | xue,dong,pu |             | dong
+ 1 | xue,dong,pu |             | e
+ 1 | xue,dong,pu |             | p
+ 1 | xue,dong,pu |             | x
+ 2 | wang,,rui   | xi,an       | 
+ 2 | wang,,rui   | xi,an       | i
+ 2 | wang,,rui   | xi,an       | r
+ 2 | wang,,rui   | xi,an       | wang
+ 2 | wang,,rui   |             | 
+ 2 | wang,,rui   |             | i
+ 2 | wang,,rui   |             | r
+ 2 | wang,,rui   |             | wang
+ 2 | xi,an       | wang,,rui   | an
+ 2 | xi,an       | wang,,rui   | xi
+ 2 | xi,an       |             | an
+ 2 | xi,an       |             | xi
+(28 rows)
+
+select a,b,c,substring(regexp_split_to_table(b,E','), 1, 100) from hl_test001 order by 1, 2, 3, 4;
+ a |      b      |      c      | substring 
+---+-------------+-------------+-----------
+ 1 | gauss,ap    | xue,dong,pu | ap
+ 1 | gauss,ap    | xue,dong,pu | gauss
+ 1 | gauss,ap    |             | ap
+ 1 | gauss,ap    |             | gauss
+ 1 | xue,dong,pu | gauss,ap,db | dong
+ 1 | xue,dong,pu | gauss,ap,db | pu
+ 1 | xue,dong,pu | gauss,ap,db | xue
+ 1 | xue,dong,pu |             | dong
+ 1 | xue,dong,pu |             | pu
+ 1 | xue,dong,pu |             | xue
+ 2 | wang,,rui   | xi,an       | rui
+ 2 | wang,,rui   | xi,an       | wang
+ 2 | wang,,rui   | xi,an       | 
+ 2 | wang,,rui   |             | rui
+ 2 | wang,,rui   |             | wang
+ 2 | wang,,rui   |             | 
+ 2 | xi,an       | wang,,rui   | an
+ 2 | xi,an       | wang,,rui   | xi
+ 2 | xi,an       |             | an
+ 2 | xi,an       |             | xi
+(20 rows)
+
+select a,b,c,regexp_split_to_table(substring(b,1, 100), E',') from hl_test001 order by 1, 2, 3, 4;
+ a |      b      |      c      | regexp_split_to_table 
+---+-------------+-------------+-----------------------
+ 1 | gauss,ap    | xue,dong,pu | ap
+ 1 | gauss,ap    | xue,dong,pu | gauss
+ 1 | gauss,ap    |             | ap
+ 1 | gauss,ap    |             | gauss
+ 1 | xue,dong,pu | gauss,ap,db | dong
+ 1 | xue,dong,pu | gauss,ap,db | pu
+ 1 | xue,dong,pu | gauss,ap,db | xue
+ 1 | xue,dong,pu |             | dong
+ 1 | xue,dong,pu |             | pu
+ 1 | xue,dong,pu |             | xue
+ 2 | wang,,rui   | xi,an       | 
+ 2 | wang,,rui   | xi,an       | rui
+ 2 | wang,,rui   | xi,an       | wang
+ 2 | wang,,rui   |             | 
+ 2 | wang,,rui   |             | rui
+ 2 | wang,,rui   |             | wang
+ 2 | xi,an       | wang,,rui   | an
+ 2 | xi,an       | wang,,rui   | xi
+ 2 | xi,an       |             | an
+ 2 | xi,an       |             | xi
+(20 rows)
+
+drop table hl_test001;
+drop table hl_test002;

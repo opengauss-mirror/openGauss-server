@@ -162,7 +162,7 @@ typedef struct MultiXactStateData {
  * transaction end, so we don't need to do retail freeing of entries.
  */
 typedef struct mXactCacheEnt {
-    struct mXactCacheEnt* next;
+    struct mXactCacheEnt *next;
     MultiXactId multi;
     int nxids;
     TransactionId xids[1]; /* VARIABLE LENGTH ARRAY */
@@ -180,17 +180,17 @@ typedef struct mXactCacheEnt {
 
 /* internal MultiXactId management */
 static void MultiXactIdSetOldestVisible(void);
-static MultiXactId CreateMultiXactId(int nxids, TransactionId* xids);
-static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nxids, TransactionId* xids);
-static MultiXactId GetNewMultiXactId(int nxids, MultiXactOffset* offset);
+static MultiXactId CreateMultiXactId(int nxids, TransactionId *xids);
+static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nxids, TransactionId *xids);
+static MultiXactId GetNewMultiXactId(int nxids, MultiXactOffset *offset);
 
 /* MultiXact cache management */
-static MultiXactId mXactCacheGetBySet(int nxids, TransactionId* xids);
-static int mXactCacheGetById(MultiXactId multi, TransactionId** xids);
-static void mXactCachePut(MultiXactId multi, int nxids, TransactionId* xids);
+static MultiXactId mXactCacheGetBySet(int nxids, TransactionId *xids);
+static int mXactCacheGetById(MultiXactId multi, TransactionId **xids);
+static void mXactCachePut(MultiXactId multi, int nxids, TransactionId *xids);
 
 #ifdef MULTIXACT_DEBUG
-static char* mxid_to_string(MultiXactId multi, int nxids, TransactionId* xids);
+static char *mxid_to_string(MultiXactId multi, int nxids, TransactionId *xids);
 #endif
 
 /* management of SLRU infrastructure */
@@ -200,7 +200,8 @@ static void ExtendMultiXactOffset(MultiXactId multi);
 static void ExtendMultiXactMember(MultiXactOffset offset, int nmembers);
 static void TruncateMultiXact(void);
 static void WriteMZeroPageXlogRec(int64 pageno, uint8 info);
-static void get_multixact_pageno(uint8 info, int64* pageno, XLogReaderState* record);
+
+static void get_multixact_pageno(uint8 info, int64 *pageno, XLogReaderState *record);
 
 /*
  * MultiXactIdCreate
@@ -253,8 +254,8 @@ MultiXactId MultiXactIdCreate(TransactionId xid1, TransactionId xid2)
 MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid)
 {
     MultiXactId newMulti;
-    TransactionId* members = NULL;
-    TransactionId* newMembers = NULL;
+    TransactionId *members = NULL;
+    TransactionId *newMembers = NULL;
     int nmembers;
     int i;
     int j;
@@ -298,7 +299,7 @@ MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid)
      * optimization, but a useful one.	Note we have the same race condition
      * here as above: j could be 0 at the end of the loop.)
      */
-    newMembers = (TransactionId*)palloc(sizeof(TransactionId) * (unsigned)(nmembers + 1));
+    newMembers = (TransactionId *)palloc(sizeof(TransactionId) * (unsigned)(nmembers + 1));
 
     for (i = 0, j = 0; i < nmembers; i++) {
         if (TransactionIdIsInProgress(members[i]))
@@ -328,7 +329,7 @@ MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid)
  */
 bool MultiXactIdIsRunning(MultiXactId multi)
 {
-    TransactionId* members = NULL;
+    TransactionId *members = NULL;
     int nmembers;
     int i;
 
@@ -389,7 +390,7 @@ bool MultiXactIdIsRunning(MultiXactId multi)
 bool MultiXactIdIsCurrent(MultiXactId multi)
 {
     bool result = false;
-    TransactionId* members = NULL;
+    TransactionId *members = NULL;
     int nmembers;
     int i;
 
@@ -499,8 +500,8 @@ static void MultiXactIdSetOldestVisible(void)
 
         LWLockRelease(MultiXactGenLock);
 
-        ereport(
-            DEBUG2, (errmsg("MultiXact: setting OldestVisible[%d] = %lu", t_thrd.proc_cxt.MyBackendId, oldestMXact)));
+        ereport(DEBUG2,
+                (errmsg("MultiXact: setting OldestVisible[%d] = %lu", t_thrd.proc_cxt.MyBackendId, oldestMXact)));
     }
 }
 
@@ -540,7 +541,7 @@ MultiXactId ReadNextMultiXactId(void)
  */
 void MultiXactIdWait(MultiXactId multi, bool allow_con_update)
 {
-    TransactionId* members = NULL;
+    TransactionId *members = NULL;
     int nmembers = 0;
 
     nmembers = GetMultiXactIdMembers(multi, &members);
@@ -567,7 +568,7 @@ void MultiXactIdWait(MultiXactId multi, bool allow_con_update)
 bool ConditionalMultiXactIdWait(MultiXactId multi)
 {
     bool result = true;
-    TransactionId* members = NULL;
+    TransactionId *members = NULL;
     int nmembers;
 
     nmembers = GetMultiXactIdMembers(multi, &members);
@@ -602,7 +603,7 @@ bool ConditionalMultiXactIdWait(MultiXactId multi)
  *
  * NB: the passed xids[] array will be sorted in-place.
  */
-static MultiXactId CreateMultiXactId(int nxids, TransactionId* xids)
+static MultiXactId CreateMultiXactId(int nxids, TransactionId *xids)
 {
     MultiXactId multi;
     MultiXactOffset offset;
@@ -650,8 +651,8 @@ static MultiXactId CreateMultiXactId(int nxids, TransactionId* xids)
     xlrec.nxids = nxids;
 
     XLogBeginInsert();
-    XLogRegisterData((char*)(&xlrec), MinSizeOfMultiXactCreate);
-    XLogRegisterData((char*)xids, (unsigned)nxids * sizeof(TransactionId));
+    XLogRegisterData((char *)(&xlrec), MinSizeOfMultiXactCreate);
+    XLogRegisterData((char *)xids, (unsigned)nxids * sizeof(TransactionId));
 
     (void)XLogInsert(RM_MULTIXACT_ID, XLOG_MULTIXACT_CREATE_ID);
 
@@ -675,13 +676,13 @@ static MultiXactId CreateMultiXactId(int nxids, TransactionId* xids)
  *
  * This is broken out of CreateMultiXactId so that xlog replay can use it.
  */
-static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nxids, TransactionId* xids)
+static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nxids, TransactionId *xids)
 {
     int64 pageno;
     int64 prev_pageno;
     int entryno;
     int slotno;
-    MultiXactOffset* offptr = NULL;
+    MultiXactOffset *offptr = NULL;
     int i;
 
     (void)LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
@@ -697,7 +698,7 @@ static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nx
      * take the trouble to generalize the slru.c error reporting code.
      */
     slotno = SimpleLruReadPage(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno, true, multi);
-    offptr = (MultiXactOffset*)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
+    offptr = (MultiXactOffset *)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
     offptr += entryno;
 
     *offptr = offset;
@@ -712,7 +713,7 @@ static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nx
     prev_pageno = -1;
 
     for (i = 0; i < nxids; i++, offset++) {
-        TransactionId* memberptr = NULL;
+        TransactionId *memberptr = NULL;
 
         pageno = (int64)MXOffsetToMemberPage(offset);
         entryno = MXOffsetToMemberEntry(offset);
@@ -722,7 +723,7 @@ static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nx
             prev_pageno = pageno;
         }
 
-        memberptr = (TransactionId*)t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_buffer[slotno];
+        memberptr = (TransactionId *)t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_buffer[slotno];
         memberptr += entryno;
 
         *memberptr = xids[i];
@@ -748,7 +749,7 @@ static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nx
  * We start a critical section before advancing the shared counters.  The
  * caller must end the critical section after writing SLRU data.
  */
-static MultiXactId GetNewMultiXactId(int nxids, MultiXactOffset* offset)
+static MultiXactId GetNewMultiXactId(int nxids, MultiXactOffset *offset)
 {
     MultiXactId result;
     MultiXactOffset nextOffset;
@@ -821,13 +822,13 @@ static MultiXactId GetNewMultiXactId(int nxids, MultiXactOffset* offset)
  * still running; in that case we have not actually looked them up, and
  * *xids is not set.
  */
-int GetMultiXactIdMembers(MultiXactId multi, TransactionId** xids)
+int GetMultiXactIdMembers(MultiXactId multi, TransactionId **xids)
 {
     int64 pageno;
     int64 prev_pageno;
     int entryno;
     int slotno;
-    MultiXactOffset* offptr = NULL;
+    MultiXactOffset *offptr = NULL;
     MultiXactOffset offset;
     int length;
     int truelength;
@@ -835,7 +836,7 @@ int GetMultiXactIdMembers(MultiXactId multi, TransactionId** xids)
     MultiXactId nextMXact;
     MultiXactId tmpMXact;
     MultiXactOffset nextOffset;
-    TransactionId* ptr = NULL;
+    TransactionId *ptr = NULL;
 
     ereport(DEBUG2, (errmsg("GetMembers: asked for " XID_FMT, multi)));
 
@@ -926,7 +927,7 @@ retry:
     entryno = MultiXactIdToOffsetEntry(multi);
 
     slotno = SimpleLruReadPage(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno, true, multi);
-    offptr = (MultiXactOffset*)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
+    offptr = (MultiXactOffset *)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
     offptr += entryno;
     offset = *offptr;
 
@@ -949,7 +950,7 @@ retry:
         if (pageno != prev_pageno)
             slotno = SimpleLruReadPage(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno, true, tmpMXact);
 
-        offptr = (MultiXactOffset*)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
+        offptr = (MultiXactOffset *)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
         offptr += entryno;
         nextMXOffset = *offptr;
 
@@ -965,7 +966,7 @@ retry:
 
     LWLockRelease(MultiXactOffsetControlLock);
 
-    ptr = (TransactionId*)palloc((unsigned)length * sizeof(TransactionId));
+    ptr = (TransactionId *)palloc((unsigned)length * sizeof(TransactionId));
     *xids = ptr;
 
     /* Now get the members themselves. */
@@ -974,7 +975,7 @@ retry:
     truelength = 0;
     prev_pageno = -1;
     for (i = 0; i < length; i++, offset++) {
-        TransactionId* xactptr = NULL;
+        TransactionId *xactptr = NULL;
 
         pageno = (int64)MXOffsetToMemberPage(offset);
         entryno = MXOffsetToMemberEntry(offset);
@@ -984,7 +985,7 @@ retry:
             prev_pageno = pageno;
         }
 
-        xactptr = (TransactionId*)t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_buffer[slotno];
+        xactptr = (TransactionId *)t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_buffer[slotno];
         xactptr += entryno;
 
         if (!TransactionIdIsValid(*xactptr)) {
@@ -1020,9 +1021,9 @@ retry:
  *
  * NB: the passed xids[] array will be sorted in-place.
  */
-static MultiXactId mXactCacheGetBySet(int nxids, TransactionId* xids)
+static MultiXactId mXactCacheGetBySet(int nxids, TransactionId *xids)
 {
-    mXactCacheEnt* entry = NULL;
+    mXactCacheEnt *entry = NULL;
 
     debug_elog3(DEBUG2, "CacheGet: looking for %s", mxid_to_string(InvalidMultiXactId, nxids, xids));
 
@@ -1052,20 +1053,20 @@ static MultiXactId mXactCacheGetBySet(int nxids, TransactionId* xids)
  * If successful, *xids is set to the address of a palloc'd copy of the
  * TransactionId set.  Return value is number of members, or -1 on failure.
  */
-static int mXactCacheGetById(MultiXactId multi, TransactionId** xids)
+static int mXactCacheGetById(MultiXactId multi, TransactionId **xids)
 {
-    mXactCacheEnt* entry = NULL;
+    mXactCacheEnt *entry = NULL;
     errno_t rc = EOK;
 
     ereport(DEBUG2, (errmsg("CacheGet: looking for " XID_FMT, multi)));
 
     for (entry = t_thrd.xact_cxt.MXactCache; entry != NULL; entry = entry->next) {
         if (entry->multi == multi) {
-            TransactionId* ptr = NULL;
+            TransactionId *ptr = NULL;
             Size size;
 
             size = sizeof(TransactionId) * (unsigned)entry->nxids;
-            ptr = (TransactionId*)palloc(size);
+            ptr = (TransactionId *)palloc(size);
             *xids = ptr;
 
             rc = memcpy_s(ptr, size, entry->xids, size);
@@ -1084,9 +1085,9 @@ static int mXactCacheGetById(MultiXactId multi, TransactionId** xids)
  * mXactCachePut
  *		Add a new MultiXactId and its composing set into the local cache.
  */
-static void mXactCachePut(MultiXactId multi, int nxids, TransactionId* xids)
+static void mXactCachePut(MultiXactId multi, int nxids, TransactionId *xids)
 {
-    mXactCacheEnt* entry = NULL;
+    mXactCacheEnt *entry = NULL;
     errno_t rc = EOK;
 
     debug_elog3(DEBUG2, "CachePut: storing %s", mxid_to_string(multi, nxids, xids));
@@ -1094,15 +1095,14 @@ static void mXactCachePut(MultiXactId multi, int nxids, TransactionId* xids)
     if (t_thrd.xact_cxt.MXactContext == NULL) {
         /* The cache only lives as long as the current transaction */
         ereport(DEBUG2, (errmsg("CachePut: initializing memory context")));
-        t_thrd.xact_cxt.MXactContext = AllocSetContextCreate(u_sess->top_transaction_mem_cxt,
-            "MultiXact Cache Context",
-            ALLOCSET_SMALL_MINSIZE,
-            ALLOCSET_SMALL_INITSIZE,
-            ALLOCSET_SMALL_MAXSIZE);
+        t_thrd.xact_cxt.MXactContext = AllocSetContextCreate(u_sess->top_transaction_mem_cxt, "MultiXact Cache Context",
+                                                             ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE,
+                                                             ALLOCSET_SMALL_MAXSIZE);
     }
 
-    entry = (mXactCacheEnt*)MemoryContextAlloc(
-        t_thrd.xact_cxt.MXactContext, offsetof(mXactCacheEnt, xids) + (unsigned)nxids * sizeof(TransactionId));
+    entry =
+        (mXactCacheEnt *)MemoryContextAlloc(t_thrd.xact_cxt.MXactContext,
+                                            offsetof(mXactCacheEnt, xids) + (unsigned)nxids * sizeof(TransactionId));
 
     entry->multi = multi;
     entry->nxids = nxids;
@@ -1117,12 +1117,12 @@ static void mXactCachePut(MultiXactId multi, int nxids, TransactionId* xids)
 }
 
 #ifdef MULTIXACT_DEBUG
-static char* mxid_to_string(MultiXactId multi, int nxids, TransactionId* xids)
+static char *mxid_to_string(MultiXactId multi, int nxids, TransactionId *xids)
 {
 #define XIDLEN 17
 
     size_t total_len = 15 * (nxids + 1) + 4;
-    char* str = palloc0(total_len);
+    char *str = palloc0(total_len);
     int i;
     int len = 0;
     errno_t errorno = EOK;
@@ -1238,7 +1238,7 @@ void PostPrepare_MultiXact(TransactionId xid)
  * multixact_twophase_recover
  *		Recover the state of a prepared transaction at startup
  */
-void multixact_twophase_recover(TransactionId xid, uint16 info, void* recdata, uint32 len)
+void multixact_twophase_recover(TransactionId xid, uint16 info, void *recdata, uint32 len)
 {
     BackendId dummyBackendId = TwoPhaseGetDummyBackendId(xid);
     MultiXactId oldestMember;
@@ -1248,7 +1248,7 @@ void multixact_twophase_recover(TransactionId xid, uint16 info, void* recdata, u
      * OldestMemberMXactId slot reserved for this prepared transaction.
      */
     Assert(len == sizeof(MultiXactId));
-    oldestMember = *((MultiXactId*)recdata);
+    oldestMember = *((MultiXactId *)recdata);
 
     t_thrd.shemem_ptr_cxt.OldestMemberMXactId[dummyBackendId] = oldestMember;
 }
@@ -1257,7 +1257,7 @@ void multixact_twophase_recover(TransactionId xid, uint16 info, void* recdata, u
  * multixact_twophase_postcommit
  *		Similar to AtEOX_MultiXact but for COMMIT PREPARED
  */
-void multixact_twophase_postcommit(TransactionId xid, uint16 info, void* recdata, uint32 len)
+void multixact_twophase_postcommit(TransactionId xid, uint16 info, void *recdata, uint32 len)
 {
     BackendId dummyBackendId = TwoPhaseGetDummyBackendId(xid);
 
@@ -1270,7 +1270,7 @@ void multixact_twophase_postcommit(TransactionId xid, uint16 info, void* recdata
  * multixact_twophase_postabort
  *		This is actually just the same as the COMMIT case.
  */
-void multixact_twophase_postabort(TransactionId xid, uint16 info, void* recdata, uint32 len)
+void multixact_twophase_postabort(TransactionId xid, uint16 info, void *recdata, uint32 len)
 {
     multixact_twophase_postcommit(xid, info, recdata, len);
 }
@@ -1301,30 +1301,22 @@ void MultiXactShmemInit(void)
 
     debug_elog2(DEBUG2, "Shared Memory Init for MultiXact");
 
-    SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl,
-        GetBuiltInTrancheName(LWTRANCHE_MULTIXACTOFFSET_CTL),
-        LWTRANCHE_MULTIXACTOFFSET_CTL,
-        NUM_MXACTOFFSET_BUFFERS,
-        0,
-        MultiXactOffsetControlLock,
-        "pg_multixact/offsets");
-    SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl,
-        GetBuiltInTrancheName(LWTRANCHE_MULTIXACTMEMBER_CTL),
-        LWTRANCHE_MULTIXACTMEMBER_CTL,
-        NUM_MXACTMEMBER_BUFFERS,
-        0,
-        MultiXactMemberControlLock,
-        "pg_multixact/members");
+    SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, GetBuiltInTrancheName(LWTRANCHE_MULTIXACTOFFSET_CTL),
+                  LWTRANCHE_MULTIXACTOFFSET_CTL, NUM_MXACTOFFSET_BUFFERS, 0, MultiXactOffsetControlLock,
+                  "pg_multixact/offsets");
+    SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, GetBuiltInTrancheName(LWTRANCHE_MULTIXACTMEMBER_CTL),
+                  LWTRANCHE_MULTIXACTMEMBER_CTL, NUM_MXACTMEMBER_BUFFERS, 0, MultiXactMemberControlLock,
+                  "pg_multixact/members");
 
     /* Initialize our shared state struct */
-    t_thrd.shemem_ptr_cxt.MultiXactState =
-        (MultiXactStateData*)ShmemInitStruct("Shared MultiXact State", SHARED_MULTIXACT_STATE_SIZE, &found);
+    t_thrd.shemem_ptr_cxt.MultiXactState = (MultiXactStateData *)ShmemInitStruct("Shared MultiXact State",
+                                                                                 SHARED_MULTIXACT_STATE_SIZE, &found);
     if (!IsUnderPostmaster) {
         Assert(!found);
 
         /* Make sure we zero out the per-backend state */
-        rc =
-            memset_s(t_thrd.shemem_ptr_cxt.MultiXactState, SHARED_MULTIXACT_STATE_SIZE, 0, SHARED_MULTIXACT_STATE_SIZE);
+        rc = memset_s(t_thrd.shemem_ptr_cxt.MultiXactState, SHARED_MULTIXACT_STATE_SIZE, 0,
+                      SHARED_MULTIXACT_STATE_SIZE);
         securec_check(rc, "", "");
     } else
         Assert(found);
@@ -1439,16 +1431,14 @@ void StartupMultiXact(void)
     entryno = (int64)MultiXactIdToOffsetEntry(multi);
     if (entryno != 0) {
         int slotno;
-        MultiXactOffset* offptr = NULL;
+        MultiXactOffset *offptr = NULL;
 
         slotno = SimpleLruReadPage(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno, true, multi);
-        offptr = (MultiXactOffset*)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
+        offptr = (MultiXactOffset *)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
         offptr += entryno;
 
-        rc = memset_s(offptr,
-            BLCKSZ - ((unsigned)entryno * sizeof(MultiXactOffset)),
-            0,
-            BLCKSZ - ((unsigned)entryno * sizeof(MultiXactOffset)));
+        rc = memset_s(offptr, BLCKSZ - ((unsigned)entryno * sizeof(MultiXactOffset)), 0,
+                      BLCKSZ - ((unsigned)entryno * sizeof(MultiXactOffset)));
         securec_check(rc, "", "");
 
         t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_dirty[slotno] = true;
@@ -1472,16 +1462,14 @@ void StartupMultiXact(void)
     entryno = (int64)MXOffsetToMemberEntry(offset);
     if (entryno != 0) {
         int slotno;
-        TransactionId* xidptr = NULL;
+        TransactionId *xidptr = NULL;
 
         slotno = SimpleLruReadPage(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, pageno, true, offset);
-        xidptr = (TransactionId*)t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_buffer[slotno];
+        xidptr = (TransactionId *)t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_buffer[slotno];
         xidptr += entryno;
 
-        rc = memset_s(xidptr,
-            BLCKSZ - ((unsigned)entryno * sizeof(TransactionId)),
-            0,
-            BLCKSZ - ((unsigned)entryno * sizeof(TransactionId)));
+        rc = memset_s(xidptr, BLCKSZ - ((unsigned)entryno * sizeof(TransactionId)), 0,
+                      BLCKSZ - ((unsigned)entryno * sizeof(TransactionId)));
         securec_check(rc, "", "");
 
         t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_dirty[slotno] = true;
@@ -1511,7 +1499,7 @@ void ShutdownMultiXact(void)
 /*
  * Get the next MultiXactId and offset to save in a checkpoint record
  */
-void MultiXactGetCheckptMulti(bool is_shutdown, MultiXactId* nextMulti, MultiXactOffset* nextMultiOffset)
+void MultiXactGetCheckptMulti(bool is_shutdown, MultiXactId *nextMulti, MultiXactOffset *nextMultiOffset)
 {
     (void)LWLockAcquire(MultiXactGenLock, LW_SHARED);
 
@@ -1730,14 +1718,14 @@ static void TruncateMultiXact(void)
         int64 pageno;
         int slotno;
         int entryno;
-        MultiXactOffset* offptr = NULL;
+        MultiXactOffset *offptr = NULL;
 
         /* lock is acquired by SimpleLruReadPage_ReadOnly */
         pageno = (int64)MultiXactIdToOffsetPage(oldestMXact);
         entryno = MultiXactIdToOffsetEntry(oldestMXact);
 
         slotno = SimpleLruReadPage_ReadOnly(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, pageno, oldestMXact);
-        offptr = (MultiXactOffset*)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
+        offptr = (MultiXactOffset *)t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_buffer[slotno];
         offptr += entryno;
         oldestOffset = *offptr;
 
@@ -1766,8 +1754,8 @@ static void TruncateMultiXact(void)
     t_thrd.shemem_ptr_cxt.MultiXactState->lastTruncationPoint = oldestMXact;
 }
 
-void XLogRecSetMultiXactOffState(
-    XLogBlockMultiXactOffParse* blockmultistate, MultiXactOffset moffset, MultiXactId multi)
+void XLogRecSetMultiXactOffState(XLogBlockMultiXactOffParse *blockmultistate, MultiXactOffset moffset,
+                                 MultiXactId multi)
 {
     blockmultistate->moffset = moffset;
     blockmultistate->multi = multi;
@@ -1781,62 +1769,62 @@ static void WriteMZeroPageXlogRec(int64 pageno, uint8 info)
     XLogBeginInsert();
     if (t_thrd.proc->workingVersionNum >= 92068) {
         info |= XLOG_MULTIXACT_INT64_PAGENO;
-        XLogRegisterData((char*)(&pageno), sizeof(int64));
+        XLogRegisterData((char *)(&pageno), sizeof(int64));
     } else {
-        XLogRegisterData((char*)(&pageno), sizeof(int));
+        XLogRegisterData((char *)(&pageno), sizeof(int));
     }
     (void)XLogInsert(RM_MULTIXACT_ID, info);
 }
-XLogRecParseState* multixact_xlog_ddl_parse_to_block(XLogReaderState* record, uint32* blocknum)
+XLogRecParseState *multixact_xlog_ddl_parse_to_block(XLogReaderState *record, uint32 *blocknum)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
-    uint8 mask_info = info & XLOG_MULTIXACT_MASK;
-    int64 pageno;
+    int64 pageno = 0;
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
-    XLogRecParseState* recordstatehead = NULL;
+    XLogRecParseState *recordstatehead = NULL;
     int ddltype = BLOCK_DDL_TYPE_NONE;
     *blocknum = 0;
 
-    if (mask_info == XLOG_MULTIXACT_ZERO_OFF_PAGE) {
+    if ((info & XLOG_MULTIXACT_MASK) == XLOG_MULTIXACT_ZERO_OFF_PAGE) {
         get_multixact_pageno(info, &pageno, record);
         ddltype = BLOCK_DDL_MULTIXACT_OFF_ZERO;
-    } else if (mask_info == XLOG_MULTIXACT_ZERO_MEM_PAGE) {
+    } else if ((info & XLOG_MULTIXACT_MASK) == XLOG_MULTIXACT_ZERO_MEM_PAGE) {
         get_multixact_pageno(info, &pageno, record);
         ddltype = BLOCK_DDL_MULTIXACT_MEM_ZERO;
     }
-    forknum = (pageno >> LOW_BLOKNUMBER_BITS);
-    lowblknum = (pageno & LOW_BLOKNUMBER_MASK);
+    forknum = (ForkNumber)((uint64)pageno >> LOW_BLOKNUMBER_BITS);
+    lowblknum = (BlockNumber)((uint64)pageno & LOW_BLOKNUMBER_MASK);
     (*blocknum)++;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, forknum, lowblknum, NULL, recordstatehead, false);
-    XLogRecSetBlockDdlState(&(recordstatehead->blockparse.extra_rec.blockddlrec), ddltype, false);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, forknum, lowblknum, NULL, recordstatehead);
+    XLogRecSetBlockDdlState(&(recordstatehead->blockparse.extra_rec.blockddlrec), ddltype, false,
+                            (char *)XLogRecGetData(record));
     return recordstatehead;
 }
-XLogRecParseState* multixact_xlog_offset_parse_to_block(XLogReaderState* record, uint32* blocknum)
+XLogRecParseState *multixact_xlog_offset_parse_to_block(XLogReaderState *record, uint32 *blocknum)
 {
-    int64 pageno;
+    uint64 pageno;
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
-    XLogRecParseState* recordstatehead = NULL;
-    xl_multixact_create* xlrec = (xl_multixact_create*)XLogRecGetData(record);
+    XLogRecParseState *recordstatehead = NULL;
+    xl_multixact_create *xlrec = (xl_multixact_create *)XLogRecGetData(record);
     pageno = MultiXactIdToOffsetPage(xlrec->mid);
     (*blocknum)++;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
     if (recordstatehead == NULL) {
         return NULL;
     }
-    forknum = (pageno >> LOW_BLOKNUMBER_BITS);
-    lowblknum = (pageno & LOW_BLOKNUMBER_MASK);
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_OFF_TYPE, forknum, lowblknum, NULL, recordstatehead, false);
+    forknum = (ForkNumber)(pageno >> LOW_BLOKNUMBER_BITS);
+    lowblknum = (BlockNumber)(pageno & LOW_BLOKNUMBER_MASK);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_OFF_TYPE, forknum, lowblknum, NULL, recordstatehead);
     XLogRecSetMultiXactOffState(&(recordstatehead->blockparse.extra_rec.blockmultixactoff), xlrec->moff, xlrec->mid);
     return recordstatehead;
 }
-void XLogRecSetMultiXactMemState(XLogBlockMultiXactMemParse* blockmultistate, MultiXactOffset startoffset,
-    MultiXactId multi, uint64 xidnum, TransactionId* xidsarry)
+void XLogRecSetMultiXactMemState(XLogBlockMultiXactMemParse *blockmultistate, MultiXactOffset startoffset,
+                                 MultiXactId multi, uint64 xidnum, TransactionId *xidsarry)
 {
     blockmultistate->startoffset = startoffset;
     blockmultistate->multi = multi;
@@ -1845,19 +1833,19 @@ void XLogRecSetMultiXactMemState(XLogBlockMultiXactMemParse* blockmultistate, Mu
         blockmultistate->xidsarry[i] = xidsarry[i];
     }
 }
-XLogRecParseState* multixact_xlog_mem_parse_to_block(
-    XLogReaderState* record, uint32* blocknum, XLogRecParseState* recordstatehead)
+XLogRecParseState *multixact_xlog_mem_parse_to_block(XLogReaderState *record, uint32 *blocknum,
+                                                     XLogRecParseState *recordstatehead)
 {
-    int64 pageno;
+    uint64 pageno;
     MultiXactOffset offset;
     MultiXactOffset startoffset = 0;
-    int64 prev_pageno;
+    uint64 prev_pageno;
     int continuenum = 0;
     TransactionId xidsarry[MAX_BLOCK_XID_NUMS];
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
-    XLogRecParseState* blockstate = NULL;
-    xl_multixact_create* xlrec = (xl_multixact_create*)XLogRecGetData(record);
+    XLogRecParseState *blockstate = NULL;
+    xl_multixact_create *xlrec = (xl_multixact_create *)XLogRecGetData(record);
     if (xlrec->nxids > 0) {
         offset = xlrec->moff;
         startoffset = offset;
@@ -1867,9 +1855,9 @@ XLogRecParseState* multixact_xlog_mem_parse_to_block(
         if (blockstate == NULL) {
             return NULL;
         }
-        forknum = (prev_pageno >> LOW_BLOKNUMBER_BITS);
-        lowblknum = (prev_pageno & LOW_BLOKNUMBER_MASK);
-        XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_MEM_TYPE, forknum, lowblknum, NULL, blockstate, false);
+        forknum = (ForkNumber)(prev_pageno >> LOW_BLOKNUMBER_BITS);
+        lowblknum = (BlockNumber)(prev_pageno & LOW_BLOKNUMBER_MASK);
+        XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_MEM_TYPE, forknum, lowblknum, NULL, blockstate);
         xidsarry[continuenum] = xlrec->xids[0];
         offset++;
         continuenum++;
@@ -1877,8 +1865,8 @@ XLogRecParseState* multixact_xlog_mem_parse_to_block(
     for (int i = 1; i < xlrec->nxids; i++, offset++) {
         pageno = MXOffsetToMemberPage(offset);
         if ((pageno != prev_pageno) || (continuenum == MAX_BLOCK_XID_NUMS)) {
-            XLogRecSetMultiXactMemState(
-                &(blockstate->blockparse.extra_rec.blockmultixactmem), startoffset, xlrec->mid, continuenum, xidsarry);
+            XLogRecSetMultiXactMemState(&(blockstate->blockparse.extra_rec.blockmultixactmem), startoffset, xlrec->mid,
+                                        continuenum, xidsarry);
             prev_pageno = pageno;
             startoffset = offset;
             continuenum = 0;
@@ -1887,41 +1875,43 @@ XLogRecParseState* multixact_xlog_mem_parse_to_block(
             if (blockstate == NULL) {
                 return NULL;
             }
-            forknum = (prev_pageno >> LOW_BLOKNUMBER_BITS);
-            lowblknum = (prev_pageno & LOW_BLOKNUMBER_MASK);
-            XLogRecSetBlockCommonState(
-                record, BLOCK_DATA_MULITACT_MEM_TYPE, forknum, lowblknum, NULL, blockstate, false);
+            forknum = (ForkNumber)(prev_pageno >> LOW_BLOKNUMBER_BITS);
+            lowblknum = (BlockNumber)(prev_pageno & LOW_BLOKNUMBER_MASK);
+            XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_MEM_TYPE, forknum, lowblknum, NULL, blockstate);
         }
         xidsarry[continuenum] = xlrec->xids[i];
         continuenum++;
     }
-    XLogRecSetMultiXactMemState(
-        &(blockstate->blockparse.extra_rec.blockmultixactmem), startoffset, xlrec->mid, continuenum, xidsarry);
+    if (blockstate == NULL) {
+        return NULL;
+    }
+    XLogRecSetMultiXactMemState(&(blockstate->blockparse.extra_rec.blockmultixactmem), startoffset, xlrec->mid,
+                                continuenum, xidsarry);
     return recordstatehead;
 }
-void XLogRecSetMultiXactUpdatOidState(
-    XLogBlockMultiUpdateParse* blockmultistate, MultiXactOffset nextoffset, MultiXactId nextmulti, TransactionId maxxid)
+void XLogRecSetMultiXactUpdatOidState(XLogBlockMultiUpdateParse *blockmultistate, MultiXactOffset nextoffset,
+                                      MultiXactId nextmulti, TransactionId maxxid)
 {
     blockmultistate->nextmulti = nextmulti;
     blockmultistate->nextoffset = nextoffset;
     blockmultistate->maxxid = maxxid;
 }
-XLogRecParseState* multixact_xlog_updateoid_parse_to_block(
-    XLogReaderState* record, uint32* blocknum, XLogRecParseState* recordstatehead)
+XLogRecParseState *multixact_xlog_updateoid_parse_to_block(XLogReaderState *record, uint32 *blocknum,
+                                                           XLogRecParseState *recordstatehead)
 {
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
     MultiXactId nextmulti;
     MultiXactOffset nextoffset;
     TransactionId max_xid;
-    XLogRecParseState* blockstate = NULL;
-    xl_multixact_create* xlrec = (xl_multixact_create*)XLogRecGetData(record);
+    XLogRecParseState *blockstate = NULL;
+    xl_multixact_create *xlrec = (xl_multixact_create *)XLogRecGetData(record);
     (*blocknum)++;
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
     if (blockstate == NULL) {
         return NULL;
     }
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_UPDATEOID_TYPE, forknum, lowblknum, NULL, blockstate, false);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_UPDATEOID_TYPE, forknum, lowblknum, NULL, blockstate);
     nextmulti = xlrec->mid + 1;
     nextoffset = xlrec->moff + xlrec->nxids;
     max_xid = XLogRecGetXid(record);
@@ -1929,13 +1919,13 @@ XLogRecParseState* multixact_xlog_updateoid_parse_to_block(
         if (TransactionIdPrecedes(max_xid, xlrec->xids[i]))
             max_xid = xlrec->xids[i];
     }
-    XLogRecSetMultiXactUpdatOidState(
-        &(blockstate->blockparse.extra_rec.blockmultiupdate), nextoffset, nextmulti, max_xid);
+    XLogRecSetMultiXactUpdatOidState(&(blockstate->blockparse.extra_rec.blockmultiupdate), nextoffset, nextmulti,
+                                     max_xid);
     return recordstatehead;
 }
-XLogRecParseState* multixact_xlog_createxid_parse_to_block(XLogReaderState* record, uint32* blocknum)
+XLogRecParseState *multixact_xlog_createxid_parse_to_block(XLogReaderState *record, uint32 *blocknum)
 {
-    XLogRecParseState* recordstatehead = NULL;
+    XLogRecParseState *recordstatehead = NULL;
     recordstatehead = multixact_xlog_offset_parse_to_block(record, blocknum);
     if (recordstatehead == NULL) {
         return NULL;
@@ -1950,14 +1940,13 @@ XLogRecParseState* multixact_xlog_createxid_parse_to_block(XLogReaderState* reco
     }
     return recordstatehead;
 }
-XLogRecParseState* multixact_redo_parse_to_block(XLogReaderState* record, uint32* blocknum)
+XLogRecParseState *multixact_redo_parse_to_block(XLogReaderState *record, uint32 *blocknum)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
-    XLogRecParseState* recordstatehead = NULL;
+    XLogRecParseState *recordstatehead = NULL;
     *blocknum = 0;
-
-    info = info & XLOG_MULTIXACT_MASK;
-    if ((info == XLOG_MULTIXACT_ZERO_OFF_PAGE) || (info == XLOG_MULTIXACT_ZERO_MEM_PAGE)) {
+    if (((info & XLOG_MULTIXACT_MASK) == XLOG_MULTIXACT_ZERO_OFF_PAGE) ||
+        ((info & XLOG_MULTIXACT_MASK) == XLOG_MULTIXACT_ZERO_MEM_PAGE)) {
         recordstatehead = multixact_xlog_ddl_parse_to_block(record, blocknum);
     } else if (info == XLOG_MULTIXACT_CREATE_ID) {
         recordstatehead = multixact_xlog_createxid_parse_to_block(record, blocknum);
@@ -1967,36 +1956,32 @@ XLogRecParseState* multixact_redo_parse_to_block(XLogReaderState* record, uint32
     return recordstatehead;
 }
 
-static void get_multixact_pageno(uint8 info, int64* pageno, XLogReaderState* record)
+static void get_multixact_pageno(uint8 info, int64 *pageno, XLogReaderState *record)
 {
     errno_t rc = EOK;
     if ((info & XLOG_MULTIXACT_INT64_PAGENO) != 0) {
         rc = memcpy_s(pageno, sizeof(int64), XLogRecGetData(record), sizeof(int64));
         securec_check(rc, "", "");
     } else {
-        rc = memcpy_s(pageno, sizeof(int), XLogRecGetData(record), sizeof(int));
+        rc = memcpy_s(pageno, sizeof(int64), XLogRecGetData(record), sizeof(int));
         securec_check(rc, "", "");
     }
 }
 /*
  * MULTIXACT resource manager's routines
  */
-void multixact_redo(XLogReaderState* record)
+void multixact_redo(XLogReaderState *record)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     uint8 mask_info = info & XLOG_MULTIXACT_MASK;
-
     /* Backup blocks are not used in multixact records */
     Assert(!XLogRecHasAnyBlockRefs(record));
-
     if (mask_info == XLOG_MULTIXACT_ZERO_OFF_PAGE) {
         int64 pageno = 0;
         int slotno;
 
         get_multixact_pageno(info, &pageno, record);
-
         (void)LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
-
         slotno = ZeroMultiXactOffsetPage(pageno, false);
         SimpleLruWritePage(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, slotno);
         Assert(!t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_dirty[slotno]);
@@ -2016,8 +2001,8 @@ void multixact_redo(XLogReaderState* record)
 
         LWLockRelease(MultiXactMemberControlLock);
     } else if (mask_info == XLOG_MULTIXACT_CREATE_ID) {
-        xl_multixact_create* xlrec = (xl_multixact_create*)XLogRecGetData(record);
-        TransactionId* xids = xlrec->xids;
+        xl_multixact_create *xlrec = (xl_multixact_create *)XLogRecGetData(record);
+        TransactionId *xids = xlrec->xids;
         TransactionId max_xid;
         int i;
 
@@ -2051,6 +2036,7 @@ void multixact_redo(XLogReaderState* record)
             }
             LWLockRelease(XidGenLock);
         }
-    } else
+    } else {
         ereport(PANIC, (errmsg("multixact_redo: unknown op code %u", (uint32)info)));
+    }
 }

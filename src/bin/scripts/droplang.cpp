@@ -136,7 +136,7 @@ int main(int argc, char* argv[])
             gettext_noop("Trusted?"));
         result = executeQuery(conn, sql.data, progname, echo);
 
-        rc = memset_s(&popt, 0, sizeof(popt));
+        rc = memset_s(&popt, sizeof(popt), 0, sizeof(popt));
         securec_check_c(rc, "\0", "\0");
         popt.topt.format = PRINT_ALIGNED;
         popt.topt.border = 1;
@@ -231,4 +231,3 @@ static void help(const char* progname)
     printf(_("  -W, --password            force password prompt\n"));
     printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
 }
-

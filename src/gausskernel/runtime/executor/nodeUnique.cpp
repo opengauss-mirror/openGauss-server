@@ -137,7 +137,10 @@ UniqueState* ExecInitUnique(Unique* node, EState* estate, int eflags)
      * unique nodes do no projections, so initialize projection info for this
      * node appropriately
      */
-    ExecAssignResultTypeFromTL(&unique_state->ps);
+    ExecAssignResultTypeFromTL(
+            &unique_state->ps,
+            ExecGetResultType(outerPlanState(unique_state))->tdTableAmType);
+
     unique_state->ps.ps_ProjInfo = NULL;
 
     /*

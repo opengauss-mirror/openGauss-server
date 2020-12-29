@@ -60,6 +60,7 @@ static char elsieid[] = "@(#)zic.c	8.20";
 #define RULE_STRLEN_MAXIMUM 8 /* "Mdd.dd.d" */
 
 #define end(cp) (strchr((cp), '\0'))
+#define UTC_OFFSET_MAX_NUM 2147483647L
 
 struct rule {
     const char* r_filename;
@@ -93,6 +94,7 @@ struct rule {
 /*
  *	r_dycode		r_dayofmonth	r_wday
  */
+
 #define DC_DOM 0 /* 1..31 */    /* unused */
 #define DC_DOWGEQ 1 /* 1..31 */ /* 0..6 (Sun..Sat) */
 #define DC_DOWLEQ 2 /* 1..31 */ /* 0..6 (Sun..Sat) */
@@ -648,6 +650,7 @@ static int itsdir(const char* name)
 /*
  * Sort by rule name.
  */
+
 static int rcomp(const void* cp1, const void* cp2)
 {
     return strcmp(((const struct rule*)cp1)->r_name, ((const struct rule*)cp2)->r_name);
@@ -661,7 +664,7 @@ static void associate(void)
     int i, j;
 
     if (nrules != 0) {
-        qsort((void*)rules, (size_t)(unsigned int)nrules, (size_t)sizeof *rules, rcomp);
+        (void)qsort((void*)rules, (size_t)(unsigned int)nrules, (size_t)sizeof *rules, rcomp);
         for (i = 0; i < nrules - 1; ++i) {
             if (strcmp(rules[i].r_name, rules[i + 1].r_name) != 0) {
                 continue;
@@ -836,9 +839,8 @@ static void infile(const char* name)
  */
 static long gethms(const char* string, const char* errstring, int signable)
 {
-    int hh;
+    long hh;
     int mm, ss, sign;
-    char xs;
 
     if (string == NULL || *string == '\0') {
         return 0;
@@ -851,11 +853,11 @@ static long gethms(const char* string, const char* errstring, int signable)
     } else {
         sign = 1;
     }
-    if (sscanf_s(string, "%d%c", &hh, &xs, sizeof(char)) == 1)
+    if (sscanf_s(string, scheck(string, "%ld"), &hh) == 1)
         mm = ss = 0;
-    else if (sscanf_s(string, "%d:%d%c", &hh, &mm, &xs, sizeof(char)) == 2)
+    else if (sscanf_s(string, scheck(string, "%ld:%d"), &hh, &mm) == 2)
         ss = 0;
-    else if (sscanf_s(string, "%d:%d:%d%c", &hh, &mm, &ss, &xs, sizeof(char)) != 3) {
+    else if (sscanf_s(string, scheck(string, "%ld:%d:%d"), &hh, &mm, &ss) != 3) {
         error(errstring);
         return 0;
     }
@@ -906,7 +908,6 @@ static int inzone(char** fields, int nfields)
 {
     int i;
     static THR_LOCAL char* buf = NULL;
-    int rc = 0;
 
     if (nfields < ZONE_MINFIELDS || nfields > ZONE_MAXFIELDS) {
         error(_("wrong number of fields on Zone line"));
@@ -914,28 +915,24 @@ static int inzone(char** fields, int nfields)
     }
     if (strcmp(fields[ZF_NAME], TZDEFAULT) == 0 && lcltime != NULL) {
         buf = erealloc(buf, (int)(132 + strlen(TZDEFAULT)));
-        rc = sprintf_s(buf, (132 + strlen(TZDEFAULT)), _("\"Zone %s\" line and -l option are mutually exclusive"), TZDEFAULT);
-        securec_check_ss_c(rc, "", "");
+        (void)sprintf(buf, _("\"Zone %s\" line and -l option are mutually exclusive"), TZDEFAULT);
         error(buf);
         return FALSE;
     }
     if (strcmp(fields[ZF_NAME], TZDEFRULES) == 0 && psxrules != NULL) {
         buf = erealloc(buf, (int)(132 + strlen(TZDEFRULES)));
-        rc = sprintf_s(buf, (132 + strlen(TZDEFRULES)), _("\"Zone %s\" line and -p option are mutually exclusive"), TZDEFRULES);
-        securec_check_ss_c(rc, "", "");
+        (void)sprintf(buf, _("\"Zone %s\" line and -p option are mutually exclusive"), TZDEFRULES);
         error(buf);
         return FALSE;
     }
     for (i = 0; i < nzones; ++i) {
         if (zones[i].z_name != NULL && strcmp(zones[i].z_name, fields[ZF_NAME]) == 0) {
             buf = erealloc(buf, (int)(132 + strlen(fields[ZF_NAME]) + strlen(zones[i].z_filename)));
-            rc = sprintf_s(buf,
-                (132 + strlen(fields[ZF_NAME]) + strlen(zones[i].z_filename)),
+            (void)sprintf(buf,
                 _("duplicate zone name %s (file \"%s\", line %d)"),
                 fields[ZF_NAME],
                 zones[i].z_filename,
                 zones[i].z_linenum);
-            securec_check_ss_c(rc, "", "");
             error(buf);
             return FALSE;
         }
@@ -1358,7 +1355,7 @@ static void writezone(const char* name, const char* string)
      * Sort.
      */
     if (timecnt > 1) {
-        qsort((void*)attypes, (size_t)(unsigned int)timecnt, (size_t)sizeof *attypes, atcomp);
+        (void)qsort((void*)attypes, (size_t)(unsigned int)timecnt, (size_t)sizeof *attypes, atcomp);
     }
 
     /*
@@ -1448,7 +1445,7 @@ static void writezone(const char* name, const char* string)
     }
     if ((fp = fopen(fullname, "wb")) == NULL) {
         if (mkdirs(fullname) != 0) {
-            exit(EXIT_FAILURE);
+            (void)exit(EXIT_FAILURE);
         }
         if ((fp = fopen(fullname, "wb")) == NULL) {
             const char* e = gs_strerror(errno);
@@ -1648,26 +1645,25 @@ static void doabbr(char* abbr, int abbr_size, const char* format, const char* le
     char* cp = NULL;
     char* slashp = NULL;
     int len;
-    int rc = 0;
+    errno_t rc;
 
     slashp = (char*)strchr(format, '/');
     if (slashp == NULL) {
         if (letters == NULL) {
-            rc = strcpy_s(abbr, abbr_size, format);
-            securec_check_ss_c(rc, "", "");
+            rc = strcpy_s(abbr, strlen(format) + 1, format);
+            securec_check_c(rc, "\0", "\0");
         } else {
-            rc = sprintf_s(abbr, abbr_size, format, letters);
+            rc = sprintf_s(abbr, strlen(format) + strlen(letters) + 2, format, letters);
             securec_check_ss_c(rc, "", "");
         }
     } else if (isdst) {
-        rc = strcpy_s(abbr, abbr_size, slashp + 1);
-        securec_check_ss_c(rc, "", "");
-    } else {
+            rc = strcpy_s(abbr, strlen(slashp + 1) + 1, slashp + 1);
+            securec_check_c(rc, "\0", "\0");
+        } else {
         if (slashp > format) {
-            rc = strncpy_s(abbr, abbr_size, format, (unsigned)(slashp - format));
-            securec_check_ss_c(rc, "", "");
+            rc = strncpy_s(abbr, strlen(format) + sizeof(unsigned long int) + 1, format, (unsigned)(slashp - format));
+            securec_check_c(rc, "\0", "\0");
         }
-
         if (checkIndex(slashp - format, abbr_size)) {
             abbr[slashp - format] = '\0';
         }
@@ -1711,17 +1707,15 @@ static void updateminmax(int x)
     }
 }
 
-static int stringoffset(char* result, int result_size, long offset)
+static int stringoffset(char* result, long offset)
 {
     int hours;
     int minutes;
     int seconds;
-    int rc  = 0;
 
     result[0] = '\0';
     if (offset < 0) {
-        rc = strcpy_s(result, result_size, "-");
-        securec_check_c(rc, "", "");
+        (void)strcpy(result, "-");
         offset = -offset;
     }
     seconds = offset % SECSPERMIN;
@@ -1733,37 +1727,30 @@ static int stringoffset(char* result, int result_size, long offset)
         result[0] = '\0';
         return -1;
     }
-    rc = sprintf_s(end(result), result_size, "%d", hours);
-    securec_check_ss_c(rc, "", "");
+    (void)sprintf(end(result), "%d", hours);
     if (minutes != 0 || seconds != 0) {
-        rc = sprintf_s(end(result), result_size, ":%02d", minutes);
-        securec_check_ss_c(rc, "", "");
-        if (seconds != 0) {
-            rc = sprintf_s(end(result), result_size, ":%02d", seconds);
-            securec_check_ss_c(rc, "", "");
-        }
+        (void)sprintf(end(result), ":%02d", minutes);
+        if (seconds != 0)
+            (void)sprintf(end(result), ":%02d", seconds);
     }
     return 0;
 }
 
-static int stringrule(char* result, int result_size, const struct rule* rp, long dstoff, long gmtoff)
+static int stringrule(char* result, const struct rule* rp, long dstoff, long gmtoff)
 {
     long tod;
-    int rc = 0;
 
     result = end(result);
     if (rp->r_dycode == DC_DOM) {
         int month, total;
 
-        if (rp->r_dayofmonth == 29 && rp->r_month == TM_FEBRUARY) {
+        if (rp->r_dayofmonth == 29 && rp->r_month == TM_FEBRUARY)
             return -1;
-        }
         total = 0;
         for (month = 0; month < rp->r_month; ++month) {
             total += len_months[0][month];
         }
-        rc = sprintf_s(result, result_size, "J%d", total + rp->r_dayofmonth);
-        securec_check_ss_c(rc, "", "");
+        (void)sprintf(result, "J%d", total + rp->r_dayofmonth);
     } else {
         int week;
 
@@ -1784,8 +1771,7 @@ static int stringrule(char* result, int result_size, const struct rule* rp, long
         } else {
             return -1; /* "cannot happen" */
         }
-        rc = sprintf_s(result, result_size, "M%d.%d.%d", rp->r_month + 1, week, rp->r_wday);
-        securec_check_ss_c(rc, "", "");
+        (void)sprintf(result, "M%d.%d.%d", rp->r_month + 1, week, rp->r_wday);
     }
     tod = rp->r_tod;
     if (rp->r_todisgmt) {
@@ -1799,11 +1785,9 @@ static int stringrule(char* result, int result_size, const struct rule* rp, long
         return -1;
     }
     if (tod != 2 * SECSPERMIN * MINSPERHOUR) {
-        rc = strcat_s(result, result_size, "/");
-        securec_check_c(rc, "", "");
-        if (stringoffset(end(result), result_size, tod) != 0) {
+        (void)strcat(result, "/");
+        if (stringoffset(end(result), tod) != 0)
             return -1;
-        }
     }
     return 0;
 }
@@ -1816,7 +1800,6 @@ static void stringzone(char* result, int result_size, const struct zone* zpfirst
     struct rule* dstrp = NULL;
     int i;
     const char* abbrvar = NULL;
-    int rc = 0;
 
     result[0] = '\0';
     zp = zpfirst + zonecount - 1;
@@ -1872,7 +1855,7 @@ static void stringzone(char* result, int result_size, const struct zone* zpfirst
     }
     abbrvar = (stdrp == NULL) ? "" : stdrp->r_abbrvar;
     doabbr(result, result_size, zp->z_format, abbrvar, FALSE, TRUE);
-    if (stringoffset(end(result), result_size, -zp->z_gmtoff) != 0) {
+    if (stringoffset(end(result), -zp->z_gmtoff) != 0) {
         result[0] = '\0';
         return;
     }
@@ -1890,22 +1873,20 @@ static void stringzone(char* result, int result_size, const struct zone* zpfirst
      *  total size = 10
      *  size left = size - (end - result) = 10 - (5 -0) = 5
      */
+
     doabbr(end(result), result_size - (end(result) - result), zp->z_format, dstrp->r_abbrvar, TRUE, TRUE);
-    if (dstrp->r_stdoff != SECSPERMIN * MINSPERHOUR) {
-        if (stringoffset(end(result), result_size, -(zp->z_gmtoff + dstrp->r_stdoff)) != 0) {
+    if (dstrp->r_stdoff != SECSPERMIN * MINSPERHOUR)
+        if (stringoffset(end(result), -(zp->z_gmtoff + dstrp->r_stdoff)) != 0) {
             result[0] = '\0';
             return;
         }
-    }
-    rc = strcat_s(result, result_size, ",");
-    securec_check_c(rc, "", "");
-    if (stringrule(result, result_size, dstrp, dstrp->r_stdoff, zp->z_gmtoff) != 0) {
+    (void)strcat(result, ",");
+    if (stringrule(result, dstrp, dstrp->r_stdoff, zp->z_gmtoff) != 0) {
         result[0] = '\0';
         return;
     }
-    rc = strcat_s(result, result_size, ",");
-    securec_check_c(rc, "", "");
-    if (stringrule(result, result_size, stdrp, dstrp->r_stdoff, zp->z_gmtoff) != 0) {
+    (void)strcat(result, ",");
+    if (stringrule(result, stdrp, dstrp->r_stdoff, zp->z_gmtoff) != 0) {
         result[0] = '\0';
         return;
     }
@@ -2172,10 +2153,8 @@ static void addtt(const zic_t starttime, int type)
         isdsts[0] = isdsts[type];
         ttisstds[0] = ttisstds[type];
         ttisgmts[0] = ttisgmts[type];
-        if (abbrinds[type] != 0) {
-            int rc = strcpy_s(chars, TZ_MAX_CHARS, &chars[abbrinds[type]]);
-            securec_check_c(rc, "", "");
-        }
+        if (abbrinds[type] != 0)
+            (void)strcpy(chars, &chars[abbrinds[type]]);
         abbrinds[0] = 0;
         charcnt = strlen(chars) + 1;
         typecnt = 1;
@@ -2227,8 +2206,8 @@ static int addtype(long gmtoff, const char* abbr, int isdst, int ttisstd, int tt
         error(_("too many local time types"));
         exit(EXIT_FAILURE);
     }
-#define LONG_IS_VALID(long_number) (-1L - 2147483647L <= (long_number) && (long_number) <= 2147483647L)
-    if (!LONG_IS_VALID(gmtoff)) {
+
+    if (!(-UTC_OFFSET_MAX_NUM - 1L <= gmtoff && gmtoff <= UTC_OFFSET_MAX_NUM)) {
         error(_("UTC offset out of range"));
         exit(EXIT_FAILURE);
     }
@@ -2299,14 +2278,11 @@ static int yearistype(int year, const char* type)
 {
     static THR_LOCAL char* buf;
     int result;
-    int rc = 0;
 
-    if (type == NULL || *type == '\0') {
+    if (type == NULL || *type == '\0')
         return TRUE;
-    }
     buf = erealloc(buf, (int)(132 + strlen(yitcommand) + strlen(type)));
-    rc = sprintf_s(buf, (int)(132 + strlen(yitcommand) + strlen(type)), "%s %d %s", yitcommand, year, type);
-    securec_check_ss_c(rc, "", "");
+    (void)sprintf(buf, "%s %d %s", yitcommand, year, type);
     result = gs_system_security(buf);
     if (WIFEXITED(result)) {
         switch (WEXITSTATUS(result)) {
@@ -2561,7 +2537,6 @@ static zic_t rpytime(const struct rule* rp, int wantedy)
 static void newabbr(const char* string)
 {
     int i;
-    int rc  = 0;
 
     if (strcmp(string, GRANDPARENTED) != 0) {
         const char* cp = NULL;
@@ -2611,8 +2586,7 @@ static void newabbr(const char* string)
         error(_("too many, or too long, time zone abbreviations"));
         exit(EXIT_FAILURE);
     }
-    rc = strcpy_s(&chars[charcnt], TZ_MAX_CHARS, string);
-    securec_check_c(rc, "", "");
+    (void)strcpy(&chars[charcnt], string);
     charcnt += eitol(i);
 }
 
@@ -2677,6 +2651,7 @@ static long eitol(int i)
 /*
  * UNIX was a registered trademark of The Open Group in 2003.
  */
+
 #ifdef WIN32
 /*
  * To run on win32

@@ -88,7 +88,7 @@ private:
     void matchArray(ScalarVector* pVector, uint16 keyIdx, uint16 cmpRows);
 
     /* build sonic hash table function */
-    template <bool useSegHashTable>
+    template <bool useSegHashTable, bool unique_check>
     void buildAggTblBatch(VectorBatch* batch);
 
     int64 insertHashTbl(VectorBatch* batch, int idx, uint32 hashval, uint32 hashLoc);
@@ -281,8 +281,4 @@ private:
     /* handle duplicate, record the orginial the location. */
     uint32 m_orgLoc[BatchMaxSize];
 };
-
-extern bool isExprSonicEnable(Expr* node);
-extern bool isAggrefSonicEnable(Oid aggfnoid);
-
 #endif

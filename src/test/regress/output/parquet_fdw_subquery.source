@@ -1,0 +1,1039 @@
+--
+--Create table
+--
+--Foreign table
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+CREATE FOREIGN TABLE customer_reviews
+        (
+            customer_id TEXT ,
+            review_date DATE ,
+            review_rating INTEGER ,
+            review_votes INTEGER,
+            review_helpful_votes INTEGER,
+            product_id CHAR(10) ,
+            product_title TEXT ,
+            product_sales_rank BIGINT,
+            product_group TEXT,
+            product_category TEXT,
+            product_subcategory TEXT,
+            similar_product_ids CHAR(10)
+        )
+        SERVER hdfs_server
+        OPTIONS(format 'parquet', foldername '/user/hive/warehouse/customer_reviews_parquet') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS d_bigrow;
+NOTICE:  foreign table "d_bigrow" does not exist, skipping
+CREATE FOREIGN TABLE d_bigrow(
+    boolean1 BOOLEAN,
+    short1 INT2,
+    integer1 INT,
+    long1 INT8,
+    list1 INT,
+    float1 FLOAT4,
+    double1 FLOAT8,
+    string1 TEXT,
+    list2 TEXT,
+    date1 DATE,
+    timestamp1 TIMESTAMP
+) SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/d_bigrow_parquet') distribute by roundrobin;
+--Regular table
+create table t (c1 int, c2 int) distribute by roundrobin;
+create table s (b1 int, b2 int, b3 int) distribute by roundrobin;
+create table r (a1 int, a2 int, a3 int) distribute by roundrobin;
+insert into t values (1, 2), (2, 3), (3, 4), (4, 5);
+insert into s values (1, 2, 2), (2, 3, 3), (3, 4, 4), (4, 5, 5);
+insert into r values (3, 2,1 ), (4,3,2), (5, 4, 3), (6, 5, 4);
+--TPCH table
+CREATE TABLE customer (
+    c_custkey integer NOT NULL,
+    c_name character varying(25) NOT NULL,
+    c_address character varying(40) NOT NULL,
+    c_nationkey integer NOT NULL,
+    c_phone character(15) NOT NULL,
+    c_acctbal numeric(15,2) NOT NULL,
+    c_mktsegment character(10) NOT NULL,
+    c_comment character varying(117) NOT NULL
+)
+DISTRIBUTE BY ROUNDROBIN ;
+CREATE TABLE lineitem (
+    l_orderkey integer NOT NULL,
+    l_partkey integer NOT NULL,
+    l_suppkey integer NOT NULL,
+    l_linenumber integer NOT NULL,
+    l_quantity numeric(15,2) NOT NULL,
+    l_extendedprice numeric(15,2) NOT NULL,
+    l_discount numeric(15,2) NOT NULL,
+    l_tax numeric(15,2) NOT NULL,
+    l_returnflag character(1) NOT NULL,
+    l_linestatus character(1) NOT NULL,
+    l_shipdate date NOT NULL,
+    l_commitdate date NOT NULL,
+    l_receiptdate date NOT NULL,
+    l_shipinstruct character(25) NOT NULL,
+    l_shipmode character(10) NOT NULL,
+    l_comment character varying(44) NOT NULL
+)
+DISTRIBUTE BY ROUNDROBIN ;
+CREATE TABLE nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25) NOT NULL,
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)
+DISTRIBUTE BY ROUNDROBIN ;
+CREATE TABLE orders (
+    o_orderkey integer NOT NULL,
+    o_custkey integer NOT NULL,
+    o_orderstatus character(1) NOT NULL,
+    o_totalprice numeric(15,2) NOT NULL,
+    o_orderdate date NOT NULL,
+    o_orderpriority character(15) NOT NULL,
+    o_clerk character(15) NOT NULL,
+    o_shippriority integer NOT NULL,
+    o_comment character varying(79) NOT NULL
+)
+DISTRIBUTE BY ROUNDROBIN ;
+CREATE TABLE part (
+    p_partkey integer NOT NULL,
+    p_name character varying(55) NOT NULL,
+    p_mfgr character(25) NOT NULL,
+    p_brand character(10) NOT NULL,
+    p_type character varying(25) NOT NULL,
+    p_size integer NOT NULL,
+    p_container character(10) NOT NULL,
+    p_retailprice numeric(15,2) NOT NULL,
+    p_comment character varying(23) NOT NULL
+)
+DISTRIBUTE BY ROUNDROBIN ;
+CREATE TABLE partsupp (
+    ps_partkey integer NOT NULL,
+    ps_suppkey integer NOT NULL,
+    ps_availqty integer NOT NULL,
+    ps_supplycost numeric(15,2) NOT NULL,
+    ps_comment character varying(199) NOT NULL
+)
+DISTRIBUTE BY ROUNDROBIN ;
+CREATE TABLE region (
+    r_regionkey integer NOT NULL,
+    r_name character(25) NOT NULL,
+    r_comment character varying(152)
+)
+DISTRIBUTE BY ROUNDROBIN ;
+CREATE TABLE supplier (
+    s_suppkey integer NOT NULL,
+    s_name character(25) NOT NULL,
+    s_address character varying(40) NOT NULL,
+    s_nationkey integer NOT NULL,
+    s_phone character(15) NOT NULL,
+    s_acctbal numeric(15,2) NOT NULL,
+    s_comment character varying(101) NOT NULL
+)
+DISTRIBUTE BY ROUNDROBIN ;
+\i @abs_srcdir@/data/tpch.data
+COPY customer (c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment) FROM stdin;
+--
+--
+COPY lineitem (l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment) FROM stdin;
+--
+--
+COPY nation (n_nationkey, n_name, n_regionkey, n_comment) FROM stdin;
+--
+--
+COPY orders (o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment) FROM stdin;
+--
+--
+COPY part (p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment) FROM stdin;
+--
+--
+COPY partsupp (ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment) FROM stdin;
+--
+--
+COPY region (r_regionkey, r_name, r_comment) FROM stdin;
+--
+--
+COPY supplier (s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment) FROM stdin;
+--
+--Test Begin
+--
+--*Disable fstream
+explain (verbose on, costs off) select * from t where c1 in (select b1 from s where c2=b2) order by c1;
+WARNING:  Statistics in some tables or columns(public.s.b2, public.t) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Sort
+   Output: t.c1, t.c2
+   Sort Key: t.c1
+   ->  Data Node Scan on "__REMOTE_SORT_QUERY__"
+         Output: t.c1, t.c2
+         Remote query: SELECT c1, c2 FROM ONLY public.t WHERE true ORDER BY 1
+         Coordinator quals: (SubPlan 1)
+         SubPlan 1
+           ->  Data Node Scan on s "_REMOTE_TABLE_QUERY_"
+                 Output: s.b1
+                 Remote query: SELECT b1, b2 FROM ONLY public.s WHERE true
+                 Coordinator quals: (t.c2 = s.b2)
+(12 rows)
+
+explain (verbose on, costs off) select * from d_bigrow where short1 in  (select review_rating from customer_reviews where review_votes = integer1) order by short1;
+WARNING:  Statistics in some tables or columns(public.customer_reviews, public.d_bigrow) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                         QUERY PLAN                                                                                                          
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: d_bigrow.boolean1, d_bigrow.short1, d_bigrow.integer1, d_bigrow.long1, d_bigrow.list1, d_bigrow.float1, d_bigrow.double1, d_bigrow.string1, d_bigrow.list2, d_bigrow.date1, d_bigrow.timestamp1
+   ->  Vector Streaming (type: GATHER)
+         Output: d_bigrow.boolean1, d_bigrow.short1, d_bigrow.integer1, d_bigrow.long1, d_bigrow.list1, d_bigrow.float1, d_bigrow.double1, d_bigrow.string1, d_bigrow.list2, d_bigrow.date1, d_bigrow.timestamp1
+         ->  Vector Sort
+               Output: d_bigrow.boolean1, d_bigrow.short1, d_bigrow.integer1, d_bigrow.long1, d_bigrow.list1, d_bigrow.float1, d_bigrow.double1, d_bigrow.string1, d_bigrow.list2, d_bigrow.date1, d_bigrow.timestamp1
+               Sort Key: d_bigrow.short1
+               ->  Vector Foreign Scan on public.d_bigrow
+                     Output: d_bigrow.boolean1, d_bigrow.short1, d_bigrow.integer1, d_bigrow.long1, d_bigrow.list1, d_bigrow.float1, d_bigrow.double1, d_bigrow.string1, d_bigrow.list2, d_bigrow.date1, d_bigrow.timestamp1
+                     Filter: (SubPlan 1)
+                     Server Type: hdfs
+                     Parquet File: /user/hive/warehouse/d_bigrow_parquet
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: customer_reviews.review_rating
+                             ->  Vector Result
+                                   Output: customer_reviews.review_rating
+                                   Filter: (customer_reviews.review_votes = d_bigrow.integer1)
+                                   ->  Vector Materialize
+                                         Output: customer_reviews.review_rating, customer_reviews.review_votes
+                                         ->  Vector Streaming(type: BROADCAST)
+                                               Output: customer_reviews.review_rating, customer_reviews.review_votes
+                                               ->  Vector Foreign Scan on public.customer_reviews
+                                                     Output: customer_reviews.review_rating, customer_reviews.review_votes
+                                                     Server Type: hdfs
+                                                     Parquet File: /user/hive/warehouse/customer_reviews_parquet
+(26 rows)
+
+select * from t where c1 in (select b1 from s where c2=b2) order by c1;
+ c1 | c2 
+----+----
+  1 |  2
+  2 |  3
+  3 |  4
+  4 |  5
+(4 rows)
+
+select * from d_bigrow where short1 in  (select review_rating from customer_reviews where review_votes = integer1) order by short1;
+ boolean1 | short1 | integer1 | long1 | list1 | float1 | double1 | string1 | list2 | date1 |        timestamp1        
+----------+--------+----------+-------+-------+--------+---------+---------+-------+-------+--------------------------
+          |     10 |       20 |     3 |     4 |      5 |       6 | a       | b     |       | Tue Oct 19 09:23:54 2004
+(1 row)
+
+--Remote sort
+explain (verbose on, costs off) select * from (select all * from t where c1 < 3 order by c1);
+WARNING:  Statistics in some tables or columns(public.t.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Output: t.c1, t.c2
+   Sort Key: t.c1
+   ->  Data Node Scan on "__REMOTE_SORT_QUERY__"
+         Output: t.c1, t.c2
+         Remote query: SELECT c1, c2 FROM ONLY public.t WHERE c1 < 3 ORDER BY 1
+(6 rows)
+
+select * from (select all * from t where c1 < 3 order by c1);
+ c1 | c2 
+----+----
+  1 |  2
+  2 |  3
+(2 rows)
+
+--Agg
+with revenue (total_revenue) as  
+( select sum(l_extendedprice * (1 - l_discount)) from lineitem where l_suppkey=1 )
+select * from revenue;
+ total_revenue 
+---------------
+ 21495562.0223
+(1 row)
+
+--*Enable fstream
+explain (verbose on, costs off) select * from t where c1 in (select b1 from s where c2=b2) order by c1;
+WARNING:  Statistics in some tables or columns(public.s.b2, public.t) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Sort
+   Output: t.c1, t.c2
+   Sort Key: t.c1
+   ->  Data Node Scan on "__REMOTE_SORT_QUERY__"
+         Output: t.c1, t.c2
+         Remote query: SELECT c1, c2 FROM ONLY public.t WHERE true ORDER BY 1
+         Coordinator quals: (SubPlan 1)
+         SubPlan 1
+           ->  Data Node Scan on s "_REMOTE_TABLE_QUERY_"
+                 Output: s.b1
+                 Remote query: SELECT b1, b2 FROM ONLY public.s WHERE true
+                 Coordinator quals: (t.c2 = s.b2)
+(12 rows)
+
+select * from t where c1 in (select b1 from s where c2=b2)  order by c1;
+ c1 | c2 
+----+----
+  1 |  2
+  2 |  3
+  3 |  4
+  4 |  5
+(4 rows)
+
+explain (verbose on, costs off) select * from d_bigrow where short1 in  (select review_rating from customer_reviews where review_votes = integer1)  order by short1;
+WARNING:  Statistics in some tables or columns(public.customer_reviews, public.d_bigrow) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                         QUERY PLAN                                                                                                          
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: d_bigrow.boolean1, d_bigrow.short1, d_bigrow.integer1, d_bigrow.long1, d_bigrow.list1, d_bigrow.float1, d_bigrow.double1, d_bigrow.string1, d_bigrow.list2, d_bigrow.date1, d_bigrow.timestamp1
+   ->  Vector Streaming (type: GATHER)
+         Output: d_bigrow.boolean1, d_bigrow.short1, d_bigrow.integer1, d_bigrow.long1, d_bigrow.list1, d_bigrow.float1, d_bigrow.double1, d_bigrow.string1, d_bigrow.list2, d_bigrow.date1, d_bigrow.timestamp1
+         ->  Vector Sort
+               Output: d_bigrow.boolean1, d_bigrow.short1, d_bigrow.integer1, d_bigrow.long1, d_bigrow.list1, d_bigrow.float1, d_bigrow.double1, d_bigrow.string1, d_bigrow.list2, d_bigrow.date1, d_bigrow.timestamp1
+               Sort Key: d_bigrow.short1
+               ->  Vector Foreign Scan on public.d_bigrow
+                     Output: d_bigrow.boolean1, d_bigrow.short1, d_bigrow.integer1, d_bigrow.long1, d_bigrow.list1, d_bigrow.float1, d_bigrow.double1, d_bigrow.string1, d_bigrow.list2, d_bigrow.date1, d_bigrow.timestamp1
+                     Filter: (SubPlan 1)
+                     Server Type: hdfs
+                     Parquet File: /user/hive/warehouse/d_bigrow_parquet
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: customer_reviews.review_rating
+                             ->  Vector Result
+                                   Output: customer_reviews.review_rating
+                                   Filter: (customer_reviews.review_votes = d_bigrow.integer1)
+                                   ->  Vector Materialize
+                                         Output: customer_reviews.review_rating, customer_reviews.review_votes
+                                         ->  Vector Streaming(type: BROADCAST)
+                                               Output: customer_reviews.review_rating, customer_reviews.review_votes
+                                               ->  Vector Foreign Scan on public.customer_reviews
+                                                     Output: customer_reviews.review_rating, customer_reviews.review_votes
+                                                     Server Type: hdfs
+                                                     Parquet File: /user/hive/warehouse/customer_reviews_parquet
+(26 rows)
+
+select * from d_bigrow where short1 in  (select review_rating from customer_reviews where review_votes = integer1)  order by short1;
+ boolean1 | short1 | integer1 | long1 | list1 | float1 | double1 | string1 | list2 | date1 |        timestamp1        
+----------+--------+----------+-------+-------+--------+---------+---------+-------+-------+--------------------------
+          |     10 |       20 |     3 |     4 |      5 |       6 | a       | b     |       | Tue Oct 19 09:23:54 2004
+(1 row)
+
+explain (verbose on, costs off) select * from t where c1 in (select sum(b2) sb2 from s group by b1 having c2 =  sum(b2)) order by c1;
+WARNING:  Statistics in some tables or columns(public.s.b1, public.t) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Sort
+   Output: t.c1, t.c2
+   Sort Key: t.c1
+   ->  Data Node Scan on "__REMOTE_SORT_QUERY__"
+         Output: t.c1, t.c2
+         Remote query: SELECT c1, c2 FROM ONLY public.t WHERE true ORDER BY 1
+         Coordinator quals: (SubPlan 1)
+         SubPlan 1
+           ->  HashAggregate
+                 Output: pg_catalog.sum((sum(s.b2))), s.b1
+                 Group By Key: s.b1
+                 Filter: (t.c2 = pg_catalog.sum((sum(s.b2))))
+                 ->  Data Node Scan on "__REMOTE_GROUP_QUERY__"
+                       Output: (sum(s.b2)), s.b1
+                       Remote query: SELECT sum(b2), b1 FROM ONLY public.s WHERE true GROUP BY 2
+(15 rows)
+
+explain (verbose on, costs off)  select * from t where c1 in (select b1 from s group by b1 having sum(b2) = c2) order by c1;
+WARNING:  Statistics in some tables or columns(public.s.b1, public.t) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Sort
+   Output: t.c1, t.c2
+   Sort Key: t.c1
+   ->  Data Node Scan on "__REMOTE_SORT_QUERY__"
+         Output: t.c1, t.c2
+         Remote query: SELECT c1, c2 FROM ONLY public.t WHERE true ORDER BY 1
+         Coordinator quals: (SubPlan 1)
+         SubPlan 1
+           ->  HashAggregate
+                 Output: s.b1
+                 Group By Key: s.b1
+                 Filter: (pg_catalog.sum((sum(s.b2))) = t.c2)
+                 ->  Data Node Scan on "__REMOTE_GROUP_QUERY__"
+                       Output: s.b1, (sum(s.b2))
+                       Remote query: SELECT b1, sum(b2) FROM ONLY public.s WHERE true GROUP BY 1
+(15 rows)
+
+select * from t where c1 in (select b1 from s group by b1 having sum(b2) = c2) order by c1;
+ c1 | c2 
+----+----
+  1 |  2
+  2 |  3
+  3 |  4
+  4 |  5
+(4 rows)
+
+explain (verbose on, costs off) select * from t where c1 in (select b1 from s, r where a2 = b2  group by b1 having sum(b3) = c2) order by c1;
+WARNING:  Statistics in some tables or columns(public.s.b2, public.s.b1, public.r.a2, public.t) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Sort
+   Output: t.c1, t.c2
+   Sort Key: t.c1
+   ->  Data Node Scan on "__REMOTE_SORT_QUERY__"
+         Output: t.c1, t.c2
+         Remote query: SELECT c1, c2 FROM ONLY public.t WHERE true ORDER BY 1
+         Coordinator quals: (SubPlan 1)
+         SubPlan 1
+           ->  HashAggregate
+                 Output: s.b1
+                 Group By Key: s.b1
+                 Filter: (sum(s.b3) = t.c2)
+                 ->  Hash Join
+                       Output: s.b1, s.b3
+                       Hash Cond: (s.b2 = r.a2)
+                       ->  Data Node Scan on s "_REMOTE_TABLE_QUERY_"
+                             Output: s.b1, s.b3, s.b2
+                             Remote query: SELECT b1, b3, b2 FROM ONLY public.s WHERE true
+                       ->  Hash
+                             Output: r.a2
+                             ->  Data Node Scan on r "_REMOTE_TABLE_QUERY_"
+                                   Output: r.a2
+                                   Remote query: SELECT a2 FROM ONLY public.r WHERE true
+(23 rows)
+
+select * from t where c1 in (select b1 from s, r where a2 = b2  group by b1 having sum(b3) = c2)  order by c1;
+ c1 | c2 
+----+----
+  1 |  2
+  2 |  3
+  3 |  4
+  4 |  5
+(4 rows)
+
+--Remote sort
+explain (verbose on, costs off) select * from (select all * from t where c1 < 3 order by c1);
+WARNING:  Statistics in some tables or columns(public.t.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Output: t.c1, t.c2
+   Sort Key: t.c1
+   ->  Data Node Scan on "__REMOTE_SORT_QUERY__"
+         Output: t.c1, t.c2
+         Remote query: SELECT c1, c2 FROM ONLY public.t WHERE c1 < 3 ORDER BY 1
+(6 rows)
+
+explain performance select * from (select all * from t where c1 < 3 order by c1);
+WARNING:  Statistics in some tables or columns(public.t.c1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                            QUERY PLAN                                                                            
+------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--? .*
+   Output: t.c1, t.c2
+   Sort Key: t.c1
+--? .*
+--?   (CPU: ex c/r=.*, ex cyc=.*, inc cyc=.*)
+--? .*
+         Output: t.c1, t.c2
+         Node/s: All datanodes
+         Remote query: SELECT c1, c2 FROM ONLY public.t WHERE c1 < 3 ORDER BY 1
+--? .*
+--? .*
+--?.*
+
+select * from (select all * from t where c1 < 3 order by c1);
+ c1 | c2 
+----+----
+  1 |  2
+  2 |  3
+(2 rows)
+
+explain (verbose on, costs off) select * from (select all * from orders where o_orderkey < 3 order by o_orderkey);
+WARNING:  Statistics in some tables or columns(public.orders.o_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                QUERY PLAN                                                                                                 
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment
+   Sort Key: orders.o_orderkey
+   ->  Data Node Scan on "__REMOTE_SORT_QUERY__"
+         Output: orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment
+         Remote query: SELECT o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment FROM ONLY public.orders WHERE o_orderkey < 3 ORDER BY 1
+(6 rows)
+
+select * from (select all * from orders where o_orderkey < 3 order by o_orderkey);
+ o_orderkey | o_custkey | o_orderstatus | o_totalprice |       o_orderdate        | o_orderpriority |     o_clerk     | o_shippriority |                        o_comment                         
+------------+-----------+---------------+--------------+--------------------------+-----------------+-----------------+----------------+----------------------------------------------------------
+          1 |       370 | O             |    172799.49 | Tue Jan 02 00:00:00 1996 | 5-LOW           | Clerk#000000951 |              0 | nstructions sleep furiously among 
+          2 |       781 | O             |     38426.09 | Sun Dec 01 00:00:00 1996 | 1-URGENT        | Clerk#000000880 |              0 |  foxes. pending accounts at the pending, silent asymptot
+(2 rows)
+
+--Agg
+with revenue (total_revenue) as  
+( select sum(l_extendedprice * (1 - l_discount)) from lineitem where l_suppkey=1 )
+select * from revenue;
+ total_revenue 
+---------------
+ 21495562.0223
+(1 row)
+
+-- normal table
+create table hotel1000 ( 
+                        lkbh text,
+                        xm text,
+                        xb text,
+                        csrq text,
+                        zjlx text,
+                        zjhm text,
+                        rzsj text,
+                        rzsj_yf float4,
+                        rjfh text,
+                        tfsj text,
+                        lddm text,
+                        ldmc text,
+                        pcsdm text,
+                        fjdm text,
+                        rzsj_q8 text,
+                        etlgxsj text,
+                        hjszd text) distribute by roundrobin;
+explain (verbose on, costs off) select 
+       dddd.xm || ' '|| dddd.ldmc || ' rzsj:' || to_char(dddd.rzsj) as info1,
+       a.xm || ' '|| a.ldmc || ' rzsj:' || to_char(a.rzsj) as info2
+from hotel1000 a,
+       (select 
+                            xm,ldmc,lddm,rzsj,zjhm
+        from 
+                            (select 
+                                     xm,ldmc,lddm,rzsj,zjhm
+                            from
+                                     hotel1000 
+                             where 
+                                     rzsj >= '2014-01-01 01:00:00'
+                                     and 
+                                     rzsj <= '2014-12-30 23:00:00'
+                            )
+        where 
+                            xm like 'wang%'
+                            and
+                            lddm in(
+                                     select 
+                                               lddm 
+                                     from
+                                               hotel1000
+                                     where
+                                               ldmc like '%shangwu%'
+                            )
+                   ) dddd
+where 
+         a.zjhm <> dddd.zjhm and
+         ABS(INTERVALTONUM(to_timestamp(a.rzsj,'yyyy-mm-dd hh24:mi:ss') - to_timestamp(dddd.rzsj,'yyyy-mm-dd hh24:mi:ss'))) < 1
+;
+WARNING:  Statistics in some tables or columns(public.hotel1000.rzsj, public.hotel1000.xm, public.hotel1000.ldmc, public.hotel1000.zjhm, public.hotel1000.lddm) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                      QUERY PLAN                                                                                                      
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: ((((public.hotel1000.xm || ' '::text) || public.hotel1000.ldmc) || ' rzsj:'::text) || public.hotel1000.rzsj), ((((a.xm || ' '::text) || a.ldmc) || ' rzsj:'::text) || a.rzsj)
+   Join Filter: ((a.zjhm <> public.hotel1000.zjhm) AND (abs(intervaltonum((to_timestamp(a.rzsj, 'yyyy-mm-dd hh24:mi:ss'::text) - to_timestamp(public.hotel1000.rzsj, 'yyyy-mm-dd hh24:mi:ss'::text)))) < 1::numeric))
+   ->  Nested Loop Semi Join
+         Output: public.hotel1000.xm, public.hotel1000.ldmc, public.hotel1000.rzsj, public.hotel1000.zjhm
+         Join Filter: (public.hotel1000.lddm = public.hotel1000.lddm)
+         ->  Data Node Scan on hotel1000 "_REMOTE_TABLE_QUERY_"
+               Output: public.hotel1000.xm, public.hotel1000.ldmc, public.hotel1000.rzsj, public.hotel1000.lddm, public.hotel1000.zjhm
+               Remote query: SELECT xm, ldmc, rzsj, lddm, zjhm FROM ONLY public.hotel1000 WHERE rzsj >= '2014-01-01 01:00:00'::text AND rzsj <= '2014-12-30 23:00:00'::text AND xm ~~ 'wang%'::text
+         ->  Data Node Scan on hotel1000 "_REMOTE_TABLE_QUERY_"
+               Output: public.hotel1000.lddm
+               Remote query: SELECT lddm FROM ONLY public.hotel1000 WHERE ldmc ~~ '%shangwu%'::text
+   ->  Data Node Scan on hotel1000 "_REMOTE_TABLE_QUERY_"
+         Output: a.xm, a.ldmc, a.rzsj, a.zjhm
+         Remote query: SELECT xm, ldmc, rzsj, zjhm FROM ONLY public.hotel1000 a WHERE true
+(15 rows)
+
+explain (verbose on, costs off) select 
+       dddd.xm || ' '|| dddd.ldmc || ' rzsj:' || to_char(dddd.rzsj) as info1,
+       a.xm || ' '|| a.ldmc || ' rzsj:' || to_char(a.rzsj) as info2
+from hotel1000 a,
+       (select 
+                            xm,ldmc,lddm,rzsj,zjhm
+        from 
+                            (select 
+                                     xm,ldmc,lddm,rzsj,zjhm
+                            from
+                                     hotel1000 
+                             where 
+                                     rzsj >= '2014-01-01 01:00:00'
+                                     and 
+                                     rzsj <= '2014-12-30 23:00:00'
+                            )
+        where 
+                            xm like 'wang%'
+                            and
+                            lddm in(
+                                     select 
+                                               lddm 
+                                     from
+                                               hotel1000
+                                     where
+                                               ldmc like '%shangwu%'
+                            )
+                   ) dddd
+where 
+         a.zjhm <> dddd.zjhm and
+         ABS(INTERVALTONUM(to_timestamp(a.rzsj,'yyyy-mm-dd hh24:mi:ss') - to_timestamp(dddd.rzsj,'yyyy-mm-dd hh24:mi:ss'))) < 1
+;
+WARNING:  Statistics in some tables or columns(public.hotel1000.rzsj, public.hotel1000.xm, public.hotel1000.ldmc, public.hotel1000.zjhm, public.hotel1000.lddm) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                      QUERY PLAN                                                                                                      
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: ((((public.hotel1000.xm || ' '::text) || public.hotel1000.ldmc) || ' rzsj:'::text) || public.hotel1000.rzsj), ((((a.xm || ' '::text) || a.ldmc) || ' rzsj:'::text) || a.rzsj)
+   Join Filter: ((a.zjhm <> public.hotel1000.zjhm) AND (abs(intervaltonum((to_timestamp(a.rzsj, 'yyyy-mm-dd hh24:mi:ss'::text) - to_timestamp(public.hotel1000.rzsj, 'yyyy-mm-dd hh24:mi:ss'::text)))) < 1::numeric))
+   ->  Nested Loop Semi Join
+         Output: public.hotel1000.xm, public.hotel1000.ldmc, public.hotel1000.rzsj, public.hotel1000.zjhm
+         Join Filter: (public.hotel1000.lddm = public.hotel1000.lddm)
+         ->  Data Node Scan on hotel1000 "_REMOTE_TABLE_QUERY_"
+               Output: public.hotel1000.xm, public.hotel1000.ldmc, public.hotel1000.rzsj, public.hotel1000.lddm, public.hotel1000.zjhm
+               Remote query: SELECT xm, ldmc, rzsj, lddm, zjhm FROM ONLY public.hotel1000 WHERE rzsj >= '2014-01-01 01:00:00'::text AND rzsj <= '2014-12-30 23:00:00'::text AND xm ~~ 'wang%'::text
+         ->  Data Node Scan on hotel1000 "_REMOTE_TABLE_QUERY_"
+               Output: public.hotel1000.lddm
+               Remote query: SELECT lddm FROM ONLY public.hotel1000 WHERE ldmc ~~ '%shangwu%'::text
+   ->  Data Node Scan on hotel1000 "_REMOTE_TABLE_QUERY_"
+         Output: a.xm, a.ldmc, a.rzsj, a.zjhm
+         Remote query: SELECT xm, ldmc, rzsj, zjhm FROM ONLY public.hotel1000 a WHERE true
+(15 rows)
+
+drop table hotel1000;
+--create foreign table
+create foreign table hotel1000 ( 
+                        lkbh text,
+                        xm text,
+                        xb text,
+                        csrq text,
+                        zjlx text,
+                        zjhm text,
+                        rzsj text,
+                        rzsj_yf float4,
+                        rjfh text,
+                        tfsj text,
+                        lddm text,
+                        ldmc text,
+                        pcsdm text,
+                        fjdm text,
+                        rzsj_q8 text,
+                        etlgxsj text,
+                        hjszd text) 
+server hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/fvt_data_query_hive.db/hotel_1000_parquet')
+distribute by roundrobin;
+explain (verbose on, costs off) select 
+       dddd.xm || ' '|| dddd.ldmc || ' rzsj:' || to_char(dddd.rzsj) as info1,
+       a.xm || ' '|| a.ldmc || ' rzsj:' || to_char(a.rzsj) as info2
+from hotel1000 a,
+       (select 
+                            xm,ldmc,lddm,rzsj,zjhm
+        from 
+                            (select 
+                                     xm,ldmc,lddm,rzsj,zjhm
+                            from
+                                     hotel1000 
+                             where 
+                                     rzsj >= '2014-01-01 01:00:00'
+                                     and 
+                                     rzsj <= '2014-12-30 23:00:00'
+                            )
+        where 
+                            xm like 'wang%'
+                            and
+                            lddm in(
+                                     select 
+                                               lddm 
+                                     from
+                                               hotel1000
+                                     where
+                                               ldmc like '%shangwu%'
+                            )
+                   ) dddd
+where 
+         a.zjhm <> dddd.zjhm and
+         ABS(INTERVALTONUM(to_timestamp(a.rzsj,'yyyy-mm-dd hh24:mi:ss') - to_timestamp(dddd.rzsj,'yyyy-mm-dd hh24:mi:ss'))) < 1
+;
+WARNING:  Statistics in some tables or columns(public.hotel1000.rzsj, public.hotel1000.xm, public.hotel1000.ldmc, public.hotel1000.zjhm, public.hotel1000.lddm) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                               QUERY PLAN                                                                                                               
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (((((public.hotel1000.xm || ' '::text) || public.hotel1000.ldmc) || ' rzsj:'::text) || public.hotel1000.rzsj)), (((((a.xm || ' '::text) || a.ldmc) || ' rzsj:'::text) || a.rzsj))
+   ->  Vector Streaming (type: GATHER)
+         Output: (((((public.hotel1000.xm || ' '::text) || public.hotel1000.ldmc) || ' rzsj:'::text) || public.hotel1000.rzsj)), (((((a.xm || ' '::text) || a.ldmc) || ' rzsj:'::text) || a.rzsj))
+         ->  Vector Nest Loop Semi Join
+               Output: ((((public.hotel1000.xm || ' '::text) || public.hotel1000.ldmc) || ' rzsj:'::text) || public.hotel1000.rzsj), ((((a.xm || ' '::text) || a.ldmc) || ' rzsj:'::text) || a.rzsj)
+               Join Filter: (public.hotel1000.lddm = public.hotel1000.lddm)
+               ->  Vector Nest Loop
+                     Output: a.xm, a.ldmc, a.rzsj, public.hotel1000.xm, public.hotel1000.ldmc, public.hotel1000.rzsj, public.hotel1000.lddm
+                     Join Filter: ((a.zjhm <> public.hotel1000.zjhm) AND (abs(intervaltonum((to_timestamp(a.rzsj, 'yyyy-mm-dd hh24:mi:ss'::text) - to_timestamp(public.hotel1000.rzsj, 'yyyy-mm-dd hh24:mi:ss'::text)))) < 1::numeric))
+                     ->  Vector Streaming(type: BROADCAST)
+                           Output: public.hotel1000.xm, public.hotel1000.ldmc, public.hotel1000.rzsj, public.hotel1000.lddm, public.hotel1000.zjhm
+                           ->  Vector Foreign Scan on public.hotel1000
+                                 Output: public.hotel1000.xm, public.hotel1000.ldmc, public.hotel1000.rzsj, public.hotel1000.lddm, public.hotel1000.zjhm
+                                 Filter: ((public.hotel1000.xm ~~ 'wang%'::text) AND (public.hotel1000.rzsj >= '2014-01-01 01:00:00'::text) AND (public.hotel1000.rzsj <= '2014-12-30 23:00:00'::text))
+                                 Pushdown Predicate Filter: ((public.hotel1000.rzsj >= '2014-01-01 01:00:00'::text) AND (public.hotel1000.rzsj <= '2014-12-30 23:00:00'::text))
+                                 Server Type: hdfs
+                                 Parquet File: /user/hive/warehouse/fvt_data_query_hive.db/hotel_1000_parquet
+                     ->  Vector Foreign Scan on public.hotel1000 a
+                           Output: a.xm, a.ldmc, a.rzsj, a.zjhm
+                           Server Type: hdfs
+                           Parquet File: /user/hive/warehouse/fvt_data_query_hive.db/hotel_1000_parquet
+               ->  Vector Materialize
+                     Output: public.hotel1000.lddm
+                     ->  Vector Streaming(type: BROADCAST)
+                           Output: public.hotel1000.lddm
+                           ->  Vector Foreign Scan on public.hotel1000
+                                 Output: public.hotel1000.lddm
+                                 Filter: (public.hotel1000.ldmc ~~ '%shangwu%'::text)
+                                 Server Type: hdfs
+                                 Parquet File: /user/hive/warehouse/fvt_data_query_hive.db/hotel_1000_parquet
+(31 rows)
+
+--add LLT 
+drop table if exists testllt001;
+NOTICE:  table "testllt001" does not exist, skipping
+create table testllt001(id int, name text) distribute by replication;
+explain (verbose on, costs off) select * from t where c1 in (select id from testllt001 where id =2);
+WARNING:  Statistics in some tables or columns(public.t.c1, public.testllt001.id) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Nested Loop Semi Join
+   Output: t.c1, t.c2
+   ->  Data Node Scan on t "_REMOTE_TABLE_QUERY_"
+         Output: t.c1, t.c2
+         Remote query: SELECT c1, c2 FROM ONLY public.t WHERE c1 = 2
+   ->  Data Node Scan on testllt001 "_REMOTE_TABLE_QUERY_"
+         Output: testllt001.id
+         Remote query: SELECT id FROM ONLY public.testllt001 WHERE id = 2
+(8 rows)
+
+drop table if exists testllt003;
+NOTICE:  table "testllt003" does not exist, skipping
+create table testllt003( id int);
+explain (verbose on, costs off) select * from testllt003 union select R_REGIONKEY from region;
+WARNING:  Statistics in some tables or columns(public.region, public.testllt003.id) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ HashAggregate
+   Output: testllt003.id
+   Group By Key: testllt003.id
+   ->  Append
+         ->  Data Node Scan on testllt003 "_REMOTE_TABLE_QUERY_"
+               Output: testllt003.id
+               Remote query: SELECT id FROM ONLY public.testllt003 WHERE true
+         ->  Data Node Scan on region "_REMOTE_TABLE_QUERY_"
+               Output: region.r_regionkey
+               Remote query: SELECT r_regionkey FROM ONLY public.region WHERE true
+(10 rows)
+
+drop table testllt001;
+drop table testllt003;
+drop table if exists testllt100t;
+NOTICE:  table "testllt100t" does not exist, skipping
+create table testllt100t(c1 int, c2 int) distribute by roundrobin ;
+create index testllt100t_index on testllt100t (c1);
+drop table if exists testllt100s;
+NOTICE:  table "testllt100s" does not exist, skipping
+create table testllt100s (b1 int, b2 int, b3 int) ;
+create index testllt100s_index on testllt100s (b1);
+explain (verbose on, costs off) select c1 from testllt100t where c1 in (select b1 from testllt100s where b1=7);
+WARNING:  Statistics in some tables or columns(public.testllt100t.c1, public.testllt100s.b1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Nested Loop Semi Join
+   Output: testllt100t.c1
+   ->  Data Node Scan on testllt100t "_REMOTE_TABLE_QUERY_"
+         Output: testllt100t.c1
+         Remote query: SELECT c1 FROM ONLY public.testllt100t WHERE c1 = 7
+   ->  Data Node Scan on testllt100s "_REMOTE_TABLE_QUERY_"
+         Output: testllt100s.b1
+         Remote query: SELECT b1 FROM ONLY public.testllt100s WHERE b1 = 7
+(8 rows)
+
+explain (verbose on, costs off) select c1 from testllt100t where c1 in (select b2 from testllt100s where b1=7);
+WARNING:  Statistics in some tables or columns(public.testllt100t.c1, public.testllt100s.b1, public.testllt100s.b2) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Hash Semi Join
+   Output: testllt100t.c1
+   Hash Cond: (testllt100t.c1 = testllt100s.b2)
+   ->  Data Node Scan on testllt100t "_REMOTE_TABLE_QUERY_"
+         Output: testllt100t.c1
+         Remote query: SELECT c1 FROM ONLY public.testllt100t WHERE true
+   ->  Hash
+         Output: testllt100s.b2
+         ->  Data Node Scan on testllt100s "_REMOTE_TABLE_QUERY_"
+               Output: testllt100s.b2
+               Remote query: SELECT b2 FROM ONLY public.testllt100s WHERE b1 = 7
+(11 rows)
+
+drop table if exists testllt100t;
+create table testllt100t(c1 int, c2 int) with (orientation=column) distribute by roundrobin ;
+drop table if exists testllt100s;
+create table testllt100s (b1 int, b2 int, b3 int) with (orientation=column);
+explain (verbose on, costs off) select c1 from testllt100t where c1 in (select b1 from testllt100s where b1=7);
+WARNING:  Statistics in some tables or columns(public.testllt100t.c1, public.testllt100s.b1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Nested Loop Semi Join
+   Output: testllt100t.c1
+   ->  Data Node Scan on testllt100t "_REMOTE_TABLE_QUERY_"
+         Output: testllt100t.c1
+         Remote query: SELECT c1 FROM ONLY public.testllt100t WHERE c1 = 7
+   ->  Data Node Scan on testllt100s "_REMOTE_TABLE_QUERY_"
+         Output: testllt100s.b1
+         Remote query: SELECT b1 FROM ONLY public.testllt100s WHERE b1 = 7
+(8 rows)
+
+create index testllt100t_index on testllt100t (c1);
+create index testllt100s_index on testllt100s (b1);
+explain (verbose on, costs off) select c1 from testllt100t where c1 in (select b1 from testllt100s where b1=7);
+WARNING:  Statistics in some tables or columns(public.testllt100t.c1, public.testllt100s.b1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Nested Loop Semi Join
+   Output: testllt100t.c1
+   ->  Data Node Scan on testllt100t "_REMOTE_TABLE_QUERY_"
+         Output: testllt100t.c1
+         Remote query: SELECT c1 FROM ONLY public.testllt100t WHERE c1 = 7
+   ->  Data Node Scan on testllt100s "_REMOTE_TABLE_QUERY_"
+         Output: testllt100s.b1
+         Remote query: SELECT b1 FROM ONLY public.testllt100s WHERE b1 = 7
+(8 rows)
+
+drop table testllt100t;
+drop table testllt100s;
+create foreign table SUBQUERY_T1(
+D_ID int,
+D_W_ID int,
+D_NAME varchar(10),
+D_STREET_1 varchar(20))SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/hive/subquery_t1_parquet')
+distribute by roundrobin;
+explain (verbose on, costs off) WITH tmp1 as (select D_ID from SUBQUERY_T1 order by D_ID)SELECT DISTINCT * FROM ( SELECT ALL * FROM SUBQUERY_T1 where D_ID = D_W_ID group by D_ID,D_NAME,D_W_ID,D_STREET_1 having D_ID < 10 order by D_ID,D_NAME,D_W_ID,D_STREET_1 DESC NULLS FIRST LIMIT 1   ) group by D_ID,D_NAME,D_W_ID,D_STREET_1 order by D_ID,D_NAME,D_W_ID,D_STREET_1 FETCH NEXT 20 ROWS ONLY ;
+WARNING:  Statistics in some tables or columns(public.subquery_t1.d_id, public.subquery_t1.d_w_id, public.subquery_t1.d_name, public.subquery_t1.d_street_1) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                         QUERY PLAN                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+   ->  Vector Streaming (type: GATHER)
+         Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+         ->  Vector Limit
+               Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+               ->  Vector Unique
+                     Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                     ->  Vector Group
+                           Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                           Group By Key: subquery_t1.d_id, subquery_t1.d_name, subquery_t1.d_w_id, subquery_t1.d_street_1
+                           ->  Vector Sort
+                                 Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                                 Sort Key: subquery_t1.d_id, subquery_t1.d_name, subquery_t1.d_w_id, subquery_t1.d_street_1
+                                 ->  Vector Streaming(type: BROADCAST)
+                                       Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                                       ->  Vector Limit
+                                             Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                                             ->  Vector Sort
+                                                   Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                                                   Sort Key: subquery_t1.d_id, subquery_t1.d_name, subquery_t1.d_street_1 DESC
+                                                   ->  Vector Streaming(type: BROADCAST)
+                                                         Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                                                         ->  Vector Limit
+                                                               Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                                                               ->  Vector Group
+                                                                     Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                                                                     Group By Key: subquery_t1.d_id, subquery_t1.d_name, subquery_t1.d_w_id, subquery_t1.d_street_1
+                                                                     ->  Vector Sort
+                                                                           Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                                                                           Sort Key: subquery_t1.d_id, subquery_t1.d_name, subquery_t1.d_w_id, subquery_t1.d_street_1 DESC
+                                                                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                                                                 Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                                                                                 Distribute Key: subquery_t1.d_id, subquery_t1.d_name, subquery_t1.d_w_id, subquery_t1.d_street_1
+                                                                                 ->  Vector Group
+                                                                                       Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                                                                                       Group By Key: subquery_t1.d_id, subquery_t1.d_name, subquery_t1.d_w_id, subquery_t1.d_street_1
+                                                                                       ->  Vector Sort
+                                                                                             Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                                                                                             Sort Key: subquery_t1.d_id, subquery_t1.d_name, subquery_t1.d_w_id, subquery_t1.d_street_1 DESC
+                                                                                             ->  Vector Foreign Scan on public.subquery_t1
+                                                                                                   Output: subquery_t1.d_id, subquery_t1.d_w_id, subquery_t1.d_name, subquery_t1.d_street_1
+                                                                                                   Filter: ((subquery_t1.d_id = subquery_t1.d_w_id) AND (subquery_t1.d_id < 10))
+                                                                                                   Pushdown Predicate Filter: (subquery_t1.d_id < 10)
+                                                                                                   Server Type: hdfs
+                                                                                                   Parquet File: /user/hive/warehouse/hive/subquery_t1_parquet
+(46 rows)
+
+drop foreign table SUBQUERY_T1;
+create table test_mergeappend_1(a integer);
+create table test_mergeappend_2(a integer);
+explain (verbose on, costs off)(select * from test_mergeappend_1 order by a) union all (select * from test_mergeappend_2 order by 1) order by 1;
+WARNING:  Statistics in some tables or columns(public.test_mergeappend_1.a, public.test_mergeappend_2.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: test_mergeappend_1.a
+   ->  Sort
+         Output: test_mergeappend_1.a
+         Sort Key: test_mergeappend_1.a
+         ->  Result
+               Output: test_mergeappend_1.a
+               ->  Append
+                     ->  Seq Scan on public.test_mergeappend_1
+                           Output: test_mergeappend_1.a
+                     ->  Seq Scan on public.test_mergeappend_2
+                           Output: test_mergeappend_2.a
+(12 rows)
+
+drop table test_mergeappend_1;
+drop table test_mergeappend_2;
+create table t_subqueryscan (a int, b int);
+explain (verbose on, costs off) select a from (select count(a) as a, count(b) as b from t_subqueryscan) order by 1;
+WARNING:  Statistics in some tables or columns(public.t_subqueryscan.a) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: __unnamed_subquery__.a
+   ->  Sort
+         Output: __unnamed_subquery__.a
+         Sort Key: __unnamed_subquery__.a
+         ->  Subquery Scan on __unnamed_subquery__
+               Output: __unnamed_subquery__.a
+               ->  Aggregate
+                     Output: count((count(t_subqueryscan.a))), count((count(t_subqueryscan.b)))
+                     ->  Streaming(type: BROADCAST)
+                           Output: (count(t_subqueryscan.a)), (count(t_subqueryscan.b))
+                           ->  Aggregate
+                                 Output: count(t_subqueryscan.a), count(t_subqueryscan.b)
+                                 ->  Seq Scan on public.t_subqueryscan
+                                       Output: t_subqueryscan.a, t_subqueryscan.b
+(15 rows)
+
+drop table t_subqueryscan;
+--end LLT
+create table test200(id200 int ) distribute by roundrobin;
+----------------
+ on
+(1 row)
+
+explain (verbose on, costs off)select * from (select id200 as id from test200 ) y, (select id200 from test200)x;
+WARNING:  Statistics in some tables or columns(public.test200) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Nested Loop
+   Output: public.test200.id200, public.test200.id200
+   ->  Data Node Scan on test200 "_REMOTE_TABLE_QUERY_"
+         Output: public.test200.id200
+         Remote query: SELECT id200 FROM ONLY public.test200 WHERE true
+   ->  Data Node Scan on test200 "_REMOTE_TABLE_QUERY_"
+         Output: public.test200.id200
+         Remote query: SELECT id200 FROM ONLY public.test200 WHERE true
+(8 rows)
+
+create view test200_view as select * from test200;
+explain (verbose on, costs off)select * from (select id200 as id from test200_view ) y, (select id200 from test200_view)x;
+WARNING:  Statistics in some tables or columns(public.test200) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Nested Loop
+   Output: public.test200.id200, public.test200.id200
+   ->  Data Node Scan on test200 "_REMOTE_TABLE_QUERY_"
+         Output: public.test200.id200
+         Remote query: SELECT id200 FROM ONLY public.test200 WHERE true
+   ->  Data Node Scan on test200 "_REMOTE_TABLE_QUERY_"
+         Output: public.test200.id200
+         Remote query: SELECT id200 FROM ONLY public.test200 WHERE true
+(8 rows)
+
+drop table test200 cascade;
+NOTICE:  drop cascades to view test200_view
+drop foreign table if exists reason;
+NOTICE:  foreign table "reason" does not exist, skipping
+drop foreign table if exists store_sales;
+NOTICE:  foreign table "store_sales" does not exist, skipping
+create foreign table  reason ( 
+       r_reason_sk     int       ,
+       r_reason_id     char(16)  ,
+       r_reason_desc   char(100) ) 
+server hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/reason_parquet')
+distribute by roundrobin;
+create foreign table  store_sales ( 
+       ss_sold_date_sk        int          ,
+       ss_sold_time_sk        int          ,
+       ss_item_sk             int          ,
+       ss_customer_sk         int          ,
+       ss_cdemo_sk            int          ,
+       ss_hdemo_sk            int          ,
+       ss_addr_sk             int          ,
+       ss_store_sk            int          ,
+       ss_promo_sk            int          ,
+       ss_ticket_number       int          ,
+       ss_quantity            int          ,
+       ss_wholesale_cost      decimal(7,2) ,
+       ss_list_price          decimal(7,2) ,
+       ss_sales_price         decimal(7,2) ,
+       ss_ext_discount_amt    decimal(7,2) ,
+       ss_ext_sales_price     decimal(7,2) ,
+       ss_ext_wholesale_cost  decimal(7,2) ,
+       ss_ext_list_price      decimal(7,2) ,
+       ss_ext_tax             decimal(7,2) ,
+       ss_coupon_amt          decimal(7,2) ,
+       ss_net_paid            decimal(7,2) ,
+       ss_net_paid_inc_tax    decimal(7,2) ,
+       ss_net_profit          decimal(7,2) ) 
+server hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/store_sales_parquet')
+distribute by roundrobin;
+select  case when (select count(*) 
+                  from store_sales 
+                  where ss_quantity between 1 and 20) > 0.001*74129
+            then (select avg(ss_ext_discount_amt) 
+                  from store_sales 
+                  where ss_quantity between 1 and 20) 
+            else (select avg(ss_net_paid)
+                  from store_sales
+                  where ss_quantity between 1 and 20) end bucket1
+from reason
+where r_reason_sk = 1
+limit 100;
+       bucket1       
+---------------------
+ 39.6454131784259568
+(1 row)
+
+drop foreign table if exists reason;
+drop foreign table if exists store_sales;
+--
+--Drop table
+--
+drop foreign table d_bigrow;
+drop foreign table customer_reviews;
+drop foreign table hotel1000;
+drop table t;
+drop table s;
+drop table r;
+drop table customer;
+drop table lineitem;
+drop table part;
+drop table partsupp;
+drop table orders;
+drop table supplier;
+drop table nation;
+drop table region;
+DROP SERVER hdfs_server CASCADE;

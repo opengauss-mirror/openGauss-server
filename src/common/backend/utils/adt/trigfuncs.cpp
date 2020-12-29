@@ -28,39 +28,32 @@
 Datum suppress_redundant_updates_trigger(PG_FUNCTION_ARGS)
 {
     TriggerData* trigdata = (TriggerData*)fcinfo->context;
-    HeapTuple newtuple;
-    HeapTuple oldtuple;
-    HeapTuple rettuple;
-    HeapTupleHeader newheader;
-    HeapTupleHeader oldheader;
+    HeapTuple newtuple, oldtuple, rettuple;
+    HeapTupleHeader newheader, oldheader;
 
     /* make sure it's called as a trigger */
-    if (!CALLED_AS_TRIGGER(fcinfo)) {
+    if (!CALLED_AS_TRIGGER(fcinfo))
         ereport(ERROR,
             (errcode(ERRCODE_E_R_I_E_TRIGGER_PROTOCOL_VIOLATED),
                 errmsg("suppress_redundant_updates_trigger: must be called as trigger")));
-    }
 
     /* and that it's called on update */
-    if (!TRIGGER_FIRED_BY_UPDATE(trigdata->tg_event)) {
+    if (!TRIGGER_FIRED_BY_UPDATE(trigdata->tg_event))
         ereport(ERROR,
             (errcode(ERRCODE_E_R_I_E_TRIGGER_PROTOCOL_VIOLATED),
                 errmsg("suppress_redundant_updates_trigger: must be called on update")));
-    }
 
     /* and that it's called before update */
-    if (!TRIGGER_FIRED_BEFORE(trigdata->tg_event)) {
+    if (!TRIGGER_FIRED_BEFORE(trigdata->tg_event))
         ereport(ERROR,
             (errcode(ERRCODE_E_R_I_E_TRIGGER_PROTOCOL_VIOLATED),
                 errmsg("suppress_redundant_updates_trigger: must be called before update")));
-    }
 
     /* and that it's called for each row */
-    if (!TRIGGER_FIRED_FOR_ROW(trigdata->tg_event)) {
+    if (!TRIGGER_FIRED_FOR_ROW(trigdata->tg_event))
         ereport(ERROR,
             (errcode(ERRCODE_E_R_I_E_TRIGGER_PROTOCOL_VIOLATED),
                 errmsg("suppress_redundant_updates_trigger: must be called for each row")));
-    }
 
     /* get tuple data, set default result */
     rettuple = newtuple = trigdata->tg_newtuple;
@@ -76,9 +69,8 @@ Datum suppress_redundant_updates_trigger(PG_FUNCTION_ARGS)
      * OID value into newtuple.  (That's not actually possible at present, but
      * maybe someday.)
      */
-    if (trigdata->tg_relation->rd_rel->relhasoids && !OidIsValid(HeapTupleHeaderGetOid(newheader))) {
+    if (trigdata->tg_relation->rd_rel->relhasoids && !OidIsValid(HeapTupleHeaderGetOid(newheader)))
         HeapTupleHeaderSetOid(newheader, HeapTupleHeaderGetOid(oldheader));
-    }
 
     /* if the tuple payload is the same ... */
     if (newtuple->t_len == oldtuple->t_len && newheader->t_hoff == oldheader->t_hoff &&

@@ -31,13 +31,12 @@
 #include "catalog/namespace.h"
 #include "funcapi.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/procarray.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
 
 PG_MODULE_MAGIC;
 
@@ -95,14 +94,14 @@ Datum pgrowlocks(PG_FUNCTION_ARGS)
         if (aclresult != ACLCHECK_OK)
             aclcheck_error(aclresult, ACL_KIND_CLASS, RelationGetRelationName(rel));
 
-        scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+        scan = (HeapScanDesc)heap_beginscan(rel, SnapshotNow, 0, NULL);
         mydata = (MyData*)palloc(sizeof(*mydata));
         mydata->rel = rel;
         mydata->scan = scan;
         mydata->ncolumns = tupdesc->natts;
         funcctx->user_fctx = mydata;
 
-        (void)MemoryContextSwitchTo(oldcontext);
+        MemoryContextSwitchTo(oldcontext);
     }
 
     funcctx = SRF_PERCALL_SETUP();

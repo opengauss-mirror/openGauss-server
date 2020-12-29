@@ -20,11 +20,10 @@
 
 #include <fcntl.h>
 #include <signal.h>
-#include <unistd.h>
 
 #include "miscadmin.h"
 #include "storage/ipc.h"
-#include "storage/pg_sema.h"
+#include "storage/lock/pg_sema.h"
 #include "securec.h"
 
 #ifdef USE_NAMED_POSIX_SEMAPHORES
@@ -143,7 +142,8 @@ static void PosixSemaphoreKill(sem_t* sem)
  */
 void PGReserveSemaphores(int maxSemas, int port)
 {
-    mySemPointers = (sem_t**)MemoryContextAlloc(t_thrd.top_mem_cxt, maxSemas * sizeof(sem_t*));
+    mySemPointers = (sem_t**)MemoryContextAlloc(
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), maxSemas * sizeof(sem_t*));
     if (mySemPointers == NULL)
         ereport(PANIC, (errmsg("out of memory")));
     numSems = 0;

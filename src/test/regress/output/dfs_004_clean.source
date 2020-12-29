@@ -1,0 +1,20 @@
+--clean enviroment
+drop schema vector_engine cascade;
+NOTICE:  drop cascades to 13 other objects
+DETAIL:  drop cascades to table vector_engine.etl_job
+drop cascades to table vector_engine.etl_job_priority
+drop cascades to table vector_engine.etl_job_dependency
+drop cascades to table vector_engine.supplier
+drop cascades to table vector_engine.region
+drop cascades to table vector_engine.partsupp
+drop cascades to table vector_engine.part
+drop cascades to table vector_engine.orders
+drop cascades to table vector_engine.nation
+drop cascades to table vector_engine.lineitem
+drop cascades to table vector_engine.customer
+drop cascades to table vector_engine.lineitem_partition
+drop cascades to table vector_engine.lineitem_vec
+drop schema dwSumData_act cascade;
+NOTICE:  drop cascades to table dwsumdata_act.c03_semi_crdt_card_acct
+drop tablespace if exists hdfs_ts;
+\! rm -rf @abs_srcdir@/dfs_init_004

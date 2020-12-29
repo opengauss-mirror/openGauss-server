@@ -117,10 +117,10 @@ char* downcase_truncate_identifier(const char* ident, int len, bool warn)
 {
     char* result = NULL;
     int i;
-    bool encIsSingleByte = false;
+    bool enc_is_single_byte = false;
 
     result = (char*)palloc(len + 1);
-    encIsSingleByte = pg_database_encoding_max_length() == 1;
+    enc_is_single_byte = pg_database_encoding_max_length() == 1;
 
     /*
      * SQL99 specifies Unicode-aware case normalization, which we don't yet
@@ -136,9 +136,9 @@ char* downcase_truncate_identifier(const char* ident, int len, bool warn)
 
         if (ch >= 'A' && ch <= 'Z') {
             ch += 'a' - 'A';
-        } else if (encIsSingleByte && IS_HIGHBIT_SET(ch) && isupper(ch)) {
+		} else if (enc_is_single_byte && IS_HIGHBIT_SET(ch) && isupper(ch)) {
             ch = tolower(ch);
-        }
+		}
         result[i] = (char)ch;
     }
     result[i] = '\0';

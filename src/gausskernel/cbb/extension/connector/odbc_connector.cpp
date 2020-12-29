@@ -36,7 +36,7 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "nodes/value.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "utils/builtins.h"
 #include "utils/date.h"
 #include "utils/dynamic_loader.h"
@@ -397,6 +397,54 @@ static void check_typeoid(Form_pg_attribute* attrs, int natts)
     }
 }
 
+static Datum odbc_type_2_Datum_sub(Form_pg_attribute attr, void* buf, const char* encoding)
+{
+    Datum result;
+
+    switch (attr->atttypid) {
+        case VARCHAROID: {
+            /* for varchar(n) and varchar2(n) type input: */
+            char* varchar_str = (char*)pg_do_encoding_conversion((unsigned char*)buf,
+                strlen((char*)buf),
+                pg_char_to_encoding((const char*)encoding),
+                pg_char_to_encoding((const char*)t_thrd.conn_cxt._DatabaseEncoding->name));
+            result = DirectFunctionCall3(varcharin,
+                CStringGetDatum((const char*)varchar_str),
+                ObjectIdGetDatum(InvalidOid),
+                Int32GetDatum(attr->atttypmod));
+            break;
+        }
+        case NVARCHAR2OID: {
+            /* for nvarchar2(n) type input: */
+            char* nvarchar2_str = (char*)pg_do_encoding_conversion((unsigned char*)buf,
+                strlen((char*)buf),
+                pg_char_to_encoding((const char*)encoding),
+                pg_char_to_encoding((const char*)t_thrd.conn_cxt._DatabaseEncoding->name));
+            result = DirectFunctionCall3(nvarchar2in,
+                CStringGetDatum((const char*)nvarchar2_str),
+                ObjectIdGetDatum(InvalidOid),
+                Int32GetDatum(attr->atttypmod));
+            break;
+        }
+        case INTERVALOID: {
+            /* for interval[fields] type input: */
+            result = DirectFunctionCall3(
+                interval_in, CStringGetDatum(buf), ObjectIdGetDatum(InvalidOid), Int32GetDatum(attr->atttypmod));
+            break;
+        }
+
+        default: /* should never run here, check_typeoid() has checked. */
+        {
+            ereport(ERROR,
+                (errmodule(MOD_EC),
+                    errcode(ERRCODE_DATATYPE_MISMATCH),
+                    errmsg("unsupport data type found, type oid: %d", attr->atttypid)));
+            return (Datum)NULL; /* just keep compiler silent */
+        }
+    }
+
+    return result;
+}
 /*
  * @Description: convert SQL_C data type to Datum in PG.
  *
@@ -432,8 +480,8 @@ static Datum odbc_type_2_Datum(Form_pg_attribute attr, void* buf, const char* en
         }
         case FLOAT4OID: {
             /*
-             * For a db infinity type: ODBC returns '#'
-             * For a db NaN type: ODBC returns 0
+             * For A db infinity type: ODBC returns '#'
+             * For A db NaN type: ODBC returns 0
              */
             if (*(char*)buf == '#') {
                 result = DirectFunctionCall3(float4in,
@@ -448,8 +496,8 @@ static Datum odbc_type_2_Datum(Form_pg_attribute attr, void* buf, const char* en
         }
         case FLOAT8OID: {
             /*
-             * For a db infinity type: ODBC returns '#'
-             * For a db NaN type: ODBC returns 0
+             * For A db infinity type: ODBC returns '#'
+             * For A db NaN type: ODBC returns 0
              */
             if (*(char*)buf == '#') {
                 result = DirectFunctionCall3(float8in,
@@ -512,44 +560,9 @@ static Datum odbc_type_2_Datum(Form_pg_attribute attr, void* buf, const char* en
                 Int32GetDatum(attr->atttypmod));
             break;
         }
-        case VARCHAROID: {
-            /* for varchar(n) and varchar2(n) type input: */
-            char* varchar_str = (char*)pg_do_encoding_conversion((unsigned char*)buf,
-                strlen((char*)buf),
-                pg_char_to_encoding((const char*)encoding),
-                pg_char_to_encoding((const char*)t_thrd.conn_cxt._DatabaseEncoding->name));
-            result = DirectFunctionCall3(varcharin,
-                CStringGetDatum((const char*)varchar_str),
-                ObjectIdGetDatum(InvalidOid),
-                Int32GetDatum(attr->atttypmod));
-            break;
-        }
-        case NVARCHAR2OID: {
-            /* for nvarchar2(n) type input: */
-            char* nvarchar2_str = (char*)pg_do_encoding_conversion((unsigned char*)buf,
-                strlen((char*)buf),
-                pg_char_to_encoding((const char*)encoding),
-                pg_char_to_encoding((const char*)t_thrd.conn_cxt._DatabaseEncoding->name));
-            result = DirectFunctionCall3(nvarchar2in,
-                CStringGetDatum((const char*)nvarchar2_str),
-                ObjectIdGetDatum(InvalidOid),
-                Int32GetDatum(attr->atttypmod));
-            break;
-        }
-        case INTERVALOID: {
-            /* for interval[fields] type input: */
-            result = DirectFunctionCall3(
-                interval_in, CStringGetDatum(buf), ObjectIdGetDatum(InvalidOid), Int32GetDatum(attr->atttypmod));
-            break;
-        }
-
         default: /* should never run here, check_typeoid() has checked. */
         {
-            ereport(ERROR,
-                (errmodule(MOD_EC),
-                    errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg("unsupport data type found, type oid: %d", attr->atttypid)));
-            return (Datum)NULL; /* just keep compiler silent */
+            result = odbc_type_2_Datum_sub(attr, buf, encoding);
         }
     }
 
@@ -577,8 +590,7 @@ void connect_odbc(
         "odbc tuple context",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE,
-        SHARED_CONTEXT);
+        ALLOCSET_DEFAULT_MAXSIZE);
 
     /* Build a tuple descriptor for our result type */
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE) {
@@ -658,13 +670,13 @@ Datum fetch_odbc(const char* dsn, FuncCallContext* funcctx, bool& isEnd, const c
     MemoryContextReset(tupleContext);
     MemoryContext oldcontext = MemoryContextSwitchTo(tupleContext);
 
-    Size cols = (Size)(uint)funcctx->tuple_desc->natts;
+    Size cols = (Size)funcctx->tuple_desc->natts;
     char** buffer = (char**)palloc0(cols * sizeof(char*));
     bool* nulls = (bool*)palloc0(cols * sizeof(bool));
     Oid* oid_types = (Oid*)palloc0(cols * sizeof(Oid));
     Datum* values = (Datum*)palloc0(cols * sizeof(Datum));
 
-    for (uint i = 0; i < cols; i++) {
+    for (Size i = 0; i < cols; i++) {
         oid_types[i] = funcctx->tuple_desc->attrs[i]->atttypid;
     }
     /* get one row from odbc */
@@ -680,7 +692,7 @@ Datum fetch_odbc(const char* dsn, FuncCallContext* funcctx, bool& isEnd, const c
     ODBC_ERRREPORT("Fail to get data from ODBC connection!", dsn);
 
     /* build a tuple */
-    for (uint i = 0; i < cols; i++) {
+    for (Size i = 0; i < cols; i++) {
         if (!nulls[i]) {
             values[i] = odbc_type_2_Datum(funcctx->tuple_desc->attrs[i], buffer[i], encoding);
         }

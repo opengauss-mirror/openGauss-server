@@ -154,6 +154,15 @@ extern HStore* hstoreUpgrade(Datum orig);
 
 #define PG_GETARG_HS(x) DatumGetHStoreP(PG_GETARG_DATUM(x))
 
+#define NOT_NULL_HS(x)                                                  \
+    do {                                                                \
+        if (unlikely(x == NULL)) {                                      \
+            ereport(ERROR,                                              \
+                    (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),           \
+                     errmsg("NULL HStore is invalid")));                \
+        }                                                               \
+    }while(0) 
+
 /*
  * Pairs is a "decompressed" representation of one key/value pair.
  * The two strings are not necessarily null-terminated.
@@ -173,7 +182,7 @@ extern HStore* hstorePairs(Pairs* pairs, int4 pcount, int4 buflen);
 extern size_t hstoreCheckKeyLen(size_t len);
 extern size_t hstoreCheckValLen(size_t len);
 
-extern int hstoreFindKey(HStore* hs, int* lowbound, char* key, uint32 keylen);
+extern int hstoreFindKey(HStore* hs, int* lowbound, const char* key, uint32 keylen);
 extern Pairs* hstoreArrayToPairs(ArrayType* a, int* npairs);
 
 #define HStoreContainsStrategyNumber 7

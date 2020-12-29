@@ -1,0 +1,22 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS moneyCMK CASCADE;
+NOTICE:  global setting "moneycmk" does not exist
+CREATE CLIENT MASTER KEY moneyCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY moneyCEK WITH VALUES (CLIENT_MASTER_KEY = moneyCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+create table IF NOT EXISTS money_type_enc(c1 int, 
+c2 money ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = moneyCEK, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+ERROR(CLIENT): encrypted money column is not implemented
+-- DROP TABLE money_type;
+DROP TABLE  IF EXISTS money_type_enc;
+NOTICE:  table "money_type_enc" does not exist, skipping
+DROP COLUMN ENCRYPTION KEY moneyCEK;
+DROP CLIENT MASTER KEY moneyCMK;
+\! gs_ktool -d all
+DELETE ALL
+ 1

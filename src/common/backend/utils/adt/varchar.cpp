@@ -83,9 +83,8 @@ static char* anychar_typmodout(int32 typmod)
     if (typmod > VARHDRSZ) {
         ss_rc = snprintf_s(res, buffer_len, buffer_len - 1, "(%d)", (int)(typmod - VARHDRSZ));
         securec_check_ss(ss_rc, "\0", "\0");
-    } else {
+    } else
         *res = '\0';
-    }
 
     return res;
 }
@@ -113,6 +112,10 @@ static char* anychar_typmodout(int32 typmod)
  *															  - ay 6/95
  */
 
+/*****************************************************************************
+ *	 bpchar - char()														 *
+ *****************************************************************************/
+
 /*
  * bpchar_input -- common guts of bpcharin and bpcharrecv
  *
@@ -129,41 +132,42 @@ static BpChar* bpchar_input(const char* s, size_t len, int32 atttypmod)
 {
     BpChar* result = NULL;
     char* r = NULL;
-    size_t max_len;
+    size_t maxlen;
     errno_t ss_rc = 0;
 
     /* If typmod is -1 (or invalid), use the actual string length */
-    if (atttypmod < (int32)VARHDRSZ) {
-        max_len = len;
-    } else {
-        max_len = atttypmod - VARHDRSZ;
-        if (len > max_len) {
+    if (atttypmod < (int32)VARHDRSZ)
+        maxlen = len;
+    else {
+
+        maxlen = atttypmod - VARHDRSZ;
+        if (len > maxlen) {
             /* Verify that extra characters are spaces, and clip them off */
-            size_t mb_max_len = pg_mbcharcliplen(s, len, max_len);
+            size_t mbmaxlen = pg_mbcharcliplen(s, len, maxlen);
             size_t j;
 
             /*
              * at this point, len is the actual BYTE length of the input
-             * string, max_len is the max number of CHARACTERS allowed for this
-             * bpchar type, mb_max_len is the length in BYTES of those chars.
+             * string, maxlen is the max number of CHARACTERS allowed for this
+             * bpchar type, mbmaxlen is the length in BYTES of those chars.
              */
-            for (j = mb_max_len; j < len; j++) {
+            for (j = mbmaxlen; j < len; j++) {
                 if (s[j] != ' ')
                     ereport(ERROR,
                         (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                            errmsg("value too long for type character(%d)", (int)max_len)));
+                            errmsg("value too long for type character(%d)", (int)maxlen)));
             }
 
             /*
-             * Now we set max_len to the necessary byte length, not the number
+             * Now we set maxlen to the necessary byte length, not the number
              * of CHARACTERS!
              */
-            max_len = len = mb_max_len;
+            maxlen = len = mbmaxlen;
         }
     }
 
-    result = (BpChar*)palloc(max_len + VARHDRSZ);
-    SET_VARSIZE(result, max_len + VARHDRSZ);
+    result = (BpChar*)palloc(maxlen + VARHDRSZ);
+    SET_VARSIZE(result, maxlen + VARHDRSZ);
     r = VARDATA(result);
     if (len > 0) {
         ss_rc = memcpy_s(r, len, s, len);
@@ -171,8 +175,8 @@ static BpChar* bpchar_input(const char* s, size_t len, int32 atttypmod)
     }
 
     /* blank pad the string if necessary */
-    if (max_len > len) {
-        ss_rc = memset_s(r + len, max_len - len, ' ', max_len - len);
+    if (maxlen > len) {
+        ss_rc = memset_s(r + len, maxlen - len, ' ', maxlen - len);
         securec_check(ss_rc, "\0", "\0");
     }
 
@@ -255,8 +259,8 @@ Datum bpcharsend(PG_FUNCTION_ARGS)
 Datum bpchar(PG_FUNCTION_ARGS)
 {
     BpChar* source = PG_GETARG_BPCHAR_PP(0);
-    int32 max_len = PG_GETARG_INT32(1);
-    bool is_explicit = PG_GETARG_BOOL(2);
+    int32 maxlen = PG_GETARG_INT32(1);
+    bool isExplicit = PG_GETARG_BOOL(2);
     BpChar* result = NULL;
     int32 len;
     char* r = NULL;
@@ -265,49 +269,48 @@ Datum bpchar(PG_FUNCTION_ARGS)
     errno_t ss_rc = 0;
 
     /* No work if typmod is invalid */
-    if (max_len < (int32)VARHDRSZ)
+    if (maxlen < (int32)VARHDRSZ)
         PG_RETURN_BPCHAR_P(source);
 
-    max_len -= VARHDRSZ;
+    maxlen -= VARHDRSZ;
 
     len = VARSIZE_ANY_EXHDR(source);
     s = VARDATA_ANY(source);
 
     /* No work if supplied data matches typmod already */
-    if (len == max_len)
+    if (len == maxlen)
         PG_RETURN_BPCHAR_P(source);
 
-    if (len > max_len) {
+    if (len > maxlen) {
         /* Verify that extra characters are spaces, and clip them off */
         size_t maxmblen;
 
-        maxmblen = pg_mbcharcliplen(s, len, max_len);
+        maxmblen = pg_mbcharcliplen(s, len, maxlen);
 
-        if (!is_explicit) {
+        if (!isExplicit) {
             for (i = maxmblen; i < len; i++)
-                if (s[i] != ' ') {
+                if (s[i] != ' ')
                     ereport(ERROR,
                         (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                            errmsg("value too long for type character(%d)", max_len)));
-                }
+                            errmsg("value too long for type character(%d)", maxlen)));
         }
 
         len = maxmblen;
 
         /*
-         * At this point, max_len is the necessary byte length, not the number
+         * At this point, maxlen is the necessary byte length, not the number
          * of CHARACTERS!
          *
          * Now, only explicit cast char type data should pad blank space.
          */
-        if (!is_explicit)
-            max_len = len;
+        if (!isExplicit)
+            maxlen = len;
     }
 
-    Assert(max_len >= len);
+    Assert(maxlen >= len);
 
-    result = (BpChar*)palloc(max_len + VARHDRSZ);
-    SET_VARSIZE(result, max_len + VARHDRSZ);
+    result = (BpChar*)palloc(maxlen + VARHDRSZ);
+    SET_VARSIZE(result, maxlen + VARHDRSZ);
     r = VARDATA(result);
 
     if (len > 0) {
@@ -316,15 +319,15 @@ Datum bpchar(PG_FUNCTION_ARGS)
     }
 
     /* blank pad the string if necessary */
-    if (max_len > len) {
-        ss_rc = memset_s(r + len, max_len - len, ' ', max_len - len);
+    if (maxlen > len) {
+        ss_rc = memset_s(r + len, maxlen - len, ' ', maxlen - len);
         securec_check(ss_rc, "\0", "\0");
     }
 
     PG_RETURN_BPCHAR_P(result);
 }
 
-/*
+/* char_bpchar()
  * Convert char to bpchar(1).
  */
 Datum char_bpchar(PG_FUNCTION_ARGS)
@@ -340,7 +343,7 @@ Datum char_bpchar(PG_FUNCTION_ARGS)
     PG_RETURN_BPCHAR_P(result);
 }
 
-/*
+/* bpchar_name()
  * Converts a bpchar() type to a NameData type.
  */
 Datum bpchar_name(PG_FUNCTION_ARGS)
@@ -355,15 +358,13 @@ Datum bpchar_name(PG_FUNCTION_ARGS)
     s_data = VARDATA_ANY(s);
 
     /* Truncate oversize input */
-    if (len >= NAMEDATALEN) {
+    if (len >= NAMEDATALEN)
         len = pg_mbcliplen(s_data, len, NAMEDATALEN - 1);
-    }
 
     /* Remove trailing blanks */
     while (len > 0) {
-        if (s_data[len - 1] != ' ') {
+        if (s_data[len - 1] != ' ')
             break;
-        }
         len--;
     }
 
@@ -377,7 +378,7 @@ Datum bpchar_name(PG_FUNCTION_ARGS)
     PG_RETURN_NAME(result);
 }
 
-/*
+/* name_bpchar()
  * Converts a NameData type to a bpchar type.
  *
  * Uses the text conversion functions, which is only appropriate if BpChar
@@ -406,6 +407,13 @@ Datum bpchartypmodout(PG_FUNCTION_ARGS)
     PG_RETURN_CSTRING(anychar_typmodout(typmod));
 }
 
+/*****************************************************************************
+ *	 varchar - varchar(n)
+ *
+ * Note: varchar piggybacks on type text for most operations, and so has no
+ * C-coded functions except for I/O and typmod checking.
+ *****************************************************************************/
+
 /*
  * varchar_input -- common guts of varcharin and varcharrecv
  *
@@ -424,21 +432,20 @@ Datum bpchartypmodout(PG_FUNCTION_ARGS)
 static VarChar* varchar_input(const char* s, size_t len, int32 atttypmod)
 {
     VarChar* result = NULL;
-    size_t max_len;
+    size_t maxlen;
 
-    max_len = atttypmod - VARHDRSZ;
+    maxlen = atttypmod - VARHDRSZ;
 
-    if (atttypmod >= (int32)VARHDRSZ && len > max_len) {
+    if (atttypmod >= (int32)VARHDRSZ && len > maxlen) {
         /* Verify that extra characters are spaces, and clip them off */
-        size_t mbmaxlen = pg_mbcharcliplen(s, len, max_len);
+        size_t mbmaxlen = pg_mbcharcliplen(s, len, maxlen);
         size_t j;
 
         for (j = mbmaxlen; j < len; j++) {
-            if (s[j] != ' ') {
+            if (s[j] != ' ')
                 ereport(ERROR,
                     (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                        errmsg("value too long for type character varying(%d)", (int)max_len)));
-            }
+                        errmsg("value too long for type character varying(%d)", (int)maxlen)));
         }
 
         len = mbmaxlen;
@@ -510,6 +517,7 @@ Datum varcharsend(PG_FUNCTION_ARGS)
 }
 
 /*
+ * varchar_transform()
  * Flatten calls to varchar's length coercion function that set the new maximum
  * length >= the previous maximum length.  We can ignore the isExplicit
  * argument, since that only affects truncation cases.
@@ -524,6 +532,7 @@ Datum varchar_transform(PG_FUNCTION_ARGS)
     Assert(list_length(expr->args) >= 2);
 
     typmod = (Node*)lsecond(expr->args);
+
     if (IsA(typmod, Const) && !((Const*)typmod)->constisnull) {
         Node* source = (Node*)linitial(expr->args);
         int32 old_typmod = exprTypmod(source);
@@ -531,10 +540,10 @@ Datum varchar_transform(PG_FUNCTION_ARGS)
         int32 old_max = old_typmod - VARHDRSZ;
         int32 new_max = new_typmod - VARHDRSZ;
 
-        if (new_typmod < 0 || (old_typmod >= 0 && old_max <= new_max)) {
+        if (new_typmod < 0 || (old_typmod >= 0 && old_max <= new_max))
             ret = relabel_to_typmod(source, new_typmod);
-        }
     }
+
     PG_RETURN_POINTER(ret);
 }
 
@@ -554,38 +563,34 @@ Datum varchar(PG_FUNCTION_ARGS)
 {
     VarChar* source = PG_GETARG_VARCHAR_PP(0);
     int32 typmod = PG_GETARG_INT32(1);
-    bool is_explicit = PG_GETARG_BOOL(2);
-    int32 len;
-    int32 max_len;
-    size_t max_mb_len;
+    bool isExplicit = PG_GETARG_BOOL(2);
+    int32 len, maxlen;
+    size_t maxmblen;
     int i;
     char* s_data = NULL;
 
     len = VARSIZE_ANY_EXHDR(source);
     s_data = VARDATA_ANY(source);
-    max_len = typmod - VARHDRSZ;
+    maxlen = typmod - VARHDRSZ;
 
     /* No work if typmod is invalid or supplied data fits it already */
-    if (max_len < 0 || len <= max_len) {
+    if (maxlen < 0 || len <= maxlen)
         PG_RETURN_VARCHAR_P(source);
-    }
 
     /* only reach here if string is too long... */
 
     /* truncate multibyte string preserving multibyte boundary */
-    max_mb_len = pg_mbcharcliplen(s_data, len, max_len);
+    maxmblen = pg_mbcharcliplen(s_data, len, maxlen);
 
-    if (!is_explicit) {
-        for (i = max_mb_len; i < len; i++) {
-            if (s_data[i] != ' ') {
+    if (!isExplicit) {
+        for (i = maxmblen; i < len; i++)
+            if (s_data[i] != ' ')
                 ereport(ERROR,
                     (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                        errmsg("value too long for type character varying(%d)", max_len)));
-            }
-        }
+                        errmsg("value too long for type character varying(%d)", maxlen)));
     }
 
-    PG_RETURN_VARCHAR_P((VarChar*)cstring_to_text_with_len(s_data, max_mb_len));
+    PG_RETURN_VARCHAR_P((VarChar*)cstring_to_text_with_len(s_data, maxmblen));
 }
 
 Datum varchartypmodin(PG_FUNCTION_ARGS)
@@ -602,6 +607,10 @@ Datum varchartypmodout(PG_FUNCTION_ARGS)
     PG_RETURN_CSTRING(anychar_typmodout(typmod));
 }
 
+/*****************************************************************************
+ * Exported functions
+ *****************************************************************************/
+
 /* "True" length (not counting trailing blanks) of a BpChar */
 int bcTruelen(BpChar* arg)
 {
@@ -611,9 +620,8 @@ int bcTruelen(BpChar* arg)
 
     len = VARSIZE_ANY_EXHDR(arg);
     for (i = len - 1; i >= 0; i--) {
-        if (s[i] != ' ') {
+        if (s[i] != ' ')
             break;
-        }
     }
     return i + 1;
 }
@@ -631,9 +639,8 @@ int bpchartruelen(const char* s, int len)
      * every supported multibyte server encoding.
      */
     for (i = len - 1; i >= 0; i--) {
-        if (s[i] != ' ') {
+        if (s[i] != ' ')
             break;
-        }
     }
     return i + 1;
 }
@@ -647,16 +654,16 @@ Datum bpcharlen(PG_FUNCTION_ARGS)
     int len;
 
     /* get number of bytes, ignoring trailing spaces */
-    if (DB_IS_CMPT(DB_CMPT_PG)) {
+    if (DB_IS_CMPT(PG_FORMAT)) {
         len = bcTruelen(arg);
     } else {
         len = VARSIZE_ANY_EXHDR(arg);
     }
 
     /* in multibyte encoding, convert to number of characters */
-    if (pg_database_encoding_max_length() != 1) {
+    if (pg_database_encoding_max_length() != 1)
         len = pg_mbstrlen_with_len(VARDATA_ANY(arg), len);
-    }
+
     PG_RETURN_INT32(len);
 }
 
@@ -688,12 +695,12 @@ Datum bpcharoctetlen(PG_FUNCTION_ARGS)
  * be careful to free working copies of toasted datums.  Most places don't
  * need to be so careful.
  *****************************************************************************/
+
 Datum bpchareq(PG_FUNCTION_ARGS)
 {
     BpChar* arg1 = PG_GETARG_BPCHAR_PP(0);
     BpChar* arg2 = PG_GETARG_BPCHAR_PP(1);
-    int len1;
-    int len2;
+    int len1, len2;
     bool result = false;
 
     len1 = bcTruelen(arg1);
@@ -703,13 +710,14 @@ Datum bpchareq(PG_FUNCTION_ARGS)
      * Since we only care about equality or not-equality, we can avoid all the
      * expense of strcoll() here, and just do bitwise comparison.
      */
-    if (len1 != len2) {
+    if (len1 != len2)
         result = false;
-    } else {
+    else
         result = (memcmp(VARDATA_ANY(arg1), VARDATA_ANY(arg2), len1) == 0);
-    }
+
     PG_FREE_IF_COPY(arg1, 0);
     PG_FREE_IF_COPY(arg2, 1);
+
     PG_RETURN_BOOL(result);
 }
 
@@ -727,14 +735,14 @@ Datum bpcharne(PG_FUNCTION_ARGS)
      * Since we only care about equality or not-equality, we can avoid all the
      * expense of strcoll() here, and just do bitwise comparison.
      */
-    if (len1 != len2) {
+    if (len1 != len2)
         result = true;
-    } else {
+    else
         result = (memcmp(VARDATA_ANY(arg1), VARDATA_ANY(arg2), len1) != 0);
-    }
 
     PG_FREE_IF_COPY(arg1, 0);
     PG_FREE_IF_COPY(arg2, 1);
+
     PG_RETURN_BOOL(result);
 }
 
@@ -795,7 +803,7 @@ Datum bpchar_sortsupport(PG_FUNCTION_ARGS)
     /* Use generic string SortSupport */
     varstr_sortsupport(ssup, collid, true);
 
-    (void)MemoryContextSwitchTo(oldcontext);
+    MemoryContextSwitchTo(oldcontext);
 
     PG_RETURN_VOID();
 }
@@ -929,14 +937,14 @@ Datum float8_bpchar(PG_FUNCTION_ARGS)
 Datum hashbpchar(PG_FUNCTION_ARGS)
 {
     BpChar* key = PG_GETARG_BPCHAR_PP(0);
-    char* key_data = NULL;
-    int key_len;
+    char* keydata = NULL;
+    int keylen;
     Datum result;
 
-    key_data = VARDATA_ANY(key);
-    key_len = bcTruelen(key);
+    keydata = VARDATA_ANY(key);
+    keylen = bcTruelen(key);
 
-    result = hash_any((unsigned char*)key_data, key_len);
+    result = hash_any((unsigned char*)keydata, keylen);
 
     /* Avoid leaking memory for toasted inputs */
     PG_FREE_IF_COPY(key, 0);
@@ -950,25 +958,24 @@ Datum hashbpchar(PG_FUNCTION_ARGS)
  * Note that the regular bpchareq/bpcharne comparison operators are assumed
  * to be compatible with these!
  */
+
 static int internal_bpchar_pattern_compare(BpChar* arg1, BpChar* arg2)
 {
     int result;
-    int len1;
-    int len2;
+    int len1, len2;
 
     len1 = bcTruelen(arg1);
     len2 = bcTruelen(arg2);
 
     result = memcmp(VARDATA_ANY(arg1), VARDATA_ANY(arg2), Min(len1, len2));
-    if (result != 0) {
+    if (result != 0)
         return result;
-    } else if (len1 < len2) {
+    else if (len1 < len2)
         return -1;
-    } else if (len1 > len2) {
+    else if (len1 > len2)
         return 1;
-    } else {
+    else
         return 0;
-    }
 }
 
 Datum bpchar_pattern_lt(PG_FUNCTION_ARGS)
@@ -1060,24 +1067,23 @@ Datum btbpchar_pattern_cmp(PG_FUNCTION_ARGS)
 static NVarChar2* nvarchar2_input(const char* s, size_t len, int32 atttypmod)
 {
     NVarChar2* result = NULL;
-    size_t max_len;
+    size_t maxlen;
 
-    max_len = atttypmod - VARHDRSZ;
+    maxlen = atttypmod - VARHDRSZ;
 
-    if (atttypmod >= (int32)VARHDRSZ && len > max_len) {
+    if (atttypmod >= (int32)VARHDRSZ && len > maxlen) {
         /* Verify that extra characters are spaces, and clip them off */
-        size_t mb_max_len = pg_mbcharcliplen_orig(s, len, max_len);
+        size_t mbmaxlen = pg_mbcharcliplen_orig(s, len, maxlen);
         size_t j;
 
-        for (j = mb_max_len; j < len; j++) {
-            if (s[j] != ' ') {
+        for (j = mbmaxlen; j < len; j++) {
+            if (s[j] != ' ')
                 ereport(ERROR,
                     (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                        errmsg("value too long for type nvarchar2(%d)", (int)max_len)));
-            }
+                        errmsg("value too long for type nvarchar2(%d)", (int)maxlen)));
         }
 
-        len = mb_max_len;
+        len = mbmaxlen;
     }
 
     result = (NVarChar2*)cstring_to_text_with_len(s, len);
@@ -1161,35 +1167,34 @@ Datum nvarchar2(PG_FUNCTION_ARGS)
 {
     NVarChar2* source = PG_GETARG_NVARCHAR2_PP(0);
     int32 typmod = PG_GETARG_INT32(1);
-    bool is_explicit = PG_GETARG_BOOL(2);
-    int32 len;
-    int32 max_len;
-    size_t max_mb_len;
+    bool isExplicit = PG_GETARG_BOOL(2);
+    int32 len, maxlen;
+    size_t maxmblen;
     int i;
     char* s_data = NULL;
 
     len = VARSIZE_ANY_EXHDR(source);
     s_data = VARDATA_ANY(source);
-    max_len = typmod - VARHDRSZ;
+    maxlen = typmod - VARHDRSZ;
 
     /* No work if typmod is invalid or supplied data fits it already */
-    if (max_len < 0 || len <= max_len) {
+    if (maxlen < 0 || len <= maxlen)
         PG_RETURN_NVARCHAR2_P(source);
-    }
+
+    /* only reach here if string is too long... */
 
     /* truncate multibyte string preserving multibyte boundary */
-    max_mb_len = pg_mbcharcliplen_orig(s_data, len, max_len);
+    maxmblen = pg_mbcharcliplen_orig(s_data, len, maxlen);
 
-    if (!is_explicit) {
-        for (i = max_mb_len; i < len; i++)
-            if (s_data[i] != ' ') {
+    if (!isExplicit) {
+        for (i = maxmblen; i < len; i++)
+            if (s_data[i] != ' ')
                 ereport(ERROR,
                     (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                        errmsg("value too long for type nvarchar2(%d)", max_len)));
-            }
+                        errmsg("value too long for type nvarchar2(%d)", maxlen)));
     }
 
-    PG_RETURN_NVARCHAR2_P((NVarChar2*)cstring_to_text_with_len(s_data, max_mb_len));
+    PG_RETURN_NVARCHAR2_P((NVarChar2*)cstring_to_text_with_len(s_data, maxmblen));
 }
 
 Datum nvarchar2typmodin(PG_FUNCTION_ARGS)
@@ -1211,6 +1216,7 @@ Datum nvarchar2typmodout(PG_FUNCTION_ARGS)
  * is the declared length of the type plus VARHDRSZ.
  * vectorize function
  */
+
 static FORCE_INLINE bool datumlike(Datum datum1, Datum datum2)
 {
     Size size1 = VARSIZE_ANY_EXHDR(datum1);
@@ -1220,17 +1226,17 @@ static FORCE_INLINE bool datumlike(Datum datum1, Datum datum2)
 
 ScalarVector* vtextlike(PG_FUNCTION_ARGS)
 {
-    ScalarVector* vec_parg1 = PG_GETARG_VECTOR(0);
-    ScalarVector* vec_parg2 = PG_GETARG_VECTOR(1);
+    ScalarVector* VecParg1 = PG_GETARG_VECTOR(0);
+    ScalarVector* VecParg2 = PG_GETARG_VECTOR(1);
     int32 nvalues = PG_GETARG_INT32(2);
-    ScalarVector* vec_result = PG_GETARG_VECTOR(3);
+    ScalarVector* VecResult = PG_GETARG_VECTOR(3);
     bool* pselection = PG_GETARG_SELECTION(4);
-    ScalarValue* presult = vec_result->m_vals;
-    ScalarValue* parg1 = vec_parg1->m_vals;
-    ScalarValue* parg2 = vec_parg2->m_vals;
-    uint8* flag1 = vec_parg1->m_flag;
-    uint8* flag2 = vec_parg2->m_flag;
-    uint8* result_flag = vec_result->m_flag;
+    ScalarValue* presult = VecResult->m_vals;
+    ScalarValue* parg1 = VecParg1->m_vals;
+    ScalarValue* parg2 = VecParg2->m_vals;
+    uint8* flag1 = VecParg1->m_flag;
+    uint8* flag2 = VecParg2->m_flag;
+    uint8* ResultFlag = VecResult->m_flag;
     Datum arg1;
     Datum arg2;
     int i;
@@ -1240,48 +1246,48 @@ ScalarVector* vtextlike(PG_FUNCTION_ARGS)
         for (i = 0; i < nvalues; i++) {
             if (pselection[i]) {
                 if (IS_NULL(flag1[i]) || IS_NULL(flag2[i])) {
-                    SET_NULL(result_flag[i]);
+                    SET_NULL(ResultFlag[i]);
                 } else {
                     arg1 = ScalarVector::Decode(parg1[i]);
                     arg2 = ScalarVector::Decode(parg2[i]);
                     result = datumlike(arg1, arg2);
                     presult[i] = result;
-                    SET_NOTNULL(result_flag[i]);
+                    SET_NOTNULL(ResultFlag[i]);
                 }
             }
         }
     } else {
         for (i = 0; i < nvalues; i++) {
             if (IS_NULL(flag1[i]) || IS_NULL(flag2[i])) {
-                SET_NULL(result_flag[i]);
+                SET_NULL(ResultFlag[i]);
             } else {
                 arg1 = ScalarVector::Decode(parg1[i]);
                 arg2 = ScalarVector::Decode(parg2[i]);
                 result = datumlike(arg1, arg2);
                 presult[i] = result;
-                SET_NOTNULL(result_flag[i]);
+                SET_NOTNULL(ResultFlag[i]);
             }
         }
     }
 
-    vec_result->m_rows = nvalues;
+    VecResult->m_rows = nvalues;
 
-    return vec_result;
+    return VecResult;
 }
 
 ScalarVector* vtextnlike(PG_FUNCTION_ARGS)
 {
-    ScalarVector* vec_parg1 = PG_GETARG_VECTOR(0);
-    ScalarVector* vec_arg2 = PG_GETARG_VECTOR(1);
+    ScalarVector* VecParg1 = PG_GETARG_VECTOR(0);
+    ScalarVector* VecParg2 = PG_GETARG_VECTOR(1);
     int32 nvalues = PG_GETARG_INT32(2);
-    ScalarVector* vec_result = PG_GETARG_VECTOR(3);
+    ScalarVector* VecResult = PG_GETARG_VECTOR(3);
     bool* pselection = PG_GETARG_SELECTION(4);
-    ScalarValue* parg1 = vec_parg1->m_vals;
-    ScalarValue* parg2 = vec_arg2->m_vals;
-    uint8* flag1 = vec_parg1->m_flag;
-    uint8* flag2 = vec_arg2->m_flag;
-    uint8* result_flag = vec_result->m_flag;
-    ScalarValue* presult = vec_result->m_vals;
+    ScalarValue* parg1 = VecParg1->m_vals;
+    ScalarValue* parg2 = VecParg2->m_vals;
+    uint8* flag1 = VecParg1->m_flag;
+    uint8* flag2 = VecParg2->m_flag;
+    uint8* ResultFlag = VecResult->m_flag;
+    ScalarValue* presult = VecResult->m_vals;
     Datum arg1;
     Datum arg2;
     int i;
@@ -1291,50 +1297,53 @@ ScalarVector* vtextnlike(PG_FUNCTION_ARGS)
         for (i = 0; i < nvalues; i++) {
             if (pselection[i]) {
                 if (IS_NULL(flag1[i]) || IS_NULL(flag2[i])) {
-                    SET_NULL(result_flag[i]);
+                    SET_NULL(ResultFlag[i]);
                 } else {
                     arg1 = ScalarVector::Decode(parg1[i]);
                     arg2 = ScalarVector::Decode(parg2[i]);
                     result = !datumlike(arg1, arg2);
                     presult[i] = result;
-                    SET_NOTNULL(result_flag[i]);
+                    SET_NOTNULL(ResultFlag[i]);
                 }
             }
         }
     } else {
         for (i = 0; i < nvalues; i++) {
             if (IS_NULL(flag1[i]) || IS_NULL(flag2[i])) {
-                SET_NULL(result_flag[i]);
+                SET_NULL(ResultFlag[i]);
             } else {
                 arg1 = ScalarVector::Decode(parg1[i]);
                 arg2 = ScalarVector::Decode(parg2[i]);
                 result = !datumlike(arg1, arg2);
                 presult[i] = result;
-                SET_NOTNULL(result_flag[i]);
+                SET_NOTNULL(ResultFlag[i]);
             }
         }
     }
 
-    vec_result->m_rows = nvalues;
-    return vec_result;
+    VecResult->m_rows = nvalues;
+    return VecResult;
 }
 
-/*
+/********************************************************************
+ *
  * vlower  vectorize function
  *
  * Purpose:
- *   Returns string, with all letters forced to lowercase.
+ *	 Returns string, with all letters forced to lowercase.
  *
+ *********************************************************************
  */
+
 ScalarVector* vlower(PG_FUNCTION_ARGS)
 {
-    ScalarVector* vec_parg1 = PG_GETARG_VECTOR(0);
+    ScalarVector* VecParg1 = PG_GETARG_VECTOR(0);
     int32 nvalues = PG_GETARG_INT32(1);
-    ScalarVector* vec_result = PG_GETARG_VECTOR(2);
+    ScalarVector* VecResult = PG_GETARG_VECTOR(2);
     bool* pselection = PG_GETARG_SELECTION(3);
-    ScalarValue* parg1 = vec_parg1->m_vals;
-    uint8* flag = vec_parg1->m_flag;
-    uint8* result_flag = vec_result->m_flag;
+    ScalarValue* parg1 = VecParg1->m_vals;
+    uint8* flag = VecParg1->m_flag;
+    uint8* ResultFlag = VecResult->m_flag;
     Oid collation = PG_GET_COLLATION();
     Datum value;
     int i;
@@ -1343,29 +1352,29 @@ ScalarVector* vlower(PG_FUNCTION_ARGS)
         for (i = 0; i < nvalues; i++) {
             if (pselection[i]) {
                 if (IS_NULL(flag[i])) {
-                    SET_NULL(result_flag[i]);
+                    SET_NULL(ResultFlag[i]);
                 } else {
                     value = ScalarVector::Decode(parg1[i]);
-                    vec_result->m_vals[i] = DirectFunctionCall1Coll(lower, collation, value);
-                    SET_NOTNULL(result_flag[i]);
+                    VecResult->m_vals[i] = DirectFunctionCall1Coll(lower, collation, value);
+                    SET_NOTNULL(ResultFlag[i]);
                 }
             }
         }
     } else {
         for (i = 0; i < nvalues; i++) {
             if (IS_NULL(flag[i])) {
-                SET_NULL(result_flag[i]);
+                SET_NULL(ResultFlag[i]);
             } else {
                 value = ScalarVector::Decode(parg1[i]);
-                vec_result->m_vals[i] = DirectFunctionCall1Coll(lower, collation, value);
-                SET_NOTNULL(result_flag[i]);
+                VecResult->m_vals[i] = DirectFunctionCall1Coll(lower, collation, value);
+                SET_NOTNULL(ResultFlag[i]);
             }
         }
     }
 
-    vec_result->m_rows = nvalues;
+    VecResult->m_rows = nvalues;
 
-    return vec_result;
+    return VecResult;
 }
 
 /********************************************************************
@@ -1380,13 +1389,13 @@ ScalarVector* vlower(PG_FUNCTION_ARGS)
  */
 ScalarVector* vupper(PG_FUNCTION_ARGS)
 {
-    ScalarVector* vec_parg1 = PG_GETARG_VECTOR(0);
+    ScalarVector* VecParg1 = PG_GETARG_VECTOR(0);
     int32 nvalues = PG_GETARG_INT32(1);
-    ScalarVector* vec_result = PG_GETARG_VECTOR(2);
+    ScalarVector* VecResult = PG_GETARG_VECTOR(2);
     bool* pselection = PG_GETARG_SELECTION(3);
-    ScalarValue* parg1 = vec_parg1->m_vals;
-    uint8* flag = vec_parg1->m_flag;
-    uint8* result_flag = vec_result->m_flag;
+    ScalarValue* parg1 = VecParg1->m_vals;
+    uint8* flag = VecParg1->m_flag;
+    uint8* ResultFlag = VecResult->m_flag;
     Oid collation = PG_GET_COLLATION();
     Datum value;
     int i;
@@ -1395,65 +1404,64 @@ ScalarVector* vupper(PG_FUNCTION_ARGS)
         for (i = 0; i < nvalues; i++) {
             if (pselection[i]) {
                 if (IS_NULL(flag[i])) {
-                    SET_NULL(result_flag[i]);
+                    SET_NULL(ResultFlag[i]);
                 } else {
                     value = ScalarVector::Decode(parg1[i]);
-                    vec_result->m_vals[i] = DirectFunctionCall1Coll(upper, collation, value);
-                    SET_NOTNULL(result_flag[i]);
+                    VecResult->m_vals[i] = DirectFunctionCall1Coll(upper, collation, value);
+                    SET_NOTNULL(ResultFlag[i]);
                 }
             }
         }
     } else {
         for (i = 0; i < nvalues; i++) {
             if (IS_NULL(flag[i])) {
-                SET_NULL(result_flag[i]);
+                SET_NULL(ResultFlag[i]);
             } else {
                 value = ScalarVector::Decode(parg1[i]);
-                vec_result->m_vals[i] = DirectFunctionCall1Coll(upper, collation, value);
-                SET_NOTNULL(result_flag[i]);
+                VecResult->m_vals[i] = DirectFunctionCall1Coll(upper, collation, value);
+                SET_NOTNULL(ResultFlag[i]);
             }
         }
     }
 
-    vec_result->m_rows = nvalues;
+    VecResult->m_rows = nvalues;
 
-    return vec_result;
+    return VecResult;
 }
 
 /*
  * The internal realization of function vlpad.
  */
-static void vlpad_internal(ScalarVector* parg1, ScalarVector* parg2, ScalarVector* vec_ret, uint8* pflags_res, int len,
+static void vlpad_internal(ScalarVector* parg1, ScalarVector* parg2, ScalarVector* VecRet, uint8* pflagsRes, int len,
     int eml, int idx, mblen_converter fun_mblen)
 {
-    int s1_len;
-    int s2_len;
-    int byte_len;
+    int s1len;
+    int s2len;
+    int bytelen;
     int m;
     char* ptr1 = NULL;
     char* ptr2 = NULL;
-    char* ptr2_start = NULL;
-    char* ptr2_end = NULL;
+    char* ptr2start = NULL;
+    char* ptr2end = NULL;
     char* ptr_ret = NULL;
     text* ret = NULL;
     errno_t rc = EOK;
 
-    s1_len = VARSIZE_ANY_EXHDR(parg1->m_vals[idx]) > 0 ? VARSIZE_ANY_EXHDR(parg1->m_vals[idx]) : 0;
-    s2_len = VARSIZE_ANY_EXHDR(parg2->m_vals[idx]) > 0 ? VARSIZE_ANY_EXHDR(parg2->m_vals[idx]) : 0;
-    s1_len = pg_mbstrlen_with_len_eml(VARDATA_ANY(parg1->m_vals[idx]), s1_len, eml);
-    s1_len = s1_len > len ? len : s1_len;
-    len = s2_len <= 0 ? s1_len : len;
-    byte_len = eml * len;
+    s1len = (VARSIZE_ANY_EXHDR(parg1->m_vals[idx]) > 0) ? VARSIZE_ANY_EXHDR(parg1->m_vals[idx]) : 0;
+    s2len = (VARSIZE_ANY_EXHDR(parg2->m_vals[idx]) > 0) ? VARSIZE_ANY_EXHDR(parg2->m_vals[idx]) : 0;
+    s1len = pg_mbstrlen_with_len_eml(VARDATA_ANY(parg1->m_vals[idx]), s1len, eml);
+    s1len = (s1len > len) ? len : s1len;
+    len = (s2len <= 0) ? s1len : len;
+    bytelen = eml * len;
 
-    if (len != 0 && byte_len / eml != len) {
+    if (len != 0 && bytelen / eml != len)
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("requested length too large")));
-    }
 
-    ret = (text*)palloc((VARHDRSZ + byte_len));
-    m = len - s1_len;
+    ret = (text*)palloc((VARHDRSZ + bytelen));
+    m = len - s1len;
 
-    ptr2 = ptr2_start = VARDATA_ANY(parg2->m_vals[idx]);
-    ptr2_end = ptr2 + s2_len;
+    ptr2 = ptr2start = VARDATA_ANY(parg2->m_vals[idx]);
+    ptr2end = ptr2 + s2len;
     ptr_ret = VARDATA(ret);
 
     while (m--) {
@@ -1463,13 +1471,12 @@ static void vlpad_internal(ScalarVector* parg1, ScalarVector* parg2, ScalarVecto
         securec_check(rc, "\0", "\0");
         ptr_ret += mlen;
         ptr2 += mlen;
-        if (ptr2 == ptr2_end) {
-            ptr2 = ptr2_start;
-        }
+        if (ptr2 == ptr2end)
+            ptr2 = ptr2start;
     }
 
     ptr1 = VARDATA_ANY(parg1->m_vals[idx]);
-    while (s1_len--) {
+    while (s1len--) {
         int mlen = fun_mblen((const unsigned char*)ptr1);
 
         rc = memcpy_s(ptr_ret, mlen, ptr1, mlen);
@@ -1480,11 +1487,11 @@ static void vlpad_internal(ScalarVector* parg1, ScalarVector* parg2, ScalarVecto
 
     SET_VARSIZE(ret, ptr_ret - (char*)ret);
 
-    if (VARSIZE_ANY_EXHDR(ret) == 0 && DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
-        SET_NULL(pflags_res[idx]);
+    if (0 == VARSIZE_ANY_EXHDR(ret) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+        SET_NULL(pflagsRes[idx]);
     } else {
-        vec_ret->m_vals[idx] = PointerGetDatum(ret);
-        SET_NOTNULL(pflags_res[idx]);
+        VecRet->m_vals[idx] = PointerGetDatum(ret);
+        SET_NOTNULL(pflagsRes[idx]);
     }
 }
 
@@ -1512,8 +1519,8 @@ ScalarVector* vlpad(PG_FUNCTION_ARGS)
     ScalarVector* parg3 = PG_GETARG_VECTOR(2);
     uint8* flag3 = parg3->m_flag;
     int32 nvalues = PG_GETARG_INT32(3);
-    ScalarVector* vec_ret = PG_GETARG_VECTOR(4);
-    uint8* pflags_res = (uint8*)(vec_ret->m_flag);
+    ScalarVector* VecRet = PG_GETARG_VECTOR(4);
+    uint8* pflagsRes = (uint8*)(VecRet->m_flag);
     bool* pselection = PG_GETARG_SELECTION(5);
     int eml;
     int len;
@@ -1529,41 +1536,40 @@ ScalarVector* vlpad(PG_FUNCTION_ARGS)
     if (pselection != NULL) {
         for (i = 0; i < nvalues; i++) {
             // if this line not selected, skip it
-            if (!pselection[i]) {
+            if (!pselection[i])
                 continue;
-            }
             /*
              * if one of the string,length,fill value in i'th row
-             * is null, set pflags_res[i] to NULL, continue
+             * is null, set pflagsRes[i] to NULL, continue
              */
-            if (IS_NULL(flag1[i]) || IS_NULL(flag2[i]) || IS_NULL(flag3[i])) {
-                SET_NULL(pflags_res[i]);
-            } else {
+            if (IS_NULL(flag1[i]) || IS_NULL(flag2[i]) || IS_NULL(flag3[i]))
+                SET_NULL(pflagsRes[i]);
+            else {
                 /*
                  * Get the length value of lpad function,
                  * negative len is silently taken as zero
                  */
                 len = DatumGetInt32(parg2->m_vals[i]);
-                len = len < 0 ? 0 : len;
-                vlpad_internal(parg1, parg3, vec_ret, pflags_res, len, eml, i, fun_mblen);
+                len = (len < 0) ? 0 : len;
+                vlpad_internal(parg1, parg3, VecRet, pflagsRes, len, eml, i, fun_mblen);
             }
         }
     } else {
         for (i = 0; i < nvalues; i++) {
             /*
              * if one of the string,length,fill value in i'th row
-             * is null, set pflags_res[i] to NULL, continue
+             * is null, set pflagsRes[i] to NULL, continue
              */
-            if (IS_NULL(flag1[i]) || IS_NULL(flag2[i]) || IS_NULL(flag3[i])) {
-                SET_NULL(pflags_res[i]);
-            } else {
+            if (IS_NULL(flag1[i]) || IS_NULL(flag2[i]) || IS_NULL(flag3[i]))
+                SET_NULL(pflagsRes[i]);
+            else {
                 /*
                  * Get the length value of lpad function,
                  * negative len is silently taken as zero
                  */
                 len = DatumGetInt32(parg2->m_vals[i]);
-                len = len < 0 ? 0 : len;
-                vlpad_internal(parg1, parg3, vec_ret, pflags_res, len, eml, i, fun_mblen);
+                len = (len < 0) ? 0 : len;
+                vlpad_internal(parg1, parg3, VecRet, pflagsRes, len, eml, i, fun_mblen);
             }
         }
     }
@@ -1736,7 +1742,7 @@ ScalarVector* vbpcharlen(PG_FUNCTION_ARGS)
     uint8* vflag = varg->m_flag;
     int32 nvalues = PG_GETARG_INT32(1);
     ScalarVector* vresult = PG_GETARG_VECTOR(2);
-    uint8* pflag_res = vresult->m_flag;
+    uint8* pflagRes = vresult->m_flag;
     bool* pselection = PG_GETARG_SELECTION(3);
     int k;
     int len;
@@ -1751,9 +1757,9 @@ ScalarVector* vbpcharlen(PG_FUNCTION_ARGS)
                     if (eml != 1)
                         len = pg_mbstrlen_with_len_eml(VARDATA_ANY(varg->m_vals[k]), len, eml);
                     vresult->m_vals[k] = Int32GetDatum(len);
-                    SET_NOTNULL(pflag_res[k]);
+                    SET_NOTNULL(pflagRes[k]);
                 } else {
-                    SET_NULL(pflag_res[k]);
+                    SET_NULL(pflagRes[k]);
                 }
             }
         }
@@ -1764,9 +1770,9 @@ ScalarVector* vbpcharlen(PG_FUNCTION_ARGS)
                 if (eml != 1)
                     len = pg_mbstrlen_with_len_eml(VARDATA_ANY(varg->m_vals[k]), len, eml);
                 vresult->m_vals[k] = Int32GetDatum(len);
-                SET_NOTNULL(pflag_res[k]);
+                SET_NOTNULL(pflagRes[k]);
             } else {
-                SET_NULL(pflag_res[k]);
+                SET_NULL(pflagRes[k]);
             }
         }
     }

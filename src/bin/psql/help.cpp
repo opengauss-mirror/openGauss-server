@@ -31,6 +31,8 @@
 #include "input.h"
 #include "sql_help.h"
 
+static char* GetEnvStr(const char* env);
+
 /*
  * PLEASE:
  * If you change something in this file, also make the same changes
@@ -126,6 +128,7 @@ void usage(void)
     printf(_("  -n, --no-libedit        disable enhanced command line editing (libedit)\n"));
     printf(_("  -o, --output=FILENAME    send query results to file (or |pipe)\n"));
     printf(_("  -q, --quiet              run quietly (no messages, only query output)\n"));
+    printf(_("  -C, --enable-client-encryption              enable client encryption feature\n"));
     printf(_("  -s, --single-step        single-step mode (confirm each query)\n"));
     printf(_("  -S, --single-line        single-line mode (end of line terminates SQL command)\n"));
 
@@ -180,7 +183,6 @@ void usage(void)
     printf(_("\nFor more information, type \"\\?\" (for internal commands) or \"\\help\" (for SQL\n"
              "commands) from within gsql, or consult the gsql section in the FusionInsight LibrA\n"
              "documentation.\n\n"));
-    printf(_("Report bugs to <pgsql-bugs@postgresql.org>.\n"));
     if (user != tmp)
         free(tmp);
     tmp = NULL;
@@ -257,7 +259,6 @@ void slashUsage(unsigned short int pager)
     fprintf(output, _("  \\di[S+] [PATTERN]      list indexes\n"));
     fprintf(output, _("  \\dl                    list large objects, same as \\lo_list\n"));
     fprintf(output, _("  \\dL[S+] [PATTERN]      list procedural languages\n"));
-    fprintf(output, _("  \\dm[S+] [PATTERN]      list materialized views\n"));
     fprintf(output, _("  \\dn[S+] [PATTERN]      list schemas\n"));
     fprintf(output, _("  \\do[S]  [PATTERN]      list operators\n"));
     fprintf(output, _("  \\dO[S+] [PATTERN]      list collations\n"));
@@ -454,7 +455,31 @@ void helpSQL(const char* topic, unsigned short int pager)
 
 void print_copyright(void)
 {
-    puts("openGauss Database Management System\n"
-         "Copyright (c) Huawei Technologies Co., Ltd. 2020. All rights reserved.\n");
+    puts("GaussDB Kernel Database Management System\n"
+         "Copyright (c) Huawei Technologies Co., Ltd. 2018. All rights reserved.\n");
 }
 
+/*
+ * GetEnvStr
+ *
+ * Note: malloc space for get the return of getenv() function, then return the malloc space.
+ *         so, this space need be free.
+ */
+static char* GetEnvStr(const char* env)
+{
+    char* tmpvar = NULL;
+    const char* temp = getenv(env);
+    errno_t rc = 0;
+    if (temp != NULL) {
+        size_t len = strlen(temp);
+        if (len == 0)
+            return NULL;
+        tmpvar = (char*)malloc(len + 1);
+        if (tmpvar != NULL) {
+            rc = strcpy_s(tmpvar, len + 1, temp);
+            securec_check_c(rc, "\0", "\0");
+            return tmpvar;
+        }
+    }
+    return NULL;
+}

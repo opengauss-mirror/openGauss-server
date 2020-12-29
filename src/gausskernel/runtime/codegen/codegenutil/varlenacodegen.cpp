@@ -111,7 +111,6 @@ llvm::Function* VarlenaCvtCodeGen()
     builder.SetInsertPoint(if_then);
     llvm::Value* argVals3[] = {int64_0, int32_1, int64_0};
     llvm::Value* data1 = builder.CreateInBoundsGEP(Val0, argVals3);
-    /* (((varattrib_1b*)arg)->va_header >> 1) & 0x7F - 1 */
     llvm::Value* len1 = builder.CreateLShr(Val_conv, 1);
     len1 = builder.CreateSub(len1, int32_1);
     builder.CreateBr(if_end);
@@ -122,7 +121,6 @@ llvm::Function* VarlenaCvtCodeGen()
     llvm::Value* data2 = builder.CreateInBoundsGEP(Val0, argVals3);
     Val_header = builder.CreateInBoundsGEP(Val0, argVals2);
     llvm::Value* len2 = builder.CreateAlignedLoad(Val_header, 4);
-    /* (((varattrib_4b *)arg)->va_4byte->va_header >> 2) & 0x3FFFFFFF - 4 */
     len2 = builder.CreateLShr(len2, 2);
     len2 = builder.CreateSub(len2, int32_4);
     builder.CreateBr(if_end);
@@ -441,7 +439,7 @@ llvm::Function* substr_codegen()
 
     /*
      * Define llvm function
-     * Since we adapt a's suibstrb(text str, interget start, integer length),
+     * Since we adapt A db's suibstrb(text str, interget start, integer length),
      * we only need to deal with the first arg.
      */
     GsCodeGen::FnPrototype fn_prototype(llvmCodeGen, "Jittedsubstr", int64Type);
@@ -449,12 +447,11 @@ llvm::Function* substr_codegen()
     fn_prototype.addArgument(GsCodeGen::NamedVariable("start", int32Type));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("length", int32Type));
     /*
-     * in case of a db compatible format we have to prepare a flag to indicate whether
+     * in case of A db compatible format we have to prepare a flag to indicate whether
      * result string is NULL, so we add one more parameter.
      */
-    if (DB_IS_CMPT(DB_CMPT_A)) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         fn_prototype.addArgument(GsCodeGen::NamedVariable("isNull", int8PtrType));
-    }
 
     llvm::Function* jitted_substr = fn_prototype.generatePrototype(&builder, &llvmargs[0]);
 
@@ -462,9 +459,8 @@ llvm::Function* substr_codegen()
     start = llvmargs[1];
     len = llvmargs[2];
 
-    if (DB_IS_CMPT(DB_CMPT_A)) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         isNull = llvmargs[3];
-    }
 
     /*
      * Convert the first arg to {i32, i8*} type to get the length and the real value.
@@ -501,7 +497,7 @@ llvm::Function* substr_codegen()
      *in case of ORC, we should set isNull to True if res_len == 0;
      *otherwise, just return the result.
      */
-    if (DB_IS_CMPT(DB_CMPT_A)) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
         DEFINE_BLOCK(be_null, jitted_substr);
         DEFINE_BLOCK(bnot_null, jitted_substr);
         DEFINE_BLOCK(ret_bb, jitted_substr);
@@ -569,19 +565,17 @@ llvm::Function* rtrim1_codegen()
     GsCodeGen::FnPrototype fn_prototype(llvmCodeGen, "Jittedrtrim1", int64Type);
     fn_prototype.addArgument(GsCodeGen::NamedVariable("str", int64Type));
     /*
-     * in case of a db compatible format we have to prepare a flag to indicate whether
+     * in case of A db compatible format we have to prepare a flag to indicate whether
      * result string is NULL, so we add one more parameter.
      */
-    if (DB_IS_CMPT(DB_CMPT_A)) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         fn_prototype.addArgument(GsCodeGen::NamedVariable("isNull", int8PtrType));
-    }
 
     llvm::Function* jitted_rtrim1 = fn_prototype.generatePrototype(&builder, &llvmargs[0]);
 
     argval = llvmargs[0];
-    if (DB_IS_CMPT(DB_CMPT_A)) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         isNull = llvmargs[1];
-    }
 
     /* load rtrim1 ir function from module */
     llvm::Function* func_rtrim1_cc = llvmCodeGen->module()->getFunction("LLVMIRrtrim1");
@@ -605,7 +599,7 @@ llvm::Function* rtrim1_codegen()
      *in case of ORC, we should set isNull to True if res_len == 0;
      *otherwise, just return the result.
      */
-    if (DB_IS_CMPT(DB_CMPT_A)) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
         DEFINE_BLOCK(be_null, jitted_rtrim1);
         DEFINE_BLOCK(bnot_null, jitted_rtrim1);
         DEFINE_BLOCK(ret_bb, jitted_rtrim1);
@@ -674,16 +668,15 @@ llvm::Function* btrim1_codegen()
     GsCodeGen::FnPrototype fn_prototype(llvmCodeGen, "Jittedbtrim1", int64Type);
     fn_prototype.addArgument(GsCodeGen::NamedVariable("str", int64Type));
     /*
-     * in case of a compatible format we have to prepare a flag to indicate whether
+     * in case of A db compatible format we have to prepare a flag to indicate whether
      * result string is NULL, so we add one more parameter.
      */
-    if (DB_IS_CMPT(DB_CMPT_A)) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         fn_prototype.addArgument(GsCodeGen::NamedVariable("isNull", int8PtrType));
-    }
     llvm::Function* jitted_btrim1 = fn_prototype.generatePrototype(&builder, &llvmargs[0]);
 
     argval = llvmargs[0];
-    if (DB_IS_CMPT(DB_CMPT_A))
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         isNull = llvmargs[1];
 
     /* load rtrim1 ir function from IR file*/
@@ -708,7 +701,7 @@ llvm::Function* btrim1_codegen()
      *in case of ORC, we should set isNull to True if res_len == 0;
      *otherwise, just return the result.
      */
-    if (DB_IS_CMPT(DB_CMPT_A)) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
         DEFINE_BLOCK(be_null, jitted_btrim1);
         DEFINE_BLOCK(bnot_null, jitted_btrim1);
         DEFINE_BLOCK(ret_bb, jitted_btrim1);

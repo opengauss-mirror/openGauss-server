@@ -1,19 +1,8 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * formatter.cpp
  *
@@ -28,7 +17,8 @@
 #include "commands/copy.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/builtins.h"
+
+extern int namestrcmp(Name name, const char* str);
 
 /*
  * This space trim operation at preasent is just deployed for FORMAT_FIXED parser.
@@ -121,6 +111,7 @@ int ReadAttributesFixedWith(CopyState cstate)
             if (cstate->illegal_chars_error) {
                 foreach (cur, cstate->illegal_chars_error) {
                     err_info = (IllegalCharErrInfo*)lfirst(cur);
+
                     if (err_info->err_offset > 0) {
                         /*
                          * bulkload illegal error is matched to this field.
@@ -197,9 +188,11 @@ static void AttributeOutFixed(CopyState cstate, char* string, FieldDesc* desc)
         ereport(ERROR, (errcode(ERRCODE_BAD_COPY_FILE_FORMAT), errmsg("field position covers previous field")));
 
     len = strlen(ptr);
+
     if (outbuf->len < desc->fieldPos) {
         char* outptr = outbuf->data + outbuf->len;
         int neednSpace = desc->fieldPos - outbuf->len;
+
         errno_t rc = memset_s(outptr, neednSpace, ' ', neednSpace);
         securec_check(rc, "", "");
         outbuf->len += neednSpace;

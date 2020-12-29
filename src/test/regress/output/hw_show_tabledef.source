@@ -9,7 +9,7 @@ CREATE  TABLE  a1 (
         c integer DEFAULT 2                                                
 )                                                                          
 WITH (orientation=row, compression=no)                                     
-                                                   
+DISTRIBUTE BY REPLICATION                                                  
 TO GROUP group1;                                                                
 CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;         
 CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;
@@ -22,7 +22,7 @@ select * from pg_get_tabledef('a1');
          c integer DEFAULT 2                                                +
  )                                                                          +
  WITH (orientation=row, compression=no)                                     +
-                                                    +
+ DISTRIBUTE BY REPLICATION                                                  +
  TO GROUP group1;                                                           +
  CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;+
  CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;
@@ -39,7 +39,7 @@ select * from pg_get_tabledef('a1');
          c integer DEFAULT 2                                                +
  )                                                                          +
  WITH (orientation=row, compression=no)                                     +
-                                                    +
+ DISTRIBUTE BY REPLICATION                                                  +
  TO GROUP group1;                                                           +
  CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;+
  ALTER TABLE a1 CLUSTER ON a1_index_2;                                      +
@@ -56,7 +56,7 @@ select * from pg_get_tabledef('a1');
          c integer DEFAULT 2                                                +
  )                                                                          +
  WITH (orientation=row, compression=no)                                     +
-                                                    +
+ DISTRIBUTE BY REPLICATION                                                  +
  TO GROUP group1;                                                           +
  CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;+
  CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;
@@ -74,7 +74,7 @@ select * from pg_get_tabledef('a1');
  )                                                                          +
  WITH (orientation=row, compression=yes)                                    +
  COMPRESS                                                                   +
-                                                    +
+ DISTRIBUTE BY REPLICATION                                                  +
  TO GROUP group1;                                                           +
  CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;+
  CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;
@@ -92,7 +92,7 @@ select * from pg_get_tabledef('a1');
  )                                                                          +
  WITH (orientation=row, compression=yes)                                    +
  COMPRESS                                                                   +
-                                                    +
+ DISTRIBUTE BY REPLICATION                                                  +
  TO GROUP group1;                                                           +
  CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;+
  CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;
@@ -111,7 +111,7 @@ select * from pg_get_tabledef('a1');
  WITH (orientation=row, compression=yes)                                    +
  COMPRESS                                                                   +
  TABLESPACE create_foreign_table_like_tblsp1                                +
-                                                    +
+ DISTRIBUTE BY REPLICATION                                                  +
  TO GROUP group1;                                                           +
  CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;+
  CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;
@@ -131,7 +131,7 @@ select * from pg_get_tabledef('test_default');
          b character varying DEFAULT 'aBc'::character varying+
  )                                                           +
  WITH (orientation=row, compression=no)                      +
-                                         +
+ DISTRIBUTE BY HASH(a)                                       +
  TO GROUP group1;
 (1 row)
 
@@ -147,7 +147,7 @@ select * from pg_get_tabledef('serialtest');
          f2 integer DEFAULT nextval('serialtest_f2_seq'::regclass) NOT NULL+
  )                                                                         +
  WITH (orientation=row, compression=no)                                    +
-                                                      +
+ DISTRIBUTE BY HASH(f1)                                                    +
  TO GROUP group1;
 (1 row)
 
@@ -158,7 +158,7 @@ select * from pg_get_tabledef('serialtest');
          c numeric(20,0)                                           
  )                                                                 
  WITH (orientation=column, compression=low)                        
-                                               
+ DISTRIBUTE BY HASH(a)                                             
  TO GROUP group1                                                        
  PARTITION BY RANGE (a)                                            
  (                                                                 
@@ -177,7 +177,7 @@ select * from pg_get_tabledef('serialtest');
          c numeric(20,0)                                           +
  )                                                                 +
  WITH (orientation=column, compression=low)                        +
-                                               +
+ DISTRIBUTE BY HASH(a)                                             +
  TO GROUP group1                                                   +
  PARTITION BY RANGE (a)                                            +
  (                                                                 +
@@ -230,7 +230,7 @@ select * from pg_get_tabledef('storage_para_t1');
          b text                                                                                                                                                                                                                                                                                                                                                                                    +
  )                                                                                                                                                                                                                                                                                                                                                                                                 +
  WITH (orientation=row, fillfactor=85, autovacuum_enabled=on, autovacuum_vacuum_threshold=100, autovacuum_vacuum_scale_factor=10, autovacuum_analyze_threshold=8, autovacuum_analyze_scale_factor=9, autovacuum_vacuum_cost_delay=90, autovacuum_vacuum_cost_limit=567, autovacuum_freeze_min_age=5000, autovacuum_freeze_max_age=300000000, autovacuum_freeze_table_age=170000000, compression=no)+
-                                                                                                                                                                                                                                                                                                                                                                               +
+ DISTRIBUTE BY HASH(a)                                                                                                                                                                                                                                                                                                                                                                             +
  TO GROUP group1                                                                                                                                                                                                                                                                                                                                                                                   +
  PARTITION BY RANGE (a)                                                                                                                                                                                                                                                                                                                                                                            +
  (                                                                                                                                                                                                                                                                                                                                                                                                 +
@@ -242,7 +242,7 @@ select * from pg_get_tabledef('storage_para_t1');
 
 --test unlogged table
 create UNLOGGED table t2(a int, b int)
- ;
+DISTRIBUTE BY HASH(a,b);
 select * from pg_get_tabledef('t2');
             pg_get_tabledef             
 ----------------------------------------
@@ -252,7 +252,7 @@ select * from pg_get_tabledef('t2');
          b integer                     +
  )                                     +
  WITH (orientation=row, compression=no)+
-                +
+ DISTRIBUTE BY HASH(a, b)              +
  TO GROUP group1;
 (1 row)
 
@@ -264,7 +264,7 @@ CREATE   TABLE  altertable_rangeparttable (
         c4 text                                                                                                
 )                                                                                                              
 WITH (orientation=row, compression=no)                                                                         
-                                                                                          
+DISTRIBUTE BY HASH(c1)                                                                                         
 TO GROUP group1                                                                                                     
 PARTITION BY RANGE (c1, c2, c3, c4)                                                                            
 (                                                                                                              
@@ -283,7 +283,7 @@ select * from pg_get_tabledef('altertable_rangeparttable');
          c4 text                                                                                                 +
  )                                                                                                               +
  WITH (orientation=row, compression=no)                                                                          +
-                                                                                            +
+ DISTRIBUTE BY HASH(c1)                                                                                          +
  TO GROUP group1                                                                                                 +
  PARTITION BY RANGE (c1, c2, c3, c4)                                                                             +
  (                                                                                                               +
@@ -316,7 +316,7 @@ select * from pg_get_tabledef('altertable_rangeparttable');
          c4 text                                                                                                                                                                                                                                                                                                                                                          +
  )                                                                                                                                                                                                                                                                                                                                                                        +
  WITH (orientation=row, compression=no)                                                                                                                                                                                                                                                                                                                                   +
-                                                                                                                                                                                                                                                                                                                                                     +
+ DISTRIBUTE BY HASH(c1)                                                                                                                                                                                                                                                                                                                                                   +
  TO GROUP group1                                                                                                                                                                                                                                                                                                                                                          +
  PARTITION BY RANGE (c1, c2, c3, c4)                                                                                                                                                                                                                                                                                                                                      +
  (                                                                                                                                                                                                                                                                                                                                                                        +
@@ -345,7 +345,7 @@ select * from pg_get_tabledef('hw_partition_update_tt');
          c_data character varying(500)                                                    +
  )                                                                                        +
  WITH (orientation=column, compression=low)                                               +
-                                                                   +
+ DISTRIBUTE BY HASH(c_id)                                                                 +
  TO GROUP group1                                                                          +
  PARTITION BY RANGE (c_id)                                                                +
  (                                                                                        +
@@ -364,7 +364,7 @@ select * from pg_get_tabledef('p_t1');
          c1 integer                                                       +
  )                                                                        +
  WITH (orientation=row, compression=no)                                   +
-                                                     +
+ DISTRIBUTE BY HASH(c1)                                                   +
  TO GROUP group1                                                          +
  PARTITION BY RANGE (c1)                                                  +
  (                                                                        +
@@ -392,7 +392,7 @@ select * from pg_get_tabledef('p_t2');
          c1 integer                                                         +
  )                                                                          +
  WITH (orientation=row, compression=no)                                     +
-                                                       +
+ DISTRIBUTE BY HASH(c1)                                                     +
  TO GROUP group1                                                            +
  PARTITION BY RANGE (c1)                                                    +
  (                                                                          +
@@ -424,7 +424,7 @@ select * from pg_get_tabledef('test_range_tsp_3');
          a integer                                                                                       +
  )                                                                                                       +
  WITH (orientation=row, compression=no)                                                                  +
-                                                                                     +
+ DISTRIBUTE BY HASH(a)                                                                                   +
  TO GROUP group1                                                                                         +
  PARTITION BY RANGE (a)                                                                                  +
  (                                                                                                       +
@@ -439,7 +439,7 @@ select * from pg_get_tabledef('test_range_tsp_3');
          b text COLLATE pg_catalog."en_US" NOT NULL
  )                                                 
  WITH (orientation=row, compression=no)            
-                               
+ DISTRIBUTE BY HASH(a)                             
  TO GROUP group1;
  select * from pg_get_tabledef('collate_test1');
                   pg_get_tabledef                   
@@ -450,7 +450,7 @@ select * from pg_get_tabledef('test_range_tsp_3');
          b text COLLATE pg_catalog."en_US" NOT NULL+
  )                                                 +
  WITH (orientation=row, compression=no)            +
-                               +
+ DISTRIBUTE BY HASH(a)                             +
  TO GROUP group1;
 (1 row)
 
@@ -460,7 +460,7 @@ select * from pg_get_tabledef('test_range_tsp_3');
           b text COLLATE pg_catalog."POSIX"
   )                                        
   WITH (orientation=row, compression=no)   
-                       
+  DISTRIBUTE BY HASH(a)                    
   TO GROUP group1;
   select * from pg_get_tabledef('collate_test2');
               pg_get_tabledef              
@@ -471,7 +471,7 @@ select * from pg_get_tabledef('test_range_tsp_3');
          b text COLLATE pg_catalog."POSIX"+
  )                                        +
  WITH (orientation=row, compression=no)   +
-                      +
+ DISTRIBUTE BY HASH(a)                    +
  TO GROUP group1;
 (1 row)
 
@@ -484,7 +484,7 @@ CREATE TABLE STUDENTS
 	NAME VARCHAR2(20),
 	AGE INT,
 	ADDRESS VARCHAR(30)
-)  ;
+) DISTRIBUTE BY REPLICATION;
  --alter table to add unique index or primary key 
 ALTER TABLE STUDENTS ADD UNIQUE (ID)
 USING INDEX
@@ -509,7 +509,7 @@ select * from pg_get_tabledef('students');
          address character varying(30)                           +
  )                                                               +
  WITH (orientation=row, compression=no)                          +
-                                         +
+ DISTRIBUTE BY REPLICATION                                       +
  TO GROUP group1;                                                +
  ALTER TABLE students ADD CONSTRAINT students_id_key UNIQUE (id);
 (1 row)
@@ -530,7 +530,7 @@ select * from pg_get_tabledef('distributors');
          name character varying(40)                                                               +
  )                                                                                                +
  WITH (orientation=row, fillfactor=70, compression=no)                                            +
-                                                                           +
+ DISTRIBUTE BY HASH(name)                                                                         +
  TO GROUP group1;                                                                                 +
  ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
 (1 row)
@@ -547,7 +547,7 @@ select * from pg_get_tabledef('distributors');
          address character varying(30)                                                            +
  )                                                                                                +
  WITH (orientation=row, fillfactor=70, compression=no)                                            +
-                                                                           +
+ DISTRIBUTE BY HASH(name)                                                                         +
  TO GROUP group1;                                                                                 +
  ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
 (1 row)
@@ -563,7 +563,7 @@ select * from pg_get_tabledef('distributors');
          name character varying(40)                                                               +
  )                                                                                                +
  WITH (orientation=row, fillfactor=70, compression=no)                                            +
-                                                                           +
+ DISTRIBUTE BY HASH(name)                                                                         +
  TO GROUP group1;                                                                                 +
  ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
 (1 row)
@@ -581,7 +581,7 @@ select * from pg_get_tabledef('distributors');
          city character varying(30)                                                               +
  )                                                                                                +
  WITH (orientation=row, fillfactor=70, compression=no)                                            +
-                                                                           +
+ DISTRIBUTE BY HASH(name)                                                                         +
  TO GROUP group1;                                                                                 +
  ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
 (1 row)
@@ -598,7 +598,7 @@ select * from pg_get_tabledef('distributors');
          city character varying(30)                                                               +
  )                                                                                                +
  WITH (orientation=row, fillfactor=70, compression=no)                                            +
-                                                                           +
+ DISTRIBUTE BY HASH(name)                                                                         +
  TO GROUP group1;                                                                                 +
  ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
 (1 row)
@@ -615,7 +615,7 @@ select * from pg_get_tabledef('distributors');
          city character varying(30)                                                               +
  )                                                                                                +
  WITH (orientation=row, fillfactor=70, compression=no)                                            +
-                                                                           +
+ DISTRIBUTE BY HASH(name)                                                                         +
  TO GROUP group1;                                                                                 +
  ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
 (1 row)
@@ -633,7 +633,7 @@ select * from pg_get_tabledef('distributors');
      CONSTRAINT zipchk CHECK ((char_length((name)::text) = 5))                                    +
  )                                                                                                +
  WITH (orientation=row, fillfactor=70, compression=no)                                            +
-                                                                           +
+ DISTRIBUTE BY HASH(name)                                                                         +
  TO GROUP group1;                                                                                 +
  ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
 (1 row)
@@ -651,7 +651,7 @@ select * from pg_get_tabledef('distributors');
      CONSTRAINT zip_check CHECK ((char_length((name)::text) = 5))                                 +
  )                                                                                                +
  WITH (orientation=row, fillfactor=70, compression=no)                                            +
-                                                                           +
+ DISTRIBUTE BY HASH(name)                                                                         +
  TO GROUP group1;                                                                                 +
  ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
 (1 row)
@@ -669,7 +669,7 @@ select * from pg_get_tabledef('suppliers');
      CONSTRAINT zip_check CHECK ((char_length((name)::text) = 5))                              +
  )                                                                                             +
  WITH (orientation=row, fillfactor=70, compression=no)                                         +
-                                                                        +
+ DISTRIBUTE BY HASH(name)                                                                      +
  TO GROUP group1;                                                                              +
  ALTER TABLE suppliers ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
 (1 row)
@@ -685,7 +685,7 @@ select * from pg_get_tabledef('suppliers');
  )                                          
  WITH (orientation=row, compression=no)     
  COMPRESS                                   
-                      
+ DISTRIBUTE BY HASH(a00)                    
  TO GROUP group1;
  
  select * from pg_get_tabledef('compress_18');
@@ -702,7 +702,7 @@ select * from pg_get_tabledef('suppliers');
  )                                         +
  WITH (orientation=row, compression=no)    +
  COMPRESS                                  +
-                     +
+ DISTRIBUTE BY HASH(a00)                   +
  TO GROUP group1;
 (1 row)
 
@@ -720,7 +720,7 @@ CREATE   TABLE  create_foreign_table_like_basic_info (
  WITH (orientation=row, compression=no)                                                                                       
  COMPRESS                                                                                                                     
  TABLESPACE create_foreign_table_like_tblsp1                                                                                  
-                                                                                                       
+ DISTRIBUTE BY HASH(u_id)                                                                                                     
  TO GROUP group1;                                                                                                                  
  ALTER TABLE create_foreign_table_like_basic_info ADD CONSTRAINT create_foreign_table_like_basic_info_pkey PRIMARY KEY (u_id);
 NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "create_foreign_table_like_basic_info_pkey" for table "create_foreign_table_like_basic_info"
@@ -741,7 +741,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "create_foreig
  WITH (orientation=row, compression=no)                                                                                       +
  COMPRESS                                                                                                                     +
  TABLESPACE create_foreign_table_like_tblsp1                                                                                  +
-                                                                                                       +
+ DISTRIBUTE BY HASH(u_id)                                                                                                     +
  TO GROUP group1;                                                                                                             +
  ALTER TABLE create_foreign_table_like_basic_info ADD CONSTRAINT create_foreign_table_like_basic_info_pkey PRIMARY KEY (u_id);
 (1 row)
@@ -754,7 +754,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "create_foreig
      CONSTRAINT ctlt1_a_check CHECK ((length(a) > 2))                             
  )                                                                                
  WITH (orientation=row, compression=no)                                           
-                                                              
+ DISTRIBUTE BY HASH(a)                                                            
  TO GROUP group1;                                                                      
  COMMENT ON COLUMN ctlt1.a IS 'A';                                                
  COMMENT ON COLUMN ctlt1.b IS 'B';                                                
@@ -776,7 +776,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "ctlt1_pkey" f
      CONSTRAINT ctlt1_a_check CHECK ((length(a) > 2))                             +
  )                                                                                +
  WITH (orientation=row, compression=no)                                           +
-                                                              +
+ DISTRIBUTE BY HASH(a)                                                            +
  TO GROUP group1;                                                                 +
  COMMENT ON COLUMN ctlt1.a IS 'A';                                                +
  COMMENT ON COLUMN ctlt1.b IS 'B';                                                +
@@ -793,7 +793,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "ctlt1_pkey" f
          initial integer                 
  )                                       
  WITH (orientation=row, compression=no)  
-               
+ DISTRIBUTE BY HASH(initial)             
  TO GROUP group1;                             
  COMMENT ON TABLE tmp IS 'table comment';
  
@@ -805,7 +805,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "ctlt1_pkey" f
          initial integer                 +
  )                                       +
  WITH (orientation=row, compression=no)  +
-               +
+ DISTRIBUTE BY HASH(initial)             +
  TO GROUP group1;                        +
  COMMENT ON TABLE tmp IS 'table comment';
 (1 row)
@@ -818,7 +818,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "ctlt1_pkey" f
      CONSTRAINT con1 CHECK (((did > 100) AND ((name)::text <> NULL::text)))
  )                                                                         
  WITH (orientation=row, compression=no)                                    
-                                                     
+ DISTRIBUTE BY HASH(did)                                                   
  TO GROUP group1;
  
  select * from pg_get_tabledef('distributors_1');
@@ -831,7 +831,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "ctlt1_pkey" f
      CONSTRAINT con1 CHECK (((did > 100) AND ((name)::text <> NULL::text)))+
  )                                                                         +
  WITH (orientation=row, compression=no)                                    +
-                                                     +
+ DISTRIBUTE BY HASH(did)                                                   +
  TO GROUP group1;
 (1 row)
 
@@ -842,7 +842,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "ctlt1_pkey" f
          t text                                                                                  
  )                                                                                               
  WITH (orientation=row, compression=no)                                                          
-                                                                         
+ DISTRIBUTE BY REPLICATION                                                                       
  TO GROUP group1;                                                                                     
  ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_i_key UNIQUE (i) DEFERRABLE INITIALLY DEFERRED;
 NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "unique_tbl_i_key" for table "unique_tbl"
@@ -856,7 +856,7 @@ NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "unique_tbl_i_key" 
          t text                                                                                  +
  )                                                                                               +
  WITH (orientation=row, compression=no)                                                          +
-                                                                         +
+ DISTRIBUTE BY REPLICATION                                                                       +
  TO GROUP group1;                                                                                +
  ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_i_key UNIQUE (i) DEFERRABLE INITIALLY DEFERRED;
 (1 row)
@@ -873,7 +873,7 @@ NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "unique_tbl_t_key" 
          t text                                                                                                       +
  )                                                                                                                    +
  WITH (orientation=row, compression=no)                                                                               +
-                                                                                              +
+ DISTRIBUTE BY REPLICATION                                                                                            +
  TO GROUP group1;                                                                                                     +
  ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_t_key UNIQUE (t) WITH (fillfactor=70) DEFERRABLE INITIALLY DEFERRED;+
  ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_i_key UNIQUE (i) DEFERRABLE INITIALLY DEFERRED;
@@ -892,7 +892,7 @@ NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "unique_tbl_t_key" 
          t text                                                                                  +
  )                                                                                               +
  WITH (orientation=row, compression=no)                                                          +
-                                                                         +
+ DISTRIBUTE BY REPLICATION                                                                       +
  TO GROUP group1;                                                                                +
  ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_t_key UNIQUE (t) DEFERRABLE;                   +
  ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_i_key UNIQUE (i) DEFERRABLE INITIALLY DEFERRED;
@@ -906,7 +906,7 @@ NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "unique_tbl_t_key" 
           name character varying(40)                                            
   )                                                                             
   WITH (orientation=row, compression=no)                                        
-                                                          
+  DISTRIBUTE BY HASH(did)                                                       
   TO GROUP group1;                                                                   
   ALTER TABLE distributors2 ADD CONSTRAINT distributors2_pkey PRIMARY KEY (did);
 NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "distributors2_pkey" for table "distributors2"
@@ -920,7 +920,7 @@ NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "distributors2
          name character varying(40)                                            +
  )                                                                             +
  WITH (orientation=row, compression=no)                                        +
-                                                         +
+ DISTRIBUTE BY HASH(did)                                                       +
  TO GROUP group1;                                                              +
  ALTER TABLE distributors2 ADD CONSTRAINT distributors2_pkey PRIMARY KEY (did);
 (1 row)
@@ -1010,7 +1010,7 @@ select * from pg_get_tabledef('f_create_foreign_table_like_basic_info');
          b integer                            
  )                                            
  WITH (orientation=column, compression=no)    
-                          
+ DISTRIBUTE BY HASH(a)                        
  TO GROUP group1;                                  
  ALTER TABLE tttt ADD PARTIAL CLUSTER KEY (b);
  
@@ -1023,7 +1023,7 @@ select * from pg_get_tabledef('f_create_foreign_table_like_basic_info');
          b integer                            +
  )                                            +
  WITH (orientation=column, compression=no)    +
-                          +
+ DISTRIBUTE BY HASH(a)                        +
  TO GROUP group1;                             +
  ALTER TABLE tttt ADD PARTIAL CLUSTER KEY (b);
 (1 row)
@@ -1034,7 +1034,7 @@ select * from pg_get_tabledef('f_create_foreign_table_like_basic_info');
          "create" character(1)         
  )                                     
  WITH (orientation=row, compression=no)
-            
+ DISTRIBUTE BY HASH("create")          
  TO GROUP group1;
  
   select * from pg_get_tabledef('delete');
@@ -1045,7 +1045,7 @@ select * from pg_get_tabledef('f_create_foreign_table_like_basic_info');
          "create" character(1)         +
  )                                     +
  WITH (orientation=row, compression=no)+
-            +
+ DISTRIBUTE BY HASH("create")          +
  TO GROUP group1;
 (1 row)
 
@@ -1056,7 +1056,7 @@ select * from pg_get_tabledef('f_create_foreign_table_like_basic_info');
 		"select" character(1) 
  )                                     
  WITH (orientation=row, compression=no)
-            
+ DISTRIBUTE BY HASH("create", "select")          
  TO GROUP group1;
  
  select * from pg_get_tabledef('update12');
@@ -1068,7 +1068,7 @@ select * from pg_get_tabledef('f_create_foreign_table_like_basic_info');
          "select" character(1)         +
  )                                     +
  WITH (orientation=row, compression=no)+
-  +
+ DISTRIBUTE BY HASH("create", "select")+
  TO GROUP group1;
 (1 row)
 
@@ -1090,7 +1090,7 @@ select * from pg_get_tabledef('ctlt3');
      CONSTRAINT ctlt3_a_check CHECK ((length(a) < 5))         +
  )                                                            +
  WITH (orientation=row, compression=no)                       +
-                                          +
+ DISTRIBUTE BY HASH(a)                                        +
  TO GROUP group1;                                             +
  ALTER TABLE ctlt3 ALTER COLUMN a SET STORAGE MAIN;           +
  COMMENT ON COLUMN ctlt3.a IS 'A3';                           +
@@ -1110,7 +1110,7 @@ select * from pg_get_tabledef('ctlt3');
          c text                                        +
  )                                                     +
  WITH (orientation=row, compression=no)                +
-                                   +
+ DISTRIBUTE BY HASH(a)                                 +
  TO GROUP group1;                                      +
  ALTER TABLE ctlt3 ALTER COLUMN a SET STORAGE MAIN;    +
  COMMENT ON COLUMN ctlt3.a IS 'A3';                    +
@@ -1129,7 +1129,7 @@ select * from pg_get_tabledef('ctlt3');
          c text                                                                 +
  )                                                                              +
  WITH (orientation=row, compression=no)                                         +
-                                                            +
+ DISTRIBUTE BY HASH(a)                                                          +
  TO GROUP group1;                                                               +
  ALTER TABLE ctlt3 ALTER COLUMN a SET STORAGE MAIN;                             +
  COMMENT ON COLUMN ctlt3.a IS 'A3';                                             +
@@ -1150,7 +1150,7 @@ select * from pg_get_tabledef('ctlt3');
      CONSTRAINT ctlt3_a_check CHECK ((length(a) < 5))  +
  )                                                     +
  WITH (orientation=row, compression=no)                +
-                                   +
+ DISTRIBUTE BY HASH(a)                                 +
  TO GROUP group1;                                      +
  ALTER TABLE ctlt3 ALTER COLUMN a SET STORAGE MAIN;    +
  COMMENT ON COLUMN ctlt3.a IS 'A3';                    +
@@ -1170,7 +1170,7 @@ select * from pg_get_tabledef('alter_set_stat_00');
          info integer                                                +
  )                                                                   +
  WITH (orientation=column, compression=low)                          +
-                                                +
+ DISTRIBUTE BY HASH(id)                                              +
  TO GROUP group1;                                                    +
  ALTER TABLE alter_set_stat_00 ALTER COLUMN info SET STATISTICS 1000;
 (1 row)
@@ -1185,7 +1185,7 @@ select * from pg_get_tabledef('alter_set_stat_00');
          info integer                                                      +
  )                                                                         +
  WITH (orientation=column, compression=low)                                +
-                                                      +
+ DISTRIBUTE BY HASH(id)                                                    +
  TO GROUP group1;                                                          +
  ALTER TABLE alter_set_stat_00 ALTER COLUMN info SET STATISTICS PERCENT 80;
 (1 row)
@@ -1203,7 +1203,7 @@ select * from pg_get_tabledef('hw_cstore_alter_t6');
          c integer                                                +
  )                                                                +
  WITH (orientation=row, compression=no)                           +
-                                              +
+ DISTRIBUTE BY HASH(a)                                            +
  TO GROUP group1;                                                 +
  ALTER TABLE hw_cstore_alter_t6 ALTER COLUMN a SET (n_distinct=7);
 (1 row)
@@ -1219,7 +1219,7 @@ select * from pg_get_tabledef('hw_cstore_alter_t6');
          c integer                     +
  )                                     +
  WITH (orientation=row, compression=no)+
-                   +
+ DISTRIBUTE BY HASH(a)                 +
  TO GROUP group1;
 (1 row)
 
@@ -1307,7 +1307,7 @@ create foreign table info_cons_add_003 (
  c_id12 varchar(20)
 )
 server hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/sql_on_hadoop.db/info_cons_tab_2')
- 
+distribute by roundrobin
 partition by (c_id12) automapped;
 ALTER FOREIGN TABLE info_cons_add_003
 ADD CONSTRAINT constr_add_003 

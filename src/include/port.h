@@ -363,9 +363,6 @@ extern void srandom(unsigned int seed);
 #define gs_random() pg_lrand48()
 #define gs_srandom(seed) pg_srand48((long int)(seed))
 
-/* only for get buffer free list key */
-#define free_list_random() free_list_lrand48()
-#define free_list_srandom(seed) free_list_srand48((long int)(seed))
 
 /* thread.h */
 extern char* pqStrerror(int errnum, char* strerrbuf, size_t buflen);

@@ -338,10 +338,8 @@ ScalarVector* vwindowfunc_withsort(PG_FUNCTION_ARGS)
             /* the number of rows to be fetched from current frame */
             int frame_calcu_rows = rtl::min(batch_rows - idx, n_rows - start_rows);
             for (m = start_rows; m < frame_calcu_rows + start_rows; m++) {
-                if (m == start_rows || which_func == WINDOW_RANK)
-                    pResCol->m_vals[idx] = winRuntime->m_windowGrp[j]->m_val[fun_idx].val;
-                else
-                    pResCol->m_vals[idx] = pResCol->m_vals[idx - 1] + 1;
+                pResCol->m_vals[idx] = ((m == start_rows) || (which_func == WINDOW_RANK)) ?
+                    winRuntime->m_windowGrp[j]->m_val[fun_idx].val : (pResCol->m_vals[idx - 1] + 1);
 
                 pResCol->m_rows++;
                 idx++;

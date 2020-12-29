@@ -166,7 +166,6 @@ llvm::Function* bi64add64_codegen(bool use_ctl)
     /* corresponding to y_scaled = y * ScaleMultipler[delta_scale] */
     right_scaled1 = builder.CreateMul(rightval, mulscale);
 
-    /* result_scale = x_scale */
     resscale1 = lvalscale;
     multi_bound = GetInt64MulOutofBoundCodeGen(&builder, delta_scale);
     cmpval = builder.CreateICmpSGE(phi_val, multi_bound, "bound_check");
@@ -184,7 +183,6 @@ llvm::Function* bi64add64_codegen(bool use_ctl)
     left_scaled2 = builder.CreateMul(leftval, mmulscale);
     right_scaled2 = rightval;
 
-    /* result_scale = y_scale */
     resscale2 = rvalscale;
     multi_bound = GetInt64MulOutofBoundCodeGen(&builder, mdelta_scale);
     cmpval = builder.CreateICmpSGE(phi_val, multi_bound, "bound_check");
@@ -205,8 +203,9 @@ llvm::Function* bi64add64_codegen(bool use_ctl)
     resscale->addIncoming(resscale2, delta_small);
 
     /* do bi64 add bi64, need to check if there is any overflow */
+    /* in llvm10 sadd_with_overflow is define as uint value 229 */
     llvm::Function* func_sadd_overflow =
-        llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::sadd_with_overflow, Intrinsic_Tys);
+        llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
     if (func_sadd_overflow == NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -290,7 +289,6 @@ llvm::Function* bi64add64_codegen(bool use_ctl)
     big_res->addIncoming(res4, left_out_bound);
     if (use_ctl) {
         tmpval = (llvm::Value*)big_res;
-        /* ctl->store_pos = replaceVariable(ctl->context, ctl->store_pos, big_res) */
         WrapReplVarWithOldCodeGen(&builder, ctl, tmpval);
         res5 = int64_0;
     } else {
@@ -421,7 +419,6 @@ llvm::Function* bi64sub64_codegen()
     /* corresponding to y_scaled = y * ScaleMultipler[delta_scale] */
     right_scaled1 = builder.CreateMul(rightval, mulscale);
 
-    /* result_scale = x_scale */
     resscale1 = lvalscale;
     multi_bound = GetInt64MulOutofBoundCodeGen(&builder, delta_scale);
     cmpval = builder.CreateICmpSGE(phi_val, multi_bound, "bound_check");
@@ -439,7 +436,6 @@ llvm::Function* bi64sub64_codegen()
     left_scaled2 = builder.CreateMul(leftval, mmulscale);
     right_scaled2 = rightval;
 
-    /* result_scale = y_scale */
     resscale2 = rvalscale;
     multi_bound = GetInt64MulOutofBoundCodeGen(&builder, mdelta_scale);
     cmpval = builder.CreateICmpSGE(phi_val, multi_bound, "bound_check");
@@ -461,8 +457,9 @@ llvm::Function* bi64sub64_codegen()
     resscale->addIncoming(resscale2, delta_small);
 
     /* do bi64 add bi64, need to check if there is any overflow */
+    /* in llvm10 sasub_with_overflow is define as uint value 241 */
     llvm::Function* func_ssub_overflow =
-        llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::ssub_with_overflow, Intrinsic_Tys);
+        llvm::Intrinsic::getDeclaration(mod, llvm_ssub_with_overflow, Intrinsic_Tys);
     if (func_ssub_overflow == NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -603,8 +600,9 @@ llvm::Function* bi64mul64_codegen()
     cmpval = builder.CreateICmpSLE(result_scale, maxInt64digitsNum, "cmp_delta_scale");
 
     /* do bi64 mul bi64, need to check if there is any overflow */
+    /* in llvm10 smul_with_overflow is define as uint value 236 */
     llvm::Function* func_smul_overflow =
-        llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::smul_with_overflow, Intrinsic_Tys);
+        llvm::Intrinsic::getDeclaration(mod, llvm_smul_with_overflow, Intrinsic_Tys);
     if (func_smul_overflow == NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),

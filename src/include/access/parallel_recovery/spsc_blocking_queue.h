@@ -30,6 +30,7 @@
 #include "access/parallel_recovery/posix_semaphore.h"
 
 namespace parallel_recovery {
+typedef void (*CallBackFunc)();
 
 struct SPSCBlockingQueue {
     pg_atomic_uint32 writeHead; /* Array index for the next write. */
@@ -38,10 +39,11 @@ struct SPSCBlockingQueue {
     uint32 mask;                /* Bit mask for computing index. */
     pg_atomic_uint32 maxUsage;
     pg_atomic_uint64 totalCnt;
+    CallBackFunc callBackFunc;
     void* buffer[1]; /* Queue buffer, the actual size is capacity. */
 };
 
-SPSCBlockingQueue* SPSCBlockingQueueCreate(uint32 capacity);
+SPSCBlockingQueue *SPSCBlockingQueueCreate(uint32 capacity, CallBackFunc func = NULL);
 void SPSCBlockingQueueDestroy(SPSCBlockingQueue* queue);
 
 bool SPSCBlockingQueuePut(SPSCBlockingQueue* queue, void* element);
@@ -51,6 +53,6 @@ void* SPSCBlockingQueueTop(SPSCBlockingQueue* queue);
 void SPSCBlockingQueuePop(SPSCBlockingQueue* queue);
 void DumpQueue(SPSCBlockingQueue* queue);
 uint32 SPSCGetQueueCount(SPSCBlockingQueue* queue);
-
+void* SPSCTimeseriesQueueTop(SPSCBlockingQueue* queue);
 }
 #endif

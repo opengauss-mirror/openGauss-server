@@ -1,0 +1,1215 @@
+--
+-- Tests for SYNONYMS
+--
+CREATE SCHEMA syn_test;
+CREATE SCHEMA pablic;
+grant all on schema pablic to public;
+SET CURRENT_SCHEMA = syn_test;
+-- 0. Precondition, create referenced objects including table, view, funciton and procedure.
+CREATE SCHEMA syn_ot;
+CREATE TABLE syn_ot.t1_row(c1 int, c2 int);
+CREATE TABLE syn_ot.t2_col(c1 int, c2 varchar2(10)) WITH(orientation = column) DISTRIBUTE BY HASH(c1);
+CREATE TABLE syn_ot.t3_part(c1 int, c2 int) PARTITION BY range(c2)
+(
+	PARTITION p1 VALUES LESS THAN (5),
+	PARTITION p2 VALUES LESS THAN (10),
+	PARTITION p3 VALUES LESS THAN (maxvalue)
+);
+CREATE VIEW syn_ot.v_t1 AS SELECT * FROM syn_ot.t1_row;
+CREATE VIEW syn_ot.v_t2 AS SELECT * FROM syn_ot.t2_col ORDER BY c1;
+CREATE VIEW syn_ot.v_t3 AS SELECT c1, max(c2) FROM syn_ot.t3_part GROUP BY c1;
+CREATE PROCEDURE syn_ot.insert_data(v_a integer, v_b integer)
+SECURITY INVOKER
+AS
+BEGIN
+	INSERT INTO syn_ot.t1_row VALUES(v_a, v_b);
+END;
+/
+CREATE OR REPLACE FUNCTION syn_ot.add(a integer, b integer) RETURNS integer AS
+$$
+SELECT $1 + $2
+$$
+LANGUAGE sql;
+CREATE OR REPLACE FUNCTION syn_ot.add(a decimal(5,2), b decimal(5,2)) RETURNS decimal(5,2) AS
+$$
+SELECT $1 + $2
+$$
+LANGUAGE sql;
+-- Case 1. SYNONYM FOR TABLE OBJECT
+-- 1.1 row-store table
+CREATE SYNONYM t1 FOR syn_ot.t1_row;
+SELECT * FROM t1 ORDER BY 1;
+ c1 | c2 
+----+----
+(0 rows)
+
+INSERT INTO t1 VALUES(1,1),(2,2);
+SELECT * FROM t1 ORDER BY 1;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+(2 rows)
+
+UPDATE t1 SET c2 = c2 * 3 WHERE c2 = 1;
+SELECT * FROM t1 ORDER BY 1;
+ c1 | c2 
+----+----
+  1 |  3
+  2 |  2
+(2 rows)
+
+DELETE FROM t1 WHERE c2 > 5;
+SELECT * FROM t1 ORDER BY 1;
+ c1 | c2 
+----+----
+  1 |  3
+  2 |  2
+(2 rows)
+
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ t1      | syn_ot       | t1_row
+(1 row)
+
+-- 1.2 col-store table
+CREATE SYNONYM t2 FOR syn_ot.t2_col;
+SELECT * FROM t2 ORDER BY 1;
+ c1 | c2 
+----+----
+(0 rows)
+
+INSERT INTO t2 VALUES(1, 'aa'),(2, 'bb');
+SELECT * FROM t2 ORDER BY 1;
+ c1 | c2 
+----+----
+  1 | aa
+  2 | bb
+(2 rows)
+
+UPDATE t2 SET c2 = upper(c2) WHERE c1 = 2;
+SELECT * FROM t2 ORDER BY 1;
+ c1 | c2 
+----+----
+  1 | aa
+  2 | BB
+(2 rows)
+
+DELETE FROM t2 WHERE c1 = 2;
+SELECT * FROM t2 ORDER BY 1;
+ c1 | c2 
+----+----
+  1 | aa
+(1 row)
+
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ t1      | syn_ot       | t1_row
+ t2      | syn_ot       | t2_col
+(2 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | t1           | syn_ot            | t1_row
+ syn_test    | t2           | syn_ot            | t2_col
+(2 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM DBA_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | t1           | syn_ot            | t1_row
+ syn_test    | t2           | syn_ot            | t2_col
+(2 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM ALL_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | t1           | syn_ot            | t1_row
+ syn_test    | t2           | syn_ot            | t2_col
+(2 rows)
+
+-- 1.3 partition table
+CREATE SYNONYM t3 FOR syn_ot.t3_part;
+SELECT * FROM t3 ORDER BY 1;
+ c1 | c2 
+----+----
+(0 rows)
+
+INSERT INTO t3 VALUES(1,2),(2,6),(3,12);
+SELECT * FROM t3 ORDER BY 1;
+ c1 | c2 
+----+----
+  1 |  2
+  2 |  6
+  3 | 12
+(3 rows)
+
+UPDATE t3 SET c2 = 10 WHERE c1 = 3;
+SELECT * FROM t3 ORDER BY 1;
+ c1 | c2 
+----+----
+  1 |  2
+  2 |  6
+  3 | 10
+(3 rows)
+
+DELETE FROM t3 WHERE c2 < 5;
+SELECT * FROM t3 ORDER BY 1;
+ c1 | c2 
+----+----
+  2 |  6
+  3 | 10
+(2 rows)
+
+SELECT * FROM t3 PARTITION(p1) ORDER BY 1;
+ c1 | c2 
+----+----
+(0 rows)
+
+SELECT * FROM t3 PARTITION(p3) ORDER BY 1;
+ c1 | c2 
+----+----
+  3 | 10
+(1 row)
+
+CREATE TABLE pt3 (LIKE syn_ot.t3_part INCLUDING PARTITION);
+CREATE TABLE pst3 (LIKE t3 INCLUDING PARTITION);
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ t1      | syn_ot       | t1_row
+ t2      | syn_ot       | t2_col
+ t3      | syn_ot       | t3_part
+(3 rows)
+
+DROP SYNONYM t1;
+SELECT count(*) FROM pg_synonym;
+ count 
+-------
+     2
+(1 row)
+
+DROP SYNONYM t2;
+SELECT count(*) FROM pg_synonym;
+ count 
+-------
+     1
+(1 row)
+
+DROP SYNONYM t3;
+SELECT count(*) FROM pg_synonym;
+ count 
+-------
+     0
+(1 row)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+(0 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM DBA_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+(0 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM ALL_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+(0 rows)
+
+-- Case 2. SYNONYM FOR VIEW OBJECT
+CREATE SYNONYM v1 FOR syn_ot.v_t1;
+SELECT * FROM v1 ORDER BY 1;
+ c1 | c2 
+----+----
+  1 |  3
+  2 |  2
+(2 rows)
+
+CREATE SYNONYM v2 FOR syn_ot.v_t2;
+SELECT * FROM v2 ORDER BY 1;
+ c1 | c2 
+----+----
+  1 | aa
+(1 row)
+
+CREATE SYNONYM v3 FOR syn_ot.v_t3;
+SELECT * FROM v3 ORDER BY 1;
+ c1 | max 
+----+-----
+  2 |   6
+  3 |  10
+(2 rows)
+
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ v1      | syn_ot       | v_t1
+ v2      | syn_ot       | v_t2
+ v3      | syn_ot       | v_t3
+(3 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | v1           | syn_ot            | v_t1
+ syn_test    | v2           | syn_ot            | v_t2
+ syn_test    | v3           | syn_ot            | v_t3
+(3 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM DBA_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | v1           | syn_ot            | v_t1
+ syn_test    | v2           | syn_ot            | v_t2
+ syn_test    | v3           | syn_ot            | v_t3
+(3 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM ALL_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | v1           | syn_ot            | v_t1
+ syn_test    | v2           | syn_ot            | v_t2
+ syn_test    | v3           | syn_ot            | v_t3
+(3 rows)
+
+DROP SYNONYM v1;
+DROP SYNONYM v2;
+SELECT count(*) FROM pg_synonym;
+ count 
+-------
+     1
+(1 row)
+
+-- Case 3. SYNONYM FOR FUNCTION OBJECT
+SELECT syn_ot.add(1,1);
+ add 
+-----
+   2
+(1 row)
+
+SELECT syn_ot.add(1.1, 1.2);
+ add 
+-----
+ 2.3
+(1 row)
+
+CREATE SYNONYM add FOR syn_ot.add;
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | add          | syn_ot            | add
+ syn_test    | v3           | syn_ot            | v_t3
+(2 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM DBA_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | add          | syn_ot            | add
+ syn_test    | v3           | syn_ot            | v_t3
+(2 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM ALL_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | add          | syn_ot            | add
+ syn_test    | v3           | syn_ot            | v_t3
+(2 rows)
+
+SELECT add(1,2);
+ add 
+-----
+   3
+(1 row)
+
+SELECT add(1.2, 2.3);
+ add 
+-----
+ 3.5
+(1 row)
+
+SELECT count(*) FROM pg_synonym;
+ count 
+-------
+     2
+(1 row)
+
+DROP SYNONYM add;
+SELECT count(*) FROM pg_synonym;
+ count 
+-------
+     1
+(1 row)
+
+-- Case 4. SYNONYM FOR PROCEDURE OBJECT
+CREATE SYNONYM insert_data FOR syn_ot.insert_data;
+CALL insert_data(3,3);
+ insert_data 
+-------------
+ 
+(1 row)
+
+SELECT * FROM syn_ot.t1_row ORDER BY 1;
+ c1 | c2 
+----+----
+  1 |  3
+  2 |  2
+  3 |  3
+(3 rows)
+
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+   synname   | synobjschema | synobjname  
+-------------+--------------+-------------
+ insert_data | syn_ot       | insert_data
+ v3          | syn_ot       | v_t3
+(2 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name  
+-------------+--------------+-------------------+-------------
+ syn_test    | insert_data  | syn_ot            | insert_data
+ syn_test    | v3           | syn_ot            | v_t3
+(2 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM DBA_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name  
+-------------+--------------+-------------------+-------------
+ syn_test    | insert_data  | syn_ot            | insert_data
+ syn_test    | v3           | syn_ot            | v_t3
+(2 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM ALL_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name  
+-------------+--------------+-------------------+-------------
+ syn_test    | insert_data  | syn_ot            | insert_data
+ syn_test    | v3           | syn_ot            | v_t3
+(2 rows)
+
+DROP SYNONYM IF EXISTS insert_data;
+SELECT count(*) FROM pg_synonym;
+ count 
+-------
+     1
+(1 row)
+
+-- Case 5. synonym object has the same name with database objects, choose db object.
+CREATE SYNONYM t1 FOR syn_ot.t1_row;
+CREATE TABLE t1(a int, b int, c int);
+-- columns of table t1, not table syn_ot.t1_row, [a, b, c]
+SELECT * FROM t1 ORDER BY 1;
+ a | b | c 
+---+---+---
+(0 rows)
+
+-- ok to insert
+INSERT INTO t1 VALUES(0, 0, 0); 
+-- Case 6. The essence of synonyms is a mapping between names.
+-- if referenced object is not existed, failed to do select.
+CREATE SYNONYM tt FOR syn_ot.tt_row;
+SELECT * FROM tt;
+ERROR:  relation "tt" does not exist
+LINE 1: SELECT * FROM tt;
+                      ^
+DETAIL:  translation for synonym "tt" is no longer valid
+INSERT INTO tt VALUES(1,1,1);
+ERROR:  relation "tt" does not exist
+LINE 1: INSERT INTO tt VALUES(1,1,1);
+                    ^
+DETAIL:  translation for synonym "tt" is no longer valid
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ t1      | syn_ot       | t1_row
+ tt      | syn_ot       | tt_row
+ v3      | syn_ot       | v_t3
+(3 rows)
+
+CREATE SYNONYM ww FOR syn_ww.tt_row;
+SELECT * FROM tt;
+ERROR:  relation "tt" does not exist
+LINE 1: SELECT * FROM tt;
+                      ^
+DETAIL:  translation for synonym "tt" is no longer valid
+CREATE SYNONYM pp FOR pp_row;
+SELECT * FROM pp;
+ERROR:  relation "pp" does not exist
+LINE 1: SELECT * FROM pp;
+                      ^
+DETAIL:  translation for synonym "pp" is no longer valid
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ pp      | syn_test     | pp_row
+ t1      | syn_ot       | t1_row
+ tt      | syn_ot       | tt_row
+ v3      | syn_ot       | v_t3
+ ww      | syn_ww       | tt_row
+(5 rows)
+
+-- if the referenced object is created, okay to do select.
+CREATE TABLE syn_ot.tt_row(id int, name varchar2(5), birth date);
+INSERT INTO syn_ot.tt_row VALUES(1, 'July', '2000-01-01');
+SELECT * FROM tt ORDER BY 1; 
+ id | name |          birth           
+----+------+--------------------------
+  1 | July | Sat Jan 01 00:00:00 2000
+(1 row)
+
+INSERT INTO tt VALUES(2, 'Mia', '2008-08-08');
+SELECT * FROM tt ORDER BY 1;
+ id | name |          birth           
+----+------+--------------------------
+  1 | July | Sat Jan 01 00:00:00 2000
+  2 | Mia  | Fri Aug 08 00:00:00 2008
+(2 rows)
+
+CREATE SCHEMA syn_ww;
+CREATE TABLE syn_ww.tt_row(a int);
+CREATE TABLE pp_row(a int);
+SELECT * FROM ww ORDER BY 1;
+ a 
+---
+(0 rows)
+
+SELECT * FROM pp ORDER BY 1;
+ a 
+---
+(0 rows)
+
+-- for table in node group, also ok to create synonym and do something.
+CREATE NODE GROUP grp1 WITH(datanode1, datanode2);
+CREATE TABLE syn_ot.t1_grp1( id int, name varchar2(5)) TO GROUP grp1;
+INSERT INTO syn_ot.t1_grp1 VALUES(1, 'AA');
+CREATE SYNONYM gt1 FOR syn_ot.t1_grp1;
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ gt1     | syn_ot       | t1_grp1
+ pp      | syn_test     | pp_row
+ t1      | syn_ot       | t1_row
+ tt      | syn_ot       | tt_row
+ v3      | syn_ot       | v_t3
+ ww      | syn_ww       | tt_row
+(6 rows)
+
+INSERT INTO gt1 VALUES(2, 'bb');
+SELECT * FROM gt1;
+ id | name 
+----+------
+  1 | AA
+  2 | bb
+(2 rows)
+
+CREATE TABLE ggtt1 (LIKE syn_ot.t1_grp1 INCLUDING ALL);
+CREATE TABLE ggtt2 (LIKE gt1 INCLUDING ALL);
+-- if referencing other unsupported objects, such as type, sequence, another synonym, failed.
+CREATE OR REPLACE SYNONYM ww for syn_ww.sw1;
+CREATE TYPE syn_ww.sw1 AS (a int, b int);
+---- use synonym to create table, report error.
+CREATE TABLE mm (a int, b ww);
+ERROR:  type "ww" does not exist
+LINE 1: CREATE TABLE mm (a int, b ww);
+                                  ^
+SELECT * FROM ww;
+ERROR:  "sw1" is a composite type
+LINE 1: SELECT * FROM ww;
+                      ^
+DETAIL:  Maybe you want to use synonym to reference a type object, but it is not yet supported.
+DROP TABLE IF EXISTS mm;
+NOTICE:  table "mm" does not exist, skipping
+DROP TYPE syn_ww.sw1;
+---- use synonym to select sequence, report error.
+CREATE SEQUENCE syn_ww.sw1 START 101 CACHE 20;
+SELECT nextval('syn_ww.sw1');
+ nextval 
+---------
+     101
+(1 row)
+
+SELECT nextval('ww');
+ERROR:  relation "ww" does not exist
+LINE 1: SELECT nextval('ww');
+                       ^
+DETAIL:  Maybe you want to use synonym to reference a sequence object, but it is not yet supported.
+CONTEXT:  referenced column: nextval
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ gt1     | syn_ot       | t1_grp1
+ pp      | syn_test     | pp_row
+ t1      | syn_ot       | t1_row
+ tt      | syn_ot       | tt_row
+ v3      | syn_ot       | v_t3
+ ww      | syn_ww       | sw1
+(6 rows)
+
+---- synonym reference another synonym, report error.
+CREATE OR REPLACE SYNONYM ww for syn_test.pp;
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ gt1     | syn_ot       | t1_grp1
+ pp      | syn_test     | pp_row
+ t1      | syn_ot       | t1_row
+ tt      | syn_ot       | tt_row
+ v3      | syn_ot       | v_t3
+ ww      | syn_test     | pp
+(6 rows)
+
+SELECT * FROM ww;
+ERROR:  relation "ww" does not exist
+LINE 1: SELECT * FROM ww;
+                      ^
+DETAIL:  Maybe you want to use synonym to reference another synonym object, but it is not yet supported.
+-- Case 7. name too long and truncate
+CREATE SYNONYM tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttoolong FOR syn_ot.t1_row;
+NOTICE:  identifier "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttoolong" will be truncated to "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttoo"
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+                             synname                             | synobjschema | synobjname 
+-----------------------------------------------------------------+--------------+------------
+ gt1                                                             | syn_ot       | t1_grp1
+ pp                                                              | syn_test     | pp_row
+ t1                                                              | syn_ot       | t1_row
+ tt                                                              | syn_ot       | tt_row
+ tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttoo | syn_ot       | t1_row
+ v3                                                              | syn_ot       | v_t3
+ ww                                                              | syn_test     | pp
+(7 rows)
+
+DROP SYNONYM IF EXISTS tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttoo;
+-- Case 8. the type of referenced object changed and then mapping automatically.
+CREATE SYNONYM rtt1 FOR syn_ot.tt_row;
+SELECT * FROM rtt1 ORDER BY 1;
+ id | name |          birth           
+----+------+--------------------------
+  1 | July | Sat Jan 01 00:00:00 2000
+  2 | Mia  | Fri Aug 08 00:00:00 2008
+(2 rows)
+
+ALTER TABLE syn_ot.tt_row ADD avg_score NUMBER(1);
+SELECT * FROM rtt1 ORDER BY 1;
+ id | name |          birth           | avg_score 
+----+------+--------------------------+-----------
+  1 | July | Sat Jan 01 00:00:00 2000 |          
+  2 | Mia  | Fri Aug 08 00:00:00 2008 |          
+(2 rows)
+
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ gt1     | syn_ot       | t1_grp1
+ pp      | syn_test     | pp_row
+ rtt1    | syn_ot       | tt_row
+ t1      | syn_ot       | t1_row
+ tt      | syn_ot       | tt_row
+ v3      | syn_ot       | v_t3
+ ww      | syn_test     | pp
+(7 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | gt1          | syn_ot            | t1_grp1
+ syn_test    | pp           | syn_test          | pp_row
+ syn_test    | rtt1         | syn_ot            | tt_row
+ syn_test    | t1           | syn_ot            | t1_row
+ syn_test    | tt           | syn_ot            | tt_row
+ syn_test    | v3           | syn_ot            | v_t3
+ syn_test    | ww           | syn_test          | pp
+(7 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM DBA_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | gt1          | syn_ot            | t1_grp1
+ syn_test    | pp           | syn_test          | pp_row
+ syn_test    | rtt1         | syn_ot            | tt_row
+ syn_test    | t1           | syn_ot            | t1_row
+ syn_test    | tt           | syn_ot            | tt_row
+ syn_test    | v3           | syn_ot            | v_t3
+ syn_test    | ww           | syn_test          | pp
+(7 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM ALL_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | gt1          | syn_ot            | t1_grp1
+ syn_test    | pp           | syn_test          | pp_row
+ syn_test    | rtt1         | syn_ot            | tt_row
+ syn_test    | t1           | syn_ot            | t1_row
+ syn_test    | tt           | syn_ot            | tt_row
+ syn_test    | v3           | syn_ot            | v_t3
+ syn_test    | ww           | syn_test          | pp
+(7 rows)
+
+CREATE TABLE syn_ot.t1_ori (c1 int, c2 int);
+CREATE SYNONYM rtt2 FOR syn_ot.t1_ori;
+INSERT INTO rtt2 VALUES(1,1);
+SELECT * FROM rtt2 ORDER BY 1;
+ c1 | c2 
+----+----
+  1 |  1
+(1 row)
+
+SELECT synname, synobjschema, synobjname FROM pg_synonym WHERE synname = 'rtt2';
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ rtt2    | syn_ot       | t1_ori
+(1 row)
+
+DROP TABLE syn_ot.t1_ori;
+SELECT * FROM rtt2 ORDER BY 1;
+ERROR:  relation "rtt2" does not exist
+LINE 1: SELECT * FROM rtt2 ORDER BY 1;
+                      ^
+DETAIL:  translation for synonym "rtt2" is no longer valid
+CREATE VIEW syn_ot.t1_ori AS SELECT * FROM syn_ot.t1_row ORDER BY 1;
+SELECT * FROM rtt2 ORDER BY 1;
+ c1 | c2 
+----+----
+  1 |  3
+  2 |  2
+  3 |  3
+(3 rows)
+
+SELECT synname, synobjschema, synobjname FROM pg_synonym WHERE synname = 'rtt2';
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ rtt2    | syn_ot       | t1_ori
+(1 row)
+
+-- Case 9. about privilege
+CREATE USER u_tmp PASSWORD 'utmp@123';
+GRANT CREATE ON DATABASE regression to u_tmp;
+SET SESSION AUTHORIZATION u_tmp PASSWORD 'utmp@123';
+CREATE SCHEMA rt_priv;
+REVOKE CREATE ON SCHEMA rt_priv FROM u_tmp;
+CREATE SYNONYM rt_priv.t1 FOR syn_ot.t1_row;
+ERROR:  permission denied for schema rt_priv
+GRANT CREATE ON SCHEMA rt_priv TO u_tmp;
+CREATE SYNONYM rt_priv.tt1 FOR syn_ot.t1_row;
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ gt1     | syn_ot       | t1_grp1
+ pp      | syn_test     | pp_row
+ rtt1    | syn_ot       | tt_row
+ rtt2    | syn_ot       | t1_ori
+ t1      | syn_ot       | t1_row
+ tt      | syn_ot       | tt_row
+ tt1     | syn_ot       | t1_row
+ v3      | syn_ot       | v_t3
+ ww      | syn_test     | pp
+(9 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ rt_priv     | tt1          | syn_ot            | t1_row
+(1 row)
+
+REVOKE CREATE ON SCHEMA rt_priv FROM u_tmp;
+DROP SYNONYM IF EXISTS rt_priv.t1;
+ERROR:  permission denied for schema rt_priv
+DROP SYNONYM rt_priv.tt1;
+ERROR:  permission denied for schema rt_priv
+GRANT CREATE ON SCHEMA rt_priv TO u_tmp;
+DROP SYNONYM rt_priv.tt1;
+DROP SYNONYM IF EXISTS rt_priv.t1;
+NOTICE:  synonym "t1" does not exist, skipping
+DROP SCHEMA rt_priv CASCADE;
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+(0 rows)
+
+-- Case 10. about privilege of two user.
+\c -
+CREATE USER user1 PASSWORD 'user@1111';
+CREATE USER user2 PASSWORD 'user@2222';
+GRANT CREATE ON DATABASE regression to user1, user2;
+SET SESSION AUTHORIZATION user1 PASSWORD 'user@1111';
+CREATE SCHEMA su1;
+CREATE TABLE ut1(a int);
+CREATE TABLE su1.ut1(a int);
+CREATE SYNONYM pablic.uut1 for ut1;
+CREATE SYNONYM pablic.uutt1 for su1.ut1;
+COMMENT ON COLUMN pablic.uut1.a is 'puut1_a';
+CREATE INDEX idx_a ON pablic.uutt1(a);
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ gt1     | syn_ot       | t1_grp1
+ pp      | syn_test     | pp_row
+ rtt1    | syn_ot       | tt_row
+ rtt2    | syn_ot       | t1_ori
+ t1      | syn_ot       | t1_row
+ tt      | syn_ot       | tt_row
+ uut1    | user1        | ut1
+ uutt1   | su1          | ut1
+ v3      | syn_ot       | v_t3
+ ww      | syn_test     | pp
+(10 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ pablic      | uut1         | user1             | ut1
+ pablic      | uutt1        | su1               | ut1
+(2 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM DBA_SYNONYMS ORDER BY 1,2;
+ERROR:  permission denied for relation dba_synonyms
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM ALL_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ pablic      | uut1         | user1             | ut1
+ pablic      | uutt1        | su1               | ut1
+(2 rows)
+
+---- test for xxx_objects modification.
+SELECT object_name, object_type FROM USER_OBJECTS WHERE object_type = 'synonym' ORDER BY 1,2;
+ object_name | object_type 
+-------------+-------------
+ uut1        | synonym
+ uutt1       | synonym
+(2 rows)
+
+SELECT object_name, object_type FROM DBA_OBJECTS WHERE object_type = 'synonym' ORDER BY 1,2;
+ERROR:  permission denied for relation dba_objects
+SELECT object_name, object_type FROM ALL_OBJECTS WHERE object_type = 'synonym' ORDER BY 1,2;
+ object_name | object_type 
+-------------+-------------
+ gt1         | synonym
+ pp          | synonym
+ rtt1        | synonym
+ rtt2        | synonym
+ t1          | synonym
+ tt          | synonym
+ uut1        | synonym
+ uutt1       | synonym
+ v3          | synonym
+ ww          | synonym
+(10 rows)
+
+\c -
+SET SESSION AUTHORIZATION user2 PASSWORD 'user@2222';
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ gt1     | syn_ot       | t1_grp1
+ pp      | syn_test     | pp_row
+ rtt1    | syn_ot       | tt_row
+ rtt2    | syn_ot       | t1_ori
+ t1      | syn_ot       | t1_row
+ tt      | syn_ot       | tt_row
+ uut1    | user1        | ut1
+ uutt1   | su1          | ut1
+ v3      | syn_ot       | v_t3
+ ww      | syn_test     | pp
+(10 rows)
+
+SELECT * FROM pablic.uut1;
+ERROR:  permission denied for relation ut1
+SELECT * FROM pablic.uutt1;
+ERROR:  permission denied for relation ut1
+CREATE SYNONYM su1.uut2 for su1.ut1;
+ERROR:  permission denied for schema su1
+DROP SYNONYM pablic.uut1;
+ERROR:  must be owner of relation uut1
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+(0 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM DBA_SYNONYMS ORDER BY 1,2;
+ERROR:  permission denied for relation dba_synonyms
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM ALL_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+(0 rows)
+
+\c -
+SET SESSION AUTHORIZATION user1 PASSWORD 'user@1111';
+DROP SCHEMA su1 CASCADE;
+NOTICE:  drop cascades to table su1.ut1
+\c -
+SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
+ synname | synobjschema | synobjname 
+---------+--------------+------------
+ gt1     | syn_ot       | t1_grp1
+ pp      | syn_test     | pp_row
+ rtt1    | syn_ot       | tt_row
+ rtt2    | syn_ot       | t1_ori
+ t1      | syn_ot       | t1_row
+ tt      | syn_ot       | tt_row
+ uut1    | user1        | ut1
+ uutt1   | su1          | ut1
+ v3      | syn_ot       | v_t3
+ ww      | syn_test     | pp
+(10 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ syn_test    | gt1          | syn_ot            | t1_grp1
+ syn_test    | pp           | syn_test          | pp_row
+ syn_test    | rtt1         | syn_ot            | tt_row
+ syn_test    | rtt2         | syn_ot            | t1_ori
+ syn_test    | t1           | syn_ot            | t1_row
+ syn_test    | tt           | syn_ot            | tt_row
+ syn_test    | v3           | syn_ot            | v_t3
+ syn_test    | ww           | syn_test          | pp
+(8 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM DBA_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ pablic      | uut1         | user1             | ut1
+ pablic      | uutt1        | su1               | ut1
+ syn_test    | gt1          | syn_ot            | t1_grp1
+ syn_test    | pp           | syn_test          | pp_row
+ syn_test    | rtt1         | syn_ot            | tt_row
+ syn_test    | rtt2         | syn_ot            | t1_ori
+ syn_test    | t1           | syn_ot            | t1_row
+ syn_test    | tt           | syn_ot            | tt_row
+ syn_test    | v3           | syn_ot            | v_t3
+ syn_test    | ww           | syn_test          | pp
+(10 rows)
+
+SELECT schema_name, synonym_name, table_schema_name, table_name FROM ALL_SYNONYMS ORDER BY 1,2;
+ schema_name | synonym_name | table_schema_name | table_name 
+-------------+--------------+-------------------+------------
+ pablic      | uut1         | user1             | ut1
+ pablic      | uutt1        | su1               | ut1
+ syn_test    | gt1          | syn_ot            | t1_grp1
+ syn_test    | pp           | syn_test          | pp_row
+ syn_test    | rtt1         | syn_ot            | tt_row
+ syn_test    | rtt2         | syn_ot            | t1_ori
+ syn_test    | t1           | syn_ot            | t1_row
+ syn_test    | tt           | syn_ot            | tt_row
+ syn_test    | v3           | syn_ot            | v_t3
+ syn_test    | ww           | syn_test          | pp
+(10 rows)
+
+-- Case 11. other supported ddl or dml, such as explain query, merge into.
+CREATE TABLE syn_ot.product
+(
+	product_id INTEGER,
+	product_name VARCHAR2(60),
+	category VARCHAR2(60)
+);
+CREATE SYNONYM p FOR syn_ot.product;
+CREATE TABLE syn_ot.newproduct AS SELECT * FROM p;
+CREATE SYNONYM np FOR syn_ot.newproduct;
+INSERT INTO p VALUES (1501, 'VIVITAR 35MM', 'ELECTRNCS');
+INSERT INTO p VALUES (1502, 'OLYMPUS IS50', 'ELECTRNCS');
+INSERT INTO p VALUES (1600, 'PLAY GYM', 'TOYS');
+INSERT INTO p VALUES (1601, 'LAMAZE', 'TOYS');
+INSERT INTO p VALUES (1666, 'HARRY POTTER', 'DVD');
+INSERT INTO np VALUES (1502, 'OLYMPUS CAMERA', 'ELECTRNCS');
+INSERT INTO np VALUES (1601, 'LAMAZE', 'TOYS');
+INSERT INTO np VALUES (1666, 'HARRY POTTER', 'TOYS');
+INSERT INTO np VALUES (1700, 'WAIT INTERFACE', 'BOOKS');
+explain (costs off, verbose off)
+SELECT p.product_id, p.product_name, p.category FROM p inner join np on p.product_id = np.product_id ORDER BY 1;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Streaming (type: GATHER)
+   Merge Sort Key: p.product_id
+   Node/s: All datanodes
+   ->  Sort
+         Sort Key: p.product_id
+         ->  Hash Join
+               Hash Cond: (p.product_id = np.product_id)
+               ->  Seq Scan on product p
+               ->  Hash
+                     ->  Seq Scan on newproduct np
+(10 rows)
+
+MERGE INTO p USING np ON (p.product_id = np.product_id)
+WHEN matched THEN
+UPDATE SET p.product_name = np.product_name, p.category=np.category;
+explain (costs off, verbose off)
+UPDATE p SET p.category=np.category FROM np WHERE p.product_id = np.product_id;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Update on product p
+         ->  Hash Join
+               Hash Cond: (p.product_id = np.product_id)
+               ->  Seq Scan on product p
+               ->  Hash
+                     ->  Seq Scan on newproduct np
+(8 rows)
+
+-- Case 12. other sanity check about search_path.
+SET current_schema = mt;
+CREATE SYNONYM mm for syn_ot.t1;
+ERROR:  schema "mt" does not exist
+SET current_schema = mt, syn_test;
+CREATE SYNONYM mm1 for syn_ot.t1;
+CREATE SYNONYM mm2 for mmt2;
+CREATE TABLE ttt1(LIKE syn_ot.t1_row);
+INSERT INTO ttt1 SELECT * FROM syn_ot.t1_row;
+SELECT * FROM ttt1 ORDER BY 1,2;
+ c1 | c2 
+----+----
+  1 |  3
+  2 |  2
+  3 |  3
+(3 rows)
+
+CREATE TABLE ttt2(LIKE syn_ot.t3_part INCLUDING ALL);
+SELECT * FROM ttt2 p1 WHERE p1.c1 NOT IN (SELECT p2.c1 FROM syn_ot.t3_part p2);
+ c1 | c2 
+----+----
+(0 rows)
+
+-- Case 13. create trigger on synonym object or use synonym in procedure.
+CREATE FUNCTION dummy_trigger() returns trigger as $$
+BEGIN
+RETURN NULL;
+END $$
+LANGUAGE plpgsql;
+CREATE TRIGGER trig_test BEFORE INSERT OR UPDATE OR DELETE
+ON t1
+FOR EACH STATEMENT
+EXECUTE PROCEDURE dummy_trigger();
+DROP TRIGGER IF EXISTS trig_test ON t1;
+CREATE OR REPLACE PROCEDURE syn_pro_01(s_id integer) IS
+s_name tt.name%TYPE;
+BEGIN
+SELECT name INTO s_name FROM tt WHERE tt.id = s_id;
+END;
+/
+CALL syn_pro_01(1);
+ syn_pro_01 
+------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE syn_pro_02(s_id integer) IS
+s_name syn_test.tt.name%TYPE;
+BEGIN
+SELECT name INTO s_name FROM tt WHERE tt.id = s_id;
+END;
+/
+CALL syn_pro_02(1);
+ syn_pro_02 
+------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE syn_pro_03
+AS
+c1 tt%ROWTYPE;
+BEGIN
+SELECT 1 INTO c1 FROM dual;
+END;
+/
+CALL syn_pro_03();
+ syn_pro_03 
+------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE syn_pro_04
+AS
+c1 syn_test.tt%ROWTYPE;
+BEGIN
+SELECT 2 INTO c1 FROM dual;
+end;
+/
+CALL syn_pro_04();
+ syn_pro_04 
+------------
+ 
+(1 row)
+
+-- case 14. function or procedure including synonym objects, which defined using language plpsql, drop and recompile.
+CREATE OR REPLACE SYNONYM ss1 FOR syn_ot.t2_col;
+CREATE OR REPLACE PROCEDURE pp1 AS
+BEGIN
+INSERT INTO ss1 VALUES(3,'SP1');
+END;
+/
+CREATE OR REPLACE FUNCTION ff0 RETURNS BIGINT AS
+$$
+SELECT count(*) FROM ss1;
+$$
+LANGUAGE SQL;
+CREATE OR REPLACE FUNCTION ff1 RETURNS void AS
+$$
+BEGIN
+UPDATE ss1 SET c2 = upper(c2) WHERE c1 = 1;
+END;
+$$
+LANGUAGE plpgsql;
+CALL pp1();
+ pp1 
+-----
+ 
+(1 row)
+
+CALL ff0();
+ ff0 
+-----
+   2
+(1 row)
+
+CALL ff1();
+ ff1 
+-----
+ 
+(1 row)
+
+SELECT * FROM ss1 order by 1, 2;
+ c1 | c2  
+----+-----
+  1 | AA
+  3 | SP1
+(2 rows)
+
+DROP SYNONYM ss1;
+CALL pp1();
+ERROR:  relation "ss1" does not exist
+LINE 1: INSERT INTO ss1 VALUES(3,'SP1')
+                    ^
+QUERY:  INSERT INTO ss1 VALUES(3,'SP1')
+CONTEXT:  PL/pgSQL function pp1() line 3 at SQL statement
+CALL ff0();
+ERROR:  relation "ss1" does not exist
+LINE 2: SELECT count(*) FROM ss1;
+                             ^
+QUERY:  
+SELECT count(*) FROM ss1;
+
+CONTEXT:  SQL function "ff0" during inlining
+CALL ff1();
+ERROR:  relation "ss1" does not exist
+LINE 1: UPDATE ss1 SET c2 = upper(c2) WHERE c1 = 1
+               ^
+QUERY:  UPDATE ss1 SET c2 = upper(c2) WHERE c1 = 1
+CONTEXT:  PL/pgSQL function ff1() line 3 at SQL statement
+RESET CURRENT_SCHEMA;
+PREPARE update_p(VARCHAR2(60)) AS UPDATE p SET p.category=np.category FROM np WHERE p.product_id = np.product_id AND p.category = $1;
+EXECUTE update_p('ELECTRNCS');
+DROP SYNONYM p;
+EXECUTE update_p('ELECTRNCS');
+ERROR:  relation "p" does not exist
+-- case 15. For define view using some synonym, dependency must be record before view decoupling is implemented, which is a little different from A db behavior.
+INSERT INTO syn_test.t1 VALUES(1,1,2),(1,2,3),(2,3,1),(2,1,5);
+CREATE SYNONYM st1 FOR syn_test.t1;
+CREATE VIEW v1 AS SELECT * FROM st1;
+SELECT * FROM v1 ORDER BY 1,2,3;
+ a | b | c 
+---+---+---
+ 0 | 0 | 0
+ 1 | 1 | 2
+ 1 | 2 | 3
+ 2 | 1 | 5
+ 2 | 3 | 1
+(5 rows)
+
+CREATE SYNONYM sv FOR v1;
+CREATE VIEW v2 AS SELECT max(a) FROM sv;
+SELECT * FROM v2;
+ max 
+-----
+   2
+(1 row)
+
+CREATE OR REPLACE FUNCTION max_a RETURNS INT AS
+$$
+SELECT max(a) FROM syn_test.t1;
+$$
+LANGUAGE SQL;
+CREATE SYNONYM m FOR max_a;
+CREATE VIEW v3 AS SELECT * FROM m();
+SELECT count(*) FROM st1 AS t, m() WHERE t.a < m;
+ count 
+-------
+     3
+(1 row)
+
+DROP SYNONYM sv;
+ERROR:  cannot drop synonym public.sv because other objects depend on it
+DETAIL:  view v2 depends on synonym public.sv
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP SYNONYM m;
+ERROR:  cannot drop synonym public.m because other objects depend on it
+DETAIL:  view v3 depends on synonym public.m
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP SYNONYM st1;
+ERROR:  cannot drop synonym public.st1 because other objects depend on it
+DETAIL:  view v1 depends on synonym public.st1
+view v2 depends on view v1
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP VIEW v3;
+DROP SYNONYM m;
+DROP SYNONYM st1 CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view v1
+drop cascades to view v2
+-- clean up.
+DROP SCHEMA syn_ot CASCADE;
+NOTICE:  drop cascades to 14 other objects
+DETAIL:  drop cascades to table syn_ot.t1_row
+drop cascades to table syn_ot.t2_col
+drop cascades to table syn_ot.t3_part
+drop cascades to view syn_ot.v_t1
+drop cascades to view syn_ot.v_t2
+drop cascades to view syn_ot.v_t3
+drop cascades to function syn_ot.insert_data(integer,integer)
+drop cascades to function syn_ot.add(integer,integer)
+drop cascades to function syn_ot.add(numeric,numeric)
+drop cascades to table syn_ot.tt_row
+drop cascades to table syn_ot.t1_grp1
+drop cascades to view syn_ot.t1_ori
+drop cascades to table syn_ot.product
+drop cascades to table syn_ot.newproduct
+DROP SCHEMA syn_test CASCADE;
+NOTICE:  drop cascades to 26 other objects
+DETAIL:  drop cascades to table syn_test.pt3
+drop cascades to table syn_test.pst3
+drop cascades to synonym syn_test.v3
+drop cascades to synonym syn_test.t1
+drop cascades to table syn_test.t1
+drop cascades to synonym syn_test.tt
+drop cascades to synonym syn_test.ww
+drop cascades to synonym syn_test.pp
+drop cascades to table syn_test.pp_row
+drop cascades to synonym syn_test.gt1
+drop cascades to table syn_test.ggtt1
+drop cascades to table syn_test.ggtt2
+drop cascades to synonym syn_test.rtt1
+drop cascades to synonym syn_test.rtt2
+drop cascades to synonym syn_test.mm1
+drop cascades to synonym syn_test.mm2
+drop cascades to table syn_test.ttt1
+drop cascades to table syn_test.ttt2
+drop cascades to function syn_test.dummy_trigger()
+drop cascades to function syn_test.syn_pro_01(integer)
+drop cascades to function syn_test.syn_pro_02(integer)
+drop cascades to function syn_test.syn_pro_03()
+drop cascades to function syn_test.syn_pro_04()
+drop cascades to function syn_test.pp1()
+drop cascades to function syn_test.ff0()
+drop cascades to function syn_test.ff1()
+DROP SCHEMA syn_ww CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table syn_ww.tt_row
+drop cascades to sequence syn_ww.sw1
+DROP SCHEMA pablic CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to synonym pablic.uut1
+drop cascades to synonym pablic.uutt1
+DROP NODE GROUP grp1;
+REVOKE CREATE ON DATABASE regression FROM u_tmp, user1, user2;
+DROP USER u_tmp, user1, user2 CASCADE;

@@ -16,12 +16,25 @@
 
 #include "nodes/relation.h"
 
+typedef void (*set_rel_pathlist_hook_type) (PlannerInfo *root,
+                                           RelOptInfo *rel,
+                                           Index rti,
+                                           RangeTblEntry *rte);
+extern THR_LOCAL PGDLLIMPORT set_rel_pathlist_hook_type set_rel_pathlist_hook;
+
+typedef void (*set_join_pathlist_hook_type) (PlannerInfo *root,
+                                               RelOptInfo *joinrel,
+                                               RelOptInfo *outerrel,
+                                               RelOptInfo *innerrel,
+                                               JoinType jointype,
+                                               SpecialJoinInfo *sjinfo,
+                                               Relids param_source_rels,
+                                               SemiAntiJoinFactors *semifactors,
+                                               List *restrictlist);
+extern THR_LOCAL PGDLLIMPORT set_join_pathlist_hook_type set_join_pathlist_hook;
+
 extern RelOptInfo* make_one_rel(PlannerInfo* root, List* joinlist);
 extern RelOptInfo* standard_join_search(PlannerInfo* root, int levels_needed, List* initial_rels);
-
-extern void generate_gather_paths(PlannerInfo *root, RelOptInfo *rel);
-extern int compute_parallel_worker(const RelOptInfo *rel, double heap_pages, double index_pages, int max_workers);
-extern void create_partial_bitmap_paths(PlannerInfo *root, RelOptInfo *rel, Path *bitmapqual);
 
 extern void set_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, RangeTblEntry* rte);
 
@@ -55,6 +68,13 @@ inline bool CheckIndexPathUseGPI(IndexPath* ipath)
 {
     return ipath->indexinfo->isGlobal;
 }
+
+
+/*
+ * orindxpath.c
+ *	  additional routines for indexable OR clauses
+ */
+extern bool create_or_index_quals(PlannerInfo* root, RelOptInfo* rel);
 
 /*
  * tidpath.h
@@ -107,7 +127,7 @@ extern bool exprs_known_equal(PlannerInfo* root, Node* item1, Node* item2);
 extern void add_child_rel_equivalences(
     PlannerInfo* root, AppendRelInfo* appinfo, RelOptInfo* parent_rel, RelOptInfo* child_rel);
 extern void mutate_eclass_expressions(PlannerInfo* root, Node* (*mutator)(), void* context, bool include_child_exprs);
-extern List* generate_implied_equalities_for_indexcol(PlannerInfo* root, IndexOptInfo* index, int indexcol);
+extern List* generate_implied_equalities_for_indexcol(PlannerInfo* root, IndexOptInfo* index, int indexcol, Relids prohibited_rels);
 extern bool have_relevant_eclass_joinclause(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2);
 extern bool has_relevant_eclass_joinclause(PlannerInfo* root, RelOptInfo* rel1);
 extern bool eclass_useful_for_merging(EquivalenceClass* eclass, RelOptInfo* rel);
@@ -128,7 +148,7 @@ extern List* canonicalize_pathkeys(PlannerInfo* root, List* pathkeys);
 extern PathKeysComparison compare_pathkeys(List* keys1, List* keys2);
 extern bool pathkeys_contained_in(List* keys1, List* keys2);
 extern Path* get_cheapest_path_for_pathkeys(
-    List* paths, List* pathkeys, Relids required_outer, CostSelector cost_criterion, bool require_parallel_safe);
+    List* paths, List* pathkeys, Relids required_outer, CostSelector cost_criterion);
 extern Path* get_cheapest_fractional_path_for_pathkeys(
     List* paths, List* pathkeys, Relids required_outer, double fraction);
 extern List* build_index_pathkeys(PlannerInfo* root, IndexOptInfo* index, ScanDirection scandir);
@@ -147,5 +167,4 @@ extern bool has_useful_pathkeys(PlannerInfo* root, RelOptInfo* rel);
 extern void set_path_rows(Path* path, double rows, double multiple = 1);
 extern EquivalenceClass* get_expr_eqClass(PlannerInfo* root, Expr* expr);
 extern void delete_eq_member(PlannerInfo* root, List* tlist, List* collectiveGroupExpr);
-extern Path *get_cheapest_parallel_safe_total_inner(List *paths);
 #endif /* PATHS_H */

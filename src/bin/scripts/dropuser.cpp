@@ -13,7 +13,7 @@
 #include "common.h"
 #include "dumputils.h"
 
-static void help(const char* progname_tem);
+static void help(const char* progname);
 
 int main(int argc, char* argv[])
 {
@@ -29,7 +29,7 @@ int main(int argc, char* argv[])
         {"if-exists", no_argument, &if_exists, 1},
         {NULL, 0, NULL, 0}};
 
-    const char* progname_tem = NULL;
+    const char* progname = NULL;
     int optindex;
     int c;
 
@@ -46,7 +46,7 @@ int main(int argc, char* argv[])
     PGconn* conn = NULL;
     PGresult* result = NULL;
 
-    progname_tem = get_progname(argv[0]);
+    progname = get_progname(argv[0]);
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pgscripts"));
 
     handle_help_version_opts(argc, argv, "dropuser", help);
@@ -78,7 +78,7 @@ int main(int argc, char* argv[])
                 /* this covers the long options */
                 break;
             default:
-                fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname_tem);
+                fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
                 exit(1);
         }
     }
@@ -90,17 +90,17 @@ int main(int argc, char* argv[])
             dropuser = argv[optind];
             break;
         default:
-            fprintf(stderr, _("%s: too many command-line arguments (first is \"%s\")\n"), progname_tem, argv[optind + 1]);
-            fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname_tem);
+            fprintf(stderr, _("%s: too many command-line arguments (first is \"%s\")\n"), progname, argv[optind + 1]);
+            fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
             exit(1);
     }
 
     if (dropuser == NULL) {
-        if (interactive) {
+        if (interactive)
             dropuser = simple_prompt("Enter name of role to drop: ", 128, true);
-        } else {
-            fprintf(stderr, _("%s: missing required argument role name\n"), progname_tem);
-            fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname_tem);
+        else {
+            fprintf(stderr, _("%s: missing required argument role name\n"), progname);
+            fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
             exit(1);
         }
     }
@@ -114,13 +114,13 @@ int main(int argc, char* argv[])
     initPQExpBuffer(&sql);
     appendPQExpBuffer(&sql, "DROP ROLE %s%s;\n", (if_exists ? "IF EXISTS " : ""), fmtId(dropuser));
 
-    conn = connectDatabase("postgres", host, port, username, prompt_password, progname_tem, false);
+    conn = connectDatabase("postgres", host, port, username, prompt_password, progname, false);
 
     if (echo)
         printf("%s", sql.data);
     result = PQexec(conn, sql.data);
     if (PQresultStatus(result) != PGRES_COMMAND_OK) {
-        fprintf(stderr, _("%s: removal of role \"%s\" failed: %s"), progname_tem, dropuser, PQerrorMessage(conn));
+        fprintf(stderr, _("%s: removal of role \"%s\" failed: %s"), progname, dropuser, PQerrorMessage(conn));
         PQfinish(conn);
         exit(1);
     }
@@ -130,11 +130,11 @@ int main(int argc, char* argv[])
     exit(0);
 }
 
-static void help(const char* progname_tem)
+static void help(const char* progname)
 {
-    printf(_("%s removes a PostgreSQL role.\n\n"), progname_tem);
+    printf(_("%s removes a PostgreSQL role.\n\n"), progname);
     printf(_("Usage:\n"));
-    printf(_("  %s [OPTION]... [ROLENAME]\n"), progname_tem);
+    printf(_("  %s [OPTION]... [ROLENAME]\n"), progname);
     printf(_("\nOptions:\n"));
     printf(_("  -e, --echo                show the commands being sent to the server\n"));
     printf(_("  -i, --interactive         prompt before deleting anything, and prompt for\n"
@@ -150,4 +150,3 @@ static void help(const char* progname_tem)
     printf(_("  -W, --password            force password prompt\n"));
     printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
 }
-

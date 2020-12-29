@@ -360,7 +360,7 @@ Node* coerce_type(ParseState* pstate, Node* node, Oid inputTypeId, Oid targetTyp
         return (Node*)newcoll;
     }
 
-    if (inputTypeId == UNKNOWNOID && ccontext == COERCION_IMPLICIT) {
+    if (UNKNOWNOID == inputTypeId && COERCION_IMPLICIT == ccontext) {
         /*
          * force to convert unknown expression to target type, since there is
          * no implicit coercion method for UNKNOWNOID type, or it will throw
@@ -762,8 +762,8 @@ static Node* build_coercion_expression(Node* node, CoercionPathType pathtype, Oi
          * various binary-compatibility cases.
          */
         AssertEreport(!procstruct->proretset, MOD_OPT, "function is not return set");
-        AssertEreport(!PROC_IS_AGG(procstruct->prokind), MOD_OPT, "function is not agg");
-        AssertEreport(!PROC_IS_WIN(procstruct->prokind), MOD_OPT, "function is not window function");
+        AssertEreport(!procstruct->proisagg, MOD_OPT, "function is not agg");
+        AssertEreport(!procstruct->proiswindow, MOD_OPT, "function is not window function");
         nargs = procstruct->pronargs;
         AssertEreport((nargs >= 1 && nargs <= 3), MOD_OPT, "The number of parameters in the function is incorrect.");
         AssertEreport((nargs < 2 || procstruct->proargtypes.values[1] == INT4OID),
@@ -1050,7 +1050,7 @@ int parser_coercion_errposition(ParseState* pstate, int coerce_location, Node* i
 }
 
 /* choose_specific_expr_type
- * Choose case when and coalesce return value type in DB_FMT_C.
+ * Choose case when and coalesce return value type in C_FORMAT.
  */
 static Oid choose_specific_expr_type(ParseState* pstate, List* exprs, const char* context)
 {
@@ -1327,12 +1327,12 @@ Oid select_common_type(ParseState* pstate, List* exprs, const char* context, Nod
         }
     }
 
-    if (DB_IS_CMPT(DB_CMPT_C) && context != NULL &&
+    if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && context != NULL &&
         (0 == strncmp(context, "CASE", sizeof("CASE")) || 0 == strncmp(context, "COALESCE", sizeof("COALESCE")))) {
-        /* To TD format, we need handle numeric and string mix situation*/
+        /* To C format, we need handle numeric and string mix situation*/
         ptype = choose_specific_expr_type(pstate, exprs, context);
     }
-    /* Follow a db nvl*/
+    /* Follow A db nvl*/
     else if (context != NULL && 0 == strncmp(context, "NVL", sizeof("NVL"))) {
         ptype = choose_nvl_type(pstate, exprs, context);
     } else {

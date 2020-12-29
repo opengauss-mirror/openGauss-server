@@ -2,17 +2,6 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * ---------------------------------------------------------------------------------------
  *
  *  heartbeat.cpp
  *
@@ -38,8 +27,8 @@
 const int EXIT_MODE_TWO = 2;
 const int SLEEP_MILLISECONDS = 20;
 
-static HeartbeatServer* g_heartbeat_server = NULL;
-static HeartbeatClient* g_heartbeat_client = NULL;
+static HeartbeatServer *g_heartbeat_server = NULL;
+static HeartbeatClient *g_heartbeat_client = NULL;
 
 /* Signal handlers */
 static void heartbeat_sighup_handler(SIGNAL_ARGS);
@@ -48,13 +37,13 @@ static void heartbeat_shutdown_handler(SIGNAL_ARGS);
 static void heartbeat_sigusr1_handler(SIGNAL_ARGS);
 static void heartbeat_kill(int code, Datum arg);
 static void heartbeat_init(void);
-static void set_block_sigmask(sigset_t* block_signal);
+static void set_block_sigmask(sigset_t *block_signal);
 static void destroy_client_and_server();
 static int create_client_and_server(int epollfd);
 static void delay_control(TimestampTz last_send_time);
-static int deal_with_events(int epollfd, struct epoll_event* events, const sigset_t* block_sig_set);
+static int deal_with_events(int epollfd, struct epoll_event *events, const sigset_t *block_sig_set);
 static int deal_with_sigup();
-static void unset_events_conn(struct epoll_event* events, int begin, int size, HeartbeatConnection* con);
+static void unset_events_conn(struct epoll_event *events, int begin, int size, HeartbeatConnection *con);
 
 static int server_loop(void)
 {
@@ -137,7 +126,7 @@ static int deal_with_sigup()
     return 0;
 }
 
-static int deal_with_events(int epollfd, struct epoll_event* events, const sigset_t* block_sig_set)
+static int deal_with_events(int epollfd, struct epoll_event *events, const sigset_t *block_sig_set)
 {
     /* Wait for events to happen in send_interval */
     int fds = epoll_pwait(epollfd, events, MAX_EVENTS, u_sess->attr.attr_common.dn_heartbeat_interval, block_sig_set);
@@ -149,12 +138,12 @@ static int deal_with_events(int epollfd, struct epoll_event* events, const sigse
     }
 
     for (int i = 0; i < fds; i++) {
-        HeartbeatConnection* con = (HeartbeatConnection*)events[i].data.ptr;
-        HeartbeatConnection* releasedConn = NULL;
+        HeartbeatConnection *con = (HeartbeatConnection *)events[i].data.ptr;
+        HeartbeatConnection *releasedConn = NULL;
 
         if (events[i].events & EPOLLIN) {
             if (con != NULL) {
-                con->callback(epollfd, events[i].events, con, (void**)&releasedConn);
+                con->callback(epollfd, events[i].events, con, (void **)&releasedConn);
                 if (releasedConn) {
                     /* skip remaining events of the release connection */
                     unset_events_conn(events, i, fds, releasedConn);
@@ -167,10 +156,10 @@ static int deal_with_events(int epollfd, struct epoll_event* events, const sigse
     return 0;
 }
 
-static void unset_events_conn(struct epoll_event* events, int begin, int size, HeartbeatConnection* con)
+static void unset_events_conn(struct epoll_event *events, int begin, int size, HeartbeatConnection *con)
 {
     for (int i = begin; i < size; i++) {
-        HeartbeatConnection* curCon = (HeartbeatConnection*)events[i].data.ptr;
+        HeartbeatConnection *curCon = (HeartbeatConnection *)events[i].data.ptr;
 
         if (curCon == con) {
             events[i].data.ptr = NULL;
@@ -195,7 +184,7 @@ static void delay_control(TimestampTz last_send_time)
     pg_usleep(secs * USECS_PER_SEC + microsecs);
 }
 
-static void set_block_sigmask(sigset_t* block_signal)
+static void set_block_sigmask(sigset_t *block_signal)
 {
     (void)sigfillset(block_signal);
 #ifdef SIGTRAP
@@ -269,7 +258,7 @@ void heartbeat_main(void)
     MemoryContext heartbeat_context;
 
     t_thrd.role = HEARTBEAT;
-    knl_thread_set_name("Heartbeater");
+    t_thrd.proc_cxt.MyProgName = "Heartbeat";
 
     heartbeat_init();
 
@@ -302,7 +291,7 @@ void heartbeat_main(void)
     /*
      * Create a resource owner to keep track of our resources.
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Heartbeat");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Heartbeat", MEMORY_CONTEXT_STORAGE);
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -310,8 +299,8 @@ void heartbeat_main(void)
      * possible memory leaks.  Formerly this code just ran in
      * TopMemoryContext, but resetting that would be a really bad idea.
      */
-    heartbeat_context = AllocSetContextCreate(
-        TopMemoryContext, "Heartbeat", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    heartbeat_context = AllocSetContextCreate(TopMemoryContext, "Heartbeat", ALLOCSET_DEFAULT_MINSIZE,
+                                              ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     (void)MemoryContextSwitchTo(heartbeat_context);
 
     /*
@@ -333,7 +322,7 @@ void heartbeat_main(void)
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
 
-    ereport(LOG, (errmsg("Heartbeater thread started")));
+    ereport(LOG, (errmsg("heartbeat thread started")));
     proc_exit(server_loop());
 }
 
@@ -398,7 +387,7 @@ static void heartbeat_sigusr1_handler(SIGNAL_ARGS)
 TimestampTz get_last_reply_timestamp(int replindex)
 {
     /* Initialize the last reply timestamp */
-    volatile heartbeat_state* stat = t_thrd.heartbeat_cxt.state;
+    volatile heartbeat_state *stat = t_thrd.heartbeat_cxt.state;
     TimestampTz last_reply_time = 0;
     if (stat == NULL || stat->pid == 0) {
         return last_reply_time;
@@ -434,8 +423,8 @@ Size heartbeat_shmem_size(void)
 void heartbeat_shmem_init(void)
 {
     bool found = false;
-    t_thrd.heartbeat_cxt.state =
-        (heartbeat_state*)ShmemInitStruct("heatbeat Shmem Data", heartbeat_shmem_size(), &found);
+    t_thrd.heartbeat_cxt.state = (heartbeat_state *)ShmemInitStruct("heatbeat Shmem Data", heartbeat_shmem_size(),
+                                                                    &found);
     if (!found) {
         errno_t rc = memset_s(t_thrd.heartbeat_cxt.state, heartbeat_shmem_size(), 0, heartbeat_shmem_size());
         securec_check(rc, "", "");
@@ -451,7 +440,7 @@ static void heartbeat_init(void)
      * EXEC_BACKEND mechanism from the postmaster).
      */
     Assert(t_thrd.heartbeat_cxt.state != NULL);
-    volatile heartbeat_state* stat = t_thrd.heartbeat_cxt.state;
+    volatile heartbeat_state *stat = t_thrd.heartbeat_cxt.state;
     stat->pid = t_thrd.proc_cxt.MyProcPid;
 
 #ifndef WIN32
@@ -467,7 +456,7 @@ static void heartbeat_init(void)
 /* Destroy the per-walsender data structure for this walsender process */
 static void heartbeat_kill(int code, Datum arg)
 {
-    heartbeat_state* stat = t_thrd.heartbeat_cxt.state;
+    heartbeat_state *stat = t_thrd.heartbeat_cxt.state;
     errno_t rc = 0;
 
     Assert(stat != NULL);
@@ -479,8 +468,8 @@ static void heartbeat_kill(int code, Datum arg)
     stat->pid = 0;
     stat->lwpId = 0;
 
-    rc = memset_s(
-        stat->channel_array, sizeof(channel_info) * MAX_REPLNODE_NUM, 0, sizeof(channel_info) * MAX_REPLNODE_NUM);
+    rc = memset_s(stat->channel_array, sizeof(channel_info) * MAX_REPLNODE_NUM, 0,
+                  sizeof(channel_info) * MAX_REPLNODE_NUM);
     securec_check_c(rc, "", "");
     SpinLockRelease(&stat->mutex);
 
@@ -518,9 +507,8 @@ static int create_client_and_server(int epollfd)
     }
 
     if (g_heartbeat_server == NULL && g_heartbeat_client == NULL) {
-        ereport(COMMERROR,
-            (errmsg("There is no need to create heartbeat server and client in mode %d.",
-                t_thrd.postmaster_cxt.HaShmData->current_mode)));
+        ereport(COMMERROR, (errmsg("There is no need to create heartbeat server and client in mode %d.",
+                                   t_thrd.postmaster_cxt.HaShmData->current_mode)));
 
         /* Wait to change to the primary mode or standby mode. */
         pg_usleep(1000000L);

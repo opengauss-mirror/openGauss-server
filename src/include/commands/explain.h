@@ -136,7 +136,7 @@ typedef struct CompareInfo {
 typedef enum PlanColOpt {
     ANAL_OPT = 0, COST_OPT, VERBOSE_OPT, PRED_OPT_TIME, PRED_OPT_ROW, PRED_OPT_MEM
 } PlanColOpt;
-
+typedef enum ExecutorTime { DN_START_TIME = 0, DN_RUN_TIME, DN_END_TIME} ExecutorTime;
 typedef struct PlanTableEntry {
     const char* name;     /* column name */
     int val;              /* column enum index in PlanInfoType */
@@ -164,7 +164,7 @@ typedef struct PlanTableData {
     char session_id[SESSIONIDLEN];  /* start time + thread id */
     Oid user_id;                    /* user id of this record, uint32 */
     char statement_id[STMTIDLEN];   /* statement_id that user input. */
-    uint64 query_id;                /* a use plan_id instead of query_id as column name */
+    uint64 query_id;                /* A db use plan_id instead of query_id as column name*/
     int node_id;                    /* plan node id. */
     char operation[OPERATIONLEN];   /* plan node operation. */
     char options[OPTIONSLEN];       /* plan node options. */
@@ -240,10 +240,10 @@ public:
     /* Set object_type according to relkind in pg_class. */
     void set_object_type(RangeTblEntry* rte, char** object_type);
 
-    /* Set operation and options for remote query and stream node. */
+    /* Set operation and options for remote query and stream node.*/
     void set_plan_table_streaming_ops(char* pname, char** operation, char** options);
 
-    /* Set join option 'CARTESIAN' to fit with a. */
+    /* Set join option 'CARTESIAN' to fit with A db. */
     void set_plan_table_join_options(Plan* plan, char** options);
 
     /* Set operation and options for node except stream node. */
@@ -455,8 +455,8 @@ typedef struct ExplainState {
     DN_RunInfo datanodeinfo;
     int* wlm_statistics_plan_max_digit; /* print plan for wlm statistics */
     char* statement_id;                 /* statement_id for EXPLAIN PLAN */
-    char* opt_model_name;
     bool is_explain_gplan;
+    char* opt_model_name;
 } ExplainState;
 
 /* Hook for plugins to get control in explain_get_index_name() */
@@ -474,7 +474,8 @@ extern void ExplainOneUtility(
     Node* utilityStmt, IntoClause* into, ExplainState* es, const char* queryString, ParamListInfo params);
 
 extern void ExplainOnePlan(
-    PlannedStmt* plannedstmt, IntoClause* into, ExplainState* es, const char* queryString, ParamListInfo params);
+    PlannedStmt* plannedstmt, IntoClause* into, ExplainState* es, const char* queryString,
+    DestReceiver *dest, ParamListInfo params);
 
 extern void ExplainPrintPlan(ExplainState* es, QueryDesc* queryDesc);
 
@@ -503,4 +504,3 @@ extern bool checkSelectStmtForPlanTable(List* rangeTable);
 extern int checkPermsForPlanTable(RangeTblEntry* rte);
 
 #endif /* EXPLAIN_H */
-

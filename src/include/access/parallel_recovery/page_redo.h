@@ -40,6 +40,9 @@ namespace parallel_recovery {
 
 static const uint32 PAGE_WORK_QUEUE_SIZE = 1024;
 
+static const uint32 PAGE_REDO_WORKER_APPLY_ITEM = 0;
+static const uint32 PAGE_REDO_WORKER_SKIP_ITEM = 1;
+
 struct SafeRestartPoint {
     SafeRestartPoint* next;
     XLogRecPtr restartPoint;
@@ -69,7 +72,7 @@ struct PageRedoWorker {
     /* The proc struct of this worker thread. */
     PGPROC* proc;
 
-    /* 
+    /* ---------------------------------------------
      * Initial context
      *
      * Global variable values at worker creation time.
@@ -80,7 +83,7 @@ struct PageRedoWorker {
     /* Initial timeline ID from the dispatcher. */
     TimeLineID initialTimeLineID;
 
-    /* 
+    /* ---------------------------------------------
      * Redo item queue.
      *
      * Redo items are provided by the dispatcher and consumed by each
@@ -95,7 +98,7 @@ struct PageRedoWorker {
     /* To-be-replayed log-record-list queue. */
     SPSCBlockingQueue* queue;
 
-    /* 
+    /* ---------------------------------------------
      * Safe restart point handling.
      */
 
@@ -111,13 +114,13 @@ struct PageRedoWorker {
      */
     XLogRecPtr lastCheckedRestartPoint;
 
-    /* 
+    /* ---------------------------------------------
      * Per-worker run-time context
      *
      * States maintained by each individual page-redo worker during
      * log replay.  These are read by the txn-redo worker.
      */
-    /*
+    /* ---------------------------------------------
      * Global run-time context
      *
      * States maintained outside page-redo worker during log replay.
@@ -132,7 +135,7 @@ struct PageRedoWorker {
     char* DataDir;
 
     TransactionId RecentXmin;
-    /* 
+    /* ---------------------------------------------
      * Redo end context
      *
      * Thread-local variable values saved after log replay has completed.
@@ -145,7 +148,7 @@ struct PageRedoWorker {
     /* XLog invalid pages. */
     void* xlogInvalidPages;
 
-    /* 
+    /* ---------------------------------------------
      * Phase barrier.
      *
      * A barrier for synchronizing the dispatcher and page redo worker
@@ -159,13 +162,12 @@ struct PageRedoWorker {
     uint64 statWaitReach;
     uint64 statWaitReplay;
     pg_atomic_uint32 readyStatus;
+    pg_atomic_uint32 skipItemFlg;
     MemoryContext oldCtx;
-
     int bufferPinWaitBufId;
 };
 
 extern THR_LOCAL PageRedoWorker* g_redoWorker;
-
 
 /* Worker lifecycle. */
 PageRedoWorker* StartPageRedoWorker(uint32 id);
@@ -184,6 +186,7 @@ void PageRedoWorkerMain();
 
 /* Dispatcher phases. */
 bool SendPageRedoEndMark(PageRedoWorker* worker);
+bool SendPageRedoClearMark(PageRedoWorker* worker);
 void WaitPageRedoWorkerReachLastMark(PageRedoWorker* worker);
 
 /* Redo processing. */
@@ -205,8 +208,8 @@ bool RedoWorkerIsIdle(PageRedoWorker* worker);
 void PageRedoSetAffinity(uint32 id);
 
 void DumpPageRedoWorker(PageRedoWorker* worker);
-void HandlePageRedoInterrupts();
 void SetPageRedoWorkerIndex(int index);
+void OnlyFreeRedoItem(RedoItem* item);
 void SetCompletedReadEndPtr(PageRedoWorker* worker, XLogRecPtr readPtr, XLogRecPtr endPtr);
 void GetCompletedReadEndPtr(PageRedoWorker* worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr);
 void UpdateRecordGlobals(RedoItem* item, HotStandbyState standbyState);

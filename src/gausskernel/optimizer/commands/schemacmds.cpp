@@ -17,6 +17,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/gtm.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
@@ -34,7 +35,7 @@
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
 #include "utils/fmgroids.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -42,12 +43,16 @@
 #include "optimizer/pgxcplan.h"
 #endif
 
+static const int TABLE_TYPE_HDFS = 1;
+static const int TABLE_TYPE_TIMESERIES = 2;
+
 static void AlterSchemaOwner_internal(HeapTuple tup, Relation rel, Oid newOwnerId);
-static StringInfo HDFSTableExistInSchema(Oid schemaOid);
+static StringInfo TableExistInSchema(Oid schemaOid, const int tableType);
 
 /*
  * CREATE SCHEMA
  */
+
 #ifdef PGXC
 void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString, bool sentToRemote)
 #else
@@ -56,7 +61,6 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
 {
     const char* schemaName = stmt->schemaname;
     const char* authId = stmt->authid;
-    char* dbname = NULL;
     Oid namespaceId;
     OverrideSearchPath* overridePath = NULL;
     List* parsetree_list = NIL;
@@ -126,22 +130,15 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
          * superuser will always have both of these privileges a fortiori.
          */
         aclresult = pg_database_aclcheck(u_sess->proc_cxt.MyDatabaseId, saved_uid, ACL_CREATE);
-        if (aclresult != ACLCHECK_OK) {
-            dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-            if (dbname == NULL) {
-                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                            errmsg("database with OID %u does not exist",
-                                u_sess->proc_cxt.MyDatabaseId)));
-            }
-            aclcheck_error(aclresult, ACL_KIND_DATABASE, dbname);
-        }
+        if (aclresult != ACLCHECK_OK)
+            aclcheck_error(aclresult, ACL_KIND_DATABASE, get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId));
 
         check_nodegroup_privilege(saved_uid, saved_uid, ACL_CREATE);
 
         check_is_member_of_role(saved_uid, owner_uid);
 
         /* Additional check to protect reserved schema names */
-        // @Temp Table. We allow datanode to create pg_temp namespace to enable create namespace stmt by CN to execute on
+        //@Temp Table. We allow datanode to create pg_temp namespace to enable create namespace stmt by CN to execute on
         // DN
         if (!g_instance.attr.attr_common.allowSystemTableMods && !u_sess->attr.attr_common.IsInplaceUpgrade &&
             IsReservedName(schemaName) && !IS_PGXC_DATANODE)
@@ -160,7 +157,7 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
      * error, transaction abort will clean things up.)
      */
     if (saved_uid != owner_uid)
-        SetUserIdAndSecContext(owner_uid, save_sec_context | SECURITY_LOCAL_USERID_CHANGE);
+        SetUserIdAndSecContext(owner_uid, (uint32)save_sec_context | SECURITY_LOCAL_USERID_CHANGE);
 
     /* Create the schema's namespace */
     namespaceId = NamespaceCreate(schemaName, owner_uid, false);
@@ -223,7 +220,7 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
      * straight to ProcessUtility.
      */
     foreach (parsetree_item, parsetree_list) {
-        Node* stmt = (Node*)lfirst(parsetree_item);
+        Node* stmt_tmp = (Node*)lfirst(parsetree_item);
 
         /*
          * we have two basic rules for view
@@ -241,21 +238,21 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
          * anyway.
          *
          */
-        if (IsA(stmt, ViewStmt) && IS_PGXC_DATANODE && !IS_SINGLE_NODE && !IsInitdb &&
+        if (IsA(stmt_tmp, ViewStmt) && IS_PGXC_DATANODE && !IS_SINGLE_NODE && !IsInitdb &&
             !u_sess->attr.attr_common.IsInplaceUpgrade && !isRestoreMode)
             continue;
 
-        if (IsA(stmt, IndexStmt)) {
-            IndexStmt* iStmt = (IndexStmt*)stmt;
+        if (IsA(stmt_tmp, IndexStmt)) {
+            IndexStmt* iStmt = (IndexStmt*)stmt_tmp;
             iStmt->skip_mem_check = true;
         }
 
-        if (IsA(stmt, RemoteQuery) && withHashbucket) {
-            RemoteQuery* rquery = (RemoteQuery*)stmt;
+        if (IsA(stmt_tmp, RemoteQuery) && withHashbucket) {
+            RemoteQuery* rquery = (RemoteQuery*)stmt_tmp;
             rquery->is_send_bucket_map = true;
         }
         /* do this step */
-        ProcessUtility(stmt,
+        ProcessUtility(stmt_tmp,
             queryString,
             NULL,
             false, /* not top level */
@@ -273,6 +270,8 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
 
     /* Reset current user and security context */
     SetUserIdAndSecContext(saved_uid, save_sec_context);
+
+    list_free(parsetree_list);
 }
 
 /*
@@ -283,7 +282,7 @@ void RemoveSchemaById(Oid schemaOid)
     Relation relation;
     HeapTuple tup;
 
-    if (IsPerformanceNamespace(schemaOid)) {
+    if (IsPerformanceNamespace(schemaOid) && !u_sess->attr.attr_common.IsInplaceUpgrade) {
         ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema 'dbe_perf' doesn't allow to drop")));
     }
     if (IsSnapshotNamespace(schemaOid)) {
@@ -312,10 +311,8 @@ void RenameSchema(const char* oldname, const char* newname)
     HeapTuple tup;
     Relation rel;
     AclResult aclresult;
-    StringInfo existDFSTbl;
     const int STR_SCHEMA_NAME_LENGTH = 9;
     const int STR_SNAPSHOT_LENGTH = 8;
-    char* dbname = NULL;
     if ((strncmp(oldname, "dbe_perf", STR_SCHEMA_NAME_LENGTH) == 0) ||
         (strncmp(oldname, "snapshot", STR_SNAPSHOT_LENGTH) == 0)) {
         ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema '%s' doesn't allow to rename", oldname)));
@@ -331,35 +328,41 @@ void RenameSchema(const char* oldname, const char* newname)
     if (OidIsValid(get_namespace_oid(newname, true)))
         ereport(ERROR, (errcode(ERRCODE_DUPLICATE_SCHEMA), errmsg("schema \"%s\" already exists", newname)));
 
-    /* must be owner */
-    if (!pg_namespace_ownercheck(HeapTupleGetOid(tup), GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_NAMESPACE, oldname);
+    /* Must be owner or have alter privilege of the schema. */
+    aclresult = pg_namespace_aclcheck(HeapTupleGetOid(tup), GetUserId(), ACL_ALTER);
+    if (aclresult != ACLCHECK_OK && !pg_namespace_ownercheck(HeapTupleGetOid(tup), GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_NAMESPACE, oldname);
+    }
 
     /* must have CREATE privilege on database */
     aclresult = pg_database_aclcheck(u_sess->proc_cxt.MyDatabaseId, GetUserId(), ACL_CREATE);
-    if (aclresult != ACLCHECK_OK) {
-        dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-        if (dbname == NULL) {
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                        errmsg("database with OID %u does not exist",
-                            u_sess->proc_cxt.MyDatabaseId)));
-        }
-        aclcheck_error(aclresult, ACL_KIND_DATABASE, dbname);
-    }
+    if (aclresult != ACLCHECK_OK)
+        aclcheck_error(aclresult, ACL_KIND_DATABASE, get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId));
 
     if (!g_instance.attr.attr_common.allowSystemTableMods && !u_sess->attr.attr_common.IsInplaceUpgrade &&
         IsReservedName(newname))
-        ereport(ERROR, (errcode(ERRCODE_RESERVED_NAME),
+        ereport(ERROR,
+            (errcode(ERRCODE_RESERVED_NAME),
                 errmsg("unacceptable schema name \"%s\"", newname),
                 errdetail("The prefix \"pg_\" is reserved for system schemas.")));
     /*
-     * If the HDFS table exists in the schema, do not rename it.
+     * If the HDFS table or timeseries table exists in the schema, do not rename it.
      */
-    existDFSTbl = HDFSTableExistInSchema(HeapTupleGetOid(tup));
-    if (existDFSTbl->len != 0) {
-        ereport(ERROR, (errcode(ERRCODE_RESERVED_NAME),
+    StringInfo existDFSTbl = TableExistInSchema(HeapTupleGetOid(tup), TABLE_TYPE_HDFS);
+    StringInfo existTimeSeriesTbl = TableExistInSchema(HeapTupleGetOid(tup), TABLE_TYPE_TIMESERIES);
+    if (0 != existDFSTbl->len) {
+        ereport(ERROR,
+            (errcode(ERRCODE_RESERVED_NAME),
                 errmsg("It is not supported to rename schema \"%s\" which includes DFS table \"%s\".",
-                    oldname, existDFSTbl->data)));
+                    oldname,
+                    existDFSTbl->data)));
+    }
+    if (0 != existTimeSeriesTbl->len) {
+        ereport(ERROR,
+            (errcode(ERRCODE_RESERVED_NAME),
+                errmsg("It is not supported to rename schema \"%s\" which includes timeseries table \"%s\".",
+                    oldname,
+                    existTimeSeriesTbl->data)));
     }
 
     /* rename */
@@ -368,35 +371,39 @@ void RenameSchema(const char* oldname, const char* newname)
     CatalogUpdateIndexes(rel, tup);
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
- * Whether or not HDFS table exists in Scheam.
+ * Whether or not HDFS or timeseries table exists in Scheam.
  * @_in_param schemaName: The schema name to be checked.
  * @return Return StringInfo of schema name if exists, otherwise return
  * StringInfo, data of which is empty.
  */
-static StringInfo HDFSTableExistInSchema(Oid namespaceId)
+static StringInfo TableExistInSchema(Oid namespaceId, const int tableType)
 {
     ScanKeyData key[2];
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     Relation classRel;
-    StringInfo existDFSTbl = makeStringInfo();
+    StringInfo existTbl = makeStringInfo();
 
     ScanKeyInit(&key[0], Anum_pg_class_relnamespace, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(namespaceId));
     ScanKeyInit(&key[1], Anum_pg_class_relkind, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(RELKIND_RELATION));
 
     classRel = heap_open(RelationRelationId, AccessShareLock);
-    scan = heap_beginscan(classRel, SnapshotNow, 2, key);
+    scan = tableam_scan_begin(classRel, SnapshotNow, 2, key);
 
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Oid RelOid = HeapTupleGetOid(tuple);
 
         Relation rel = relation_open(RelOid, AccessShareLock);
-        if (RelationIsDfsStore(rel)) {
-            appendStringInfo(existDFSTbl, "%s", RelationGetRelationName(rel));
+        if (tableType == TABLE_TYPE_HDFS && RelationIsDfsStore(rel)) {
+            appendStringInfo(existTbl, "%s", RelationGetRelationName(rel));
+            relation_close(rel, AccessShareLock);
+            break;
+        } else if (tableType == TABLE_TYPE_TIMESERIES && RelationIsTsStore(rel)) {
+            appendStringInfo(existTbl, "%s", RelationGetRelationName(rel));
             relation_close(rel, AccessShareLock);
             break;
         }
@@ -404,10 +411,10 @@ static StringInfo HDFSTableExistInSchema(Oid namespaceId)
         relation_close(rel, AccessShareLock);
     }
 
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(classRel, AccessShareLock);
 
-    return existDFSTbl;
+    return existTbl;
 }
 
 void AlterSchemaOwner_oid(Oid oid, Oid newOwnerId)
@@ -457,6 +464,7 @@ static void AlterSchemaOwner_internal(HeapTuple tup, Relation rel, Oid newOwnerI
     Assert(RelationGetRelid(rel) == NamespaceRelationId);
 
     nspForm = (Form_pg_namespace)GETSTRUCT(tup);
+
     /*
      * If the new owner is the same as the existing owner, consider the
      * command to have succeeded.  This is for dump restoration purposes.
@@ -466,7 +474,6 @@ static void AlterSchemaOwner_internal(HeapTuple tup, Relation rel, Oid newOwnerI
         bool repl_null[Natts_pg_namespace];
         bool repl_repl[Natts_pg_namespace];
         Acl* newAcl = NULL;
-        char* dbname = NULL;
         Datum aclDatum;
         bool isNull = false;
         HeapTuple newtuple;
@@ -489,15 +496,8 @@ static void AlterSchemaOwner_internal(HeapTuple tup, Relation rel, Oid newOwnerI
          * no special case for them.
          */
         aclresult = pg_database_aclcheck(u_sess->proc_cxt.MyDatabaseId, GetUserId(), ACL_CREATE);
-        if (aclresult != ACLCHECK_OK) {
-            dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-            if (dbname == NULL) {
-                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                            errmsg("database with OID %u does not exist",
-                                u_sess->proc_cxt.MyDatabaseId)));
-            }
-            aclcheck_error(aclresult, ACL_KIND_DATABASE, dbname);
-        }
+        if (aclresult != ACLCHECK_OK)
+            aclcheck_error(aclresult, ACL_KIND_DATABASE, get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId));
         errno_t errorno = EOK;
         errorno = memset_s(repl_null, sizeof(repl_null), false, sizeof(repl_null));
         securec_check(errorno, "\0", "\0");
@@ -518,12 +518,12 @@ static void AlterSchemaOwner_internal(HeapTuple tup, Relation rel, Oid newOwnerI
             repl_val[Anum_pg_namespace_nspacl - 1] = PointerGetDatum(newAcl);
         }
 
-        newtuple = heap_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
+        newtuple = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
 
         simple_heap_update(rel, &newtuple->t_self, newtuple);
         CatalogUpdateIndexes(rel, newtuple);
 
-        heap_freetuple_ext(newtuple);
+        tableam_tops_free_tuple(newtuple);
 
         /* Update owner dependency reference */
         changeDependencyOnOwner(NamespaceRelationId, HeapTupleGetOid(tup), newOwnerId);

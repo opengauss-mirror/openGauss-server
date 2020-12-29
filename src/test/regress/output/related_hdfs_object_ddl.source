@@ -1,0 +1,526 @@
+set enable_global_stats = true;
+--test hdfs tablespace
+--create tablesapce
+----normal option
+\! rm -rf @abs_srcdir@/hdfs_ts05
+\! rm -rf @abs_srcdir@/hdfs_ts06
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05';
+select spcname, spcoptions from pg_tablespace where spcname='hdfs_ts05';
+--?.*
+--?.*
+ hdfs_ts05 | 
+(1 row)
+
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='general', Seq_page_cost=0.5, Random_page_cost=0.5);
+select spcname, spcoptions from pg_tablespace where spcname='hdfs_ts05';
+--?.*
+--?.*
+ hdfs_ts05 | {filesystem=general,seq_page_cost=0.5,random_page_cost=0.5}
+(1 row)
+
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' maxsize 'UNLIMITED' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+select spcname, spcoptions, spcmaxsize from pg_tablespace where spcname='hdfs_ts05';
+--?.*
+--?.*
+--? hdfs_ts05 | {filesystem=hdfs,"address=.*",cfgpath=/opt/config,storepath=.*_ts} | 
+(1 row)
+
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' maxsize '50K' with(filesystem='hdfs', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts', Seq_page_cost=0.5, Random_page_cost=0.5);
+select spcname, spcoptions, spcmaxsize from pg_tablespace where spcname='hdfs_ts05';
+--?.*
+--?.*
+--? hdfs_ts05 | {filesystem=hdfs,cfgpath=/opt/config,storepath=.*,seq_page_cost=0.5,random_page_cost=0.5} | 50 K
+(1 row)
+
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem="hDfs", cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_TS');
+select spcname, spcoptions from pg_tablespace where spcname='hdfs_ts05';
+--?.*
+--?.*
+--? hdfs_ts05 | {filesystem=hDfs,cfgpath=/opt/config,storepath=.*_TS}
+(1 row)
+
+create table temp_tblspc_tbl(a int) tablespace hdfs_ts05;
+\d+ temp_tblspc_tbl
+                   Table "public.temp_tblspc_tbl"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts05"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=no, version=0.12
+
+set cstore_insert_mode=main;
+insert into temp_tblspc_tbl values(12);
+SELECT * FROM temp_tblspc_tbl;
+ a  
+----
+ 12
+(1 row)
+
+drop table temp_tblspc_tbl;
+---------filesYstem, adDress, cfgpatH, sTorepath
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with("filesYstem"="hdfs", "adDress"='@hdfshostname@:@hdfsport@',"cfgpatH"='@hdfscfgpath@',"sTorepath"='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+select spcname, spcoptions from pg_tablespace where spcname='hdfs_ts05';
+--?.*
+--?.*
+--? hdfs_ts05 | {filesYstem=hdfs,"adDress=10.185.178.241:25000,10.185.178.239:25000",cfgpatH=/opt/config,sTorepath=/.*_ts}
+(1 row)
+
+create table temp_tblspc_tbl(a int) tablespace hdfs_ts05;
+\d+ temp_tblspc_tbl
+                   Table "public.temp_tblspc_tbl"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts05"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=no, version=0.12
+
+set cstore_insert_mode=main;
+insert into temp_tblspc_tbl values(12);
+SELECT * FROM temp_tblspc_tbl;
+ a  
+----
+ 12
+(1 row)
+
+drop table temp_tblspc_tbl;
+-----unnormal optoins combination
+---------general, address, cfgpath, storepath
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='general', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  Unsupport address, cfgpath, storepath options when the filesystem is not HDFS.
+---------general, address
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='general',address='@hdfshostname@:@hdfsport@');
+ERROR:  Unsupport address, cfgpath, storepath options when the filesystem is not HDFS.
+---------general, cfgpath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='general', cfgpath='@hdfscfgpath@');
+ERROR:  Unsupport address, cfgpath, storepath options when the filesystem is not HDFS.
+---------general, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='general',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  Unsupport address, cfgpath, storepath options when the filesystem is not HDFS.
+---------hdfs, cfgpath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs',  cfgpath='@hdfscfgpath@');
+ERROR:  Failed to get storepath from tablespace options.
+---------hdfs, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  Failed to get cfgpath from tablespace options.
+---------hdfs, cfgpath, error format storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='hanfng/hdfs_ts505');
+ERROR:  The path "hanfng/hdfs_ts505" must be an absolute path.
+---------hdfs, error format cfgpath, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='opt/config',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  The path "opt/config" must be an absolute path.
+----------------------------------------------------------------time out
+--------hdfs, invalid address, cfgpath, storepath
+--create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='10.185.168.241:25000,10.185.178.239:25000', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+---------hdfs, error format address, cfgpath, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='10.185.878.241:25000,10.185.178.239:25000', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  invalid input syntax for type inet: "10.185.878.241"
+---------hdfs, ipv6 format address, cfgpath, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='1050:0:0:0:5:600:300c:326b', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  invalid input syntax for type inet: "1050"
+--------more then 2 address,  cfgpath, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' maxsize 'UNLIMITED' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@,10.185.178.131:25000', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  The count of address "@hdfshostname@:@hdfsport@,10.185.178.131:25000" must be not greater than 2.
+---------hdfs, invalid cfgpath, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='/opt',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  Failed to connect hdfs, detail can be found in log of coordinator1.
+------------------not hdfs, general
+---------hdf, address, cfgpath, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdf', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  Invalid string for  "filesystem" option.
+DETAIL:  Valid string are "general", "hdfs".
+---------filesyste, address, cfgpath, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesyste='hdf', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  unrecognized parameter "filesyste"
+---------hdfs, addres, cfgpath, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', addres='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  unrecognized parameter "addres"
+---------hdfs, address, cfgpat, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpat='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  unrecognized parameter "cfgpat"
+---------hdfs, address, cfgpath, storepat
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepat='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  unrecognized parameter "storepat"
+---------hdfss, address, cfgpath, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfss', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  Invalid string for  "filesystem" option.
+DETAIL:  Valid string are "general", "hdfs".
+---------hdfs, addresss, cfgpath, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', addresss='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  unrecognized parameter "addresss"
+---------hdfs, address, cfgpaths, storepath
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpaths='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  unrecognized parameter "cfgpaths"
+---------hdfs, address, cfgpath, storepaths
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepaths='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  unrecognized parameter "storepaths"
+------- the location has been Occupied, create tablespace
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+create tablespace hdfs_ts06 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+--?ERROR:  directory ".*" already in use as a tablespace
+--------the storepath has been Occupied, create tablespace
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+create tablespace hdfs_ts06 location '@abs_srcdir@/hdfs_ts06' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+--?ERROR:  Directory ".*" already in use as a tablespace on HDFS.
+\! rm -rf @abs_srcdir@/tmp_check/hdfs_ts06
+------drop tablespace
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+----------exists a hdfs table, drop tablespace failed, drop hdfstable, then drop tabelspace.
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+create table hdfs_tbl(a int) tablespace hdfs_ts05;
+insert into hdfs_tbl values(1);
+set cstore_insert_mode=main;
+insert into hdfs_tbl values(2);
+drop tablespace if exists hdfs_ts05;
+ERROR:  tablespace "hdfs_ts05" is not empty
+select * from hdfs_tbl;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+drop table hdfs_tbl;
+create table hdfs_tbl(a int) tablespace hdfs_ts05;
+drop tablespace if exists hdfs_ts05;
+ERROR:  tablespace "hdfs_ts05" is not empty
+drop table hdfs_tbl;
+drop tablespace if exists hdfs_ts05;
+-- alter tablespace rename
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/tmp_check/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+alter tablespace hdfs_ts05 rename to new_hdfs_ts05;
+select spcname from pg_tablespace where spcname like '%hdfs_ts05';
+    spcname    
+---------------
+ new_hdfs_ts05
+(1 row)
+
+alter tablespace new_hdfs_ts05 rename to hdfs_ts05;
+-- alter tablespace owner to newuser
+select spcname, pg_catalog.pg_get_userbyid(spcowner) AS spcowner from pg_tablespace where spcname like '%hdfs_ts05';
+--?.*
+--?.*
+--? hdfs_ts05 |.*
+(1 row)
+
+create user newuser identified by "gauss@123";
+alter tablespace hdfs_ts05 owner to newuser;
+select spcname, pg_catalog.pg_get_userbyid(spcowner) AS spcowner from pg_tablespace where spcname like '%hdfs_ts05';
+  spcname  | spcowner 
+-----------+----------
+ hdfs_ts05 | newuser
+(1 row)
+
+drop tablespace if exists hdfs_ts05;
+drop user newuser;
+---unsupport alter tablespace optoins include set and reset
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/tmp_check/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+------unsupport set/reset filesystem, address, cfgpath, storepath
+alter tablespace hdfs_ts05 set (filesystem='hdfs');
+ERROR:  It is unsupported to alter tablespace option "filesystem" for DFS tablespace.
+alter tablespace hdfs_ts05 set (address='@hdfshostname@:@hdfsport@');
+ERROR:  It is unsupported to alter tablespace option "address" for DFS tablespace.
+alter tablespace hdfs_ts05 set (cfgpath='@hdfscfgpath@');
+ERROR:  It is unsupported to alter tablespace option "cfgpath" for DFS tablespace.
+alter tablespace hdfs_ts05 set (storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+ERROR:  It is unsupported to alter tablespace option "storepath" for DFS tablespace.
+alter tablespace hdfs_ts05 reset (filesystem);
+ERROR:  It is unsupported to alter tablespace option "filesystem" for DFS tablespace.
+alter tablespace hdfs_ts05 reset (cfgpath);
+ERROR:  It is unsupported to alter tablespace option "cfgpath" for DFS tablespace.
+alter tablespace hdfs_ts05 reset (address);
+ERROR:  It is unsupported to alter tablespace option "address" for DFS tablespace.
+alter tablespace hdfs_ts05 reset (storepath);
+ERROR:  It is unsupported to alter tablespace option "storepath" for DFS tablespace.
+-----support set/reset random_page_cost and seq_page_cost
+alter tablespace hdfs_ts05 set (random_page_cost=1.5);
+alter tablespace hdfs_ts05 set (seq_page_cost=1.6);
+select spcname, spcoptions from pg_tablespace where spcname like 'hdfs_ts05';
+--?.*
+--?.*
+--? hdfs_ts05 | {filesystem=hdfs,"address=10.185.178.241:25000,10.185.178.239:25000",cfgpath=/opt/config,storepath=.*,random_page_cost=1.5,seq_page_cost=1.6}
+(1 row)
+
+alter tablespace hdfs_ts05 set ("seq_pAge_cost"=1.6);
+alter tablespace hdfs_ts05 set ("raNdom_page_cost"=1.5);
+select spcname, spcoptions from pg_tablespace where spcname like 'hdfs_ts05';
+--?.*
+--?.*
+--? hdfs_ts05 | {filesystem=hdfs,"address=10.185.178.241:25000,10.185.178.239:25000",cfgpath=/opt/config,storepath=.*,seq_pAge_cost=1.6,raNdom_page_cost=1.5}
+(1 row)
+
+alter tablespace hdfs_ts05 reset ("seq_pAge_cost");
+alter tablespace hdfs_ts05 reset (raNdom_page_cost);
+select spcname, spcoptions from pg_tablespace where spcname like 'hdfs_ts05';
+--?.*
+--?.*
+--? hdfs_ts05 | {filesystem=hdfs,"address=10.185.178.241:25000,10.185.178.239:25000",cfgpath=/opt/config,storepath=.*}
+(1 row)
+
+alter tablespace hdfs_ts05 set ("seq_pAge_cost"=1.6);
+alter tablespace hdfs_ts05 set ("raNdom_page_cost"=1.5);
+select spcname, spcoptions from pg_tablespace where spcname like 'hdfs_ts05';
+--?.*
+--?.*
+--? hdfs_ts05 | {filesystem=hdfs,"address=10.185.178.241:25000,10.185.178.239:25000",cfgpath=/opt/config,storepath=.*,seq_pAge_cost=1.6,raNdom_page_cost=1.5}
+(1 row)
+
+alter tablespace hdfs_ts05 reset (seq_page_cost);
+alter tablespace hdfs_ts05 reset (random_page_cost);
+select spcname, spcoptions from pg_tablespace where spcname like 'hdfs_ts05';
+--?.*
+--?.*
+--? hdfs_ts05 | {filesystem=hdfs,"address=10.185.178.241:25000,10.185.178.239:25000",cfgpath=/opt/config,storepath=.*}
+(1 row)
+
+---alter tablesapce maxsize
+alter tablespace hdfs_ts05 RESIZE MAXSIZE '5K' ;
+select spcname, spcmaxsize from pg_tablespace where spcname like 'hdfs_ts05';
+  spcname  | spcmaxsize 
+-----------+------------
+ hdfs_ts05 | 5 K
+(1 row)
+
+alter tablespace hdfs_ts05 RESIZE MAXSIZE 'UNLIMITED' ;
+select spcname, spcmaxsize from pg_tablespace where spcname like 'hdfs_ts05';
+  spcname  | spcmaxsize 
+-----------+------------
+ hdfs_ts05 | 
+(1 row)
+
+--test database 
+--create database
+create database db001;
+drop database db001;
+-----create database with hdfs tablespace, throw error
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/tmp_check/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+create database db001 tablespace hdfs_ts05;
+ERROR:  DFS tablespace can not be used as default tablespace.
+drop tablespace if exists hdfs_ts05;
+drop tablespace if exists non_hdfs_ts05;
+NOTICE:  Tablespace "non_hdfs_ts05" does not exist, skipping.
+create tablespace non_hdfs_ts05 location '@abs_srcdir@/tmp_check/hdfs_ts05';
+create database db001 tablespace non_hdfs_ts05;
+drop database db001;
+drop tablespace if exists non_hdfs_ts05;
+------alter database rename,  include hdfs table in database, throw error
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/tmp_check/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+create database db001;
+\c db001
+drop table if exists temp_tblspc_tbl;
+NOTICE:  table "temp_tblspc_tbl" does not exist, skipping
+create table temp_tblspc_tbl(a int) tablespace hdfs_ts05;
+\c regression
+alter database db001 rename to newdb001;
+ERROR:  It is unsupported to rename database "db001" on DFS tablespace "hdfs_ts05".
+\c db001
+drop table if exists temp_tblspc_tbl;
+\c regression
+alter database db001 rename to newdb001;
+ERROR:  It is unsupported to rename database "db001" on DFS tablespace "hdfs_ts05".
+drop database db001;
+---alter database set default_tablespace hdfs tablespace, throw error
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/tmp_check/hdfs_ts05' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+create database db001;
+alter database db001 set tablespace hdfs_ts05;
+ERROR:  DFS tablespace can not be used as default tablespace.
+drop database db001;
+drop tablespace if exists hdfs_ts05;
+drop tablespace if exists non_hdfs_ts05;
+NOTICE:  Tablespace "non_hdfs_ts05" does not exist, skipping.
+create tablespace non_hdfs_ts05 location '@abs_srcdir@/tmp_check/hdfs_ts05';
+create database db001;
+alter database db001 set tablespace non_hdfs_ts05;
+drop database db001;
+drop tablespace if exists non_hdfs_ts05;
+-------drop database
+create database hdfs_db001;
+\c hdfs_db001
+drop tablespace if exists hdfs_ts05;
+NOTICE:  Tablespace "hdfs_ts05" does not exist, skipping.
+create tablespace hdfs_ts05 location '@abs_srcdir@/tmp_check/hdfs_ts05' with(filesystem='hdfs', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+create table hdfs_db001_tbl(a int) tablespace hdfs_ts05;
+set cstore_insert_mode=main;
+insert into hdfs_db001_tbl values(12);
+\c regression
+drop database if exists hdfs_db001;
+drop database if exists hdfs_db001;
+NOTICE:  database "hdfs_db001" does not exist, skipping
+------test schema
+-------alter schema rename, throw error
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/tmp_check/hdfs_ts05' with(filesystem='hdfs', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+create schema schema001;
+drop table if exists temp_tblspc_tbl;
+NOTICE:  table "temp_tblspc_tbl" does not exist, skipping
+create table schema001.temp_tblspc_tbl(a int) tablespace hdfs_ts05;
+alter schema schema001 rename to newschema001;
+ERROR:  It is not supported to rename schema "schema001" which includes DFS table "temp_tblspc_tbl".
+drop table if exists schema001.temp_tblspc_tbl;
+alter schema schema001 rename to newschema001;
+alter schema newschema001 rename to schema001;
+create table schema001.temp_tblspc_tbl(a int) tablespace hdfs_ts05;
+drop schema schema001;
+ERROR:  cannot drop schema schema001 because other objects depend on it
+DETAIL:  table schema001.temp_tblspc_tbl depends on schema schema001
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+drop schema schema001 cascade;
+NOTICE:  drop cascades to table schema001.temp_tblspc_tbl
+--test index
+--- unsupport create index on hdfs table
+drop tablespace if exists hdfs_ts05;
+create tablespace hdfs_ts05 location '@abs_srcdir@/tmp_check/hdfs_ts05' with(filesystem='hdfs', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/related_hdfs_object_ddl_ts');
+create table temp_tblspc_tbl(a int) tablespace hdfs_ts05;
+create unique index index_temp_tblspc_tbl on temp_tblspc_tbl(a);
+ERROR:  access method "psort" does not support unique indexes
+--unsupport create index on hdfs tablesapce
+create table ddl_nor_001(a int, b int);
+create index index_ddl_nor_001 on ddl_nor_001(a) tablespace hdfs_ts05;
+ERROR:  It is not supported to create index on DFS tablespace.
+--unsupport alter index set tablespace hdfs tablespace
+create index index_ddl_nor_001 on ddl_nor_001(a);
+alter index index_ddl_nor_001 set tablespace hdfs_ts05;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter DFS tablespace.
+drop table ddl_nor_001;
+---test truncate
+set cstore_insert_mode=main;
+insert into temp_tblspc_tbl values(1),(2),(3),(4),(5);
+insert into temp_tblspc_tbl values(1),(2),(3),(4),(5);
+truncate temp_tblspc_tbl;
+select count(*) from temp_tblspc_tbl;
+ count 
+-------
+     0
+(1 row)
+
+set cstore_insert_mode=auto;
+insert into temp_tblspc_tbl values(1),(2),(3),(4),(5);
+insert into temp_tblspc_tbl values(1),(2),(3),(4),(5);
+set cstore_insert_mode=main;
+insert into temp_tblspc_tbl values(1),(2),(3),(4),(5);
+insert into temp_tblspc_tbl values(1),(2),(3),(4),(5);
+start transaction;
+truncate temp_tblspc_tbl;
+rollback;
+select count(*) from temp_tblspc_tbl;
+ count 
+-------
+    20
+(1 row)
+
+start transaction;
+truncate temp_tblspc_tbl;
+commit;
+select count(*) from temp_tblspc_tbl;
+ count 
+-------
+     0
+(1 row)
+
+drop table temp_tblspc_tbl;
+	
+-- alter dfs table schema
+drop table hdfs_tbl;
+ERROR:  table "hdfs_tbl" does not exist
+create table hdfs_tbl(a int) tablespace hdfs_ts05;
+create schema new_schema;
+alter table hdfs_tbl set schema new_schema;
+ERROR:  Un-support feature
+DETAIL:  DFS table doesn't allow ALTER TABLE SET SCHEMA
+--set normal table tablespace to hdfs ts
+create table nor_ddl_001(a int);
+\d+ nor_ddl_001
+                     Table "public.nor_ddl_001"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+Has OIDs: no
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no
+
+alter table nor_ddl_001 set tablespace hdfs_ts05;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter DFS tablespace.
+----index
+create index index_001 on nor_ddl_001 (a);
+create index index_001 on nor_ddl_001 (a);
+ERROR:  relation "index_001" already exists
+alter index index_001 set tablespace hdfs_ts05;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter DFS tablespace.
+set default_tablespace=hdfs_ts05;
+create index index_001 on nor_ddl_001 (a);
+ERROR:  It is not supported to create index on DFS tablespace.
+create view ddl_view as select *from nor_ddl_001;
+drop view ddl_view;
+drop table nor_ddl_001;
+drop table hdfs_tbl;
+drop tablespace if exists hdfs_ts05;

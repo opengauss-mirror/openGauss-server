@@ -1,0 +1,118 @@
+create table test_online(a int, b int, c serial) tablespace hdfs_ts;
+NOTICE:  CREATE TABLE will create implicit sequence "test_online_c_seq" for serial column "test_online.c"
+insert into test_online select v ,v*10, v*100 from generate_series(1, 20) as v; 
+alter table test_online drop column b;
+select * from test_online order by 1;
+ a  |  c   
+----+------
+  1 |  100
+  2 |  200
+  3 |  300
+  4 |  400
+  5 |  500
+  6 |  600
+  7 |  700
+  8 |  800
+  9 |  900
+ 10 | 1000
+ 11 | 1100
+ 12 | 1200
+ 13 | 1300
+ 14 | 1400
+ 15 | 1500
+ 16 | 1600
+ 17 | 1700
+ 18 | 1800
+ 19 | 1900
+ 20 | 2000
+(20 rows)
+
+create table test_online_like(like test_online INCLUDING STORAGE INCLUDING DISTRIBUTION) tablespace hdfs_ts;
+NOTICE:  CREATE TABLE will create implicit sequence "test_online_like_c_seq" for serial column "test_online_like.c"
+\d+ test_online
+                                            Table "public.test_online"
+ Column |  Type   |                        Modifiers                        | Storage | Stats target | Description 
+--------+---------+---------------------------------------------------------+---------+--------------+-------------
+ a      | integer |                                                         | plain   |              | 
+ c      | integer | not null default nextval('test_online_c_seq'::regclass) | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+\d+ test_online_like
+                                            Table "public.test_online_like"
+ Column |  Type   |                          Modifiers                           | Storage | Stats target | Description 
+--------+---------+--------------------------------------------------------------+---------+--------------+-------------
+ a      | integer |                                                              | plain   |              | 
+ c      | integer | not null default nextval('test_online_like_c_seq'::regclass) | plain   |              | 
+Has OIDs: no
+Tablespace: "hdfs_ts"
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=orc, compression=snappy, version=0.12
+
+select attname, atttypid, attnum from pg_attribute where attrelid='test_online'::regclass order by 1,2,3;
+           attname            | atttypid | attnum 
+------------------------------+----------+--------
+ ........pg.dropped.2........ |        0 |      2
+ a                            |       23 |      1
+ c                            |       23 |      3
+ cmax                         |       29 |     -6
+ cmin                         |       29 |     -4
+ ctid                         |       27 |     -1
+ tableoid                     |       26 |     -7
+ xc_node_id                   |       23 |     -8
+ xmax                         |       28 |     -5
+ xmin                         |       28 |     -3
+(10 rows)
+
+select attname, atttypid, attnum from pg_attribute where attrelid='test_online_like'::regclass order by 1,2,3;
+           attname            | atttypid | attnum 
+------------------------------+----------+--------
+ ........pg.dropped.2........ |        0 |      2
+ a                            |       23 |      1
+ c                            |       23 |      3
+ cmax                         |       29 |     -6
+ cmin                         |       29 |     -4
+ ctid                         |       27 |     -1
+ tableoid                     |       26 |     -7
+ xc_node_id                   |       23 |     -8
+ xmax                         |       28 |     -5
+ xmin                         |       28 |     -3
+(10 rows)
+
+select gs_switch_relfilenode(E'test_online','test_online_like');
+ gs_switch_relfilenode 
+-----------------------
+                    12
+(1 row)
+
+select * from test_online_like order by 1;
+ a  |  c   
+----+------
+  1 |  100
+  2 |  200
+  3 |  300
+  4 |  400
+  5 |  500
+  6 |  600
+  7 |  700
+  8 |  800
+  9 |  900
+ 10 | 1000
+ 11 | 1100
+ 12 | 1200
+ 13 | 1300
+ 14 | 1400
+ 15 | 1500
+ 16 | 1600
+ 17 | 1700
+ 18 | 1800
+ 19 | 1900
+ 20 | 2000
+(20 rows)
+
+drop table test_online cascade;
+drop table test_online_like cascade;

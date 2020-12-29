@@ -159,7 +159,7 @@ class redis_tester():
     def initdb(self):
         for dbNode in self.new_node:
             datadir = self.getAbsPath(self.data_path, dbNode.name)
-            cmd = "source %s && gs_initdb -D %s --nodename %s -w ttest@123" % (self.envir_file, datadir, dbNode.name)
+            cmd = "source %s && gs_initdb -D %s --nodename %s -w gauss@123" % (self.envir_file, datadir, dbNode.name)
             (status, output) = commands.getstatusoutput(cmd)
             if (status != 0):
                 exitWithError("initdb[%s] failed. Error: %s" % (dbNode.name, output))

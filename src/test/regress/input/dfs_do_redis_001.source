@@ -1,0 +1,124 @@
+\! @abs_bindir@/gsql -d regression -h 127.0.0.1 -p @portstring@ -U $USER -c "drop schema if exists  dfs_redistable cascade;" >@abs_srcdir@/tmp_check/dfs_redis_010.log 2>&1
+
+create schema dfs_redistable;
+set current_schema = 'dfs_redistable';
+--temp table
+CREATE TEMP TABLE redis_tmp_table (id int, name varchar);
+--column table
+CREATE TABLE mpp_col(id INT,name VARCHAR(15) NOT NULL) with(orientation = column);
+CREATE TABLE mpp_col_rep(id INT,name VARCHAR(15) NOT NULL) with(orientation = column) distribute by replication;
+copy mpp_col from '@abs_srcdir@/data/redis.data1';
+copy mpp_col_rep from '@abs_srcdir@/data/redis.data1';
+--row table
+CREATE TABLE mpp_row(id INT,name VARCHAR(15) NOT NULL);
+CREATE TABLE mpp_row_rep(id INT,name VARCHAR(15) NOT NULL) distribute by replication;
+copy mpp_row from '@abs_srcdir@/data/redis.data1';
+copy mpp_row_rep from '@abs_srcdir@/data/redis.data1';
+CREATE TABLE mpp_zxf(id1 INT,id2 int,id3 int,name VARCHAR(15) NOT NULL) distribute by hash (id1,id2,id3);
+
+--dfs table
+create table dfs_redis(a int, b int) tablespace hdfs_ts;
+drop table if exists dfs_temp;
+create table dfs_temp (a int, b int);
+insert into dfs_temp values(1,generate_series(1,6000));
+insert into dfs_temp values(generate_series(1,1000),generate_series(1,1000));
+insert into dfs_redis select * from  dfs_temp;
+drop table if exists dfs_temp;
+
+drop table if exists dfs_redis_p;
+create table dfs_redis_p(
+    a int,
+    b int,
+    c int
+)
+tablespace hdfs_ts
+distribute by hash (a)
+partition by values (b);
+drop table if exists dfs_temp_p;
+create table dfs_temp_p (a int, b int, c int);
+insert into dfs_temp_p values(1,generate_series(1,6000), generate_series(1,6000));
+insert into dfs_temp_p values(generate_series(1,1000),generate_series(1,1000), generate_series(1,1000));
+insert into dfs_redis_p select * from  dfs_temp_p;
+drop table if exists dfs_temp_p;
+
+--test data before redistribution
+select count(*) from mpp_col;
+select count(*) from mpp_col where name = 'sjf';
+select count(*) from mpp_row;
+select count(*) from  dfs_redis;
+select count(*) from  dfs_redis where a = 1;
+select count(distinct(a)) from dfs_redis;
+select count(*) from  dfs_redis_p;
+select count(*) from  dfs_redis_p where a = 1;
+select count(distinct(a)) from dfs_redis_p;
+
+---add node
+\! python @abs_srcdir@/addnode.py -t addnode -s @abs_srcdir@ -b @abs_bindir@ -g new_group_005 -n 2
+
+---select to verify
+select group_name,in_redistribution from pgxc_group where group_name = 'new_group_005';
+
+--select count(*) from mpp_col;
+--select count(*) from mpp_col where name = 'sjf';
+--select count(*) from mpp_row;
+--select * from pgxc_class;
+--do redistribute
+
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -r -u $USER -d regression -p $PGPORT 2>@abs_srcdir@/tmp_check/dfs_redis_020.log ; echo $?
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -r -u $USER -d regression -p $PGPORT -f -m insert 2>@abs_srcdir@/tmp_check/dfs_redis_020.log ; echo $?
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -r -u $USER -d regression -p $PGPORT -f  2>@abs_srcdir@/tmp_check/dfs_redis_020.log ; echo $?
+--insert into mpp_col select * from mpp_s;
+select count(*) from mpp_col;
+select count(*) from mpp_col where name = 'sjf';
+select count(*) from mpp_row;
+select count(*) from  dfs_redis;
+select count(*) from  dfs_redis where a = 1;
+select count(distinct(a)) from dfs_redis;
+select count(*) from  dfs_redis_p;
+select count(*) from  dfs_redis_p where a = 1;
+select count(distinct(a)) from dfs_redis_p;
+
+update pgxc_class set redistributed='i';
+update mpp_col set name = 'sfj';
+delete from mpp_col;
+insert into mpp_col values(12, 'mpp');
+copy mpp_col from '@abs_srcdir@/data/redis.data1';
+update dfs_redis set b = 100;
+insert into dfs_redis values(200, 200);
+delete from dfs_redis;
+drop table dfs_redis;
+update dfs_redis_p set b = 100;
+insert into dfs_redis_p values(200, 200);
+delete from dfs_redis_p;
+drop table dfs_redis_p;
+update pgxc_class set redistributed='n';
+
+select count(*) from mpp_col;
+select count(*) from mpp_col where name = 'sjf';
+select count(*) from mpp_row;
+select count(*) from  dfs_redis;
+select count(*) from  dfs_redis where a = 1;
+select count(distinct(a)) from dfs_redis;
+vacuum dfs_redistable.dfs_redis;
+vacuum full dfs_redistable.dfs_redis;
+explain (verbose, costs off, nodes off) select count(*) from dfs_redis where a<50;
+select count(*) from dfs_redis where a<50;
+delete from dfs_redis where a <50;
+select count(*) from dfs_redis where a<50;
+select count(*) from dfs_redis;
+delete from dfs_redis;
+select count(*) from dfs_redis;
+---partition dfs table
+select count(*) from  dfs_redis_p;
+select count(*) from  dfs_redis_p where a = 1;
+select count(distinct(a)) from dfs_redis_p;
+vacuum dfs_redistable.dfs_redis_p;
+vacuum full dfs_redistable.dfs_redis_p;
+select count(*) from dfs_redis_p where a<50;
+delete from dfs_redis_p where a <50;
+select count(*) from dfs_redis_p where a<50;
+select count(*) from dfs_redis_p;
+delete from dfs_redis_p;
+select count(*) from dfs_redis_p;
+
+drop schema dfs_redistable cascade;

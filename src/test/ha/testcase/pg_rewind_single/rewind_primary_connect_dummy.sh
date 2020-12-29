@@ -15,7 +15,7 @@ stop_standby
 
 # build standby incremental will fail
 #gs_rewind -D $data_dir/datanode1_standby --source-server='hostaddr=127.0.0.1 port='$dn1_primary_port' dbname=postgres application_name=gs_rewind user='$username'' -P --debug
-gs_ctl build -D $data_dir/datanode1_standby 
+gs_ctl build -D $data_dir/datanode1_standby -b incremental -Z single_node
 
 if [ $? -eq 0 ]; then
 	echo "$failed_keyword, test_1: gs_rewind success but not expected!"
@@ -26,7 +26,7 @@ fi
 
 start_dummystandby
 
-gs_ctl build -D $data_dir/datanode1_standby 
+gs_ctl build -D $data_dir/datanode1_standby -b incremental -Z single_node 
 
 if [ $? -eq 0 ]; then
 	echo "test_1: gs_rewind success as expected"
@@ -52,9 +52,6 @@ else
 	exit 1
 fi
 
-# wait for secondary connect to standby
-check_standby_setup
-
 gsql -d $db -p $dn1_primary_port -c "checkpoint;checkpoint;checkpoint;"
 
 gsql -d $db -p $dn1_standby_port -c "checkpoint;checkpoint;checkpoint;"
@@ -63,7 +60,7 @@ stop_standby
 
 # xlog separate between primary and standby/dummystandby, build standby will fail
 #gs_rewind -D $data_dir/datanode1_standby --source-server='hostaddr=127.0.0.1 port='$dn1_primary_port' dbname=postgres application_name=gs_rewind user='$username'' -P
-gs_ctl build  -D $data_dir/datanode1_standby 
+gs_ctl build  -D $data_dir/datanode1_standby -b incremental -Z single_node
 
 if [ $? -eq 0 ]; then
 	echo "$failed_keyword, test_2: gs_rewind success but not expected!"
@@ -77,7 +74,7 @@ start_standby_as_primary
 kill_primary
 
 #gs_rewind -D $data_dir/datanode1 --source-server='hostaddr=127.0.0.1 port='$dn1_standby_port' dbname=postgres application_name=gs_rewind user='$username'' -P
-gs_ctl build -D $data_dir/datanode1 
+gs_ctl build -D $data_dir/datanode1 -b incremental -Z single_node
 
 if [ $? -eq 0 ]; then
 	echo "test_2: gs_rewind success as expected"

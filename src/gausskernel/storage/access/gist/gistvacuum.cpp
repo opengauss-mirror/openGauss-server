@@ -55,7 +55,6 @@ Datum gistvacuumcleanup(PG_FUNCTION_ARGS)
      * Need lock unless it's local to this backend.
      */
     needLock = !RELATION_IS_LOCAL(rel);
-
     /* try to find deleted pages */
     if (needLock)
         LockRelationForExtension(rel, ExclusiveLock);
@@ -73,7 +72,6 @@ Datum gistvacuumcleanup(PG_FUNCTION_ARGS)
         buffer = ReadBufferExtended(rel, MAIN_FORKNUM, blkno, RBM_NORMAL, info->strategy);
         LockBuffer(buffer, GIST_SHARE);
         page = (Page)BufferGetPage(buffer);
-
         if (PageIsNew(page) || GistPageIsDeleted(page)) {
             totFreePages++;
             RecordFreeIndexPage(rel, blkno);
@@ -104,7 +102,6 @@ typedef struct GistBDItem {
 static void pushStackIfSplited(Page page, GistBDItem *stack)
 {
     GISTPageOpaque opaque = GistPageGetOpaque(page);
-
     if (stack->blkno != GIST_ROOT_BLKNO && !XLogRecPtrIsInvalid(stack->parentlsn) &&
         (GistFollowRight(page) || XLByteLT(stack->parentlsn, opaque->nsn)) &&
         opaque->rightlink != InvalidBlockNumber /* sanity check */) {
@@ -157,7 +154,6 @@ Datum gistbulkdelete(PG_FUNCTION_ARGS)
         LockBuffer(buffer, GIST_SHARE);
         gistcheckpage(rel, buffer);
         page = (Page)BufferGetPage(buffer);
-
         if (GistPageIsLeaf(page)) {
             OffsetNumber todelete[MaxOffsetNumber];
             int ntodelete = 0;
@@ -185,7 +181,6 @@ Datum gistbulkdelete(PG_FUNCTION_ARGS)
             for (i = FirstOffsetNumber; i <= maxoff; i = OffsetNumberNext(i)) {
                 iid = PageGetItemId(page, i);
                 idxtuple = (IndexTuple)PageGetItem(page, iid);
-
                 if (callback(&(idxtuple->t_tid), callback_state, InvalidOid)) {
                     todelete[ntodelete] = i - ntodelete;
                     ntodelete++;

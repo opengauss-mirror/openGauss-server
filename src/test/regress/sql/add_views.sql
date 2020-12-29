@@ -1,5 +1,5 @@
-create user "user1" with sysadmin password 'Test@Mpp';
-set role "user1" password 'Test@Mpp';
+create user "user1" with sysadmin password 'Gaussdba@Mpp';
+set role "user1" password 'Gaussdba@Mpp';
 create table t1 (a int ,b int);
 select * from DBA_TABLES where table_name = 't1';
 select * from DBA_TAB_COLUMNS where table_name = 't1';
@@ -37,8 +37,8 @@ comment on column t6.a is 'column a';
 select * from DBA_TAB_COMMENTS where table_name = 't6';
 select * from DBA_TAB_COMMENTS where table_name = 't5';
 
-create user "user2" with sysadmin password 'Test@Mpp';
-set role "user2" password 'Test@Mpp';
+create user "user2" with sysadmin password 'Gaussdba@Mpp';
+set role "user2" password 'Gaussdba@Mpp';
 
 select * from USER_TABLES where table_name = 't1';
 select * from USER_TAB_COLUMNS where table_name = 't1';
@@ -49,7 +49,7 @@ select * from USER_CONS_COLUMNS where table_name = 't3';
 select * from USER_IND_EXPRESSIONS where index_name = 't4_index_expression';
 select * from USER_TAB_COMMENTS where table_name = 't6';
 
-set role "user1" password 'Test@Mpp';
+set role "user1" password 'Gaussdba@Mpp';
 
 drop table t1;
 drop table t2;

@@ -1,0 +1,12 @@
+drop server if exists  obs_server cascade;
+NOTICE:  server "obs_server" does not exist, skipping
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+drop schema if exists text_csv_foreign_schema cascade;
+NOTICE:  schema "text_csv_foreign_schema" does not exist, skipping
+create schema text_csv_foreign_schema;

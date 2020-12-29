@@ -32,6 +32,7 @@ extern void backup_target(file_entry_t* entry, const char* lastoff);
 extern void backup_target_dir(const char* path);
 extern void backup_target_file(char* path, const char* lastoff);
 extern void backup_target_symlink(const char* path);
+extern void backup_fake_target_file(const char* path);
 extern bool isOldXlog(const char* path, const char* lastoff);
 extern bool is_in_restore_process(const char* pg_data);
 extern void delete_all_file(const char* path, bool remove_top);

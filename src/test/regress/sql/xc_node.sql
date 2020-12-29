@@ -49,10 +49,10 @@ DROP NODE IF EXISTS datanode1;
 DROP NODE coordinator3;
 DROP NODE IF EXISTS coordinator3;
 select node_name from pgxc_node order by node_name;
-
+execute direct on (coordinator2) 'select node_name from pgxc_node order by node_name;';
 ABORT;
 select node_name from pgxc_node order by node_name;
-
+execute direct on (coordinator2) 'select node_name from pgxc_node order by node_name;';
 
 -- drop node with
 DROP NODE coordinator3 with;
@@ -64,15 +64,36 @@ START TRANSACTION;
 DROP NODE datanode1 with (coordinator1);
 DROP NODE coordinator3 with (coordinator1);
 select node_name from pgxc_node order by node_name;
-
+execute direct on (coordinator2) 'select node_name from pgxc_node order by node_name;';
 ABORT;
 START TRANSACTION;
 DROP NODE datanode1 with (coordinator2);
 DROP NODE coordinator3 with (coordinator2);
 select node_name from pgxc_node order by node_name;
-
+execute direct on (coordinator2) 'select node_name from pgxc_node order by node_name;';
 ABORT;
 select node_name from pgxc_node order by node_name;
+execute direct on (coordinator2) 'select node_name from pgxc_node order by node_name;';
 
+create table DTS2018120706312_t1 (id int, num int) distribute by replication;
+execute direct on (coordinator1) 'select * from pgxc_node_str()';
+execute direct on (coordinator2) 'select * from pgxc_node_str()';
+execute direct on (datanode1) 'select * from pgxc_node_str()';
 
+execute direct on (coordinator1) 'select * from DTS2018120706312_t1';
+execute direct on (coordinator2) 'select * from DTS2018120706312_t1';
+execute direct on (datanode1) 'select * from DTS2018120706312_t1';
 
+execute direct on (coordinator1) 'execute direct on (coordinator1) ''select * from DTS2018120706312_t1''';
+execute direct on (coordinator2) 'execute direct on (coordinator1) ''select * from DTS2018120706312_t1''';
+execute direct on (datanode1) 'execute direct on (coordinator1) ''select * from DTS2018120706312_t1''';
+execute direct on (coordinator1) 'execute direct on (datanode1) ''select * from DTS2018120706312_t1''';
+execute direct on (coordinator2) 'execute direct on (datanode1) ''select * from DTS2018120706312_t1''';
+execute direct on (datanode1) 'execute direct on (datanode1) ''select * from DTS2018120706312_t1''';
+
+execute direct on (coordinator1)'select count(*) from gs_wlm_operator_info';
+execute direct on (coordinator2)'select count(*) from gs_wlm_operator_info';
+
+drop table DTS2018120706312_t1;
+
+execute direct on (datanode1) '';

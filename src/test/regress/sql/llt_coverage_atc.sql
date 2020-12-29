@@ -154,7 +154,7 @@ drop table if exists llt_show_datanode_buffers_1;
 create table llt_show_datanode_buffers(q1 int, q2 int);
 create table llt_show_datanode_buffers_1(q1 int, q2 int);
 create table llt_show_datanode_buffers_2(q1 int, q2 int);
-create table llt_show_datanode_buffers_3(q1 int, q2 int);
+create table llt_show_datanode_buffers_3(q1 int, q2 int) distribute by replication;
 insert into llt_show_datanode_buffers select generate_series(1,1000,9), generate_series(50,500,9) from tmp_tb1_llt_coverage_atc;
 insert into llt_show_datanode_buffers select generate_series(100,700,6), generate_series(500,1000,6) from tmp_tb1_llt_coverage_atc;
 insert into llt_show_datanode_buffers_1 select generate_series(1,1000,6), generate_series(50,500,6) from tmp_tb1_llt_coverage_atc;
@@ -183,7 +183,7 @@ create table coalesce_test
 (
 	a	int,
 	b	character varying(5)
-);
+)distribute by hash(a);
 insert into coalesce_test select generate_series(1,50),'ABC' from tmp_tb1_llt_coverage_atc;
 insert into coalesce_test select generate_series(1,50),'EGT' from tmp_tb1_llt_coverage_atc;
 analyze coalesce_test;

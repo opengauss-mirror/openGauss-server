@@ -1,0 +1,69 @@
+--
+-- BULK LOAD PARALLEL TEST 3
+--
+----
+--16. noescaping in TEXT format
+----
+create foreign table escaping(c1 int, c2 varchar, c3 int) server hdfs_server options (filenames '/user/hive/warehouse/text_on_hdfs/load_escape.data', format 'text', noescaping 'true', delimiter '|') distribute by roundrobin;
+select * from escaping;
+ c1  |    c2    | c3  
+-----+----------+-----
+ 321 | a apply\ | 123
+ 321 | a apply\ | 123
+ 321 | a apply\ | 123
+(3 rows)
+
+drop foreign table escaping;
+----
+--17. write only is invalid
+----
+CREATE FOREIGN TABLE FT_WRITE_ONLY_TEST
+(
+c1 int,
+c2 varchar(10)
+)
+SERVER hdfs_server
+OPTIONS(filenames '/user/hive/warehouse/text_on_hdfs/*', format 'text', delimiter ',') write only
+distribute by roundrobin;
+ERROR:  Unsupport write only.
+----
+--18. ignore_extra_data and fill_missing_fields
+----
+create foreign table extra_data(c1 int, c2 varchar) server hdfs_server options (filenames '/user/hive/warehouse/text_on_hdfs/load_escape.data', format 'text', noescaping 'true', delimiter '|', ignore_extra_data 'true') distribute by roundrobin;
+select * from extra_data;
+ c1  |    c2    
+-----+----------
+ 321 | a apply\
+ 321 | a apply\
+ 321 | a apply\
+(3 rows)
+
+alter foreign table extra_data options(set ignore_extra_data 'false');
+select * from extra_data;
+ERROR:  extra data after last expected column
+CONTEXT:  file "/user/hive/warehouse/text_on_hdfs/load_escape.data", lineNo 1, offset 0: "321|a apply\|123"
+create foreign table missing_fields(c1 int, c2 varchar, c3 int, c4 int) server hdfs_server options (filenames '/user/hive/warehouse/text_on_hdfs/load_escape.data', format 'text', noescaping 'true', delimiter '|', fill_missing_fields 'true') distribute by roundrobin;
+select * from missing_fields;
+ c1  |    c2    | c3  | c4 
+-----+----------+-----+----
+ 321 | a apply\ | 123 |   
+ 321 | a apply\ | 123 |   
+ 321 | a apply\ | 123 |   
+(3 rows)
+
+alter foreign table missing_fields options(set fill_missing_fields 'false');
+select * from missing_fields;
+ERROR:  missing data for column "c4"
+CONTEXT:  file "/user/hive/warehouse/text_on_hdfs/load_escape.data", lineNo 1, offset 0: "321|a apply\|123"
+explain (costs off) select * from missing_fields;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on missing_fields
+               Server Type: hdfs
+               Text File: /user/hive/warehouse/text_on_hdfs/load_escape.data
+(5 rows)
+
+drop foreign table extra_data;
+drop foreign table missing_fields;

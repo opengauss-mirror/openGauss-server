@@ -32,7 +32,8 @@ gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test2; CREATE TABL
 															  , L_SHIPMODE     CHAR(10)
 															  , L_COMMENT      VARCHAR(44)
 															)
-															with (orientation = column);"
+															with (orientation = column)
+															distribute by hash(L_ORDERKEY);"
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test3;"
 
 #data replication test for row store
@@ -41,7 +42,7 @@ gsql -d $db -p $dn1_primary_port -c "set enable_data_replicate=on; copy mpp_test
 gsql -d $db -p $dn1_primary_port -c "set enable_data_replicate=on; copy mpp_test2 from '$scripts_dir/data/lineitem.data' delimiter '|';"
 
 #disable stream replication to standby or dummy, cluster is running under high performance mode
-gs_guc reload -D $data_dir/datanode1 -c "enable_stream_replication=false"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "enable_stream_replication=false"
 
 #wait param change reload to standby
 while [ $(gsql -d $db -p $dn1_standby_port -m -c "show enable_stream_replication;" | grep "off" | wc -l) -eq 0 ]
@@ -105,10 +106,10 @@ fi
 
 function test_catchup()
 {
-gs_guc reload -D $data_dir/datanode1 -c "enable_incremental_catchup=off"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "enable_incremental_catchup=off"
 
 #enable stream replication to standby or dummy, cluster is running under high performance mode
-gs_guc reload -D $data_dir/datanode1 -c "enable_stream_replication=true"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "enable_stream_replication=true"
 
 #DML test after enable stream replication
 gsql -d $db -p $dn1_primary_port -c "set enable_data_replicate=off; copy mpp_test1 from '$scripts_dir/data/data5';"
@@ -161,7 +162,7 @@ sleep 1
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test1;"
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test2;"
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_test3;"
-gs_guc reload -D $data_dir/datanode1 -c "enable_incremental_catchup=on"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "enable_incremental_catchup=on"
 }
 
 test_replication

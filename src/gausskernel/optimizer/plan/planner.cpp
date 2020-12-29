@@ -19,7 +19,6 @@
 #include <limits.h>
 #include <math.h>
 
-#include "access/parallel.h"
 #include "access/transam.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_cast.h"
@@ -30,9 +29,8 @@
 #include "executor/executor.h"
 #include "executor/nodeAgg.h"
 #include "executor/nodeRecursiveunion.h"
-#include "foreign/metainformation.h"
 #include "gaussdb_version.h"
-#include "knl/knl_session.h"
+#include "knl/knl_instance.h"
 #include "miscadmin.h"
 #include "lib/bipartite_match.h"
 #include "nodes/makefuncs.h"
@@ -49,15 +47,18 @@
 #include "optimizer/paths.h"
 #include "optimizer/plancat.h"
 #include "optimizer/planmain.h"
+#include "optimizer/planmem_walker.h"
 #include "optimizer/planner.h"
 #include "optimizer/prep.h"
 #include "optimizer/subselect.h"
 #include "optimizer/tlist.h"
 #include "parser/analyze.h"
+#include "optimizer/gtmfree.h"
 #include "parser/parsetree.h"
 #include "parser/parse_agg.h"
 #include "parser/parse_oper.h"
 #include "parser/parse_hint.h"
+#include "parser/parse_type.h"
 #include "rewrite/rewriteManip.h"
 #include "securec.h"
 #include "utils/rel.h"
@@ -65,7 +66,6 @@
 #ifdef PGXC
 #include "commands/prepare.h"
 #include "pgxc/pgxc.h"
-#include "pgxc/execRemote.h"
 #include "optimizer/pgxcplan.h"
 #include "optimizer/streamplan.h"
 #include "workload/cpwlm.h"
@@ -76,12 +76,15 @@
 #include "utils/selfuncs.h"
 #include "utils/fmgroids.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "vecexecutor/vecfunc.h"
 #include "optimizer/randomplan.h"
 #include "optimizer/optimizerdebug.h"
 #include "optimizer/dataskew.h"
-#include "tsdb/planner.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/optimizer/planner.h"
+#endif
+#include "optimizer/stream_remove.h"
 
 #ifndef MIN
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
@@ -99,23 +102,45 @@ static int g_agglist[] = {AGG_HASHED, AGG_SORTED};
 
 const char* ESTIMATION_ITEM = "EstimationItem";
 
+/* From experiment, we assume 2.5 times dn number of distinct value can give all dn work to do */
+#define DN_MULTIPLIER_FOR_SATURATION 2.5
+
 #define PLAN_HAS_DELTA(plan)                                                                          \
     ((IsA((plan), CStoreScan) && HDFS_STORE == ((CStoreScan*)(plan))->relStoreLocation) \
 		||(IsA((plan), CStoreIndexScan) && HDFS_STORE == ((CStoreIndexScan*)(plan)->relStoreLocation) \
 		|| IsA((plan), DfsScan) || IsA((plan), DfsIndexScan))
 
-extern RangeTblEntry* make_dummy_remote_rte(char* relname, Alias* alias);
-extern List* reassign_nodelist(RangeTblEntry* rte, List* ori_node_list);
-extern Node* preprocess_expression(PlannerInfo* root, Node* expr, int kind);
+const static Oid VectorEngineUnsupportType[] = {
+    POINTOID,
+    LSEGOID,
+    BOXOID,
+    LINEOID,
+    CIRCLEOID,
+    POLYGONOID,
+    PATHOID
+    };
 
+extern PGXCNodeAllHandles* connect_compute_pool(int srvtype);
+extern uint64 get_datasize(Plan* plan, int srvtype, int* filenum);
+
+extern RangeTblEntry* make_dummy_remote_rte(char* relname, Alias* alias);
+extern ForeignOptions* setForeignOptions(Oid relid);
+extern List* reassign_nodelist(RangeTblEntry* rte, List* ori_node_list);
+
+extern Node* preprocess_expression(PlannerInfo* root, Node* expr, int kind);
 static Plan* inheritance_planner(PlannerInfo* root);
 static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction);
 static void preprocess_rowmarks(PlannerInfo* root);
+static void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, int64* count_est);
 static double preprocess_limit(PlannerInfo* root, double tuple_fraction, int64* offset_est, int64* count_est);
-static void standard_qp_callback(PlannerInfo *root, void *extra);
 
+static bool grouping_is_can_hash(Query* parse, AggClauseCosts* agg_costs);
+static Size compute_hash_entry_size(bool vectorized, Path* cheapest_path, int path_width, AggClauseCosts* agg_costs);
 static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, double limit_tuples, int path_width,
     Path* cheapest_path, Path* sorted_path, const double* dNumGroups, AggClauseCosts* agg_costs, Size* hash_entry_size);
+static void compute_distinct_sorted_path_cost(Path* sorted_p, List* sorted_pathkeys, Query* parse, PlannerInfo* root, 
+    int numDistinctCols, Cost sorted_startup_cost, Cost sorted_total_cost, double path_rows, 
+    Distribution* sorted_distribution, int path_width, double dNumDistinctRows, double limit_tuples);
 static bool choose_hashed_distinct(PlannerInfo* root, double tuple_fraction, double limit_tuples, double path_rows,
     int path_width, Cost cheapest_startup_cost, Cost cheapest_total_cost, Distribution* cheapest_distribution,
     Cost sorted_startup_cost, Cost sorted_total_cost, Distribution* sorted_distribution, List* sorted_pathkeys,
@@ -141,6 +166,7 @@ static bool vector_engine_preprocess_walker(Node* node, void* rtables);
 static void init_optimizer_context(PlannerGlobal* glob);
 static void deinit_optimizer_context(PlannerGlobal* glob);
 static void check_index_column();
+static bool check_sort_for_upsert(PlannerInfo* root);
 
 #ifdef PGXC
 static void separate_rowmarks(PlannerInfo* root);
@@ -158,7 +184,6 @@ typedef struct {
     List* tlist;         /* preprocessed query targetlist */
     List* activeWindows; /* active windows, if any */
     List* groupClause;   /* overrides parse->groupClause */
-    List* rollup_groupclauses;
 } standard_qp_extra;
 
 typedef enum path_key { windows_func_pathkey = 0, distinct_pathkey, sort_pathkey } path_key;
@@ -170,14 +195,46 @@ typedef struct {
 THR_LOCAL List* g_index_vars;
 
 static SAggMethod g_hashagg_option_list[] = {DN_REDISTRIBUTE_AGG, DN_AGG_REDISTRIBUTE_AGG, DN_AGG_CN_AGG};
-const int ALL_HASHAGG_OPTION = 3;
-const int HASHAGG_OPTION_WITH_STREAM = 2;
+#define ALL_HASHAGG_OPTION 3
+#define HASHAGG_OPTION_WITH_STREAM 2
 
 typedef struct {
     List* rqs;
     bool include_all_plans;
     bool has_modify_table;
+    bool under_mergeinto;
+    int elevel;
 } FindRQContext;
+
+/*
+ * This struct is used to find:
+ * 1) How many RemoteQuery(VecRemoteQuery) in a plan?
+ * 2) Does this plan contain write operations?
+ * 3) How many DNs will be involved in?
+ *
+ * This struct is only used to check if we should allow a query to be executed in GTM-Free mode.
+ * In GTM-Free mode:
+ *     if 1) the query need to split into multiple queries and 2) the query need to write to the database:
+ *         Report error
+ *     if the query needs more than one DN to be involved in:
+ *         Without multinode hint:
+ *             if application_type is:
+ *                 not_perfect_sharding_type(Default): allow the query to be executed, no warning/error
+ *                 perfect_sharding_type: report ERROR
+ *         With multinode hint:
+ *             allow the query to continue, report no warnings or errors.
+ */
+typedef struct
+{
+    int remote_query_count;
+    bool has_modify_table;
+
+    /*
+     * All nodes involved in the query. It stores IDs(int type) of DNs, such as 1,2,3...
+     * The same name exists in ExecNodes.
+     */
+    List *nodeList;
+} FindNodesContext;
 
 static bool needs_two_level_groupagg(PlannerInfo* root, Plan* plan, Node* distinct_node, List* distributed_key,
     bool* need_redistribute, bool* need_local_redistribute);
@@ -186,7 +243,6 @@ static Plan* mark_agg_stream(PlannerInfo* root, List* tlist, Plan* plan, List* g
 static Plan* mark_top_agg(
     PlannerInfo* root, List* tlist, Plan* agg_plan, Plan* sub_plan, AggOrientation agg_orientation);
 static Plan* mark_group_stream(PlannerInfo* root, List* tlist, Plan* result_plan);
-static List* append_distribute_var_list(List* varlist, Node* tlist_node);
 static Plan* mark_distinct_stream(
     PlannerInfo* root, List* tlist, Plan* plan, List* groupcls, Index query_level, List* current_pathkeys);
 static List* get_optimal_distribute_key(PlannerInfo* root, List* groupClause, Plan* plan, double* multiple);
@@ -211,7 +267,6 @@ static Plan* get_count_distinct_partial_plan(PlannerInfo* root, Plan* result_pla
     AttrNumber* groupColIdx, bool* needs_stream, Size hash_entry_size, RelOptInfo* rel_info);
 static Node* get_multiple_from_expr(
     PlannerInfo* root, Node* expr, double rows, double* skew_multiple, double* bias_multiple);
-static void free_est_varlist(List* varlist);
 static void set_root_matching_key(PlannerInfo* root, List* targetlist);
 static List* add_groupId_to_groupExpr(List* query_group, List* tlist);
 
@@ -262,7 +317,6 @@ static void add_metadata(Plan* plan, PlannerInfo* root);
 static bool precheck_before_accelerate();
 static bool is_pushdown_node(Plan *plan);
 static bool estimate_acceleration_cost(Plan *plan);
-extern Plan* get_foreign_scan(Plan *plan);
 #ifdef ENABLE_MULTIPLE_NODES
 static bool walk_plan_for_coop_analyze(Plan *plan, PlannerInfo *root);
 static void walk_set_plan_for_coop_analyze(Plan *plan, PlannerInfo *root);
@@ -272,6 +326,7 @@ static bool has_pgfdw_rel(PlannerInfo* root);
 extern Plan *deparse_agg_node(Plan *agg, PlannerInfo *root);
 #endif
 static void find_remotequery(Plan *plan, PlannerInfo *root);
+static void gtm_process_top_node(Plan *plan, void *context);
 void GetRemoteQuery(PlannedStmt *plan, const char *queryString);
 void GetRemoteQueryWalker(Plan* plan, void* context, const char *queryString);
 void PlanTreeWalker(Plan* plan, void (*walker)(Plan*, void*, const char*), void*, const char *queryString);
@@ -306,10 +361,17 @@ PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams)
 
 #ifdef PGXC
     /*
+     * streaming engine hook for agg rewrite.
+     */
+    if (t_thrd.streaming_cxt.streaming_planner_hook)
+        result = (*(planner_hook_type) t_thrd.streaming_cxt.streaming_planner_hook)\
+                 (parse, cursorOptions, boundParams);
+    else
+    /*
      * A Coordinator receiving a query from another Coordinator
      * is not allowed to go into PGXC planner.
      */
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+    if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && !IsConnFromCoord())
         result = pgxc_planner(parse, cursorOptions, boundParams);
     else
 #endif
@@ -355,6 +417,38 @@ static bool queryIsReadOnly(Query* query)
     return false;
 }
 
+/*
+ * @Description: fill bucketmap info into planstmt.
+ *
+ * @param[IN] result:  plan info
+ * @param[IN] node_group_info_context:  bucketmap info
+ * @return: void
+ */
+static void FillPlanBucketmap(PlannedStmt *result,
+    NodeGroupInfoContext *nodeGroupInfoContext)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    /* bucketmap is not needed, just return. */
+    if (!IsBucketmapNeeded(result)) {
+        result->num_bucketmaps = 0;
+        return;
+    }
+#endif
+
+    result->num_bucketmaps = nodeGroupInfoContext->num_bucketmaps;
+    for (int i = 0; i < MAX_SPECIAL_BUCKETMAP_NUM; i++) {
+        result->bucketMap[i] = nodeGroupInfoContext->bucketMap[i];
+    }
+    pfree_ext(nodeGroupInfoContext);
+
+    if (IS_PGXC_COORDINATOR && result->num_bucketmaps == 0) {
+        result->bucketMap[0] = GetGlobalStreamBucketMap(result);
+        if (result->bucketMap[0] != NULL) {
+            result->num_bucketmaps = 1;
+        }
+    }
+}
+
 PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo boundParams)
 {
     PlannedStmt* result = NULL;
@@ -387,6 +481,16 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
 
     if (enable_check_implicit_cast())
         find_implicit_cast_var(parse);
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (IS_STREAM) {
+        shipping_context context;
+        stream_walker_context_init(&context);
+
+        (void)stream_walker((Node*)parse, (void*)(&context));
+        disable_unshipped_log(parse, &context);
+    }
+#endif
 
     /* Initilizing the work mem used by optimizer */
     if (IS_STREAM_PLAN) {
@@ -438,52 +542,7 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     glob->bloomfilter.bloomfilter_index = -1;
     glob->bloomfilter.add_index = true;
     glob->estiopmem = esti_op_mem;
-
-    /*
-     * Assess whether it's feasible to use parallel mode for this query.
-     * We can't do this in a standalone backend, or if the command will
-     * try to modify any data, or if this is a cursor operation, or if
-     * GUCs are set to values that don't permit parallelism, or if
-     * parallel-unsafe functions are present in the query tree.
-     *
-     * For now, we don't try to use parallel mode if we're running inside
-     * a parallel worker.  We might eventually be able to relax this
-     * restriction, but for now it seems best not to have parallel workers
-     * trying to create their own parallel workers.
-     *
-     * We can't use parallelism in serializable mode because the predicate
-     * locking code is not parallel-aware.  It's not catastrophic if someone
-     * tries to run a parallel plan in serializable mode; it just won't get
-     * any workers and will run serially.  But it seems like a good heuristic
-     * to assume that the same serialization level will be in effect at plan
-     * time and execution time, so don't generate a parallel plan if we're
-     * in serializable mode.
-     */
-    glob->parallelModeOK = (cursorOptions & CURSOR_OPT_PARALLEL_OK) != 0 && IsUnderPostmaster &&
-        parse->commandType == CMD_SELECT && !parse->hasModifyingCTE && parse->utilityStmt == NULL &&
-        u_sess->attr.attr_sql.max_parallel_workers_per_gather > 0 && !IsParallelWorker() &&
-        !IsolationIsSerializable() && !has_parallel_hazard((Node *)parse, true);
-
-    /*
-     * glob->parallelModeNeeded is normally set to false here and changed to
-     * true during plan creation if a Gather or Gather Merge plan is actually
-     * created (cf. create_gather_plan, create_gather_merge_plan).
-     *
-     * However, if force_parallel_mode = on or force_parallel_mode = regress,
-     * then we impose parallel mode whenever it's safe to do so, even if the
-     * final plan doesn't use parallelism.  It's not safe to do so if the
-     * query contains anything parallel-unsafe; parallelModeOK will be false
-     * in that case.  Note that parallelModeOK can't change after this point.
-     * Otherwise, everything in the query is either parallel-safe or
-     * parallel-restricted, and in either case it should be OK to impose
-     * parallel-mode restrictions.  If that ends up breaking something, then
-     * either some function the user included in the query is incorrectly
-     * labelled as parallel-safe or parallel-restricted when in reality it's
-     * parallel-unsafe, or else the query planner itself has a bug.
-     */
-    glob->parallelModeNeeded =
-        glob->parallelModeOK && (u_sess->attr.attr_sql.force_parallel_mode != FORCE_PARALLEL_OFF);
-
+    
     if (IS_STREAM_PLAN)
         glob->vectorized = !vector_engine_preprocess_walker((Node*)parse, parse->rtable);
     else
@@ -499,16 +558,22 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
      * the top-most PlannerInfo->glob
      */
     bool ngbk_is_multiple_nodegroup_scenario = false;
-    bool ngbk_is_all_in_installation_nodegroup_scenario = true;
+    int ngbk_different_nodegroup_count = 1;
     Distribution* ngbk_in_redistribution_group_distribution = NULL;
     Distribution* ngbk_compute_permission_group_distribution = NULL;
     Distribution* ngbk_query_union_set_group_distribution = NULL;
+    Distribution* ngbk_single_node_distribution = NULL;
     ng_backup_nodegroup_options(&ngbk_is_multiple_nodegroup_scenario,
-        &ngbk_is_all_in_installation_nodegroup_scenario,
+        &ngbk_different_nodegroup_count,
         &ngbk_in_redistribution_group_distribution,
         &ngbk_compute_permission_group_distribution,
-        &ngbk_query_union_set_group_distribution);
+        &ngbk_query_union_set_group_distribution,
+        &ngbk_single_node_distribution);
     ng_init_nodegroup_optimizer(parse);
+
+    /* Must assign value after call ng_init_nodegroup_optimizer(). */
+    u_sess->opt_cxt.is_dngather_support = 
+        u_sess->opt_cxt.is_dngather_support && ng_get_single_node_distribution() != NULL;
 
     /* Determine what fraction of the plan is likely to be scanned */
     if ((uint32)cursorOptions & CURSOR_OPT_FAST_PLAN) {
@@ -592,6 +657,7 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
 #endif
 
     top_plan = set_plan_references(root, top_plan);
+    delete_redundant_streams_of_remotequery((RemoteQuery *)top_plan);
 
     /*
      * just for cooperation analysis on client cluster,
@@ -681,7 +747,11 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     }
 
     /* Assign plan node id for each plan node */
-    if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && root->query_level == 1) {
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && root->query_level == 1) {
+#else
+    if (root->query_level == 1) {
+#endif
         finalize_node_id(top_plan,
             &plan_node_id,
             &parent_node_id,
@@ -764,12 +834,12 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
 
     result->commandType = parse->commandType;
     result->queryId = parse->queryId;
+    result->uniqueSQLId = parse->uniqueSQLId;
     result->hasReturning = (parse->returningList != NIL);
     result->hasModifyingCTE = parse->hasModifyingCTE;
     result->canSetTag = parse->canSetTag;
     result->transientPlan = glob->transientPlan;
     result->dependsOnRole = glob->dependsOnRole;
-    result->parallelModeNeeded = glob->parallelModeNeeded;
     result->planTree = top_plan;
     result->rtable = glob->finalrtable;
     result->resultRelations = glob->resultRelations;
@@ -781,26 +851,18 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     result->invalItems = glob->invalItems;
     result->nParamExec = glob->nParamExec;
     result->noanalyze_rellist = (List*)copyObject(t_thrd.postgres_cxt.g_NoAnalyzeRelNameList);
-#ifdef STREAMPLAN
-    if (IS_PGXC_COORDINATOR)
+
+    if (IS_PGXC_COORDINATOR &&
+        (t_thrd.proc->workingVersionNum < 92097 || total_num_streams > 0)) {
         result->nodesDefinition = get_all_datanodes_def();
+    }
     result->num_nodes = u_sess->pgxc_cxt.NumDataNodes;
     result->num_streams = total_num_streams;
     result->max_push_sql_num = max_push_sql_num;
     result->gather_count = gather_count;
     result->num_plannodes = num_plannodes;
-    result->num_bucketmaps = node_group_info_context->num_bucketmaps;
-    for (i = 0; i < MAX_SPECIAL_BUCKETMAP_NUM; i++) {
-        result->bucketMap[i] = node_group_info_context->bucketMap[i];
-    }
-    pfree_ext(node_group_info_context);
 
-    if (IS_PGXC_COORDINATOR && result->num_bucketmaps == 0) {
-        result->bucketMap[0] = GetGlobalStreamBucketMap(result);
-        if (result->bucketMap[0] != NULL) {
-            result->num_bucketmaps = 1;
-        }
-    }
+    FillPlanBucketmap(result, node_group_info_context);
 
     result->query_string = NULL;
     result->MaxBloomFilterNum = root->glob->bloomfilter.bloomfilter_index + 1;
@@ -811,6 +873,9 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
         result->initPlan = init_plan;
     }
     pfree_ext(subplan_ids);
+    
+#ifndef ENABLE_MULTIPLE_NODES
+    (void)InitStreamObject(result);
 #endif
 
     /* dynamic query dop main entry */
@@ -851,10 +916,11 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     result->plan_hint_warning = glob->hint_warning;
 
     ng_restore_nodegroup_options(ngbk_is_multiple_nodegroup_scenario,
-        ngbk_is_all_in_installation_nodegroup_scenario,
+        ngbk_different_nodegroup_count,
         ngbk_in_redistribution_group_distribution,
         ngbk_compute_permission_group_distribution,
-        ngbk_query_union_set_group_distribution);
+        ngbk_query_union_set_group_distribution,
+        ngbk_single_node_distribution);
 
     deinit_optimizer_context(glob);
 
@@ -997,6 +1063,47 @@ bool PreprocessOperator(Node* node, void* context)
     return expression_tree_walker(node, (bool (*)())PreprocessOperator, (void*)context);
 }
 
+/**
+ * Check whether the current nodegroup state support recursive cte.  
+ * This must be called after calling ng_init_nodegroup_optimizer and
+ * is_dngather_support is assigned.
+ */
+void check_is_support_recursive_cte(PlannerInfo* root) 
+{
+    if (!IS_STREAM_PLAN || !root->is_under_recursive_cte) {
+        return;
+    }
+
+    errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason, 
+        NOTPLANSHIPPING_LENGTH, "With-Recursive under multi-nodegroup scenario is not shippable");
+    int different_nodegroup_count = ng_get_different_nodegroup_count();
+
+    /* 1. Installation nodegroup, compute nodegroup, single nodegroup. */
+    if (different_nodegroup_count > 2) {
+       securec_check_ss_c(sprintf_rc, "\0", "\0");
+       mark_stream_unsupport();
+       return;
+    }   
+
+    /* 2. Installation nodegroup, compute nodegroup. */
+    if (different_nodegroup_count == 2 && ng_get_single_node_distribution() == NULL) {
+       securec_check_ss_c(sprintf_rc, "\0", "\0");
+       mark_stream_unsupport();
+       return;
+    }
+
+    /* 3. Installation nodegroup, single nodegroup which is used */
+    if (different_nodegroup_count == 2 && u_sess->opt_cxt.is_dngather_support == true) {
+       securec_check_ss_c(sprintf_rc, "\0", "\0");
+       mark_stream_unsupport();
+       return;
+    }
+
+    /* 4. Installation nodegroup, single nodegroup but not used. */
+    /*    Installation nodegroup. */
+    return;
+}
+
 /* --------------------
  * subquery_planner
  *	  Invokes the planner on a subquery.  We recurse to here for each
@@ -1025,7 +1132,7 @@ bool PreprocessOperator(Node* node, void* context)
  * --------------------
  */
 Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_root, bool hasRecursion,
-    double tuple_fraction, PlannerInfo** subroot, ItstDisKey* diskeys, List* subqueryRestrictInfo)
+    double tuple_fraction, PlannerInfo** subroot, int options, ItstDisKey* diskeys, List* subqueryRestrictInfo)
 {
     int num_old_subplans = list_length(glob->subplans);
     PlannerInfo* root = NULL;
@@ -1065,7 +1172,9 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     root->rowMarks = NIL;
     root->hasInheritedTarget = false;
     root->grouping_map = NULL;
-    root->hasRownumQual = false;
+    root->subquery_type = options;
+    root->param_upper = NULL;
+	root->hasRownumQual = false;
 
     /*
      * Apply memory context for query rewrite in optimizer.
@@ -1098,16 +1207,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
         root->is_under_recursive_cte = false;
     }
 
-    /*
-     * With-Recursive only supports base relations are all in installation node group.
-     */
-    if (IS_STREAM_PLAN && root->is_under_recursive_cte && !ng_is_all_in_installation_nodegroup_scenario()) {
-        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-            NOTPLANSHIPPING_LENGTH,
-            "With-Recursive under multi-nodegroup scenario is not shippable");
-        securec_check_ss_c(sprintf_rc, "\0", "\0");
-        mark_stream_unsupport();
-    }
+    check_is_support_recursive_cte(root);
 
 #ifdef PGXC
     root->rs_alias_index = 1;
@@ -1190,7 +1290,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      */
     inline_set_returning_functions(root);
 
-    if (LAZY_AGG & u_sess->attr.attr_sql.rewrite_rule) {
+    if ((LAZY_AGG & u_sess->attr.attr_sql.rewrite_rule) && permit_from_rewrite_hint(root, LAZY_AGG)) {
         lazyagg_main(parse);
         DEBUG_QRW("After lazyagg");
     }
@@ -1202,16 +1302,18 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     if (parse->commandType == CMD_SELECT && checkSelectStmtForPlanTable(parse->rtable)) {
         OnlySelectFromPlanTable = true;
     }
-    
+
+#ifndef ENABLE_MULTIPLE_NODES
     /* Change ROWNUM to LIMIT if possible */
     preprocess_rownum(root, parse);
     DEBUG_QRW("After preprocess rownum");
-
+#endif
     /*
      * Check to see if any subqueries in the jointree can be merged into this
      * query.
      */
-    parse->jointree = (FromExpr*)pull_up_subqueries(root, (Node*)parse->jointree, NULL, NULL);
+    parse->jointree = (FromExpr*)pull_up_subqueries(root, (Node*)parse->jointree);
+
     DEBUG_QRW("After simple subquery pull up");
 
     /*
@@ -1225,7 +1327,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
         DEBUG_QRW("After simple union all flatten");
     }
 
-    /* Transform hint. */
+    /* Transform hint.*/
     transform_hints(root, parse, parse->hintState);
 
     DEBUG_QRW("After transform hint");
@@ -1237,6 +1339,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      * done after we have done pull_up_subqueries, of course.
      */
     root->hasJoinRTEs = false;
+    root->hasLateralRTEs = false;
     hasOuterJoins = false;
     foreach (l, parse->rtable) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(l);
@@ -1245,10 +1348,10 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             root->hasJoinRTEs = true;
             if (IS_OUTER_JOIN(rte->jointype)) {
                 hasOuterJoins = true;
-                /* Can quit scanning once we find an outer join */
-                break;
             }
         }
+        if (rte->lateral)
+            root->hasLateralRTEs = true;
     }
 
     /*
@@ -1393,16 +1496,31 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     /* Also need to preprocess expressions for function and values RTEs */
     foreach (l, parse->rtable) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(l);
+        int kind;
 
         if (rte->rtekind == RTE_RELATION) {
             if (rte->tablesample) {
                 rte->tablesample =
                     (TableSampleClause*)preprocess_expression(root, (Node*)rte->tablesample, EXPRKIND_TABLESAMPLE);
             }
+        } else if (rte->rtekind == RTE_SUBQUERY) {
+            /*
+             * We don't want to do all preprocessing yet on the subquery's
+             * expressions, since that will happen when we plan it.  But if it
+             * contains any join aliases of our level, those have to get
+             * expanded now, because planning of the subquery won't do it.
+             * That's only possible if the subquery is LATERAL.
+             */
+            if (rte->lateral && root->hasJoinRTEs)
+                rte->subquery = (Query *)flatten_join_alias_vars(root, (Node *) rte->subquery);
         } else if (rte->rtekind == RTE_FUNCTION) {
-            rte->funcexpr = preprocess_expression(root, rte->funcexpr, EXPRKIND_RTFUNC);
+            /* Preprocess the function expression fully */
+            kind = rte->lateral ? EXPRKIND_RTFUNC_LATERAL : EXPRKIND_RTFUNC;
+            rte->funcexpr = preprocess_expression(root, rte->funcexpr, kind);
         } else if (rte->rtekind == RTE_VALUES) {
-            rte->values_lists = (List*)preprocess_expression(root, (Node*)rte->values_lists, EXPRKIND_VALUES);
+            /* Preprocess the values lists fully */
+            kind = rte->lateral ? EXPRKIND_VALUES_LATERAL : EXPRKIND_VALUES;
+            rte->values_lists = (List*)preprocess_expression(root, (Node*)rte->values_lists, kind);
         }
 
         /*
@@ -1447,35 +1565,43 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      * implicitly-ANDed-list form at this point, even though they are declared
      * as Node *.
      */
-    newHaving = NIL;
-    foreach (l, (List*)parse->havingQual) {
-        Node* havingclause = (Node*)lfirst(l);
+    if (!parse->unique_check)  {
+        newHaving = NIL;
+        foreach(l, (List *) parse->havingQual)  {
+            Node       *havingclause = (Node *)lfirst(l);
 
-        /*
-         * For groupingSets, having clause can only be calculate in havingQual, can not push-down to lefttree's qual.
-         *
-         * For example:
-         * select sum(a), b from group by rollup(a, b) having b > 10;
-         * this mean: group by a, b
-         *            group by a
-         *            group by ()
-         *
-         * For "group by ()", we need calculate sum(a) for all lefttree's rows.
-         */
-        if (contain_agg_clause(havingclause) || contain_volatile_functions(havingclause) ||
-            contain_subplans(havingclause) || parse->groupingSets) {
-            /* keep it in HAVING */
-            newHaving = lappend(newHaving, havingclause);
-        } else if (parse->groupClause) {
-            /* move it to WHERE */
-            parse->jointree->quals = (Node*)lappend((List*)parse->jointree->quals, havingclause);
-        } else {
-            /* put a copy in WHERE, keep it in HAVING */
-            parse->jointree->quals = (Node*)lappend((List*)parse->jointree->quals, copyObject(havingclause));
-            newHaving = lappend(newHaving, havingclause);
+            /* 
+             * For groupingSets, having clause can only be calculate in havingQual, can not push-down to lefttree's qual.
+             * 
+             * For example:
+             * select sum(a), b from group by rollup(a, b) having b > 10;
+             * this mean: group by a, b
+             *            group by a
+             *            group by ()
+             *
+             * For "group by ()", we need calculate sum(a) for all lefttree's rows.
+             */
+            if (contain_agg_clause(havingclause) ||
+                contain_volatile_functions(havingclause) ||
+                contain_subplans(havingclause)
+                || parse->groupingSets) {
+                /* keep it in HAVING */
+                newHaving = lappend(newHaving, havingclause);
+            } else if (parse->groupClause)  {
+                /* move it to WHERE */
+                parse->jointree->quals = (Node *)
+                    lappend((List *) parse->jointree->quals, havingclause);
+            } else {
+                /* put a copy in WHERE, keep it in HAVING */
+                parse->jointree->quals = (Node *)
+                    lappend((List *) parse->jointree->quals,
+                            copyObject(havingclause));
+                newHaving = lappend(newHaving, havingclause);
+            }
         }
+        parse->havingQual = (Node *) newHaving;
     }
-    parse->havingQual = (Node*)newHaving;
+
 
     DEBUG_QRW("After having qual rewrite");
 
@@ -1653,7 +1779,7 @@ Node* preprocess_expression(PlannerInfo* root, Node* expr, int kind)
      * can skip it in VALUES lists, however, since they can't contain any Vars
      * at all.
      */
-    if (root->hasJoinRTEs && kind != EXPRKIND_VALUES)
+    if (root->hasJoinRTEs && !(kind == EXPRKIND_RTFUNC || kind == EXPRKIND_VALUES))
         expr = flatten_join_alias_vars(root, expr);
 
     /*
@@ -1742,6 +1868,23 @@ void preprocess_qual_conditions(PlannerInfo* root, Node* jtnode)
                 errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("unrecognized node type when process qual condition: %d", (int)nodeTag(jtnode))));
     }
+}
+
+/*
+ * preprocess_phv_expression
+ *   Do preprocessing on a PlaceHolderVar expression that's been pulled up.
+ *
+ * If a LATERAL subquery references an output of another subquery, and that
+ * output must be wrapped in a PlaceHolderVar because of an intermediate outer
+ * join, then we'll push the PlaceHolderVar expression down into the subquery
+ * and later pull it back up during find_lateral_references, which runs after
+ * subquery_planner has preprocessed all the expressions that were in the
+ * current query level to start with.  So we need to preprocess it then.
+ */
+Expr *
+preprocess_phv_expression(PlannerInfo *root, Expr *expr)
+{
+   return (Expr *) preprocess_expression(root, (Node *) expr, EXPRKIND_PHV);
 }
 
 /*
@@ -1954,6 +2097,7 @@ static Plan* inheritance_planner(PlannerInfo* root)
             MOD_OPT,
             "the list of SpecialJoinInfos is not NIL when generating a modified instance of the original Query for "
             "each target relation.");
+        Assert(subroot.lateral_info_list == NIL);
         /* and we haven't created PlaceHolderInfos, either */
         AssertEreport(subroot.placeholder_list == NIL,
             MOD_OPT,
@@ -2262,6 +2406,39 @@ static void rebuild_pathkey_for_groupingSet(
     }
 }
 
+static inline Path* choose_best_path(bool use_cheapest_path, PlannerInfo* root, Path* cheapest_path, Path* sorted_path)
+{
+        Path* best_path;
+        if (use_cheapest_path) {
+            best_path = cheapest_path;
+        }
+        else {
+            best_path = sorted_path;
+            ereport(DEBUG2, (errmodule(MOD_OPT), (errmsg("Use presorted path instead of cheapest path."))));
+            /* print more details */
+            if (log_min_messages <= DEBUG2)
+                debug1_print_new_path(root, best_path, false);
+        }
+
+        return best_path;
+}
+
+#ifdef ENABLE_MULTIPLE_NODES
+static bool has_ts_func(List* tlist)
+{
+    FillWalkerContext fill_context;
+    error_t rc = memset_s(&fill_context, sizeof(fill_context), 0, sizeof(fill_context));
+    securec_check(rc, "\0", "\0");
+
+    expression_tree_walker((Node*)tlist, (walker)fill_function_call_walker, &fill_context);
+    if (fill_context.fill_func_calls > 0 || fill_context.fill_last_func_calls > 0 ||
+        fill_context.column_calls > 0) {
+        return true;
+    }
+    return false;    
+}
+#endif
+
 /* --------------------
  * grouping_planner
  *	  Perform planning steps related to grouping, aggregation, etc.
@@ -2389,7 +2566,6 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         double sub_limit_tuples;
         AttrNumber* groupColIdx = NULL;
         bool need_tlist_eval = true;
-        standard_qp_extra qp_extra;
         Path* cheapest_path = NULL;
         Path* sorted_path = NULL;
         Path* best_path = NULL;
@@ -2405,8 +2581,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         int* tleref_to_colnum_map = NULL;
         List* rollup_lists = NIL;
         List* rollup_groupclauses = NIL;
-        /* Add for olap function */
-        bool need_hash = true;
+        bool  needSecondLevelAgg = true;	/* For olap function*/
         List* superset_key = root->dis_keys.superset_keys;
         Size hash_entry_size = 0;
         char PathContextName[NAMEDATALEN] = {0};
@@ -2576,7 +2751,77 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
             u_sess->opt_cxt.query_dop = dop_tmp;
         }
 
+        /*
+         * Calculate pathkeys that represent grouping/ordering requirements.
+         * Stash them in PlannerInfo so that query_planner can canonicalize
+         * them after EquivalenceClasses have been formed.	The sortClause is
+         * certainly sort-able, but GROUP BY and DISTINCT might not be, in
+         * which case we just leave their pathkeys empty.
+         */
 
+        /* To groupingSet, we need build it's groupPathKey according to it's lower levels sort clause.*/
+        if (parse->groupingSets) {
+            List* groupcls = (List*)llast(rollup_groupclauses);
+
+            if (groupcls && grouping_is_sortable(groupcls)) {
+                root->group_pathkeys = make_pathkeys_for_sortclauses(root, groupcls, tlist, false);
+            } else {
+                root->group_pathkeys = NIL;
+            }
+        } else if (parse->groupClause && grouping_is_sortable(parse->groupClause)) {
+            root->group_pathkeys = make_pathkeys_for_sortclauses(root, parse->groupClause, tlist, false);
+        } else {
+            root->group_pathkeys = NIL;
+        }
+
+        /* We consider only the first (bottom) window in pathkeys logic */
+        if (wflists != NULL && wflists->activeWindows != NIL) {
+            WindowClause* wc = NULL;
+
+            wc = (WindowClause*)linitial(wflists->activeWindows);
+
+            root->window_pathkeys = make_pathkeys_for_window(root, wc, tlist, false);
+        } else {
+            root->window_pathkeys = NIL;
+        }
+
+        if (parse->distinctClause && grouping_is_sortable(parse->distinctClause)) {
+
+            root->distinct_pathkeys = make_pathkeys_for_sortclauses(root, parse->distinctClause, tlist, false);
+        } else {
+            root->distinct_pathkeys = NIL;
+        }
+
+        root->sort_pathkeys = make_pathkeys_for_sortclauses(root, parse->sortClause, tlist, false);
+
+        /*
+         * Figure out whether we want a sorted result from query_planner.
+         *
+         * If we have a sortable GROUP BY clause, then we want a result sorted
+         * properly for grouping.  Otherwise, if we have window functions to
+         * evaluate, we try to sort for the first window.  Otherwise, if
+         * there's a sortable DISTINCT clause that's more rigorous than the
+         * ORDER BY clause, we try to produce output that's sufficiently well
+         * sorted for the DISTINCT.  Otherwise, if there is an ORDER BY
+         * clause, we want to sort by the ORDER BY clause.
+         *
+         * Note: if we have both ORDER BY and GROUP BY, and ORDER BY is a
+         * superset of GROUP BY, it would be tempting to request sort by ORDER
+         * BY --- but that might just leave us failing to exploit an available
+         * sort order at all.  Needs more thought.	The choice for DISTINCT
+         * versus ORDER BY is much easier, since we know that the parser
+         * ensured that one is a superset of the other.
+         */
+        if (root->group_pathkeys)
+            root->query_pathkeys = root->group_pathkeys;
+        else if (root->window_pathkeys)
+            root->query_pathkeys = root->window_pathkeys;
+        else if (list_length(root->distinct_pathkeys) > list_length(root->sort_pathkeys))
+            root->query_pathkeys = root->distinct_pathkeys;
+        else if (root->sort_pathkeys)
+            root->query_pathkeys = root->sort_pathkeys;
+        else
+            root->query_pathkeys = NIL;
 
         /*
          * Figure out whether there's a hard limit on the number of rows that
@@ -2590,11 +2835,6 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         else
             sub_limit_tuples = limit_tuples;
 
-        /* Set up data needed by standard_qp_callback */
-        qp_extra.tlist = tlist;
-        qp_extra.activeWindows = wflists ? wflists->activeWindows : NULL;
-        qp_extra.rollup_groupclauses = rollup_groupclauses;
-
         /*
          * Generate the best unsorted and presorted paths for this Query (but
          * note there may not be any presorted path).  query_planner will also
@@ -2605,7 +2845,6 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
             sub_tlist,
             tuple_fraction,
             sub_limit_tuples,
-            standard_qp_callback, &qp_extra,
             &cheapest_path,
             &sorted_path,
             dNumGroups,
@@ -2700,12 +2939,13 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
          * always read all the input tuples, so use the cheapest-total path.
          * Otherwise, trust query_planner's decision about which to use.
          */
-        if (use_hashed_grouping || use_hashed_distinct || sorted_path == NULL)
-            best_path = cheapest_path;
-        else
-            best_path = sorted_path;
+        best_path = choose_best_path((use_hashed_grouping || use_hashed_distinct || sorted_path == NULL),
+                                    root, cheapest_path, sorted_path);
 
         (void)MemoryContextSwitchTo(PlanGenerateContext);
+
+        /* record the param */
+        root->param_upper = PATH_REQ_UPPER(cheapest_path);
 
         /*
          * Check to see if it's possible to optimize MIN/MAX aggregates. If
@@ -2932,7 +3172,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     localNumGroup,
                     result_plan,
                     wflists,
-                    &need_hash,
+                    &needSecondLevelAgg,
                     collectiveGroupExpr);
 
                 /* Delete eq class expr after grouping */
@@ -2985,7 +3225,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     is_replicated_plan(result_plan)) {
                     needs_stream = false;
                 } else {
-                    needs_stream = needs_agg_stream(root, tlist, result_plan->distributed_keys);
+                    needs_stream = needs_agg_stream(root, tlist, result_plan->distributed_keys, &result_plan->exec_nodes->distribution);
                 }
             }
 
@@ -2999,92 +3239,100 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                 expression_returns_set((Node*)tlist) || expression_returns_set((Node*)parse->havingQual);
             bool next_is_second_level_group = false;
 
-            if (use_hashed_grouping) {
-                if (need_hash) {
-                    /* Hashed aggregate plan --- no sort needed */
-                    if (IS_STREAM_PLAN && is_execute_on_datanodes(result_plan) && !is_replicated_plan(result_plan)) {
-                        if (agg_costs.hasDnAggs || list_length(agg_costs.exprAggs) == 0)
-                            result_plan = generate_hashagg_plan(root,
-                                result_plan,
-                                tlist,
-                                &agg_costs,
-                                numGroupCols,
-                                numGroups,
-                                wflists,
-                                groupColIdx,
-                                extract_grouping_ops(parse->groupClause),
-                                &needs_stream,
-                                hash_entry_size,
-                                AGG_LEVEL_1_INTENT,
-                                rel_info);
-                        else {
-                            Node* node = (Node*)linitial(agg_costs.exprAggs);
-                            AssertEreport(list_length(agg_costs.exprAggs) == 1,
-                                MOD_OPT,
-                                "invalid length of distinct expression when generating plan for hashed aggregate.");
+            /* Don't need second level agg when distribute key is in group clause of groupingsets. */
+            if (!needSecondLevelAgg) {
+                /* need do nothing*/
+            } else if (use_hashed_grouping)  {
+                /* Hashed aggregate plan --- no sort needed */
+                if (IS_STREAM_PLAN &&
+                    is_execute_on_datanodes(result_plan) &&
+                    !is_replicated_plan(result_plan)) {
+                    if (agg_costs.hasDnAggs || list_length(agg_costs.exprAggs) == 0) {
+                        result_plan = generate_hashagg_plan(root,
+                                                            result_plan,
+                                                            tlist,
+                                                            &agg_costs,
+                                                            numGroupCols,
+                                                            numGroups,
+                                                            wflists,
+                                                            groupColIdx,
+                                                            extract_grouping_ops(parse->groupClause),
+                                                            &needs_stream,
+                                                            hash_entry_size,
+                                                            AGG_LEVEL_1_INTENT,
+                                                            rel_info);
+                    } else {
+                        Node    *node = (Node *) linitial(agg_costs.exprAggs);
+                        AssertEreport(list_length(agg_costs.exprAggs) == 1,
+                                      MOD_OPT,
+                                      "invalid length of distinct expression when generating plan for hashed aggregate.");
 
-                            result_plan = get_count_distinct_partial_plan(root,
-                                result_plan,
-                                &tlist,
-                                node,
-                                agg_costs,
-                                numGroups,
-                                wflists,
-                                groupColIdx,
-                                &needs_stream,
-                                hash_entry_size,
-                                rel_info);
-                        }
-
-                        next_is_second_level_group = true;
-                    } else if (!parse->groupingSets) {
-                        /*
-                         * To Ap function, need not do hashagg if it is not stream plan,
-                         * in this case, all work always is finished in sort agg.
-                         */
-                        result_plan = (Plan*)make_agg(root,
-                            tlist,
-                            (List*)parse->havingQual,
-                            AGG_HASHED,
-                            &agg_costs,
-                            numGroupCols,
-                            groupColIdx,
-                            extract_grouping_ops(parse->groupClause),
-                            localNumGroup,
-                            result_plan,
-                            wflists,
-                            needs_stream,
-                            true,
-                            NIL,
-                            false,
-                            hash_entry_size);
-
-                        next_is_second_level_group = true;
+                        result_plan = get_count_distinct_partial_plan(root,
+                                                                      result_plan,
+                                                                      &tlist,
+                                                                      node,
+                                                                      agg_costs,
+                                                                      numGroups,
+                                                                      wflists,
+                                                                      groupColIdx,
+                                                                      &needs_stream,
+                                                                      hash_entry_size,
+                                                                      rel_info);
                     }
 
-                    if (IS_STREAM_PLAN && needs_stream && is_execute_on_datanodes(result_plan) &&
-                        !is_replicated_plan(result_plan)) {
+                    next_is_second_level_group = true;
+                } else if (!parse->groupingSets) {
+                    /*
+                     * To Ap function, need not do hashagg if it is not stream plan,
+                     * in this case, all work always is finished in sort agg.
+                    */
+                    result_plan = (Plan *) make_agg(root,
+                                    tlist,
+                                    (List *) parse->havingQual,
+                                    AGG_HASHED,
+                                    &agg_costs,
+                                    numGroupCols,
+                                    groupColIdx,
+                                    extract_grouping_ops(parse->groupClause),
+                                    localNumGroup,
+                                    result_plan,
+                                    wflists,
+                                    needs_stream,
+                                    true,
+                                    NIL,
+                                    false,
+                                    hash_entry_size);
 
-                        if (next_is_second_level_group && contain_sets_expression) {
-                            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                                NOTPLANSHIPPING_LENGTH,
-                                "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
-                            securec_check_ss_c(sprintf_rc, "\0", "\0");
-                            mark_stream_unsupport();
-                        }
+                    next_is_second_level_group = true;
+                }
 
-                        if (wflists != NULL && wflists->activeWindows)
-                            result_plan->targetlist =
-                                make_windowInputTargetList(root, result_plan->targetlist, wflists->activeWindows);
+                if (IS_STREAM_PLAN &&
+                    needs_stream &&
+                    is_execute_on_datanodes(result_plan) &&
+                    !is_replicated_plan(result_plan))  {
 
-                        result_plan = (Plan*)mark_agg_stream(
-                            root, tlist, result_plan, parse->groupClause, AGG_LEVEL_1_INTENT, &has_second_agg_sort);
-                        if (!has_second_agg_sort)
-                            current_pathkeys = NIL;
-                        else
-                            current_pathkeys = root->group_pathkeys;
-                    } else /* Hashed aggregation produces randomly-ordered results */
+                    if (next_is_second_level_group && contain_sets_expression) {
+                        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                            NOTPLANSHIPPING_LENGTH,
+                            "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
+                        securec_check_ss_c(sprintf_rc, "\0", "\0");
+                        mark_stream_unsupport();
+                    }
+
+                    if (wflists != NULL && wflists->activeWindows) {
+                        result_plan->targetlist = make_windowInputTargetList(root, result_plan->targetlist,
+                                                            wflists->activeWindows);
+                    }
+                    result_plan = (Plan *)mark_agg_stream(root, tlist, result_plan, parse->groupClause,
+                                        AGG_LEVEL_1_INTENT, &has_second_agg_sort);
+                    if (!has_second_agg_sort) {
                         current_pathkeys = NIL;
+                    } else {
+                        current_pathkeys = root->group_pathkeys;
+                    }
+                } else {
+                    /* Hashed aggregation produces randomly-ordered results */
+                    current_pathkeys = NIL;
                 }
             } else if (parse->hasAggs) {
                 /* Plain aggregate plan --- sort if needed */
@@ -3231,27 +3479,24 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 
                 } else {
                     if (IS_STREAM_PLAN && count_distinct_optimization) {
-                        /* we don't support more than one count(distinct) to push down */
-                        if (list_length(agg_costs.exprAggs) > 1) {
-                            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                                NOTPLANSHIPPING_LENGTH,
-                                "More than one \"Count(Distinct)\"");
-                            securec_check_ss_c(sprintf_rc, "\0", "\0");
-                            mark_stream_unsupport();
-                        }
-                        if (agg_costs.hasDnAggs) {
-                            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                                NOTPLANSHIPPING_LENGTH,
-                                "\"String_agg\" or \"Array_agg\" or \"Listagg\"");
-                            securec_check_ss_c(sprintf_rc, "\0", "\0");
-                            mark_stream_unsupport();
-                        }
-                        if (agg_costs.numOrderedAggs > 0) {
-                            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                                NOTPLANSHIPPING_LENGTH,
-                                "\"Order by\" in agg function");
-                            securec_check_ss_c(sprintf_rc, "\0", "\0");
-                            mark_stream_unsupport();
+                        if (list_length(agg_costs.exprAggs) > 1 ||
+                            agg_costs.hasDnAggs ||
+                            agg_costs.numOrderedAggs > 0) {
+                            /*
+                             * Add gather here for listagg&array_agg is confused with sort in result_plan,
+                             * as gather may lead to disordered in MPP scenario, but user can add order by
+                             * in agg function which can avoid this changed and is recommended in SQL standard.
+                             */
+                            if ((u_sess->attr.attr_sql.rewrite_rule & PARTIAL_PUSH) && permit_from_rewrite_hint(root, PARTIAL_PUSH))  {
+                                needs_stream = false;
+                                result_plan = make_simple_RemoteQuery(result_plan, root, false);
+                            } else {
+                                errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                                    NOTPLANSHIPPING_LENGTH,
+                                    "multi count(distinct) or agg which need order can not ship.");
+                                securec_check_ss_c(sprintf_rc, "\0", "\0");
+                                mark_stream_unsupport();
+                            }
                         } else if (agg_costs.exprAggs != NIL) {
 
                             if (distinct_needs_local_stream)
@@ -3457,7 +3702,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     while (--nrows > 0)
                         plans = lappend(plans, copyObject(result_plan));
 
-                    result_plan = (Plan*)make_append(plans, -1, tlist);
+                    result_plan = (Plan*)make_append(plans, tlist);
                 }
             }
 #ifdef PGXC
@@ -3544,7 +3789,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                 AttrNumber* ordColIdx = NULL;
                 Oid* ordOperators = NULL;
 
-                window_pathkeys = make_pathkeys_for_window(root, wc, tlist);
+                window_pathkeys = make_pathkeys_for_window(root, wc, tlist, true);
 
                 /*
                  * This is a bit tricky: we build a sort node even if we don't
@@ -3822,9 +4067,13 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
      * ModifyTable node instead.)
      */
     if (parse->rowMarks) {
+#ifdef ENABLE_MOT
         if (!IsMOTEngineUsed()) {
+#endif
             result_plan = (Plan*)make_lockrows(root, result_plan);
+#ifdef ENABLE_MOT
         }
+#endif
 
         /*
          * The result can no longer be assumed sorted, since redistribute add
@@ -3852,6 +4101,10 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
             (result_plan->dop > 1 && root->sort_pathkeys)) {
             result_plan = (Plan*)make_sort_from_pathkeys(root, result_plan, root->sort_pathkeys, limit_tuples);
 #ifdef PGXC
+#ifdef STREAMPLAN
+            if (IS_STREAM_PLAN && check_sort_for_upsert(root))
+                result_plan = make_stream_sort(root, result_plan);
+#endif /* STREAMPLAN */
             if (IS_PGXC_COORDINATOR && !IS_STREAM && !IsConnFromCoord())
                 result_plan = (Plan*)create_remotesort_plan(root, result_plan);
 #endif /* PGXC */
@@ -3927,18 +4180,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
      */
     root->query_pathkeys = current_pathkeys;
 #endif
+
 #ifdef ENABLE_MULTIPLE_NODES
-    if (u_sess->attr.attr_common.enable_tsdb) {
+    if (g_instance.attr.attr_common.enable_tsdb) {
         result_plan = tsdb_modifier(root, tlist, result_plan);
-    } else {
-        FillWalkerContext fill_context = {
-            .call = NULL, .fill_func_calls = 0, .fill_last_func_calls = 0, .column_calls = 0};
-        expression_tree_walker((Node*)tlist, (walker)fill_function_call_walker, &fill_context);
-        if (fill_context.fill_func_calls > 0 || fill_context.fill_last_func_calls > 0 ||
-            fill_context.column_calls > 0) {
-            ereport(
-                ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("please enable tsdb to use tsdb functions !")));
-        }
+    } else if (has_ts_func(tlist)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("please enable tsdb to use tsdb functions !")));
     }
 #endif
     (void)MemoryContextSwitchTo(oldcontext);
@@ -4221,7 +4468,7 @@ static Plan* build_grouping_chain(PlannerInfo* root, Query* parse, List** tlist,
  * @in result_plan - left plan
  * @in wflists - windows fun info.
  * @in need_stream - if need stream
- * @out need_hash - if need hashagg
+ * @out needSecondLevelAgg  - if need second level agg
  * @in collectiveGroupExpr - collective group exprs
  * @out - agg plan
  */
@@ -4539,7 +4786,7 @@ static void preprocess_rowmarks(PlannerInfo* root)
          * choose to do something special while fetching their rows, but that
          * is of no concern here.)
          */
-        if (rte->relkind == RELKIND_FOREIGN_TABLE)
+        if (rte->relkind == RELKIND_FOREIGN_TABLE || rte->relkind == RELKIND_STREAM)
             continue;
 
         rels = bms_del_member(rels, rc->rti);
@@ -4574,14 +4821,16 @@ static void preprocess_rowmarks(PlannerInfo* root)
         newrc->rti = newrc->prti = i;
         newrc->rowmarkId = ++(root->glob->lastRowMarkId);
         /* real tables support REFERENCE, anything else needs COPY */
-        if (rte->rtekind == RTE_RELATION && rte->relkind != RELKIND_FOREIGN_TABLE)
+        if (rte->rtekind == RTE_RELATION && rte->relkind != RELKIND_FOREIGN_TABLE && rte->relkind != RELKIND_STREAM)
             newrc->markType = ROW_MARK_REFERENCE;
         else
             newrc->markType = ROW_MARK_COPY;
         newrc->noWait = false; /* doesn't matter */
         newrc->isParent = false;
-        newrc->bms_nodeids = (RTE_RELATION == rte->rtekind && RELKIND_FOREIGN_TABLE != rte->relkind)
-                              ? ng_get_baserel_data_nodeids(rte->relid, rte->relkind) : NULL;
+        newrc->bms_nodeids = (RTE_RELATION == rte->rtekind && RELKIND_FOREIGN_TABLE != rte->relkind 
+                              && RELKIND_STREAM != rte->relkind)
+                                 ? ng_get_baserel_data_nodeids(rte->relid, rte->relkind)
+                                 : NULL;
 
         prowmarks = lappend(prowmarks, newrc);
     }
@@ -4621,7 +4870,60 @@ static void separate_rowmarks(PlannerInfo* root)
     root->xc_rowMarks = rml_1;
 }
 
-#endif /* PGXC */
+#endif /*PGXC*/
+
+/*
+ * Try to obtain the clause values.  We use estimate_expression_value
+ * primarily because it can sometimes do something useful with Params.
+ */
+static void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, int64* count_est)
+{
+    Query* parse = root->parse;
+    Node* est = NULL;
+
+    /* Should not be called unless LIMIT or OFFSET */
+    AssertEreport(parse->limitCount || parse->limitOffset,
+        MOD_OPT,
+        "invalid result tuples when doing pre-estimation for LIMIT and/or OFFSET clauses.");
+    
+    if (parse->limitCount) {
+        est = estimate_expression_value(root, parse->limitCount);
+        if (est && IsA(est, Const)) {
+            if (((Const*)est)->constisnull) {
+                /* NULL indicates LIMIT ALL, ie, no limit */
+                *count_est = 0; /* treat as not present */
+            } else {
+                *count_est = DatumGetInt64(((Const*)est)->constvalue);
+                if (*count_est <= 0) {
+                    *count_est = 1; /* force to at least 1 */
+                }
+            }
+        } else {
+            *count_est = -1; /* can't estimate */
+        }
+    } else {
+        *count_est = 0; /* not present */
+    }
+
+    if (parse->limitOffset) {
+        est = estimate_expression_value(root, parse->limitOffset);
+        if (est && IsA(est, Const)) {
+            if (((Const*)est)->constisnull) {
+                /* Treat NULL as no offset; the executor will too */
+                *offset_est = 0; /* treat as not present */
+            } else {
+                *offset_est = DatumGetInt64(((Const*)est)->constvalue);
+                if (*offset_est < 0) {
+                    *offset_est = 0; /* less than 0 is same as 0 */
+                }
+            }
+        } else {
+            *offset_est = -1; /* can't estimate */
+        }
+    } else {
+        *offset_est = 0; /* not present */
+    }
+}
 
 /*
  * preprocess_limit - do pre-estimation for LIMIT and/or OFFSET clauses
@@ -4642,50 +4944,9 @@ static void separate_rowmarks(PlannerInfo* root)
  */
 static double preprocess_limit(PlannerInfo* root, double tuple_fraction, int64* offset_est, int64* count_est)
 {
-    Query* parse = root->parse;
-    Node* est = NULL;
     double limit_fraction;
 
-    /* Should not be called unless LIMIT or OFFSET */
-    AssertEreport(parse->limitCount || parse->limitOffset,
-        MOD_OPT,
-        "invalid result tuples when doing pre-estimation for LIMIT and/or OFFSET clauses.");
-
-    /*
-     * Try to obtain the clause values.  We use estimate_expression_value
-     * primarily because it can sometimes do something useful with Params.
-     */
-    if (parse->limitCount) {
-        est = estimate_expression_value(root, parse->limitCount);
-        if (est && IsA(est, Const)) {
-            if (((Const*)est)->constisnull) {
-                /* NULL indicates LIMIT ALL, ie, no limit */
-                *count_est = 0; /* treat as not present */
-            } else {
-                *count_est = DatumGetInt64(((Const*)est)->constvalue);
-                if (*count_est <= 0)
-                    *count_est = 1; /* force to at least 1 */
-            }
-        } else
-            *count_est = -1; /* can't estimate */
-    } else
-        *count_est = 0; /* not present */
-
-    if (parse->limitOffset) {
-        est = estimate_expression_value(root, parse->limitOffset);
-        if (est && IsA(est, Const)) {
-            if (((Const*)est)->constisnull) {
-                /* Treat NULL as no offset; the executor will too */
-                *offset_est = 0; /* treat as not present */
-            } else {
-                *offset_est = DatumGetInt64(((Const*)est)->constvalue);
-                if (*offset_est < 0)
-                    *offset_est = 0; /* less than 0 is same as 0 */
-            }
-        } else
-            *offset_est = -1; /* can't estimate */
-    } else
-        *offset_est = 0; /* not present */
+    estimate_limit_offset_count(root, offset_est, count_est);
 
     if (*count_est != 0) {
         /*
@@ -4709,20 +4970,19 @@ static double preprocess_limit(PlannerInfo* root, double tuple_fraction, int64* 
          * be smaller.
          */
         if (tuple_fraction >= 1.0) {
-            if (limit_fraction >= 1.0) {
-                /* both absolute */
-                tuple_fraction = Min(tuple_fraction, limit_fraction);
-            } else {
-                /* caller absolute, limit fractional; use caller's value */
-            }
+            /*
+             * if true, both absolute
+             * else, caller absolute, limit fractional; use caller's value
+             */
+            tuple_fraction = limit_fraction >= 1.0 ?
+                Min(tuple_fraction, limit_fraction) : tuple_fraction;
         } else if (tuple_fraction > 0.0) {
-            if (limit_fraction >= 1.0) {
-                /* caller fractional, limit absolute; use limit */
-                tuple_fraction = limit_fraction;
-            } else {
-                /* both fractional */
-                tuple_fraction = Min(tuple_fraction, limit_fraction);
-            }
+            /*
+             * if true, caller fractional, limit absolute; use limit
+             * else, both fractional
+             */
+            tuple_fraction = limit_fraction >= 1.0 ?
+                limit_fraction : Min(tuple_fraction, limit_fraction);
         } else {
             /* no info from caller, just use limit */
             tuple_fraction = limit_fraction;
@@ -4737,10 +4997,7 @@ static double preprocess_limit(PlannerInfo* root, double tuple_fraction, int64* 
          *
          * As above, use 10% if OFFSET is present but unestimatable.
          */
-        if (*offset_est < 0)
-            limit_fraction = 0.10;
-        else
-            limit_fraction = (double)*offset_est;
+        limit_fraction = *offset_est < 0 ? 0.10 : (double)*offset_est;
 
         /*
          * If we have absolute counts from both caller and OFFSET, add them
@@ -4749,22 +5006,16 @@ static double preprocess_limit(PlannerInfo* root, double tuple_fraction, int64* 
          * we heuristically assume that's the fractional one.
          */
         if (tuple_fraction >= 1.0) {
-            if (limit_fraction >= 1.0) {
-                /* both absolute, so add them together */
-                tuple_fraction += limit_fraction;
-            } else {
-                /* caller absolute, limit fractional; use limit */
-                tuple_fraction = limit_fraction;
-            }
+            tuple_fraction = limit_fraction >= 1.0 ?
+                tuple_fraction + limit_fraction : limit_fraction;
         } else {
             if (limit_fraction >= 1.0) {
                 /* caller fractional, limit absolute; use caller's value */
             } else {
                 /* both fractional, so add them together */
                 tuple_fraction += limit_fraction;
-                if (tuple_fraction >= 1.0) {
-                    tuple_fraction = 0.0; /* assume fetch all */
-                }
+                /* assume fetch all */
+                tuple_fraction = tuple_fraction >= 1.0 ? 0.0 : tuple_fraction;
             }
         }
     }
@@ -4882,106 +5133,6 @@ List* preprocess_groupclause(PlannerInfo* root, List* force)
 
     return new_groupclause;
 }
-
-/*
- * Compute query_pathkeys and other pathkeys during plan generation
- */
-static void
-standard_qp_callback(PlannerInfo *root, void *extra)
-{
-    Query      *parse = root->parse;
-    standard_qp_extra *qp_extra = (standard_qp_extra *) extra;
-    List       *tlist = qp_extra->tlist;
-    List       *activeWindows = qp_extra->activeWindows;
-    List       *rollup_groupclauses = qp_extra->rollup_groupclauses;
-
-    /*
-     * Calculate pathkeys that represent grouping/ordering requirements.
-     * Stash them in PlannerInfo so that query_planner can canonicalize
-     * them after EquivalenceClasses have been formed.	The sortClause is
-     * certainly sort-able, but GROUP BY and DISTINCT might not be, in
-     * which case we just leave their pathkeys empty.
-     *
-     * To groupingSet, we need build it's groupPathKey according to it's lower levels sort clause.
-     */
-    if (parse->groupingSets) {
-        List* groupcls = (List*)llast(rollup_groupclauses);
-
-        if (groupcls && grouping_is_sortable(groupcls)) {
-            root->group_pathkeys = make_pathkeys_for_sortclauses(root, groupcls, tlist, true);
-        } else {
-            root->group_pathkeys = NIL;
-        }
-    }
-    else if (parse->groupClause &&
-            grouping_is_sortable(parse->groupClause))
-        root->group_pathkeys =
-            make_pathkeys_for_sortclauses(root,
-                    parse->groupClause,
-                    tlist,
-                    true);
-    else
-        root->group_pathkeys = NIL;
-
-    /* We consider only the first (bottom) window in pathkeys logic */
-    if (activeWindows != NIL)
-    {
-        WindowClause *wc = (WindowClause *) linitial(activeWindows);
-
-        root->window_pathkeys = make_pathkeys_for_window(root,
-                wc,
-                tlist);
-    }
-    else
-        root->window_pathkeys = NIL;
-
-    if (parse->distinctClause &&
-            grouping_is_sortable(parse->distinctClause))
-        root->distinct_pathkeys =
-            make_pathkeys_for_sortclauses(root,
-                    parse->distinctClause,
-                    tlist,
-                    true);
-    else
-        root->distinct_pathkeys = NIL;
-
-    root->sort_pathkeys =
-        make_pathkeys_for_sortclauses(root,
-                parse->sortClause,
-                tlist,
-                true);
-
-    /*
-     * Figure out whether we want a sorted result from query_planner.
-     *
-     * If we have a sortable GROUP BY clause, then we want a result sorted
-     * properly for grouping.  Otherwise, if we have window functions to
-     * evaluate, we try to sort for the first window.  Otherwise, if there's a
-     * sortable DISTINCT clause that's more rigorous than the ORDER BY clause,
-     * we try to produce output that's sufficiently well sorted for the
-     * DISTINCT.  Otherwise, if there is an ORDER BY clause, we want to sort
-     * by the ORDER BY clause.
-     *
-     * Note: if we have both ORDER BY and GROUP BY, and ORDER BY is a superset
-     * of GROUP BY, it would be tempting to request sort by ORDER BY --- but
-     * that might just leave us failing to exploit an available sort order at
-     * all.  Needs more thought.  The choice for DISTINCT versus ORDER BY is
-     * much easier, since we know that the parser ensured that one is a
-     * superset of the other.
-     */
-    if (root->group_pathkeys)
-        root->query_pathkeys = root->group_pathkeys;
-    else if (root->window_pathkeys)
-        root->query_pathkeys = root->window_pathkeys;
-    else if (list_length(root->distinct_pathkeys) >
-            list_length(root->sort_pathkeys))
-        root->query_pathkeys = root->distinct_pathkeys;
-    else if (root->sort_pathkeys)
-        root->query_pathkeys = root->sort_pathkeys;
-    else
-        root->query_pathkeys = NIL;
-}
-
 
 /*
  * Extract lists of grouping sets that can be implemented using a single
@@ -5497,18 +5648,16 @@ static void compute_hashed_path_cost(PlannerInfo* root, double limit_tuples, int
         Path* path = NULL;
         distributed_key = NIL;
 
-        if (need_second_hashagg)
-            path = hashed_p;
-        else
-            path = cheapest_path;
+        path = need_second_hashagg ? hashed_p : cheapest_path;
 
         /* need compare three hashagg cost. */
         if (IS_STREAM_PLAN && path->locator_type != LOCATOR_TYPE_REPLICATED) {
             needs_stream = needs_agg_stream(root, parse->targetList, path->distribute_keys);
 
-            if (needs_stream)
+            if (needs_stream) {
                 distributed_key =
                     get_distributekey_from_tlist(root, parse->targetList, parse->groupClause, path->rows, &multiple);
+            }
             /* get the optimizer hashagg path for three path. */
             get_optimal_hashed_path(root,
                 path,
@@ -5537,23 +5686,21 @@ static void compute_hashed_path_cost(PlannerInfo* root, double limit_tuples, int
                 hashentrysize);
         }
 
-        if (need_second_hashagg)
+        if (need_second_hashagg) {
             elog(DEBUG1,
                 "[choose optimize hashagg]: the total cost of hashagg with redistribute for the second level: %lf",
                 hashed_p->total_cost);
-        else
+        } else {
             elog(DEBUG1,
                 "[choose optimize hashagg]: the total cost of hashagg with no count(distinct): %lf",
                 hashed_p->total_cost);
+        }
     }
 
-    if (distributed_key != NIL) {
-        list_free_ext(distributed_key);
-        distributed_key = NULL;
-    }
+    list_free_ext(distributed_key);
 
     /* Result of hashed agg is always unsorted */
-    if (target_pathkeys != NULL)
+    if (target_pathkeys != NULL) {
         cost_sort(hashed_p,
             target_pathkeys,
             hashed_p->total_cost,
@@ -5563,6 +5710,7 @@ static void compute_hashed_path_cost(PlannerInfo* root, double limit_tuples, int
             u_sess->opt_cxt.op_work_mem,
             limit_tuples,
             root->glob->vectorized);
+    }
 
     elog(DEBUG1, "[final hashed path total cost]: %lf", hashed_p->total_cost);
 }
@@ -5982,6 +6130,44 @@ static void compute_sorted_path_cost(PlannerInfo* root, double limit_tuples, int
 }
 
 /*
+ * Executor doesn't support hashed aggregation with DISTINCT or ORDER BY
+ * aggregates.	(Doing so would imply storing *all* the input values in
+ * the hash table, and/or running many sorts in parallel, either of which
+ * seems like a certain loser.)
+ */
+static bool grouping_is_can_hash(Query* parse, AggClauseCosts* agg_costs)
+{
+    bool can_hash = false;
+    can_hash = grouping_is_hashable(parse->groupClause);
+    if (IS_STREAM_PLAN) {
+        can_hash = can_hash && (agg_costs->numOrderedAggs == 0 &&
+                                   (list_length(agg_costs->exprAggs) == 0 ||
+                                       (list_length(agg_costs->exprAggs) == 1 && !agg_costs->hasDnAggs &&
+                                           !agg_costs->hasdctDnAggs && !agg_costs->unhashable)));
+    } else {
+        can_hash = can_hash && (agg_costs->numOrderedAggs == 0 && list_length(agg_costs->exprAggs) == 0);
+    }
+
+    return can_hash;
+}
+
+/* Estimate per-hash-entry space at tuple width... and per-hash-entry overhead */
+static Size compute_hash_entry_size(bool vectorized, Path* cheapest_path, int path_width, AggClauseCosts* agg_costs)
+{
+    Size hash_entry_size;
+    if (vectorized){
+        hash_entry_size =
+            get_path_actual_total_width(cheapest_path, vectorized, OP_HASHAGG, agg_costs->numAggs);
+    } else {
+        hash_entry_size = get_hash_entry_size(path_width, agg_costs->numAggs);
+    }
+        
+    /* plus space for pass-by-ref transition values... */
+    hash_entry_size += agg_costs->transitionSpace;
+    return hash_entry_size;
+}
+
+/*
  * choose_hashed_grouping - should we use hashed grouping?
  *
  * Returns TRUE to select hashing, FALSE to select sorting.
@@ -5997,22 +6183,8 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
     Path hashed_p, sorted_p;
     errno_t rc = EOK;
 
-    /*
-     * Executor doesn't support hashed aggregation with DISTINCT or ORDER BY
-     * aggregates.	(Doing so would imply storing *all* the input values in
-     * the hash table, and/or running many sorts in parallel, either of which
-     * seems like a certain loser.)
-     */
-    can_hash = grouping_is_hashable(parse->groupClause);
-    if (IS_STREAM_PLAN)
-        can_hash = can_hash && (agg_costs->numOrderedAggs == 0 &&
-                                   (list_length(agg_costs->exprAggs) == 0 ||
-                                       (list_length(agg_costs->exprAggs) == 1 && !agg_costs->hasDnAggs &&
-                                           !agg_costs->hasdctDnAggs && !agg_costs->unhashable)));
-    else
-        can_hash = can_hash && (agg_costs->numOrderedAggs == 0 && list_length(agg_costs->exprAggs) == 0);
-
-    can_sort = grouping_is_sortable(parse->groupClause);
+    can_hash = grouping_is_can_hash(parse, agg_costs);
+    can_sort = grouping_is_sortable(parse->groupClause) && !root->parse->unique_check;
 
     /* Quick out if only one choice is workable */
     if (!(can_hash && can_sort)) {
@@ -6054,14 +6226,16 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
             bool expr_is_distributable = IsTypeDistributable(exprType((Node*)linitial(agg_costs->exprAggs)));
 
             /* case2 */
-            if (!grp_is_distributable && expr_is_distributable) {
-                return true;
-            } else if (!grp_is_distributable && !expr_is_distributable) { /* case3 */
-                errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                    NOTPLANSHIPPING_LENGTH,
-                    "\"Count(Distinct)\" on redistribution unsupported data type");
-                securec_check_ss_c(sprintf_rc, "\0", "\0");
-                mark_stream_unsupport();
+            if (!grp_is_distributable) {
+                if (expr_is_distributable) {
+                    return true;
+                } else { /* case3 */
+                    errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                        NOTPLANSHIPPING_LENGTH,
+                        "\"Count(Distinct)\" on redistribution unsupported data type");
+                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    mark_stream_unsupport();
+                }
             }
         }
 #endif
@@ -6079,19 +6253,7 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
         return (AGG_HASHED == g_agglist[random_option]);
     }
 
-    /*
-     * Don't do it if it doesn't look like the hashtable will fit into
-     * work_mem.
-     *
-     * Estimate per-hash-entry space at tuple width... and per-hash-entry overhead
-     */
-    if (root->glob->vectorized)
-        hashentrysize =
-            get_path_actual_total_width(cheapest_path, root->glob->vectorized, OP_HASHAGG, agg_costs->numAggs);
-    else
-        hashentrysize = get_hash_entry_size(path_width, agg_costs->numAggs);
-    /* plus space for pass-by-ref transition values... */
-    hashentrysize += agg_costs->transitionSpace;
+    hashentrysize = compute_hash_entry_size(root->glob->vectorized, cheapest_path, path_width, agg_costs);
     *hash_entry_size = hashentrysize;
 
     /*
@@ -6101,10 +6263,8 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
      * hashing, but it's not clear that the case is common enough (or that our
      * estimates are good enough) to justify trying to solve it exactly.
      */
-    if (list_length(root->distinct_pathkeys) > list_length(root->sort_pathkeys))
-        target_pathkeys = root->distinct_pathkeys;
-    else
-        target_pathkeys = root->sort_pathkeys;
+    target_pathkeys = list_length(root->distinct_pathkeys) > list_length(root->sort_pathkeys) ?
+        root->distinct_pathkeys : root->sort_pathkeys;
 
     /* init hash path and sort path. */
     rc = memset_s(&hashed_p, sizeof(hashed_p), 0, sizeof(hashed_p));
@@ -6141,15 +6301,60 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
      * Now make the decision using the top-level tuple fraction.  First we
      * have to convert an absolute count (LIMIT) into fractional form.
      */
-    if (tuple_fraction >= 1.0) {
-        tuple_fraction /= dNumGroups[0];
-    }
+    tuple_fraction = tuple_fraction >= 1.0 ? tuple_fraction / dNumGroups[0] : tuple_fraction;
 
     if (compare_fractional_path_costs(&hashed_p, &sorted_p, tuple_fraction) < 0) {
         /* Hashed is cheaper, so use it */
         return true;
     }
     return false;
+}
+
+static void compute_distinct_sorted_path_cost(Path* sorted_p, List* sorted_pathkeys, Query* parse, PlannerInfo* root, 
+    int numDistinctCols, Cost sorted_startup_cost, Cost sorted_total_cost, double path_rows, 
+    Distribution* sorted_distribution, int path_width, double dNumDistinctRows, double limit_tuples)
+{
+    List* current_pathkeys = NIL;
+    List* needed_pathkeys = NIL;
+
+    sorted_p->startup_cost = sorted_startup_cost;
+    sorted_p->total_cost = sorted_total_cost;
+    ng_copy_distribution(&sorted_p->distribution, sorted_distribution);
+    current_pathkeys = sorted_pathkeys;
+    if (parse->hasDistinctOn && list_length(root->distinct_pathkeys) < list_length(root->sort_pathkeys)) {
+        needed_pathkeys = root->sort_pathkeys;
+    } else {
+        needed_pathkeys = root->distinct_pathkeys;
+    }
+    if (!pathkeys_contained_in(needed_pathkeys, current_pathkeys)) {
+        if (list_length(root->distinct_pathkeys) >= list_length(root->sort_pathkeys)) {
+            current_pathkeys = root->distinct_pathkeys;
+        } else {
+            current_pathkeys = root->sort_pathkeys;
+        }
+        cost_sort(sorted_p,
+            current_pathkeys,
+            sorted_p->total_cost,
+            path_rows,
+            path_width,
+            0.0,
+            u_sess->opt_cxt.op_work_mem,
+            -1.0,
+            root->glob->vectorized);
+    }
+    cost_group(
+        sorted_p, root, numDistinctCols, dNumDistinctRows, sorted_p->startup_cost, sorted_p->total_cost, path_rows);
+    if (parse->sortClause && !pathkeys_contained_in(root->sort_pathkeys, current_pathkeys)) {
+        cost_sort(sorted_p,
+            root->sort_pathkeys,
+            sorted_p->total_cost,
+            dNumDistinctRows,
+            path_width,
+            0.0,
+            u_sess->opt_cxt.op_work_mem,
+            limit_tuples,
+            root->glob->vectorized);
+    }
 }
 
 /*
@@ -6180,8 +6385,6 @@ static bool choose_hashed_distinct(PlannerInfo* root, double tuple_fraction, dou
     int numDistinctCols = list_length(parse->distinctClause);
     bool can_sort = false;
     bool can_hash = false;
-    List* current_pathkeys = NIL;
-    List* needed_pathkeys = NIL;
     Path hashed_p;
     Path sorted_p;
 
@@ -6273,49 +6476,24 @@ static bool choose_hashed_distinct(PlannerInfo* root, double tuple_fraction, dou
      * Now for the GROUP case.	See comments in grouping_planner about the
      * sorting choices here --- this code should match that code.
      */
-    sorted_p.startup_cost = sorted_startup_cost;
-    sorted_p.total_cost = sorted_total_cost;
-    ng_copy_distribution(&sorted_p.distribution, sorted_distribution);
-    current_pathkeys = sorted_pathkeys;
-    if (parse->hasDistinctOn && list_length(root->distinct_pathkeys) < list_length(root->sort_pathkeys))
-        needed_pathkeys = root->sort_pathkeys;
-    else
-        needed_pathkeys = root->distinct_pathkeys;
-    if (!pathkeys_contained_in(needed_pathkeys, current_pathkeys)) {
-        if (list_length(root->distinct_pathkeys) >= list_length(root->sort_pathkeys))
-            current_pathkeys = root->distinct_pathkeys;
-        else
-            current_pathkeys = root->sort_pathkeys;
-        cost_sort(&sorted_p,
-            current_pathkeys,
-            sorted_p.total_cost,
-            path_rows,
-            path_width,
-            0.0,
-            u_sess->opt_cxt.op_work_mem,
-            -1.0,
-            root->glob->vectorized);
-    }
-    cost_group(
-        &sorted_p, root, numDistinctCols, dNumDistinctRows, sorted_p.startup_cost, sorted_p.total_cost, path_rows);
-    if (parse->sortClause && !pathkeys_contained_in(root->sort_pathkeys, current_pathkeys))
-        cost_sort(&sorted_p,
-            root->sort_pathkeys,
-            sorted_p.total_cost,
-            dNumDistinctRows,
-            path_width,
-            0.0,
-            u_sess->opt_cxt.op_work_mem,
-            limit_tuples,
-            root->glob->vectorized);
+    compute_distinct_sorted_path_cost(&sorted_p, 
+        sorted_pathkeys,
+        parse,
+        root,
+        numDistinctCols,
+        sorted_startup_cost,
+        sorted_total_cost,
+        path_rows,
+        sorted_distribution,
+        path_width,
+        dNumDistinctRows,
+        limit_tuples);
 
     /*
      * Now make the decision using the top-level tuple fraction.  First we
      * have to convert an absolute count (LIMIT) into fractional form.
      */
-    if (tuple_fraction >= 1.0) {
-        tuple_fraction /= dNumDistinctRows;
-    }
+    tuple_fraction = tuple_fraction >= 1.0 ? tuple_fraction / dNumDistinctRows : tuple_fraction;
 
     if (compare_fractional_path_costs(&hashed_p, &sorted_p, tuple_fraction) < 0) {
         /* Hashed is cheaper, so use it */
@@ -6790,8 +6968,12 @@ static List* make_windowInputTargetList(PlannerInfo* root, List* tlist, List* ac
             Node* node = (Node*)lfirst(lc);
 
             if (IsA(node, Var)) {
-                if (var_from_dependency_rel(parse, (Var*)node, dep_oids) && !tlist_member(node, new_tlist))
-                    flattenable_vars_final = lappend(flattenable_vars_final, node);
+                if (!tlist_member(node, new_tlist)) {
+                    if (var_from_dependency_rel(parse, (Var *)node, dep_oids) ||
+                        var_from_sublink_pulluped(parse, (Var *) node)) {
+                        flattenable_vars_final = lappend(flattenable_vars_final, node);
+                    }
+                }
             } else
                 flattenable_vars_final = lappend(flattenable_vars_final, node);
         }
@@ -6816,7 +6998,7 @@ static List* make_windowInputTargetList(PlannerInfo* root, List* tlist, List* ac
  * In the future we might try to implement windowing using hashing, in which
  * case the ordering could be relaxed, but for now we always sort.
  */
-List* make_pathkeys_for_window(PlannerInfo* root, WindowClause* wc, List* tlist)
+List* make_pathkeys_for_window(PlannerInfo* root, WindowClause* wc, List* tlist, bool canonicalize)
 {
     List* window_pathkeys = NIL;
     List* window_sortclauses = NIL;
@@ -6837,7 +7019,7 @@ List* make_pathkeys_for_window(PlannerInfo* root, WindowClause* wc, List* tlist)
 
     /* Okay, make the combined pathkeys */
     window_sortclauses = list_concat(list_copy(wc->partitionClause), list_copy(wc->orderClause));
-    window_pathkeys = make_pathkeys_for_sortclauses(root, window_sortclauses, tlist, true);
+    window_pathkeys = make_pathkeys_for_sortclauses(root, window_sortclauses, tlist, canonicalize);
     list_free_ext(window_sortclauses);
     return window_pathkeys;
 }
@@ -7016,7 +7198,8 @@ bool plan_cluster_use_sort(Oid tableOid, Oid indexOid)
     rte = makeNode(RangeTblEntry);
     rte->rtekind = RTE_RELATION;
     rte->relid = tableOid;
-    rte->relkind = RELKIND_RELATION;  /* Don't be too picky. */
+    rte->relkind = RELKIND_RELATION;
+    rte->lateral = false;
     rte->inh = false;
     rte->inFromCl = true;
     query->rtable = list_make1(rte);
@@ -7076,10 +7259,7 @@ bool plan_cluster_use_sort(Oid tableOid, Oid indexOid)
         (rel->orientation != REL_ROW_ORIENTED));
 
     /* Estimate the cost of index scan */
-    indexScanPath = create_index_path(root, indexInfo,
-                                      NIL, NIL, NIL, NIL, NIL,
-                                      ForwardScanDirection, false,
-                                      NULL, 1.0, false);
+    indexScanPath = create_index_path(root, indexInfo, NIL, NIL, NIL, NIL, NIL, ForwardScanDirection, false, NULL, NULL, 1.0);
 
     return (seqScanAndSortPath.total_cost < indexScanPath->path.total_cost);
 }
@@ -7145,8 +7325,7 @@ bool planClusterPartitionUseSort(Relation partRel, Oid indexOid, PlannerInfo* ro
         (relOptInfo->orientation != REL_ROW_ORIENTED));
 
     /* Estimate the cost of index scan */
-    indexScanPath = create_index_path(root, indexInfo, NIL, NIL, NIL, NIL, 
-        NIL, ForwardScanDirection, false, NULL, 1.0, false);
+    indexScanPath = create_index_path(root, indexInfo, NIL, NIL, NIL, NIL, NIL, ForwardScanDirection, false, NULL, NULL, 1.0);
 
     return (seqScanAndSortPath.total_cost < indexScanPath->path.total_cost);
 }
@@ -7156,132 +7335,6 @@ Size get_hash_entry_size(int width, int numAggs)
 {
     return alloc_trunk_size(MAXALIGN(width) + MAXALIGN(sizeof(MinimalTupleData))) + hash_agg_entry_size(numAggs);
 }
-
-/*
- * plan_create_index_workers
- * 		Use the planner to decide how many parallel worker processes
- * 		CREATE INDEX should request for use
- *
- * tableOid is the table on which the index is to be built.  indexOid is the
- * OID of an index to be created or reindexed (which must be a btree index).
- *
- * Return value is the number of parallel worker processes to request.  It
- * may be unsafe to proceed if this is 0.  Note that this does not include the
- * leader participating as a worker (value is always a number of parallel
- * worker processes).
- *
- * Note: caller had better already hold some type of lock on the table and
- * index.
- */
-int plan_create_index_workers(Oid tableOid, Oid indexOid)
-{
-    int parallel_workers;
-    RelPageType heap_blocks;
-    double reltuples;
-    double allvisfrac;
-
-    /* Return immediately when parallelism disabled */
-    if (u_sess->attr.attr_sql.max_parallel_maintenance_workers == 0) {
-        return 0;
-    }
-
-    /* Set up largely-dummy planner state */
-    Query *query = makeNode(Query);
-    query->commandType = CMD_SELECT;
-
-    PlannerGlobal *glob = makeNode(PlannerGlobal);
-    PlannerInfo *root = makeNode(PlannerInfo);
-    root->parse = query;
-    root->glob = glob;
-    root->query_level = 1;
-    root->planner_cxt = CurrentMemoryContext;
-    root->wt_param_id = -1;
-
-    /*
-     * Build a minimal RTE.
-     *
-     * Mark the RTE with inh = true.  This is a kludge to prevent
-     * get_relation_info() from fetching index info, which is necessary
-     * because it does not expect that any IndexOptInfo is currently
-     * undergoing REINDEX.
-     */
-    RangeTblEntry *rte = makeNode(RangeTblEntry);
-    rte->rtekind = RTE_RELATION;
-    rte->relid = tableOid;
-    rte->relkind = RELKIND_RELATION; /* Don't be too picky. */
-    rte->inh = true;
-    rte->inFromCl = true;
-    query->rtable = list_make1(rte);
-
-    /* Set up RTE/RelOptInfo arrays */
-    setup_simple_rel_arrays(root);
-
-    /* Build RelOptInfo */
-    RelOptInfo *rel = build_simple_rel(root, 1, RELOPT_BASEREL);
-    /* Rels are assumed already locked by the caller */
-    Relation heap = heap_open(tableOid, NoLock);
-    Relation index = index_open(indexOid, NoLock);
-
-    /*
-     * Determine if it's safe to proceed.
-     *
-     * Currently, parallel workers can't access the leader's temporary tables.
-     * Furthermore, any index predicate or index expressions must be parallel
-     * safe.
-     */
-    if (heap->rd_rel->relpersistence == RELPERSISTENCE_TEMP ||
-        heap->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP ||
-        has_parallel_hazard((Node *)RelationGetIndexExpressions(index), false) ||
-        has_parallel_hazard((Node *)RelationGetIndexPredicate(index), false)) {
-        parallel_workers = 0;
-        goto done;
-    }
-
-    /*
-     * If parallel_workers storage parameter is set for the table, accept that
-     * as the number of parallel worker processes to launch (though still cap
-     * at max_parallel_maintenance_workers).  Note that we deliberately do not
-     * consider any other factor when parallel_workers is set. (e.g., memory
-     * use by workers.)
-     */
-    if (rel->rel_parallel_workers != -1) {
-        parallel_workers = Min(rel->rel_parallel_workers, u_sess->attr.attr_sql.max_parallel_maintenance_workers);
-        goto done;
-    }
-
-    /*
-     * Estimate heap relation size ourselves, since rel->pages cannot be
-     * trusted (heap RTE was marked as inheritance parent)
-     */
-    estimate_rel_size(heap, NULL, &heap_blocks, &reltuples, &allvisfrac, NULL);
-
-    /*
-     * Determine number of workers to scan the heap relation using generic
-     * model
-     */
-    parallel_workers =
-        compute_parallel_worker(rel, heap_blocks, -1, u_sess->attr.attr_sql.max_parallel_maintenance_workers);
-
-    /*
-     * Cap workers based on available maintenance_work_mem as needed.
-     *
-     * Note that each tuplesort participant receives an even share of the
-     * total maintenance_work_mem budget.  Aim to leave participants
-     * (including the leader as a participant) with no less than 32MB of
-     * memory.  This leaves cases where maintenance_work_mem is set to 64MB
-     * immediately past the threshold of being capable of launching a single
-     * parallel worker to sort.
-     */
-    while (parallel_workers > 0 && u_sess->attr.attr_memory.maintenance_work_mem / (parallel_workers + 1) < 32768L) {
-        parallel_workers--;
-    }
-
-done:
-    index_close(index, NoLock);
-    heap_close(heap, NoLock);
-    return parallel_workers;
-}
-
 
 #ifdef STREAMPLAN
 
@@ -7359,7 +7412,7 @@ static bool needs_two_level_groupagg(PlannerInfo* root, Plan* plan, Node* distin
 
     return two_level_sort;
 }
-
+#ifdef ENABLE_MULTIPLE_NODES
 static List* append_distribute_var_list(List* varlist, Node* tlist_node)
 {
     ListCell* lc = NULL;
@@ -7399,7 +7452,7 @@ static List* append_distribute_var_list(List* varlist, Node* tlist_node)
 
     return varlist;
 }
-
+#endif
 /*
  * @Description: Generate top agg.
  * @in root: Per-query information for planning/optimization.
@@ -7423,7 +7476,7 @@ static Plan* mark_top_agg(
         locate_grouping_columns(root, agg_plan->targetlist, ((Plan*)stream_plan)->targetlist, groupColIdx);
         sub_plan = (Plan*)make_sort_from_groupcols(root, root->parse->groupClause, groupColIdx, (Plan*)stream_plan);
         inherit_plan_locator_info(sub_plan, stream_plan);
-
+#ifdef ENABLE_MULTIPLE_NODES
         if (IsA(stream_plan, RemoteQuery)) {
             ((RemoteQuery*)stream_plan)->mergesort_required = true;
             sub_plan->plan_rows = PLAN_LOCAL_ROWS(sub_plan);
@@ -7431,6 +7484,11 @@ static Plan* mark_top_agg(
             AssertEreport(IsA(stream_plan, Stream), MOD_OPT, "unexpected node type when generating top agg.");
             ((Stream*)stream_plan)->is_sorted = true;
         }
+#else
+        if (IsA(stream_plan, Stream)) {
+            ((Stream*)stream_plan)->is_sorted = true;
+        }
+#endif
     } else
         sub_plan = (Plan*)stream_plan;
 
@@ -7509,14 +7567,14 @@ static Plan* mark_agg_stream(PlannerInfo* root, List* tlist, Plan* plan, List* g
             streamplan->dop = 1;
         }
     }
-
+#ifdef ENABLE_MULTIPLE_NODES
     if (plan == streamplan) {
         // in some cases, there is no new stream node added (such as in called by add_remote_subplan)
         // if that's case, nothing else should be done. otherwise, we may create agg over agg operator
         // which is unnecessary and incorrrect for some agg function such as (avg)
         return plan;
     }
-
+#endif
     if (((Agg*)plan)->aggstrategy == AGG_SORTED)
         *has_second_agg_sort = true;
 
@@ -7600,7 +7658,7 @@ static bool contain_other_windowfuncs(List* tlist, WindowFunc* wfc)
         if (IsA(expr, WindowFunc)) {
             WindowFunc* winFun = (WindowFunc*)expr;
 
-            /* If this winFun and wfc be computed in same node and is not rank or row_number return true. */
+            /* If this winFun and wfc be computed in same node and is not rank or row_number return true.*/
             if (winFun->winref == wfc->winref && winFun->winfnoid != ROWNUMBERFUNCOID &&
                 winFun->winfnoid != RANKFUNCOID) {
                 return true;
@@ -7701,6 +7759,19 @@ static Plan* build_lower_winagg_plan(PlannerInfo* root, Plan* plan, WindowClause
     return bottomPlan;
 }
 
+Distribution* get_windows_best_distribution(Plan* plan) 
+{
+    if (!u_sess->attr.attr_sql.enable_dngather || !u_sess->opt_cxt.is_dngather_support) {    
+        return ng_get_dest_distribution(plan);
+    } 
+
+    if (plan->plan_rows <= u_sess->attr.attr_sql.dngather_min_rows) {
+        return ng_get_single_node_distribution();
+    }
+        
+    return ng_get_dest_distribution(plan);
+}
+
 /*
  * @Description: Add stream node under windowAgg node if need.
  * @in root: Per-query information for planning/optimization.
@@ -7732,7 +7803,7 @@ static Plan* mark_windowagg_stream(
             wa_plan->partColIdx, MOD_OPT, "invalid part column index when adding stream node upder windowAgg node.");
 
         List* partitionExprs = get_sortgrouplist_exprs(wc->partitionClause, tlist);
-        bool need_stream = needs_agg_stream(root, partitionExprs, plan->distributed_keys);
+        bool need_stream = needs_agg_stream(root, partitionExprs, plan->distributed_keys, &plan->exec_nodes->distribution);
 
         /*
          * Two case we need stream:
@@ -7760,7 +7831,7 @@ static Plan* mark_windowagg_stream(
                 }
             }
 
-            Plan* streamplan = make_stream_plan(root, bottomPlan, bestDistExpr, multiple);
+            Plan* streamplan = make_stream_plan(root, bottomPlan, bestDistExpr, multiple, get_windows_best_distribution(plan));
             if (!need_stream)
                 ((Stream*)streamplan)->smpDesc.distriType = LOCAL_DISTRIBUTE;
 
@@ -7898,6 +7969,15 @@ static Plan* mark_distinct_stream(
     if (plan == NULL || !IsA(plan, Unique) || is_execute_on_coordinator(plan) || is_execute_on_allnodes(plan))
         return plan;
 
+    /**
+     * if on single-node and smp enabled, do not add a stream operator
+     */
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->opt_cxt.query_dop > 1) {
+        return plan;
+    }
+#endif
+
     if (query_level == 1)
         streamplan = make_simple_RemoteQuery(plan, root, false);
     else {
@@ -8034,7 +8114,9 @@ static bool has_column_store_relation(Plan* top_plan)
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
             return true;
 
         case T_ForeignScan:
@@ -8042,6 +8124,21 @@ static bool has_column_store_relation(Plan* top_plan)
             if (IsVecOutput(top_plan))
                 return true;
             break;
+
+        case T_ExtensiblePlan: {
+            ExtensiblePlan* ext_plans = (ExtensiblePlan*)top_plan;
+            ListCell* lc = NULL;
+
+            /* If result table is column store, return true */
+            if (IsVecOutput(top_plan))
+                return true;
+
+            foreach (lc, ext_plans->extensible_plans) {
+                Plan* plan = (Plan*)lfirst(lc);
+                if (has_column_store_relation(plan))
+                    return true;
+            }
+        } break;
 
         case T_MergeAppend: {
             MergeAppend* ma = (MergeAppend*)top_plan;
@@ -8143,7 +8240,9 @@ bool is_vector_scan(Plan* plan)
         case T_CStoreIndexHeapScan:
         case T_CStoreIndexAnd:
         case T_CStoreIndexOr:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
             return true;
         case T_PartIterator:
             if (is_vector_scan(plan->lefttree))
@@ -8155,6 +8254,20 @@ bool is_vector_scan(Plan* plan)
     return false;
 }
 
+static bool IsTypeUnSupportedByVectorEngine(Oid typeOid)
+{
+    /* we don't support user defined type. */
+    if (typeOid >= FirstNormalObjectId) {
+        return true;
+    }
+
+    for (uint32 i = 0; i < sizeof(VectorEngineUnsupportType) / sizeof(Oid); ++i) {
+        if (VectorEngineUnsupportType[i] == typeOid) {
+            return true;
+        }
+    }
+    return false;
+}
 /*
  * @Description: Check if it has unsupport expression in vector engine
  *
@@ -8182,11 +8295,24 @@ bool vector_engine_unsupport_expression_walker(Node* node)
         case T_CoerceToDomainValue:
         case T_CurrentOfExpr:
             return true;
-	case T_Var:
-	    if (((Var*)node)->varattno == InvalidAttrNumber) {
-		return true;
-	    }
-	default:
+        case T_Var: {
+            Var *var = (Var *)node;
+            if (var->varattno == InvalidAttrNumber) {
+                return true;
+            } else {
+                return IsTypeUnSupportedByVectorEngine(var->vartype);
+            }
+            break;
+        }
+        case T_Const: {
+                Const* c = (Const *)node;
+                return IsTypeUnSupportedByVectorEngine(c->consttype);
+            }
+        case T_Param: {
+            Param *par = (Param *)node;
+            return IsTypeUnSupportedByVectorEngine(par->paramtype);
+        }
+        default:
             break;
     }
     return expression_tree_walker(node, (bool (*)())vector_engine_unsupport_expression_walker, (void*)NULL);
@@ -8212,7 +8338,8 @@ Plan* try_vectorize_plan(Plan* top_plan, Query* parse, bool from_subplan, Planne
      * is turned off or the plan cannot go through vector_engine_walker.
      */
     if (!u_sess->attr.attr_sql.enable_vector_engine || vector_engine_walker(top_plan, from_subplan) ||
-        (subroot != NULL && subroot->is_under_recursive_tree)) {
+        (subroot != NULL && subroot->is_under_recursive_tree) ||
+        (ENABLE_PRED_PUSH_ALL(NULL) || (subroot != NULL && SUBQUERY_PREDPUSH(subroot)))) {
         /*
          * Distributed Recursive CTE Support
          *
@@ -8540,7 +8667,17 @@ static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
                 result_plan->vec_output = false;
                 return true;
             }
-        }
+        } break;
+
+        case T_ExtensiblePlan: {
+            ExtensiblePlan* ext_plan = (ExtensiblePlan*)result_plan;
+            ListCell* lc = NULL;
+            foreach (lc, ext_plan->extensible_plans) {
+                Plan* plan = (Plan*)lfirst(lc);
+                if (vector_engine_walker(plan, check_rescan))
+                    return true;
+            }
+        } break;
 
         default:
             break;
@@ -8568,13 +8705,27 @@ static Plan* fallback_plan(Plan* result_plan)
         case T_CStoreIndexScan:
         case T_CStoreIndexHeapScan:
         case T_CStoreIndexCtidScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
             result_plan = (Plan*)make_vectorow(build_vector_plan(result_plan));
             break;
         /* vec_output was set to 'true' initially, change to 'false' in row plan */
         case T_ForeignScan:
             result_plan->vec_output = false;
             break;
+        case T_ExtensiblePlan: {
+            ListCell* lc = NULL;
+            ExtensiblePlan* ext_plans = (ExtensiblePlan*) result_plan;
+            foreach (lc, ext_plans->extensible_plans) {
+                Plan* plan = (Plan*)lfirst(lc);
+                plan = (Plan*)fallback_plan(plan);
+                if (IsVecOutput(plan)) {
+                    plan = (Plan*)make_vectorow(plan);
+                }
+                lfirst(lc) = plan;
+            }
+        } break;
         case T_RemoteQuery:
             if (!IsVecOutput(result_plan) && IsVecOutput(result_plan->lefttree) &&
                 IsA(result_plan->lefttree, ModifyTable)) {
@@ -8685,13 +8836,41 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery)
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
         case T_CStoreIndexScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
             result_plan = build_vector_plan(result_plan);
             break;
         case T_ForeignScan:
             if (IsVecOutput(result_plan))
                 return build_vector_plan(result_plan);
             break;
+        case T_ExtensiblePlan:
+            {
+                ExtensiblePlan* ext_plans = (ExtensiblePlan*)result_plan;
+                ListCell* lc = NULL;
+                List* newPlans = NIL;
+
+                foreach (lc, ext_plans->extensible_plans) {
+                    Plan* plan = (Plan*)lfirst(lc);
+                    lfirst(lc) = vectorize_plan(plan, ignore_remotequery);
+                    if (IsVecOutput(result_plan) &&
+                        !IsVecOutput(plan)) {
+                        if (IsA(plan, ForeignScan)) {
+                            build_vector_plan(plan);
+                        } else {
+                            plan = (Plan*)make_rowtovec(plan);
+                        }
+                    } else if (!IsVecOutput(result_plan) && IsVecOutput(plan))
+                        plan = (Plan*)make_vectorow(plan);
+                    newPlans = lappend(newPlans, plan);
+                }
+                ext_plans->extensible_plans = newPlans;
+                if (IsVecOutput(result_plan)) {
+                    build_vector_plan(result_plan);
+                }
+                break;
+            }
         case T_SeqScan: {
             if (result_plan->isDeltaTable) {
                 result_plan = (Plan*)make_rowtovec(result_plan);
@@ -8899,7 +9078,9 @@ static Plan* build_vector_plan(Plan* plan)
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
         case T_CStoreIndexScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
             break;
         case T_Hash:  // we should remove hash node in the vector plan
             break;
@@ -9323,9 +9504,11 @@ static void get_redist_hashagg_path(PlannerInfo* root, Plan* lefttree, const Agg
 {
     Path* subpath = cost_agg_convert_to_path(lefttree);
 
-    AssertEreport(target_distribution != NULL && target_distribution->bms_data_nodeids != NULL,
-        MOD_OPT,
-        "invalid target distribution information or its bms_data_nodeids is null.");
+    if (target_distribution == NULL || (
+        target_distribution->bms_data_nodeids == NULL &&
+        target_distribution->group_oid == InvalidOid)) {
+        target_distribution = ng_get_installation_group_distribution();
+    }
 
     StreamPath* redist_path = cost_agg_do_redistribute(subpath,
         distributed_key,
@@ -9398,9 +9581,11 @@ static void get_hashagg_redist_hashagg_path(PlannerInfo* root, Plan* lefttree, c
 {
     Path* subpath = cost_agg_convert_to_path(lefttree);
 
-    AssertEreport(target_distribution != NULL && target_distribution->bms_data_nodeids != NULL,
-        MOD_OPT,
-        "The target distribution information or its bitmap data nodeids is null.");
+    if (target_distribution == NULL || (
+        target_distribution->bms_data_nodeids == NULL &&
+        target_distribution->group_oid == InvalidOid)) {
+        target_distribution = ng_get_installation_group_distribution();
+    }
 
     Path* agg_path_1 = cost_agg_do_agg(subpath,
         root,
@@ -9493,9 +9678,11 @@ static void get_redist_hashagg_redist_hashagg_path(PlannerInfo* root, Plan* left
 {
     Path* subpath = cost_agg_convert_to_path(lefttree);
 
-    AssertEreport(target_distribution != NULL && target_distribution->bms_data_nodeids != NULL,
-        MOD_OPT,
-        "The target distribution information or its bitmap data nodeids is null.");
+    if (target_distribution == NULL || (
+        target_distribution->bms_data_nodeids == NULL &&
+        target_distribution->group_oid == InvalidOid)) {
+        target_distribution = ng_get_installation_group_distribution();
+    }
 
     StreamPath* redist_path_1 = cost_agg_do_redistribute(subpath,
         distributed_key_less_skew,
@@ -9607,6 +9794,43 @@ static uint32 get_hashagg_skew(AggSkewInfo* skew_info, List* distribute_keys)
     return skew_info->getSkewInfo();
 }
 
+DistrbutionPreferenceType get_agg_distribution_perference_type(Plan* plan) 
+{
+    if (!u_sess->attr.attr_sql.enable_dngather || !u_sess->opt_cxt.is_dngather_support) {
+        return DPT_SHUFFLE;
+    }
+
+    if (plan->plan_rows <= u_sess->attr.attr_sql.dngather_min_rows) {
+        return DPT_SINGLE;
+    }
+
+    return DPT_SHUFFLE;
+}
+
+/*
+ * Agg's single node distribution comparision function.
+ */
+bool compare_agg_single_node_distribution(Distribution* new_distribution, Distribution* old_distribution, 
+                                      double new_cost, double old_cost) 
+{
+    if (!u_sess->attr.attr_sql.enable_dngather || !u_sess->opt_cxt.is_dngather_support) {
+        return new_cost < old_cost;
+    }
+
+    bool better_distribution = false;
+    bool is_new_single_node_distribution = ng_is_single_node_group_distribution(new_distribution);
+    bool is_old_single_node_distribution = ng_is_single_node_group_distribution(old_distribution);
+    if (is_new_single_node_distribution && !is_old_single_node_distribution) {
+        better_distribution = true;
+    } else if (!is_new_single_node_distribution && is_old_single_node_distribution) {
+        better_distribution = false;
+    } else {
+        better_distribution = new_cost < old_cost;
+    }
+
+    return better_distribution;
+}
+
 /*
  * Choose the cheapest plan for agg from the following three paths
  * 1. agg(dn)->gather->agg(cn)
@@ -9643,7 +9867,8 @@ static SAggMethod get_optimal_hashagg(PlannerInfo* root, Plan* lefttree, const A
     }
 
     /* Get target computing node group list with heuristic method */
-    List* distribution_list = ng_get_candidate_distribution_list(lefttree, root->is_correlated);
+    List* distribution_list = ng_get_agg_candidate_distribution_list(lefttree, root->is_correlated, 
+         get_agg_distribution_perference_type(lefttree));
 
     /* If guc u_sess->attr.attr_sql.plan_mode_seed is random plan, we should choose random path between AGG_HASHED and
      * AGG_SORTED */
@@ -9747,7 +9972,11 @@ static SAggMethod get_optimal_hashagg(PlannerInfo* root, Plan* lefttree, const A
                     AGG_HASHED,
                     need_stream,
                     &result_path);
-                if (u_sess->opt_cxt.query_dop == 1 && (best_cost == 0.0 || result_path.total_cost < best_cost) &&
+
+                /*2. Compare new cost with the last.*/
+                bool better_distribution = compare_agg_single_node_distribution(target_distribution, best_target_distribution, result_path.total_cost, best_cost);
+ 
+                if (1 == u_sess->opt_cxt.query_dop && (best_cost == 0.0 || better_distribution) &&
                     best_cost < NG_FORBIDDEN_COST) {
                     best_cost = result_path.total_cost;
                     best_target_distribution = target_distribution;
@@ -9779,7 +10008,11 @@ static SAggMethod get_optimal_hashagg(PlannerInfo* root, Plan* lefttree, const A
                         0,
                         need_stream,
                         &result_path);
-                    if (best_cost == 0.0 || result_path.total_cost < best_cost) {
+
+
+                    /* Compare new cost with the last.*/
+                    bool better_distribution = compare_agg_single_node_distribution(target_distribution, best_target_distribution, result_path.total_cost, best_cost);
+                    if (best_cost == 0.0 || better_distribution) {
                         best_cost = result_path.total_cost;
                         best_target_distribution = target_distribution;
                         option = DN_REDISTRIBUTE_AGG;
@@ -9804,7 +10037,10 @@ static SAggMethod get_optimal_hashagg(PlannerInfo* root, Plan* lefttree, const A
                     0,
                     need_stream,
                     &result_path);
-                if (best_cost == 0.0 || result_path.total_cost < best_cost) {
+
+                /* Compare new cost with the last.*/
+                bool better_distribution = compare_agg_single_node_distribution(target_distribution, best_target_distribution, result_path.total_cost, best_cost);
+                if (best_cost == 0.0 || better_distribution) {
                     best_cost = result_path.total_cost;
                     best_target_distribution = target_distribution;
                     option = DN_AGG_REDISTRIBUTE_AGG;
@@ -9833,7 +10069,10 @@ static SAggMethod get_optimal_hashagg(PlannerInfo* root, Plan* lefttree, const A
                     0,
                     need_stream,
                     &result_path);
-                if (u_sess->opt_cxt.query_dop == 1 && (best_cost == 0.0 || result_path.total_cost < best_cost) &&
+
+                /* Compare new cost with the last.*/
+                bool better_distribution = compare_agg_single_node_distribution(target_distribution, best_target_distribution, result_path.total_cost, best_cost);
+                if (1 == u_sess->opt_cxt.query_dop && (best_cost == 0.0 || better_distribution) &&
                     best_cost < NG_FORBIDDEN_COST) {
                     best_cost = result_path.total_cost;
                     best_target_distribution = target_distribution;
@@ -9884,6 +10123,21 @@ static SAggMethod get_optimal_hashagg(PlannerInfo* root, Plan* lefttree, const A
     }
 
     return option;
+}
+
+/*
+ * For compare agg's distribution with child's to reduce stream plan.
+ */
+bool is_agg_distribution_compalible_with_child(Distribution* aggDistribution, Distribution* childDistribution) 
+{
+    if (ng_is_single_node_group_distribution(aggDistribution)
+        && ng_is_single_node_group_distribution(childDistribution)) {
+        return true;
+    }
+
+    // For other Distribution type, they may compalible too, but now
+    // we only handle the single distribution.
+    return false;
 }
 
 static Plan* generate_hashagg_plan(PlannerInfo* root, Plan* plan, List* final_list, AggClauseCosts* agg_costs,
@@ -10279,6 +10533,36 @@ static Plan* generate_hashagg_plan(PlannerInfo* root, Plan* plan, List* final_li
         if (final_agg_mp_option == DN_AGG_CN_AGG) {
             final_agg_mp_option = DN_AGG_REDISTRIBUTE_AGG;
         }
+    }
+
+    // Single node distribution.
+    if (is_agg_distribution_compalible_with_child(final_distribution, &(plan->exec_nodes->distribution))) {
+        plan = (Plan*)make_agg(root,
+            plan->targetlist,
+            qual,
+            AGG_HASHED,
+            agg_costs,
+            numGroupCols,
+            local_groupColIdx,
+            groupColOps,
+            final_groups,
+            plan,
+            wflists,
+            *needs_stream,
+            trans_agg,
+            NIL,
+            hash_entry_size,
+            true,
+            agg_orientation);
+
+        if (skew_info != NULL) {
+            if (skew_opt == SKEW_RES_NONE) {
+               skew_opt = skew_info->getSkewInfo();
+            }
+            ((Agg*)plan)->skew_optimize = skew_opt;
+            delete skew_info;
+        }
+        return plan;
     }
 
     if (agg_option == DN_REDISTRIBUTE_AGG_CN_AGG || agg_option == DN_REDISTRIBUTE_AGG_REDISTRIBUTE_AGG) {
@@ -10799,6 +11083,20 @@ static Plan* get_count_distinct_partial_plan(PlannerInfo* root, Plan* result_pla
     return result_plan;
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
+static void free_est_varlist(List* varlist)
+{
+    ListCell* lc = NULL;
+    foreach (lc, varlist) {
+        EstSPNode* node = (EstSPNode*)lfirst(lc);
+        if (IsA(node, EstSPNode)) {
+            list_free_ext(node->varlist);
+        }
+    }
+    list_free_ext(varlist);
+}
+#endif
+
 double get_bias_from_varlist(PlannerInfo* root, List* varlist, double rows, bool isCoalesceExpr)
 {
     double bias = 1.0;
@@ -10834,6 +11132,7 @@ double get_bias_from_varlist(PlannerInfo* root, List* varlist, double rows, bool
 void get_multiple_from_exprlist(PlannerInfo* root, List* exprList, double rows, bool* useskewmultiple,
     bool usebiasmultiple, double* skew_multiple, double* bias_multiple)
 {
+#ifdef ENABLE_MULTIPLE_NODES
     ListCell* lc = NULL;
     List* varlist = NIL;
     Node* expr = NULL;
@@ -10862,7 +11161,10 @@ void get_multiple_from_exprlist(PlannerInfo* root, List* exprList, double rows, 
             *bias_multiple = get_bias_from_varlist(root, varlist, rows);
     }
     free_est_varlist(varlist);
-
+#else
+    *skew_multiple = 1.0;
+    *bias_multiple = 0.0;
+#endif
     return;
 }
 
@@ -11189,18 +11491,6 @@ List* add_groupId_to_groupExpr(List* query_group, List* tlist)
         return grouplist;
     } else
         return query_group;
-}
-
-static void free_est_varlist(List* varlist)
-{
-    ListCell* lc = NULL;
-    foreach (lc, varlist) {
-        EstSPNode* node = (EstSPNode*)lfirst(lc);
-        if (IsA(node, EstSPNode)) {
-            list_free_ext(node->varlist);
-        }
-    }
-    list_free_ext(varlist);
 }
 
 /* set_root_matching_key
@@ -11876,6 +12166,10 @@ static bool estimate_acceleration_cost_for_obs(Plan* plan, const char* relname)
 
     uint64 fnum_per_thread = fnum / (u_sess->pgxc_cxt.NumDataNodes * u_sess->opt_cxt.query_dop);
     uint64 size_per_thread = totalSize / (u_sess->pgxc_cxt.NumDataNodes * u_sess->opt_cxt.query_dop);
+
+    if (unlikely(pl_size == 0)) {
+        ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("pl_size should not be zero")));
+    }
     uint64 rp_per_thread = size_per_thread / pl_size + 1;
 
     bool fnum_cond = fnum_per_thread < 2;
@@ -12735,8 +13029,8 @@ static bool has_pgfdw_rel(PlannerInfo* root)
     for (int i = 1; i < root->simple_rel_array_size; i++) {
         RangeTblEntry* rte = root->simple_rte_array[i];
 
-        if (rte->rtekind == RTE_RELATION && rte->relkind == RELKIND_FOREIGN_TABLE &&
-            IsSpecifiedFDWFromRelid(rte->relid, GC_FDW)) {
+        if (rte->rtekind == RTE_RELATION && (rte->relkind == RELKIND_FOREIGN_TABLE || rte->relkind == RELKIND_STREAM)
+            && IsSpecifiedFDWFromRelid(rte->relid, GC_FDW)) {
             return true;
         }
     }
@@ -12983,6 +13277,8 @@ void GetRemoteQuery(PlannedStmt* stmt, const char* queryString)
     context.rqs = NIL;
     context.include_all_plans = false;
     context.has_modify_table = false;
+    context.under_mergeinto = false;
+    context.elevel = 0;
     ListCell* lc = NULL;
 
     if (stmt == NULL)
@@ -13036,6 +13332,112 @@ void GetRemoteQueryWalker(Plan* plan, void* context, const char* queryString)
     PlanTreeWalker(plan, GetRemoteQueryWalker, context, queryString);
 }
 
+static void
+collect_exec_nodes(ExecNodes *exec_nodes, void *context)
+{
+    Assert(context != NULL);
+
+    if (exec_nodes == NULL) {
+        return;
+    }
+
+    FindNodesContext *ctx = (FindNodesContext *)context;
+     ctx->nodeList = list_concat_unique_int(ctx->nodeList, exec_nodes->nodeList);
+}
+
+/* Process the top node. */
+static void gtm_process_top_node(Plan *plan, void *context)
+{
+    FindNodesContext *ctx = (FindNodesContext*)context;
+    if (IsA(plan, RemoteQuery) || IsA(plan, VecRemoteQuery)) {
+        RemoteQuery *rq = (RemoteQuery*)plan;
+
+        /* Refer to ng_get_dest_execnodes */
+        if (rq->exec_nodes != NULL) {
+            collect_exec_nodes(rq->exec_nodes, context);
+        } else {
+            collect_exec_nodes(plan->exec_nodes, context);
+        }
+
+        if (rq->position != PLAN_ROUTER && rq->position != SCAN_GATHER) {
+            ctx->remote_query_count++;
+        }
+    } else if (IsA(plan, ModifyTable) || IsA(plan, VecModifyTable)) {
+        FindNodesContext *ctx = (FindNodesContext*)context;
+        ctx->has_modify_table = true;
+    } else if (IsA(plan, Stream) || IsA(plan, VecStream)) {
+        Stream *st= (Stream*)plan;
+        collect_exec_nodes(st->scan.plan.exec_nodes, context);
+        collect_exec_nodes(st->consumer_nodes, context);
+    }
+}
+
+/*
+ * ONLY used in GTM-Free mode.
+ *
+ * This function will iterate the plan tree and find:
+ *     1) How many RemoteQuery/VecRemoteQuery in this plan
+ *     2) The DNs on which the query will execute.
+ *     3) Will this query write to the database?
+ */
+static void
+gtm_free_rqs_nodes_walker(Plan *plan, void *context)
+{
+
+    ListCell *lc = NULL;
+    List *children_nodes  = NIL;
+
+    Assert(context != NULL);
+
+    if (plan == NULL) {
+        return;
+    }
+
+    gtm_process_top_node(plan, context);
+
+    /* Find the children node and call gtm_free_rqs_nodes_walker recursively. */
+    if (IsA(plan, Append) || IsA(plan, VecAppend)) {
+        children_nodes = ((Append*)plan)->appendplans;
+    } else if (IsA(plan, ModifyTable) || IsA(plan, VecModifyTable)) {
+        /* list_concat will destory the plantree, so use lappend */
+        foreach(lc, ((ModifyTable*)plan)->plans) {
+            children_nodes = lappend(children_nodes, lfirst(lc));
+        }
+
+        foreach(lc, ((ModifyTable*)plan)->remote_plans) {
+            children_nodes = lappend(children_nodes, lfirst(lc));
+        }
+
+        foreach(lc, ((ModifyTable*)plan)->remote_insert_plans) {
+            children_nodes = lappend(children_nodes, lfirst(lc));
+        }
+
+        foreach(lc, ((ModifyTable*)plan)->remote_update_plans) {
+            children_nodes = lappend(children_nodes, lfirst(lc));
+        }
+
+        foreach(lc, ((ModifyTable*)plan)->remote_delete_plans) {
+            children_nodes = lappend(children_nodes, lfirst(lc));
+        }
+    } else if (IsA(plan, MergeAppend) || IsA(plan, VecMergeAppend)) {
+        children_nodes = ((MergeAppend*)plan)->mergeplans;
+    } else if (IsA(plan, SubqueryScan) || IsA(plan, VecSubqueryScan)) {
+        children_nodes = lappend(children_nodes, ((SubqueryScan*)plan)->subplan);
+    } else {
+        if (plan->lefttree) {
+            children_nodes = lappend(children_nodes, plan->lefttree);
+        }
+        if (plan->righttree) {
+            children_nodes = lappend(children_nodes, plan->righttree);
+        }
+    }
+
+    foreach(lc, children_nodes) {
+        Plan *child = (Plan*)lfirst(lc);
+        gtm_free_rqs_nodes_walker(child, context);
+    }
+}
+
 /*
  * @Description: plan tree walker for find remotequery plannode.
  * @in plan - Plan information
@@ -13055,33 +13457,7 @@ void PlanTreeWalker(Plan* plan, void (*walker)(Plan*, void*, const char*), void*
     if (IsA(plan, Append) || IsA(plan, VecAppend)) {
         plans = ((Append*)plan)->appendplans;
     } else if (IsA(plan, ModifyTable) || IsA(plan, VecModifyTable)) {
-        FindRQContext* ctx = (FindRQContext*)context;
-
-        ctx->has_modify_table = true;
-
-        /* list_concat will destory the plantree, so use lappend */
-        foreach (lc, ((ModifyTable*)plan)->plans) {
-            plans = lappend(plans, lfirst(lc));
-        }
-
-        /* include all other plans in ModifyTable as well */
-        if (ctx->include_all_plans) {
-            foreach (lc, ((ModifyTable*)plan)->remote_plans) {
-                plans = lappend(plans, lfirst(lc));
-            }
-
-            foreach (lc, ((ModifyTable*)plan)->remote_insert_plans) {
-                plans = lappend(plans, lfirst(lc));
-            }
-
-            foreach (lc, ((ModifyTable*)plan)->remote_update_plans) {
-                plans = lappend(plans, lfirst(lc));
-            }
-
-            foreach (lc, ((ModifyTable*)plan)->remote_delete_plans) {
-                plans = lappend(plans, lfirst(lc));
-            }
-        }
+        plans = ((ModifyTable*)plan)->plans;
     } else if (IsA(plan, MergeAppend) || IsA(plan, VecMergeAppend)) {
         plans = ((MergeAppend*)plan)->mergeplans;
     } else if (IsA(plan, SubqueryScan) || IsA(plan, VecSubqueryScan)) {
@@ -13101,3 +13477,323 @@ void PlanTreeWalker(Plan* plan, void (*walker)(Plan*, void*, const char*), void*
         walker(child, context, queryString);
     }
 }
+
+/*
+ * Fill FindNodesContext, see FindNodesContext for more information.
+ *
+ * ONLY used in GTM-Free mode.
+ */
+static void
+collect_query_info(PlannedStmt *stmt, FindNodesContext *context)
+{
+    Assert(stmt != NULL);
+    Assert(context != NULL);
+
+    context->remote_query_count = 0;
+    context->has_modify_table = false;
+    context->nodeList = NIL;
+
+    gtm_free_rqs_nodes_walker(stmt->planTree, context);
+
+    ListCell* lc = NULL;
+    foreach(lc, stmt->subplans) {
+        Plan *plan = (Plan*)lfirst(lc);
+        gtm_free_rqs_nodes_walker(plan, context);
+    }
+}
+
+/*
+ * Report error if 1) the query need to split into multiple queries and 2) the query need to write to the database.
+ * see FindNodesContext for more information.
+ *
+ * ONLY used in GTM-Free mode.
+ */
+static void
+block_write_when_split_queries(PlannedStmt *stmt, FindNodesContext *context, int elevel)
+{
+    if (context->remote_query_count > 1 && context->has_modify_table) {
+        ereport(elevel,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("INSERT/UPDATE/DELETE/MERGE contains multiple remote queries under GTM-free mode"),
+                 errhint("modify your SQL to generate light-proxy or fast-query-shipping plan")));
+    }
+}
+
+/*
+ * ONLY used in GTM-Free mode.
+ *
+ * If the query needs more than one DN to be involved in:
+ *
+ * When multinode hint is used:
+ *     allow the query to be executed, no warning/error
+ * When multinode hint is not used:
+ *     if application_type is:
+ *         not_perfect_sharding_type(Default): allow the query to be executed, no warning/error
+ *         perfect_sharding_type: report ERROR
+ */
+static void
+block_query_need_multi_nodes(PlannedStmt *stmt, FindNodesContext *context, int elevel)
+{
+    if (u_sess->attr.attr_sql.application_type != PERFECT_SHARDING_TYPE) {
+        return;
+    }
+
+    if (stmt->multi_node_hint) {
+        return;
+    }
+
+    if (list_length(context->nodeList) > 1) {
+        const char *sql = t_thrd.postgres_cxt.debug_query_string;
+        if (sql == NULL) {
+            sql = "No sql in this query, please check other warnings and ignore this one.";
+        }
+        ereport(elevel,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Your SQL needs more than one datanode to be involved in. SQL Statement:\n%s", sql),
+                 errhint("(1) use hint /*+ multinode */\n"
+                  "       (2) make your SQL be perfect sharding."
+                  "\nChoose either of the above options is OK.")));
+    }
+}
+
+/*
+ * ONLY used in GTM-Free mode.
+ *
+ * In GTM-Free mode, we should apply some restrictions on the query.
+ * check_gtm_free_plan is the ENTRY to check if the query satisfies these restrictioins.
+ */
+void check_gtm_free_plan(PlannedStmt *stmt, int elevel)
+{
+    if (stmt == NULL)
+        return;
+
+    /* only check under gtm free */
+    if (!g_instance.attr.attr_storage.enable_gtm_free)
+        return;
+
+    if (u_sess->attr.attr_sql.enable_cluster_resize)
+        return;
+
+    /* no need to check on DN for now */
+    if (IS_PGXC_DATANODE || IS_SINGLE_NODE)
+        return;
+
+    FindNodesContext context;
+
+    collect_query_info(stmt, &context);
+    block_write_when_split_queries(stmt, &context, elevel);
+    block_query_need_multi_nodes(stmt, &context, elevel);
+}
+
+/*
+ * @Description: plan walker to find MERGE INTO -> BROADCAST pattern.
+ * @in node - Plan information
+ * @in context - FindRQContext
+ * @in queryString - execute sql statement in pbe.
+ * @out - void
+ */
+static void check_plan_mergeinto_replicate_walker(Plan* node, void* context, const char *queryString)
+{
+    Assert(context != NULL);
+
+    if (node == NULL) {
+        return;
+    }
+
+    FindRQContext *ctx = (FindRQContext*)context;
+    if (ctx->under_mergeinto) {
+        if (IsA(node, Stream) || IsA(node, VecStream)) {
+            ereport(ctx->elevel,
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("MERGE INTO on replicated table does not yet support followed stream.")));
+        }
+    }
+
+    ctx->under_mergeinto = ctx->under_mergeinto ||
+        (IsA(node, ModifyTable) && ((ModifyTable*)node)->operation == CMD_MERGE) ||
+        (IsA(node, VecModifyTable) && ((VecModifyTable*)node)->operation == CMD_MERGE);
+
+    PlanTreeWalker(node, check_plan_mergeinto_replicate_walker, context, NULL);
+}
+
+/**
+ * @Description: plan tree walker for find remotequery plannode.
+ *      Here we walk through the entire plantree for MERGE INTO statement with
+ *      replcate target relation to find the pattern:
+ *              MODIFYTABLE (MERGE INTO)
+ *              ...
+ *              └─ STREAM
+ *      where SREAM appears under MERGE INTO if merge target is replicated.
+ *      This is because when join results are streamed to other datanode, the
+ *      junkfilter ctid will become a mess. This may be an overkill since planner
+ *      only allows all replicate relations in source subquery. However, we
+ *      double-check the plan here for extra safety.
+ *      This should be later fixed by replacing ctid by PK or attributes which
+ *      yields to unique and not null constraint.
+ * @in stmt - Plan information
+ * @out - void
+ */
+void check_plan_mergeinto_replicate(PlannedStmt* stmt, int elevel)
+{
+    if (stmt == NULL || stmt->commandType != CMD_MERGE) {
+        return;
+    }
+
+    /* No need to check if none of the targets are replicate */
+    bool no_replicate = true;
+    ListCell* lc = NULL;
+    foreach(lc, stmt->resultRelations) {
+        Index rti = lfirst_int(lc);
+        RangeTblEntry* target = rt_fetch(rti, stmt->rtable);
+        if (GetLocatorType(target->relid) == LOCATOR_TYPE_REPLICATED) {
+            no_replicate = false;
+            break;
+        }
+    }
+    if (no_replicate) {
+        return;
+    }
+    FindRQContext context;
+    context.rqs = NIL;
+    context.include_all_plans = false;
+    context.has_modify_table = false;
+    context.under_mergeinto = false;
+    context.elevel = elevel;
+    PlanTreeWalker((Plan*)stmt->planTree, check_plan_mergeinto_replicate_walker, (void*) &context, NULL);
+}
+
+/*
+ * @Description:
+ *    For mergeinto commands with replicated target table,
+ *    we only allow source relation/subquery to be fully
+ *    replicated.
+ *
+ * @param[IN] parse: parsed query tree.
+ *
+ * @return void
+ */
+void check_entry_mergeinto_replicate(Query* parse)
+{
+    RangeTblEntry* target = rt_fetch(parse->mergeTarget_relation, parse->rtable);
+    Assert(target != NULL);
+    /* only deal with replicated target */
+    if (GetLocatorType(target->relid) != LOCATOR_TYPE_REPLICATED) {
+        return;
+    }
+    ListCell* lc = NULL;
+    foreach(lc, parse->rtable) {
+        RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
+        /* only deal with plain relations */
+        if (rte->rtekind != RTE_RELATION)
+            continue;
+        if (GetLocatorType(rte->relid) != LOCATOR_TYPE_REPLICATED) {
+            ereport(ERROR,
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("MERGE INTO on replicated table does not yet support using distributed tables.")));
+        }
+    }
+}
+
+static bool check_sort_for_upsert(PlannerInfo* root)
+{
+    PlannerInfo* plan_info = root;
+    Query* parse = plan_info->parse;
+
+    /* ORDER BY LIMIT can guarentee the ordering */
+    if (parse->limitCount || parse->limitOffset)
+        return false;
+
+    while (plan_info->parent_root != NULL) {
+        plan_info = plan_info->parent_root;
+        parse = plan_info->parse;
+        if (parse != NULL && parse->upsertClause != NULL) {
+            return true;
+        }
+    }
+    return false;
+}
+
+List* get_plan_list(Plan* plan)
+{
+    List* plan_list = NIL;
+
+    switch (nodeTag(plan)) {
+        case T_ModifyTable:
+        case T_VecModifyTable: {
+            ModifyTable* mt = (ModifyTable*)plan;
+
+            Assert(mt->plans != NULL);
+            plan_list = mt->plans;
+
+            break;
+        }
+        case T_Append:
+        case T_VecAppend: {
+            Append* append = (Append*)plan;
+
+            Assert(append->appendplans != NULL);
+            plan_list = append->appendplans;
+
+            break;
+        }
+        case T_MergeAppend:
+        case T_VecMergeAppend: {
+            MergeAppend* append = (MergeAppend*)plan;
+
+            Assert(append->mergeplans != NULL);
+            plan_list = append->mergeplans;
+
+            break;
+        }
+        case T_BitmapAnd:
+        case T_BitmapOr:
+        case T_CStoreIndexAnd:
+        case T_CStoreIndexOr: {
+            BitmapAnd* ba = (BitmapAnd*)plan;
+
+            Assert(ba->bitmapplans != NULL);
+            plan_list = ba->bitmapplans;
+
+            break;
+        }
+        default:
+            /* do nothing */
+            break;
+    }
+
+    return plan_list;
+}
+
+/*
+ * @Description: find ForeignScan node in left-hand tree.
+ *
+ * @param[IN] plan :  the root of the sub plan tree
+ * @return: Plan*: ForeignScan node found.
+ */
+Plan* get_foreign_scan(Plan* plan)
+{
+    Assert(plan);
+
+    ereport(DEBUG5, (errmodule(MOD_ACCELERATE), errmsg("in %s", __FUNCTION__)));
+
+    bool found = false;
+
+    while (plan != NULL) {
+        if (T_ForeignScan == nodeTag(plan) || T_VecForeignScan == nodeTag(plan)) {
+            found = true;
+            break;
+        }
+
+        plan = plan->lefttree;
+    }
+
+    if (!found) {
+        ereport(ERROR,
+            (errcode(ERRCODE_NO_DATA_FOUND), errmodule(MOD_ACCELERATE), errmsg("Fail to find ForeignScan node!")));
+    }
+
+    return plan;
+}
+

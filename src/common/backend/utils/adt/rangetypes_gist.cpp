@@ -85,6 +85,7 @@ typedef struct {
     int entries_count;        /* total number of entries being split */
 
     /* Information about currently selected split follows */
+
     bool first; /* true if no split was selected yet */
 
     RangeBound* left_upper;  /* upper bound of left interval */
@@ -333,11 +334,10 @@ Datum range_gist_penalty(PG_FUNCTION_ARGS)
                      * Get extension of original range using subtype_diff. Use
                      * constant if subtype_diff unavailable.
                      */
-                    if (has_subtype_diff) {
+                    if (has_subtype_diff)
                         *penalty = call_subtype_diff(typcache, new_upper.val, orig_upper.val);
-                    } else {
+                    else
                         *penalty = DEFAULT_SUBTYPE_DIFF_PENALTY;
-                    }
                 } else {
                     /* No extension of original range */
                     *penalty = 0.0;
@@ -368,11 +368,10 @@ Datum range_gist_penalty(PG_FUNCTION_ARGS)
                      * Get extension of original range using subtype_diff. Use
                      * constant if subtype_diff unavailable.
                      */
-                    if (has_subtype_diff) {
+                    if (has_subtype_diff)
                         *penalty = call_subtype_diff(typcache, orig_lower.val, new_lower.val);
-                    } else {
+                    else
                         *penalty = DEFAULT_SUBTYPE_DIFF_PENALTY;
-                    }
                 } else {
                     /* No extension of original range */
                     *penalty = 0.0;
@@ -439,7 +438,6 @@ Datum range_gist_picksplit(PG_FUNCTION_ARGS)
     uint32 biggest_class = 0;
     int biggest_class_count = 0;
     int total_count;
-    int rc  = 0;
 
     /* use first item to look up range type's info */
     pred_left = DatumGetRangeType(entryvec->vector[FirstOffsetNumber].key);
@@ -453,9 +451,7 @@ Datum range_gist_picksplit(PG_FUNCTION_ARGS)
     /*
      * Get count distribution of range classes.
      */
-    rc = memset_s(count_in_classes, sizeof(count_in_classes), 0, sizeof(count_in_classes));
-    securec_check(rc, "", "");
-
+    memset(count_in_classes, 0, sizeof(count_in_classes));
     for (i = FirstOffsetNumber; i <= maxoff; i = OffsetNumberNext(i)) {
         RangeType* range = DatumGetRangeType(entryvec->vector[i].key);
 
@@ -502,8 +498,7 @@ Datum range_gist_picksplit(PG_FUNCTION_ARGS)
          */
         SplitLR classes_groups[CLS_COUNT];
 
-        rc = memset_s(classes_groups, sizeof(classes_groups), 0, sizeof(classes_groups));
-        securec_check(rc, "", "");
+        memset(classes_groups, 0, sizeof(classes_groups));
 
         if (count_in_classes[CLS_NORMAL] > 0) {
             /* separate normal ranges if any */
@@ -578,6 +573,12 @@ Datum range_gist_same(PG_FUNCTION_ARGS)
 
     PG_RETURN_POINTER(result);
 }
+
+/*
+ * ----------------------------------------------------------
+ * STATIC FUNCTIONS
+ * ----------------------------------------------------------
+ */
 
 /*
  * Return the smallest range that contains r1 and r2
@@ -796,6 +797,7 @@ static void range_gist_class_split(
 
         /* Get class of range */
         classtype = get_gist_range_class(range);
+
         /* Place range to appropriate page */
         if (classes_groups[classtype] == SPLIT_LEFT)
             PLACE_LEFT(range, i);
@@ -985,14 +987,12 @@ static void range_gist_double_sorting_split(TypeCacheEntry* typcache, GistEntryV
          * Find next lower bound of right group.
          */
         while (i1 < nentries && range_cmp_bounds(typcache, right_lower, &by_lower[i1].lower) == 0) {
-            if (range_cmp_bounds(typcache, &by_lower[i1].upper, left_upper) > 0) {
+            if (range_cmp_bounds(typcache, &by_lower[i1].upper, left_upper) > 0)
                 left_upper = &by_lower[i1].upper;
-            }
             i1++;
         }
-        if (i1 >= nentries) {
+        if (i1 >= nentries)
             break;
-        }
         right_lower = &by_lower[i1].lower;
 
         /*
@@ -1021,14 +1021,12 @@ static void range_gist_double_sorting_split(TypeCacheEntry* typcache, GistEntryV
          * Find next upper bound of left group.
          */
         while (i2 >= 0 && range_cmp_bounds(typcache, left_upper, &by_upper[i2].upper) == 0) {
-            if (range_cmp_bounds(typcache, &by_upper[i2].lower, right_lower) < 0) {
+            if (range_cmp_bounds(typcache, &by_upper[i2].lower, right_lower) < 0)
                 right_lower = &by_upper[i2].lower;
-            }
             i2--;
         }
-        if (i2 < 0) {
+        if (i2 < 0)
             break;
-        }
         left_upper = &by_upper[i2].upper;
 
         /*
@@ -1166,13 +1164,12 @@ static void range_gist_consider_split(ConsiderSplitContext* context, RangeBound*
      * Calculate entries distribution ratio assuming most uniform distribution
      * of common entries.
      */
-    if (min_left_count >= (context->entries_count + 1) / 2) {
+    if (min_left_count >= (context->entries_count + 1) / 2)
         left_count = min_left_count;
-    } else if (max_left_count <= context->entries_count / 2) {
+    else if (max_left_count <= context->entries_count / 2)
         left_count = max_left_count;
-    } else {
+    else
         left_count = context->entries_count / 2;
-    }
     right_count = context->entries_count - left_count;
 
     /*
@@ -1181,6 +1178,7 @@ static void range_gist_consider_split(ConsiderSplitContext* context, RangeBound*
      * LIMIT_RATIO then we will never accept the new split.
      */
     ratio = ((float4)Min(left_count, right_count)) / ((float4)context->entries_count);
+
     if (ratio > LIMIT_RATIO) {
         bool selectthis = false;
 
@@ -1191,23 +1189,21 @@ static void range_gist_consider_split(ConsiderSplitContext* context, RangeBound*
          * available, it's used for overlap measure.  Without subtype_diff we
          * use number of "common entries" as an overlap measure.
          */
-        if (context->has_subtype_diff) {
+        if (context->has_subtype_diff)
             overlap = call_subtype_diff(context->typcache, left_upper->val, right_lower->val);
-        } else {
+        else
             overlap = max_left_count - min_left_count;
-        }
 
         /* If there is no previous selection, select this split */
-        if (context->first) {
+        if (context->first)
             selectthis = true;
-        } else {
+        else {
             /*
              * Choose the new split if it has a smaller overlap, or same
              * overlap but better ratio.
              */
-            if (overlap < context->overlap || (overlap == context->overlap && ratio > context->ratio)) {
+            if (overlap < context->overlap || (overlap == context->overlap && ratio > context->ratio))
                 selectthis = true;
-            }
         }
 
         if (selectthis) {
@@ -1255,9 +1251,9 @@ static int get_gist_range_class(RangeType* range)
  */
 static int single_bound_cmp(const void* a, const void* b, void* arg)
 {
-    auto* i1 = (SingleBoundSortItem*)a;
-    auto* i2 = (SingleBoundSortItem*)b;
-    auto* typcache = (TypeCacheEntry*)arg;
+    SingleBoundSortItem* i1 = (SingleBoundSortItem*)a;
+    SingleBoundSortItem* i2 = (SingleBoundSortItem*)b;
+    TypeCacheEntry* typcache = (TypeCacheEntry*)arg;
 
     return range_cmp_bounds(typcache, &i1->bound, &i2->bound);
 }
@@ -1267,9 +1263,9 @@ static int single_bound_cmp(const void* a, const void* b, void* arg)
  */
 static int interval_cmp_lower(const void* a, const void* b, void* arg)
 {
-    auto* i1 = (NonEmptyRange*)a;
-    auto* i2 = (NonEmptyRange*)b;
-    auto* typcache = (TypeCacheEntry*)arg;
+    NonEmptyRange* i1 = (NonEmptyRange*)a;
+    NonEmptyRange* i2 = (NonEmptyRange*)b;
+    TypeCacheEntry* typcache = (TypeCacheEntry*)arg;
 
     return range_cmp_bounds(typcache, &i1->lower, &i2->lower);
 }
@@ -1279,9 +1275,9 @@ static int interval_cmp_lower(const void* a, const void* b, void* arg)
  */
 static int interval_cmp_upper(const void* a, const void* b, void* arg)
 {
-    auto* i1 = (NonEmptyRange*)a;
-    auto* i2 = (NonEmptyRange*)b;
-    auto* typcache = (TypeCacheEntry*)arg;
+    NonEmptyRange* i1 = (NonEmptyRange*)a;
+    NonEmptyRange* i2 = (NonEmptyRange*)b;
+    TypeCacheEntry* typcache = (TypeCacheEntry*)arg;
 
     return range_cmp_bounds(typcache, &i1->upper, &i2->upper);
 }
@@ -1294,13 +1290,12 @@ static int common_entry_cmp(const void* i1, const void* i2)
     double delta1 = ((CommonEntry*)i1)->delta;
     double delta2 = ((CommonEntry*)i2)->delta;
 
-    if (delta1 < delta2) {
+    if (delta1 < delta2)
         return -1;
-    } else if (delta1 > delta2) {
+    else if (delta1 > delta2)
         return 1;
-    } else {
+    else
         return 0;
-    }
 }
 
 /*

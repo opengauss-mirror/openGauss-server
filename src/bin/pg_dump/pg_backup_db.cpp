@@ -133,6 +133,7 @@ static PGconn* _connectDB(ArchiveHandle* AH, const char* reqdb, const char* requ
     const char* newuser = NULL;
     char* password = AH->savedPassword;
     bool new_pass = false;
+    errno_t rc = 0;
 
     if (reqdb == NULL)
         newdb = PQdb(AH->connection);
@@ -153,7 +154,7 @@ static PGconn* _connectDB(ArchiveHandle* AH, const char* reqdb, const char* requ
     }
 
     do {
-#define PARAMS_ARRAY_SIZE 7
+#define PARAMS_ARRAY_SIZE 8
         const char** keywords = (const char**)pg_malloc(PARAMS_ARRAY_SIZE * sizeof(*keywords));
         const char** values = (const char**)pg_malloc(PARAMS_ARRAY_SIZE * sizeof(*values));
 
@@ -169,14 +170,18 @@ static PGconn* _connectDB(ArchiveHandle* AH, const char* reqdb, const char* requ
         values[4] = newdb;
         keywords[5] = "fallback_application_name";
         values[5] = progname;
-        keywords[6] = NULL;
-        values[6] = NULL;
+        keywords[6] = "enable_ce";
+        values[6] = "1";
+        keywords[7] = NULL;
+        values[7] = NULL;
 
         new_pass = false;
         newConn = PQconnectdbParams(keywords, values, true);
 
         free(keywords);
         keywords = NULL;
+        rc = memset_s(values, PARAMS_ARRAY_SIZE * sizeof(*values), 0, PARAMS_ARRAY_SIZE * sizeof(*values));
+        securec_check_c(rc, "\0", "\0");
         free(values);
         values = NULL;
 
@@ -194,7 +199,7 @@ static PGconn* _connectDB(ArchiveHandle* AH, const char* reqdb, const char* requ
             write_stderr("Connecting to %s as %s\n", newdb, newuser);
 
             if (password != NULL) {
-                errno_t rc = memset_s(password, strlen(password), 0, strlen(password));
+                rc = memset_s(password, strlen(password), 0, strlen(password));
                 securec_check_c(rc, "\0", "\0");
                 free(password);
                 password = NULL;
@@ -230,8 +235,8 @@ static PGconn* _connectDB(ArchiveHandle* AH, const char* reqdb, const char* requ
  * cache if the username keeps changing.  In current usage, however, the
  * username never does change, so one savedPassword is sufficient.
  */
-void ConnectDatabase(Archive* AHX, const char* dbname, const char* pghost, const char* pgport, const char* username,
-    enum trivalue prompt_password)
+char* ConnectDatabase(Archive* AHX, const char* dbname, const char* pghost, const char* pgport, const char* username,
+    enum trivalue promptPassword, bool exitOnError)
 {
     ArchiveHandle* AH = (ArchiveHandle*)AHX;
     char* password = AH->savedPassword;
@@ -241,19 +246,19 @@ void ConnectDatabase(Archive* AHX, const char* dbname, const char* pghost, const
     if (AH->connection != NULL)
         exit_horribly(modulename, "already connected to a database\n");
 
-    if (prompt_password == TRI_YES && password == NULL) {
+    if (promptPassword == TRI_YES && password == NULL) {
         password = simple_prompt("Password: ", 100, false);
         if (password == NULL)
             exit_horribly(modulename, "out of memory\n");
     }
-    AH->promptPassword = prompt_password;
+    AH->promptPassword = promptPassword;
 
     /*
      * Start the connection.  Loop until we have a password if requested by
      * backend.
      */
     do {
-#define PARAMS_ARRAY_SIZE 7
+#define PARAMS_ARRAY_SIZE 8
         const char** keywords = (const char**)pg_malloc(PARAMS_ARRAY_SIZE * sizeof(*keywords));
         const char** values = (const char**)pg_malloc(PARAMS_ARRAY_SIZE * sizeof(*values));
 
@@ -269,8 +274,10 @@ void ConnectDatabase(Archive* AHX, const char* dbname, const char* pghost, const
         values[4] = dbname;
         keywords[5] = "fallback_application_name";
         values[5] = progname;
-        keywords[6] = NULL;
-        values[6] = NULL;
+        keywords[6] = "enable_ce";
+        values[6] = "1";
+        keywords[7] = NULL;
+        values[7] = NULL;
 
         new_pass = false;
         AH->connection = PQconnectdbParams(keywords, values, true);
@@ -285,6 +292,8 @@ void ConnectDatabase(Archive* AHX, const char* dbname, const char* pghost, const
 
         free(keywords);
         keywords = NULL;
+        rc = memset_s(values, PARAMS_ARRAY_SIZE * sizeof(*values), 0, PARAMS_ARRAY_SIZE * sizeof(*values));
+        securec_check_c(rc, "\0", "\0");
         free(values);
         values = NULL;
 
@@ -293,7 +302,7 @@ void ConnectDatabase(Archive* AHX, const char* dbname, const char* pghost, const
 
         if (PQstatus(AH->connection) == CONNECTION_BAD &&
             (strstr(PQerrorMessage(AH->connection), "password") != NULL) && password == NULL &&
-            prompt_password != TRI_NO) {
+            promptPassword != TRI_NO) {
             PQfinish(AH->connection);
             password = simple_prompt("Password: ", 100, false);
             if (password == NULL)
@@ -305,16 +314,21 @@ void ConnectDatabase(Archive* AHX, const char* dbname, const char* pghost, const
     AH->savedPassword = password;
 
     /* check to see that the backend connection was successfully made */
-    if (PQstatus(AH->connection) == CONNECTION_BAD)
+    if (PQstatus(AH->connection) == CONNECTION_BAD) {
+        if (!exitOnError) {
+            return PQerrorMessage(AH->connection);
+        }
         exit_horribly(modulename,
             "connection to database \"%s\" failed: %s",
             PQdb(AH->connection) != NULL ? PQdb(AH->connection) : "",
             PQerrorMessage(AH->connection));
+    }
 
     /* check for version mismatch */
     _check_database_version(AH);
 
     PQsetNoticeProcessor(AH->connection, notice_processor, NULL);
+    return NULL;
 }
 
 /*
@@ -525,12 +539,14 @@ void PrintTblName(const char* buf, size_t bufLen)
     tableName = strtok_r(tmpStr, split, &saveStr);
     while (tableName != NULL) {
         tableName = strtok_r(NULL, split, &saveStr);
-
         if ((isCompleted) && (tableName != NULL)) {
             write_msg(NULL, "table %s complete data imported !\n", tableName);
             break;
         }
 
+        if (tableName == NULL) {
+            break;
+        }
         if (strcmp(tableName, "INTO") == 0) {
             isCompleted = true;
         }
@@ -685,6 +701,8 @@ PGconn* get_dumplog_conn(
 
         free(keywords);
         keywords = NULL;
+        errno_t rc = memset_s(values, DUMPLOG_PARAM_SIZE * sizeof(*values), 0, DUMPLOG_PARAM_SIZE * sizeof(*values));
+        securec_check_c(rc, "\0", "\0");
         free(values);
         values = NULL;
 

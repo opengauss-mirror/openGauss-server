@@ -45,11 +45,11 @@ all:
 
 scanEreport: $(OBJS1) | submake-libpgport
 	$(CC) $(CXXFLAGS) $(OBJS1) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X) $(LIBS)
-	$(top_builddir)/$(subdir)/scanEreport $(top_srcdir)/src/common/backend $(top_srcdir)/src/gausskernel/ $(top_srcdir)/src/common/backend/utils/errcodes.txt
+	$(top_builddir)/$(subdir)/scanEreport $(top_srcdir) ereport.txt $(top_srcdir)/src/common/backend/utils/errcodes.txt
 
 utscanEreport: $(OBJS1) | submake-libpgport
 	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS1) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o libutscanEreport.so -lsecurec
-	mv libutscanEreport.so $(top_builddir)/src/test/ut/lib
+	mv libutscanEreport.so $(top_builddir)/src/distribute/test/ut/lib
 
 OBJS=   gsqlerr.o $(WIN32RES)
 
@@ -58,7 +58,7 @@ gsqlerr: $(OBJS) | submake-libpgport
 
 utgsqlerr: $(OBJS) | submake-libpgport
 	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o libutgsqlerr.so -lsecurec
-	mv libutgsqlerr.so $(top_builddir)/src/test/ut/lib
+	mv libutgsqlerr.so $(top_builddir)/src/distribute/test/ut/lib
 
 ifeq ($(enable_multiple_nodes), yes)
 install: all installdirs

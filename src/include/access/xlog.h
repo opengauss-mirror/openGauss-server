@@ -22,17 +22,13 @@
 #include "access/parallel_recovery/redo_item.h"
 #include "knl/knl_instance.h"
 #include "access/htup.h"
-#include "storage/lwlock.h"
 
-#include <time.h>
 /* Sync methods */
 #define SYNC_METHOD_FSYNC 0
 #define SYNC_METHOD_FDATASYNC 1
 #define SYNC_METHOD_OPEN 2 /* for O_SYNC */
 #define SYNC_METHOD_FSYNC_WRITETHROUGH 3
 #define SYNC_METHOD_OPEN_DSYNC 4 /* for O_DSYNC */
-
-#define U64_HIGH_BITS_OFFSET 32
 
 /*
  * Like InRecovery, standbyState is only valid in the startup process.
@@ -70,6 +66,7 @@ typedef enum {
 
 #define REP_CONN_ARRAY 2  // support 2 relp  connection
 
+const static XLogRecPtr MAX_XLOG_REC_PTR = (XLogRecPtr)0xFFFFFFFFFFFFFFFF;
 extern volatile uint64 sync_system_identifier;
 
 /*
@@ -135,58 +132,6 @@ extern const char* DemoteModeDescs[];
 extern const int DemoteModeNum;
 
 #define DemoteModeDesc(mode) (((mode) > 0 && (mode) < DemoteModeNum) ? DemoteModeDescs[(mode)] : DemoteModeDescs[0])
-
-typedef struct {
-    LWLock* lock;
-    PGSemaphoreData	sem;
-} WALFlushWaitLock;
-
-typedef struct {
-    LWLock* lock;
-    PGSemaphoreData	sem;
-} WALInitSegLock;
-
-typedef struct {
-    LWLock* lock;
-    PGSemaphoreData	sem;
-} WALBufferInitWaitLock;
-
-#define WAL_INSERT_STATUS_ENTRIES 4194304
-#define WAL_NOT_COPIED 0
-#define WAL_COPIED 1
-#define WAL_COPY_SUSPEND (-1)
-#define WAL_SCANNED_LRC_INIT (-2)
-
-/* (ientry + 1) % WAL_INSERT_STATUS_ENTRIES */
-#define GET_NEXT_STATUS_ENTRY(ientry) ((ientry + 1) & (WAL_INSERT_STATUS_ENTRIES - 1))
-
-#define GET_STATUS_ENTRY_INDEX(ientry) ientry
-
-struct WalInsertStatusEntry {
-    /* The end LSN of the record corresponding to this entry */
-    uint64 endLSN;
-
-    /* The log record counter of the record corresponding to this entry */
-    int32  LRC;
-
-    /* WAL copy status: "0" - not copied; "1" - copied */
-    uint32 status;
-};
-
-struct WALFlushWaitLockPadded {
-    WALFlushWaitLock l;
-    char padding[PG_CACHE_LINE_SIZE];
-};
-
-struct WALBufferInitWaitLockPadded {
-    WALBufferInitWaitLock l;
-    char padding[PG_CACHE_LINE_SIZE];
-};
-
-struct WALInitSegLockPadded {
-    WALInitSegLock l;
-    char padding[PG_CACHE_LINE_SIZE];
-};
 
 /*
  * OR-able request flag bits for checkpoints.  The "cause" bits are used only
@@ -303,10 +248,13 @@ typedef struct XLogwrtResult {
     XLogRecPtr Flush; /* last byte + 1 flushed */
 } XLogwrtResult;
 
-extern void XLogMultiFileInit(int advance_xlog_file_num);
+typedef struct TermFileData {
+    uint32 term;
+    bool finish_redo;
+} TermFileData;
+
 extern XLogRecPtr XLogInsertRecord(struct XLogRecData* rdata, XLogRecPtr fpw_lsn, bool isupgrade = false);
-extern void XLogWaitFlush(XLogRecPtr recptr);
-extern void XLogWaitBufferInit(XLogRecPtr recptr);
+extern void XLogFlush(XLogRecPtr record, bool LogicalPage = false);
 extern void UpdateMinRecoveryPoint(XLogRecPtr lsn, bool force);
 extern bool XLogBackgroundFlush(void);
 extern bool XLogNeedsFlush(XLogRecPtr RecPtr);
@@ -361,8 +309,6 @@ extern void SetThisTimeID(uint64 timelineID);
 extern Size XLOGShmemSize(void);
 extern void XLOGShmemInit(void);
 extern void BootStrapXLOG(void);
-extern int XLogSemas(void);
-extern void InitWalSemaphores(void);
 extern void StartupXLOG(void);
 extern void ShutdownXLOG(int code, Datum arg);
 extern void InitXLOGAccess(void);
@@ -379,6 +325,7 @@ extern XLogRecPtr GetFlushRecPtr(void);
 extern TimeLineID GetRecoveryTargetTLI(void);
 extern void DummyStandbySetRecoveryTargetTLI(TimeLineID timeLineID);
 
+extern bool CheckFinishRedoSignal(void);
 extern bool CheckPromoteSignal(void);
 extern bool CheckPrimarySignal(void);
 extern bool CheckStandbySignal(void);
@@ -396,31 +343,36 @@ extern void DisableFpwBeforeFirstCkpt(void);
 extern Size LsnXlogFlushChkShmemSize(void);
 extern void LsnXlogFlushChkShmInit(void);
 extern void heap_xlog_logical_new_page(XLogReaderState* record);
-void heap_xlog_bcm_new_page(xl_heap_logical_newpage* xlrec, RelFileNode node, char* cuData);
 extern bool IsServerModeStandby(void);
 
 extern void SetCBMTrackedLSN(XLogRecPtr trackedLSN);
 extern XLogRecPtr GetCBMTrackedLSN(void);
+extern XLogRecPtr GetCBMRotateLsn(void);
+void SetCBMRotateLsn(XLogRecPtr rotate_lsn);
+extern void SetCBMFileStartLsn(XLogRecPtr currCbmNameStartLsn);
+extern XLogRecPtr GetCBMFileStartLsn(void);
 
-extern void SetDelayXlogRecycle(bool toDelay);
+extern void SetDelayXlogRecycle(bool toDelay, bool isRedo = false);
 extern bool GetDelayXlogRecycle(void);
 extern void SetDDLDelayStartPtr(XLogRecPtr ddlDelayStartPtr);
 extern XLogRecPtr GetDDLDelayStartPtr(void);
+extern void heap_xlog_bcm_new_page(xl_heap_logical_newpage* xlrec, RelFileNode node, char* cuData);
 
 /*
  * Starting/stopping a base backup
  */
 extern XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfile, DIR* tblspcdir,
     char** tblspcmapfile, List** tablespaces, bool infotbssize, bool needtblspcmapfile);
-extern void startupInitRoachBackup(void);
 extern void set_start_backup_flag(bool startFlag);
 extern bool get_startBackup_flag(void);
+extern bool check_roach_start_backup(const char *slotName);
 extern bool GetDelayXlogRecycle(void);
 extern XLogRecPtr GetDDLDelayStartPtr(void);
 extern XLogRecPtr do_pg_stop_backup(char* labelfile, bool waitforarchive);
 extern void do_pg_abort_backup(void);
-extern void enable_delay_xlog_recycle(void);
-extern void disable_delay_xlog_recycle(void);
+extern void RegisterAbortExclusiveBackup();
+extern void enable_delay_xlog_recycle(bool isRedo = false);
+extern void disable_delay_xlog_recycle(bool isRedo = false);
 extern void startupInitDelayXlog(void);
 extern XLogRecPtr enable_delay_ddl_recycle(void);
 extern char* getLastRewindTime();
@@ -428,6 +380,10 @@ extern void disable_delay_ddl_recycle(XLogRecPtr barrierLSN, bool isForce, XLogR
 extern void startupInitDelayDDL(void);
 extern void execDelayedDDL(XLogRecPtr startLSN, XLogRecPtr endLSN, bool ignoreCBMErr);
 extern bool IsRoachRestore(void);
+extern XLogRecPtr do_roach_start_backup(const char *backupidstr);
+extern XLogRecPtr do_roach_stop_backup(const char *backupidstr);
+extern XLogRecPtr enable_delay_ddl_recycle_with_slot(const char* slotname);
+extern void disable_delay_ddl_recycle_with_slot(const char* slotname, XLogRecPtr *startLSN, XLogRecPtr *endLSN);
 
 extern void CloseXlogFilesAtThreadExit(void);
 extern void SetLatestXTime(TimestampTz xtime);
@@ -439,10 +395,22 @@ void ResourceManagerStop(void);
 void rm_redo_error_callback(void* arg);
 extern void load_server_mode(void);
 extern void WaitCheckpointSync(void);
+extern void btree_clear_imcompleteAction();
+extern void update_max_page_flush_lsn(XLogRecPtr biggest_lsn, ThreadId thdId, bool is_force);
+extern void set_global_max_page_flush_lsn(XLogRecPtr lsn);
+XLogRecPtr get_global_max_page_flush_lsn();
 void GetRecoveryLatch();
 void ReLeaseRecoveryLatch();
 void ExtremRtoUpdateMinCheckpoint();
 bool IsRecoveryDone();
+
+void CopyXlogForForceFinishRedo(XLogSegNo logSegNo, uint32 termId, XLogReaderState *xlogreader,
+                                XLogRecPtr lastRplEndLsn);
+void RenameXlogForForceFinishRedo(XLogSegNo beginSegNo, TimeLineID tli, uint32 termId);
+void ReOpenXlog(XLogReaderState *xlogreader);
+void SetSwitchHistoryFile(XLogRecPtr switchLsn, XLogRecPtr catchLsn, uint32 termId);
+void CheckMaxPageFlushLSN(XLogRecPtr reqLsn);
+bool CheckForForceFinishRedoTrigger(TermFileData *term_file);
 
 extern XLogRecPtr XlogRemoveSegPrimary;
 
@@ -451,7 +419,7 @@ extern XLogRecPtr XlogRemoveSegPrimary;
 #define DISABLE_CONN_FILE "disable_conn_file"
 #define BACKUP_LABEL_OLD "backup_label.old"
 #define BACKUP_LABEL_FILE_ROACH "backup_label.roach"
-#define BACKUP_LABEL_FILE_ROACH_DONE "backup_label_roach.done"
+#define BACKUP_LABEL_FILE_ROACH_DONE "backup_label.roach.done"
 #define DELAY_XLOG_RECYCLE_FILE "delay_xlog_recycle"
 #define DELAY_DDL_RECYCLE_FILE "delay_ddl_recycle"
 #define REWIND_LABLE_FILE "rewind_lable"
@@ -468,15 +436,19 @@ typedef struct delayddlrange {
     }
 #define DISABLE_DDL_DELAY_TIMEOUT 1800000
 #define ENABLE_DDL_DELAY_TIMEOUT 60000
-#define ROACH_BARRIER_PREFIX "roach_barrier_"
 
 #define TABLESPACE_MAP "tablespace_map"
 #define TABLESPACE_MAP_OLD "tablespace_map.old"
 
-static inline void WakeupWalSemaphore(PGSemaphore sema)
+#define ROACH_BACKUP_PREFIX "gs_roach"
+#define ROACH_FULL_BAK_PREFIX "gs_roach_full"
+#define ROACH_INC_BAK_PREFIX "gs_roach_inc"
+
+static const uint64 INVALID_READ_OFF = 0xFFFFFFFF;
+
+inline bool force_finish_enabled()
 {
-    PGSemaphoreReset(sema);
-    PGSemaphoreUnlock(sema);
+    return (g_instance.attr.attr_storage.enable_update_max_page_flush_lsn != 0);
 }
 
 #endif /* XLOG_H */

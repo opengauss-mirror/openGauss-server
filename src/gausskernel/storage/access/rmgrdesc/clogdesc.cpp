@@ -20,9 +20,9 @@
 #include "common/fe_memutils.h"
 #endif
 
-void clog_desc(StringInfo buf, XLogReaderState* record)
+void clog_desc(StringInfo buf, XLogReaderState *record)
 {
-    char* rec = XLogRecGetData(record);
+    char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     errno_t rc = EOK;
 
@@ -43,4 +43,3 @@ void clog_desc(StringInfo buf, XLogReaderState* record)
     } else
         appendStringInfo(buf, "UNKNOWN");
 }
-

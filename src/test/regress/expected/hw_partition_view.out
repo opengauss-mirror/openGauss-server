@@ -1,0 +1,179 @@
+--SYNTAX: 
+-- CREATE [ OR REPLACE ] [ TEMP | TEMPORARY ] VIEW name [ ( column_name [, ...] ) ]
+--    [ WITH ( view_option_name [= view_option_value] [, ... ] ) ]
+--    AS query
+-- (Y)1.CREATE VIEW
+--    2.OPS ON VIEW
+--     (Y)2.1 INSERT
+--     (Y)2.2 UPDATE
+--     (Y)2.3 DELETE
+create table hw_partition_view_rtest_t1 (a int4, b int4)
+partition by range (a)
+(
+	partition hw_partition_view_rtest_t1_p1 values less than(10),
+	partition hw_partition_view_rtest_t1_p2 values less than(20),
+	partition hw_partition_view_rtest_t1_p3 values less than(30),
+	partition hw_partition_view_rtest_t1_p4 values less than(40),
+	partition hw_partition_view_rtest_t1_p5 values less than(50),
+	partition hw_partition_view_rtest_t1_p6 values less than(60),
+	partition hw_partition_view_rtest_t1_p7 values less than(70),
+	partition hw_partition_view_rtest_t1_p8 values less than(80),
+	partition hw_partition_view_rtest_t1_p9 values less than(90),
+	partition hw_partition_view_rtest_t1_p10 values less than(100)
+)ENABLE ROW MOVEMENT;
+create table hw_partition_view_rtest_t2 (a int4, b int4)
+partition by range (a)
+(
+	partition hw_partition_view_rtest_t2_p1 values less than(10),
+	partition hw_partition_view_rtest_t2_p2 values less than(20),
+	partition hw_partition_view_rtest_t2_p3 values less than(30),
+	partition hw_partition_view_rtest_t2_p4 values less than(40),
+	partition hw_partition_view_rtest_t2_p5 values less than(50),
+	partition hw_partition_view_rtest_t2_p6 values less than(60),
+	partition hw_partition_view_rtest_t2_p7 values less than(70),
+	partition hw_partition_view_rtest_t2_p8 values less than(80),
+	partition hw_partition_view_rtest_t2_p9 values less than(90),
+	partition hw_partition_view_rtest_t2_p10 values less than(100)
+)ENABLE ROW MOVEMENT;
+create table hw_partition_view_rtest_t3 (a int4, b int4)
+partition by range (a)
+(
+	partition hw_partition_view_rtest_t3_p1 values less than(10),
+	partition hw_partition_view_rtest_t3_p2 values less than(20),
+	partition hw_partition_view_rtest_t3_p3 values less than(30),
+	partition hw_partition_view_rtest_t3_p4 values less than(40),
+	partition hw_partition_view_rtest_t3_p5 values less than(50),
+	partition hw_partition_view_rtest_t3_p6 values less than(60),
+	partition hw_partition_view_rtest_t3_p7 values less than(70),
+	partition hw_partition_view_rtest_t3_p8 values less than(80),
+	partition hw_partition_view_rtest_t3_p9 values less than(90),
+	partition hw_partition_view_rtest_t3_p10 values less than(100)
+)ENABLE ROW MOVEMENT;
+create view rtest_v1 
+	as 
+		select * from hw_partition_view_rtest_t1;
+create rule rtest_v1_ins 
+	as 
+		on insert to rtest_v1 
+			do instead
+				insert into hw_partition_view_rtest_t1 values (new.a, new.b) returning *;
+-- update on partitioned table not supported
+create rule rtest_v1_upd 
+	as 
+		on update to rtest_v1 
+			do instead
+				update hw_partition_view_rtest_t1 
+					set a = new.a, b = new.b
+					where a = old.a;
+create rule rtest_v1_del 
+	as 
+		on delete to rtest_v1 
+			do instead
+				delete from hw_partition_view_rtest_t1 where a = old.a returning *;
+	
+insert into hw_partition_view_rtest_t2 values (1, 21);
+insert into hw_partition_view_rtest_t2 values (2, 22);
+insert into hw_partition_view_rtest_t2 values (3, 23);
+insert into hw_partition_view_rtest_t3 values (11, 31);
+insert into hw_partition_view_rtest_t3 values (12, 32);
+insert into hw_partition_view_rtest_t3 values (13, 33);
+insert into hw_partition_view_rtest_t3 values (14, 34);
+insert into hw_partition_view_rtest_t3 values (15, 35);
+-- insert values
+insert into rtest_v1 values (1, 11);
+insert into rtest_v1 values (2, 12);
+select * from rtest_v1 order by a, b;
+ a | b  
+---+----
+ 1 | 11
+ 2 | 12
+(2 rows)
+
+-- delete with constant expression
+delete from rtest_v1 where a = 1;
+select * from rtest_v1 order by a, b;
+ a | b  
+---+----
+ 2 | 12
+(1 row)
+
+insert into rtest_v1 values (1, 11);
+delete from rtest_v1 where b = 12;
+select * from rtest_v1 order by a, b;
+ a | b  
+---+----
+ 1 | 11
+(1 row)
+
+insert into rtest_v1 values (2, 12);
+insert into rtest_v1 values (2, 13);
+select * from rtest_v1 order by a, b;
+ a | b  
+---+----
+ 1 | 11
+ 2 | 12
+ 2 | 13
+(3 rows)
+
+delete from rtest_v1 where b = 12; --this call delete 2 tuples , strange
+select * from rtest_v1 order by a, b;
+ a | b  
+---+----
+ 1 | 11
+(1 row)
+
+delete from rtest_v1; 
+-- insert select
+insert into rtest_v1 
+	select * from hw_partition_view_rtest_t2;
+select * from rtest_v1 order by a, b;
+ a | b  
+---+----
+ 1 | 21
+ 2 | 22
+ 3 | 23
+(3 rows)
+
+delete from rtest_v1;
+-- same with swapped targetlist
+insert into rtest_v1 (b, a) 
+	select b, a from hw_partition_view_rtest_t2;
+select * from rtest_v1 order by a, b;
+ a | b  
+---+----
+ 1 | 21
+ 2 | 22
+ 3 | 23
+(3 rows)
+
+-- now with only one target attribute
+insert into rtest_v1 (a) 
+	select a from hw_partition_view_rtest_t3;
+select * from rtest_v1 order by a, b;
+ a  | b  
+----+----
+  1 | 21
+  2 | 22
+  3 | 23
+ 11 |   
+ 12 |   
+ 13 |   
+ 14 |   
+ 15 |   
+(8 rows)
+
+select * from rtest_v1 
+	where b isnull order by a, b;
+ a  | b 
+----+---
+ 11 |  
+ 12 |  
+ 13 |  
+ 14 |  
+ 15 |  
+(5 rows)
+
+drop table hw_partition_view_rtest_t1 cascade;
+NOTICE:  drop cascades to view rtest_v1
+drop table hw_partition_view_rtest_t2 cascade;
+drop table hw_partition_view_rtest_t3 cascade;

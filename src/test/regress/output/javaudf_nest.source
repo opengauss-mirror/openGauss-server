@@ -1,0 +1,97 @@
+---test: nest call
+START TRANSACTION;
+CREATE FUNCTION java_addOne_Integer(int)
+	RETURNS int
+	AS 'huawei.javaudf.basic.BasicJavaUDF.addOne(java.lang.Integer)'
+	IMMUTABLE LANGUAGE java;
+CREATE FUNCTION nullOnEven(int)
+	RETURNS int
+	AS 'huawei.javaudf.basic.BasicJavaUDF.nullOnEven'
+	IMMUTABLE LANGUAGE java;
+SELECT nullOnEven(java_addOne_Integer(1));
+ nulloneven 
+------------
+           
+(1 row)
+
+SELECT nullOnEven(java_addOne_Integer(2));
+ nulloneven 
+------------
+          3
+(1 row)
+
+SELECT nullOnEven(java_addOne_Integer(java_addOne_Integer(java_addOne_Integer(java_addOne_Integer(java_addOne_Integer(1))))));
+ nulloneven 
+------------
+           
+(1 row)
+
+CREATE FUNCTION oldstyle_length(int4, text)
+	RETURNS int4
+	AS '@abs_bindir@/../lib/postgresql/java/regress.so'
+	LANGUAGE C;
+SELECT nullOnEven(oldstyle_length(10, 'abc'));
+ nulloneven 
+------------
+         13
+(1 row)
+
+SELECT nullOnEven(java_addOne_Integer(oldstyle_length(10, 'abc')));
+ nulloneven 
+------------
+           
+(1 row)
+
+SELECT oldstyle_length(java_addOne_Integer(9), 'abc');
+ oldstyle_length 
+-----------------
+              13
+(1 row)
+
+SELECT java_addOne_Integer(oldstyle_length(java_addOne_Integer(9), 'abc'));
+ java_addone_integer 
+---------------------
+                  14
+(1 row)
+
+DROP FUNCTION java_addOne_Integer;
+DROP FUNCTION nullOnEven;
+DROP FUNCTION oldstyle_length;
+ROLLBACK;
+---test: normal user can not create javaudf
+CREATE USER udf_usr PASSWORD 'GAUSS@123';
+GRANT ALL PRIVILEGES ON LANGUAGE java TO udf_usr;
+ERROR:  language "java" is not trusted
+HINT:  Only system admin can use untrusted languages.
+SET SESSION SESSION AUTHORIZATION udf_usr PASSWORD 'GAUSS@123';
+CREATE FUNCTION java_addOne_Integer(int)
+	RETURNS int
+	AS 'huawei.javaudf.basic.BasicJavaUDF.addOne(java.lang.Integer)'
+	IMMUTABLE LANGUAGE java;
+ERROR:  permission denied for language java
+---test: sysadmin user can create and use javaudf */
+RESET SESSION AUTHORIZATION;
+CREATE USER udf_admin PASSWORD 'GAUSS@123' SYSADMIN;
+SET SESSION SESSION AUTHORIZATION udf_admin PASSWORD 'GAUSS@123';
+CREATE FUNCTION nullOnEven(int)
+	RETURNS int
+	AS 'huawei.javaudf.basic.BasicJavaUDF.nullOnEven'
+	IMMUTABLE LANGUAGE java;
+SELECT nullOnEven(2);
+ nulloneven 
+------------
+           
+(1 row)
+
+---test: normal user can use granted udf */
+GRANT ALL PRIVILEGES ON SCHEMA udf_admin TO udf_usr;
+SET SESSION SESSION AUTHORIZATION udf_usr PASSWORD 'GAUSS@123';
+SELECT udf_admin.nullOnEven(2);
+ nulloneven 
+------------
+           
+(1 row)
+
+RESET SESSION AUTHORIZATION;
+DROP USER udf_admin CASCADE;
+DROP USER udf_usr CASCADE;

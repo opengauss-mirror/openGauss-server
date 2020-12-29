@@ -16,9 +16,9 @@
 /* members of struct parray are hidden from client. */
 struct parray
 {
-	void **data;		/* pointer array, expanded if necessary */
-	size_t alloced;		/* number of elements allocated */
-	size_t used;		/* number of elements in use */
+    void **data;    /* pointer array, expanded if necessary */
+    size_t alloced; /* number of elements allocated */
+    size_t used;    /* number of elements in use */
 };
 
 /*
@@ -28,15 +28,15 @@ struct parray
 parray *
 parray_new(void)
 {
-	parray *a = pgut_new(parray);
+    parray *a = pgut_new(parray);
 
-	a->data = NULL;
-	a->used = 0;
-	a->alloced = 0;
+    a->data = NULL;
+    a->used = 0;
+    a->alloced = 0;
 
-	parray_expand(a, 1024);
+    parray_expand(a, 1024);
 
-	return a;
+    return a;
 }
 
 /*
@@ -47,54 +47,60 @@ parray_new(void)
 void
 parray_expand(parray *array, size_t newsize)
 {
-	void **p;
+    void **p;
+    errno_t rc = 0;
 
-	/* already allocated */
-	if (newsize <= array->alloced)
-		return;
+    /* already allocated */
+    if (newsize <= array->alloced)
+        return;
 
-	p = (void **)pgut_realloc(array->data, sizeof(void *) * newsize);
+    p = (void **)pgut_realloc(array->data, sizeof(void *) * array->alloced, sizeof(void *) * newsize);
 
-	/* initialize expanded area to NULL */
-	memset(p + array->alloced, 0, (newsize - array->alloced) * sizeof(void *));
+    /* initialize expanded area to NULL */
+    rc = memset_s(p + array->alloced, (newsize - array->alloced) * sizeof(void *),
+             0, (newsize - array->alloced) * sizeof(void *));
+    securec_check_c(rc, "\0", "\0");
 
-	array->alloced = newsize;
-	array->data = p;
+    array->alloced = newsize;
+    array->data = p;
 }
 
 void
 parray_free(parray *array)
 {
-	if (array == NULL)
-		return;
-	free(array->data);
-	free(array);
+    if (array == NULL)
+        return;
+    free(array->data);
+    free(array);
 }
 
 void
 parray_append(parray *array, void *elem)
 {
-	if (array->used + 1 > array->alloced)
-		parray_expand(array, array->alloced * 2);
+    if (array->used + 1 > array->alloced)
+        parray_expand(array, array->alloced * 2);
 
-	array->data[array->used++] = elem;
+    array->data[array->used++] = elem;
 }
 
 void
 parray_insert(parray *array, size_t index, void *elem)
 {
-	if (array->used + 1 > array->alloced)
-		parray_expand(array, array->alloced * 2);
+    errno_t rc = 0;
+    
+    if (array->used + 1 > array->alloced)
+        parray_expand(array, array->alloced * 2);
 
-	memmove(array->data + index + 1, array->data + index,
-		(array->alloced - index - 1) * sizeof(void *));
-	array->data[index] = elem;
+    rc = memmove_s(array->data + index + 1, (array->alloced - index - 1) * sizeof(void *), array->data + index,
+        (array->alloced - index - 1) * sizeof(void *));
+    securec_check_c(rc, "\0", "\0");
+    array->data[index] = elem;
 
-	/* adjust used count */
-	if (array->used < index + 1)
-		array->used = index + 1;
-	else
-		array->used++;
+    /* adjust used count */
+    if (array->used < index + 1)
+        array->used = index + 1;
+    else
+        array->used++;
 }
 
 /*
@@ -104,110 +110,120 @@ parray_insert(parray *array, size_t index, void *elem)
 parray *
 parray_concat(parray *dest, const parray *src)
 {
-	/* expand head array */
-	parray_expand(dest, dest->used + src->used);
+    errno_t rc = 0;
+    /* expand head array */
+    parray_expand(dest, dest->used + src->used);
 
-	/* copy content of src after content of dest */
-	memcpy(dest->data + dest->used, src->data, src->used * sizeof(void *));
-	dest->used += parray_num(src);
+    /* copy content of src after content of dest */
+    rc = memcpy_s(dest->data + dest->used, (dest->alloced - dest->used) * sizeof(void *),
+             src->data, src->used * sizeof(void *));
+    securec_check_c(rc, "\0", "\0");
+    dest->used += parray_num(src);
 
-	return dest;
+    return dest;
 }
 
 void
 parray_set(parray *array, size_t index, void *elem)
 {
-	if (index > array->alloced - 1)
-		parray_expand(array, index + 1);
+    if (index > array->alloced - 1)
+        parray_expand(array, index + 1);
 
-	array->data[index] = elem;
+    array->data[index] = elem;
 
-	/* adjust used count */
-	if (array->used < index + 1)
-		array->used = index + 1;
+    /* adjust used count */
+    if (array->used < index + 1)
+        array->used = index + 1;
 }
 
 void *
 parray_get(const parray *array, size_t index)
 {
-	if (index > array->alloced - 1)
-		return NULL;
-	return array->data[index];
+    if (index > array->alloced - 1)
+        return NULL;
+    return array->data[index];
 }
 
 void *
 parray_remove(parray *array, size_t index)
 {
-	void *val;
+    errno_t rc = 0;
+    void *val;
 
-	/* removing unused element */
-	if (index > array->used)
-		return NULL;
+    /* removing unused element */
+    if (index > array->used)
+        return NULL;
 
-	val = array->data[index];
+    val = array->data[index];
 
-	/* Do not move if the last element was removed. */
-	if (index < array->alloced - 1)
-		memmove(array->data + index, array->data + index + 1,
-			(array->alloced - index - 1) * sizeof(void *));
+    /* Do not move if the last element was removed. */
+    if (index < array->alloced - 1) {
+        rc = memmove_s(array->data + index, (array->alloced - index) * sizeof(void *), array->data + index + 1,
+         (array->alloced - index - 1) * sizeof(void *));
+        securec_check_c(rc, "\0", "\0");
+    }
 
-	/* adjust used count */
-	array->used--;
+    /* adjust used count */
+    array->used--;
 
-	return val;
+    return val;
 }
 
 bool
 parray_rm(parray *array, const void *key, int(*compare)(const void *, const void *))
 {
-	int i;
+    int i;
 
-	for (i = 0; i < array->used; i++)
-	{
-		if (compare(&key, &array->data[i]) == 0)
-		{
-			parray_remove(array, i);
-			return true;
-		}
-	}
-	return false;
+    for (i = 0; i < array->used; i++)
+    {
+        if (compare(&key, &array->data[i]) == 0)
+        {
+            parray_remove(array, i);
+            return true;
+        }
+    }
+    return false;
 }
 
 size_t
 parray_num(const parray *array)
 {
-	return array->used;
+    return array->used;
 }
 
 void
 parray_qsort(parray *array, int(*compare)(const void *, const void *))
 {
-	qsort(array->data, array->used, sizeof(void *), compare);
+    qsort(array->data, array->used, sizeof(void *), compare);
 }
 
 void
 parray_walk(parray *array, void (*action)(void *))
 {
-	int i;
-	for (i = 0; i < array->used; i++)
-		action(array->data[i]);
+    int i;
+    if (array == nullptr) {
+        return;
+    }
+
+    for (i = 0; i < array->used; i++)
+        action(array->data[i]);
 }
 
 void *
 parray_bsearch(parray *array, const void *key, int(*compare)(const void *, const void *))
 {
-	return bsearch(&key, array->data, array->used, sizeof(void *), compare);
+    return bsearch(&key, array->data, array->used, sizeof(void *), compare);
 }
 
 /* checks that parray contains element */
-bool parray_contains(parray *array, void *elem)
+bool parray_contains(parray *array, const void *elem)
 {
-	int i;
+    int i;
 
-	for (i = 0; i < parray_num(array); i++)
-	{
-		if (parray_get(array, i) == elem)
-			return true;
-	}
-	return false;
+    for (i = 0; i < parray_num(array); i++)
+    {
+        if (parray_get(array, i) == elem)
+            return true;
+    }
+    return false;
 }

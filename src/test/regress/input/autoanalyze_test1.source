@@ -1,0 +1,67 @@
+set max_query_retry_times = 0;
+/*column+unpartition table*/
+insert into t1 values (generate_series(1,51),generate_series(1,51),generate_series(1,51));
+CALL sleep_loop_autoanalyze_count(1, 't1', 0.1);
+copy t1 from '@abs_srcdir@/data/autoanalyze_test_data.txt';
+CALL sleep_loop_autoanalyze_count(2, 't1', 0.1);
+update t1 set a = 3,b = 2 where a < 35 AND a > 0;
+CALL sleep_loop_autoanalyze_count(3, 't1', 0.1);
+delete from t1 where a < 50 AND a > 0;
+CALL sleep_loop_autoanalyze_count(4, 't1', 0.1);
+select
+	pg_stat_get_analyze_count('t1'::regclass) as analyze_count, 
+	pg_stat_get_autoanalyze_count('t1'::regclass) as autoanalyze_count, 
+	pg_stat_get_vacuum_count('t1'::regclass) as vacuum_count, 
+	pg_stat_get_autovacuum_count('t1'::regclass) as autovacuum_count
+from dual;
+
+/*column+unpartition+unlogged table*/
+create unlogged table t1_unlogged with(orientation=column) distribute by hash(sk) as (select * from t1);
+insert into t1_unlogged values (generate_series(1,51),generate_series(1,51),generate_series(1,51));
+copy t1_unlogged from '@abs_srcdir@/data/autoanalyze_test_data.txt';
+update t1_unlogged set a = 3,b = 2 where a < 35 AND a > 0;
+delete from t1_unlogged where a < 50 AND a > 0;
+
+/*column+unpartition+temp table*/
+create temp table t1_temp with(orientation=column) distribute by hash(sk) as (select * from t1);
+insert into t1_temp values (generate_series(1,51),generate_series(1,51),generate_series(1,51));
+copy t1_temp from '@abs_srcdir@/data/autoanalyze_test_data.txt';
+update t1_temp set a = 3,b = 2 where a < 35 AND a > 0;
+delete from t1_temp where a < 50 AND a > 0;
+
+/*column+REPLICATION table*/
+create table t1_rep with(orientation=column) distribute by REPLICATION as (select * from t1);
+insert into t1_rep values (generate_series(1,51),generate_series(1,51),generate_series(1,51));
+CALL sleep_loop_autoanalyze_count(1, 't1_rep', 0.1);
+copy t1_rep from '@abs_srcdir@/data/autoanalyze_test_data.txt';
+CALL sleep_loop_autoanalyze_count(2, 't1_rep', 0.1);
+delete from t1_rep where a < 55 AND a > 0;
+CALL sleep_loop_autoanalyze_count(3, 't1_rep', 0.1);
+select
+	pg_stat_get_analyze_count('t1_rep'::regclass) as analyze_count,
+	pg_stat_get_autoanalyze_count('t1_rep'::regclass) as autoanalyze_count,
+	pg_stat_get_vacuum_count('t1_rep'::regclass) as vacuum_count,
+	pg_stat_get_autovacuum_count('t1_rep'::regclass) as autovacuum_count
+from dual;
+
+/*result+column+unpartition+unlogged table*/
+
+select
+	pg_stat_get_analyze_count('t1_unlogged'::regclass) as analyze_count,
+	pg_stat_get_autoanalyze_count('t1_unlogged'::regclass) as autoanalyze_count,
+	pg_stat_get_vacuum_count('t1_unlogged'::regclass) as vacuum_count,
+	pg_stat_get_autovacuum_count('t1_unlogged'::regclass) as autovacuum_count
+from dual;
+
+/*result+column+unpartition+temp table*/
+select
+	pg_stat_get_analyze_count('t1_temp'::regclass) as analyze_count,
+	pg_stat_get_autoanalyze_count('t1_temp'::regclass) as autoanalyze_count,
+	pg_stat_get_vacuum_count('t1_temp'::regclass) as vacuum_count,
+	pg_stat_get_autovacuum_count('t1_temp'::regclass) as autovacuum_count
+from dual;
+
+drop table t1_unlogged;
+drop table t1_temp;
+drop table t1_rep;
+set max_query_retry_times = 3;

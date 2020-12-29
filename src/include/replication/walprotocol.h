@@ -17,6 +17,7 @@
 #include "access/xlogdefs.h"
 #include "datatype/timestamp.h"
 #include "replication/replicainternal.h"
+#define XLOG_NAME_LENGTH 24
 
 /*
  * All messages from WalSender must contain these fields to allow us to
@@ -130,6 +131,24 @@ typedef struct {
 } WalDataPageMessageHeader;
 
 /*
+ * Refence :ArchiveXlogMessage
+ */
+typedef struct ArchiveXlogMessage {
+    XLogRecPtr targetLsn;
+    uint term;
+    int sub_term; 
+    uint slice;
+} ArchiveXlogMessage;
+
+/*
+ * Refence :ArchiveXlogResponseMeeeage
+ */
+typedef struct ArchiveXlogResponseMeeeage {
+    bool pitr_result;
+    XLogRecPtr targetLsn;
+} ArchiveXlogResponseMeeeage;
+
+/*
  * Keepalive message from primary (message type 'k'). (lowercase k)
  * This is wrapped within a CopyData message at the FE/BE protocol level.
  *
@@ -146,6 +165,12 @@ typedef enum {
     SWITCHOVER_DEMOTE_FAILED,
     SWITCHOVER_DEMOTE_CATCHUP_EXIST
 } SwitchResponseCode;
+
+typedef enum {
+    PITR_TASK_NONE = 0,
+    PITR_TASK_GET,
+    PITR_TASK_DONE
+} PITR_TASK_STATUS;
 
 /*
  * switchover response message from primary (message type 'p').  This is wrapped within
@@ -239,4 +264,3 @@ typedef struct StandbySwitchRequestMessage {
 #define MAX_SEND_SIZE (XLOG_BLCKSZ * 16)
 
 #endif /* _WALPROTOCOL_H */
-

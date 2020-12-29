@@ -32,11 +32,11 @@
 #include "replication/heartbeat/libpq/libpq-be.h"
 #include "replication/heartbeat/heartbeat_conn.h"
 
-static char* GetIp(struct sockaddr* addr)
+static char *GetIp(struct sockaddr *addr)
 {
-    char* ip = (char*)palloc0(IP_LEN);
-    struct sockaddr_in* saddr = (sockaddr_in*)addr;
-    char* result = NULL;
+    char *ip = (char *)palloc0(IP_LEN);
+    struct sockaddr_in *saddr = (sockaddr_in *)addr;
+    char *result = NULL;
 
     if (AF_INET6 == saddr->sin_family) {
         result = inet_net_ntop(AF_INET6, &saddr->sin_addr, AF_INET6_MAX_BITS, ip, IP_LEN);
@@ -60,28 +60,28 @@ static char* GetIp(struct sockaddr* addr)
     return ip;
 }
 
-static bool IsIpInWhiteList(const char* ip)
+static bool IsIpInWhiteList(const char *ip)
 {
     for (int i = START_REPLNODE_NUM; i < MAX_REPLNODE_NUM; i++) {
-        ReplConnInfo* replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+        ReplConnInfo *replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
         if (replconninfo == NULL) {
             continue;
         }
 
-        if (strncmp((char*)replconninfo->remotehost, ip, IP_LEN) == 0) {
+        if (strncmp((char *)replconninfo->remotehost, ip, IP_LEN) == 0) {
             return true;
         }
     }
     return false;
 }
 
-HeartbeatConnection* MakeConnection(int fd, PurePort* port)
+HeartbeatConnection *MakeConnection(int fd, PurePort *port)
 {
-    HeartbeatConnection* con = (HeartbeatConnection*)palloc0(sizeof(HeartbeatConnection));
+    HeartbeatConnection *con = (HeartbeatConnection *)palloc0(sizeof(HeartbeatConnection));
 
     /* The port is NULL for listen fd */
     if (port != NULL) {
-        con->remoteHost = GetIp((struct sockaddr*)&port->raddr.addr);
+        con->remoteHost = GetIp((struct sockaddr *)&port->raddr.addr);
         if (con->remoteHost == NULL) {
             FREE_AND_RESET(con);
             ereport(COMMERROR, (errmsg("Get the remote host ip failed.\n")));
@@ -103,7 +103,7 @@ HeartbeatConnection* MakeConnection(int fd, PurePort* port)
     return con;
 }
 
-void ConnCloseAndFree(HeartbeatConnection* con)
+void ConnCloseAndFree(HeartbeatConnection *con)
 {
     Assert(con != NULL);
     if (con == NULL) {
@@ -130,7 +130,7 @@ void ConnCloseAndFree(HeartbeatConnection* con)
     FREE_AND_RESET(con);
 }
 
-void RemoveConn(HeartbeatConnection* con)
+void RemoveConn(HeartbeatConnection *con)
 {
     if (con != NULL) {
         EventDel(con->epHandle, con);
@@ -139,9 +139,9 @@ void RemoveConn(HeartbeatConnection* con)
 }
 
 /* Add an event to epoll */
-int EventAdd(int epoll_handle, int events, HeartbeatConnection* con)
+int EventAdd(int epoll_handle, int events, HeartbeatConnection *con)
 {
-    struct epoll_event epv = {0, {0}};
+    struct epoll_event epv = { 0, {0}};
     epv.data.ptr = con;
     epv.events = con->events = events;
 
@@ -154,9 +154,9 @@ int EventAdd(int epoll_handle, int events, HeartbeatConnection* con)
 }
 
 /* Delete an event from epoll */
-void EventDel(int epollFd, HeartbeatConnection* con)
+void EventDel(int epollFd, HeartbeatConnection *con)
 {
-    struct epoll_event epv = {0, {0}};
+    struct epoll_event epv = { 0, {0}};
     epv.events = 0;
     epv.data.ptr = con;
 
@@ -165,9 +165,9 @@ void EventDel(int epollFd, HeartbeatConnection* con)
     }
 }
 
-void UpdateLastHeartbeatTime(const char* remoteHost, int remotePort, TimestampTz timestamp)
+void UpdateLastHeartbeatTime(const char *remoteHost, int remotePort, TimestampTz timestamp)
 {
-    volatile heartbeat_state* stat = t_thrd.heartbeat_cxt.state;
+    volatile heartbeat_state *stat = t_thrd.heartbeat_cxt.state;
 
     SpinLockAcquire(&stat->mutex);
     for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
@@ -176,14 +176,11 @@ void UpdateLastHeartbeatTime(const char* remoteHost, int remotePort, TimestampTz
             continue;
         }
 
-        if (strncmp((char*)replconninfo->remotehost, (char*)remoteHost, IP_LEN) == 0 &&
+        if (strncmp((char *)replconninfo->remotehost, (char *)remoteHost, IP_LEN) == 0 &&
             replconninfo->remoteheartbeatport == remotePort) {
             stat->channel_array[i].last_reply_timestamp = timestamp;
-            ereport(DEBUG2,
-                (errmsg("Update last heartbeat  time： remotehost:%s, port:%d, time:%ld",
-                    remoteHost,
-                    remotePort,
-                    timestamp)));
+            ereport(DEBUG2, (errmsg("Update last heartbeat  time： remotehost:%s, port:%d, time:%ld", remoteHost,
+                                    remotePort, timestamp)));
             SpinLockRelease(&stat->mutex);
             return;
         }
@@ -192,7 +189,7 @@ void UpdateLastHeartbeatTime(const char* remoteHost, int remotePort, TimestampTz
     ereport(COMMERROR, (errmsg("Can't find channel, remote host:%s, remote port:%d", remoteHost, remotePort)));
 }
 
-bool SendPacket(const HeartbeatConnection* con, const char* buf, size_t len)
+bool SendPacket(const HeartbeatConnection *con, const char *buf, size_t len)
 {
     int ret = 0;
 
@@ -208,20 +205,20 @@ bool SendPacket(const HeartbeatConnection* con, const char* buf, size_t len)
     return true;
 }
 
-bool SendHeartbeatPacket(const HeartbeatConnection* con)
+bool SendHeartbeatPacket(const HeartbeatConnection *con)
 {
     HeartbeatPacket packet;
     packet.sendTime = GetCurrentTimestamp();
 
-    return SendPacket(con, (char*)(&packet), sizeof(HeartbeatPacket));
+    return SendPacket(con, (char *)(&packet), sizeof(HeartbeatPacket));
 }
 
 /*
  * ConnectCreate -- create a local connection data structure
  */
-PurePort* ConnectCreate(int serverFd)
+PurePort *ConnectCreate(int serverFd)
 {
-    PurePort* port = (PurePort*)palloc0(sizeof(PurePort));
+    PurePort *port = (PurePort *)palloc0(sizeof(PurePort));
     port->sock = -1;
 
     if (StreamConnection(serverFd, port) != STATUS_OK) {

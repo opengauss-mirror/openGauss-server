@@ -4,6 +4,7 @@
  *	  Routines to support inter-object dependencies.
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
@@ -93,6 +94,21 @@ struct ObjectAddresses {
 	int			maxrefs; /* current size of palloc'd array(s) */
 };
 
+/* typedef ObjectAddresses appears in dependency.h */
+
+/* threaded list of ObjectAddresses, for recursion detection */
+typedef struct ObjectAddressStack {
+    const ObjectAddress* object;     /* object being visited */
+    int flags;                       /* its current flag bits */
+    struct ObjectAddressStack* next; /* next outer stack level */
+} ObjectAddressStack;
+
+/* for find_expr_references_walker */
+typedef struct {
+    ObjectAddresses* addrs; /* addresses being accumulated */
+    List* rtables;          /* list of rangetables to resolve Vars */
+} find_expr_references_context;
+
 /*
  * There is also a SharedDependencyType enum type that determines the exact
  * semantics of an entry in pg_shdepend.  Just like regular dependency entries,
@@ -131,7 +147,7 @@ typedef enum SharedDependencyType {
 	SHARED_DEPENDENCY_OWNER = 'o',
 	SHARED_DEPENDENCY_ACL = 'a',
 	SHARED_DEPENDENCY_RLSPOLICY = 'r',
-    SHARED_DEPENDENCY_MOT_TABLE = 'm',
+	SHARED_DEPENDENCY_MOT_TABLE = 'm',
 	SHARED_DEPENDENCY_INVALID = 0
 } SharedDependencyType;
 
@@ -177,6 +193,11 @@ typedef enum ObjectClass {
 	OCLASS_PGXC_NODE,        /* pgxc_node */
 	OCLASS_PGXC_GROUP,       /* pgxc_group */
 #endif
+	OCLASS_GLOBAL_SETTING,                  /* global setting */
+    OCLASS_COLUMN_SETTING,                  /* column setting */
+    OCLASS_CL_CACHED_COLUMN,        /* client logic cached column */
+    OCLASS_GLOBAL_SETTING_ARGS,        /* global setting args */
+    OCLASS_COLUMN_SETTING_ARGS,        /* column setting args */
 	OCLASS_DEFACL,           /* pg_default_acl */
 	OCLASS_EXTENSION,        /* pg_extension */
 	OCLASS_DATA_SOURCE,      /* data source */
@@ -191,6 +212,15 @@ typedef enum ObjectClass {
 
 #define PERFORM_DELETION_INTERNAL			0x0001
 #define PERFORM_DELETION_CONCURRENTLY		0x0002
+
+/* ObjectAddressExtra flag bits */
+#define DEPFLAG_ORIGINAL 0x0001  /* an original deletion target */
+#define DEPFLAG_NORMAL 0x0002    /* reached via normal dependency */
+#define DEPFLAG_AUTO 0x0004      /* reached via auto dependency */
+#define DEPFLAG_INTERNAL 0x0008  /* reached via internal dependency */
+#define DEPFLAG_EXTENSION 0x0010 /* reached via extension dependency */
+#define DEPFLAG_REVERSE 0x0020   /* reverse internal/extension link */
+
 
 extern void performDeletion(const ObjectAddress *object,
                             DropBehavior behavior,
@@ -219,7 +249,7 @@ extern ObjectClass getObjectClass(const ObjectAddress *object);
 extern char *getObjectDescription(const ObjectAddress *object);
 extern char *getObjectDescriptionOids(Oid classid, Oid objid);
 
-extern ObjectAddresses *new_object_addresses(void);
+extern ObjectAddresses *new_object_addresses(const int maxRefs = 32);
 
 extern void add_exact_object_address(const ObjectAddress *object,
                                      ObjectAddresses *addrs);
@@ -286,7 +316,9 @@ extern void deleteSharedDependencyRecordsFor(Oid classId,
                                              int32 objectSubId);
 
 extern void recordDependencyOnOwner(Oid classId, Oid objectId, Oid owner, const char *objfile = NULL);
+#ifdef ENABLE_MOT
 extern void recordDependencyOnDatabase(Oid classId, Oid objectId, Oid serverId, Oid owner, const char *objfile = NULL);
+#endif
 
 extern void changeDependencyOnOwner(Oid classId, 
                                     Oid objectId,
@@ -328,5 +360,9 @@ extern void deleteDictionaryTSFile(Oid dictId);
 extern void deleteDatabaseTSFile(Oid databaseId);
 extern void changeDependencyOnObjfile(Oid objectId, Oid refobjId, const char *newObjfile);
 
+#ifdef ENABLE_MULTIPLE_NODES
+namespace Tsdb {
+extern void performTsCudescDeletion(List* cudesc_oids);
+}
+#endif   /* ENABLE_MULTIPLE_NODES */
 #endif   /* DEPENDENCY_H */
-

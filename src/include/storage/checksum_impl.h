@@ -100,7 +100,7 @@
  */
 
 #include "c.h"
-#include "storage/bufpage.h"
+#include "storage/buf/bufpage.h"
 
 /* number of checksums to calculate in parallel */
 #define N_SUMS 32

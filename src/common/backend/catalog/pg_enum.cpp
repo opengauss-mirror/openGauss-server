@@ -26,7 +26,7 @@
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 static void RenumberEnumType(Relation pg_enum, HeapTuple* existing, int nelems);
 static int oid_cmp(const void* p1, const void* p2);
@@ -34,7 +34,7 @@ static int sort_order_cmp(const void* p1, const void* p2);
 
 #define checkEnumLableValue(val)                                                             \
     do {                                                                                     \
-        if (NAMEDATALEN - 1 < strlen(val) || 0 == strlen(val)) {                             \
+        if (NAMEDATALEN < strlen(val) || 0 == strlen(val)) {                                 \
             ereport(ERROR,                                                                   \
                 (errcode(ERRCODE_INVALID_NAME),                                              \
                     errmsg("invalid enum label \"%s\"", val),                                \

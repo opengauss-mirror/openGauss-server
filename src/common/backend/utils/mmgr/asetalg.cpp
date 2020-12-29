@@ -65,15 +65,15 @@ const uint64 BlkMagicNum = 0xDADADADADADADADA;
  * AllocSetMethodDefinition
  *      Define the method functions based on the templated value
  */
-template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
+template <bool is_shared, bool is_tracked>
 void AlignMemoryAllocator::AllocSetMethodDefinition(MemoryContextMethods* method)
 {
-    method->alloc = &AlignMemoryAllocator::AllocSetAlloc<enable_memoryprotect, is_shared, is_tracked>;
-    method->free_p = &AlignMemoryAllocator::AllocSetFree<enable_memoryprotect, is_shared, is_tracked>;
-    method->realloc = &AlignMemoryAllocator::AllocSetRealloc<enable_memoryprotect, is_shared, is_tracked>;
+    method->alloc = &AlignMemoryAllocator::AllocSetAlloc<is_shared, is_tracked>;
+    method->free_p = &AlignMemoryAllocator::AllocSetFree<is_shared, is_tracked>;
+    method->realloc = &AlignMemoryAllocator::AllocSetRealloc<is_shared, is_tracked>;
     method->init = &AlignMemoryAllocator::AllocSetInit;
-    method->reset = &AlignMemoryAllocator::AllocSetReset<enable_memoryprotect, is_shared, is_tracked>;
-    method->delete_context = &AlignMemoryAllocator::AllocSetDelete<enable_memoryprotect, is_shared, is_tracked>;
+    method->reset = &AlignMemoryAllocator::AllocSetReset<is_shared, is_tracked>;
+    method->delete_context = &AlignMemoryAllocator::AllocSetDelete<is_shared, is_tracked>;
     method->get_chunk_space = &AlignMemoryAllocator::AllocSetGetChunkSpace;
     method->is_empty = &AlignMemoryAllocator::AllocSetIsEmpty;
     method->stats = &AlignMemoryAllocator::AllocSetStats;
@@ -90,28 +90,16 @@ void AlignMemoryAllocator::AllocSetMethodDefinition(MemoryContextMethods* method
  */
 void AlignMemoryAllocator::AllocSetContextSetMethods(unsigned long value, MemoryContextMethods* method)
 {
-    bool isProt = (value & IS_PROTECT) ? true : false;
     bool isTracked = (value & IS_TRACKED) ? true : false;
     bool isShared = (value & IS_SHARED) ? true : false;
 
-    if (isProt) {
-        if (isShared)
-            AllocSetMethodDefinition<true, true, false>(method);
-        else {
-            if (isTracked)
-                AllocSetMethodDefinition<true, false, true>(method);
-            else
-                AllocSetMethodDefinition<true, false, false>(method);
-        }
-    } else {
-        if (isShared)
-            AllocSetMethodDefinition<false, true, false>(method);
-        else {
-            if (isTracked)
-                AllocSetMethodDefinition<false, false, true>(method);
-            else
-                AllocSetMethodDefinition<false, false, false>(method);
-        }
+    if (isShared)
+        AllocSetMethodDefinition<true, false>(method);
+    else {
+        if (isTracked)
+            AllocSetMethodDefinition<false, true>(method);
+        else
+            AllocSetMethodDefinition<false, false>(method);
     }
 }
 
@@ -133,9 +121,6 @@ MemoryContext AlignMemoryAllocator::AllocSetContextCreate(MemoryContext parent, 
         func = &GenericFunctions;
     else
         func = &SessionFunctions;
-
-    if (GS_MP_INITED)
-        value |= IS_PROTECT;
 
     /* only track the unshared context after t_thrd.mem_cxt.mem_track_mem_cxt is created */
     if (func == &GenericFunctions && parent && MEMORY_TRACKING_MODE && t_thrd.mem_cxt.mem_track_mem_cxt &&
@@ -189,7 +174,7 @@ MemoryContext AlignMemoryAllocator::AllocSetContextCreate(MemoryContext parent, 
     AllocBlock block;
 
     if (GS_MP_INITED)
-        block = (AllocBlock)(*func->malloc)(blksize);
+        block = (AllocBlock)(*func->malloc)(blksize, true);
     else
         gs_malloc(blksize, block, AllocBlock);
 
@@ -237,7 +222,7 @@ MemoryContext AlignMemoryAllocator::AllocSetContextCreate(MemoryContext parent, 
  *		Returns pointer to allocated memory of given size; memory is added
  *		to the set.
  */
-template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
+template <bool is_shared, bool is_tracked>
 void* AlignMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Size size, const char* file, int line)
 {
     AllocSet set = (AllocSet)context;
@@ -272,8 +257,8 @@ void* AlignMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Siz
     /* allocate the align memory in one block */
     blksize = MAXALIGN(size) + ALLOC_BLOCKHDRSZ;
 
-    if (enable_memoryprotect)
-        ret = (*func->memalign)(&addr, align, blksize);
+    if (GS_MP_INITED)
+        ret = (*func->memalign)(&addr, align, blksize, true);
     else
         ret = posix_memalign(&addr, align, blksize);
 
@@ -312,7 +297,7 @@ void* AlignMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Siz
  * AllocSetFree
  *		Frees allocated memory; memory is removed from the set.
  */
-template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
+template <bool is_shared, bool is_tracked>
 void AlignMemoryAllocator::AllocSetFree(MemoryContext context, void* ptr)
 {
     AllocSet set = (AllocSet)context;
@@ -367,7 +352,7 @@ void AlignMemoryAllocator::AllocSetFree(MemoryContext context, void* ptr)
     if (is_tracked)
         MemoryTrackingFreeInfo(context, tempSize);
 
-    if (enable_memoryprotect)
+    if (GS_MP_INITED)
         (*func->free)(ptr, tempSize);
     else
         gs_free(ptr, tempSize);
@@ -382,7 +367,7 @@ void AlignMemoryAllocator::AllocSetFree(MemoryContext context, void* ptr)
  *		is added to the set.  Memory associated with given pointer is copied
  *		into the new memory, and the old memory is freed.
  */
-template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
+template <bool is_shared, bool is_tracked>
 void* AlignMemoryAllocator::AllocSetRealloc(
     MemoryContext context, void* ptr, Size align, Size size, const char* file, int line)
 {
@@ -441,7 +426,7 @@ void* AlignMemoryAllocator::AllocSetRealloc(
 
     /* allocate new block */
     newPointer =
-        AllocSetAlloc<enable_memoryprotect, is_shared, is_tracked>((MemoryContext)set, align, size, file, line);
+        AllocSetAlloc<is_shared, is_tracked>((MemoryContext)set, align, size, file, line);
 
     /* leave immediately if request was not completed */
     if (newPointer == NULL)
@@ -457,7 +442,7 @@ void* AlignMemoryAllocator::AllocSetRealloc(
     }
 
     /* free old block */
-    AllocSetFree<enable_memoryprotect, is_shared, is_tracked>((MemoryContext)set, ptr);
+    AllocSetFree<is_shared, is_tracked>((MemoryContext)set, ptr);
 
     return newPointer;
 }
@@ -475,7 +460,7 @@ void AlignMemoryAllocator::AllocSetInit(MemoryContext context)
  *		Frees all memory which is allocated in the given set.
  *
  */
-template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
+template <bool is_shared, bool is_tracked>
 void AlignMemoryAllocator::AllocSetReset(MemoryContext context)
 {
     AllocSet set = (AllocSet)context;
@@ -522,7 +507,7 @@ void AlignMemoryAllocator::AllocSetReset(MemoryContext context)
                 MemoryTrackingFreeInfo(context, tempSize);
 
             /* Normal case, release the block */
-            if (enable_memoryprotect)
+            if (GS_MP_INITED)
                 (*func->free)(tmpptr, tempSize);
             else
                 gs_free(tmpptr, tempSize);
@@ -553,7 +538,7 @@ void AlignMemoryAllocator::AllocSetReset(MemoryContext context)
  *		Frees all memory which is allocated in the given set,
  *		in preparation for deletion of the set.
  */
-template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
+template <bool is_shared, bool is_tracked>
 void AlignMemoryAllocator::AllocSetDelete(MemoryContext context)
 {
     AllocSet set = (AllocSet)context;
@@ -599,7 +584,7 @@ void AlignMemoryAllocator::AllocSetDelete(MemoryContext context)
         if (is_tracked)
             MemoryTrackingFreeInfo(context, tempSize);
 
-        if (enable_memoryprotect)
+        if (GS_MP_INITED)
             (*func->free)(tmpptr, tempSize);
         else
             gs_free(tmpptr, tempSize);

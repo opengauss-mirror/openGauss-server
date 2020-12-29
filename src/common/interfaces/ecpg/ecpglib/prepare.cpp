@@ -108,7 +108,6 @@ static bool prepare_common(int lineno, struct connection* con, const char* name,
         ecpg_free(thisPtr);
         return false;
     }
-
     /* create statement */
     stmt->lineno = lineno;
     stmt->connection = con;

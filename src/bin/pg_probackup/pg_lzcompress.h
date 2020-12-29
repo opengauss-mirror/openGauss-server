@@ -78,6 +78,10 @@ typedef struct PGLZ_Strategy
 extern const PGLZ_Strategy *const PGLZ_strategy_default;
 extern const PGLZ_Strategy *const PGLZ_strategy_always;
 
+static int32 compress(const char *source, int32 slen, char *dest,
+                      const PGLZ_Strategy *strategy,
+                      int32 good_match, int32 good_drop,
+                      int32 result_max, int mask);
 
 /* ----------
  * Global function declarations

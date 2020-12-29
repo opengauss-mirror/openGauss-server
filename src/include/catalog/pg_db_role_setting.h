@@ -48,10 +48,10 @@ typedef FormData_pg_db_role_setting *Form_pg_db_role_setting;
  *        compiler constants for pg_db_role_setting
  * ----------------
  */
-#define Natts_pg_db_role_setting                3
-#define Anum_pg_db_role_setting_setdatabase        1
-#define Anum_pg_db_role_setting_setrole            2
-#define Anum_pg_db_role_setting_setconfig        3
+#define Natts_pg_db_role_setting				3
+#define Anum_pg_db_role_setting_setdatabase		1
+#define Anum_pg_db_role_setting_setrole			2
+#define Anum_pg_db_role_setting_setconfig		3
 
 /* ----------------
  *        initial contents of pg_db_role_setting are NOTHING

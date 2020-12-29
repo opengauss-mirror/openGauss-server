@@ -30,7 +30,7 @@ CREATE TABLE import_src0
   c_varbit varbit(10),
   c_oid oid
 )
-   
+distribute by hash(c_hashid)  
 ;
 
 CREATE TABLE import_src1
@@ -66,13 +66,13 @@ CREATE TABLE import_src1
   c_oid oid
 )
 WITH (ORIENTATION = COLUMN)
- 
+distribute by hash(c_hashid)
 ;
 
 CREATE TABLESPACE ts location '@testtablespace@/tablespace_limit';
 
-COPY import_src0 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_alter_change_plus_update.dat';
-COPY import_src1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_alter_change_plus_update.dat';
+COPY import_src0 FROM '@abs_srcdir@/data/cstore_alter_change_plus_update.dat';
+COPY import_src1 FROM '@abs_srcdir@/data/cstore_alter_change_plus_update.dat';
 
 CREATE TABLE import_0
 (
@@ -107,7 +107,7 @@ CREATE TABLE import_0
   c_oid oid
 )
 TABLESPACE ts
- 
+distribute by hash(c_hashid)
 ;
 
 CREATE TABLE import_1
@@ -144,7 +144,7 @@ CREATE TABLE import_1
 )
 WITH (ORIENTATION = COLUMN)
 TABLESPACE ts
- 
+distribute by hash(c_hashid)
 ;
 
 ALTER TABLESPACE ts RESIZE MAXSIZE '5M';

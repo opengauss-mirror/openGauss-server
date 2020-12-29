@@ -83,14 +83,15 @@
 #include "postmaster/postmaster.h"
 #include "replication/slot.h"
 #include "storage/ipc.h"
-#include "storage/lwlock_be.h"
+#include "storage/lock/lwlock_be.h"
 #include "storage/predicate.h"
 #include "storage/proc.h"
-#include "storage/s_lock.h"
+#include "storage/lock/s_lock.h"
 #include "storage/spin.h"
 #include "storage/cucache_mgr.h"
 #include "utils/atomic.h"
 #include "instruments/instr_event.h"
+#include "instruments/instr_statement.h"
 #include "tsan_annotation.h"
 
 #define LW_FLAG_HAS_WAITERS ((uint32)1 << 30)
@@ -102,8 +103,8 @@
 
 #define LW_LOCK_MASK ((uint32)((1 << 25) - 1))
 #ifdef LOCK_DEBUG
-/* Must be greater than MAX_BACKENDS - which is 2^23-1, so we're fine. */
-#define LW_SHARED_MASK ((uint32)(1 << 23))
+    /* Must be greater than MAX_BACKENDS - which is 2^23-1, so we're fine. */
+    #define LW_SHARED_MASK ((uint32)(1 << 23))
 #endif
 
 #define LWLOCK_TRANCHE_SIZE 128
@@ -118,7 +119,7 @@ int LWLockTranchesAllocated = 0;
  *
  *
  * The array BuiltinTrancheNames represents LWLock tranche' names
- * for BuiltinTrancheIds in src/include/storage/lwlock.h.
+ * for BuiltinTrancheIds in src/include/storage/lock/lwlock.h.
  * The order should be consistent with the order of BuiltinTrancheIds.
  */
 static const char *BuiltinTrancheNames[] = {
@@ -137,6 +138,9 @@ static const char *BuiltinTrancheNames[] = {
     "InstrUserLockId",
     "GPCMappingLock",
     "GPCPrepareMappingLock",
+    "ASPMappingLock",
+    "GlobalSeqLock",
+    "NormalizedSqlLock",
     "BufferIOLock",
     "BufferContentLock",
     "DataCacheLock",
@@ -150,19 +154,17 @@ static const char *BuiltinTrancheNames[] = {
     "MultiXactMember Ctl",
     "OldSerXid SLRU Ctl",
     "WALInsertLock",
-    "WALFlushWaitLock",
-    "WALBufferInitLock",
-    "WALInitSegLock",
     "DoubleWriteLock",
+    "DWSingleFlushPosLock",
+    "DWSingleFlushWriteLock",
     "LWTRANCHE_ACCOUNT_TABLE",
     "GeneralExtendedLock",
-    /* LWTRANCHE_GTT_CTL */
-    "GlobalTempTableControl",
+    "MPFLLOCK",
+    "GlobalTempTableControl", /* LWTRANCHE_GTT_CTL */
     "PLdebugger",
-    "SharedTupleStore",
-    "parallel_append",
-    "ParallelHashJoinLock",
-    "TidBitMapLock"
+    "NGroupMappingLock",
+    "MatviewSeqnoLock",
+    "IOStatLock"
 };
 
 static void RegisterLWLockTranches(void);
@@ -223,7 +225,7 @@ inline static void LOG_LWDEBUG(const char *where, LWLock *lock, const char *msg)
 
 static void init_lwlock_stats(void);
 static void print_lwlock_stats(int code, Datum arg);
-static lwlock_stats *get_lwlock_stats_entry(LWLock *lockid);
+static lwlock_stats* get_lwlock_stats_entry(LWLock* lockid);
 
 static void init_lwlock_stats(void)
 {
@@ -269,10 +271,15 @@ static void print_lwlock_stats(int code, Datum arg)
     /* Grab an LWLock to keep different backends from mixing reports */
     LWLockAcquire(GetMainLWLockByIndex(0), LW_EXCLUSIVE);
 
-    while ((lwstats = (lwlock_stats *)hash_seq_search(&scan)) != NULL) {
-        fprintf(stderr, "PID %d lwlock %s %p: shacq %u exacq %u blk %u spindelay %u dequeue self %u\n",
-                t_thrd.proc_cxt.MyProcPid, LWLockTrancheArray[lwstats->key.tranche]->name, lwstats->key.instance,
-                lwstats->sh_acquire_count, lwstats->ex_acquire_count, lwstats->block_count, lwstats->spin_delay_count,
+    while ((lwstats = (lwlock_stats*)hash_seq_search(&scan)) != NULL) {
+        fprintf(stderr,
+                "PID %d lwlock %s: shacq %u exacq %u blk %u spindelay %u dequeue self %u\n",
+                t_thrd.proc_cxt.MyProcPid,
+                LWLockTrancheArray[lwstats->key.tranche]->name,
+                lwstats->sh_acquire_count,
+                lwstats->ex_acquire_count,
+                lwstats->block_count,
+                lwstats->spin_delay_count,
                 lwstats->dequeue_self_count);
     }
 
@@ -309,6 +316,7 @@ static lwlock_stats *get_lwlock_stats_entry(LWLock *lock)
 }
 #endif /* LWLOCK_STATS */
 
+const int NUM_DW_SINGLE_FLUSH_LOCK = 161; /* one page correspond to one lock */
 /*
  * Compute number of LWLocks to allocate.
  */
@@ -359,13 +367,11 @@ int NumLWLocks(void)
     /* slot.c needs one for each slot */
     numLocks += g_instance.attr.attr_storage.max_replication_slots;
 
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
-        numLocks += NUM_BUFFER_FREE_LIST;
-    } else {
-        numLocks += 1;
-    }
-
     /* double write.c needs flush lock */
+    numLocks += 1;                              /* batch flush lock */
+    numLocks += NUM_DW_SINGLE_FLUSH_LOCK + 1;  /* single flush write lock and the get pos lock */
+
+    /* for materialized view */
     numLocks += 1;
 
     /*
@@ -523,6 +529,30 @@ static void InitializeLWLocks(int numLocks)
         LWLockInitialize(&lock->lock, LWTRANCHE_GPC_PREPARE_MAPPING);
     }
 
+    for (id = 0; id < NUM_UNIQUE_SQL_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_ASP_MAPPING);
+    }
+
+    for (id = 0; id < NUM_GS_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_GlobalSeq);
+    }
+
+    for (id = 0; id < NUM_NORMALIZED_SQL_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_NORMALIZED_SQL);
+    }
+
+    for (id = 0; id < NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_MPFL);
+    }
+
+    for (id = 0; id < NUM_NGROUP_INFO_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_NGROUP_MAPPING);
+    }
+
+    for (id = 0; id < NUM_IO_STAT_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_IO_STAT);
+    }
+
     Assert((lock - t_thrd.shemem_ptr_cxt.mainLWLockArray) == NumFixedLWLocks);
 
     for (id = NumFixedLWLocks; id < numLocks; id++, lock++) {
@@ -556,12 +586,12 @@ const char *GetLWLockIdentifier(uint32 classId, uint16 eventId)
 void DumpLWLockInfo()
 {
     static const int NUM_COUNTERS_LWLOCKARRAY = 2;
-    int *LWLockCounter =
-        (int *)((char *)t_thrd.shemem_ptr_cxt.mainLWLockArray - NUM_COUNTERS_LWLOCKARRAY * sizeof(int));
+    int* LWLockCounter = (int*) ((char*)t_thrd.shemem_ptr_cxt.mainLWLockArray - NUM_COUNTERS_LWLOCKARRAY * sizeof(int));
     SpinLockAcquire(t_thrd.shemem_ptr_cxt.ShmemLock);
-    ereport(INFO, (errmsg("dumpLWLockInfo LWLockCounter: %d, %d.", LWLockCounter[0], LWLockCounter[1])));
+    ereport(INFO,
+            (errmsg("dumpLWLockInfo LWLockCounter: %d, %d.", LWLockCounter[0], LWLockCounter[1])));
     for (int i = 0; i < LWLockCounter[0]; i++) {
-        LWLock *lock = &t_thrd.shemem_ptr_cxt.mainLWLockArray[i].lock;
+        LWLock* lock = &t_thrd.shemem_ptr_cxt.mainLWLockArray[i].lock;
         ereport(INFO,
                 (errmsg("dumpLWLockInfo LWLock: %d, %d, %s.", i, lock->tranche, LWLockTrancheArray[lock->tranche])));
     }
@@ -611,8 +641,8 @@ static void RegisterLWLockTranches(void)
 
     if (LWLockTrancheArray == NULL) {
         LWLockTranchesAllocated = LWLOCK_TRANCHE_SIZE;
-        LWLockTrancheArray = (const char **)MemoryContextAllocZero(t_thrd.top_mem_cxt,
-                                                                   LWLockTranchesAllocated * sizeof(char *));
+        LWLockTrancheArray = (const char **)MemoryContextAllocZero(
+            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), LWLockTranchesAllocated * sizeof(char *));
     }
 
     /*
@@ -690,6 +720,7 @@ static void LWThreadSuicide(PGPROC *proc, int extraWaits, LWLock *lock, LWLockMo
     while (extraWaits-- > 0) {
         PGSemaphoreUnlock(&proc->sem);
     }
+    statement_full_info_record(LWLOCK_WAIT_END);
     LWLockReportWaitFailed(lock);
     ereport(FATAL, (errmsg("force thread %lu to exit because of lwlock deadlock", proc->pid),
                     errdetail("Lock Info: (%s), mode %d", T_NAME(lock), mode)));
@@ -841,9 +872,7 @@ static void LWLockWaitListUnlock(LWLock *lock)
     TsAnnotateRWLockReleased(&lock->listlock, 1);
 
     old_state = pg_atomic_fetch_and_u32(&lock->state, ~LW_FLAG_LOCKED);
-    if (unlikely((old_state & LW_FLAG_LOCKED) == 0)) {
-        ereport(PANIC, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("lock %s is not held", T_NAME(lock))));
-    }
+    Assert(old_state & LW_FLAG_LOCKED);
 }
 
 /*
@@ -1207,7 +1236,6 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
          * yet/anymore.
          */
         mustwait = LWLockAttemptLock(lock, mode);
-
         if (!mustwait) {
             /* XXX: remove before commit? */
             LOG_LWDEBUG("LWLockAcquire", lock, "immediately acquired lock");
@@ -1228,7 +1256,6 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
         LWLockQueueSelf(lock, mode);
 
         mustwait = LWLockAttemptLock(lock, mode);
-
         /* ok, grabbed the lock the second time round, need to undo queueing */
         if (!mustwait) {
             LOG_LWDEBUG("LWLockAcquire", lock, "acquired, undoing queue");
@@ -1258,7 +1285,7 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
 #ifdef LWLOCK_STATS
         lwstats->block_count++;
 #endif
-
+        statement_full_info_record(LWLOCK_WAIT_START, mode, NULL, lock->tranche);
         LWLockReportWaitStart(lock);
         TRACE_POSTGRESQL_LWLOCK_WAIT_START(T_NAME(lock), mode);
         for (;;) {
@@ -1285,6 +1312,7 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
             Assert(nwaiters < MAX_BACKENDS);
         }
 #endif
+        statement_full_info_record(LWLOCK_WAIT_END);
 
         TRACE_POSTGRESQL_LWLOCK_WAIT_DONE(T_NAME(lock), mode);
         LWLockReportWaitEnd();
@@ -1342,7 +1370,6 @@ bool LWLockConditionalAcquire(LWLock *lock, LWLockMode mode)
 
     /* Check for the lock */
     mustwait = LWLockAttemptLock(lock, mode);
-
     if (mustwait) {
         /* Failed to get lock, so release interrupt holdoff */
         RESUME_INTERRUPTS();
@@ -1412,7 +1439,7 @@ bool LWLockAcquireOrWait(LWLock *lock, LWLockMode mode)
 #ifdef LWLOCK_STATS
             lwstats->block_count++;
 #endif
-
+            statement_full_info_record(LWLOCK_WAIT_START, mode, NULL, lock->tranche);
             LWLockReportWaitStart(lock);
             TRACE_POSTGRESQL_LWLOCK_WAIT_START(T_NAME(lock), mode);
 
@@ -1439,6 +1466,7 @@ bool LWLockAcquireOrWait(LWLock *lock, LWLockMode mode)
                 Assert(nwaiters < MAX_BACKENDS);
             }
 #endif
+            statement_full_info_record(LWLOCK_WAIT_END);
             TRACE_POSTGRESQL_LWLOCK_WAIT_DONE(T_NAME(lock), mode);
             LWLockReportWaitEnd();
 
@@ -1547,7 +1575,6 @@ bool LWLockWaitForVar(LWLock *lock, uint64 *valptr, uint64 oldval, uint64 *newva
          * and variables state.
          */
         mustwait = LWLockConflictsWithVar(lock, valptr, oldval, newval, &result);
-
         /* Ok, no conflict after we queued ourselves. Undo queueing. */
         if (!mustwait) {
             LOG_LWDEBUG("LWLockWaitForVar", lock, "free, undoing queue");
@@ -1663,9 +1690,8 @@ void LWLockUpdateVar(LWLock *lock, uint64 *valptr, uint64 val)
     LWLockWaitListUnlock(lock);
 
     /* Awaken any waiters I removed from the queue. */
-    dlist_foreach_modify(iter, &wakeup)
-    {
-        PGPROC *waiter = dlist_container(PGPROC, lwWaitLink, iter.cur);
+    dlist_foreach_modify(iter, &wakeup) {
+        PGPROC* waiter = dlist_container(PGPROC, lwWaitLink, iter.cur);
 
         dlist_delete(&waiter->lwWaitLink);
         /* check comment in LWLockWakeup() about this barrier */
@@ -1722,10 +1748,9 @@ void LWLockRelease(LWLock *lock)
     Assert(!(oldstate & LW_VAL_EXCLUSIVE));
 
     /* We're still waiting for backends to get scheduled, don't wake them up again. */
-    check_waiters = ((oldstate & (LW_FLAG_HAS_WAITERS | LW_FLAG_RELEASE_OK)) ==
-                     (LW_FLAG_HAS_WAITERS | LW_FLAG_RELEASE_OK)) &&
-                    ((oldstate & LW_LOCK_MASK) == 0);
-
+    check_waiters =
+        ((oldstate & (LW_FLAG_HAS_WAITERS | LW_FLAG_RELEASE_OK)) == (LW_FLAG_HAS_WAITERS | LW_FLAG_RELEASE_OK))
+        && ((oldstate & LW_LOCK_MASK) == 0);
     /* As waking up waiters requires the spinlock to be acquired, only do so
      * if necessary. */
     if (check_waiters) {
@@ -1910,11 +1935,11 @@ void *get_held_lwlocks(void)
 }
 
 #define COPY_LWLOCK_HANDLE(src, dst) do { \
-    (dst)->lock_addr.lock = (src)->lock; \
-    (dst)->lock_sx = (src)->mode;        \
-    ++(src);                             \
-    ++(dst);                             \
-} while (0)
+        (dst)->lock_addr.lock = (src)->lock; \
+        (dst)->lock_sx = (src)->mode;        \
+        ++(src);                             \
+        ++(dst);                             \
+    } while (0)
 
 /* copy lwlocks from heldlocks to dst whose size is at least num_heldlocks */
 void copy_held_lwlocks(void *heldlocks, lwlock_id_mode *dst, int num_heldlocks)
@@ -1981,4 +2006,19 @@ void print_leak_warning_at_commit()
         ereport(WARNING,
                 (errmsg("LWLock %s is held when commit transaction", T_NAME(t_thrd.storage_cxt.held_lwlocks[i].lock))));
     }
+}
+
+LWLockMode GetHeldLWLockMode(LWLock *lock)
+{
+    for (int i = 0; i < t_thrd.storage_cxt.num_held_lwlocks; i++) {
+        if (t_thrd.storage_cxt.held_lwlocks[i].lock == lock) {
+            return t_thrd.storage_cxt.held_lwlocks[i].mode;
+        }
+    }
+
+    ereport(ERROR,
+            (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+             errmsg("lock %s is not held", T_NAME(lock))));
+
+    return (LWLockMode)0; /* keep compiler silence */
 }

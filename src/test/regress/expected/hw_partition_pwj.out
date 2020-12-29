@@ -1,0 +1,3243 @@
+--
+---- TEST FOR PWJ
+--
+set enable_partitionwise = on;
+-- PREPARE
+-- CREATE TABLE partition_pwj_test_t1
+CREATE TABLE partition_pwj_test_t1 (A INT4, B TEXT)
+PARTITION BY RANGE (A)
+(
+	PARTITION p1_partition_pwj_test_t1 VALUES LESS THAN (10),
+	PARTITION p2_partition_pwj_test_t1 VALUES LESS THAN (20),
+	PARTITION p3_partition_pwj_test_t1 VALUES LESS THAN (100),
+	PARTITION p4_partition_pwj_test_t1 VALUES LESS THAN (110)
+);
+-- CREATE TABLE partition_pwj_test_t2
+CREATE TABLE partition_pwj_test_t2 (A INT4, B TEXT)
+PARTITION BY RANGE (A)
+(
+	PARTITION p1_partition_pwj_test_t2 VALUES LESS THAN (10),
+	PARTITION p2_partition_pwj_test_t2 VALUES LESS THAN (20),
+	PARTITION p3_partition_pwj_test_t2 VALUES LESS THAN (100),
+	PARTITION p4_partition_pwj_test_t2 VALUES LESS THAN (110)
+);
+-- CREATE TABLE partition_pwj_test_t3
+CREATE TABLE partition_pwj_test_t3 (A INT4, B TEXT)
+PARTITION BY RANGE (A)
+(
+	PARTITION p1_partition_pwj_test_t3 VALUES LESS THAN (10),
+	PARTITION p2_partition_pwj_test_t3 VALUES LESS THAN (20),
+	PARTITION p3_partition_pwj_test_t3 VALUES LESS THAN (100),
+	PARTITION p4_partition_pwj_test_t3 VALUES LESS THAN (110)
+);
+-- CREATE TABLE partition_pwj_test_t4
+CREATE TABLE partition_pwj_test_t4 (A INT4, B TEXT);
+-- CREATE INDEX ON partition_pwj_test_t1
+CREATE INDEX INDEX_ON_TEST_T1 ON partition_pwj_test_t1 (A) LOCAL;
+-- CREATE INDEX ON partition_pwj_test_t2
+CREATE INDEX INDEX_ON_TEST_T2 ON partition_pwj_test_t2 (A) LOCAL;
+-- CREATE INDEX ON partition_pwj_test_t3
+CREATE INDEX INDEX_ON_TEST_T3 ON partition_pwj_test_t3 (A) LOCAL;
+-- CREATE INDEX ON partition_pwj_test_t4
+CREATE INDEX INDEX_ON_TEST_T4 ON partition_pwj_test_t4 (A);
+-- CREATE INDEX ON partition_pwj_test_t1
+CREATE INDEX INDEX_ON_TEST_T1_1 ON partition_pwj_test_t1 (B) LOCAL;
+-- CREATE INDEX ON partition_pwj_test_t2
+CREATE INDEX INDEX_ON_TEST_T2_1 ON partition_pwj_test_t2 (B) LOCAL;
+-- CREATE INDEX ON partition_pwj_test_t3
+CREATE INDEX INDEX_ON_TEST_T3_1 ON partition_pwj_test_t3 (B) LOCAL;
+-- CREATE INDEX ON partition_pwj_test_t4
+CREATE INDEX INDEX_ON_TEST_T4_1 ON partition_pwj_test_t4 (B);
+-- INSERT RECORD
+INSERT INTO partition_pwj_test_t1 VALUES (1, 'TEST_T1_1'), (2, 'TEST_T1_2'), (11, 'TEST_T1_11'), (12, 'TEST_T1_12'), (91, 'TEST_T1_91'), (92, 'TEST_T1_92'), (101, 'TEST_T1_101'), (102, 'TEST_T1_102');
+INSERT INTO partition_pwj_test_t2 VALUES (1, 'TEST_T2_1'), (2, 'TEST_T2_2'), (11, 'TEST_T2_11'), (12, 'TEST_T2_12'), (91, 'TEST_T2_91'), (92, 'TEST_T2_92'), (101, 'TEST_T2_101'), (102, 'TEST_T3_102');
+INSERT INTO partition_pwj_test_t3 VALUES (1, 'TEST_T3_1'), (2, 'TEST_T3_2'), (11, 'TEST_T3_11'), (12, 'TEST_T3_12'), (91, 'TEST_T3_91'), (92, 'TEST_T3_92'), (101, 'TEST_T3_101'), (102, 'TEST_T3_102');
+INSERT INTO partition_pwj_test_t4 VALUES (1, 'TEST_T4_1'), (2, 'TEST_T4_2'), (11, 'TEST_T4_11'), (12, 'TEST_T4_12'), (91, 'TEST_T4_91'), (92, 'TEST_T4_92'), (101, 'TEST_T4_101'), (102, 'TEST_T4_102');
+SELECT REL.RELNAME, PART.RELNAME, PART.RANGENUM, PART.INTERVALNUM, PART.PARTKEY, PART.PARTKEY, PART.BOUNDARIES
+FROM PG_PARTITION PART INNER JOIN PG_CLASS REL ON (REL.OID = PART.PARENTID)
+WHERE REL.RELNAME IN('partition_pwj_test_t1', 'partition_pwj_test_t2', 'partition_pwj_test_t3', 'partition_pwj_test_t4') ORDER BY REL.RELNAME, PART.RELNAME;
+        relname        |         relname          | rangenum | intervalnum | partkey | partkey | boundaries 
+-----------------------+--------------------------+----------+-------------+---------+---------+------------
+ partition_pwj_test_t1 | p1_partition_pwj_test_t1 |        0 |           0 |         |         | {10}
+ partition_pwj_test_t1 | p2_partition_pwj_test_t1 |        0 |           0 |         |         | {20}
+ partition_pwj_test_t1 | p3_partition_pwj_test_t1 |        0 |           0 |         |         | {100}
+ partition_pwj_test_t1 | p4_partition_pwj_test_t1 |        0 |           0 |         |         | {110}
+ partition_pwj_test_t1 | partition_pwj_test_t1    |        0 |           0 | 1       | 1       | 
+ partition_pwj_test_t2 | p1_partition_pwj_test_t2 |        0 |           0 |         |         | {10}
+ partition_pwj_test_t2 | p2_partition_pwj_test_t2 |        0 |           0 |         |         | {20}
+ partition_pwj_test_t2 | p3_partition_pwj_test_t2 |        0 |           0 |         |         | {100}
+ partition_pwj_test_t2 | p4_partition_pwj_test_t2 |        0 |           0 |         |         | {110}
+ partition_pwj_test_t2 | partition_pwj_test_t2    |        0 |           0 | 1       | 1       | 
+ partition_pwj_test_t3 | p1_partition_pwj_test_t3 |        0 |           0 |         |         | {10}
+ partition_pwj_test_t3 | p2_partition_pwj_test_t3 |        0 |           0 |         |         | {20}
+ partition_pwj_test_t3 | p3_partition_pwj_test_t3 |        0 |           0 |         |         | {100}
+ partition_pwj_test_t3 | p4_partition_pwj_test_t3 |        0 |           0 |         |         | {110}
+ partition_pwj_test_t3 | partition_pwj_test_t3    |        0 |           0 | 1       | 1       | 
+(15 rows)
+
+SELECT * FROM partition_pwj_test_t1 order by 1, 2;
+  a  |      b      
+-----+-------------
+   1 | TEST_T1_1
+   2 | TEST_T1_2
+  11 | TEST_T1_11
+  12 | TEST_T1_12
+  91 | TEST_T1_91
+  92 | TEST_T1_92
+ 101 | TEST_T1_101
+ 102 | TEST_T1_102
+(8 rows)
+
+SELECT * FROM partition_pwj_test_t2 order by 1, 2;
+  a  |      b      
+-----+-------------
+   1 | TEST_T2_1
+   2 | TEST_T2_2
+  11 | TEST_T2_11
+  12 | TEST_T2_12
+  91 | TEST_T2_91
+  92 | TEST_T2_92
+ 101 | TEST_T2_101
+ 102 | TEST_T3_102
+(8 rows)
+
+SELECT * FROM partition_pwj_test_t3 order by 1, 2;
+  a  |      b      
+-----+-------------
+   1 | TEST_T3_1
+   2 | TEST_T3_2
+  11 | TEST_T3_11
+  12 | TEST_T3_12
+  91 | TEST_T3_91
+  92 | TEST_T3_92
+ 101 | TEST_T3_101
+ 102 | TEST_T3_102
+(8 rows)
+
+SELECT * FROM partition_pwj_test_t4 order by 1, 2;
+  a  |      b      
+-----+-------------
+   1 | TEST_T4_1
+   2 | TEST_T4_2
+  11 | TEST_T4_11
+  12 | TEST_T4_12
+  91 | TEST_T4_91
+  92 | TEST_T4_92
+ 101 | TEST_T4_101
+ 102 | TEST_T4_102
+(8 rows)
+
+--
+---- MERGEJOIN + SEQSCAN
+--
+SET ENABLE_PARTITIONWISE = ON;
+SET ENABLE_SEQSCAN = ON;
+SET ENABLE_INDEXSCAN = OFF;
+SET ENABLE_INDEXONLYSCAN = OFF;
+SET ENABLE_BITMAPSCAN = OFF;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = ON;
+SET ENABLE_NESTLOOP = OFF;
+SET ENABLE_HASHJOIN = OFF;
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Sort
+               Sort Key: partition_pwj_test_t1.a
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t1
+                           Selected Partitions:  1..4
+         ->  Sort
+               Sort Key: partition_pwj_test_t2.a
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(15 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE SORT + OPEN MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = ON;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- OPEN SORT + CLOSE MATERIAL
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Sort
+               Sort Key: partition_pwj_test_t1.a
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t1
+                           Selected Partitions:  1..4
+         ->  Sort
+               Sort Key: partition_pwj_test_t2.a
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(15 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE SORT + CLOSE MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t2
+                     Selected Partitions:  1..4
+(11 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE PARTITIONWISEJOIN
+SET ENABLE_PARTITIONWISE = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t2
+                     Selected Partitions:  1..4
+(11 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+--
+---- MERGEJOIN + INDEXSCAN
+--
+SET ENABLE_PARTITIONWISE = ON;
+SET ENABLE_SEQSCAN = OFF;
+SET ENABLE_INDEXSCAN = ON;
+SET ENABLE_INDEXONLYSCAN = OFF;
+SET ENABLE_BITMAPSCAN = OFF;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = ON;
+SET ENABLE_NESTLOOP = OFF;
+SET ENABLE_HASHJOIN = OFF;
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+-- OPEN SORT + OPEN MATERIAL
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE SORT + OPEN MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = ON;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- OPEN SORT + CLOSE MATERIAL
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE SORT + CLOSE MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE PARTITIONWISEJOIN
+SET ENABLE_PARTITIONWISE = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+--
+---- MERGEJOIN + INDEXONLYSCAN
+--
+SET ENABLE_PARTITIONWISE = ON;
+SET ENABLE_SEQSCAN = OFF;
+SET ENABLE_INDEXSCAN = OFF;
+SET ENABLE_INDEXONLYSCAN = ON;
+SET ENABLE_BITMAPSCAN = OFF;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = ON;
+SET ENABLE_NESTLOOP = OFF;
+SET ENABLE_HASHJOIN = OFF;
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+-- OPEN SORT + OPEN MATERIAL
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE SORT + OPEN MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = ON;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- OPEN SORT + CLOSE MATERIAL
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE SORT + CLOSE MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE PARTITIONWISEJOIN
+SET ENABLE_PARTITIONWISE = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+--
+---- MERGEJOIN + BITMAPSCAN
+--
+SET ENABLE_PARTITIONWISE = ON;
+SET ENABLE_SEQSCAN = OFF;
+SET ENABLE_INDEXSCAN = OFF;
+SET ENABLE_INDEXONLYSCAN = OFF;
+SET ENABLE_BITMAPSCAN = ON;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = ON;
+SET ENABLE_NESTLOOP = OFF;
+SET ENABLE_HASHJOIN = OFF;
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+-- OPEN SORT + OPEN MATERIAL
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Sort
+               Sort Key: partition_pwj_test_t1.a
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                           Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                                 Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Sort
+               Sort Key: partition_pwj_test_t2.a
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                           Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                                 Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+(21 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE SORT + OPEN MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = ON;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                     Recheck Cond: ((a = partition_pwj_test_t1.a) AND (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[])))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                           Index Cond: ((a = partition_pwj_test_t1.a) AND (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[])))
+(16 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- OPEN SORT + CLOSE MATERIAL
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Merge Join
+         Merge Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Sort
+               Sort Key: partition_pwj_test_t1.a
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                           Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                                 Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Sort
+               Sort Key: partition_pwj_test_t2.a
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                           Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                                 Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+(21 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE SORT + CLOSE MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                     Recheck Cond: ((a = partition_pwj_test_t1.a) AND (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[])))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                           Index Cond: ((a = partition_pwj_test_t1.a) AND (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[])))
+(16 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE PARTITIONWISEJOIN
+SET ENABLE_PARTITIONWISE = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                     Recheck Cond: (a = partition_pwj_test_t1.a)
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                           Index Cond: (a = partition_pwj_test_t1.a)
+(13 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+--
+---- NESTLOOP + SEQSCAN
+--
+SET ENABLE_PARTITIONWISE = TRUE;
+SET ENABLE_SEQSCAN = ON;
+SET ENABLE_INDEXSCAN = OFF;
+SET ENABLE_INDEXONLYSCAN = OFF;
+SET ENABLE_BITMAPSCAN = OFF;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = OFF;
+SET ENABLE_NESTLOOP = ON;
+SET ENABLE_HASHJOIN = OFF;
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE SORT + OPEN MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = ON;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- OPEN SORT + CLOSE MATERIAL
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t2
+                     Selected Partitions:  1..4
+(11 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE SORT + CLOSE MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t2
+                     Selected Partitions:  1..4
+(11 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE PARTITIONWISEJOIN
+SET ENABLE_PARTITIONWISE = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t2
+                     Selected Partitions:  1..4
+(11 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+--
+---- NESTLOOP + INDEX
+--
+SET ENABLE_PARTITIONWISE = TRUE;
+SET ENABLE_SEQSCAN = OFF;
+SET ENABLE_INDEXSCAN = ON;
+SET ENABLE_INDEXONLYSCAN = OFF;
+SET ENABLE_BITMAPSCAN = OFF;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = OFF;
+SET ENABLE_NESTLOOP = ON;
+SET ENABLE_HASHJOIN = OFF;
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE SORT + OPEN MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = ON;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- OPEN SORT + CLOSE MATERIAL
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                     Index Cond: (a = partition_pwj_test_t1.a)
+                     Selected Partitions:  1..4
+(11 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE SORT + CLOSE MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                     Index Cond: (a = partition_pwj_test_t1.a)
+                     Selected Partitions:  1..4
+(11 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE PARTITIONWISEJOIN
+SET ENABLE_PARTITIONWISE = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                     Index Cond: (a = partition_pwj_test_t1.a)
+                     Selected Partitions:  1..4
+(11 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+--
+---- NESTLOOP + INDEXONLYSCAN
+--
+SET ENABLE_PARTITIONWISE = TRUE;
+SET ENABLE_SEQSCAN = OFF;
+SET ENABLE_INDEXSCAN = OFF;
+SET ENABLE_INDEXONLYSCAN = ON;
+SET ENABLE_BITMAPSCAN = OFF;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = OFF;
+SET ENABLE_NESTLOOP = ON;
+SET ENABLE_HASHJOIN = OFF;
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE SORT + OPEN MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = ON;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- OPEN SORT + CLOSE MATERIAL
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                     Index Cond: (a = partition_pwj_test_t1.a)
+                     Selected Partitions:  1..4
+(11 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE SORT + CLOSE MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                     Index Cond: (a = partition_pwj_test_t1.a)
+                     Selected Partitions:  1..4
+(11 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE PARTITIONWISEJOIN
+SET ENABLE_PARTITIONWISE = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                     Index Cond: (a = partition_pwj_test_t1.a)
+                     Selected Partitions:  1..4
+(11 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+--
+---- NESTLOOP + BITMAPSCAN
+--
+SET ENABLE_PARTITIONWISE = TRUE;
+SET ENABLE_SEQSCAN = OFF;
+SET ENABLE_INDEXSCAN = OFF;
+SET ENABLE_INDEXONLYSCAN = OFF;
+SET ENABLE_BITMAPSCAN = ON;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = OFF;
+SET ENABLE_NESTLOOP = ON;
+SET ENABLE_HASHJOIN = OFF;
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                           Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                                 Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+(18 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE SORT + OPEN MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = ON;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                           Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                                 Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+(18 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- OPEN SORT + CLOSE MATERIAL
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                     Recheck Cond: ((a = partition_pwj_test_t1.a) AND (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[])))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                           Index Cond: ((a = partition_pwj_test_t1.a) AND (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[])))
+(16 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE SORT + CLOSE MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                     Recheck Cond: ((a = partition_pwj_test_t1.a) AND (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[])))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                           Index Cond: ((a = partition_pwj_test_t1.a) AND (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[])))
+(16 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE PARTITIONWISEJOIN
+SET ENABLE_PARTITIONWISE = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                     Recheck Cond: ((a = partition_pwj_test_t1.a) AND (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[])))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                           Index Cond: ((a = partition_pwj_test_t1.a) AND (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[])))
+(16 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+--
+---- HASHJOIN + SEQSCAN
+--
+SET ENABLE_PARTITIONWISE = TRUE;
+SET ENABLE_SEQSCAN = ON;
+SET ENABLE_INDEXSCAN = OFF;
+SET ENABLE_INDEXONLYSCAN = OFF;
+SET ENABLE_BITMAPSCAN = OFF;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = OFF;
+SET ENABLE_NESTLOOP = OFF;
+SET ENABLE_HASHJOIN = ON;
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE SORT + OPEN MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = ON;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- OPEN SORT + CLOSE MATERIAL
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE SORT + CLOSE MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE PARTITIONWISEJOIN
+SET ENABLE_PARTITIONWISE = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+--
+---- HASHJOIN + INDEXSACN
+--
+SET ENABLE_PARTITIONWISE = TRUE;
+SET ENABLE_SEQSCAN = OFF;
+SET ENABLE_INDEXSCAN = ON;
+SET ENABLE_INDEXONLYSCAN = OFF;
+SET ENABLE_BITMAPSCAN = OFF;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = OFF;
+SET ENABLE_NESTLOOP = OFF;
+SET ENABLE_HASHJOIN = ON;
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE SORT + OPEN MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = ON;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- OPEN SORT + CLOSE MATERIAL
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE SORT + CLOSE MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- CLOSE PARTITIONWISEJOIN
+SET ENABLE_PARTITIONWISE = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+--
+---- HASHJOIN + INDEXONLYSACN
+--
+SET ENABLE_PARTITIONWISE = TRUE;
+SET ENABLE_SEQSCAN = OFF;
+SET ENABLE_INDEXSCAN = OFF;
+SET ENABLE_INDEXONLYSCAN = ON;
+SET ENABLE_BITMAPSCAN = OFF;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = OFF;
+SET ENABLE_NESTLOOP = OFF;
+SET ENABLE_HASHJOIN = ON;
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE SORT + OPEN MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = ON;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- OPEN SORT + CLOSE MATERIAL
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE SORT + CLOSE MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE PARTITIONWISEJOIN
+SET ENABLE_PARTITIONWISE = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Only Scan using index_on_test_t1 on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Index Only Scan using index_on_test_t2 on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+--
+---- HASHJOIN + BITMAPSCAN
+--
+SET ENABLE_PARTITIONWISE = TRUE;
+SET ENABLE_SEQSCAN = OFF;
+SET ENABLE_INDEXSCAN = OFF;
+SET ENABLE_INDEXONLYSCAN = OFF;
+SET ENABLE_BITMAPSCAN = ON;
+SET ENABLE_TIDSCAN = OFF;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = OFF;
+SET ENABLE_NESTLOOP = OFF;
+SET ENABLE_HASHJOIN = ON;
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                           Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                                 Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+(18 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE SORT + OPEN MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = ON;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                           Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                                 Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+(18 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- OPEN SORT + CLOSE MATERIAL
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                           Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                                 Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+(18 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE SORT + CLOSE MATERIAL
+SET ENABLE_SORT = OFF;
+SET ENABLE_MATERIAL = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                           Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                                 Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+(18 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+-- CLOSE PARTITIONWISEJOIN
+SET ENABLE_PARTITIONWISE = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102));
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                           Recheck Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                                 Index Cond: (a = ANY ('{1,2,11,12,91,92,101,102}'::integer[]))
+(18 rows)
+
+SELECT partition_pwj_test_t1.A, partition_pwj_test_t2.A FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A in (1,2,11,12,91,92,101,102)) order by 1, 2;
+  a  |  a  
+-----+-----
+   1 |   1
+   2 |   2
+  11 |  11
+  12 |  12
+  91 |  91
+  92 |  92
+ 101 | 101
+ 102 | 102
+(8 rows)
+
+--
+---- other cases
+--
+SET ENABLE_PARTITIONWISE = TRUE;
+SET ENABLE_SEQSCAN = ON;
+SET ENABLE_INDEXSCAN = ON;
+SET ENABLE_INDEXONLYSCAN = ON;
+SET ENABLE_BITMAPSCAN = ON;
+SET ENABLE_TIDSCAN = ON;
+SET ENABLE_SORT = ON;
+SET ENABLE_MATERIAL = ON;
+SET ENABLE_MERGEJOIN = ON;
+SET ENABLE_NESTLOOP = ON;
+SET ENABLE_HASHJOIN = ON;
+--
+---- jointype
+--
+-- JOINTYPE LEFT JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 LEFT JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Left Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 LEFT JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- JOINTYPE FULL JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 FULL JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Full Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 FULL JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- JOINTYPE RIGHT JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 RIGHT JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Left Join
+         Hash Cond: (partition_pwj_test_t2.a = partition_pwj_test_t1.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t2
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t1
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 RIGHT JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- JOINTYPE CROSS JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 CROSS JOIN partition_pwj_test_t2;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Streaming(type: BROADCAST)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t1
+                           Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 CROSS JOIN partition_pwj_test_t2 order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   1 | TEST_T1_1   | TEST_T2_101
+   1 | TEST_T1_1   | TEST_T2_11
+   1 | TEST_T1_1   | TEST_T2_12
+   1 | TEST_T1_1   | TEST_T2_2
+   1 | TEST_T1_1   | TEST_T2_91
+   1 | TEST_T1_1   | TEST_T2_92
+   1 | TEST_T1_1   | TEST_T3_102
+   2 | TEST_T1_2   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_101
+   2 | TEST_T1_2   | TEST_T2_11
+   2 | TEST_T1_2   | TEST_T2_12
+   2 | TEST_T1_2   | TEST_T2_2
+   2 | TEST_T1_2   | TEST_T2_91
+   2 | TEST_T1_2   | TEST_T2_92
+   2 | TEST_T1_2   | TEST_T3_102
+  11 | TEST_T1_11  | TEST_T2_1
+  11 | TEST_T1_11  | TEST_T2_101
+  11 | TEST_T1_11  | TEST_T2_11
+  11 | TEST_T1_11  | TEST_T2_12
+  11 | TEST_T1_11  | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_91
+  11 | TEST_T1_11  | TEST_T2_92
+  11 | TEST_T1_11  | TEST_T3_102
+  12 | TEST_T1_12  | TEST_T2_1
+  12 | TEST_T1_12  | TEST_T2_101
+  12 | TEST_T1_12  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  12 | TEST_T1_12  | TEST_T2_2
+  12 | TEST_T1_12  | TEST_T2_91
+  12 | TEST_T1_12  | TEST_T2_92
+  12 | TEST_T1_12  | TEST_T3_102
+  91 | TEST_T1_91  | TEST_T2_1
+  91 | TEST_T1_91  | TEST_T2_101
+  91 | TEST_T1_91  | TEST_T2_11
+  91 | TEST_T1_91  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_2
+  91 | TEST_T1_91  | TEST_T2_91
+  91 | TEST_T1_91  | TEST_T2_92
+  91 | TEST_T1_91  | TEST_T3_102
+  92 | TEST_T1_92  | TEST_T2_1
+  92 | TEST_T1_92  | TEST_T2_101
+  92 | TEST_T1_92  | TEST_T2_11
+  92 | TEST_T1_92  | TEST_T2_12
+  92 | TEST_T1_92  | TEST_T2_2
+  92 | TEST_T1_92  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+  92 | TEST_T1_92  | TEST_T3_102
+ 101 | TEST_T1_101 | TEST_T2_1
+ 101 | TEST_T1_101 | TEST_T2_101
+ 101 | TEST_T1_101 | TEST_T2_11
+ 101 | TEST_T1_101 | TEST_T2_12
+ 101 | TEST_T1_101 | TEST_T2_2
+ 101 | TEST_T1_101 | TEST_T2_91
+ 101 | TEST_T1_101 | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T3_102
+ 102 | TEST_T1_102 | TEST_T2_1
+ 102 | TEST_T1_102 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T2_11
+ 102 | TEST_T1_102 | TEST_T2_12
+ 102 | TEST_T1_102 | TEST_T2_2
+ 102 | TEST_T1_102 | TEST_T2_91
+ 102 | TEST_T1_102 | TEST_T2_92
+ 102 | TEST_T1_102 | TEST_T3_102
+(64 rows)
+
+-- JOINTYPE INNER JOIN -- TRY TO USE PARTITIONWISE JOIN
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+-- PARTITIONED TABLE + ORDINARY TABLE
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t4.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t4 ON (partition_pwj_test_t1.A = partition_pwj_test_t4.A);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t4.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Seq Scan on partition_pwj_test_t4
+(9 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t4.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t4 ON (partition_pwj_test_t1.A = partition_pwj_test_t4.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T4_1
+   2 | TEST_T1_2   | TEST_T4_2
+  11 | TEST_T1_11  | TEST_T4_11
+  12 | TEST_T1_12  | TEST_T4_12
+  91 | TEST_T1_91  | TEST_T4_91
+  92 | TEST_T1_92  | TEST_T4_92
+ 101 | TEST_T1_101 | TEST_T4_101
+ 102 | TEST_T1_102 | TEST_T4_102
+(8 rows)
+
+--
+---- JOIN-CONDITION
+--
+-- JOIN-COLUMN IS NOT IN PARTITIONKEY
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.B = partition_pwj_test_t2.B);
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.b = partition_pwj_test_t2.b)
+         ->  Streaming(type: REDISTRIBUTE)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t1
+                           Selected Partitions:  1..4
+         ->  Hash
+               ->  Streaming(type: REDISTRIBUTE)
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on partition_pwj_test_t2
+                                 Selected Partitions:  1..4
+(14 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.B = partition_pwj_test_t2.B);
+ a | b | b 
+---+---+---
+(0 rows)
+
+-- JOIN-CONFITION IS NOT AN EQUAL EXPRESSION
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A > partition_pwj_test_t2.A);
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a > partition_pwj_test_t2.a)
+         ->  Streaming(type: BROADCAST)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t1
+                           Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(13 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A > partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   2 | TEST_T1_2   | TEST_T2_1
+  11 | TEST_T1_11  | TEST_T2_1
+  11 | TEST_T1_11  | TEST_T2_2
+  12 | TEST_T1_12  | TEST_T2_1
+  12 | TEST_T1_12  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_2
+  91 | TEST_T1_91  | TEST_T2_1
+  91 | TEST_T1_91  | TEST_T2_11
+  91 | TEST_T1_91  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_2
+  92 | TEST_T1_92  | TEST_T2_1
+  92 | TEST_T1_92  | TEST_T2_11
+  92 | TEST_T1_92  | TEST_T2_12
+  92 | TEST_T1_92  | TEST_T2_2
+  92 | TEST_T1_92  | TEST_T2_91
+ 101 | TEST_T1_101 | TEST_T2_1
+ 101 | TEST_T1_101 | TEST_T2_11
+ 101 | TEST_T1_101 | TEST_T2_12
+ 101 | TEST_T1_101 | TEST_T2_2
+ 101 | TEST_T1_101 | TEST_T2_91
+ 101 | TEST_T1_101 | TEST_T2_92
+ 102 | TEST_T1_102 | TEST_T2_1
+ 102 | TEST_T1_102 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T2_11
+ 102 | TEST_T1_102 | TEST_T2_12
+ 102 | TEST_T1_102 | TEST_T2_2
+ 102 | TEST_T1_102 | TEST_T2_91
+ 102 | TEST_T1_102 | TEST_T2_92
+(28 rows)
+
+-- JOIN-CONFITION IS NOT OPERATOR
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (TRUE);
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Streaming(type: BROADCAST)
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t1
+                           Selected Partitions:  1..4
+         ->  Materialize
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (TRUE) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   1 | TEST_T1_1   | TEST_T2_101
+   1 | TEST_T1_1   | TEST_T2_11
+   1 | TEST_T1_1   | TEST_T2_12
+   1 | TEST_T1_1   | TEST_T2_2
+   1 | TEST_T1_1   | TEST_T2_91
+   1 | TEST_T1_1   | TEST_T2_92
+   1 | TEST_T1_1   | TEST_T3_102
+   2 | TEST_T1_2   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_101
+   2 | TEST_T1_2   | TEST_T2_11
+   2 | TEST_T1_2   | TEST_T2_12
+   2 | TEST_T1_2   | TEST_T2_2
+   2 | TEST_T1_2   | TEST_T2_91
+   2 | TEST_T1_2   | TEST_T2_92
+   2 | TEST_T1_2   | TEST_T3_102
+  11 | TEST_T1_11  | TEST_T2_1
+  11 | TEST_T1_11  | TEST_T2_101
+  11 | TEST_T1_11  | TEST_T2_11
+  11 | TEST_T1_11  | TEST_T2_12
+  11 | TEST_T1_11  | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_91
+  11 | TEST_T1_11  | TEST_T2_92
+  11 | TEST_T1_11  | TEST_T3_102
+  12 | TEST_T1_12  | TEST_T2_1
+  12 | TEST_T1_12  | TEST_T2_101
+  12 | TEST_T1_12  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  12 | TEST_T1_12  | TEST_T2_2
+  12 | TEST_T1_12  | TEST_T2_91
+  12 | TEST_T1_12  | TEST_T2_92
+  12 | TEST_T1_12  | TEST_T3_102
+  91 | TEST_T1_91  | TEST_T2_1
+  91 | TEST_T1_91  | TEST_T2_101
+  91 | TEST_T1_91  | TEST_T2_11
+  91 | TEST_T1_91  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_2
+  91 | TEST_T1_91  | TEST_T2_91
+  91 | TEST_T1_91  | TEST_T2_92
+  91 | TEST_T1_91  | TEST_T3_102
+  92 | TEST_T1_92  | TEST_T2_1
+  92 | TEST_T1_92  | TEST_T2_101
+  92 | TEST_T1_92  | TEST_T2_11
+  92 | TEST_T1_92  | TEST_T2_12
+  92 | TEST_T1_92  | TEST_T2_2
+  92 | TEST_T1_92  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+  92 | TEST_T1_92  | TEST_T3_102
+ 101 | TEST_T1_101 | TEST_T2_1
+ 101 | TEST_T1_101 | TEST_T2_101
+ 101 | TEST_T1_101 | TEST_T2_11
+ 101 | TEST_T1_101 | TEST_T2_12
+ 101 | TEST_T1_101 | TEST_T2_2
+ 101 | TEST_T1_101 | TEST_T2_91
+ 101 | TEST_T1_101 | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T3_102
+ 102 | TEST_T1_102 | TEST_T2_1
+ 102 | TEST_T1_102 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T2_11
+ 102 | TEST_T1_102 | TEST_T2_12
+ 102 | TEST_T1_102 | TEST_T2_2
+ 102 | TEST_T1_102 | TEST_T2_91
+ 102 | TEST_T1_102 | TEST_T2_92
+ 102 | TEST_T1_102 | TEST_T3_102
+(64 rows)
+
+-- ONE JOIN-CONFITION MATCH PWJ
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A > 1 AND partition_pwj_test_t2.A > 2 AND partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t1
+                     Recheck Cond: ((a > 1) AND (a > 2))
+                     Selected Partitions:  1..4
+                     ->  Partitioned Bitmap Index Scan on index_on_test_t1
+                           Index Cond: ((a > 1) AND (a > 2))
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Bitmap Heap Scan on partition_pwj_test_t2
+                           Recheck Cond: ((a > 2) AND (a > 1))
+                           Selected Partitions:  1..4
+                           ->  Partitioned Bitmap Index Scan on index_on_test_t2
+                                 Index Cond: ((a > 2) AND (a > 1))
+(18 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A > 1 AND partition_pwj_test_t2.A > 2 AND partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(6 rows)
+
+--
+---- PARITION NUM
+--
+-- THE NUM IS NOT EUQAL
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A > 1 AND partition_pwj_test_t2.A > 12);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 3
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Filter: ((a > 1) AND (a > 12))
+                     Selected Partitions:  2..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 3
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Filter: ((a > 12) AND (a > 1))
+                           Selected Partitions:  2..4
+(14 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A > 1 AND partition_pwj_test_t2.A > 12) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(4 rows)
+
+-- THE NUM IS EUQAL, BUT THE BOUNDARY IS NOT EQUAL
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A > 12 AND partition_pwj_test_t1.A < 100);
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         Join Filter: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 2
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Filter: ((a < 100) AND (a > 12))
+                     Selected Partitions:  2..3
+         ->  Partition Iterator
+               Iterations: 2
+               ->  Partitioned Seq Scan on partition_pwj_test_t2
+                     Filter: ((a > 12) AND (a < 100))
+                     Selected Partitions:  2..3
+(13 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A > 12 AND partition_pwj_test_t1.A < 100) order by 1, 2, 3;
+ a  |     b      |     b      
+----+------------+------------
+ 91 | TEST_T1_91 | TEST_T2_91
+ 92 | TEST_T1_92 | TEST_T2_92
+(2 rows)
+
+-- THE NUM IS EUQAL, AND THE BOUNDARY IS EQUAL
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Selected Partitions:  1..4
+(12 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A) order by 1, 2, 3;
+  a  |      b      |      b      
+-----+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1
+   2 | TEST_T1_2   | TEST_T2_2
+  11 | TEST_T1_11  | TEST_T2_11
+  12 | TEST_T1_12  | TEST_T2_12
+  91 | TEST_T1_91  | TEST_T2_91
+  92 | TEST_T1_92  | TEST_T2_92
+ 101 | TEST_T1_101 | TEST_T2_101
+ 102 | TEST_T1_102 | TEST_T3_102
+(8 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A < 10 AND partition_pwj_test_t2.A < 10);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+         ->  Partition Iterator
+               Iterations: 1
+               ->  Partitioned Seq Scan on partition_pwj_test_t1
+                     Filter: (a < 10)
+                     Selected Partitions:  1
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 1
+                     ->  Partitioned Seq Scan on partition_pwj_test_t2
+                           Filter: (a < 10)
+                           Selected Partitions:  1
+(14 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B FROM partition_pwj_test_t1 INNER JOIN partition_pwj_test_t2 ON (partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t1.A < 10 AND partition_pwj_test_t2.A < 10) order by 1, 2, 3;
+ a |     b     |     b     
+---+-----------+-----------
+ 1 | TEST_T1_1 | TEST_T2_1
+ 2 | TEST_T1_2 | TEST_T2_2
+(2 rows)
+
+--
+---- MUTLI-KEYPOINT TEST
+--
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t3.a = partition_pwj_test_t1.a)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on partition_pwj_test_t3
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Hash Join
+                     Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on partition_pwj_test_t1
+                                 Selected Partitions:  1..4
+                     ->  Hash
+                           ->  Partition Iterator
+                                 Iterations: 4
+                                 ->  Partitioned Seq Scan on partition_pwj_test_t2
+                                       Selected Partitions:  1..4
+(19 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A order by 1, 2, 3;
+  a  |      b      |      b      |      b      
+-----+-------------+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1   | TEST_T3_1
+   2 | TEST_T1_2   | TEST_T2_2   | TEST_T3_2
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102
+(8 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A AND partition_pwj_test_t1.A > 10;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t3.a = partition_pwj_test_t1.a)
+         ->  Partition Iterator
+               Iterations: 3
+               ->  Partitioned Seq Scan on partition_pwj_test_t3
+                     Filter: (a > 10)
+                     Selected Partitions:  2..4
+         ->  Hash
+               ->  Hash Join
+                     Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+                     ->  Partition Iterator
+                           Iterations: 3
+                           ->  Partitioned Seq Scan on partition_pwj_test_t1
+                                 Filter: (a > 10)
+                                 Selected Partitions:  2..4
+                     ->  Hash
+                           ->  Partition Iterator
+                                 Iterations: 3
+                                 ->  Partitioned Seq Scan on partition_pwj_test_t2
+                                       Filter: (a > 10)
+                                       Selected Partitions:  2..4
+(22 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A AND partition_pwj_test_t1.A > 10 order by 1, 2, 3, 4;
+  a  |      b      |      b      |      b      
+-----+-------------+-------------+-------------
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102
+(6 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A AND partition_pwj_test_t1.A > 10 AND partition_pwj_test_t2.A > 10;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t3.a = partition_pwj_test_t1.a)
+         ->  Partition Iterator
+               Iterations: 3
+               ->  Partitioned Seq Scan on partition_pwj_test_t3
+                     Filter: (a > 10)
+                     Selected Partitions:  2..4
+         ->  Hash
+               ->  Hash Join
+                     Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+                     ->  Partition Iterator
+                           Iterations: 3
+                           ->  Partitioned Seq Scan on partition_pwj_test_t1
+                                 Filter: (a > 10)
+                                 Selected Partitions:  2..4
+                     ->  Hash
+                           ->  Partition Iterator
+                                 Iterations: 3
+                                 ->  Partitioned Seq Scan on partition_pwj_test_t2
+                                       Filter: (a > 10)
+                                       Selected Partitions:  2..4
+(22 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A AND partition_pwj_test_t1.A > 10 AND partition_pwj_test_t2.A > 10 order by 1, 2, 3, 4;
+  a  |      b      |      b      |      b      
+-----+-------------+-------------+-------------
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102
+(6 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A AND partition_pwj_test_t1.A > 10 AND partition_pwj_test_t2.A > 20;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t3.a = partition_pwj_test_t1.a)
+         ->  Partition Iterator
+               Iterations: 2
+               ->  Partitioned Seq Scan on partition_pwj_test_t3
+                     Filter: ((a > 10) AND (a > 20))
+                     Selected Partitions:  3..4
+         ->  Hash
+               ->  Hash Join
+                     Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+                     ->  Partition Iterator
+                           Iterations: 2
+                           ->  Partitioned Seq Scan on partition_pwj_test_t1
+                                 Filter: ((a > 10) AND (a > 20))
+                                 Selected Partitions:  3..4
+                     ->  Hash
+                           ->  Partition Iterator
+                                 Iterations: 2
+                                 ->  Partitioned Seq Scan on partition_pwj_test_t2
+                                       Filter: ((a > 20) AND (a > 10))
+                                       Selected Partitions:  3..4
+(22 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A AND partition_pwj_test_t1.A > 10 AND partition_pwj_test_t2.A > 20 order by 1, 2, 3, 4;
+  a  |      b      |      b      |      b      
+-----+-------------+-------------+-------------
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102
+(4 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B, partition_pwj_test_t4.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3, partition_pwj_test_t4 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Nested Loop
+         ->  Streaming(type: BROADCAST)
+               ->  Hash Join
+                     Hash Cond: (partition_pwj_test_t3.a = partition_pwj_test_t1.a)
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on partition_pwj_test_t3
+                                 Selected Partitions:  1..4
+                     ->  Hash
+                           ->  Hash Join
+                                 Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+                                 ->  Partition Iterator
+                                       Iterations: 4
+                                       ->  Partitioned Seq Scan on partition_pwj_test_t1
+                                             Selected Partitions:  1..4
+                                 ->  Hash
+                                       ->  Partition Iterator
+                                             Iterations: 4
+                                             ->  Partitioned Seq Scan on partition_pwj_test_t2
+                                                   Selected Partitions:  1..4
+         ->  Materialize
+               ->  Seq Scan on partition_pwj_test_t4
+(23 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B, partition_pwj_test_t4.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3, partition_pwj_test_t4 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A order by 1, 2, 3, 4, 5;
+  a  |      b      |      b      |      b      |      b      
+-----+-------------+-------------+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1   | TEST_T3_1   | TEST_T4_1
+   1 | TEST_T1_1   | TEST_T2_1   | TEST_T3_1   | TEST_T4_101
+   1 | TEST_T1_1   | TEST_T2_1   | TEST_T3_1   | TEST_T4_102
+   1 | TEST_T1_1   | TEST_T2_1   | TEST_T3_1   | TEST_T4_11
+   1 | TEST_T1_1   | TEST_T2_1   | TEST_T3_1   | TEST_T4_12
+   1 | TEST_T1_1   | TEST_T2_1   | TEST_T3_1   | TEST_T4_2
+   1 | TEST_T1_1   | TEST_T2_1   | TEST_T3_1   | TEST_T4_91
+   1 | TEST_T1_1   | TEST_T2_1   | TEST_T3_1   | TEST_T4_92
+   2 | TEST_T1_2   | TEST_T2_2   | TEST_T3_2   | TEST_T4_1
+   2 | TEST_T1_2   | TEST_T2_2   | TEST_T3_2   | TEST_T4_101
+   2 | TEST_T1_2   | TEST_T2_2   | TEST_T3_2   | TEST_T4_102
+   2 | TEST_T1_2   | TEST_T2_2   | TEST_T3_2   | TEST_T4_11
+   2 | TEST_T1_2   | TEST_T2_2   | TEST_T3_2   | TEST_T4_12
+   2 | TEST_T1_2   | TEST_T2_2   | TEST_T3_2   | TEST_T4_2
+   2 | TEST_T1_2   | TEST_T2_2   | TEST_T3_2   | TEST_T4_91
+   2 | TEST_T1_2   | TEST_T2_2   | TEST_T3_2   | TEST_T4_92
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11  | TEST_T4_1
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11  | TEST_T4_101
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11  | TEST_T4_102
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11  | TEST_T4_11
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11  | TEST_T4_12
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11  | TEST_T4_2
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11  | TEST_T4_91
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11  | TEST_T4_92
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12  | TEST_T4_1
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12  | TEST_T4_101
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12  | TEST_T4_102
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12  | TEST_T4_11
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12  | TEST_T4_12
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12  | TEST_T4_2
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12  | TEST_T4_91
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12  | TEST_T4_92
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91  | TEST_T4_1
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91  | TEST_T4_101
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91  | TEST_T4_102
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91  | TEST_T4_11
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91  | TEST_T4_12
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91  | TEST_T4_2
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91  | TEST_T4_91
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91  | TEST_T4_92
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92  | TEST_T4_1
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92  | TEST_T4_101
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92  | TEST_T4_102
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92  | TEST_T4_11
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92  | TEST_T4_12
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92  | TEST_T4_2
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92  | TEST_T4_91
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92  | TEST_T4_92
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101 | TEST_T4_1
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101 | TEST_T4_101
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101 | TEST_T4_102
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101 | TEST_T4_11
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101 | TEST_T4_12
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101 | TEST_T4_2
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101 | TEST_T4_91
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101 | TEST_T4_92
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102 | TEST_T4_1
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102 | TEST_T4_101
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102 | TEST_T4_102
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102 | TEST_T4_11
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102 | TEST_T4_12
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102 | TEST_T4_2
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102 | TEST_T4_91
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102 | TEST_T4_92
+(64 rows)
+
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B, partition_pwj_test_t4.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3, partition_pwj_test_t4 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A AND partition_pwj_test_t4.A = partition_pwj_test_t1.A;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t4.a = partition_pwj_test_t1.a)
+         ->  Seq Scan on partition_pwj_test_t4
+         ->  Hash
+               ->  Hash Join
+                     Hash Cond: (partition_pwj_test_t3.a = partition_pwj_test_t1.a)
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on partition_pwj_test_t3
+                                 Selected Partitions:  1..4
+                     ->  Hash
+                           ->  Hash Join
+                                 Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+                                 ->  Partition Iterator
+                                       Iterations: 4
+                                       ->  Partitioned Seq Scan on partition_pwj_test_t1
+                                             Selected Partitions:  1..4
+                                 ->  Hash
+                                       ->  Partition Iterator
+                                             Iterations: 4
+                                             ->  Partitioned Seq Scan on partition_pwj_test_t2
+                                                   Selected Partitions:  1..4
+(23 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B, partition_pwj_test_t4.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3, partition_pwj_test_t4 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A AND partition_pwj_test_t4.A = partition_pwj_test_t1.A order by 1, 2, 3, 4, 5;
+  a  |      b      |      b      |      b      |      b      
+-----+-------------+-------------+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1   | TEST_T3_1   | TEST_T4_1
+   2 | TEST_T1_2   | TEST_T2_2   | TEST_T3_2   | TEST_T4_2
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11  | TEST_T4_11
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12  | TEST_T4_12
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91  | TEST_T4_91
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92  | TEST_T4_92
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101 | TEST_T4_101
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102 | TEST_T4_102
+(8 rows)
+
+SET ENABLE_SORT = OFF;
+EXPLAIN (COSTS OFF, NODES OFF) SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B, partition_pwj_test_t4.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3, partition_pwj_test_t4 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A AND partition_pwj_test_t4.A = partition_pwj_test_t1.A;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Join
+         Hash Cond: (partition_pwj_test_t4.a = partition_pwj_test_t1.a)
+         ->  Seq Scan on partition_pwj_test_t4
+         ->  Hash
+               ->  Hash Join
+                     Hash Cond: (partition_pwj_test_t3.a = partition_pwj_test_t1.a)
+                     ->  Partition Iterator
+                           Iterations: 4
+                           ->  Partitioned Seq Scan on partition_pwj_test_t3
+                                 Selected Partitions:  1..4
+                     ->  Hash
+                           ->  Hash Join
+                                 Hash Cond: (partition_pwj_test_t1.a = partition_pwj_test_t2.a)
+                                 ->  Partition Iterator
+                                       Iterations: 4
+                                       ->  Partitioned Seq Scan on partition_pwj_test_t1
+                                             Selected Partitions:  1..4
+                                 ->  Hash
+                                       ->  Partition Iterator
+                                             Iterations: 4
+                                             ->  Partitioned Seq Scan on partition_pwj_test_t2
+                                                   Selected Partitions:  1..4
+(23 rows)
+
+SELECT partition_pwj_test_t1.*, partition_pwj_test_t2.B, partition_pwj_test_t3.B, partition_pwj_test_t4.B FROM partition_pwj_test_t1, partition_pwj_test_t2, partition_pwj_test_t3, partition_pwj_test_t4 WHERE partition_pwj_test_t1.A = partition_pwj_test_t2.A AND partition_pwj_test_t2.A = partition_pwj_test_t3.A AND partition_pwj_test_t4.A = partition_pwj_test_t1.A order by 1, 2, 3, 4, 5;
+  a  |      b      |      b      |      b      |      b      
+-----+-------------+-------------+-------------+-------------
+   1 | TEST_T1_1   | TEST_T2_1   | TEST_T3_1   | TEST_T4_1
+   2 | TEST_T1_2   | TEST_T2_2   | TEST_T3_2   | TEST_T4_2
+  11 | TEST_T1_11  | TEST_T2_11  | TEST_T3_11  | TEST_T4_11
+  12 | TEST_T1_12  | TEST_T2_12  | TEST_T3_12  | TEST_T4_12
+  91 | TEST_T1_91  | TEST_T2_91  | TEST_T3_91  | TEST_T4_91
+  92 | TEST_T1_92  | TEST_T2_92  | TEST_T3_92  | TEST_T4_92
+ 101 | TEST_T1_101 | TEST_T2_101 | TEST_T3_101 | TEST_T4_101
+ 102 | TEST_T1_102 | TEST_T3_102 | TEST_T3_102 | TEST_T4_102
+(8 rows)
+
+--
+---- CLEAN UP
+--
+DROP TABLE partition_pwj_test_t1;
+DROP TABLE partition_pwj_test_t2;
+DROP TABLE partition_pwj_test_t3;
+DROP TABLE partition_pwj_test_t4;
+RESET ENABLE_PARTITIONWISE;
+RESET ENABLE_SEQSCAN;
+RESET ENABLE_INDEXSCAN;
+RESET ENABLE_INDEXONLYSCAN;
+RESET ENABLE_BITMAPSCAN;
+RESET ENABLE_TIDSCAN;
+RESET ENABLE_SORT;
+RESET ENABLE_MATERIAL;
+RESET ENABLE_MERGEJOIN;
+RESET ENABLE_NESTLOOP;
+RESET ENABLE_HASHJOIN;

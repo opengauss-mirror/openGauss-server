@@ -1,19 +1,7 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  *   statctl.cpp
  *   functions for statistics control
@@ -49,17 +37,21 @@
 #include "utils/ps_status.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "datatype/timestamp.h"
 #include "catalog/pg_database.h"
 #include "utils/errcodes.h"
 #include "commands/tablespace.h"
+#include "optimizer/planner.h"
 
 #include <mntent.h>
 #include "workload/commgr.h"
 #include "workload/workload.h"
 #include "instruments/list.h"
 #include "pgxc/groupmgr.h"
+#include "instruments/instr_unique_sql.h"
+#include "instruments/instr_slow_query.h"
+
 #ifdef PGXC
 #include "pgxc/poolutils.h"
 #endif
@@ -103,7 +95,9 @@
 
 #define session_info_collect_timer 180 /* seconds */
 
-extern bool StreamThreadAmI();
+#define G_WLM_IOSTAT_HASH(bucket) \
+    g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl[bucket].hashTable
+
 extern uint64 pg_relation_perm_table_size(Relation rel);
 extern uint64 pg_relation_table_size(Relation rel);
 
@@ -150,7 +144,7 @@ bool IsQidInvalid(const Qid* qid)
  */
 Qid* ReserveQid(Qid* qid)
 {
-    qid->procId = (unsigned int)u_sess->pgxc_cxt.PGXCNodeId;
+    qid->procId = u_sess->pgxc_cxt.PGXCNodeId;
     qid->queryId = (IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid);
 
     return qid;
@@ -194,8 +188,32 @@ bool IsQidEqual(const Qid* qid1, const Qid* qid2)
  */
 uint32 GetHashCode(const Qid* qid)
 {
-    Oid newValue = qid->procId & (qid->queryId + qid->stamp);
+    Oid newValue = qid->queryId + qid->stamp;
     return oid_hash(&newValue, sizeof(Oid));
+}
+
+/*
+ * function name: GetIoStatBucket
+ * description  : generate a bucket id by qid
+ * arguments    :
+ *                _in_ qid: qid reference to get hash code
+ * return value : unsigned int32 hash code
+ */
+uint32 GetIoStatBucket(const Qid* qid)
+{
+    return GetHashCode(qid) % NUM_IO_STAT_PARTITIONS;
+}
+
+/*
+ * function name: GetIoStatLockId
+ * description  : generate a lock id by bucket id
+ * arguments    :
+ *                _in_ bucketId: bucket id to get lock id
+ * return value : int lock id
+ */
+int GetIoStatLockId(const uint32 bucketId)
+{
+    return g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl[bucketId].lockId;
 }
 
 /*
@@ -442,20 +460,47 @@ void WLMParseFunc4SessionInfo(StringInfo msg, void* suminfo, int size)
     errno_t errval = memset_s(&detail, sizeof(detail), 0, sizeof(detail));
     securec_check_errval(errval, , LOG);
 
-    detail.usedMemory = (int)pq_getmsgint(msg, 4);
-    detail.peakMemory = (int)pq_getmsgint(msg, 4);
-    detail.spillCount = (int)pq_getmsgint(msg, 4);
+    detail.usedMemory = pq_getmsgint(msg, 4);
+    detail.peakMemory = pq_getmsgint(msg, 4);
+    detail.spillCount = pq_getmsgint(msg, 4);
     detail.space = (uint64)pq_getmsgint64(msg);
     detail.dnTime = pq_getmsgint64(msg);
     detail.spillSize = pq_getmsgint64(msg);
     detail.broadcastSize = pq_getmsgint64(msg);
     detail.cpuTime = pq_getmsgint64(msg);
-    detail.warning = (int)pq_getmsgint(msg, 4);
-    int peak_iops = (int)pq_getmsgint(msg, 4);
-    int curr_iops = (int)pq_getmsgint(msg, 4);
+    detail.warning = pq_getmsgint(msg, 4);
+    int peak_iops = pq_getmsgint(msg, 4);
+    int curr_iops = pq_getmsgint(msg, 4);
 
     errval = strncpy_s(detail.nodeName, sizeof(detail.nodeName), pq_getmsgstring(msg), sizeof(detail.nodeName) - 1);
     securec_check_errval(errval, , LOG);
+
+    if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION && gendata->tag == WLM_COLLECT_SESSINFO) {
+        /* slow query info */
+        /* tuple info & cache IO */
+        gendata->slowQueryInfo.current_table_counter->t_tuples_returned += pq_getmsgint64(msg);
+        gendata->slowQueryInfo.current_table_counter->t_tuples_fetched += pq_getmsgint64(msg);
+        gendata->slowQueryInfo.current_table_counter->t_tuples_inserted += pq_getmsgint64(msg);
+        gendata->slowQueryInfo.current_table_counter->t_tuples_updated += pq_getmsgint64(msg);
+        gendata->slowQueryInfo.current_table_counter->t_tuples_deleted += pq_getmsgint64(msg);
+        gendata->slowQueryInfo.current_table_counter->t_blocks_fetched += pq_getmsgint64(msg);
+        gendata->slowQueryInfo.current_table_counter->t_blocks_hit += pq_getmsgint64(msg);
+
+        /* time Info */
+        for (uint32 idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
+            gendata->slowQueryInfo.localTimeInfoArray[idx] += pq_getmsgint64(msg);
+        }
+
+        /* plan info */
+        int64 plan_size = pq_getmsgint64(msg);
+        const char* plan = pq_getmsgstring(msg);
+        char* query_plan = (char*) palloc0(plan_size);
+        if (strstr(plan, "NoPlan") == NULL) {
+            errval = memcpy_s(query_plan, plan_size, plan, plan_size);
+            securec_check_errval(errval, , LOG);
+            gendata->query_plan = lappend(gendata->query_plan, query_plan);
+        }
+    }
 
     pq_getmsgend(msg);
 
@@ -505,8 +550,8 @@ void WLMParseFunc4CollectInfo(StringInfo msg, void* suminfo, int size)
     securec_check_errval(errval, , LOG);
 
     /* fetch IO utilization and cpu utilization */
-    int io_util = (int)pq_getmsgint(msg, 4);
-    int cpu_util = (int)pq_getmsgint(msg, 4);
+    int io_util = pq_getmsgint(msg, 4);
+    int cpu_util = pq_getmsgint(msg, 4);
     detail.cpuCnt = pq_getmsgint(msg, 4);
 
     pq_getmsgend(msg);
@@ -530,8 +575,8 @@ void WLMParseIOInfo(StringInfo msg, void* info, int size)
 {
     WLMIoGeninfo* detail = (WLMIoGeninfo*)info;
 
-    int curr_iops = (int)pq_getmsgint(msg, 4);
-    int peak_iops = (int)pq_getmsgint(msg, 4);
+    int curr_iops = pq_getmsgint(msg, 4);
+    int peak_iops = pq_getmsgint(msg, 4);
 
     pq_getmsgend(msg);
 
@@ -558,11 +603,11 @@ void WLMParseFunc4UserInfo(StringInfo msg, void* suminfo, int size)
     char nodeName[NAMEDATALEN];
 
     /* fetch IO utilization and cpu utilization */
-    int useMemory = (int)pq_getmsgint(msg, 4);
-    int cpuUsedCnt = (int)pq_getmsgint(msg, 4);
-    int cpuTotalCnt = (int)pq_getmsgint(msg, 4);
-    int peak_iops = (int)pq_getmsgint(msg, 4);
-    int curr_iops = (int)pq_getmsgint(msg, 4);
+    int useMemory = pq_getmsgint(msg, 4);
+    int cpuUsedCnt = pq_getmsgint(msg, 4);
+    int cpuTotalCnt = pq_getmsgint(msg, 4);
+    int peak_iops = pq_getmsgint(msg, 4);
+    int curr_iops = pq_getmsgint(msg, 4);
     uint64 readBytes = pq_getmsgint64(msg);
     uint64 writeBytes = pq_getmsgint64(msg);
     uint64 readCounts = pq_getmsgint64(msg);
@@ -671,6 +716,7 @@ int WLMGetSessionLevelInfoInternalByNG(const char* group_name, const char* keyst
     securec_check_errval(errval, , LOG);
     WLMInitMinValue4SessionInfo(gendata);
 
+    gendata->tag = WLM_COLLECT_ANY;
     WLMRemoteInfoReceiverByNG(group_name, gendata, sizeof(*gendata), WLMParseFunc4SessionInfo);
     WLMCheckMinValue4SessionInfo(gendata);
 
@@ -845,7 +891,7 @@ void WLMUpdateCgroup(WLMNodeGroupInfo* ng, PgBackendStatus* beentry, const char*
 
             gs_atomic_add_32((int*)&g_instance.wlm_cxt->stat_manager.sendsig, 1);
 
-            LWLockAcquire(ProcArrayLock, LW_SHARED);
+            (void)LWLockAcquire(ProcArrayLock, LW_SHARED);
             int ret = SendProcSignal(data->tid, PROCSIG_UPDATE_WORKLOAD_DATA, InvalidBackendId);
             LWLockRelease(ProcArrayLock);
 
@@ -923,9 +969,16 @@ bool WLMAjustCGroupByCNSessid(WLMNodeGroupInfo* ng, uint64 sess_id, const char* 
 
     if (IS_PGXC_COORDINATOR) {
         char query[KBYTES];
-
-        /* get backend status with thread id */
-        PgBackendStatus* beentry = pgstat_get_backend_entry(sess_id);
+        PgBackendStatus* beentry = NULL;
+        PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
+        while (node != NULL) {
+            PgBackendStatus* tmpBeentry = node->data;
+            if ((tmpBeentry != NULL) && (tmpBeentry->st_sessionid == sess_id)) {
+                beentry = tmpBeentry;
+                break;
+            }
+            node = node->next;
+        }
 
         if (beentry == NULL || beentry->st_cgname == NULL) {
             return false;
@@ -967,7 +1020,7 @@ bool WLMAjustCGroupByCNSessid(WLMNodeGroupInfo* ng, uint64 sess_id, const char* 
             rc = snprintf_s(query,
                 sizeof(query),
                 sizeof(query) - 1,
-                "select gs_wlm_switch_cgroup(%lu, \'%s\');",
+                "select pg_catalog.gs_wlm_switch_cgroup(%lu, \'%s\');",
                 (ThreadId)beentry->st_queryid,
                 cgroup);
             securec_check_ss(rc, "\0", "\0");
@@ -975,27 +1028,30 @@ bool WLMAjustCGroupByCNSessid(WLMNodeGroupInfo* ng, uint64 sess_id, const char* 
             /* attach control group for each thread for the session on each data node */
             (void)FetchStatistics4WLM(query, NULL, 0, WLMStrategyFuncIgnoreResult);
         }
+        
     }
 
     if (IS_PGXC_DATANODE) {
-        int i, num;
+        int i;
+        uint32 num = 0;
         int j = 0;
         int is_changed = 1;
 
         /* No threads to update, nothing to do. */
-        if ((num = pgstat_fetch_stat_numbackends()) == 0) {
+        PgBackendStatusNode* node = gs_stat_read_current_status(&num);
+        if (num == 0) {
             return true;
         }
 
         pid_t* threads = (pid_t*)palloc0(num * sizeof(pid_t));
 
         /* Get all threads with the coordinator process id */
-        for (i = 0; i < num; ++i) {
-            PgBackendStatus* beentry = pgstat_fetch_stat_beentry(i + 1);
-
+        while (node != NULL) {
+            PgBackendStatus* beentry = node->data;
             if (beentry != NULL && (ThreadId)beentry->st_queryid == sess_id) {
                 threads[j++] = beentry->st_tid;
             }
+            node = node->next;
         }
 
         /* Attach these threads batch with the new group. */
@@ -1123,7 +1179,7 @@ void WLMCleanUpNodeInternal(const Qid* qid)
          * We will check the thread count, if all threads has finished,
          * we will release the thread list and remove it from the hash table.
          */
-        gs_atomic_add_32(&info->threadCount, -1);
+        (void)pg_atomic_fetch_sub_u32((volatile uint32*)&info->threadCount, 1);
 
         /* No threads already, remove the info from the hash table. */
         if (info->threadCount <= 0) {
@@ -1228,6 +1284,35 @@ char* GetStatusName(WLMStatusTag tag)
     return "unknown";
 }
 
+char* GetPendingEnqueueState()
+{
+    if (g_instance.wlm_cxt->dynamic_workload_inited) {
+        if (t_thrd.wlm_cxt.parctl_state.preglobal_waiting) {
+            return "Global";
+        } else if (IsTransactionBlock()) {
+            return "Transaction";
+        } else if (t_thrd.wlm_cxt.parctl_state.subquery) {
+            return "StoredProc";
+        } else if (t_thrd.wlm_cxt.parctl_state.central_waiting) {
+            return "CentralQueue";
+        } else if (t_thrd.wlm_cxt.parctl_state.respool_waiting) {
+            return "Respool";
+        }
+    } else {
+        if (t_thrd.wlm_cxt.parctl_state.global_waiting) {
+            return "Global";
+        } else if (IsTransactionBlock()) {
+            return "Transaction";
+        } else if (t_thrd.wlm_cxt.parctl_state.subquery) {
+            return "StoredProc";
+        } else if (t_thrd.wlm_cxt.parctl_state.respool_waiting) {
+            return "Respool";
+        }
+    }
+
+    return "None";
+}
+
 /*
  * function name: GetEnqueueState
  * description  : get enqueue state
@@ -1241,29 +1326,7 @@ char* GetEnqueueState(const WLMCollectInfo* pCollectInfo)
 {
     /* Current status must be "pending". */
     if (pCollectInfo->status == WLM_STATUS_PENDING) {
-        if (g_instance.wlm_cxt->dynamic_workload_inited) {
-            if (t_thrd.wlm_cxt.parctl_state.preglobal_waiting) {
-                return "Global";
-            } else if (IsTransactionBlock()) {
-                return "Transaction";
-            } else if (t_thrd.wlm_cxt.parctl_state.subquery) {
-                return "StoredProc";
-            } else if (t_thrd.wlm_cxt.parctl_state.central_waiting) {
-                return "CentralQueue";
-            } else if (t_thrd.wlm_cxt.parctl_state.respool_waiting) {
-                return "Respool";
-            }
-        } else {
-            if (t_thrd.wlm_cxt.parctl_state.global_waiting) {
-                return "Global";
-            } else if (IsTransactionBlock()) {
-                return "Transaction";
-            } else if (t_thrd.wlm_cxt.parctl_state.subquery) {
-                return "StoredProc";
-            } else if (t_thrd.wlm_cxt.parctl_state.respool_waiting) {
-                return "Respool";
-            }
-        }
+        return GetPendingEnqueueState();
     }
 
     /*
@@ -1280,6 +1343,15 @@ char* GetEnqueueState(const WLMCollectInfo* pCollectInfo)
         return "StoredProc";
     }
 
+    /* when statement finish and out of respool, we
+     * should mark it not out of global reserve
+     */
+    if (pCollectInfo->status == WLM_STATUS_FINISHED &&
+        (t_thrd.wlm_cxt.parctl_state.reserve == 1 ||
+        t_thrd.wlm_cxt.parctl_state.global_reserve == 1)) {
+        return "Respool";
+    }
+
     return "None";
 }
 
@@ -1290,45 +1362,57 @@ char* GetEnqueueState(const WLMCollectInfo* pCollectInfo)
  *                _in_ pCollectInfo: collect info
  * return value : query type
  */
-char* GetQueryType(const WLMCollectInfo* pCollectInfo)
+char* GetPendingQueryType()
 {
-    if (pCollectInfo->status == WLM_STATUS_PENDING) {
-        if (t_thrd.wlm_cxt.qnode.rp) { /* waiting in the respool */
-            if (t_thrd.wlm_cxt.parctl_state.simple) {
-                return "Simple";
-            } else {
-                return "Complicated";
-            }
-        } else if (t_thrd.wlm_cxt.qnode.lcnode) { /* waiting in the global queue */
-            if (t_thrd.wlm_cxt.parctl_state.special) { /* check it whether is special */
-                return "Internal";
-            } else {
-                return "Ordinary";
-            }
-        } else if (t_thrd.wlm_cxt.parctl_state.global_reserve) {
-            return "Ordinary";
-        } else if (g_instance.wlm_cxt->dynamic_workload_inited) {
-            if (t_thrd.wlm_cxt.parctl_state.simple) {
-                return "Ordinary";
-            } else {
-                return "Complicated";
-            }
-        } else {
-            return "Internal";
-        }
-    } else {
-        if (t_thrd.wlm_cxt.parctl_state.special) {
-            return "Internal";
-        } else if (t_thrd.wlm_cxt.parctl_state.simple ||
-                   (!IsQueuedSubquery() && !g_instance.wlm_cxt->dynamic_workload_inited)) {
+    if (t_thrd.wlm_cxt.qnode.rp) { /* waiting in the respool */
+        if (t_thrd.wlm_cxt.parctl_state.simple) {
             return "Simple";
-        } else if (pCollectInfo->execStartTime == 0 &&
-                   t_thrd.wlm_cxt.qnode.rp ==
-                     NULL) { /* not in running or resource pool list, just like cancel a pending query */
+        } else {
+            return "Complicated";
+        }
+    } else if (t_thrd.wlm_cxt.qnode.lcnode) { /* waiting in the global queue */
+        if (t_thrd.wlm_cxt.parctl_state.special) { /* check it whether is special */
+            return "Internal";
+        } else {
+            return "Ordinary";
+        }
+    } else if (t_thrd.wlm_cxt.parctl_state.global_reserve) {
+        return "Ordinary";
+    } else if (g_instance.wlm_cxt->dynamic_workload_inited) {
+        if (t_thrd.wlm_cxt.parctl_state.simple) {
             return "Ordinary";
         } else {
             return "Complicated";
         }
+    } else {
+        return "Internal";
+    }
+
+}
+
+char* GetOtherQueryType(const WLMCollectInfo* pCollectInfo)
+{
+    if (t_thrd.wlm_cxt.parctl_state.special) {
+        return "Internal";
+    } else if (t_thrd.wlm_cxt.parctl_state.simple ||
+               (!IsQueuedSubquery() && !g_instance.wlm_cxt->dynamic_workload_inited)) {
+        return "Simple";
+    } else if (pCollectInfo->execStartTime == 0 &&
+               t_thrd.wlm_cxt.qnode.rp ==
+                 NULL) { /* not in running or resource pool list, just like cancel a pending query */
+        return "Ordinary";
+    } else {
+        return "Complicated";
+    }
+}
+
+
+char* GetQueryType(const WLMCollectInfo* pCollectInfo)
+{
+    if (pCollectInfo->status == WLM_STATUS_PENDING) {
+        return GetPendingQueryType();
+    } else {
+        return GetOtherQueryType(pCollectInfo);
     }
 }
 
@@ -1480,6 +1564,9 @@ void WLMReleaseStmtDetailItem(WLMStmtDetail* detail)
     if (detail->clientaddr != NULL) {
         pfree_ext(detail->clientaddr);
     }
+
+    pfree_ext(detail->slowQueryInfo.current_table_counter);
+    pfree_ext(detail->slowQueryInfo.localTimeInfoArray);
 }
 
 /*
@@ -1539,16 +1626,21 @@ void WLMRemoveExpiredRecords(void)
     for (i = 0; i < count; ++i) {
         hashCode = WLMHashCode(qids + i, sizeof(Qid));
         LockSessHistHashPartition(hashCode, LW_EXCLUSIVE);
+        
+        detail = (WLMStmtDetail*)hash_search(
+            g_instance.wlm_cxt->stat_manager.session_info_hashtbl, qids + i, HASH_FIND, NULL);
 
-        if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
-            detail = (WLMStmtDetail*)hash_search(
-                g_instance.wlm_cxt->stat_manager.session_info_hashtbl, qids + i, HASH_FIND, NULL);
-
+        if (IS_PGXC_COORDINATOR && detail != NULL) {
             if (detail != NULL) {
                 WLMReleaseStmtDetailItem(detail);
             }
         }
 
+        if (IS_PGXC_DATANODE && detail != NULL) {
+            pfree_ext(detail->slowQueryInfo.current_table_counter);
+            pfree_ext(detail->slowQueryInfo.localTimeInfoArray);
+            pfree_ext(detail->query_plan);
+        }
         hash_search(g_instance.wlm_cxt->stat_manager.session_info_hashtbl, qids + i, HASH_REMOVE, NULL);
 
         UnLockSessHistHashPartition(hashCode);
@@ -1610,6 +1702,12 @@ void WLMUpdateCollectInfo(void)
          * in the hash table on coordinator.
          */
         if (info->tag == WLM_ACTION_REMAIN && info->cpuctrl > 0) {
+            if (idx >= num) {
+                if (hash_get_seq_num() > 0) {
+                    hash_seq_term(hash_seq);
+                }
+                break;
+            }
             infoptrs[idx].cpuctrl = info->cpuctrl;
             errno_t errval = strncpy_s(infoptrs[idx].nodegroup, NAMEDATALEN, info->nodegroup, NAMEDATALEN - 1);
             securec_check_errval(errval, , LOG);
@@ -1620,10 +1718,6 @@ void WLMUpdateCollectInfo(void)
             errval = memcpy_s(&infoptrs[idx].geninfo, sizeof(WLMGeneralInfo), &info->geninfo, sizeof(WLMGeneralInfo));
             securec_check_errval(errval, , LOG);
             idx++;
-        }
-
-        if (idx >= num) {
-            break;
         }
     }
 
@@ -1676,7 +1770,7 @@ bool WLMUserNeedAdjustSpace(UserData* userdata)
             return false;
         }
 
-        uint64 min_space_size = (userdata->spacelimit * SPACE_MIN_PERCENT / FULL_PERCENT);
+        int64 min_space_size = (userdata->spacelimit * SPACE_MIN_PERCENT / FULL_PERCENT);
 
         /* user's space has been 80% of the space limit, we may adjust the space */
         if (userdata->adjust == 0 && (userdata->totalspace >= min_space_size)) {
@@ -1714,10 +1808,8 @@ bool WLMUserNeedAdjustSpace(UserData* userdata)
  */
 void WLMReAdjustUserSpace(UserData* userdata, bool isForce)
 {
-    if (g_instance.attr.attr_resource.enable_perm_space) {
-        UpdateUsedSpace(userdata->userid, userdata->totalspace, userdata->tmpSpace);
-        userdata->spaceUpdate = false;
-    }
+    UpdateUsedSpace(userdata->userid, userdata->totalspace, userdata->tmpSpace);
+    userdata->spaceUpdate = false;
 }
 
 /*
@@ -1731,10 +1823,15 @@ void WLMReadjustAllUserSpace(Oid uid)
     char username[NAMEDATALEN] = {0};
 
     if (!OidIsValid(uid)) {
+        if (!superuser()) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("Only system admin user can use this function")));
+        }
+
         if (!IS_PGXC_COORDINATOR) {
             WLMReadjustUserSpaceThroughAllDbs(ALL_USER);
         } else {
-            const char* query = "select gs_wlm_readjust_user_space(0);";
+            const char* query = "select pg_catalog.gs_wlm_readjust_user_space(0);";
             /* verify all user space on each data node */
             (void)FetchStatistics4WLM(query, NULL, 0, WLMStrategyFuncIgnoreResult);
         }
@@ -1742,6 +1839,11 @@ void WLMReadjustAllUserSpace(Oid uid)
         if (uid == BOOTSTRAP_SUPERUSERID) {
             ereport(NOTICE, (errmsg("super user need not verify space")));
             return;
+        }
+
+        if (!superuser() && uid != GetUserId()) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("Normal user could not readjust other user space")));
         }
 
         if (GetRoleName(uid, username, NAMEDATALEN) != NULL) {
@@ -1774,7 +1876,7 @@ void WLMReadjustUserSpaceByQuery(const char* username, List* database_name_list)
         rc = snprintf_s(query,
             sizeof(query),
             sizeof(query) - 1,
-            "select gs_wlm_readjust_user_space_with_reset_flag(\'%s\', %s);",
+            "select pg_catalog.gs_wlm_readjust_user_space_with_reset_flag(\'%s\', %s);",
             username,
             isFirstDb ? "true" : "false");
         securec_check_ss(rc, "\0", "\0");
@@ -1806,7 +1908,7 @@ void WLMReadjustUserSpaceByQuery(const char* username, List* database_name_list)
 
 void GetUserSpaceThroughAllDbs(const char* username)
 {
-    HeapScanDesc scan;
+    TableScanDesc scan;
     Datum datum;
     HeapTuple tup = NULL;
     Relation pg_database_rel = NULL;
@@ -1844,7 +1946,6 @@ void GetUserSpaceThroughAllDbs(const char* username)
     heap_close(pg_database_rel, AccessShareLock);
 
     WLMReadjustUserSpaceByQuery(username, database_name_list);
-
     list_free_deep(database_name_list);
 }
 
@@ -1891,6 +1992,13 @@ void WLMReadjustUserSpaceThroughAllDbs(const char* username)
 
     if (!allUser) {
         uid = GetRoleOid(username);
+        if (!superuser() && uid != GetUserId()) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("Normal user could not readjust other user space")));
+        }
+    } else if (!superuser()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("Only system admin user can use this function")));
     }
 
     if (OidIsValid(uid) || allUser) {
@@ -1919,7 +2027,7 @@ void WLMReadjustUserSpaceThroughAllDbs(const char* username)
             rc = snprintf_s(query,
                 sizeof(query),
                 sizeof(query) - 1,
-                "select gs_wlm_readjust_user_space_through_username(\'%s\');",
+                "select pg_catalog.gs_wlm_readjust_user_space_through_username(\'%s\');",
                 username);
             securec_check_ss(rc, "\0", "\0");
 
@@ -1933,19 +2041,38 @@ void WLMReadjustUserSpaceThroughAllDbs(const char* username)
     return;
 }
 
-static bool allocAllUserSpaceInfo(List*** rels, UserData*** userDataInfos, uint64** size, uint64** tmpSize, int userNum)
+static bool allocAllUserSpaceInfo(List*** rels, UserData*** userDataInfos, int64** size, int64** tmpSize, int userNum)
 {
     if (userNum <= 0) {
         return false;
     }
     *rels = (List**)palloc0(sizeof(List*) * userNum);
     *userDataInfos = (UserData**)palloc0(sizeof(UserData*) * userNum);
-    *size = (uint64*)palloc0(sizeof(uint64) * userNum);
-    *tmpSize = (uint64*)palloc0(sizeof(uint64) * userNum);
+    *size = (int64*)palloc0(sizeof(int64) * userNum);
+    *tmpSize = (int64*)palloc0(sizeof(int64) * userNum);
+    if (*rels == NULL || *userDataInfos == NULL || *size == NULL || *tmpSize == 0) {
+        if (*rels != NULL) {
+            pfree(*rels);
+            *rels = NULL;
+        }
+        if (*userDataInfos != NULL) {
+            pfree(*userDataInfos);
+            *userDataInfos = NULL;
+        }
+        if (*size != NULL) {
+            pfree(*size);
+            *size = NULL;
+        }
+        if (*tmpSize != NULL) {
+            pfree(*tmpSize);
+            *tmpSize = NULL;
+        }
+        return false;
+    }
     return true;
 }
 
-static void freeAllUserSpaceInfo(List*** rels, UserData*** userDataInfos, uint64** size, uint64** tmpSize)
+static void freeAllUserSpaceInfo(List*** rels, UserData*** userDataInfos, int64** size, int64** tmpSize)
 {
     if (*rels != NULL) {
         pfree(*rels);
@@ -1971,8 +2098,8 @@ void WLMReAdjustAllUserSpaceInternal(bool isReset)
     int userNum = 0;
     List** rels = NULL;
     UserData** userDataInfos = NULL;
-    uint64* size = NULL;
-    uint64* tmpSize = NULL;
+    int64* size = NULL;
+    int64* tmpSize = NULL;
 
     int index = 0;
     ListCell* cell = NULL;
@@ -2093,8 +2220,8 @@ void WLMReAdjustUserSpaceWithResetFlagInternal(UserData* userdata, bool isReset)
     ListCell* cell = NULL;
     Relation rel;
     HeapTuple tup;
-    uint64 size = 0;
-    uint64 tmpSize = 0;
+    int64 size = 0;
+    int64 tmpSize = 0;
 
     rel = heap_open(RelationRelationId, AccessShareLock);
 
@@ -2195,6 +2322,13 @@ void WLMReadjustUserSpaceByNameWithResetFlag(const char* username, bool resetFla
     Oid uid = InvalidOid;
     if (strcmp(username, ALL_USER) != 0) {
         uid = GetRoleOid(username);
+        if (!superuser() && uid != GetUserId()) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("Normal user could not readjust other user space")));
+        }
+    } else if (!superuser()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("Only system admin user can use this function")));
     }
 
     HASH_SEQ_STATUS hash_seq;
@@ -2372,9 +2506,9 @@ void updateIOFlowData(const WLMUserCollInfoDetail* data, UserData* userdata)
 void WLMUpdateGroupUserSpace(UserData* userdata)
 {
     if (userdata != NULL && list_length(userdata->childlist) > 0) {
-        uint64 parent_space = 0;
-        uint64 parentTmpSpace = 0;
-        uint64 parentSpillSpace = 0;
+        int64 parent_space = 0;
+        int64 parentTmpSpace = 0;
+        int64 parentSpillSpace = 0;
         ListCell* cell = NULL;
 
         /* set parent total space */
@@ -2393,31 +2527,28 @@ void WLMUpdateGroupUserSpace(UserData* userdata)
 }
 
 /*
- * @Description: update user iops or query iops
- * @IN :
- * @See also:
+ * function name: WLMUpdatePartialSessionIops
+ * description  : update user iops or query iops for partial hash table
+ * arguments    :
+ *                _in_ bucketId: which bucket in partial IO hash table
+ * return value : void
  */
-void WLMUpdateSessionIops(void)
+static void WLMUpdatePartialSessionIops(uint32 bucketId)
 {
-    int i = 0;
-    int idx = 0;
-
     int j = 0;
 
     HASH_SEQ_STATUS* hash_seq = &g_instance.wlm_cxt->stat_manager.iostat_info_seq;
 
-    WLMAutoLWLock htbl_lock(WorkloadIoStatHashLock, LW_SHARED);
-
-    htbl_lock.AutoLWLockAcquire();
-
+    int lockId = GetIoStatLockId(bucketId);
+    (void)LWLockAcquire(GetMainLWLockByIndex(lockId), LW_SHARED);
+    long idx = hash_get_num_entries(G_WLM_IOSTAT_HASH(bucketId));
     ereport(DEBUG3,
         (errmsg("WLMProcessThreadMain: WLMUpdateSessionIops: "
-                "length of g_statManager.iostat_info_hashtbl: %ld",
-            hash_get_num_entries(g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl))));
+                "length of g_statManager.iostat_info_hashtbl in bucket %u: %ld", bucketId, idx)));
 
     /* get current user info count, we will do nothing if it's 0 */
-    if (g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl == NULL ||
-        (idx = hash_get_num_entries(g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl)) == 0) {
+    if (idx <= 0) {
+        LWLockRelease(GetMainLWLockByIndex(lockId));
         return;
     }
 
@@ -2426,10 +2557,10 @@ void WLMUpdateSessionIops(void)
 
     if (sessionarray == NULL) {
         ereport(LOG, (errmsg("Alloc memory to update user IO info failed, ignore this time.")));
+        LWLockRelease(GetMainLWLockByIndex(lockId));
         return;
     }
-
-    hash_seq_init(hash_seq, g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl);
+    hash_seq_init(hash_seq, G_WLM_IOSTAT_HASH(bucketId));
 
     /* Get all user data from the register info hash table. */
     while ((DNodeIoInfo = (WLMDNodeIOInfo*)hash_seq_search(hash_seq)) != NULL) {
@@ -2438,12 +2569,12 @@ void WLMUpdateSessionIops(void)
         }
     }
 
-    htbl_lock.AutoLWLockRelease();
+    LWLockRelease(GetMainLWLockByIndex(lockId));
 
     int retry_count = 0;
 
 retry:
-    for (i = 0; i < j; ++i) {
+    for (int i = 0; i < j; ++i) {
         Qid qid = sessionarray[i]->qid;
 
         char keystr[NAMEDATALEN];
@@ -2466,13 +2597,28 @@ retry:
 
         WLMRemoteInfoReceiverByNG(sessionarray[i]->nodegroup, &ioinfo, sizeof(ioinfo), WLMParseIOInfo);
 
-        USE_AUTO_LWLOCK(WorkloadIoStatHashLock, LW_EXCLUSIVE);
-
+        (void)LWLockAcquire(GetMainLWLockByIndex(lockId), LW_EXCLUSIVE);
         if (sessionarray[i]->tag == WLM_ACTION_REMAIN) {
             sessionarray[i]->io_geninfo = ioinfo;
         }
-
+        LWLockRelease(GetMainLWLockByIndex(lockId));
+        ereport(DEBUG2, (errmodule(MOD_WLM), errmsg("[IOSTAT] SETIFNO queryId: %lu, maxpeak_iops: %d, curr_iops: %d",
+            qid.queryId, ioinfo.peakIopsData.max_value, ioinfo.currIopsData.max_value)));
         CHECK_FOR_INTERRUPTS();
+    }
+    pfree_ext(sessionarray);
+}
+/*
+ * @Description: update user iops or query iops
+ * @IN :
+ * @See also:
+ */
+void WLMUpdateSessionIops(void)
+{
+    if (g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl != NULL) {
+        for (uint32 bucketId = 0; bucketId < NUM_IO_STAT_PARTITIONS; ++bucketId) {
+            WLMUpdatePartialSessionIops(bucketId);
+        }
     }
 }
 
@@ -2626,7 +2772,6 @@ void WLMUpdateUserInfo(void)
             CHECK_FOR_INTERRUPTS();
         }
 
-    retry2:
         for (idx = 0; idx < num; ++idx) {
             Oid uid = uids[idx];
             char keystr[NAMEDATALEN + 64] = {0};
@@ -2659,7 +2804,7 @@ void WLMUpdateUserInfo(void)
             int ret = WLMRemoteInfoSenderByNG(ngnames[idx], keystr, WLM_COLLECT_USERINFO);
             if (ret != 0) {
                 WLMDoSleepAndRetry(&retry_count);
-                goto retry2;
+                goto retry;
             }
 
             CHECK_FOR_INTERRUPTS();
@@ -2677,9 +2822,7 @@ void WLMUpdateUserInfo(void)
 
             RELEASE_AUTO_LWLOCK();
 #ifndef ENABLE_MULTIPLE_NODES
-            if (userdata != NULL) {
-                WLMUpdateSingleNodeUserInfo(userdata);
-            }
+            WLMUpdateSingleNodeUserInfo(userdata);
 #endif
             if (userdata != NULL && userdata->spaceUpdate) {
                 WLMReAdjustUserSpace(userdata);
@@ -2689,13 +2832,8 @@ void WLMUpdateUserInfo(void)
         }
     }
 
-    if (uids != NULL) {
-        pfree(uids);
-    }
-
-    if (ngnames != NULL) {
-        pfree(ngnames);
-    }
+    pfree_ext(uids);
+    pfree_ext(ngnames);
 }
 
 /*
@@ -2768,38 +2906,37 @@ void WLMCleanUpIoInfo(void)
     HASH_SEQ_STATUS hash_seq;
 
     WLMDNodeIOInfo* info = NULL;
-    long num = hash_get_num_entries(g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl);
+    long num;
 
-    /* nothing to clean up */
-    if (num <= 0) {
-        return;
-    }
+    for (uint32 bucketId = 0; bucketId < NUM_IO_STAT_PARTITIONS; ++bucketId) {
+        int lockId = GetIoStatLockId(bucketId);
+        (void)LWLockAcquire(GetMainLWLockByIndex(lockId), LW_EXCLUSIVE);
+        num = hash_get_num_entries(G_WLM_IOSTAT_HASH(bucketId));
+        ereport(DEBUG1, (errmsg("clean up all invalid io info, count/max in bucket %u: %ld/%d",
+            bucketId, num, g_instance.wlm_cxt->stat_manager.max_iostatinfo_num)));
 
-    ereport(DEBUG1,
-        (errmsg("clean up all invalid io info, count/max: %ld/%d",
-            num,
-            g_instance.wlm_cxt->stat_manager.max_iostatinfo_num)));
-
-    hash_seq_init(&hash_seq, g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl);
-
-    USE_AUTO_LWLOCK(WorkloadIoStatHashLock, LW_EXCLUSIVE);
-
-    while ((info = (WLMDNodeIOInfo*)hash_seq_search(&hash_seq)) != NULL) {
-        /*
-         * If the record in the hash table is valid,
-         * we will send a request to every datanodes
-         * to get its cpu time, and update the record
-         * in the hash table on coordinator.
-         */
-        if (info->tag == WLM_ACTION_REMOVED) {
-            /*
-             * If the record in the hash table is
-             * valid no longer, it will be removed.
-             */
-            hash_search(g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl, &info->qid, HASH_REMOVE, NULL);
+        if (num <= 0) {
+            /* nothing to clean up */
+            LWLockRelease(GetMainLWLockByIndex(lockId));
+            continue;
         }
-
-        CHECK_FOR_INTERRUPTS();
+        hash_seq_init(&hash_seq, G_WLM_IOSTAT_HASH(bucketId));
+        while ((info = (WLMDNodeIOInfo*)hash_seq_search(&hash_seq)) != NULL) {
+            /*
+             * If the record in the hash table is valid,
+             * we will send a request to every datanodes
+             * to get its cpu time, and update the record
+             * in the hash table on coordinator.
+             */
+            if (info->tag == WLM_ACTION_REMOVED) {
+                /*
+                 * If the record in the hash table is
+                 * valid no longer, it will be removed.
+                 */
+                hash_search(G_WLM_IOSTAT_HASH(bucketId), &info->qid, HASH_REMOVE, NULL);
+            }
+        }
+        LWLockRelease(GetMainLWLockByIndex(lockId));
     }
 }
 
@@ -3571,29 +3708,18 @@ void WLMCleanupHistoryUserResourceInfo(void)
 #endif
 }
 
-/*
- * @Description: init transcation on workload backend thread
- * @OUT backinit: transaction init
- * @Return: void
- * @See also:
- */
-void WLMInitTransaction(bool* backinit)
+void WLMInitPostgres()
 {
-    if (*backinit || (IS_PGXC_DATANODE && g_instance.wlm_cxt->stat_manager.infoinit &&
-                      !g_instance.attr.attr_resource.enable_perm_space)) {
-        return;
-    }
-
     /*
      * We will initialize the connection to the datanodes,
      * and make the multinode executor ready. We do it only
      * once at the first time to get cpu time.
      */
-    MemoryContext oldContext = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    MemoryContext oldContext = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
 
     char* username = NULL;
 
-    if (strcmp(t_thrd.proc_cxt.MyProgName, "WlmMonitor")) {
+    if (strcmp(t_thrd.proc_cxt.MyProgName, "WLMmonitor")) {
         username = g_instance.wlm_cxt->stat_manager.mon_user;
     } else {
         username = g_instance.wlm_cxt->stat_manager.user;
@@ -3603,7 +3729,19 @@ void WLMInitTransaction(bool* backinit)
     t_thrd.proc_cxt.PostInit->InitWLM();
 
     (void)MemoryContextSwitchTo(oldContext);
+}
 
+/*
+ * @Description: init transcation on workload backend thread
+ * @OUT backinit: transaction init
+ * @Return: void
+ * @See also:
+ */
+void WLMInitTransaction(bool* backinit)
+{
+    if (*backinit || (IS_PGXC_DATANODE && g_instance.wlm_cxt->stat_manager.infoinit &&
+                         !g_instance.attr.attr_resource.enable_perm_space))
+        return;	
     /*
      * Reset the transaction state, it's always TRANS_INPROGRESS
      * in this thread until the thread is finished.
@@ -3769,23 +3907,29 @@ void WLMReleaseNodeFromHash(void)
 void WLMReleaseIoInfoFromHash(void)
 {
     WLMGeneralParam* g_wlm_params = &u_sess->wlm_cxt->wlm_params;
+    if (!u_sess->wlm_cxt->wlm_params.iotrack && !u_sess->wlm_cxt->wlm_params.iocontrol) {
+        return;
+    }
+
+    uint32 bucketId = GetIoStatBucket(&g_wlm_params->qid);
+    int lockId = GetIoStatLockId(bucketId);
+    (void)LWLockAcquire(GetMainLWLockByIndex(lockId), LW_EXCLUSIVE);
 
     WLMDNodeIOInfo* ioinfo = (WLMDNodeIOInfo*)hash_search(
-        g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl, &g_wlm_params->qid, HASH_FIND, NULL);
+        G_WLM_IOSTAT_HASH(bucketId), &g_wlm_params->qid, HASH_FIND, NULL);
     if (ioinfo != NULL) {
         /*
          * We will check the thread count, if all threads has finished,
          * we will release the thread list and remove it from the hash table.
          */
-        gs_atomic_add_32(&ioinfo->threadCount, -1);
+        (void)pg_atomic_fetch_sub_u32((volatile uint32*)&ioinfo->threadCount, 1);
 
         /* No threads already, remove the info from the hash table. */
         if (ioinfo->threadCount <= 0) {
-            USE_AUTO_LWLOCK(WorkloadIoStatHashLock, LW_EXCLUSIVE);
-
-            hash_search(g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl, &g_wlm_params->qid, HASH_REMOVE, NULL);
+            hash_search(G_WLM_IOSTAT_HASH(bucketId), &g_wlm_params->qid, HASH_REMOVE, NULL);
         }
     }
+    LWLockRelease(GetMainLWLockByIndex(lockId));
     g_wlm_params->iotrack = 0;
     g_wlm_params->iocontrol = 0;
     g_wlm_params->iocount = 0;
@@ -3908,7 +4052,7 @@ WLMExceptTag WLMIsOutOfThreshold(const WLMCollectInfo* pCollectInfo, const excep
     /* check cpu skew percent. */
     if (t_thrd.wlm_cxt.except_ctl->qualiEndTime > 0 && except->skewpercent > 0 &&
         pCollectInfo->execEndTime >= t_thrd.wlm_cxt.except_ctl->qualiEndTime) {
-        return GetSkewRatioOfDN(&pCollectInfo->sdetail.geninfo) >= (int)except->skewpercent ? WLM_EXCEPT_CPU
+        return (GetSkewRatioOfDN(&pCollectInfo->sdetail.geninfo) >= (int)except->skewpercent) ? WLM_EXCEPT_CPU
                                                                                             : WLM_EXCEPT_NONE;
     }
 
@@ -4082,17 +4226,18 @@ void WLMInsertIoInfoIntoHashTable(void)
         return;
     }
 
+    uint32 bucketId = GetIoStatBucket(&g_wlm_params->qid);
+    int lockId = GetIoStatLockId(bucketId);
+    (void)LWLockAcquire(GetMainLWLockByIndex(lockId), LW_EXCLUSIVE);
     /* too many collect info now, ignore this time. */
-    if (hash_get_num_entries(g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl) >
-        g_instance.wlm_cxt->stat_manager.max_iostatinfo_num) {
+    if (hash_get_num_entries(G_WLM_IOSTAT_HASH(bucketId)) > g_instance.wlm_cxt->stat_manager.max_iostatinfo_num) {
         g_wlm_params->iotrack = 0;
+        LWLockRelease(GetMainLWLockByIndex(lockId));
         return;
     }
 
-    USE_AUTO_LWLOCK(WorkloadIoStatHashLock, LW_EXCLUSIVE);
-
     WLMDNodeIOInfo* pDNodeIoInfo = (WLMDNodeIOInfo*)hash_search(
-        g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl, &g_wlm_params->qid, HASH_ENTER_NULL, &hasFound);
+        G_WLM_IOSTAT_HASH(bucketId), &g_wlm_params->qid, HASH_ENTER_NULL, &hasFound);
 
     if (pDNodeIoInfo != NULL) {
         rc = memset_s(pDNodeIoInfo, sizeof(WLMDNodeIOInfo), 0, sizeof(WLMDNodeIOInfo));
@@ -4115,6 +4260,7 @@ void WLMInsertIoInfoIntoHashTable(void)
 
         ereport(DEBUG1, (errmsg("insert wlm io collect info into hash table, tid: %lu.", g_wlm_params->qid.queryId)));
     }
+    LWLockRelease(GetMainLWLockByIndex(lockId));
 }
 
 /*
@@ -4555,8 +4701,7 @@ void WLMSetSessionInfo(void)
     if (t_thrd.wlm_cxt.parctl_state.subquery) {
         return;
     }
-
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+    if ((IS_PGXC_COORDINATOR && !IsConnFromCoord()) || IS_SINGLE_NODE) {
         uint32 hashCode = WLMHashCode(&g_wlm_params->qid, sizeof(Qid));
 
         (void)LockSessRealTHashPartition(hashCode, LW_SHARED);
@@ -4604,13 +4749,16 @@ void WLMSetSessionInfo(void)
         /* Get session info from real session info. */
         pDetail->start_time = pRealDetail->start_time;
         pDetail->block_time = pRealDetail->block_time;
-        pDetail->statement = pstrdup(pRealDetail->statement);
+        pDetail->statement = FindCurrentUniqueSQL();
 
         /* Get session info from current thread. */
         pDetail->qid = g_wlm_params->qid;
         pDetail->databaseid = u_sess->proc_cxt.MyDatabaseId;
         pDetail->userid = GetUserId();
-        pDetail->debug_query_id = u_sess->debug_query_id;
+        if (u_sess->debug_query_id == 0)
+            pDetail->debug_query_id = u_sess->slow_query_cxt.slow_query.debug_query_sql_id;
+        else
+            pDetail->debug_query_id = u_sess->debug_query_id;
         pDetail->fintime = GetCurrentTimestamp();
         pDetail->status = t_thrd.wlm_cxt.collect_info->status;
         /*
@@ -4621,24 +4769,27 @@ void WLMSetSessionInfo(void)
             TimestampTzPlusMilliseconds(GetCurrentTimestamp(), session_info_collect_timer * MSECS_PER_SEC);
         pDetail->estimate_time = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->estimate_time;
         pDetail->estimate_memory = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->estimate_memory;
-        pDetail->query_plan_issue = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue;
-        pDetail->query_plan = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan;
+        pDetail->query_plan_issue = pstrdup(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
+        pDetail->query_plan = pstrdup(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
+        pDetail->plan_size = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size;
+
         pDetail->query_band = NULL;
-        pDetail->msg = t_thrd.wlm_cxt.collect_info->sdetail.msg;
+        pDetail->msg = pstrdup(t_thrd.wlm_cxt.collect_info->sdetail.msg);
 
         pDetail->clienthostname = NULL;
         pDetail->schname = NULL;
         pDetail->username = NULL;
-        /* only recored session info when the duration is greater or equal to
+        /* only recored session info is slow query or when the duration is greater or equal to
          * u_sess->attr.attr_resource.resource_track_duration */
-        pDetail->valid = (pDetail->fintime - pDetail->start_time) / USECS_PER_SEC >=
-                                 u_sess->attr.attr_resource.resource_track_duration
-                             ? true
-                             : false;
+        int64 duration = (pDetail->fintime - pDetail->start_time) / USECS_PER_SEC;
+        pDetail->valid = true;
+        if (duration < u_sess->attr.attr_resource.resource_track_duration)
+            pDetail->valid = false;
 
-        t_thrd.wlm_cxt.collect_info->sdetail.msg = NULL;
-        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue = NULL;
-        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan = NULL;
+        pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.msg);
+        pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
+        pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size = 0;
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->iscomplex = 1;
 
         if (u_sess->attr.attr_resource.query_band != NULL) {
@@ -4654,10 +4805,8 @@ void WLMSetSessionInfo(void)
         }
 
         if (u_sess->attr.attr_common.application_name) {
-            errno_t errval = strncpy_s(pDetail->appname,
-                sizeof(pDetail->appname),
-                u_sess->attr.attr_common.application_name,
-                sizeof(pDetail->appname) - 1);
+            errno_t errval = strncpy_s(pDetail->appname, sizeof(pDetail->appname),
+                u_sess->attr.attr_common.application_name, sizeof(pDetail->appname) - 1);
             securec_check_errval(errval, , LOG);
         }
         pDetail->clientaddr = DUP_POINTER(&t_thrd.shemem_ptr_cxt.MyBEEntry->st_clientaddr);
@@ -4668,20 +4817,15 @@ void WLMSetSessionInfo(void)
         securec_check_errval(errval, , LOG);
 
         /* get cgroup name */
-        rc = snprintf_s(pDetail->cgroup,
-            sizeof(pDetail->cgroup),
-            sizeof(pDetail->cgroup) - 1,
-            "%s",
-            t_thrd.wlm_cxt.collect_info->cginfo.cgroup);
+        rc = snprintf_s(pDetail->cgroup, sizeof(pDetail->cgroup), sizeof(pDetail->cgroup) - 1,
+            "%s", t_thrd.wlm_cxt.collect_info->cginfo.cgroup);
         securec_check_ss(rc, "\0", "\0");
 
         /* get node group name */
         errval = strncpy_s(
             pDetail->nodegroup, sizeof(pDetail->nodegroup), g_wlm_params->ngroup, sizeof(pDetail->nodegroup) - 1);
         securec_check_errval(errval, , LOG);
-
-        /* get user name */
-        pDetail->username = GetUserNameFromId(pDetail->userid);
+        WLMSetSessionSlowInfo(pDetail);
 
         WLMCNUpdateDNodeInfoState(pRealDetail, WLM_ACTION_REMOVED);
 
@@ -4699,7 +4843,7 @@ void WLMSetSessionInfo(void)
 
         LockSessHistHashPartition(hashCode, LW_EXCLUSIVE);
         int64 dnDuration = WLMGetTimestampDuration(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnStartTime,
-            (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnEndTime > 0 ?
+            ((t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnEndTime > 0) ?
              t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnEndTime : GetCurrentTimestamp())) / MSECS_PER_SEC;
         if (t_thrd.wlm_cxt.dn_cpu_detail->status == WLM_STATUS_FINISHED &&
             dnDuration < u_sess->attr.attr_resource.resource_track_duration) {
@@ -4730,72 +4874,9 @@ void WLMSetSessionInfo(void)
         securec_check(rc, "\0", "\0");
 #endif
         pDetail->qid = g_wlm_params->qid;
-        pDetail->threadid = t_thrd.proc_cxt.MyProcPid;
-#ifndef ENABLE_MULTIPLE_NODES
-        /* compare with multinode, single node enter DN running /CN finished */
-        /* the below info is copy from old CN part, so status running should not record info */
-        if (t_thrd.wlm_cxt.collect_info->status != WLM_STATUS_RUNNING) {
-            USE_MEMORY_CONTEXT(g_instance.wlm_cxt->query_resource_track_mcxt);
-            pDetail->start_time = t_thrd.wlm_cxt.collect_info->execStartTime;
-            pDetail->block_time = WLMGetTimestampDuration(
-                t_thrd.wlm_cxt.collect_info->blockStartTime,
-                t_thrd.wlm_cxt.collect_info->blockEndTime);
-            pDetail->statement = pstrdup(t_thrd.wlm_cxt.collect_info->sdetail.statement);
-            pDetail->databaseid = u_sess->proc_cxt.MyDatabaseId;
-            pDetail->userid = GetUserId();
-            pDetail->debug_query_id = u_sess->debug_query_id;
-            pDetail->fintime = GetCurrentTimestamp();
-            pDetail->estimate_time = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->estimate_time;
-            if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue != NULL) {
-                pDetail->query_plan_issue = pstrdup(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
-            } else {
-                pDetail->query_plan_issue = NULL;
-            }
-            if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan != NULL) {
-                pDetail->query_plan = pstrdup(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
-            } else {
-                pDetail->query_plan = NULL;
-            }
-            pDetail->msg = t_thrd.wlm_cxt.collect_info->sdetail.msg;
-            if (u_sess->attr.attr_resource.query_band != NULL) {
-                pDetail->query_band = pstrdup(u_sess->attr.attr_resource.query_band);
-            } else {
-                pDetail->query_band = NULL;
-            }
-            if (t_thrd.shemem_ptr_cxt.MyBEEntry->st_clienthostname) {
-                pDetail->clienthostname = pstrdup(t_thrd.shemem_ptr_cxt.MyBEEntry->st_clienthostname);
-            } else {
-                pDetail->clienthostname = NULL;
-            }
-            if (u_sess->attr.attr_common.namespace_current_schema) {
-                pDetail->schname = pstrdup(u_sess->attr.attr_common.namespace_current_schema);
-            } else {
-                pDetail->schname = NULL;
-            }
-            pDetail->username = GetUserNameFromId(pDetail->userid);
-            pDetail->valid = (pDetail->fintime - pDetail->start_time) / USECS_PER_SEC >=
-                u_sess->attr.attr_resource.resource_track_duration
-                ? true : false;
-            if (u_sess->attr.attr_common.application_name) {
-                errno_t errval = strncpy_s(pDetail->appname, sizeof(pDetail->appname),
-                    u_sess->attr.attr_common.application_name,
-                    sizeof(pDetail->appname) - 1);
-                securec_check_errval(errval, , LOG);
-            }
-            pDetail->clientaddr = DUP_POINTER(&t_thrd.shemem_ptr_cxt.MyBEEntry->st_clientaddr);
-                    /* get cgroup name */
-            rc = snprintf_s(pDetail->cgroup, sizeof(pDetail->cgroup),
-                sizeof(pDetail->cgroup) - 1, "%s", t_thrd.wlm_cxt.collect_info->cginfo.cgroup);
-            securec_check_ss(rc, "\0", "\0");
-            rc = strncpy_s(pDetail->nodegroup, sizeof(pDetail->nodegroup),
-                g_wlm_params->ngroup, sizeof(pDetail->nodegroup) - 1);
-            securec_check_errval(rc, , LOG);
-        }
-        pDetail->status = t_thrd.wlm_cxt.collect_info->status;
-#else
         pDetail->valid = true;
-        pDetail->status = t_thrd.wlm_cxt.dn_cpu_detail->status;
-#endif
+        pDetail->threadid = t_thrd.proc_cxt.MyProcPid;
+
         /*
          * We have to save the max time to keep the record in the memory,
          * while the record expired, we will remove it from the hash table.
@@ -4810,13 +4891,20 @@ void WLMSetSessionInfo(void)
         pDetail->geninfo.spillCount = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->spillCount;
         pDetail->geninfo.spillSize = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->spillSize;
         pDetail->geninfo.broadcastSize = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->broadcastSize;
-        TimestampTz endTime = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnEndTime > 0
+        TimestampTz endTime = (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnEndTime > 0)
                                   ? t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnEndTime
                                   : GetCurrentTimestamp();
         pDetail->geninfo.dnTime =
             WLMGetTimestampDuration(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnStartTime, endTime);
         pDetail->warning = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->warning;
         pDetail->geninfo.totalCpuTime = 0;
+        pDetail->status = t_thrd.wlm_cxt.dn_cpu_detail->status;
+        MemoryContext oldContext = MemoryContextSwitchTo(g_instance.wlm_cxt->query_resource_track_mcxt);
+        pDetail->query_plan = pstrdup(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
+        MemoryContextSwitchTo(oldContext);
+        pDetail->plan_size = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size;
+        pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size = 0;
 
         /* update the mySessionMemoryEntry for memory manager display */
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->iscomplex = 1;
@@ -4835,6 +4923,9 @@ void WLMSetSessionInfo(void)
 
         if (g_wlm_params->ptr != NULL) {
             pDetail->geninfo.totalCpuTime = ((WLMDNodeInfo*)g_wlm_params->ptr)->geninfo.totalCpuTime;
+        }
+        if (t_thrd.wlm_cxt.dn_cpu_detail->status == WLM_STATUS_FINISHED) {
+            WLMSetSessionSlowInfo(pDetail);
         }
 
         UnLockSessHistHashPartition(hashCode);
@@ -4858,14 +4949,14 @@ void WLMFillGeneralDataFromStmtInfo(WLMGeneralData* generalData, WLMStmtDetail* 
     cpuTime = stmtInfo->geninfo.totalCpuTime / USECS_PER_MSEC;
     GetMaxAndMinSessionInfo(generalData, peakMemoryData, stmtInfo->geninfo.maxPeakChunksQuery);
     GetMaxAndMinSessionInfo(generalData, usedMemoryData, 0);
-    GetMaxAndMinSessionInfo(generalData, spillData, spillSize);
-    GetMaxAndMinSessionInfo(generalData, broadcastData, (int)broadcastSize);
+    GetMaxAndMinSessionInfo(generalData, spillData, stmtInfo->geninfo.spillSize);
+    GetMaxAndMinSessionInfo(generalData, broadcastData, stmtInfo->geninfo.broadcastSize);
     GetMaxAndMinSessionInfo(generalData, cpuData, cpuTime);
     GetMaxAndMinSessionInfo(generalData, dnTimeData, stmtInfo->geninfo.dnTime);
     GetMaxAndMinSessionInfo(generalData, peakIopsData, stmtInfo->ioinfo.peak_iops);
     GetMaxAndMinSessionInfo(generalData, currIopsData, stmtInfo->ioinfo.curr_iops);
     setTopNWLMSessionInfo(generalData, 0, cpuTime, g_instance.attr.attr_common.PGXCNodeName, TOP5);
-    if (stmtInfo->geninfo.spillCount > 0 || spillSize > 0) {
+    if (stmtInfo->geninfo.spillCount > 0 || stmtInfo->geninfo.spillSize > 0) {
         generalData->spillNodeCount++;
     }
 }
@@ -4915,9 +5006,10 @@ void* WLMGetSessionInfo(const Qid* qid, int removed, int* num)
 
         WLMStmtDetail* pDetail = NULL;
         WLMSessionStatistics* detail = NULL;
-        WLMSessionStatistics* pDetails = (WLMSessionStatistics*)palloc0((size_t)(*num) * sizeof(WLMSessionStatistics));
+        Size totalSize = mul_size(sizeof(WLMSessionStatistics), (Size)(*num));
+        WLMSessionStatistics* pDetails = (WLMSessionStatistics*)palloc0(totalSize);
 
-        bool is_super_user = superuser();
+        bool is_super_user = superuser() || isMonitoradmin(GetUserId());
         Oid cur_user_id = GetUserId();
 
         HASH_SEQ_STATUS hash_seq;
@@ -4926,7 +5018,12 @@ void* WLMGetSessionInfo(const Qid* qid, int removed, int* num)
         /* Fetch all session info from the hash table. */
         while ((pDetail = (WLMStmtDetail*)hash_seq_search(&hash_seq)) != NULL) {
             if (pDetail->valid && (is_super_user || pDetail->userid == cur_user_id)) {
+                StringInfoData plan_string;
                 detail = pDetails + i;
+
+                rc = memset_s(&detail->gendata, sizeof(detail->gendata), 0, sizeof(detail->gendata));
+                securec_check_errval(rc, , LOG);
+                WLMInitMinValue4SessionInfo(&detail->gendata);
 
                 detail->qid = pDetail->qid;
                 detail->databaseid = pDetail->databaseid;
@@ -4936,20 +5033,61 @@ void* WLMGetSessionInfo(const Qid* qid, int removed, int* num)
                 detail->fintime = pDetail->fintime;
                 detail->status = pDetail->status;
                 detail->block_time = pDetail->block_time;
-                detail->query_plan = pDetail->query_plan == NULL ? (char*)"NoPlan" : pstrdup(pDetail->query_plan);
+
+                if (pDetail->query_plan == NULL) {
+                    initStringInfo(&plan_string);
+                    appendStringInfo(&plan_string, "Coordinator Name: %s \nNoPlan\n\n\n",
+                        g_instance.attr.attr_common.PGXCNodeName);
+                    plan_string.data[plan_string.len -1] = '\0';
+                    detail->query_plan = pstrdup(plan_string.data);
+                    pfree_ext(plan_string.data);
+                } else {
+                    detail->query_plan = pstrdup(pDetail->query_plan);
+                }
+
+                if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION) {
+                    detail->gendata.slowQueryInfo.current_table_counter =
+                        (PgStat_TableCounts*) palloc0(sizeof(PgStat_TableCounts));
+                    detail->gendata.slowQueryInfo.current_table_counter->t_tuples_returned =
+                        pDetail->slowQueryInfo.current_table_counter->t_tuples_returned;
+                    detail->gendata.slowQueryInfo.current_table_counter->t_tuples_fetched =
+                        pDetail->slowQueryInfo.current_table_counter->t_tuples_fetched;
+                    detail->gendata.slowQueryInfo.current_table_counter->t_tuples_inserted =
+                        pDetail->slowQueryInfo.current_table_counter->t_tuples_inserted;
+                    detail->gendata.slowQueryInfo.current_table_counter->t_tuples_updated =
+                        pDetail->slowQueryInfo.current_table_counter->t_tuples_updated;
+                    detail->gendata.slowQueryInfo.current_table_counter->t_tuples_deleted =
+                        pDetail->slowQueryInfo.current_table_counter->t_tuples_deleted;
+                    detail->gendata.slowQueryInfo.current_table_counter->t_blocks_fetched =
+                        pDetail->slowQueryInfo.current_table_counter->t_blocks_fetched;
+                    detail->gendata.slowQueryInfo.current_table_counter->t_blocks_hit =
+                        pDetail->slowQueryInfo.current_table_counter->t_blocks_hit;
+
+                    detail->gendata.slowQueryInfo.localTimeInfoArray =
+                        (int64*) palloc0(sizeof(int64) * TOTAL_TIME_INFO_TYPES);
+                    for (uint32 idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
+                        detail->gendata.slowQueryInfo.localTimeInfoArray[idx] =
+                            pDetail->slowQueryInfo.localTimeInfoArray[idx];
+                    }
+                    detail->gendata.query_plan =
+                        lappend(detail->gendata.query_plan, pstrdup(detail->query_plan));
+                }
+                detail->n_returned_rows = pDetail->slowQueryInfo.n_returned_rows;
                 detail->query_plan_issue =
-                    pDetail->query_plan_issue == NULL ? (char*)"" : pstrdup(pDetail->query_plan_issue);
-                detail->query_band = pDetail->query_band == NULL ? (char*)"" : pstrdup(pDetail->query_band);
-                detail->err_msg = pDetail->msg == NULL ? (char*)"" : pstrdup(pDetail->msg);
-                detail->statement = pDetail->statement == NULL ? (char*)"" : pstrdup(pDetail->statement);
-                detail->clienthostname = pDetail->clienthostname == NULL ? (char*)"" : pstrdup(pDetail->clienthostname);
-                detail->schname = pDetail->schname == NULL ? (char*)"" : pstrdup(pDetail->schname);
-                detail->username = pDetail->username == NULL ? (char*)"" : pstrdup(pDetail->username);
+                    (pDetail->query_plan_issue == NULL) ? (char*)"" : pstrdup(pDetail->query_plan_issue);
+                detail->query_band = (pDetail->query_band == NULL) ? (char*)"" : pstrdup(pDetail->query_band);
+                detail->err_msg = (pDetail->msg == NULL) ? (char*)"" : pstrdup(pDetail->msg);
+                detail->statement = (pDetail->statement == NULL) ? (char*)"" : pstrdup(pDetail->statement);
+                detail->clienthostname =
+                    (pDetail->clienthostname == NULL) ? (char*)"" : pstrdup(pDetail->clienthostname);
+                detail->schname = (pDetail->schname == NULL) ? (char*)"" : pstrdup(pDetail->schname);
+                detail->username = (pDetail->username == NULL) ? (char*)"" : pstrdup(pDetail->username);
                 detail->appname = pstrdup(pDetail->appname);
                 detail->clientaddr = NULL;
                 detail->estimate_time = pDetail->estimate_time;
                 detail->estimate_memory = pDetail->estimate_memory;
-                detail->duration = (detail->fintime - detail->start_time) / USECS_PER_MSEC; /* not include block time */
+                /* not include block time */
+                detail->duration = (detail->fintime - detail->start_time) / USECS_PER_MSEC;
                 detail->remove = false;
 
                 rc = snprintf_s(
@@ -5003,10 +5141,8 @@ void* WLMGetSessionInfo(const Qid* qid, int removed, int* num)
         *num = i;
 #ifdef ENABLE_MULTIPLE_NODES
         char keystr[NAMEDATALEN];
-        int retry_count = 0;
         PGXCNodeAllHandles* pgxc_handles = NULL;
 
-    retry:
         pgxc_handles = WLMRemoteInfoCollectorStart();
 
         if (pgxc_handles == NULL) {
@@ -5018,11 +5154,6 @@ void* WLMGetSessionInfo(const Qid* qid, int removed, int* num)
 
         for (i = 0; i < *num; ++i) {
             detail = pDetails + i;
-
-            rc = memset_s(&detail->gendata, sizeof(detail->gendata), 0, sizeof(detail->gendata));
-            securec_check_errval(rc, , LOG);
-            WLMInitMinValue4SessionInfo(&detail->gendata);
-
             errno_t ssval = snprintf_s(keystr,
                 sizeof(keystr),
                 sizeof(keystr) - 1,
@@ -5036,24 +5167,17 @@ void* WLMGetSessionInfo(const Qid* qid, int removed, int* num)
             int ret = WLMRemoteInfoSender(pgxc_handles, keystr, WLM_COLLECT_SESSINFO);
 
             if (ret != 0) {
-                ++retry_count;
                 release_pgxc_handles(pgxc_handles);
                 pgxc_handles = NULL;
 
-                ereport(WARNING, (errmsg("send failed, retry_count: %d", retry_count)));
+                ereport(ERROR,
+                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                    errmsg("Remote Sender: Failed to send command to datanode")));
 
-                pg_usleep(3 * USECS_PER_SEC);
-
-                if (retry_count >= 3) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                            errmsg("Remote Sender: Failed to send command to datanode")));
-                }
-
-                goto retry;
             }
 
             /* Fetch session statistics from each datanode */
+            detail->gendata.tag = WLM_COLLECT_SESSINFO;
             WLMRemoteInfoReceiver(pgxc_handles, &detail->gendata, sizeof(detail->gendata), WLMParseFunc4SessionInfo);
             WLMCheckMinValue4SessionInfo(&detail->gendata);
         }
@@ -5065,6 +5189,20 @@ void* WLMGetSessionInfo(const Qid* qid, int removed, int* num)
 
     return NULL;
 }
+
+char* PlanListToString(const List* query_plan)
+{
+    StringInfoData string;
+    ListCell* l = NULL;
+    initStringInfo(&string);
+
+    foreach (l, query_plan) {
+        char* plan = (char*)lfirst(l);
+        appendStringInfoString(&string, plan);
+    }
+    return string.data;
+}
+
 
 /*
  * function name: WLMGetInstanceInfo
@@ -5092,8 +5230,10 @@ void* WLMGetInstanceInfo(int* num, bool isCleanup)
         for (j = NUM_INSTANCE_REALTIME_PARTITIONS; --j >= 0;) {
             LWLockRelease(GetMainLWLockByIndex(FirstInstanceRealTLock + j));
         }
+        ereport(DEBUG2, (errmodule(MOD_WLM), errmsg("the number of instance info is %d.", *num)));
         return NULL;
     }
+    ereport(DEBUG2, (errmodule(MOD_WLM), errmsg("the number of instance info is %d.", *num)));
 
     int i = 0;
 
@@ -5128,6 +5268,8 @@ void* WLMGetInstanceInfo(int* num, bool isCleanup)
             /* remove it from the hash table. */
             hash_search(
                 g_instance.wlm_cxt->instance_manager.instance_info_hashtbl, &pDetail->timestamp, HASH_REMOVE, NULL);
+            ereport(DEBUG2, (errmodule(MOD_WLM),
+                errmsg("remove instance info(%lu) from hashtable.", pDetail->timestamp)));
         }
 
         ++i;
@@ -5147,6 +5289,7 @@ void* WLMGetInstanceInfo(int* num, bool isCleanup)
     }
 
     *num = i;
+    ereport(DEBUG2, (errmodule(MOD_WLM), errmsg("the real-number of instance info is %d.", *num)));
 
     return pDetails;
 }
@@ -5219,6 +5362,269 @@ int64 WLMGetTimestampDuration(TimestampTz start, TimestampTz end)
     return result;
 }
 
+
+bool WLMSetCNCollectInfoStatusPending(WLMGeneralParam* g_wlm_params)
+{
+    t_thrd.wlm_cxt.collect_info->blockStartTime = GetCurrentTimestamp();
+    
+    /* reserve new qid */
+    ReserveQid(&g_wlm_params->qid);
+
+    g_wlm_params->qid.stamp = t_thrd.wlm_cxt.collect_info->blockStartTime;
+
+    pgstat_report_statement_wlm_status();
+
+    if (t_thrd.wlm_cxt.collect_info->attribute == WLM_ATTR_INVALID) {
+        return false;
+    }
+
+    /* Get current threshold and action. */
+    WLMGetThresholdAction(t_thrd.wlm_cxt.collect_info);
+
+    /*
+     * If we have set the waiting time that statement is waiting
+     * in the queue, we will set timer to finish it or switch
+     * to new priority list. Before set timer, we must check statement
+     * finish time, if max waiting time is out of the finish time,
+     * the timer will be set from block start time to statement finish time.
+     */
+    if (t_thrd.wlm_cxt.parctl_state.enqueue && t_thrd.wlm_cxt.except_ctl->max_waiting_time > 0) {
+        const TimestampTz statement_fin_time = GetStatementFinTime();
+
+        /* get current block end time during this time */
+        if (t_thrd.wlm_cxt.except_ctl->max_waiting_time > 0) {
+            t_thrd.wlm_cxt.except_ctl->blockEndTime =
+                TimestampTzPlusMilliseconds(t_thrd.wlm_cxt.collect_info->blockStartTime,
+                    t_thrd.wlm_cxt.except_ctl->max_waiting_time * MSECS_PER_SEC);
+        }
+
+        if (u_sess->attr.attr_common.StatementTimeout > 0 &&
+            t_thrd.wlm_cxt.except_ctl->blockEndTime > statement_fin_time) {
+            t_thrd.wlm_cxt.except_ctl->blockEndTime = statement_fin_time;
+        }
+
+        (void)WLMSetTimer(t_thrd.wlm_cxt.collect_info->blockStartTime, t_thrd.wlm_cxt.except_ctl->blockEndTime);
+    }
+
+    return true;
+}
+
+bool WLMSetCNCollectInfoStatusRunning(WLMGeneralParam* g_wlm_params)
+{
+    errno_t rc;
+
+    dywlm_client_set_respool_memory(g_wlm_params->memsize, WLM_STATUS_RESERVE);
+
+    WLMSetExecutorStartTime();
+
+    /* reset datanode collect info */
+    if (g_wlm_params->ptr != NULL) {
+        WLMCNUpdateDNodeInfoState(g_wlm_params->ptr, WLM_ACTION_REMOVED);
+        g_wlm_params->ptr = NULL;
+    }
+
+    if (g_wlm_params->ioptr != NULL) {
+        WLMCNUpdateIoInfoState(g_wlm_params->ioptr, WLM_ACTION_REMOVED);
+        g_wlm_params->ioptr = NULL;
+    }
+
+    /* memory track is on and query is need track resource, we will track the session info */
+    if ((u_sess->attr.attr_resource.enable_resource_track && u_sess->exec_cxt.need_track_resource &&
+            u_sess->attr.attr_resource.resource_track_level != RESOURCE_TRACK_NONE) ||
+        !t_thrd.wlm_cxt.parctl_state.simple) {
+        g_wlm_params->memtrack = 1;
+    } else {
+        g_wlm_params->memtrack = 0;
+
+        /* When mySessionMemoryEntry->query_plan is not NULL,
+           should not free g_collectInfo.sdetail.statement. */
+        if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
+            t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan == NULL &&
+            t_thrd.wlm_cxt.collect_info->sdetail.statement) {
+            pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.statement);
+        }
+    }
+
+    // set IO control info on coordinator
+    g_wlm_params->iops_limits = u_sess->attr.attr_resource.iops_limits ? u_sess->attr.attr_resource.iops_limits
+                                                                       : (g_wlm_params->rpdata.iops_limits);
+    g_wlm_params->io_priority = u_sess->attr.attr_resource.io_priority ? u_sess->attr.attr_resource.io_priority
+                                                                       : (g_wlm_params->rpdata.io_priority);
+
+    /*
+     * IO is tracked on DN for complicated query or load job,
+     * when enable_resource_track, iops_limits or io_priority is set by user.
+     * IO collect info for complicated queries is gathered on CN
+     * every 10 seconds only if enable_resource_track is open.
+     */
+    if (t_thrd.wlm_cxt.parctl_state.iocomplex == 1 || g_wlm_params->iostate != IOSTATE_NONE) {
+        if (u_sess->attr.attr_resource.enable_resource_track) {
+            g_wlm_params->iotrack = 1;
+        }
+
+        if (WLMCheckIOIsUnderControl()) {
+            g_wlm_params->iocontrol = 1;
+        }
+    }
+
+    /* Maybe the query have no control group, we have to set a default group. */
+    if (*u_sess->wlm_cxt->control_group == '\0') {
+        rc = snprintf_s(t_thrd.wlm_cxt.collect_info->cginfo.cgroup,
+            sizeof(t_thrd.wlm_cxt.collect_info->cginfo.cgroup),
+            sizeof(t_thrd.wlm_cxt.collect_info->cginfo.cgroup) - 1,
+            "%s:%s",
+            GSCGROUP_DEFAULT_CLASS,
+            GSCGROUP_MEDIUM_TIMESHARE);
+    } else {
+        /*
+         * control group maybe has changed in pending mode, so we
+         * must reset the control group in the collect info here.
+         */
+        rc = snprintf_s(t_thrd.wlm_cxt.collect_info->cginfo.cgroup,
+            sizeof(t_thrd.wlm_cxt.collect_info->cginfo.cgroup),
+            sizeof(t_thrd.wlm_cxt.collect_info->cginfo.cgroup) - 1,
+            "%s",
+            u_sess->wlm_cxt->control_group);
+    }
+    securec_check_ss(rc, "\0", "\0");
+
+    t_thrd.wlm_cxt.qnode.priority =
+        gscgroup_get_percent(t_thrd.wlm_cxt.thread_node_group, u_sess->wlm_cxt->control_group);
+
+    pgstat_report_statement_wlm_status();
+
+    /* qid is invalid, attribute also is invalid */
+    if (IsQidInvalid(&g_wlm_params->qid)) {
+        t_thrd.wlm_cxt.collect_info->attribute = WLM_ATTR_INVALID;
+
+        if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
+            t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan != NULL) {
+            pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
+            t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size = 0;
+        }
+
+        if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
+            t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue != NULL) {
+            pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
+        }
+
+        if (t_thrd.wlm_cxt.collect_info->sdetail.statement != NULL) {
+            pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.statement);
+        }
+
+        return false;
+    }
+
+    /*
+     * if we do not set any exception info in cgroup or the statement
+     * is a simple statement, the attribute of collect info will be
+     * set invalid, that is we need not handle any exception.
+     */
+    if (t_thrd.wlm_cxt.parctl_state.simple) {
+        t_thrd.wlm_cxt.collect_info->attribute = WLM_ATTR_INVALID;
+    }
+
+    WLMGetThresholdAction(t_thrd.wlm_cxt.collect_info);
+
+    /* register collect info */
+    if ((t_thrd.wlm_cxt.parctl_state.subquery == 0) && !WLMInsertCollectInfoIntoHashTable()) {
+        if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
+            t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan != NULL) {
+            pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
+            t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size = 0;
+        }
+
+        if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
+            t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue != NULL) {
+            pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
+        }
+
+        if (t_thrd.wlm_cxt.collect_info->sdetail.statement != NULL) {
+            pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.statement);
+        }
+    }
+
+    /*
+     * insert io into hash table on CN,
+     *  only when enable_resource_track is true.
+     */
+    WLMInsertIoInfoIntoHashTable();
+
+    if (t_thrd.wlm_cxt.collect_info->attribute == WLM_ATTR_INVALID) {
+        return false;
+    }
+
+    const TimestampTz statement_fin_time = GetStatementFinTime();
+    TimestampTz intervalEndTime = 0;
+
+    /* cpu threshold is valid */
+    if (t_thrd.wlm_cxt.except_ctl->max_interval_time > 0) {
+        intervalEndTime = TimestampTzPlusMilliseconds(t_thrd.wlm_cxt.collect_info->execStartTime,
+            t_thrd.wlm_cxt.except_ctl->max_interval_time * MSECS_PER_SEC);
+
+        t_thrd.wlm_cxt.except_ctl->qualiEndTime = intervalEndTime;
+    }
+
+    if (u_sess->attr.attr_common.StatementTimeout > 0) {
+        t_thrd.wlm_cxt.except_ctl->execEndTime = statement_fin_time;
+    }
+
+    if (t_thrd.wlm_cxt.except_ctl->max_running_time > 0) {
+        TimestampTz tmpEndTime = TimestampTzPlusMilliseconds(t_thrd.wlm_cxt.collect_info->execStartTime,
+            t_thrd.wlm_cxt.except_ctl->max_running_time * MSECS_PER_SEC);
+
+        if (t_thrd.wlm_cxt.except_ctl->execEndTime <= 0 ||
+            t_thrd.wlm_cxt.except_ctl->execEndTime > tmpEndTime) {
+            t_thrd.wlm_cxt.except_ctl->execEndTime = tmpEndTime;
+        }
+    }
+
+    if (intervalEndTime <= 0 || (t_thrd.wlm_cxt.except_ctl->execEndTime > 0 &&
+                                    intervalEndTime > t_thrd.wlm_cxt.except_ctl->execEndTime)) {
+        intervalEndTime = t_thrd.wlm_cxt.except_ctl->execEndTime;
+    }
+
+    t_thrd.wlm_cxt.except_ctl->intvalEndTime = intervalEndTime;
+
+    /* interval end time is valid, we will set a timer */
+    if (t_thrd.wlm_cxt.except_ctl->intvalEndTime > 0) {
+        (void)WLMSetTimer(t_thrd.wlm_cxt.collect_info->execStartTime,
+                          t_thrd.wlm_cxt.except_ctl->intvalEndTime);
+    }
+
+    return true;
+}
+
+bool WLMSetCNCollectInfoStatusFinish(WLMGeneralParam* g_wlm_params)
+{
+    t_thrd.wlm_cxt.collect_info->execEndTime = GetCurrentTimestamp();
+    
+    pgstat_report_statement_wlm_status();
+
+    dywlm_client_set_respool_memory(-g_wlm_params->memsize, WLM_STATUS_RELEASE);
+
+    if (g_wlm_params->iotrack) {
+        WLMCNUpdateIoInfoState(g_wlm_params->ioptr, WLM_ACTION_REMOVED);
+    }
+
+    u_sess->wlm_cxt->is_active_statements_reset = true;
+
+    /* No exception handler and memory track, nothing to do. */
+    if (t_thrd.wlm_cxt.collect_info->attribute == WLM_ATTR_INVALID && g_wlm_params->memtrack == 0 &&
+        g_wlm_params->iotrack == 0) {
+        return false;
+    }
+
+    if (g_wlm_params->memtrack) {
+        WLMSetSessionInfo();
+    }
+
+    /* It's to clean collect info and insert the info into the view. */
+    (void)WLMCNStatInfoCollector(t_thrd.wlm_cxt.collect_info);
+
+    return true;
+}
+
 /*
  * function name: WLMSetCNCollectInfoStatus
  * description  : set cn collect info status
@@ -5228,264 +5634,26 @@ int64 WLMGetTimestampDuration(TimestampTz start, TimestampTz end)
  */
 void WLMSetCNCollectInfoStatus(WLMStatusTag status)
 {
-    errno_t rc;
     WLMGeneralParam* g_wlm_params = &u_sess->wlm_cxt->wlm_params;
 
     t_thrd.wlm_cxt.collect_info->status = status;
 
     switch (status) {
         case WLM_STATUS_PENDING:
-
-            t_thrd.wlm_cxt.collect_info->blockStartTime = GetCurrentTimestamp();
-
-            /* reserve new qid */
-            ReserveQid(&g_wlm_params->qid);
-
-            g_wlm_params->qid.stamp = t_thrd.wlm_cxt.collect_info->blockStartTime;
-
-            pgstat_report_statement_wlm_status();
-
-            if (t_thrd.wlm_cxt.collect_info->attribute == WLM_ATTR_INVALID) {
+            if (!WLMSetCNCollectInfoStatusPending(g_wlm_params)) {
                 return;
             }
-
-            /* Get current threshold and action. */
-            WLMGetThresholdAction(t_thrd.wlm_cxt.collect_info);
-
-            /*
-             * If we have set the waiting time that statement is waiting
-             * in the queue, we will set timer to finish it or switch
-             * to new priority list. Before set timer, we must check statement
-             * finish time, if max waiting time is out of the finish time,
-             * the timer will be set from block start time to statement finish time.
-             */
-            if (t_thrd.wlm_cxt.parctl_state.enqueue && t_thrd.wlm_cxt.except_ctl->max_waiting_time > 0) {
-                const TimestampTz statement_fin_time = GetStatementFinTime();
-
-                /* get current block end time during this time */
-                if (t_thrd.wlm_cxt.except_ctl->max_waiting_time > 0) {
-                    t_thrd.wlm_cxt.except_ctl->blockEndTime =
-                        TimestampTzPlusMilliseconds(t_thrd.wlm_cxt.collect_info->blockStartTime,
-                            t_thrd.wlm_cxt.except_ctl->max_waiting_time * MSECS_PER_SEC);
-                }
-
-                if (u_sess->attr.attr_common.StatementTimeout > 0 &&
-                    t_thrd.wlm_cxt.except_ctl->blockEndTime > statement_fin_time) {
-                    t_thrd.wlm_cxt.except_ctl->blockEndTime = statement_fin_time;
-                }
-
-                (void)WLMSetTimer(t_thrd.wlm_cxt.collect_info->blockStartTime, t_thrd.wlm_cxt.except_ctl->blockEndTime);
-            }
-
             break;
         case WLM_STATUS_RUNNING: {
-            dywlm_client_set_respool_memory(g_wlm_params->memsize, WLM_STATUS_RESERVE);
-
-            WLMSetExecutorStartTime();
-
-            /* reset datanode collect info */
-            if (g_wlm_params->ptr != NULL) {
-                WLMCNUpdateDNodeInfoState(g_wlm_params->ptr, WLM_ACTION_REMOVED);
-                g_wlm_params->ptr = NULL;
-            }
-
-            if (g_wlm_params->ioptr != NULL) {
-                WLMCNUpdateIoInfoState(g_wlm_params->ioptr, WLM_ACTION_REMOVED);
-                g_wlm_params->ioptr = NULL;
-            }
-
-            /* memory track is on and query is need track resource, we will track the session info */
-            if ((u_sess->attr.attr_resource.enable_resource_track && u_sess->exec_cxt.need_track_resource &&
-                    u_sess->attr.attr_resource.resource_track_level != RESOURCE_TRACK_NONE) ||
-                !t_thrd.wlm_cxt.parctl_state.simple) {
-                g_wlm_params->memtrack = 1;
-            } else {
-                g_wlm_params->memtrack = 0;
-
-                /* When mySessionMemoryEntry->query_plan is not NULL,
-                   should not free g_collectInfo.sdetail.statement. */
-                if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
-                    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan == NULL &&
-                    t_thrd.wlm_cxt.collect_info->sdetail.statement) {
-                    pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.statement);
-                }
-            }
-
-            // set IO control info on coordinator
-            g_wlm_params->iops_limits = u_sess->attr.attr_resource.iops_limits ? u_sess->attr.attr_resource.iops_limits
-                                                                               : (g_wlm_params->rpdata.iops_limits);
-            g_wlm_params->io_priority = u_sess->attr.attr_resource.io_priority ? u_sess->attr.attr_resource.io_priority
-                                                                               : (g_wlm_params->rpdata.io_priority);
-
-            /*
-             * IO is tracked on DN for complicated query or load job,
-             * when enable_resource_track, iops_limits or io_priority is set by user.
-             * IO collect info for complicated queries is gathered on CN
-             * every 10 seconds only if enable_resource_track is open.
-             */
-#ifdef ENABLE_MULTIPLE_NODES
-            if (t_thrd.wlm_cxt.parctl_state.iocomplex == 1 || g_wlm_params->iostate != IOSTATE_NONE) {
-                if (u_sess->attr.attr_resource.enable_resource_track) {
-                    g_wlm_params->iotrack = 1;
-                }
-
-                if (WLMCheckIOIsUnderControl()) {
-                    g_wlm_params->iocontrol = 1;
-                }
-            }
-#endif
-
-            /* Maybe the query have no control group, we have to set a default group. */
-            if (*u_sess->wlm_cxt->control_group == '\0') {
-                rc = snprintf_s(t_thrd.wlm_cxt.collect_info->cginfo.cgroup,
-                    sizeof(t_thrd.wlm_cxt.collect_info->cginfo.cgroup),
-                    sizeof(t_thrd.wlm_cxt.collect_info->cginfo.cgroup) - 1,
-                    "%s:%s",
-                    GSCGROUP_DEFAULT_CLASS,
-                    GSCGROUP_MEDIUM_TIMESHARE);
-            } else {
-                /*
-                 * control group maybe has changed in pending mode, so we
-                 * must reset the control group in the collect info here.
-                 */
-                rc = snprintf_s(t_thrd.wlm_cxt.collect_info->cginfo.cgroup,
-                    sizeof(t_thrd.wlm_cxt.collect_info->cginfo.cgroup),
-                    sizeof(t_thrd.wlm_cxt.collect_info->cginfo.cgroup) - 1,
-                    "%s",
-                    u_sess->wlm_cxt->control_group);
-            }
-            securec_check_ss(rc, "\0", "\0");
-
-            t_thrd.wlm_cxt.qnode.priority =
-                gscgroup_get_percent(t_thrd.wlm_cxt.thread_node_group, u_sess->wlm_cxt->control_group);
-
-            pgstat_report_statement_wlm_status();
-
-            /* qid is invalid, attribute also is invalid */
-            if (IsQidInvalid(&g_wlm_params->qid)) {
-                t_thrd.wlm_cxt.collect_info->attribute = WLM_ATTR_INVALID;
-
-                if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
-                    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan != NULL) {
-                    pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
-                }
-
-                if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
-                    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue != NULL) {
-                    pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
-                }
-
-                if (t_thrd.wlm_cxt.collect_info->sdetail.statement != NULL) {
-                    pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.statement);
-                }
-
+            if (!WLMSetCNCollectInfoStatusRunning(g_wlm_params)) {
                 return;
             }
-
-            /*
-             * if we do not set any exception info in cgroup or the statement
-             * is a simple statement, the attribute of collect info will be
-             * set invalid, that is we need not handle any exception.
-             */
-            if (t_thrd.wlm_cxt.parctl_state.simple) {
-                t_thrd.wlm_cxt.collect_info->attribute = WLM_ATTR_INVALID;
-            }
-
-            WLMGetThresholdAction(t_thrd.wlm_cxt.collect_info);
-
-            /* register collect info */
-            if ((t_thrd.wlm_cxt.parctl_state.subquery == 0) && !WLMInsertCollectInfoIntoHashTable()) {
-                if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
-                    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan != NULL) {
-                    pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
-                }
-
-                if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
-                    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue != NULL) {
-                    pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
-                }
-
-                if (t_thrd.wlm_cxt.collect_info->sdetail.statement != NULL) {
-                    pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.statement);
-                }
-            }
-
-            /*
-             * insert io into hash table on CN,
-             *  only when enable_resource_track is true.
-             */
-            WLMInsertIoInfoIntoHashTable();
-
-            if (t_thrd.wlm_cxt.collect_info->attribute == WLM_ATTR_INVALID) {
-                return;
-            }
-
-            const TimestampTz statement_fin_time = GetStatementFinTime();
-            TimestampTz intervalEndTime = 0;
-
-            /* cpu threshold is valid */
-            if (t_thrd.wlm_cxt.except_ctl->max_interval_time > 0) {
-                intervalEndTime = TimestampTzPlusMilliseconds(t_thrd.wlm_cxt.collect_info->execStartTime,
-                    t_thrd.wlm_cxt.except_ctl->max_interval_time * MSECS_PER_SEC);
-
-                t_thrd.wlm_cxt.except_ctl->qualiEndTime = intervalEndTime;
-            }
-
-            if (u_sess->attr.attr_common.StatementTimeout > 0) {
-                t_thrd.wlm_cxt.except_ctl->execEndTime = statement_fin_time;
-            }
-
-            if (t_thrd.wlm_cxt.except_ctl->max_running_time > 0) {
-                TimestampTz tmpEndTime = TimestampTzPlusMilliseconds(t_thrd.wlm_cxt.collect_info->execStartTime,
-                    t_thrd.wlm_cxt.except_ctl->max_running_time * MSECS_PER_SEC);
-
-                if (t_thrd.wlm_cxt.except_ctl->execEndTime <= 0 ||
-                    t_thrd.wlm_cxt.except_ctl->execEndTime > tmpEndTime) {
-                    t_thrd.wlm_cxt.except_ctl->execEndTime = tmpEndTime;
-                }
-            }
-
-            if (intervalEndTime <= 0 || (t_thrd.wlm_cxt.except_ctl->execEndTime > 0 &&
-                                            intervalEndTime > t_thrd.wlm_cxt.except_ctl->execEndTime)) {
-                intervalEndTime = t_thrd.wlm_cxt.except_ctl->execEndTime;
-            }
-
-            t_thrd.wlm_cxt.except_ctl->intvalEndTime = intervalEndTime;
-
-            /* interval end time is valid, we will set a timer */
-            if (t_thrd.wlm_cxt.except_ctl->intvalEndTime > 0) {
-                (void)WLMSetTimer(t_thrd.wlm_cxt.collect_info->execStartTime,
-                                  t_thrd.wlm_cxt.except_ctl->intvalEndTime);
-            }
-
             break;
         }
         case WLM_STATUS_FINISHED:
-            t_thrd.wlm_cxt.collect_info->execEndTime = GetCurrentTimestamp();
-
-            pgstat_report_statement_wlm_status();
-
-            dywlm_client_set_respool_memory(-g_wlm_params->memsize, WLM_STATUS_RELEASE);
-
-            if (g_wlm_params->iotrack) {
-                WLMCNUpdateIoInfoState(g_wlm_params->ioptr, WLM_ACTION_REMOVED);
-            }
-
-            u_sess->wlm_cxt->is_active_statements_reset = true;
-
-            /* No exception handler and memory track, nothing to do. */
-            if (t_thrd.wlm_cxt.collect_info->attribute == WLM_ATTR_INVALID && g_wlm_params->memtrack == 0 &&
-                g_wlm_params->iotrack == 0) {
+            if (!WLMSetCNCollectInfoStatusFinish(g_wlm_params)) {
                 return;
             }
-
-            if (g_wlm_params->memtrack) {
-                WLMSetSessionInfo();
-            }
-
-            /* It's to clean collect info and insert the info into the view. */
-            (void)WLMCNStatInfoCollector(t_thrd.wlm_cxt.collect_info);
-
             break;
         case WLM_STATUS_ABORT:
         default:
@@ -5560,10 +5728,7 @@ void WLMSetDNodeInfoStatus(const Qid* qid, WLMStatusTag status)
 
             /* The query is finished, we will remove the node from hash. */
             WLMReleaseNodeFromHash();
-
-            if (u_sess->wlm_cxt->wlm_params.iotrack || u_sess->wlm_cxt->wlm_params.iocontrol) {
-                WLMReleaseIoInfoFromHash();
-            }
+            WLMReleaseIoInfoFromHash();
 
             t_thrd.wlm_cxt.except_ctl->intvalEndTime = 0;
 
@@ -5711,7 +5876,8 @@ void WLMCreateDNodeInfoOnDN(const QueryDesc* qd)
     /* stream thread does not compute */
     if (StreamThreadAmI() || IsQidInvalid(&g_wlm_params->qid)) {
         g_wlm_params->complicate = 0;
-    } else if (g_wlm_params->complicate && u_sess->debug_query_id && uid != BOOTSTRAP_SUPERUSERID &&
+    } else if (g_wlm_params->complicate
+               && u_sess->debug_query_id && uid != BOOTSTRAP_SUPERUSERID &&
                t_thrd.shemem_ptr_cxt.mySessionMemoryEntry) {
         if (NULL == u_sess->wlm_cxt->local_foreign_respool) {
             USE_AUTO_LWLOCK(WorkloadUserInfoLock, LW_SHARED);
@@ -5767,7 +5933,7 @@ void WLMCreateDNodeInfoOnDN(const QueryDesc* qd)
         WLMDNodeInfo* info = (WLMDNodeInfo*)g_wlm_params->ptr;
 
         /* count the thread of the query */
-        gs_atomic_add_32(&info->threadCount, 1);
+        (void)pg_atomic_fetch_add_u32((volatile uint32*)&info->threadCount, 1);
 
         return;
     }
@@ -5801,7 +5967,7 @@ void WLMCreateDNodeInfoOnDN(const QueryDesc* qd)
 
             g_wlm_params->ptr = pDNodeInfo;
         } else {
-            gs_atomic_add_32(&pDNodeInfo->threadCount, 1);
+            (void)pg_atomic_fetch_add_u32((volatile uint32*)&pDNodeInfo->threadCount, 1);
         }
 
         UnLockSessRealTHashPartition(hashCode);
@@ -5841,18 +6007,18 @@ void WLMCreateIOInfoOnDN()
         WLMDNodeIOInfo* info = (WLMDNodeIOInfo*)g_wlm_params->ioptr;
 
         /* count the thread of the query */
-        gs_atomic_add_32(&info->threadCount, 1);
+        (void)pg_atomic_fetch_add_u32((volatile uint32*)&info->threadCount, 1);
 
         return;
     }
 
-    WLMAutoLWLock htab_lock(WorkloadIoStatHashLock, LW_EXCLUSIVE);
+    uint32 bucketId = GetIoStatBucket(&g_wlm_params->qid);
+    int lockId = GetIoStatLockId(bucketId);
+    (void)LWLockAcquire(GetMainLWLockByIndex(lockId), LW_EXCLUSIVE);
     WLMAutoLWLock user_lock(WorkloadUserInfoLock, LW_SHARED);
 
-    htab_lock.AutoLWLockAcquire();
-
     pDNodeIoInfo = (WLMDNodeIOInfo*)hash_search(
-        g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl, &g_wlm_params->qid, HASH_ENTER_NULL, &hasFound);
+        G_WLM_IOSTAT_HASH(bucketId), &g_wlm_params->qid, HASH_ENTER_NULL, &hasFound);
 
     if (pDNodeIoInfo != NULL) {
         if (!hasFound) {
@@ -5874,8 +6040,7 @@ void WLMCreateIOInfoOnDN()
 
             errno_t errval = memset_s(pDNodeIoInfo->io_geninfo.hist_iops_tbl,
                 sizeof(pDNodeIoInfo->io_geninfo.hist_iops_tbl),
-                0,
-                sizeof(pDNodeIoInfo->io_geninfo.hist_iops_tbl));
+                0, sizeof(pDNodeIoInfo->io_geninfo.hist_iops_tbl));
             securec_check_errval(errval, , LOG);
 
             user_lock.AutoLWLockAcquire();
@@ -5888,14 +6053,14 @@ void WLMCreateIOInfoOnDN()
 
             ereport(DEBUG1, (errmsg("insert one element into IO hash table !")));
         } else {
-            gs_atomic_add_32(&pDNodeIoInfo->threadCount, 1);
+            (void)pg_atomic_fetch_add_u32((volatile uint32*)&pDNodeIoInfo->threadCount, 1);
         }
 
-        htab_lock.AutoLWLockRelease();
+        LWLockRelease(GetMainLWLockByIndex(lockId));
     } else {
         ereport(LOG, (errmsg("WLM Error: Cannot alloc memory, out of memory!")));
 
-        htab_lock.AutoLWLockRelease();
+        LWLockRelease(GetMainLWLockByIndex(lockId));
 
         return;
     }
@@ -6014,6 +6179,20 @@ uint32 WLMHashCode(const void* key, Size keysize)
 }
 
 /*
+ * function name: WLMSetCollectInfoStatusFinish
+ * description  : set collect info to finished on cn or dn
+ * arguments    : void
+ * return value : void
+ */
+void WLMSetCollectInfoStatusFinish()
+{
+    if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
+        volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+        beentry->st_backstat.enqueue = "None";
+    }
+}
+
+/*
  * function name: WLMSetCollectInfoStatus
  * description  : set collect info on cn or dn
  * arguments    :
@@ -6022,7 +6201,7 @@ uint32 WLMHashCode(const void* key, Size keysize)
  */
 void WLMSetCollectInfoStatus(WLMStatusTag status)
 {
-    if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
+    if (IS_PGXC_COORDINATOR || (IS_SINGLE_NODE && !StreamThreadAmI())) {
         WLMSetCNCollectInfoStatus(status);
     }
 
@@ -6101,6 +6280,25 @@ void WLMGetCPUDataIndicator(PgBackendStatus* beentry, WLMDataIndicator<int64>* i
 /*
  * function name: WLMInitializeStatInfo
  * description  : initialize statistics info
+ * arguments    :
+ *                _in_ hash_ctl: HASHCTRL to creat hash table
+ * return value : void
+ */
+static void WLMIoStatInit(HASHCTL& hash_ctl)
+{
+    IOHashCtrl* ioctrl = (IOHashCtrl*)MemoryContextAllocZero(
+        g_instance.wlm_cxt->workload_manager_mcxt, sizeof(IOHashCtrl) * NUM_IO_STAT_PARTITIONS);
+    int flags = HASH_ELEM | HASH_SHRCTX | HASH_FUNCTION | HASH_COMPARE | HASH_ALLOC | HASH_DEALLOC;
+    for (int i = 0; i < NUM_IO_STAT_PARTITIONS; ++i) {
+        ioctrl[i].hashTable = hash_create("wlm iostat info hash table", WORKLOAD_STAT_HASH_SIZE, &hash_ctl, flags);
+        ioctrl[i].lockId = FirstIOStatLock + i;
+    }
+    g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl = ioctrl;
+}
+
+/*
+ * function name: WLMInitializeStatInfo
+ * description  : initialize statistics info
  * arguments    : void
  * return value : void
  */
@@ -6158,10 +6356,7 @@ void WLMInitializeStatInfo(void)
     hash_ctl.dealloc = pfree;
 
     /* creat hash table for wlm iostat info */
-    g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl = hash_create("wlm iostat info hash table",
-        WORKLOAD_STAT_HASH_SIZE,
-        &hash_ctl,
-        HASH_ELEM | HASH_SHRCTX | HASH_FUNCTION | HASH_COMPARE | HASH_ALLOC | HASH_DEALLOC);
+    WLMIoStatInit(hash_ctl);
 
     rc = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
     securec_check_errval(rc, , LOG);
@@ -6251,6 +6446,7 @@ void WLMInitializeStatInfo(void)
  */
 void WLMSetStatInfo(const char* sqltext)
 {
+    pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.statement);
     /* reset all statistics info */
     ResetAllStatInfo();
 
@@ -6260,7 +6456,7 @@ void WLMSetStatInfo(const char* sqltext)
         gscgroup_get_grpconf(t_thrd.wlm_cxt.thread_node_group, t_thrd.wlm_cxt.collect_info->cginfo.cgroup);
 
     if (sqltext != NULL) {
-        USE_MEMORY_CONTEXT(g_instance.wlm_cxt->query_resource_track_mcxt);
+        USE_MEMORY_CONTEXT(t_thrd.wlm_cxt.query_resource_track_mcxt);
 
         if (strlen(sqltext) < 8 * KBYTES) {
             t_thrd.wlm_cxt.collect_info->sdetail.statement = pstrdup(sqltext);
@@ -6612,7 +6808,7 @@ void WLMTopSQLReady(QueryDesc* queryDesc)
 
     if (((IS_PGXC_COORDINATOR && !IsConnFromCoord()) || IS_SINGLE_NODE) && u_sess->attr.attr_resource.enable_resource_track) {
         if (queryDesc->sourceText) {
-            USE_MEMORY_CONTEXT(g_instance.wlm_cxt->query_resource_track_mcxt);
+            USE_MEMORY_CONTEXT(t_thrd.wlm_cxt.query_resource_track_mcxt);
 
             if (t_thrd.wlm_cxt.collect_info->sdetail.statement != NULL) {
                 pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.statement);
@@ -6645,8 +6841,12 @@ void WLMInitQueryPlan(QueryDesc* queryDesc, bool isQueryDesc)
     if (queryDesc == NULL) {
         return;
     }
-
-    if (IS_LOCAL_NODE && u_sess->attr.attr_resource.enable_resource_track &&
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
+#else
+    if (!StreamThreadAmI() &&
+#endif
+        u_sess->attr.attr_resource.enable_resource_track &&
         u_sess->exec_cxt.need_track_resource && t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL &&
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan == NULL && isQueryDesc) {
 
@@ -6675,10 +6875,13 @@ void WLMInitQueryPlan(QueryDesc* queryDesc, bool isQueryDesc)
 
     if (queryDesc != NULL && t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL) {
         double total_cost = WLMGetTotalCost(queryDesc, isQueryDesc);
+        const int cost_rate = 200;
+        const int kb_per_mb = 1024;
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->estimate_time =
-            (int64)((total_cost / 200 < INT64_MAX) ? total_cost / 200 : INT64_MAX);
+            (int64)((total_cost / cost_rate < INT64_MAX) ? (total_cost / cost_rate) : INT64_MAX);
         if (u_sess->wlm_cxt->local_foreign_respool == NULL) {
-            t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->estimate_memory = WLMGetQueryMem(queryDesc, isQueryDesc) / 1024;
+            t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->estimate_memory =
+                WLMGetQueryMem(queryDesc, isQueryDesc) / kb_per_mb;
         } else {
             t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->estimate_memory =
                 WLMGetQueryMemDN(queryDesc, isQueryDesc) / 1024;
@@ -6697,18 +6900,19 @@ void WLMFillGeneralDataSingleNode(WLMGeneralData* gendata, WLMDNodeInfo* nodeInf
     SessionLevelMemory* sessionMemory = (SessionLevelMemory*)nodeInfo->mementry;
 
     if (!IsQidInvalid(&nodeInfo->qid)) {
-        WLMAutoLWLock io_lock(WorkloadIoStatHashLock, LW_SHARED);
-        io_lock.AutoLWLockAcquire();
+        uint32 bucketId = GetIoStatBucket(&nodeInfo->qid);
+        int lockId = GetIoStatLockId(bucketId);
+        (void)LWLockAcquire(GetMainLWLockByIndex(lockId), LW_SHARED);
     
         /* get history peak read/write Bps/iops and current total bytes/times of read/write from hash table */
         WLMDNodeIOInfo* ioinfo = (WLMDNodeIOInfo*)hash_search(
-            g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl, &nodeInfo->qid, HASH_FIND, NULL);
+            G_WLM_IOSTAT_HASH(bucketId), &nodeInfo->qid, HASH_FIND, NULL);
     
         if (ioinfo != NULL) {
             peak_iops = ioinfo->io_geninfo.peak_iops;
             curr_iops = ioinfo->io_geninfo.curr_iops;
         }
-        io_lock.AutoLWLockRelease();
+        LWLockRelease(GetMainLWLockByIndex(lockId));
     }
     
     WLMInitMinValue4SessionInfo(gendata);
@@ -6717,7 +6921,7 @@ void WLMFillGeneralDataSingleNode(WLMGeneralData* gendata, WLMDNodeInfo* nodeInf
     queryMemInChunks =sessionMemory->queryMemInChunks << (chunkSizeInBits - BITS_IN_MB);
     peakChunksQuery = sessionMemory->peakChunksQuery << (chunkSizeInBits - BITS_IN_MB);
     totalCpuTime = nodeInfo->geninfo.totalCpuTime;
-    dnTime = sessionMemory->dnEndTime > 0 ? sessionMemory->dnEndTime : GetCurrentTimestamp();
+    dnTime = (sessionMemory->dnEndTime > 0) ? sessionMemory->dnEndTime : GetCurrentTimestamp();
     dnTime = WLMGetTimestampDuration(sessionMemory->dnStartTime, dnTime);
 
     GetMaxAndMinSessionInfo(gendata, peakMemoryData, peakChunksQuery);
@@ -6796,10 +7000,10 @@ void* WLMGetSessionStatistics(int* num)
 
             SessionLevelMemory* entry = (SessionLevelMemory*)pDNodeInfo->mementry;
 
-            stat_element->statement = pDNodeInfo->statement == NULL ? (char*)"" : pstrdup(pDNodeInfo->statement);
-            stat_element->query_plan = entry->query_plan == NULL ? (char*)"NoPlan" : pstrdup(entry->query_plan);
+            stat_element->statement = (pDNodeInfo->statement == NULL) ? (char*)"" : pstrdup(pDNodeInfo->statement);
+            stat_element->query_plan = (entry->query_plan == NULL) ? (char*)"NoPlan" : pstrdup(entry->query_plan);
             stat_element->query_plan_issue =
-                entry->query_plan_issue == NULL ? (char*)"" : pstrdup(entry->query_plan_issue);
+                (entry->query_plan_issue == NULL) ? (char*)"" : pstrdup(entry->query_plan_issue);
             stat_element->query_band = pstrdup(pDNodeInfo->qband);
             stat_element->block_time = pDNodeInfo->block_time;
             stat_element->start_time = pDNodeInfo->start_time;
@@ -6901,16 +7105,9 @@ void WLMParseThreadInfo(StringInfo msg, void* suminfo, int size)
  * @Return:      io statistics info
  * @See also:
  */
-WLMIoStatisticsGenenral* WLMGetIOStatisticsGeneral(int* num)
+WLMIoStatisticsList* WLMGetIOStatisticsGeneral()
 {
-    int i = 0;
-
-    WLMDNodeIOInfo* pDNodeIoInfo = NULL;
-
-    WLMAutoLWLock htab_lock(WorkloadIoStatHashLock, LW_SHARED);
-
-    HASH_SEQ_STATUS hash_seq;
-
+    const int maxHashCount = 1000;
     /* check workload manager is valid */
     if (!ENABLE_WORKLOAD_CONTROL) {
         ereport(WARNING, (errmsg("workload manager is not valid.")));
@@ -6922,43 +7119,49 @@ WLMIoStatisticsGenenral* WLMGetIOStatisticsGeneral(int* num)
         return NULL;
     }
 
-    htab_lock.AutoLWLockAcquire();
-
-    /* get current session info count, we will do nothing if it's 0 */
-    if ((*num = hash_get_num_entries(g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl)) == 0) {
-        return NULL;
-    }
-
-    WLMIoStatisticsGenenral* stat_element = NULL;
-    WLMIoStatisticsGenenral* stat_array = (WLMIoStatisticsGenenral*)palloc0(*num * sizeof(WLMIoStatisticsGenenral));
-
-    hash_seq_init(&hash_seq, g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl);
-
-    /* Get all real time session statistics from the register info hash table. */
-    while ((pDNodeIoInfo = (WLMDNodeIOInfo*)hash_seq_search(&hash_seq)) != NULL) {
-
-        if (pDNodeIoInfo->tag == WLM_ACTION_REMAIN) {
-            stat_element = stat_array + i;
-
-            stat_element->tid = pDNodeIoInfo->tid;
-            stat_element->maxcurr_iops = pDNodeIoInfo->io_geninfo.currIopsData.max_value;
-            stat_element->mincurr_iops = pDNodeIoInfo->io_geninfo.currIopsData.min_value;
-            stat_element->maxpeak_iops = pDNodeIoInfo->io_geninfo.peakIopsData.max_value;
-            stat_element->minpeak_iops = pDNodeIoInfo->io_geninfo.peakIopsData.min_value;
-
-            stat_element->iops_limits = pDNodeIoInfo->iops_limits;
-            stat_element->io_priority = pDNodeIoInfo->io_priority;
-            stat_element->curr_iops_limit = pDNodeIoInfo->io_geninfo.curr_iops_limit;
-
-            ++i;
+    WLMIoStatisticsList results;
+    results.next = NULL;
+    HASH_SEQ_STATUS hash_seq;
+    WLMDNodeIOInfo* pDNodeIoInfo = NULL;
+    for (uint32 bucketId = 0; bucketId < NUM_IO_STAT_PARTITIONS; ++bucketId) {
+        int lockId = GetIoStatLockId(bucketId);
+        (void)LWLockAcquire(GetMainLWLockByIndex(lockId), LW_SHARED);
+        long count = hash_get_num_entries(G_WLM_IOSTAT_HASH(bucketId));
+        if (count <= 0) {
+            (void)LWLockRelease(GetMainLWLockByIndex(lockId));
+            continue;
         }
+        if (count >= maxHashCount) {
+             ereport(LOG, (errcode(ERRCODE_LOG),
+                           errmsg("[WLM IOStatistics]hash count:%ld, bucket id :%u", count, bucketId)));
+        }
+        hash_seq_init(&hash_seq, G_WLM_IOSTAT_HASH(bucketId));
+        /* Get all real time session statistics from the register info hash table. */
+        while ((pDNodeIoInfo = (WLMDNodeIOInfo*)hash_seq_search(&hash_seq)) != NULL) {
+            if (pDNodeIoInfo->tag == WLM_ACTION_REMAIN) {
+                WLMIoStatisticsList* stat_node = (WLMIoStatisticsList*)palloc0(sizeof(WLMIoStatisticsList));
+                WLMIoStatisticsGenenral* stat_element =
+                    (WLMIoStatisticsGenenral*)palloc0(sizeof(WLMIoStatisticsGenenral));
+
+                stat_element->tid = pDNodeIoInfo->tid;
+                stat_element->maxcurr_iops = pDNodeIoInfo->io_geninfo.currIopsData.max_value;
+                stat_element->mincurr_iops = pDNodeIoInfo->io_geninfo.currIopsData.min_value;
+                stat_element->maxpeak_iops = pDNodeIoInfo->io_geninfo.peakIopsData.max_value;
+                stat_element->minpeak_iops = pDNodeIoInfo->io_geninfo.peakIopsData.min_value;
+
+                stat_element->iops_limits = pDNodeIoInfo->iops_limits;
+                stat_element->io_priority = pDNodeIoInfo->io_priority;
+                stat_element->curr_iops_limit = pDNodeIoInfo->io_geninfo.curr_iops_limit;
+
+                stat_node->node = stat_element;
+                stat_node->next = results.next;
+                results.next = stat_node;
+            }
+        }
+        LWLockRelease(GetMainLWLockByIndex(lockId));
     }
 
-    htab_lock.AutoLWLockRelease();
-
-    *num = i;
-
-    return stat_array;
+    return results.next;
 }
 
 /*
@@ -6989,6 +7192,12 @@ int WLMGetProgPath(const char* argv0)
 
         exec_path = gaussdb_bin_path;
         get_parent_directory(exec_path);
+    }
+    Assert(exec_path != NULL);
+    if (backend_env_valid(exec_path, "GAUSSHOME") == false) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("Incorrect backend environment variable $GAUSSHOME"),
+            errdetail("Please refer to the backend instance log for the detail")));
     }
     check_backend_env(exec_path);
     rc = snprintf_s(g_instance.wlm_cxt->stat_manager.execdir,
@@ -7042,7 +7251,7 @@ void WLMStartToGetStatistics(void)
     if (query_statistics_num) {
         rc = sprintf_s(sql,
             WLM_RECORD_SQL_LEN,
-            "select create_wlm_session_info(%d);",
+            "select pg_catalog.create_wlm_session_info(%d);",
             u_sess->attr.attr_resource.enable_resource_record ? 1 : 0);
         securec_check_ss(rc, "\0", "\0");
         current_size += rc;
@@ -7050,7 +7259,7 @@ void WLMStartToGetStatistics(void)
     if (operator_statistics_num) {
         rc = sprintf_s(sql + current_size,
             WLM_RECORD_SQL_LEN - current_size,
-            "select create_wlm_operator_info(%d);",
+            "select pg_catalog.create_wlm_operator_info(%d);",
             u_sess->attr.attr_resource.enable_resource_record ? 1 : 0);
         securec_check_ss(rc, "\0", "\0");
     }
@@ -7073,7 +7282,7 @@ void WLMStartToGetStatistics(void)
 void WLMCleanTopSqlInfo(void)
 {
     if (!u_sess->attr.attr_resource.enable_resource_track || !u_sess->attr.attr_resource.enable_resource_record ||
-        (u_sess->attr.attr_resource.resource_track_duration == 0)) {
+        (u_sess->attr.attr_resource.topsql_retention_time == 0)) {
         return;
     }
 
@@ -7107,7 +7316,7 @@ void WLMCleanTopSqlInfo(void)
     WLMRemoteNodeExecuteSql(cleanOperatorSql);
     rc = sprintf_s(cleanSessionSql,
         WLM_CLEAN_SQL_LEN,
-        "delete from gs_wlm_session_info where finish_time < '%s';",
+        "delete from gs_wlm_session_query_info_all where finish_time < '%s';",
         expiredTimeStr);
     securec_check_ss(rc, "\0", "\0");
     WLMRemoteNodeExecuteSql(cleanSessionSql);
@@ -7244,7 +7453,7 @@ bool WLMUpdateMemoryInfo(bool need_adjust)
     unsigned long lib = 0;
     unsigned long data = 0;
     unsigned long dt = 0;
-    uint32 cu_size = (uint32)(CUCache->GetCurrentMemSize() + MetaCacheGetCurrentUsedSize()) >> BITS_IN_MB;
+    uint32 cu_size = (uint32)((uint64)(CUCache->GetCurrentMemSize() + MetaCacheGetCurrentUsedSize()) >> BITS_IN_MB);
     int gpu_used = 0;
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -7376,8 +7585,8 @@ void WLMWorkerInitialize(struct Port* port)
         securec_check_ss(rc, "\0", "\0");
     }
 
-    port->remote_host = MemoryContextStrdup(u_sess->top_mem_cxt, remote_host);
-    port->remote_port = MemoryContextStrdup(u_sess->top_mem_cxt, remote_port);
+    port->remote_host = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), remote_host);
+    port->remote_port = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), remote_port);
 }
 
 /*
@@ -7495,7 +7704,7 @@ int WLMProcessThreadMain(void)
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    knl_thread_set_name("WlmCollector");
+    t_thrd.proc_cxt.MyProgName = "WLMCollectWorker";
 
     if (u_sess->proc_cxt.MyProcPort->remote_host) {
         pfree(u_sess->proc_cxt.MyProcPort->remote_host);
@@ -7504,7 +7713,7 @@ int WLMProcessThreadMain(void)
     u_sess->proc_cxt.MyProcPort->remote_host = pstrdup("localhost");
 
     /* Identify myself via ps */
-    init_ps_display("WlmCollector worker process", "", "", "");
+    init_ps_display("wlm collect worker process", "", "", "");
 
     SetProcessingMode(InitProcessing);
 
@@ -7530,9 +7739,7 @@ int WLMProcessThreadMain(void)
 
     t_thrd.wlm_cxt.collect_info->sdetail.statement = "WLM fetch collect info from data nodes";
 
-    if (!StringIsValid(u_sess->attr.attr_common.application_name)) {
-        u_sess->attr.attr_common.application_name = pstrdup("workload");
-    }
+    u_sess->attr.attr_common.application_name = pstrdup("workload");
 
     t_thrd.wlm_cxt.parctl_state.special = 1;
 
@@ -7590,6 +7797,7 @@ int WLMProcessThreadMain(void)
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
 
+    WLMInitPostgres();
     SetProcessingMode(NormalProcessing);
 
     int curTryCounter;
@@ -7639,7 +7847,7 @@ int WLMProcessThreadMain(void)
          * Now return to normal top-level context and clear ErrorContext for
          * next time.
          */
-        (void)MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+        (void)MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
         FlushErrorState();
 
         /* Now we can allow interrupts again */
@@ -7665,7 +7873,7 @@ int WLMProcessThreadMain(void)
     /* init transaction to execute query */
     WLMInitTransaction(&backinit);
 
-    ereport(LOG, (errmsg("WlmCollector thread starting up.")));
+    ereport(LOG, (errmsg("process wlm thread starting up.")));
 
     /* build user info and resource pool hash table if does not exist */
     if (!g_instance.wlm_cxt->stat_manager.infoinit) {
@@ -7851,6 +8059,7 @@ int WLMProcessThreadMain(void)
                 WLMCleanTopSqlInfo();
                 topsql_clean_last_time = now;
             }
+
             /* Check if the memory is out of control */
             if (backinit && (getSessionMemoryUsageMB() > MAX_MEMORY_THREHOLD)) {
                 ereport(ERROR,
@@ -7891,7 +8100,7 @@ int WLMProcessThreadMain(void)
 
     backinit = false;
 
-    ereport(DEBUG1, (errmsg("exit WlmCollector thread!")));
+    ereport(DEBUG1, (errmsg("exit wlm worker thread!")));
 
     return 0;
 }
@@ -8068,7 +8277,7 @@ void WLMGetDebugInfo(StringInfo strinfo, WLMDebugInfo* debug_info)
         _("CollectInfo: scan_count[%d], cgroup[%s], attribute[%s], max_mem[%ldKB], avail_mem[%ldKB]\n"),
         debug_info->colinfo->sdetail.geninfo.scanCount,
         debug_info->colinfo->cginfo.cgroup,
-        debug_info->colinfo->attribute == WLM_ATTR_INVALID ? "Invalid" : "Valid",
+        (debug_info->colinfo->attribute == WLM_ATTR_INVALID) ? "Invalid" : "Valid",
         debug_info->colinfo->max_mem,
         debug_info->colinfo->avail_mem);
 

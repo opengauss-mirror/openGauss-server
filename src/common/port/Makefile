@@ -29,13 +29,13 @@ include $(top_builddir)/src/Makefile.global
 
 VERSION = 1
 
-override CPPFLAGS := -I$(LIBOPENSSL_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(top_builddir)/src/common/port -DFRONTEND $(CPPFLAGS) $(CFLAGS_SSE42)
+override CPPFLAGS := -I$(top_builddir)/src/common/port -DFRONTEND $(CPPFLAGS) $(CFLAGS_SSE42)
 LIBS += $(PTHREAD_LIBS)
 
-override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -fstack-protector --param ssp-buffer-size=4 -Wstack-protector
-override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC -fstack-protector --param ssp-buffer-size=4 -Wstack-protector
+override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC
+override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC 
 
-override CPPSources=$(shell find -name "*.cpp" ! -name "path.cpp")
+override CPPSources=$(shell find -name "*.cpp" ! -name "path.cpp" | sort)
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"
     ifneq "$(shell which g++ |grep hutaf_llt |wc -l)" "1"
@@ -126,7 +126,7 @@ libport_srv.so: $(OBJS_SRV)
 	$(CC) -fPIC -shared $(CFLAGS) $(LDFLAGS) $(LDFLAGS_EX) -o $@ $^
 
 port: libport.so libport_srv.so
-	mv *.so $(top_builddir)/src/test/ut/lib
+	mv *.so $(top_builddir)/src/distribute/test/ut/lib
 	
 # Because this uses its own compilation rule, it doesn't use the
 # dependency tracking logic from Makefile.global.  To make sure that

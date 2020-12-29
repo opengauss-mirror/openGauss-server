@@ -9,7 +9,7 @@ CREATE TABLE colcmpr_date
 	b date,
 	c date
 ) with (orientation = column)  ;
-COPY colcmpr_date FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_date.data';
+COPY colcmpr_date FROM '@abs_srcdir@/data/colcmpr_date.data';
 SELECT * FROM colcmpr_date;
 DROP TABLE colcmpr_date;
 
@@ -23,6 +23,6 @@ CREATE TABLE colcmpr_date_01
 	b date,
 	c date
 ) with (orientation = column) ;
-COPY colcmpr_date_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_date_01.data';
+COPY colcmpr_date_01 FROM '@abs_srcdir@/data/colcmpr_date_01.data';
 SELECT * FROM colcmpr_date_01;
 DROP TABLE colcmpr_date_01;

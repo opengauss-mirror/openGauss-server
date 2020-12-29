@@ -21,7 +21,13 @@ REFDOCDIR= $(top_srcdir)/doc/src/sgml/ref
 MAKESGMLDIR = $(top_builddir)/src/common/pgxc/tools/makesgml
 SGMLDIR= $(top_builddir)/doc/src/sgml
 
-override CPPFLAGS := -I. -I$(srcdir) -I$(libpq_srcdir) -I$(top_srcdir)/src/bin/pg_dump $(CPPFLAGS)
+override CPPFLAGS := -I. -I$(srcdir) -I$(libpq_srcdir) -I$(top_srcdir)/src/bin/pg_dump -DHAVE_CE -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc $(CPPFLAGS)
+
+$(top_builddir)/src/common/interfaces/libpq/client_logic_processor/stmt_processor.o:
+	$(MAKE) -C $(top_builddir)/src/common/interfaces/libpq/client_logic_processor/ stmt_processor.o ENABLE_CE=1
+
+describe.o:  $(top_builddir)/src/common/interfaces/libpq/client_logic_processor/stmt_processor.o
+
 CFLAGS += -Wl,-z,relro,-z,now
 LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
 
@@ -49,7 +55,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
 endif
 OBJS=	command.o common.o help.o input.o stringutils.o mainloop.o copy.o \
 	startup.o prompt.o variables.o large_obj.o print.o describe.o \
-	mbprint.o dumputils.o keywords.o kwlookup.o tab-complete.o\
+	mbprint.o dumputils.o keywords.o kwlookup.o \
 	sql_help.o \
 	$(top_builddir)/src/lib/elog/elog.a \
 	$(WIN32RES)
@@ -59,17 +65,19 @@ FLEXFLAGS = -Cfe -b -p -p
 
 all: submake-aes gsql
 
-gsql: $(OBJS) | submake-libpq submake-libpgport
-	$(CC) $(CFLAGS) $(OBJS) $(EXTRA_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -lncurses -o $@$(X)
+libpq_pgport:=$(subst -lpq,-lpq_ce,$(libpq_pgport)) -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -lsecurec -L$(LIBKMC_LIB_PATH) -lkmc
 
 $(top_builddir)/src/lib/elog/elog.a:
 	$(MAKE) -C $(top_builddir)/src/lib/elog elog.a
+
+gsql: submake-libpq_ce submake-libpgport $(OBJS)
+	$(CC) $(CFLAGS) $(OBJS) $(EXTRA_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -lncurses -o $@$(X)
 
 help.o: sql_help.h
 
 sqla: $(OBJS) 
 	$(CC) -fPIC -shared $(CFLAGS) $(OBJS) $(EXTRA_OBJS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -lncurses -o lib$@.so
-	mv lib$@.so $(top_builddir)/src/test/ut/lib
+	mv lib$@.so $(top_builddir)/src/distribute/test/ut/lib
 	
 dumputils.cpp keywords.cpp: % : $(top_srcdir)/src/bin/pg_dump/%
 	rm -f $@ && $(LN_S) $< .
@@ -103,6 +111,7 @@ install: all installdirs
 	$(INSTALL_PROGRAM) gsql$(X) '$(DESTDIR)$(bindir)/gsql$(X)'
 	$(INSTALL_DATA) $(srcdir)/psqlrc.sample '$(DESTDIR)$(datadir)/psqlrc.sample'
 	$(INSTALL_DATA) retry_errcodes.conf '$(DESTDIR)$(bindir)/retry_errcodes.conf'
+	 $(MAKE) -C $(libpq_builddir) install ENABLE_CE=1
 
 installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(bindir)' '$(DESTDIR)$(datadir)'
@@ -113,6 +122,7 @@ uninstall:
 # psqlscan.cpp is in the distribution tarball, so is not cleaned here
 clean distclean:
 	rm -f gsql$(X) $(OBJS) dumputils.cpp keywords.cpp kwlookup.cpp lex.backup *.depend
-
+	$(MAKE) -C $(libpq_builddir) clean ENABLE_CE=1
 maintainer-clean: distclean
 	rm -f sql_help.h sql_help.cpp psqlscan.cpp
+

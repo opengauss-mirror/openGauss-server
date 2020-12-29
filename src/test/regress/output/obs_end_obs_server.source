@@ -1,0 +1,5 @@
+drop server if exists  obs_server cascade;
+drop schema text_csv_foreign_schema cascade;
+NOTICE:  drop cascades to 2 other objects
+--?.*
+--?.*

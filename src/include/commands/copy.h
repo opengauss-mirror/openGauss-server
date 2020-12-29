@@ -45,10 +45,12 @@ typedef struct CopyStateData* CopyState;
 typedef enum CopyDest {
     COPY_FILE,   /* to/from file */
     COPY_OLD_FE, /* to/from frontend (2.0 protocol) */
-    COPY_NEW_FE,  /* to/from frontend (3.0 protocol) */
+    COPY_NEW_FE  /* to/from frontend (3.0 protocol) */
 #ifdef PGXC
-    COPY_BUFFER, /* Do not send, just prepare */
+    ,
+    COPY_BUFFER /* Do not send, just prepare */
 #endif
+    ,
     COPY_GDS,
     COPY_FILE_SEGMENT,
     COPY_ROACH,
@@ -160,7 +162,7 @@ typedef struct CopyStateData {
 
     /* parameters from the COPY command */
     Relation rel;           /* relation to copy to or from */
-    Relation curPartionRel; /* current partion to copy to */
+    Relation curPartionRel; /* current partion to copy to*/
     QueryDesc* queryDesc;   /* executable query to copy from */
     List* attnumlist;       /* integer list of attnums to copy */
     char* filename;         /* filename, or NULL for STDIN/STDOUT */
@@ -219,14 +221,14 @@ typedef struct CopyStateData {
     ExprState** defexprs;   /* array of default att expressions */
     bool volatile_defexprs; /* is any of defexprs volatile? */
     List* range_table;
-    Datum copy_beginTime;    /* log the query start time */
+    Datum copy_beginTime;    /* log the query start time*/
     bool log_errors;         /* mark where we tolerate data exceptions and log them into copy_error_log */
     int reject_limit;        /* number of data exceptions we allow per Copy (on coordinator) */
     bool logErrorsData;      /* mark where we tolerate data exceptions and log them into copy_error_log  and make sure
-                                Whether to fill the rowrecord field of the copy_error_log */
+                                Whether to fill the rowrecord field of the copy_error_log*/
     Relation err_table;      /* opened copy_error_log table */
-    CopyErrorLogger* logger; /* logger used for copy from error logging */
-    FmgrInfo* err_out_functions; /* lookup info for output functions of copy_error_log */
+    CopyErrorLogger* logger; /* logger used for copy from error logging*/
+    FmgrInfo* err_out_functions; /* lookup info for output functions of copy_error_log*/
 
     /*
      * These variables are used to reduce overhead in textual COPY FROM.
@@ -239,6 +241,7 @@ typedef struct CopyStateData {
     StringInfoData attribute_buf;
 
     /* field raw data pointers found by COPY FROM */
+
     int max_fields;
     char** raw_fields;
 
@@ -280,7 +283,7 @@ typedef struct CopyStateData {
     char* out_fix_alignment;
     StringInfo headerString;
 
-    /* For bulkload */
+    /* For bulkload*/
     BulkLoadStream* io_stream;
     List* file_list;
     ListCell* file_index;
@@ -298,7 +301,7 @@ typedef struct CopyStateData {
     uint32 distSessionKey;
     List* illegal_chars_error; /* used to record every illegal_chars_error for each imported data line. */
 
-    bool isExceptionShutdown; /* To differentiate normal end of a bulkload task or a task abort because of exceptions */
+    bool isExceptionShutdown; /* To differentiate normal end of a bulkload task or a task abort because of exceptions*/
 
     // For export
     //

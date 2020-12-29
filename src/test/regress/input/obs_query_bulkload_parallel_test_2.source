@@ -1,0 +1,15 @@
+--
+-- OBS BULK LOAD PARALLEL TEST 2
+--
+----
+--3. Load data in normal mode and data with header line
+----
+CREATE FOREIGN TABLE EXT_HEADER (name text, time date)
+SERVER obs_server OPTIONS(location 'obs://@obsbucket@/obscheck/header/', 
+	format 'text',
+    DELIMITER ';',
+    encoding 'utf8',
+    chunksize '32') distribute by roundrobin;
+SELECT COUNT(*) FROM EXT_HEADER;
+DROP FOREIGN TABLE EXT_HEADER;
+

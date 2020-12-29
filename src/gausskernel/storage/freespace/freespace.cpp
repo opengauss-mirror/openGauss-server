@@ -39,7 +39,6 @@
 #include "gstrace/storage_gstrace.h"
 
 
-
 /* Address of the root page. */
 static const FSMAddress g_fsm_root_address = {FSM_ROOT_LEVEL, 0};
 
@@ -245,7 +244,7 @@ void XLogBlockTruncateRelFSM(Relation rel, BlockNumber nblocks)
     }
     smgrtruncatefunc(rel->rd_smgr, FSM_FORKNUM, new_nfsmblocks);
     XLogTruncateRelation(rel->rd_node, MAIN_FORKNUM, new_nfsmblocks);
-
+   
     rel->rd_smgr->smgr_fsm_nblocks = new_nfsmblocks;
 }
 
@@ -328,8 +327,7 @@ void FreeSpaceMapTruncateRel(Relation rel, BlockNumber nblocks)
      * at the next command boundary.  But this ensures it isn't outright wrong
      * until then.
      */
-    if (rel->rd_smgr)
-        rel->rd_smgr->smgr_fsm_nblocks = new_nfsmblocks;
+    rel->rd_smgr->smgr_fsm_nblocks = new_nfsmblocks;
 }
 
 /*

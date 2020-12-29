@@ -2,47 +2,38 @@
 drop database if exists pg_type_databse;
 NOTICE:  database "pg_type_databse" does not exist, skipping
 create database pg_type_databse dbcompatibility 'PG';
-
 \c pg_type_databse
 create table d_format_test(a varchar(10) not null);
 insert into d_format_test values('');
-
-
-
 -- concat test
 select concat(null,'','','') is null;
- ?column?
+ ?column? 
 ----------
  f
 (1 row)
-
 
 select concat('','') is null;
- ?column?
+ ?column? 
 ----------
  f
 (1 row)
-
 
 select ''::int;
 ERROR:  invalid input syntax for integer: ""
 LINE 1: select ''::int;
                ^
 CONTEXT:  referenced column: int4
-
 select concat_ws('','ABCDE', 2, null, 22);
- concat_ws
+ concat_ws 
 -----------
  ABCDE222
 (1 row)
 
-
 select concat_ws(null,'ABCDE', 2, null, 22);
- concat_ws
+ concat_ws 
 -----------
  
 (1 row)
-
 
 --char、varchar test
 create table char_test(a char(10),b varchar(10));
@@ -65,7 +56,7 @@ select length(a),length(b) from char_test;
      10 |     10
       2 |      4
       0 |      0
-        |
+        |       
       1 |      1
 (6 rows)
 
@@ -76,7 +67,7 @@ select lengthb(a),lengthb(b) from char_test;
       20 |      20
       10 |       8
       10 |       0
-         |
+         |        
       10 |       1
 (6 rows)
 
@@ -87,16 +78,15 @@ select bit_length(a),bit_length(b) from char_test;
         160 |        160
          32 |         64
           0 |          0
-            |
+            |           
           8 |          8
 (6 rows)
-
 
 create index a on char_test(a);
 create index b on char_test(b);
 set enable_seqscan to off;
 select * from char_test where a = '零0';
-     a     |   b
+     a     |   b    
 -----------+--------
  零0       | 零1二3
 (1 row)
@@ -107,3 +97,18 @@ select * from char_test where b = '零1二3';
  零0       | 零1二3
 (1 row)
 
+select int1mod(3, 0);
+ERROR:  division by zero
+CONTEXT:  referenced column: int1mod
+select int2mod(3, 0);
+ERROR:  division by zero
+CONTEXT:  referenced column: int2mod
+select int4mod(3, 0);
+ERROR:  division by zero
+CONTEXT:  referenced column: int4mod
+select int8mod(3, 0);
+ERROR:  division by zero
+CONTEXT:  referenced column: int8mod
+select numeric_mod(1234.5678,0.0);
+ERROR:  division by zero
+CONTEXT:  referenced column: numeric_mod

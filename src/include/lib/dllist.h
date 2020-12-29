@@ -52,7 +52,7 @@ typedef struct Dlelem {
     struct Dllist* dle_list; /* what list this element is in */
 } Dlelem;
 
-typedef struct Dllist{
+typedef struct Dllist {
 	Dlelem	   *dll_head;
 	Dlelem	   *dll_tail;
     uint64      dll_len;
@@ -63,9 +63,15 @@ public:
     DllistWithLock();
     ~DllistWithLock();
     void Remove(Dlelem* e);
+    void AddHead(Dlelem* e);
     void AddTail(Dlelem* e);
     Dlelem* RemoveHead();
     bool IsEmpty();
+
+    inline uint64 GetLength()
+    {
+        return m_list.dll_len;
+    }
 
 private:
     slock_t m_lock;

@@ -55,7 +55,9 @@
 #include "commands/sec_rls_cmds.h"
 #include "commands/tablespace.h"
 #include "commands/trigger.h"
+#include "commands/user.h"
 #include "foreign/foreign.h"
+#include "libpq/auth.h"
 #include "libpq/be-fsstubs.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
@@ -70,7 +72,7 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "datasource/datasource.h"
 
 /*
@@ -186,8 +188,10 @@ ObjectAddress get_object_address(
             case OBJECT_SEQUENCE:
             case OBJECT_TABLE:
             case OBJECT_VIEW:
+            case OBJECT_CONTQUERY:
             case OBJECT_MATVIEW:
             case OBJECT_FOREIGN_TABLE:
+            case OBJECT_STREAM:
                 address = get_relation_by_qualified_name(objtype, objname, &relation, lockmode, missing_ok);
                 break;
             case OBJECT_COLUMN:
@@ -216,6 +220,10 @@ ObjectAddress get_object_address(
                 address = get_object_address_type(objtype, objname, missing_ok);
                 break;
             case OBJECT_AGGREGATE:
+                /* Given ordered set aggregate with no direct args, aggr_args variable is modified in gram.y.
+                   So the parse of aggr_args should be changed. See gram.y for detail. */
+                objargs = (List*)linitial(objargs);
+
                 address.classId = ProcedureRelationId;
                 address.objectId = LookupAggNameTypeNames(objname, objargs, missing_ok);
                 address.objectSubId = 0;
@@ -532,17 +540,30 @@ static ObjectAddress get_relation_by_qualified_name(
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("\"%s\" is not a view", RelationGetRelationName(relation))));
             break;
+        case OBJECT_CONTQUERY:
+            if (relation->rd_rel->relkind != RELKIND_CONTQUERY)
+                ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("\"%s\" is not a contquery", RelationGetRelationName(relation))));
+            break;
         case OBJECT_MATVIEW:
             if (relation->rd_rel->relkind != RELKIND_MATVIEW)
                 ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("\"%s\" is not a materialized view", RelationGetRelationName(relation))));
+                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                         errmsg("\"%s\" is not a materialized view",
+                                RelationGetRelationName(relation))));
             break;
         case OBJECT_FOREIGN_TABLE:
             if (relation->rd_rel->relkind != RELKIND_FOREIGN_TABLE)
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("\"%s\" is not a foreign table", RelationGetRelationName(relation))));
+            break;
+        case OBJECT_STREAM:
+            if (relation->rd_rel->relkind != RELKIND_STREAM)
+                ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("\"%s\" is not a stream", RelationGetRelationName(relation))));
             break;
         default:
             ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized objtype: %d", (int)objtype)));
@@ -771,9 +792,15 @@ void check_object_ownership(
         case OBJECT_SEQUENCE:
         case OBJECT_TABLE:
         case OBJECT_VIEW:
+        case OBJECT_CONTQUERY:
         case OBJECT_MATVIEW:
         case OBJECT_FOREIGN_TABLE:
+        case OBJECT_STREAM:
         case OBJECT_COLUMN:
+            if (!pg_class_ownercheck(RelationGetRelid(relation), roleid)) {
+                aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, RelationGetRelationName(relation));
+            }
+            break;
         case OBJECT_RULE:
         case OBJECT_TRIGGER:
         case OBJECT_CONSTRAINT:
@@ -783,9 +810,12 @@ void check_object_ownership(
             break;
         case OBJECT_DATABASE:
             if (!pg_database_ownercheck(address.objectId, roleid))
-                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE, NameListToString(objname));
+                aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_DATABASE, NameListToString(objname));
             break;
         case OBJECT_TYPE:
+            if (!pg_type_ownercheck(address.objectId, roleid))
+                aclcheck_error_type(ACLCHECK_NO_PRIV, address.objectId);
+            break;
         case OBJECT_DOMAIN:
         case OBJECT_ATTRIBUTE:
             if (!pg_type_ownercheck(address.objectId, roleid))
@@ -794,7 +824,7 @@ void check_object_ownership(
         case OBJECT_AGGREGATE:
         case OBJECT_FUNCTION:
             if (!pg_proc_ownercheck(address.objectId, roleid))
-                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PROC, NameListToString(objname));
+                aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, NameListToString(objname));
             break;
         case OBJECT_OPERATOR:
             if (!pg_oper_ownercheck(address.objectId, roleid))
@@ -802,7 +832,7 @@ void check_object_ownership(
             break;
         case OBJECT_SCHEMA:
             if (!pg_namespace_ownercheck(address.objectId, roleid))
-                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_NAMESPACE, NameListToString(objname));
+                aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_NAMESPACE, NameListToString(objname));
             break;
         case OBJECT_COLLATION:
             if (!pg_collation_ownercheck(address.objectId, roleid))
@@ -822,7 +852,7 @@ void check_object_ownership(
             break;
         case OBJECT_FOREIGN_SERVER:
             if (!pg_foreign_server_ownercheck(address.objectId, roleid))
-                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_FOREIGN_SERVER, NameListToString(objname));
+                aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_FOREIGN_SERVER, NameListToString(objname));
             break;
         case OBJECT_LANGUAGE:
             if (!pg_language_ownercheck(address.objectId, roleid))
@@ -858,7 +888,7 @@ void check_object_ownership(
         } break;
         case OBJECT_TABLESPACE:
             if (!pg_tablespace_ownercheck(address.objectId, roleid))
-                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_TABLESPACE, NameListToString(objname));
+                aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_TABLESPACE, NameListToString(objname));
             break;
         case OBJECT_TSDICTIONARY:
             if (!pg_ts_dict_ownercheck(address.objectId, roleid))
@@ -872,9 +902,16 @@ void check_object_ownership(
         case OBJECT_USER:
             /*
              * We treat roles as being "owned" by those with CREATEROLE priv,
-             * except that superusers are only owned by superusers.
+             * except that superusers are only owned by superusers and
+             * opradmin user and persistence user are only owned by the initial user.
              */
-            if (superuser_arg(address.objectId)) {
+            if (is_role_persistence(address.objectId)) {
+                if(roleid != INITIAL_USER_ID)
+                    ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be initial user")));
+            } else if (isOperatoradmin(address.objectId)) {
+                if(roleid != INITIAL_USER_ID)
+                    ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be initial user")));
+            } else if (superuser_arg(address.objectId)) {
                 if (!superuser_arg(roleid))
                     ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be system admin")));
             }

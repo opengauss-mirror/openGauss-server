@@ -1,0 +1,91 @@
+set enable_global_stats = true;
+
+--INT4
+CREATE TABLE vint4_test(a INT4, b INT4, c INT4) with (orientation = orc)   tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+copy vint4_test from '@abs_srcdir@/data/vint4_normal.data' delimiter '|' NULL '';
+
+select * from vint4_test order by a;
+
+--test vint4pl
+--select b+c, (b+c) is NULL from vint4_test where a <= 3 order by a;
+select b+c as result from vint4_test where a <= 3 order by a;
+select b+c as result from vint4_test where a <= 10 order by a; --out-of-range
+
+--test vint4mul
+--select b-c, (b-c) is NULL from vint4_test  where a > 10 and a <= 14 order by a;
+select b-c as result from vint4_test  where a > 10 and a <= 14 order by a;
+select b-c as result from vint4_test where a > 10 and a <= 20 order by a; --out-of-range
+
+--test vint4mi
+--select b*c, (b*c) is NULL from vint4_test where a > 20 and a <= 24 order by a ;
+select b*c as result from vint4_test where a > 20 and a <= 24 order by a;
+select b*c as result from vint4_test where a > 20 and a <= 30 order by a; --out-of-range
+
+--others
+select max(b),max(c) from vint4_test;
+select min(b),min(c) from vint4_test;
+select avg(b),avg(c) from vint4_test;
+select sum(b),sum(c) from vint4_test;
+
+--test vint4_sop
+select b,c from vint4_test where b=c order by a;
+select b,c from vint4_test where b<>c order by a;
+select b,c from vint4_test where b>c order by a;
+select b,c from vint4_test where b>=c order by a;
+select b,c from vint4_test where b<c order by a;
+select b,c from vint4_test where b<=c order by a;
+
+--INT8
+CREATE TABLE vint8_test(a INT8, b INT8, c INT8) with (orientation = orc)  tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+copy vint8_test from '@abs_srcdir@/data/vint8_normal.data' delimiter '|' NULL '';
+
+--test vint8pl
+--select b+c, (b+c) is NULL from vint8_test where a <= 3 order by a;
+select b+c as result from vint8_test where a <= 3::int8 order by a;
+select b+c as result from vint8_test where a <= 10::int8 order by a; --out-of-range
+
+--test vint8mul
+--select b-c, (b-c) is NULL from vint8_test where a > 10 and a <= 14 order by a;
+select b-c as result from vint8_test where a > 10::int8 and a <= 14::int8 order by a;
+select b-c as result from vint8_test where a > 10::int8 and a <= 20::int8 order by a; --out-of-range
+
+--test vint8mi
+--select b*c, (b*c) is NULL from vint8_test where a > 20 and a <= 24 order by a;
+select b*c as result from vint8_test where a > 20::int8 and a <= 24::int8 order by a;
+select b*c as result from vint8_test where a > 20::int8 and a <= 30::int8 order by a; --out-of-range
+
+--test vint8pl for int84pl/int48pl
+select b+(-2) as result from vint8_test where a <= 3::int8 order by a;
+select (-2)+b as result from vint8_test where a <= 10::int8 order by a;
+
+--test vint8mul for int84mul/int48mul
+select b*(-2) as result from vint8_test where a > 20::int8 and a <= 24::int8 order by a;
+select (-2)*b as result from vint8_test where a > 20::int8 and a <= 30::int8 order by a; --out-of-range
+
+--test vint8mi for int48mi/int84mi
+select b-(-2) as result from vint8_test where a > 10::int8 and a <= 14::int8 order by a;
+select (-2)-b as result from vint8_test where a > 10::int8 and a <= 20::int8 order by a; --out-of-range
+
+select max(b),max(c) from vint8_test;
+select min(b),min(c) from vint8_test;
+select avg(b),avg(c) from vint8_test;
+select sum(b),sum(c) from vint8_test;
+
+--test vint8_sop
+select b,c from vint8_test where b=c order by a;
+select b,c from vint8_test where b<>c order by a;
+select b,c from vint8_test where b>c order by a;
+select b,c from vint8_test where b>=c order by a;
+select b,c from vint8_test where b<c order by a;
+select b,c from vint8_test where b<=c order by a;
+                      
+                      
+select abs(c) from vint4_test where  c>-2147483647 and b > 1 order by c;
+select abs(c) from vint4_test order by c;
+select abs(c) from vint4_test where a < 30 and b > 0 order by c;
+                      
+--clean table
+drop table vint4_test;
+drop table vint8_test;
+
+

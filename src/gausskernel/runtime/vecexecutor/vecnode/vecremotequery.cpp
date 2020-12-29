@@ -38,7 +38,6 @@ VectorBatch* ExecVecRemoteQuery(VecRemoteQueryState* node)
     RemoteQuery* rq = (RemoteQuery*)parent->ss.ps.plan;
 
     // we assume that we do not do any qual calculation in the vector remotequery node.
-    
     Assert(parent->ss.ps.qual == NULL);
     Assert(!parent->update_cursor);
 
@@ -48,8 +47,9 @@ VectorBatch* ExecVecRemoteQuery(VecRemoteQueryState* node)
                 return NULL;
         } else if (SCAN_GATHER == rq->position) {
             do_query_for_scangather(node, true);
-        } else
+        } else {
             do_query(node, true);
+        }
 
         parent->query_Done = true;
     }
@@ -59,18 +59,17 @@ VectorBatch* ExecVecRemoteQuery(VecRemoteQueryState* node)
     if (PLAN_ROUTER == rq->position && true == node->resource_error) {
         outer_node = outerPlanState(outerPlanState(node)); /* skip scangather node */
         result_batch = VectorEngine(outer_node);
-    } else if (parent->batchsortstate)
+    } else if (parent->batchsortstate) {
         batchsort_getbatch((Batchsortstate*)parent->batchsortstate, true, result_batch);
-    else
+    } else {
         FetchBatch(parent, result_batch);
+    }
 
     /* When finish remote query already, should better reset the flag. */
-    
     if (BatchIsNull(result_batch))
         node->need_error_check = false;
 
     /* report error if any */
-    
     pgxc_node_report_error(node);
     /*
      *We only handle stream plan && RemoteQuery as root && DML's tag here.
@@ -85,7 +84,6 @@ VectorBatch* ExecVecRemoteQuery(VecRemoteQueryState* node)
         return result_batch;
 
     /* early free the connection to the compute pool */
-    
     if (PLAN_ROUTER == rq->position) {
         release_conn_to_compute_pool();
     }

@@ -148,7 +148,9 @@ bool CheckObjectExist(Oid objectOid, PgObjectType objectType)
         case OBJECT_TYPE_INDEX:
         case OBJECT_TYPE_SEQUENCE:
         case OBJECT_TYPE_VIEW:
+        case OBJECT_TYPE_CONTQUERY:
         case OBJECT_TYPE_FOREIGN_TABLE:
+        case OBJECT_TYPE_STREAM:
             tup = SearchSysCache1(RELOID, ObjectIdGetDatum(objectOid));
             break;
         case OBJECT_TYPE_PROC:
@@ -235,8 +237,14 @@ PgObjectType GetPgObjectTypePgClass(char relkind)
         case RELKIND_FOREIGN_TABLE:
             objectType = OBJECT_TYPE_FOREIGN_TABLE;
             break;
+        case RELKIND_STREAM:
+            objectType = OBJECT_TYPE_STREAM;
+            break;
         case RELKIND_VIEW:
             objectType = OBJECT_TYPE_VIEW;
+            break;
+        case RELKIND_CONTQUERY:
+            objectType = OBJECT_TYPE_CONTQUERY;
             break;
         case RELKIND_SEQUENCE:
             objectType = OBJECT_TYPE_SEQUENCE;
@@ -284,7 +292,9 @@ void recordCommentObjectTime(ObjectAddress addr, Relation rel, ObjectType objTyp
         case OBJECT_SEQUENCE:
         case OBJECT_TABLE:
         case OBJECT_VIEW:
+        case OBJECT_CONTQUERY:
         case OBJECT_FOREIGN_TABLE:
+        case OBJECT_STREAM:
         case OBJECT_COLUMN:
             if (rel != NULL) {
                 recordRelationMTime(rel->rd_id, rel->rd_rel->relkind);

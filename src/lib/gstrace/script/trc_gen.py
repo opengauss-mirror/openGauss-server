@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# coding=utf-8
 #
 # Copyright (c) 2020 Huawei Technologies Co.,Ltd.
 # 
@@ -28,12 +29,6 @@ import re
 import argparse
 import hashlib
 import sys
-import platform
-
-PY3 = False
-PYTHON_VERSION = platform.python_version_tuple()
-if PYTHON_VERSION[0] == '3':
-    PY3 = True
 
 struct_def = """struct comp_func {
    uint32_t comp;
@@ -128,7 +123,10 @@ def parse_file(path):
   return parsed_lines
 
 def calculate_sha(path):
-    return hashlib.sha256(open(path, 'rb').read()).hexdigest()
+    content = ''
+    with open(path, 'rb') as file:
+        content = file.read()
+    return hashlib.sha256(content).hexdigest()
 
 class FileSystemVisitor:
   def __init__(self):
@@ -193,9 +191,8 @@ def GenFuncTrcId(comp, listfuncs, outdir):
 
     # append to the file
     output = '{0}/{1}_gstrace.h'.format(outdir, comp)
-    file = open(output, 'w')
-    file.write(res)
-    file.close()
+    with open(output, 'w') as file:
+        file.write(res)
 
 def GenCompId(comps, outdir):
     res = '// This is a generated file\n\n'
@@ -211,9 +208,8 @@ def GenCompId(comps, outdir):
 
     # append to the file
     output = '{0}/comps.h'.format(outdir)
-    file = open(output, 'w')
-    file.write(res)
-    file.close()
+    with open(output, 'w') as file:
+        file.write(res)
 
 def GenFuncCompName(map_comp, comp_with_funcnum, comps, outdir):
     filename = 'funcs.comps'
@@ -224,12 +220,8 @@ def GenFuncCompName(map_comp, comp_with_funcnum, comps, outdir):
     res = '%s#define HASH_TRACE_CONFIG "%s"\n\n' % (res, str(sha256sum))
     res = '%s%s\n\n' % (res, struct_def)
 
-    if PY3:
-        for k,v in map_comp.items():
-            res = '%s%s\n\n' % (res, str(FuncArray(k, v)))
-    else:
-        for k,v in map_comp.iteritems():
-            res = '%s%s\n\n' % (res, str(FuncArray(k, v)))
+    for k,v in map_comp.iteritems():
+        res = '%s%s\n\n' % (res, str(FuncArray(k, v)))
 
     res = '%s%s\n\n' % (res, str(CompArray(comp_with_funcnum)))
     res = '%s%s\n\n' % (res, str(CompNameArray(comps)))
@@ -240,9 +232,8 @@ def GenFuncCompName(map_comp, comp_with_funcnum, comps, outdir):
 
     # output
     output = '{0}/{1}.h'.format(outdir, filename)
-    file = open(output, 'w')
-    file.write(res)
-    file.close()
+    with open(output, 'w') as file:
+        file.write(res)
 
 if __name__ == '__main__':
     # argparser
@@ -267,21 +258,14 @@ if __name__ == '__main__':
     sha_visitor = ShaVisitor()
     sha_visitor.visit(args.source)
     str_result = ",".join(sha_visitor.result)
-    if PY3:
-        sha256sum = hashlib.sha256(str_result.encode('utf-8')).hexdigest()
-    else:
-        sha256sum = hashlib.sha256(str_result).hexdigest()
+    sha256sum = hashlib.sha256(str_result).hexdigest()
 
     map_comp = {}
     for comp in comps:
         map_comp[comp] = []
 
-    if PY3:
-        for k,v in funcs.items():
-            map_comp[k] = v
-    else:
-        for k,v in funcs.iteritems():
-            map_comp[k] = v
+    for k,v in funcs.iteritems():
+        map_comp[k] = v
 
     comp_with_funcnum = []  
     for comp in comps:
@@ -295,12 +279,8 @@ if __name__ == '__main__':
     GenCompId(comps, args.output)
 
     # generate functions' trace id
-    if PY3:
-        for k,v in map_comp.items():
-            GenFuncTrcId(k, v, args.output)
-    else:
-        for k,v in map_comp.iteritems():
-            GenFuncTrcId(k, v, args.output)
+    for k,v in map_comp.iteritems():
+        GenFuncTrcId(k, v, args.output)
 
     # generate functions and componentes' name for gstrace tool
     GenFuncCompName(map_comp, comp_with_funcnum, comps, args.output)

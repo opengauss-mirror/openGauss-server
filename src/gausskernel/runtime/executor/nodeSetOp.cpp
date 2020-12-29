@@ -44,6 +44,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "executor/executor.h"
 #include "executor/nodeSetOp.h"
 #include "executor/nodeAgg.h"
@@ -115,7 +116,9 @@ static int fetch_tuple_flag(SetOpState* setopstate, TupleTableSlot* inputslot)
     int flag;
     bool is_null = false;
 
-    flag = DatumGetInt32(slot_getattr(inputslot, node->flagColIdx, &is_null));
+    Assert(inputslot != NULL && inputslot->tts_tupleDescriptor != NULL);
+
+    flag = DatumGetInt32(tableam_tslot_getattr(inputslot, node->flagColIdx, &is_null));
     Assert(!is_null);
     Assert(flag == 0 || flag == 1);
     return flag;
@@ -132,9 +135,15 @@ static void build_hash_table(SetOpState* setopstate)
     Assert(node->strategy == SETOP_HASHED);
     Assert(node->numGroups > 0);
 
-    setopstate->hashtable = BuildTupleHashTable(node->numCols, node->dupColIdx, setopstate->eqfunctions,
-        setopstate->hashfunctions, node->numGroups, sizeof(SetOpHashEntryData), setopstate->tableContext,
-        setopstate->tempContext, work_mem);
+    setopstate->hashtable = BuildTupleHashTable(node->numCols,
+        node->dupColIdx,
+        setopstate->eqfunctions,
+        setopstate->hashfunctions,
+        node->numGroups,
+        sizeof(SetOpHashEntryData),
+        setopstate->tableContext,
+        setopstate->tempContext,
+        work_mem);
 }
 
 /*
@@ -351,10 +360,14 @@ static void setop_fill_hash_table(SetOpState* setopstate)
                 if (entry != NULL) {
                     /* If new tuple group, initialize counts */
                     initialize_counts(&entry->pergroup);
-                    agg_spill_to_disk(temp_file_control, setopstate->hashtable, outer_slot,
-                                      ((SetOp*)setopstate->ps.plan)->numGroups, false, 
-                                      setopstate->ps.plan->plan_node_id, SET_DOP(setopstate->ps.plan->dop),
-                                      setopstate->ps.instrument);
+                    agg_spill_to_disk(temp_file_control,
+                        setopstate->hashtable,
+                        outer_slot,
+                        ((SetOp*)setopstate->ps.plan)->numGroups,
+                        false,
+                        setopstate->ps.plan->plan_node_id,
+                        SET_DOP(setopstate->ps.plan->dop),
+                        setopstate->ps.instrument);
 
                     if (temp_file_control->filesource) {
                         if (setopstate->ps.instrument) {
@@ -598,8 +611,12 @@ SetOpState* ExecInitSetOp(SetOp* node, EState* estate, int eflags)
      */
     if (node->strategy == SETOP_HASHED) {
         int64 operator_mem = SET_NODEMEM(node->plan.operatorMemKB[0], node->plan.dop);
-        setopstate->tableContext = AllocSetContextCreate(CurrentMemoryContext, "SetOp hash table",
-            ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, STANDARD_CONTEXT,
+        setopstate->tableContext = AllocSetContextCreate(CurrentMemoryContext,
+            "SetOp hash table",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE,
+            STANDARD_CONTEXT,
             operator_mem * 1024L);
     }
 
@@ -623,7 +640,10 @@ SetOpState* ExecInitSetOp(SetOp* node, EState* estate, int eflags)
      * setop nodes do no projections, so initialize projection info for this
      * node appropriately
      */
-    ExecAssignResultTypeFromTL(&setopstate->ps);
+    ExecAssignResultTypeFromTL(
+            &setopstate->ps,
+            ExecGetResultType(outerPlanState(setopstate))->tdTableAmType);
+
     setopstate->ps.ps_ProjInfo = NULL;
 
     /*
@@ -782,8 +802,7 @@ void ExecReScanSetOp(SetOpState* node)
 
     /* Release first tuple of group, if we have made a copy */
     if (node->grp_firstTuple != NULL) {
-        heap_freetuple_ext(node->grp_firstTuple);
-        node->grp_firstTuple = NULL;
+        tableam_tops_free_tuple(node->grp_firstTuple);
     }
 
     /* Release any hashtable storage */
@@ -851,7 +870,7 @@ void ExecReSetSetOp(SetOpState* node)
 
     /* Release first tuple of group, if we have made a copy */
     if (node->grp_firstTuple != NULL) {
-        heap_freetuple(node->grp_firstTuple);
+        tableam_tops_free_tuple(node->grp_firstTuple);
         node->grp_firstTuple = NULL;
     }
 

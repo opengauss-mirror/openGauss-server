@@ -35,7 +35,7 @@ fetch 100 from APPEND_CUR_036;
 CLOSE APPEND_CUR_036;
 END;
 
-explain (verbose on, costs off, nodes off)   select 'datanode1'::name,c_char_1 , c_char_2 from APPEND_BATCH_5000_036_1 group by 1,2,3 order by 1,2,3;
+explain (verbose on, costs off)   select 'datanode1'::name,c_char_1 , c_char_2 from APPEND_BATCH_5000_036_1 group by 1,2,3 order by 1,2,3;
 --test expr
 select 'datanode1'::name,c_char_1 , c_char_2 from APPEND_BATCH_5000_036_1 group by 1,2,3 order by 1,2,3 limit 20;
 ---test group by

@@ -1,0 +1,13 @@
+/*
+ * This file is used to clean the env of testing JavaUDF
+ */
+---
+-- Kill fenced UDF Master process
+---
+\! ps -ef | grep 'gaussdb fenced UDF master process' | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1
+\! rm -rf /tmp/.gaussUDF.socket > /dev/null 2>&1
+----
+--- Clear Data
+----
+DROP SCHEMA javaudf_basic CASCADE;
+

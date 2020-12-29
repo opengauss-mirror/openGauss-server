@@ -10,7 +10,8 @@
 #-------------------------------------------------------------------------
 
 subdir = src/common/interfaces/libpq
-top_builddir = ../../../..
+top_builddir = ../../../../
+backenddir = $(top_builddir)/src/common/backend
 include $(top_builddir)/src/Makefile.global
 
 
@@ -19,7 +20,16 @@ NAME= pq
 SO_MAJOR_VERSION= 5
 SO_MINOR_VERSION= 5
 
-override CPPFLAGS :=  -DFRONTEND -DUNSAFE_STAT_OK -I$(srcdir) $(CPPFLAGS) -I$(top_builddir)/src/common/port -I$(top_srcdir)/src/common/port
+DOXYGEN="$(top_builddir)/../$(BUILD_TOOLS_PATH)/doxygen/bin/doxygen"
+override CPPFLAGS :=  -DFRONTEND -DFRONTEND_PARSER -DUNSAFE_STAT_OK -I$(srcdir) $(CPPFLAGS) -I$(top_builddir)/src/common/port -I$(top_srcdir)/src/common/port
+override CPPFLAGS += -DPGXC -Wno-write-strings -I$(srcdir) -I$(top_builddir)/src/ -I$(top_builddir)/src/include -I$(top_builddir)/src/include/libpq/
+override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks
+override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks/encryption_hooks
+
+ifeq "$(ENABLE_CE)" "1"
+override CPPFLAGS += -DHAVE_CE -DWORDS_BIGENDIAN -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -lsecurec -L$(LIBKMC_LIB_PATH) -lkmc
+endif
+
 ifneq ($(PORTNAME), win32)
 override CXXFLAGS += $(PTHREAD_CFLAGS)
 endif
@@ -52,7 +62,12 @@ OBJS += $(filter crypt.o getaddrinfo.o getpeereid.o inet_aton.o open.o snprintf.
 # backend/libpq
 OBJS += ip.o md5.o sha2.o
 # utils/mb
+ifeq ($(PORTNAME), win32)
 OBJS += encnames.o wchar.o
+else
+OBJS += encnames.o
+endif
+
 # thread fix 
 OBJS += gs_strerror.o gs_env_r.o gs_syscall_lock.o gs_readdir.o
 
@@ -86,12 +101,73 @@ ifeq ($(PORTNAME), win32)
 SHLIB_LINK += -lshfolder -lwsock32 -lws2_32 -lsecur32 $(filter -leay32 -lssleay32 -lcomerr32 -lkrb5_32, $(LIBS))
 endif
 
+SHLIB_LINK +=  -lssl -lcrypto
+
+.PHONY: subsystem app-lib-depends ce_docs no_parser
+
 SHLIB_EXPORTS = exports.txt
 
-all: all-lib
+ifeq "$(ENABLE_CE)" "1"
+SUBDIRS = frontend_parser client_logic_common client_logic_expressions client_logic_cache client_logic_processor client_logic_fmt client_logic_hooks
+encryption_hooks_files := $(shell find client_logic_hooks/encryption_hooks -name '*.cpp' | sort)
+
+OBJS += $(hooks_files:.cpp=.o)
+OBJS += $(encryption_hooks_files:.cpp=.o)
+endif
+
+files:= $(foreach DIR,$(SUBDIRS),  $(wildcard $(DIR)/*.cpp) )
+ifneq "$(ENABLE_CE)" "1"
+files += $(srcdir)/frontend_parser/fe-wchar.o $(srcdir)/frontend_parser/frontend_mbutils.o $(srcdir)/frontend_parser/wstrncmp.cpp
+OBJS += $(files:.cpp=.o)
+else
+CE_OBJS+=$(patsubst fe-%.o,libpq_ce/fe-%.o,$(OBJS))
+mains:= $(foreach DIR,$(SUBDIRS),  $(wildcard $(DIR)/main.cpp))
+files:= $(filter-out $(mains), $(files))
+CE_OBJS += $(files:.cpp=.o)
+CE_OBJS += cl_state.o
+
+OBJS:=$(CE_OBJS)
+NAME:=pq_ce
+
+libpq_ce/fe-protocol3.o libpq_ce/fe-exec.o: client_logic_cache/types_to_oid.h
+libpq_ce/fe-%.o: fe-%.cpp
+	$(CC) -c -o $@ $(CFLAGS) $(CPPFLAGS)  $(CXXFLAG) $<
+	
+ce_docs:
+	@$(DOXYGEN) cl_doxy
+	@firefox $(top_builddir)/src/common/interfaces/libpq/gs_cl_docs/html/index.html&
+libpq_ce: 
+	@- if ! test -e libpq_ce; then mkdir libpq_ce; fi
+
+endif
+
+
+frontend_parser/gram.hpp:
+	$(MAKE) -C frontend_parser gram.hpp
+frontend_parser/parser.o frontend_parser/keywords.o:frontend_parser/gram.hpp
+
+
+frontend_parser_basic:
+	make fe-wchar.cpp -C frontend_parser
+
+subsystem: 
+	$(foreach DIR,$(SUBDIRS),make ENABLE_CE=1 -C $(DIR); )
+#libpq.a: subsystem  all-lib
+
+ifneq "$(ENABLE_CE)" "1"
+all-lib-depends: frontend_parser_basic
+	$(MAKE) all-lib
+else
+all-lib-depends: libpq_ce subsystem
+	$(MAKE) all-lib
+endif
+
+all: gs_ktool all-lib-depends
+gs_ktool:
+	$(MAKE) -C $(top_builddir)/src/bin/gs_ktool
 
 utlibpq: all-lib
-	cp libpq.so $(top_builddir)/src/test/ut/lib/libutlibpq.so
+	cp libpq.so $(top_builddir)/src/distribute/test/ut/lib/libutlibpq.so
 
 # Shared library stuff
 include $(top_srcdir)/src/Makefile.shlib
@@ -153,6 +229,9 @@ uninstall: uninstall-lib
 	rm -f '$(DESTDIR)$(includedir_internal)/pqexpbuffer.h'
 	rm -f '$(DESTDIR)$(datadir)/pg_service.conf.sample'
 
+clean_ce_docs:
+	rm -rf gs_cl_docs
+
 clean distclean: clean-lib
 	$(MAKE) -C test $@
 	rm -f $(OBJS) pthread.h libpq.rc
@@ -164,7 +243,7 @@ clean distclean: clean-lib
 	rm -f md5.cpp sha2.cpp ip.cpp
 	rm -f encnames.cpp wchar.cpp
 	rm -f gs_strerror gs_env_r.cpp gs_syscall_lock.cpp gs_readdir.cpp
-
+	$(foreach DIR,$(SUBDIRS),make -C $(DIR) clean; )
 maintainer-clean: distclean maintainer-clean-lib
 	$(MAKE) -C test $@
 	rm -f libpq-dist.rc

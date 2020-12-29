@@ -16,6 +16,8 @@
  * extended_statistics.cpp
  *     Extended statistics and selectivity estimation functions.
  *
+ * Portions Copyright (c) 2018, Huawei Tech. Co., Ltd.
+ *
  * IDENTIFICATION
  *     src/common/backend/utils/adt/extended_statistics.cpp
  *
@@ -44,7 +46,7 @@
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 /*
  * The max attribute number of multi-column statistic
@@ -92,7 +94,7 @@ static void es_error_column_not_exist(const char* relation_name, const char* col
  */
 void es_free_extendedstats(ExtendedStats* es)
 {
-    if (es == NULL) {
+    if (NULL == es) {
         return;
     }
 
@@ -122,7 +124,7 @@ void es_free_extendedstats(ExtendedStats* es)
  */
 void es_free_extendedstats_list(List* es_list)
 {
-    if (es_list == NULL) {
+    if (NULL == es_list) {
         return;
     }
 
@@ -199,8 +201,8 @@ Form_pg_type es_get_attrtype(Oid typeoid)
  */
 void es_get_column_typid_typmod(Oid relid, int2 attnum, Oid* p_atttypid, int* p_atttypmod)
 {
-    HeapTuple att_tup = SearchSysCache2(ATTNUM, ObjectIdGetDatum(relid), Int32GetDatum(attnum));
-    if (!HeapTupleIsValid(att_tup)) {
+    HeapTuple attTup = SearchSysCache2(ATTNUM, ObjectIdGetDatum(relid), Int32GetDatum(attnum));
+    if (!HeapTupleIsValid(attTup))
         ereport(ERROR,
             (errmodule(MOD_OPT),
                 errcode(ERRCODE_CACHE_LOOKUP_FAILED),
@@ -208,29 +210,28 @@ void es_get_column_typid_typmod(Oid relid, int2 attnum, Oid* p_atttypid, int* p_
                     attnum,
                     relid,
                     g_instance.attr.attr_common.PGXCNodeName)));
-    }
 
-    Form_pg_attribute att_form = (Form_pg_attribute)GETSTRUCT(att_tup);
+    Form_pg_attribute attForm = (Form_pg_attribute)GETSTRUCT(attTup);
 
     /*
      * If a drop column operation happened between fetching sample rows and updating
      * pg_statistic, we don't have to further processing the dropped-column's stats
      * update, so just skip.
      */
-    if (att_form->attisdropped) {
+    if (attForm->attisdropped) {
         elog(WARNING,
             "relation:%s's attnum:%d is droppred during ANALYZE, so skipped.",
-            get_rel_name(att_form->attrelid),
-            att_form->attnum);
+            get_rel_name(attForm->attrelid),
+            attForm->attnum);
 
-        ReleaseSysCache(att_tup);
+        ReleaseSysCache(attTup);
         return;
     }
 
-    *p_atttypid = att_form->atttypid;
-    *p_atttypmod = att_form->atttypmod;
+    *p_atttypid = attForm->atttypid;
+    *p_atttypmod = attForm->atttypmod;
 
-    ReleaseSysCache(att_tup);
+    ReleaseSysCache(attTup);
 }
 
 /*
@@ -260,7 +261,7 @@ void es_get_columns_typid_typmod(
         es_get_column_typid_typmod(relid, cur_attnum, &(atttypid_array[i]), &(atttypmod_array[i]));
     }
 
-    *p_num_column = (uint)num_column;
+    *p_num_column = num_column;
     *p_atttypid_array = atttypid_array;
     *p_atttypmod_array = atttypmod_array;
 }
@@ -314,7 +315,7 @@ Oid es_get_typinput(Oid typeoid)
 void es_get_attnum_of_statistic_items(
     Relation rel, VacuumStmt* vacstmt, Bitmapset** p_bms_single_column, List** p_list_multi_column)
 {
-    Assert(vacstmt->va_cols != NULL);
+    Assert(NULL != vacstmt->va_cols);
 
     Bitmapset* bms_single_column = NULL;
     List* list_multi_column = NIL;
@@ -326,13 +327,14 @@ void es_get_attnum_of_statistic_items(
         if (IsA(item, String)) {
             char* column_name = strVal(item);
             int column_attnum = attnameAttNum(rel, column_name, false);
-            if (column_attnum != InvalidAttrNumber) {
+            if (InvalidAttrNumber != column_attnum) {
                 bms_single_column = bms_add_member(bms_single_column, column_attnum);
             } else {
                 es_error_column_not_exist(RelationGetRelationName(rel), column_name);
             }
-        } else if (IsA(item, List)) {        
-            /* Multi-column */
+        }
+        /* Multi-column */
+        else if (IsA(item, List)) {
             List* multi_column_name_list = (List*)item;
             Bitmapset* bms_multi_column = NULL;
 
@@ -419,7 +421,7 @@ void es_check_alter_table_statistics(Relation rel, AlterTableCmd* cmd)
             Assert(IsA(col_name, String));
             char* col_name_str = strVal(col_name);
             int col_attnum = attnameAttNum(rel, col_name_str, false);
-            if (col_attnum != InvalidAttrNumber) {
+            if (InvalidAttrNumber != col_attnum) {
                 bms_attnums = bms_add_member(bms_attnums, col_attnum);
                 elog(ES_LOGLEVEL, "Define multi column stats, colname[%s] attnum[%d]", col_name_str, col_attnum);
             } else {
@@ -549,7 +551,7 @@ static bool es_is_supported_replicate(VacuumStmt* stmt, Oid relid)
         return false;
     }
 
-    bool isReplication = (stmt->disttype == DISTTYPE_REPLICATION);
+    bool isReplication = (DISTTYPE_REPLICATION == stmt->disttype);
     if (!isReplication) {
         return false;
     }
@@ -592,10 +594,10 @@ static bool es_has_es_requirement(VacuumStmt* stmt, Oid relid, bool inh)
 
     bool ans = false;
     List* bmslist_multi_attnum = NULL;
-    if (stmt->va_cols == NULL) {
+    if (NULL == stmt->va_cols) {
         bmslist_multi_attnum = es_explore_declared_stats(relid, stmt, inh);
     }
-    if (bmslist_multi_attnum != NIL) {
+    if (NIL != bmslist_multi_attnum) {
         ans = true;
         list_free_deep(bmslist_multi_attnum);
     }
@@ -667,7 +669,8 @@ void es_check_availability_for_table(VacuumStmt* stmt, Relation rel, bool inh, b
     *p_replicate_needs_extstats = replicate_needs_extstats;
 
     /* Report error for replicate foreign table */
-    if (replicate_needs_extstats && rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
+    if (replicate_needs_extstats && (RELKIND_FOREIGN_TABLE == rel->rd_rel->relkind
+        || RELKIND_STREAM == rel->rd_rel->relkind)) {
         ereport(ERROR,
             (errmodule(MOD_OPT),
                 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -750,7 +753,7 @@ static void es_get_column_name_alias_item(StringInfoData* final_alias, AnalyzeSa
     uint32 name_alias_flag, unsigned int index, const char* separator, const char* prefix, const char* postfix)
 {
     /* For ", " */
-    if (index != 0) {
+    if (0 != index) {
         appendStringInfo(final_alias, "%s", separator);
     }
 
@@ -908,7 +911,7 @@ Bitmapset* es_get_multi_column_attnum(HeapTuple tuple, Relation relation)
  */
 List* es_explore_declared_stats(Oid relid, VacuumStmt* vacstmt, bool inh)
 {
-    Assert(vacstmt->va_cols == NIL);
+    Assert(NIL == vacstmt->va_cols);
 
     char relkind = es_get_starelkind();
     ScanKeyData key[3];
@@ -921,10 +924,10 @@ List* es_explore_declared_stats(Oid relid, VacuumStmt* vacstmt, bool inh)
     SysScanDesc scan = systable_beginscan(relation, StatisticExtRelidKindInhKeyIndexId, true, SnapshotNow, 3, key);
 
     List* es_list = NIL;
-    for (HeapTuple tuple = NULL; (tuple = systable_getnext(scan)) != NULL;) {
+    for (HeapTuple tuple = NULL; NULL != (tuple = systable_getnext(scan));) {
         if (HeapTupleIsValid(tuple)) {
             Bitmapset* bms_attnum = es_get_multi_column_attnum(tuple, relation);
-            if (bms_attnum != NULL) {
+            if (NULL != bms_attnum) {
                 es_list = lappend(es_list, bms_attnum);
             }
         }
@@ -980,7 +983,7 @@ Datum es_mcv_slot_cstring_array_to_array_array(
         char* ch = DatumGetCString(elemsp[i]);
         elog(ES_LOGLEVEL, "[%s]", ch);
 
-        Assert(nullsp[i] == false);
+        Assert(false == nullsp[i]);
         elems[i] = OidFunctionCall3(ANYARRAYINFUNCOID, elemsp[i], atttypid_array[i], atttypmod_array[i]);
     }
 
@@ -1020,6 +1023,7 @@ VacAttrStats** es_build_vacattrstats_array(
 
     /* A list of VacAttrStats */
     List* vacattrstats_list = NIL;
+
     bool flagExistsEvent = false;
 
     ListCell* lc = NULL;
@@ -1035,7 +1039,7 @@ VacAttrStats** es_build_vacattrstats_array(
 
         /* Build up structure for the new statistic */
         VacAttrStats* vacAttrStats = examine_attribute(rel, bms_multi_column, true);
-        if (vacAttrStats == NULL) {
+        if (NULL == vacAttrStats) {
             continue;
         }
         vacAttrStats->anl_context = CurrentMemoryContext;
@@ -1047,7 +1051,7 @@ VacAttrStats** es_build_vacattrstats_array(
 
     *array_length = 0;
     VacAttrStats** vacattrstats_array = NULL;
-    if (vacattrstats_list != NIL) {
+    if (NIL != vacattrstats_list) {
         *array_length = list_length(vacattrstats_list);
         vacattrstats_array = (VacAttrStats**)palloc0(list_length(vacattrstats_list) * sizeof(VacAttrStats*));
         int i = 0;
@@ -1101,7 +1105,7 @@ static List* es_search_extended_statistics(
     ScanKeyInit(&key[1], Anum_pg_statistic_ext_starelkind, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(relkind));
     ScanKeyInit(&key[2], Anum_pg_statistic_ext_stainherit, BTEqualStrategyNumber, F_BOOLEQ, BoolGetDatum(inh));
 
-    if (bms_attnums != NULL) {
+    if (NULL != bms_attnums) {
         num_key = 4;
         ext_att_num = es_get_att_vector(bms_attnums);
         ScanKeyInit(
@@ -1113,13 +1117,13 @@ static List* es_search_extended_statistics(
         systable_beginscan(relation, StatisticExtRelidKindInhKeyIndexId, true, SnapshotNow, num_key, key);
 
     int count = 0;
-    for (HeapTuple tuple = NULL; (tuple = systable_getnext(scan)) != NULL;) {
+    for (HeapTuple tuple = NULL; NULL != (tuple = systable_getnext(scan));) {
         if (HeapTupleIsValid(tuple)) {
             Bitmapset* bms_attnum_tuple = es_get_multi_column_attnum(tuple, relation);
-            Assert(bms_attnums == NULL || bms_equal(bms_attnums, bms_attnum_tuple));
+            Assert(NULL == bms_attnums || bms_equal(bms_attnums, bms_attnum_tuple));
 
             /* Skip single column stats */
-            if (bms_attnum_tuple == NULL) {
+            if (NULL == bms_attnum_tuple) {
                 continue;
             }
 
@@ -1137,6 +1141,7 @@ static List* es_search_extended_statistics(
             if (statistic_kind_flag > 0 && nullfrac < 0.0001 && -0.0001 < distinct && distinct < 0.0001) {
                 continue;
             }
+
             /* We only care about ES_MAX_FETCH_NUM_OF_INSTANCE instance of extended statistics */
             ++count;
             if (statistic_kind_flag > 0 && count > (ES_MAX_FETCH_NUM_OF_INSTANCE + 1)) {
@@ -1219,7 +1224,10 @@ static List* es_search_extended_statistics(
 
     systable_endscan(scan);
     heap_close(relation, AccessShareLock);
-    pfree_ext(ext_att_num);
+
+    if (NULL != ext_att_num) {
+        pfree_ext(ext_att_num);
+    }
 
     return es_list;
 }
@@ -1312,7 +1320,7 @@ ArrayType* es_construct_mcv_value_array(VacAttrStats* stats, int mcv_slot_index)
 bool es_is_multicolumn_stats_exists(Oid relid, char relkind, bool inh, Bitmapset* bms_attnums)
 {
     List* es_list = es_search_extended_statistics(relid, relkind, inh, bms_attnums, ES_SEARCH);
-    bool found = (es_list != NULL) ? true : false;
+    bool found = (NULL != es_list) ? true : false;
     es_free_extendedstats_list(es_list);
     return found;
 }
@@ -1341,7 +1349,7 @@ float4 es_get_multi_column_distinct(Oid relid, char relkind, bool inh, Bitmapset
 {
     List* es_list = es_search_extended_statistics(relid, relkind, inh, bms_attnums, ES_DISTINCT);
 
-    if (es_list == NULL) {
+    if (NULL == es_list) {
         return 0.0;
     } else {
         Assert(1 == list_length(es_list));
@@ -1373,10 +1381,10 @@ ExtendedStats* es_get_multi_column_stats(Oid relid, char relkind, bool inh, Bitm
     uint32 mcv_flag = has_null ? ES_MCV : ES_NULL_MCV;
     List* es_list = es_search_extended_statistics(relid, relkind, inh, bms_attnums, ES_ALL & (~mcv_flag));
 
-    if (es_list == NIL) {
+    if (NIL == es_list) {
         return NULL;
     } else {
-        Assert(list_length(es_list) == 1);
+        Assert(1 == list_length(es_list));
         ExtendedStats* es = (ExtendedStats*)linitial(es_list);
         list_free(es_list);
         return es;
@@ -1404,7 +1412,7 @@ List* es_get_multi_column_stats(Oid relid, char relkind, bool inh, int* num_stat
     uint32 mcv_flag = has_null ? ES_MCV : ES_NULL_MCV;
     List* es_list = es_search_extended_statistics(relid, relkind, inh, NULL, ES_ALL & (~mcv_flag));
 
-    if (es_list == NULL) {
+    if (NULL == es_list) {
         *num_stats = 0;
         return NIL;
     } else {
@@ -1420,13 +1428,10 @@ List* es_get_multi_column_stats(Oid relid, char relkind, bool inh, int* num_stat
 
 static int2vector* es_get_att_vector(Bitmapset* attnum)
 {
-    int num = bms_num_members(attnum);
-    int x = -1;
-    int i = 0;
+    int num = bms_num_members(attnum), x = -1, i = 0;
     int2* attnum_array = (int2*)palloc0(sizeof(int2) * num);
-    while ((x = bms_next_member(attnum, x)) >= 0) {
+    while ((x = bms_next_member(attnum, x)) >= 0)
         attnum_array[i++] = x;
-    }
     int2vector* result = buildint2vector(attnum_array, num);
     pfree_ext(attnum_array);
     return result;
@@ -1438,12 +1443,11 @@ void es_split_multi_column_stats(List* va_list, List** va_cols, List** va_cols_m
 
     foreach (lc, va_list) {
         Node* item = (Node*)lfirst(lc);
-        if (IsA(item, String)) {
+        if (IsA(item, String))
             *va_cols = list_append_unique(*va_cols, item);
-        } else if (IsA(item, List)) {
+        else if (IsA(item, List))
             *va_cols_multi = list_append_unique(*va_cols_multi, item);
-        } else {
+        else
             Assert(false);
-        }
     }
 }

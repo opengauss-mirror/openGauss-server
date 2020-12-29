@@ -73,13 +73,12 @@ static void pg_to_ascii(unsigned char* src, unsigned char* src_end, unsigned cha
      * Encode
      */
     for (x = src; x < src_end; x++) {
-        if (*x < 128) {
+        if (*x < 128)
             *dest++ = *x;
-        } else if (*x < range) {
+        else if (*x < range)
             *dest++ = ' '; /* bogus 128 to 'range' */
-        } else {
+        else
             *dest++ = ascii[*x - range];
-        }
     }
 }
 
@@ -161,20 +160,17 @@ void ascii_safe_strlcpy(char* dest, const char* src, size_t destsiz)
         /* use unsigned char here to avoid compiler warning */
         unsigned char ch = *src++;
 
-        if (ch == '\0') {
+        if (ch == '\0')
             break;
-        }
-
-        if (32 <= ch && ch <= 127) {
         /* Keep printable ASCII characters */
+        if (32 <= ch && ch <= 127)
             *dest = ch;
-        } else if (ch == '\n' || ch == '\r' || ch == '\t') {
         /* White-space is also OK */
+        else if (ch == '\n' || ch == '\r' || ch == '\t')
             *dest = ch;
-        } else {
         /* Everything else is replaced with '?' */
+        else
             *dest = '?';
-        }
         dest++;
     }
 

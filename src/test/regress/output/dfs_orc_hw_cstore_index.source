@@ -1,0 +1,902 @@
+---
+--case 1:  unsupported index test
+---
+CREATE TABLE cstore_insert_t1(c1 int, c2 float, c3 text) WITH (orientation = orc) tablespace hdfs_ts ;
+COPY cstore_insert_t1 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+CREATE UNIQUE INDEX unsupport1_idx ON cstore_insert_t1(c1);
+ERROR:  access method "psort" does not support unique indexes
+CREATE INDEX CONCURRENTLY unsupport2_idx ON cstore_insert_t1(c1);
+ERROR:  PGXC does not support concurrent INDEX yet
+DETAIL:  The feature is not currently supported
+CREATE INDEX unsupport3_idx ON cstore_insert_t1(lower(c2));
+ERROR:  access method "psort" does not support index expressions
+CREATE INDEX unsupport4_idx ON cstore_insert_t1(c1) where c1 > 1;
+ERROR:  access method "psort" does not support WHERE clause
+CREATE INDEX unsupport5_idx ON cstore_insert_t1(c2 NULLS FIRST);
+ERROR:  access method "psort" does not support NULLS FIRST/LAST options
+CREATE INDEX unsupport6_idx ON cstore_insert_t1 USING hash (c1);
+ERROR:  access method "hash" does not support column store
+CREATE INDEX unsupport7_idx ON cstore_insert_t1 USING gist (c1);
+ERROR:  access method "gist" does not support column store
+CREATE INDEX unsupport8_idx ON cstore_insert_t1 USING gin (c1);
+ERROR:  access method "gin" does not support column store
+CREATE INDEX unsupport9_idx ON cstore_insert_t1 USING spgist (c1);
+ERROR:  access method "spgist" does not support column store
+CREATE INDEX unsupport10_idx ON cstore_insert_t1 USING btree (c1);
+ERROR:  access method "btree" does not support column store
+COPY cstore_insert_t1 FROM '@abs_srcdir@/data/cstore_copy_t2.data' DELIMITER ',';
+DROP TABLE cstore_insert_t1;
+CREATE TABLE row_table(c1 int, c2 float, c3 text);
+CREATE INDEX unsupport11_idx ON row_table USING psort (c1);
+ERROR:  access method "psort" does not support row store
+DROP TABLE row_table;
+----
+--case 3:  check reserve column
+----
+CREATE TABLE check_column(id int, tid int);
+ERROR:  column name "tid" conflicts with a system column name
+CREATE TABLE check_column(id int);
+ALTER TABLE check_column ADD COLUMN tid int;
+ERROR:  column name "tid" conflicts with a system column name
+DROP TABLE check_column;
+----
+---case 4: different data type with index
+----
+create table row_index_tbl(
+  id1 int1
+ ,id2 int2
+ ,id4 int4
+ ,id8 int8
+ ,int1 int
+ ,bint bigint
+ ,f1   float
+ ,flag char
+ ,name1 varchar(20)
+ ,name2 varchar2(20)
+ ,name3 nvarchar2(20)
+ ,name4 text
+ ,name5 bytea
+ ,time1 date
+ ,time2 timetz
+ ,time3 time
+ ,num1 float8
+ ,num2 decimal
+ ,serial1 serial
+ ,interval1 interval
+ ,interval2 tinterval) distribute by hash(id2);
+NOTICE:  CREATE TABLE will create implicit sequence "row_index_tbl_serial1_seq" for serial column "row_index_tbl.serial1"
+insert into row_index_tbl values(10,400,2000,40000,1,111111,1.1,'a','aa','bb','cc','dd','ff','1996-02-12','1984-2-6 01:00:30+8','02:05:36',30.12,0.03,2147483647,'2 day 13:34:56','["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]');
+insert into row_index_tbl values(20,300,3000,10000,2,222222,2.2,'b','ee','cc','dd','aa','hh','1998-03-24','1986-2-6 03:00:30+8','04:36:25',20.15,0.06,-2147483647,'1 day 18:34:56','["May 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]');
+insert into row_index_tbl values(30,200,4000,30000,3,333333,3.3,'c','cc','bb','aa','ee','gg','1997-05-26','1987-2-6 08:00:30+8','06:36:18',34.36,0.07,2136483647,'18 day 14:34:56','["Feb 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]');
+insert into row_index_tbl values(40,100,1000,20000,4,444444,4.4,'d','cc','bb','aa','ee','dd','1992-01-30','1989-2-6 06:00:30+8','08:21:56',25.12,0.05,-2136483647,'7 day 16:34:56','["epoch" "Mon May 1 00:30:30 1995"]');
+create table cstore_index_tbl(
+  id1 int1
+ ,id2 int2
+ ,id4 int4
+ ,id8 int8
+ ,int1 int
+ ,bint bigint
+ ,f1   float
+ ,flag char
+ ,name1 varchar(20)
+ ,name2 varchar2(20)
+ ,name3 nvarchar2(20)
+ ,name4 text
+ ,name5 bytea
+ ,time1 date
+ ,time2 timetz
+ ,time3 time
+ ,num1 float8
+ ,num2 decimal
+ ,serial1 serial
+ ,interval1 interval
+ ,interval2 tinterval)with(orientation = orc) tablespace hdfs_ts  distribute by hash(id2);
+NOTICE:  CREATE TABLE will create implicit sequence "cstore_index_tbl_serial1_seq" for serial column "cstore_index_tbl.serial1"
+insert into cstore_index_tbl select * from row_index_tbl;
+select ctid from cstore_index_tbl order by 1;
+ ctid  
+-------
+ (0,1)
+ (0,1)
+ (0,1)
+ (0,1)
+(4 rows)
+
+create index idx_int1 on cstore_index_tbl(id1);
+create index idx_int2 on cstore_index_tbl(id2);
+create index idx_int4 on cstore_index_tbl(id4);
+create index idx_int8 on cstore_index_tbl(id8);
+create index idx_int on cstore_index_tbl(int1);
+create index idx_bigint on cstore_index_tbl(bint);
+create index idx_float on cstore_index_tbl(flag);
+create index idx_varchar on cstore_index_tbl(name1);
+create index idx_varchar2 on cstore_index_tbl(name2);
+create index idx_nvarchar2 on cstore_index_tbl(name3);
+create index idx_text on cstore_index_tbl(name4);
+create index idx_date on cstore_index_tbl(time1);
+create index idx_timetz on cstore_index_tbl(time2);
+create index idx_time on cstore_index_tbl(time3);
+create index idx_float8 on cstore_index_tbl(num1);
+create index idx_decimal on cstore_index_tbl(num2);
+create index idx_serial on cstore_index_tbl(serial1);
+create index idx_interval on cstore_index_tbl(interval1);
+create index idx_tinterval on cstore_index_tbl(interval2);
+create index idx_id4_name1 on cstore_index_tbl(id4,name1);
+create index idx_id4_name2 on cstore_index_tbl(id4,name2);
+create index idx_id4_name3 on cstore_index_tbl(id4,name3);
+create index idx_id4_name4 on cstore_index_tbl(id4,name4);
+create index idx_bint_flag on cstore_index_tbl(bint,flag);
+create index idx_int1_time on cstore_index_tbl(int1,time3);
+create index idx_time1_name2 on cstore_index_tbl(time1,name2);
+create index idx_id4_time2 on cstore_index_tbl(id4,time2);
+create index idx_num1_time2 on cstore_index_tbl(num1,time2);
+create index idx_id4_num2 on cstore_index_tbl(id4,num2);
+create index idx_name1_name2 on cstore_index_tbl(name1,name2);
+create index idx_time1_interval1 on cstore_index_tbl(time1,interval1);
+set enable_seqscan=off;
+explain (verbose on, costs off) select * from cstore_index_tbl where id2 > 100;
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_int2 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.id2 > 100)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: (cstore.cstore_index_tbl.id2 > 100)
+(14 rows)
+
+select * from cstore_index_tbl where id2 > 100 order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs   | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 |  2147483647 | @ 2 days 13 hours 34 mins 56 secs  | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(3 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where id4 > 1000;
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_id4_num2 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.id4 > 1000)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: (cstore.cstore_index_tbl.id4 > 1000)
+(14 rows)
+
+select * from cstore_index_tbl where id4 > 1000 order by id4;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 |  2147483647 | @ 2 days 13 hours 34 mins 56 secs  | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs   | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+(3 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where id8 > 10000;
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_int8 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.id8 > 10000)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: (cstore.cstore_index_tbl.id8 > 10000)
+(14 rows)
+
+select * from cstore_index_tbl where id8 > 10000 order by id8;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 40  | 100 | 1000 | 20000 |    4 | 444444 | 4.4 | d    | cc    | bb    | aa    | ee    | \x6464 | Thu Jan 30 00:00:00 1992 | 06:00:30+08 | 08:21:56 | 25.12 |  .05 | -2136483647 | @ 7 days 16 hours 34 mins 56 secs  | ["Wed Dec 31 16:00:00 1969 PST" "Mon May 01 00:30:30 1995 PDT"]
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 |  2147483647 | @ 2 days 13 hours 34 mins 56 secs  | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(3 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where name1 > 'aa';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_name1_name2 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: ((public.cstore_index_tbl.name1)::text > 'aa'::text)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: ((cstore.cstore_index_tbl.name1)::text > 'aa'::text)
+(14 rows)
+
+select * from cstore_index_tbl where name1 > 'aa' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 40  | 100 | 1000 | 20000 |    4 | 444444 | 4.4 | d    | cc    | bb    | aa    | ee    | \x6464 | Thu Jan 30 00:00:00 1992 | 06:00:30+08 | 08:21:56 | 25.12 |  .05 | -2136483647 | @ 7 days 16 hours 34 mins 56 secs  | ["Wed Dec 31 16:00:00 1969 PST" "Mon May 01 00:30:30 1995 PDT"]
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs   | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+(3 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where name2 > 'aa';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_name1_name2 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: ((public.cstore_index_tbl.name2)::text > 'aa'::text)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: ((cstore.cstore_index_tbl.name2)::text > 'aa'::text)
+(14 rows)
+
+select * from cstore_index_tbl where name2 > 'aa' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 40  | 100 | 1000 | 20000 |    4 | 444444 | 4.4 | d    | cc    | bb    | aa    | ee    | \x6464 | Thu Jan 30 00:00:00 1992 | 06:00:30+08 | 08:21:56 | 25.12 |  .05 | -2136483647 | @ 7 days 16 hours 34 mins 56 secs  | ["Wed Dec 31 16:00:00 1969 PST" "Mon May 01 00:30:30 1995 PDT"]
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs   | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 |  2147483647 | @ 2 days 13 hours 34 mins 56 secs  | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(4 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where name3 > 'aa';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_id4_name3 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: ((public.cstore_index_tbl.name3)::text > 'aa'::text)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: ((cstore.cstore_index_tbl.name3)::text > 'aa'::text)
+(14 rows)
+
+select * from cstore_index_tbl where name3 > 'aa' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1             |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+-----------------------------------+-----------------------------------------------------------------
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs  | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 |  2147483647 | @ 2 days 13 hours 34 mins 56 secs | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(2 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where name4 > 'aa';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_id4_name4 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.name4 > 'aa'::text)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: (cstore.cstore_index_tbl.name4 > 'aa'::text)
+(14 rows)
+
+select * from cstore_index_tbl where name4 > 'aa' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 40  | 100 | 1000 | 20000 |    4 | 444444 | 4.4 | d    | cc    | bb    | aa    | ee    | \x6464 | Thu Jan 30 00:00:00 1992 | 06:00:30+08 | 08:21:56 | 25.12 |  .05 | -2136483647 | @ 7 days 16 hours 34 mins 56 secs  | ["Wed Dec 31 16:00:00 1969 PST" "Mon May 01 00:30:30 1995 PDT"]
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 |  2147483647 | @ 2 days 13 hours 34 mins 56 secs  | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(3 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where time1 > '1992-01-30';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_time1_interval1 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.time1 > 'Thu Jan 30 00:00:00 1992'::timestamp without time zone)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: (cstore.cstore_index_tbl.time1 > 'Thu Jan 30 00:00:00 1992'::timestamp without time zone)
+(14 rows)
+
+select * from cstore_index_tbl where time1 > '1992-01-30' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs   | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 |  2147483647 | @ 2 days 13 hours 34 mins 56 secs  | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(3 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where time2 > '1984-2-6 01:00:30+8';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_num1_time2 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.time2 > '01:00:30+08'::time with time zone)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: (cstore.cstore_index_tbl.time2 > '01:00:30+08'::time with time zone)
+(14 rows)
+
+select * from cstore_index_tbl where time2 > '1984-2-6 01:00:30+8' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 40  | 100 | 1000 | 20000 |    4 | 444444 | 4.4 | d    | cc    | bb    | aa    | ee    | \x6464 | Thu Jan 30 00:00:00 1992 | 06:00:30+08 | 08:21:56 | 25.12 |  .05 | -2136483647 | @ 7 days 16 hours 34 mins 56 secs  | ["Wed Dec 31 16:00:00 1969 PST" "Mon May 01 00:30:30 1995 PDT"]
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs   | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+(3 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where num1 > 20.20;
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_num1_time2 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.num1 > 20.2::double precision)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: (cstore.cstore_index_tbl.num1 > 20.2::double precision)
+(14 rows)
+
+select * from cstore_index_tbl where num1 > 20.20 order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 40  | 100 | 1000 | 20000 |    4 | 444444 | 4.4 | d    | cc    | bb    | aa    | ee    | \x6464 | Thu Jan 30 00:00:00 1992 | 06:00:30+08 | 08:21:56 | 25.12 |  .05 | -2136483647 | @ 7 days 16 hours 34 mins 56 secs  | ["Wed Dec 31 16:00:00 1969 PST" "Mon May 01 00:30:30 1995 PDT"]
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 |  2147483647 | @ 2 days 13 hours 34 mins 56 secs  | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(3 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where num2 > 0.05;
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_id4_num2 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.num2 > .05)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: (cstore.cstore_index_tbl.num2 > .05)
+(14 rows)
+
+select * from cstore_index_tbl where num2 > 0.05 order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs   | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+(2 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where serial1 > -2136483647;
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_serial on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.serial1 > (-2136483647))
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: (cstore.cstore_index_tbl.serial1 > (-2136483647))
+(14 rows)
+
+select * from cstore_index_tbl where serial1 > -2136483647 order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |  serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+------------+------------------------------------+-----------------------------------------------------------------
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 | 2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 | 2147483647 | @ 2 days 13 hours 34 mins 56 secs  | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(2 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where interval1 > '1 day 18:34:56';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_time1_interval1 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.interval1 > '@ 1 day 18 hours 34 mins 56 secs'::interval)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: (cstore.cstore_index_tbl.interval1 > '@ 1 day 18 hours 34 mins 56 secs'::interval)
+(14 rows)
+
+select * from cstore_index_tbl where interval1 > '1 day 18:34:56' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 40  | 100 | 1000 | 20000 |    4 | 444444 | 4.4 | d    | cc    | bb    | aa    | ee    | \x6464 | Thu Jan 30 00:00:00 1992 | 06:00:30+08 | 08:21:56 | 25.12 |  .05 | -2136483647 | @ 7 days 16 hours 34 mins 56 secs  | ["Wed Dec 31 16:00:00 1969 PST" "Mon May 01 00:30:30 1995 PDT"]
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 |  2147483647 | @ 2 days 13 hours 34 mins 56 secs  | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(3 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where interval2 > '["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_tinterval on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.interval2 > '["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]'::tinterval)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: (cstore.cstore_index_tbl.interval2 > '["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]'::tinterval)
+(14 rows)
+
+select * from cstore_index_tbl where interval2 > '["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 40  | 100 | 1000 | 20000 |    4 | 444444 | 4.4 | d    | cc    | bb    | aa    | ee    | \x6464 | Thu Jan 30 00:00:00 1992 | 06:00:30+08 | 08:21:56 | 25.12 |  .05 | -2136483647 | @ 7 days 16 hours 34 mins 56 secs  | ["Wed Dec 31 16:00:00 1969 PST" "Mon May 01 00:30:30 1995 PDT"]
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs   | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+(3 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where id2 > 100 and name1 > 'aa';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_name1_name2 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: ((public.cstore_index_tbl.name1)::text > 'aa'::text)
+                           Filter: (public.cstore_index_tbl.id2 > 100)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: ((cstore.cstore_index_tbl.id2 > 100) AND ((cstore.cstore_index_tbl.name1)::text > 'aa'::text))
+(15 rows)
+
+select * from cstore_index_tbl where id2 > 100 and name1 > 'aa' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs   | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+(2 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where id4 > 1000 and name2 > 'aa';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Heap Scan on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Recheck Cond: ((public.cstore_index_tbl.id4 > 1000) AND ((public.cstore_index_tbl.name2)::text > 'aa'::text))
+                           ->  CStore Index Ctid Scan on idx_id4_name2
+                                 Index Cond: ((public.cstore_index_tbl.id4 > 1000) AND ((public.cstore_index_tbl.name2)::text > 'aa'::text))
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: ((cstore.cstore_index_tbl.id4 > 1000) AND ((cstore.cstore_index_tbl.name2)::text > 'aa'::text))
+(16 rows)
+
+select * from cstore_index_tbl where id4 > 1000 and name2 > 'aa' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs   | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 |  2147483647 | @ 2 days 13 hours 34 mins 56 secs  | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(3 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where num1 > 20.5 and name3 > 'aa';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_num1_time2 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.num1 > 20.5::double precision)
+                           Filter: ((public.cstore_index_tbl.name3)::text > 'aa'::text)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: ((cstore.cstore_index_tbl.num1 > 20.5::double precision) AND ((cstore.cstore_index_tbl.name3)::text > 'aa'::text))
+(15 rows)
+
+select * from cstore_index_tbl where num1 > 20.5 and name3 > 'aa' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |  serial1   |             interval1             |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+------------+-----------------------------------+-----------------------------------------------------------------
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 | 2147483647 | @ 2 days 13 hours 34 mins 56 secs | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(1 row)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where id4 > 1000 and time1 > '1992-01-30';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_time1_interval1 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.time1 > 'Thu Jan 30 00:00:00 1992'::timestamp without time zone)
+                           Filter: (public.cstore_index_tbl.id4 > 1000)
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: ((cstore.cstore_index_tbl.id4 > 1000) AND (cstore.cstore_index_tbl.time1 > 'Thu Jan 30 00:00:00 1992'::timestamp without time zone))
+(15 rows)
+
+select * from cstore_index_tbl where id4 > 1000 and time1 > '1992-01-30' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs   | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 |  2147483647 | @ 2 days 13 hours 34 mins 56 secs  | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(3 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where flag > 'a' and time3 < '08:21:53' order by id2;
+                                                                                                                                                                                                                                                                                                                                                 QUERY PLAN                                                                                                                                                                                                                                                                                                                                                  
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Sort
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         Sort Key: public.cstore_index_tbl.id2
+         ->  Result
+               Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+               ->  Append
+                     ->  Row Adapter
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           ->  CStore Index Scan using idx_int1_time on public.cstore_index_tbl
+                                 Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                                 Index Cond: (public.cstore_index_tbl.time3 < '08:21:53'::time without time zone)
+                                 Filter: (public.cstore_index_tbl.flag > 'a'::bpchar)
+                     ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                           Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                           Filter: ((cstore.cstore_index_tbl.flag > 'a'::bpchar) AND (cstore.cstore_index_tbl.time3 < '08:21:53'::time without time zone))
+(18 rows)
+
+select * from cstore_index_tbl where flag > 'a' and time3 < '08:21:53' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |             interval1              |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+------------------------------------+-----------------------------------------------------------------
+ 30  | 200 | 4000 | 30000 |    3 | 333333 | 3.3 | c    | cc    | bb    | aa    | ee    | \x6767 | Mon May 26 00:00:00 1997 | 08:00:30+08 | 06:36:18 | 34.36 |  .07 |  2136483647 | @ 18 days 14 hours 34 mins 56 secs | ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs   | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+(2 rows)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where name1 > 'aa' and name2 > 'bb';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Heap Scan on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Recheck Cond: (((public.cstore_index_tbl.name1)::text > 'aa'::text) AND ((public.cstore_index_tbl.name2)::text > 'bb'::text))
+                           ->  CStore Index Ctid Scan on idx_name1_name2
+                                 Index Cond: (((public.cstore_index_tbl.name1)::text > 'aa'::text) AND ((public.cstore_index_tbl.name2)::text > 'bb'::text))
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: (((cstore.cstore_index_tbl.name1)::text > 'aa'::text) AND ((cstore.cstore_index_tbl.name2)::text > 'bb'::text))
+(16 rows)
+
+select * from cstore_index_tbl where name1 > 'aa' and name2 > 'bb' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |            interval1             |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+----------------------------------+-----------------------------------------------------------------
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+(1 row)
+
+explain (verbose on, costs off) select * from cstore_index_tbl where time1 > '1996-02-12' and interval1 < '2 day 13:34:56';
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Heap Scan on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Recheck Cond: ((public.cstore_index_tbl.time1 > 'Mon Feb 12 00:00:00 1996'::timestamp without time zone) AND (public.cstore_index_tbl.interval1 < '@ 2 days 13 hours 34 mins 56 secs'::interval))
+                           ->  CStore Index Ctid Scan on idx_time1_interval1
+                                 Index Cond: ((public.cstore_index_tbl.time1 > 'Mon Feb 12 00:00:00 1996'::timestamp without time zone) AND (public.cstore_index_tbl.interval1 < '@ 2 days 13 hours 34 mins 56 secs'::interval))
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: ((cstore.cstore_index_tbl.time1 > 'Mon Feb 12 00:00:00 1996'::timestamp without time zone) AND (cstore.cstore_index_tbl.interval1 < '@ 2 days 13 hours 34 mins 56 secs'::interval))
+(16 rows)
+
+select * from cstore_index_tbl where time1 > '1996-02-12' and interval1 < '2 day 13:34:56' order by id2;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |   serial1   |            interval1             |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+-------------+----------------------------------+-----------------------------------------------------------------
+ 20  | 300 | 3000 | 10000 |    2 | 222222 | 2.2 | b    | ee    | cc    | dd    | aa    | \x6868 | Tue Mar 24 00:00:00 1998 | 03:00:30+08 | 04:36:25 | 20.15 |  .06 | -2147483647 | @ 1 day 18 hours 34 mins 56 secs | ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+(1 row)
+
+----
+---case 5: mix indexed and un-indexed(use the table in case 6)
+----
+drop index idx_int1;
+drop index idx_int4;
+drop index idx_int8;
+drop index idx_int;
+drop index idx_bigint;
+drop index idx_float;
+drop index idx_varchar;
+drop index idx_varchar2;
+drop index idx_nvarchar2;
+drop index idx_text;
+drop index idx_date;
+drop index idx_timetz;
+drop index idx_time;
+drop index idx_float8;
+drop index idx_decimal;
+drop index idx_serial;
+drop index idx_interval;
+drop index idx_tinterval;
+drop index idx_id4_name1;
+drop index idx_id4_name2;
+drop index idx_id4_name3;
+drop index idx_id4_name4;
+drop index idx_time1_name2;
+drop index idx_id4_time2;
+drop index idx_num1_time2;
+drop index idx_id4_num2;
+drop index idx_name1_name2;
+drop index idx_time1_interval1;
+drop index idx_bint_flag;
+set enable_seqscan=off;
+explain (verbose on, costs off) select * from cstore_index_tbl where id2 >100  and name1 < 'dd' and num1=30.12;
+                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                     ->  CStore Index Scan using idx_int2 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.id1, public.cstore_index_tbl.id2, public.cstore_index_tbl.id4, public.cstore_index_tbl.id8, public.cstore_index_tbl.int1, public.cstore_index_tbl.bint, public.cstore_index_tbl.f1, public.cstore_index_tbl.flag, public.cstore_index_tbl.name1, public.cstore_index_tbl.name2, public.cstore_index_tbl.name3, public.cstore_index_tbl.name4, public.cstore_index_tbl.name5, public.cstore_index_tbl.time1, public.cstore_index_tbl.time2, public.cstore_index_tbl.time3, public.cstore_index_tbl.num1, public.cstore_index_tbl.num2, public.cstore_index_tbl.serial1, public.cstore_index_tbl.interval1, public.cstore_index_tbl.interval2
+                           Index Cond: (public.cstore_index_tbl.id2 > 100)
+                           Filter: (((public.cstore_index_tbl.name1)::text < 'dd'::text) AND (public.cstore_index_tbl.num1 = 30.12::double precision))
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.id1, cstore.cstore_index_tbl.id2, cstore.cstore_index_tbl.id4, cstore.cstore_index_tbl.id8, cstore.cstore_index_tbl.int1, cstore.cstore_index_tbl.bint, cstore.cstore_index_tbl.f1, cstore.cstore_index_tbl.flag, cstore.cstore_index_tbl.name1, cstore.cstore_index_tbl.name2, cstore.cstore_index_tbl.name3, cstore.cstore_index_tbl.name4, cstore.cstore_index_tbl.name5, cstore.cstore_index_tbl.time1, cstore.cstore_index_tbl.time2, cstore.cstore_index_tbl.time3, cstore.cstore_index_tbl.num1, cstore.cstore_index_tbl.num2, cstore.cstore_index_tbl.serial1, cstore.cstore_index_tbl.interval1, cstore.cstore_index_tbl.interval2
+                     Filter: ((cstore.cstore_index_tbl.id2 > 100) AND ((cstore.cstore_index_tbl.name1)::text < 'dd'::text) AND (cstore.cstore_index_tbl.num1 = 30.12::double precision))
+(15 rows)
+
+select * from cstore_index_tbl where id2 >100  and name1 < 'dd' and num1=30.12;
+ id1 | id2 | id4  |  id8  | int1 |  bint  | f1  | flag | name1 | name2 | name3 | name4 | name5  |          time1           |    time2    |  time3   | num1  | num2 |  serial1   |             interval1             |                            interval2                            
+-----+-----+------+-------+------+--------+-----+------+-------+-------+-------+-------+--------+--------------------------+-------------+----------+-------+------+------------+-----------------------------------+-----------------------------------------------------------------
+ 10  | 400 | 2000 | 40000 |    1 | 111111 | 1.1 | a    | aa    | bb    | cc    | dd    | \x6666 | Mon Feb 12 00:00:00 1996 | 01:00:30+08 | 02:05:36 | 30.12 |  .03 | 2147483647 | @ 2 days 13 hours 34 mins 56 secs | ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+(1 row)
+
+drop index idx_int2;
+drop table row_index_tbl;
+drop table cstore_index_tbl;
+-----
+--- case 6: truncate and delete cstore relation with index
+-----
+create table IDEX_PARTITION_TABLE_001(COL_INT int) with(orientation = orc);
+CREATE INDEX STORAGE_IDEX_PARTITION_IDEX_001 ON IDEX_PARTITION_TABLE_001(COL_INT);
+insert into IDEX_PARTITION_TABLE_001 values(1000);
+truncate table IDEX_PARTITION_TABLE_001;
+select * from IDEX_PARTITION_TABLE_001;
+ col_int 
+---------
+(0 rows)
+
+insert into IDEX_PARTITION_TABLE_001 values(1000);
+delete from IDEX_PARTITION_TABLE_001 where col_int=1000;
+select * from IDEX_PARTITION_TABLE_001 where col_int=1000;
+ col_int 
+---------
+(0 rows)
+
+drop table IDEX_PARTITION_TABLE_001;
+----
+--- case 7: two indexes with the same column
+----
+create table row_index_tbl(c1 int,c2 int,c3 int) distribute by hash(c1);
+insert into row_index_tbl values(0,1,2);
+insert into row_index_tbl values(3,4,5);
+insert into row_index_tbl values(6,7,8);
+insert into row_index_tbl values(9,10,11);
+create table cstore_index_tbl(c1 int,c2 int,c3 int) with (orientation = orc) tablespace hdfs_ts  distribute by hash(c1);
+insert into cstore_index_tbl select * from row_index_tbl;
+create index idx_c2 on cstore_index_tbl(c2);
+explain (verbose on, costs off) SELECT c2  FROM cstore_index_tbl WHERE c2 > 2 and  c2 < 9;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.cstore_index_tbl.c2
+   Node/s: All datanodes
+   ->  Result
+         Output: public.cstore_index_tbl.c2
+         ->  Append
+               ->  Row Adapter
+                     Output: public.cstore_index_tbl.c2
+                     ->  CStore Index Scan using idx_c2 on public.cstore_index_tbl
+                           Output: public.cstore_index_tbl.c2
+                           Index Cond: ((public.cstore_index_tbl.c2 > 2) AND (public.cstore_index_tbl.c2 < 9))
+               ->  Seq Scan on cstore.pg_delta_542893125 cstore_index_tbl
+                     Output: cstore.cstore_index_tbl.c2
+                     Filter: ((cstore.cstore_index_tbl.c2 > 2) AND (cstore.cstore_index_tbl.c2 < 9))
+(14 rows)
+
+SELECT c2  FROM cstore_index_tbl WHERE c2 > 2 and  c2 < 9 order by c2;
+ c2 
+----
+  4
+  7
+(2 rows)
+
+drop table row_index_tbl;
+drop table cstore_index_tbl;
+-- test storage parameters for index normal-relation
+CREATE TABLE heaptbl_idxstorage ( a int, b int , c int ) with ( orientation = orc );
+CREATE INDEX idx00_heaptbl_idxstorage ON heaptbl_idxstorage(b) with (max_batchrow = 20000, partial_cluster_rows = 720000, deltarow_threshold = 2000 );
+SELECT relam, relkind, reloptions FROM pg_class WHERE relname = 'idx00_heaptbl_idxstorage';
+ relam | relkind |                                reloptions                                
+-------+---------+--------------------------------------------------------------------------
+  4039 | i       | {max_batchrow=20000,partial_cluster_rows=720000,deltarow_threshold=2000}
+(1 row)
+
+SELECT reloptions FROM pg_class WHERE oid = (SELECT relcudescrelid FROM pg_class WHERE relname = 'idx00_heaptbl_idxstorage');
+                                                   reloptions                                                    
+-----------------------------------------------------------------------------------------------------------------
+ {max_batchrow=20000,partial_cluster_rows=720000,deltarow_threshold=2000,orientation = orc,internal_mask=33031}
+(1 row)
+
+ALTER INDEX idx00_heaptbl_idxstorage SET (max_batchrow = 40000, partial_cluster_rows = 920000, deltarow_threshold = 4000 );
+SELECT relam, relkind, reloptions FROM pg_class WHERE relname = 'idx00_heaptbl_idxstorage';
+ relam | relkind |                                reloptions                                
+-------+---------+--------------------------------------------------------------------------
+  4039 | i       | {max_batchrow=40000,partial_cluster_rows=920000,deltarow_threshold=4000}
+(1 row)
+
+SELECT reloptions FROM pg_class WHERE oid = (SELECT relcudescrelid FROM pg_class WHERE relname = 'idx00_heaptbl_idxstorage');
+                                                   reloptions                                                    
+-----------------------------------------------------------------------------------------------------------------
+ {orientation = orc,internal_mask=33031,max_batchrow=40000,partial_cluster_rows=920000,deltarow_threshold=4000}
+(1 row)
+
+DROP TABLE heaptbl_idxstorage;
+-- test: fill vector batch by switching to different CUs
+CREATE TABLE coltbl ( a int, b int ) WITH ( orientation = orc );
+CREATE TABLE rowtbl ( a int, b int );
+INSERT INTO rowtbl VALUES ( 1, 1) , (1, 2); 
+INSERT INTO coltbl SELECT * FROM rowtbl; 
+TRUNCATE TABLE rowtbl;
+INSERT INTO rowtbl VALUES ( 1, 3) , (1, 4);
+INSERT INTO coltbl SELECT * FROM rowtbl;
+TRUNCATE TABLE rowtbl;
+INSERT INTO rowtbl VALUES ( 1, 5) , (1, 6);
+INSERT INTO coltbl SELECT * FROM rowtbl;
+CREATE INDEX idx_coltbl ON coltbl(b);
+SELECT * FROM coltbl WHERE b < 6;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 2
+ 1 | 3
+ 1 | 4
+ 1 | 5
+(5 rows)
+
+DROP TABLE coltbl;
+DROP TABLE rowtbl;
+-- index scan: constant target list
+create table test_index_const_targetlist (id int,info int,info1 int) with(orientation = orc) tablespace hdfs_ts ;
+create index idx1_test_index_const_targetlist on test_index_const_targetlist(info);
+create index idx2_test_index_const_targetlist on test_index_const_targetlist(info1);
+insert into test_index_const_targetlist values(generate_series(1,10),generate_series(1,10), 1);
+update test_index_const_targetlist set info=info+1 where info>5;
+select 1 from test_index_const_targetlist where  info1=1 ;
+ ?column? 
+----------
+        1
+        1
+        1
+        1
+        1
+        1
+        1
+        1
+        1
+        1
+(10 rows)
+
+DROP TABLE test_index_const_targetlist;

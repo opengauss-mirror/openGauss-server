@@ -32,6 +32,7 @@ int main(int argc, char** argv)
     initPQExpBuffer(&sql);
 
     appendPQExpBuffer(&sql, "dbname=%s", argv[1]);
+    appendPQExpBuffer(&sql, "enable_ce=1");
 
     conn = PQconnectdb(sql.data);
     if (PQstatus(conn) == CONNECTION_BAD) {

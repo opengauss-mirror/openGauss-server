@@ -55,7 +55,7 @@ View definition:
    FROM dbe_perf.get_global_workload_transaction() get_global_workload_transaction(node_name, workload, commit_counter, rollback_counter, resp_min, resp_max, resp_avg, resp_total, bg_commit_counter, bg_rollback_counter, bg_resp_min, bg_resp_max, bg_resp_avg, bg_resp_total);
 
 \d+ DBE_PERF.user_transaction
-                 View "dbe_perf.user_transaction"
+                View "dbe_perf.user_transaction"
        Column        |  Type  | Modifiers | Storage | Description 
 ---------------------+--------+-----------+---------+-------------
  usename             | name   |           | plain   | 
@@ -135,10 +135,12 @@ from dbe_perf.workload_transaction  order by workload;
 
 select node_name, workload, commit_counter >=0, rollback_counter >=0, resp_min >= 0, resp_max >= 0, resp_avg >= 0, resp_total >= 0
 from DBE_PERF.global_workload_transaction order by node_name, workload;
- node_name |   workload   | ?column? | ?column? | ?column? | ?column? | ?column? | ?column? 
------------+--------------+----------+----------+----------+----------+----------+----------
- datanode1 | default_pool | t        | t        | t        | t        | t        | t
-(1 row)
+  node_name   |   workload   | ?column? | ?column? | ?column? | ?column? | ?column? | ?column? 
+--------------+--------------+----------+----------+----------+----------+----------+----------
+ coordinator1 | default_pool | t        | t        | t        | t        | t        | t
+ coordinator2 | default_pool | t        | t        | t        | t        | t        | t
+ coordinator3 | default_pool | t        | t        | t        | t        | t        | t
+(3 rows)
 
 drop table temp_info_before;
 drop table temp_info_after;
@@ -155,12 +157,18 @@ select usename from DBE_PERF.user_transaction where usename like 'workload_u%' o
 (3 rows)
 
 select node_name, usename from DBE_PERF.global_user_transaction where usename like 'workload_u%' order by node_name, usename;
- node_name |   usename   
------------+-------------
- datanode1 | workload_u1
- datanode1 | workload_u2
- datanode1 | workload_u3
-(3 rows)
+  node_name   |   usename   
+--------------+-------------
+ coordinator1 | workload_u1
+ coordinator1 | workload_u2
+ coordinator1 | workload_u3
+ coordinator2 | workload_u1
+ coordinator2 | workload_u2
+ coordinator2 | workload_u3
+ coordinator3 | workload_u1
+ coordinator3 | workload_u2
+ coordinator3 | workload_u3
+(9 rows)
 
 drop user workload_u1;
 drop user workload_u2;
@@ -179,12 +187,12 @@ select node_name, usename from DBE_PERF.global_user_transaction where usename li
 show track_sql_count;
  track_sql_count 
 -----------------
- on
+ off
 (1 row)
 
 SET track_sql_count=on;
 start transaction;
-create table t1_workload_sql(id int, num int) ;
+create table t1_workload_sql(id int, num int) distribute by hash(id);
 insert into t1_workload_sql values(1,1);
 update t1_workload_sql set num = 2 where id = 1;
 select * from t1_workload_sql;
@@ -203,9 +211,10 @@ select workload, ddl_count>=2, dml_count>=4, dcl_count>=2 from DBE_PERF.workload
 (1 row)
 
 select workload, ddl_count>=2, dml_count>=4, dcl_count>=2 from DBE_PERF.summary_workload_sql_count where node_name='coordinator1';
- workload | ?column? | ?column? | ?column? 
-----------+----------+----------+----------
-(0 rows)
+   workload   | ?column? | ?column? | ?column? 
+--------------+----------+----------+----------
+ default_pool | t        | t        | t
+(1 row)
 
 select workload, total_select_elapse>0, total_update_elapse>0, total_insert_elapse>0, total_delete_elapse>0 from DBE_PERF.workload_sql_elapse_time;
    workload   | ?column? | ?column? | ?column? | ?column? 
@@ -232,22 +241,26 @@ select workload, avg_select_elapse>0, avg_update_elapse>0, avg_insert_elapse>0, 
 (1 row)
 
 select workload, total_select_elapse>0, total_update_elapse>0, total_insert_elapse>0, total_delete_elapse>0 from DBE_PERF.summary_workload_sql_elapse_time where node_name='coordinator1';
- workload | ?column? | ?column? | ?column? | ?column? 
-----------+----------+----------+----------+----------
-(0 rows)
+   workload   | ?column? | ?column? | ?column? | ?column? 
+--------------+----------+----------+----------+----------
+ default_pool | t        | t        | t        | t
+(1 row)
 
 select workload, max_select_elapse>0, max_update_elapse>0, max_insert_elapse>0, max_delete_elapse>0 from DBE_PERF.summary_workload_sql_elapse_time where node_name='coordinator1';
- workload | ?column? | ?column? | ?column? | ?column? 
-----------+----------+----------+----------+----------
-(0 rows)
+   workload   | ?column? | ?column? | ?column? | ?column? 
+--------------+----------+----------+----------+----------
+ default_pool | t        | t        | t        | t
+(1 row)
 
 select workload, min_select_elapse>=0, min_update_elapse>=0, min_insert_elapse>=0, min_delete_elapse>=0 from DBE_PERF.summary_workload_sql_elapse_time where node_name='coordinator1';
- workload | ?column? | ?column? | ?column? | ?column? 
-----------+----------+----------+----------+----------
-(0 rows)
+   workload   | ?column? | ?column? | ?column? | ?column? 
+--------------+----------+----------+----------+----------
+ default_pool | t        | t        | t        | t
+(1 row)
 
 select workload, avg_select_elapse>0, avg_update_elapse>0, avg_insert_elapse>0, avg_delete_elapse>0 from DBE_PERF.summary_workload_sql_elapse_time where node_name='coordinator1';
- workload | ?column? | ?column? | ?column? | ?column? 
-----------+----------+----------+----------+----------
-(0 rows)
+   workload   | ?column? | ?column? | ?column? | ?column? 
+--------------+----------+----------+----------+----------
+ default_pool | t        | t        | t        | t
+(1 row)
 

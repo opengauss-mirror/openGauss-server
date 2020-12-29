@@ -37,7 +37,7 @@
 #include "libpq/libpq-fe.h"
 #include "libpq/pqsignal.h"
 #include "portability/instr_time.h"
-
+#include "utils/elog.h"
 #include <ctype.h>
 #include <math.h>
 
@@ -375,8 +375,9 @@ static void* xmalloc(size_t size)
     void* result = NULL;
 
     /* Avoid unportable behavior of malloc(0) */
-    if (size == 0)
+    if (size == 0) {
         size = 1;
+    }
     result = malloc(size);
     if (!result) {
         fprintf(stderr, "out of memory\n");
@@ -390,8 +391,9 @@ static void* xrealloc(void* ptr, size_t size)
     void* result = NULL;
 
     /* Avoid unportable behavior of realloc(NULL, 0) */
-    if (ptr == NULL && size == 0)
+    if (ptr == NULL && size == 0) {
         size = 1;
+    }
     result = realloc(ptr, size);
     if (!result) {
         fprintf(stderr, "out of memory\n");
@@ -559,18 +561,21 @@ static int compareVariables(const void* v1, const void* v2)
 
 static char* getVariable(CState* st, char* name)
 {
-    Variable key, *var;
+    Variable key;
+    Variable* var = NULL;
 
     /* On some versions of Solaris, bsearch of zero items dumps core */
-    if (st->nvariables <= 0)
+    if (st->nvariables <= 0) {
         return NULL;
+    }
 
     key.name = name;
     var = (Variable*)bsearch((void*)&key, (void*)st->variables, st->nvariables, sizeof(Variable), compareVariables);
-    if (var != NULL)
+    if (var != NULL) {
         return var->value;
-    else
+    } else {
         return NULL;
+    }
 }
 
 /* check whether the name consists of alphabets, numerals and underscores. */
@@ -579,8 +584,9 @@ static bool isLegalVariableName(const char* name)
     int i;
 
     for (i = 0; name[i] != '\0'; i++) {
-        if (!isalnum((unsigned char)name[i]) && name[i] != '_')
+        if (!isalnum((unsigned char)name[i]) && name[i] != '_') {
             return false;
+        }
     }
 
     return true;
@@ -588,14 +594,16 @@ static bool isLegalVariableName(const char* name)
 
 static int putVariable(CState* st, const char* context, char* name, char* value)
 {
-    Variable key, *var;
+    Variable key;
+    Variable* var = NULL;
 
     key.name = name;
     /* On some versions of Solaris, bsearch of zero items dumps core */
-    if (st->nvariables > 0)
+    if (st->nvariables > 0) {
         var = (Variable*)bsearch((void*)&key, (void*)st->variables, st->nvariables, sizeof(Variable), compareVariables);
-    else
+    } else {
         var = NULL;
+    }
 
     if (var == NULL) {
         Variable* newvars = NULL;
@@ -609,10 +617,11 @@ static int putVariable(CState* st, const char* context, char* name, char* value)
             return false;
         }
 
-        if (st->variables)
+        if (st->variables) {
             newvars = (Variable*)xrealloc(st->variables, (st->nvariables + 1) * sizeof(Variable));
-        else
+        } else {
             newvars = (Variable*)xmalloc(sizeof(Variable));
+        }
 
         st->variables = newvars;
 
@@ -645,11 +654,13 @@ static char* parseVariable(const char* sql, int* eaten)
     do {
         i++;
     } while (isalnum((unsigned char)sql[i]) || sql[i] == '_');
-    if (i == 1)
+    if (i == 1) {
         return NULL;
+    }
 
     name = (char*)xmalloc(i);
-    memcpy(name, &sql[1], i - 1);
+    errno_t rc = memcpy_s(name, i, &sql[1], i - 1);
+    securec_check_c(rc, "", "");
     name[i - 1] = '\0';
 
     *eaten = i;
@@ -659,6 +670,7 @@ static char* parseVariable(const char* sql, int* eaten)
 static char* replaceVariable(char** sql, char* param, int len, char* value)
 {
     int valueln = strlen(value);
+    errno_t rc;
 
     if (valueln > len) {
         size_t offset = param - *sql;
@@ -669,14 +681,17 @@ static char* replaceVariable(char** sql, char* param, int len, char* value)
 
     if (valueln != len)
         memmove(param + valueln, param + len, strlen(param + len) + 1);
-    strncpy(param, value, valueln);
+    rc = memcpy_s(param, valueln, value, valueln);
+    securec_check_c(rc, "", "");
 
     return param + valueln;
 }
 
 static char* assignVariables(CState* st, char* sql)
 {
-    char *p, *name, *val;
+    char *p = NULL;
+    char *name = NULL;
+    char *val = NULL;
 
     p = sql;
     while ((p = strchr(p, ':')) != NULL) {
@@ -746,14 +761,15 @@ static bool runShellCommand(CState* st, char* variable, char** argv, int argc)
         }
 
         arglen = strlen(arg);
-        if (len + arglen + (i > 0 ? 1 : 0) >= SHELL_COMMAND_SIZE - 1) {
+        if ((len + arglen + ((i > 0) ? 1 : 0)) >= (SHELL_COMMAND_SIZE - 1)) {
             fprintf(stderr, "%s: too long shell command\n", argv[0]);
             return false;
         }
 
         if (i > 0)
             command[len++] = ' ';
-        memcpy(command + len, arg, arglen);
+        errno_t rc = memcpy_s(command + len, SHELL_COMMAND_SIZE - len, arg, arglen);
+        securec_check_c(rc, "", "");
         len += arglen;
     }
 
@@ -786,8 +802,9 @@ static bool runShellCommand(CState* st, char* variable, char** argv, int argc)
 
     /* Check whether the result is an integer and assign it to the variable */
     retval = (int)strtol(res, &endptr, 10);
-    while (*endptr != '\0' && isspace((unsigned char)*endptr))
+    while (*endptr != '\0' && isspace((unsigned char)*endptr)) {
         endptr++;
+    }
     if (*res == '\0' || *endptr != '\0') {
         fprintf(stderr, "%s: must return an integer ('%s' returned)\n", argv[0], res);
         return false;
@@ -867,7 +884,7 @@ top:
 
         INSTR_TIME_SET_CURRENT(now);
         now_us = INSTR_TIME_GET_MICROSEC(now);
-        if (st->until <= now_us) {
+        if (st->until <= (uint64)now_us) {
             st->sleeping = 0; /* Done sleeping, go ahead with next command */
             if (st->throttling) {
                 /* Measure lag of throttled transaction relative to target */
@@ -1076,11 +1093,12 @@ top:
                 int j;
 
                 for (j = 0; commands[j] != NULL; j++) {
-                    PGresult* res;
+                    PGresult* res = NULL;
                     char name[MAX_PREPARE_NAME];
 
-                    if (commands[j]->type != SQL_COMMAND)
+                    if (commands[j]->type != SQL_COMMAND) {
                         continue;
+                    }
                     preparedStatementName(name, st->use_file, j);
                     res = PQprepare(st->con, name, commands[j]->argv[0], commands[j]->argc - 1, NULL);
                     if (PQresultStatus(res) != PGRES_COMMAND_OK)
@@ -1448,21 +1466,21 @@ static void init(void)
     for (i = 0; i < (int)lengthof(DDLs); i++) {
         int hasWithOpts = 0;
         char opts[256];
-        char check_buffer[256];
-        char buffer[256];
+        char check_buffer[512];
+        char buffer[512];
         struct ddlinfo* ddl = &DDLs[i];
 
         /* Remove old table, if it exists. */
         snprintf(check_buffer,
-            256,
+            512,
             "select table_type from information_schema.tables where table_name = '%s' and table_type = 'FOREIGN TABLE'",
             ddl->table);
         PGresult *res = PQexec(con, check_buffer);
 
         if (PQntuples(res) == 0) {
-            snprintf(buffer, 256, "drop table if exists %s", ddl->table);
+            snprintf(buffer, 512, "drop table if exists %s", ddl->table);
         } else {
-            snprintf(buffer, 256, "drop foreign table if exists %s", ddl->table);
+            snprintf(buffer, 512, "drop foreign table if exists %s", ddl->table);
         }
         PQclear(res);
         executeStatement(con, buffer);
@@ -1503,7 +1521,7 @@ static void init(void)
         /* Add distribution columns if necessary */
         if (use_branch)
             snprintf(buffer,
-                256,
+                512,
                 "create%s table %s(%s)%s %s",
                 unlogged_tables ? " unlogged" : "",
                 ddl->table,
@@ -1514,7 +1532,7 @@ static void init(void)
 #endif
             if (!is_mot) {
                 snprintf(buffer,
-                    256,
+                    512,
                     "create%s table %s(%s)%s",
                     unlogged_tables ? " unlogged" : "",
                     ddl->table,
@@ -1522,7 +1540,7 @@ static void init(void)
                     opts);
             } else {
                 snprintf(buffer,
-                    256,
+                    512,
                     "create foreign table %s(%s)",
                     ddl->table,
                     ddl->cols);
@@ -1530,24 +1548,6 @@ static void init(void)
 
         executeStatement(con, buffer);
     }
-    /*
-    executeStatement(con, "start transaction");
-
-    for (i = 0; i < nbranches * scale; i++)
-    {
-        snprintf(sql, 256, "insert into pgbench_branches(bid,bbalance) values(%d,0)", i + 1);
-        executeStatement(con, sql);
-    }
-
-    for (i = 0; i < ntellers * scale; i++)
-    {
-        snprintf(sql, 256, "insert into pgbench_tellers(ttid,bid,tbalance) values (%d,%d,0)",
-                 i + 1, i / ntellers + 1);
-        executeStatement(con, sql);
-    }
-
-    executeStatement(con, "commit");
-    */
 
 #define MINI_BATCH 5000
     /* if mot create primary keys before data load */
@@ -1637,9 +1637,9 @@ static void init(void)
          */
         if (use_branch) {
             for (i = 0; i < (int)lengthof(DDLAFTERs_bid); i++) {
-                char buffer[256];
-
-                strncpy(buffer, DDLAFTERs_bid[i], 256);
+                char buffer[256] = {0};
+                errno_t sc_rc = strncpy_s(buffer, sizeof(buffer), DDLAFTERs_bid[i], strlen(DDLAFTERs[i]));
+                securec_check(sc_rc, "\0", "\0");
 
                 if (index_tablespace != NULL) {
                     char* escape_tablespace = NULL;
@@ -1655,17 +1655,20 @@ static void init(void)
         } else
 #endif
             for (i = 0; i < (int)lengthof(DDLAFTERs); i++) {
-                char buffer[256];
+                char buffer[256] = {0};
 
-                strncpy(buffer, DDLAFTERs[i], 256);
+                errno_t sc_rc = strncpy_s(buffer, sizeof(buffer), DDLAFTERs[i], strlen(DDLAFTERs[i]));
+                securec_check(sc_rc, "\0", "\0");
 
                 if (index_tablespace != NULL) {
-                    char* escape_tablespace = NULL;
+                    char* escape_tablespace1 = NULL;
 
-                    escape_tablespace = PQescapeIdentifier(con, index_tablespace, strlen(index_tablespace));
-                    snprintf(
-                        buffer + strlen(buffer), 256 - strlen(buffer), " using index tablespace %s", escape_tablespace);
-                    PQfreemem(escape_tablespace);
+                    escape_tablespace1 = PQescapeIdentifier(con, index_tablespace, strlen(index_tablespace));
+                    snprintf(buffer + strlen(buffer),
+                        256 - strlen(buffer),
+                        " using index tablespace %s",
+                        escape_tablespace1);
+                    PQfreemem(escape_tablespace1);
                 }
 
                 executeStatement(con, buffer, true);
@@ -1730,7 +1733,8 @@ static Command* process_commands(char* buf)
 
     Command* my_commands = NULL;
     int j;
-    char *p, *tok;
+    char *p = NULL;;
+    char *tok = NULL;
 
     /* Make the string buf end at the next newline */
     if ((p = strchr(buf, '\n')) != NULL)
@@ -1738,8 +1742,9 @@ static Command* process_commands(char* buf)
 
     /* Skip leading whitespace */
     p = buf;
-    while (isspace((unsigned char)*p))
+    while (isspace((unsigned char)*p)) {
         p++;
+    }
 
     /* If the line is empty or actually a comment, we're done */
     if (*p == '\0' || strncmp(p, "--", 2) == 0)
@@ -1778,7 +1783,7 @@ static Command* process_commands(char* buf)
                 exit(1);
             }
 
-            for (j = my_commands->argc < 5 ? 3 : 5; j < my_commands->argc; j++)
+            for (j = ((my_commands->argc < 5) ? 3 : 5); j < my_commands->argc; j++)
                 fprintf(stderr, "%s: extra argument \"%s\" ignored\n", my_commands->argv[0], my_commands->argv[j]);
         } else if (pg_strcasecmp(my_commands->argv[0], "sleep") == 0) {
             if (my_commands->argc < 2) {
@@ -1795,8 +1800,9 @@ static Command* process_commands(char* buf)
             if (my_commands->argv[1][0] != ':') {
                 char* c = my_commands->argv[1];
 
-                while (isdigit((unsigned char)*c))
+                while (isdigit((unsigned char)*c)) {
                     c++;
+                }
                 if (*c) {
                     my_commands->argv[2] = c;
                     if (my_commands->argc < 3)
@@ -1922,8 +1928,9 @@ static Command** process_builtin(char* tb)
         Command* command = NULL;
 
         p = buf;
-        while (*tb && *tb != '\n')
+        while (*tb && *tb != '\n') {
             *p++ = *tb++;
+        }
 
         if (*tb == '\0')
             break;
@@ -1934,8 +1941,9 @@ static Command** process_builtin(char* tb)
         *p = '\0';
 
         command = process_commands(buf);
-        if (command == NULL)
+        if (command == NULL) {
             continue;
+        }
 
         my_commands[lineno] = command;
         lineno++;
@@ -2043,10 +2051,11 @@ static void printResults(int ttype, int normal_xacts, int nclients, TState* thre
                     total_exec_count += thread->exec_count[cnum];
                 }
 
-                if (total_exec_count > 0)
+                if (total_exec_count > 0) {
                     total_time = INSTR_TIME_GET_MILLISEC(total_exec_elapsed) / (double)total_exec_count;
-                else
+                } else {
                     total_time = 0.0;
+                }
 
                 printf("\t%f\t%s\n", total_time, command->line);
             }
@@ -2344,7 +2353,7 @@ int main(int argc, char** argv)
     throttle_delay *= nthreads;
 
     if (orient) {
-#define MIN_LEN(s, x) ((strlen(s) > x ? x : strlen(s)))
+#define MIN_LEN(s, x) (((strlen(s) > x) ? x : strlen(s)))
         if (strncmp(orient, "row", MIN_LEN(orient, 3)) == 0) {
             with_options = xstrdup("orientation = row");
         } else if (strncmp(orient, "column", MIN_LEN(orient, 6)) == 0) {
@@ -2361,12 +2370,13 @@ int main(int argc, char** argv)
     if (argc > optind)
         dbName = argv[optind];
     else {
-        if ((env = getenv("PGDATABASE")) != NULL && *env != '\0')
+        if ((env = getenv("PGDATABASE")) != NULL && *env != '\0') {
             dbName = env;
-        else if (login != NULL && *login != '\0')
+        } else if (login != NULL && *login != '\0') {
             dbName = login;
-        else
+        } else {
             dbName = "";
+        }
     }
 
     if (is_init_mode) {

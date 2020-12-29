@@ -53,7 +53,7 @@ const uint32 SLEEP_COUNT_QUE_TAKE = 0xFFF;
 
 const int QUEUE_CAPACITY_MIN_LIMIT = 2;
 
-SPSCBlockingQueue* SPSCBlockingQueueCreate(uint32 capacity)
+SPSCBlockingQueue *SPSCBlockingQueueCreate(uint32 capacity, CallBackFunc func)
 {
     /*
      * We require the capacity to be a power of 2, so index wrap can be
@@ -62,8 +62,8 @@ SPSCBlockingQueue* SPSCBlockingQueueCreate(uint32 capacity)
      */
     Assert(capacity >= QUEUE_CAPACITY_MIN_LIMIT && POWER_OF_TWO(capacity));
 
-    size_t allocSize = sizeof(SPSCBlockingQueue) + sizeof(void*) * capacity;
-    SPSCBlockingQueue* queue = (SPSCBlockingQueue*)palloc0(allocSize);
+    size_t allocSize = sizeof(SPSCBlockingQueue) + sizeof(void *) * capacity;
+    SPSCBlockingQueue *queue = (SPSCBlockingQueue *)palloc0(allocSize);
 
     uint32 mask = capacity - 1;
     pg_atomic_init_u32(&queue->writeHead, 0);
@@ -72,27 +72,28 @@ SPSCBlockingQueue* SPSCBlockingQueueCreate(uint32 capacity)
     queue->mask = mask;
     queue->maxUsage = 0;
     queue->totalCnt = 0;
+    queue->callBackFunc = func;
     return queue;
 }
 
-void SPSCBlockingQueueDestroy(SPSCBlockingQueue* queue)
+void SPSCBlockingQueueDestroy(SPSCBlockingQueue *queue)
 {
     pfree(queue);
 }
 
-// TEST_LOG
-void DumpItem(RedoItem* item, const char* funcName);
-bool SPSCBlockingQueuePut(SPSCBlockingQueue* queue, void* element)
+bool SPSCBlockingQueuePut(SPSCBlockingQueue *queue, void *element)
 {
     uint32 head;
     uint32 tail;
-    uint64 cnt = 0;
     uint32 tmpCnt;
+
     head = pg_atomic_read_u32(&queue->writeHead);
     do {
         tail = pg_atomic_read_u32(&queue->readTail);
-        cnt++;
-        HandlePageRedoInterrupts();
+
+        if (queue->callBackFunc != NULL) {
+            queue->callBackFunc();
+        }
     } while (SPACE(head, tail, queue->mask) == 0);
 
     /*
@@ -117,14 +118,14 @@ bool SPSCBlockingQueuePut(SPSCBlockingQueue* queue, void* element)
     return true;
 }
 
-uint32 SPSCGetQueueCount(SPSCBlockingQueue* queue)
+uint32 SPSCGetQueueCount(SPSCBlockingQueue *queue)
 {
     uint32 head = pg_atomic_read_u32(&queue->writeHead);
     uint32 tail = pg_atomic_read_u32(&queue->readTail);
     return (COUNT(head, tail, queue->mask));
 }
 
-void* SPSCBlockingQueueTake(SPSCBlockingQueue* queue)
+void *SPSCBlockingQueueTake(SPSCBlockingQueue *queue)
 {
     uint32 head;
     uint32 tail;
@@ -142,14 +143,16 @@ void* SPSCBlockingQueueTake(SPSCBlockingQueue* queue)
                 sleeptime = MAX_REDO_QUE_TAKE_DELAY;
             pg_usleep(sleeptime);
         }
-        HandlePageRedoInterrupts();
+        if (queue->callBackFunc != NULL) {
+            queue->callBackFunc();
+        }
     } while (COUNT(head, tail, queue->mask) == 0);
 
     t_thrd.page_redo_cxt.sleep_long = false;
     /* Make sure the buffer is read after the index. */
     pg_read_barrier();
 
-    void* elem = queue->buffer[tail];
+    void *elem = queue->buffer[tail];
 
     /* Make sure the read of the buffer finishes before updating the tail. */
     pg_memory_barrier();
@@ -158,7 +161,7 @@ void* SPSCBlockingQueueTake(SPSCBlockingQueue* queue)
     return elem;
 }
 
-bool SPSCBlockingQueueGetAll(SPSCBlockingQueue* queue, void*** eleArry, uint32* eleNum)
+bool SPSCBlockingQueueGetAll(SPSCBlockingQueue *queue, void ***eleArry, uint32 *eleNum)
 {
     uint32 head;
     uint32 tail;
@@ -178,7 +181,9 @@ bool SPSCBlockingQueueGetAll(SPSCBlockingQueue* queue, void*** eleArry, uint32* 
                 sleeptime = MAX_REDO_QUE_TAKE_DELAY;
             pg_usleep(sleeptime);
         }
-        HandlePageRedoInterrupts();
+        if (queue->callBackFunc != NULL) {
+            queue->callBackFunc();
+        }
     } while (COUNT(head, tail, queue->mask) == 0);
     t_thrd.page_redo_cxt.sleep_long = false;
     /* Make sure the buffer is read after the index. */
@@ -195,7 +200,7 @@ bool SPSCBlockingQueueGetAll(SPSCBlockingQueue* queue, void*** eleArry, uint32* 
 }
 
 /* for high performance, we do not put any check here. */
-void SPSCBlockingQueuePopN(SPSCBlockingQueue* queue, uint32 n)
+void SPSCBlockingQueuePopN(SPSCBlockingQueue *queue, uint32 n)
 {
     uint32 head;
     uint32 tail;
@@ -207,14 +212,10 @@ void SPSCBlockingQueuePopN(SPSCBlockingQueue* queue, uint32 n)
 
     /* make sure pop n is less than queueCnt, tail will not exceed capacity. */
     if (queueCnt < n || ((tail & (queue->mask)) + n) > queue->capacity) {
-        ereport(WARNING,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("SPSCBlockingQueuePopN queue error, "
-                       "queueCnt:%u, n:%u, capacity:%u",
-                    queueCnt,
-                    n,
-                    queue->capacity)));
+        ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                          errmsg("SPSCBlockingQueuePopN queue error, "
+                                 "queueCnt:%u, n:%u, capacity:%u",
+                                 queueCnt, n, queue->capacity)));
         return;
     }
 
@@ -224,14 +225,14 @@ void SPSCBlockingQueuePopN(SPSCBlockingQueue* queue, uint32 n)
     pg_atomic_write_u32(&queue->readTail, (tail + n) & queue->mask);
 }
 
-bool SPSCBlockingQueueIsEmpty(SPSCBlockingQueue* queue)
+bool SPSCBlockingQueueIsEmpty(SPSCBlockingQueue *queue)
 {
     uint32 head = pg_atomic_read_u32(&queue->writeHead);
     uint32 tail = pg_atomic_read_u32(&queue->readTail);
     return (COUNT(head, tail, queue->mask) == 0);
 }
 
-void* SPSCBlockingQueueTop(SPSCBlockingQueue* queue)
+void *SPSCBlockingQueueTop(SPSCBlockingQueue *queue)
 {
     uint32 head;
     uint32 tail;
@@ -249,15 +250,17 @@ void* SPSCBlockingQueueTop(SPSCBlockingQueue* queue)
                 sleeptime = MAX_REDO_QUE_TAKE_DELAY;
             pg_usleep(sleeptime);
         }
-        HandlePageRedoInterrupts();
+        if (queue->callBackFunc != NULL) {
+            queue->callBackFunc();
+        }
     } while (COUNT(head, tail, queue->mask) == 0);
     t_thrd.page_redo_cxt.sleep_long = false;
     pg_read_barrier();
-    void* elem = queue->buffer[tail];
+    void *elem = queue->buffer[tail];
     return elem;
 }
 
-void SPSCBlockingQueuePop(SPSCBlockingQueue* queue)
+void SPSCBlockingQueuePop(SPSCBlockingQueue *queue)
 {
     uint32 head;
     uint32 tail;
@@ -275,15 +278,10 @@ void SPSCBlockingQueuePop(SPSCBlockingQueue* queue)
     pg_atomic_write_u32(&queue->readTail, (tail + 1) & queue->mask);
 }
 
-void DumpQueue(const SPSCBlockingQueue* queue)
+void DumpQueue(const SPSCBlockingQueue *queue)
 {
-    ereport(LOG,
-        (errmodule(MOD_REDO),
-            errcode(ERRCODE_LOG),
-            errmsg("[REDO_LOG_TRACE]queue info: writeHead %u, readTail %u, capacity %u, mask %u",
-                queue->writeHead,
-                queue->readTail,
-                queue->capacity,
-                queue->mask)));
+    ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                  errmsg("[REDO_LOG_TRACE]queue info: writeHead %u, readTail %u, capacity %u, mask %u",
+                         queue->writeHead, queue->readTail, queue->capacity, queue->mask)));
 }
 }  // namespace extreme_rto

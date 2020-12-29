@@ -109,7 +109,7 @@
  * Other compilers use __cpu or __cpu__ so we test for both in those cases.
  */
 
-/* ----------
+/*----------
  * Standard gcc asm format (assuming "volatile slock_t *lock"):
 
     __asm__ __volatile__(
@@ -128,8 +128,9 @@
  * gcc from thinking it can cache the values of shared-memory fields
  * across the asm code.  Add "cc" if your asm code changes the condition
  * code register, and also list any temp registers the code uses.
- * ----------
+ *----------
  */
+
 #ifdef __i386__ /* 32-bit i386 */
 #define HAS_TEST_AND_SET
 
@@ -137,7 +138,7 @@ typedef unsigned char slock_t;
 
 #define TAS(lock) tas(lock)
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     register slock_t _res = 1;
 
@@ -151,9 +152,9 @@ static __inline__ int tas(volatile slock_t *lock)
                          "	lock			\n"
                          "	xchgb	%0,%1	\n"
                          "1: \n"
-                            : "+q"(_res), "+m"(*lock)
-                            :
-                            : "memory", "cc");
+                         : "+q"(_res), "+m"(*lock)
+                         :
+                         : "memory", "cc");
     return (int)_res;
 }
 
@@ -196,7 +197,7 @@ typedef unsigned char slock_t;
 
 #define TAS(lock) tas(lock)
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     register slock_t _res = 1;
 
@@ -207,9 +208,9 @@ static __inline__ int tas(volatile slock_t *lock)
      */
     __asm__ __volatile__("	lock			\n"
                          "	xchgb	%0,%1	\n"
-                            : "+q"(_res), "+m"(*lock)
-                            :
-                            : "memory", "cc");
+                         : "+q"(_res), "+m"(*lock)
+                         :
+                         : "memory", "cc");
     return (int)_res;
 }
 
@@ -254,7 +255,7 @@ typedef unsigned int slock_t;
 
 #ifndef __INTEL_COMPILER
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     long int ret;
 
@@ -264,7 +265,7 @@ static __inline__ int tas(volatile slock_t *lock)
 
 #else /* __INTEL_COMPILER */
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     int ret;
 
@@ -282,6 +283,7 @@ static __inline__ int tas(volatile slock_t *lock)
  * later, so the compiler builtin is preferred if available.  Note also that
  * the int-width variant of the builtin works on more chips than other widths.
  */
+
 #if defined(__aarch64__) || defined(__aarch64)
 
 #define HAS_TEST_AND_SET
@@ -294,7 +296,7 @@ typedef int slock_t;
 
 static __inline__ int
 
-tas(volatile slock_t *lock)
+    tas(volatile slock_t* lock)
 {
     return __sync_lock_test_and_set(lock, 1);
 }
@@ -305,9 +307,9 @@ tas(volatile slock_t *lock)
 
 typedef unsigned int slock_t;
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
-    volatile register slock_t *ulAddr = lock;
+    volatile register slock_t* ulAddr = lock;
     register slock_t _res = 1;
     unsigned int tmp = 0;
 
@@ -315,9 +317,9 @@ static __inline__ int tas(volatile slock_t *lock)
                      "1: ldaxr   %w0, %2\n"
                      "   stlxr   %w1, %w3, %2\n"
                      "   cbnz    %w1, 1b\n"
-                        : "=&r"(_res), "=&r"(tmp), "+Q"(*ulAddr)
-                        : "r"(_res)
-                        : "cc", "memory");
+                     : "=&r"(_res), "=&r"(tmp), "+Q"(*ulAddr)
+                     : "r"(_res)
+                     : "cc", "memory");
     return (int)_res;
 }
 
@@ -339,7 +341,7 @@ static __inline__ int tas(volatile slock_t *lock)
 
 typedef int slock_t;
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     return __sync_lock_test_and_set(lock, 1);
 }
@@ -350,7 +352,7 @@ static __inline__ int tas(volatile slock_t *lock)
 
 typedef unsigned char slock_t;
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     register slock_t _res = 1;
 
@@ -369,7 +371,7 @@ typedef unsigned int slock_t;
 
 #define TAS(lock) tas(lock)
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     int _res = 0;
 
@@ -392,7 +394,7 @@ typedef unsigned char slock_t;
 
 #define TAS(lock) tas(lock)
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     register slock_t _res;
 
@@ -461,7 +463,7 @@ typedef unsigned int slock_t;
  * an isync is a sufficient synchronization barrier after a lwarx/stwcx loop.
  * On newer machines, we can use lwsync instead for better performance.
  */
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     slock_t _t;
     int _res;
@@ -520,16 +522,16 @@ typedef unsigned char slock_t;
 
 #define TAS(lock) tas(lock)
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     register int rv;
 
     __asm__ __volatile__("	clrl	%0		\n"
                          "	tas		%1		\n"
                          "	sne		%0		\n"
-                            : "=d"(rv), "+m"(*lock)
-                            :
-                            : "memory", "cc");
+                         : "=d"(rv), "+m"(*lock)
+                         :
+                         : "memory", "cc");
     return rv;
 }
 
@@ -546,7 +548,7 @@ typedef unsigned char slock_t;
 
 #define TAS(lock) tas(lock)
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     register int _res;
 
@@ -554,9 +556,9 @@ static __inline__ int tas(volatile slock_t *lock)
                          "	bbssi	$0, (%2), 1f	\n"
                          "	clrl	%0				\n"
                          "1: \n"
-                            : "=&r"(_res), "+m"(*lock)
-                            : "r"(lock)
-                            : "memory");
+                         : "=&r"(_res), "+m"(*lock)
+                         : "r"(lock)
+                         : "memory");
     return _res;
 }
 
@@ -569,15 +571,15 @@ typedef unsigned char slock_t;
 
 #define TAS(lock) tas(lock)
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     register int _res;
 
     __asm__ __volatile__("	sbitb	0, %1	\n"
                          "	sfsd	%0		\n"
-                            : "=r"(_res), "+m"(*lock)
-                            :
-                            : "memory");
+                         : "=r"(_res), "+m"(*lock)
+                         :
+                         : "memory");
     return _res;
 }
 
@@ -596,7 +598,7 @@ typedef unsigned long slock_t;
 
 #define TAS(lock) tas(lock)
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
     register slock_t _res;
 
@@ -611,9 +613,9 @@ static __inline__ int tas(volatile slock_t *lock)
                          "	br		3f		\n"
                          "2:	mov		1, %0	\n"
                          "3:					\n"
-                            : "=&r"(_res), "+m"(*lock)
-                            :
-                            : "memory", "0");
+                         : "=&r"(_res), "+m"(*lock)
+                         :
+                         : "memory", "0");
     return (int)_res;
 }
 
@@ -633,9 +635,9 @@ typedef unsigned int slock_t;
 
 #define TAS(lock) tas(lock)
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
-    register volatile slock_t *_l = lock;
+    register volatile slock_t* _l = lock;
     register int _res;
     register int _tmp;
 
@@ -650,9 +652,9 @@ static __inline__ int tas(volatile slock_t *lock)
                          "       or      %0, %0, %1  \n"
                          "       sync                \n"
                          "       .set pop              "
-                            : "=&r"(_res), "=&r"(_tmp), "+R"(*_l)
-                            :
-                            : "memory");
+                         : "=&r"(_res), "=&r"(_tmp), "+R"(*_l)
+                         :
+                         : "memory");
     return _res;
 }
 
@@ -667,7 +669,7 @@ __asm__ __volatile__( \
 		"       .set pop              "
 :
 :		"memory");
-*((volatile slock_t *)(lock)) = 0;
+*((volatile slock_t*)(lock)) = 0;
 }
 while (0)
 
@@ -691,22 +693,22 @@ typedef unsigned char slock_t;
 
 #define TAS(lock) tas(lock)
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
-register int _res;
+    register int _res;
 
     /*
- * This asm is coded as if %0 could be any register, but actually SuperH
- * restricts the target of xor-immediate to be R0.  That's handled by
- * the "z" constraint on _res.
- */
-__asm__ __volatile__("	tas.b @%2    \n"
-                     "	movt  %0     \n"
-                     "	xor   #1,%0  \n"
-                        : "=z"(_res), "+m"(*lock)
-                        : "r"(lock)
-                        : "memory", "t");
-return _res;
+     * This asm is coded as if %0 could be any register, but actually SuperH
+     * restricts the target of xor-immediate to be R0.  That's handled by
+     * the "z" constraint on _res.
+     */
+    __asm__ __volatile__("	tas.b @%2    \n"
+                         "	movt  %0     \n"
+                         "	xor   #1,%0  \n"
+                         : "=z"(_res), "+m"(*lock)
+                         : "r"(lock)
+                         : "memory", "t");
+    return _res;
 }
 
 #endif /* __sh__ */
@@ -748,6 +750,7 @@ typedef unsigned char slock_t;
  * Platforms that use non-gcc inline assembly:
  * ---------------------------------------------------------------------
  */
+
 #if !defined(HAS_TEST_AND_SET) /* We didn't trigger above, let's try here */
 
 #if defined(USE_UNIVEL_CC) /* Unixware compiler */
@@ -757,7 +760,7 @@ typedef unsigned char slock_t;
 
 #define TAS(lock) tas(lock)
 
-asm int tas(volatile slock_t *s_lock)
+asm int tas(volatile slock_t* s_lock)
 {
     /* UNIVEL wants %mem in column 1, so we don't pg_indent this file */
     % mem s_lock pushl % ebx movl s_lock, % ebx movl $255, % eax lock xchgb % al, (% ebx) popl % ebx
@@ -802,13 +805,13 @@ typedef struct {
     int sema[4];
 } slock_t;
 
-#define TAS_ACTIVE_WORD(lock) ((volatile int *)(((uintptr_t)(lock) + 15) & ~15))
+#define TAS_ACTIVE_WORD(lock) ((volatile int*)(((uintptr_t)(lock) + 15) & ~15))
 
 #if defined(__GNUC__)
 
-static __inline__ int tas(volatile slock_t *lock)
+static __inline__ int tas(volatile slock_t* lock)
 {
-    volatile int *lockword = TAS_ACTIVE_WORD(lock);
+    volatile int* lockword = TAS_ACTIVE_WORD(lock);
     register int lockval;
 
     __asm__ __volatile__("	ldcwx	0(0,%2),%0	\n" : "=r"(lockval), "+m"(*lockword) : "r"(lockword) : "memory");
@@ -913,11 +916,12 @@ typedef abilock_t slock_t;
 
 typedef int slock_t;
 
-#define TAS(lock) _check_lock((slock_t *)(lock), 0, 1)
-#define S_UNLOCK(lock) _clear_lock((slock_t *)(lock), 0)
+#define TAS(lock) _check_lock((slock_t*)(lock), 0, 1)
+#define S_UNLOCK(lock) _clear_lock((slock_t*)(lock), 0)
 #endif /* _AIX */
 
 /* These are in s_lock.c */
+
 #if defined(sun3) /* Sun3 */
 #define HAS_TEST_AND_SET
 
@@ -933,7 +937,7 @@ typedef unsigned int slock_t;
 typedef unsigned char slock_t;
 #endif
 
-extern slock_t pg_atomic_cas(volatile slock_t *lock, slock_t with, slock_t cmp);
+extern slock_t pg_atomic_cas(volatile slock_t* lock, slock_t with, slock_t cmp);
 
 #define TAS(a) (pg_atomic_cas((a), 1, 0) != 0)
 #endif
@@ -976,9 +980,7 @@ static __forceinline void spin_delay(void)
 
 /* Blow up if we didn't have any way to do spinlocks */
 #ifndef HAS_TEST_AND_SET
-#error PostgreSQL does not have native spinlock support on this platform.  \
-To continue the compilation, rerun configure using --disable-spinlocks.  \
-However, performance will be poor. Please report this to pgsql-bugs@postgresql.org.
+#error PostgreSQL does not have native spinlock support on this platform.  To continue the compilation, rerun configure using --disable-spinlocks.  However, performance will be poor.  Please report this to pgsql-bugs@postgresql.org.
 #endif
 
 #else /* !HAVE_SPINLOCKS */
@@ -990,10 +992,10 @@ However, performance will be poor. Please report this to pgsql-bugs@postgresql.o
  */
 typedef PGSemaphoreData slock_t;
 
-extern bool s_lock_free_sema(volatile slock_t *lock);
-extern void s_unlock_sema(volatile slock_t *lock);
-extern void s_init_lock_sema(volatile slock_t *lock);
-extern int tas_sema(volatile slock_t *lock);
+extern bool s_lock_free_sema(volatile slock_t* lock);
+extern void s_unlock_sema(volatile slock_t* lock);
+extern void s_init_lock_sema(volatile slock_t* lock);
+extern int tas_sema(volatile slock_t* lock);
 
 #define S_LOCK_FREE(lock) s_lock_free_sema(lock)
 #define S_UNLOCK(lock) s_unlock_sema(lock)
@@ -1005,6 +1007,7 @@ extern int tas_sema(volatile slock_t *lock);
 /*
  * Default Definitions - override these above as needed.
  */
+
 #if !defined(S_LOCK)
 #define S_LOCK(lock) do { \
     if (TAS(lock))                          \
@@ -1034,7 +1037,7 @@ extern int tas_sema(volatile slock_t *lock);
  * which the PostgreSQL project does not have access.
  */
 #define USE_DEFAULT_S_UNLOCK
-extern void s_unlock(volatile slock_t *lock);
+extern void s_unlock(volatile slock_t* lock);
 #define S_UNLOCK(lock) s_unlock(lock)
 #endif /* S_UNLOCK */
 
@@ -1047,7 +1050,7 @@ extern void s_unlock(volatile slock_t *lock);
 #endif /* SPIN_DELAY */
 
 #if !defined(TAS)
-extern int tas(volatile slock_t *lock); /* in port/.../tas.s, or
+extern int tas(volatile slock_t* lock); /* in port/.../tas.s, or
                                          * s_lock.c */
 
 #define TAS(lock) tas(lock)
@@ -1064,17 +1067,17 @@ extern int tas(volatile slock_t *lock); /* in port/.../tas.s, or
 #include <pthread.h>
 typedef pthread_mutex_t slock_t;
 #define SPIN_DELAY() ((void)0)
-#define TAS_SPIN(lock) pthread_mutex_lock((pthread_mutex_t *)lock)
-#define S_INIT_LOCK(lock) pthread_mutex_init((pthread_mutex_t *)lock, NULL)
-#define S_LOCK(lock) pthread_mutex_lock((pthread_mutex_t *)lock)
-#define S_UNLOCK(lock) pthread_mutex_unlock((pthread_mutex_t *)lock)
-#define S_LOCK_FREE(lock) pthread_mutex_destroy((pthread_mutex_t *)lock)
+#define TAS_SPIN(lock)  pthread_mutex_lock((pthread_mutex_t*)lock)
+#define S_INIT_LOCK(lock) pthread_mutex_init((pthread_mutex_t*)lock, NULL)
+#define S_LOCK(lock) pthread_mutex_lock((pthread_mutex_t*)lock)
+#define S_UNLOCK(lock) pthread_mutex_unlock((pthread_mutex_t*)lock)
+#define S_LOCK_FREE(lock) pthread_mutex_destroy((pthread_mutex_t*)lock)
 
 #endif
 /*
  * Platform-independent out-of-line support routines
  */
-extern int s_lock(volatile slock_t *lock, const char *file, int line);
+extern int s_lock(volatile slock_t* lock, const char* file, int line);
 
 /* Support for dynamic adjustment of spins_per_delay */
 #define DEFAULT_SPINS_PER_DELAY 100
@@ -1090,8 +1093,8 @@ typedef struct {
     int spins;
     int delays;
     int cur_delay;
-    void *ptr;
-    const char *file;
+    void* ptr;
+    const char* file;
     int line;
 } SpinDelayStatus;
 
@@ -1099,7 +1102,7 @@ typedef struct {
     {                                      \
         0, 0, 0, (ptr), __FILE__, __LINE__ \
     }
-void perform_spin_delay(SpinDelayStatus *status);
-void finish_spin_delay(SpinDelayStatus *status);
+void perform_spin_delay(SpinDelayStatus* status);
+void finish_spin_delay(SpinDelayStatus* status);
 
 #endif /* S_LOCK_H */

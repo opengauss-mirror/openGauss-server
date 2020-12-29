@@ -17,6 +17,7 @@
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+import os
 import hashlib
 
 def check_content_key(content, key):
@@ -47,9 +48,11 @@ def aes_cbc_decrypt(content, key):
     return server_decipher_key
 
 def aes_cbc_decrypt_with_path(path):
-    with open(path + '/server.key.cipher', 'rb') as f:
+    ciper_path = os.path.realpath(path + '/server.key.cipher')
+    with open(ciper_path, 'rb') as f:
         cipher_txt = f.read()
-    with open(path + '/server.key.rand', 'rb') as f:
+    rand_path = os.path.realpath(path + '/server.key.rand')
+    with open(rand_path, 'rb') as f:
         rand_txt = f.read()
     if cipher_txt is None or cipher_txt == "":
         return None

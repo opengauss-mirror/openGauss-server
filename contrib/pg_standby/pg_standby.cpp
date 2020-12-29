@@ -345,7 +345,7 @@ static bool SetWALFileNameForCleanup(void)
         }
     }
 
-    XLogFileName(exclusiveCleanupFileName, tli, ((uint32)log) << 32 | seg);
+    XLogFileName(exclusiveCleanupFileName, tli, (((uint32)log) << 32) | seg);
 
     return cleanup;
 }

@@ -50,7 +50,7 @@ extern void destroy_handles();
 const int SLEEP_INTERVAL = 10;
 namespace PercentileSpace {
 bool pgstat_fetch_sql_rt_info(PGXCNodeAllHandles* pgxcHandle, char tag, int* Count, SqlRTInfo* sqlRT);
-List* pgstat_send_command(PGXCNodeAllHandles* pgxc_handles, char tag);
+List* pgstat_send_command(PGXCNodeAllHandles* pgxc_handles, char tag, bool* isSendSuccess);
 void SubPercentileMain(void);
 bool SetTimer(TimestampTz start, TimestampTz stop);
 bool ResetTimer(int interval);
@@ -61,7 +61,7 @@ void heapSort(SqlRTInfo* sqlRT, int size);
 void init_gspqsignal();
 void init_MemCxt();
 unsigned int process_remote_count_msg(const char* msg, int len);
-void process_remote_record_msg(const char* msg, int len, int index, SqlRTInfo* sqlRT, int64 Count);
+void process_remote_record_msg(const char* msg, int len, int index, SqlRTInfo* sqlRT, int64 Count, bool* isWrongMsg);
 bool CheckQueryPercentile(void);
 void calculatePercentileOfSingleNode(void);
 void calculatePercentileOfMultiNode(void);
@@ -97,6 +97,23 @@ void JobPercentileIAm(void)
 bool IsJobPercentileProcess(void)
 {
     return t_thrd.role == PERCENTILE_WORKER;
+}
+
+void InitPercentile(void)
+{
+    /* init memory context */
+    g_instance.stat_cxt.InstrPercentileContext = AllocSetContextCreate(g_instance.instance_context,
+        "PercentileContext",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE,
+        SHARED_CONTEXT);
+
+    if (g_instance.stat_cxt.sql_rt_info_array == NULL) {
+        g_instance.stat_cxt.sql_rt_info_array =
+            (SqlRTInfoArray *)MemoryContextAllocZero(
+            g_instance.stat_cxt.InstrPercentileContext, sizeof(SqlRTInfoArray));
+    }
 }
 
 void PercentileSpace::init_gspqsignal()
@@ -154,14 +171,14 @@ NON_EXEC_STATIC void PercentileMain()
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
-    knl_thread_set_name("PercentileJob");
+    t_thrd.proc_cxt.MyProgName = "getpercentile";
     if (u_sess->proc_cxt.MyProcPort->remote_host) {
         pfree(u_sess->proc_cxt.MyProcPort->remote_host);
     }
     u_sess->proc_cxt.MyProcPort->remote_host = pstrdup("localhost");
     u_sess->attr.attr_common.application_name = pstrdup("PercentileJob");
     /* Identify myself via ps */
-    init_ps_display("PercentileJob process", "", "", "");
+    init_ps_display("instrumention percentile process", "", "", "");
     SetProcessingMode(InitProcessing);
     PercentileSpace::init_gspqsignal();
     /* Early initialization */
@@ -175,7 +192,7 @@ NON_EXEC_STATIC void PercentileMain()
 
     SetProcessingMode(NormalProcessing);
     on_shmem_exit(PGXCNodeCleanAndRelease, 0);
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Percentile");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Percentile", MEMORY_CONTEXT_DFX);
     /* initialize current pool handles, it's also only once */
     exec_init_poolhandles();
 
@@ -187,9 +204,7 @@ NON_EXEC_STATIC void PercentileMain()
     pgstat_bestart();
     pgstat_report_appname("PercentileJob");
     pgstat_report_activity(STATE_IDLE, NULL);
-    if (IS_SINGLE_NODE) {
-        pgstat_init_sql_rt_info_array(&g_instance.stat_cxt);
-    }
+
     while (!t_thrd.percentile_cxt.need_exit) {
         if (u_sess->sig_cxt.got_PoolReload) {
             processPoolerReload();
@@ -342,7 +357,7 @@ void PercentileSpace::SubPercentileMain(void)
     }                               /* end of loop */
 }
 
-List* PercentileSpace::pgstat_send_command(PGXCNodeAllHandles* pgxc_handles, char tag)
+List* PercentileSpace::pgstat_send_command(PGXCNodeAllHandles* pgxc_handles, char tag, bool* isSendSuccess)
 {
     int i;
     List* connlist = NULL;
@@ -352,6 +367,8 @@ List* PercentileSpace::pgstat_send_command(PGXCNodeAllHandles* pgxc_handles, cha
         int stat = pgxc_node_pgstat_send(pgxc_connections[i], tag);
         if (stat == 0) {
             connlist = lappend_int(connlist, i);
+        } else {
+            *isSendSuccess = false;
         }
     }
     return connlist;
@@ -370,9 +387,11 @@ unsigned int PercentileSpace::process_remote_count_msg(const char* msg, int len)
     return count;
 }
 
-void PercentileSpace::process_remote_record_msg(const char* msg, int len, int index, SqlRTInfo* sqlRT, int64 Count)
+void PercentileSpace::process_remote_record_msg(const char* msg, int len, int index,
+                                                SqlRTInfo* sqlRT, int64 Count, bool* isWrongMsg)
 {
-    if (index >= Count) {
+    if (sqlRT == NULL || index >= Count) {
+        *isWrongMsg = true;
         return;
     }
 
@@ -390,7 +409,8 @@ void PercentileSpace::process_remote_record_msg(const char* msg, int len, int in
 bool PercentileSpace::pgstat_fetch_sql_rt_info(PGXCNodeAllHandles* pgxcHandle, char tag, int* Count, SqlRTInfo* sqlRT)
 {
     struct timeval timeout = {120, 0};
-    List* connlist = PercentileSpace::pgstat_send_command(pgxcHandle, tag);
+    bool isSendSuccess = true;
+    List* connlist = PercentileSpace::pgstat_send_command(pgxcHandle, tag, &isSendSuccess);
     int index = 0;
     bool isWrongMsg = false;
     bool isTimeOut = false;
@@ -398,16 +418,28 @@ bool PercentileSpace::pgstat_fetch_sql_rt_info(PGXCNodeAllHandles* pgxcHandle, c
         PGXCNodeHandle* cn_handle = pgxcHandle->coord_handles[linitial_int(connlist)];
         connlist = list_delete_first(connlist);
         bool isFinished = false;
-        while (!pgxc_node_receive(1, &cn_handle, &timeout)) {
+        for (;;) {
+            if (pgxc_node_receive(1, &cn_handle, &timeout)) {
+                ereport(LOG,
+                    (errmsg("%s:%d recv fail", __FUNCTION__, __LINE__)));
+                break;
+            }
+
             char* msg = NULL;
             int len;
 
             char msg_type = get_message(cn_handle, &len, &msg);
             switch (msg_type) {
+                case '\0': /* message is not completed */
+                case 'A':  /* NotificationResponse */
+                case 'S':  /* SetCommandComplete */
+                    break;
+                case 'E': /* message is error */
+                    isWrongMsg = true;
+                    break;
                 case 'c': { /* sql rt info count */
                     unsigned int count = PercentileSpace::process_remote_count_msg(msg, len);
-                    if (count <= MAX_SQL_RT_INFO_COUNT && count >= 0 && 
-                        *Count < (int)(MaxAllocSize / sizeof(SqlRTInfo))) {
+                    if (sqlRT == NULL && count <= MAX_SQL_RT_INFO_COUNT) {
                         *Count = *Count + count;
                         if ((*Count < 0) || (*Count > MAX_SQL_RT_INFO_COUNT_REMOTE)) {
                             isWrongMsg = true;
@@ -418,7 +450,7 @@ bool PercentileSpace::pgstat_fetch_sql_rt_info(PGXCNodeAllHandles* pgxcHandle, c
                     break;
                 }
                 case 'r': { /* sql rt info */
-                    PercentileSpace::process_remote_record_msg(msg, len, index, sqlRT, *Count);
+                    PercentileSpace::process_remote_record_msg(msg, len, index, sqlRT, *Count, &isWrongMsg);
                     index++;
                     break;
                 }
@@ -437,10 +469,13 @@ bool PercentileSpace::pgstat_fetch_sql_rt_info(PGXCNodeAllHandles* pgxcHandle, c
             }
         }
         cn_handle->state = DN_CONNECTION_STATE_IDLE;
-        if ((!isTimeOut && !isFinished) || isWrongMsg) {
+        if (!isFinished || isWrongMsg) {
             isTimeOut = true;
             break;
         }
+    }
+    if (!isSendSuccess) {
+        isTimeOut = true;
     }
     return isTimeOut;
 }
@@ -633,7 +668,7 @@ Datum get_instr_rt_percentile(PG_FUNCTION_ARGS)
 
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(NUM_PERCENTILE_COUNT, false);
+        tupdesc = CreateTemplateTupleDesc(NUM_PERCENTILE_COUNT, false, TAM_HEAP);
         if (!(PercentileSpace::CheckQueryPercentile())) {
             MemoryContextSwitchTo(oldcontext);
             SRF_RETURN_DONE(funcctx);
@@ -652,7 +687,7 @@ Datum get_instr_rt_percentile(PG_FUNCTION_ARGS)
     funcctx = SRF_PERCALL_SETUP();
     if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         Datum values[NUM_PERCENTILE_COUNT];
-        bool nulls[NUM_PERCENTILE_COUNT];
+        bool nulls[NUM_PERCENTILE_COUNT] = {false};
         HeapTuple tuple;
         Datum result;
         int i = -1;

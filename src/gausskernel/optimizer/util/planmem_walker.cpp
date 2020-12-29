@@ -279,7 +279,14 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
             if (p2walker((Node*)((ForeignScan*)node)->fdw_private, context))
                 return true;
             break;
-
+        case T_ExtensiblePlan:
+            if (walk_scan_node_fields((Scan*)node, walker, context))
+                return true;
+            if (p2walker((Node*)((ExtensiblePlan*)node)->extensible_plans, context))
+                return true;
+            if (p2walker((Node*)((ExtensiblePlan*)node)->extensible_exprs, context))
+                return true;
+            break;
         case T_IndexScan:
             if (walk_scan_node_fields((Scan*)node, walker, context))
                 return true;
@@ -363,13 +370,14 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
             if (p2walker((Node*)item->hdfsQual, context))
                 return true;
         } break;
-
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
             if (walk_scan_node_fields((Scan*)node, walker, context))
                 return true;
             if (p2walker((Node*)((TsStoreScan*)node)->tsstorequal, context))
                 return true;
             break;
+#endif   /* ENABLE_MULTIPLE_NODES */
 
         case T_VecStream:
         case T_Stream:

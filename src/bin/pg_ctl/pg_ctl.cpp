@@ -54,8 +54,13 @@
 #include "common/fe_memutils.h"
 #include "logging.h"
 
+#ifdef ENABLE_MOT
 #include "fetchmot.h"
+#endif
 
+#ifndef MAX_PATH_LEN
+#define MAX_PATH_LEN 1024
+#endif
 #define PROG_NAME "gs_ctl"
 #define PG_REWIND_VERSION "(PostgreSQL) 9.2.4"
 #define PG_REWIND_VERSIONSTR "gs_rewind " DEF_GS_VERSION "\n"
@@ -99,7 +104,8 @@ typedef enum {
     BUILD_COMMAND,
     BUILD_QUERY_COMMAND,
     RESTORE_COMMAND,
-    HOTPATCH_COMMAND
+    HOTPATCH_COMMAND,
+    FINISH_REDO_COMMAND
 } CtlCommand;
 
 typedef enum {
@@ -108,7 +114,7 @@ typedef enum {
     SYNCHRONOUS_COMMIT_REMOTE_RECEIVE, /* wait for local flush and remote receive */
     SYNCHRONOUS_COMMIT_REMOTE_WRITE,   /* wait for local flush and remote write */
     SYNCHRONOUS_COMMIT_REMOTE_FLUSH,   /* wait for local and remote flush */
-    SYNCHRONOUS_COMMIT_REMOTE_APPLY,
+    SYNCHRONOUS_COMMIT_REMOTE_APPLY,   /* wait for local and remote replay */
     SYNCHRONOUS_BAD
 } SyncCommitLevel;
 
@@ -134,6 +140,7 @@ static int sig = SIGTERM;                   /* default */
 static CtlCommand ctl_command = NO_COMMAND;
 char* pg_data = NULL;
 static char* pg_config = NULL;
+static char* pg_host = NULL;
 static char* pgdata_opt = NULL;
 static char* post_opts = NULL;
 const char* progname = "gs_ctl";
@@ -190,6 +197,9 @@ const int g_length_suffix = 3;
         }                   \
     } while (0)
 
+/* max length of password */
+#define MAX_PASSWORD_LENGTH 999
+
 char ssl_cert_file[MAXPGPATH];
 char ssl_key_file[MAXPGPATH];
 char ssl_ca_file[MAXPGPATH];
@@ -220,10 +230,12 @@ static void do_help(void);
 static void set_mode(char* modeopt);
 static void set_sig(char* signame);
 static void do_init(void);
+static void do_start_set_para(void);
 static void do_start(void);
 static void do_stop(bool force);
 static void do_restart(void);
 static void do_reload(void);
+static void do_finish_redo(void);
 static void do_status(void);
 
 static void do_promote(void);
@@ -275,7 +287,6 @@ static void set_build_pid(pgpid_t pid);
 static void close_connection(void);
 static PGconn* get_connectionex(void);
 static ServerMode get_runmode(void);
-static DbState get_primary_status(void);
 static void freefile(char** lines);
 static char* get_localrole_string(ServerMode mode);
 static void do_actual_build(uint32 term = 0);
@@ -292,7 +303,7 @@ static void read_ssl_confval(void);
 static char* get_string_by_sync_mode(bool syncmode);
 static void free_ctl();
 extern int GetLengthAndCheckReplConn(const char* ConnInfoList);
-extern BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint32 term);
+extern BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char* sysidentifier, uint32 timeline, uint32 term);
 
 void check_input_for_security(char* input_env_value)
 {
@@ -493,69 +504,79 @@ static PGconn* get_connection(void)
         }
 
         /* add user and passwd for gs_ctl if needed */
-        if (register_username != NULL && register_password != NULL) {
-            if (*register_username == '.') {
-                register_username += 2;
+        while (true) {
+            if (register_username != NULL && register_password != NULL) {
+                if (*register_username == '.') {
+                    register_username += 2;
+                }
+                ret = snprintf_s(local_conninfo,
+                    sizeof(local_conninfo),
+                    sizeof(local_conninfo) - 1,
+                    "dbname=postgres port=%d host='%s' user='%s' password='%s' "
+                    "application_name=%s connect_timeout=5 options='-c xc_maintenance_mode=on -c remotetype=internaltool'",
+                    portnum,
+                    host_str,
+                    register_username,
+                    register_password,
+                    progname);
+                securec_check_ss_c(ret, "\0", "\0");
+            } else if (register_username == NULL && register_password != NULL) {
+                ret = snprintf_s(local_conninfo,
+                    sizeof(local_conninfo),
+                    sizeof(local_conninfo) - 1,
+                    "dbname=postgres port=%d host='%s' password='%s' "
+                    "application_name=%s connect_timeout=5 options='-c xc_maintenance_mode=on -c remotetype=internaltool'",
+                    portnum,
+                    host_str,
+                    register_password,
+                    progname);
+                securec_check_ss_c(ret, "\0", "\0");
+            } else if (register_username != NULL && register_password == NULL) {
+                if (*register_username == '.') {
+                    register_username += 2;
+                }
+                ret = snprintf_s(local_conninfo,
+                    sizeof(local_conninfo),
+                    sizeof(local_conninfo) - 1,
+                    "dbname=postgres port=%d host='%s' user='%s' application_name=%s "
+                    "connect_timeout=5 options='-c xc_maintenance_mode=on -c remotetype=internaltool'",
+                    portnum,
+                    host_str,
+                    register_username,
+                    progname);
+                securec_check_ss_c(ret, "\0", "\0");
+            } else {
+                ret = snprintf_s(local_conninfo,
+                    sizeof(local_conninfo),
+                    sizeof(local_conninfo) - 1,
+                    "dbname=postgres port=%d host='%s' application_name=%s "
+                    "connect_timeout=5 options='-c xc_maintenance_mode=on -c remotetype=internaltool'",
+                    portnum,
+                    host_str,
+                    progname);
+                securec_check_ss_c(ret, "\0", "\0");
             }
-            ret = snprintf_s(local_conninfo,
-                sizeof(local_conninfo),
-                sizeof(local_conninfo) - 1,
-                "dbname=postgres port=%d host='%s' user='%s' password='%s' "
-                "application_name=%s connect_timeout=5 options='-c xc_maintenance_mode=on -c remotetype=internaltool'",
-                portnum,
-                host_str,
-                register_username,
-                register_password,
-                progname);
-            securec_check_ss_c(ret, "\0", "\0");
-        } else if (register_username == NULL && register_password != NULL) {
-            ret = snprintf_s(local_conninfo,
-                sizeof(local_conninfo),
-                sizeof(local_conninfo) - 1,
-                "dbname=postgres port=%d host='%s' password='%s' "
-                "application_name=%s connect_timeout=5 options='-c xc_maintenance_mode=on -c remotetype=internaltool'",
-                portnum,
-                host_str,
-                register_password,
-                progname);
-            securec_check_ss_c(ret, "\0", "\0");
-        } else if (register_username != NULL && register_password == NULL) {
-            if (*register_username == '.') {
-                register_username += 2;
+
+            dbConn = PQconnectdb(local_conninfo);
+            if (dbConn->status == CONNECTION_BAD && (strstr(PQerrorMessage(dbConn), "password") != NULL) &&
+                register_password == NULL) {
+                PQfinish(dbConn);
+                if (register_username == NULL) {
+                    register_password = simple_prompt("Password: ", MAX_PASSWORD_LENGTH, false);
+                } else {
+                    char* prompt_text = NULL;
+                    prompt_text = (char*)pg_malloc(strlen(register_username) + MAX_PASSWORD_LENGTH);
+                    ret = sprintf_s(prompt_text, strlen(register_username) + MAX_PASSWORD_LENGTH, _("Password for user %s: "), register_username);
+                    securec_check_ss_c(ret, "\0", "\0");
+                    register_password = simple_prompt(prompt_text, MAX_PASSWORD_LENGTH, false);
+                    free(prompt_text);
+                    prompt_text = NULL;
+                }
+            } else {
+                break;
             }
-            ret = snprintf_s(local_conninfo,
-                sizeof(local_conninfo),
-                sizeof(local_conninfo) - 1,
-                "dbname=postgres port=%d host='%s' user='%s' application_name=%s "
-                "connect_timeout=5 options='-c xc_maintenance_mode=on -c remotetype=internaltool'",
-                portnum,
-                host_str,
-                register_username,
-                progname);
-            securec_check_ss_c(ret, "\0", "\0");
-        } else {
-#ifdef ENABLE_MULTIPLE_NODES
-            ret = snprintf_s(local_conninfo,
-                sizeof(local_conninfo),
-                sizeof(local_conninfo) - 1,
-                "dbname=postgres port=%d host='%s' application_name=%s "
-                "connect_timeout=5 options='-c xc_maintenance_mode=on -c remotetype=internaltool'",
-                portnum,
-                host_str,
-                progname);
-#else
-            ret = snprintf_s(local_conninfo,
-                sizeof(local_conninfo),
-                sizeof(local_conninfo) - 1,
-                "dbname=postgres port=%d application_name=%s "
-                "connect_timeout=5 options='-c xc_maintenance_mode=on -c remotetype=internaltool'",
-                portnum,
-                progname);
-#endif
-            securec_check_ss_c(ret, "\0", "\0");
         }
 
-        dbConn = PQconnectdb(local_conninfo);
         rc = memset_s(local_conninfo, MAXCONNINFO, 0, sizeof(local_conninfo));
         securec_check_c(rc, "", "");
     }
@@ -679,64 +700,6 @@ static ServerMode get_runmode(void)
     return UNKNOWN_MODE;
 }
 
-static DbState get_primary_status(void)
-{
-    PGconn* conn = NULL;
-    PGresult* res = NULL;
-    char* val = NULL;
-    const char* sql_string = "select peer_state from pg_stat_get_wal_receiver();";
-    char primary_status[MAXRUNMODE] = {0};
-    errno_t tnRet = EOK;
-
-    conn = get_connectionex();
-
-    if (PQstatus(conn) != CONNECTION_OK) {
-        pg_log(PG_WARNING, _("Could not connect to the local server : connection failed!\n"));
-        close_connection();
-        conn = NULL;
-        return UNKNOWN_STATE;
-    }
-    
-    res = PQexec(conn, sql_string);
-
-    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        PQclear(res);
-        pg_log(PG_WARNING, _("SQL command failed! \n%s\n%s\n"), sql_string, PQerrorMessage(conn));
-        close_connection();
-        conn = NULL;
-        return UNKNOWN_STATE;
-    }
-
-    if (PQnfields(res) != 1 || PQntuples(res) != 1) {
-        int ntuples = PQntuples(res);
-        int nfields = PQnfields(res);
-
-        PQclear(res);
-        pg_log(PG_WARNING,
-            _("invalid response from primary server: "
-              "Expected 1 tuple with 1 fields, got %d tuples with %d fields."),
-            ntuples,
-            nfields);
-        close_connection();
-        conn = NULL;
-        return UNKNOWN_STATE;
-    }
-
-    if ((val = PQgetvalue(res, 0, 0)) != NULL) {
-        tnRet = strncpy_s(primary_status, MAXRUNMODE, val, strlen(val));
-        securec_check_c(tnRet, "\0", "\0");
-        primary_status[MAXRUNMODE - 1] = '\0';
-    }
-    PQclear(res);
-    close_connection();
-    conn = NULL;
-
-    if (!strncmp(primary_status, "Normal", MAXRUNMODE)) {
-        return NORMAL_STATE;
-    }
-    return UNKNOWN_STATE;
-}
-
 static void freefile(char** lines)
 {
     char** line = NULL;
@@ -768,8 +731,17 @@ static void freefile(char** lines)
  */
 static pgpid_t start_postmaster(void)
 {
-    char cmd[MAXPGPATH];
-    int ret;
+    /* make sure version_file length is big enough when template_file using realpath */
+    const int MAX_REALPATH_LEN = 4096;
+    char cmd[MAXPGPATH] = {0};
+    char version_file[MAX_REALPATH_LEN] = {0};
+    char template_file[MAXPGPATH] = {0};
+    char version_str[MAXPGPATH] = {0};
+    char ch;
+    float undocumented_version = 0;
+    struct stat buf;
+    FILE* fd = NULL;
+    int ret = 0;
 
 #ifndef WIN32
     pgpid_t pm_pid;
@@ -790,6 +762,42 @@ static pgpid_t start_postmaster(void)
     }
 
     /* fork succeeded, in child */
+
+    if (pg_host != NULL && *(pg_host) != '\0') {
+        ret = snprintf_s(template_file, MAXPGPATH, MAXPGPATH - 1, "%s/binary_upgrade/old_upgrade_version", pg_host);
+        securec_check_ss_c(ret, "\0", "\0");
+        if (realpath(template_file, version_file) == NULL && version_file[0] == '\0') {
+            pg_log(PG_WARNING, _("could not get correct path or the abs path is too long!\n"));
+            exit(1);
+        }
+
+        if (stat(version_file, &buf) < 0) {
+            if (errno != ENOENT) {
+                pg_log(PG_WARNING, _("could not stat file %s: %s\n"), version_file, strerror(errno));
+                exit(1);
+            }
+        } else {
+            fd = fopen(version_file, "r");
+            if (fd == NULL) {
+                if (errno == ENOENT) {
+                    pg_log(PG_WARNING, _("file %s is not exist\n"), version_file);
+                } else {
+                    pg_log(PG_WARNING, _("open file %s failed: %s\n"), version_file, strerror(errno));
+                }
+                exit(1);
+            }
+
+            if (fscanf_s(fd, "%s%c", version_str, MAXPGPATH, &ch, 1) != 2 || ch != '\n') {
+                pg_log(PG_WARNING, _("invalid data in file %s"), version_file);
+            }
+            if (fscanf_s(fd, "%f%c", &undocumented_version, &ch, 1) != 2 || ch != '\n') {
+                pg_log(PG_WARNING, _("invalid data in file %s"), version_file);
+            }
+            undocumented_version *= 1000;
+            (void)fclose(fd);
+            fd = NULL;
+        }
+    }
     /*
      * Since there might be quotes to handle here, it is easier simply to pass
      * everything to a shell to process them.  Use exec so that the postmaster
@@ -797,18 +805,34 @@ static pgpid_t start_postmaster(void)
      */
     if (log_file != NULL) {
 #ifdef ENABLE_MULTIPLE_NODES
-        ret = snprintf_s(cmd,
-            MAXPGPATH,
-            MAXPGPATH - 1,
-            "exec \"%s\" %s %s %s %s < \"%s\" >> \"%s\" 2>&1",
-            exec_path,
-            pgxcCommand,
-            pgdata_opt,
-            post_opts,
-            pgha_opt,
-            DEVNULL,
-            log_file);
-        securec_check_ss_c(ret, "\0", "\0");
+        if (undocumented_version) {
+            ret = snprintf_s(cmd,
+                MAXPGPATH,
+                MAXPGPATH - 1,
+                "exec \"%s\" -u %u %s %s %s %s < \"%s\" >> \"%s\" 2>&1",
+                exec_path,
+                (uint32)undocumented_version,
+                pgxcCommand,
+                pgdata_opt,
+                post_opts,
+                pgha_opt ? pgha_opt : "",
+                DEVNULL,
+                log_file);
+            securec_check_ss_c(ret, "\0", "\0");
+        } else {
+            ret = snprintf_s(cmd,
+                MAXPGPATH,
+                MAXPGPATH - 1,
+                "exec \"%s\" %s %s %s %s < \"%s\" >> \"%s\" 2>&1",
+                exec_path,
+                pgxcCommand,
+                pgdata_opt,
+                post_opts,
+                pgha_opt ? pgha_opt : "",
+                DEVNULL,
+                log_file);
+            securec_check_ss_c(ret, "\0", "\0");
+        }
 #else
         ret = snprintf_s(cmd,
             MAXPGPATH,
@@ -817,7 +841,7 @@ static pgpid_t start_postmaster(void)
             exec_path,
             pgdata_opt,
             post_opts,
-            pgha_opt,
+            pgha_opt ? pgha_opt : "",
             DEVNULL,
             log_file);
         securec_check_ss_c(ret, "\0", "\0");
@@ -825,18 +849,32 @@ static pgpid_t start_postmaster(void)
 #endif
     } else {
 #ifdef ENABLE_MULTIPLE_NODES
-
-        ret = snprintf_s(cmd,
-            MAXPGPATH,
-            MAXPGPATH - 1,
-            "exec \"%s\" %s %s %s %s < \"%s\" 2>&1",
-            exec_path,
-            pgxcCommand,
-            pgdata_opt,
-            post_opts,
-            pgha_opt,
-            DEVNULL);
-        securec_check_ss_c(ret, "\0", "\0");
+        if (undocumented_version) {
+            ret = snprintf_s(cmd,
+                MAXPGPATH,
+                MAXPGPATH - 1,
+                "exec \"%s\" -u %u %s %s %s %s < \"%s\" 2>&1",
+                exec_path,
+                (uint32)undocumented_version,
+                pgxcCommand,
+                pgdata_opt,
+                post_opts,
+                pgha_opt ? pgha_opt : "",
+                DEVNULL);
+            securec_check_ss_c(ret, "\0", "\0");
+        } else {
+            ret = snprintf_s(cmd,
+                MAXPGPATH,
+                MAXPGPATH - 1,
+                "exec \"%s\" %s %s %s %s < \"%s\" 2>&1",
+                exec_path,
+                pgxcCommand,
+                pgdata_opt,
+                post_opts,
+                pgha_opt ? pgha_opt : "",
+                DEVNULL);
+            securec_check_ss_c(ret, "\0", "\0");
+        }
 #else
         ret = snprintf_s(cmd,
             MAXPGPATH,
@@ -845,7 +883,7 @@ static pgpid_t start_postmaster(void)
             exec_path,
             pgdata_opt,
             post_opts,
-            pgha_opt,
+            pgha_opt ? pgha_opt : "",
             DEVNULL);
         securec_check_ss_c(ret, "\0", "\0");
 #endif
@@ -874,7 +912,7 @@ static pgpid_t start_postmaster(void)
             exec_path,
             pgdata_opt,
             post_opts,
-            pgha_opt,
+            pgha_opt ? pgha_opt : "",
             DEVNULL,
             log_file);
         securec_check_ss_c(ret, "\0", "\0");
@@ -886,7 +924,7 @@ static pgpid_t start_postmaster(void)
             exec_path,
             pgdata_opt,
             post_opts,
-            pgha_opt,
+            pgha_opt ? pgha_opt : "",
             DEVNULL);
         securec_check_ss_c(ret, "\0", "\0");
     }
@@ -1124,7 +1162,7 @@ static PGPing test_postmaster_connection(pgpid_t pm_pid, bool do_checkpoint, str
                         beforeStat = afterStat;
                     }
                 }
-            }
+            }   
         }
 #else
         if (WaitForSingleObject(postmasterProcess, 0) == WAIT_OBJECT_0)
@@ -1149,13 +1187,6 @@ static PGPing test_postmaster_connection(pgpid_t pm_pid, bool do_checkpoint, str
 
         pg_usleep(1000000); /* 1 sec */
     }
-
-#ifndef ENABLE_MULTIPLE_NODES
-    if (i >= wait_seconds) {
-        pg_log(
-            PG_PROGRESS, _("start timeout after %d seconds, please check the process status manually. "), wait_seconds);
-    }
-#endif
 
     /* return result of last call to PQping */
     return ret;
@@ -1200,9 +1231,7 @@ static void read_post_opts(void)
                 char* arg1 = NULL;
                 char* dest = NULL;
                 char* destleft = NULL;
-#ifndef ENABLE_MULTIPLE_NODES
-                char* tmp_postopts = NULL;
-#endif
+
                 check_input_for_security(optlines[0]);
                 optline = optlines[0];
                 /* trim off line endings */
@@ -1214,12 +1243,12 @@ static void read_post_opts(void)
                  * double-quote?
                  */
                 if ((arg1 = strstr(optline, " \"")) != NULL) {
-                    *arg1 = '\0'; /* terminate so we get only program name */
+                    *arg1 = '\0';         /* terminate so we get only program
+                                           * name */
 #ifdef ENABLE_MULTIPLE_NODES
                     post_opts = arg1 + 1; /* point past whitespace */
 #else
-                    tmp_postopts = arg1 + 1;
-                    post_opts = xstrdup(tmp_postopts);
+                    post_opts = xstrdup(arg1 + 1);
 #endif
                 }
                 if (exec_path == NULL) {
@@ -1335,7 +1364,7 @@ static void do_init(void)
 #ifdef ENABLE_MULTIPLE_NODES
         exec_path = find_other_exec_or_die(argv0, "gs_initdb", "gs_initdb (PostgreSQL) " PG_VERSION "\n");
 #else
-        exec_path = find_other_exec_or_die(argv0, "gs_initdb", "gs_initdb " DEF_GS_VERSION "\n");
+        exec_path = find_other_exec_or_die(argv0, "gs_initdb", "gs_initdb (openGauss) " PG_VERSION "\n");
 #endif
 
     if (pgdata_opt == NULL)
@@ -1399,7 +1428,6 @@ static int get_instance_port(const char* filename)
             optlines[opt_index] = NULL;
             opt_index++;
         }
-
         free(optlines);
         optlines = NULL;
     } else {
@@ -1464,7 +1492,7 @@ static int do_check_port(uint32 portnum)
             fp = NULL;
 
             pg_log(PG_WARNING,
-                _("port:%u already in use. /proc/net/tcp:\n%s \n%s"),
+                _("port:%d already in use. /proc/net/tcp:\n%s \n%s"),
                 localport,
                 "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ",
                 buf);
@@ -1499,12 +1527,21 @@ static int do_check_port(uint32 portnum)
     return 0;
 }
 
+static void do_start_set_para(void)
+{
+/* No -D or -D already added during server start */
+    if (ctl_command == RESTART_COMMAND || pgdata_opt == NULL)
+        pgdata_opt = "";
+
+    if (exec_path == NULL)
+        exec_path = find_other_exec_or_die(argv0, "gaussdb", PG_BACKEND_VERSIONSTR);
+}
+
 static void do_start(void)
 {
     pgpid_t old_pid = 0;
     pgpid_t pm_pid;
     int ret;
-    int restart_count = 0;
     int portnum;
     struct stat beforeStat;
 
@@ -1527,15 +1564,7 @@ static void do_start(void)
 
     read_post_opts();
 
-    /* No -D or -D already added during server start */
-    if (ctl_command == RESTART_COMMAND || pgdata_opt == NULL)
-        pgdata_opt = "";
-
-    if (pgha_opt == NULL)
-        pgha_opt = "";
-
-    if (exec_path == NULL)
-        exec_path = find_other_exec_or_die(argv0, "gaussdb", PG_BACKEND_VERSIONSTR);
+    do_start_set_para();
 
 #if defined(HAVE_GETRLIMIT) && defined(RLIMIT_CORE)
     if (allow_core_files)
@@ -1560,8 +1589,6 @@ static void do_start(void)
     /* get port from conf file to check port conflict before serer started */
     portnum = get_instance_port(pg_conf_file);
 
-start_retry:
-
     if (portnum > 0 && do_check_port(portnum) > 0)
         pg_log(PG_PROGRESS, _("port conflict when start server\n"));
 
@@ -1583,27 +1610,15 @@ start_retry:
                 pg_log(PG_PRINT, _("\n"));
                 pg_log(PG_PROGRESS, _("stopped waiting\n"));
                 pg_log(PG_PROGRESS, _("server is still starting up\n"));
-
                 break;
             case PQPING_NO_RESPONSE:
                 pg_log(PG_PRINT, _("\n"));
                 pg_log(PG_PROGRESS, _("stopped waiting\n"));
-                pg_log(PG_PROGRESS, _("could not start server\n"));
-                pg_log(PG_PROGRESS, _("Examine the log output.\n"));
-                if (ctl_command == BUILD_COMMAND && restart_count < 3) {
-                    /*
-                     * After gs_ctl build -b full finish, do start maybe failed
-                     * and return PQPING_NO_RESPONSE but the pm process is alive,
-                     * so we retry to start.
-                     */
+                pg_log(PG_PROGRESS,
+                    _(" could not start server\n"
+                      "Examine the log output.\n"));
+                if (ctl_command == BUILD_COMMAND) {
                     set_build_pid(0);
-                    restart_count++;
-                    pg_log(PG_PRINT, _("\n"));
-                    pg_log(PG_PROGRESS, _("stopped waiting and restart server\n"));
-                    kill_proton_force();
-                    /* avoid the zombie process */
-                    (void)wait(NULL);
-                    goto start_retry;
                 }
                 exit(1);
                 break;
@@ -1666,15 +1681,15 @@ static void do_stop(bool force)
               "single-user server is running (PID: %ld)  %s\n"),
             pid,
             strerror(errno));
-        if (errno == ESRCH) {
-            return;
-        }
         if (force || (shutdown_mode == IMMEDIATE_MODE)) {
             kill_proton_force();
             if (-1 == chmod(pid_file, 0600)) {
                 pg_log(PG_WARNING, _(" could not set permissions of file \"%s\": %m\n"), pid_file);
                 return;
             }
+        }
+        if (errno == 3) {
+            exit(0);
         }
         exit(1);
     }
@@ -1867,6 +1882,55 @@ static void do_reload(void)
     print_msg(_("server signaled\n"));
 }
 
+static void
+do_finish_redo(void)
+{
+    FILE *fofile = NULL;
+    char redo_path[MAXPGPATH];
+    pgpid_t pid;
+    bool do_finish = true;
+    int ret = snprintf_s(redo_path, MAXPGPATH, MAXPGPATH-1, "%s/finish_redo_file", pg_data);
+    securec_check_ss_c(ret, "", "");
+    if ((fofile = fopen(redo_path, "w")) == NULL)
+    {
+        pg_log(PG_WARNING, _("fail to open finish redo file\n"));
+        exit(1);
+    }
+    if (fwrite(&do_finish, sizeof(bool), 1, fofile) != 1)
+    {
+        pg_log(PG_WARNING, _("fail to write finish redo file\n"));
+    }
+    if (fclose(fofile))
+    {
+        pg_log(PG_WARNING, _("fail to close finish redo file\n"));
+    }
+    fofile = NULL;
+
+    pid = get_pgpid();
+
+    if (pid == 0) /* no pid file */
+    {
+        pg_log(PG_WARNING, _("PID file \"%s\" does not exist\n"), pid_file);
+        pg_log(PG_WARNING, _("Is server running?\n"));
+        exit(1);
+    }
+    else if (pid < 0) /* standalone backend, not postmaster */
+    {
+        pid = -pid;
+        pg_log(PG_WARNING, _("cannot finish redo server: single-user server is running (PID: %ld)\n"), pid);
+        exit(1);
+    }
+
+    sig = SIGUSR1;
+    if (kill((pid_t) pid, sig) != 0)
+    {
+        pg_log(PG_WARNING, _("could not send finish redo signal (PID: %ld): %s\n"), pid, strerror(errno));
+        if (unlink(redo_path) != 0)
+            pg_log(PG_WARNING, _("could not remove finish redo file \"%s\": %s\n"), redo_path, strerror(errno));
+        exit(1);
+    }
+}
+
 static void do_failover(uint32 term)
 {
     FILE* fofile = NULL;
@@ -1883,14 +1947,14 @@ static void do_failover(uint32 term)
     pg_log(PG_WARNING, _("failover term (%u)\n"), term);
 
     if ((fofile = fopen(term_path, "w")) == NULL) {
-        pg_log(PG_WARNING, _("missing arguments for kill mode\n"));
+        pg_log(PG_WARNING, _("could not open file successfully\n"));
         exit(1);
     }
     if (fwrite(&term, sizeof(uint32), 1, fofile) != 1) {
-        pg_log(PG_WARNING, _("missing arguments for kill mode\n"));
+        pg_log(PG_WARNING, _("could not write file successfully\n"));
     }
     if (fclose(fofile)) {
-        pg_log(PG_WARNING, _("missing arguments for kill mode\n"));
+        pg_log(PG_WARNING, _("file is closed\n"));
     }
     fofile = NULL;
 
@@ -1988,7 +2052,6 @@ static void do_failover(uint32 term)
         pg_log(PG_WARNING, _(" failover failed (%s)\n"), pg_data);
         exit(1);
     }
-
     pg_log(PG_WARNING, _(" done\n"));
     pg_log(PG_WARNING, _(" failover completed (%s)\n"), pg_data);
 }
@@ -2114,15 +2177,16 @@ static void do_notify(uint32 term)
         securec_check_ss_c(ret, "\0", "\0");
 
         if ((fofile = fopen(term_path, "w")) == NULL) {
-            pg_log(PG_WARNING, _("missing arguments for kill mode"));
+            pg_log(PG_WARNING, _("failed to open file \"%s\": %s\n"), term_path, strerror(errno));
             free(notify_file);
+            notify_file = NULL;
             exit(1);
         }
         if (fwrite(&term, sizeof(uint32), 1, fofile) != 1) {
-            pg_log(PG_WARNING, _("missing arguments for kill mode"));
+            pg_log(PG_WARNING, _("failed to write file \"%s\": %s\n"), term_path, strerror(errno));
         }
         if (fclose(fofile)) {
-            pg_log(PG_WARNING, _("missing arguments for kill mode"));
+            pg_log(PG_WARNING, _("failed to close file \"%s\": %s\n"), term_path, strerror(errno));
         }
         fofile = NULL;
     }
@@ -2130,6 +2194,7 @@ static void do_notify(uint32 term)
     if ((notifile = fopen(notify_file, "w")) == NULL) {
         pg_log(PG_WARNING, _(" could not create notify signal file \"%s\": %s"), notify_file, strerror(errno));
         free(notify_file);
+        notify_file = NULL;
         exit(1);
     }
     if (fclose(notifile)) {
@@ -2343,39 +2408,6 @@ static void do_query(void)
     conn = NULL;
 }
 
-static bool check_pid_exists(pgpid_t pid)
-{
-    FILE* fp = NULL;
-    char buf[1024] = {0};
-    char command[128] = {0};
-    
-    int ret = snprintf_s(command,
-        sizeof(command),
-        sizeof(command) - 1,
-        "ps ux | grep \"gaussdb\" | grep -v \"grep\" | awk \'{print $2}\' | grep -w %ld",
-        pid);
-    securec_check_ss_c(ret, "\0", "\0");
-    fp = popen(command, "r");
-    if (fp == NULL) {
-        pg_log(PG_WARNING, _("Failed to execute command %s \n"), command);
-        return false;
-    }
-
-    int readbuf = fread(buf, 1, sizeof(buf), fp);
-    if (readbuf == 0) {
-        pclose(fp);
-        return false;
-    }
-
-    if (atoi(buf) != pid) {
-        pclose(fp);
-        return false;
-    }
-
-    pclose(fp);
-    return true;
-}
-
 static void do_switchover(uint32 term)
 {
     FILE* sofile = NULL;
@@ -2421,14 +2453,6 @@ static void do_switchover(uint32 term)
         pg_log(PG_WARNING,
             _(" cannot switchover server; "
               "single-user server is running (PID: %ld)\n"),
-            pid);
-        exit(1);
-    }
-
-    if (!check_pid_exists(pid)) {
-        pg_log(PG_WARNING,
-            _(" cannot switchover server; "
-              "The process(PID: %ld) does not exist\n"),
             pid);
         exit(1);
     }
@@ -2508,9 +2532,7 @@ static void do_switchover(uint32 term)
         pg_log(PG_PRINT, _("\n"));
         if ((origin_run_mode == STANDBY_MODE && run_mode != PRIMARY_MODE) ||
             (origin_run_mode == CASCADE_STANDBY_MODE && run_mode != STANDBY_MODE)) {
-            pg_log(PG_WARNING,
-                _("\n switchover timeout after %d seconds. please manually check the cluster status.\n"),
-                wait_seconds);
+            pg_log(PG_WARNING, _("\n switchover timeout after %d seconds. please manually check the cluster status.\n"), wait_seconds);
         } else {
             pg_log(PG_PROGRESS, _("done\n"));
             pg_log(PG_PROGRESS, _("switchover completed (%s)\n"), pg_data);
@@ -2630,7 +2652,7 @@ static void do_build_query(void)
         exit(1);
     } else if (build_pid == 0) {
         /*
-         * Build pid is 0 means that cuurent build has been
+         * Build pid is 0 means that current build has been
          * completed. If the master is alive, but we can not
          * access it to get a valid mode, use dbstate mode instead.
          */
@@ -2673,6 +2695,9 @@ static void display_build_query(const GaussState* state)
 
     char* local_role = NULL;
     char db_state[INFO_LEN] = {0};
+    char* dataSize = NULL;
+    char* dataSizeTotl = NULL;
+    char* estimatedTime = NULL;
     errno_t tnRet = EOK;
 
     if (state == NULL) {
@@ -2707,16 +2732,19 @@ static void display_build_query(const GaussState* state)
             pg_log(PG_PRINT, _("        %-30s: Full\n"), build_mode_opts);
         else if (state->build_info.build_mode == INC_BUILD)
             pg_log(PG_PRINT, _("        %-30s: Incremental\n"), build_mode_opts);
-        char* datasize = show_datasize(state->build_info.total_done);
-        pg_log(PG_PRINT, _("        %-30s: %s\n"), data_synced_opts, datasize);
-        free(datasize);
-        datasize = show_datasize(state->build_info.total_size);
-        pg_log(PG_PRINT, _("        %-30s: %s\n"), total_data_opts, datasize);
-        free(datasize);
+        dataSize = show_datasize(state->build_info.total_size);
+        dataSizeTotl = show_datasize(state->build_info.total_done);
+        estimatedTime = show_estimated_time(state->build_info.estimated_time);
+        pg_log(PG_PRINT, _("        %-30s: %s\n"), data_synced_opts, dataSizeTotl);
+        pg_log(PG_PRINT, _("        %-30s: %s\n"), total_data_opts, dataSize);
         pg_log(PG_PRINT, _("        %-30s: %d%%\n"), process_opts, state->build_info.process_schedule);
-        datasize = show_estimated_time(state->build_info.estimated_time);
-        pg_log(PG_PRINT, _("        %-30s: %s\n"), remain_time_opts, datasize);
-        free(datasize);
+        pg_log(PG_PRINT,
+            _("        %-30s: %s\n"),
+            remain_time_opts,
+            estimatedTime);
+        free(dataSize);
+        free(dataSizeTotl);
+        free(estimatedTime);
     }
     pg_log(PG_PRINT, _("\n"));
 }
@@ -2794,6 +2822,8 @@ static char* get_string_by_mode(ServerMode s_mode)
             return "Primary";
         case STANDBY_MODE:
             return "Standby";
+        case CASCADE_STANDBY_MODE:
+            return "Cascade Standby";
         case PENDING_MODE:
             return "Pending";
         default:
@@ -2912,28 +2942,28 @@ static char* pgwin32_CommandLine(bool registration)
     if (NULL != registration) {
         if (pg_strcasecmp(cmdLine + strlen(cmdLine) - 4, ".exe") != 0) {
             /* If commandline does not end in .exe, append it */
-            ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), ".exe");
+            ret = strcat_s(cmdLine, sizeof(cmdLine), ".exe");
             securec_check_c(ret, "\0", "\0");
         }
-        ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), " runservice -N \"");
+        ret = strcat_s(cmdLine, sizeof(cmdLine), " runservice -N \"");
         securec_check_c(ret, "\0", "\0");
-        ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), register_servicename);
+        ret = strcat_s(cmdLine, sizeof(cmdLine), register_servicename);
         securec_check_c(ret, "\0", "\0");
-        ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), "\"");
+        ret = strcat_s(cmdLine, sizeof(cmdLine), "\"");
         securec_check_c(ret, "\0", "\0");
     }
 
     if (pg_config != NULL) {
-        ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), " -D \"");
+        ret = strcat_s(cmdLine, sizeof(cmdLine), " -D \"");
         securec_check_c(ret, "\0", "\0");
-        ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), pg_config);
+        ret = strcat_s(cmdLine, sizeof(cmdLine), pg_config);
         securec_check_c(ret, "\0", "\0");
-        ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), "\"");
+        ret = strcat_s(cmdLine, sizeof(cmdLine), "\"");
         securec_check_c(ret, "\0", "\0");
     }
 
     if (registration != NULL && do_wait != NULL) {
-        ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), " -w");
+        ret = strcat_s(cmdLine, sizeof(cmdLine), " -w");
         securec_check_c(ret, "\0", "\0");
     }
 
@@ -2949,21 +2979,21 @@ static char* pgwin32_CommandLine(bool registration)
     }
 
     if (registration && silent_mode) {
-        ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), " -s");
+        ret = strcat_s(cmdLine, sizeof(cmdLine), " -s");
         securec_check_c(ret, "\0", "\0");
     }
 
     if (post_opts != NULL) {
-        ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), " ");
+        ret = strcat_s(cmdLine, sizeof(cmdLine), " ");
         securec_check_c(ret, "\0", "\0");
         if (registration) {
-            ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), " -o \"");
+            ret = strcat_s(cmdLine, sizeof(cmdLine), " -o \"");
             securec_check_c(ret, "\0", "\0");
         }
-        ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), post_opts);
+        ret = strcat_s(cmdLine, sizeof(cmdLine), post_opts);
         securec_check_c(ret, "\0", "\0");
         if (registration) {
-            ret = strcat_s(cmdLine, sizeof(cmdLine) - strlen(cmdLine), "\"");
+            ret = strcat_s(cmdLine, sizeof(cmdLine), "\"");
             securec_check_c(ret, "\0", "\0");
         }
     }
@@ -3433,14 +3463,14 @@ static void do_help(void)
     printf(_("  %s restart [-w] [-t SECS] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"
              "                 [-o \"OPTIONS\"]\n"),
         progname);
-    printf(_("  %s build   [-D DATADIR] [-b BUILD_MODE] [-r SECS] [-q]\n"), progname);
-    printf(_("  %s restore [-D DATADIR] [-s] [--remove-backup]\n"), progname);
+    printf(_("  %s build   [-D DATADIR] [-r SECS] [-q]\n"), progname);
 #endif
 
     printf(_("  %s stop    [-W] [-t SECS] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"), progname);
     printf(_("  %s reload  [-D DATADIR] [-s]\n"), progname);
     printf(_("  %s status  [-D DATADIR]\n"), progname);
     printf(_("  %s promote [-D DATADIR] [-s]\n"), progname);
+    printf(_("  %s finishredo [-D DATADIR] [-s]\n"), progname);
     (void)printf(
         _("  %s failover               [-W] [-t SECS] [-D DATADIR] [-U USERNAME] [-P PASSWORD] [-T TERM]\n"), progname);
     (void)printf(_("  %s switchover             [-W] [-D DATADIR] [-m SWITCHOVER-MODE] [-U USERNAME] [-P PASSWORD]\n"),
@@ -3459,7 +3489,7 @@ static void do_help(void)
     (void)printf(_("  %s hotpatch  [-D DATADIR] [-a ACTION] [-n NAME]\n"), progname);
 #endif
     printf(_("\nCommon options:\n"));
-
+    printf(_("  -b,  --mode=MODE	 the mode of building the datanode.MODE can be \"full\", \"incremental\"\n"));
     printf(_("  -D, --pgdata=DATADIR   location of the database storage area\n"));
     printf(_("  -s, --silent           only print errors, no informational messages\n"));
     printf(_("  -t, --timeout=SECS     seconds to wait when using -w option\n"));
@@ -3468,18 +3498,19 @@ static void do_help(void)
     printf(_("  -W                     do not wait until operation completes\n"));
     printf(_("  -M                     the database start as the appointed  mode\n"));
     printf(_("  -T                     Failover requires a term\n"));
-#ifdef ENABLE_MULTIPLE_NODES
-    printf(_("  -L                     query lsn:XX/XX validity and show the max_lsn\n"));
-#endif
+    printf(_("  -q                     do not start automatically after build finishing, needed start by caller\n"));
     printf(_("  -d                     more debug info will be print\n"));
+    printf(_("  -L                     query lsn:XX/XX validity and show the max_lsn\n"));
     (void)printf(_("  -P PASSWORD            password of account to connect local server\n"));
     (void)printf(_("  -U USERNAME            user name of account to connect local server\n"));
 
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("  -Z NODE-TYPE           can be \"coordinator\" or \"datanode\" (Postgres-XC)\n"));
+#else
+    printf(_("  -Z NODE-TYPE           can be \"single_node\"\n"));
 #endif
     printf(_("  -?, --help             show this help, then exit\n"));
-    printf(_("(The default is to wait for shutdown, but not for start or restart.)\n\n"));
+    printf(_("(The default is to wait for shutdown, start and restart.)\n\n"));
     printf(_("If the -D option is omitted, the environment variable PGDATA is used.\n"));
 
     printf(_("\nOptions for start or restart:\n"));
@@ -3493,31 +3524,30 @@ static void do_help(void)
              "                         (PostgreSQL server executable) or gs_initdb\n"));
     printf(_("  -p PATH-TO-POSTGRES    normally not necessary\n"));
     printf(_("\nOptions for stop or restart:\n"));
-    printf(_("  -m, --mode=MODE        MODE can be \"fast\", or \"immediate\"\n"));
+    printf(_("  -m, --mode=MODE        MODE can be \"fast\" or \"immediate\"\n"));
     printf(_("\nOptions for restore:\n"));
     printf(_("  --remove-backup        Remove the pg_rewind_bak dir after restore with \"restore\" command\n"));
-#ifdef ENABLE_MULTIPLE_NODES
+
     printf(_("\nOptions for hotpatch:\n"));
     printf(
         _("  -a ACTION  patch command, ACTION can be \"load\" \"unload\" \"active\" \"deactive\" \"info\" \"list\"\n"));
     printf(_("  -n NAME    patch name, NAME should be patch name with path\n"));
-#endif
+
     printf(_("\nShutdown modes are:\n"));
     printf(_("  fast        quit directly, with proper shutdown\n"));
     printf(_("  immediate   quit without complete shutdown; will lead to recovery on restart\n"));
 
     (void)printf(_("\nSwitchover modes are:\n"));
-#ifdef ENABLE_MULTIPLE_NODES
     (void)printf(_("  smart       demote primary after all clients have disconnected(not recommended in cluster)\n"));
-#endif
     (void)printf(_("  fast        demote primary directly, with proper shutdown\n"));
 
     printf(_("\nSERVERMODE are:\n"));
-    printf(_("  primary        database system run as a primary server, send xlog to standby server\n"));
-    printf(_("  standby        database system run as a standby server, receive xlog from primary server\n"));
-    printf(_("  pending        database system run as a pending server, wait for promoting to primary or demoting to "
+    printf(_("  primary         database system run as a primary server, send xlog to standby server\n"));
+    printf(_("  standby         database system run as a standby server, receive xlog from primary server\n"));
+    printf(_("  cascade_standby database system run as a cascade standby server, receive xlog from standby server\n"));
+    printf(_("  pending         database system run as a pending server, wait for promoting to primary or demoting to "
              "standby\n"
-             "                 Only used in start command\n"));
+             "			       Only used in start command\n"));
     printf(_("\nAllowed signal names for kill:\n"));
     printf("  ABRT HUP INT QUIT TERM USR1 USR2\n");
 
@@ -3534,24 +3564,12 @@ static void do_help(void)
 
 #endif
     printf(_("\nBuild connection option:\n"));
-
-#ifdef ENABLE_MULTIPLE_NODES
-    printf(_("  -b, --mode=MODE        the mode of building the datanode.MODE can be \"full\", \"incremental\"\n"));
-#else
-    printf(_("  -b  MODE               the mode of building the datanode.MODE can be \"full\", \"incremental\"\n"));
-#endif
     printf(_("  -r, --recvtimeout=INTERVAL    time that receiver waits for communication from server (in seconds)\n"));
-    printf(_("  -q                     do not start automatically after build finishing, needed start by caller\n"));
-
-#ifndef ENABLE_MULTIPLE_NODES
-    printf(_("\nOption for query:\n"));
-    printf(_("  -L                     query lsn:XX/XX validity and show the max_lsn\n"));
-#endif
+    printf(_("  -C, connector    CN/DN connect to CN for build\n"));
 
 #ifdef ENABLE_MULTIPLE_NODES
-    printf(_("  -C, connector    CN/DN connect to CN for build\n"));
     printf(_("\nReport bugs to <postgres-xc-bugs@lists.sourceforge.net>.\n"));
-#else
+
     printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
 #endif
 }
@@ -3893,13 +3911,26 @@ static void do_build(uint32 term)
 static void do_restore(void)
 {
     pgpid_t pid = get_pgpid();
-    if (pid > 0) {
+    if (pid != 0 && postmaster_is_alive((pid_t)pid)
+#ifndef WIN32
+        && IsMyPostmasterPid((pid_t)pid, pg_config)
+#endif
+    ) {
         pg_log(PG_WARNING, _("terminating restore process due to gaussdb is still alive"));
         return;
     }
 
     restore_target_dir(pg_data, clear_backup_dir);
     return;
+}
+
+static void CheckBuildParameter()
+{
+    if ((pgha_str != NULL) && (strncmp(pgha_str, "standby", strlen("standby")) != 0) &&
+        (strncmp(pgha_str, "cascade_standby", strlen("cascade_standby")) != 0)) {
+        pg_log(PG_WARNING, _(" the parameter of build is not recognized\n"));
+        exit(1);
+    }
 }
 
 /*
@@ -3910,39 +3941,73 @@ static void do_restore(void)
  */
 static void do_incremental_build(uint32 term)
 {
-    const char* filename = pg_conf_file;
     errno_t tnRet = 0;
     BuildErrorCode status = BUILD_SUCCESS;
+    PGresult* res = NULL;
+    errno_t errorno = EOK;
+    char* sysidentifier = NULL;
+    uint32 timeline;
+    char connstrSource[MAXPGPATH] = {0};
+
+    CheckBuildParameter();
+
     set_build_pid(getpid());
-    char connstrSource[1024];
 
-    /* 1. load repl_conninfo into conninfo_global.
-     * read from postgresql.conf or get from command line.
+    /* 
+     * Save connection info from command line or postgresql file.
      */
-    get_conninfo(filename);
+    get_conninfo(pg_conf_file);
 
-    /* 2. get primary host. */
+    /* Find a available connection. */
     streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
     if (streamConn == NULL) {
         pg_log(PG_WARNING, _("could not connect to server.\n"));
         exit(1);
     }
 
-    /* 3. get number of used replconninfo. */
-    replconn_num = get_replconn_number(pg_conf_file);
-
-    tnRet = sprintf_s(connstrSource,
+    /* Concate connection str to primary host for performing rewind. */
+    errorno = sprintf_s(connstrSource,
         sizeof(connstrSource),
-        "host=%s port=%s "
-        "dbname=postgres application_name=gs_rewind connect_timeout=5 rw_timeout=10",
-        streamConn->pghost != NULL ? streamConn->pghost : streamConn->pghostaddr,
+        "host=%s port=%s dbname=postgres application_name=gs_rewind connect_timeout=5  rw_timeout=10",
+        (streamConn->pghost != NULL) ? streamConn->pghost : streamConn->pghostaddr,
         streamConn->pgport);
-    securec_check_ss_c(tnRet, "\0", "\0");
+    securec_check_ss_c(errorno, "\0", "\0");
 
-    /* deallocate the connections, we used it in step 4. */
+    /*
+     * Run IDENTIFY_SYSTEM so we can get sys identifier and timeline.
+     */
+    res = PQexec(streamConn, "IDENTIFY_SYSTEM");
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        pg_log(PG_WARNING, _("could not identify system: %s"), PQerrorMessage(streamConn));
+        PQfinish(streamConn);
+        streamConn = NULL;
+        PQclear(res);
+        exit(1);
+    }
+    if (PQntuples(res) != 1 || PQnfields(res) != 4) {
+        pg_log(PG_WARNING, _("could not identify system, got %d rows and %d fields\n"), PQntuples(res), PQnfields(res));
+        PQfinish(streamConn);
+        streamConn = NULL;
+        PQclear(res);
+        exit(1);
+    }
+    sysidentifier = pg_strdup(PQgetvalue(res, 0, 0));
+    timeline = atoi(PQgetvalue(res, 0, 1));
+    PQclear(res);
+    if (streamConn != NULL) {
+        PQfinish(streamConn);
+        streamConn = NULL;
+    }
+
+    /* Pretend to be gs_rewind and perform rewind. */
     progname = "gs_rewind";
-    status = gs_increment_build(pg_data, connstrSource, term);
+    status = gs_increment_build(pg_data, connstrSource, sysidentifier, timeline, term);
 
+    if (sysidentifier != NULL) {
+        pg_free(sysidentifier);
+    }
+
+#ifdef ENABLE_MOT
     if (status == BUILD_SUCCESS) {
         /* try and fetch the mot checkpoint */
         if (streamConn == NULL) {
@@ -3960,13 +4025,16 @@ static void do_incremental_build(uint32 term)
         if (motChkptDir) {
             free(motChkptDir);
         }
+
+        if (streamConn != NULL) {
+            PQfinish(streamConn);
+            streamConn = NULL;
+        }
     }
+#endif
 
     progname = "gs_ctl";
-    if (streamConn != NULL) {
-        PQfinish(streamConn);
-        streamConn = NULL;
-    }
+
     if (status == BUILD_SUCCESS) {
         /* cascade standby will use use pgha_opt directly */
         if (pgha_opt == NULL || strstr(pgha_opt, "cascade_standby") == NULL) {
@@ -4102,7 +4170,7 @@ static void do_actual_build(uint32 term)
         }
         start_time = time(NULL);
         if (needstartafterbuild == true) {
-            if (0 != chdir(cwd)) {
+            if (chdir(cwd) != 0) {
                 pg_fatal(_("the current work directory: %s could not be changed"), gs_strerror(errno));
                 exit(1);
             }
@@ -4158,7 +4226,7 @@ static void kill_proton_force(void)
     struct timeval timeOut;
     char Lrealpath[MAX_REALPATH_LEN + 1] = {0};
     char cmd[MAX_REALPATH_LEN + 1] = {
-        "ps c -eo pid,euid,cmd | grep GaussMaster | grep -v grep | awk '{if($2 == curuid && $1!=\"-n\") print "
+        "ps c -eo pid,euid,cmd | grep gaussdb | grep -v grep | awk '{if($2 == curuid && $1!=\"-n\") print "
         "\"/proc/\"$1\"/cwd\"}' curuid=`id -u`| xargs ls -l | awk '{if ($NF==\""};
     char cmdexten[] = {"\")  print $(NF-2)}' | awk -F/ '{print $3 }' | xargs kill -9 >/dev/null 2>&1 "};
     errno_t tnRet = EOK;
@@ -4297,6 +4365,7 @@ static void set_build_pid(pgpid_t pid)
             strerror(errno));
         return;
     }
+    pg_log(PG_WARNING, _(" fopen build pid file \"%s\" success\n"), build_pid_file);
     if (fprintf(pidf, "%ld", pid) < 0) {
         fclose(pidf);
         pidf = NULL;
@@ -4306,6 +4375,7 @@ static void set_build_pid(pgpid_t pid)
             strerror(errno));
         return;
     }
+    pg_log(PG_WARNING, _(" fprintf build pid file \"%s\" success\n"), build_pid_file);
     if (fsync(fileno(pidf)) != 0) {
         fclose(pidf);
         pidf = NULL;
@@ -4315,6 +4385,7 @@ static void set_build_pid(pgpid_t pid)
             strerror(errno));
         return;
     }
+    pg_log(PG_WARNING, _(" fsync build pid file \"%s\" success\n"), build_pid_file);
     fclose(pidf);
     pidf = NULL;
 }
@@ -4390,6 +4461,9 @@ FILE* hotpatch_wait_return_file(void)
     int ret = 0;
     FILE* retfd = NULL;
     pid_t tmp_pid = 0;
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 1000000;
 
     canonicalize_path(g_hotpatch_ret_file);
 
@@ -4405,12 +4479,12 @@ FILE* hotpatch_wait_return_file(void)
             if (tmp_pid != process_id) {  // the return file is not mine, continue wait for mine
                 fclose(retfd);
                 retfd = NULL;
-                usleep(g_millisecond);
+                (void)nanosleep(&ts, NULL);
                 continue;
             }
             break;
         }
-        usleep(g_millisecond);
+        (void)nanosleep(&ts, NULL);
     }
 
     return retfd;
@@ -4442,7 +4516,7 @@ void hotpatch_wait_and_get_replyinfo_from_node(bool is_list)
     return_string[MAX_LENGTH_RETURN_STRING - 1] = '\0';
     if (is_list) {
         hotpatch_process_list(
-            return_string, sizeof(return_string), pg_data, MAXPGPATH, canonicalize_path, write_stderr);
+            return_string, sizeof(return_string), pg_data, strlen(pg_data), canonicalize_path, write_stderr);
     } else {
         pg_log(PG_WARNING, _("%s\n"), return_string);
     }
@@ -4515,6 +4589,24 @@ void set_hotpatch_name(const char* arg)
     return;
 }
 
+static void Help(int argc, const char** argv)
+{
+    /* support --help and --version even if invoked as root */
+    if (argc > 1) {
+        if ((strcmp(argv[1], "-h") == 0) || (strcmp(argv[1], "--help") == 0) || (strcmp(argv[1], "-?") == 0)) {
+            do_help();
+            exit(0);
+        } else if ((strcmp(argv[1], "-V") == 0) || (strcmp(argv[1], "--version")) == 0) {
+#ifdef ENABLE_MULTIPLE_NODES
+            puts("gs_ctl " DEF_GS_VERSION);
+#else
+            puts("gs_ctl (openGauss) " PG_VERSION);
+#endif
+            exit(0);
+        }
+    }
+}
+
 int main(int argc, char** argv)
 {
     static struct option long_options[] = {{"help", no_argument, NULL, '?'},
@@ -4567,17 +4659,7 @@ int main(int argc, char** argv)
 
     umask(S_IRWXG | S_IRWXO);
 
-    /* support --help and --version even if invoked as root */
-    if (argc > 1) {
-        if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-?") == 0) {
-            do_help();
-            exit(0);
-        } else if (strcmp(argv[1], "-V") == 0 || strcmp(argv[1], "--version") == 0) {
-            puts("gs_ctl " DEF_GS_VERSION);
-            exit(0);
-        }
-    }
-
+    Help(argc, (const char**)argv);
     /*
      * Disallow running as root, to forestall any possible security holes.
      */
@@ -4588,7 +4670,7 @@ int main(int argc, char** argv)
               "Please log in (using, e.g., \"su\") as the "
               "(unprivileged) user that will\n"
               "own the server process.\n"));
-        exit(1);
+        goto Error;
     }
 #endif
 
@@ -4608,9 +4690,10 @@ int main(int argc, char** argv)
 #else
         // The node defaults to a datanode
         FREE_AND_RESET(pgxcCommand);
-        pgxcCommand = xstrdup("--datanode");
+        pgxcCommand = xstrdup("--single_node");
 
-        while ((c = getopt_long(argc, argv, "b:cD:l:m:M:N:o:p:P:r:sS:t:U:wWdqL:T:", long_options, &option_index)) != -1)
+        while ((c = getopt_long(
+            argc, argv, "b:cD:l:m:M:N:o:p:P:r:sS:t:U:wWZ:dqL:T:", long_options, &option_index)) != -1)
 #endif
         {
             switch (c) {
@@ -4627,7 +4710,7 @@ int main(int argc, char** argv)
                     check_input_for_security(optarg);
                     if (strlen(optarg) > MAX_PATH_LEN) {
                         pg_log(PG_WARNING, _("max path length is exceeded\n"));
-                        exit(1);
+                        goto Error;
                     }
                     pgdata_D = xstrdup(optarg);
                     canonicalize_path(pgdata_D);
@@ -4679,8 +4762,8 @@ int main(int argc, char** argv)
                 case 'P':
                     FREE_AND_RESET(register_password);
                     register_password = xstrdup(optarg);
-                    tnRet = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
-                    securec_check_c(tnRet, "\0", "\0");
+                    ret = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
+                    securec_check_c(ret, optarg, "\0");
                     break;
                 case 'Z':
                     FREE_AND_RESET(pgxcCommand);
@@ -4688,7 +4771,7 @@ int main(int argc, char** argv)
                     if (strcmp(optarg, "coordinator") == 0 || strcmp(optarg, "datanode") == 0) {
                         pg_log(PG_WARNING,
                             _(" --coordinator and --datanode option are not supported on single node mode\n"));
-                        exit(1);
+                        goto Error;
                     }
 #endif
                     if (strcmp(optarg, "coordinator") == 0)
@@ -4708,14 +4791,14 @@ int main(int argc, char** argv)
                     set_starttype(optarg);
 #else
                     pg_log(PG_WARNING, _(" -S option not supported on this platform\n"));
-                    exit(1);
+                    goto Error;
 #endif
                     break;
                 case 't':
                     check_input_for_security(optarg);
                     if (atoi(optarg) < 0 || atoi(optarg) > PG_INT32_MAX) {
                         pg_log(PG_WARNING, _("unexpected wait seconds specified\n"));
-                        exit(1);
+                        goto Error;
                     }
                     wait_seconds = atoi(optarg);
                     break;
@@ -4724,9 +4807,9 @@ int main(int argc, char** argv)
                     check_input_for_security(optarg);
                     char* tmp = NULL;
                     term = (uint32)strtoul(optarg, &tmp, 10);
-                    if (*tmp != '\0') {
+                    if (*tmp != '\0' || strlen(optarg) == 0) {
                         pg_log(PG_WARNING, _("unexpected term specified\n"));
-                        exit(1);
+                        goto Error;
                     }
                     break;
                 }
@@ -4739,12 +4822,12 @@ int main(int argc, char** argv)
                     } else { /* Prepend .\ for local accounts */
                         if (strlen(optarg) + g_length_suffix > NAMEDATALEN) {
                             pg_log(PG_WARNING, _("wrong name length: %zu"), strlen(optarg));
-                            exit(1);
+                            goto Error;
                         }
                         register_username = (char*)malloc(strlen(optarg) + g_length_suffix);
                         if (register_username == NULL) {
                             pg_log(PG_WARNING, _("out of memory\n"));
-                            exit(1);
+                            goto Error;
                         }
                         ret = strcpy_s(register_username, strlen(optarg) + g_length_suffix, ".\\");
                         securec_check_c(ret, register_username, "\0");
@@ -4776,7 +4859,7 @@ int main(int argc, char** argv)
                     standby_recv_timeout = atoi(optarg);
                     if (standby_recv_timeout < 0) {
                         pg_log(PG_WARNING, _(" invalid recv timeout\n"));
-                        exit(1);
+                        goto Error;
                     }
                     break;
                 case 'C':
@@ -4788,13 +4871,13 @@ int main(int argc, char** argv)
                     check_input_for_security(optarg);
                     if (sscanf_s(optarg, "%08X/%08X", &queryxlogid, &queryxlogseg) != 2) {
                         pg_log(PG_WARNING, _("invalid lsn \"%s\"\n"), optarg);
-                        exit(1);
+                        goto Error;
                     }
                     /* Start to find the max lsn from a valid xlogfile */
                     querylsn = queryxlogseg + ((XLogRecPtr)queryxlogid * XLogSegmentsPerXLogId * XLogSegSize);
                     if (XLogRecPtrIsInvalid(querylsn)) {
                         pg_log(PG_WARNING, _("invalid lsn \"%s\"\n"), optarg);
-                        exit(1);
+                        goto Error;
                     }
                     islsnquery = true;
                     break;
@@ -4804,23 +4887,27 @@ int main(int argc, char** argv)
                 case 'q':
                     needstartafterbuild = false;
                     break;
-                case 'a': {
+                case 'a':
                     check_input_for_security(optarg);
-                    int opt_len = strlen(optarg);
-                    if (opt_len >= g_max_length_act) {
-                        pg_log(PG_WARNING, _("invalid hotpatch command \n"));
-                        exit(1);
+                    {
+                        int ret = 0;
+                        int opt_len = strlen(optarg);
+                        ;
+                        if (opt_len >= g_max_length_act) {
+                            pg_log(PG_WARNING, _("invalid hotpatch command \n"));
+                            goto Error;
+                        }
+                        ret = snprintf_s(g_hotpatch_action, g_max_length_act, g_max_length_act - 1, "%s", optarg);
+                        securec_check_ss_c(ret, "\0", "\0");
                     }
-                    ret = snprintf_s(g_hotpatch_action, g_max_length_act, g_max_length_act - 1, "%s", optarg);
-                    securec_check_ss_c(ret, "\0", "\0");
-                } break;
+                    break;
                 case 1:
                     clear_backup_dir = true;
                     break;
                 default:
                     /* getopt_long already issued a suitable error message */
                     do_advice();
-                    exit(1);
+                    goto Error;
             }
         }
 
@@ -4829,7 +4916,7 @@ int main(int argc, char** argv)
             if (ctl_command != NO_COMMAND) {
                 pg_log(PG_WARNING, _("too many command-line arguments (first is)\n"));
                 do_advice();
-                exit(1);
+                goto Error;
             }
 
             if (strcmp(argv[optind], "init") == 0 || strcmp(argv[optind], "gs_initdb") == 0)
@@ -4860,7 +4947,7 @@ int main(int argc, char** argv)
                 if (argc - optind < 3) {
                     pg_log(PG_WARNING, _(" missing arguments for kill mode\n"));
                     do_advice();
-                    exit(1);
+                    goto Error;
                 }
                 ctl_command = KILL_COMMAND;
                 set_sig(argv[++optind]);
@@ -4878,14 +4965,14 @@ int main(int argc, char** argv)
                 ctl_command = BUILD_COMMAND;
             else if (strcmp(argv[optind], "restore") == 0)
                 ctl_command = RESTORE_COMMAND;
-#ifdef ENABLE_MULTIPLE_NODES
             else if (strcmp(argv[optind], "hotpatch") == 0)
                 ctl_command = HOTPATCH_COMMAND;
-#endif
+            else if (strcmp(argv[optind], "finishredo") == 0)
+                ctl_command = FINISH_REDO_COMMAND;
             else {
                 pg_log(PG_WARNING, _(" unrecognized operation mode \"%s\"\n"), argv[optind]);
                 do_advice();
-                exit(1);
+                goto Error;
             }
             optind++;
         }
@@ -4894,7 +4981,7 @@ int main(int argc, char** argv)
     if (ctl_command == NO_COMMAND) {
         pg_log(PG_WARNING, _(" no operation specified\n"));
         do_advice();
-        exit(1);
+        goto Error;
     }
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -4903,7 +4990,7 @@ int main(int argc, char** argv)
         (pgxcCommand == NULL)) {
         pg_log(PG_WARNING, _(" Coordinator or Datanode option not specified (-Z)\n"));
         do_advice();
-        exit(1);
+        goto Error;
     }
 #endif
 
@@ -4943,7 +5030,7 @@ int main(int argc, char** argv)
     if (pg_config == NULL && ctl_command != KILL_COMMAND && ctl_command != UNREGISTER_COMMAND) {
         pg_log(PG_WARNING, _(" no database directory specified and environment variable PGDATA unset\n"));
         do_advice();
-        exit(1);
+        goto Error;
     }
 
     if (!wait_set) {
@@ -5008,6 +5095,9 @@ int main(int argc, char** argv)
         securec_check_ss_c(ret, "\0", "\0");
     }
 
+    pg_host = getenv("PGHOST");
+    check_input_for_security(pg_host);
+
     // log output redirect
     init_log(PROG_NAME);
 
@@ -5046,12 +5136,12 @@ int main(int argc, char** argv)
             pg_log(PG_PROGRESS, _("gs_ctl reload ,datadir is %s \n"), pg_data);
             do_reload();
             break;
+        case FINISH_REDO_COMMAND:
+            pg_log(PG_PROGRESS, _("gs_ctl finish redo ,datadir is %s \n"), pg_data);
+            do_finish_redo();
+            break;
         case FAILOVER_COMMAND:
             pg_log(PG_PROGRESS, _("gs_ctl failover ,datadir is %s \n"), pg_data);
-            if (get_primary_status() == NORMAL_STATE) {
-                pg_log(PG_PROGRESS, _("The primary node status is normal, failover failed! \n"));
-                break;
-            }
             if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
                 do_failover(term);
                 pg_ctl_unlock(lockfile);
@@ -5143,8 +5233,11 @@ int main(int argc, char** argv)
     }
 
     free_ctl();
-
     exit(0);
+
+Error:
+    free_ctl();
+    exit(1);
 }
 
 static void free_ctl()
@@ -5153,12 +5246,10 @@ static void free_ctl()
     if (register_servicename != NULL && strcmp(register_servicename, "gaussdb") != 0) {
         FREE_AND_RESET(register_servicename);
     }
-    FREE_AND_RESET(register_password);
-    FREE_AND_RESET(pgha_str);
     if (pgdata_opt != NULL && strcmp(pgdata_opt, "") != 0) {
         FREE_AND_RESET(pgdata_opt);
     }
-    if (pgha_opt != NULL && strcmp(pgha_opt, "") != 0) {
-        FREE_AND_RESET(pgha_opt);
-    }
+    FREE_AND_RESET(register_password);
+    FREE_AND_RESET(pgha_str);
+    FREE_AND_RESET(pgha_opt);
 }

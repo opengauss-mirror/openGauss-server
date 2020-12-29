@@ -52,6 +52,7 @@ typedef struct {
 /*****************************************************************************
  *	 USER I/O ROUTINES														 *
  *****************************************************************************/
+
 /*
  *		int2in			- converts "num" to short
  */
@@ -127,7 +128,7 @@ int2vector* buildint2vector(const int2* int2s, int n)
     return result;
 }
 
-/* Copy int2vector */
+/*Copy int2vector*/
 int2vector* int2vectorCopy(int2vector* from)
 {
     if (from == NULL || (from->dim1 == 1 && from->values[0] == 0)) {
@@ -163,8 +164,9 @@ Datum int2vectorin(PG_FUNCTION_ARGS)
         while (*intString && !isspace((unsigned char)*intString))
             intString++;
     }
-    while (*intString && isspace((unsigned char)*intString))
+    while (*intString && isspace((unsigned char)*intString)) {
         intString++;
+    }
     if (*intString)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("int2vector has too many elements")));
 
@@ -184,21 +186,18 @@ Datum int2vectorin(PG_FUNCTION_ARGS)
 Datum int2vectorout(PG_FUNCTION_ARGS)
 {
     int2vector* int2Array = (int2vector*)PG_GETARG_POINTER(0);
-    int num;
-	int nnums = int2Array->dim1;
+    int num, nnums = int2Array->dim1;
     char* rp = NULL;
     char* result = NULL;
 
     /* assumes sign, 5 digits, ' ' */
     rp = result = (char*)palloc(nnums * 7 + 1);
     for (num = 0; num < nnums; num++) {
-        if (num != 0) {
+        if (num != 0)
             *rp++ = ' ';
-        }
         pg_itoa(int2Array->values[num], rp);
-        while (*++rp != '\0') {
+        while (*++rp != '\0')
             ;
-        }
     }
     *rp = '\0';
     PG_RETURN_CSTRING(result);
@@ -268,6 +267,7 @@ Datum int2vectoreq(PG_FUNCTION_ARGS)
 /*****************************************************************************
  *	 PUBLIC ROUTINES														 *
  *****************************************************************************/
+
 /*
  *		int4in			- converts "num" to int4
  */
@@ -318,6 +318,7 @@ Datum int4send(PG_FUNCTION_ARGS)
  *		CONVERSION ROUTINES
  *		===================
  */
+
 Datum i2toi4(PG_FUNCTION_ARGS)
 {
     int16 arg1 = PG_GETARG_INT16(0);
@@ -376,6 +377,7 @@ Datum bool_int2(PG_FUNCTION_ARGS)
  *		COMPARISON OPERATOR ROUTINES
  *		============================
  */
+
 /*
  *		inteq			- returns 1 iff arg1 == arg2
  *		intne			- returns 1 iff arg1 != arg2
@@ -384,6 +386,7 @@ Datum bool_int2(PG_FUNCTION_ARGS)
  *		intgt			- returns 1 iff arg1 > arg2
  *		intge			- returns 1 iff arg1 >= arg2
  */
+
 Datum int4eq(PG_FUNCTION_ARGS)
 {
     int32 arg1 = PG_GETARG_INT32(0);
@@ -582,6 +585,7 @@ Datum int42ge(PG_FUNCTION_ARGS)
  *		int[24]mul		- returns arg1 * arg2
  *		int[24]div		- returns arg1 / arg2
  */
+
 Datum int4um(PG_FUNCTION_ARGS)
 {
     int32 arg = PG_GETARG_INT32(0);
@@ -635,7 +639,7 @@ Datum int4div(PG_FUNCTION_ARGS)
 {
     int32 arg1 = PG_GETARG_INT32(0);
     int32 arg2 = PG_GETARG_INT32(1);
-    // a compatibility change the result to float.
+    // A db compatibility change the result to float.
     float8 result;
 
     if (arg2 == 0) {
@@ -654,7 +658,7 @@ Datum int4div(PG_FUNCTION_ARGS)
      * zero, some throw an exception.  We can dodge the problem by recognizing
      * that division by -1 is the same as negation.
      */
-    // a compatibility change the result to float. This check is nessessary
+    // A db compatibility change the result to float. This check is nessessary
     // to avoid overflow when INT_MIN / (-1)
     if (arg2 == -1) {
         int64 res = (int64)arg1 * (-1);
@@ -665,6 +669,7 @@ Datum int4div(PG_FUNCTION_ARGS)
     }
 
     /* No overflow is possible */
+
     result = (arg1 * 1.0) / (arg2 * 1.0);
 
     PG_RETURN_FLOAT8(result);
@@ -674,6 +679,7 @@ Datum int4inc(PG_FUNCTION_ARGS)
 {
     int32 arg = PG_GETARG_INT32(0);
     int32 result;
+
     if (unlikely(pg_add_s32_overflow(arg, 1, &result)))
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("integer out of range")));
 
@@ -750,7 +756,7 @@ Datum int2div(PG_FUNCTION_ARGS)
      * SHRT_MIN / -1 is problematic, since the result can't be represented on
      * a two's-complement machine.  Some machines produce SHRT_MIN, some
      * produce zero, some throw an exception.  We produce an exception like
-     * C and D do.
+     * C db and D db do.
      */
     if (arg2 == -1) {
         int32 res = (int32)arg1 * (-1);
@@ -761,6 +767,7 @@ Datum int2div(PG_FUNCTION_ARGS)
     }
 
     /* No overflow is possible */
+
     result = (arg1 * 1.0) / (arg2 * 1.0);
 
     PG_RETURN_FLOAT8(result);
@@ -873,7 +880,7 @@ Datum int42div(PG_FUNCTION_ARGS)
      * INT_MIN / -1 is problematic, since the result can't be represented on a
      * two's-complement machine.  Some machines produce INT_MIN, some produce
      * zero, some throw an exception.  We produce an exception like
-     * C and D do.
+     * C db and D db do.
      */
     if (arg2 == -1) {
         int64 res = (int64)arg1 * (-1);
@@ -884,6 +891,7 @@ Datum int42div(PG_FUNCTION_ARGS)
     }
 
     /* No overflow is possible */
+
     result = (arg1 * 1.0) / (arg2 * 1.0);
     PG_RETURN_FLOAT8(result);
 }
@@ -892,12 +900,17 @@ Datum int4mod(PG_FUNCTION_ARGS)
 {
     int32 arg1 = PG_GETARG_INT32(0);
     int32 arg2 = PG_GETARG_INT32(1);
-    if (unlikely(arg2 == 0)) {
-        /* zero is not allowed to be divisor */
-        ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
 
-        /* ensure compiler realizes we mustn't reach the division (gcc bug) */
-        PG_RETURN_NULL();
+    if (unlikely(arg2 == 0)) {
+        if (DB_IS_CMPT(PG_FORMAT)) {
+            /* zero is not allowed to be divisor if compatible with PG */
+            ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
+
+            /* ensure compiler realizes we mustn't reach the division (gcc bug) */
+            PG_RETURN_NULL();
+        }
+        /* zero is allowed to be divisor */
+        PG_RETURN_INT32(arg1);
     }
 
     /*
@@ -909,6 +922,7 @@ Datum int4mod(PG_FUNCTION_ARGS)
         PG_RETURN_INT32(0);
 
     /* No overflow is possible */
+
     PG_RETURN_INT32(arg1 % arg2);
 }
 
@@ -918,11 +932,15 @@ Datum int2mod(PG_FUNCTION_ARGS)
     int16 arg2 = PG_GETARG_INT16(1);
 
     if (unlikely(arg2 == 0)) {
-        /* zero is not allowed to be divisor */
-        ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
+        if (DB_IS_CMPT(PG_FORMAT)) {
+            /* zero is not allowed to be divisor if compatible with PG */
+            ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
 
-        /* ensure compiler realizes we mustn't reach the division (gcc bug) */
-        PG_RETURN_NULL();
+            /* ensure compiler realizes we mustn't reach the division (gcc bug) */
+            PG_RETURN_NULL();
+        }
+        /* zero is allowed to be divisor */
+        PG_RETURN_INT16(arg1);
     }
 
     /*
@@ -935,6 +953,7 @@ Datum int2mod(PG_FUNCTION_ARGS)
         PG_RETURN_INT16(0);
 
     /* No overflow is possible */
+
     PG_RETURN_INT16(arg1 % arg2);
 }
 
@@ -1342,6 +1361,7 @@ Datum i1toi2(PG_FUNCTION_ARGS)
 Datum i2toi1(PG_FUNCTION_ARGS)
 {
     int16 arg1 = PG_GETARG_INT16(0);
+
     if (arg1 < 0 || arg1 > UCHAR_MAX)
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
 
@@ -1358,6 +1378,7 @@ Datum i1toi4(PG_FUNCTION_ARGS)
 Datum i4toi1(PG_FUNCTION_ARGS)
 {
     int32 arg1 = PG_GETARG_INT32(0);
+
     if (arg1 < 0 || arg1 > UCHAR_MAX)
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
 
@@ -1374,9 +1395,10 @@ Datum i1toi8(PG_FUNCTION_ARGS)
 Datum i8toi1(PG_FUNCTION_ARGS)
 {
     int64 arg1 = PG_GETARG_INT64(0);
-    if (arg1 < 0 || arg1 > UCHAR_MAX) {
+
+    if (arg1 < 0 || arg1 > UCHAR_MAX)
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
-    }
+
     PG_RETURN_UINT8((uint8)arg1);
 }
 
@@ -1397,6 +1419,7 @@ Datum i1tof8(PG_FUNCTION_ARGS)
 Datum f4toi1(PG_FUNCTION_ARGS)
 {
     float4 arg1 = PG_GETARG_FLOAT4(0);
+
     if (arg1 < 0 || arg1 > UCHAR_MAX)
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
 
@@ -1406,6 +1429,7 @@ Datum f4toi1(PG_FUNCTION_ARGS)
 Datum f8toi1(PG_FUNCTION_ARGS)
 {
     float8 arg1 = PG_GETARG_FLOAT8(0);
+
     if (arg1 < 0 || arg1 > UCHAR_MAX)
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
 
@@ -1470,6 +1494,7 @@ Datum int1pl(PG_FUNCTION_ARGS)
     uint16 result;
 
     result = arg1 + arg2;
+
     if (result > UCHAR_MAX) {
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
     }
@@ -1482,6 +1507,7 @@ Datum int1mi(PG_FUNCTION_ARGS)
     uint8 arg1 = PG_GETARG_UINT8(0);
     uint8 arg2 = PG_GETARG_UINT8(1);
     uint8 result;
+
     if (arg1 < arg2) {
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
     }
@@ -1502,6 +1528,7 @@ Datum int1mul(PG_FUNCTION_ARGS)
      * int16 (so that the result can't overflow) and then do a range check.
      */
     result16 = (int16)arg1 * (int16)arg2;
+
     if ((result16 < 0) || (result16 > UCHAR_MAX)) {
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
     }
@@ -1513,7 +1540,9 @@ Datum int1div(PG_FUNCTION_ARGS)
 {
     uint8 arg1 = PG_GETARG_UINT8(0);
     uint8 arg2 = PG_GETARG_UINT8(1);
+
     float8 result;
+
     if (arg2 == 0) {
         ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
 
@@ -1537,14 +1566,20 @@ Datum int1mod(PG_FUNCTION_ARGS)
 {
     uint8 arg1 = PG_GETARG_UINT8(0);
     uint8 arg2 = PG_GETARG_UINT8(1);
-    if (arg2 == 0) {
-        /* zero is not allowed to be divisor */
-        ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
 
-        /* ensure compiler realizes we mustn't reach the division (gcc bug) */
-        PG_RETURN_NULL();
+    if (arg2 == 0) {
+        if (DB_IS_CMPT(PG_FORMAT)) {
+            /* zero is not allowed to be divisor if compatible with PG */
+            ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
+
+            /* ensure compiler realizes we mustn't reach the division (gcc bug) */
+            PG_RETURN_NULL();
+        }
+        PG_RETURN_UINT8(arg1);
     }
+
     /* No overflow is possible */
+
     PG_RETURN_UINT8(arg1 % arg2);
 }
 
@@ -1568,7 +1603,9 @@ Datum int1inc(PG_FUNCTION_ARGS)
 {
     uint8 arg = PG_GETARG_UINT8(0);
     int16 result;
+
     result = arg + 1;
+
     /* Overflow check */
     if (result > UCHAR_MAX)
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));

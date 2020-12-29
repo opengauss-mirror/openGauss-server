@@ -198,28 +198,75 @@ sub AddDir
 	{
 		foreach my $subdir (split /\s+/, $1)
 		{
-			next
-			  if $subdir eq "\$(top_builddir)/src/timezone"
-			;    #special case for non-standard include
-			next
-			  if $subdir eq "\$(top_builddir)/src/interfaces/libpq"
-			;    #special case for non-standard include
-			next
-			  if $subdir eq "\$(top_builddir)/contrib/file_fdw"
-			;    #special case for non-standard include
-			 next
-			  if $subdir eq "\$(top_builddir)/contrib/hdfs_fdw"
-			;    #special case for non-standard include
-			 next
-			  if $subdir eq "\$(top_builddir)/contrib/bbox"
-			;    #special case for non-standard include
-			 next
-			  if $subdir eq "\$(top_builddir)/src/distribute/kernel/extension/roach_api"
-			;    #special case for non-standard include
-			 next
-		  	if $reldir . "\\" . $subdir eq "src\\backend\\port\\darwin";
+			if ($subdir eq "../common/backend")
+			{
+				$self->AddDir('src\common\backend');			
+			}
+			else
+			{
+				next
+			      if $subdir eq "\$(top_builddir)/src/common/timezone"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "\$(top_builddir)/src/common/interfaces/libpq"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "\$(top_builddir)/contrib/file_fdw"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "\$(top_builddir)/contrib/hdfs_fdw"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "\$(top_builddir)/contrib/bbox"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "\$(top_builddir)/src/distribute/kernel/extension/roach_api"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "\$(top_builddir)/contrib/log_fdw"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "\$(top_builddir)/contrib/test_decoding"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "\$(top_builddir)/contrib/mppdb_decoding"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "\$(top_builddir)/contrib/carbondata"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "\$(top_builddir)/contrib/postgres_fdw"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "frontend_parser"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "client_logic_common"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "client_logic_expressions"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "client_logic_cache"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "client_logic_processor"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "client_logic_fmt"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "client_logic_hooks"
+			    ;    #special case for non-standard include
+			    next
+			      if $subdir eq "connector"
+			    ;    #special case for non-standard include
+			    next
+		  	      if $reldir . "\\" . $subdir eq "src\\common\\backend\\port\\darwin";
 
-			$self->AddDir($reldir . "\\" . $subdir);
+			    $self->AddDir($reldir . "\\" . $subdir);			
+			}
+
 		}
 	}
 	while ($mf =~ m{^(?:EXTRA_)?OBJS[^=]*=\s*(.*)$}m)
@@ -296,7 +343,7 @@ sub AddDir
 			}
 			elsif ($top eq "(backend_src)")
 			{
-				eval { $self->ReplaceFile($fn, "src\\backend\\$target") };
+				eval { $self->ReplaceFile($fn, "src\\common\\backend\\$target") };
 			}
 			else
 			{
@@ -325,14 +372,14 @@ sub AddResourceFile
 	  localtime(time);
 	my $d = sprintf("%02d%03d", ($year - 100), $yday);
 
-	if (Solution::IsNewer("$dir\\win32ver.rc", 'src\port\win32ver.rc'))
+	if (Solution::IsNewer("$dir\\win32ver.rc", 'src\common\port\win32ver.rc'))
 	{
 		print "Generating win32ver.rc for $dir\n";
-		open(I, 'src\port\win32ver.rc')
+		open(I, 'src\common\port\win32ver.rc')
 		  || confess "Could not open win32ver.rc";
 		open(O, ">$dir\\win32ver.rc")
 		  || confess "Could not write win32ver.rc";
-		my $icostr = $ico ? "IDI_ICON ICON \"src/port/$ico.ico\"" : "";
+		my $icostr = $ico ? "IDI_ICON ICON \"src/common/port/$ico.ico\"" : "";
 		while (<I>)
 		{
 			s/FILEDESC/"$desc"/gm;

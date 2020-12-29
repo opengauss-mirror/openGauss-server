@@ -26,6 +26,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/cstore_delete.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
@@ -40,7 +41,7 @@
 #include "utils/numeric_gs.h"
 #include "utils/relcache.h"
 #include "utils/snapmgr.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "utils/typcache.h"
 
 // tupledesc id
@@ -149,32 +150,32 @@ void CStoreDelete::Destroy()
 void CStoreDelete::CollectPartDeltaOids()
 {
     Relation pgpartition = NULL;
-    HeapScanDesc scan = NULL;
+    TableScanDesc scan = NULL;
     HeapTuple tuple = NULL;
     ScanKeyData keys[ARRAY_2_LEN];
     Form_pg_partition partitionFrom = NULL;
 
     /* Process all partitions of this partitiond table */
     ScanKeyInit(&keys[0],
-        Anum_pg_partition_parttype,
-        BTEqualStrategyNumber,
-        F_CHAREQ,
-        CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION));
+                Anum_pg_partition_parttype,
+                BTEqualStrategyNumber,
+                F_CHAREQ,
+                CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION));
 
     ScanKeyInit(&keys[1],
-        Anum_pg_partition_parentid,
-        BTEqualStrategyNumber,
-        F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(m_relation)));
+                Anum_pg_partition_parentid,
+                BTEqualStrategyNumber,
+                F_OIDEQ,
+                ObjectIdGetDatum(RelationGetRelid(m_relation)));
 
     pgpartition = heap_open(PartitionRelationId, AccessShareLock);
-    scan = heap_beginscan(pgpartition, SnapshotNow, ARRAY_2_LEN, keys);
+    scan = tableam_scan_begin(pgpartition, SnapshotNow, ARRAY_2_LEN, keys);
 
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         partitionFrom = (Form_pg_partition)GETSTRUCT(tuple);
         m_partDeltaOids = lappend_oid(m_partDeltaOids, partitionFrom->reldeltarelid);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pgpartition, AccessShareLock);
 }
 
@@ -197,20 +198,20 @@ void CStoreDelete::InitDeleteMemArg(Plan* plan, MemInfoArg* ArgmemInfo)
             plan->operatorMemKB[0] ? plan->operatorMemKB[0] : u_sess->attr.attr_storage.psort_work_mem;
         m_DelMemInfo->spreadNum = 0;
         MEMCTL_LOG(DEBUG2,
-            "CStoreDelete(init plan):Insert workmem is : %dKB, sort workmem: %dKB,can spread maxMem is %dKB.",
-            m_DelMemInfo->MemInsert,
-            m_DelMemInfo->MemSort,
-            m_DelMemInfo->canSpreadmaxMem);
+                   "CStoreDelete(init plan):Insert workmem is : %dKB, sort workmem: %dKB,can spread maxMem is %dKB.",
+                   m_DelMemInfo->MemInsert,
+                   m_DelMemInfo->MemSort,
+                   m_DelMemInfo->canSpreadmaxMem);
     } else if (ArgmemInfo != NULL) {
         m_DelMemInfo->canSpreadmaxMem = ArgmemInfo->canSpreadmaxMem;
         m_DelMemInfo->MemInsert = ArgmemInfo->MemInsert;
         m_DelMemInfo->MemSort = ArgmemInfo->MemSort;
         m_DelMemInfo->spreadNum = ArgmemInfo->spreadNum;
         MEMCTL_LOG(DEBUG2,
-            "CStoreDelete(init ArgmemInfo):Insert workmem is : %dKB, sort workmem: %dKB,can spread maxMem is %dKB.",
-            m_DelMemInfo->MemInsert,
-            m_DelMemInfo->MemSort,
-            m_DelMemInfo->canSpreadmaxMem);
+                   "CStoreDelete(init ArgmemInfo):Insert workmem is : %dKB, sort workmem: %dKB,can spread maxMem is %dKB.",
+                   m_DelMemInfo->MemInsert,
+                   m_DelMemInfo->MemSort,
+                   m_DelMemInfo->canSpreadmaxMem);
     } else {
         m_DelMemInfo->canSpreadmaxMem = 0;
         m_DelMemInfo->MemInsert = 0;
@@ -306,7 +307,7 @@ void CStoreDelete::InitDeleteSortStateForTable(TupleDesc sortTupDesc, int /* par
     maxMem = m_DelMemInfo->canSpreadmaxMem > 0 ? m_DelMemInfo->canSpreadmaxMem : 0;
 
     m_deleteSortState = batchsort_begin_heap(
-        sortTupDesc, nkeys, attNums, &typeEntry->lt_opr, sortCollations, nullsFirstFlags, SortMem, false, maxMem);
+                            sortTupDesc, nkeys, attNums, &typeEntry->lt_opr, sortCollations, nullsFirstFlags, SortMem, false, maxMem);
 }
 
 void CStoreDelete::InitDeleteSortStateForPartition(TupleDesc sortTupDesc, int partidAttNo, int ctidAttNo)
@@ -341,7 +342,7 @@ void CStoreDelete::InitDeleteSortStateForPartition(TupleDesc sortTupDesc, int pa
     maxMem = m_DelMemInfo->canSpreadmaxMem > 0 ? m_DelMemInfo->canSpreadmaxMem : 0;
 
     m_deleteSortState = batchsort_begin_heap(
-        m_sortTupDesc, nkeys, attNums, sortOperators, sortCollations, nullsFirstFlags, SortMem, false, maxMem);
+                            m_sortTupDesc, nkeys, attNums, sortOperators, sortCollations, nullsFirstFlags, SortMem, false, maxMem);
 }
 
 void CStoreDelete::PutDeleteBatchForTable(_in_ VectorBatch* batch, _in_ JunkFilter* junkfilter)
@@ -431,8 +432,8 @@ uint64 CStoreDelete::ExecDeleteForTable()
                 if (lastRowTid != NULL && ItemPointerEquals(lastRowTid, tid)) {
                     if (m_isRptRepeatTupErrForUpdate) {
                         ereport(ERROR, (errcode(ERRCODE_CARDINALITY_VIOLATION),
-                            errmsg("Non-deterministic UPDATE"),
-                            errdetail("multiple updates to a row by a single query for column store table.")));
+                                        errmsg("Non-deterministic UPDATE"),
+                                        errdetail("multiple updates to a row by a single query for column store table.")));
                     }
                     continue;
                 }
@@ -465,8 +466,8 @@ uint64 CStoreDelete::ExecDeleteForTable()
 
                 if (m_isRptRepeatTupErrForUpdate) {
                     ereport(ERROR, (errcode(ERRCODE_CARDINALITY_VIOLATION),
-                        errmsg("Non-deterministic UPDATE"),
-                        errdetail("multiple updates to a row by a single query for column store table.")));
+                                    errmsg("Non-deterministic UPDATE"),
+                                    errdetail("multiple updates to a row by a single query for column store table.")));
                 }
 
                 continue;
@@ -553,8 +554,8 @@ uint64 CStoreDelete::ExecDeleteForPartition()
                 if (lastRowTid != NULL && ItemPointerEquals(lastRowTid, tid)) {
                     if (m_isRptRepeatTupErrForUpdate) {
                         ereport(ERROR, (errcode(ERRCODE_CARDINALITY_VIOLATION),
-                            errmsg("Non-deterministic UPDATE"),
-                            errdetail("multiple updates to a row by a single query for column store table.")));
+                                        errmsg("Non-deterministic UPDATE"),
+                                        errdetail("multiple updates to a row by a single query for column store table.")));
                     }
                     continue;
                 }
@@ -575,12 +576,12 @@ uint64 CStoreDelete::ExecDeleteForPartition()
 
                 // get partition fake relation
                 searchFakeReationForPartitionOid(m_estate->esfRelations,
-                    m_estate->es_query_cxt,
-                    m_relation,
-                    curPartID,
-                    partFakeRel,
-                    partition,
-                    RowExclusiveLock);
+                                                 m_estate->es_query_cxt,
+                                                 m_relation,
+                                                 curPartID,
+                                                 partFakeRel,
+                                                 partition,
+                                                 RowExclusiveLock);
             } else if (lastPartID != curPartID) {
                 /* Partiton changed
                  *
@@ -598,12 +599,12 @@ uint64 CStoreDelete::ExecDeleteForPartition()
 
                 // get partition fake relation
                 searchFakeReationForPartitionOid(m_estate->esfRelations,
-                    m_estate->es_query_cxt,
-                    m_relation,
-                    curPartID,
-                    partFakeRel,
-                    partition,
-                    RowExclusiveLock);
+                                                 m_estate->es_query_cxt,
+                                                 m_relation,
+                                                 curPartID,
+                                                 partFakeRel,
+                                                 partition,
+                                                 RowExclusiveLock);
                 Assert(partFakeRel);
             } else if (lastCUID != curCUID) {
                 // CU changed in same Partition
@@ -623,8 +624,8 @@ uint64 CStoreDelete::ExecDeleteForPartition()
 
                 if (m_isRptRepeatTupErrForUpdate) {
                     ereport(ERROR, (errcode(ERRCODE_CARDINALITY_VIOLATION),
-                        errmsg("Non-deterministic UPDATE"),
-                        errdetail("multiple updates to a row by a single query for column store table.")));
+                                    errmsg("Non-deterministic UPDATE"),
+                                    errdetail("multiple updates to a row by a single query for column store table.")));
                 }
 
                 continue;
@@ -672,8 +673,8 @@ void CStoreDelete::ExecDelete(_in_ Relation rel, _in_ ScalarVector* vecRowId, _i
             if (lastRowTid != NULL && ItemPointerEquals(lastRowTid, tid)) {
                 if (m_isRptRepeatTupErrForUpdate) {
                     ereport(ERROR, (errcode(ERRCODE_CARDINALITY_VIOLATION),
-                        errmsg("Non-deterministic UPDATE"),
-                        errdetail("multiple updates to a row by a single query for column store table.")));
+                                    errmsg("Non-deterministic UPDATE"),
+                                    errdetail("multiple updates to a row by a single query for column store table.")));
                 }
                 continue;
             }
@@ -796,34 +797,36 @@ Retry:
     index_close(idx_rel, RowExclusiveLock);
 
     // Step 2: update del_bitmap
-    HTSU_Result result = HeapTupleInvisible;
-    ItemPointerData update_ctid;
-    TransactionId update_xmax;
+    TM_Result result = TM_Invisible;
+    TM_FailureData tmfd;
 
     if (newTup) {
-        result = heap_update(cudesc_rel,
+        result = tableam_tuple_update(cudesc_rel,
             NULL,
             &oldTupCtid,
             newTup,
-            &update_ctid,
-            &update_xmax,
             GetCurrentCommandId(true),
             InvalidSnapshot,
-            true);
+            InvalidSnapshot,
+            true,
+            &tmfd,
+            NULL,   // we don't need update_indexes
+            false);
 
         switch (result) {
-            case HeapTupleSelfUpdated: {
-                // Now It is HeapTupleSelfUpdated
+            case TM_SelfModified: {
+                // Now It is TM_SelfModified
                 ereport(ERROR,
-                    (errcode(ERRCODE_LOCK_NOT_AVAILABLE), (errmsg("delete or update failed because lock conflict"))));
+                        (errcode(ERRCODE_LOCK_NOT_AVAILABLE), (errmsg("delete or update failed because lock conflict"))));
                 break;
             }
-            case HeapTupleMayBeUpdated: {
+            case TM_Ok: {
                 CatalogUpdateIndexes(cudesc_rel, newTup);
                 break;
             }
 
-            case HeapTupleUpdated: {
+            case TM_Updated:
+            case TM_Deleted: {
                 heap_freetuple(newTup);
                 newTup = NULL;
                 heap_close(cudesc_rel, NoLock);
@@ -832,8 +835,8 @@ Retry:
 
             default: {
                 ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_OPERATION),
-                        (errmsg("CStore: unrecognized heap_update status: %u", result))));
+                        (errcode(ERRCODE_INVALID_OPERATION),
+                         (errmsg("CStore: unrecognized heap_update status: %u", result))));
                 break;
             }
         }

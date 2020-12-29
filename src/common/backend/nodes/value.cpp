@@ -12,11 +12,20 @@
  *
  * -------------------------------------------------------------------------
  */
+#ifndef FRONTEND_PARSER
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
 #include "nodes/parsenodes.h"
-
+#else
+#include "postgres_fe.h"
+#include "datatypes.h"
+#include "nodes/primnodes.h"
+#include "nodes/value.h"
+#include "catalog/pg_attribute.h"
+#include "access/tupdesc.h"
+#include "nodes/parsenodes_common.h"
+#endif // FRONTEND_PARSER
 /*
  *	makeInteger
  */

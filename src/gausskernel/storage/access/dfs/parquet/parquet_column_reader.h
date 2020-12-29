@@ -21,7 +21,6 @@
  * -------------------------------------------------------------------------
  */
 
-
 #ifndef PQRQUET_COLUMN_READER_H
 #define PQRQUET_COLUMN_READER_H
 
@@ -43,7 +42,7 @@ constexpr int64_t NANOSECONDS_PER_DAY = MICROSECONDS_PER_DAY * INT64_C(1000);
 constexpr int64_t JULIAN_TO_UNIX_EPOCH_DAYS = INT64_C(2440588);
 constexpr int64_t NANOSECONDS_PER_MICROSECOND = INT64_C(1000);  // the number of nanoseconds in a microseconds
 constexpr int64_t PARQUET_PSQL_EPOCH_IN_DAYS = INT64_C(10957);  // the days base's difference between parquet and pg,
-                                                                // 19701.1~2000.1.1
+// 19701.1~2000.1.1
 
 constexpr int64_t epochOffsetDiff = (8 * NANOSECONDS_PER_DAY / 24);
 
@@ -82,19 +81,19 @@ public:
     }
 
     virtual void begin(std::unique_ptr<GSInputStream> gsInputStream,
-                        const std::shared_ptr<parquet::FileMetaData> &fileMetaData) = 0;
+                       const std::shared_ptr<parquet::FileMetaData> &fileMetaData) = 0;
 
     virtual void Destroy() = 0;
 
-    virtual void setRowGroupIndex(uint64_t rowGroupIndex) = 0;
+    virtual void setRowGroupIndex(const uint64_t rowGroupIndex) = 0;
 
     /*
      * Skip a special number of rows in one column of ORC file.
      * @_in_param numValues: The number of rows to read.
      */
-    virtual void skip(uint64_t numValues) = 0;
+    virtual void skip(const uint64_t numValues) = 0;
 
-    virtual void nextInternal(uint64_t numValuesToRead) = 0;
+    virtual void nextInternal(const uint64_t numValuesToRead) = 0;
 
     /*
      * Set the bloom filter in the column reader.
@@ -118,7 +117,7 @@ public:
      */
     virtual void predicateFilter(uint64_t numValues, bool *isSelected) = 0;
 
-    virtual int fillScalarVector(uint64_t numRowsToRead, bool *isSelected, ScalarVector *scalorVector) = 0;
+    virtual int fillScalarVector(uint64_t numRowsToRead, const bool *isSelected, ScalarVector *scalorVector) = 0;
 
     /*
      * Check if the equal op restrict(we generate a bloom filter) matches
@@ -132,11 +131,11 @@ public:
     virtual bool checkBloomFilter(uint64_t index) const = 0;
 
     virtual Node *buildColRestriction(RestrictionType type, parquet::ParquetFileReader *fileReader,
-                                    uint64_t rowGroupIndex) const = 0;
+                                      uint64_t rowGroupIndex) const = 0;
 };
 
 ParquetColumnReader *createParquetColumnReader(const parquet::ColumnDescriptor *desc, uint32_t columnIndex,
-                                                uint32_t mppColumnIndex, ReaderState *readerState, const Var *var);
+                                               uint32_t mppColumnIndex, ReaderState *readerState, const Var *var);
 }  // namespace reader
 }  // namespace dfs
 #endif

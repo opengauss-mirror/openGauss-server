@@ -57,6 +57,11 @@
         }                                          \
     } while (0)
 
+typedef struct join_relid_relname {
+    Relids relids;  /* Join relids*/
+    List* rel_list; /* Join rel name.*/
+} relid_relname;
+
 static const char* KeywordDesc(HintKeyword keyword);
 static void relnamesToBuf(List* relnames, StringInfo buf);
 static void JoinMethodHintDesc(JoinMethodHint* hint, StringInfo buf);
@@ -70,6 +75,7 @@ static void find_unused_hint_to_buf(List* hint_list, StringInfo hint_buf);
 static void JoinMethodHintDelete(JoinMethodHint* hint);
 static void LeadingHintDelete(LeadingHint* hint);
 static void RowsHintDelete(RowsHint* hint);
+static void RewriteHintDelete(RewriteHint* hint);
 static void StreamHintDelete(StreamHint* hint);
 static void BlockNameHintDelete(BlockNameHint* hint);
 static void ScanMethodHintDelete(ScanMethodHint* hint);
@@ -80,8 +86,10 @@ static void drop_duplicate_blockname_hint(HintState* hstate);
 static void drop_duplicate_join_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_stream_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_row_hint(PlannerInfo* root, HintState* hstate);
+static void drop_duplicate_rewrite_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_scan_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_skew_hint(PlannerInfo* root, HintState* hstate);
+static void drop_duplicate_predpush_hint(PlannerInfo* root, HintState* hstate);
 static int find_relid_aliasname(Query* parse, const char* aliasname, bool find_in_rtable = false);
 static Relids create_bms_of_relids(
     PlannerInfo* root, Query* parse, Hint* hint, List* relnamelist = NIL, Relids currelids = NULL);
@@ -92,7 +100,7 @@ static void transform_skew_hint(PlannerInfo* root, Query* parse, List* skew_hint
 static SkewHintTransf* set_skew_hint(PlannerInfo* root, Query* parse, SkewHint* skew_hint);
 static void set_subquery_rel(
     Query* parse, RangeTblEntry* rte, SkewHintTransf* skew_hint_transf, RangeTblEntry* parent_rte = NULL);
-static void set_base_rel(RangeTblEntry* rte, SkewHintTransf* skew_hint_transf);
+static void set_base_rel(Query* parse, RangeTblEntry* rte, SkewHintTransf* skew_hint_transf);
 static bool subquery_can_pull_up(RangeTblEntry* subquery_rte, Query* parse);
 static void set_skew_column(PlannerInfo* root, Query* parse, SkewHintTransf* skew_hint_transf, Oid** col_typid);
 static RangeTblEntry* find_column_in_rtable_subquery(Query* parse, const char* column_name, int* location);
@@ -114,8 +122,11 @@ static char* get_name(ListCell* lc);
 static bool support_redistribution(Oid typid);
 static List* delete_invalid_hint(PlannerInfo* root, HintState* hint, List* list);
 static Relids OuterInnerJoinCreate(Query* parse, HintState* hstate, List* relnames, bool join_order_hint);
+static unsigned int get_rewrite_rule_bits(RewriteHint* hint);
+
 extern yyscan_t hint_scanner_init(const char* str, hint_yy_extra_type* yyext);
 extern void hint_scanner_destroy(yyscan_t yyscanner);
+extern void hint_scanner_yyerror(const char* msg, yyscan_t yyscanner);
 extern Datum GetDatumFromString(Oid typeOid, int4 typeMod, char* value);
 extern Const* makeConst(Oid consttype, int32 consttypmod, Oid constcollid, int constlen, Datum constvalue,
     bool constisnull, bool constbyval, Cursor_Data* vars = NULL);
@@ -213,6 +224,12 @@ static const char* KeywordDesc(HintKeyword keyword)
         case HINT_KEYWORD_SKEW:
             value = HINT_SKEW;
             break;
+        case HINT_KEYWORD_PREDPUSH:
+            value = HINT_PRED_PUSH;
+            break;
+        case HINT_KEYWORD_REWRITE:
+            value = HINT_REWRITE;
+            break;        
         default:
             elog(WARNING, "unrecognized keyword %d", (int)keyword);
             break;
@@ -260,6 +277,54 @@ static void relnamesToBuf(List* relnames, StringInfo buf)
             }
         }
     }
+}
+
+/*
+ * @Description: Collect predpush tables in the same level.
+ * @in root: Root of the current SQL.
+ * @out result: Relids of the tables which are predpush on.
+ */
+Relids predpush_candidates_same_level(PlannerInfo *root)
+{
+    HintState *hstate = root->parse->hintState;
+    if (hstate == NULL)
+        return NULL;
+
+    if (hstate->predpush_hint == NULL)
+        return NULL;
+
+    ListCell *lc = NULL;
+    Relids result = NULL;
+    foreach (lc, hstate->predpush_hint) {
+        PredpushHint *predpushHint = (PredpushHint*)lfirst(lc);
+        result = bms_union(result, predpushHint->candidates);
+    }
+
+    return result;
+}
+
+/*
+ * @Description: get the prompts for redicate pushdown into subquery.
+ * @in hint: predicate pushdown hint.
+ * @out buf: String buf.
+ */
+static void PredpushHintDesc(PredpushHint* hint, StringInfo buf)
+{
+    Hint base_hint = hint->base;
+
+    Assert(buf != NULL);
+
+    appendStringInfo(buf, " %s(", KeywordDesc(hint->base.hint_keyword));
+
+    if (hint->candidates != NULL)
+        appendStringInfo(buf, "(");
+
+    relnamesToBuf(base_hint.relnames, buf);
+
+    if (hint->candidates != NULL)
+        appendStringInfo(buf, ")");
+
+    appendStringInfoString(buf, ")");
 }
 
 /*
@@ -549,6 +614,9 @@ char* descHint(Hint* hint)
         case T_SkewHint:
             SkewHintDesc((SkewHint*)hint, &str);
             break;
+        case T_PredpushHint:
+            PredpushHintDesc((PredpushHint*)hint, &str);
+            break;
         default:
             break;
     }
@@ -587,6 +655,7 @@ void desc_hint_in_state(PlannerInfo* root, HintState* hstate)
     /* Append already used hint to buf, not used hint to str_buf. */
     find_unused_hint_to_buf(hstate->join_hint, &str_buf);
     find_unused_hint_to_buf(hstate->row_hint, &str_buf);
+    find_unused_hint_to_buf(hstate->rewrite_hint, &str_buf);
     find_unused_hint_to_buf(hstate->stream_hint, &str_buf);
     find_unused_hint_to_buf(hstate->scan_hint, &str_buf);
     find_unused_hint_to_buf(hstate->block_name_hint, &str_buf);
@@ -608,6 +677,21 @@ void desc_hint_in_state(PlannerInfo* root, HintState* hstate)
     }
 
     pfree_ext(str_buf.data);
+}
+
+/*
+ * @Description: Delete predicate pushdown, free memory.
+ * @in hint: predicate pushdown hint.
+ */
+static void PredpushHintDelete(PredpushHint* hint)
+{
+    if (hint == NULL)
+        return;
+
+    HINT_FREE_RELNAMES(hint);
+
+    bms_free(hint->candidates);
+    pfree_ext(hint);
 }
 
 /*
@@ -655,6 +739,20 @@ static void RowsHintDelete(RowsHint* hint)
     HINT_FREE_RELNAMES(hint);
 
     bms_free(hint->joinrelids);
+    pfree_ext(hint);
+}
+
+/*
+ * @Description: Delete rows hint.
+ * @in hint: Rows Hint.
+ */
+static void RewriteHintDelete(RewriteHint* hint)
+{
+    if (hint == NULL)
+        return;
+
+    HINT_FREE_RELNAMES(hint);
+
     pfree_ext(hint);
 }
 
@@ -729,6 +827,7 @@ static void SkewHintDelete(SkewHint* hint)
     }
 
     pfree_ext(hint);
+    hint = NULL;
 }
 
 /*
@@ -794,6 +893,12 @@ void hintDelete(Hint* hint)
         case T_SkewHint:
             SkewHintDelete((SkewHint*)hint);
             break;
+        case T_PredpushHint:
+            PredpushHintDelete((PredpushHint*)hint);
+            break;
+        case T_RewriteHint:
+            RewriteHintDelete((RewriteHint*)hint);
+            break;
         default:
             elog(WARNING, "unrecognized hint method: %d", (int)nodeTag(hint));
             break;
@@ -826,6 +931,11 @@ void HintStateDelete(HintState* hintState)
         RowsHintDelete(hint);
     }
 
+    foreach (lc, hintState->rewrite_hint) {
+        RewriteHint* hint = (RewriteHint*)lfirst(lc);
+        RewriteHintDelete(hint);
+    }
+
     foreach (lc, hintState->stream_hint) {
         StreamHint* hint = (StreamHint*)lfirst(lc);
         StreamHintDelete(hint);
@@ -844,6 +954,11 @@ void HintStateDelete(HintState* hintState)
     foreach (lc, hintState->skew_hint) {
         SkewHint* hint = (SkewHint*)lfirst(lc);
         SkewHintDelete(hint);
+    }
+
+    foreach (lc, hintState->predpush_hint) {
+        PredpushHint* hint = (PredpushHint*)lfirst(lc);
+        PredpushHintDelete(hint);
     }
 }
 
@@ -865,6 +980,9 @@ HintState* HintStateCreate()
     hstate->scan_hint = NIL;
     hstate->skew_hint = NIL;
     hstate->hint_warning = NIL;
+    hstate->multi_node_hint = false;
+    hstate->predpush_hint = NIL;
+    hstate->rewrite_hint = NIL;
 
     return hstate;
 }
@@ -1008,6 +1126,15 @@ HintState* create_hintstate(const char* hints)
                 case T_SkewHint:
                     hstate->skew_hint = lappend(hstate->skew_hint, hint);
                     break;
+                case T_MultiNodeHint:
+                    hstate->multi_node_hint = true;
+                    break;
+                case T_PredpushHint:
+                    hstate->predpush_hint = lappend(hstate->predpush_hint, hint);
+                    break;
+                case T_RewriteHint:
+                    hstate->rewrite_hint = lappend(hstate->rewrite_hint, hint);
+                    break;
                 default:
                     break;
             }
@@ -1023,6 +1150,7 @@ HintState* create_hintstate(const char* hints)
     /* When nothing specified a hint, we free HintState and returns NULL. */
     if (hstate->nall_hints == 0 && hstate->hint_warning == NIL) {
         pfree_ext(hstate);
+        hstate = NULL;
     } else {
         /* Delete repeated BlockName hint. */
         if (list_length(hstate->block_name_hint) > 1) {
@@ -1089,9 +1217,9 @@ static Relids create_bms_of_relids(PlannerInfo* root, Query* parse, Hint* hint, 
 
     /* For skew hint we will found relation from parse`s rtable. */
     bool find_in_rtable = false;
-    if (IsA(hint, SkewHint)) {
+    if (IsA(hint, SkewHint) || IsA(hint, PredpushHint)) {
         find_in_rtable = true;
-    }
+	}
 
     foreach (lc, relnames) {
         Node* item = (Node*)lfirst(lc);
@@ -1181,12 +1309,17 @@ static List* set_hint_relids(PlannerInfo* root, Query* parse, List* l)
                 case T_SkewHint:
                     ((SkewHint*)hint)->relid = relids;
                     break;
+                case T_PredpushHint:
+                    ((PredpushHint*)hint)->candidates = relids;
+                    break;
                 default:
                     break;
             }
             pre = lc;
         } else {
-            l = list_delete_cell(l, lc, pre);
+            if (!IsA(hint, PredpushHint) || !((PredpushHint*)hint)->negative) {
+                l = list_delete_cell(l, lc, pre);
+            }
         }
 
         lc = next;
@@ -1571,6 +1704,73 @@ static void drop_duplicate_row_hint(PlannerInfo* root, HintState* hstate)
 }
 
 /*
+ * @Description: Delete duplicate predpush hint.
+ * @in hstate: Hint state.
+ */
+static void drop_duplicate_predpush_hint(PlannerInfo* root, HintState* hstate)
+{
+    bool hasError = false;
+    ListCell* lc = NULL;
+
+    foreach (lc, hstate->predpush_hint) {
+        PredpushHint* predpushHint = (PredpushHint*)lfirst(lc);
+
+        if (predpushHint->base.state != HINT_STATE_DUPLICATION) {
+            ListCell* lc_next = lnext(lc);
+            while (lc_next != NULL) {
+                PredpushHint* predpush_hint = (PredpushHint*)lfirst(lc_next);
+
+                if (predpushHint->dest_id == predpush_hint->dest_id) {
+                    predpush_hint->base.state = HINT_STATE_DUPLICATION;
+                    hasError = true;
+                }
+
+                lc_next = lnext(lc_next);
+            }
+        }
+    }
+
+    if (hasError) {
+        hstate->predpush_hint = delete_invalid_hint(root, hstate, hstate->predpush_hint);
+    }
+}
+
+/*
+ * @Description: Delete duplicate rewrite hint.
+ * @in hstate: Hint state.
+ */
+static void drop_duplicate_rewrite_hint(PlannerInfo* root, HintState* hstate)
+{
+    bool hasError = false;
+    ListCell* lc = NULL;
+
+    foreach (lc, hstate->rewrite_hint) {
+        RewriteHint* rewriteHint = (RewriteHint*)lfirst(lc);
+
+        if (rewriteHint->base.state != HINT_STATE_DUPLICATION) {
+            ListCell* lc_next = lnext(lc);
+            while (lc_next != NULL) {
+                RewriteHint* rewrite_hint = (RewriteHint*)lfirst(lc_next);
+
+                List *list_diff = list_difference(rewriteHint->param_names, rewrite_hint->param_names);
+                if (list_diff == NIL) {
+                    rewrite_hint->base.state = HINT_STATE_DUPLICATION;
+                    hasError = true;
+                }
+                list_free(list_diff);
+
+                lc_next = lnext(lc_next);
+            }
+        }
+    }
+
+    if (hasError) {
+        hstate->rewrite_hint = delete_invalid_hint(root, hstate, hstate->rewrite_hint);
+    }
+}
+
+
+/*
  * @Description: Delete duplicate scan hint.
  * @in hstate: Hint state.
  */
@@ -1812,8 +2012,9 @@ static int get_col_location(const char* column_name, List* eref_col)
     return location;
 }
 
+/* ------------------------------set skew value info---------------------------- */
+
 /*
- * set skew value info
  * @Description: Transform skew value into datum.
  * @in skew_value: skew value in hint.
  * @in val_typid: column type oid.
@@ -1932,7 +2133,7 @@ static void set_skew_value(PlannerInfo* root, SkewHintTransf* skew_hint_transf, 
 
     ListCell* lc = NULL;
     List* l = skew_hint_transf->before->column_list;
-    int c_length = list_length(l);
+    uint32 c_length = list_length(l);
     Oid val_typid;
     int4 val_typmod;
     Oid val_collid;
@@ -1962,7 +2163,8 @@ static void set_skew_value(PlannerInfo* root, SkewHintTransf* skew_hint_transf, 
 
         /* 1.Set skew value into datum. */
         bool set = set_skew_value_to_datum(skew_value, &val_datum, &constisnull, val_typid, val_typmod, &edata);
-        if (!set) {
+
+        if (set == false) {
             append_warning_to_list(root,
                 (Hint*)skew_hint_transf->before,
                 "Error hint:%s fail to convert skew value to datum. Details: \"%s\"",
@@ -1999,8 +2201,8 @@ static void set_skew_value(PlannerInfo* root, SkewHintTransf* skew_hint_transf, 
     }
 }
 
+/* ------------------------------set skew column info---------------------------- */
 /*
- * set skew column info
  * @Description: pull up varno of expr in column info if need.
  * @in parse: parse tree.
  * @in rte: subquery rte that the column belongs to.
@@ -2086,7 +2288,7 @@ static void set_colinfo_by_relation(Oid relid, int location, SkewColumnInfo* col
 {
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     ResourceOwner tmpOwner;
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForSkewHint");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForSkewHint", MEMORY_CONTEXT_OPTIMIZER);
     Relation relation = NULL;
 
     relation = heap_open(relid, AccessShareLock);
@@ -2373,7 +2575,7 @@ static void set_skew_column(PlannerInfo* root, Query* parse, SkewHintTransf* ske
 
     ListCell* lc = NULL;
     List* l = skew_hint_transf->before->column_list;
-    uint32 c_length = (uint32)list_length(l);
+    uint32 c_length = list_length(l);
 
     *col_typid = (Oid*)palloc0(sizeof(Oid) * c_length);
 
@@ -2520,8 +2722,9 @@ static void set_skew_column(PlannerInfo* root, Query* parse, SkewHintTransf* ske
     }
 }
 
+/* -------------------------------set skew rel info----------------------------- */
+
 /*
- * set skew rel info
  * @Description: Judge the subquery whether can be pull up.
  * @in subquery_rte: the RangeTblEntry of subquery.
  * @in parse: Query struct.
@@ -2547,10 +2750,11 @@ static bool subquery_can_pull_up(RangeTblEntry* subquery_rte, Query* parse)
 
 /*
  * @Description: Set base relations into rel_info_list.
+ * @in parse: parse tree.
  * @in rte: rte of base rel.
  * @in skew_hint_transf: SkewHintTransf node used to store the info after transform.
  */
-static void set_base_rel(RangeTblEntry* rte, SkewHintTransf* skew_hint_transf)
+static void set_base_rel(Query* parse, RangeTblEntry* rte, SkewHintTransf* skew_hint_transf)
 {
     SkewRelInfo* rel_info = makeNode(SkewRelInfo);
 
@@ -2644,7 +2848,7 @@ static void set_skew_rel(PlannerInfo* root, Query* parse, SkewHintTransf* skew_h
             set_subquery_rel(parse, rte, skew_hint_transf);
         } else if (rte->rtekind == RTE_RELATION) {
             /* Set the base relation info. */
-            set_base_rel(rte, skew_hint_transf);
+            set_base_rel(parse, rte, skew_hint_transf);
         } else {
             append_warning_to_list(root,
                 (Hint*)skew_hint_transf->before,
@@ -2732,6 +2936,129 @@ static void transform_skew_hint(PlannerInfo* root, Query* parse, List* skew_hint
 }
 
 /*
+ * @Description: Transform predpush hint into processible type, including:
+ *  transfrom subquery name
+ * @in root: query level info.
+ * @in parse: parse tree.
+ * @in skew_hint_list: SkewHint list.
+ */
+static void transform_predpush_hint(PlannerInfo* root, Query* parse, List* predpush_hint_list)
+{
+    if (predpush_hint_list == NULL)
+        return;
+
+    ListCell* lc = NULL;
+    foreach (lc, predpush_hint_list) {
+        PredpushHint* predpush_hint = (PredpushHint*)lfirst(lc);
+        if (predpush_hint->dest_name == NULL) {
+            continue;
+        }
+
+        int relid = find_relid_aliasname(parse, predpush_hint->dest_name, true);
+        if (relid <= NOTFOUNDRELNAME) {
+            continue;
+        }
+
+        predpush_hint->dest_id = relid;
+    }
+
+    return;
+}
+
+/*
+ * @Description: Transform rewrite hint into bitmap.
+ * @in root: query level info.
+ * @in parse: parse tree.
+ * @in rewrite_hint_list: Rewrite Hint list.
+ */
+static void transform_rewrite_hint(PlannerInfo* root, Query* parse, List* rewrite_hint_list)
+{
+    if (rewrite_hint_list == NULL)
+        return;
+    
+    ListCell* lc = NULL;
+    foreach (lc, rewrite_hint_list) {
+        RewriteHint* rewrite_hint = (RewriteHint*)lfirst(lc);
+        if (rewrite_hint->param_names == NULL) {
+            continue;
+        }
+
+        rewrite_hint->param_bits = get_rewrite_rule_bits(rewrite_hint);
+    }
+}
+
+static unsigned int get_rewrite_rule_bits(RewriteHint* hint)
+{
+    ListCell* lc = NULL;
+    unsigned int bits = 0;
+
+    foreach (lc, hint->param_names)
+    {
+        Node *param_name_str = (Node*)lfirst(lc);
+        if (param_name_str == NULL) {
+            continue;
+        }
+        if (!IsA(param_name_str, String)) {
+            continue;
+        }
+        char* param_name = ((Value*)param_name_str)->val.str;
+
+        if (pg_strcasecmp(param_name, "lazyagg") == 0) {
+            bits = bits | LAZY_AGG;
+        }
+        else if (pg_strcasecmp(param_name, "magicset") == 0) {
+            bits = bits | MAGIC_SET;
+        }
+        else if (pg_strcasecmp(param_name, "partialpush") == 0) {
+            bits = bits | PARTIAL_PUSH;
+        }
+        else if (pg_strcasecmp(param_name, "uniquecheck") == 0) {
+            bits = bits | SUBLINK_PULLUP_WITH_UNIQUE_CHECK;
+        }
+        else if (pg_strcasecmp(param_name, "disablerep") == 0) {
+            bits = bits | SUBLINK_PULLUP_DISABLE_REPLICATED;
+        }
+        else if (pg_strcasecmp(param_name, "intargetlist") == 0) {
+            bits = bits | SUBLINK_PULLUP_IN_TARGETLIST;
+        }
+        else {
+            elog(WARNING, "invalid rewrite rule. (Supported rules: lazyagg, magicset, partialpush, uniquecheck, disablerep, intargetlist)");
+        }
+    }
+
+    return bits;
+}
+
+
+/*
+ * @Description: Check rewrite rule constraints hint:
+ * @in root: Planner Info
+ * @in params: Rewrite rule parameter
+ */
+bool permit_from_rewrite_hint(PlannerInfo *root, unsigned int params)
+{
+    unsigned int bits = 0;
+
+    HintState *hstate = root->parse->hintState;
+    if (hstate == NULL)
+        return true;
+
+    ListCell* lc = NULL;
+    foreach (lc, hstate->rewrite_hint) {
+        RewriteHint* rewrite_hint = (RewriteHint*)lfirst(lc);
+
+        if (rewrite_hint->param_bits == 0)
+            bits = get_rewrite_rule_bits(rewrite_hint);
+        else 
+            bits = rewrite_hint->param_bits;
+
+        if (bits & params)
+            return false;
+    }
+    return true;
+}
+
+/*
  * @Description: Transform hint into handy form.
  *  create bitmap of relids from alias names, to make it easier to check
  *  whether a join path matches a join method hint.
@@ -2752,8 +3079,14 @@ void transform_hints(PlannerInfo* root, Query* parse, HintState* hstate)
     hstate->stream_hint = set_hint_relids(root, parse, hstate->stream_hint);
     hstate->scan_hint = set_hint_relids(root, parse, hstate->scan_hint);
     hstate->skew_hint = set_hint_relids(root, parse, hstate->skew_hint);
+    hstate->predpush_hint = set_hint_relids(root, parse, hstate->predpush_hint);
 
     transform_leading_hint(root, parse, hstate);
+
+    /* Transform predpush hint, for subquery name */
+    transform_predpush_hint(root, parse, hstate->predpush_hint);
+
+    transform_rewrite_hint(root, parse, hstate->rewrite_hint);
 
     /* Delete duplicate hint. */
     drop_duplicate_join_hint(root, hstate);
@@ -2761,6 +3094,8 @@ void transform_hints(PlannerInfo* root, Query* parse, HintState* hstate)
     drop_duplicate_row_hint(root, hstate);
     drop_duplicate_scan_hint(root, hstate);
     drop_duplicate_skew_hint(root, hstate);
+    drop_duplicate_predpush_hint(root, hstate);
+    drop_duplicate_rewrite_hint(root, hstate);
 
     /* Transform skew hint into handy form, SkewHint structure will be transform to SkewHintTransf. */
     transform_skew_hint(root, parse, hstate->skew_hint);
@@ -2914,3 +3249,22 @@ void output_hint_warning(List* warning, int lev)
     warning = NIL;
 }
 
+/*
+ * enable predpush? we assume that 'No predpush' need to be the first element.
+ */
+bool permit_predpush(PlannerInfo *root)
+{
+    if (root == NULL) {
+        return true;
+    }
+
+    HintState *hstate = root->parse->hintState;
+    if (hstate == NULL)
+        return true;
+
+    if (hstate->predpush_hint == NULL)
+        return true;
+
+    PredpushHint *predpushHint = (PredpushHint*)linitial(hstate->predpush_hint);
+    return !predpushHint->negative;
+}

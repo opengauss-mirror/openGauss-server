@@ -16,7 +16,7 @@ function test_1()
   echo "primary killed"
   failover_to_standby
   echo "failover_to_standby"
-  build_result=`gs_ctl build -D ${primary_data_dir}`
+  build_result=`gs_ctl build -Z single_node -D ${primary_data_dir}`
   if [[ $build_result =~ $inc_build_pattern ]]
   then
     echo "inc build success"

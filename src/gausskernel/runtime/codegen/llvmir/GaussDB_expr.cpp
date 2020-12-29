@@ -32,7 +32,6 @@
 #include "commands/typecmds.h"
 #include "executor/execdebug.h"
 #include "executor/nodeSubplan.h"
-#include "funcapi.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -868,7 +867,7 @@ Datum Simplebi64add64CodeGen(BiAdjustScale overflow, Numeric larg, Numeric rarg)
     uint8 rval_scale = NUMERIC_BI_SCALE(rarg);
     int64 left_val = NUMERIC_64VALUE(larg);
     int64 right_val = NUMERIC_64VALUE(rarg);
-    int64 res;
+    int64 res = 0;
     int128 big_result = 0;
     int res_scale = 0;;
 

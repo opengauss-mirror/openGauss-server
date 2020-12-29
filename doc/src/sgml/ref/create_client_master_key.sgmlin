@@ -1,0 +1,17 @@
+<refentry id="SQL-CREATE_CLIENT_MASTER_KEY">
+<refmeta>
+<refentrytitle>SQL-CREATE CLIENT MASTER KEY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE CLIENT MASTER KEY</refname>
+<refpurpose>create client master key</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE CLIENT MASTER KEY  
+     [WITH] ( ['KEY_STORE' , 'KEY_PATH' , 'ALGORITHM'] );
+</synopsis>
+</refsynopsisdiv>
+</refentry>

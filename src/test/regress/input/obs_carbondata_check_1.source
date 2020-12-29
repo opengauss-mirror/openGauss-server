@@ -1,0 +1,80 @@
+\c carbondata
+SET DATESTYLE='ISO, MDY';
+--alter format to carbondata
+ALTER FOREIGN TABLE IF EXISTS orc_tbl OPTIONS(SET format 'CARBONDATA');
+
+--alter format to orc
+ALTER FOREIGN TABLE IF EXISTS orc_tbl OPTIONS(SET format 'ORC');
+
+--alter comtain column bytea table format to orc
+ALTER FOREIGN TABLE IF EXISTS orc_tbl OPTIONS(SET format 'CARBONDATA');
+ALTER FOREIGN TABLE IF EXISTS orc_tbl ALTER COLUMN N_NATIONKEY SET DATA TYPE bytea;
+ALTER FOREIGN TABLE orc_tbl OPTIONS(SET format 'ORC');
+
+--drop table
+DROP FOREIGN TABLE IF EXISTS orc_tbl;
+
+--alter type varchar(30)
+SELECT * FROM table_attribute;
+ALTER FOREIGN TABLE IF EXISTS table_attribute ALTER COLUMN c_decimal1 SET DATA TYPE DECIMAL(8, 5);
+SELECT * FROM table_attribute;
+ALTER FOREIGN TABLE IF EXISTS table_attribute ALTER COLUMN c_varchar1 SET DATA TYPE VARCHAR(80);
+SELECT * FROM table_attribute;
+
+--alter type varchar(80)
+ALTER FOREIGN TABLE IF EXISTS table_attribute ALTER COLUMN c_varchar2 SET DATA TYPE MAP;
+ALTER FOREIGN TABLE IF EXISTS table_attribute ALTER COLUMN c_varchar2 SET DATA TYPE STRUCT;
+
+--alter checkencoding
+ALTER FOREIGN TABLE table_attribute OPTIONS(ADD CHECKENCODING 'high');
+SELECT * FROM table_attribute;
+
+--alter encoding
+ALTER FOREIGN TABLE table_attribute OPTIONS(SET ENCODING 'GBK');
+SELECT * FROM table_attribute;
+ALTER FOREIGN TABLE table_attribute OPTIONS(SET ENCODING 'UTF8');
+
+--compress data
+SELECT * FROM data_filter_snappy WHERE c_varchar3 = '星期一' LINIT 10;
+SELECT * FROM data_filter_snappy WHERE c_string1 IS NULL LIMIT 20;
+SELECT * FROM data_filter_snappy WHERE c_timestamp <= '2019-08-21 09:09:09' LIMIT 10;
+SELECT * FROM data_filter_snappy WHERE c_string1 <='Gun!Gun!!taiuibceg' LIMIT 20;
+SELECT * FROM data_filter_snappy WHERE c_varchar2 = 'a#HA#BTT#OP#ZBJ#SFYCG#asaa' LIMIT 5;
+
+SELECT * FROM data_filter_gzip WHERE c_varchar3 = '星期一' LINIT 10;
+SELECT * FROM data_filter_gzip WHERE c_string1 IS NULL LIMIT 20;
+SELECT * FROM data_filter_gzip WHERE c_timestamp <= '2019-08-21 09:09:09' LIMIT 10;
+SELECT * FROM data_filter_gzip WHERE c_string1 <='Gun!Gun!!taiuibceg' LIMIT 20;
+SELECT * FROM data_filter_gzip WHERE c_varchar2 = 'a#HA#BTT#OP#ZBJ#SFYCG#asaa' LIMIT 5;
+
+SELECT * FROM data_filter_zstd WHERE c_varchar3 = '星期一' LINIT 10;
+SELECT * FROM data_filter_zstd WHERE c_string1 IS NULL LIMIT 20;
+SELECT * FROM data_filter_zstd WHERE c_timestamp <= '2019-08-21 09:09:09' LIMIT 10;
+SELECT * FROM data_filter_zstd WHERE c_string1 <='Gun!Gun!!taiuibceg' LIMIT 20;
+SELECT * FROM data_filter_zstd WHERE c_varchar2 = 'a#HA#BTT#OP#ZBJ#SFYCG#asaa';
+
+--compress sort data
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar3 = '星期一' LINIT 10;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_string1 IS NULL LIMIT 20;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_timestamp <= '2019-08-21 09:09:09' LIMIT 10;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_string1 <='Gun!Gun!!taiuibceg' LIMIT 20;
+SELECT * FROM data_filter_snappy_sort_invert WHERE c_varchar2 = 'a#HA#BTT#OP#ZBJ#SFYCG#asaa' LIMIT 5;
+
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar3 = '星期一' LINIT 10;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_string1 IS NULL LIMIT 20;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_timestamp <= '2019-08-21 09:09:09' LIMIT 10;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_string1 <='Gun!Gun!!taiuibceg' LIMIT 20;
+SELECT * FROM data_filter_gzip_sort_invert WHERE c_varchar2 = 'a#HA#BTT#OP#ZBJ#SFYCG#asaa' LIMIT 5;
+
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar3 = '星期一' LINIT 10;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_string1 IS NULL LIMIT 20;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_timestamp <= '2019-08-21 09:09:09' LIMIT 10;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_string1 <='Gun!Gun!!taiuibceg' LIMIT 20;
+SELECT * FROM data_filter_zstd_sort_invert WHERE c_varchar2 = 'a#HA#BTT#OP#ZBJ#SFYCG#asaa' LIMIT 5;
+
+--analyze table
+--ANALYZE table_attribute;
+
+--explain performance
+SET explain_perf_mode = pretty;
+EXPLAIN PERFORMANCE SELECT c_varchar3 FROM table_attribute;

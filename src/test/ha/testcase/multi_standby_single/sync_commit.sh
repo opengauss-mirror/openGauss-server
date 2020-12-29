@@ -8,9 +8,9 @@ function test_1()
   check_detailed_instance
 
   kill_cluster
-  gs_guc set -D $primary_data_dir -c "synchronous_commit = on"
-  gs_guc set -D $primary_data_dir -c "synchronous_standby_names = '2(*)'"
-  gs_guc set -D $primary_data_dir -c "most_available_sync = off"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_commit = on"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_standby_names = '2(*)'"
+  gs_guc set -Z datanode -D $primary_data_dir -c "most_available_sync = off"
   start_cluster
 
   echo "check 2-sync slaves"
@@ -47,9 +47,9 @@ function test_1()
   fi
 
   kill_cluster
-  gs_guc set -D $primary_data_dir -c "synchronous_commit = on"
-  gs_guc set -D $primary_data_dir -c "synchronous_standby_names = 'ANY 2(*)'"
-  gs_guc set -D $primary_data_dir -c "most_available_sync = off"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_commit = on"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_standby_names = 'ANY 2(*)'"
+  gs_guc set -Z datanode -D $primary_data_dir -c "most_available_sync = off"
   start_cluster
 
   sleep 5
@@ -58,8 +58,8 @@ function test_1()
   check_asynchronous_commit "datanode1" 0
 
   kill_cluster
-  gs_guc set -D $primary_data_dir -c "synchronous_commit = off"
-  gs_guc set -D $primary_data_dir -c "synchronous_standby_names = '2(*)'"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_commit = off"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_standby_names = '2(*)'"
   start_cluster
 
   sleep 5
@@ -86,8 +86,8 @@ function test_1()
   fi
 
    kill_cluster
-  gs_guc set -D $primary_data_dir -c "synchronous_commit = on"
-  gs_guc set -D $primary_data_dir -c "synchronous_standby_names = '2(standbynode1,standbynode2)'"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_commit = on"
+  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_standby_names = '2(standbynode1,standbynode2)'"
   start_cluster
 
   sleep 5

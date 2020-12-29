@@ -417,13 +417,13 @@ analyze patest0;
 analyze patest1;
 analyze patest2;
 
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 select * from patest0 join (select f1 from int4_tbl where f1 >= 0 order by f1 limit 1) ss on id = f1;
 select * from patest0 join (select f1 from int4_tbl where f1 >= 0 order by f1 limit 1) ss on id = f1;
 
 drop index patest2i;
 
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 select * from patest0 join (select f1 from int4_tbl where f1 >= 0 order by f1 limit 1) ss on id = f1;
 select * from patest0 join (select f1 from int4_tbl where f1 >= 0 order by f1 limit 1) ss on id = f1;
 
@@ -451,12 +451,12 @@ insert into matest3 (name) values ('Test 5');
 insert into matest3 (name) values ('Test 6');
 
 set enable_indexscan = off;  -- force use of seqscan/sort, so no merge
-explain (verbose, costs off, nodes off) select * from matest0 order by 1-id;
+explain (verbose, costs off) select * from matest0 order by 1-id;
 select * from matest0 order by 1-id;
 reset enable_indexscan;
 
 set enable_seqscan = off;  -- plan with fewest seqscans should be merge
-explain (verbose, costs off, nodes off) select * from matest0 order by 1-id;
+explain (verbose, costs off) select * from matest0 order by 1-id;
 select * from matest0 order by 1-id;
 reset enable_seqscan;
 
@@ -471,39 +471,39 @@ set enable_indexscan = on;
 set enable_bitmapscan = off;
 
 -- Check handling of duplicated, constant, or volatile targetlist items
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 SELECT thousand, tenthous FROM tenk1
 UNION ALL
 SELECT thousand, thousand FROM tenk1
 ORDER BY thousand, tenthous;
 
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 SELECT thousand, tenthous, thousand+tenthous AS x FROM tenk1
 UNION ALL
 SELECT 42, 42, hundred FROM tenk1
 ORDER BY thousand, tenthous;
 
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 SELECT thousand, tenthous FROM tenk1
 UNION ALL
 SELECT thousand, random()::integer FROM tenk1
 ORDER BY thousand, tenthous;
 
 -- Check min/max aggregate optimization
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 SELECT min(x) FROM
   (SELECT unique1 AS x FROM tenk1 a
    UNION ALL
    SELECT unique2 AS x FROM tenk1 b) s;
 
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 SELECT min(y) FROM
   (SELECT unique1 AS x, unique1 AS y FROM tenk1 a
    UNION ALL
    SELECT unique2 AS x, unique2 AS y FROM tenk1 b) s;
 
 -- XXX planner doesn't recognize that index on unique2 is sufficiently sorted
-explain (costs off, num_nodes off, nodes off)
+explain (costs off)
 SELECT x, y FROM
   (SELECT thousand AS x, tenthous AS y FROM tenk1 a
    UNION ALL

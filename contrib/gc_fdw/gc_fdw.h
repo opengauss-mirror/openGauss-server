@@ -15,6 +15,7 @@
 #include "lib/stringinfo.h"
 #include "nodes/relation.h"
 #include "pgxc/execRemote.h"
+#include "pgxc/pgFdwRemote.h"
 #include "utils/relcache.h"
 
 #include "libpq/libpq-fe.h"

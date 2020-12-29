@@ -39,4 +39,3 @@ void PosixSemaphoreWait(PosixSemaphore* sem);
 void PosixSemaphorePost(PosixSemaphore* sem);
 }
 #endif
-

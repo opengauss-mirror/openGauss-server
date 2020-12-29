@@ -16,81 +16,81 @@ analyze joinplan_table_01;
 analyze joinplan_table_02;
 
 -- Join on distribute key
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c2;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c2;
 
 -- One side join on distribute key
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c1;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c1;
 
 -- Both sides join on distribute key but not same
-explain (verbose on, costs off, nodes off) select * from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c1 and joinplan_table_01.c2 = joinplan_table_02.c2;
+explain (verbose on, costs off) select * from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c1 and joinplan_table_01.c2 = joinplan_table_02.c2;
 
 -- Both sides join on non-distribute key
-explain (verbose on, costs off, nodes off) select * from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c3 = joinplan_table_02.c3;
-explain (verbose on, costs off, nodes off) select * from joinplan_table_01, joinplan_table_02 where substring(joinplan_table_01.c3, 2) = substring(joinplan_table_02.c3, 2);
+explain (verbose on, costs off) select * from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c3 = joinplan_table_02.c3;
+explain (verbose on, costs off) select * from joinplan_table_01, joinplan_table_02 where substring(joinplan_table_01.c3, 2) = substring(joinplan_table_02.c3, 2);
 
 set enable_nestloop=off;
 -- Join on distribute key
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c2;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c2;
 
 -- One side join on distribute key
-explain (verbose on, costs off, nodes off) select joinplan_table_02.*, joinplan_table_01.c3 from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c2 = joinplan_table_02.c2;
+explain (verbose on, costs off) select joinplan_table_02.*, joinplan_table_01.c3 from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c2 = joinplan_table_02.c2;
 
 -- Both sides join on distribute key but not same
-explain (verbose on, costs off, nodes off) select * from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c1 and joinplan_table_01.c2 = joinplan_table_02.c2;
+explain (verbose on, costs off) select * from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c1 and joinplan_table_01.c2 = joinplan_table_02.c2;
 
 -- Both sides join on non-distribute key
-explain (verbose on, costs off, nodes off) select * from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c3 = joinplan_table_02.c3;
-explain (verbose on, costs off, nodes off) select * from joinplan_table_01, joinplan_table_02 where substring(joinplan_table_01.c3, 2) = substring(joinplan_table_02.c3, 2);
+explain (verbose on, costs off) select * from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c3 = joinplan_table_02.c3;
+explain (verbose on, costs off) select * from joinplan_table_01, joinplan_table_02 where substring(joinplan_table_01.c3, 2) = substring(joinplan_table_02.c3, 2);
 
 set enable_nestloop=off;
 set enable_hashjoin=off;
 -- Join on distribute key
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c2;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c2;
 
 -- One side join on distribute key
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c1;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c1;
 
 -- Both sides join on distribute key but not same
-explain (verbose on, costs off, nodes off) select * from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c1 and joinplan_table_01.c2 = joinplan_table_02.c2;
+explain (verbose on, costs off) select * from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c1 = joinplan_table_02.c1 and joinplan_table_01.c2 = joinplan_table_02.c2;
 
 -- Both sides join on non-distribute key
-explain (verbose on, costs off, nodes off) select * from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c3 = joinplan_table_02.c3;
-explain (verbose on, costs off, nodes off) select * from joinplan_table_01, joinplan_table_02 where substring(joinplan_table_01.c3, 2) = substring(joinplan_table_02.c3, 2);
+explain (verbose on, costs off) select * from joinplan_table_01, joinplan_table_02 where joinplan_table_01.c3 = joinplan_table_02.c3;
+explain (verbose on, costs off) select * from joinplan_table_01, joinplan_table_02 where substring(joinplan_table_01.c3, 2) = substring(joinplan_table_02.c3, 2);
 
 -- Anti Join, Semi Join, Left Join, Right Join, Full Join, Cartesian Join
 set enable_nestloop=on;
 set enable_hashjoin=on;
 
 -- left/right/full Join on distribute key
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 left join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c2;
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 right join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c2;
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 full join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c2;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 left join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c2;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 right join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c2;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 full join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c2;
 
 -- left/right/full Join, one side on distribute key
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 left join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c1;
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 right join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c1;
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 full join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c1;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 left join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c1;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 right join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c1;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 full join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c1;
 
 -- left/right/full Join, Both sides join on distribute key but not same
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 left join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c1 and joinplan_table_01.c2 = joinplan_table_02.c2;
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 right join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c1 and joinplan_table_01.c2 = joinplan_table_02.c2;
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 full join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c1 and joinplan_table_01.c2 = joinplan_table_02.c2;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 left join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c1 and joinplan_table_01.c2 = joinplan_table_02.c2;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 right join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c1 and joinplan_table_01.c2 = joinplan_table_02.c2;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 full join joinplan_table_02 on joinplan_table_01.c1 = joinplan_table_02.c1 and joinplan_table_01.c2 = joinplan_table_02.c2;
 
 -- Both sides join on non-distribute key
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 left join joinplan_table_02 on joinplan_table_01.c3 = joinplan_table_02.c3;
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 right join joinplan_table_02 on joinplan_table_01.c3 = joinplan_table_02.c3;
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 full join joinplan_table_02 on joinplan_table_01.c3 = joinplan_table_02.c3;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 left join joinplan_table_02 on joinplan_table_01.c3 = joinplan_table_02.c3;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 right join joinplan_table_02 on joinplan_table_01.c3 = joinplan_table_02.c3;
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 full join joinplan_table_02 on joinplan_table_01.c3 = joinplan_table_02.c3;
 
 -- Both sides join on non-distribute key with function
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 left join joinplan_table_02 on substring(joinplan_table_01.c3, 2) = substring(joinplan_table_02.c3, 2);
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 right join joinplan_table_02 on substring(joinplan_table_01.c3, 2) = substring(joinplan_table_02.c3, 2);
-explain (verbose on, costs off, nodes off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 full join joinplan_table_02 on substring(joinplan_table_01.c3, 2) = substring(joinplan_table_02.c3, 2);
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 left join joinplan_table_02 on substring(joinplan_table_01.c3, 2) = substring(joinplan_table_02.c3, 2);
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 right join joinplan_table_02 on substring(joinplan_table_01.c3, 2) = substring(joinplan_table_02.c3, 2);
+explain (verbose on, costs off) select joinplan_table_01.*, joinplan_table_02.c3 from joinplan_table_01 full join joinplan_table_02 on substring(joinplan_table_01.c3, 2) = substring(joinplan_table_02.c3, 2);
 
 -- Anti Join/Semi Join
-explain (verbose on, costs off, nodes off) select joinplan_table_01.* from joinplan_table_01 where joinplan_table_01.c1 not in (select joinplan_table_02.c2 from joinplan_table_02);
-explain (verbose on, costs off, nodes off) select joinplan_table_02.* from joinplan_table_02 where joinplan_table_02.c1 not in (select joinplan_table_01.c1 from joinplan_table_01);
-explain (verbose on, costs off, nodes off) select joinplan_table_01.* from joinplan_table_01 where joinplan_table_01.c1 not in (select joinplan_table_02.c1 from joinplan_table_02);
-explain (verbose on, costs off, nodes off) select joinplan_table_02.* from joinplan_table_02 where joinplan_table_02.c1 not in (select joinplan_table_01.c2 from joinplan_table_01);
+explain (verbose on, costs off) select joinplan_table_01.* from joinplan_table_01 where joinplan_table_01.c1 not in (select joinplan_table_02.c2 from joinplan_table_02);
+explain (verbose on, costs off) select joinplan_table_02.* from joinplan_table_02 where joinplan_table_02.c1 not in (select joinplan_table_01.c1 from joinplan_table_01);
+explain (verbose on, costs off) select joinplan_table_01.* from joinplan_table_01 where joinplan_table_01.c1 not in (select joinplan_table_02.c1 from joinplan_table_02);
+explain (verbose on, costs off) select joinplan_table_02.* from joinplan_table_02 where joinplan_table_02.c1 not in (select joinplan_table_01.c2 from joinplan_table_01);
 
 drop table joinplan_table_01;
 drop table joinplan_table_02;
@@ -134,7 +134,7 @@ analyze semi_to_inner_unique2;
 select count(*) from semi_to_inner_unique2;
 select count(*) from semi_to_inner_unique1;
 
-EXPLAIN (VERBOSE ON, COSTS OFF, NODES OFF) SELECT count(*) from semi_to_inner_unique1 where semi_to_inner_unique1.id IN(SELECT semi_to_inner_unique2.id FROM semi_to_inner_unique2 RIGHT JOIN  semi_to_inner_unique1 USING(id));
+EXPLAIN (VERBOSE ON, COSTS OFF) SELECT count(*) from semi_to_inner_unique1 where semi_to_inner_unique1.id IN(SELECT semi_to_inner_unique2.id FROM semi_to_inner_unique2 RIGHT JOIN  semi_to_inner_unique1 USING(id));
 
 SELECT count(*) from semi_to_inner_unique1 where semi_to_inner_unique1.id IN(SELECT semi_to_inner_unique2.id FROM semi_to_inner_unique2 RIGHT JOIN  semi_to_inner_unique1 USING(id));
 
@@ -167,7 +167,7 @@ insert into Multi_Jointable2 select * from row_Multi_Jointable2;
 analyze Multi_Jointable1;
 analyze Multi_Jointable2;
 
-EXPLAIN (VERBOSE ON, COSTS OFF, NODES OFF)
+EXPLAIN (VERBOSE ON, COSTS OFF)
 select joinplan_table_01.id from Multi_Jointable1 joinplan_table_01 where (joinplan_table_01.id,joinplan_table_01.id1) not in (select 2,2 from Multi_Jointable2 tt1) order by 1;
 select joinplan_table_01.id from Multi_Jointable1 joinplan_table_01 where (joinplan_table_01.id,joinplan_table_01.id1) not in (select 2,2 from Multi_Jointable2 tt1) order by 1;
 

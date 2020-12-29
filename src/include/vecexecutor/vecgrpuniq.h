@@ -97,7 +97,6 @@ static bool Match(Encap* cap, int batchIdx, GUCell* cell)
     int cols = cap->cols;
     AttrNumber* colIdx = cap->colIdx;
     FmgrInfo* eqfuncs = cap->eqfunctions;
-    PGFunction eqfunc;
 
     for (i = 0; i < cols; i++) {
         pVector = &arr[colIdx[i] - 1];
@@ -114,10 +113,7 @@ static bool Match(Encap* cap, int batchIdx, GUCell* cell)
                 key1 = ScalarVector::Decode(pVector->m_vals[batchIdx]);
                 key2 = ScalarVector::Decode(cellVal->val);
 
-                // extract header
-                eqfunc = eqfuncs[i].fn_addr;
-
-                match = DatumGetBool(DirectFunctionCall2(eqfunc, key1, key2));
+                match = DatumGetBool(FunctionCall2((eqfuncs + i), key1, key2));
                 if (match == false)
                     return false;
             }
@@ -189,6 +185,7 @@ static void BindingFp(T* node)
     }
 }
 
+template <typename T>
 static void ReplaceGrpUniqEqfunc(Encap* cap, Form_pg_attribute* attrs)
 {
     AttrNumber* colIdx = cap->colIdx;
@@ -240,7 +237,7 @@ void InitGrpUniq(T* state, int cols, AttrNumber* colIdx)
         }
     }
 
-    ReplaceGrpUniqEqfunc(cap, attrs);
+    ReplaceGrpUniqEqfunc<T>(cap, attrs);
 
     state->scanBatch = New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, outDesc);
     state->currentBuf = New(CurrentMemoryContext) VarBuf(CurrentMemoryContext);

@@ -12,7 +12,7 @@
 
 typedef struct RemoteConfig
 {
-	char* proto;
+	const char* proto;
 	char* host;
 	char* port;
 	char* path;

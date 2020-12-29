@@ -1,0 +1,334 @@
+--VACUUM FULL
+\! @abs_bindir@/gs_guc reload -Z coordinator -c "autovacuum = off" -D @cndata@/@coordinator1@
+gs_guc reload: autovacuum=off
+server signaled
+SET enable_vector_engine = true;
+--
+--case 1: Vacuum full column store TABLE
+--
+DROP TABLE IF EXISTS LINEITEM;
+NOTICE:  table "lineitem" does not exist, skipping
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10)
+  , L_COMMENT      VARCHAR(44)
+)
+with (orientation = orc) tablespace hdfs_ts
+distribute by hash(L_ORDERKEY);
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_cstore.data' delimiter '|';
+SELECT * FROM LINEITEM ORDER BY L_ORDERKEY, L_PARTKEY, L_SUPPKEY LIMIT 10;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus |        l_shipdate        |       l_commitdate       |      l_receiptdate       |      l_shipinstruct       | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+--------------------------+--------------------------+--------------------------+---------------------------+------------+-------------------------------------
+          1 |      2132 |      4633 |            4 |      28.00 |        28955.64 |        .09 |   .06 | N            | O            | Sun Apr 21 00:00:00 1996 | Sat Mar 30 00:00:00 1996 | Thu May 16 00:00:00 1996 | NONE                      | AIR        | lites. fluffily even de
+          1 |     15635 |       638 |            6 |      32.00 |        49620.16 |        .07 |   .02 | N            | O            | Tue Jan 30 00:00:00 1996 | Wed Feb 07 00:00:00 1996 | Sat Feb 03 00:00:00 1996 | DELIVER IN PERSON         | MAIL       | arefully slyly ex
+          1 |     24027 |      1534 |            5 |      24.00 |        22824.48 |        .10 |   .04 | N            | O            | Sat Mar 30 00:00:00 1996 | Thu Mar 14 00:00:00 1996 | Mon Apr 01 00:00:00 1996 | NONE                      | FOB        |  pending foxes. slyly re
+          1 |     63700 |      3701 |            3 |       8.00 |        13309.60 |        .10 |   .02 | N            | O            | Mon Jan 29 00:00:00 1996 | Tue Mar 05 00:00:00 1996 | Wed Jan 31 00:00:00 1996 | TAKE BACK RETURN          | REG AIR    | riously. regular, express dep
+          1 |     67310 |      7311 |            2 |      36.00 |        45983.16 |        .09 |   .06 | N            | O            | Fri Apr 12 00:00:00 1996 | Wed Feb 28 00:00:00 1996 | Sat Apr 20 00:00:00 1996 | TAKE BACK RETURN          | MAIL       | ly final dependencies: slyly bold 
+          1 |    155190 |      7706 |            1 |      17.00 |        21168.23 |        .04 |   .02 | N            | O            | Wed Mar 13 00:00:00 1996 | Mon Feb 12 00:00:00 1996 | Fri Mar 22 00:00:00 1996 | DELIVER IN PERSON         | TRUCK      | egular courts above the
+          2 |    106170 |      1191 |            1 |      38.00 |        44694.46 |       0.00 |   .05 | N            | O            | Tue Jan 28 00:00:00 1997 | Tue Jan 14 00:00:00 1997 | Sun Feb 02 00:00:00 1997 | TAKE BACK RETURN          | RAIL       | ven requests. deposits breach a
+          3 |      4297 |      1798 |            1 |      45.00 |        54058.05 |        .06 |  0.00 | R            | F            | Wed Feb 02 00:00:00 1994 | Tue Jan 04 00:00:00 1994 | Wed Feb 23 00:00:00 1994 | NONE                      | AIR        | ongside of the furiously brave acco
+          3 |     19036 |      6540 |            2 |      49.00 |        46796.47 |        .10 |  0.00 | R            | F            | Tue Nov 09 00:00:00 1993 | Mon Dec 20 00:00:00 1993 | Wed Nov 24 00:00:00 1993 | TAKE BACK RETURN          | RAIL       | 
+          3 |    128449 |      3474 |            3 |      27.00 |        39890.88 |        .06 |   .07 | A            | F            | Sun Jan 16 00:00:00 1994 | Mon Nov 22 00:00:00 1993 | Sun Jan 23 00:00:00 1994 | DELIVER IN PERSON         |            | 
+(10 rows)
+
+VACUUM FULL LINEITEM;
+SELECT * FROM LINEITEM ORDER BY L_ORDERKEY, L_PARTKEY, L_SUPPKEY LIMIT 10;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus |        l_shipdate        |       l_commitdate       |      l_receiptdate       |      l_shipinstruct       | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+--------------------------+--------------------------+--------------------------+---------------------------+------------+-------------------------------------
+          1 |      2132 |      4633 |            4 |      28.00 |        28955.64 |        .09 |   .06 | N            | O            | Sun Apr 21 00:00:00 1996 | Sat Mar 30 00:00:00 1996 | Thu May 16 00:00:00 1996 | NONE                      | AIR        | lites. fluffily even de
+          1 |     15635 |       638 |            6 |      32.00 |        49620.16 |        .07 |   .02 | N            | O            | Tue Jan 30 00:00:00 1996 | Wed Feb 07 00:00:00 1996 | Sat Feb 03 00:00:00 1996 | DELIVER IN PERSON         | MAIL       | arefully slyly ex
+          1 |     24027 |      1534 |            5 |      24.00 |        22824.48 |        .10 |   .04 | N            | O            | Sat Mar 30 00:00:00 1996 | Thu Mar 14 00:00:00 1996 | Mon Apr 01 00:00:00 1996 | NONE                      | FOB        |  pending foxes. slyly re
+          1 |     63700 |      3701 |            3 |       8.00 |        13309.60 |        .10 |   .02 | N            | O            | Mon Jan 29 00:00:00 1996 | Tue Mar 05 00:00:00 1996 | Wed Jan 31 00:00:00 1996 | TAKE BACK RETURN          | REG AIR    | riously. regular, express dep
+          1 |     67310 |      7311 |            2 |      36.00 |        45983.16 |        .09 |   .06 | N            | O            | Fri Apr 12 00:00:00 1996 | Wed Feb 28 00:00:00 1996 | Sat Apr 20 00:00:00 1996 | TAKE BACK RETURN          | MAIL       | ly final dependencies: slyly bold 
+          1 |    155190 |      7706 |            1 |      17.00 |        21168.23 |        .04 |   .02 | N            | O            | Wed Mar 13 00:00:00 1996 | Mon Feb 12 00:00:00 1996 | Fri Mar 22 00:00:00 1996 | DELIVER IN PERSON         | TRUCK      | egular courts above the
+          2 |    106170 |      1191 |            1 |      38.00 |        44694.46 |       0.00 |   .05 | N            | O            | Tue Jan 28 00:00:00 1997 | Tue Jan 14 00:00:00 1997 | Sun Feb 02 00:00:00 1997 | TAKE BACK RETURN          | RAIL       | ven requests. deposits breach a
+          3 |      4297 |      1798 |            1 |      45.00 |        54058.05 |        .06 |  0.00 | R            | F            | Wed Feb 02 00:00:00 1994 | Tue Jan 04 00:00:00 1994 | Wed Feb 23 00:00:00 1994 | NONE                      | AIR        | ongside of the furiously brave acco
+          3 |     19036 |      6540 |            2 |      49.00 |        46796.47 |        .10 |  0.00 | R            | F            | Tue Nov 09 00:00:00 1993 | Mon Dec 20 00:00:00 1993 | Wed Nov 24 00:00:00 1993 | TAKE BACK RETURN          | RAIL       | 
+          3 |    128449 |      3474 |            3 |      27.00 |        39890.88 |        .06 |   .07 | A            | F            | Sun Jan 16 00:00:00 1994 | Mon Nov 22 00:00:00 1993 | Sun Jan 23 00:00:00 1994 | DELIVER IN PERSON         |            | 
+(10 rows)
+
+--
+--case 2: Vacuum full partitioned column store TABLE
+--
+DROP TABLE IF EXISTS LINEITEM;
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10)
+  , L_COMMENT      VARCHAR(44)
+)
+with (orientation = orc)
+distribute by hash(L_ORDERKEY)
+partition by range(L_ORDERKEY)
+(
+    partition p1 values less than (10),
+    partition p2 values less than (100),
+    partition p3 values less than (1000),
+    partition p4 values less than (10000),
+    partition p5 values less than (100000),
+    partition p6 values less than (1000000),
+    partition p7 values less than (10000000),
+    partition p8 values less than (maxvalue)
+);
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_cstore.data' delimiter '|';
+SELECT * FROM LINEITEM ORDER BY L_ORDERKEY, L_PARTKEY, L_SUPPKEY LIMIT 10;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus |        l_shipdate        |       l_commitdate       |      l_receiptdate       |      l_shipinstruct       | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+--------------------------+--------------------------+--------------------------+---------------------------+------------+-------------------------------------
+          1 |      2132 |      4633 |            4 |      28.00 |        28955.64 |        .09 |   .06 | N            | O            | Sun Apr 21 00:00:00 1996 | Sat Mar 30 00:00:00 1996 | Thu May 16 00:00:00 1996 | NONE                      | AIR        | lites. fluffily even de
+          1 |     15635 |       638 |            6 |      32.00 |        49620.16 |        .07 |   .02 | N            | O            | Tue Jan 30 00:00:00 1996 | Wed Feb 07 00:00:00 1996 | Sat Feb 03 00:00:00 1996 | DELIVER IN PERSON         | MAIL       | arefully slyly ex
+          1 |     24027 |      1534 |            5 |      24.00 |        22824.48 |        .10 |   .04 | N            | O            | Sat Mar 30 00:00:00 1996 | Thu Mar 14 00:00:00 1996 | Mon Apr 01 00:00:00 1996 | NONE                      | FOB        |  pending foxes. slyly re
+          1 |     63700 |      3701 |            3 |       8.00 |        13309.60 |        .10 |   .02 | N            | O            | Mon Jan 29 00:00:00 1996 | Tue Mar 05 00:00:00 1996 | Wed Jan 31 00:00:00 1996 | TAKE BACK RETURN          | REG AIR    | riously. regular, express dep
+          1 |     67310 |      7311 |            2 |      36.00 |        45983.16 |        .09 |   .06 | N            | O            | Fri Apr 12 00:00:00 1996 | Wed Feb 28 00:00:00 1996 | Sat Apr 20 00:00:00 1996 | TAKE BACK RETURN          | MAIL       | ly final dependencies: slyly bold 
+          1 |    155190 |      7706 |            1 |      17.00 |        21168.23 |        .04 |   .02 | N            | O            | Wed Mar 13 00:00:00 1996 | Mon Feb 12 00:00:00 1996 | Fri Mar 22 00:00:00 1996 | DELIVER IN PERSON         | TRUCK      | egular courts above the
+          2 |    106170 |      1191 |            1 |      38.00 |        44694.46 |       0.00 |   .05 | N            | O            | Tue Jan 28 00:00:00 1997 | Tue Jan 14 00:00:00 1997 | Sun Feb 02 00:00:00 1997 | TAKE BACK RETURN          | RAIL       | ven requests. deposits breach a
+          3 |      4297 |      1798 |            1 |      45.00 |        54058.05 |        .06 |  0.00 | R            | F            | Wed Feb 02 00:00:00 1994 | Tue Jan 04 00:00:00 1994 | Wed Feb 23 00:00:00 1994 | NONE                      | AIR        | ongside of the furiously brave acco
+          3 |     19036 |      6540 |            2 |      49.00 |        46796.47 |        .10 |  0.00 | R            | F            | Tue Nov 09 00:00:00 1993 | Mon Dec 20 00:00:00 1993 | Wed Nov 24 00:00:00 1993 | TAKE BACK RETURN          | RAIL       | 
+          3 |    128449 |      3474 |            3 |      27.00 |        39890.88 |        .06 |   .07 | A            | F            | Sun Jan 16 00:00:00 1994 | Mon Nov 22 00:00:00 1993 | Sun Jan 23 00:00:00 1994 | DELIVER IN PERSON         |            | 
+(10 rows)
+
+VACUUM FULL LINEITEM;
+SELECT * FROM LINEITEM ORDER BY L_ORDERKEY, L_PARTKEY, L_SUPPKEY LIMIT 10;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus |        l_shipdate        |       l_commitdate       |      l_receiptdate       |      l_shipinstruct       | l_shipmode |              l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+--------------------------+--------------------------+--------------------------+---------------------------+------------+-------------------------------------
+          1 |      2132 |      4633 |            4 |      28.00 |        28955.64 |        .09 |   .06 | N            | O            | Sun Apr 21 00:00:00 1996 | Sat Mar 30 00:00:00 1996 | Thu May 16 00:00:00 1996 | NONE                      | AIR        | lites. fluffily even de
+          1 |     15635 |       638 |            6 |      32.00 |        49620.16 |        .07 |   .02 | N            | O            | Tue Jan 30 00:00:00 1996 | Wed Feb 07 00:00:00 1996 | Sat Feb 03 00:00:00 1996 | DELIVER IN PERSON         | MAIL       | arefully slyly ex
+          1 |     24027 |      1534 |            5 |      24.00 |        22824.48 |        .10 |   .04 | N            | O            | Sat Mar 30 00:00:00 1996 | Thu Mar 14 00:00:00 1996 | Mon Apr 01 00:00:00 1996 | NONE                      | FOB        |  pending foxes. slyly re
+          1 |     63700 |      3701 |            3 |       8.00 |        13309.60 |        .10 |   .02 | N            | O            | Mon Jan 29 00:00:00 1996 | Tue Mar 05 00:00:00 1996 | Wed Jan 31 00:00:00 1996 | TAKE BACK RETURN          | REG AIR    | riously. regular, express dep
+          1 |     67310 |      7311 |            2 |      36.00 |        45983.16 |        .09 |   .06 | N            | O            | Fri Apr 12 00:00:00 1996 | Wed Feb 28 00:00:00 1996 | Sat Apr 20 00:00:00 1996 | TAKE BACK RETURN          | MAIL       | ly final dependencies: slyly bold 
+          1 |    155190 |      7706 |            1 |      17.00 |        21168.23 |        .04 |   .02 | N            | O            | Wed Mar 13 00:00:00 1996 | Mon Feb 12 00:00:00 1996 | Fri Mar 22 00:00:00 1996 | DELIVER IN PERSON         | TRUCK      | egular courts above the
+          2 |    106170 |      1191 |            1 |      38.00 |        44694.46 |       0.00 |   .05 | N            | O            | Tue Jan 28 00:00:00 1997 | Tue Jan 14 00:00:00 1997 | Sun Feb 02 00:00:00 1997 | TAKE BACK RETURN          | RAIL       | ven requests. deposits breach a
+          3 |      4297 |      1798 |            1 |      45.00 |        54058.05 |        .06 |  0.00 | R            | F            | Wed Feb 02 00:00:00 1994 | Tue Jan 04 00:00:00 1994 | Wed Feb 23 00:00:00 1994 | NONE                      | AIR        | ongside of the furiously brave acco
+          3 |     19036 |      6540 |            2 |      49.00 |        46796.47 |        .10 |  0.00 | R            | F            | Tue Nov 09 00:00:00 1993 | Mon Dec 20 00:00:00 1993 | Wed Nov 24 00:00:00 1993 | TAKE BACK RETURN          | RAIL       | 
+          3 |    128449 |      3474 |            3 |      27.00 |        39890.88 |        .06 |   .07 | A            | F            | Sun Jan 16 00:00:00 1994 | Mon Nov 22 00:00:00 1993 | Sun Jan 23 00:00:00 1994 | DELIVER IN PERSON         |            | 
+(10 rows)
+
+DROP TABLE LINEITEM;
+--
+-- case3:
+--
+create table coltbl1(a int,b text) with(orientation = orc) tablespace hdfs_ts;
+insert into coltbl1 values(generate_series(1,1000),'asdf'||generate_series(1,1000));
+insert into coltbl1 values(generate_series(11,454),'97');
+select count(*) from coltbl1;
+ count 
+-------
+  1444
+(1 row)
+
+create table coltbl2(a int,b text) with(orientation = orc) tablespace hdfs_ts;
+insert into coltbl2 select * from coltbl1;
+insert into coltbl2 select * from coltbl1;
+insert into coltbl2 select * from coltbl1;
+insert into coltbl2 select * from coltbl1;
+insert into coltbl2 select * from coltbl1 where a < 45;
+delete from coltbl2;
+delete from coltbl2;
+delete from coltbl2;
+delete from coltbl2;
+select count(*) from coltbl2;
+ count 
+-------
+     0
+(1 row)
+
+insert into coltbl2 select * from coltbl1;
+insert into coltbl2 select * from coltbl1;
+insert into coltbl2 select * from coltbl1 where a > 234;
+select count(*) from coltbl2;
+ count 
+-------
+  3874
+(1 row)
+
+vacuum full coltbl2;
+select count(*) from coltbl2;
+ count 
+-------
+  3874
+(1 row)
+
+drop table coltbl1;
+drop table coltbl2;
+--
+--case: skip CSTORE.XXXXX relations when VACUUM FULL DATABASE;
+--
+CREATE DATABASE cstore_vacuum_full_db;
+\c cstore_vacuum_full_db
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10)
+  , L_COMMENT      VARCHAR(44)
+)
+with (orientation = orc)
+distribute by hash(L_ORDERKEY)
+partition by range(L_ORDERKEY)
+(
+    partition p1 values less than (10),
+    partition p2 values less than (100),
+    partition p3 values less than (1000),
+    partition p4 values less than (10000),
+    partition p5 values less than (100000),
+    partition p6 values less than (1000000),
+    partition p7 values less than (10000000),
+    partition p8 values less than (maxvalue)
+);
+CREATE FUNCTION check_xmin_xmax(tblname text) RETURNS integer AS $$
+DECLARE
+     parentOid integer;
+	 partOid   integer;
+	 xmin1     integer;
+	 xmax1     integer;
+	 xmin2     integer;
+	 xmax2     integer;
+BEGIN
+	 SELECT INTO parentOid oid from pg_class where relname = $1;
+	 FOR partOid IN select oid from pg_partition where parentid = parentOid and relcudescrelid != 0 LOOP
+		SELECT INTO xmin1 xmin from pg_partition where oid = partOid;
+		SELECT INTO xmin2 xmin FROM pg_class where oid = (select relcudescrelid from pg_partition where oid =  partOid);
+		IF xmin1 = xmin2 THEN
+			SELECT INTO xmin2 xmin FROM pg_class where oid = (select reldeltarelid from pg_partition where oid =  partOid);
+			IF xmin1 <> xmin2 THEN
+				RETURN 0;
+			END IF;
+		ELSE
+			RETURN 0;
+		END IF;
+
+		SELECT INTO xmax1 xmax from pg_partition where oid = partOid;
+		SELECT INTO xmax2 xmax FROM pg_class where oid = (select relcudescrelid from pg_partition where oid =  partOid);
+		IF xmax1 = xmax2 THEN
+			SELECT INTO xmax2 xmax FROM pg_class where oid = (select reldeltarelid from pg_partition where oid =  partOid);
+			IF xmax1 <> xmax2 THEN
+				RETURN 0;
+			END IF;
+		ELSE
+			RETURN 0;
+		END IF;
+	 END LOOP;
+     RETURN 1;
+END $$ LANGUAGE plpgsql;
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_cstore.data' delimiter '|';
+VACUUM FULL LINEITEM;
+EXECUTE DIRECT ON ( datanode1 ) ' SELECT check_xmin_xmax(CAST (varchar ''lineitem'' AS text)) ';
+ check_xmin_xmax 
+-----------------
+               1
+(1 row)
+
+EXECUTE DIRECT ON ( datanode2 ) ' SELECT check_xmin_xmax(CAST (varchar ''lineitem'' AS text)) ';
+ check_xmin_xmax 
+-----------------
+               1
+(1 row)
+
+VACUUM FULL;
+EXECUTE DIRECT ON ( datanode1 ) ' SELECT check_xmin_xmax(CAST (varchar ''lineitem'' AS text)) ';
+ check_xmin_xmax 
+-----------------
+               1
+(1 row)
+
+EXECUTE DIRECT ON ( datanode2 ) ' SELECT check_xmin_xmax(CAST (varchar ''lineitem'' AS text)) ';
+ check_xmin_xmax 
+-----------------
+               1
+(1 row)
+
+DROP TABLE LINEITEM;
+\c regression
+-- fix bug: table desc
+CREATE FOREIGN TABLE hw_ferrtbl_desc(id integer, name text, memo text, num float) SERVER gsmpp_server OPTIONS ("location" '@abs_srcdir@/test.csv', "format" 'csv', "mode" 'private') with hw_ferrtbl;
+\d+ hw_ferrtbl
+                                Table "public.hw_ferrtbl"
+  Column   |           Type           | Modifiers | Storage  | Stats target | Description 
+-----------+--------------------------+-----------+----------+--------------+-------------
+ nodeid    | integer                  |           | plain    |              | 
+ begintime | timestamp with time zone |           | plain    |              | 
+ filename  | character varying        |           | extended |              | 
+ rownum    | bigint                   |           | plain    |              | 
+ rawrecord | text                     |           | extended |              | 
+ detail    | text                     |           | extended |              | 
+Has OIDs: no
+Distribute By: ROUND ROBIN
+Location Nodes: ALL DATANODES
+Options: orientation=row, internal_mask=33029
+
+DROP FOREIGN TABLE hw_ferrtbl_desc;
+-- check lock leak about vacuum full ctore relation
+CREATE TABLE session_lock_leak1 (lock_num int, sessionid number);
+CREATE TABLE session_lock_leak2 (lock_num int, sessionid number);
+create table vacuum_full_lock_leak(c1 int2, c2 int4) with (orientation = orc) tablespace hdfs_ts;
+INSERT INTO vacuum_full_lock_leak VALUES(0,1), (1, 2);
+INSERT INTO session_lock_leak1 select count(1),sessionid from pg_locks group by sessionid; -- CN
+vacuum full vacuum_full_lock_leak;
+INSERT INTO session_lock_leak2 select count(1),sessionid from pg_locks group by sessionid; -- CN
+select t1.lock_num = t2.lock_num as release_all_leak from session_lock_leak2 t2, session_lock_leak1 t1 where t1.sessionid = t2.sessionid;
+ release_all_leak 
+------------------
+ t
+(1 row)
+
+DROP TABLE session_lock_leak1, session_lock_leak2, vacuum_full_lock_leak;
+-- check relation cache refcount leak
+CREATE TABLE colstore_relcache_leak( a int, b int ) with ( orientation = orc) tablespace hdfs_ts;
+CREATE INDEX colstore_index1 ON colstore_relcache_leak(b);
+VACUUM colstore_index1;
+WARNING:  skipping "colstore_index1" --- cannot vacuum non-tables or special system tables
+DROP TABLE colstore_relcache_leak;
+\! @abs_bindir@/gs_guc reload -Z coordinator -c "autovacuum = on" -D @cndata@/@coordinator1@
+gs_guc reload: autovacuum=on
+server signaled
+-- vacuum full bug fix
+CREATE TABLE lost_cudesc_index(w_id int, w_ytd numeric(12,2),sum_d_ytd numeric) with (orientation = orc) tablespace hdfs_ts;
+CREATE TABLE sz_lost_cudesc_index(tblsz bigint);
+INSERT INTO sz_lost_cudesc_index SELECT pg_table_size('lost_cudesc_index');
+VACUUM FULL lost_cudesc_index;
+SELECT pg_table_size('lost_cudesc_index') = (SELECT tblsz from sz_lost_cudesc_index);
+ ?column? 
+----------
+ t
+(1 row)
+
+DROP TABLE sz_lost_cudesc_index;
+DROP TABLE lost_cudesc_index;

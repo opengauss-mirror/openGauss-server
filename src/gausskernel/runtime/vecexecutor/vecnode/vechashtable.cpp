@@ -21,6 +21,7 @@
  *
  * ---------------------------------------------------------------------------------------
  */
+#include "access/tableam.h"
 #include "vecexecutor/vechashtable.h"
 #include "vecexecutor/vecexecutor.h"
 #include "executor/executor.h"
@@ -658,7 +659,7 @@ hashFileSource::hashFileSource(VectorBatch* batch, MemoryContext context, int ce
         m_tupleSize = 100;
         m_tuple = (MinimalTuple)palloc(m_tupleSize);
         m_tuple->t_len = m_tupleSize;
-        m_hashTupleSlot = MakeTupleTableSlot();
+        m_hashTupleSlot = MakeTupleTableSlot(true, tuple_desc->tdTableAmType);
         ExecSetSlotDescriptor(m_hashTupleSlot, tuple_desc);
     }
 
@@ -674,6 +675,7 @@ hashFileSource::hashFileSource(TupleTableSlot* hash_slot, int file_num)
     m_context = NULL;
     if (m_hashTupleSlot->tts_tupleDescriptor == NULL) {
         ExecSetSlotDescriptor(m_hashTupleSlot, hash_slot->tts_tupleDescriptor);
+        m_hashTupleSlot->tts_tupslotTableAm = hash_slot->tts_tupleDescriptor->tdTableAmType;
     }
 
     m_cols = 0;
@@ -1199,8 +1201,9 @@ size_t hashFileSource::writeCellCompress(hashCell* cell, int file_idx)
 
     /* restore the len */
     m_tuple->t_len = m_tupleSize;
-    m_tuple = heap_form_minimal_tuple(m_hashTupleSlot->tts_tupleDescriptor, m_values, m_isnull, m_tuple);
-    m_tupleSize = m_tuple->t_len > m_tupleSize ? m_tuple->t_len : m_tupleSize;
+
+    m_tuple = tableam_tops_form_minimal_tuple(m_hashTupleSlot->tts_tupleDescriptor, m_values, m_isnull, m_tuple, HEAP_TUPLE);
+    m_tupleSize = (m_tuple->t_len > m_tupleSize) ? m_tuple->t_len : m_tupleSize;
     writeTupCompress<true>(m_tuple, file_idx);
 
     /* the actual size without transform or compress */
@@ -1282,8 +1285,8 @@ size_t hashFileSource::writeBatchCompress(VectorBatch* batch, int idx, int file_
 
     /* restore the len */
     m_tuple->t_len = m_tupleSize;
-    m_tuple = heap_form_minimal_tuple(m_hashTupleSlot->tts_tupleDescriptor, m_values, m_isnull, m_tuple);
-    m_tupleSize = m_tuple->t_len > m_tupleSize ? m_tuple->t_len : m_tupleSize;
+	m_tuple = tableam_tops_form_minimal_tuple(m_hashTupleSlot->tts_tupleDescriptor, m_values, m_isnull, m_tuple, HEAP_TUPLE);
+    m_tupleSize = (m_tuple->t_len > m_tupleSize) ? m_tuple->t_len : m_tupleSize;
 
     writeTupCompress<true>(m_tuple, file_idx);
 
@@ -1446,7 +1449,10 @@ VectorBatch* hashFileSource::getBatchCompress()
             break;
         }
 
-        slot_getallattrs(slot);
+        /* Get the Table Accessor Method*/
+        Assert(slot != NULL && slot->tts_tupleDescriptor != NULL);
+
+        tableam_tslot_getallattrs(slot);
         Assert(slot->tts_nvalid == m_cols);
 
         /* Pack one slot into vectorbatch */
@@ -1571,7 +1577,10 @@ hashCell* hashFileSource::getCellCompress()
             break;
         }
 
-        slot_getallattrs(slot);
+        /*Get the Table Accessor Method*/
+        Assert(slot != NULL && slot->tts_tupleDescriptor != NULL);
+
+        tableam_tslot_getallattrs(slot);
         Assert(slot->tts_nvalid == m_cols);
 
         for (i = 0; i < m_cols; i++) {

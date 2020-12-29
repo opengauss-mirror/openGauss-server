@@ -1,0 +1,22 @@
+--
+-- OBS BULK LOAD PARALLEL TEST 2
+--
+----
+--3. Load data in normal mode and data with header line
+----
+CREATE FOREIGN TABLE EXT_HEADER (name text, time date)
+SERVER gsmpp_server OPTIONS(location 'gsobs://@obshostname@/@obsbucket@/obscheck/header.txt', 
+	format 'text',
+    DELIMITER ';',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@');
+SELECT COUNT(*) FROM EXT_HEADER;
+ count 
+-------
+     5
+(1 row)
+
+DROP FOREIGN TABLE EXT_HEADER;

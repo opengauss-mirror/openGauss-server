@@ -41,8 +41,9 @@ ifeq ($(enable_pldebugger), yes)
 endif
 
 ifeq ($(enable_multiple_nodes), yes)
-SUBDIRS +=  ../distribute/kernel ../distribute/kernel/extension/roach_api ../distribute/kernel/extension/dimsearch/main \
-	../distribute/kernel/extension/tsdb
+SUBDIRS += $(top_builddir)/contrib/carbondata \
+	../distribute/kernel ../distribute/kernel/extension/roach_api ../distribute/kernel/extension/dimsearch/main \
+	../distribute/kernel/extension/tsdb ../distribute/kernel/extension/streaming
 
 ifeq ($(enable_qunit), yes)
 SUBDIRS += $(top_builddir)/src/distribute/test/QUnit/test/wrapper
@@ -116,6 +117,13 @@ ifeq ($(SUPPORT_HOTPATCH), yes)
     LIBS += -ldoprapatch
     LDFLAGS += -L$(LIBHOTPATCH_LIB_PATH)
     CXXFLAGS += -I$(LIBHOTPATCH_INCLUDE_PATH)
+    ifeq ($(PLAT_FORM_STR), euleros2.0_sp8_aarch64)
+        ifeq ($(enable_debug), no)
+            HOTPATCH_ATOMIC_LDS = -Wl,-T$(LIBHOTPATCH_TOOL_PATH)/atomic.lds
+        else
+            HOTPATCH_ATOMIC_LDS = -Wl,-T$(LIBHOTPATCH_TOOL_PATH)/atomic_debug.lds
+        endif
+    endif
     CRC_LOG=crc.log
     CRC_CHECK=$(LIBHOTPATCH_TOOL_PATH)/makepatch -CHECK -CRC gaussdb > $(CRC_LOG)
 endif
@@ -130,14 +138,14 @@ LIBS += -llz4
 ############################################################################
 LIBS += -lcjson
 
+##########################################################################
+# append hll for compression: libhll.so
+############################################################################
+LIBS += -lhll
+
 #############################################################################
 # PLJava component
 ###############################################################################
-ifeq ($(with_3rd), NONE)
-PLJAVA_HOME = $(top_builddir)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
-else
-PLJAVA_HOME = $(with_3rd)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
-endif
 PLJAVA_LIB_PATH = $(PLJAVA_HOME)/lib
 PLJAVA_JAR_PATH = $(PLJAVA_HOME)/java
 LIBPLJAVA = libpljava.so
@@ -146,9 +154,11 @@ JARPLJAVA = pljava.jar
 ##############################################################################
 # MOT component
 ##############################################################################
-LIBS += -latomic -lmot_engine
-LDFLAGS += -L$(top_builddir)/src/gausskernel/storage/mot/core/bin
-CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
+ifeq ($(enable_mot), yes)
+  LIBS += -latomic -lmot_engine
+  LDFLAGS += -L$(top_builddir)/src/gausskernel/storage/mot/core/bin
+  CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
+endif
 
 ##############################################################################
 # jemalloc component
@@ -171,23 +181,27 @@ LIBCGROUP=libcgroup.so
 ############################################################################
 # link orc for gaussdb
 ############################################################################
-ORC_LIB_NAME=
-ifeq ($(enable_llt), yes)
- ORC_LIB_NAME=orc_pic
-else
- ifeq ($(enable_ut), yes)
-  ORC_LIB_NAME=orc_pic
- else
-  ORC_LIB_NAME=orc	
- endif
-endif
-LIBS += -l${ORC_LIB_NAME}
+LIBS += -lorc
 
 ############################################################################
 # link parquet for gaussdb
 ############################################################################
 LDFLAGS += -L$(LIBPARQUET_LIB_PATH)
 LIBS += -lparquet
+
+############################################################################
+# link carbondata for gaussdb
+############################################################################
+ifeq ($(enable_multiple_nodes), yes)
+LIBS += -lcarbondata
+LDFLAGS += -L$(LIBCARBONDATA_LIB_PATH)
+endif
+
+############################################################################
+# link thrift for gaussdb
+############################################################################
+LDFLAGS += -L$(LIBTHRIFT_LIB_PATH)
+LIBS += -lthrift
 
 ############################################################################
 # link snappy for gaussdb
@@ -204,6 +218,12 @@ else
 endif
 LIBS += -l${SNAPPY_LIB_NAME}
 
+############################################################################
+# link zstd for gaussdb
+############################################################################
+LDFLAGS += -L$(ZSTD_LIB_PATH)
+LIBS += -lzstd
+
 ################################################################################
 # protobuf
 ################################################################################
@@ -214,9 +234,10 @@ else
  ifeq ($(enable_ut), yes)
   PROTOBUF_LIB_NAME=protobuf_pic
  else
-  PROTOBUF_LIB_NAME=protobuf
+  PROTOBUF_LIB_NAME=protobuf	
  endif
 endif
+
 LIBS += -l${PROTOBUF_LIB_NAME}
 
 ##################################################################################
@@ -267,8 +288,9 @@ LIBS += -laio
 ################################################################################
 # grpc
 ################################################################################
-LIBS += -lgrpc++ -lgrpc
-
+LIBS += -lgrpc++ -lgpr -lgrpc -lupb -labsl_str_format_internal -labsl_strings -labsl_spinlock_wait 
+LIBS += -labsl_throw_delegate -labsl_strings_internal -labsl_base -labsl_dynamic_annotations -labsl_int128 \
+    -labsl_bad_optional_access -labsl_raw_logging_internal -labsl_log_severity -laddress_sorting
 ################################################################################
 # for 3rd support
 ################################################################################
@@ -277,17 +299,22 @@ LDFLAGS += -L$(LIBLLVM_LIB_PATH) -L$(LIBTINFO_LIB_PATH) \
     -L$(LIBCGROUP_LIB_PATH) -L$(LIBORC_LIB_PATH) \
     -L$(SNAPPY_LIB_PATH) -L$(PROTOBUF_LIB_PATH) \
     -L$(KERBEROS_LIB_PATH) -L$(LIBSTD_LIB_PATH) -L$(BOOST_LIB_PATH) \
-    -L$(LIBXML_LIB_PATH) -L$(LIBOPENSSL_LIB_PATH) -L$(GRPC_LIB_PATH)
+    -L$(LIBXML_LIB_PATH) -L$(LIBOPENSSL_LIB_PATH) -L$(GRPC_LIB_PATH) \
+    -L$(LIBCARBONDATA_LIB_PATH)
 
-# append lz4 for compression: lz4
-LDFLAGS += -L$(LZ4_LIB_PATH)
-CXXFLAGS+= -I$(LZ4_INCLUDE_PATH)
+  # append lz4 for compression: lz4
+  LDFLAGS += -L$(LZ4_LIB_PATH)
+  CXXFLAGS+= -I$(LZ4_INCLUDE_PATH)
 
-# append cjson for json parser in c: cjson
-LDFLAGS += -L$(CJSON_LIB_PATH)
-CXXFLAGS+= -I$(CJSON_INCLUDE_PATH)
+  # append cjson for json parser in c: cjson
+  LDFLAGS += -L$(CJSON_LIB_PATH)
+  CXXFLAGS+= -I$(CJSON_INCLUDE_PATH)
 
-CXXFLAGS+= -I$(LIBOBS_INCLUDE_PATH) 
+  # append hll for compression: hll
+  LDFLAGS += -L$(HLL_LIB_PATH)
+  CXXFLAGS+= -I$(HLL_INCLUDE_PATH)
+
+  CXXFLAGS+= -I$(LIBOBS_INCLUDE_PATH) 
 
 ifeq ($(enable_multiple_nodes), yes)
   LDFLAGS += -L$(top_builddir)/src/distribute/gtm/libpg
@@ -300,18 +327,21 @@ endif
 ##########################################################################
 
 all: submake-libpgport submake-schemapg libgstrace submake-libalarmclient gaussdb $(POSTGRES_IMP)
+ifeq ($(enable_multiple_nodes), yes)
+all: submake-libcarbondata
+endif
 
 ifneq ($(PORTNAME), cygwin)
 ifneq ($(PORTNAME), win32)
 ifneq ($(PORTNAME), aix)
 
-gaussdb: $(OBJS)
-	$(CC) $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) $(export_dynamic) $(call expand_subsys,$^) $(LIBS) $(LLVMLIBS) -o $@
+gaussdb: $(OBJS) |
+	$(CC) $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) $(export_dynamic) $(call expand_subsys,$^) $(LIBS) $(LLVMLIBS) $(HOTPATCH_ATOMIC_LDS) -o $@
 	$(CRC_CHECK)
 
 db: $(OBJS)
 	$(CC) -fPIC -shared $(CXXFLAGS) $(LDFLAGS) $(LDFLAGS_EX) $(export_dynamic) $(call expand_subsys,$^) $(LIBS) $(LLVMLIBS) -o libdb.so
-	mv libdb.so $(top_builddir)/src/test/ut/lib
+	mv libdb.so $(top_builddir)/src/distribute/test/ut/lib
 
 endif
 endif
@@ -375,9 +405,14 @@ endif # aix
 libgstrace:
 	$(MAKE) -C $(top_builddir)/src/lib/gstrace
 
+ifeq ($(enable_multiple_nodes), yes)
 # Update the commonly used headers before building the subdirectories
+$(SUBDIRS:%=%-recursive): $(top_builddir)/src/include/parser/gram.hpp $(top_builddir)/src/include/catalog/schemapg.h $(top_builddir)/src/common/backend/utils/fmgroids.h $(top_builddir)/src/common/backend/utils/pg_builtin_proc.h $(top_builddir)/src/include/utils/errcodes.h $(top_builddir)/src/include/utils/probes.h $(top_builddir)/src/include/parser/hint_gram.hpp $(top_builddir)/src/include/replication/repl_gram.hpp $(top_builddir)/src/include/replication/syncrep_gram.hpp $(top_builddir)/src/include/storage/lwlocknames.h $(top_builddir)/contrib/carbondata/libcarbondata.a
+
+else
 $(SUBDIRS:%=%-recursive): $(top_builddir)/src/include/parser/gram.hpp $(top_builddir)/src/include/catalog/schemapg.h $(top_builddir)/src/common/backend/utils/fmgroids.h $(top_builddir)/src/common/backend/utils/pg_builtin_proc.h $(top_builddir)/src/include/utils/errcodes.h $(top_builddir)/src/include/utils/probes.h $(top_builddir)/src/include/parser/hint_gram.hpp $(top_builddir)/src/include/replication/repl_gram.hpp $(top_builddir)/src/include/replication/syncrep_gram.hpp $(top_builddir)/src/include/storage/lwlocknames.h
 
+endif
 
 # run this unconditionally to avoid needing to know its dependencies here:
 submake-schemapg: | submake-fmgroids
@@ -392,7 +427,15 @@ submake-lwlocknames: $(top_builddir)/src/include/storage/lwlocknames.h
 # libplgsql.a needs a convenient way to force fmgroids.h to get built
 submake-fmgroids: $(top_builddir)/src/common/backend/utils/fmgroids.h $(top_builddir)/src/include/utils/fmgroids.h
 
-.PHONY: submake-schemapg submake-errcodes 
+# run this to build pljava
+submake-libpljava: | submake-fmgroids
+	$(top_builddir)/third_party/dependency/pljava/build.sh -m only_so
+
+# run this to build carbondata-sdk
+$(top_builddir)/contrib/carbondata/libcarbondata.a: 
+	$(MAKE) -C $(top_builddir)/contrib/carbondata all
+
+.PHONY: submake-schemapg submake-errcodes
 
 ../common/backend/catalog/schemapg.h: | submake-schemapg
 
@@ -406,7 +449,7 @@ submake-libplpgsql: | submake-fmgroids
 
 # Those are rules to create dependent GTM libraries automatically
 $(top_builddir)/src/common/interfaces/libpq/libpq.a:
-	$(MAKE) -C $(top_builddir)/src/common/interfaces/libpq libpq.a
+	$(MAKE) -C $(top_builddir)/src/common/interfaces/libpq
 
 ifeq ($(enable_multiple_nodes), yes)
 $(top_builddir)/src/distribute/gtm/common/libgtmcommon.a:
@@ -552,48 +595,50 @@ install: all installdirs install-bin
 	$(MAKE) -C runtime/codegen install-data
 	$(MAKE) -C ../common/backend/tsearch install-data
 	$(MAKE) -C storage/bulkload install-data
-ifeq ($(enable_multiple_nodes), yes)
 	$(MAKE) -C $(top_builddir)/contrib/file_fdw install
 	$(MAKE) -C $(top_builddir)/contrib/hdfs_fdw install
+	$(MAKE) -C $(top_builddir)/contrib/log_fdw install
+ifeq ($(enable_multiple_nodes), yes)
 	$(MAKE) -C ../distribute/kernel/extension/gauss_connector install
 	$(MAKE) -C ../distribute/kernel/extension/roach_api install
 	$(MAKE) -C ../distribute/kernel/extension/dimsearch install
 	$(MAKE) -C ../distribute/kernel/extension/tsdb install
-	$(MAKE) -C $(top_builddir)/contrib/pg_upgrade install
+	$(MAKE) -C ../distribute/kernel/extension/streaming install
 	$(MAKE) -C $(top_builddir)/contrib/pg_upgrade_support install
 	$(MAKE) -C $(top_builddir)/contrib/gc_fdw install
-	$(MAKE) -C $(top_builddir)/contrib/log_fdw install
 
 	# This script is needed by postgis
 	$(INSTALL_DATA) $(srcdir)/../../contrib/postgis/PostGIS_install.sh '$(DESTDIR)$(includedir_server)/../../../share/postgis/PostGIS_install.sh'
 	$(INSTALL_DATA) $(srcdir)/../../contrib/postgis/extension_dependency.h '$(DESTDIR)$(includedir_server)'
 endif
+ifeq ($(enable_mot), yes)
+	$(MAKE) -C $(top_builddir)/src/gausskernel/storage/mot/fdw_adapter/src install
+endif
 	$(MAKE) -C $(top_builddir)/contrib/test_decoding install
 	$(MAKE) -C $(top_builddir)/contrib/mppdb_decoding install
-	$(MAKE) -C $(top_builddir)/src/gausskernel/storage/mot/fdw_adapter/src install
+	$(MAKE) -C $(top_builddir)/contrib/security_plugin install
 	$(INSTALL_DATA) $(srcdir)/../common/backend/libpq/pg_hba.conf.sample '$(DESTDIR)$(datadir)/pg_hba.conf.sample'
 	$(INSTALL_DATA) $(srcdir)/../common/backend/libpq/pg_ident.conf.sample '$(DESTDIR)$(datadir)/pg_ident.conf.sample'
 	$(INSTALL_DATA) $(srcdir)/../common/backend/utils/misc/postgresql.conf.sample '$(DESTDIR)$(datadir)/postgresql.conf.sample'
 	$(INSTALL_DATA) $(srcdir)/storage/access/transam/recovery.conf.sample '$(DESTDIR)$(datadir)/recovery.conf.sample'
-	$(INSTALL_DATA) $(srcdir)/../include/storage/mot/jit_def.h '$(DESTDIR)$(includedir_server)/storage/mot/jit_def.h'
 
 	cd $(KERBEROS_LIB_PATH) && tar -cpf - ./* | ( cd $(DESTDIR)$(libdir); tar -xpf -  )
 	mkdir -p '$(DESTDIR)$(libdir)/../temp/'
 	rm -f $(DESTDIR)$(libdir)/libpcre*
 	cp $(LIBOBS_LIB_PATH)/libpcre* '$(DESTDIR)$(libdir)/../temp/'
 	mv $(DESTDIR)$(libdir)/../temp/* '$(DESTDIR)$(libdir)/'
-	cp $(LIBOBS_LIB_PATH)/libsecurec* '$(DESTDIR)$(libdir)/'
+	cp $(SECUREDYNAMICLIB_HOME)/libsecurec* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/liblog4* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/libeSDK* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/libxml2* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/libcharset* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/libiconv* '$(DESTDIR)$(libdir)/'
-	cp $(LIBOBS_LIB_PATH)/preloadable_libiconv* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/OBS* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/libnghttp* '$(DESTDIR)$(libdir)/'
 	cp $(LIBPARQUET_LIB_PATH)/libparquet* '$(DESTDIR)$(libdir)/'
 	cp -d $(ZLIB_LIB_PATH)/libz* '$(DESTDIR)$(libdir)/'
 	cp -d $(LZ4_LIB_PATH)/liblz4* '$(DESTDIR)$(libdir)/'
+	cp -d $(HLL_LIB_PATH)/libhll* '$(DESTDIR)$(libdir)/'
 	cp -d $(CJSON_LIB_PATH)/libcjson* '$(DESTDIR)$(libdir)/'
 	cp $(GRPC_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 ifneq (, $(findstring __USE_NUMA, $(CFLAGS)))
@@ -602,28 +647,45 @@ endif
 ifeq ($(with_3rd), NONE)
 	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libstdc++.so.6 '$(DESTDIR)$(libdir)/'
 	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libgcc_s.so.1 '$(DESTDIR)$(libdir)/'
+ifeq ($(enable_mot), yes)
 	cp -d $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libatomic.so* '$(DESTDIR)$(libdir)/'
+endif
 ifeq ($(enable_thread_check), yes)
 	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so '$(DESTDIR)$(libdir)/'
 	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so.0 '$(DESTDIR)$(libdir)/'
 	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so.0.0.0 '$(DESTDIR)$(libdir)/'
 endif
+	cp $(top_builddir)/buildtools/server_key/* '$(DESTDIR)$(bindir)/'
 else
 	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libstdc++.so.6 '$(DESTDIR)$(libdir)/'
 	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libgcc_s.so.1 '$(DESTDIR)$(libdir)/'
+ifeq ($(enable_mot), yes)
 	cp -d $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libatomic.so* '$(DESTDIR)$(libdir)/'
+endif
 ifeq ($(enable_thread_check), yes)
 	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so '$(DESTDIR)$(libdir)/'
 	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so.0 '$(DESTDIR)$(libdir)/'
 	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so.0.0.0 '$(DESTDIR)$(libdir)/'
 endif
+	cp $(with_3rd)/buildtools/server_key/* '$(DESTDIR)$(bindir)/'
 endif
-	cp '$(LIBOPENSSL_SSL_PATH)/openssl_om.cnf' '$(DESTDIR)$(datadir)/../sslcert/om/openssl.cnf'
-	cp '$(LIBOPENSSL_SSL_PATH)/openssl_grpc.cnf' '$(DESTDIR)$(datadir)/../sslcert/grpc/openssl.cnf'
+	cp -r $(with_3rd)/platform/$(PLAT_FORM_STR)/openjdk8/jdk1.8.222/jre/* '$(DESTDIR)$(bindir)/../jre/'
+
+	cp $(PLJAVA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
+	cp $(PLJAVA_JAR_PATH)/$(JARPLJAVA) '$(DESTDIR)$(pkglibdir)/java/'
+	cp $(PLJAVA_HOME)/udstools.py '$(DESTDIR)$(datadir)/tmp/'
+
+	cp '$(top_builddir)/src/include/ssl/openssl_gsql.cnf' '$(DESTDIR)$(datadir)/../sslcert/gsql/openssl.cnf'
+	cp '$(top_builddir)/src/include/ssl/openssl_gsql.cnf' '$(DESTDIR)$(datadir)/../sslcert/gds/openssl.cnf'
+	cp '$(top_builddir)/src/include/ssl/openssl_grpc.cnf' '$(DESTDIR)$(datadir)/../sslcert/grpc/openssl.cnf'
+	cp '$(top_builddir)/src/include/ssl/openssl_om.cnf' '$(DESTDIR)$(datadir)/../sslcert/om/openssl.cnf'
+	cp '$(LIBOPENSSL_BIN_PATH)/openssl' '$(DESTDIR)$(bindir)/openssl'
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so' '$(DESTDIR)$(libdir)/libcurl.so'
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4' '$(DESTDIR)$(libdir)/libcurl.so.4'
 
 ifeq ($(PLAT_FORM_STR), euleros2.0_sp2_x86_64)
+	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
+else ifeq ($(PLAT_FORM_STR), euleros2.0_sp5_x86_64)
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
 else ifeq ($(PLAT_FORM_STR), euleros2.0_sp8_aarch64)
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
@@ -633,14 +695,8 @@ else ifeq ($(PLAT_FORM_STR), openeuler_x86_64)
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
 else ifeq ($(PLAT_FORM_STR), centos7.6_x86_64)
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
-else ifeq ($(PLAT_FORM_STR), asianux_x86_64)
-	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
-else ifeq ($(PLAT_FORM_STR), kylin_aarch64)
-	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
-else ifeq ($(PLAT_FORM_STR), neokylin_aarch64)
-	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
 else
-	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
+	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.5.0' '$(DESTDIR)$(libdir)/libcurl.so.4.5.0'
 endif
 
 	rm -rf '$(DESTDIR)$(libdir)/../temp'
@@ -662,12 +718,14 @@ ifeq (${host_cpu}, aarch64)
 	$(INSTALL_PROGRAM) ../bin/scripts/setArmOptimization$(X).sh '$(DESTDIR)$(bindir)/setArmOptimization$(X).sh'
 	$(INSTALL_PROGRAM) ../bin/scripts/bind_net_irq$(X).sh '$(DESTDIR)$(bindir)/bind_net_irq$(X).sh'
 endif
+	$(INSTALL_PROGRAM) '$(LZ4_BIN_PATH)/lz4' '$(DESTDIR)$(bindir)/lz4'
+
+	@rm -f '$(DESTDIR)$(bindir)/gs_encrypt$(X)'
+	ln -s gaussdb$(X) '$(DESTDIR)$(bindir)/gs_encrypt$(X)'
 
 ifeq ($(enable_multiple_nodes), yes)
 	@rm -f '$(DESTDIR)$(bindir)/gaussmaster$(X)'
-	@rm -f '$(DESTDIR)$(bindir)/gs_encrypt$(X)'
 	ln -s gaussdb$(X) '$(DESTDIR)$(bindir)/gaussmaster$(X)'
-	ln -s gaussdb$(X) '$(DESTDIR)$(bindir)/gs_encrypt$(X)'
 	$(INSTALL_PROGRAM) ../bin/scripts/drop_caches$(X).sh '$(DESTDIR)$(bindir)/drop_caches$(X).sh'
 	$(INSTALL_PROGRAM) ../bin/scripts/run_drop_cache$(X).sh '$(DESTDIR)$(bindir)/run_drop_cache$(X).sh'
 else
@@ -687,11 +745,16 @@ installdirs:
 	@if test -d '$(top_builddir)/src/common/backend/libpq/kerberos'; then cp -rf '$(top_builddir)/src/common/backend/libpq/kerberos'  '$(DESTDIR)$(bindir)/../etc/'; fi
 	$(MKDIR_P) '$(DESTDIR)$(llvmirdir)'
 	$(MKDIR_P) '$(DESTDIR)$(libdir)/postgresql/pg_plugin'
+	$(MKDIR_P) '$(DESTDIR)$(libdir)/postgresql/proc_srclib'
 	$(MKDIR_P) '$(DESTDIR)$(libdir)/libsimsearch'
 	$(MKDIR_P) '$(DESTDIR)$(pkglibdir)/java'
+	$(MKDIR_P) '$(DESTDIR)$(bindir)/../jre'
 	$(MKDIR_P) '$(DESTDIR)$(datadir)/tmp'
 	$(MKDIR_P) '$(DESTDIR)$(datadir)/../sslcert'
+	$(MKDIR_P) '$(DESTDIR)$(datadir)/../sslcert/gsql'
+	$(MKDIR_P) '$(DESTDIR)$(datadir)/../sslcert/etcd'
 	$(MKDIR_P) '$(DESTDIR)$(datadir)/../sslcert/grpc'
+	$(MKDIR_P) '$(DESTDIR)$(datadir)/../sslcert/gds'
 	$(MKDIR_P) '$(DESTDIR)$(datadir)/../sslcert/om'
 
 ifeq ($(PORTNAME), cygwin)
@@ -727,6 +790,7 @@ else
 endif
 	rm -f $(DESTDIR)$(libdir)/libcgroup*
 	rm -f $(DESTDIR)$(libdir)/libsimsearch/*
+	rm -f '$(DESTDIR)$(libdir)/$(LIBPLJAVA)' '$(DESTDIR)$(pkglibdir)/java/$(JARPLJAVA)'
 
 ifeq ($(MAKE_EXPORTS), true)
 	rm -f '$(DESTDIR)$(pkglibdir)/$(POSTGRES_IMP)'
@@ -752,15 +816,17 @@ ifeq ($(enable_multiple_nodes), yes)
 	$(MAKE) -C ../distribute/kernel/extension/gauss_connector uninstall
 	$(MAKE) -C ../distribute/kernel/extension/roach_api uninstall
 	$(MAKE) -C ../distribute/kernel/extension/dimsearch uninstall
-	$(MAKE) -C $(top_builddir)/contrib/pg_upgrade_support clean
 else
 	$(MAKE) -C $(top_builddir)/contrib/gc_fdw uninstall
 endif
-	$(MAKE) -C $(top_builddir)/contrib/log_fdw uninstall
+ifeq ($(enable_mot), yes)
 	$(MAKE) -C $(top_builddir)/src/gausskernel/storage/mot/fdw_adapter/src uninstall
-	$(MAKE) -C $(top_builddir)/contrib/pg_upgrade clean
+endif
+	$(MAKE) -C $(top_builddir)/contrib/log_fdw uninstall
+	$(MAKE) -C $(top_builddir)/contrib/pg_upgrade_support clean
 	$(MAKE) -C $(top_builddir)/contrib/test_decoding uninstall
 	$(MAKE) -C $(top_builddir)/contrib/mppdb_decoding uninstall
+	$(MAKE) -C $(top_builddir)/contrib/security_plugin uninstall
 	rm -f '$(DESTDIR)$(datadir)/pg_hba.conf.sample' \
 	      '$(DESTDIR)$(datadir)/pg_ident.conf.sample' \
 	      '$(DESTDIR)$(datadir)/postgresql.conf.sample' \
@@ -798,7 +864,6 @@ maintainer-clean: distclean
 	      bootstrap/bootscanner.cpp \
 	      ../common/backend/parser/gram.cpp \
 	      ../common/backend/parser/gram.hpp \
-	      ../common/backend/parser/hint_gram.cpp \
 	      ../common/backend/parser/hint_gram.hpp \
 	      ../common/backend/parser/scan.cpp \
 	      ../common/backend/catalog/schemapg.h \

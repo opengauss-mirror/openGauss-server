@@ -286,8 +286,6 @@ bool do_lo_list(void)
         return false;
     }
 
-    CHECK_TUPLE_NUM(res);
-
     myopt.topt.tuples_only = false;
     myopt.nullPrint = NULL;
     myopt.title = _("Large objects");

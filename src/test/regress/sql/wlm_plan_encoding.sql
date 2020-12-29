@@ -1,12 +1,3 @@
-/*
-################################################################################
-# TESTCASE NAME : wlm_plan_encoding1
-# COMPONENT(S)  : plan encoding
-# MODIFIED BY   : WHO            WHEN          COMMENT
-#               : -------------- ------------- ---------------------------------
-#               :                12-16-2019    created
-################################################################################
-*/
 -- 0. aiEngine
 -- 0.1 illegal ip
 select check_engine_status(' ',' ');
@@ -37,7 +28,6 @@ select create_wlm_operator_info(0);
 
 \c regression
 -- 1.2 run query
-explain (analyze on, costs off, verbose off)
 select
         l_returnflag,
         l_linestatus,
@@ -81,7 +71,6 @@ select create_wlm_operator_info(0);
 
 \c regression
 -- 2.2 run query
-explain (analyze on, costs off, verbose off)
 select
 	s_acctbal,
 	s_name,
@@ -149,7 +138,6 @@ select create_wlm_operator_info(0);
 
 \c regression
 -- 3.2 run query
-explain (analyze on, costs off, verbose off)
 select
 	l_orderkey,
 	sum(l_extendedprice * (1 - l_discount)) as revenue,
@@ -196,7 +184,6 @@ select create_wlm_operator_info(0);
 
 \c regression
 -- 4.2 run query
-explain (analyze on, costs off, verbose off)
 select
 	o_orderpriority,
 	count(*) as order_count

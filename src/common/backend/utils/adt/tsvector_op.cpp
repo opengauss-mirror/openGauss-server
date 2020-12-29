@@ -36,9 +36,8 @@ typedef struct {
 } CHKVAL;
 
 typedef struct StatEntry {
-    /* zero indicates that we already was here
-     * while walking throug the tree */
-    uint32 ndoc;
+    uint32 ndoc; /* zero indicates that we already was here
+                  * while walking throug the tree */
     uint32 nentry;
     struct StatEntry* left;
     struct StatEntry* right;
@@ -72,13 +71,11 @@ static Datum tsvector_update_trigger(PG_FUNCTION_ARGS, bool config_column);
  */
 static bool is_expected_type(Oid typid, Oid expected_type)
 {
-    if (typid == expected_type) {
+    if (typid == expected_type)
         return true;
-    }
     typid = getBaseType(typid);
-    if (typid == expected_type) {
+    if (typid == expected_type)
         return true;
-    }
     return false;
 }
 
@@ -86,14 +83,12 @@ static bool is_expected_type(Oid typid, Oid expected_type)
 static bool is_text_type(Oid typid)
 {
     /* varchar(n) and char(n) are binary-compatible with text */
-    if (typid == TEXTOID || typid == VARCHAROID || typid == BPCHAROID) {
+    if (typid == TEXTOID || typid == VARCHAROID || typid == BPCHAROID)
         return true;
-    }
     /* Allow domains over these types, too */
     typid = getBaseType(typid);
-    if (typid == TEXTOID || typid == VARCHAROID || typid == BPCHAROID) {
+    if (typid == TEXTOID || typid == VARCHAROID || typid == BPCHAROID)
         return true;
-    }
     return false;
 }
 
@@ -102,15 +97,15 @@ static bool is_text_type(Oid typid)
  */
 static int silly_cmp_tsvector(const TSVector a, const TSVector b)
 {
-    if (VARSIZE(a) < VARSIZE(b)) {
+    if (VARSIZE(a) < VARSIZE(b))
         return -1;
-    } else if (VARSIZE(a) > VARSIZE(b)) {
+    else if (VARSIZE(a) > VARSIZE(b))
         return 1;
-    } else if (a->size < b->size) {
+    else if (a->size < b->size)
         return -1;
-    } else if (a->size > b->size) {
+    else if (a->size > b->size)
         return 1;
-    } else {
+    else {
         WordEntry* aptr = ARRPTR(a);
         WordEntry* bptr = ARRPTR(b);
         int i = 0;
@@ -127,9 +122,9 @@ static int silly_cmp_tsvector(const TSVector a, const TSVector b)
                 WordEntryPos* bp = POSDATAPTR(b, bptr);
                 int j;
 
-                if (POSDATALEN(a, aptr) != POSDATALEN(b, bptr)) {
+                if (POSDATALEN(a, aptr) != POSDATALEN(b, bptr))
                     return (POSDATALEN(a, aptr) > POSDATALEN(b, bptr)) ? -1 : 1;
-                }
+
                 for (j = 0; j < POSDATALEN(a, aptr); j++) {
                     if (WEP_GETPOS(*ap) != WEP_GETPOS(*bp)) {
                         return (WEP_GETPOS(*ap) > WEP_GETPOS(*bp)) ? -1 : 1;
@@ -174,16 +169,15 @@ Datum tsvector_strip(PG_FUNCTION_ARGS)
     ts_check_feature_disable();
     TSVector in = PG_GETARG_TSVECTOR(0);
     TSVector out;
-    int i;
-    int len = 0;
+    int i, len = 0;
     WordEntry* arrin = ARRPTR(in);
     WordEntry* arrout = NULL;
     char* cur = NULL;
     errno_t rc;
 
-    for (i = 0; i < in->size; i++) {
+    for (i = 0; i < in->size; i++)
         len += arrin[i].len;
-    }
+
     len = CALCDATASIZE(in->size, len);
     out = (TSVector)palloc0(len);
     SET_VARSIZE(out, len);
@@ -198,7 +192,6 @@ Datum tsvector_strip(PG_FUNCTION_ARGS)
         arrout[i].len = arrin[i].len;
         arrout[i].pos = cur - STRPTR(out);
         cur += arrout[i].len;
-        len -= arrout[i].len;
     }
 
     PG_FREE_IF_COPY(in, 0);
@@ -225,7 +218,6 @@ Datum tsvector_setweight(PG_FUNCTION_ARGS)
     WordEntry* entry = NULL;
     WordEntryPos* p = NULL;
     unsigned int w = 0;
-    errno_t rc;
 
     switch (cw) {
         case 'A':
@@ -250,7 +242,7 @@ Datum tsvector_setweight(PG_FUNCTION_ARGS)
     }
 
     out = (TSVector)palloc(VARSIZE(in));
-    rc = memcpy_s(out, VARSIZE(in), in, VARSIZE(in));
+    errno_t rc = memcpy_s(out, VARSIZE(in), in, VARSIZE(in));
     securec_check(rc, "\0", "\0");
     entry = ARRPTR(out);
     i = out->size;
@@ -279,14 +271,12 @@ static int4 add_pos(TSVector src, WordEntry* srcptr, TSVector dest, WordEntry* d
 {
     uint16* clen = &_POSVECPTR(dest, destptr)->npos;
     int i;
-    uint16 slen = POSDATALEN(src, srcptr);
-    uint16 startlen;
-    WordEntryPos *spos = POSDATAPTR(src, srcptr);
-    WordEntryPos *dpos = POSDATAPTR(dest, destptr);
+    uint16 slen = POSDATALEN(src, srcptr), startlen;
+    WordEntryPos *spos = POSDATAPTR(src, srcptr), *dpos = POSDATAPTR(dest, destptr);
 
-    if (!destptr->haspos) {
+    if (!destptr->haspos)
         *clen = 0;
-    }
+
     startlen = *clen;
     for (i = 0; i < slen && *clen < MAXNUMPOS && (*clen == 0 || WEP_GETPOS(dpos[*clen - 1]) != MAXENTRYPOS - 1); i++) {
         WEP_SETWEIGHT(dpos[*clen], WEP_GETWEIGHT(spos[i]));
@@ -294,9 +284,8 @@ static int4 add_pos(TSVector src, WordEntry* srcptr, TSVector dest, WordEntry* d
         (*clen)++;
     }
 
-    if (*clen != startlen) {
+    if (*clen != startlen)
         destptr->haspos = 1;
-    }
     return *clen - startlen;
 }
 
@@ -309,14 +298,7 @@ Datum tsvector_concat(PG_FUNCTION_ARGS)
     WordEntry* ptr1 = NULL;
     WordEntry* ptr2 = NULL;
     WordEntryPos* p = NULL;
-    int maxpos = 0;
-    int i;
-    int j;
-    int i1;
-    int i2;
-    int dataoff;
-    int output_bytes;
-    int output_size;
+    int maxpos = 0, i, j, i1, i2, dataoff, output_bytes, output_size;
     char* data = NULL;
     char* data1 = NULL;
     char* data2 = NULL;
@@ -331,7 +313,7 @@ Datum tsvector_concat(PG_FUNCTION_ARGS)
         if ((j = POSDATALEN(in1, ptr)) != 0) {
             p = POSDATAPTR(in1, ptr);
             while (j--) {
-                if (maxpos < WEP_GETPOS(*p))
+                if (WEP_GETPOS(*p) > maxpos)
                     maxpos = WEP_GETPOS(*p);
                 p++;
             }
@@ -404,9 +386,10 @@ Datum tsvector_concat(PG_FUNCTION_ARGS)
             dataoff += ptr2->len;
             if (ptr->haspos) {
                 int addlen = add_pos(in2, ptr2, out, ptr, maxpos);
-                if (addlen == 0) {
+
+                if (addlen == 0)
                     ptr->haspos = 0;
-                } else {
+                else {
                     dataoff = SHORTALIGN(dataoff);
                     dataoff += addlen * sizeof(WordEntryPos) + sizeof(uint16);
                 }
@@ -435,12 +418,13 @@ Datum tsvector_concat(PG_FUNCTION_ARGS)
                     dataoff += POSDATALEN(in1, ptr1) * sizeof(WordEntryPos) + sizeof(uint16);
                     if (ptr2->haspos)
                         dataoff += add_pos(in2, ptr2, out, ptr, maxpos) * sizeof(WordEntryPos);
-                } else {
-                    /* must have ptr2->haspos */
+                } else /* must have ptr2->haspos */
+                {
                     int addlen = add_pos(in2, ptr2, out, ptr, maxpos);
-                    if (addlen == 0) {
+
+                    if (addlen == 0)
                         ptr->haspos = 0;
-                    } else {
+                    else {
                         dataoff = SHORTALIGN(dataoff);
                         dataoff += addlen * sizeof(WordEntryPos) + sizeof(uint16);
                     }
@@ -490,9 +474,10 @@ Datum tsvector_concat(PG_FUNCTION_ARGS)
         dataoff += ptr2->len;
         if (ptr->haspos) {
             int addlen = add_pos(in2, ptr2, out, ptr, maxpos);
-            if (addlen == 0) {
+
+            if (addlen == 0)
                 ptr->haspos = 0;
-            } else {
+            else {
                 dataoff = SHORTALIGN(dataoff);
                 dataoff += addlen * sizeof(WordEntryPos) + sizeof(uint16);
             }
@@ -507,11 +492,11 @@ Datum tsvector_concat(PG_FUNCTION_ARGS)
      * Instead of checking each offset individually, we check for overflow of
      * pos fields once at the end.
      */
-    if (dataoff > MAXSTRPOS) {
+    if (dataoff > MAXSTRPOS)
         ereport(ERROR,
             (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                 errmsg("string is too long for tsvector (%d bytes, max %d bytes)", dataoff, MAXSTRPOS)));
-    }
+
     /*
      * Adjust sizes (asserting that we didn't overrun the original estimates)
      * and collapse out any unused array entries.
@@ -543,20 +528,18 @@ int4 tsCompareString(const char* a, int lena, const char* b, int lenb, bool pref
     int cmp;
 
     if (lena == 0) {
-        if (prefix) {
+        if (prefix)
             cmp = 0; /* empty string is prefix of anything */
-        } else {
+        else
             cmp = (lenb > 0) ? -1 : 0;
-        }
     } else if (lenb == 0) {
         cmp = (lena > 0) ? 1 : 0;
     } else {
         cmp = memcmp(a, b, Min(lena, lenb));
 
         if (prefix) {
-            if (cmp == 0 && lena > lenb) {
+            if (cmp == 0 && lena > lenb)
                 cmp = 1; /* a is longer, so not a prefix of b */
-            }
         } else if (cmp == 0 && lena != lenb) {
             cmp = (lena < lenb) ? -1 : 1;
         }
@@ -580,9 +563,8 @@ static bool checkclass_str(CHKVAL* chkval, WordEntry* val, QueryOperand* item)
     ptr = posvec->pos;
 
     while (len--) {
-        if (item->weight & (1 << WEP_GETWEIGHT(*ptr))) {
+        if (item->weight & (1 << WEP_GETWEIGHT(*ptr)))
             return true;
-        }
         ptr++;
     }
     return false;
@@ -605,14 +587,14 @@ static bool checkcondition_str(const void* checkval, QueryOperand* val)
         StopMiddle = StopLow + (StopHigh - StopLow) / 2;
         difference = tsCompareString(
             chkval->operand + val->distance, val->length, chkval->values + StopMiddle->pos, StopMiddle->len, false);
+
         if (difference == 0) {
             res = (val->weight && StopMiddle->haspos) ? checkclass_str(chkval, StopMiddle, val) : true;
             break;
-        } else if (difference > 0) {
+        } else if (difference > 0)
             StopLow = StopMiddle + 1;
-        } else {
+        else
             StopHigh = StopMiddle;
-        }
     }
 
     if (!res && val->prefix) {
@@ -620,9 +602,9 @@ static bool checkcondition_str(const void* checkval, QueryOperand* val)
          * there was a failed exact search, so we should scan further to find
          * a prefix match.
          */
-        if (StopLow >= StopHigh) {
+        if (StopLow >= StopHigh)
             StopMiddle = StopHigh;
-        }
+
         while (res == false && StopMiddle < chkval->arre &&
                tsCompareString(chkval->operand + val->distance,
                    val->length,
@@ -653,28 +635,28 @@ bool TS_execute(
     /* since this function recurses, it could be driven to stack overflow */
     check_stack_depth();
 
-    if (curitem->type == QI_VAL) {
+    if (curitem->type == QI_VAL)
         return chkcond(checkval, (QueryOperand*)curitem);
-    }
+
     switch (curitem->qoperator.oper) {
         case OP_NOT:
-            if (calcnot) {
+            if (calcnot)
                 return !TS_execute(curitem + 1, checkval, calcnot, chkcond);
-            } else {
+            else
                 return true;
-            }
+
         case OP_AND:
-            if (TS_execute(curitem + curitem->qoperator.left, checkval, calcnot, chkcond)) {
+            if (TS_execute(curitem + curitem->qoperator.left, checkval, calcnot, chkcond))
                 return TS_execute(curitem + 1, checkval, calcnot, chkcond);
-            } else {
+            else
                 return false;
-            }
+
         case OP_OR:
-            if (TS_execute(curitem + curitem->qoperator.left, checkval, calcnot, chkcond)) {
+            if (TS_execute(curitem + curitem->qoperator.left, checkval, calcnot, chkcond))
                 return true;
-            } else {
+            else
                 return TS_execute(curitem + 1, checkval, calcnot, chkcond);
-            }
+
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -698,9 +680,9 @@ bool tsquery_requires_match(QueryItem* curitem)
     /* since this function recurses, it could be driven to stack overflow */
     check_stack_depth();
 
-    if (curitem->type == QI_VAL) {
+    if (curitem->type == QI_VAL)
         return true;
-    }
+
     switch (curitem->qoperator.oper) {
         case OP_NOT:
 
@@ -713,18 +695,18 @@ bool tsquery_requires_match(QueryItem* curitem)
 
         case OP_AND:
             /* If either side requires a match, we're good */
-            if (tsquery_requires_match(curitem + curitem->qoperator.left)) {
+            if (tsquery_requires_match(curitem + curitem->qoperator.left))
                 return true;
-            } else {
+            else
                 return tsquery_requires_match(curitem + 1);
-            }
+
         case OP_OR:
             /* Both sides must require a match */
-            if (tsquery_requires_match(curitem + curitem->qoperator.left)) {
+            if (tsquery_requires_match(curitem + curitem->qoperator.left))
                 return tsquery_requires_match(curitem + 1);
-            } else {
+            else
                 return false;
-            }
+
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -802,6 +784,10 @@ Datum ts_match_tq(PG_FUNCTION_ARGS)
 }
 
 /*
+ * ts_stat statistic function support
+ */
+
+/*
  * Returns the number of positions in value 'wptr' within tsvector 'txt',
  * that have a weight equal to one of the weights in 'weight' bitmask.
  */
@@ -824,23 +810,21 @@ static int check_weight(TSVector txt, WordEntry* wptr, int8 weight)
 static void insertStatEntry(MemoryContext persistentContext, TSVectorStat* stat, TSVector txt, uint32 off)
 {
     WordEntry* we = ARRPTR(txt) + off;
-    StatEntry *node = stat->root;
-    StatEntry *pnode = NULL;
-    int n;
-    int res = 0;
+    StatEntry *node = stat->root, *pnode = NULL;
+    int n, res = 0;
     uint32 depth = 1;
 
-    if (stat->weight == 0) {
+    if (stat->weight == 0)
         n = (we->haspos) ? POSDATALEN(txt, we) : 1;
-    } else {
+    else
         n = (we->haspos) ? check_weight(txt, we, stat->weight) : 0;
-    }
-    if (n == 0) {
+
+    if (n == 0)
         return; /* nothing to insert */
-    }
 
     while (node != NULL) {
         res = compareStatWord(node, we, txt);
+
         if (res == 0) {
             break;
         } else {
@@ -850,9 +834,9 @@ static void insertStatEntry(MemoryContext persistentContext, TSVectorStat* stat,
         depth++;
     }
 
-    if (depth > stat->maxdepth) {
+    if (depth > stat->maxdepth)
         stat->maxdepth = depth;
-    }
+
     if (node == NULL) {
         node = (StatEntry*)MemoryContextAlloc(persistentContext, STATENTRYHDRSZ + we->len);
         node->left = node->right = NULL;
@@ -867,12 +851,12 @@ static void insertStatEntry(MemoryContext persistentContext, TSVectorStat* stat,
         if (pnode == NULL) {
             stat->root = node;
         } else {
-            if (res < 0) {
+            if (res < 0)
                 pnode->left = node;
-            } else {
+            else
                 pnode->right = node;
-            }
         }
+
     } else {
         node->ndoc++;
         node->nentry += n;
@@ -886,19 +870,16 @@ static void chooseNextStatEntry(
     uint32 middle = (low + high) >> 1;
 
     pos = (low + middle) >> 1;
-    if (low != middle && pos >= offset && pos - offset < (uint32)(txt->size)) {
+    if (low != middle && pos >= offset && pos - offset < (uint32)(txt->size))
         insertStatEntry(persistentContext, stat, txt, pos - offset);
-    }
     pos = (high + middle + 1) >> 1;
-    if (middle + 1 != high && pos >= offset && pos - offset < (uint32)(txt->size)) {
+    if (middle + 1 != high && pos >= offset && pos - offset < (uint32)(txt->size))
         insertStatEntry(persistentContext, stat, txt, pos - offset);
-    }
-    if (low != middle) {
+
+    if (low != middle)
         chooseNextStatEntry(persistentContext, stat, txt, low, middle, offset);
-    }
-    if (high != middle + 1) {
+    if (high != middle + 1)
         chooseNextStatEntry(persistentContext, stat, txt, middle + 1, high, offset);
-    }
 }
 
 /*
@@ -912,12 +893,11 @@ static void chooseNextStatEntry(
  *
  *	where vector_column is a tsvector-type column in vector_table.
  */
+
 static TSVectorStat* ts_accum(MemoryContext persistentContext, TSVectorStat* stat, Datum data)
 {
     TSVector txt = DatumGetTSVector(data);
-    uint32 i;
-    uint32 nbit = 0;
-    uint32 offset;
+    uint32 i, nbit = 0, offset;
 
     if (stat == NULL) { /* Init in first */
         stat = (TSVectorStat*)MemoryContextAllocZero(persistentContext, sizeof(TSVectorStat));
@@ -932,9 +912,9 @@ static TSVectorStat* ts_accum(MemoryContext persistentContext, TSVectorStat* sta
     }
 
     i = txt->size - 1;
-    for (; i > 0; i >>= 1) {
+    for (; i > 0; i >>= 1)
         nbit++;
-    }
+
     nbit = 1 << nbit;
     offset = (nbit - txt->size) / 2;
 
@@ -959,38 +939,36 @@ static void ts_setup_firstcall(FunctionCallInfo fcinfo, FuncCallContext* funcctx
 
     node = stat->root;
     /* find leftmost value */
-    if (node == NULL) {
+    if (node == NULL)
         stat->stack[stat->stackpos] = NULL;
-    } else {
+    else
         for (;;) {
             stat->stack[stat->stackpos] = node;
             if (node->left != NULL) {
                 stat->stackpos++;
                 node = node->left;
-            } else {
+            } else
                 break;
-            }
         }
-    }
     Assert(stat->stackpos <= stat->maxdepth);
 
-    tupdesc = CreateTemplateTupleDesc(3, false);
+    tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "word", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "ndoc", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "nentry", INT4OID, -1, 0);
     funcctx->tuple_desc = BlessTupleDesc(tupdesc);
     funcctx->attinmeta = TupleDescGetAttInMetadata(tupdesc);
 
-    (void)MemoryContextSwitchTo(oldcontext);
+    MemoryContextSwitchTo(oldcontext);
 }
 
 static StatEntry* walkStatEntryTree(TSVectorStat* stat)
 {
     StatEntry* node = stat->stack[stat->stackpos];
 
-    if (node == NULL) {
+    if (node == NULL)
         return NULL;
-    }
+
     if (node->ndoc != 0) {
         /* return entry itself: we already was at left sublink */
         return node;
@@ -1005,16 +983,15 @@ static StatEntry* walkStatEntryTree(TSVectorStat* stat)
             if (node->left != NULL) {
                 stat->stackpos++;
                 node = node->left;
-            } else {
+            } else
                 break;
-            }
         }
         Assert(stat->stackpos <= stat->maxdepth);
     } else {
         /* we already return all left subtree, itself and  right subtree */
-        if (stat->stackpos == 0) {
+        if (stat->stackpos == 0)
             return NULL;
-        }
+
         stat->stackpos--;
         return walkStatEntryTree(stat);
     }
@@ -1030,6 +1007,7 @@ static Datum ts_process_call(FuncCallContext* funcctx)
 
     st = (TSVectorStat*)funcctx->user_fctx;
     entry = walkStatEntryTree(st);
+
     if (entry != NULL) {
         Datum result;
         char* values[3];
@@ -1069,21 +1047,21 @@ static TSVectorStat* ts_stat_sql(MemoryContext persistentContext, text* txt, tex
     Portal portal;
     SPIPlanPtr plan;
 
-    if ((plan = SPI_prepare(query, 0, NULL)) == NULL) {
+    if ((plan = SPI_prepare(query, 0, NULL)) == NULL)
         /* internal error */
         ereport(ERROR, (errcode(ERRCODE_SPI_PREPARE_FAILURE), errmsg("SPI_prepare(\"%s\") failed", query)));
-    }
-    if ((portal = SPI_cursor_open(NULL, plan, NULL, NULL, true)) == NULL) {
+
+    if ((portal = SPI_cursor_open(NULL, plan, NULL, NULL, true)) == NULL)
         /* internal error */
         ereport(ERROR, (errcode(ERRCODE_SPI_CURSOR_OPEN_FAILURE), errmsg("SPI_cursor_open(\"%s\") failed", query)));
-    }
+
     SPI_cursor_fetch(portal, true, 100);
 
     if (SPI_tuptable == NULL || SPI_tuptable->tupdesc->natts != 1 ||
-        !is_expected_type(SPI_gettypeid(SPI_tuptable->tupdesc, 1), TSVECTOROID)) {
+        !is_expected_type(SPI_gettypeid(SPI_tuptable->tupdesc, 1), TSVECTOROID))
         ereport(
             ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("ts_stat query must return one tsvector column")));
-    }
+
     stat = (TSVectorStat*)MemoryContextAllocZero(persistentContext, sizeof(TSVectorStat));
     stat->maxdepth = 1;
 
@@ -1122,9 +1100,8 @@ static TSVectorStat* ts_stat_sql(MemoryContext persistentContext, text* txt, tex
         for (i = 0; i < (int)SPI_processed; i++) {
             Datum data = SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &isnull);
 
-            if (!isnull) {
+            if (!isnull)
                 stat = ts_accum(persistentContext, stat, data);
-            }
         }
 
         SPI_freetuptable(SPI_tuptable);
@@ -1156,11 +1133,11 @@ Datum ts_stat1(PG_FUNCTION_ARGS)
         /*
          * Connect to SPI manager
          */
-        if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
+        if ((rc = SPI_connect()) != SPI_OK_CONNECT)
             ereport(ERROR,
                 (errcode(ERRCODE_SPI_CONNECTION_FAILURE),
                     errmsg("SPI_connect failed: %s", SPI_result_code_string(rc))));
-        }
+
         stat = ts_stat_sql(funcctx->multi_call_memory_ctx, txt, NULL);
         PG_FREE_IF_COPY(txt, 0);
         ts_setup_firstcall(fcinfo, funcctx, stat);
@@ -1168,9 +1145,8 @@ Datum ts_stat1(PG_FUNCTION_ARGS)
     }
 
     funcctx = SRF_PERCALL_SETUP();
-    if ((result = ts_process_call(funcctx)) != (Datum)0) {
+    if ((result = ts_process_call(funcctx)) != (Datum)0)
         SRF_RETURN_NEXT(funcctx, result);
-    }
     SRF_RETURN_DONE(funcctx);
 }
 
@@ -1190,11 +1166,11 @@ Datum ts_stat2(PG_FUNCTION_ARGS)
         /*
          * Connect to SPI manager
          */
-        if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
+        if ((rc = SPI_connect()) != SPI_OK_CONNECT)
             ereport(ERROR,
                 (errcode(ERRCODE_SPI_CONNECTION_FAILURE),
                     errmsg("SPI_connect failed: %s", SPI_result_code_string(rc))));
-        }
+
         stat = ts_stat_sql(funcctx->multi_call_memory_ctx, txt, ws);
         PG_FREE_IF_COPY(txt, 0);
         PG_FREE_IF_COPY(ws, 1);
@@ -1203,9 +1179,8 @@ Datum ts_stat2(PG_FUNCTION_ARGS)
     }
 
     funcctx = SRF_PERCALL_SETUP();
-    if ((result = ts_process_call(funcctx)) != (Datum)0) {
+    if ((result = ts_process_call(funcctx)) != (Datum)0)
         SRF_RETURN_NEXT(funcctx, result);
-    }
     SRF_RETURN_DONE(funcctx);
 }
 
@@ -1243,85 +1218,75 @@ static Datum tsvector_update_trigger(PG_FUNCTION_ARGS, bool config_column)
     Oid cfgId;
 
     /* Check call context */
-    if (!CALLED_AS_TRIGGER(fcinfo)) { /* internal error */
+    if (!CALLED_AS_TRIGGER(fcinfo)) /* internal error */
         ereport(ERROR,
             (errcode(ERRCODE_TRIGGERED_ACTION_EXCEPTION),
                 errmsg("tsvector_update_trigger: not fired by trigger manager")));
-    }
+
     trigdata = (TriggerData*)fcinfo->context;
-    if (trigdata == NULL) {
-        ereport(ERROR,
-            (errcode(ERRCODE_TRIGGERED_ACTION_EXCEPTION), errmsg("tsvector_update_trigger: context is NULL")));
-    }
-    if (!TRIGGER_FIRED_FOR_ROW(trigdata->tg_event)) {
+    if (!TRIGGER_FIRED_FOR_ROW(trigdata->tg_event))
         ereport(ERROR,
             (errcode(ERRCODE_TRIGGERED_ACTION_EXCEPTION), errmsg("tsvector_update_trigger: must be fired for row")));
-    }
-    if (!TRIGGER_FIRED_BEFORE(trigdata->tg_event)) {
+    if (!TRIGGER_FIRED_BEFORE(trigdata->tg_event))
         ereport(ERROR,
             (errcode(ERRCODE_TRIGGERED_ACTION_EXCEPTION),
                 errmsg("tsvector_update_trigger: must be fired BEFORE event")));
-    }
-    if (TRIGGER_FIRED_BY_INSERT(trigdata->tg_event)) {
+
+    if (TRIGGER_FIRED_BY_INSERT(trigdata->tg_event))
         rettuple = trigdata->tg_trigtuple;
-    } else if (TRIGGER_FIRED_BY_UPDATE(trigdata->tg_event)) {
+    else if (TRIGGER_FIRED_BY_UPDATE(trigdata->tg_event))
         rettuple = trigdata->tg_newtuple;
-    } else {
+    else
         ereport(ERROR,
             (errcode(ERRCODE_TRIGGERED_ACTION_EXCEPTION),
                 errmsg("tsvector_update_trigger: must be fired for INSERT or UPDATE")));
-    }
 
     trigger = trigdata->tg_trigger;
     rel = trigdata->tg_relation;
 
-    if (trigger->tgnargs < 3) {
+    if (trigger->tgnargs < 3)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("tsvector_update_trigger: arguments must be tsvector_field, ts_config, text_field1, ...)")));
-    }
+
     /* Find the target tsvector column */
     tsvector_attr_num = SPI_fnumber(rel->rd_att, trigger->tgargs[0]);
-    if (tsvector_attr_num == SPI_ERROR_NOATTRIBUTE) {
+    if (tsvector_attr_num == SPI_ERROR_NOATTRIBUTE)
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_COLUMN), errmsg("tsvector column \"%s\" does not exist", trigger->tgargs[0])));
-    }
-    if (!is_expected_type(SPI_gettypeid(rel->rd_att, tsvector_attr_num), TSVECTOROID)) {
+    if (!is_expected_type(SPI_gettypeid(rel->rd_att, tsvector_attr_num), TSVECTOROID))
         ereport(ERROR,
             (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("column \"%s\" is not of tsvector type", trigger->tgargs[0])));
-    }
+
     /* Find the configuration to use */
     if (config_column) {
         int config_attr_num;
 
         config_attr_num = SPI_fnumber(rel->rd_att, trigger->tgargs[1]);
-        if (config_attr_num == SPI_ERROR_NOATTRIBUTE) {
+        if (config_attr_num == SPI_ERROR_NOATTRIBUTE)
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_COLUMN),
                     errmsg("configuration column \"%s\" does not exist", trigger->tgargs[1])));
-        }
-        if (!is_expected_type(SPI_gettypeid(rel->rd_att, config_attr_num), REGCONFIGOID)) {
+        if (!is_expected_type(SPI_gettypeid(rel->rd_att, config_attr_num), REGCONFIGOID))
             ereport(ERROR,
                 (errcode(ERRCODE_DATATYPE_MISMATCH),
                     errmsg("column \"%s\" is not of regconfig type", trigger->tgargs[1])));
-        }
+
         datum = SPI_getbinval(rettuple, rel->rd_att, config_attr_num, &isnull);
-        if (isnull) {
+        if (isnull)
             ereport(ERROR,
                 (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                     errmsg("configuration column \"%s\" must not be null", trigger->tgargs[1])));
-        }
         cfgId = DatumGetObjectId(datum);
     } else {
         List* names = NIL;
 
         names = stringToQualifiedNameList(trigger->tgargs[1]);
         /* require a schema so that results are not search path dependent */
-        if (list_length(names) < 2) {
+        if (list_length(names) < 2)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("text search configuration name \"%s\" must be schema-qualified", trigger->tgargs[1])));
-        }
         cfgId = get_ts_config_oid(names, false);
     }
 
@@ -1336,26 +1301,24 @@ static Datum tsvector_update_trigger(PG_FUNCTION_ARGS, bool config_column)
         int numattr;
 
         numattr = SPI_fnumber(rel->rd_att, trigger->tgargs[i]);
-        if (numattr == SPI_ERROR_NOATTRIBUTE) {
+        if (numattr == SPI_ERROR_NOATTRIBUTE)
             ereport(
                 ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN), errmsg("column \"%s\" does not exist", trigger->tgargs[i])));
-        }
-        if (!is_text_type(SPI_gettypeid(rel->rd_att, numattr))) {
+        if (!is_text_type(SPI_gettypeid(rel->rd_att, numattr)))
             ereport(ERROR,
                 (errcode(ERRCODE_DATATYPE_MISMATCH),
                     errmsg("column \"%s\" is not of a character type", trigger->tgargs[i])));
-        }
+
         datum = SPI_getbinval(rettuple, rel->rd_att, numattr, &isnull);
-        if (isnull) {
+        if (isnull)
             continue;
-        }
+
         txt = DatumGetTextP(datum);
 
         parsetext(cfgId, &prs, VARDATA(txt), VARSIZE(txt) - VARHDRSZ);
 
-        if (txt != (text*)DatumGetPointer(datum)) {
+        if (txt != (text*)DatumGetPointer(datum))
             pfree_ext(txt);
-        }
     }
 
     /* make tsvector value */
@@ -1373,10 +1336,10 @@ static Datum tsvector_update_trigger(PG_FUNCTION_ARGS, bool config_column)
         pfree_ext(prs.words);
     }
 
-    if (rettuple == NULL) { /* internal error */
+    if (rettuple == NULL) /* internal error */
         ereport(ERROR,
             (errcode(ERRCODE_NOT_NULL_VIOLATION),
                 errmsg("tsvector_update_trigger: %d returned by SPI_modifytuple", SPI_result)));
-    }
+
     return PointerGetDatum(rettuple);
 }

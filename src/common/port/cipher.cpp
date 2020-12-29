@@ -25,7 +25,6 @@
 #include "securec_check.h"
 #include "utils/syscall_lock.h"
 #include "utils/pg_crc_tables.h"
-
 #include "openssl/rand.h"
 #include "openssl/evp.h"
 #include "openssl/ossl_typ.h"
@@ -78,20 +77,20 @@ char* SEC_decodeBase64(const char* pucInBuf, GS_UINT32* pulOutBufLen);
 char* SEC_encodeBase64(const char* pucInBuf, GS_UINT32 ulInBufLen);
 
 /* for stored cipherfile buffer */
-RandkeyFile grand_file_content[3];
-CipherkeyFile gcipher_file_content[3];
+RandkeyFile g_rand_file_content[CIPHER_TYPE_MAX];
+CipherkeyFile g_cipher_file_content[CIPHER_TYPE_MAX];
 
 bool init_vector_random(GS_UCHAR* init_vector, size_t vector_len)
 {
     errno_t errorno = EOK;
-    GS_UINT32 retval = 0;
+    int retval = 0;
     GS_UCHAR random_vector[RANDOM_LEN] = {0};
 
-    retval = RAND_bytes(random_vector, RANDOM_LEN);
+    retval = RAND_priv_bytes(random_vector, RANDOM_LEN);
     if (retval != 1) {
         errorno = memset_s(random_vector, RANDOM_LEN, '\0', RANDOM_LEN);
         securec_check_c(errorno, "", "");
-        (void)fprintf(stderr, _("generate random initial vector failed, errcode:%u\n"), retval);
+        (void)fprintf(stderr, _("generate random initial vector failed, errcode:%d\n"), retval);
         return false;
     }
 
@@ -102,10 +101,9 @@ bool init_vector_random(GS_UCHAR* init_vector, size_t vector_len)
     return true;
 }
 
-/* check whether the input password meet the requirements of the length and complexity */
+/* check whether the input password(for key derivation) meet the requirements of the length and complexity */
 bool check_input_password(const char* password)
 {
-#define MIN_PWD_LEN 8
 #define PASSWD_KINDS 4
     int key_input_len = 0;
     int kinds[PASSWD_KINDS] = {0};
@@ -117,7 +115,7 @@ bool check_input_password(const char* password)
         return false;
     }
     key_input_len = strlen(password);
-    if (key_input_len < MIN_PWD_LEN) {
+    if (key_input_len < MIN_KEY_LEN) {
         (void)fprintf(stderr, _("Invalid password,it must contain at least eight characters\n"));
         return false;
     }
@@ -323,7 +321,7 @@ bool CipherFileIsValid(CipherkeyFile* cipher)
 
     if (!EQ_CRC32(cipher->crc, cipher_crc)) {
         (void)fprintf(
-                stderr, _("CRC checksum does not match value stored in file, maybe the cipher file is corrupt\n"));
+            stderr, _("CRC checksum does not match value stored in file, maybe the cipher file is corrupt\n"));
         return false;
     }
 
@@ -339,12 +337,12 @@ static bool ReadKeyContentFromFile(KeyMode mode, const char* cipherkeyfile, cons
     CipherkeyFile* global_cipher_file = NULL;
 
     if (mode == OBS_MODE) {
-        global_rand_file = &grand_file_content[OBS_CLOUD_TYPE];
-        global_cipher_file = &gcipher_file_content[OBS_CLOUD_TYPE];
+        global_rand_file = &g_rand_file_content[OBS_CLOUD_TYPE];
+        global_cipher_file = &g_cipher_file_content[OBS_CLOUD_TYPE];
     } else if (obsnormal_or_initdb) {
         /* Note: Data Source use initdb key file by default (datasource.key.* not given) */
-        global_rand_file = &grand_file_content[INITDB_NOCLOUDOBS_TYPE];
-        global_cipher_file = &gcipher_file_content[INITDB_NOCLOUDOBS_TYPE];
+        global_rand_file = &g_rand_file_content[INITDB_NOCLOUDOBS_TYPE];
+        global_cipher_file = &g_cipher_file_content[INITDB_NOCLOUDOBS_TYPE];
     } else if (mode == SOURCE_MODE) {
         /*
          * For Data Source:
@@ -364,15 +362,18 @@ static bool ReadKeyContentFromFile(KeyMode mode, const char* cipherkeyfile, cons
         }
         (void)syscalllockRelease(&read_cipher_lock);
         return true;
+    } else if (mode == GDS_MODE) {
+        global_rand_file = &g_rand_file_content[GDS_SSL_TYPE];
+        global_cipher_file = &g_cipher_file_content[GDS_SSL_TYPE];
     } else {
-        global_rand_file = &grand_file_content[SSL_TYPE];
-        global_cipher_file = &gcipher_file_content[SSL_TYPE];
+        global_rand_file = &g_rand_file_content[GSQL_SSL_TYPE];
+        global_cipher_file = &g_cipher_file_content[GSQL_SSL_TYPE];
     }
 
     (void)syscalllockAcquire(&read_cipher_lock);
 
     /* needn't read cipher file if content is saved in buffer */
-    if (0 != global_cipher_file->cipherkey[0] && 0 != global_rand_file->randkey[0] && !must_formfile) {
+    if (global_cipher_file->cipherkey[0] != 0 && global_rand_file->randkey[0] != 0 && !must_formfile) {
         rc = memcpy_s(cipher_file_content, sizeof(CipherkeyFile), global_cipher_file, sizeof(CipherkeyFile));
         securec_check_c(rc, "\0", "\0");
         rc = memcpy_s(rand_file_content, sizeof(RandkeyFile), global_rand_file, sizeof(RandkeyFile));
@@ -404,21 +405,10 @@ static bool ReadKeyContentFromFile(KeyMode mode, const char* cipherkeyfile, cons
 /* Read the contents of the file to buffer */
 bool ReadContentFromFile(const char* filename, void* content, size_t csize)
 {
-#define MAX_REALPATH_LEN 4096
     FILE* pfRead = NULL;
     int cnt = 0;
     /*open and read file*/
-    if (!is_absolute_path(filename)) {
-        char Lrealpath[MAX_REALPATH_LEN + 1] = {0};
-        if (realpath(filename, Lrealpath) == NULL) {
-            (void)fprintf(stderr, _("[%s] realpath failed : %s!\n"), filename, gs_strerror(errno));
-            return false;
-        }
-        pfRead = fopen(Lrealpath, "rb");
-    } else {
-        pfRead = fopen(filename, "rb");
-    }
-    if (pfRead == NULL) {
+    if ((pfRead = fopen(filename, "rb")) == NULL) {
         (void)fprintf(stderr, _("could not open file \"%s\": %s\n"), filename, gs_strerror(errno));
         return false;
     }
@@ -474,7 +464,8 @@ static bool WriteContentToFile(const char* filename, const void* content, size_t
 /* Judge if the KeyMode is legal */
 static bool isModeExists(KeyMode mode)
 {
-    if (mode != SERVER_MODE && mode != CLIENT_MODE && mode != OBS_MODE && mode != SOURCE_MODE) {
+    if (mode != SERVER_MODE && mode != CLIENT_MODE && 
+        mode != OBS_MODE && mode != SOURCE_MODE && mode != GDS_MODE) {
 #ifndef ENABLE_LLT
         (void)fprintf(stderr, _("AK/SK encrypt/decrypt encounters invalid key mode.\n"));
         return false;
@@ -532,7 +523,7 @@ static bool gen_cipher_file(KeyMode mode, /* SERVER_MODE or CLIENT_MODE or OBS_M
     GS_UCHAR* key_salt = NULL;
 
     GS_UINT32 cipherlen = 0;
-    GS_UINT32 retval = 0;
+    int retval = 0;
 
     CipherkeyFile cipher_file_content;
 
@@ -544,10 +535,10 @@ static bool gen_cipher_file(KeyMode mode, /* SERVER_MODE or CLIENT_MODE or OBS_M
     }
 
     /* generate init rand key */
-    retval = RAND_bytes(encrypt_rand, RANDOM_LEN);
+    retval = RAND_priv_bytes(encrypt_rand, RANDOM_LEN);
     if (retval != 1) {
 #ifndef ENABLE_LLT
-        (void)fprintf(stderr, _("generate random key failed,errcode:%u\n"), retval);
+        (void)fprintf(stderr, _("generate random key failed,errcode:%d\n"), retval);
         goto RETURNFALSE;
 #endif
     }
@@ -610,7 +601,7 @@ static bool gen_cipher_file(KeyMode mode, /* SERVER_MODE or CLIENT_MODE or OBS_M
      * Change the privileges: include read & write
      * Note: it should be checked by OM tool: gs_ec.
      */
-    if (mode == SOURCE_MODE || mode == CLIENT_MODE || mode == SERVER_MODE) {
+    if (mode == SOURCE_MODE || mode == CLIENT_MODE || mode == SERVER_MODE || mode == OBS_MODE) {
 #ifdef WIN32
         ret = _chmod(cipherkeyfile, 0600);
 #else
@@ -706,7 +697,7 @@ static bool gen_rand_file(
      * Change the privileges: include read & write
      * Note: it should be checked by OM tool: gs_ec.
      */
-    if (mode == SOURCE_MODE || mode == CLIENT_MODE || mode == SERVER_MODE) {
+    if (mode == SOURCE_MODE || mode == CLIENT_MODE || mode == SERVER_MODE || mode == OBS_MODE) {
         /*open and write file*/
         if ((pfWrite = fopen(randfile, "r")) == NULL) {
             (void)fprintf(stderr, _("could not open file \"%s\" for writing: %s\n"), randfile, gs_strerror(errno));
@@ -761,14 +752,14 @@ RETURNFALSE:
 void gen_cipher_rand_files(
     KeyMode mode, const char* plain_key, const char* user_name, const char* datadir, const char* preStr)
 {
-    GS_UINT32 retval = 0;
+    int retval = 0;
     GS_UCHAR init_rand[RANDOM_LEN] = {0};
     GS_UCHAR server_vector[RANDOM_LEN] = {'\0'};
     GS_UCHAR client_vector[RANDOM_LEN] = {'\0'};
 
-    retval = RAND_bytes(init_rand, RANDOM_LEN);
+    retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
     if (retval != 1) {
-        (void)fprintf(stderr, _("generate random key failed,errcode:%u\n"), retval);
+        (void)fprintf(stderr, _("generate random key failed,errcode:%d\n"), retval);
         return;
     }
 
@@ -818,7 +809,7 @@ void decode_cipher_files(
     }
 
     /* in server_mode,read the files begin with server% */
-    if (mode == SERVER_MODE) {
+    if (mode == SERVER_MODE || mode == GDS_MODE) {
         ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/server%s", datadir, CIPHER_KEY_FILE);
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/server%s", datadir, RAN_KEY_FILE);
@@ -854,9 +845,9 @@ void decode_cipher_files(
 
     /* firstly we get key from memory, and then try to read from file. */
     if (!ReadKeyContentFromFile(mode, cipherkeyfile, randfile, &cipher_file_content, &rand_file_content,
-                                obsnormal_or_initdb, false) && 
+            obsnormal_or_initdb, false) && 
         !ReadKeyContentFromFile(mode, cipherkeyfile, randfile, &cipher_file_content, &rand_file_content,
-                                obsnormal_or_initdb, true)) {
+            obsnormal_or_initdb, true)) {
         ClearCipherKeyFile(&cipher_file_content);
         ClearRandKeyFile(&rand_file_content);
         (void)fprintf(stderr, _("read cipher file or random parameter file failed.\n"));
@@ -864,7 +855,7 @@ void decode_cipher_files(
     }
 
     if (!DecryptInputKey(cipher_file_content.cipherkey, CIPHER_LEN, rand_file_content.randkey,
-                         cipher_file_content.key_salt, cipher_file_content.vector_salt, plainpwd, &plainlen)) {
+            cipher_file_content.key_salt, cipher_file_content.vector_salt, plainpwd, &plainlen)) {
         (void)fprintf(stderr, _("decrypt key failed.\n"));
     }
 
@@ -948,9 +939,9 @@ bool check_certificate_signature_algrithm(const SSL_CTX* SSL_context)
 /*
  * @Brief	: long check_certificate_time()
  * @Description	: check the time of the certificate.
- * @return	: return the number of seconds when the certificate expires less than 7 days.
+ * @return	: return the number of seconds when the certificate expires less than alarm_days.
  */
-long check_certificate_time(const SSL_CTX* SSL_context)
+long check_certificate_time(const SSL_CTX* SSL_context, const int alarm_days)
 {
     if (SSL_context == NULL) {
         return 0;
@@ -972,7 +963,7 @@ long check_certificate_time(const SSL_CTX* SSL_context)
         }
 
         /* Compare localTime with notafter.*/
-        if (pday < 7 && pday >= 0) {
+        if (pday < alarm_days && pday >= 0) {
             int diff = pday * 24 * 60 * 60 + psec;
             return diff;
         }
@@ -1074,6 +1065,7 @@ GS_UINT32 CRYPT_encrypt(GS_UINT32 ulAlgId, const GS_UCHAR* pucKey, GS_UINT32 ulK
     blocksize = EVP_CIPHER_CTX_block_size(ctx);
     if (blocksize == 0) {
         (void)fprintf(stderr, ("invalid blocksize, ERROR in EVP_CIPHER_CTX_block_size\n"));
+        EVP_CIPHER_CTX_free(ctx);
         return 1;
     }
 
@@ -1082,6 +1074,7 @@ GS_UINT32 CRYPT_encrypt(GS_UINT32 ulAlgId, const GS_UCHAR* pucKey, GS_UINT32 ulK
     pchInbuffer = (unsigned char*)OPENSSL_malloc(blocksize);
     if (pchInbuffer == NULL) {
         (void)fprintf(stderr, _("malloc failed\n"));
+        EVP_CIPHER_CTX_free(ctx);
         return 1;
     }
     /* the first byte uses "0x80" to padding ,and the others uses "0x00" */
@@ -1213,10 +1206,17 @@ GS_UINT32 CRYPT_hmac(GS_UINT32 ulAlgType, const GS_UCHAR* pucKey, GS_UINT32 upuc
         HMAC_CTX_free(ctx);
         return 1;
     }
+#ifndef WIN32
     if (!HMAC(evp_md, pucKey, (int)upucKeyLen, pucData, ulDataLen, pucDigest, pulDigestLen)) {
         HMAC_CTX_free(ctx);
         return 1;
     }
+#else
+    if (!HMAC(evp_md, pucKey, (int)upucKeyLen, pucData, ulDataLen, pucDigest, (unsigned int*)pulDigestLen)) {
+        HMAC_CTX_free(ctx);
+        return 1;
+    }
+#endif
     HMAC_CTX_free(ctx);
     return 0;
 }
@@ -1240,9 +1240,15 @@ char* SEC_encodeBase64(const char* pucInBuf, GS_UINT32 ulInBufLen)
     }
 
     b64 = BIO_new(BIO_f_base64());
+    if (b64 == NULL) {
+        return NULL;
+    }
     BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
 
     bio = BIO_new(BIO_s_mem());
+    if (bio == NULL) {
+        return NULL;
+    }
     bio = BIO_push(b64, bio);
 
     BIO_write(bio, pucInBuf, ulInBufLen);
@@ -1287,9 +1293,17 @@ char* SEC_decodeBase64(const char* pucInBuf, GS_UINT32* pulOutBufLen)
     }
 
     b64 = BIO_new(BIO_f_base64());
+    if (b64 == NULL) {
+        OPENSSL_free(out_str);
+        return NULL;
+    }
     BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
 
     bio = BIO_new_mem_buf(pucInBuf, in_len);
+    if (bio == NULL) {
+        OPENSSL_free(out_str);
+        return NULL;
+    }
     bio = BIO_push(b64, bio);
 
     *pulOutBufLen = BIO_read(bio, out_str, in_len);

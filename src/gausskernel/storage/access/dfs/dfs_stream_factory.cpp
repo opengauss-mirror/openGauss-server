@@ -16,7 +16,7 @@
  *  dfs_stream_factory.cpp
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/access/dfs/dfs_stream_factory.cpp
+ *    src/gausskernel/storage/access/dfs/dfs_stream_factory.cpp
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -32,7 +32,6 @@
 #endif
 
 namespace dfs {
-
 /*
  * @Description: orc reader InputStream factory
  * @IN/OUT conn: dfs connector
@@ -46,7 +45,6 @@ DFS_UNIQUE_PTR<dfs::GSInputStream> InputStreamFactory(dfs::DFSConnector *conn, c
     Assert(conn && readerState);
 
     int32_t connect_type = conn->getType();
-
     if (OBS_CONNECTOR == connect_type) {
         /*
          * when we read file through foreign table,
@@ -57,10 +55,15 @@ DFS_UNIQUE_PTR<dfs::GSInputStream> InputStreamFactory(dfs::DFSConnector *conn, c
          * OBS should be immutable.
          */
         Assert(FOREIGNTABLEFILEID == readerState->currentFileID);
+        OBSReadWriteHandler* reader_handler = static_cast<OBSReadWriteHandler *>(conn->getHandler());
+        if (reader_handler == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_FDW_UNABLE_TO_ESTABLISH_CONNECTION), errmodule(MOD_ORC),
+                        errmsg("obs readwrite handler is null")));
+        }
         if (use_cache) {
-            return dfs::readObsFileWithCache(static_cast<OBSReadWriteHandler *>(conn->getHandler()), path, readerState);
+            return dfs::readObsFileWithCache(reader_handler, path, readerState);
         } else {
-            return dfs::readObsFile(static_cast<OBSReadWriteHandler *>(conn->getHandler()), path, readerState);
+            return dfs::readObsFile(reader_handler, path, readerState);
         }
     } else {
         ereport(ERROR, (errcode(ERRCODE_FDW_UNABLE_TO_ESTABLISH_CONNECTION), errmodule(MOD_ORC),
@@ -69,5 +72,4 @@ DFS_UNIQUE_PTR<dfs::GSInputStream> InputStreamFactory(dfs::DFSConnector *conn, c
 
     return DFS_UNIQUE_PTR<GSInputStream>();
 }
-
 }  // namespace dfs

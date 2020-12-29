@@ -7,7 +7,6 @@ set enable_seqscan=off;
 set opfusion_debug_mode = 'log';
 set log_min_messages=debug;
 set logging_module = 'on(OPFUSION)';
-set max_parallel_workers_per_gather=0;
 
 -- create table
 drop table if exists test_bypass_sq1;
@@ -76,6 +75,8 @@ explain select * from test_bypass_sq1 where col1 is not null and col2 = 0 order 
 select * from test_bypass_sq1 where col1 is not null and col2 = 0 order by col1;
 explain update test_bypass_sq1 set col2=col2-1,col3='test_update' where col1=0 and col2=0;
 update test_bypass_sq1 set col2=col2-1,col3='test_update' where col1=0 and col2=0;
+explain update test_bypass_sq1 set col2=col1 where col1=0 and col2=0;
+update test_bypass_sq1 set col2=col1 where col1=0 and col2=0;
 explain update test_bypass_sq1 set col2=col1-1,col3='test_update' where col1=2 and col2=2;
 update test_bypass_sq1 set col2=col1-1,col3='test_update' where col1=2 and col2=2;
 explain select * from test_bypass_sq1 where col1=0 and col2=-1;
@@ -386,6 +387,22 @@ update test_bypass_sq7 set col2 =1 where col1 =11;
 insert into test_bypass_sq7 values (1,2,3);
 delete test_bypass_sq7 where col1 =1;
 SELECT node_name,select_count, update_count, insert_count, delete_count,  ddl_count, dml_count FROM gs_sql_count where user_name='qps';
+CREATE OR REPLACE FUNCTION tri_bypass() RETURNS trigger AS $$
+BEGIN
+    NEW.col2 = NEW.col2 + 2;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+set opfusion_debug_mode = 'log';
+drop table if exists test_bypass_sq8;
+create table test_bypass_sq8(col1 int, col2 int, col3 text);
+create index itest_bypass_sq8 on test_bypass_sq8(col1,col2);
+create trigger tri_bypass after insert on test_bypass_sq8 for each row execute procedure tri_bypass();
+insert into test_bypass_sq8 values(1,1,'test');
+explain select * from test_bypass_sq8 where col1 = 1;
+explain update test_bypass_sq8 set col2 = 2 where col1 = 1;
+explain delete test_bypass_sq8 where col1 = 1;
+explain insert into test_bypass_sq8 values(2,2,'testinsert');
 set opfusion_debug_mode=off;
 RESET SESSION AUTHORIZATION;
 SELECT node_name,select_count, update_count, insert_count, delete_count,  ddl_count, dml_count FROM pgxc_sql_count where user_name='qps' order by node_name;
@@ -414,4 +431,6 @@ drop table test_bypass_sq4;
 drop table test_bypass_sq5;
 drop table test_bypass_sq6;
 drop table test_bypass_sq7;
+drop table test_bypass_sq8;
+drop function tri_bypass;
 drop type complextype;

@@ -26,6 +26,7 @@
 #include "gtm/gtm_c.h"
 #include "gtm/gtm_txn.h"
 #include "pgxc/execRemote.h"
+#include "pgxc/pgxcXact.h"
 /* PGXC_DATANODE */
 #include "postmaster/autovacuum.h"
 #include "libpq/pqformat.h"
@@ -36,7 +37,6 @@
 #include "access/cstore_am.h"
 #include "access/cstore_rewrite.h"
 #include "access/multixact.h"
-#include "access/parallel.h"
 #include "access/subtrans.h"
 #include "access/transam.h"
 #include "access/twophase.h"
@@ -56,10 +56,12 @@
 #include "commands/trigger.h"
 #include "commands/sequence.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "distributelayer/streamMain.h"
 #include "executor/lightProxy.h"
 #include "executor/spi.h"
 #include "libpq/be-fsstubs.h"
 #include "miscadmin.h"
+#include "opfusion/opfusion.h"
 #include "pgstat.h"
 #include "pgxc/groupmgr.h"
 #include "replication/datasyncrep.h"
@@ -82,11 +84,18 @@
 #include "utils/timestamp.h"
 #include "pg_trace.h"
 #include "utils/distribute_test.h"
-#include "storage/cstore_mem_alloc.h"
+#include "storage/cstore/cstore_mem_alloc.h"
 #include "workload/cpwlm.h"
+#include "instruments/ash.h"
 #include "instruments/instr_workload.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
+#include "instruments/instr_statement.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/cache/queryid_cachemgr.h"
+#include "tsdb/cache/part_cachemgr.h"
+#include "tsdb/storage/part.h"
+#endif   /* ENABLE_MULTIPLE_NODES */
 
 extern void CodeGenThreadTearDown();
 extern void CleanupDfsHandlers(bool isTop);
@@ -102,12 +111,13 @@ THR_LOCAL bool TwoPhaseCommit = false;
 
 volatile int synchronous_commit = SYNCHRONOUS_COMMIT_ON;
 
-extern bool StreamThreadAmI();
 extern bool is_user_name_changed();
-
 extern void HDFSAbortCacheBlock();
 extern THR_LOCAL Oid lastUDFOid;
 #define MAX_GID_LENGTH 256
+
+#define SPI_COMMIT 0
+#define SPI_ROLLBACK 1
 
 /*
  *	transaction states - transaction state from server perspective
@@ -135,7 +145,6 @@ typedef enum TBlockState {
     /* transaction block states */
     TBLOCK_BEGIN,         /* starting transaction block */
     TBLOCK_INPROGRESS,    /* live transaction */
-    TBLOCK_PARALLEL_INPROGRESS, /* live transaction inside parallel worker */
     TBLOCK_END,           /* COMMIT received */
     TBLOCK_ABORT,         /* failed xact, awaiting ROLLBACK */
     TBLOCK_ABORT_END,     /* failed xact, ROLLBACK received */
@@ -164,11 +173,12 @@ struct TransactionStateData {
     GTM_TransactionKey txnKey;
     bool isLocalParameterUsed; /* Check if a local parameter is active
                                 * in transaction block (SET LOCAL, DEFERRED) */
+    DList *savepointList;      /* SavepointData list */
 #else
     TransactionId transactionId; /* my XID, or Invalid if none */
 #endif
     SubTransactionId subTransactionId;   /* my subxact ID */
-    char* name;                          /* savepoint name, if any */
+    char *name;                          /* savepoint name, if any */
     int savepointLevel;                  /* savepoint level */
     TransState state;                    /* low-level state */
     TBlockState blockState;              /* high-level state */
@@ -176,7 +186,7 @@ struct TransactionStateData {
     int gucNestLevel;                    /* GUC context nesting depth */
     MemoryContext curTransactionContext; /* my xact-lifetime context */
     ResourceOwner curTransactionOwner;   /* my query resources */
-    TransactionId* childXids;            /* subcommitted child XIDs, in XID order */
+    TransactionId *childXids;            /* subcommitted child XIDs, in XID order */
     int nChildXids;                      /* # of subcommitted child XIDs */
     int maxChildXids;                    /* allocated size of childXids[] */
     Oid prevUser;                        /* previous CurrentUserId setting */
@@ -184,11 +194,11 @@ struct TransactionStateData {
     bool prevXactReadOnly;               /* entry-time xact r/o state */
     bool startedInRecovery;              /* did we start in recovery? */
     bool didLogXid;                      /* has xid been included in WAL record? */
-    int parallelModeLevel;               /* Enter/ExitParallelMode counter */
     struct TransactionStateData* parent; /* back link to parent */
-
+#ifdef ENABLE_MOT
     /* which storage engine tables are used in current transaction for D/I/U/S statements */
     StorageEngineType storageEngineType;
+#endif
 };
 
 /*
@@ -198,9 +208,10 @@ struct TransactionStateData {
  */
 static THR_LOCAL TransactionStateData TopTransactionStateData = {
 #ifdef PGXC
-    0,                                                      /* global transaction id */
-    {InvalidTransactionHandle, InvalidTransactionTimeline}, /* transaction key in GTM */
-    false,                                                  /* isLocalParameterUsed */
+    0,                                                        /* global transaction id */
+    { InvalidTransactionHandle, InvalidTransactionTimeline }, /* transaction key in GTM */
+    false,                                                    /* isLocalParameterUsed */
+    NULL,
 #else
     0,                           /* transaction id */
 #endif
@@ -221,12 +232,17 @@ static THR_LOCAL TransactionStateData TopTransactionStateData = {
     false,              /* entry-time xact r/o state */
     false,              /* startedInRecovery */
     false,              /* didLogXid */
-    0,                  /* parallelModeLevel */
+#ifdef ENABLE_MOT
     NULL,               /* link to parent state block */
     SE_TYPE_UNSPECIFIED /* storage engine used in transaction */
+#else
+    NULL                /* link to parent state block */
+#endif
 };
 
 static THR_LOCAL TransactionState CurrentTransactionState = NULL;
+static THR_LOCAL TBlockState SavedSTPTransactionBlockState = TBLOCK_DEFAULT;
+static THR_LOCAL TransState SavedSTPTransactionState = TRANS_DEFAULT;
 
 /*
  * PGXC receives from GTM a timestamp value at the same time as a GXID
@@ -245,18 +261,18 @@ extern THR_LOCAL int UDFRPCSocket;
  * List of add-on start- and end-of-xact callbacks
  */
 typedef struct XactCallbackItem {
-    struct XactCallbackItem* next;
+    struct XactCallbackItem *next;
     XactCallback callback;
-    void* arg;
+    void *arg;
 } XactCallbackItem;
 
 /*
  * List of add-on start- and end-of-subxact callbacks
  */
 typedef struct SubXactCallbackItem {
-    struct SubXactCallbackItem* next;
+    struct SubXactCallbackItem *next;
     SubXactCallback callback;
-    void* arg;
+    void *arg;
 } SubXactCallbackItem;
 
 #ifdef PGXC
@@ -266,21 +282,23 @@ typedef struct SubXactCallbackItem {
  * on GTM in order to maintain data consistency on GTM with other cluster nodes.
  */
 typedef struct GTMCallbackItem {
-    struct GTMCallbackItem* next;
+    struct GTMCallbackItem *next;
     GTMCallback callback;
-    void* arg;
+    void *arg;
 } GTMCallbackItem;
 #endif
 
+#ifdef ENABLE_MOT
 typedef struct RedoCommitCallbackItem {
     struct RedoCommitCallbackItem* next;
     RedoCommitCallback callback;
     void* arg;
 } RedoCommitCallbackItem;
+#endif
 
 /* local function prototypes */
 static void AssignTransactionId(TransactionState s);
-static void AbortTransaction(bool PerfectRollback = false, bool stpRollback = false);
+static void AbortTransaction(bool PerfectRollback = false, bool STP_rollback = false);
 static void AtAbort_Memory(void);
 static void AtCleanup_Memory(void);
 static void AtAbort_ResourceOwner(void);
@@ -295,16 +313,18 @@ static void CleanGTMCallbacks(void);
 static void CallGTMCallbacks(GTMEvent event);
 static void CleanSequenceCallbacks(void);
 static void CallSequenceCallbacks(GTMEvent event);
+static void DeleteSavepoint(DList **dlist, DListCell *cell);
+static void SendOneSavepointToRemoteCoordinators(const char *cmd, const char *name, SavepointStmtType stmtType,
+                                                 GlobalTransactionId transactionId = InvalidTransactionId);
+
 #endif
 static void CleanupTransaction(void);
-static void CommitTransaction(bool stpCommit = false);
+static void CommitTransaction(bool STP_commit = false);
 static TransactionId RecordTransactionAbort(bool isSubXact);
 static void StartTransaction(bool begin_on_gtm);
 
 static void StartSubTransaction(void);
-static void CommitSubTransaction(bool stpCommit = false);
-static void AbortSubTransaction(bool stpRollback = false);
-static void CleanupSubTransaction(void);
+static void CommitSubTransaction(bool STP_commit = false);
 static void PushTransaction(void);
 static void PopTransaction(void);
 
@@ -315,17 +335,129 @@ static void AtSubCommit_Memory(void);
 static void AtSubStart_Memory(void);
 static void AtSubStart_ResourceOwner(void);
 
-static void ShowTransactionState(const char* str);
+static void ShowTransactionState(const char *str);
 static void ShowTransactionStateRec(TransactionState state);
-static const char* BlockStateAsString(TBlockState blockState);
-static const char* TransStateAsString(TransState state);
-static void PrepareTransaction(bool stpCommit = false);
+static const char *BlockStateAsString(TBlockState blockState);
+static const char *TransStateAsString(TransState state);
+static void PrepareTransaction(bool STP_commit = false);
 
 extern void print_leak_warning_at_commit();
 #ifndef ENABLE_LLT
 extern void clean_ec_conn();
 extern void delete_ec_ctrl();
 #endif
+
+void InitTopTransactionState(void)
+{
+    TopTransactionStateData = {
+#ifdef PGXC
+        0,
+        { InvalidTransactionHandle, InvalidTransactionTimeline },
+        false,
+        NULL,
+#else
+        0,
+#endif
+        0,
+        NULL,
+        0,
+        TRANS_DEFAULT,
+        TBLOCK_DEFAULT,
+        0,
+        0,
+        NULL,
+        NULL,
+        NULL,
+        0,
+        0,
+        InvalidOid,
+        0,
+        false,
+        false,
+        false,
+        NULL
+    };
+}
+
+
+/* ----------------------------------------------------------------
+ *      Transaction routines for store procedure
+ *     
+ * For supporting transaction state in transaction block(transaction is started 
+ * by begin/start statement) transforms with transaction state in STP's. When the 
+ * STP run in transaction started by begin/start statement and STP contains transaction 
+ * statement, it should call SaveCurrentSTPTopTransactionState() to save Top 
+ * Transaction's state and restore transaction state with RestoreCurrentSTPTopTransactionState.
+ * to keep the Top transaction state. 
+ *
+ * ----------------------------------------------------------------
+ */
+
+void SaveCurrentSTPTopTransactionState()
+{
+    TransactionState s = &TopTransactionStateData;
+
+    /* Only support call this in STP.*/
+    if (u_sess->SPI_cxt._stack == NULL || !u_sess->SPI_cxt.is_stp) {
+        ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE), 
+            errmsg("SaveCurrentSTPTopTransactionState can only be called in STP.")));
+    }
+
+    /* TBLOCK_STARTED: the transaction block state when call or select STP immediately. */
+    /* TBLOCK_INPROGRESS: the transaction block state when call or select STP in existed transactions. */
+    if (s->blockState != TBLOCK_STARTED 
+        && s->blockState != TBLOCK_INPROGRESS) {
+        ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE), 
+            errmsg("SaveCurrentSTPTopTransactionState: unexpected state %s", 
+            BlockStateAsString(s->blockState))));
+    }
+
+    SavedSTPTransactionBlockState = s->blockState;
+    SavedSTPTransactionState = s->state;
+}
+
+void RestoreCurrentSTPTopTransactionState()
+{
+    TransactionState s = &TopTransactionStateData;
+
+    /* Only support call this in STP.*/
+    if (u_sess->SPI_cxt._stack == NULL || !u_sess->SPI_cxt.is_stp) {
+        ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE), 
+            errmsg("RestoreCurrentSTPTopTransactionState can only be called in STP.")));
+    }
+
+    /* STP's transaction state can't be TBLOCK_DEFAULT. */	
+    if (SavedSTPTransactionBlockState == TBLOCK_DEFAULT) {
+        ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE), 
+            errmsg("RestoreCurrentSTPTopTransactionState:NULL, call RestoreCurrentSTPTopTransactionState firstly.")));
+    }
+
+    /* TBLOCK_STARTED: The transaction block state whatever call or select STP immediately or in */ 
+    /* outer transaction block. */
+    /* TBLOCK_INPROGRESS: the transaction block state when call or select STP in existed sub transaction. */
+    if (s->blockState != TBLOCK_STARTED
+        && s->blockState != TBLOCK_INPROGRESS) {
+        ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE), 
+            errmsg("RestoreCurrentSTPTopTransactionState: unexpected state %s", 
+            BlockStateAsString(s->blockState))));
+    }
+
+    s->blockState = SavedSTPTransactionBlockState;
+    SavedSTPTransactionBlockState = TBLOCK_DEFAULT;
+    s->state = SavedSTPTransactionState;
+    SavedSTPTransactionState = TRANS_DEFAULT;
+}
+
+bool IsStpInOuterSubTransaction() 
+{
+    TransactionState s = CurrentTransactionState;
+    if (s->blockState >= TBLOCK_SUBBEGIN
+        && u_sess->SPI_cxt.is_stp 
+        && s->nestingLevel > u_sess->SPI_cxt.portal_stp_exception_counter + 1) {
+        return true;
+    }
+    return false;
+}
 
 /* ----------------------------------------------------------------
  *	transaction initialization routines
@@ -360,12 +492,31 @@ bool IsTransactionState(void)
     return (s->state == TRANS_INPROGRESS);
 }
 
+#ifdef ENABLE_MULTIPLE_NODES 
+static void CheckDeleteLock(bool is_commit)
+{
+    ereport(DEBUG2, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("check delete query enter.")));
+    if (g_instance.attr.attr_common.enable_tsdb  && 
+        Tsdb::TableStatus::GetInstance().is_in_deletion()) {
+        Tsdb::TableStatus::GetInstance().remove_query();
+    }
+
+    return;    
+}
+#endif   /* ENABLE_MULTIPLE_NODES */ 
+
 bool WorkerThreadCanSeekAnotherMission(ThreadStayReason* reason)
 {
     TransactionState s = CurrentTransactionState;
 
     if (t_thrd.threadpool_cxt.reaper_dead_session) {
         *reason = TWORKER_PREDEADSESSION;
+        return true;
+    }
+
+    if (u_sess->status == KNL_SESS_UNINIT) {
+        *reason = TWORKER_PREDEADSESSION;
+        t_thrd.threadpool_cxt.reaper_dead_session = true;
         return true;
     }
 
@@ -496,14 +647,14 @@ TransactionId GetCurrentTransactionId(void)
  * This will return a Top Transaction Id From the gid string,
  * used for gid checking
  */
-TransactionId GetTransactionIdFromGidStr(char* gid)
+TransactionId GetTransactionIdFromGidStr(char *gid)
 {
 #ifndef ENABLE_MULTIPLE_NODES
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return InvalidTransactionId;
 #else
     TransactionId topxid = InvalidTransactionId;
-    char* substr = NULL;
+    char *substr = NULL;
     int rc = -1;
 
     /* gid must start with 'T' */
@@ -617,6 +768,16 @@ TransactionId GetStableLatestTransactionId(void)
     return t_thrd.xact_cxt.stablexid;
 }
 
+/* Get parent xid if any, return InvalidTransactionId if it is top transaction */
+TransactionId GetParentTransactionIdIfAny(const TransactionState s)
+{
+    if (s->parent != NULL) {
+        return s->parent->transactionId;
+    } else {
+        return InvalidTransactionId;
+    }
+}
+
 #ifdef PGXC
 /*
  *	GetCurrentLocalParamStatus
@@ -667,12 +828,9 @@ TransactionId GetNewGxidGTM(TransactionState s, bool is_sub_xact)
 
     /* don't retry here, current handle cannot have valid transactionid */
     if (TransactionIdIsValid(s->transactionId))
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                errmsg("current transaction with handle: (%d:%u) have a valid xid: %lu already",
-                    key.txnHandle,
-                    key.txnTimeline,
-                    s->transactionId)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                        errmsg("current transaction with handle: (%d:%u) have a valid xid: %lu already", key.txnHandle,
+                               key.txnTimeline, s->transactionId)));
 
     xid = (TransactionId)GetGxidGTM(key, is_sub_xact);
 
@@ -721,15 +879,6 @@ static void AssignTransactionId(TransactionState s)
     Assert(s->state == TRANS_INPROGRESS);
 
     /*
-     * Workers synchronize transaction state at the beginning of each parallel
-     * operation, so we can't account for new XIDs at this point.
-     */
-    if (IsInParallelMode() || IsParallelWorker()) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot assign XIDs during a parallel operation")));
-    }
-
-    /*
      * Ensure parent(s) have XIDs, so that a child always has an XID later
      * than its parent.  Musn't recurse here, or we might get a stack overflow
      * if we're at the bottom of a huge stack of subtransactions none of which
@@ -737,10 +886,10 @@ static void AssignTransactionId(TransactionState s)
      */
     if (isSubXact && !TransactionIdIsValid(s->parent->transactionId)) {
         TransactionState p = s->parent;
-        TransactionState* parents = NULL;
+        TransactionState *parents = NULL;
         size_t parentOffset = 0;
 
-        parents = (TransactionState*)palloc(sizeof(TransactionState) * s->nestingLevel);
+        parents = (TransactionState *)palloc(sizeof(TransactionState) * s->nestingLevel);
         while (p != NULL && !TransactionIdIsValid(p->transactionId)) {
             parents[parentOffset++] = p;
             p = p->parent;
@@ -785,6 +934,8 @@ static void AssignTransactionId(TransactionState s)
     /* send my top transaction id to exec CN */
     if (!isSubXact && IsConnFromCoord() && u_sess->need_report_top_xid)
         ReportTopXid(s->transactionId);
+    if (!isSubXact)
+        instr_stmt_report_txid(s->transactionId);
     FixCurrentSnapshotByGxid(s->transactionId);
 
     if (isSubXact)
@@ -854,9 +1005,9 @@ static void AssignTransactionId(TransactionState s)
             xlrec.nsubxacts = t_thrd.xact_cxt.nUnreportedXids;
 
             XLogBeginInsert();
-            XLogRegisterData((char*)&xlrec, MinSizeOfXactAssignment);
-            XLogRegisterData(
-                (char*)t_thrd.xact_cxt.unreportedXids, t_thrd.xact_cxt.nUnreportedXids * sizeof(TransactionId));
+            XLogRegisterData((char *)&xlrec, MinSizeOfXactAssignment);
+            XLogRegisterData((char *)t_thrd.xact_cxt.unreportedXids,
+                             t_thrd.xact_cxt.nUnreportedXids * sizeof(TransactionId));
 
             (void)XLogInsert(RM_XACT_ID, XLOG_XACT_ASSIGNMENT);
 
@@ -930,16 +1081,8 @@ CommandId GetCurrentCommandId(bool used)
 #endif
 
     /* this is global to a transaction, not subtransaction-local */
-    if (used) {
-        /*
-         * Forbid setting currentCommandIdUsed in a parallel worker, because
-         * we have no provision for communicating this back to the master.  We
-         * could relax this restriction when currentCommandIdUsed was already
-         * true at the start of the parallel operation.
-         */
-        Assert(!IsParallelWorker());
+    if (used)
         t_thrd.xact_cxt.currentCommandIdUsed = true;
-    }
     return t_thrd.xact_cxt.currentCommandId;
 }
 
@@ -1027,18 +1170,12 @@ TimestampTz GetCurrentStmtsysTimestamp(void)
 /*
  *	SetCurrentStatementStartTimestamp
  *
- * The time on the DN is obtained from the CN. If the CN does not deliver the time,
- * the time of the current DN is used.
- * In a parallel worker, this should already have been provided by a call
- * to SetParallelStartTimestamps().
+ *	The time on the DN is obtained from the CN. If the CN does not deliver the time,
+ *	the time of the current DN is used.
  */
 void SetCurrentStatementStartTimestamp(void)
 {
-    if (!IsParallelWorker()) {
-        t_thrd.xact_cxt.stmtStartTimestamp = GetCurrentTimestamp();
-    } else {
-        Assert(t_thrd.xact_cxt.stmtStartTimestamp != 0);
-    }
+    t_thrd.xact_cxt.stmtStartTimestamp = GetCurrentTimestamp();
 }
 
 void SetStatementStartTimestamp(TimestampTz timestamp)
@@ -1133,10 +1270,10 @@ bool TransactionIdIsCurrentTransactionId(TransactionId xid)
      * We always say that BootstrapTransactionId is "not my transaction ID"
      * even when it is (ie, during bootstrap).	Along with the fact that
      * transam.c always treats BootstrapTransactionId as already committed,
-     * this causes the tqual.c routines to see all tuples as committed, which
-     * is what we need during bootstrap.  (Bootstrap mode only inserts tuples,
-     * it never updates or deletes them, so all tuples can be presumed good
-     * immediately.)
+     * this causes the heapam_visibility.c routines to see all tuples as 
+     * committed, which is what we need during bootstrap.  (Bootstrap mode 
+     * only inserts tuples, it never updates or deletes them, so all tuples 
+     * can be presumed good immediately.)
      *
      * Likewise, InvalidTransactionId and FrozenTransactionId are certainly
      * not my transaction ID, so we can just return "false" immediately for
@@ -1144,17 +1281,6 @@ bool TransactionIdIsCurrentTransactionId(TransactionId xid)
      */
     if (!TransactionIdIsNormal(xid))
         return false;
-
-    /*
-     * In parallel workers, the XIDs we must consider as current are stored in
-     * ParallelCurrentXids rather than the transaction-state stack.  Note that
-     * the XIDs in this array are sorted numerically rather than according to
-     * transactionIdPrecedes order.
-     */
-    if (t_thrd.xact_cxt.nParallelCurrentXids > 0) {
-        return bsearch(&xid, t_thrd.xact_cxt.ParallelCurrentXids, (uint32)t_thrd.xact_cxt.nParallelCurrentXids,
-            sizeof(TransactionId), xidComparator) != NULL ? true : false;
-    }
 
     /*
      * We will return true for the Xid of the current subtransaction, any of
@@ -1206,42 +1332,7 @@ bool TransactionStartedDuringRecovery(void)
 }
 
 /*
- * 	EnterParallelMode
- */
-void EnterParallelMode(void)
-{
-    TransactionState s = CurrentTransactionState;
-    Assert(s->parallelModeLevel >= 0);
-    ++s->parallelModeLevel;
-}
-
-/*
- * 	ExitParallelMode
- */
-void ExitParallelMode(void)
-{
-    TransactionState s = CurrentTransactionState;
-    Assert(s->parallelModeLevel > 0);
-    Assert(s->parallelModeLevel > 1 || !ParallelContextActive());
-    --s->parallelModeLevel;
-}
-
-/*
- * 	IsInParallelMode
- *
- * Are we in a parallel operation, as either the master or a worker?  Check
- * this to prohibit operations that change backend-local state expected to
- * match across all workers.  Mere caches usually don't require such a
- * restriction.  State modified in a strict push/pop fashion, such as the
- * active snapshot stack, is often fine.
- */
-bool IsInParallelMode(void)
-{
-    return CurrentTransactionState->parallelModeLevel != 0;
-}
-
-/*
- * 	CommandCounterIncrement
+ *	CommandCounterIncrement
  */
 void CommandCounterIncrement(void)
 {
@@ -1252,22 +1343,11 @@ void CommandCounterIncrement(void)
      * overflow, and keeps no-op CommandCounterIncrement operations cheap.
      */
     if (t_thrd.xact_cxt.currentCommandIdUsed) {
-        /*
-         * Workers synchronize transaction state at the beginning of each
-         * parallel operation, so we can't account for new commands after that
-         * point.
-         */
-        if (IsInParallelMode() || IsParallelWorker()) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot start commands during a parallel operation")));
-        }
-
         t_thrd.xact_cxt.currentCommandId += 1;
         if (t_thrd.xact_cxt.currentCommandId == InvalidCommandId) { /* check for overflow */
             t_thrd.xact_cxt.currentCommandId -= 1;
-            ereport(ERROR,
-                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                    errmsg("cannot have more than 2^32-2 commands in a transaction")));
+            ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                            errmsg("cannot have more than 2^32-2 commands in a transaction")));
         }
         t_thrd.xact_cxt.currentCommandIdUsed = false;
 
@@ -1328,11 +1408,11 @@ static void AtStart_Memory(void)
      * size, so that space will be reserved immediately.
      */
     if (t_thrd.xact_cxt.TransactionAbortContext == NULL)
-        t_thrd.xact_cxt.TransactionAbortContext =
-            AllocSetContextCreate(t_thrd.top_mem_cxt, "TransactionAbortContext", 32 * 1024, 32 * 1024, 32 * 1024);
+        t_thrd.xact_cxt.TransactionAbortContext = AllocSetContextCreate(t_thrd.top_mem_cxt, "TransactionAbortContext",
+                                                                        32 * 1024, 32 * 1024, 32 * 1024);
 
-    /* Set global variable cursor_array to NIL at beginning of a transaction */
-    u_sess->plsql_cxt.cursor_array = NIL;
+    /* Set global variable context_array to NIL at beginning of a transaction */
+    u_sess->plsql_cxt.context_array = NIL;
 
     /* We shouldn't have a transaction context already. */
     Assert(u_sess->top_transaction_mem_cxt == NULL);
@@ -1340,11 +1420,9 @@ static void AtStart_Memory(void)
     /* Create a toplevel context for the transaction. */
     Assert(t_thrd.xact_cxt.PGXCBucketMap == NULL);
 
-    u_sess->top_transaction_mem_cxt = AllocSetContextCreate(u_sess->top_mem_cxt,
-        "TopTransactionContext",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    u_sess->top_transaction_mem_cxt = AllocSetContextCreate(u_sess->top_mem_cxt, "TopTransactionContext",
+                                                            ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+                                                            ALLOCSET_DEFAULT_MAXSIZE);
 
     /*
      * In a top-level transaction, t_thrd.mem_cxt.cur_transaction_mem_cxt is the same as
@@ -1365,7 +1443,7 @@ static void AtStart_ResourceOwner(void)
     Assert(t_thrd.utils_cxt.TopTransactionResourceOwner == NULL);
 
     /* Create a toplevel resource owner for the transaction. */
-    s->curTransactionOwner = ResourceOwnerCreate(NULL, "TopTransaction");
+    s->curTransactionOwner = ResourceOwnerCreate(NULL, "TopTransaction", MEMORY_CONTEXT_STORAGE);
 
     t_thrd.utils_cxt.TopTransactionResourceOwner = s->curTransactionOwner;
     t_thrd.utils_cxt.CurTransactionResourceOwner = s->curTransactionOwner;
@@ -1388,10 +1466,8 @@ static void AtSubStart_Memory(void)
      * We make it a child of the immediate parent's t_thrd.mem_cxt.cur_transaction_mem_cxt.
      */
     t_thrd.mem_cxt.cur_transaction_mem_cxt = AllocSetContextCreate(t_thrd.mem_cxt.cur_transaction_mem_cxt,
-        "CurTransactionContext",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+                                                                   "CurTransactionContext", ALLOCSET_DEFAULT_MINSIZE,
+                                                                   ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     s->curTransactionContext = t_thrd.mem_cxt.cur_transaction_mem_cxt;
 
     /* Make the t_thrd.mem_cxt.cur_transaction_mem_cxt active. */
@@ -1408,13 +1484,14 @@ static void AtSubStart_ResourceOwner(void)
      * Create a resource owner for the subtransaction.	We make it a child of
      * the immediate parent's resource owner.
      */
-    s->curTransactionOwner = ResourceOwnerCreate(s->parent->curTransactionOwner, "SubTransaction");
+    s->curTransactionOwner = ResourceOwnerCreate(s->parent->curTransactionOwner, "SubTransaction",
+        MEMORY_CONTEXT_STORAGE);
 
     t_thrd.utils_cxt.CurTransactionResourceOwner = s->curTransactionOwner;
     t_thrd.utils_cxt.CurrentResourceOwner = s->curTransactionOwner;
 }
 
-CommitSeqNo GetLocalNextCSN()
+CommitSeqNo getLocalNextCSN()
 {
     return pg_atomic_fetch_add_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo, 1);
 }
@@ -1435,13 +1512,13 @@ static TransactionId RecordTransactionCommit(void)
     bool markXidCommitted = TransactionIdIsValid(xid);
     TransactionId latestXid = InvalidTransactionId;
     int nrels;
-    ColFileNodeRel* rels = NULL;
+    ColFileNodeRel *rels = NULL;
     int nchildren;
-    TransactionId* children = NULL;
+    TransactionId *children = NULL;
     int nmsgs = 0;
-    SharedInvalidationMessage* invalMessages = NULL;
+    SharedInvalidationMessage *invalMessages = NULL;
     int nlibrary = 0;
-    char* library_name = NULL;
+    char *library_name = NULL;
     int library_length = 0;
     bool RelcacheInitFileInval = false;
     bool wrote_xlog = false;
@@ -1474,13 +1551,13 @@ static TransactionId RecordTransactionCommit(void)
          * since it's a bit fragile.
          */
         if (nrels != 0)
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("cannot commit a transaction that deleted files but has no xid")));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                            errmsg("cannot commit a transaction that deleted files but has no xid")));
 
         /* Can't have child XIDs either; AssignTransactionId enforces this */
         Assert(nchildren == 0);
 
+#ifdef ENABLE_MOT
         /*
          * For MOT, XACT_EVENT_COMMIT will just do the OCC validation.
          * Actual commit (write redo and apply changes) will be done during XACT_EVENT_RECORD_COMMIT event.
@@ -1496,6 +1573,7 @@ static TransactionId RecordTransactionCommit(void)
         if (t_thrd.xlog_cxt.XactLastRecEnd != 0) {
             wrote_xlog = true;
         }
+#endif
 
         /*
          * If we didn't create XLOG entries, we're done here; otherwise we
@@ -1512,9 +1590,8 @@ static TransactionId RecordTransactionCommit(void)
          * Check that we haven't commited halfway through RecordTransactionAbort.
          */
         if (TransactionIdDidAbort(xid))
-            ereport(PANIC,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("cannot commit transaction %lu, it was already aborted", xid)));
+            ereport(PANIC, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                            errmsg("cannot commit transaction %lu, it was already aborted", xid)));
 
         /*
          * Begin commit critical section and insert the commit XLOG record.
@@ -1523,39 +1600,56 @@ static TransactionId RecordTransactionCommit(void)
          */
         BufmgrCommit();
 
-#ifdef ENABLE_MULTIPLE_NODES
-        /* for dn auto commit condition, get a new next csn from gtm. */
-        if (TransactionIdIsNormal(xid) &&
-            (!(useLocalXid || !IsPostmasterEnvironment || GTM_FREE_MODE || GetForceXidFromGTM())) &&
-            (GetCommitCsn() == 0)) {
-            /* First set csn to commit in progress */
-            SetXact2CommitInProgress(xid, 0);
+        if (useLocalXid || !IsPostmasterEnvironment || GTM_FREE_MODE) {
 
-            /* Then get a new csn from gtm */
-            ereport(LOG, (errmsg("Set a new csn from gtm for auto commit transactions.")));
-            if (GTM_MODE)
-                setCommitCsn(GetCSNGTM());
-            else
-                setCommitCsn(CommitCSNGTM(true));
-        }
-#else
+
+#ifndef ENABLE_MULTIPLE_NODES
         /* For hot standby, set csn to commit in progress */
         CommitSeqNo csn = SetXact2CommitInProgress(xid, 0);
         if (XLogStandbyInfoActive()) {
             XLogBeginInsert();
-            XLogRegisterData((char*)(&xid), sizeof(TransactionId));
-            XLogRegisterData((char*)(&csn), sizeof(CommitSeqNo));
+            XLogRegisterData((char *) (&xid), sizeof(TransactionId));
+            XLogRegisterData((char *) (&csn), sizeof(CommitSeqNo));
+            uint64 childrenxidnum = nchildren;
+            XLogRegisterData((char *) (&childrenxidnum), sizeof(uint64));
+            if (childrenxidnum > 0) {
+                XLogRegisterData((char *)children, nchildren * sizeof(TransactionId));
+            }
             XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_CSN_COMMITTING);
         }
-        setCommitCsn(getNextCSN());
-#endif
+#else
+        /*
+         * set commit CSN and update global CSN in gtm free mode.
+         */
+        SetXact2CommitInProgress(xid, 0);
 
+#endif
+        setCommitCsn(getLocalNextCSN());
+        } else {
+            /* for dn auto commit condition, get a new next csn from gtm. */
+            if (TransactionIdIsNormal(xid) &&
+                (!(useLocalXid || !IsPostmasterEnvironment || GTM_FREE_MODE || GetForceXidFromGTM())) &&
+                (GetCommitCsn() == 0)) {
+                /* First set csn to commit in progress */
+                SetXact2CommitInProgress(xid, 0);
+
+                /* Then get a new csn from gtm */
+                ereport(LOG, (errmsg("Set a new csn from gtm for auto commit transactions.")));
+                if (GTM_MODE)
+                    setCommitCsn(GetCSNGTM());
+                else
+                    setCommitCsn(CommitCSNGTM(true));
+            }
+        }
+
+#ifdef ENABLE_MOT
         /*
          * For MOT, XACT_EVENT_COMMIT will just do the OCC validation.
          * Actual commit (write redo and apply changes) will be done during XACT_EVENT_RECORD_COMMIT event.
          * This should be done after setCommitCsn for the transaction.
          */
         CallXactCallbacks(XACT_EVENT_RECORD_COMMIT);
+#endif
 
         /*
          * Mark ourselves as within our "commit critical section".	This
@@ -1599,9 +1693,11 @@ static TransactionId RecordTransactionCommit(void)
                 xlrec.xinfo |= XACT_COMPLETION_UPDATE_RELCACHE_FILE;
             if (t_thrd.xact_cxt.forceSyncCommit)
                 xlrec.xinfo |= XACT_COMPLETION_FORCE_SYNC_COMMIT;
+#ifdef ENABLE_MOT
             if (IsMOTEngineUsed() || IsMixedEngineUsed()) {
                 xlrec.xinfo |= XACT_MOT_ENGINE_USED;
             }
+#endif
 
             xlrec.dbId = u_sess->proc_cxt.MyDatabaseId;
             xlrec.tsId = u_sess->proc_cxt.MyDatabaseTableSpace;
@@ -1619,30 +1715,30 @@ static TransactionId RecordTransactionCommit(void)
             xlrec.nlibrary = nlibrary;
 
             XLogBeginInsert();
-            XLogRegisterData((char*)(&xlrec), MinSizeOfXactCommit);
+            XLogRegisterData((char *)(&xlrec), MinSizeOfXactCommit);
 
             /* dump rels to delete */
             if (nrels > 0) {
-                XLogRegisterData((char*)rels, nrels * sizeof(ColFileNodeRel));
+                XLogRegisterData((char *)rels, nrels * sizeof(ColFileNodeRel));
                 (void)LWLockAcquire(DelayDDLLock, LW_SHARED);
             }
 
             /* dump committed child Xids */
             if (nchildren > 0) {
-                XLogRegisterData((char*)children, nchildren * sizeof(TransactionId));
+                XLogRegisterData((char *)children, nchildren * sizeof(TransactionId));
             }
 
             /* dump shared cache invalidation messages */
             if (nmsgs > 0) {
-                XLogRegisterData((char*)invalMessages, nmsgs * sizeof(SharedInvalidationMessage));
+                XLogRegisterData((char *)invalMessages, nmsgs * sizeof(SharedInvalidationMessage));
             }
 
 #ifndef ENABLE_MULTIPLE_NODES
-            XLogRegisterData((char*)&u_sess->utils_cxt.RecentXmin, sizeof(TransactionId));
+            XLogRegisterData((char *) &u_sess->utils_cxt.RecentXmin, sizeof(TransactionId));
 #endif
 
             if (nlibrary > 0) {
-                XLogRegisterData((char*)library_name, library_length);
+                XLogRegisterData((char *)library_name, library_length);
             }
 
             /* we allow filtering by xacts */
@@ -1667,15 +1763,15 @@ static TransactionId RecordTransactionCommit(void)
             xlrec.nsubxacts = nchildren;
 
             XLogBeginInsert();
-            XLogRegisterData((char*)(&xlrec), MinSizeOfXactCommitCompact);
+            XLogRegisterData((char *)(&xlrec), MinSizeOfXactCommitCompact);
 
             /* dump committed child Xids */
             if (nchildren > 0) {
-                XLogRegisterData((char*)children, nchildren * sizeof(TransactionId));
+                XLogRegisterData((char *)children, nchildren * sizeof(TransactionId));
             }
 
 #ifndef ENABLE_MULTIPLE_NODES
-            XLogRegisterData((char*)&u_sess->utils_cxt.RecentXmin, sizeof(TransactionId));
+            XLogRegisterData((char *) &u_sess->utils_cxt.RecentXmin, sizeof(TransactionId));
 #endif
 
             /* we allow filtering by xacts */
@@ -1721,12 +1817,22 @@ static TransactionId RecordTransactionCommit(void)
          * We do not sleep if u_sess->attr.attr_storage.enableFsync is not turned on, nor if there are
          * fewer than u_sess->attr.attr_storage.CommitSiblings other backends with active transactions.
          */
-        /* Wait for local flush only when we don't wait for the remote server */
-        XLogWaitFlush(t_thrd.xlog_cxt.XactLastRecEnd);
+        if (u_sess->attr.attr_storage.CommitDelay > 0 && u_sess->attr.attr_storage.enableFsync &&
+            MinimumActiveBackends(u_sess->attr.attr_storage.CommitSiblings))
+            pg_usleep(u_sess->attr.attr_storage.CommitDelay);
+
+        XLogFlush(t_thrd.xlog_cxt.XactLastRecEnd);
+
+        /*
+         * Wake up all walsenders to send WAL up to the COMMIT record
+         * immediately if replication is enabled
+         */
+        if (g_instance.attr.attr_storage.max_wal_senders > 0)
+            WalSndWakeup();
 
         /* Now we may update the CLOG, if we wrote a COMMIT record above */
         if (markXidCommitted) {
-            t_thrd.pgxact->needToSyncXid = true;
+            t_thrd.pgxact->needToSyncXid |= SNAPSHOT_UPDATE_NEED_SYNC;
             TransactionIdCommitTree(xid, nchildren, children, GetCommitCsn());
         }
     } else {
@@ -1741,6 +1847,7 @@ static TransactionId RecordTransactionCommit(void)
          * Report the latest async commit LSN, so that the WAL writer knows to
          * flush this commit.
          */
+        XLogSetAsyncXactLSN(t_thrd.xlog_cxt.XactLastRecEnd);
 
         /*
          * We must not immediately update the CLOG, since we didn't flush the
@@ -1748,7 +1855,7 @@ static TransactionId RecordTransactionCommit(void)
          * flushed before the CLOG may be updated.
          */
         if (markXidCommitted) {
-            t_thrd.pgxact->needToSyncXid = true;
+            t_thrd.pgxact->needToSyncXid |= SNAPSHOT_UPDATE_NEED_SYNC;
             TransactionIdAsyncCommitTree(xid, nchildren, children, t_thrd.xlog_cxt.XactLastRecEnd, GetCommitCsn());
         }
     }
@@ -1806,7 +1913,7 @@ static void AtCommit_Memory(void)
      * Now that we're "out" of a transaction, have the system allocate things
      * in the top memory context instead of per-transaction contexts.
      */
-    (void)MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    (void)MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
 
     /* Release all transaction-local memory. */
     Assert(u_sess->top_transaction_mem_cxt != NULL);
@@ -1881,7 +1988,7 @@ static void AtSubCommit_childXids(void)
     /* Allocate or enlarge the parent array if necessary */
     if (s->parent->maxChildXids < new_nChildXids) {
         int new_maxChildXids;
-        TransactionId* new_childXids = NULL;
+        TransactionId *new_childXids = NULL;
 
         /*
          * Make it 2x what's needed right now, to avoid having to enlarge it
@@ -1890,11 +1997,11 @@ static void AtSubCommit_childXids(void)
          * here or in the calculation of new_nChildXids.)
          */
         new_maxChildXids = Min(new_nChildXids * 2, (int)(MaxAllocSize / sizeof(TransactionId)));
+
         if (new_maxChildXids < new_nChildXids)
-            ereport(ERROR,
-                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                    errmsg("maximum number of committed subtransactions (%d) exceeded",
-                        (int)(MaxAllocSize / sizeof(TransactionId)))));
+            ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                            errmsg("maximum number of committed subtransactions (%d) exceeded",
+                                   (int)(MaxAllocSize / sizeof(TransactionId)))));
 
         /*
          * We keep the child-XID arrays in u_sess->top_transaction_mem_cxt; this avoids
@@ -1902,11 +2009,11 @@ static void AtSubCommit_childXids(void)
          * bytes of grandchild XIDs.
          */
         if (s->parent->childXids == NULL)
-            new_childXids = (TransactionId*)MemoryContextAlloc(
-                u_sess->top_transaction_mem_cxt, (unsigned)new_maxChildXids * sizeof(TransactionId));
+            new_childXids = (TransactionId *)MemoryContextAlloc(u_sess->top_transaction_mem_cxt,
+                                                                (unsigned)new_maxChildXids * sizeof(TransactionId));
         else
-            new_childXids =
-                (TransactionId*)repalloc(s->parent->childXids, (unsigned)new_maxChildXids * sizeof(TransactionId));
+            new_childXids = (TransactionId *)repalloc(s->parent->childXids,
+                                                      (unsigned)new_maxChildXids * sizeof(TransactionId));
 
         s->parent->childXids = new_childXids;
         s->parent->maxChildXids = new_maxChildXids;
@@ -1925,9 +2032,8 @@ static void AtSubCommit_childXids(void)
 
     if (s->nChildXids > 0) {
         errorno = memcpy_s(&s->parent->childXids[s->parent->nChildXids + 1],
-            (unsigned)s->parent->maxChildXids * sizeof(TransactionId),
-            s->childXids,
-            (unsigned)s->nChildXids * sizeof(TransactionId));
+                           (unsigned)s->parent->maxChildXids * sizeof(TransactionId), s->childXids,
+                           (unsigned)s->nChildXids * sizeof(TransactionId));
         securec_check(errorno, "", "");
     }
 
@@ -1957,11 +2063,11 @@ static TransactionId RecordTransactionAbort(bool isSubXact)
     TransactionId latestXid;
     xl_xact_abort xlrec;
     int nrels = 0;
-    ColFileNodeRel* rels = NULL;
+    ColFileNodeRel *rels = NULL;
     int nchildren = 0;
-    TransactionId* children = NULL;
+    TransactionId *children = NULL;
     int nlibrary = 0;
-    char* library_name = NULL;
+    char *library_name = NULL;
     int library_length = 0;
     bool bCanAbort = true;
     TransactionId xid = GetCurrentTransactionIdIfAny();
@@ -1986,7 +2092,7 @@ static TransactionId RecordTransactionAbort(bool isSubXact)
      * If we send commit prepared command to DN, we can not write an ABORT record
      * in xlog and clog.
      */
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && IsNormalProcessingMode()) {
+    if (IsNormalProcessingMode()) {
         if (!t_thrd.xact_cxt.XactLocalNodeCanAbort) {
             /* Reset XactLastRecEnd until the next transaction writes something */
             if (!isSubXact)
@@ -2007,9 +2113,8 @@ static TransactionId RecordTransactionAbort(bool isSubXact)
      * Check that we haven't aborted halfway through RecordTransactionCommit.
      */
     if (bCanAbort && TransactionIdDidCommit(xid))
-        ereport(PANIC,
-            (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                errmsg("cannot abort transaction %lu, it was already committed", xid)));
+        ereport(PANIC, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                        errmsg("cannot abort transaction %lu, it was already committed", xid)));
 
     /* Fetch the data we need for the abort record */
     nrels = smgrGetPendingDeletes(false, &rels);
@@ -2036,21 +2141,21 @@ static TransactionId RecordTransactionAbort(bool isSubXact)
         xlrec.nlibrary = nlibrary;
 
         XLogBeginInsert();
-        XLogRegisterData((char*)(&xlrec), MinSizeOfXactAbort);
+        XLogRegisterData((char *)(&xlrec), MinSizeOfXactAbort);
 
         /* dump rels to delete */
         if (nrels > 0) {
-            XLogRegisterData((char*)rels, nrels * sizeof(ColFileNodeRel));
+            XLogRegisterData((char *)rels, nrels * sizeof(ColFileNodeRel));
             (void)LWLockAcquire(DelayDDLLock, LW_SHARED);
         }
 
         /* dump committed child Xids */
         if (nchildren > 0)
-            XLogRegisterData((char*)children, nchildren * sizeof(TransactionId));
+            XLogRegisterData((char *)children, nchildren * sizeof(TransactionId));
 
         /* dump library */
         if (nlibrary > 0) {
-            XLogRegisterData((char*)library_name, library_length);
+            XLogRegisterData((char *)library_name, library_length);
         }
 
         abortRecLSN = XLogInsert(RM_XACT_ID, XLOG_XACT_ABORT);
@@ -2127,7 +2232,7 @@ static void AtAbort_Memory(void)
     if (t_thrd.xact_cxt.TransactionAbortContext != NULL)
         (void)MemoryContextSwitchTo(t_thrd.xact_cxt.TransactionAbortContext);
     else
-        (void)MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+        (void)MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 }
 
 static void AtSubAbort_Memory(void)
@@ -2185,7 +2290,7 @@ static void AtCleanup_Memory(void)
      * Now that we're "out" of a transaction, have the system allocate things
      * in the top memory context instead of per-transaction contexts.
      */
-    (void)MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    (void)MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * Clear the special abort context for next time.
@@ -2198,9 +2303,14 @@ static void AtCleanup_Memory(void)
      */
     if (u_sess->top_transaction_mem_cxt != NULL)
         MemoryContextDelete(u_sess->top_transaction_mem_cxt);
-    u_sess->plsql_cxt.cursor_array = NIL;
+    u_sess->plsql_cxt.context_array = NIL;
     u_sess->top_transaction_mem_cxt = NULL;
     t_thrd.mem_cxt.cur_transaction_mem_cxt = NULL;
+
+    /* the memory is allocated from top_transaction_mem_cxt */
+    t_thrd.asy_cxt.upperPendingActions = NULL;
+    t_thrd.asy_cxt.upperPendingNotifies = NULL;
+
     CurrentTransactionState->curTransactionContext = NULL;
 
     t_thrd.xact_cxt.PGXCBucketMap = NULL;
@@ -2310,6 +2420,7 @@ static void StartTransaction(bool begin_on_gtm)
     t_thrd.xact_cxt.XactLocalNodePrepared = false;
     t_thrd.xact_cxt.XactLocalNodeCanAbort = true;
     t_thrd.xact_cxt.XactPrepareSent = false;
+    t_thrd.xact_cxt.AlterCoordinatorStmt = false;
     t_thrd.utils_cxt.pRelatedRel = NULL;
 
     /* reinitialize within-transaction counters */
@@ -2371,22 +2482,12 @@ static void StartTransaction(bool begin_on_gtm)
     Assert(s->prevSecContext == 0);
 
     /*
-     * set transaction_timestamp() (a/k/a now()).  Normally, we want this to
-     * be the same as the first command's statement_timestamp(), so don't do a
-     * fresh GetCurrentTimestamp() call (which'd be expensive anyway).  But
-     * for transactions started inside procedures (i.e., nonatomic SPI
-     * contexts), we do need to advance the timestamp.  Also, in a parallel
-     * worker, the timestamp should already have been provided by a call to
-     * SetParallelStartTimestamps.
+     * set transaction_timestamp() (a/k/a now()).  We want this to be the same
+     * as the first command's statement_timestamp(), so don't do a fresh
+     * GetCurrentTimestamp() call (which'd be expensive anyway).  Also, mark
+     * xactStopTimestamp as unset.
      */
-    if (!IsParallelWorker()) {
-        if (!SPI_inside_nonatomic_context())
-            t_thrd.xact_cxt.xactStartTimestamp = t_thrd.xact_cxt.stmtStartTimestamp;
-        else
-            t_thrd.xact_cxt.xactStartTimestamp = GetCurrentTimestamp();
-    } else {
-        Assert(t_thrd.xact_cxt.xactStartTimestamp != 0);
-    }
+    t_thrd.xact_cxt.xactStartTimestamp = t_thrd.xact_cxt.stmtStartTimestamp;
     t_thrd.xact_cxt.xactStopTimestamp = 0;
 
     s->txnKey.txnHandle = InvalidTransactionHandle;
@@ -2395,24 +2496,36 @@ static void StartTransaction(bool begin_on_gtm)
      * begin transaction and get timestamp but not gxid from GTM
      * NB: autovacuum begin transaction and get gxid together in BeginTranAutovacuumGTM
      */
-    if (GTM_MODE && !u_sess->attr.attr_common.xc_maintenance_mode && IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
-        begin_on_gtm                /* not in CommitTransaction */
-        && IsNormalProcessingMode() /* not InitPostgres */
-        && !(IsAutoVacuumWorkerProcess() && (t_thrd.pgxact->vacuumFlags & PROC_IN_VACUUM))) {
-        s->txnKey = BeginTranGTM(&gtm_timestamp);
-        t_thrd.xact_cxt.GTMxactStartTimestamp = (TimestampTz)gtm_timestamp;
+    bool normal_working = begin_on_gtm && IsNormalProcessingMode() && /* not in CommitTransaction and InitPostgres */
+                          !(IsAutoVacuumWorkerProcess() && (t_thrd.pgxact->vacuumFlags & PROC_IN_VACUUM));
+    bool update_xact_time = !GTM_FREE_MODE && !u_sess->attr.attr_common.xc_maintenance_mode && normal_working &&
+                            IS_PGXC_COORDINATOR && !IsConnFromCoord();
+    if (update_xact_time) {
+        if (GTM_MODE) {
+            s->txnKey = BeginTranGTM(&gtm_timestamp);
+            t_thrd.xact_cxt.GTMxactStartTimestamp = (TimestampTz)gtm_timestamp;
+        } else {
+            t_thrd.xact_cxt.GTMxactStartTimestamp = t_thrd.xact_cxt.xactStartTimestamp;
+        }
         SetCurrentGTMDeltaTimestamp();
 
         SetCurrentStmtTimestamp();
         SetStmtSysGTMDeltaTimestamp();
     }
 
-    /* When GTM-Free, use local time to initialize global time */
-    if (!GTM_MODE) {
+    /*
+     * CN uses local time to initialize timestamp when gtm_free is on, and,
+     * DN uses local time to initialize timestamp if not get timestamp from cn
+     */
+    update_xact_time = (GTM_FREE_MODE && IS_PGXC_COORDINATOR && !IsConnFromCoord()) ||
+                       (!t_thrd.xact_cxt.timestamp_from_cn && IS_PGXC_DATANODE && normal_working);
+    if (update_xact_time) {
         t_thrd.xact_cxt.GTMxactStartTimestamp = t_thrd.xact_cxt.xactStartTimestamp;
         t_thrd.xact_cxt.GTMdeltaTimestamp = 0;
+        SetCurrentStmtTimestamp();
     }
-
+    /* reset timestamp flag */
+    t_thrd.xact_cxt.timestamp_from_cn = false;
 #ifdef PGXC
     /* For Postgres-XC, transaction start timestamp has to follow the GTM timeline */
     pgstat_report_xact_timestamp(t_thrd.xact_cxt.GTMxactStartTimestamp);
@@ -2436,17 +2549,15 @@ static void StartTransaction(bool begin_on_gtm)
     /* done with start processing, set current transaction state to "in progress" */
     s->state = TRANS_INPROGRESS;
 
-    if (!IsParallelWorker()) {
-        CallXactCallbacks(XACT_EVENT_START);
-    }
+#ifdef ENABLE_MOT
+    CallXactCallbacks(XACT_EVENT_START);
+#endif
 
     if (module_logging_is_on(MOD_TRANS_XACT)) {
-        ereport(LOG,
-            (errmodule(MOD_TRANS_XACT),
-                errmsg("start transaction succ. In Node %s, trans state: %s -> %s.",
-                    g_instance.attr.attr_common.PGXCNodeName,
-                    TransStateAsString(TRANS_START),
-                    TransStateAsString(TRANS_INPROGRESS))));
+        ereport(LOG, (errmodule(MOD_TRANS_XACT),
+                      errmsg("start transaction succ. In Node %s, trans state: %s -> %s.",
+                             g_instance.attr.attr_common.PGXCNodeName, TransStateAsString(TRANS_START),
+                             TransStateAsString(TRANS_INPROGRESS))));
     }
 
     ShowTransactionState("StartTransaction");
@@ -2456,6 +2567,11 @@ static void StartTransaction(bool begin_on_gtm)
 
 void ThreadLocalFlagCleanUp()
 {
+    /* clean hash table in opfusion */
+    if (IS_PGXC_DATANODE) {
+        OpFusion::ClearInUnexpectSituation();
+    }
+
     if (UDFRPCSocket > -1) {
         close(UDFRPCSocket);
         UDFRPCSocket = -1;
@@ -2476,19 +2592,13 @@ void ThreadLocalFlagCleanUp()
  *
  * NB: if you change this routine, better look at PrepareTransaction too!
  */
-static void CommitTransaction(bool stpCommit)
+static void CommitTransaction(bool STP_commit)
 {
     u_sess->need_report_top_xid = false;
     TransactionState s = CurrentTransactionState;
     TransactionId latestXid;
     bool barrierLockHeld = false;
     bool use_old_version_gid = GTM_MODE || (t_thrd.proc->workingVersionNum <= GTM_OLD_VERSION_NUM);
-    bool is_parallel_worker = (s->blockState == TBLOCK_PARALLEL_INPROGRESS);
-
-    /* Enforce parallel mode restrictions during parallel worker commit. */
-    if (is_parallel_worker) {
-        EnterParallelMode();
-    }
 
     ShowTransactionState("CommitTransaction");
 
@@ -2505,8 +2615,8 @@ static void CommitTransaction(bool stpCommit)
 
     /* check the current transaction state */
     if (s->state != TRANS_INPROGRESS)
-        ereport(WARNING,
-            (errcode(ERRCODE_WARNING), errmsg("CommitTransaction while in %s state", TransStateAsString(s->state))));
+        ereport(WARNING, (errcode(ERRCODE_WARNING),
+                          errmsg("CommitTransaction while in %s state", TransStateAsString(s->state))));
     Assert((!StreamThreadAmI() && s->parent == NULL) || StreamThreadAmI());
     /*
      * Note that parent thread will do commit transaction.
@@ -2527,14 +2637,12 @@ static void CommitTransaction(bool stpCommit)
     t_thrd.xact_cxt.handlesDestroyedInCancelQuery = false;
     ThreadLocalFlagCleanUp();
 
-    /*
-     * When commit within nested store procedure, it will create a plan cache.
-     * During commit time, need to clean up those plan cache.
+    /* When commit within nested store procedure, it will create a plan cache.
+     * During commit time, need to clean up those plan cahce.
      */
-    if (stpCommit) {
+    if (STP_commit) {
         ResourceOwnerDecrementNPlanRefs(t_thrd.utils_cxt.CurrentResourceOwner, true);
     }
-
 #ifdef PGXC
     /*
      * If we are a Coordinator and currently serving the client,
@@ -2571,9 +2679,8 @@ static void CommitTransaction(bool stpCommit)
          */
         t_thrd.xact_cxt.XactXidStoreForCheck = GetTopTransactionIdIfAny();
         if (module_logging_is_on(MOD_TRANS_XACT)) {
-            ereport(LOG,
-                (errmodule(MOD_TRANS_XACT),
-                    errmsg("reserved xid for commit check is %lu", t_thrd.xact_cxt.XactXidStoreForCheck)));
+            ereport(LOG, (errmodule(MOD_TRANS_XACT),
+                          errmsg("reserved xid for commit check is %lu", t_thrd.xact_cxt.XactXidStoreForCheck)));
         }
 
         /*
@@ -2583,25 +2690,18 @@ static void CommitTransaction(bool stpCommit)
          */
         if (IsTwoPhaseCommitRequired(t_thrd.xact_cxt.XactWriteLocalNode)) {
             errno_t errorno = EOK;
-            u_sess->xact_cxt.prepareGID = (char*)MemoryContextAlloc(u_sess->top_transaction_mem_cxt, MAX_GID_LENGTH);
+            u_sess->xact_cxt.prepareGID = (char *)MemoryContextAlloc(u_sess->top_transaction_mem_cxt, MAX_GID_LENGTH);
             if (use_old_version_gid) {
-                errorno = snprintf_s(u_sess->xact_cxt.prepareGID,
-                    MAX_GID_LENGTH,
-                    MAX_GID_LENGTH - 1,
-                    "T%lu_%s",
-                    GetTopTransactionId(),
-                    g_instance.attr.attr_common.PGXCNodeName);
+                errorno = snprintf_s(u_sess->xact_cxt.prepareGID, MAX_GID_LENGTH, MAX_GID_LENGTH - 1, "T%lu_%s",
+                                     GetTopTransactionId(), g_instance.attr.attr_common.PGXCNodeName);
             } else {
-                errorno = snprintf_s(u_sess->xact_cxt.prepareGID,
-                    MAX_GID_LENGTH,
-                    MAX_GID_LENGTH - 1,
-                    "N%lu_%s",
-                    GetTopTransactionId(),
-                    g_instance.attr.attr_common.PGXCNodeName);
+                errorno = snprintf_s(u_sess->xact_cxt.prepareGID, MAX_GID_LENGTH, MAX_GID_LENGTH - 1, "N%lu_%s",
+                                     GetTopTransactionId(), g_instance.attr.attr_common.PGXCNodeName);
             }
             securec_check_ss(errorno, "", "");
 
-            u_sess->xact_cxt.savePrepareGID = MemoryContextStrdup(u_sess->top_mem_cxt, u_sess->xact_cxt.prepareGID);
+            u_sess->xact_cxt.savePrepareGID = MemoryContextStrdup(
+                SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), u_sess->xact_cxt.prepareGID);
 
             if (t_thrd.xact_cxt.XactWriteLocalNode) {
                 /*
@@ -2610,8 +2710,11 @@ static void CommitTransaction(bool stpCommit)
                  * and that will lead to transaction abortion.
                  */
                 Assert(GlobalTransactionIdIsValid(s->transactionId));
+                
+                /* let gs_clean know local prepared xact is running */
+                t_thrd.pgxact->prepare_xid = GetCurrentTransactionIdIfAny();
 
-                PrepareTransaction(stpCommit);
+                PrepareTransaction(STP_commit);
                 s->blockState = TBLOCK_DEFAULT;
 
                 /*
@@ -2644,7 +2747,7 @@ static void CommitTransaction(bool stpCommit)
          * If there weren't any, we are done ... otherwise loop back to check
          * if they queued deferred triggers.  Lather, rinse, repeat.
          */
-        if (!PreCommit_Portals(false, stpCommit))
+        if (!PreCommit_Portals(false, STP_commit))
             break;
     }
 
@@ -2654,10 +2757,6 @@ static void CommitTransaction(bool stpCommit)
      * of this stuff could still throw an error, which would switch us into
      * the transaction-abort path.
      */
-    /* If we might have parallel workers, clean them up now. */
-    if (IsInParallelMode()) {
-        AtEOXact_Parallel(true);
-    }
     /* Shut down the deferred-trigger manager */
     AfterTriggerEndXact(true);
 
@@ -2699,15 +2798,14 @@ static void CommitTransaction(bool stpCommit)
 #ifdef ENABLE_DISTRIBUTE_TEST
             if (TEST_STUB(CN_COMMIT_PREPARED_FAILED, twophase_default_error_emit)) {
                 ereport(g_instance.distribute_test_param_instance->elevel,
-                    (errmsg("GTM_TEST  %s: commit prepare %s failed",
-                        g_instance.attr.attr_common.PGXCNodeName,
-                        u_sess->xact_cxt.savePrepareGID)));
+                        (errmsg("GTM_TEST  %s: commit prepare %s failed", g_instance.attr.attr_common.PGXCNodeName,
+                                u_sess->xact_cxt.savePrepareGID)));
             }
             /* white box test start */
             if (execute_whitebox(WHITEBOX_LOC, u_sess->xact_cxt.savePrepareGID, WHITEBOX_DEFAULT, 0.0001)) {
                 ereport(g_instance.distribute_test_param_instance->elevel,
-                    (errmsg("WHITE_BOX TEST  %s: failed before phase1 commit prepared.",
-                        g_instance.attr.attr_common.PGXCNodeName)));
+                        (errmsg("WHITE_BOX TEST  %s: failed before phase1 commit prepared.",
+                                g_instance.attr.attr_common.PGXCNodeName)));
             }
             /* white box test end */
 #endif
@@ -2732,7 +2830,7 @@ static void CommitTransaction(bool stpCommit)
 #ifdef ENABLE_DISTRIBUTE_TEST
         if (u_sess->xact_cxt.prepareGID != NULL && TEST_STUB(CN_PREPARED_SLEEP, twophase_default_error_emit)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("GTM_TEST  %s: prepare sleep", g_instance.attr.attr_common.PGXCNodeName)));
+                    (errmsg("GTM_TEST  %s: prepare sleep", g_instance.attr.attr_common.PGXCNodeName)));
             pg_usleep(g_instance.distribute_test_param_instance->sleep_time * 1000000);
         }
 
@@ -2763,9 +2861,8 @@ static void CommitTransaction(bool stpCommit)
              * They should end transaction from GTM firstly before local commit.
              */
             if (!AtEOXact_GlobalTxn(true, true)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_CONNECTION_FAILURE),
-                        errmsg("Failed to receive GTM commit transaction response for DN or other CN.")));
+                ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE),
+                                errmsg("Failed to receive GTM commit transaction response for DN or other CN.")));
             }
         }
     }
@@ -2775,7 +2872,7 @@ static void CommitTransaction(bool stpCommit)
     HOLD_INTERRUPTS();
 
     /* Commit updates to the relation map --- do this as late as possible */
-    AtEOXact_RelationMap(true, is_parallel_worker);
+    AtEOXact_RelationMap(true);
 
     /*
      * set the current transaction state information appropriately during
@@ -2783,7 +2880,6 @@ static void CommitTransaction(bool stpCommit)
      */
     TransState oldstate = s->state;
     s->state = TRANS_COMMIT;
-    s->parallelModeLevel = 0;
 
     /* Wait data replicate */
     if (!IsInitdb && !g_instance.attr.attr_storage.enable_mix_replication) {
@@ -2796,29 +2892,15 @@ static void CommitTransaction(bool stpCommit)
     }
 
     /*
+     * For MOT, XACT_EVENT_COMMIT will just do the validation.
+     * Actual commit (write redo and apply changes) will be done during XACT_EVENT_RECORD_COMMIT event.
+     */
+    CallXactCallbacks(XACT_EVENT_COMMIT);
+
+    /*
      * Here is where we really truly local commit.
      */
-    if (!is_parallel_worker) {
-        /*
-         * For MOT, XACT_EVENT_COMMIT will just do the validation.
-         * Actual commit (write redo and apply changes) will be done during XACT_EVENT_RECORD_COMMIT event.
-         */
-        CallXactCallbacks(XACT_EVENT_COMMIT);
-
-        latestXid = RecordTransactionCommit();
-    } else {
-        /*
-         * We must not mark our XID committed; the parallel master is
-         * responsible for that.
-         */
-        latestXid = InvalidTransactionId;
-
-        /*
-         * Make sure the master will know about any WAL we wrote before it
-         * commits.
-         */
-        ParallelWorkerReportLastRecEnd(t_thrd.xlog_cxt.XactLastRecEnd);
-    }
+    latestXid = RecordTransactionCommit();
     if (TwoPhaseCommit)
         StmtRetrySetTransactionCommitFlag(true);
 
@@ -2843,12 +2925,10 @@ static void CommitTransaction(bool stpCommit)
 
     /* log for local commit status */
     if (module_logging_is_on(MOD_TRANS_XACT)) {
-        ereport(LOG,
-            (errmodule(MOD_TRANS_XACT),
-                errmsg("Local Node %s: local commit has written clog and xlog, trans state : %s -> %s",
-                    g_instance.attr.attr_common.PGXCNodeName,
-                    TransStateAsString(oldstate),
-                    TransStateAsString(s->state))));
+        ereport(LOG, (errmodule(MOD_TRANS_XACT),
+                      errmsg("Local Node %s: local commit has written clog and xlog, trans state : %s -> %s",
+                             g_instance.attr.attr_common.PGXCNodeName, TransStateAsString(oldstate),
+                             TransStateAsString(s->state))));
     }
 
 #ifdef ENABLE_DISTRIBUTE_TEST
@@ -2856,7 +2936,7 @@ static void CommitTransaction(bool stpCommit)
     if (GlobalTransactionIdIsValid(t_thrd.pgxact->prepare_xid) &&
         TEST_STUB(CN_COMMIT_PREPARED_SLEEP, twophase_default_error_emit)) {
         ereport(g_instance.distribute_test_param_instance->elevel,
-            (errmsg("GTM_TEST  %s: commit prepare sleep", g_instance.attr.attr_common.PGXCNodeName)));
+                (errmsg("GTM_TEST  %s: commit prepare sleep", g_instance.attr.attr_common.PGXCNodeName)));
         /* sleep 30s or more */
         pg_usleep(g_instance.distribute_test_param_instance->sleep_time * 1000000);
     }
@@ -2885,15 +2965,15 @@ static void CommitTransaction(bool stpCommit)
     if (GlobalTransactionIdIsValid(t_thrd.pgxact->prepare_xid) &&
         TEST_STUB(CN_ABORT_AFTER_ALL_COMMITTED, twophase_default_error_emit)) {
         ereport(g_instance.distribute_test_param_instance->elevel,
-            (errmsg("GTM_TEST  %s: cn abort after all committed ", g_instance.attr.attr_common.PGXCNodeName)));
+                (errmsg("GTM_TEST  %s: cn abort after all committed ", g_instance.attr.attr_common.PGXCNodeName)));
     }
 
     /* white box test start */
     if (GlobalTransactionIdIsValid(t_thrd.pgxact->prepare_xid) &&
         execute_whitebox(WHITEBOX_LOC, u_sess->xact_cxt.savePrepareGID, WHITEBOX_DEFAULT, 0.0001)) {
         ereport(g_instance.distribute_test_param_instance->elevel,
-            (errmsg(
-                "WHITE_BOX TEST  %s: cn abort after all committed failed", g_instance.attr.attr_common.PGXCNodeName)));
+                (errmsg("WHITE_BOX TEST  %s: cn abort after all committed failed",
+                        g_instance.attr.attr_common.PGXCNodeName)));
     }
     /* white box test end */
 #endif
@@ -2912,10 +2992,10 @@ static void CommitTransaction(bool stpCommit)
      */
     ProcArrayEndTransaction(t_thrd.proc, latestXid);
 
-    if (!is_parallel_worker) {
-        /* Release MOT locks */
-        CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
-    }
+#ifdef ENABLE_MOT
+    /* Release MOT locks */
+    CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
+#endif
 
     /*
      * This is all post-commit cleanup.  Note that if an error is raised here,
@@ -2949,6 +3029,7 @@ static void CommitTransaction(bool stpCommit)
 
     /* Clean up the relation cache */
     AtEOXact_RelationCache(true);
+    AtEOXact_FreeTupleDesc();
 
     AtEOXact_PartitionCache(true);
 
@@ -2963,8 +3044,8 @@ static void CommitTransaction(bool stpCommit)
      */
     AtEOXact_Inval(true);
 
-    if (ENABLE_DN_GPC) {
-        GPC->Commit();
+    if ((ENABLE_CN_GPC && !STP_commit) || ENABLE_DN_GPC) {
+        g_instance.plan_cache->Commit();
     }
 
     /*
@@ -2992,10 +3073,10 @@ static void CommitTransaction(bool stpCommit)
 
     AtCommit_Notify();
     AtEOXact_GUC(true, 1);
-    AtEOXact_SPI(true, false, stpCommit);
+    AtEOXact_SPI(true, false, STP_commit);
     AtEOXact_on_commit_actions(true);
-    if (!stpCommit){
-        AtEOXact_Namespace(true, is_parallel_worker);
+    if (!STP_commit) {
+        AtEOXact_Namespace(true);
     }
     AtEOXact_SMgr();
     AtEOXact_Files();
@@ -3027,9 +3108,10 @@ static void CommitTransaction(bool stpCommit)
     s->childXids = NULL;
     s->nChildXids = 0;
     s->maxChildXids = 0;
-    s->storageEngineType = SE_TYPE_UNSPECIFIED;
 
-    t_thrd.xact_cxt.nParallelCurrentXids = 0;
+#ifdef ENABLE_MOT
+    s->storageEngineType = SE_TYPE_UNSPECIFIED;
+#endif
 
 #ifdef PGXC
     s->isLocalParameterUsed = false;
@@ -3053,6 +3135,9 @@ static void CommitTransaction(bool stpCommit)
         SetReceivedCommandId(FirstCommandId);
     else
         SetSendCommandId(false);
+
+    /*AtCommit_Memory has freed up the memory for savepointList*/
+    s->savepointList = NULL;
 #endif
 
     TwoPhaseCommit = false;
@@ -3061,12 +3146,10 @@ static void CommitTransaction(bool stpCommit)
     s->state = TRANS_DEFAULT;
 
     if (module_logging_is_on(MOD_TRANS_XACT)) {
-        ereport(LOG,
-            (errmodule(MOD_TRANS_XACT),
-                errmsg("Local Node %s: local commit process completed, trans state : %s -> %s",
-                    g_instance.attr.attr_common.PGXCNodeName,
-                    TransStateAsString(oldstate),
-                    TransStateAsString(s->state))));
+        ereport(LOG, (errmodule(MOD_TRANS_XACT),
+                      errmsg("Local Node %s: local commit process completed, trans state : %s -> %s",
+                             g_instance.attr.attr_common.PGXCNodeName, TransStateAsString(oldstate),
+                             TransStateAsString(s->state))));
     }
 
     /* clear the transaction distribute check xid when transaction commit */
@@ -3078,7 +3161,14 @@ static void CommitTransaction(bool stpCommit)
     AtEOXact_Remote();
     /* flush all profile log about this worker thread */
     flush_plog();
+#ifdef ENABLE_MULTIPLE_NODES 
+    CheckDeleteLock(true);
+    Tsdb::PartCacheMgr::GetInstance().commit_item();
+#endif   /* ENABLE_MULTIPLE_NODES */        
     print_leak_warning_at_commit();
+#ifdef ENABLE_MULTIPLE_NODES
+    closeAllVfds();
+#endif
 }
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -3189,7 +3279,8 @@ static int finish_txn_gtm_lite(bool commit, bool is_write)
          * GTMLite: we don't need to check if connected to GTM as GetCSNGTM will
          * establish the connection if one doesn't exist
          */
-        if (IsAutoVacuumWorkerProcess() || GetForceXidFromGTM()) {
+        if (IsAutoVacuumWorkerProcess() || GetForceXidFromGTM() ||
+            IsStatementFlushProcess() || IsJobAspProcess()) {
             if (commit) {
                 if (GlobalTransactionIdIsValid(s->transactionId)) {
                     csn = CommitCSNGTM(false);
@@ -3241,7 +3332,7 @@ bool AtEOXact_GlobalTxn(bool commit, bool is_write)
  * If PrepareTransaction is called during an implicit 2PC, do not release ressources,
  * this is made by CommitTransaction when transaction has been committed on Nodes.
  */
-static void PrepareTransaction(bool stpCommit)
+static void PrepareTransaction(bool STP_commit)
 {
     u_sess->need_report_top_xid = false;
     TransactionState s = CurrentTransactionState;
@@ -3251,10 +3342,8 @@ static void PrepareTransaction(bool stpCommit)
     TimestampTz prepared_at;
 #ifdef PGXC
     bool isImplicit = !(s->blockState == TBLOCK_PREPARE);
-    char* nodestring = NULL;
+    char *nodestring = NULL;
 #endif
-
-    Assert(!IsInParallelMode());
 
     ShowTransactionState("PrepareTransaction");
 
@@ -3262,8 +3351,8 @@ static void PrepareTransaction(bool stpCommit)
      * check the current transaction state
      */
     if (s->state != TRANS_INPROGRESS)
-        ereport(WARNING,
-            (errcode(ERRCODE_WARNING), errmsg("PrepareTransaction while in %s state", TransStateAsString(s->state))));
+        ereport(WARNING, (errcode(ERRCODE_WARNING),
+                          errmsg("PrepareTransaction while in %s state", TransStateAsString(s->state))));
     Assert((!StreamThreadAmI() && s->parent == NULL) || StreamThreadAmI());
 
 #ifdef PGXC
@@ -3272,11 +3361,9 @@ static void PrepareTransaction(bool stpCommit)
         TransactionId topTransactionId = GetTopTransactionIdIfAny();
         if (topTransactionId != GetTransactionIdFromGidStr(u_sess->xact_cxt.prepareGID)) {
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("Node  %s: prepare gid is %s, and top xid is %lu, different transaction!",
-                        g_instance.attr.attr_common.PGXCNodeName,
-                        u_sess->xact_cxt.prepareGID,
-                        topTransactionId)));
+                    (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                     errmsg("Node  %s: prepare gid is %s, and top xid is %lu, different transaction!",
+                            g_instance.attr.attr_common.PGXCNodeName, u_sess->xact_cxt.prepareGID, topTransactionId)));
         }
     }
 
@@ -3285,21 +3372,21 @@ static void PrepareTransaction(bool stpCommit)
             pfree(u_sess->xact_cxt.savePrepareGID);
             u_sess->xact_cxt.savePrepareGID = NULL;
         }
-        u_sess->xact_cxt.savePrepareGID = MemoryContextStrdup(u_sess->top_mem_cxt, u_sess->xact_cxt.prepareGID);
+        u_sess->xact_cxt.savePrepareGID = MemoryContextStrdup(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), u_sess->xact_cxt.prepareGID);
 
 #ifdef ENABLE_DISTRIBUTE_TEST
         if (TEST_STUB(CN_LOCAL_PREPARED_FAILED_A, twophase_default_error_emit)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("GTM_TEST  %s: prepare transaction %s failed",
-                    g_instance.attr.attr_common.PGXCNodeName,
-                    u_sess->xact_cxt.savePrepareGID)));
+                    (errmsg("GTM_TEST  %s: prepare transaction %s failed", g_instance.attr.attr_common.PGXCNodeName,
+                            u_sess->xact_cxt.savePrepareGID)));
         }
 
         /* white box test start */
         if (execute_whitebox(WHITEBOX_LOC, u_sess->xact_cxt.savePrepareGID, WHITEBOX_DEFAULT, 0.0001)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("WHITE_BOX TEST  %s: prepare transaction failed before remote prepare",
-                    g_instance.attr.attr_common.PGXCNodeName)));
+                    (errmsg("WHITE_BOX TEST  %s: prepare transaction failed before remote prepare",
+                            g_instance.attr.attr_common.PGXCNodeName)));
         }
         /* white box test end */
 #endif
@@ -3309,16 +3396,15 @@ static void PrepareTransaction(bool stpCommit)
 #ifdef ENABLE_DISTRIBUTE_TEST
         if (TEST_STUB(CN_LOCAL_PREPARED_FAILED_B, twophase_default_error_emit)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("GTM_TEST  %s: prepare transaction %s failed",
-                    g_instance.attr.attr_common.PGXCNodeName,
-                    u_sess->xact_cxt.savePrepareGID)));
+                    (errmsg("GTM_TEST  %s: prepare transaction %s failed", g_instance.attr.attr_common.PGXCNodeName,
+                            u_sess->xact_cxt.savePrepareGID)));
         }
 
         /* white box test start */
         if (execute_whitebox(WHITEBOX_LOC, u_sess->xact_cxt.savePrepareGID, WHITEBOX_DEFAULT, 0.002)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("WHITE_BOX TEST  %s: prepare transaction failed after remote prepare",
-                    g_instance.attr.attr_common.PGXCNodeName)));
+                    (errmsg("WHITE_BOX TEST  %s: prepare transaction failed after remote prepare",
+                            g_instance.attr.attr_common.PGXCNodeName)));
         }
         /* white box test end */
 #endif
@@ -3348,7 +3434,7 @@ static void PrepareTransaction(bool stpCommit)
          * If there weren't any, we are done ... otherwise loop back to check
          * if they queued deferred triggers.  Lather, rinse, repeat.
          */
-        if (!PreCommit_Portals(true, stpCommit))
+        if (!PreCommit_Portals(true, STP_commit))
             break;
     }
 
@@ -3389,9 +3475,8 @@ static void PrepareTransaction(bool stpCommit)
      * doesn't seem worth the trouble.
      */
     if (XactHasExportedSnapshots())
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("cannot PREPARE a transaction that has exported snapshots")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot PREPARE a transaction that has exported snapshots")));
 
     /* Prevent cancel/die interrupt while cleaning up */
     HOLD_INTERRUPTS();
@@ -3411,8 +3496,8 @@ static void PrepareTransaction(bool stpCommit)
      * Reserve the GID for this transaction. This could fail if the requested
      * GID is invalid or already in use.
      */
-    gxact = MarkAsPreparing(
-        handle, xid, u_sess->xact_cxt.prepareGID, prepared_at, GetUserId(), u_sess->proc_cxt.MyDatabaseId);
+    gxact = MarkAsPreparing(handle, xid, u_sess->xact_cxt.prepareGID, prepared_at, GetUserId(),
+                            u_sess->proc_cxt.MyDatabaseId, t_thrd.proc->sessionid);
     u_sess->xact_cxt.prepareGID = NULL;
 
     /*
@@ -3480,6 +3565,7 @@ static void PrepareTransaction(bool stpCommit)
 
     /* Clean up the relation cache */
     AtEOXact_RelationCache(true);
+    AtEOXact_FreeTupleDesc();
 
     AtEOXact_PartitionCache(true);
 
@@ -3530,10 +3616,12 @@ static void PrepareTransaction(bool stpCommit)
      * we can retry here because transaction would finally abort in such situation.
      */
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        t_thrd.xact_cxt.XactLocalNodeCanAbort = false;
         if (!GTM_FREE_MODE && !AtEOXact_GlobalTxn(true, true)) {
-            ereport(ERROR,
+            ereport(
+                ERROR,
                 (errcode(ERRCODE_CONNECTION_EXCEPTION),
-                    errmsg("Failed to receive GTM commit transaction response after CN local PREPARE TRANSACTION '%s'.",
+                 errmsg("Failed to receive GTM commit transaction response after CN local PREPARE TRANSACTION '%s'.",
                         u_sess->xact_cxt.savePrepareGID)));
         }
     }
@@ -3541,15 +3629,15 @@ static void PrepareTransaction(bool stpCommit)
 
     /* PREPARE acts the same as COMMIT as far as GUC is concerned */
     AtEOXact_GUC(true, 1);
-    AtEOXact_SPI(true, false, stpCommit);
+    AtEOXact_SPI(true, false, STP_commit);
     AtEOXact_on_commit_actions(true);
     /*
-     * For commit within stored procedure don't clean up namespace.
+     * For commit within stored procedure dont clean up namespace.
      * Otherwise it will throw warning leaked override search path,
      * since we push the search path hasn't pop yet.
      */
-    if (!stpCommit) {
-        AtEOXact_Namespace(true, false);
+    if (!STP_commit) {
+        AtEOXact_Namespace(true);
     }
     AtEOXact_SMgr();
     AtEOXact_Files();
@@ -3581,9 +3669,10 @@ static void PrepareTransaction(bool stpCommit)
     s->childXids = NULL;
     s->nChildXids = 0;
     s->maxChildXids = 0;
-    s->storageEngineType = SE_TYPE_UNSPECIFIED;
 
-    t_thrd.xact_cxt.nParallelCurrentXids = 0;
+#ifdef ENABLE_MOT
+    s->storageEngineType = SE_TYPE_UNSPECIFIED;
+#endif
 
     /*
      * done with 1st phase commit processing, set current transaction state
@@ -3626,7 +3715,7 @@ static void PrepareTransaction(bool stpCommit)
 #endif
 }
 
-static void AbortTransaction(bool PerfectRollback, bool stpRollback)
+static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
 {
     u_sess->need_report_top_xid = false;
     TransactionState s = CurrentTransactionState;
@@ -3651,7 +3740,20 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
 
     /* Make sure we have a valid memory context and resource owner */
     AtAbort_Memory();
+
+    /*
+     * No need to set the CurrentResourceOwner to
+     * TopTransactionResourceOwner for rollback within stored procedure.
+     * Rollback will clean up local resources attached to CurrentResourceOwner.
+     * Otherwise will throw warning for snapshot reference leak or plancache reference leak.
+     */
     AtAbort_ResourceOwner();
+
+#ifdef ENABLE_MULTIPLE_NODES 
+    /* check and release delete LW lock for timeseries store */
+    CheckDeleteLock(false);
+    Tsdb::PartCacheMgr::GetInstance().abort_item();
+#endif   /* ENABLE_MULTIPLE_NODES */   
 
     /* CStoreMemAlloc Reset is not allowed interrupt */
     CStoreMemAlloc::Reset();
@@ -3685,9 +3787,8 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
             t_thrd.xact_cxt.XactXidStoreForCheck = GetTopTransactionIdIfAny();
 
         if (module_logging_is_on(MOD_TRANS_XACT)) {
-            ereport(LOG,
-                (errmodule(MOD_TRANS_XACT),
-                    errmsg("reserved xid for abort check is %lu", t_thrd.xact_cxt.XactXidStoreForCheck)));
+            ereport(LOG, (errmodule(MOD_TRANS_XACT),
+                          errmsg("reserved xid for abort check is %lu", t_thrd.xact_cxt.XactXidStoreForCheck)));
         }
     }
 
@@ -3742,17 +3843,19 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
      * in progress.
      */
     if (!GTM_FREE_MODE) {
-        if (t_thrd.xact_cxt.XactLocalNodeCanAbort && !AtEOXact_GlobalTxn(false, false)) {
-            ereport(WARNING,
-                (errmsg("Failed to receive GTM rollback transaction response  for aborting prepared %s.",
-                    u_sess->xact_cxt.savePrepareGID)));
+        if (t_thrd.xact_cxt.XactLocalNodeCanAbort && !AtEOXact_GlobalTxn(false, false) &&
+            !t_thrd.proc_cxt.proc_exit_inprogress) {
+            ereport(WARNING, (errmsg("Failed to receive GTM rollback transaction response  for aborting prepared %s.",
+                                     u_sess->xact_cxt.savePrepareGID)));
         }
     }
 
+#ifdef ENABLE_MOT
     /* If it is MOT transaction reserve the connection. */
     if (IsMOTEngineUsed()) {
         PerfectRollback = true;
     }
+#endif
 
     /* Handle remote abort first. */
     bool reserved_conn = (PerfectRollback && !is_user_name_changed());
@@ -3764,15 +3867,14 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
 #ifdef ENABLE_DISTRIBUTE_TEST
         if (TEST_STUB(CN_ABORT_PREPARED_FAILED, twophase_default_error_emit)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("GTM_TEST  %s: abort prepared %s failed",
-                    g_instance.attr.attr_common.PGXCNodeName,
-                    u_sess->xact_cxt.savePrepareGID)));
+                    (errmsg("GTM_TEST  %s: abort prepared %s failed", g_instance.attr.attr_common.PGXCNodeName,
+                            u_sess->xact_cxt.savePrepareGID)));
         }
 
         /* white box test start */
         if (execute_whitebox(WHITEBOX_LOC, u_sess->xact_cxt.savePrepareGID, WHITEBOX_DEFAULT, 0.0001)) {
-            ereport(
-                LOG, (errmsg("WHITE_BOX TEST  %s: abort prepared failed", g_instance.attr.attr_common.PGXCNodeName)));
+            ereport(LOG,
+                    (errmsg("WHITE_BOX TEST  %s: abort prepared failed", g_instance.attr.attr_common.PGXCNodeName)));
         }
         /* white box test end */
 #endif
@@ -3806,7 +3908,7 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
 #endif
 
     /* clean up ec conection */
-#ifdef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_LLT
     clean_ec_conn();
     delete_ec_ctrl();
 #endif
@@ -3844,10 +3946,9 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
     t_thrd.xact_cxt.needRemoveTwophaseState = false;
 
     /* check the current transaction state */
-    bool is_parallel_worker = (s->blockState == TBLOCK_PARALLEL_INPROGRESS);
     if (s->state != TRANS_INPROGRESS && s->state != TRANS_PREPARE)
         ereport(WARNING,
-            (errcode(ERRCODE_WARNING), errmsg("AbortTransaction while in %s state", TransStateAsString(s->state))));
+                (errcode(ERRCODE_WARNING), errmsg("AbortTransaction while in %s state", TransStateAsString(s->state))));
 
     Assert((!StreamThreadAmI() && s->parent == NULL) || StreamThreadAmI());
 
@@ -3877,25 +3978,22 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
     SetUserIdAndSecContext(s->prevUser, s->prevSecContext);
     u_sess->exec_cxt.is_exec_trigger_func = false;
 
-    /* If in parallel mode, clean up workers and exit parallel mode. */
-    if (IsInParallelMode()) {
-        AtEOXact_Parallel(false);
-        s->parallelModeLevel = 0;
-    }
+    /* reset flag is_delete_function */
+    u_sess->plsql_cxt.is_delete_function = false;
 
     /*
      * do abort processing
      */
     AfterTriggerEndXact(false); /* 'false' means it's abort */
 
-    if (!is_parallel_worker) {
-        CallXactCallbacks(XACT_EVENT_PREROLLBACK_CLEANUP);
-    }
+#ifdef ENABLE_MOT
+    CallXactCallbacks(XACT_EVENT_PREROLLBACK_CLEANUP);
+#endif
 
-    AtAbort_Portals(stpRollback);
+    AtAbort_Portals(STP_rollback);
     AtEOXact_LargeObject(false);
     AtAbort_Notify();
-    AtEOXact_RelationMap(false, is_parallel_worker);
+    AtEOXact_RelationMap(false);
     AtAbort_Twophase();
 #ifdef ENABLE_MULTIPLE_NODES
     rollback_searchlet();
@@ -3905,22 +4003,9 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
 
     /*
      * Advertise the fact that we aborted in pg_clog (assuming that we got as
-     * far as assigning an XID to advertise).  But if we're inside a parallel
-     * worker, skip this; the user backend must be the one to write the abort
-     * record.
+     * far as assigning an XID to advertise).
      */
-    if (!is_parallel_worker) {
-        latestXid = RecordTransactionAbort(false);
-    } else {
-        latestXid = InvalidTransactionId;
-
-        /*
-         * Since the parallel master won't get our value of XactLastRecEnd in
-         * this case, we nudge WAL-writer ourselves in this case.  See related
-         * comments in RecordTransactionAbort for why this matters.
-         */
-        XLogSetAsyncXactLSN(t_thrd.xlog_cxt.XactLastRecEnd);
-    }
+    latestXid = RecordTransactionAbort(false);
 
     t_thrd.pgxact->prepare_xid = InvalidTransactionId;
 
@@ -3941,13 +4026,12 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
     if (t_thrd.utils_cxt.TopTransactionResourceOwner != NULL) {
         bool change_user_name = false;
         instr_report_workload_xact_info(false);
-        if (!is_parallel_worker) {
-            CallXactCallbacks(XACT_EVENT_ABORT);
-        }
+        CallXactCallbacks(XACT_EVENT_ABORT);
 
         ResourceOwnerRelease(t_thrd.utils_cxt.TopTransactionResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
         AtEOXact_Buffers(false);
         AtEOXact_RelationCache(false);
+        AtEOXact_FreeTupleDesc();
         AtEOXact_PartitionCache(false);
         AtEOXact_BucketCache(false);
         AtEOXact_Inval(false);
@@ -3971,10 +4055,15 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
         if (change_user_name)
             u_sess->misc_cxt.CurrentUserName = NULL;
 
-        AtEOXact_SPI(false, stpRollback, false);
+        AtEOXact_SPI(false, STP_rollback, false);
         AtEOXact_on_commit_actions(false);
-        if (!stpRollback) {
-            AtEOXact_Namespace(false, is_parallel_worker);
+        /*
+         * For rollback within stored procedure don't need clean up namespace.
+         * Otherwise it will throw warning leaked override search path,
+         * since we push the search path hasn't pop yet.
+         */
+        if(!STP_rollback) {
+            AtEOXact_Namespace(false);
         }
         AtEOXact_SMgr();
         AtEOXact_Files();
@@ -4006,6 +4095,11 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
 
     /* flush all profile log about this worker thread */
     flush_plog();
+#ifdef ENABLE_MULTIPLE_NODES
+    closeAllVfds();
+#endif
+
+    s->savepointList = NULL;
 
     TwoPhaseCommit = false;
     t_thrd.xact_cxt.bInAbortTransaction = false;
@@ -4019,9 +4113,8 @@ static void CleanupTransaction(void)
 
     /* State should still be TRANS_ABORT from AbortTransaction(). */
     if (s->state != TRANS_ABORT)
-        ereport(FATAL,
-            (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                errmsg("CleanupTransaction: unexpected state %s", TransStateAsString(s->state))));
+        ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                        errmsg("CleanupTransaction: unexpected state %s", TransStateAsString(s->state))));
 
     /* do abort cleanup processing */
     AtCleanup_Portals();      /* now safe to release portal memory */
@@ -4045,9 +4138,9 @@ static void CleanupTransaction(void)
     s->nChildXids = 0;
     s->maxChildXids = 0;
 
+#ifdef ENABLE_MOT
     s->storageEngineType = SE_TYPE_UNSPECIFIED;
-
-    t_thrd.xact_cxt.nParallelCurrentXids = 0;
+#endif
 
     /* done with abort processing, set current transaction state back to default */
     s->state = TRANS_DEFAULT;
@@ -4065,7 +4158,7 @@ static void CleanupTransaction(void)
 #endif
 }
 
-void StartTransactionCommand(bool stpRollback)
+void StartTransactionCommand(bool STP_rollback)
 {
     TransactionState s = CurrentTransactionState;
 
@@ -4076,12 +4169,10 @@ void StartTransactionCommand(bool stpRollback)
             s->blockState = TBLOCK_STARTED;
 
             if (module_logging_is_on(MOD_TRANS_XACT)) {
-                ereport(LOG,
-                    (errmodule(MOD_TRANS_XACT),
-                        errmsg("StartTransactionCommand: In Node %s, TransBlock state : %s -> %s",
-                            g_instance.attr.attr_common.PGXCNodeName,
-                            BlockStateAsString(TBLOCK_DEFAULT),
-                            BlockStateAsString(s->blockState))));
+                ereport(LOG, (errmodule(MOD_TRANS_XACT),
+                              errmsg("StartTransactionCommand: In Node %s, TransBlock state : %s -> %s",
+                                     g_instance.attr.attr_common.PGXCNodeName, BlockStateAsString(TBLOCK_DEFAULT),
+                                     BlockStateAsString(s->blockState))));
             }
 
             break;
@@ -4107,15 +4198,14 @@ void StartTransactionCommand(bool stpRollback)
              */
         case TBLOCK_ABORT:
         case TBLOCK_SUBABORT:
-            if (stpRollback) {
+            if (STP_rollback) {
                 s->blockState = TBLOCK_DEFAULT;
             }
             break;
 
-        /* These cases are invalid. */
+            /* These cases are invalid. */
         case TBLOCK_STARTED:
         case TBLOCK_BEGIN:
-        case TBLOCK_PARALLEL_INPROGRESS:
         case TBLOCK_SUBBEGIN:
         case TBLOCK_END:
         case TBLOCK_SUBRELEASE:
@@ -4128,9 +4218,8 @@ void StartTransactionCommand(bool stpRollback)
         case TBLOCK_SUBABORT_RESTART:
         case TBLOCK_PREPARE:
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("StartTransactionCommand: unexpected state %s", BlockStateAsString(s->blockState))));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                            errmsg("StartTransactionCommand: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
     }
 
@@ -4142,25 +4231,21 @@ void StartTransactionCommand(bool stpRollback)
     (void)MemoryContextSwitchTo(t_thrd.mem_cxt.cur_transaction_mem_cxt);
 }
 
-void CommitTransactionCommand(bool stpCommit)
+void CommitTransactionCommand(bool STP_commit)
 {
     TransactionState s = CurrentTransactionState;
     TBlockState oldstate = s->blockState;
-    const int stpownerlevel = 2;
 
     switch (s->blockState) {
             /*
              * This shouldn't happen, because it means the previous
              * StartTransactionCommand didn't set the STARTED state
-             * appropriately, while TBLOCK_PARALLEL_INPROGRESS
-             * should be ended by EndParallelWorkerTranaction(),
-             * not this function.
+             * appropriately.
              */
         case TBLOCK_DEFAULT:
-        case TBLOCK_PARALLEL_INPROGRESS:
             ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("CommitTransactionCommand: unexpected state %s", BlockStateAsString(s->blockState))));
+                    (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                     errmsg("CommitTransactionCommand: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
 
             /*
@@ -4168,7 +4253,7 @@ void CommitTransactionCommand(bool stpCommit)
              * transaction commit, and return to the idle state.
              */
         case TBLOCK_STARTED:
-            CommitTransaction(stpCommit);
+            CommitTransaction(STP_commit);
             s->blockState = TBLOCK_DEFAULT;
             break;
 
@@ -4188,30 +4273,45 @@ void CommitTransactionCommand(bool stpCommit)
              * counter and return.
              */
         case TBLOCK_INPROGRESS:
-        case TBLOCK_SUBINPROGRESS:
+            if ((ENABLE_CN_GPC && !STP_commit) || ENABLE_DN_GPC) {
+                g_instance.plan_cache->Commit();
+            }    
             CommandCounterIncrement();
 
-            if (stpCommit && u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
+            if (STP_commit) {
+                CommitTransaction(STP_commit);
+                s->blockState = TBLOCK_DEFAULT;
+            }
+            break;
+
+        case TBLOCK_SUBINPROGRESS:
+            if ((ENABLE_CN_GPC && !STP_commit) || ENABLE_DN_GPC) {
+                g_instance.plan_cache->Commit();
+            }
+            CommandCounterIncrement();
+
+            if (u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
                 int subTransactionCounter = 0;
                 Assert(!StreamThreadAmI());
-
                 do {
                     MemoryContextSwitchTo(t_thrd.mem_cxt.cur_transaction_mem_cxt);
-                    CommitSubTransaction(stpCommit);
-                    s = CurrentTransactionState;
+                    CommitSubTransaction(STP_commit);
+                    s = CurrentTransactionState;    /* changed by pop */
                     subTransactionCounter++;
-
+#ifdef ENABLE_MULTIPLE_NODES
                     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
                         /* CN should send release savepoint command to remote nodes for savepoint name reuse */
-                        pgxc_node_remote_savepoint("release s1", EXEC_ON_ALL_NODES, true, false);
+                        HandleReleaseOrRollbackSavepoint("release s1", "s1", SUB_STMT_RELEASE);
+                        pgxc_node_remote_savepoint("release s1", EXEC_ON_DATANODES, false, false);
                     }
-                } while (s->blockState == TBLOCK_SUBINPROGRESS);
+#endif
+               }while (s->blockState == TBLOCK_SUBINPROGRESS);
 
-                /* If we had a commit command, finish off the main xact too */
-                Assert(subTransactionCounter == u_sess->SPI_cxt.portal_stp_exception_counter);
-                t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.StpSavedResourceOwner;
-                CommitTransaction(stpCommit);
-                s->blockState = TBLOCK_DEFAULT;
+               /* If we had a COMMIT command, finish off the main xact too */
+               Assert(subTransactionCounter == u_sess->SPI_cxt.portal_stp_exception_counter);
+               t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.STPSavedResourceOwner;
+               CommitTransaction(STP_commit);
+               s->blockState = TBLOCK_DEFAULT;
             }
             break;
 
@@ -4220,7 +4320,7 @@ void CommitTransactionCommand(bool stpCommit)
              * idle state.
              */
         case TBLOCK_END:
-            CommitTransaction(stpCommit);
+            CommitTransaction(STP_commit);
             s->blockState = TBLOCK_DEFAULT;
             break;
 
@@ -4270,8 +4370,11 @@ void CommitTransactionCommand(bool stpCommit)
              * state.)
              */
         case TBLOCK_SUBBEGIN:
-            if (CurrentTransactionState->nestingLevel == stpownerlevel) {
-                t_thrd.utils_cxt.StpSavedResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+            // Recording Portal's ResourceOwner for rebuilding resource chain 
+            // when procedure contain transaction and exception statement.
+            // nestingLevel = 2: Top ResourceOwner -> Portal ResourceOwner (current).
+            if (CurrentTransactionState->nestingLevel == 2 && STP_commit) {
+                t_thrd.utils_cxt.STPSavedResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
             }
             StartSubTransaction();
             s->blockState = TBLOCK_SUBINPROGRESS;
@@ -4319,8 +4422,8 @@ void CommitTransactionCommand(bool stpCommit)
                 s->blockState = TBLOCK_DEFAULT;
             } else
                 ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                        errmsg("CommitTransactionCommand: unexpected state %s", BlockStateAsString(s->blockState))));
+                        (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                         errmsg("CommitTransactionCommand: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
 
             /*
@@ -4335,10 +4438,11 @@ void CommitTransactionCommand(bool stpCommit)
 
             /* As above, but it's not dead yet, so abort first. */
         case TBLOCK_SUBABORT_PENDING:
-            AbortSubTransaction(stpCommit);
+            AbortSubTransaction();
             CleanupSubTransaction();
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
-                ereport(WARNING,
+                ereport(
+                    WARNING,
                     (errmsg(
                         "Transaction aborted as connection handles were destroyed due to clean up stream failed.")));
                 AbortOutOfAnyTransaction(true);
@@ -4352,7 +4456,7 @@ void CommitTransactionCommand(bool stpCommit)
              * with the same name.
              */
         case TBLOCK_SUBRESTART: {
-            char* name = NULL;
+            char *name = NULL;
             int savepointLevel;
 
             /* save name and keep Cleanup from freeing it */
@@ -4360,10 +4464,11 @@ void CommitTransactionCommand(bool stpCommit)
             s->name = NULL;
             savepointLevel = s->savepointLevel;
 
-            AbortSubTransaction(stpCommit);
+            AbortSubTransaction();
             CleanupSubTransaction();
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
-                ereport(WARNING,
+                ereport(
+                    WARNING,
                     (errmsg(
                         "Transaction aborted as connection handles were destroyed due to clean up stream failed.")));
                 AbortOutOfAnyTransaction(true);
@@ -4385,7 +4490,7 @@ void CommitTransactionCommand(bool stpCommit)
              * don't need AbortSubTransaction.
              */
         case TBLOCK_SUBABORT_RESTART: {
-            char* name = NULL;
+            char *name = NULL;
             int savepointLevel;
 
             /* save name and keep Cleanup from freeing it */
@@ -4407,23 +4512,22 @@ void CommitTransactionCommand(bool stpCommit)
         } break;
         default:
             ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("CommitTransactionCommand: unexpected state %s", BlockStateAsString(s->blockState))));
+                    (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                     errmsg("CommitTransactionCommand: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
     }
 
     if (module_logging_is_on(MOD_TRANS_XACT)) {
         ereport(LOG,
-            (errmodule(MOD_TRANS_XACT),
-                errmsg("CommitTransactionCommand: TransBlock state %s -> %s",
-                    BlockStateAsString(oldstate),
-                    BlockStateAsString(s->blockState))));
+                (errmodule(MOD_TRANS_XACT), errmsg("CommitTransactionCommand: TransBlock state %s -> %s",
+                                                   BlockStateAsString(oldstate), BlockStateAsString(s->blockState))));
     }
 }
 
-void AbortCurrentTransaction(bool stpRollback)
+void AbortCurrentTransaction(bool STP_rollback)
 {
     TransactionState s = CurrentTransactionState;
+    bool PerfectRollback = false;
 
     switch (s->blockState) {
         case TBLOCK_DEFAULT:
@@ -4439,7 +4543,7 @@ void AbortCurrentTransaction(bool stpRollback)
                  */
                 if (s->state == TRANS_START)
                     s->state = TRANS_INPROGRESS;
-                AbortTransaction(false, stpRollback);
+                AbortTransaction(PerfectRollback, STP_rollback);
                 CleanupTransaction();
             }
             break;
@@ -4449,7 +4553,7 @@ void AbortCurrentTransaction(bool stpRollback)
              * & cleanup transaction.
              */
         case TBLOCK_STARTED:
-            AbortTransaction(false, stpRollback);
+            AbortTransaction(PerfectRollback, STP_rollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4462,7 +4566,7 @@ void AbortCurrentTransaction(bool stpRollback)
              * state.
              */
         case TBLOCK_BEGIN:
-            AbortTransaction(false, stpRollback);
+            AbortTransaction(PerfectRollback, STP_rollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4473,9 +4577,13 @@ void AbortCurrentTransaction(bool stpRollback)
              * ABORT state.  We will stay in ABORT until we get a ROLLBACK.
              */
         case TBLOCK_INPROGRESS:
-        case TBLOCK_PARALLEL_INPROGRESS:
-            AbortTransaction(false, stpRollback);
-            s->blockState = TBLOCK_ABORT;
+            AbortTransaction(PerfectRollback, STP_rollback);
+            if (STP_rollback) {
+                s->blockState = TBLOCK_DEFAULT;
+                CleanupTransaction();
+            } else {
+                s->blockState = TBLOCK_ABORT;
+            }
             /* CleanupTransaction happens when we exit TBLOCK_ABORT_END */
             break;
 
@@ -4485,7 +4593,7 @@ void AbortCurrentTransaction(bool stpRollback)
              * the transaction).
              */
         case TBLOCK_END:
-            AbortTransaction(false, stpRollback);
+            AbortTransaction(PerfectRollback, STP_rollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4514,7 +4622,7 @@ void AbortCurrentTransaction(bool stpRollback)
              * Abort, cleanup, go to idle state.
              */
         case TBLOCK_ABORT_PENDING:
-            AbortTransaction(false, stpRollback);
+            AbortTransaction(PerfectRollback, STP_rollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4525,7 +4633,7 @@ void AbortCurrentTransaction(bool stpRollback)
              * the transaction).
              */
         case TBLOCK_PREPARE:
-            AbortTransaction(false, stpRollback);
+            AbortTransaction(PerfectRollback, STP_rollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4536,31 +4644,31 @@ void AbortCurrentTransaction(bool stpRollback)
              * we get ROLLBACK.
              */
         case TBLOCK_SUBINPROGRESS:
-            if (stpRollback && u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
+            if (u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
                 int subTransactionCounter = 0;
                 do {
-                    AbortSubTransaction(stpRollback);
+                    AbortSubTransaction(STP_rollback);
                     s->blockState = TBLOCK_SUBABORT;
                     CleanupSubTransaction();
                     s = CurrentTransactionState;
                     subTransactionCounter++;
-                } while (s->blockState == TBLOCK_SUBINPROGRESS);
+                } while(s->blockState == TBLOCK_SUBINPROGRESS);
 
                 Assert(subTransactionCounter == u_sess->SPI_cxt.portal_stp_exception_counter);
                 if (s->state == TRANS_START) {
                     s->state = TRANS_INPROGRESS;
                 }
-
-                AbortTransaction(false, stpRollback);
+                AbortTransaction(PerfectRollback, STP_rollback);
                 CleanupTransaction();
                 s->blockState = TBLOCK_DEFAULT;
             } else {
                 AbortSubTransaction();
                 s->blockState = TBLOCK_SUBABORT;
             }
-            
+
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
-                ereport(WARNING,
+                ereport(
+                    WARNING,
                     (errmsg(
                         "Transaction aborted as connection handles were destroyed due to clean up stream failed.")));
                 AbortOutOfAnyTransaction(true);
@@ -4577,10 +4685,11 @@ void AbortCurrentTransaction(bool stpRollback)
         case TBLOCK_SUBCOMMIT:
         case TBLOCK_SUBABORT_PENDING:
         case TBLOCK_SUBRESTART:
-            AbortSubTransaction(stpRollback);
+            AbortSubTransaction();
             CleanupSubTransaction();
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
-                ereport(WARNING,
+                ereport(
+                    WARNING,
                     (errmsg(
                         "Transaction aborted as connection handles were destroyed due to clean up stream failed.")));
                 AbortOutOfAnyTransaction(true);
@@ -4592,12 +4701,11 @@ void AbortCurrentTransaction(bool stpRollback)
         case TBLOCK_SUBABORT_END:
         case TBLOCK_SUBABORT_RESTART:
             CleanupSubTransaction();
-            AbortCurrentTransaction(stpRollback);
+            AbortCurrentTransaction();
             break;
         default:
-            ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("AbortCurrentTransaction: unexpected state %s", BlockStateAsString(s->blockState))));
+            ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                            errmsg("AbortCurrentTransaction: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
     }
 }
@@ -4620,29 +4728,26 @@ void AbortCurrentTransaction(bool stpRollback)
  *	making callers do it.)
  *	stmtType: statement type name, for error messages.
  */
-void PreventTransactionChain(bool isTopLevel, const char* stmtType)
+void PreventTransactionChain(bool isTopLevel, const char *stmtType)
 {
     /*
      * xact block already started?
      */
     if (IsTransactionBlock())
-        ereport(ERROR,
-            (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
-                /* translator: %s represents an SQL statement name */
-                errmsg("%s cannot run inside a transaction block", stmtType)));
+        ereport(ERROR, (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
+                        /* translator: %s represents an SQL statement name */
+                        errmsg("%s cannot run inside a transaction block", stmtType)));
 
     if (IsSubTransaction())
-        ereport(ERROR,
-            (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
-                /* translator: %s represents an SQL statement name */
-                errmsg("%s cannot run inside a subtransaction", stmtType)));
+        ereport(ERROR, (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
+                        /* translator: %s represents an SQL statement name */
+                        errmsg("%s cannot run inside a subtransaction", stmtType)));
 
     /* inside a function call? */
     if (!isTopLevel)
-        ereport(ERROR,
-            (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
-                /* translator: %s represents an SQL statement name */
-                errmsg("%s cannot be executed from a function or multi-command string", stmtType)));
+        ereport(ERROR, (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
+                        /* translator: %s represents an SQL statement name */
+                        errmsg("%s cannot be executed from a function or multi-command string", stmtType)));
 
     /* If we got past IsTransactionBlock test, should be in default state */
     if (CurrentTransactionState->blockState != TBLOCK_DEFAULT && CurrentTransactionState->blockState != TBLOCK_STARTED)
@@ -4667,7 +4772,7 @@ void PreventTransactionChain(bool isTopLevel, const char* stmtType)
  *	inside a function.
  *	stmtType: statement type name, for error messages.
  */
-void RequireTransactionChain(bool isTopLevel, const char* stmtType)
+void RequireTransactionChain(bool isTopLevel, const char *stmtType)
 {
     /* xact block already started? */
     if (IsTransactionBlock()) {
@@ -4684,10 +4789,9 @@ void RequireTransactionChain(bool isTopLevel, const char* stmtType)
         return;
     }
 
-    ereport(ERROR,
-        (errcode(ERRCODE_NO_ACTIVE_SQL_TRANSACTION),
-            /* translator: %s represents an SQL statement name */
-            errmsg("%s can only be used in transaction blocks", stmtType)));
+    ereport(ERROR, (errcode(ERRCODE_NO_ACTIVE_SQL_TRANSACTION),
+                    /* translator: %s represents an SQL statement name */
+                    errmsg("%s can only be used in transaction blocks", stmtType)));
 }
 
 /*
@@ -4734,22 +4838,24 @@ bool IsInTransactionChain(bool isTopLevel)
  * At transaction end, the callback occurs post-commit or post-abort, so the
  * callback functions can only do noncritical cleanup.
  */
-void RegisterXactCallback(XactCallback callback, void* arg)
+void RegisterXactCallback(XactCallback callback, void *arg)
 {
-    XactCallbackItem* item = NULL;
+    XactCallbackItem *item = NULL;
 
-    item = (XactCallbackItem*)MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(XactCallbackItem));
+    item = (XactCallbackItem *)MemoryContextAlloc(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(XactCallbackItem));
     item->callback = callback;
     item->arg = arg;
     item->next = u_sess->xact_cxt.Xact_callbacks;
     u_sess->xact_cxt.Xact_callbacks = item;
 }
 
-void UnregisterXactCallback(XactCallback callback, const void* arg)
+void UnregisterXactCallback(XactCallback callback, const void *arg)
 {
-    XactCallbackItem* item = NULL;
-    XactCallbackItem* prev = NULL;
+    XactCallbackItem *item = NULL;
+    XactCallbackItem *prev = NULL;
 
+    prev = NULL;
     for (item = u_sess->xact_cxt.Xact_callbacks; item; prev = item, item = item->next) {
         if (item->callback == callback && item->arg == arg) {
             if (prev != NULL) {
@@ -4765,7 +4871,7 @@ void UnregisterXactCallback(XactCallback callback, const void* arg)
 
 void CallXactCallbacks(XactEvent event)
 {
-    XactCallbackItem* item = NULL;
+    XactCallbackItem *item = NULL;
 
     for (item = u_sess->xact_cxt.Xact_callbacks; item; item = item->next) {
         (*item->callback)(event, item->arg);
@@ -4783,22 +4889,24 @@ void CallXactCallbacks(XactEvent event)
  * subtransaction start, the callback is called when the subtransaction has
  * finished initializing.
  */
-void RegisterSubXactCallback(SubXactCallback callback, void* arg)
+void RegisterSubXactCallback(SubXactCallback callback, void *arg)
 {
-    SubXactCallbackItem* item = NULL;
+    SubXactCallbackItem *item = NULL;
 
-    item = (SubXactCallbackItem*)MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(SubXactCallbackItem));
+    item = (SubXactCallbackItem *)MemoryContextAlloc(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(SubXactCallbackItem));
     item->callback = callback;
     item->arg = arg;
     item->next = u_sess->xact_cxt.SubXact_callbacks;
     u_sess->xact_cxt.SubXact_callbacks = item;
 }
 
-void UnregisterSubXactCallback(SubXactCallback callback, const void* arg)
+void UnregisterSubXactCallback(SubXactCallback callback, const void *arg)
 {
-    SubXactCallbackItem* item = NULL;
-    SubXactCallbackItem* prev = NULL;
+    SubXactCallbackItem *item = NULL;
+    SubXactCallbackItem *prev = NULL;
 
+    prev = NULL;
     for (item = u_sess->xact_cxt.SubXact_callbacks; item; prev = item, item = item->next) {
         if (item->callback == callback && item->arg == arg) {
             if (prev != NULL) {
@@ -4814,7 +4922,7 @@ void UnregisterSubXactCallback(SubXactCallback callback, const void* arg)
 
 static void CallSubXactCallbacks(SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid)
 {
-    SubXactCallbackItem* item = NULL;
+    SubXactCallbackItem *item = NULL;
 
     for (item = u_sess->xact_cxt.SubXact_callbacks; item; item = item->next) {
         (*item->callback)(event, mySubid, parentSubid, item->arg);
@@ -4831,21 +4939,21 @@ static void CallSubXactCallbacks(SubXactEvent event, SubTransactionId mySubid, S
  * The callback is called when xact finishes and may be initialized by events
  * related to GTM that need to be taken care of at the end of a transaction block.
  */
-void RegisterGTMCallback(GTMCallback callback, void* arg)
+void RegisterGTMCallback(GTMCallback callback, void *arg)
 {
-    GTMCallbackItem* item = NULL;
+    GTMCallbackItem *item = NULL;
 
-    item = (GTMCallbackItem*)MemoryContextAlloc(u_sess->top_transaction_mem_cxt, sizeof(GTMCallbackItem));
+    item = (GTMCallbackItem *)MemoryContextAlloc(u_sess->top_transaction_mem_cxt, sizeof(GTMCallbackItem));
     item->callback = callback;
     item->arg = arg;
     item->next = t_thrd.xact_cxt.GTM_callbacks;
     t_thrd.xact_cxt.GTM_callbacks = item;
 }
 
-void UnregisterGTMCallback(GTMCallback callback, const void* arg)
+void UnregisterGTMCallback(GTMCallback callback, const void *arg)
 {
-    GTMCallbackItem* item = NULL;
-    GTMCallbackItem* prev = NULL;
+    GTMCallbackItem *item = NULL;
+    GTMCallbackItem *prev = NULL;
 
     prev = NULL;
     for (item = t_thrd.xact_cxt.GTM_callbacks; item; prev = item, item = item->next) {
@@ -4863,7 +4971,7 @@ void UnregisterGTMCallback(GTMCallback callback, const void* arg)
 
 static void CallGTMCallbacks(GTMEvent event)
 {
-    GTMCallbackItem* item = NULL;
+    GTMCallbackItem *item = NULL;
 
     for (item = t_thrd.xact_cxt.GTM_callbacks; item; item = item->next) {
         (*item->callback)(event, item->arg);
@@ -4875,11 +4983,12 @@ static void CallGTMCallbacks(GTMEvent event)
  * of u_sess->top_transaction_mem_cxt, because we want to delete the seqence
  * on the GTM after CN/DN commit.
  */
-void RegisterSequenceCallback(GTMCallback callback, void* arg)
+void RegisterSequenceCallback(GTMCallback callback, void *arg)
 {
-    GTMCallbackItem* item = NULL;
+    GTMCallbackItem *item = NULL;
 
-    item = (GTMCallbackItem*)MemoryContextAlloc(t_thrd.top_mem_cxt, sizeof(GTMCallbackItem));
+    item = (GTMCallbackItem *)MemoryContextAlloc(
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(GTMCallbackItem));
     item->callback = callback;
     item->arg = arg;
     item->next = t_thrd.xact_cxt.Seq_callbacks;
@@ -4888,7 +4997,7 @@ void RegisterSequenceCallback(GTMCallback callback, void* arg)
 
 static void CallSequenceCallbacks(GTMEvent event)
 {
-    GTMCallbackItem* item = NULL;
+    GTMCallbackItem *item = NULL;
 
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
@@ -4903,8 +5012,8 @@ static void CallSequenceCallbacks(GTMEvent event)
          * Once GTM is faulty, CN will try to connect GTM recursively
          * if the error level is ERROR, which may cause coredump.
          */
-        t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
         if (event == GTM_EVENT_ABORT) {
+            t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
             ereport(WARNING, (errmsg("Fail to call sequence call backs when aborting transaction.")));
         } else {
             PG_RE_THROW();
@@ -4919,18 +5028,18 @@ static void CallSequenceCallbacks(GTMEvent event)
  */
 static void CleanSequenceCallbacks(void)
 {
-    GTMCallbackItem* item = NULL;
-    GTMCallbackItem* next = NULL;
+    GTMCallbackItem *item = NULL;
+    GTMCallbackItem *next = NULL;
     for (item = t_thrd.xact_cxt.Seq_callbacks; item; item = next) {
         next = item->next;
 
         if (item->callback == drop_sequence_cb) {
-            drop_sequence_callback_arg* cbargs = (drop_sequence_callback_arg*)(item->arg);
+            drop_sequence_callback_arg *cbargs = (drop_sequence_callback_arg *)(item->arg);
             if (cbargs != NULL) {
                 pfree_ext(cbargs);
             }
         } else if (item->callback == rename_sequence_cb) {
-            rename_sequence_callback_arg* rcbargs = (rename_sequence_callback_arg*)(item->arg);
+            rename_sequence_callback_arg *rcbargs = (rename_sequence_callback_arg *)(item->arg);
             if (rcbargs != NULL) {
                 if (rcbargs->newseqname) {
                     pfree_ext(rcbargs->newseqname);
@@ -4970,18 +5079,16 @@ void BeginTransactionBlock(void)
 
             /* Already a transaction block in progress. */
         case TBLOCK_INPROGRESS:
-        case TBLOCK_PARALLEL_INPROGRESS:
         case TBLOCK_SUBINPROGRESS:
         case TBLOCK_ABORT:
         case TBLOCK_SUBABORT:
             if ((IS_PGXC_COORDINATOR && !IsConnFromCoord()) ||
                 (IS_PGXC_DATANODE == true && IS_SINGLE_NODE == true && useLocalXid == true)) {
-                ereport(WARNING,
-                    (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION), errmsg("there is already a transaction in progress")));
+                ereport(WARNING, (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
+                                  errmsg("there is already a transaction in progress")));
             } else {
-                ereport(ERROR,
-                    (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
-                        errmsg("non-execute cn or dn: there is already a transaction in progress")));
+                ereport(ERROR, (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
+                                errmsg("non-execute cn or dn: there is already a transaction in progress")));
             }
             break;
 
@@ -5000,9 +5107,8 @@ void BeginTransactionBlock(void)
         case TBLOCK_SUBABORT_RESTART:
         case TBLOCK_PREPARE:
         default:
-            ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("BeginTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
+            ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                            errmsg("BeginTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
     }
 
@@ -5030,7 +5136,7 @@ void BeginTransactionBlock(void)
  * We do it this way because it's not convenient to change memory context,
  * resource owner, etc while executing inside a Portal.
  */
-bool PrepareTransactionBlock(const char* gid)
+bool PrepareTransactionBlock(const char *gid)
 {
     TransactionState s;
     bool result = false;
@@ -5038,13 +5144,14 @@ bool PrepareTransactionBlock(const char* gid)
 #ifdef ENABLE_DISTRIBUTE_TEST
     if (TEST_STUB(DN_PREPARED_FAILED, twophase_default_error_emit)) {
         ereport(g_instance.distribute_test_param_instance->elevel,
-            (errmsg("GTM_TEST  %s: prepared transaction %s failed", g_instance.attr.attr_common.PGXCNodeName, gid)));
+                (errmsg("GTM_TEST  %s: prepared transaction %s failed", g_instance.attr.attr_common.PGXCNodeName,
+                        gid)));
     }
     /* white box test start */
     if (execute_whitebox(WHITEBOX_LOC, gid, WHITEBOX_DEFAULT, 0.0001)) {
         ereport(g_instance.distribute_test_param_instance->elevel,
-            (errmsg("WHITE_BOX TEST  %s: dn prepare transaction failed in prepareTransactionBlock",
-                g_instance.attr.attr_common.PGXCNodeName)));
+                (errmsg("WHITE_BOX TEST  %s: dn prepare transaction failed in prepareTransactionBlock",
+                        g_instance.attr.attr_common.PGXCNodeName)));
     }
     /* white box test end */
 #endif
@@ -5066,11 +5173,9 @@ bool PrepareTransactionBlock(const char* gid)
             s->blockState = TBLOCK_PREPARE;
 
             if (module_logging_is_on(MOD_TRANS_XACT)) {
-                ereport(LOG,
-                    (errmodule(MOD_TRANS_XACT),
-                        errmsg("Node %s: state in prepareTransactionBlock is %s",
-                            g_instance.attr.attr_common.PGXCNodeName,
-                            BlockStateAsString(s->blockState))));
+                ereport(LOG, (errmodule(MOD_TRANS_XACT),
+                              errmsg("Node %s: state in prepareTransactionBlock is %s",
+                                     g_instance.attr.attr_common.PGXCNodeName, BlockStateAsString(s->blockState))));
             }
         } else {
             /*
@@ -5089,6 +5194,31 @@ bool PrepareTransactionBlock(const char* gid)
 #endif
 
     return result;
+}
+
+static void SubTransactionBlockAbort()
+{
+    TransactionState s = CurrentTransactionState;
+    while (s->parent != NULL) {
+        if (s->blockState == TBLOCK_SUBINPROGRESS) {
+            s->blockState = TBLOCK_SUBABORT_PENDING;
+        } else if (s->blockState == TBLOCK_SUBABORT) {
+            s->blockState = TBLOCK_SUBABORT_END;
+        } else {
+            ereport(FATAL,
+                    (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                     errmsg("EndTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
+        }
+        s = s->parent;
+    }
+    if (s->blockState == TBLOCK_INPROGRESS) {
+        s->blockState = TBLOCK_ABORT_PENDING;
+    } else if (s->blockState == TBLOCK_ABORT) {
+        s->blockState = TBLOCK_ABORT_END;
+    } else {
+        ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                        errmsg("EndTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
+    }
 }
 
 /*
@@ -5117,9 +5247,8 @@ bool EndTransactionBlock(void)
             s->blockState = TBLOCK_END;
 
             if (module_logging_is_on(MOD_TRANS_XACT)) {
-                ereport(LOG,
-                    (errmodule(MOD_TRANS_XACT),
-                        errmsg("EndTransactionBlock: state %s", BlockStateAsString(s->blockState))));
+                ereport(LOG, (errmodule(MOD_TRANS_XACT),
+                              errmsg("EndTransactionBlock: state %s", BlockStateAsString(s->blockState))));
             }
 
             result = true;
@@ -5143,17 +5272,16 @@ bool EndTransactionBlock(void)
                     s->blockState = TBLOCK_SUBCOMMIT;
                 } else {
                     ereport(FATAL,
-                        (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                            errmsg("EndTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
+                            (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                             errmsg("EndTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
                 }
                 s = s->parent;
             }
             if (s->blockState == TBLOCK_INPROGRESS) {
                 s->blockState = TBLOCK_END;
             } else {
-                ereport(FATAL,
-                    (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                        errmsg("EndTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
+                ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                                errmsg("EndTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
             }
             result = true;
             break;
@@ -5164,27 +5292,7 @@ bool EndTransactionBlock(void)
              * transaction.
              */
         case TBLOCK_SUBABORT:
-            while (s->parent != NULL) {
-                if (s->blockState == TBLOCK_SUBINPROGRESS) {
-                    s->blockState = TBLOCK_SUBABORT_PENDING;
-                } else if (s->blockState == TBLOCK_SUBABORT) {
-                    s->blockState = TBLOCK_SUBABORT_END;
-                } else {
-                    ereport(FATAL,
-                        (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                            errmsg("EndTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
-                }
-                s = s->parent;
-            }
-            if (s->blockState == TBLOCK_INPROGRESS) {
-                s->blockState = TBLOCK_ABORT_PENDING;
-            } else if (s->blockState == TBLOCK_ABORT) {
-                s->blockState = TBLOCK_ABORT_END;
-            } else {
-                ereport(FATAL,
-                    (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                        errmsg("EndTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
-            }
+            SubTransactionBlockAbort();
             break;
 
             /*
@@ -5194,18 +5302,9 @@ bool EndTransactionBlock(void)
              * put us back into the default state.
              */
         case TBLOCK_STARTED:
-            ereport(
-                WARNING, (errcode(ERRCODE_NO_ACTIVE_SQL_TRANSACTION), errmsg("there is no transaction in progress")));
+            ereport(WARNING,
+                    (errcode(ERRCODE_NO_ACTIVE_SQL_TRANSACTION), errmsg("there is no transaction in progress")));
             result = true;
-            break;
-
-        /*
-         * The user issued a COMMIT that somehow ran inside a parallel
-         * worker.  We can't cope with that.
-         */
-        case TBLOCK_PARALLEL_INPROGRESS:
-            ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE), errmsg("cannot commit during a parallel operation")));
             break;
 
             /* These cases are invalid. */
@@ -5223,9 +5322,8 @@ bool EndTransactionBlock(void)
         case TBLOCK_SUBABORT_RESTART:
         case TBLOCK_PREPARE:
         default:
-            ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("EndTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
+            ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                            errmsg("EndTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
     }
 
@@ -5279,10 +5377,9 @@ void UserAbortTransactionBlock(void)
                 } else if (s->blockState == TBLOCK_SUBABORT) {
                     s->blockState = TBLOCK_SUBABORT_END;
                 } else {
-                    ereport(FATAL,
-                        (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                            errmsg(
-                                "UserAbortTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
+                    ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                                    errmsg("UserAbortTransactionBlock: unexpected state %s",
+                                           BlockStateAsString(s->blockState))));
                 }
                 s = s->parent;
             }
@@ -5292,8 +5389,8 @@ void UserAbortTransactionBlock(void)
                 s->blockState = TBLOCK_ABORT_END;
             } else {
                 ereport(FATAL,
-                    (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                        errmsg("UserAbortTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
+                        (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                         errmsg("UserAbortTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
             }
 
             break;
@@ -5305,18 +5402,9 @@ void UserAbortTransactionBlock(void)
              * default state.
              */
         case TBLOCK_STARTED:
-            ereport(
-                NOTICE, (errcode(ERRCODE_NO_ACTIVE_SQL_TRANSACTION), errmsg("there is no transaction in progress")));
+            ereport(NOTICE,
+                    (errcode(ERRCODE_NO_ACTIVE_SQL_TRANSACTION), errmsg("there is no transaction in progress")));
             s->blockState = TBLOCK_ABORT_PENDING;
-            break;
-
-        /*
-         * The user issued an ABORT that somehow ran inside a parallel
-         * worker.  We can't cope with that.
-         */
-        case TBLOCK_PARALLEL_INPROGRESS:
-            ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE), errmsg("cannot abort during a parallel operation")));
             break;
 
             /* These cases are invalid. */
@@ -5335,8 +5423,8 @@ void UserAbortTransactionBlock(void)
         case TBLOCK_PREPARE:
         default:
             ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("UserAbortTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
+                    (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                     errmsg("UserAbortTransactionBlock: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
     }
 
@@ -5350,21 +5438,9 @@ void UserAbortTransactionBlock(void)
  * DefineSavepoint
  *		This executes a SAVEPOINT command.
  */
-void DefineSavepoint(const char* name)
+void DefineSavepoint(const char *name)
 {
     TransactionState s = CurrentTransactionState;
-
-    /*
-     * Workers synchronize transaction state at the beginning of each parallel
-     * operation, so we can't account for new subtransactions after that
-     * point.  (Note that this check will certainly error out if s->blockState
-     * is TBLOCK_PARALLEL_INPROGRESS, so we can treat that as an invalid case
-     * below.)
-     */
-    if (IsInParallelMode()) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-            errmsg("cannot define savepoints during a parallel operation")));
-    }
 
     switch (s->blockState) {
         case TBLOCK_INPROGRESS:
@@ -5386,7 +5462,6 @@ void DefineSavepoint(const char* name)
         case TBLOCK_DEFAULT:
         case TBLOCK_STARTED:
         case TBLOCK_BEGIN:
-        case TBLOCK_PARALLEL_INPROGRESS:
         case TBLOCK_SUBBEGIN:
         case TBLOCK_END:
         case TBLOCK_SUBRELEASE:
@@ -5401,9 +5476,8 @@ void DefineSavepoint(const char* name)
         case TBLOCK_SUBABORT_RESTART:
         case TBLOCK_PREPARE:
         default:
-            ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("DefineSavepoint: unexpected state %s", BlockStateAsString(s->blockState))));
+            ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                            errmsg("DefineSavepoint: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
     }
 }
@@ -5414,40 +5488,27 @@ void DefineSavepoint(const char* name)
  *
  * As above, we don't actually do anything here except change blockState.
  */
-void ReleaseSavepoint(List* options)
+void ReleaseSavepoint(List *options)
 {
 #ifdef ENABLE_DISTRIBUTE_TEST
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         if (TEST_STUB(CN_RELEASESAVEPOINT_BEFORE_LOCAL_DEAL_FAILED, twophase_default_error_emit)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("SUBXACT_TEST %s: cn release savepoint before local deal failed.",
-                    g_instance.attr.attr_common.PGXCNodeName)));
+                    (errmsg("SUBXACT_TEST %s: cn release savepoint before local deal failed.",
+                            g_instance.attr.attr_common.PGXCNodeName)));
         }
     } else {
         if (TEST_STUB(DN_RELEASESAVEPOINT_BEFORE_LOCAL_DEAL_FAILED, twophase_default_error_emit)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("SUBXACT_TEST %s:dn release savepoint before local deal failed.",
-                    g_instance.attr.attr_common.PGXCNodeName)));
+                    (errmsg("SUBXACT_TEST %s:dn release savepoint before local deal failed.",
+                            g_instance.attr.attr_common.PGXCNodeName)));
         }
     }
 #endif
 
     TransactionState s = CurrentTransactionState;
     TransactionState target, xact;
-    ListCell* cell = NULL;
-    char* name = NULL;
-
-    /*
-     * Workers synchronize transaction state at the beginning of each parallel
-     * operation, so we can't account for transaction state change after that
-     * point.  (Note that this check will certainly error out if s->blockState
-     * is TBLOCK_PARALLEL_INPROGRESS, so we can treat that as an invalid case
-     * below.)
-     */
-    if (IsInParallelMode()) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-            errmsg("cannot release savepoints during a parallel operation")));
-    }
+    char *name = NULL;
 
     switch (s->blockState) {
             /*
@@ -5469,7 +5530,6 @@ void ReleaseSavepoint(List* options)
         case TBLOCK_DEFAULT:
         case TBLOCK_STARTED:
         case TBLOCK_BEGIN:
-        case TBLOCK_PARALLEL_INPROGRESS:
         case TBLOCK_SUBBEGIN:
         case TBLOCK_END:
         case TBLOCK_SUBRELEASE:
@@ -5484,19 +5544,12 @@ void ReleaseSavepoint(List* options)
         case TBLOCK_SUBABORT_RESTART:
         case TBLOCK_PREPARE:
         default:
-            ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("ReleaseSavepoint: unexpected state %s", BlockStateAsString(s->blockState))));
+            ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                            errmsg("ReleaseSavepoint: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
     }
 
-    foreach (cell, options) {
-        DefElem* elem = (DefElem*)lfirst(cell);
-
-        if (strcmp(elem->defname, "savepoint_name") == 0) {
-            name = strVal(elem->arg);
-        }
-    }
+    name = GetSavepointName(options);
 
     Assert(PointerIsValid(name));
 
@@ -5538,25 +5591,11 @@ void ReleaseSavepoint(List* options)
  *
  * As above, we don't actually do anything here except change blockState.
  */
-void RollbackToSavepoint(List* options)
+void RollbackToSavepoint(List *options)
 {
     TransactionState s = CurrentTransactionState;
     TransactionState target, xact;
-    ListCell* cell = NULL;
-    char* name = NULL;
-
-    /*
-     * Workers synchronize transaction state at the beginning of each parallel
-     * operation, so we can't account for transaction state change after that
-     * point.  (Note that this check will certainly error out if s->blockState
-     * is TBLOCK_PARALLEL_INPROGRESS, so we can treat that as an invalid case
-     * below.)
-     */
-    if (IsInParallelMode()) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-            errmsg("cannot rollback to savepoints during a parallel operation")));
-    }
-
+    char *name = NULL;
 
     switch (s->blockState) {
             /*
@@ -5577,7 +5616,6 @@ void RollbackToSavepoint(List* options)
         case TBLOCK_DEFAULT:
         case TBLOCK_STARTED:
         case TBLOCK_BEGIN:
-        case TBLOCK_PARALLEL_INPROGRESS:
         case TBLOCK_SUBBEGIN:
         case TBLOCK_END:
         case TBLOCK_SUBRELEASE:
@@ -5590,19 +5628,12 @@ void RollbackToSavepoint(List* options)
         case TBLOCK_SUBABORT_RESTART:
         case TBLOCK_PREPARE:
         default:
-            ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("RollbackToSavepoint: unexpected state %s", BlockStateAsString(s->blockState))));
+            ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                            errmsg("RollbackToSavepoint: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
     }
 
-    foreach (cell, options) {
-        DefElem* elem = (DefElem*)lfirst(cell);
-
-        if (strcmp(elem->defname, "savepoint_name") == 0) {
-            name = strVal(elem->arg);
-        }
-    }
+    name = GetSavepointName(options);
 
     Assert(PointerIsValid(name));
 
@@ -5636,9 +5667,8 @@ void RollbackToSavepoint(List* options)
         } else if (xact->blockState == TBLOCK_SUBABORT) {
             xact->blockState = TBLOCK_SUBABORT_END;
         } else {
-            ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("RollbackToSavepoint: unexpected state %s", BlockStateAsString(xact->blockState))));
+            ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                            errmsg("RollbackToSavepoint: unexpected state %s", BlockStateAsString(xact->blockState))));
         }
         xact = xact->parent;
         Assert(PointerIsValid(xact));
@@ -5650,9 +5680,8 @@ void RollbackToSavepoint(List* options)
     } else if (xact->blockState == TBLOCK_SUBABORT) {
         xact->blockState = TBLOCK_SUBABORT_RESTART;
     } else {
-        ereport(FATAL,
-            (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                errmsg("RollbackToSavepoint: unexpected state %s", BlockStateAsString(xact->blockState))));
+        ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                        errmsg("RollbackToSavepoint: unexpected state %s", BlockStateAsString(xact->blockState))));
     }
 }
 
@@ -5665,24 +5694,9 @@ void RollbackToSavepoint(List* options)
  *		automatically does CommitTransactionCommand/StartTransactionCommand
  *		instead of expecting the caller to do it.
  */
-void BeginInternalSubTransaction(const char* name)
+void BeginInternalSubTransaction(const char *name)
 {
     TransactionState s = CurrentTransactionState;
-
-    /*
-     * Workers synchronize transaction state at the beginning of each parallel
-     * operation, so we can't account for new subtransactions after that
-     * point. We might be able to make an exception for the type of
-     * subtransaction established by this function, which is typically used in
-     * contexts where we're going to release or roll back the subtransaction
-     * before proceeding further, so that no enduring change to the
-     * transaction state occurs. For now, however, we prohibit this case along
-     * with all the others.
-     */
-    if (IsInParallelMode()) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-            errmsg("cannot start subtransactions during a parallel operation")));
-    }
 
     switch (s->blockState) {
         case TBLOCK_STARTED:
@@ -5705,7 +5719,6 @@ void BeginInternalSubTransaction(const char* name)
             /* These cases are invalid. */
         case TBLOCK_DEFAULT:
         case TBLOCK_BEGIN:
-        case TBLOCK_PARALLEL_INPROGRESS:
         case TBLOCK_SUBBEGIN:
         case TBLOCK_SUBRELEASE:
         case TBLOCK_SUBCOMMIT:
@@ -5719,12 +5732,12 @@ void BeginInternalSubTransaction(const char* name)
         case TBLOCK_SUBABORT_RESTART:
         default:
             ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("BeginInternalSubTransaction: unexpected state %s", BlockStateAsString(s->blockState))));
+                    (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                     errmsg("BeginInternalSubTransaction: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
     }
 
-    CommitTransactionCommand();
+    CommitTransactionCommand(true);
     StartTransactionCommand();
 }
 
@@ -5737,22 +5750,10 @@ void ReleaseCurrentSubTransaction(void)
 {
     TransactionState s = CurrentTransactionState;
 
-    /*
-     * Workers synchronize transaction state at the beginning of each parallel
-     * operation, so we can't account for commit of subtransactions after that
-     * point.  This should not happen anyway.  Code calling this would
-     * typically have called BeginInternalSubTransaction() first, failing
-     * there.
-     */
-    if (IsInParallelMode()) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-            errmsg("cannot commit subtransactions during a parallel operation")));
-    }
-
     if (s->blockState != TBLOCK_SUBINPROGRESS) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                errmsg("ReleaseCurrentSubTransaction: unexpected state %s", BlockStateAsString(s->blockState))));
+                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                 errmsg("ReleaseCurrentSubTransaction: unexpected state %s", BlockStateAsString(s->blockState))));
     }
     Assert(s->state == TRANS_INPROGRESS);
     (void)MemoryContextSwitchTo(t_thrd.mem_cxt.cur_transaction_mem_cxt);
@@ -5782,7 +5783,6 @@ void RollbackAndReleaseCurrentSubTransaction(void)
         case TBLOCK_DEFAULT:
         case TBLOCK_STARTED:
         case TBLOCK_BEGIN:
-        case TBLOCK_PARALLEL_INPROGRESS:
         case TBLOCK_SUBBEGIN:
         case TBLOCK_INPROGRESS:
         case TBLOCK_END:
@@ -5797,24 +5797,178 @@ void RollbackAndReleaseCurrentSubTransaction(void)
         case TBLOCK_SUBABORT_RESTART:
         case TBLOCK_PREPARE:
         default:
-            ereport(FATAL,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("RollbackAndReleaseCurrentSubTransaction: unexpected state %s",
-                        BlockStateAsString(s->blockState))));
+            ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                            errmsg("RollbackAndReleaseCurrentSubTransaction: unexpected state %s",
+                                   BlockStateAsString(s->blockState))));
             break;
     }
 
     /* Abort the current subtransaction, if needed. */
     if (s->blockState == TBLOCK_SUBINPROGRESS) {
-        AbortSubTransaction(false);
+        AbortSubTransaction();
     }
 
     /* And clean it up, too */
     CleanupSubTransaction();
 
     s = CurrentTransactionState; /* changed by pop */
-    AssertState(
-        s->blockState == TBLOCK_SUBINPROGRESS || s->blockState == TBLOCK_INPROGRESS || s->blockState == TBLOCK_STARTED);
+    AssertState(s->blockState == TBLOCK_SUBINPROGRESS || s->blockState == TBLOCK_INPROGRESS ||
+                s->blockState == TBLOCK_STARTED);
+}
+
+char *GetSavepointName(List *options)
+{
+    ListCell *cell = NULL;
+    char *name = NULL;
+
+    foreach (cell, options) {
+        DefElem *elem = (DefElem *)lfirst(cell);
+
+        if (strcmp(elem->defname, "savepoint_name") == 0) {
+            name = strVal(elem->arg);
+        }
+    }
+    AssertEreport(PointerIsValid(name), MOD_TRANS_XACT, "name pointer is Invalid");
+    return name;
+}
+
+/*
+ * RecordSavepoint
+ * record savepoint's cmd/name/send state/type info for sending to other cns when ddl comes.
+ */
+void RecordSavepoint(const char *cmd, const char *name, bool hasSent, SavepointStmtType stmtType)
+{
+    TransactionState s = &TopTransactionStateData;
+    GlobalTransactionId transactionId = GetCurrentTransactionId();
+    SavepointData *savepointInfo = NULL;
+    MemoryContext curContext;
+
+    curContext = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+
+    savepointInfo = (SavepointData *)MemoryContextAlloc(u_sess->top_transaction_mem_cxt, sizeof(SavepointData));
+    savepointInfo->cmd = MemoryContextStrdup(u_sess->top_transaction_mem_cxt, cmd);
+    savepointInfo->name = MemoryContextStrdup(u_sess->top_transaction_mem_cxt, name);
+    savepointInfo->hasSent = false;
+    savepointInfo->stmtType = stmtType;
+    savepointInfo->transactionId = transactionId;
+    s->savepointList = dlappend(s->savepointList, savepointInfo);
+
+    MemoryContextSwitchTo(curContext);
+}
+
+void SendOneSavepointToRemoteCoordinators(const char *cmd, const char *name, SavepointStmtType stmtType,
+                                          GlobalTransactionId transactionId)
+{
+    switch (stmtType) {
+        case SUB_STMT_SAVEPOINT:
+            pgxc_node_remote_savepoint(cmd, EXEC_ON_COORDS, true, true, transactionId);
+            break;
+        case SUB_STMT_RELEASE:
+            pgxc_node_remote_savepoint(cmd, EXEC_ON_COORDS, false, false, InvalidTransactionId);
+            break;
+        case SUB_STMT_ROLLBACK_TO:
+            pgxc_node_remote_savepoint(cmd, EXEC_ON_COORDS, false, false, InvalidTransactionId);
+            break;
+        default:
+            ereport(ERROR, (errmsg("Wrong type: %d in execSendSavepoint.", stmtType)));
+            break;
+    }
+}
+
+/*
+ * Savepoints were sent to all nodes in old version, which leads to error when non-exec CN is down.
+ * To solve this problem, we send savepoints to other CNs when executing non-exec-CN-participated
+ * utilities in subtransaction. This function is called when executing utilities rather than defining savepoints.
+ */
+void SendSavepointToRemoteCoordinator()
+{
+    DList *dlist = TopTransactionStateData.savepointList;
+    DListCell *cell = NULL;
+
+    dlist_foreach_cell(cell, dlist)
+    {
+        SavepointData *elem = (SavepointData *)lfirst(cell);
+
+        if (elem->hasSent == false) {
+            elem->hasSent = true;
+            SendOneSavepointToRemoteCoordinators(elem->cmd, elem->name, elem->stmtType, elem->transactionId);
+        }
+    }
+}
+
+/*
+ * When the excute coordinate recieves "rollback to/release targetSavePoint",
+ *  (1) delete related savepoints in savepointList.
+ *  (2) send the "rollback to/release targetSavePoint" command to other coordinators if there's DDL/DCL before it.
+ */
+void HandleReleaseOrRollbackSavepoint(const char *cmd, const char *name, SavepointStmtType stmtType)
+{
+    DList **dlist = &TopTransactionStateData.savepointList;
+    DListCell *cell = dlist_tail_cell(*dlist);
+    bool targetSendState = false;
+
+    /*
+     * If the recieved command is "rollback to targetSavePoint", delete savepints after targetSavePoint.
+     * If the recieved command is "release targetSavePoint", delete the last targetSavePoint and savepoints after it.
+     */
+    while (cell != NULL) {
+        SavepointData *elem = (SavepointData *)lfirst(cell);
+        AssertEreport(PointerIsValid(elem), MOD_TRANS_XACT, "Savepoint pointer is invalid");
+
+        if (strcmp(elem->name, name) != 0) {
+            DeleteSavepoint(dlist, cell);
+        } else {
+            targetSendState = elem->hasSent;
+            if (stmtType == SUB_STMT_ROLLBACK_TO) {
+                break;
+            } else if (stmtType == SUB_STMT_RELEASE) {
+                DeleteSavepoint(dlist, cell);
+                break;
+            } else {
+                ereport(ERROR, (errmsg("Wrong type: %d when handling savepoints.", stmtType)));
+            }
+        }
+        /* The tail has been delete in DeleteSavepoint, we get the new tail here. */
+        cell = dlist_tail_cell(*dlist);
+    }
+
+    /*
+     * If there's DDL/DCL before "rollback to/release targetSavePoint", the define savepoint command has been sent
+     * when handling DDL/DCL.  We need to send "rollback to/release targetSavePoint" to other coordinators.
+     */
+    if (targetSendState) {
+        SendOneSavepointToRemoteCoordinators(cmd, name, stmtType);
+    }
+}
+
+void DeleteSavepoint(DList **dlist, DListCell *cell)
+{
+    SavepointData *savepointInfo = (SavepointData *)lfirst(cell);
+    if (savepointInfo != NULL) {
+        if (savepointInfo->cmd != NULL) {
+            pfree(savepointInfo->cmd);
+            savepointInfo->cmd = NULL;
+        }
+        if (savepointInfo->name != NULL) {
+            pfree(savepointInfo->name);
+            savepointInfo->name = NULL;
+        }
+    }
+
+    /* dlist can be freed in dlist_delete_cell if there's no element in it. */
+    *dlist = dlist_delete_cell(*dlist, cell, true);
+}
+
+void FreeSavepointList()
+{
+    DList **dlist = &TopTransactionStateData.savepointList;
+    DListCell *cell = dlist_head_cell(*dlist);
+
+    while (cell != NULL) {
+        DeleteSavepoint(dlist, cell);
+        /* The head has been delete in DeleteSavepoint, we get the new head here. */
+        cell = dlist_head_cell(*dlist);
+    }
 }
 
 /*
@@ -5840,10 +5994,9 @@ void AbortOutOfAnyTransaction(bool reserve_topxact_abort)
         switch (s->blockState) {
             case TBLOCK_DEFAULT:
                 if (reserve_topxact_abort) {
-                    ereport(FATAL,
-                        (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                            errmsg("AbortOutOfAnyTransaction reserving top xact abort: unexpected state %s",
-                                BlockStateAsString(s->blockState))));
+                    ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                                    errmsg("AbortOutOfAnyTransaction reserving top xact abort: unexpected state %s",
+                                           BlockStateAsString(s->blockState))));
                 }
 
                 if (s->state == TRANS_DEFAULT) {
@@ -5868,12 +6021,11 @@ void AbortOutOfAnyTransaction(bool reserve_topxact_abort)
             case TBLOCK_STARTED:
             case TBLOCK_BEGIN:
                 if (reserve_topxact_abort) {
-                    ereport(FATAL,
-                        (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                            errmsg("AbortOutOfAnyTransaction reserving top xact abort: unexpected state %s",
-                                BlockStateAsString(s->blockState))));
+                    ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                                    errmsg("AbortOutOfAnyTransaction reserving top xact abort: unexpected state %s",
+                                           BlockStateAsString(s->blockState))));
                 }
-                /* fall-through */
+                /* fall through */
             case TBLOCK_END:
             case TBLOCK_ABORT_PENDING:
             case TBLOCK_PREPARE:
@@ -5883,7 +6035,6 @@ void AbortOutOfAnyTransaction(bool reserve_topxact_abort)
                 break;
 
             case TBLOCK_INPROGRESS:
-            case TBLOCK_PARALLEL_INPROGRESS:
                 AbortTransaction();
                 if (reserve_topxact_abort) {
                     s->blockState = TBLOCK_ABORT;
@@ -5897,10 +6048,9 @@ void AbortOutOfAnyTransaction(bool reserve_topxact_abort)
             case TBLOCK_ABORT:
             case TBLOCK_ABORT_END:
                 if (reserve_topxact_abort) {
-                    ereport(FATAL,
-                        (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                            errmsg("AbortOutOfAnyTransaction reserving top xact abort: unexpected state %s",
-                                BlockStateAsString(s->blockState))));
+                    ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                                    errmsg("AbortOutOfAnyTransaction reserving top xact abort: unexpected state %s",
+                                           BlockStateAsString(s->blockState))));
                 }
                 CleanupTransaction();
                 s->blockState = TBLOCK_DEFAULT;
@@ -5909,18 +6059,17 @@ void AbortOutOfAnyTransaction(bool reserve_topxact_abort)
             /* In a subtransaction, so clean it up and abort parent too */
             case TBLOCK_SUBBEGIN:
                 if (reserve_topxact_abort) {
-                    ereport(FATAL,
-                        (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                            errmsg("AbortOutOfAnyTransaction reserving top xact abort: unexpected state %s",
-                                BlockStateAsString(s->blockState))));
+                    ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                                    errmsg("AbortOutOfAnyTransaction reserving top xact abort: unexpected state %s",
+                                           BlockStateAsString(s->blockState))));
                 }
-                /* fall-through */
+                /* fall through */
             case TBLOCK_SUBINPROGRESS:
             case TBLOCK_SUBRELEASE:
             case TBLOCK_SUBCOMMIT:
             case TBLOCK_SUBABORT_PENDING:
             case TBLOCK_SUBRESTART:
-                AbortSubTransaction(false);
+                AbortSubTransaction();
                 CleanupSubTransaction();
                 s = CurrentTransactionState; /* changed by pop */
                 break;
@@ -5929,21 +6078,19 @@ void AbortOutOfAnyTransaction(bool reserve_topxact_abort)
             case TBLOCK_SUBABORT_END:
             case TBLOCK_SUBABORT_RESTART:
                 if (reserve_topxact_abort) {
-                    ereport(FATAL,
-                        (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                            errmsg("AbortOutOfAnyTransaction reserving top xact abort: unexpected state %s",
-                                BlockStateAsString(s->blockState))));
+                    ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                                    errmsg("AbortOutOfAnyTransaction reserving top xact abort: unexpected state %s",
+                                           BlockStateAsString(s->blockState))));
                 }
-                /* fall-through */
+                /* fall through */
             case TBLOCK_SUBABORT:
                 CleanupSubTransaction();
                 s = CurrentTransactionState; /* changed by pop */
                 break;
             default:
-                ereport(FATAL,
-                    (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                        errmsg("AbortOutOfAnyTransaction reserving top xact abort: unexpected state %s",
-                            BlockStateAsString(s->blockState))));
+                ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                                errmsg("AbortOutOfAnyTransaction reserving top xact abort: unexpected state %s",
+                                       BlockStateAsString(s->blockState))));
                 break;
         }
 
@@ -6004,7 +6151,6 @@ char TransactionBlockStatusCode(void)
         case TBLOCK_BEGIN:
         case TBLOCK_SUBBEGIN:
         case TBLOCK_INPROGRESS:
-        case TBLOCK_PARALLEL_INPROGRESS:
         case TBLOCK_SUBINPROGRESS:
         case TBLOCK_END:
         case TBLOCK_SUBRELEASE:
@@ -6025,9 +6171,8 @@ char TransactionBlockStatusCode(void)
     }
 
     /* should never get here */
-    ereport(FATAL,
-        (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-            errmsg("invalid transaction block state: %s", BlockStateAsString(s->blockState))));
+    ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                    errmsg("invalid transaction block state: %s", BlockStateAsString(s->blockState))));
     return 0; /* keep compiler quiet */
 }
 
@@ -6109,7 +6254,7 @@ static void StartSubTransaction(void)
  *	The caller has to make sure to always reassign CurrentTransactionState
  *	if it has a local pointer to it after calling this function.
  */
-static void CommitSubTransaction(bool stpCommit)
+static void CommitSubTransaction(bool STP_commit)
 {
     TransactionState s = CurrentTransactionState;
 
@@ -6117,12 +6262,6 @@ static void CommitSubTransaction(bool stpCommit)
 
     if (s->state != TRANS_INPROGRESS) {
         ereport(WARNING, (errmsg("CommitSubTransaction while in %s state", TransStateAsString(s->state))));
-    }
-
-    /* If in parallel mode, clean up workers and exit parallel mode. */
-    if (IsInParallelMode()) {
-        AtEOSubXact_Parallel(true, s->subTransactionId);
-        s->parallelModeLevel = 0;
     }
 
     /* Pre-commit processing goes here -- nothing to do at the moment */
@@ -6174,22 +6313,18 @@ static void CommitSubTransaction(bool stpCommit)
 #ifdef ENABLE_DISTRIBUTE_TEST
         if (TEST_STUB(CN_COMMIT_SUBXACT_BEFORE_SEND_GTM_FAILED, twophase_default_error_emit)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("SUBXACT_TEST %s: Commit subtransaction %s before notice GTM failed.",
-                    g_instance.attr.attr_common.PGXCNodeName,
-                    s->name)));
+                    (errmsg("SUBXACT_TEST %s: Commit subtransaction %s before notice GTM failed.",
+                            g_instance.attr.attr_common.PGXCNodeName, s->name)));
         } else if (TEST_STUB(CN_COMMIT_BEFORE_GTM_FAILED_AND_CANCEL_FLUSH_FAILED, twophase_default_error_emit)) {
-            ereport(ERROR,
-                (errmsg("SUBXACT_TEST %s: Commit subtransaction %s before notice GTM failed.",
-                    g_instance.attr.attr_common.PGXCNodeName,
-                    s->name)));
+            ereport(ERROR, (errmsg("SUBXACT_TEST %s: Commit subtransaction %s before notice GTM failed.",
+                                   g_instance.attr.attr_common.PGXCNodeName, s->name)));
         }
 #endif
 #ifdef ENABLE_DISTRIBUTE_TEST
         if (TEST_STUB(CN_COMMIT_SUBXACT_AFTER_SEND_GTM_FAILED, twophase_default_error_emit)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("SUBXACT_TEST  %s: Commit subtransaction %s after notice GTM failed.",
-                    g_instance.attr.attr_common.PGXCNodeName,
-                    s->name)));
+                    (errmsg("SUBXACT_TEST  %s: Commit subtransaction %s after notice GTM failed.",
+                            g_instance.attr.attr_common.PGXCNodeName, s->name)));
         }
 #endif
     }
@@ -6207,11 +6342,10 @@ static void CommitSubTransaction(bool stpCommit)
         XactLockTableDelete(s->transactionId);
     }
 
-    /*
-     * When commit within nedted store procedure, it will create a plan cache.
-     * During commit time, need to clean up those plan cache.
+    /* When commit within nested store procedure, it will create a plan cache.
+     * During commit time, need to clean up those plan cahce.
      */
-    if (stpCommit) {
+    if (STP_commit) {
         ResourceOwnerDecrementNPlanRefs(t_thrd.utils_cxt.CurrentResourceOwner, true);
         ResourceOwnerDecrementNsnapshots(t_thrd.utils_cxt.CurrentResourceOwner, NULL);
     }
@@ -6221,11 +6355,11 @@ static void CommitSubTransaction(bool stpCommit)
     ResourceOwnerRelease(s->curTransactionOwner, RESOURCE_RELEASE_AFTER_LOCKS, true, false);
 
     AtEOXact_GUC(true, s->gucNestLevel);
-    if (!stpCommit) {
-        AtEOSubXact_SPI(true, s->subTransactionId, false, stpCommit);
+    if(!STP_commit) {
+        AtEOSubXact_SPI(true, s->subTransactionId, false, STP_commit);
     }
     AtEOSubXact_on_commit_actions(true, s->subTransactionId, s->parent->subTransactionId);
-    if (!stpCommit) {
+    if(!STP_commit) {
         AtEOSubXact_Namespace(true, s->subTransactionId, s->parent->subTransactionId);
     }
     AtEOSubXact_Files(true, s->subTransactionId, s->parent->subTransactionId);
@@ -6253,7 +6387,7 @@ static void CommitSubTransaction(bool stpCommit)
     PopTransaction();
 }
 
-static void AbortSubTransaction(bool stpRollback)
+void AbortSubTransaction(bool STP_rollback)
 {
     TransactionState s = CurrentTransactionState;
     t_thrd.xact_cxt.bInAbortTransaction = true;
@@ -6266,7 +6400,7 @@ static void AbortSubTransaction(bool stpRollback)
     CleanupDfsHandlers(false);
 
     /* clean up ec connection */
-#ifdef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_LLT
     clean_ec_conn();
     delete_ec_ctrl();
 #endif
@@ -6356,12 +6490,6 @@ static void AbortSubTransaction(bool stpRollback)
     SetUserIdAndSecContext(s->prevUser, s->prevSecContext);
     u_sess->exec_cxt.is_exec_trigger_func = false;
 
-    /* Exit from parallel mode, if necessary. */
-    if (IsInParallelMode()) {
-        AtEOSubXact_Parallel(false, s->subTransactionId);
-        s->parallelModeLevel = 0;
-    }
-
     /*
      * We can skip all this stuff if the subxact failed before creating a
      * ResourceOwner...
@@ -6369,14 +6497,13 @@ static void AbortSubTransaction(bool stpRollback)
     if (s->curTransactionOwner) {
         if (GTM_MODE && IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
             if (!AtEOXact_GlobalTxn(false, false)) {
-                ereport(WARNING,
-                    (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
-                        errmsg("Failed to receive GTM abort subtransaction response.")));
+                ereport(WARNING, (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
+                                  errmsg("Failed to receive GTM abort subtransaction response.")));
             }
         }
         AfterTriggerEndSubXact(false);
-        AtSubAbort_Portals(
-            s->subTransactionId, s->parent->subTransactionId, s->curTransactionOwner, s->parent->curTransactionOwner);
+        AtSubAbort_Portals(s->subTransactionId, s->parent->subTransactionId, s->curTransactionOwner,
+                           s->parent->curTransactionOwner);
         AtEOSubXact_LargeObject(false, s->subTransactionId, s->parent->subTransactionId);
         AtSubAbort_Notify();
 
@@ -6409,9 +6536,9 @@ static void AbortSubTransaction(bool stpRollback)
         ResourceOwnerRelease(s->curTransactionOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, false);
 
         AtEOXact_GUC(false, s->gucNestLevel);
-        AtEOSubXact_SPI(false, s->subTransactionId, stpRollback, false);
+        AtEOSubXact_SPI(false, s->subTransactionId, STP_rollback, false);
         AtEOSubXact_on_commit_actions(false, s->subTransactionId, s->parent->subTransactionId);
-        if (!stpRollback) {
+        if (!STP_rollback) {
             AtEOSubXact_Namespace(false, s->subTransactionId, s->parent->subTransactionId);
         }
         AtEOSubXact_Files(false, s->subTransactionId, s->parent->subTransactionId);
@@ -6438,7 +6565,7 @@ static void AbortSubTransaction(bool stpRollback)
  *	The caller has to make sure to always reassign CurrentTransactionState
  *	if it has a local pointer to it after calling this function.
  */
-static void CleanupSubTransaction(void)
+void CleanupSubTransaction(void)
 {
     TransactionState s = CurrentTransactionState;
 
@@ -6461,7 +6588,9 @@ static void CleanupSubTransaction(void)
 
     s->state = TRANS_DEFAULT;
 
+#ifdef ENABLE_MOT
     s->storageEngineType = SE_TYPE_UNSPECIFIED;
+#endif
 
     PopTransaction();
 }
@@ -6479,20 +6608,22 @@ static void PushTransaction(void)
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         if (TEST_STUB(CN_SAVEPOINT_BEFORE_PUSHXACT_FAILED, twophase_default_error_emit)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("SUBXACT_TEST  %s: before push transaction failed", g_instance.attr.attr_common.PGXCNodeName)));
+                    (errmsg("SUBXACT_TEST  %s: before push transaction failed",
+                            g_instance.attr.attr_common.PGXCNodeName)));
         }
     } else {
         if (TEST_STUB(DN_SAVEPOINT_BEFORE_PUSHXACT_FAILED, twophase_default_error_emit)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("SUBXACT_TEST  %s: before push transaction failed", g_instance.attr.attr_common.PGXCNodeName)));
+                    (errmsg("SUBXACT_TEST  %s: before push transaction failed",
+                            g_instance.attr.attr_common.PGXCNodeName)));
         }
     }
 
     /* white box test start */
     if (execute_whitebox(WHITEBOX_LOC, NULL, WHITEBOX_DEFAULT, 0.001)) {
         ereport(g_instance.distribute_test_param_instance->elevel,
-            (errmsg("WHITE_BOX TEST  %s: savepoint before push transaction failed",
-                g_instance.attr.attr_common.PGXCNodeName)));
+                (errmsg("WHITE_BOX TEST  %s: savepoint before push transaction failed",
+                        g_instance.attr.attr_common.PGXCNodeName)));
     }
     /* white box test end */
 #endif
@@ -6508,9 +6639,8 @@ static void PushTransaction(void)
     if (t_thrd.xact_cxt.currentSubTransactionId == InvalidSubTransactionId) {
         t_thrd.xact_cxt.currentSubTransactionId -= 1;
         pfree(s);
-        ereport(ERROR,
-            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                errmsg("cannot have more than 2^32-1 subtransactions in a transaction")));
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("cannot have more than 2^32-1 subtransactions in a transaction")));
     }
 
     /* We can now stack a minimally valid subtransaction without fear of failure. */
@@ -6539,19 +6669,21 @@ static void PushTransaction(void)
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         if (TEST_STUB(CN_SAVEPOINT_AFTER_PUSHXACT_FAILED, twophase_default_error_emit)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("SUBXACT_TEST  %s: after push transaction failed", g_instance.attr.attr_common.PGXCNodeName)));
+                    (errmsg("SUBXACT_TEST  %s: after push transaction failed",
+                            g_instance.attr.attr_common.PGXCNodeName)));
         }
     } else {
         if (TEST_STUB(DN_SAVEPOINT_AFTER_PUSHXACT_FAILED, twophase_default_error_emit)) {
             ereport(g_instance.distribute_test_param_instance->elevel,
-                (errmsg("SUBXACT_TEST  %s: after push transaction failed", g_instance.attr.attr_common.PGXCNodeName)));
+                    (errmsg("SUBXACT_TEST  %s: after push transaction failed",
+                            g_instance.attr.attr_common.PGXCNodeName)));
         }
     }
     /* white box test start */
     if (execute_whitebox(WHITEBOX_LOC, NULL, WHITEBOX_DEFAULT, 0.001)) {
         ereport(g_instance.distribute_test_param_instance->elevel,
-            (errmsg("WHITE_BOX TEST  %s: savepoint after push transaction failed",
-                g_instance.attr.attr_common.PGXCNodeName)));
+                (errmsg("WHITE_BOX TEST  %s: savepoint after push transaction failed",
+                        g_instance.attr.attr_common.PGXCNodeName)));
     }
     /* white box test end */
 #endif
@@ -6595,137 +6727,10 @@ static void PopTransaction(void)
 }
 
 /*
- * 	SetParallelStartTimestamps
- *
- * In a parallel worker, we should inherit the parent transaction's
- * timestamps rather than setting our own.  The parallel worker
- * infrastructure must call this to provide those values before
- * calling StartTransaction() or SetCurrentStatementStartTimestamp().
- */
-void SetParallelStartTimestamps(TimestampTz xact_ts, TimestampTz stmt_ts)
-{
-    Assert(IsParallelWorker());
-    t_thrd.xact_cxt.xactStartTimestamp = xact_ts;
-    t_thrd.xact_cxt.stmtStartTimestamp = stmt_ts;
-}
-
-/*
- * SerializeTransactionState
- *      Write out relevant details of our transaction state that will be
- *      needed by a parallel worker.
- *
- * We need to save and restore XactDeferrable, XactIsoLevel, and the XIDs
- * associated with this transaction. We emit the XIDs in sorted order for
- * the convenience of the receiving process.
- */
-void SerializeTransactionState(ParallelInfoContext *cxt)
-{
-    Assert(cxt != NULL);
-    int rc;
-    int i;
-    int nxids = 0;
-    Size transSize;
-    TransactionState s = NULL;
-    cxt->xactIsoLevel = u_sess->utils_cxt.XactIsoLevel;
-    cxt->xactDeferrable = u_sess->attr.attr_storage.XactDeferrable;
-    cxt->topTransactionId = GetTopTransactionIdIfAny();
-    cxt->currentTransactionId = GetCurrentTransactionIdIfAny();
-    cxt->currentCommandId = t_thrd.xact_cxt.currentCommandId;
-    cxt->RecentGlobalXmin = u_sess->utils_cxt.RecentGlobalXmin;
-    cxt->TransactionXmin = u_sess->utils_cxt.TransactionXmin;
-    cxt->RecentXmin = u_sess->utils_cxt.RecentXmin;
-    cxt->nParallelCurrentXids = 0;
-    cxt->ParallelCurrentXids = NULL;
-
-    /*
-     * If we're running in a parallel worker and launching a parallel worker
-     * of our own, we can just pass along the information that was passed to
-     * us.
-     */
-    if (t_thrd.xact_cxt.nParallelCurrentXids > 0) {
-        cxt->nParallelCurrentXids = t_thrd.xact_cxt.nParallelCurrentXids;
-        transSize = sizeof(TransactionId) * (uint32)t_thrd.xact_cxt.nParallelCurrentXids;
-        cxt->ParallelCurrentXids = (TransactionId*)palloc(transSize);
-        rc = memcpy_s(cxt->ParallelCurrentXids, transSize, t_thrd.xact_cxt.ParallelCurrentXids, transSize);
-        securec_check_c(rc, "", "");
-        return;
-    }
-
-    /*
-     * OK, we need to generate a sorted list of XIDs that our workers should
-     * view as current. First, figure out how many there are.
-     */
-    for (s = CurrentTransactionState; s != NULL; s = s->parent) {
-        if (TransactionIdIsValid(s->transactionId)) {
-            nxids++;
-        }
-        nxids += s->nChildXids;
-    }
-
-    if (nxids <= 0) {
-        return;
-    }
-
-    /* Copy them to our scratch space. */
-    cxt->nParallelCurrentXids = nxids;
-    transSize = sizeof(TransactionId) * (uint32)nxids;
-    cxt->ParallelCurrentXids = (TransactionId*)palloc(transSize);
-
-    for (i = 0, s = CurrentTransactionState; s != NULL; s = s->parent) {
-        if (TransactionIdIsValid(s->transactionId)) {
-            cxt->ParallelCurrentXids[i++] = s->transactionId;
-        }
-
-        if (s->childXids != NULL && s->nChildXids > 0) {
-            rc = memcpy_s(&cxt->ParallelCurrentXids[i], transSize - (i * sizeof(TransactionId)),
-                            s->childXids, (uint32)s->nChildXids * sizeof(TransactionId));
-            securec_check_c(rc, "", "");
-            i += s->nChildXids;
-        }
-    }
-    Assert(i == nxids);
-
-    /* Sort them. */
-    qsort(cxt->ParallelCurrentXids, nxids, sizeof(TransactionId), xidComparator);
-}
-
-/*
- * StartParallelWorkerTransaction
- * 		Start a parallel worker transaction, restoring the relevant
- * 		transaction state serialized by SerializeTransactionState.
- */
-void StartParallelWorkerTransaction(ParallelInfoContext *cxt)
-{
-    Assert(CurrentTransactionState->blockState == TBLOCK_DEFAULT);
-    StartTransaction(true);
-
-    u_sess->utils_cxt.XactIsoLevel = cxt->xactIsoLevel;
-    u_sess->attr.attr_storage.XactDeferrable = cxt->xactDeferrable;
-    TopTransactionStateData.transactionId = cxt->topTransactionId;
-    CurrentTransactionState->transactionId = cxt->currentTransactionId;
-    t_thrd.xact_cxt.currentCommandId = cxt->currentCommandId;
-    t_thrd.xact_cxt.nParallelCurrentXids = cxt->nParallelCurrentXids;
-    t_thrd.xact_cxt.ParallelCurrentXids = cxt->ParallelCurrentXids;
-
-    CurrentTransactionState->blockState = TBLOCK_PARALLEL_INPROGRESS;
-}
-
-/*
- * EndParallelWorkerTransaction
- * 		End a parallel worker transaction.
- */
-void EndParallelWorkerTransaction(void)
-{
-    Assert(CurrentTransactionState->blockState == TBLOCK_PARALLEL_INPROGRESS);
-    CommitTransaction();
-    CurrentTransactionState->blockState = TBLOCK_DEFAULT;
-}
-
-/*
  * ShowTransactionState
- * 		Debug support
+ *		Debug support
  */
-static void ShowTransactionState(const char* str)
+static void ShowTransactionState(const char *str)
 {
     /* skip work if message will definitely not be printed */
     if (log_min_messages <= DEBUG3 || client_min_messages <= DEBUG3) {
@@ -6758,17 +6763,12 @@ static void ShowTransactionStateRec(TransactionState s)
 
     /* use ereport to suppress computation if msg will not be printed */
     ereport(DEBUG3,
-        (errmsg_internal("name: %s; blockState: %13s; state: %7s, xid/subid/cid: " XID_FMT "/" XID_FMT
-                         "/%u%s, nestlvl: %d, children: %s",
-            PointerIsValid(s->name) ? s->name : "unnamed",
-            BlockStateAsString(s->blockState),
-            TransStateAsString(s->state),
-            s->transactionId,
-            s->subTransactionId,
-            (unsigned int)t_thrd.xact_cxt.currentCommandId,
-            t_thrd.xact_cxt.currentCommandIdUsed ? " (used)" : "",
-            s->nestingLevel,
-            buf.data)));
+            (errmsg_internal("name: %s; blockState: %13s; state: %7s, xid/subid/cid: " XID_FMT "/" XID_FMT
+                             "/%u%s, nestlvl: %d, children: %s",
+                             PointerIsValid(s->name) ? s->name : "unnamed", BlockStateAsString(s->blockState),
+                             TransStateAsString(s->state), s->transactionId, s->subTransactionId,
+                             (unsigned int)t_thrd.xact_cxt.currentCommandId,
+                             t_thrd.xact_cxt.currentCommandIdUsed ? " (used)" : "", s->nestingLevel, buf.data)));
 
     pfree(buf.data);
     buf.data = NULL;
@@ -6778,7 +6778,7 @@ static void ShowTransactionStateRec(TransactionState s)
  * BlockStateAsString
  *		Debug support
  */
-static const char* BlockStateAsString(TBlockState blockState)
+static const char *BlockStateAsString(TBlockState blockState)
 {
     switch (blockState) {
         case TBLOCK_DEFAULT:
@@ -6789,8 +6789,6 @@ static const char* BlockStateAsString(TBlockState blockState)
             return "BEGIN";
         case TBLOCK_INPROGRESS:
             return "INPROGRESS";
-        case TBLOCK_PARALLEL_INPROGRESS:
-            return "PARALLEL_INPROGRESS";
         case TBLOCK_END:
             return "END";
         case TBLOCK_ABORT:
@@ -6829,7 +6827,7 @@ static const char* BlockStateAsString(TBlockState blockState)
  * TransStateAsString
  *		Debug support
  */
-static const char* TransStateAsString(TransState state)
+static const char *TransStateAsString(TransState state)
 {
     switch (state) {
         case TRANS_DEFAULT:
@@ -6859,7 +6857,7 @@ static const char* TransStateAsString(TransState state)
  * the caller should *not* pfree() it (this is a change from pre-8.4 code!).
  * If there are no subxacts, *ptr is set to NULL.
  */
-int xactGetCommittedChildren(TransactionId** ptr)
+int xactGetCommittedChildren(TransactionId **ptr)
 {
     TransactionState s = CurrentTransactionState;
 
@@ -6872,15 +6870,40 @@ int xactGetCommittedChildren(TransactionId** ptr)
     return s->nChildXids;
 }
 
+HTAB *relfilenode_hashtbl_create()
+{
+    HASHCTL hashCtrl;
+    HTAB *hashtbl = NULL;
+    errno_t rc;
+
+    rc = memset_s(&hashCtrl, sizeof(hashCtrl), 0, sizeof(hashCtrl));
+    securec_check(rc, "", "");
+    hashCtrl.hcxt = (MemoryContext)CurrentMemoryContext;
+    hashCtrl.hash = tag_hash;
+    hashCtrl.keysize = sizeof(RelFileNode);
+    /* keep  entrysize >= keysize, stupid limits */
+    hashCtrl.entrysize = sizeof(RelFileNode);
+
+    hashtbl = hash_create("relfilenode_hashtbl_create", 64, &hashCtrl, (HASH_CONTEXT | HASH_FUNCTION | HASH_ELEM));
+    return hashtbl;
+}
+
 /*
  *	XLOG support routines
  */
-static void unlink_relfiles(_in_ ColFileNodeRel* xnodes, _in_ int nrels, bool hasbucket)
+static void unlink_relfiles(_in_ ColFileNodeRel *xnodes, _in_ int nrels, bool hasbucket)
 {
     ColMainFileNodesCreate();
+
+    if (IS_DEL_RELS_OVER_HASH_THRESHOLD(nrels)) {
+        DropBufferForDelRelsinXlogUsingHash(xnodes, nrels);
+    } else {
+        DropBufferForDelRelinXlogUsingScan(xnodes, nrels);
+    }
+
     for (int i = 0; i < nrels; ++i) {
         ColFileNode colFileNode;
-        ColFileNodeRel* colFileNodeRel = xnodes + i;
+        ColFileNodeRel *colFileNodeRel = xnodes + i;
 
         ColFileNodeCopy(&colFileNode, colFileNodeRel);
 
@@ -6937,8 +6960,8 @@ static void unlink_relfiles(_in_ ColFileNodeRel* xnodes, _in_ int nrels, bool ha
 
             LockRelFileNode(relFileNode, AccessExclusiveLock);
             /* Column relation not support hash bucket now */
-            ColumnRelationDoDeleteFiles(
-                &colFileNode.filenode, colFileNode.forknum, InvalidBackendId, colFileNode.ownerid);
+            ColumnRelationDoDeleteFiles(&colFileNode.filenode, colFileNode.forknum, InvalidBackendId,
+                                        colFileNode.ownerid);
             UnlockRelFileNode(relFileNode, AccessExclusiveLock);
         }
     }
@@ -6950,8 +6973,9 @@ static void unlink_relfiles(_in_ ColFileNodeRel* xnodes, _in_ int nrels, bool ha
  * actions for which the order of execution is critical.
  */
 static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, TransactionId* sub_xids, int nsubxacts,
-    SharedInvalidationMessage* inval_msgs, int nmsgs, ColFileNodeRel* xnodes, bool hasbucket, int nrels, int nlibrary,
-    Oid dbId, Oid tsId, uint32 xinfo, uint64 csn, TransactionId new_global_xmin)
+                                      SharedInvalidationMessage* inval_msgs, int nmsgs, ColFileNodeRel* xnodes,
+                                      bool hasbucket, int nrels, int nlibrary, Oid dbId, Oid tsId, uint32 xinfo,
+                                      uint64 csn, TransactionId newGlobalXmin)
 {
     TransactionId max_xid;
     XLogRecPtr globalDelayDDLLSN;
@@ -6977,6 +7001,7 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
     }
 
     if (t_thrd.xlog_cxt.standbyState == STANDBY_DISABLED) {
+#ifdef ENABLE_MOT
         /*
          * Report committed transaction to MOT Engine.
          * If (XactMOTEngineUsed(xinfo)) - This is an optimization to avoid calling
@@ -6985,6 +7010,7 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
          * engine type is cleared in 2phase commit prepare phase.
          */
         CallRedoCommitCallback(xid);
+#endif
 
         /*
          * Mark the transaction committed in pg_xact. We don't bother updating
@@ -7007,23 +7033,15 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
         }
 #else
         else {
-            Assert(false);
+            ereport(
+                PANIC, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                    errmsg("xact_redo_commit_internal: unknown csn state %lu", (uint64)csn)));
         }
 #endif
     } else {
         CSNLogRecordAssignedTransactionId(max_xid);
 
-        /*
-         * If a transaction completion record arrives that has as-yet
-         * unobserved subtransactions then this will not have been fully
-         * handled by the call to RecordKnownAssignedTransactionIds() in the
-         * main recovery loop in xlog.c. So we need to do bookkeeping again to
-         * cover that case. This is confusing and it is easy to think this
-         * call is irrelevant, which has happened three times in development
-         * already. Leave it in.
-         */
-        // RecordKnownAssignedTransactionIds(max_xid);
-
+#ifdef ENABLE_MOT
         /*
          * Report committed transaction to MOT Engine.
          * If (XactMOTEngineUsed(xinfo)) - This is an optimization to avoid calling
@@ -7032,6 +7050,7 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
          * engine type is cleared in 2phase commit prepare phase.
          */
         CallRedoCommitCallback(xid);
+#endif
 
         /*
          * Mark the transaction committed in pg_clog. We use async commit
@@ -7059,11 +7078,13 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
         }
 #else
         else {
-            Assert(false);
+            ereport(
+                PANIC, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+                    errmsg("xact_redo_commit_internal: unknown csn state %lu", (uint64)csn)));
         }
 
-        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin, new_global_xmin)) {
-            t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin = new_global_xmin;
+        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin, newGlobalXmin)) {
+            t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin = newGlobalXmin;
         }
 
 #endif
@@ -7111,22 +7132,17 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
 
         globalDelayDDLLSN = GetDDLDelayStartPtr();
 
-        if (!XLogRecPtrIsInvalid(globalDelayDDLLSN) && XLByteLT(globalDelayDDLLSN, lsn)) {
-            t_thrd.xact_cxt.xactDelayDDL = true;
-        } else {
-            t_thrd.xact_cxt.xactDelayDDL = false;
-        }
+        t_thrd.xact_cxt.xactDelayDDL =
+            ((!XLogRecPtrIsInvalid(globalDelayDDLLSN) && XLByteLT(globalDelayDDLLSN, lsn)) ? true : false);
 
         unlink_relfiles(xnodes, nrels, hasbucket);
     }
 
     /* remove library file */
     if (nlibrary > 0) {
-
 #ifdef ENABLE_MULTIPLE_NODES
-        char* filename = (char*)xnodes + ((unsigned)nrels * sizeof(ColFileNodeRel)) +
-                         ((unsigned)nsubxacts * sizeof(TransactionId)) +
-                         ((unsigned)nmsgs * sizeof(SharedInvalidationMessage));
+        char* filename = (char*)xnodes + (nrels * sizeof(ColFileNodeRel)) + (nsubxacts * sizeof(TransactionId)) +
+                         (nmsgs * sizeof(SharedInvalidationMessage));
 #else
         char* filename = (char*)xnodes + (nrels * sizeof(ColFileNodeRel)) + ((nsubxacts + 1) * sizeof(TransactionId)) +
                          (nmsgs * sizeof(SharedInvalidationMessage));
@@ -7151,8 +7167,14 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (remove_committed_csn_info(xid)) {
+    if (RemoveCommittedCsnInfo(xid)) {
         XactLockTableDelete(xid);
+    }
+
+    for (int i = 0; i < nsubxacts; ++i) {
+        if (RemoveCommittedCsnInfo(sub_xids[i])) {
+            XactLockTableDelete(sub_xids[i]);
+        }
     }
 #endif
 }
@@ -7160,25 +7182,24 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
 /*
  * Utility function to call xact_redo_commit_internal after breaking down xlrec
  */
-static void xact_redo_commit(xl_xact_commit* xlrec, TransactionId xid, XLogRecPtr lsn, bool hasbucket)
+static void xact_redo_commit(xl_xact_commit *xlrec, TransactionId xid, XLogRecPtr lsn, bool hasbucket)
 {
     TransactionId* subxacts = NULL;
     SharedInvalidationMessage* inval_msgs = NULL;
-    TransactionId global_xmin = InvalidTransactionId;
+    TransactionId globalXmin = InvalidTransactionId;
 
     Assert(TransactionIdIsValid(xid));
 
     /* subxid array follows relfilenodes */
-    subxacts = (TransactionId*)&(xlrec->xnodes[xlrec->nrels]);
+    subxacts = (TransactionId *)&(xlrec->xnodes[xlrec->nrels]);
 
     /* invalidation messages array follows subxids */
     inval_msgs = (SharedInvalidationMessage*)&(subxacts[xlrec->nsubxacts]);
 
 #ifndef ENABLE_MULTIPLE_NODES
     /* recent_xmin follows inval_msgs */
-    global_xmin = *((TransactionId*)&(inval_msgs[xlrec->nmsgs]));
+    globalXmin = *((TransactionId *)&(inval_msgs[xlrec->nmsgs]));
 #endif
-
     xact_redo_commit_internal(xid,
         lsn,
         subxacts,
@@ -7193,21 +7214,21 @@ static void xact_redo_commit(xl_xact_commit* xlrec, TransactionId xid, XLogRecPt
         xlrec->tsId,
         xlrec->xinfo,
         xlrec->csn,
-        global_xmin);
+        globalXmin);
 }
 
 /*
  * Utility function to call xact_redo_commit_internal  for compact form of message.
  */
-static void xact_redo_commit_compact(xl_xact_commit_compact* xlrec, TransactionId xid, XLogRecPtr lsn)
+static void xact_redo_commit_compact(xl_xact_commit_compact *xlrec, TransactionId xid, XLogRecPtr lsn)
 {
     /* recent_xmin follows subxacts for hot standby */
-    TransactionId global_xmin = InvalidTransactionId;
+    TransactionId globalXmin = InvalidTransactionId;
 
 #ifndef ENABLE_MULTIPLE_NODES
     Assert(TransactionIdIsValid(xid));
 
-    global_xmin = *((TransactionId*)&(xlrec->subxacts[xlrec->nsubxacts]));
+    globalXmin = *((TransactionId *)&(xlrec->subxacts[xlrec->nsubxacts]));
 #endif
 
     xact_redo_commit_internal(xid,
@@ -7220,11 +7241,11 @@ static void xact_redo_commit_compact(xl_xact_commit_compact* xlrec, TransactionI
         0,
         0, /* relfilenodes */
         0,
-        InvalidOid,   /* dbId */
-        InvalidOid,   /* tsId */
-        0,            /* xinfo */
-        xlrec->csn,   /* csn */
-        global_xmin); /* recent_xmin */
+        InvalidOid,  /* dbId */
+        InvalidOid,  /* tsId */
+        0,           /* xinfo */
+        xlrec->csn, /* csn */
+        globalXmin); /* recent_xmin */
 }
 
 /*
@@ -7236,15 +7257,15 @@ static void xact_redo_commit_compact(xl_xact_commit_compact* xlrec, TransactionI
  * topxid != xid, whereas in commit we would find topxid == xid always
  * because subtransaction commit is never WAL logged.
  */
-static void xact_redo_abort(xl_xact_abort* xlrec, TransactionId xid, XLogRecPtr lsn, bool hasbucket)
+static void xact_redo_abort(xl_xact_abort *xlrec, TransactionId xid, XLogRecPtr lsn, bool hasbucket)
 {
-    TransactionId* sub_xids = NULL;
+    TransactionId *sub_xids = NULL;
     TransactionId max_xid;
     XLogRecPtr globalDelayDDLLSN;
 
     Assert(TransactionIdIsValid(xid));
 
-    sub_xids = (TransactionId*)&(xlrec->xnodes[xlrec->nrels]);
+    sub_xids = (TransactionId *)&(xlrec->xnodes[xlrec->nrels]);
 
     max_xid = TransactionIdLatest(xid, xlrec->nsubxacts, sub_xids);
 
@@ -7296,8 +7317,8 @@ static void xact_redo_abort(xl_xact_abort* xlrec, TransactionId xid, XLogRecPtr 
 
     if (xlrec->nlibrary) {
         /* ship rel and TransactionId */
-        char* filename = NULL;
-        filename = (char*)xlrec->xnodes + ((unsigned)xlrec->nrels * sizeof(ColFileNodeRel)) +
+        char *filename = NULL;
+        filename = (char *)xlrec->xnodes + ((unsigned)xlrec->nrels * sizeof(ColFileNodeRel)) +
                    ((unsigned)xlrec->nsubxacts * sizeof(TransactionId));
 
         parseAndRemoveLibrary(filename, xlrec->nlibrary);
@@ -7316,7 +7337,7 @@ static void xact_redo_prepare(TransactionId xid)
     }
 }
 
-void xact_redo(XLogReaderState* record)
+void xact_redo(XLogReaderState *record)
 {
     XLogRecPtr lsn = record->EndRecPtr;
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
@@ -7326,14 +7347,14 @@ void xact_redo(XLogReaderState* record)
     Assert(!XLogRecHasAnyBlockRefs(record));
 
     if (info == XLOG_XACT_COMMIT_COMPACT) {
-        xl_xact_commit_compact* xlrec = (xl_xact_commit_compact*)XLogRecGetData(record);
+        xl_xact_commit_compact *xlrec = (xl_xact_commit_compact *)XLogRecGetData(record);
 
         xact_redo_commit_compact(xlrec, XLogRecGetXid(record), lsn);
     } else if (info == XLOG_XACT_COMMIT) {
-        xl_xact_commit* xlrec = (xl_xact_commit*)XLogRecGetData(record);
+        xl_xact_commit *xlrec = (xl_xact_commit *)XLogRecGetData(record);
         xact_redo_commit(xlrec, XLogRecGetXid(record), lsn, hasbucket);
     } else if (info == XLOG_XACT_ABORT) {
-        xl_xact_abort* xlrec = (xl_xact_abort*)XLogRecGetData(record);
+        xl_xact_abort *xlrec = (xl_xact_abort *)XLogRecGetData(record);
 
         xact_redo_abort(xlrec, XLogRecGetXid(record), lsn, hasbucket);
     } else if (info == XLOG_XACT_PREPARE) {
@@ -7350,7 +7371,7 @@ void xact_redo(XLogReaderState* record)
         /* Update prepare trx's csn to commit-in-progress. */
         RecoverPrepareTransactionCSNLog(XLogRecGetData(record));
     } else if (info == XLOG_XACT_COMMIT_PREPARED) {
-        xl_xact_commit_prepared* xlrec = (xl_xact_commit_prepared*)XLogRecGetData(record);
+        xl_xact_commit_prepared *xlrec = (xl_xact_commit_prepared *)XLogRecGetData(record);
 
         xact_redo_commit(&xlrec->crec, xlrec->xid, lsn, hasbucket);
 
@@ -7359,7 +7380,7 @@ void xact_redo(XLogReaderState* record)
         PrepareRedoRemove(xlrec->xid, false);
         LWLockRelease(TwoPhaseStateLock);
     } else if (info == XLOG_XACT_ABORT_PREPARED) {
-        xl_xact_abort_prepared* xlrec = (xl_xact_abort_prepared*)XLogRecGetData(record);
+        xl_xact_abort_prepared *xlrec = (xl_xact_abort_prepared *)XLogRecGetData(record);
 
         xact_redo_abort(&xlrec->arec, xlrec->xid, lsn, hasbucket);
 
@@ -7369,18 +7390,18 @@ void xact_redo(XLogReaderState* record)
         LWLockRelease(TwoPhaseStateLock);
     } else if (info == XLOG_XACT_ASSIGNMENT) {
     } else {
-        ereport(
-            PANIC, (errcode(ERRCODE_INVALID_TRANSACTION_STATE), errmsg("xact_redo: unknown op code %u", (uint32)info)));
+        ereport(PANIC,
+                (errcode(ERRCODE_INVALID_TRANSACTION_STATE), errmsg("xact_redo: unknown op code %u", (uint32)info)));
     }
 }
 
-void XactGetRelFiles(XLogReaderState* record, ColFileNodeRel** xnodesPtr, int* nrelsPtr)
+void XactGetRelFiles(XLogReaderState *record, ColFileNodeRel **xnodesPtr, int *nrelsPtr)
 {
     Assert(XLogRecGetRmid(record) == RM_XACT_ID);
 
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
-    xl_xact_commit* commit = NULL;
-    xl_xact_abort* abort = NULL;
+    xl_xact_commit *commit = NULL;
+    xl_xact_abort *abort = NULL;
 
     switch (info) {
         case XLOG_XACT_COMMIT_COMPACT:
@@ -7388,22 +7409,20 @@ void XactGetRelFiles(XLogReaderState* record, ColFileNodeRel** xnodesPtr, int* n
         case XLOG_XACT_ASSIGNMENT:
             break;
         case XLOG_XACT_COMMIT:
-            commit = (xl_xact_commit*)XLogRecGetData(record);
+            commit = (xl_xact_commit *)XLogRecGetData(record);
             break;
         case XLOG_XACT_ABORT:
-            abort = (xl_xact_abort*)XLogRecGetData(record);
+            abort = (xl_xact_abort *)XLogRecGetData(record);
             break;
         case XLOG_XACT_COMMIT_PREPARED:
-            commit = &(((xl_xact_commit_prepared*)XLogRecGetData(record))->crec);
+            commit = &(((xl_xact_commit_prepared *)XLogRecGetData(record))->crec);
             break;
         case XLOG_XACT_ABORT_PREPARED:
-            abort = &(((xl_xact_abort_prepared*)XLogRecGetData(record))->arec);
+            abort = &(((xl_xact_abort_prepared *)XLogRecGetData(record))->arec);
             break;
         default:
-            ereport(PANIC,
-                (errmodule(MOD_REDO),
-                    errcode(ERRCODE_LOG),
-                    errmsg("xactWillRemoveRelFiles: unknown op code %u", (uint32)info)));
+            ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                            errmsg("xactWillRemoveRelFiles: unknown op code %u", (uint32)info)));
     }
 
     if (commit != NULL) {
@@ -7420,26 +7439,26 @@ void XactGetRelFiles(XLogReaderState* record, ColFileNodeRel** xnodesPtr, int* n
     return;
 }
 
-bool xactWillRemoveRelFiles(XLogReaderState* record)
+bool xactWillRemoveRelFiles(XLogReaderState *record)
 {
     int nrels = 0;
-    ColFileNodeRel* xnodes = NULL;
+    ColFileNodeRel *xnodes = NULL;
 
     Assert(XLogRecGetRmid(record) == RM_XACT_ID);
     XactGetRelFiles(record, &xnodes, &nrels);
     return nrels > 0;
 }
 
-void xactApplyXLogDropRelation(XLogReaderState* record)
+void xactApplyXLogDropRelation(XLogReaderState *record)
 {
     int nrels = 0;
-    ColFileNodeRel* xnodes = NULL;
+    ColFileNodeRel *xnodes = NULL;
 
     XactGetRelFiles(record, &xnodes, &nrels);
     for (int i = 0; i < nrels; i++) {
         RelFileNodeBackend rbnode;
         ColFileNode node;
-        ColFileNodeRel* nodeRel = xnodes + i;
+        ColFileNodeRel *nodeRel = xnodes + i;
 
         ColFileNodeCopy(&node, nodeRel);
         if (!IsValidColForkNum(node.forknum)) {
@@ -7483,7 +7502,7 @@ bool IsTransactionLocalNode(bool write)
 }
 
 /* Check if the given xid is form implicit 2PC */
-bool IsXidImplicit(const char* xid)
+bool IsXidImplicit(const char *xid)
 {
 #define implicit2PC_head "_$XC$"
     const size_t implicit2PC_head_len = strlen(implicit2PC_head);
@@ -7535,7 +7554,6 @@ void ReportCommandIdChange(CommandId cid)
     pq_beginmessage(&buf, 'M');
     pq_sendint32(&buf, cid);
     pq_endmessage(&buf);
-    pq_flush();
 }
 
 void ReportTopXid(TransactionId local_top_xid)
@@ -7617,7 +7635,7 @@ bool IsPGXCNodeXactDatanodeDirect(void)
  * In future we might copy CurrentTransactionState thoroughly to avoid
  * other potential transaction state dependence in abort scenarios.
  */
-void StreamTxnContextSaveXact(StreamTxnContext* stc)
+void StreamTxnContextSaveXact(StreamTxnContext *stc)
 {
     STCSaveElem(stc->CurrentTransactionState, CurrentTransactionState);
     STCSaveElem(stc->subTransactionId, CurrentTransactionState->subTransactionId);
@@ -7630,7 +7648,7 @@ void StreamTxnContextSaveXact(StreamTxnContext* stc)
     STCSaveElem(stc->stmtSystemTimestamp, t_thrd.time_cxt.stmt_system_timestamp);
 }
 
-void StreamTxnContextRestoreXact(StreamTxnContext* stc)
+void StreamTxnContextRestoreXact(StreamTxnContext *stc)
 {
     STCRestoreElem(stc->subTransactionId, CurrentTransactionState->subTransactionId);
     STCRestoreElem(stc->currentSubTransactionId, t_thrd.xact_cxt.currentSubTransactionId);
@@ -7642,7 +7660,7 @@ void StreamTxnContextRestoreXact(StreamTxnContext* stc)
     STCRestoreElem(stc->stmtSystemTimestamp, t_thrd.time_cxt.stmt_system_timestamp);
 }
 
-void StreamTxnContextSetTransactionState(StreamTxnContext* stc)
+void StreamTxnContextSetTransactionState(StreamTxnContext *stc)
 {
     TransactionState srcTranState = (TransactionState)stc->CurrentTransactionState;
     TransactionState s = CurrentTransactionState;
@@ -7690,7 +7708,7 @@ bool IsInLiveSubtransaction()
  * @in sub_xids - the array of sub transactions
  * @return - no return
  */
-void ExtendCsnlogForSubtrans(TransactionId parent_xid, int nsub_xid, TransactionId* sub_xids)
+void ExtendCsnlogForSubtrans(TransactionId parent_xid, int nsub_xid, TransactionId *sub_xids)
 {
     ExtendCSNLOG(parent_xid);
     for (int i = 0; i < nsub_xid; i++) {
@@ -7709,11 +7727,9 @@ void ExtendCsnlogForSubtrans(TransactionId parent_xid, int nsub_xid, Transaction
 CommitSeqNo SetXact2CommitInProgress(TransactionId xid, CommitSeqNo csn)
 {
     int nchildren;
-    TransactionId* children = NULL;
+    TransactionId *children = NULL;
     CommitSeqNo latestCSN = t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo;
-
     latestCSN = latestCSN > csn ? latestCSN : csn;
-
     if (!TransactionIdIsValid(xid))
         xid = GetTopTransactionIdIfAny();
     /*
@@ -7726,7 +7742,8 @@ CommitSeqNo SetXact2CommitInProgress(TransactionId xid, CommitSeqNo csn)
     nchildren = xactGetCommittedChildren(&children);
     CSNLogSetCommitSeqNo(xid, nchildren, children, COMMITSEQNO_COMMIT_INPROGRESS | latestCSN);
 
-    ereport(DEBUG1, (errmsg("Set %lu to commit in progress, latest csn is %lu", xid, latestCSN)));
+    ereport(
+        DEBUG1, (errmsg("Set %lu to commit in progress, latest csn is %lu", xid, latestCSN)));
     return latestCSN;
 }
 
@@ -7744,11 +7761,9 @@ TransactionState CopyTxnStateByCurrentMcxt(TransactionState state)
     }
 
     if (state->childXids) {
-        ret->childXids = (TransactionId*)palloc(sizeof(TransactionId) * (unsigned)ret->maxChildXids);
-        code = memcpy_s(ret->childXids,
-            sizeof(TransactionId) * (unsigned)ret->maxChildXids,
-            state->childXids,
-            sizeof(TransactionId) * (unsigned)ret->nChildXids);
+        ret->childXids = (TransactionId *)palloc(sizeof(TransactionId) * (unsigned)ret->maxChildXids);
+        code = memcpy_s(ret->childXids, sizeof(TransactionId) * (unsigned)ret->maxChildXids, state->childXids,
+                        sizeof(TransactionId) * (unsigned)ret->nChildXids);
         securec_check(code, "", "");
     }
 
@@ -7758,6 +7773,7 @@ TransactionState CopyTxnStateByCurrentMcxt(TransactionState state)
     return ret;
 }
 
+#ifdef ENABLE_MOT
 /*
  * Check if we are using MOT storage engine in current transaction.
  */
@@ -7821,7 +7837,8 @@ void RegisterRedoCommitCallback(RedoCommitCallback callback, void* arg)
 {
     RedoCommitCallbackItem* item;
 
-    item = (RedoCommitCallbackItem*)MemoryContextAlloc(g_instance.instance_context, sizeof(RedoCommitCallbackItem));
+    item = (RedoCommitCallbackItem*)MemoryContextAlloc(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(RedoCommitCallbackItem));
     item->callback = callback;
     item->arg = arg;
     item->next = g_instance.xlog_cxt.redoCommitCallback;
@@ -7836,3 +7853,5 @@ void CallRedoCommitCallback(TransactionId xid)
         (*item->callback) (xid, item->arg);
     }
 }
+#endif
+

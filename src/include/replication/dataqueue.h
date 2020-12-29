@@ -29,7 +29,7 @@
 #include "gs_threadlocal.h"
 #include "replication/dataqueuedefs.h"
 #include "replication/bcm.h"
-#include "storage/s_lock.h"
+#include "storage/lock/s_lock.h"
 #include "utils/hsearch.h"
 #include "utils/pg_crc.h"
 
@@ -39,7 +39,7 @@
 #define GETBUCKETID(attid) (((uint)(attid) >> 16) - 1)
 
 /*
- * ------------------------------------------------------
+ *------------------------------------------------------
  * |****************|          |**************|			|
  * -----------------------------------------------------
  * 0  			use_tail1       use_head2    use_tail2   tail
@@ -117,4 +117,3 @@ extern void AtAbort_RelationSync(void);
 extern void AtCommit_RelationSync(void);
 extern void PallocBCMBCMElementArray(void);
 #endif
-

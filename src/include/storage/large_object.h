@@ -41,6 +41,7 @@ typedef struct LargeObjectDesc {
 /* flag bits: */
 #define IFS_RDLOCK (1 << 0)
 #define IFS_WRLOCK (1 << 1)
+
 } LargeObjectDesc;
 
 /*
@@ -85,4 +86,3 @@ extern void inv_truncate(LargeObjectDesc* obj_desc, int len);
 #endif
 
 #endif /* LARGE_OBJECT_H */
-

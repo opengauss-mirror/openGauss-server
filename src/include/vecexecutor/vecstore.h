@@ -28,7 +28,7 @@
 #include "executor/executor.h"
 #include "nodes/execnodes.h"
 #include "pgstat.h"
-#include "storage/buffile.h"
+#include "storage/buf/buffile.h"
 #include "utils/memutils.h"
 #include "utils/memprot.h"
 #include "utils/datum.h"
@@ -241,7 +241,7 @@ inline bool VecStore::HasFreeSlot()
 inline bool VecStore::GrowMemValueSlots(char* opname, int planid, MemoryContext context)
 {
     double grow_ratio =
-        Min(DEFAULT_GROW_RATIO, ((double)(MaxAllocSize / sizeof(MultiColumns))) / m_storeColumns.m_capacity);
+        Min(DEFAULT_GROW_RATIO, ((double)(MaxAllocSize / sizeof(MultiColumns))) / (double)m_storeColumns.m_capacity);
     double unspread_ratio = grow_ratio;
     bool need_spread = false;
     int64 mem_used = m_allowedMem - m_availMem;

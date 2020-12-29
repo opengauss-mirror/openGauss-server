@@ -19,14 +19,8 @@ endif
 
 SUBDIRS	= learn
 
-ifeq ($(enable_multiple_nodes), yes)
-OBJS = clauses.o joininfo.o orclauses.o pathnode.o placeholder.o plancat.o predtest.o \
-       relnode.o restrictinfo.o tlist.o var.o pruning.o randomplan.o optimizerdebug.o planmem_walker.o \
-       nodegroups.o plananalyzer.o optcommon.o dataskew.o autoanalyzer.o bucketinfo.o bucketpruning.o
-else
-OBJS = clauses.o joininfo.o orclauses.o pathnode.o placeholder.o plancat.o predtest.o \
-       relnode.o restrictinfo.o tlist.o var.o pgxcship_single.o pruning.o randomplan.o optimizerdebug.o planmem_walker.o \
-       nodegroups.o plananalyzer.o optcommon.o dataskew.o autoanalyzer.o bucketinfo.o bucketpruning.o
-endif
+OBJS = clauses.o joininfo.o pathnode.o placeholder.o plancat.o predtest.o \
+       relnode.o restrictinfo.o tlist.o var.o pruningboundary.o pgxcship.o pruning.o randomplan.o optimizerdebug.o planmem_walker.o \
+       nodegroups.o plananalyzer.o optcommon.o dataskew.o joinskewinfo.o autoanalyzer.o bucketinfo.o bucketpruning.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

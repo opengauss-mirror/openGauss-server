@@ -1,0 +1,40 @@
+drop table if exists lineitem_with_null;
+CREATE TABLE lineitem_with_null
+(
+    L_ORDERKEY    BIGINT
+  , L_PARTKEY     BIGINT
+  , L_SUPPKEY     BIGINT
+  , L_LINENUMBER  BIGINT
+  , L_QUANTITY    DECIMAL(15,2)
+  , L_EXTENDEDPRICE  DECIMAL(15,2)
+  , L_DISCOUNT    DECIMAL(15,2)
+  , L_TAX         DECIMAL(15,2)
+  , L_RETURNFLAG  CHAR(1)
+  , L_LINESTATUS  CHAR(1)
+  , L_SHIPDATE    DATE
+  , L_COMMITDATE  DATE
+  , L_RECEIPTDATE DATE
+  , L_SHIPINSTRUCT CHAR(25)
+  , L_SHIPMODE     CHAR(10)
+  , L_COMMENT      VARCHAR(44)
+)
+with (orientation = column)
+distribute by hash(L_ORDERKEY);
+COPY lineitem_with_null FROM '@abs_srcdir@/data/lineitem.data' with (format 'text', delimiter '|', null '');
+analyze lineitem_with_null;
+analyze lineitem_with_null(L_PARTKEY);
+analyze lineitem_with_null(L_SHIPMODE);
+analyze lineitem_with_null(L_COMMENT);
+--- analyze should ignore deleted tuples
+delete from lineitem_with_null where l_tax = 0 ;
+analyze lineitem_with_null;
+select (select n_distinct from pg_stats where tablename = 'lineitem_with_null' and attname = 'l_tax') <= (select count(distinct l_tax) from lineitem_with_null) ;
+drop table lineitem_with_null;
+--- check normal user privilege
+create user normal_usr password 'Mpp*gs123';
+set role normal_usr password 'Mpp*gs123';
+create table lineitem_with_null2 ( a int , b int ) partition by range(a) (partition p1 values less than(1) );
+vacuum full lineitem_with_null2;
+drop table lineitem_with_null2;
+reset role;
+drop user normal_usr cascade;

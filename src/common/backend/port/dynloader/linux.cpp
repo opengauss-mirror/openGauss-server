@@ -89,7 +89,8 @@ void* pg_dlopen(char* filename)
         }
     }
 
-    local_ptr = MemoryContextStrdup(u_sess->top_mem_cxt, filename) return (void*)local_ptr;
+    local_ptr = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), filename);
+    return (void*)local_ptr;
 #endif
 }
 

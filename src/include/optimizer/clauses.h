@@ -65,7 +65,6 @@ extern bool contain_subplans(Node* clause);
 extern bool contain_mutable_functions(Node* clause);
 extern bool contain_volatile_functions(Node* clause);
 extern bool contain_specified_function(Node* clause, Oid funcid);
-extern bool has_parallel_hazard(Node *node, bool allow_restricted);
 extern bool contain_nonstrict_functions(Node* clause, bool check_agg = false);
 extern bool contain_leaky_functions(Node* clause);
 extern bool exec_simple_check_mutable_function(Node* clause);
@@ -89,7 +88,7 @@ extern Node* eval_const_expressions(PlannerInfo* root, Node* node);
 
 extern Node* eval_const_expressions_params(PlannerInfo* root, Node* node, ParamListInfo boundParams);
 
-extern Node* estimate_expression_value(PlannerInfo* root, Node* node);
+extern Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* estate = NULL);
 
 extern Query* inline_set_returning_function(PlannerInfo* root, RangeTblEntry* rte);
 extern Query* search_cte_by_parse_tree(Query* parse, RangeTblEntry* rte, bool under_recursive_tree);
@@ -99,7 +98,7 @@ extern Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid
 extern bool contain_var_unsubstitutable_functions(Node* clause);
 extern void distribute_qual_to_rels(PlannerInfo* root, Node* clause, bool is_deduced, bool below_outer_join,
     JoinType jointype, Index security_level, Relids qualscope, Relids ojscope, Relids outerjoin_nonnullable,
-    Relids deduced_nullable_relids);
+    Relids deduced_nullable_relids, List **postponed_qual_list);
 extern void check_plan_correlation(PlannerInfo* root, Node* expr);
 extern bool findConstraintByVar(Var* var, Oid relid, constraintType conType);
 extern bool is_var_node(Node* node);
@@ -108,6 +107,7 @@ extern bool treat_as_join_clause(Node* clause, RestrictInfo* rinfo, int varRelid
 extern List* extract_function_outarguments(Oid funcid, List* parameters, List* funcname);
 extern bool need_adjust_agg_inner_func_type(Aggref* aggref);
 
+#ifndef ENABLE_MULTIPLE_NODES
 extern bool contain_rownum_walker(Node *node, void *context); 
 
 static inline bool contain_rownum_expr(Node *node) 
@@ -126,5 +126,5 @@ static inline void ExcludeRownumExpr(ParseState* pstate, Node* expr)
 }
 
 extern List* get_quals_lists(Node *jtnode);
-
+#endif
 #endif /* CLAUSES_H */

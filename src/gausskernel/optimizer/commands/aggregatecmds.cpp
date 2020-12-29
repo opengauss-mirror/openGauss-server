@@ -25,6 +25,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_aggregate.h"
@@ -67,13 +68,16 @@ void DefineAggregate(List* name, List* args, bool oldstyle, List* parameters)
     Oid transTypeId;
     ListCell* pl = NULL;
 
+    /* attribute for ordered set aggregate */
+    char aggKind = AGGKIND_NORMAL;
+
     /* Convert list of names to a name and namespace */
     aggNamespace = QualifiedNameGetCreationNamespace(name, &aggName);
 
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(aggNamespace, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(aggNamespace, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(aggNamespace));
     if (u_sess->attr.attr_sql.enforce_a_behavior) {
         Oid proowner = InvalidOid;
         /*
@@ -82,6 +86,7 @@ void DefineAggregate(List* name, List* args, bool oldstyle, List* parameters)
          */
         bool isalter = false;
         proowner = GetUserIdFromNspId(aggNamespace);
+
         if (!OidIsValid(proowner))
             proowner = GetUserId();
         else if (proowner != GetUserId())
@@ -90,7 +95,7 @@ void DefineAggregate(List* name, List* args, bool oldstyle, List* parameters)
         if (isalter) {
             aclresult = pg_namespace_aclcheck(aggNamespace, proowner, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(aggNamespace, true));
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(aggNamespace));
         }
     }
     foreach (pl, parameters) {
@@ -171,13 +176,20 @@ void DefineAggregate(List* name, List* args, bool oldstyle, List* parameters)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                     errmsg("basetype is redundant with aggregate input type specification")));
-
-        numArgs = list_length(args);
+        
+        /* Given ordered set aggregate with no direct args, aggr_args variable is modified in gram.y.
+           So the parse of aggr_args should be changed. See gram.y for detail. */
+        numArgs = list_length((List*)linitial(args));
         aggArgTypes = (Oid*)palloc(sizeof(Oid) * numArgs);
-        foreach (lc, args) {
+        foreach (lc, (List*)linitial(args)) {
             TypeName* curTypeName = (TypeName*)lfirst(lc);
 
             aggArgTypes[i++] = typenameTypeId(NULL, curTypeName);
+        }
+        
+        /* Set aggKind to AGGKIND_ORDERED_SET if second arg of aggr_args is 0. */
+        if (intVal(lsecond(args)) == 0) {
+            aggKind = AGGKIND_ORDERED_SET;
         }
     }
 
@@ -204,6 +216,7 @@ void DefineAggregate(List* name, List* args, bool oldstyle, List* parameters)
      */
     AggregateCreate(aggName, /* aggregate name */
         aggNamespace,        /* namespace */
+        aggKind,             /* agg kind */
         aggArgTypes,         /* input data type(s) */
         numArgs,
         transfuncName, /* step function name */
@@ -243,13 +256,15 @@ void RenameAggregate(List* name, List* args, const char* newname)
     namespaceOid = procForm->pronamespace;
 
     /* make sure the new name doesn't exist */
-    if (SearchSysCacheExists3(PROCNAMEARGSNSP, CStringGetDatum(newname),
-        PointerGetDatum(&procForm->proargtypes), ObjectIdGetDatum(namespaceOid)))
+    if (SearchSysCacheExists3(PROCNAMEARGSNSP,
+            CStringGetDatum(newname),
+            PointerGetDatum(&procForm->proargtypes),
+            ObjectIdGetDatum(namespaceOid)))
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_FUNCTION),
                 errmsg("function %s already exists in schema \"%s\"",
                     funcname_signature_string(newname, procForm->pronargs, NIL, procForm->proargtypes.values),
-                    get_namespace_name(namespaceOid, true))));
+                    get_namespace_name(namespaceOid))));
 
     /* must be owner */
     if (!pg_proc_ownercheck(procOid, GetUserId()))
@@ -258,7 +273,7 @@ void RenameAggregate(List* name, List* args, const char* newname)
     /* must have CREATE privilege on namespace */
     aclresult = pg_namespace_aclcheck(namespaceOid, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
 
     /* rename */
     (void)namestrcpy(&(((Form_pg_proc)GETSTRUCT(tup))->proname), newname);
@@ -266,7 +281,7 @@ void RenameAggregate(List* name, List* args, const char* newname)
     CatalogUpdateIndexes(rel, tup);
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -282,4 +297,3 @@ void AlterAggregateOwner(List* name, List* args, Oid newOwnerId)
     /* The rest is just like a function */
     AlterFunctionOwner_oid(procOid, newOwnerId);
 }
-

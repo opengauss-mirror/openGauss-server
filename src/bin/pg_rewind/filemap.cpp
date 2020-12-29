@@ -22,10 +22,8 @@
 #include "storage/cu.h"
 #include "storage/fd.h"
 
-#define REWIND_LABLE_FILE "rewind_lable"
 #define BLOCKSIZE (8 * 1024)
 #define BUILD_PATH_LEN 2560 /* (MAXPGPATH*2 + 512) */
-#define MAX_UINT32_LEN 10
 const int FILE_NAME_MAX_LEN = 1024;
 const int MATCH_ONE = 1;
 const int MATCH_TWO = 2;
@@ -33,6 +31,7 @@ const int MATCH_THREE = 3;
 const int MATCH_FOUR = 4;
 const int MATCH_FIVE = 5;
 const int MATCH_SIX = 6;
+const int MATCH_SEVEN = 7;
 
 filemap_t* filemap = NULL;
 filemap_t* filemaptarget = NULL;
@@ -52,16 +51,56 @@ extern char pgxcnodename[MAX_VALUE_LEN];
  */
 const uint64 MAX_FILE_SIZE = (uint64)RELSEG_SIZE * BLCKSZ;
 
+/*
+ * List of files excluded from filemap processing. Used only for incremental build.
+ * Refer to senddir and delete_datadir for full build.
+ */
+const char *excludeFiles[] = {
+    "postmaster.pid",
+    "postmaster.opts",
+    "postgresql.conf",
+    "postgresql.conf.lock",
+    "postgresql.conf.bak",
+    "postgresql.conf.old",
+    "pg_ctl.lock",
+    "build_completed.start"
+    "backup_label",
+    "client.crt",
+    "client.key",
+    "pg_replslot",
+    "gs_build.pid",
+    "gaussdb.state",
+    "pg_errorinfo",
+    "pg_location",
+    "config_exec_params",
+    "delay_xlog_recycle",
+    "delay_ddl_recycle",
+    "pg_rewind_bak",
+    "pg_rewind_filemap",
+    "build_completed.done",
+    "barrier_lsn",
+    "pg_dw",
+    "pg_dw.build",
+    "cacert.pem",
+    "server.crt",
+    "server.key",
+    "server.key.cipher",
+    "server.key.rand",
+    /* end of list */
+    NULL
+};
+
 static char* datasegpath(RelFileNode rnode, ForkNumber forknum, BlockNumber segno);
 static int path_cmp(const void* a, const void* b);
 static int final_filemap_cmp(const void* a, const void* b);
 static void filemap_list_to_array(filemap_t* map);
+static char* format_text(const char* fmt, ...) __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 static char* relpathbackend_t(RelFileNode rnode, BackendId backend, ForkNumber forknum);
 static bool check_abs_tblspac_path(const char *fname, unsigned int *segNo, RelFileNode *rnode);
 static bool check_base_path(const char *fname, unsigned int *segNo, RelFileNode *rnode);
 static bool check_rel_tblspac_path(const char *fname, unsigned int *segNo, RelFileNode *rnode);
-extern char divergeXlogFileName[MAXFNAMELEN];
-extern char lastxlogfileName[MAXFNAMELEN];
+static bool check_hashbucket_dir_path(const char* fname);
+static int get_cu_alignsize_columnId(int columnId);
 static pthread_t targetfilestatpid;
 
 /*
@@ -115,13 +154,16 @@ void processTargetFileMap(const char* path, file_type_t type, size_t oldsize, co
 void* createTargetFilemap(void* data)
 {
     filemap_t* map = filemaptarget;
+    pg_log(PG_PROGRESS, "traverse_datadir start.\n");
     traverse_datadir(datadir_target, &processTargetFileMap);
     if (increment_return_code != BUILD_SUCCESS) {
         pthread_exit((void*)increment_return_code);
     }
-
+    pg_log(PG_PROGRESS, "filemap_list_to_array start.\n");
     filemap_list_to_array(map);
+    pg_log(PG_PROGRESS, "filemap_list_to_array end sort start. length is %d \n", map->narray);
     qsort(map->array, map->narray, sizeof(file_entry_t*), path_cmp);
+    pg_log(PG_PROGRESS, "sort end.\n");
     pthread_exit(NULL);
 }
 
@@ -179,6 +221,7 @@ int targetFilemapSearch(const char* path, file_entry_t* entry)
     file_entry_t key;
     file_entry_t* key_ptr = NULL;
     file_entry_t** e;
+    errno_t rc = EOK;
 
     if (path == NULL || entry == NULL) {
         pg_log(PG_ERROR, "invalid input path=%s.\n", path);
@@ -199,6 +242,7 @@ int targetFilemapSearch(const char* path, file_entry_t* entry)
     entry->type = (*e)->type;
     entry->oldsize = (*e)->oldsize;
     entry->link_target = (*e)->link_target;
+    securec_check(rc, "", "");
 
     pg_log(PG_DEBUG,
         "path %s,type %d,size %lu,link %s\n",
@@ -241,6 +285,46 @@ bool check_valid_tablspace(const char* path, file_type_t type)
     return true;
 }
 
+static inline bool is_skip_tblspc(const char* path, file_type_t type)
+{
+    /*
+     * Skip other datanode tblspc
+     */
+    if (strstr(path, TABLESPACE_VERSION_DIRECTORY) != NULL && strstr(path, pgxcnodename) == NULL) {
+        return true;
+    }
+    
+    /*
+     * Skip invalid tblspc oid
+     */
+    if (strstr(path, "pg_tblspc/") != NULL && check_valid_tablspace(path, type) == false) {
+        pg_log(PG_PROGRESS, "invalid tablespace in primary:path=%s.\n", path);
+        return true;
+    }
+    return false;
+}
+
+static bool process_source_file_sanity_check(const char* path, file_type_t type)
+{
+    bool match_hbucket_dir = false;
+    bool isreldatafile = isRelDataFile(path, &match_hbucket_dir);
+    if (type == FILE_TYPE_DIRECTORY) {
+        if (!match_hbucket_dir && isreldatafile) {
+            pg_fatal("path \"%s\" in source type is dir,"
+                "but checking res shows that it isn't a hashbucket dir but a relDataFile.", path);
+        } else if (match_hbucket_dir && !isreldatafile) {
+            pg_fatal("path \"%s\" in source list, type is dir,"
+                "but checking res shows that it match a hbucket dir but not match a relDataFile.", path);
+        } else {
+            isreldatafile = false;
+        }
+    } else if (type != FILE_TYPE_REGULAR && isreldatafile) {
+        pg_fatal("data file \"%s\" in source is not a regular file\n", path);
+    }
+
+    return isreldatafile;
+}
+
 /*
  * Callback for processing source file list.
  *
@@ -264,22 +348,12 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
     /*
      * Completely ignore some special files in source and destination.
      */
-    if (strcmp(path, "postmaster.pid") == 0 || strcmp(path, "postmaster.opts") == 0)
-        return;
-
-    /* skip configure file and other state files */
-    if (strncmp(path, "postgresql.conf", 15) == 0 || strncmp(path, "postgresql.conf.lock", 20) == 0 ||
-        strncmp(path, "postgresql.conf.bak", 19) == 0 || strncmp(path, "pg_ctl.lock", 11) == 0 ||
-        strncmp(path, "build_completed.start", 21) == 0 || strncmp(path, "backup_label", 12) == 0 ||
-        strncmp(path, "client.crt", 10) == 0 || strncmp(path, "client.key", 10) == 0 ||
-        strncmp(path, "pg_replslot", 11) == 0 || strncmp(path, "gs_build.pid", 12) == 0 ||
-        strncmp(path, "gaussdb.state", 13) == 0 || strncmp(path, "pg_errorinfo", 12) == 0 ||
-        strncmp(path, "pg_location", 11) == 0 || strncmp(path, "config_exec_params", 18) == 0 ||
-        strncmp(path, "delay_xlog_recycle", 18) == 0 || strncmp(path, "delay_ddl_recycle", 17) == 0 ||
-        strstr(path, "pg_rewind_bak") != NULL || strstr(path, "build_completed.done") != NULL ||
-        strncmp(path, "barrier_lsn", strlen("barrier_lsn")) == 0 || strncmp(path, "pg_dw", strlen("pg_dw")) == 0 ||
-        strncmp(path, "pg_dw.build", strlen("pg_dw.build")) == 0)
-        return;
+    for (int excludeIdx = 0; excludeFiles[excludeIdx] != NULL; excludeIdx++) {
+        if (strstr(path, excludeFiles[excludeIdx]) != NULL) {
+            pg_log(PG_DEBUG, "entry \"%s\" excluded from source file list", path);
+            return;
+        }
+    }
 
     /* Pretend that pg_xlog is a directory, even if it's really a symlink.
      * We don't want to mess with the symlink itself, nor complain if it's a
@@ -300,33 +374,22 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
 
     pg_log(PG_DEBUG, "process_source_file:path=%s.\n", path);
 
-    /*
-     * Skip other datanode tblspc
-     */
-    if (strstr(path, TABLESPACE_VERSION_DIRECTORY) != NULL && strstr(path, pgxcnodename) == NULL)
-        return;
-    /*
-     * Skip invalid tblspc oid
-     */
-    if (strstr(path, "pg_tblspc/") != NULL && check_valid_tablspace(path, type) == false) {
-        pg_log(PG_PROGRESS, "invalid tablespace in primary:path=%s.\n", path);
+    if (is_skip_tblspc(path, type)) {
         return;
     }
 
+#ifdef ENABLE_MOT
     /* skip mot checkpoint files */
     if (strstr(path, "mot.ctrl") != NULL || strstr(path, "chkpt_") != NULL) {
         return;
     }
+#endif
 
     /*
      * sanity check: a filename that looks like a data file better be a
      * regular file
      */
-    isreldatafile = isRelDataFile(path);
-    if (type != FILE_TYPE_REGULAR && isreldatafile) {
-        pg_fatal("data file \"%s\" in source is not a regular file\n", path);
-        return;
-    }
+    isreldatafile = process_source_file_sanity_check(path, type);
 
     ss_c = snprintf_s(localpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, path);
     securec_check_ss_c(ss_c, "\0", "\0");
@@ -396,7 +459,7 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
                  * Don't copy nonuse xlog
                  */
                 if (NULL != strstr(path, "pg_xlog")) {
-                    if (isOldXlog(path, lastxlogfileName)) {
+                    if (isOldXlog(path, divergeXlogFileName)) {
                         action = FILE_ACTION_NONE;
                         oldsize = 0;
                     }
@@ -427,7 +490,11 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
                  * replayed.
                  */
                 /* mod blocksize 8k to avoid half page write */
-                oldsize = statbuf.oldsize - (statbuf.oldsize % BLOCKSIZE);
+                oldsize = statbuf.oldsize;
+                if (oldsize % BLOCKSIZE != 0) {
+                    oldsize = oldsize - (oldsize % BLOCKSIZE);
+                    pg_log(PG_PROGRESS, "target file size mod BLOCKSIZE not equal 0 %s %ld \n", path, statbuf.oldsize);
+                }
                 if (oldsize < newsize)
                     action = FILE_ACTION_COPY_TAIL;
                 else if (oldsize > newsize)
@@ -496,22 +563,12 @@ void process_target_file(const char* path, file_type_t type, size_t oldsize, con
     /*
      * Completely ignore some special files
      */
-    if (strcmp(path, "postmaster.pid") == 0 || strcmp(path, "postmaster.opts") == 0)
-        return;
-
-    /* skip configure file and other state files */
-    if (strncmp(path, "postgresql.conf", 15) == 0 || strncmp(path, "postgresql.conf.lock", 20) == 0 ||
-        strncmp(path, "pg_ctl.lock", 11) == 0 || strncmp(path, "build_completed.start", 21) == 0 ||
-        strncmp(path, "backup_label", 12) == 0 || strncmp(path, "client.crt", 10) == 0 ||
-        strncmp(path, "client.key", 10) == 0 || strncmp(path, "gs_build.pid", 12) == 0 ||
-        strncmp(path, "pg_replslot", 11) == 0 || strncmp(path, "gaussdb.state", 13) == 0 ||
-        strncmp(path, "pg_errorinfo", 12) == 0 || strncmp(path, "pg_location", 11) == 0 ||
-        strncmp(path, "config_exec_params", 18) == 0 || strncmp(path, "delay_xlog_recycle", 18) == 0 ||
-        strncmp(path, "delay_ddl_recycle", 17) == 0 ||
-        strncmp(path, REWIND_LABLE_FILE, strlen(REWIND_LABLE_FILE)) == 0 ||
-        strncmp(path, "barrier_lsn", strlen("barrier_lsn")) == 0 || strncmp(path, "pg_dw", strlen("pg_dw")) == 0 ||
-        strncmp(path, "pg_dw.build", strlen("pg_dw.build")) == 0)
-        return;
+    for (int excludeIdx = 0; excludeFiles[excludeIdx] != NULL; excludeIdx++) {
+        if (strstr(path, excludeFiles[excludeIdx]) != NULL) {
+            pg_log(PG_DEBUG, "entry \"%s\" excluded from target file list", path);
+            return;
+        }
+    }
 
     pg_log(PG_DEBUG, "process_target_file:path=%s.\n", path);
 
@@ -642,8 +699,8 @@ void process_block_change(ForkNumber forknum, RelFileNode rnode, BlockNumber blk
                 break;
         }
         if (processed) {
-            pg_log(PG_DEBUG, "add data page map(%s): rel %u/%u/%u forknum %u blkno %u\n", action_to_str(entry->action),
-                rnode.spcNode, rnode.dbNode, rnode.relNode, forknum, blkno);
+            pg_log(PG_DEBUG, "add data page map(%s): rel %u/%u/%u, bucketNode:%d forknum %u blkno %u\n", action_to_str(entry->action),
+                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, forknum, blkno);
         }
     } else {
         /*
@@ -652,10 +709,11 @@ void process_block_change(ForkNumber forknum, RelFileNode rnode, BlockNumber blk
          * it was subsequently removed in the target system, too. We can
          * safely ignore it.
          */
-        pg_log(PG_DEBUG, "no entry to be processed: rel %u/%u/%u forknum %u blkno %u\n",
+        pg_log(PG_DEBUG, "no entry to be processed: rel %u/%u/%u, bucketNode:%d forknum %u blkno %u\n",
             rnode.spcNode,
             rnode.dbNode,
             rnode.relNode,
+            rnode.bucketNode,
             forknum,
             blkno);
     }
@@ -673,6 +731,7 @@ void process_waldata_change(
     file_entry_t key;
     file_entry_t* key_ptr = NULL;
     file_entry_t* entry = NULL;
+    off_t data_offset;
     int file_segno;
     filemap_t* map = filemap;
     file_entry_t** e;
@@ -688,6 +747,7 @@ void process_waldata_change(
         max_file_size = MAX_FILE_SIZE;
 
     file_segno = file_offset / max_file_size;
+    data_offset = file_offset % max_file_size;
 
     /* for COLUMN_STORE the forknum = MAX_FORKNUM + attrid */
     if (store == COLUMN_STORE)
@@ -730,17 +790,17 @@ void process_waldata_change(
 
     pg_free(path);
     path = NULL;
-
-    if (store == ROW_STORE)
+    uint32 align_size = (uint32)get_cu_alignsize_columnId(forknum - MAX_FORKNUM);
+    if (ROW_STORE == store)
         pg_fatal("The Row Store Heap SHOULD BE NOT synchronized in the WAL Streaming.\n");
     else
-        entry->block_size = ALIGNOF_CUSIZE;
+        entry->block_size = align_size;
 
-    Assert(data_size % ALIGNOF_CUSIZE == 0);
-    if (data_size % ALIGNOF_CUSIZE != 0)
+    Assert(0 == data_size % align_size);
+    if (data_size % align_size != 0)
         pg_fatal("unexpected CU data size %lu bytes which isn't aligned with the required CU data size.\n", data_size);
     /* Here we just follow the ALIGNOF_CUSIZE(8192) of CU */
-    for (cu_slice_index = 0; cu_slice_index < data_size / ALIGNOF_CUSIZE; cu_slice_index++)
+    for (cu_slice_index = 0; cu_slice_index < data_size / align_size; cu_slice_index++)
         datapagemap_add(&entry->pagemap, cu_slice_index);
     return;
 }
@@ -879,7 +939,7 @@ void print_filemap_to_file(FILE* file)
 
     for (i = 0; i < map->narray; i++) {
         entry = map->array[i];
-        fprintf(file, "%s (%s) old(%ld) new(%ld)\n",
+        fprintf(file, "%s (%s) old(%ld) new(%lu)\n",
             entry->path, action_to_str(entry->action),
             entry->oldsize, entry->newsize);
         if (entry->pagemap.bitmapsize > 0) {
@@ -900,15 +960,19 @@ void print_filemap_to_file(FILE* file)
  * relation files. Other forks are always copied in toto, because we cannot
  * reliably track changes to them, because WAL only contains block references
  * for the main fork.
+ *
+ * Hashbucket dir path is same with normal table main fork path. So, out arg
+ * match_hbucket_dir records the possibility. If don't care, set it NULL
  */
-bool isRelDataFile(const char* path)
+bool isRelDataFile(const char* path, bool* match_hbucket_dir)
 {
     RelFileNode rnode;
     unsigned int segNo;
+    int columnid;
     int forknum;
     int nmatch;
     bool matched = false;
-	char *fname = NULL;
+    char *fname = NULL;
 
     /* ----
      * Relation data files can be in one of the following directories:
@@ -917,11 +981,11 @@ bool isRelDataFile(const char* path)
      *		shared relations
      *
      * base/<db oid>/
-     *		regular relations, default tablespace
+     *      regular relations, default tablespace
      *
      * pg_tblspc/<tblspc oid>/PG_9.4_201403261/
-     *		within a non-default tablespace (the name of the directory
-     *		depends on version)
+     *      within a non-default tablespace (the name of the directory
+     *      depends on version)
      *
      * And the relation data files themselves have a filename like:
      *
@@ -932,10 +996,17 @@ bool isRelDataFile(const char* path)
     rnode.spcNode = InvalidOid;
     rnode.dbNode = InvalidOid;
     rnode.relNode = InvalidOid;
+    rnode.bucketNode = InvalidBktId;
     segNo = 0;
+    matched = false;
     nmatch = 0;
+    columnid = 0;
     forknum = 0;
 
+    if (match_hbucket_dir != NULL) {
+        *match_hbucket_dir = check_hashbucket_dir_path(path);
+    }
+    
     nmatch = sscanf_s(path, "global/%u.%u", &rnode.relNode, &segNo);
     if (nmatch == 1 || nmatch == 2) {
         rnode.spcNode = GLOBALTABLESPACE_OID;
@@ -949,7 +1020,7 @@ bool isRelDataFile(const char* path)
         matched = check_abs_tblspac_path(fname, &segNo, &rnode);
     } else {
         matched = false;
-    } 
+    }
 
     /*
      * The sscanf tests above can match files that have extra characters at
@@ -984,14 +1055,7 @@ static char* datasegpath(RelFileNode rnode, ForkNumber forknum, BlockNumber segn
 
     path = relpathbackend_t((rnode), InvalidBackendId, (forknum));
     if (segno > 0 || forknum > MAX_FORKNUM) {
-        /*
-         * add 2 more bytes, 1 for '.', 1 for '\0'.
-         * the max length of path is MAXPGPATH, so segPathLen will not overflow.
-         */
-        int segPathLen = strlen(path) + MAX_UINT32_LEN + 2;
-        segpath = (char*)pg_malloc(segPathLen);
-        int rc = snprintf_s(segpath, segPathLen, segPathLen - 1, "%s.%u", path, segno);
-        securec_check_ss_c(rc, "", "");
+        segpath = format_text("%s.%u", path, segno);
         pg_free(path);
         return segpath;
     } else {
@@ -1043,6 +1107,121 @@ static int final_filemap_cmp(const void* a, const void* b)
 }
 
 /*
+ * format_text
+ *
+ * Format text data under the control of fmt (an sprintf-style format string)
+ * and return it in an allocated-on-demand buffer.  The buffer is allocated
+ * with palloc in the backend, or malloc in frontend builds.  Caller is
+ * responsible to free the buffer when no longer needed, if appropriate.
+ *
+ * Errors are not returned to the caller, but are reported via elog(ERROR)
+ * in the backend, or printf-to-stderr-and-exit() in frontend builds.
+ * One should therefore think twice about using this in libpq.
+ */
+static char* format_text(const char* fmt, ...)
+{
+#define MaxAllocSize ((Size)0x3fffffff) /* 1 gigabyte - 1 */
+    size_t len = 128;                   /* initial assumption about buffer size */
+
+    for (;;) {
+        char* result = NULL;
+        va_list args;
+        size_t newlen;
+        int nprinted;
+
+        /*
+         * Allocate result buffer.  Note that in frontend this maps to malloc
+         * with exit-on-error.
+         */
+        result = (char*)pg_malloc(len);
+
+        /* Try to format the data. */
+        va_start(args, fmt);
+        errno = 0;
+        /*
+         * Assert check here is to catch buggy vsnprintf that overruns the
+         * specified buffer length.  Solaris 7 in 64-bit mode is an example of a
+         * platform with such a bug.
+         */
+#ifdef USE_ASSERT_CHECKING
+        result[len - 1] = '\0';
+#endif
+        nprinted = vsnprintf_s(result, len, len - 1, fmt, args);
+        Assert(result[len - 1] == '\0');
+        /*
+         * If vsnprintf reports an error other than ENOMEM, fail.  The possible
+         * causes of this are not user-facing errors, so elog should be enough.
+         */
+        if (nprinted < 0 && errno != 0 && errno != ENOMEM) {
+#ifndef FRONTEND
+            elog(ERROR, "vsnprintf failed: %m");
+#else
+            fprintf(stderr, "vsnprintf failed: %s\n", strerror(errno));
+            exit(EXIT_FAILURE);
+#endif
+        }
+        /*
+         * Note: some versions of vsnprintf return the number of chars actually
+         * stored, not the total space needed as C99 specifies.  And at least one
+         * returns -1 on failure.  Be conservative about believing whether the
+         * print worked.
+         */
+        if (nprinted >= 0 && (size_t)nprinted < len - 1) {
+            /* Success.  Note nprinted does not include trailing null. */
+            newlen = (size_t)nprinted;
+            goto newlenend;
+        }
+        if (nprinted >= 0 && (size_t)nprinted > len) {
+            /*
+             * This appears to be a C99-compliant vsnprintf, so believe its
+             * estimate of the required space.  (If it's wrong, the logic will
+             * still work, but we may loop multiple times.)  Note that the space
+             * needed should be only nprinted+1 bytes, but we'd better allocate
+             * one more than that so that the test above will succeed next time.
+             *
+             * In the corner case where the required space just barely overflows,
+             * fall through so that we'll error out below (possibly after
+             * looping).
+             */
+            if ((size_t)nprinted <= MaxAllocSize - 2) {
+                newlen = nprinted + 2;
+                goto newlenend;
+            }
+        }
+        /*
+         * Buffer overrun, and we don't know how much space is needed.  Estimate
+         * twice the previous buffer size, but not more than MaxAllocSize; if we
+         * are already at MaxAllocSize, choke.  Note we use this palloc-oriented
+         * overflow limit even when in frontend.
+         */
+        if (len >= MaxAllocSize) {
+#ifndef FRONTEND
+            ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("out of memory")));
+#else
+            fprintf(stderr, _("out of memory\n"));
+            exit(EXIT_FAILURE);
+#endif
+        }
+        if (len >= MaxAllocSize / 2) {
+            newlen = MaxAllocSize;
+            goto newlenend;
+        }
+        newlen = len * 2;
+        goto newlenend;
+
+    newlenend:
+        va_end(args);
+
+        if (newlen < len)
+            return result; /* success */
+
+        /* Release buffer and loop around to try again with larger len. */
+        pg_free(result);
+        len = newlen;
+    }
+}
+
+/*
  * relpathbackend_t - construct path to a relation's file
  */
 static char* relpathbackend_t(RelFileNode rnode, BackendId backend, ForkNumber forknum)
@@ -1053,6 +1232,7 @@ static char* relpathbackend_t(RelFileNode rnode, BackendId backend, ForkNumber f
 
     /* Column store file path, e.g: 16384_C1.0, 16384_C1_bcm */
     if (forknum > MAX_FORKNUM) {
+        Assert(rnode.bucketNode == InvalidBktId);
         char attr_name[32];
         int attid = forknum - MAX_FORKNUM;
 
@@ -1095,6 +1275,7 @@ static char* relpathbackend_t(RelFileNode rnode, BackendId backend, ForkNumber f
             /* Shared system relations live in {datadir}/global */
             Assert(rnode.dbNode == 0);
             Assert(backend == InvalidBackendId);
+            Assert(rnode.bucketNode == InvalidBktId);
             pathlen = 7 + OIDCHARS + 1 + FORKNAMECHARS + 1;
             path = (char*)pg_malloc(pathlen);
             if (forknum != MAIN_FORKNUM)
@@ -1105,24 +1286,26 @@ static char* relpathbackend_t(RelFileNode rnode, BackendId backend, ForkNumber f
         } else if (rnode.spcNode == DEFAULTTABLESPACE_OID) {
             /* The default tablespace is {datadir}/base */
             if (backend == InvalidBackendId) {
-                pathlen = 5 + OIDCHARS + 1 + OIDCHARS + 1 + FORKNAMECHARS + 1;
+                pathlen = 5 + OIDCHARS + 1 + OIDCHARS + 1 + OIDCHARS + 2 + OIDCHARS + 1 + FORKNAMECHARS + 1;
                 path = (char*)pg_malloc(pathlen);
-                if (forknum != MAIN_FORKNUM) {
-                    if (rnode.bucketNode == InvalidBktId) {
+                if (rnode.bucketNode == DIR_BUCKET_ID) {
+                    ss_c = snprintf_s(
+                            path, pathlen, pathlen - 1, "base/%u/%u/", rnode.dbNode, rnode.relNode);
+                } else if (forknum != MAIN_FORKNUM) {
+                    if(rnode.bucketNode == InvalidBktId) {
                         ss_c = snprintf_s(
-                            path, pathlen, pathlen - 1, "base/%u/%u_%s", rnode.dbNode, rnode.relNode,
-                            forkNames_t[forknum]);
+                            path, pathlen, pathlen - 1, "base/%u/%u_%s", rnode.dbNode, rnode.relNode, forkNames_t[forknum]);
                     } else {
                         ss_c = snprintf_s(
-                            path, pathlen, pathlen - 1, "base/%u/%u_b%d_%s", rnode.dbNode, rnode.relNode, 
-                            rnode.bucketNode, forkNames_t[forknum]);
+                            path, pathlen, pathlen - 1, "base/%u/%u/%u_b%d_%s", rnode.dbNode, rnode.relNode, 
+                            rnode.relNode, rnode.bucketNode, forkNames_t[forknum]);
                     }
                 } else {
                     if (rnode.bucketNode == InvalidBktId) {
                         ss_c = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u", rnode.dbNode, rnode.relNode);
                     } else {
-                        ss_c = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u_b%d", 
-                            rnode.dbNode, rnode.relNode, rnode.bucketNode);
+                        ss_c = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u/%u_b%d", 
+                            rnode.dbNode, rnode.relNode, rnode.relNode, rnode.bucketNode);
                     }
                 }
                 securec_check_ss_c(ss_c, "\0", "\0");
@@ -1148,17 +1331,27 @@ static char* relpathbackend_t(RelFileNode rnode, BackendId backend, ForkNumber f
         } else {
             /* All other tablespaces are accessed via symlinks */
             if (backend == InvalidBackendId) {
-                pathlen = 9 + 1 + OIDCHARS + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1 + OIDCHARS +
-                          1
+                pathlen = 9 + 1 + OIDCHARS + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1 +
 #ifdef PGXC
-                          /* Postgres-XC tablespaces include node name */
-                          + strlen(pgxcnodename) + 1
+                /* Postgres-XC tablespaces include node name */
+                strlen(pgxcnodename) + 1 +
 #endif
-                          + OIDCHARS + 1 + FORKNAMECHARS + 1;
+                OIDCHARS + 1 + OIDCHARS + 1 + OIDCHARS + 2 + OIDCHARS + 1 + FORKNAMECHARS + 1;
+
                 path = (char*)pg_malloc(pathlen);
 #ifdef PGXC
-                if (forknum != MAIN_FORKNUM) {
-                    if (rnode.bucketNode == InvalidBktId) {
+                if (rnode.bucketNode == DIR_BUCKET_ID) {
+                    ss_c = snprintf_s(path,
+                            pathlen,
+                            pathlen - 1,
+                            "pg_tblspc/%u/%s_%s/%u/%u/",
+                            rnode.spcNode,
+                            TABLESPACE_VERSION_DIRECTORY,
+                            pgxcnodename,
+                            rnode.dbNode,
+                            rnode.relNode);
+                } else if (forknum != MAIN_FORKNUM) {
+                    if(rnode.bucketNode == InvalidBktId) {
                         ss_c = snprintf_s(path,
                             pathlen,
                             pathlen - 1,
@@ -1173,17 +1366,18 @@ static char* relpathbackend_t(RelFileNode rnode, BackendId backend, ForkNumber f
                         ss_c = snprintf_s(path,
                             pathlen,
                             pathlen - 1,
-                            "pg_tblspc/%u/%s_%s/%u/%u_b%d_%s",
+                            "pg_tblspc/%u/%s_%s/%u/%u/%u_b%d_%s",
                             rnode.spcNode,
                             TABLESPACE_VERSION_DIRECTORY,
                             pgxcnodename,
                             rnode.dbNode,
                             rnode.relNode,
+                            rnode.relNode,
                             rnode.bucketNode,
                             forkNames_t[forknum]);
                     }
                 } else {
-                    if (rnode.bucketNode == InvalidBktId) {
+                    if(rnode.bucketNode == InvalidBktId) {
                         ss_c = snprintf_s(path,
                             pathlen,
                             pathlen - 1,
@@ -1197,11 +1391,12 @@ static char* relpathbackend_t(RelFileNode rnode, BackendId backend, ForkNumber f
                         ss_c = snprintf_s(path,
                             pathlen,
                             pathlen - 1,
-                            "pg_tblspc/%u/%s_%s/%u/%u_b%d",
+                            "pg_tblspc/%u/%s_%s/%u/%u/%u_b%d",
                             rnode.spcNode,
                             TABLESPACE_VERSION_DIRECTORY,
                             pgxcnodename,
                             rnode.dbNode,
+                            rnode.relNode,
                             rnode.relNode,
                             rnode.bucketNode);
                     }
@@ -1291,6 +1486,35 @@ static char* relpathbackend_t(RelFileNode rnode, BackendId backend, ForkNumber f
     return path;
 }
 
+static bool check_hashbucket_dir_path(const char* fname)
+{
+    int nmatch;
+    RelFileNode rnode;
+    char buf[FILE_NAME_MAX_LEN] = {0};
+    
+    /* Base Hashbucket Dir Path */
+    nmatch = sscanf_s(fname, "base/%u/%u/%u", &rnode.dbNode, &rnode.relNode, &rnode.relNode);
+    if (nmatch == MATCH_TWO) {
+        return true;
+    }
+
+    /* Rel tablespace Hashbucket Table File Name Format Checking */
+    nmatch = sscanf_s(fname, "pg_tblspc/%u/%[^/]/%u/%u/%u", &rnode.spcNode, buf, sizeof(buf),
+        &rnode.dbNode, &rnode.relNode, &rnode.relNode);
+    if (nmatch == MATCH_FOUR) {
+        return true;
+    }
+
+    /* Abs tablespace Hashbucket Table File Name Format Checking */
+    nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u/%u", buf, sizeof(buf),
+        &rnode.dbNode, &rnode.relNode, &rnode.relNode);
+    if (nmatch == MATCH_THREE) {
+        return true;
+    }
+
+    return false;
+}
+
 bool check_base_path(const char *fname, unsigned int *segNo, RelFileNode *rnode)
 {
     int         columnid = 0;
@@ -1301,28 +1525,32 @@ bool check_base_path(const char *fname, unsigned int *segNo, RelFileNode *rnode)
     rnode->relNode = InvalidOid;
     rnode->bucketNode = InvalidBktId;
 
+    /* Column Store Table File Format Checking */
     nmatch = sscanf_s(fname, "base/%u/%u_C%d.%u",
                     &rnode->dbNode, &rnode->relNode, &columnid, segNo);
     if (nmatch == MATCH_FOUR) {
         return false;
     }
-    nmatch = sscanf_s(fname, "base/%u/%u_b%d.%u",
-                      &rnode->dbNode, &rnode->relNode, &rnode->bucketNode, segNo);
-    if (nmatch == MATCH_THREE || nmatch == MATCH_FOUR) {
+
+    /* Hashbucket File Format Checking */
+    nmatch = sscanf_s(fname, "base/%u/%u/%u_b%d.%u",
+                    &rnode->dbNode, &rnode->relNode, &rnode->relNode, &rnode->bucketNode, segNo);
+    if (nmatch == MATCH_FOUR || nmatch == MATCH_FIVE) {
         return true;
     }
 
-    nmatch = sscanf_s(fname, "base/%u/%u_b%d_vm.%u",
-                      &rnode->dbNode, &rnode->relNode, &rnode->bucketNode, segNo);
-    if (nmatch == MATCH_THREE || nmatch == MATCH_FOUR) {
+    nmatch = sscanf_s(fname, "base/%u/%u/%u_b%d_vm.%u",
+                    &rnode->dbNode, &rnode->relNode, &rnode->relNode, &rnode->bucketNode, segNo);
+    if (nmatch == MATCH_FOUR || nmatch == MATCH_FIVE) {
         return true;
     }
-    nmatch = sscanf_s(fname, "base/%u/%u_b%d_fsm.%u",
-                      &rnode->dbNode, &rnode->relNode, &rnode->bucketNode, segNo);
-    if (nmatch == MATCH_THREE || nmatch == MATCH_FOUR) {
+    nmatch = sscanf_s(fname, "base/%u/%u/%u_b%d_fsm.%u",
+                    &rnode->dbNode, &rnode->relNode, &rnode->relNode, &rnode->bucketNode, segNo);
+    if (nmatch == MATCH_FOUR || nmatch == MATCH_FIVE) {
         return true;
     }
 
+    /* Normal Table File Format Checking */
     nmatch = sscanf_s(fname, "base/%u/%u.%u",
                       &rnode->dbNode, &rnode->relNode, segNo);
     if (nmatch == MATCH_TWO || nmatch == MATCH_THREE) {
@@ -1358,24 +1586,26 @@ bool check_rel_tblspac_path(const char *fname, unsigned int *segNo, RelFileNode 
         return false;
     }
 
-    nmatch = sscanf_s(fname, "pg_tblspc/%u/%[^/]/%u/%u_b%d.%u",
-                      &rnode->spcNode, buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, &rnode->bucketNode, segNo);
-    if (nmatch == MATCH_FIVE || nmatch == MATCH_SIX) {
+    /* Hashbucket Table File Name Format Checking */
+    nmatch = sscanf_s(fname, "pg_tblspc/%u/%[^/]/%u/%u/%u_b%d.%u", &rnode->spcNode, buf, sizeof(buf),
+                &rnode->dbNode, &rnode->relNode, &rnode->relNode, &rnode->bucketNode, segNo);
+    if (nmatch == MATCH_SIX || nmatch == MATCH_SEVEN) {
         return true;
     }
 
-    nmatch = sscanf_s(fname, "pg_tblspc/%u/%[^/]/%u/%u_b%d_fsm.%u",
-                      &rnode->spcNode, buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, &rnode->bucketNode, segNo);
-    if (nmatch == MATCH_FIVE || nmatch == MATCH_SIX) {
+    nmatch = sscanf_s(fname, "pg_tblspc/%u/%[^/]/%u/%u/%u_b%d_fsm.%u", &rnode->spcNode, buf, sizeof(buf),
+                &rnode->dbNode, &rnode->relNode, &rnode->relNode, &rnode->bucketNode, segNo);
+    if (nmatch == MATCH_SIX || nmatch == MATCH_SEVEN) {
         return true;
     }
 
-    nmatch = sscanf_s(fname, "pg_tblspc/%u/%[^/]/%u/%u_b%d_vm.%u",
-                      &rnode->spcNode, buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, &rnode->bucketNode, segNo);
-    if (nmatch == MATCH_FIVE || nmatch == MATCH_SIX) {
+    nmatch = sscanf_s(fname, "pg_tblspc/%u/%[^/]/%u/%u/%u_b%d_vm.%u", &rnode->spcNode, buf, sizeof(buf),
+                &rnode->dbNode, &rnode->relNode, &rnode->relNode, &rnode->bucketNode, segNo);
+    if (nmatch == MATCH_SIX || nmatch == MATCH_SEVEN) {
         return true;
     }
 
+    /* Normal Table File Name Checking */
     nmatch = sscanf_s(fname, "pg_tblspc/%u/%[^/]/%u/%u.%u",
                       &rnode->spcNode, buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, segNo);
     if (nmatch == MATCH_FOUR || nmatch == MATCH_FIVE) {
@@ -1410,40 +1640,43 @@ bool check_abs_tblspac_path(const char *fname, unsigned int *segNo, RelFileNode 
     rnode->bucketNode = InvalidBktId;
     nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u_C%d.%u",
                       buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, &columnid, segNo);
-    if (nmatch == MATCH_SIX) {
+    if (nmatch == MATCH_FIVE) {
         return false;
     }
-    nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u_b%u.%u",
-                      buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, &bktno, segNo);
+
+    /* Hashbucket Table File Name Format Checking */
+    nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u/%u_b%u.%u",
+                buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, &rnode->relNode, &bktno, segNo);
     if (nmatch == MATCH_FIVE || nmatch == MATCH_SIX) {
         return true;
     }
-    nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u_b%u_fsm.%u",
-                      buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, &bktno, segNo);
+    nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u/%u_b%u_fsm.%u",
+                buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, &rnode->relNode, &bktno, segNo);
     if (nmatch == MATCH_FIVE || nmatch == MATCH_SIX) {
         return true;
     }
-    nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u_b%u_vm.%u",
-                      buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, &bktno, segNo);
+    nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u/%u_b%u_vm.%u",
+                buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, &rnode->relNode, &bktno, segNo);
     if (nmatch == MATCH_FIVE || nmatch == MATCH_SIX) {
         return true;
     }
 
+    /* Normal Table File Name Format Checking */
     nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u.%u",
-                      buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, segNo);
-    if (nmatch == MATCH_FOUR || nmatch == MATCH_FIVE) {
+                buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, segNo);
+    if (nmatch == MATCH_THREE || nmatch == MATCH_FOUR) {
         return true;
     }
 
     nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u_fsm.%u",
-                      buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, segNo);
-    if (nmatch == MATCH_FOUR || nmatch == MATCH_FIVE) {
+                buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, segNo);
+    if (nmatch == MATCH_THREE || nmatch == MATCH_FOUR) {
         return true;
     }
 
     nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u_vm.%u",
-                      buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, segNo);
-    if (nmatch == MATCH_FOUR || nmatch == MATCH_FIVE) {
+                buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, segNo);
+    if (nmatch == MATCH_THREE || nmatch == MATCH_FOUR) {
         return true;
     }
 
@@ -1481,3 +1714,12 @@ bool isPathInFilemap(const char* path)
     return true;
 }
 
+static int get_cu_alignsize_columnId(int columnId)
+{
+    Assert(columnId > 0);
+    int align_size = ALIGNOF_CUSIZE;
+    if (columnId >= TS_COLUMN_ID_BASE) {
+        align_size = ALIGNOF_TIMESERIES_CUSIZE;
+    }
+    return align_size;
+}

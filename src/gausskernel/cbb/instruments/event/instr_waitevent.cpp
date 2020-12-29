@@ -108,9 +108,20 @@ static uint32 get_event_id(uint32 wait_event_info)
     return eventId;
 }
 
+/* using for DBE_PERF.wait_events */
+static void update_max_last_updated(volatile WaitStatisticsInfo* event, TimestampTz last_updated)
+{
+    if (event != NULL && last_updated > event->last_updated) {
+        event->last_updated = last_updated;
+    }
+}
+
+/* using for DBE_PERF.wait_events */
 static void updateWaitStatusInfo(WaitInfo* gsInstrWaitInfo, WaitStatusInfo status_info)
 {
     for (int i = 0; i < STATE_WAIT_NUM; i++) {
+        update_max_last_updated(&gsInstrWaitInfo->status_info.statistics_info[i],
+            status_info.statistics_info[i].last_updated);
         if (status_info.statistics_info[i].counter == 0) {
             continue;
         }
@@ -127,6 +138,41 @@ static void updateWaitStatusInfo(WaitInfo* gsInstrWaitInfo, WaitStatusInfo statu
     }
 }
 
+/* init all events's last updated time for all backend entries */
+void InstrWaitEventInitLastUpdated(PgBackendStatus* current_entry, TimestampTz current_time)
+{
+    if (current_entry == NULL) {
+        return;
+    }
+    int i = 0;
+
+    /* io event */
+    for (i = 0; i < IO_EVENT_NUM; i++) {
+        current_entry->waitInfo.event_info.io_info[i].last_updated = current_time;
+    }
+
+    /* lock info */
+    for (i = 0; i < LOCK_EVENT_NUM; i++) {
+        current_entry->waitInfo.event_info.lock_info[i].last_updated = current_time;
+    }
+
+    /* lwlock info */
+    for (i = 0; i < LWLOCK_EVENT_NUM; i++) {
+        current_entry->waitInfo.event_info.lwlock_info[i].last_updated = current_time;
+    }
+
+    /* status */
+    for (i = 0; i < STATE_WAIT_NUM + 1; i++) {
+        current_entry->waitInfo.status_info.statistics_info[i].last_updated = current_time;
+    }
+}
+
+/* update last updated time of wait event  */
+static void instr_wait_event_report_last_updated(volatile WaitStatisticsInfo* event)
+{
+    event->last_updated = GetCurrentTimestamp();
+}
+
 void UpdateWaitStatusStat(volatile WaitInfo* InstrWaitInfo, uint32 waitstatus, int64 duration)
 {
     updateMinValueForAtomicType(duration,
@@ -135,6 +181,7 @@ void UpdateWaitStatusStat(volatile WaitInfo* InstrWaitInfo, uint32 waitstatus, i
     InstrWaitInfo->status_info.statistics_info[waitstatus].counter++;
     InstrWaitInfo->status_info.statistics_info[waitstatus].total_duration += duration;
     updateMaxValueForAtomicType(duration, &(InstrWaitInfo->status_info.statistics_info[waitstatus].max_duration));
+    instr_wait_event_report_last_updated(&InstrWaitInfo->status_info.statistics_info[waitstatus]);
 }
 
 void UpdateWaitEventStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_info, int64 duration)
@@ -153,6 +200,7 @@ void UpdateWaitEventStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_inf
             InstrWaitInfo->event_info.lwlock_info[eventId].counter++;
             InstrWaitInfo->event_info.lwlock_info[eventId].total_duration += duration;
             updateMaxValueForAtomicType(duration, &(InstrWaitInfo->event_info.lwlock_info[eventId].max_duration));
+            instr_wait_event_report_last_updated(&InstrWaitInfo->event_info.lwlock_info[eventId]);
             break;
         case PG_WAIT_LOCK:
             updateMinValueForAtomicType(duration,
@@ -161,6 +209,7 @@ void UpdateWaitEventStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_inf
             InstrWaitInfo->event_info.lock_info[eventId].counter++;
             InstrWaitInfo->event_info.lock_info[eventId].total_duration += duration;
             updateMaxValueForAtomicType(duration, &(InstrWaitInfo->event_info.lock_info[eventId].max_duration));
+            instr_wait_event_report_last_updated(&InstrWaitInfo->event_info.lock_info[eventId]);
             break;
         case PG_WAIT_IO:
             if (wait_event_info != WAIT_EVENT_WAL_BUFFER_ACCESS) {
@@ -170,6 +219,7 @@ void UpdateWaitEventStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_inf
                 InstrWaitInfo->event_info.io_info[eventId].counter++;
                 InstrWaitInfo->event_info.io_info[eventId].total_duration += duration;
                 updateMaxValueForAtomicType(duration, &(InstrWaitInfo->event_info.io_info[eventId].max_duration));
+                instr_wait_event_report_last_updated(&InstrWaitInfo->event_info.io_info[eventId]);
             } else {
                 InstrWaitInfo->event_info.io_info[eventId].counter++;
             }
@@ -190,15 +240,18 @@ void UpdateWaitEventFaildStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_even
     switch (classId) {
         case PG_WAIT_LWLOCK:
             InstrWaitInfo->event_info.lwlock_info[eventId].failed_counter++;
+            instr_wait_event_report_last_updated(&InstrWaitInfo->event_info.lwlock_info[eventId]);
             break;
         case PG_WAIT_LOCK:
             InstrWaitInfo->event_info.lock_info[eventId].failed_counter++;
+            instr_wait_event_report_last_updated(&InstrWaitInfo->event_info.lock_info[eventId]);
             break;
         default:
             break;
     }
 }
 
+/* using in DBE_PERF.wait_events */
 void CollectWaitInfo(WaitInfo* gsInstrWaitInfo, WaitStatusInfo status_info, WaitEventInfo event_info)
 {
     /* update status wait info */
@@ -206,53 +259,49 @@ void CollectWaitInfo(WaitInfo* gsInstrWaitInfo, WaitStatusInfo status_info, Wait
 
     /* update Io Event wait info */
     for (int i = 0; i < IO_EVENT_NUM; i++) {
-        if (event_info.io_info[i].counter == 0) {
-            continue;
+        WaitStatisticsInfo *io_info = &gsInstrWaitInfo->event_info.io_info[i];
+
+        update_max_last_updated(io_info, event_info.io_info[i].last_updated);
+        if (event_info.io_info[i].counter != 0) {
+            updateMinValueForAtomicType(event_info.io_info[i].min_duration,
+                &io_info->min_duration, io_info->counter);
+            updateMaxValueForAtomicType(event_info.io_info[i].max_duration, &io_info->max_duration);
+            io_info->counter += event_info.io_info[i].counter;
+            io_info->total_duration += event_info.io_info[i].total_duration;
+            io_info->avg_duration = io_info->total_duration / io_info->counter;
         }
-        updateMinValueForAtomicType(event_info.io_info[i].min_duration,
-            &(gsInstrWaitInfo->event_info.io_info[i].min_duration),
-            gsInstrWaitInfo->event_info.io_info[i].counter);
-        updateMaxValueForAtomicType(
-            event_info.io_info[i].max_duration, &(gsInstrWaitInfo->event_info.io_info[i].max_duration));
-        gsInstrWaitInfo->event_info.io_info[i].counter += event_info.io_info[i].counter;
-        gsInstrWaitInfo->event_info.io_info[i].total_duration += event_info.io_info[i].total_duration;
-        gsInstrWaitInfo->event_info.io_info[i].avg_duration =
-            gsInstrWaitInfo->event_info.io_info[i].total_duration / gsInstrWaitInfo->event_info.io_info[i].counter;
     }
 
     /* update Lock Event wait info */
     for (int i = 0; i < LOCK_EVENT_NUM; i++) {
-        if (event_info.lock_info[i].counter == 0) {
-            continue;
+        WaitStatisticsInfo *lock_info = &gsInstrWaitInfo->event_info.lock_info[i];
+
+        update_max_last_updated(lock_info, event_info.lock_info[i].last_updated);
+        if (event_info.lock_info[i].counter != 0) {
+            updateMinValueForAtomicType(event_info.lock_info[i].min_duration,
+                &lock_info->min_duration, lock_info->counter);
+            updateMaxValueForAtomicType(event_info.lock_info[i].max_duration, &lock_info->max_duration);
+            lock_info->counter += event_info.lock_info[i].counter;
+            lock_info->failed_counter += event_info.lock_info[i].failed_counter;
+            lock_info->total_duration += event_info.lock_info[i].total_duration;
+            lock_info->avg_duration = lock_info->total_duration / lock_info->counter;
         }
-        updateMinValueForAtomicType(event_info.lock_info[i].min_duration,
-            &(gsInstrWaitInfo->event_info.lock_info[i].min_duration),
-            gsInstrWaitInfo->event_info.lock_info[i].counter);
-        updateMaxValueForAtomicType(
-            event_info.lock_info[i].max_duration, &(gsInstrWaitInfo->event_info.lock_info[i].max_duration));
-        gsInstrWaitInfo->event_info.lock_info[i].counter += event_info.lock_info[i].counter;
-        gsInstrWaitInfo->event_info.lock_info[i].failed_counter += event_info.lock_info[i].failed_counter;
-        gsInstrWaitInfo->event_info.lock_info[i].total_duration += event_info.lock_info[i].total_duration;
-        gsInstrWaitInfo->event_info.lock_info[i].avg_duration =
-            gsInstrWaitInfo->event_info.lock_info[i].total_duration / gsInstrWaitInfo->event_info.lock_info[i].counter;
     }
 
     /* update LWLock Event wait info */
     for (int i = 0; i < LWLOCK_EVENT_NUM; i++) {
-        if (event_info.lwlock_info[i].counter == 0) {
-            continue;
+        WaitStatisticsInfo *lwlock_info = &gsInstrWaitInfo->event_info.lwlock_info[i];
+
+        update_max_last_updated(lwlock_info, event_info.lwlock_info[i].last_updated);
+        if (event_info.lwlock_info[i].counter != 0) {
+            updateMinValueForAtomicType(event_info.lwlock_info[i].min_duration,
+                &lwlock_info->min_duration, lwlock_info->counter);
+            updateMaxValueForAtomicType(event_info.lwlock_info[i].max_duration, &lwlock_info->max_duration);
+            lwlock_info->counter += event_info.lwlock_info[i].counter;
+            lwlock_info->failed_counter += event_info.lwlock_info[i].failed_counter;
+            lwlock_info->total_duration += event_info.lwlock_info[i].total_duration;
+            lwlock_info->avg_duration = lwlock_info->total_duration / lwlock_info->counter;
         }
-        updateMinValueForAtomicType(event_info.lwlock_info[i].min_duration,
-            &(gsInstrWaitInfo->event_info.lwlock_info[i].min_duration),
-            gsInstrWaitInfo->event_info.lwlock_info[i].counter);
-        updateMaxValueForAtomicType(
-            event_info.lwlock_info[i].max_duration, &(gsInstrWaitInfo->event_info.lwlock_info[i].max_duration));
-        gsInstrWaitInfo->event_info.lwlock_info[i].counter += event_info.lwlock_info[i].counter;
-        gsInstrWaitInfo->event_info.lwlock_info[i].failed_counter += event_info.lwlock_info[i].failed_counter;
-        gsInstrWaitInfo->event_info.lwlock_info[i].total_duration += event_info.lwlock_info[i].total_duration;
-        gsInstrWaitInfo->event_info.lwlock_info[i].avg_duration =
-            gsInstrWaitInfo->event_info.lwlock_info[i].total_duration /
-            gsInstrWaitInfo->event_info.lwlock_info[i].counter;
     }
 }
 
@@ -268,6 +317,7 @@ static void create_tuple_entry(TupleDesc tupdesc)
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "avg_wait_time", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "max_wait_time", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "min_wait_time", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "last_updated", TIMESTAMPTZOID, -1, 0);
 }
 
 static void set_status_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, int i, uint32 eventId)
@@ -280,6 +330,7 @@ static void set_status_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, int
     values[++i] = Int64GetDatum(gsInstrWaitInfo->status_info.statistics_info[eventId].avg_duration);
     values[++i] = Int64GetDatum(gsInstrWaitInfo->status_info.statistics_info[eventId].max_duration);
     values[++i] = Int64GetDatum(gsInstrWaitInfo->status_info.statistics_info[eventId].min_duration);
+    values[++i] = TimestampTzGetDatum(gsInstrWaitInfo->status_info.statistics_info[eventId].last_updated);
 }
 
 static void set_io_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, int i, uint32 eventId)
@@ -292,6 +343,7 @@ static void set_io_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, i
     values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.io_info[eventId].avg_duration);
     values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.io_info[eventId].max_duration);
     values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.io_info[eventId].min_duration);
+    values[++i] = TimestampTzGetDatum(gsInstrWaitInfo->event_info.io_info[eventId].last_updated);
 }
 
 static void set_lock_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, int i, uint32 eventId)
@@ -304,6 +356,7 @@ static void set_lock_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values,
     values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.lock_info[eventId].avg_duration);
     values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.lock_info[eventId].max_duration);
     values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.lock_info[eventId].min_duration);
+    values[++i] = TimestampTzGetDatum(gsInstrWaitInfo->event_info.lock_info[eventId].last_updated);
 }
 
 static void set_lwlock_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* values, int i, uint32 eventId, bool* nulls)
@@ -322,6 +375,7 @@ static void set_lwlock_event_tuple_value(WaitInfo* gsInstrWaitInfo, Datum* value
     values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.lwlock_info[eventId].avg_duration);
     values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.lwlock_info[eventId].max_duration);
     values[++i] = Int64GetDatum(gsInstrWaitInfo->event_info.lwlock_info[eventId].min_duration);
+    values[++i] = TimestampTzGetDatum(gsInstrWaitInfo->event_info.lwlock_info[eventId].last_updated);
 }
 
 static void set_tuple_value(
@@ -345,7 +399,7 @@ static void set_tuple_value(
 
 Datum get_instr_wait_event(PG_FUNCTION_ARGS)
 {
-    const int INSTR_WAITEVENT_ATTRUM = 9;
+    const int INSTR_WAITEVENT_ATTRUM = 10;
     FuncCallContext* funcctx = NULL;
 
     if (SRF_IS_FIRSTCALL()) {
@@ -356,7 +410,7 @@ Datum get_instr_wait_event(PG_FUNCTION_ARGS)
 
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(INSTR_WAITEVENT_ATTRUM, false);
+        tupdesc = CreateTemplateTupleDesc(INSTR_WAITEVENT_ATTRUM, false, TAM_HEAP);
 
         create_tuple_entry(tupdesc);
 

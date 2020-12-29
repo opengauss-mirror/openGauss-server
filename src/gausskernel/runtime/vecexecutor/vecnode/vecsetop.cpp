@@ -1,19 +1,7 @@
-/*
+/* ---------------------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * ---------------------------------------------------------------------------------------
  *
  * vecsetop.cpp
  *
@@ -79,14 +67,17 @@ VecSetOpState* ExecInitVecSetOp(VecSetOp* node, EState* estate, int eflags)
      * efficiently; see ExecReScanSetOp.
      */
     if (node->strategy == SETOP_HASHED)
-        eflags &= ~EXEC_FLAG_REWIND;
+        eflags = (uint32)eflags & ~EXEC_FLAG_REWIND;
     outerPlanState(set_op_state) = ExecInitNode(outerPlan(node), estate, eflags);
 
     /*
      * setop nodes do no projections, so initialize projection info for this
      * node appropriately
      */
-    ExecAssignResultTypeFromTL(&set_op_state->ps);
+    ExecAssignResultTypeFromTL(
+            &set_op_state->ps,
+            ExecGetResultType(outerPlanState(set_op_state))->tdTableAmType);
+
     set_op_state->ps.ps_ProjInfo = NULL;
 
     /*
@@ -166,7 +157,6 @@ void setOpTbl::ResetNecessary(VecSetOpState* node)
             closeFile();
 
         /* And rebuild empty hashtable if needed */
-        
         m_runState = SETOP_PREPARE;
         MemoryContextResetAndDeleteChildren(m_hashContext);
 
@@ -221,7 +211,6 @@ setOpTbl::setOpTbl(VecSetOpState* runtime) : m_runtime(runtime)
     m_eqfunctions = runtime->eqfunctions;
     m_outerHashFuncs = runtime->hashfunctions;
     /* indexs of the columns to check for duplicate-ness in the target list */
-    
     m_keyIdx = (int*)palloc(sizeof(int) * m_key);
 
     m_rows = 0;
@@ -247,7 +236,6 @@ setOpTbl::setOpTbl(VecSetOpState* runtime) : m_runtime(runtime)
     m_scanBatch = New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, desc);
 
     /* Initialize m_keyDesc in vechashtable and check if m_keySimple is false */
-    
     m_keyDesc = (ScalarDesc*)palloc(m_outerColNum * sizeof(ScalarDesc));
     for (i = 0; i < m_key; i++) {
         m_keyDesc[i].typeId = attrs[m_keyIdx[i]]->atttypid;
@@ -290,15 +278,12 @@ setOpTbl::setOpTbl(VecSetOpState* runtime) : m_runtime(runtime)
         m_rows = 0;
 
         /* add one column to store the hash value.*/
-        
         m_cellSize += sizeof(hashVal);
 
         /* Binding functions used in hash strategy */
-        
         BindingFp();
 
         /* Binding the function point Operation in hashSetOpTbl to function setOpTbl::Run */
-        
         setOpTbl::Operation = &setOpTbl::RunHash;
     } else {
         m_firstFlag = 0;
@@ -639,7 +624,6 @@ hashSource* setOpTbl::GetHashSource()
             m_filesource->rewind(m_filesource->getCurrentIdx());
 
             /* reset the rows in the hash table */
-            
             m_rows = 0;
 
             MemoryContextReset(m_filesource->m_context);
@@ -775,7 +759,6 @@ void setOpTbl::BuildSetOpTbl(VectorBatch* batch)
 
         while (NULL != cell) {
             /* First compare hash value.*/
-            
             if (m_cacheLoc[i] == cell->m_val[m_outerColNum].val && MatchKey<simple>(batch, i, cell)) {
                 found_match = true;
                 break;
@@ -850,7 +833,7 @@ bool setOpTbl::MatchKey(VectorBatch* batch, int batchIdx, SetOpHashCell* cell)
                 key1 = ScalarVector::Decode(vector->m_vals[batchIdx]);
                 key2 = ScalarVector::Decode(hashval->val);
 
-                match = DatumGetBool(DirectFunctionCall2(m_eqfunctions[i].fn_addr, key1, key2));
+                match = DatumGetBool(FunctionCall2((m_eqfunctions + i), key1, key2));
                 if (match == false)
                     return false;
             }

@@ -19,7 +19,7 @@
 #include "storage/smgr.h"
 
 typedef struct st_smgrid {
-    const char* smgr_name;
+    const char *smgr_name;
 } smgrid;
 
 /*
@@ -31,7 +31,7 @@ static const int STORAGE_MANAGERS_LENGTH = lengthof(g_storage_managers);
 
 Datum smgrin(PG_FUNCTION_ARGS)
 {
-    char* s = PG_GETARG_CSTRING(0);
+    char *s = PG_GETARG_CSTRING(0);
     int16 i;
 
     for (i = 0; i < STORAGE_MANAGERS_LENGTH; i++) {
@@ -46,7 +46,7 @@ Datum smgrin(PG_FUNCTION_ARGS)
 Datum smgrout(PG_FUNCTION_ARGS)
 {
     int16 i = PG_GETARG_INT16(0);
-    char* s = NULL;
+    char *s = NULL;
 
     if (i >= STORAGE_MANAGERS_LENGTH || i < 0) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("invalid storage manager ID: %d", i)));

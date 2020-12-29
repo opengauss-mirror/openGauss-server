@@ -25,6 +25,7 @@ extern void rewriteTargetListMerge(Query* parsetree, Index result_relation, List
 
 #ifdef PGXC
 extern List* QueryRewriteCTAS(Query* parsetree);
+extern List* QueryRewriteRefresh(Query *parsetree);
 #endif
 
 #endif /* REWRITEHANDLER_H */

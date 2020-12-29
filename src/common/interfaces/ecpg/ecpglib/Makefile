@@ -21,7 +21,7 @@ override CPPFLAGS := -I../include -I$(top_srcdir)/src/common/interfaces/ecpg/inc
 	-I$(libpq_srcdir) -I$(top_builddir)/src/common/port $(CPPFLAGS)
 override CFLAGS += $(PTHREAD_CFLAGS)
 
-override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -fstack-protector --param ssp-buffer-size=2 -Wstack-protector
+override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC
 override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC
 
 # Need to recompile any libpgport object files

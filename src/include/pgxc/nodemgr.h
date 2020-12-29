@@ -52,6 +52,11 @@ typedef struct {
     Oid *nodeList;             /* nodeid about all nodes in the same segment */
 } NodeRelationInfo;
 
+typedef struct DNInfo {
+    Oid    oid;
+    int    idx;         /* the sequence id of dn */
+}DNInfo;
+
 extern GlobalNodeDefinition* global_node_definition;
 
 extern void NodeTablesShmemInit(void);
@@ -80,8 +85,17 @@ extern int PgxcGetCentralNodeIndex();
 extern void PgxcNodeFreeDnMatric(void);
 extern void PgxcNodeInitDnMatric(void);
 extern bool PgxcNodeCheckDnMatric(Oid oid1, Oid oid2);
+extern bool PgxcNodeCheckPrimaryHost(Oid oid, const char* host);
 extern Oid PgxcNodeGetPrimaryDNFromMatric(Oid oid1);
 extern void PgxcNodeCount(int* numCoords, int* numDns);
 
 extern bool set_dnoid_info_from_matric(NodeRelationInfo *needCreateNode, bool *isMatricVisited);
+
+/* interface of dataNode to use hash table */
+extern void dn_info_local_hash_create();
+extern int  dn_info_hash_search(Oid dn_oid);
+extern void dn_info_hash_insert(Oid dn_oid, int row);
+extern void dn_info_hash_delete(Oid dn_oid);
+extern void dn_info_hash_destory();
+
 #endif /* NODEMGR_H */

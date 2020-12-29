@@ -346,9 +346,15 @@ MaterialState* ExecInitMaterial(Material* node, EState* estate, int eflags)
      * initialize tuple type.  no need to initialize projection info because
      * this node doesn't do projections.
      */
-    ExecAssignResultTypeFromTL(&mat_state->ss.ps);
     ExecAssignScanTypeFromOuterPlan(&mat_state->ss);
+
+    ExecAssignResultTypeFromTL(
+            &mat_state->ss.ps,
+            mat_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
+
     mat_state->ss.ps.ps_ProjInfo = NULL;
+
+    Assert(mat_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
 
     /*
      * Lastly, if this Material node is under subplan and used for materializing

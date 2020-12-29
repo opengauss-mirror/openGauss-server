@@ -22,13 +22,14 @@
  * -------------------------------------------------------------------------
  */
 #include "access/dfs/dfs_query.h"
+#include "access/dfs/dfs_query_reader.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "access/relscan.h"
 #include "executor/execdebug.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "executor/nodeSeqscan.h"
-#include "storage/cstore_compress.h"
+#include "storage/cstore/cstore_compress.h"
 #include "access/cstore_am.h"
 #include "optimizer/clauses.h"
 #include "nodes/params.h"
@@ -45,14 +46,12 @@
 #include "access/sysattr.h"
 #include "catalog/indexing.h"
 #include "commands/tablespace.h"
-#include "utils/tqual.h"
-#include "funcapi.h"
+#include "access/heapam.h"
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/dfsstore_ctlg.h"
 #include "dfsdesc.h"
-#include "dfs_adaptor.h"
 
 VectorBatch* DfsScanNext(DfsScanState* node);
 static bool DfsScanRecheck(ForeignScanState* node, VectorBatch* batch);
@@ -211,7 +210,7 @@ DfsScanState* ExecInitDfsScan(DfsScan* node, Relation parentHeapRel, EState* est
     /*
      * Initialize result tuple type and projection info.
      */
-    ExecAssignResultTypeFromTL(&scanState->ps);
+    ExecAssignResultTypeFromTL(&scanState->ps, currentRelation->rd_tam_type);
 
     scanState->ps.vectorized = true;
     scanState->isPartTbl = node->isPartTbl;
@@ -369,6 +368,24 @@ void ExecEndDfsScan(DfsScanState* node)
         (void)ExecClearTuple(node->ss_ScanTupleSlot);
 }
 
+/* the path concats by reliable information in system catalog, but to avoid attack, we still check the information */
+static char* canonicalize_dfs_path(const char* path)
+{
+    char* lrealpath = NULL;
+    char* ret_val = NULL;
+    const short max_realpath_len = 4096;
+    lrealpath = (char*)palloc(max_realpath_len + 1);
+    
+    ret_val = realpath(path, lrealpath);
+    if (ret_val == NULL && lrealpath[0] == '\0') {
+        ereport(
+            ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("realpath failed : %s!\n", path)));
+    }
+    char* shortpath = pstrdup(lrealpath);
+    pfree(lrealpath);
+    return shortpath;
+}
+
 /*
  * Brief        : Build the Dfs table file path List.
  * Input        : rel, the table relation.
@@ -419,7 +436,9 @@ List* BuildSplitList(Relation rel, StringInfo rootDir, Snapshot snapshot)
             const char* fileName = dfsDesc[dfsDescIndex].GetFileName();
             StringInfo filePath = makeStringInfo();
             appendStringInfo(filePath, "%s/%s", rootDir->data, fileName);
-            SplitInfo* split = InitFileSplit(filePath->data, NULL, dfsDesc[dfsDescIndex].GetFileSize());
+            char* validpath = canonicalize_dfs_path(filePath->data);
+            pfree(filePath->data);
+            SplitInfo* split = InitFileSplit(validpath, NULL, dfsDesc[dfsDescIndex].GetFileSize());
             fileSplits = lappend(fileSplits, split);
         }
 

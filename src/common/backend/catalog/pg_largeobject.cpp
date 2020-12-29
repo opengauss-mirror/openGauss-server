@@ -27,7 +27,7 @@
 #include "utils/fmgroids.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 /*
  * Create a large object having the given LO identifier.

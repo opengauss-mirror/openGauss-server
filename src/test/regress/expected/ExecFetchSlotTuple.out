@@ -1,0 +1,18 @@
+select foo from (select 1) as foo;
+ foo 
+-----
+ (1)
+(1 row)
+
+select foo from (select null) as foo;
+ foo 
+-----
+ ()
+(1 row)
+
+select foo from (select 'xyzzy',1,null) as foo;
+    foo     
+------------
+ (xyzzy,1,)
+(1 row)
+

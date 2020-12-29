@@ -387,9 +387,9 @@ START TRANSACTION;
   SELECT 0/0;
 ERROR:  division by zero
   SAVEPOINT two;    -- ignored till the end of ...
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+--?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
   RELEASE SAVEPOINT one;      -- ignored till the end of ...
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+--?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
   ROLLBACK TO SAVEPOINT one;
   SELECT 1;
  ?column? 

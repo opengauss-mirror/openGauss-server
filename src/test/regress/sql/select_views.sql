@@ -12,7 +12,7 @@ SELECT * FROM toyemp WHERE name = 'sharon';
 --
 -- Test for Leaky view scenario
 --
-CREATE ROLE regress_alice PASSWORD 'ttest@123';
+CREATE ROLE regress_alice PASSWORD 'gauss@123';
 
 CREATE FUNCTION f_leak (text)
        RETURNS bool LANGUAGE 'plpgsql' COST 0.0000001

@@ -1,6 +1,5 @@
 /*
- * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
- * Portions Copyright (c) 2004-2005, PostgreSQL Global Development Group
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -14,7 +13,7 @@
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
  *
- * alarm_log.cpp
+ * alarm_log.c
  *    alarm logging and reporting
  *
  * IDENTIFICATION
@@ -23,17 +22,15 @@
  * -------------------------------------------------------------------------
  */
 #include <fcntl.h>
-#include <time.h>
-#include <unistd.h>
 #include <signal.h>
 #include <ctype.h>
 #include <syslog.h>
 #include <limits.h>
-#include <assert.h>
+#include "cm/path.h"
+#include "cm/cm_c.h"
+#include "cm/stringinfo.h"
 #include "alarm/alarm_log.h"
 #include <sys/time.h>
-#include "securec.h"
-#include "securec_check.h"
 #if !defined(WIN32)
 #include <sys/syscall.h>
 #define gettid() syscall(__NR_gettid)
@@ -56,13 +53,6 @@
 #define LBF_MODE _IOLBF
 #endif
 
-#ifdef USE_ASSERT_CHECKING
-#define Assert(cond) assert(cond)
-#else
-#define Assert(cond) ((void)0)
-#endif
-
-#define MAX_PATH_LEN 1024
 #define SYSTEM_ALARM_LOG "system_alarm"
 #define MAX_SYSTEM_ALARM_LOG_SIZE (128 * 1024 * 1024) /* 128MB */
 #define CURLOGFILEMARK "-current.log"
@@ -304,13 +294,13 @@ void write_alarm(Alarm* alarmItem, const char* alarmName, const char* alarmLevel
         rcs = snprintf_s(reportInfo,
             REPORT_MSG_SIZE,
             REPORT_MSG_SIZE - 1,
-            "{" SYSQUOTE "id" SYSQUOTE SYSCOLON SYSQUOTE "%016d" SYSQUOTE SYSCOMMA SYSQUOTE
+            "{" SYSQUOTE "id" SYSQUOTE SYSCOLON SYSQUOTE "%016ld" SYSQUOTE SYSCOMMA SYSQUOTE
             "name" SYSQUOTE SYSCOLON SYSQUOTE "%s" SYSQUOTE SYSCOMMA SYSQUOTE "level" SYSQUOTE SYSCOLON SYSQUOTE
             "%s" SYSQUOTE SYSCOMMA SYSQUOTE "scope" SYSQUOTE SYSCOLON "%s" SYSCOMMA SYSQUOTE
             "source_tag" SYSQUOTE SYSCOLON SYSQUOTE "%s-%s" SYSQUOTE SYSCOMMA SYSQUOTE
             "op_type" SYSQUOTE SYSCOLON SYSQUOTE "%s" SYSQUOTE SYSCOMMA SYSQUOTE "details" SYSQUOTE SYSCOLON SYSQUOTE
             "%s" SYSQUOTE SYSCOMMA SYSQUOTE "clear_type" SYSQUOTE SYSCOLON SYSQUOTE "%s" SYSQUOTE SYSCOMMA SYSQUOTE
-            "start_timestamp" SYSQUOTE SYSCOLON "%lu" SYSCOMMA SYSQUOTE "end_timestamp" SYSQUOTE SYSCOLON "%d"
+            "start_timestamp" SYSQUOTE SYSCOLON "%ld" SYSCOMMA SYSQUOTE "end_timestamp" SYSQUOTE SYSCOLON "%d"
             "}\n",
             alarmItem->id,
             alarmName,
@@ -327,12 +317,12 @@ void write_alarm(Alarm* alarmItem, const char* alarmName, const char* alarmLevel
         rcs = snprintf_s(reportInfo,
             REPORT_MSG_SIZE,
             REPORT_MSG_SIZE - 1,
-            "{" SYSQUOTE "id" SYSQUOTE SYSCOLON SYSQUOTE "%016d" SYSQUOTE SYSCOMMA SYSQUOTE
+            "{" SYSQUOTE "id" SYSQUOTE SYSCOLON SYSQUOTE "%016ld" SYSQUOTE SYSCOMMA SYSQUOTE
             "name" SYSQUOTE SYSCOLON SYSQUOTE "%s" SYSQUOTE SYSCOMMA SYSQUOTE "level" SYSQUOTE SYSCOLON SYSQUOTE
             "%s" SYSQUOTE SYSCOMMA SYSQUOTE "scope" SYSQUOTE SYSCOLON "%s" SYSCOMMA SYSQUOTE
             "source_tag" SYSQUOTE SYSCOLON SYSQUOTE "%s-%s" SYSQUOTE SYSCOMMA SYSQUOTE
             "op_type" SYSQUOTE SYSCOLON SYSQUOTE "%s" SYSQUOTE SYSCOMMA SYSQUOTE "start_timestamp" SYSQUOTE SYSCOLON
-            "%d" SYSCOMMA SYSQUOTE "end_timestamp" SYSQUOTE SYSCOLON "%lu"
+            "%d" SYSCOMMA SYSQUOTE "end_timestamp" SYSQUOTE SYSCOLON "%ld"
             "}\n",
             alarmItem->id,
             alarmName,

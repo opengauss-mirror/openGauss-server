@@ -1,0 +1,537 @@
+CREATE ROLE dfm PASSWORD 'Gauss@123';
+SELECT a.rolname, n.nspname FROM pg_authid a JOIN pg_namespace n ON (a.oid = n.nspowner AND a.rolname='dfm');
+DROP ROLE dfm;
+
+CREATE USER dfm PASSWORD 'Gauss@123';
+SELECT a.rolname, n.nspname FROM pg_authid a JOIN pg_namespace n ON (a.oid = n.nspowner AND a.rolname='dfm');
+CREATE TABLESPACE dfm LOCATION '@testtablespace@';
+SHOW search_path;
+SHOW default_tablespace;
+
+SET search_path='dfm';
+SHOW search_path;
+SHOW default_tablespace;
+
+DROP USER dfm;
+SHOW search_path;
+SHOW default_tablespace;
+SELECT nspname from pg_namespace where nspname='dfm';
+
+RESET search_path;
+RESET default_tablespace;
+
+CREATE USER dfm PASSWORD 'Gauss@123';
+
+SET SESSION AUTHORIZATION dfm PASSWORD 'Gauss@123';
+
+SHOW search_path;
+SHOW default_tablespace;
+
+DROP USER dfm;
+
+RESET SESSION AUTHORIZATION;
+SET search_path='dfm';
+--can not drop current schema
+DROP USER dfm CASCADE;
+SELECT nspname from pg_namespace where nspname='dfm';
+DROP TABLESPACE dfm;
+
+--test audit for set role/session rollback
+CREATE USER SET_SESSION_ROLLBACK_AUDIT PASSWORD 'GAUSS@123';
+START TRANSACTION;
+SET SESSION SESSION AUTHORIZATION SET_SESSION_ROLLBACK_AUDIT PASSWORD 'GAUSS@123';
+CREATE USER SET_SESSION_ROLLBACK_AUDIT_TABLE IDENTIFIED BY 'GAUSS@123';
+COMMIT;
+DROP USER SET_SESSION_ROLLBACK_AUDIT;
+
+create user test_drop_user password 'Gauss@123';
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_drop_user -W Gauss@123 -c "create table test_drop_user_tbl(id int);drop table test_drop_user_tbl;"
+drop user test_drop_user cascade;
+create user test_drop_user password 'Gauss@123';
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_drop_user -W Gauss@123 -c "create table test_drop_user_tbl(id int);drop table test_drop_user_tbl;"
+drop user test_drop_user cascade;
+create user test_drop_user password 'Gauss@123';
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_drop_user -W Gauss@123 -c "create table test_drop_user_tbl(id int);drop table test_drop_user_tbl;"
+drop user if exists test_drop_user cascade;
+create user test_drop_user password 'Gauss@123';
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_drop_user -W Gauss@123 -c "create table test_drop_user_tbl(id int);drop table test_drop_user_tbl;"
+drop user if exists test_drop_user cascade;
+
+REVOKE ALL on schema public FROM public;
+create role test_revoke_for_sysadmin login sysadmin password 'Gauss@123';
+clean connection to all check to user test_revoke_for_sysadmin;
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_revoke_for_sysadmin -W Gauss@123 -c "create table public.test_revoke_for_sysadmin_table(id int);drop table public.test_revoke_for_sysadmin_table;"
+drop role test_revoke_for_sysadmin;
+GRANT ALL on schema public TO public;
+
+--test set role/session error with wrong username or password
+create role wrong_role password 'Gauss@123';
+set role wrong_role password 'Gauss@1234';
+\! sleep 1
+set role null_role password 'Gauss@123';
+\! sleep 1
+set session authorization wrong_role password 'Gauss@1234';
+\! sleep 1
+set session authorization null_role password 'Gauss@123';
+\! sleep 1
+drop role wrong_role;
+
+--test nouser can alter set initial account
+create user alter_set_initial_user sysadmin password 'gauss@123';
+DECLARE C_USER VARCHAR(100);
+BEGIN
+EXECUTE IMMEDIATE 'select user' INTO C_USER;
+EXECUTE IMMEDIATE ('set role alter_set_initial_user password ''gauss@123'';');
+EXECUTE IMMEDIATE ('alter role '||quote_ident(C_USER)||' set session_timeout to ''5min'' ;');
+END;
+/
+reset role;
+drop user alter_set_initial_user;
+
+--test createrole can't change itself privileges.
+create user createrole_change_itself createrole password 'gauss@123';
+set role createrole_change_itself password 'gauss@123';
+alter user createrole_change_itself  VALID BEGIN '1111-11-11' VALID until '2222-12-12';
+reset role;
+drop user createrole_change_itself;
+--
+-- drop database
+--
+create database a1qazse4;
+\c a1qazse4;
+\! @gsqldir@/gsql -d postgres -p @portstring@ -c "drop database a1qazse4"
+\c postgres; 
+drop database a1qazse4;
+
+--
+-- test audit for new object
+--
+-- open the audit guc parameter.
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_system_object=8191" > /dev/null 2>&1
+select pg_sleep(1);
+
+--1¡¢audit for resouce pool and workload.
+select * from pg_delete_audit('1111-1-1','2222-2-2');
+create resource pool test_resourcepool_audit;
+create workload group test_workloadgroup_audit;
+alter workload group test_workloadgroup_audit using resource pool test_resourcepool_audit;
+drop workload group test_workloadgroup_audit;
+drop resource pool test_resourcepool_audit;
+select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name = 'test_resourcepool';
+select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name = 'test_workloadgroup';
+
+--2¡¢audit for app workload group mapping.
+select * from pg_delete_audit('1111-1-1','2222-2-2');
+create app workload group mapping test_appworkloadgroupmapping_audit;
+alter app workload group mapping test_appworkloadgroupmapping_audit with (workload_gpname='default_group');
+drop app workload group mapping test_appworkloadgroupmapping_audit;
+select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name = 'test_appworkloadgroupmapping';
+
+--3¡¢audit for server in hardoop
+select * from pg_delete_audit('1111-1-1','2222-2-2');
+create role temp_role password 'Gauss@123';
+create server test_serverforhardoop_audit foreign data wrapper hdfs_fdw options (address '10.10.0.100:25000', hdfscfgpath '/home/omm', type 'hdfs');
+--alter server test_serverforhardoop_audit options (add hdfscfgpath '/opt/hadoop');
+alter server test_serverforhardoop_audit owner to temp_role;
+alter server test_serverforhardoop_audit rename to test_serverforhardoop_audit1;
+drop server test_serverforhardoop_audit1;
+drop role temp_role;
+select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name LIKE 'test_serverforhardoop';
+
+--4 audit for data source 
+create data source ds_tst_102 options (encoding 'utf8', password 'Gs@123456', username 'gaussdb');
+alter data source ds_tst_102 type 'MPPDB';
+alter data source ds_tst_102 rename to ds_tst_104;
+create user ds_tst_user_101 identified by 'Gs@123456';
+alter user ds_tst_user_101 with sysadmin;
+alter data source ds_tst_104 owner to ds_tst_user_101;
+drop data source ds_tst_104;
+drop user ds_tst_user_101;
+select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where object_name='ds_tst_001';
+
+-- close the audit guc parameter.
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "audit_system_object=7" > /dev/null 2>&1
+select pg_sleep(1);
+
+create role nologin_privilege_role password 'Gauss@123';
+set role nologin_privilege_role password 'Gauss@123';
+create table stream_test(id int);
+insert into stream_test values(1),(2);
+drop table stream_test;
+reset role;
+drop role nologin_privilege_role;
+
+--ALTER SYSTEM KILL SESSION '123456789101213,0' IMMEDIATE;
+
+--select pg_stat_get_backend_pid(1);
+--select pg_stat_get_activity(123456789101112);
+
+create user sec_app_account_02_001_roleadmin with createrole identified by 'Gauss_234';
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U sec_app_account_02_001_roleadmin -W Gauss_234 -r -c "create user sec_app_account_02_001_testa identified by 'Gauss_234';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U sec_app_account_02_001_roleadmin -W Gauss_234 -r -c "drop user sec_app_account_02_001_testa;"
+drop user sec_app_account_02_001_roleadmin;
+
+--audit for set parameter operator.
+select * from pg_delete_audit('1111-1-1','2222-2-2');
+create user set_role_user password 'gauss@123';
+set role set_role_user password 'gauss@123';
+reset role;
+drop user set_role_user;
+select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where detail_info like '%set_role_user%';
+select * from pg_delete_audit('1111-1-1','2222-2-2');
+
+
+------------------------ TESTS FOR PGUSER ------------------------------------------- 
+/* These cases are for pguser option test in CreateUserStmt.
+ * A user created with pguser option will have a password stored in MD5 format.
+ */
+create user md5user_default		 with pguser password 'gauss@123';
+create user md5user_superuser 	 with pguser sysadmin password 'gauss@123';
+create user md5user_createdb 	 with pguser createdb password 'gauss@123';
+create user md5user_login 		 with pguser login password 'gauss@123';
+create user md5user_inherit 	 with pguser inherit password 'gauss@123';
+create user md5user_replication	 with pguser replication password 'gauss@123';
+create user md5user_auditadmin 	 with pguser auditadmin password 'gauss@123';
+create role md5role_default		 with pguser password 'gauss@123';
+create role md5role_superuser 	 with pguser sysadmin password 'gauss@123';
+create role md5role_createdb 	 with pguser createdb password 'gauss@123';
+create role md5role_login 		 with pguser login password 'gauss@123';
+create role md5role_inherit 	 with pguser inherit password 'gauss@123';
+create role md5role_replication	 with pguser replication password 'gauss@123';
+create role md5role_auditadmin	 with pguser auditadmin password 'gauss@123';
+
+-- Incorrect statements.
+create user md5error with pguser pguser password 'gauss@123';
+create role md5error with pguser pguser password 'gauss@123';
+
+-- some check.
+select usename, 
+	usecreatedb,
+	usesuper,
+	usecatupd,
+	userepl,
+	left(passwd, 3) = 'md5' as ismd5passwd,
+	valbegin, 
+	valuntil, 
+	respool from pg_user where usename ilike 'md5%' order by usename;
+
+select usename, 
+	usecreatedb, 
+	usesuper, 
+	usecatupd, 
+	userepl, 
+	left(passwd, 3) = 'md5' as ismd5passwd,
+	valbegin, 
+	valuntil, 
+	respool from pg_shadow where usename ilike 'md5%' order by usename;
+
+select rolname, 
+	rolsuper, 
+	rolinherit, 
+	rolcreaterole, 
+	rolcreatedb, 
+	rolcatupdate, 
+	rolcanlogin, 
+	rolreplication,
+	rolauditadmin, 
+	rolsystemadmin, 
+	rolconnlimit, 
+	rolpassword, 
+	rolvalidbegin, 
+	rolvaliduntil, 
+	rolrespool, 
+	rolconfig
+	from pg_roles where rolname ilike 'md5%' order by rolname;
+	
+select rolname    ,
+	rolsuper,
+	rolinherit,
+	rolcreaterole,
+	rolcreatedb,
+	rolcatupdate,
+	rolcanlogin,
+	rolreplication,
+	rolauditadmin,
+	rolsystemadmin,
+	rolconnlimit,
+	left(rolpassword, 3) = 'md5' as ismd5passwd,
+	rolvalidbegin,
+	rolvaliduntil,
+	rolrespool    
+	from pg_authid where rolname ilike 'md5%' order by rolname;
+
+
+-- Password can be changed by "PGUSER" itself.
+set role md5user_default password 'gauss@123';
+alter role md5user_default identified by 'gauss@123456' replace 'gauss@123';
+
+-- Reset the connection to user postgres
+\c
+-- Invalid password
+set role md5user_default password 'gauss@123';
+\c
+
+-- Login normal 
+set role md5user_default password 'gauss@123456';
+\c
+
+-- The password format of md5user_default should be "md5" still.
+select usename, 
+	usecreatedb,
+	usesuper,
+	usecatupd,
+	userepl,
+	left(passwd, 3) = 'md5' as ismd5passwd,
+	valbegin, 
+	valuntil, 
+	respool from pg_user where usename ilike 'md5%' order by usename;
+
+select usename, 
+	usecreatedb, 
+	usesuper, 
+	usecatupd, 
+	userepl, 
+	left(passwd, 3) = 'md5' as ismd5passwd,
+	valbegin, 
+	valuntil, 
+	respool from pg_shadow where usename ilike 'md5%' order by usename;
+
+select rolname, 
+	rolsuper, 
+	rolinherit, 
+	rolcreaterole, 
+	rolcreatedb, 
+	rolcatupdate, 
+	rolcanlogin, 
+	rolreplication,
+	rolauditadmin, 
+	rolsystemadmin, 
+	rolconnlimit, 
+	rolpassword, 
+	rolvalidbegin, 
+	rolvaliduntil, 
+	rolrespool, 
+	rolconfig
+	from pg_roles where rolname ilike 'md5%' order by rolname;
+	
+select rolname    ,
+	rolsuper,
+	rolinherit,
+	rolcreaterole,
+	rolcreatedb,
+	rolcatupdate,
+	rolcanlogin,
+	rolreplication,
+	rolauditadmin,
+	rolsystemadmin,
+	rolconnlimit,
+	left(rolpassword, 3) = 'md5' as ismd5passwd,
+	rolvalidbegin,
+	rolvaliduntil,
+	rolrespool    
+	from pg_authid where rolname ilike 'md5%' order by rolname;
+
+-- Clean
+drop user md5user_default cascade;
+drop user md5user_superuser cascade;
+drop user md5user_createdb cascade;
+drop user md5user_login cascade;
+drop user md5user_inherit cascade;
+drop user md5user_replication cascade;
+drop user md5user_auditadmin cascade;
+drop role md5role_default ;
+drop role md5role_superuser ;
+drop role md5role_createdb ;
+drop role md5role_login ;
+drop role md5role_inherit ;
+drop role md5role_replication ;
+drop role md5role_auditadmin ;
+
+--audit for set parameter operator.
+select * from pg_delete_audit('1111-1-1','2222-2-2');
+create user set_role_user password 'gauss@123';
+set role set_role_user password 'gauss@123';
+reset role;
+drop user set_role_user;
+select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where detail_info like '%set_role_user%';
+select * from pg_delete_audit('1111-1-1','2222-2-2');
+
+create user test_rename_user password 'gauss@123';
+\! @abs_bindir@/gsql -d postgres -U test_rename_user -W gauss@123 -p @portstring@ -r -c "create table rename_test(id int);"
+\! @abs_bindir@/gsql -d postgres -U test_rename_user -W gauss@123 -p @portstring@ -r -c "table rename_test;"
+alter user test_rename_user rename to test_rename_user2;
+\! @abs_bindir@/gsql -d postgres -U test_rename_user2 -W gauss@123 -p @portstring@ -r -c "table rename_test;"
+\! @abs_bindir@/gsql -d postgres -U test_rename_user2 -W gauss@123 -p @portstring@ -r -c "alter user test_rename_user2 identified by 'gauss@234' replace 'gauss@123';"
+drop user test_rename_user2 cascade;
+drop user if exists test_rename_user;
+
+\! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -c "create user user01 password 'gauss@123';"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -c "create user user02 password 'gauss@123';"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -U user01 -W 'gauss@123' -c "set role user03;"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -U user01 -W 'gauss@123' -c "set role user02;"
+drop user user01;
+drop user user02;
+\! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -c "create user current_user01 password 'gauss@123';"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -c "create user current_user02 password 'gauss@123';"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -U current_user01 -W 'gauss@123' -c "drop user current_user02;"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -U current_user01 -W 'gauss@123' -c "drop user current_user03;"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -U current_user01 -W 'gauss@123' -c "alter user current_user02 sysadmin;"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@ -r -U current_user01 -W 'gauss@123' -c "alter user current_user03 sysadmin;"
+drop user current_user01;
+drop user current_user02;
+
+/*-----------------------------------------------------------------
+		test alter user with pguser (DTS2017031606532)
+-----------------------------------------------------------------*/
+create or replace function isMD5(pwd text) returns bool as $$ begin return left(pwd, 3) = 'md5'; end; $$ language plpgsql;
+
+--alter with admin
+create user md5user_default with password 'Gauss@123';
+create role md5role_default with password 'Gauss@123';
+alter user md5user_default with pguser;	--error
+alter role md5role_default with pguser;	--error
+alter user md5user_default with pguser password 'Gauss@1234';
+alter role md5role_default with pguser password 'Gauss@1234';
+alter user md5user_default with pguser;	--OK
+alter role md5role_default with pguser;	--OK
+select usename, isMD5(passwd) from pg_shadow where usename ilike 'md5%' order by usename;	--md5 now
+select rolname, isMD5(rolpassword) from pg_authid where rolname ilike 'md5%' order by rolname;	--md5 now
+alter user md5user_default with password 'Gauss@12345';
+alter role md5role_default with password 'Gauss@12345';
+select usename, isMD5(passwd) from pg_shadow where usename ilike 'md5%' order by usename;	--md5 still
+select rolname, isMD5(rolpassword) from pg_authid where rolname ilike 'md5%' order by rolname;	--md5 still
+drop user md5user_default;
+drop role md5role_default;
+
+--alter by userself
+create user md5user_default with password 'Gauss@12345';
+set role md5user_default password 'Gauss@12345';
+alter user md5user_default with pguser;	--error
+alter user md5user_default with pguser identified by 'Gauss@123456' replace 'Gauss@12344'; --invalid password;
+alter user md5user_default with pguser identified by 'Gauss@123456' replace 'Gauss@12345'; --OK
+
+\c
+select usename, isMD5(passwd) from pg_shadow where usename ilike 'md5%' order by usename;	--md5 now
+select rolname, isMD5(rolpassword) from pg_authid where rolname ilike 'md5%' order by rolname;	--md5 now
+set role md5user_default password 'Gauss@123456';
+alter user md5user_default with pguser;	--OK
+alter user md5user_default identified by 'Gauss@123456' replace 'Gauss@12344'; --invalid password;
+alter user md5user_default identified by 'Gauss@1234567' replace 'Gauss@123456'; --OK
+\c
+select usename, isMD5(passwd) from pg_shadow where usename ilike 'md5%' order by usename;	--md5 still
+select rolname, isMD5(rolpassword) from pg_authid where rolname ilike 'md5%' order by rolname;	--md5 still
+drop user md5user_default cascade;
+drop function isMD5;
+
+create user test_createrole_lock_cr with createrole password "Gauss_234";
+create user test_createrole_lock_sys with sysadmin password "Gauss_234";
+create user test_createrole_lock_audit with auditadmin password "Gauss_234";
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_createrole_lock_cr -W Gauss_234 -c "Alter user test_createrole_lock_sys account lock;"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_createrole_lock_cr -W Gauss_234 -c "Alter user test_createrole_lock_audit account lock;"
+drop user test_createrole_lock_cr;
+drop user test_createrole_lock_sys;
+drop user test_createrole_lock_audit;
+\h create user
+\h create role
+\h alter user
+\h alter role
+\h create group
+
+-- Test PG system functions by normal user
+create user test_normal_user password 'Gauss@123';
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Gauss@123 -c "select * from pg_ls_dir('./');"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Gauss@123 -c "select * from pg_read_file('tmp.txt');"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Gauss@123 -c "select * from pg_read_file('tmp.txt', 2, 9);"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Gauss@123 -c "select * from pg_read_binary_file('tmp.txt');"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Gauss@123 -c "select * from pg_stat_file('tmp.txt');"
+\! @abs_bindir@/gsql  -d postgres -p @portstring@  -U test_normal_user -W Gauss@123 -c "select * from pg_stat_file_recursive('tmp.txt');"
+drop user test_normal_user cascade;
+-- End Test PG system functions
+
+--Test client ecological compatibility with PG
+create user md5_compatible_user1 with pguser password 'gauss@123';
+create user md5_compatible_user2 password 'md529c2b5b4676f802b4e20e393024e280a';
+create user normal_compatible_user1 password 'gauss@123';
+create user normal_compatible_user2 password 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
+select length(rolpassword) from pg_authid where rolname = 'md5_compatible_user1';
+select length(rolpassword) from pg_authid where rolname = 'md5_compatible_user2';
+select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user1';
+select length(rolpassword) from pg_authid where rolname = 'normal_compatible_user2';
+set role md5_compatible_user1 password 'gauss@123';
+reset role;
+set role md5_compatible_user2 password 'gauss@123';
+reset role;
+set role md5_compatible_user2 password 'md529c2b5b4676f802b4e20e393024e280a';
+alter role md5_compatible_user2 identified by 'md529c2b5b4676f802b4e20e393024e280a' replace 'gauss@123';
+alter role md5_compatible_user2 identified by 'Gauss@123' replace 'md529c2b5b4676f802b4e20e393024e280a';
+alter role md5_compatible_user2 identified by 'Gauss@123' replace 'gauss@123';
+reset role;
+set role normal_compatible_user1 password 'gauss@123';
+reset role;
+set role normal_compatible_user2 password 'gauss@123';
+reset role;
+set role normal_compatible_user2 password 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
+alter role normal_compatible_user2 identified by 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c' replace 'gauss@123';
+alter role normal_compatible_user2 identified by 'Gauss@123' replace 'sha25653c72feddf77df9a38f48724531cf74be113f35eaa5c944275d634ed6b4e1225c7d8e77a413478827aadb9632a30a23c18d1c0ed6a82c6c7384acc59439387069dece15b293836a1796a6c5bb1e86d769ecad3a32b42303836ba44da853eea59md5a518c1e222bc618c225a95695b75736c';
+alter role normal_compatible_user2 identified by 'Gauss@123' replace 'gauss@123';
+reset role;
+
+drop user md5_compatible_user1;
+drop user md5_compatible_user2;
+drop user normal_compatible_user1;
+drop user normal_compatible_user2;
+
+--The supported special character of password are: ~!@#$%^&*()-_=+\\|[{}];:,<.>/?
+create role special_character_password_role password 'gauss""123';
+drop role special_character_password_role; 
+
+--test create table for non-eixt/invalid/available schema
+
+create user schematest_user1 password 'Gauss_234';
+create schema schematest_schema_1;
+set current_schema=schematest_schema_1;
+create table schematest_tbtest(a int); drop table schematest_schema_1.schematest_tbtest;
+create table schematest_schema_1.schematest_tbtest(a int);  drop table schematest_schema_1.schematest_tbtest;
+
+set current_schema=schema_no_exit;
+create table schematest_tbtest(a int);
+create table schema_no_exit.schematest_tbtest(a int);
+
+set current_schema=schema_no_exit,schematest_schema_1;
+create table schematest_tbtest(a int); drop table schematest_schema_1.schematest_tbtest;
+
+set role schematest_user1 password "Gauss_234";
+set current_schema=schematest_schema_1;
+create table schematest_tbtest(a int);
+create table schematest_schema_1.schematest_tbtest(a int);
+
+set current_schema=schema_no_exit;
+create table schematest_tbtest(a int);
+create table schema_no_exit.schematest_tbtest(a int);
+
+set current_schema=schematest_schema_1,schema_no_exit;
+create table schematest_tbtest(a int);
+
+set current_schema=schematest_schema_1,schematest_user1;
+create table schematest_tbtest(a int);
+drop table schematest_tbtest;
+reset role;
+
+drop user if exists  schematest_user1;
+drop schema schematest_schema_1;
+
+--test disable gram for iam authenication
+create user iam_auth_user01 password disable;
+create user iam_auth_user02 identified by disable;
+alter user iam_auth_user01 password 'gauss@123';
+alter user iam_auth_user02 identified by 'gauss@123';
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user01 -W gauss@123 -c "alter user iam_auth_user01 password disable;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user02 -W gauss@123 -c "alter user iam_auth_user02 identified by disable;"
+alter user iam_auth_user01 password disable;
+alter user iam_auth_user02 identified by disable;
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user01 -W gauss@123 -c "\q"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U iam_auth_user02 -W gauss@123 -c "\q"
+alter user iam_auth_user01 password 'gauss@234';
+alter user iam_auth_user02 identified by 'gauss@234' replace 'gauss@34';
+drop user iam_auth_user01;
+drop user iam_auth_user02;

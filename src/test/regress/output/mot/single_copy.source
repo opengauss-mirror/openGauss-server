@@ -20,8 +20,8 @@ select * from test;
  10 | 10
 (10 rows)
 
-copy (select * from test) to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test.csv' DELIMITER ',';
-copy test2 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test.csv' DELIMITER ',';
+copy (select * from test) to '@abs_builddir@/results/test.csv' DELIMITER ',';
+copy test2 from '@abs_builddir@/results/test.csv' DELIMITER ',';
 select * from test2;
  x  | y  
 ----+----

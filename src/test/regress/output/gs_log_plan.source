@@ -1,0 +1,8 @@
+\o /dev/null
+call gs_create_log_tables();
+explain (analyze on)  select filename,logtime,msg from gs_pg_log_ft;
+explain (analyze on,format json)  select filename,logtime,msg from gs_pg_log_ft;
+explain (analyze on ,detail on,format json)  select filename,logtime,msg from gs_pg_log_ft;
+set explain_perf_mode='pretty';
+explain (analyze on,format text)  select filename,logtime,msg from gs_pg_log_ft;
+explain (analyze on ,detail on,format text)  select filename,logtime,msg from gs_pg_log_ft;

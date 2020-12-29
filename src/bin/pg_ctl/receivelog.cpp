@@ -726,7 +726,7 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
                 pg_log(PG_WARNING, _(" keepalive message is incorrect size: %d\n"), r);
                 goto error;
             }
-            pg_log(PG_PRINT, _(" keepalive message is received\n"));
+            pg_log(PG_DEBUG, _(" keepalive message is received\n"));
             /* copy the received buffer to keepalive */
             ret = memcpy_s(&keepalive, sizeof(PrimaryKeepaliveMessage), copybuf + 1, sizeof(PrimaryKeepaliveMessage));
             securec_check(ret, "\0", "\0");

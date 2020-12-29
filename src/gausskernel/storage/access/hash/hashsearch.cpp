@@ -66,7 +66,7 @@ bool _hash_next(IndexScanDesc scan, ScanDirection dir)
 /*
  * Advance to next page in a bucket, if any.
  */
-static void _hash_readnext(Relation rel, Buffer* bufp, Page* pagep, HashPageOpaque* opaquep)
+static void _hash_readnext(Relation rel, Buffer *bufp, Page *pagep, HashPageOpaque *opaquep)
 {
     BlockNumber blkno;
 
@@ -85,7 +85,7 @@ static void _hash_readnext(Relation rel, Buffer* bufp, Page* pagep, HashPageOpaq
 /*
  * Advance to previous page in a bucket, if any.
  */
-static void _hash_readprev(Relation rel, Buffer* bufp, Page* pagep, HashPageOpaque* opaquep)
+static void _hash_readprev(Relation rel, Buffer *bufp, Page *pagep, HashPageOpaque *opaquep)
 {
     BlockNumber blkno;
 
@@ -139,8 +139,8 @@ bool _hash_first(IndexScanDesc scan, ScanDirection dir)
      * to lock all the buckets against splits or compactions.
      */
     if (scan->numberOfKeys < 1)
-        ereport(
-            ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("hash indexes do not support whole-index scans")));
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("hash indexes do not support whole-index scans")));
 
     /* There may be more than one index qual, but we hash only the first */
     cur = &scan->keyData[0];
@@ -243,7 +243,7 @@ bool _hash_first(IndexScanDesc scan, ScanDirection dir)
  *		On success exit, we have pin and read-lock on whichever page
  *		contains the right item; on failure, we have released all buffers.
  */
-bool _hash_step(IndexScanDesc scan, Buffer* bufP, ScanDirection dir)
+bool _hash_step(IndexScanDesc scan, Buffer *bufP, ScanDirection dir)
 {
     Relation rel = scan->indexRelation;
     HashScanOpaque so = (HashScanOpaque)scan->opaque;

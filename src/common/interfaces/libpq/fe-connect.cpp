@@ -23,6 +23,9 @@
 #include "fe-auth.h"
 #include "pg_config_paths.h"
 #include "utils/syscall_lock.h"
+#ifdef HAVE_CE
+#include "client_logic_cache/icached_column_manager.h"
+#endif /* HAVE_CE */
 
 #ifndef WIN32
 #ifndef _GNU_SOURCE
@@ -94,19 +97,6 @@ static int ldapServiceLookup(const char* purl, PQconninfoOption* options, PQExpB
 #endif
 #endif
 
-// support sctp
-#ifndef SOL_SCTP
-#define SOL_SCTP 132
-#endif
-
-#ifndef SCTP_NODELAY
-#define SCTP_NODELAY 3
-#endif
-
-#ifndef IPPROTO_SCTP
-#define IPPROTO_SCTP 132
-#endif
-
 extern const char* libpqVersionString;
 
 /*
@@ -118,8 +108,14 @@ extern const char* libpqVersionString;
 #define ERRCODE_APPNAME_UNKNOWN "42704"
 
 /* This is part of the protocol so just define it */
+#ifdef ERRCODE_INVALID_PASSWORD
+#undef ERRCODE_INVALID_PASSWORD
+#endif
 #define ERRCODE_INVALID_PASSWORD "28P01"
 /* This too */
+#ifdef ERRCODE_CANNOT_CONNECT_NOW
+#undef ERRCODE_CANNOT_CONNECT_NOW
+#endif
 #define ERRCODE_CANNOT_CONNECT_NOW "57P03"
 
 /*
@@ -136,7 +132,7 @@ extern const char* libpqVersionString;
 #else
 #define DefaultSSLMode "disable"
 #endif
-char* sctp_link_addr = NULL;
+char* tcp_link_addr = NULL;
 THR_LOCAL bool comm_client_bind = false;
 THR_LOCAL volatile Oid* libpq_wait_nodeid = NULL;
 THR_LOCAL volatile int* libpq_wait_nodecount = NULL;
@@ -256,6 +252,7 @@ static const PQconninfoOption PQconninfoOptions[] = {
     {"replication", NULL, NULL, NULL, "Replication", "D", 5, 0},
     {"backend_version", NULL, NULL, NULL, "Backend-version", "D", 10, 0},
     {"prototype", NULL, "1", NULL, "Prototype", "", 2, 0},
+    {"enable_ce", NULL, NULL, NULL, "Enable Client Encryption", "D", 1, 0},
 
     /* Connection_info is a json string containing driver_name, driver_version, driver_path and os_user.
      * If connection_info is not NULL, use connection_info and ignore the value of connectionExtraInfo.
@@ -372,8 +369,18 @@ PGconn* PQconnectdbParams(const char* const* keywords, const char* const* values
     PGconn* conn = PQconnectStartParams(keywords, values, expand_dbname);
 
     if ((conn != NULL) && conn->status != CONNECTION_BAD) {
+
+#ifdef HAVE_CE
+        const char *role = (conn->pguser != NULL) ? conn->pguser : "";
+        conn->client_logic->gucParams.role = role;
+        if (connectDBComplete(conn) == 1 && conn->client_logic->enable_client_encryption) {
+            ICachedColumnManager::get_instance().load_cache(conn);
+        }
+#else
         (void)connectDBComplete(conn);
-        if (conn->replication == NULL || conn->replication[0] == '\0') {
+#endif
+
+        if (conn->replication == NULL || (conn->replication[0] == '\0')) {
             (void)connectSetConninfo(conn);
         }
     }
@@ -424,8 +431,15 @@ PGconn* PQconnectdb(const char* conninfo)
 {
     PGconn* conn = PQconnectStart(conninfo);
 
-    if ((conn != NULL) && conn->status != CONNECTION_BAD)
+    if ((conn != NULL) && conn->status != CONNECTION_BAD) {
+#ifdef HAVE_CE
+        if (connectDBComplete(conn) == 1 && conn->client_logic->enable_client_encryption) {
+            ICachedColumnManager::get_instance().load_cache(conn);
+        }
+#else
         (void)connectDBComplete(conn);
+#endif
+    }
 
     return conn;
 }
@@ -444,9 +458,8 @@ void PQSetFinTime(time_t* fin_times, PGconn* conn)
             /*
              * Rounding could cause connection to fail; need at least 2 secs
              */
-            if (timeout < 2) {
+            if (timeout < 2)
                 timeout = 2;
-            }
 
             /* calculate the finish time based on start + timeout */
             *fin_times = time(NULL) + timeout;
@@ -547,9 +560,8 @@ int PQconnectdbParallel(char const* const* conninfo, int count, PGconn* conn[], 
                 /*
                  * Rounding could cause connection to fail; need at least 2 secs
                  */
-                if (connect_timeout < 2) {
+                if (connect_timeout < 2)
                     connect_timeout = 2;
-                }
 
                 /* Set up max retry count, 2 secs for a retry. */
                 retry_cnt[i] = connect_timeout / timeout;
@@ -565,7 +577,7 @@ int PQconnectdbParallel(char const* const* conninfo, int count, PGconn* conn[], 
     i = 0;
     while (conn_done < count) {
         Oid tmp_nodeid = nodeid[i];
-        if (con_stat[i] == CONNECTION_STARTED) {
+        if (CONNECTION_STARTED == con_stat[i]) {
             /*
              * Wait, if necessary.	Note that the initial state (just after
              * PQconnectStart) is to wait for the socket to select for writing.
@@ -765,12 +777,12 @@ char* PQbuildPGconn(const char* conninfo, PGconn** connPtr, int* packetlen)
         conn->wait_ssl_try = true;
 #endif
 
-    /* Whenever change the authenication process, change the version here for compatible. */
+    /* Whenever change the authenication process, change the version here for compatible.*/
     conn->pversion = PG_PROTOCOL(3, 51);
     conn->send_appname = true;
     conn->status = CONNECTION_NEEDED;
 
-    /* Build the startup packet */
+    /* Build the startup packet*/
     if (PG_PROTOCOL_MAJOR(conn->pversion) >= 3)
         startpacket = pqBuildStartupPacket3(conn, packetlen, EnvironmentOptions);
     else
@@ -923,16 +935,6 @@ static void fillPGconn(PGconn* conn, PQconninfoOption* connOptions)
     tmp = conninfo_getval(connOptions, "fencedUdfRPCMode");
     conn->fencedUdfRPCMode = (tmp != NULL) ? true : false;
 
-    tmp = conninfo_getval(connOptions, "prototype");  // 1: tcp, 2:sctp
-    if (tmp != NULL) {
-        if (strcmp("2", tmp) == 0) {
-            conn->sctp_flag = true;
-        } else {
-            conn->sctp_flag = false;
-        }
-    } else
-        conn->sctp_flag = false;
-
     tmp = conninfo_getval(connOptions, "connection_info");
     conn->connection_info = tmp ? strdup(tmp) : NULL;
 
@@ -944,6 +946,10 @@ static void fillPGconn(PGconn* conn, PQconninfoOption* connOptions)
         else
             conn->connection_extra_info = true;
     }
+#ifdef HAVE_CE
+    tmp = conninfo_getval(connOptions, "enable_ce");
+    conn->client_logic->enable_client_encryption = (tmp != NULL) ? true : false;
+#endif
 }
 
 /*
@@ -1228,9 +1234,15 @@ PGconn* PQsetdbLogin(const char* pghost, const char* pgport, const char* pgoptio
     /*
      * Connect to the database
      */
-    if (connectDBStart(conn))
+    if (connectDBStart(conn)) {
+#ifdef HAVE_CE
+        if (connectDBComplete(conn) == 1 && conn->client_logic->enable_client_encryption) {
+            ICachedColumnManager::get_instance().load_cache(conn);
+        }
+#else
         (void)connectDBComplete(conn);
-
+#endif
+    }
     return conn;
 }
 
@@ -1305,9 +1317,9 @@ static void connectFailureMessage(PGconn* conn, int errorno)
                 rcs = strcpy_s(host_addr, NI_MAXHOST, "???");
         }
 #endif
-        else
+        else {
             rcs = strcpy_s(host_addr, NI_MAXHOST, "???");
-
+        }
         securec_check_c(rcs, "\0", "\0");
 
         if (conn->pghostaddr != NULL && conn->pghostaddr[0] != '\0')
@@ -1352,13 +1364,11 @@ static int useKeepalives(PGconn* conn)
     char* ep = NULL;
     int val;
 
-    if (conn->keepalives == NULL) {
+    if (conn->keepalives == NULL)
         return 1;
-    }
     val = strtol(conn->keepalives, &ep, 10);
-    if (*ep) {
+    if (*ep)
         return -1;
-    }
     return val != 0 ? 1 : 0;
 }
 
@@ -1374,9 +1384,8 @@ static int setKeepalivesIdle(PGconn* conn)
         return 1;
 
     idle = atoi(conn->keepalives_idle);
-    if (idle < 0) {
+    if (idle < 0)
         idle = 0;
-    }
 
 #ifdef TCP_KEEPIDLE
     if (setsockopt(conn->sock, IPPROTO_TCP, TCP_KEEPIDLE, (char*)&idle, sizeof(idle)) < 0) {
@@ -1415,9 +1424,8 @@ static int setKeepalivesInterval(PGconn* conn)
         return 1;
 
     interval = atoi(conn->keepalives_interval);
-    if (interval < 0) {
+    if (interval < 0)
         interval = 0;
-    }
 
 #ifdef TCP_KEEPINTVL
     if (setsockopt(conn->sock, IPPROTO_TCP, TCP_KEEPINTVL, (char*)&interval, sizeof(interval)) < 0) {
@@ -1445,9 +1453,8 @@ static int setKeepalivesCount(PGconn* conn)
         return 1;
 
     count = atoi(conn->keepalives_count);
-    if (count < 0) {
+    if (count < 0)
         count = 0;
-    }
 
 #ifdef TCP_KEEPCNT
     if (setsockopt(conn->sock, IPPROTO_TCP, TCP_KEEPCNT, (char*)&count, sizeof(count)) < 0) {
@@ -1618,7 +1625,7 @@ static int connectDBStart(PGconn* conn)
     conn->addr_cur = addrs;
     conn->addrlist_family = hint.ai_family;
 
-    /* Whenever change the authenication process, change the version here for compatible. */
+    /* Whenever change the authenication process, change the version here for compatible.*/
     conn->pversion = PG_PROTOCOL(3, 51);
     conn->send_appname = true;
     conn->status = CONNECTION_NEEDED;
@@ -1668,14 +1675,12 @@ static int connectDBComplete(PGconn* conn)
             /*
              * Rounding could cause connection to fail; need at least 2 secs
              */
-            if (timeout < 2) {
+            if (timeout < 2)
                 timeout = 2;
-            }
             /* calculate the finish time based on start + timeout */
             finish_time = time(NULL) + timeout;
         }
     }
-
     for (;;) {
         /*
          * Wait, if necessary.	Note that the initial state (just after
@@ -1748,8 +1753,9 @@ static void PQgetLibpath(char* libpath, int libpathLen)
                 libpath[libpathIndex++] = '\'';
             } else if ((fname[fnameIndex] == '"') || (fname[fnameIndex] == '\\')) {
                 libpath[libpathIndex++] = '\\';
+            } else {
+                libpath[libpathIndex++] = fname[fnameIndex++];
             }
-            libpath[libpathIndex++] = fname[fnameIndex++];
         }
         libpath[libpathIndex] = '\0';
     } else
@@ -1928,11 +1934,7 @@ keep_going: /* We will come back to here until there is
                 conn->raddr.salen = addr_cur->ai_addrlen;
 
                 /* Open a socket */
-                if (conn->sctp_flag) {
-                    conn->sock = socket(addr_cur->ai_family, SOCK_STREAM, IPPROTO_SCTP);
-                } else {
-                    conn->sock = socket(addr_cur->ai_family, SOCK_STREAM, 0);
-                }
+                conn->sock = socket(addr_cur->ai_family, SOCK_STREAM, 0);
                 if (conn->sock < 0) {
                     /*
                      * ignore socket() failure if we have more addresses
@@ -1953,23 +1955,11 @@ keep_going: /* We will come back to here until there is
                  * TCP sockets, nonblock mode, close-on-exec. Fail if any
                  * of this fails.
                  */
-                if (!IS_AF_UNIX(addr_cur->ai_family)) {
-                    if (!conn->sctp_flag) {
-                        if (!connectNoDelay(conn)) {
-                            closesocket(conn->sock);
-                            conn->sock = -1;
-                            conn->addr_cur = addr_cur->ai_next;
-                            continue;
-                        }
-                    } else {
-                        int on = 1;
-                        if (setsockopt(conn->sock, SOL_SCTP, SCTP_NODELAY, (char*)&on, sizeof(on)) != 0) {
-                            closesocket(conn->sock);
-                            conn->sock = -1;
-                            conn->addr_cur = addr_cur->ai_next;
-                            continue;
-                        }
-                    }
+                if (!IS_AF_UNIX(addr_cur->ai_family) && !connectNoDelay(conn)) {
+                    closesocket(conn->sock);
+                    conn->sock = -1;
+                    conn->addr_cur = addr_cur->ai_next;
+                    continue;
                 }
                 if (
 #ifndef WIN32
@@ -1997,7 +1987,7 @@ keep_going: /* We will come back to here until there is
                 }
 #endif /* F_SETFD */
 
-                if ((!IS_AF_UNIX(addr_cur->ai_family)) && (!(conn->sctp_flag))) {
+                if (!IS_AF_UNIX(addr_cur->ai_family)) {
 #ifndef WIN32
                     int on = 1;
 #endif
@@ -2093,19 +2083,12 @@ keep_going: /* We will come back to here until there is
                         continue;
                     }
                 }
-
-                /*
-                 * It must bind localhost before connect on sctp mode.
-                 * Random_Port_Reuse must not use bind interface on tcp mode,
-                 * because socket owns a random port private when used bind interface.
-                 * SO_REUSEPORT solve this problem in kernel 3.9, we can not use it now.
-                 * when sctp_flag or comm_client_bind is true, client use bind.
-                 */
-                 char *bind_addr = sctp_link_addr;
-                 if (!IS_AF_UNIX(addr_cur->ai_family)
-                        && (conn->sctp_flag || comm_client_bind)
-                        && bind_addr != NULL
-                        && strcmp(bind_addr, "0.0.0.0") != 0) {
+                
+                char *bind_addr = tcp_link_addr;
+                if (!IS_AF_UNIX(addr_cur->ai_family)
+                    && comm_client_bind
+                    && bind_addr != NULL
+                    && strcmp(bind_addr, "0.0.0.0") != 0) {
                     struct addrinfo* addr = NULL;
                     struct addrinfo hint;
                     int ret;
@@ -2122,7 +2105,7 @@ keep_going: /* We will come back to here until there is
                             libpq_gettext("could not translate host name: %s, please check "
                                           "local_bind_address:\"%s\" and pglocalhost:\"%s\"!\n"),
                             gai_strerror(ret),
-                            sctp_link_addr,
+                            tcp_link_addr,
                             conn->pglocalhost);
                         if (addr != NULL)
                             pg_freeaddrinfo_all(hint.ai_family, addr);
@@ -2144,10 +2127,7 @@ keep_going: /* We will come back to here until there is
 #ifdef WIN32
                             Sleep(1000);
 #else
-                            struct timespec ts;
-                            ts.tv_sec = 1;
-                            ts.tv_nsec = 0;
-                            (void)nanosleep(&ts, NULL);
+                            (void)usleep(1000000L);
 #endif
                             continue;
                         } else
@@ -2374,8 +2354,10 @@ keep_going: /* We will come back to here until there is
                 conn->allow_ssl_try = false;
             }
             /* We only try SSL in outer connection, inner connection will not use SSL */
-            if ((0 == *conn->pgoptions || strstr(conn->pgoptions, "remotetype") == NULL) &&
-                conn->allow_ssl_try && !conn->wait_ssl_try && conn->ssl == NULL) {
+            if ((*conn->pgoptions == 0 || (strstr(conn->pgoptions, "remotetype") == NULL)) &&
+                conn->allow_ssl_try && !conn->wait_ssl_try && conn->ssl == NULL)
+
+            {
                 ProtocolVersion pv;
 
                 /*
@@ -2832,10 +2814,11 @@ keep_going: /* We will come back to here until there is
                     }
                 }
 #ifdef WIN32
-                if (pqGetnchar((char*)conn->ginbuf.value, llen, conn)) {
+                if (pqGetnchar((char*)conn->ginbuf.value, llen, conn))
 #else
-                if (pqGetnchar((char*)conn->ginbuf.value, llen, conn)) {
+                if (pqGetnchar((char*)conn->ginbuf.value, llen, conn))
 #endif
+                {
                     /* We'll come back when there is more data. */
                     return PGRES_POLLING_READING;
                 }
@@ -3129,7 +3112,6 @@ static PGconn* makeEmptyPGconn(void)
     conn->xactStatus = PQTRANS_IDLE;
     conn->options_valid = false;
     conn->nonblocking = false;
-    conn->sctp_flag = false;
     conn->setenv_state = SETENV_STATE_IDLE;
     conn->client_encoding = PG_SQL_ASCII;
     conn->std_strings = false; /* unless server says differently */
@@ -3143,6 +3125,9 @@ static PGconn* makeEmptyPGconn(void)
     conn->wait_ssl_try = false;
 #endif
     conn->is_logic_conn = false;
+#ifdef HAVE_CE
+    conn->client_logic = new PGClientLogic(conn);
+#endif // HAVE_CE
 
     /*
      * We try to send at least 8K at a time, which is the usual size of pipe
@@ -3244,6 +3229,12 @@ void freePGconn(PGconn* conn)
     libpq_free(conn->connection_info);
     termPQExpBuffer(&conn->errorMessage);
     termPQExpBuffer(&conn->workBuffer);
+#ifdef HAVE_CE
+    if (conn && conn->client_logic) {
+        delete conn->client_logic;
+        conn->client_logic = NULL;
+    }
+#endif
 
     libpq_free(conn);
 
@@ -3397,7 +3388,7 @@ void PQreset(PGconn* conn)
 
             /* reset connection_info */
             if ((conn != NULL) && conn->status != CONNECTION_BAD &&
-                (conn->replication == NULL || (conn->replication != NULL && conn->replication[0] == '\0'))) {
+                (conn->replication == NULL || conn->replication[0] == '\0')) {
                 (void)connectSetConninfo(conn);
             }
         }
@@ -3494,7 +3485,6 @@ void PQfreeCancel(PGcancel* cancel)
     libpq_free(cancel);
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 /*
  * attempt to request stop of the
  * current query, stop the query asap.
@@ -3522,8 +3512,8 @@ static int internal_stop(SockAddr* raddr, int be_pid, char* errbuf, int errbufsi
     if ((tmpsock = socket(raddr->addr.ss_family, SOCK_STREAM, 0)) < 0) {
         check_sprintf_s(
             snprintf_truncated_s(errbuf,errbufsize,
-                                 "internal_stop() -- socket() failed: errno: %s",
-                                 strerror(errno)));
+            "internal_stop() -- socket() failed: errno: %s",
+            strerror(errno)));
         goto stop_errReturn;
     }
 
@@ -3531,8 +3521,8 @@ static int internal_stop(SockAddr* raddr, int be_pid, char* errbuf, int errbufsi
     if (fcntl(tmpsock, F_SETFD, FD_CLOEXEC) == -1) {
         check_sprintf_s(
             snprintf_truncated_s(errbuf,errbufsize,
-                                 "internal_stop() -- setsockopt(FD_CLOEXEC) failed: errno: %s",
-                                 strerror(errno)));
+            "internal_stop() -- setsockopt(FD_CLOEXEC) failed: errno: %s",
+            strerror(errno)));
         goto stop_errReturn;
     }
 #endif /* F_SETFD */
@@ -3542,8 +3532,8 @@ static int internal_stop(SockAddr* raddr, int be_pid, char* errbuf, int errbufsi
         if (setsockopt(tmpsock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, len) < 0) {
             check_sprintf_s(
                 snprintf_truncated_s(errbuf,errbufsize,
-                                     "internal_stop() -- setsockopt(SO_SNDTIMEO) failed: errno: %s",
-                                     strerror(errno)));
+                "internal_stop() -- setsockopt(SO_SNDTIMEO) failed: errno: %s",
+                strerror(errno)));
             goto stop_errReturn;
         }
 
@@ -3551,8 +3541,8 @@ static int internal_stop(SockAddr* raddr, int be_pid, char* errbuf, int errbufsi
         if (setsockopt(tmpsock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, len) < 0) {
             check_sprintf_s(
                 snprintf_truncated_s(errbuf,errbufsize,
-                                     "internal_stop() -- setsockopt(SO_RCVTIMEO) failed: errno: %s",
-                                     strerror(errno)));
+                "internal_stop() -- setsockopt(SO_RCVTIMEO) failed: errno: %s",
+                strerror(errno)));
             goto stop_errReturn;
         }
     }
@@ -3567,13 +3557,13 @@ retry3:
             /* connection timeout */
             check_sprintf_s(
             snprintf_truncated_s(errbuf,errbufsize,
-                                 "internal_stop() -- connect() timeout, failed: errno: %s",
-                                 strerror(errno)));
+            "internal_stop() -- connect() timeout, failed: errno: %s",
+            strerror(errno)));
         } else {
             check_sprintf_s(
                 snprintf_truncated_s(errbuf,errbufsize,
-                                     "internal_stop() -- connect() failed: errno: %s",
-                                     strerror(errno)));
+                "internal_stop() -- connect() failed: errno: %s",
+                strerror(errno)));
         }
         goto stop_errReturn;
     }
@@ -3600,15 +3590,15 @@ retry4:
             /* send() timeout */
             check_sprintf_s(
             snprintf_truncated_s(errbuf,errbufsize,
-                                 "internal_stop() -- send() timeout, failed: errno: %s",
-                                 strerror(errno)));
+            "internal_stop() -- send() timeout, failed: errno: %s",
+            strerror(errno)));
         } else
 #endif
         {
             check_sprintf_s(
                 snprintf_truncated_s(errbuf,errbufsize,
-                                     "internal_stop() -- send() failed: errno: %s",
-                                     strerror(errno)));
+                "internal_stop() -- send() failed: errno: %s",
+                strerror(errno)));
         }
 
         goto stop_errReturn;
@@ -3662,10 +3652,6 @@ stop_errReturn:
  * errbufsize (recommended size is 256 bytes).	*errbuf is not changed on
  * success return.
  */
-int PQStop(PGcancel* cancel, char* errbuf, int errbufsize, uint64 query_id)
-{
-    return PQstop_timeout(cancel, errbuf, errbufsize, 0, query_id);
-}
 
 int PQstop_timeout(PGcancel* cancel, char* errbuf, int errbufsize, int timeout, uint64 query_id)
 {
@@ -3676,7 +3662,11 @@ int PQstop_timeout(PGcancel* cancel, char* errbuf, int errbufsize, int timeout, 
 
     return internal_stop(&cancel->raddr, cancel->be_pid, errbuf, errbufsize, timeout, query_id);
 }
-#endif
+
+int PQStop(PGcancel* cancel, char* errbuf, int errbufsize, uint64 query_id)
+{
+    return PQstop_timeout(cancel, errbuf, errbufsize, 0, query_id);
+}
 
 /*
  * PQcancel and PQrequestCancel: attempt to request cancellation of the
@@ -3721,18 +3711,18 @@ static int internal_cancel(SockAddr* raddr, int be_pid, int be_key, char* errbuf
      */
     if ((tmpsock = socket(raddr->addr.ss_family, SOCK_STREAM, 0)) < 0) {
         check_sprintf_s(
-            snprintf_truncated_s(errbuf, errbufsize,
-                                 "internal_cancel() -- socket() failed: errno: %s",
-                                 strerror(errno)));
+            snprintf_truncated_s(errbuf,errbufsize,
+            "internal_cancel() -- socket() failed: errno: %s",
+            strerror(errno)));
         goto cancel_errReturn;
     }
 
 #ifdef F_SETFD
     if (fcntl(tmpsock, F_SETFD, FD_CLOEXEC) == -1) {
         check_sprintf_s(
-            snprintf_truncated_s(errbuf, errbufsize,
-                                 "internal_cancel() -- setsockopt(FD_CLOEXEC) failed: errno: %s",
-                                 strerror(errno)));
+            snprintf_truncated_s(errbuf,errbufsize,
+            "internal_cancel() -- setsockopt(FD_CLOEXEC) failed: errno: %s",
+            strerror(errno)));
         goto cancel_errReturn;
     }
 #endif /* F_SETFD */
@@ -3740,9 +3730,9 @@ static int internal_cancel(SockAddr* raddr, int be_pid, int be_key, char* errbuf
     on = 1;
     if (setsockopt(tmpsock, SOL_SOCKET, SO_KEEPALIVE, (char*)&on, sizeof(on)) < 0) {
         check_sprintf_s(
-            snprintf_truncated_s(errbuf, errbufsize,
-                                 "internal_cancel() -- setsockopt(SO_KEEPALIVE) failed: errno: %s",
-                                 strerror(errno)));
+            snprintf_truncated_s(errbuf,errbufsize,
+            "internal_cancel() -- setsockopt(SO_KEEPALIVE) failed: errno: %s",
+            strerror(errno)));
         goto cancel_errReturn;
     }
 
@@ -3750,18 +3740,18 @@ static int internal_cancel(SockAddr* raddr, int be_pid, int be_key, char* errbuf
         /* timeout for connect() & send() */
         if (setsockopt(tmpsock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, len) < 0) {
             check_sprintf_s(
-                snprintf_truncated_s(errbuf, errbufsize,
-                                     "internal_cancel() -- setsockopt(SO_SNDTIMEO) failed: errno: %s",
-                                     strerror(errno)));
+                snprintf_truncated_s(errbuf,errbufsize,
+                "internal_cancel() -- setsockopt(SO_SNDTIMEO) failed: errno: %s",
+                strerror(errno)));
             goto cancel_errReturn;
         }
 
         /* timeout for recv() */
         if (setsockopt(tmpsock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, len) < 0) {
             check_sprintf_s(
-                snprintf_truncated_s(errbuf, errbufsize,
-                                     "internal_cancel() -- setsockopt(SO_RCVTIMEO) failed: errno: %s",
-                                     strerror(errno)));
+                snprintf_truncated_s(errbuf,errbufsize,
+                "internal_cancel() -- setsockopt(SO_RCVTIMEO) failed: errno: %s",
+                strerror(errno)));
             goto cancel_errReturn;
         }
     }
@@ -3775,14 +3765,14 @@ retry3:
         if (SOCK_ERRNO == EINPROGRESS || SOCK_ERRNO == ETIMEDOUT) {
             /* connection timeout here */
             check_sprintf_s(
-            snprintf_truncated_s(errbuf, errbufsize,
-                                 "internal_cancel() -- connect() timeout, failed: errno: %s",
-                                 strerror(errno)));
+            snprintf_truncated_s(errbuf,errbufsize,
+            "internal_cancel() -- connect() timeout, failed: errno: %s",
+            strerror(errno)));
         } else {
             check_sprintf_s(
-                snprintf_truncated_s(errbuf, errbufsize,
-                                     "internal_cancel() -- connect() failed: errno: %s",
-                                     strerror(errno)));
+                snprintf_truncated_s(errbuf,errbufsize,
+                "internal_cancel() -- connect() failed: errno: %s",
+                strerror(errno)));
         }
         goto cancel_errReturn;
     }
@@ -3807,14 +3797,14 @@ retry4:
         if (SOCK_ERRNO == EAGAIN || SOCK_ERRNO == EWOULDBLOCK) {
             /* send() timeout here */
             check_sprintf_s(
-            snprintf_truncated_s(errbuf, errbufsize,
+            snprintf_truncated_s(errbuf,errbufsize,
             "internal_cancel() -- send() timeout, failed: errno: %s",
             strerror(errno)));
         } else
 #endif
         {
             check_sprintf_s(
-                snprintf_truncated_s(errbuf, errbufsize,
+                snprintf_truncated_s(errbuf,errbufsize,
                 "internal_cancel() -- send() failed: errno: %s",
                 strerror(errno)));
         }
@@ -3922,151 +3912,6 @@ int PQrequestCancel(PGconn* conn)
     return r;
 }
 
-/* internal_connect() is an internal helper function to make code-sharing
- * between the two versions of the connect function possible.
- */
-static int internal_stream_connect(SockAddr* raddr, ConnPack* csp, int packetlen, char* errbuf, int errbufsize)
-{
-    int ret = 0;
-    int tmpsock = -1;
-    char recvbuf[2];
-    char response = 'o';
-    int on = 0;
-    int reconnectime = 10000;
-
-    recvbuf[0] = 0;
-    recvbuf[1] = 0;
-
-    /*
-     * We need to open a temporary connection to the postmaster. Do this with
-     * only kernel calls.
-     */
-retry0:
-    if ((tmpsock = socket(raddr->addr.ss_family, SOCK_STREAM, 0)) < 0) {
-        check_sprintf_s(
-            snprintf_truncated_s(errbuf, errbufsize,
-            "stream connect socket() fail: errno: %s",
-            strerror(errno)));
-        goto connect_errReturn;
-    }
-
-#ifdef F_SETFD
-    if (fcntl(tmpsock, F_SETFD, FD_CLOEXEC) == -1) {
-        check_sprintf_s(
-            snprintf_truncated_s(errbuf, errbufsize,
-            "stream connect setsockopt(FD_CLOEXEC) fail: errno: %s",
-            strerror(errno)));
-        goto connect_errReturn;
-    }
-#endif /* F_SETFD */
-
-    on = 1;
-    if (setsockopt(tmpsock, SOL_SOCKET, SO_KEEPALIVE, (char*)&on, sizeof(on)) < 0) {
-
-        check_sprintf_s(
-            snprintf_truncated_s(errbuf, errbufsize,
-            "stream connect setsockopt(SO_KEEPALIVE) failed: errno: %s",
-            strerror(errno)));
-        goto connect_errReturn;
-    }
-
-retry1:
-    if (connect(tmpsock, (struct sockaddr*)&raddr->addr, raddr->salen) < 0) {
-        if (SOCK_ERRNO == EINTR)
-            goto retry1;
-
-        if (reconnectime > 0 && (SOCK_ERRNO == ETIMEDOUT || SOCK_ERRNO == ECONNREFUSED)) {
-            closesocket(tmpsock);
-            tmpsock = -1;
-            reconnectime--;
-            goto retry0;
-        }
-        /* Interrupted system call - we'll just try again */
-
-        check_sprintf_s(
-            snprintf_truncated_s(errbuf, errbufsize,
-                                 "stream connect connect() fail: errno: %s",
-                                 strerror(errno)));
-        goto connect_errReturn;
-    }
-
-    /*
-     * We needn't set nonblocking I/O or NODELAY options here.
-     */
-
-retry2:
-    if ((ret = send(tmpsock, (char*)csp, packetlen, 0)) != packetlen) {
-        if (ret < 0 && (SOCK_ERRNO == EINTR || SOCK_ERRNO == ETIMEDOUT))
-            /* Interrupted system call - we'll just try again */
-            goto retry2;
-        check_sprintf_s(
-        snprintf_truncated_s(errbuf, errbufsize,
-                             "send stream key fail: errno: %s",
-                             strerror(errno)));
-        goto connect_errReturn;
-    }
-
-    // receive the stream request response status
-retry3:
-    if ((ret = recv(tmpsock, (char*)recvbuf, 1, 0)) != 1) {
-        if (ret < 0 && SOCK_ERRNO == EINTR)
-            /* Interrupted system call - we'll just try again */
-            goto retry3;
-
-        check_sprintf_s(
-            snprintf_truncated_s(errbuf, errbufsize,
-                                 "receive accept response fail: errno: %s",
-                                 strerror(errno)));
-        goto connect_errReturn;
-        /* we ignore other error conditions */
-    }
-
-retry4:
-    if ((ret = send(tmpsock, &response, 1, 0)) != 1) {
-        if (ret < 0 && (SOCK_ERRNO == EINTR || SOCK_ERRNO == ETIMEDOUT))
-            /* Interrupted system call - we'll just try again */
-            goto retry4;
-        else
-            goto connect_errReturn;
-        /* we ignore other error conditions */
-    }
-
-    // receive the error message
-    if (recvbuf[0] != 'o') {
-        if (tmpsock >= 0)
-            closesocket(tmpsock);
-
-        check_sprintf_s(
-            snprintf_truncated_s(errbuf, errbufsize,
-                                 "remote setup stream connection fail: errno: %s",
-                                 strerror(errno)));
-        return -1;
-    }
-
-    return tmpsock;
-
-connect_errReturn:
-
-    if (tmpsock >= 0)
-        closesocket(tmpsock);
-
-    return -1;
-}
-
-/*
- * Stream  Connect: request connect to remote stream
- *
- * Returns socket if able to connect to remote stream, -1 if not.
- *
- * On failure, an error message is stored in *errbuf, which must be of size
- * errbufsize (recommended size is 256 bytes).	*errbuf is not changed on
- * success return.
- */
-int StreamConnect(void* raddr, ConnPack* csp, int packetlen, char* errbuf, int errbufsize)
-{
-    return internal_stream_connect((SockAddr*)raddr, csp, packetlen, errbuf, errbufsize);
-}
-
 /*
  * pqPacketSend() -- convenience routine to send a message to server.
  *
@@ -4133,31 +3978,13 @@ int pqPacketSend(PGconn* conn, char pack_type, const void* buf, size_t buf_len)
  */
 static int ldapServiceLookup(const char* purl, PQconninfoOption* options, PQExpBuffer errorMessage)
 {
-    int port = LDAP_DEF_PORT,
-        scope,
-        rc,
-        msgid,
-        size,
-        state,
-        oldstate,
-        i;
+    int port = LDAP_DEF_PORT, scope, rc, msgid, size, state, oldstate, i;
     bool found_keyword = false;
-    char *url = NULL,
-         *hostname = NULL,
-         *portstr = NULL,
-         *endptr = NULL,
-         *dn = NULL,
-         *scopestr = NULL,
-         *filter = NULL,
-         *result = NULL,
-         *p = NULL,
-         *p1 = NULL,
-         *optname = NULL,
-         *optval = NULL;
+    char *url = NULL, *hostname = NULL, *portstr = NULL, *endptr = NULL, *dn = NULL, *scopestr = NULL, *filter = NULL,
+         *result = NULL, *p = NULL, *p1 = NULL, *optname = NULL, *optval = NULL;
     char* attrs[2] = {NULL, NULL};
     LDAP* ld = NULL;
-    LDAPMessage *res = NULL,
-                *entry = NULL;
+    LDAPMessage *res = NULL, *entry = NULL;
     struct berval** values = NULL;
     LDAP_TIMEVAL time = {PGLDAP_TIMEOUT, 0};
     errno_t securec_rc = EOK;
@@ -4351,10 +4178,11 @@ static int ldapServiceLookup(const char* purl, PQconninfoOption* options, PQExpB
     for (i = 0; values[i] != NULL; i++)
         size += values[i]->bv_len + 1;
 #ifdef WIN32
-    if ((result = (char*)malloc(size)) == NULL) {
+    if ((result = (char*)malloc(size)) == NULL)
 #else
-    if ((result = malloc(size)) == NULL) {
+    if ((result = malloc(size)) == NULL)
 #endif
+    {
         printfPQExpBuffer(errorMessage, libpq_gettext("out of memory\n"));
         ldap_value_free_len(values);
         ldap_unbind(ld);
@@ -4586,11 +4414,9 @@ last_file:
 static int parseServiceFile(const char* serviceFile, const char* service, PQconninfoOption* options,
     PQExpBuffer errorMessage, bool* group_found)
 {
-    int linenr = 0,
-        i;
+    int linenr = 0, i;
     FILE* f = NULL;
-    char buf[MAXBUFSIZE] = {0},
-         *line = NULL;
+    char buf[MAXBUFSIZE] = {0}, *line = NULL;
 
     f = fopen(serviceFile, "r");
     if (f == NULL) {
@@ -4845,9 +4671,8 @@ static PQconninfoOption* conninfo_parse(const char* conninfo, PQExpBuffer errorM
         /* Get the parameter name */
         pname = cp;
         while (*cp) {
-            if (*cp == '=') {
+            if (*cp == '=')
                 break;
-            }
             if (isspace((unsigned char)*cp)) {
                 *cp++ = '\0';
                 while (*cp) {
@@ -4889,12 +4714,10 @@ static PQconninfoOption* conninfo_parse(const char* conninfo, PQExpBuffer errorM
                 }
                 if (*cp == '\\') {
                     cp++;
-                    if (*cp != '\0') {
+                    if (*cp != '\0')
                         *cp2++ = *cp++;
-                    }
-                } else {
+                } else
                     *cp2++ = *cp++;
-                }
             }
             *cp2 = '\0';
         } else {
@@ -4910,9 +4733,8 @@ static PQconninfoOption* conninfo_parse(const char* conninfo, PQExpBuffer errorM
                 }
                 if (*cp == '\\') {
                     cp++;
-                    if (*cp != '\0') {
+                    if (*cp != '\0')
                         *cp2++ = *cp++;
-                    }
                     continue;
                 }
                 if (*cp == '\'') {
@@ -5235,9 +5057,8 @@ static bool conninfo_uri_parse_options(PQconninfoOption* options, const char* ur
     p = start;
 
     /* Look ahead for possible user credentials designator */
-    while (*p && *p != '@' && *p != '/') {
+    while (*p && *p != '@' && *p != '/')
         ++p;
-    }
     if (*p == '@') {
         /*
          * Found username/password designator, so URI should be of the form
@@ -5246,9 +5067,8 @@ static bool conninfo_uri_parse_options(PQconninfoOption* options, const char* ur
         user = start;
 
         p = user;
-        while (*p != '\0' && *p != ':' && *p != '@') {
+        while (p != NULL && *p != ':' && *p != '@')
             ++p;
-        }
 
         /* Save last char and cut off at end of user name */
         prevchar = *p;
@@ -5260,9 +5080,8 @@ static bool conninfo_uri_parse_options(PQconninfoOption* options, const char* ur
         if (prevchar == ':') {
             const char* password = p + 1;
 
-            while (*p != '\0' && *p != '@') {
+            while (p != NULL && *p != '@')
                 ++p;
-            }
             *p = '\0';
 
             if (*password && conninfo_storeval(options, "password", password, errorMessage, false, true) == NULL)
@@ -5286,9 +5105,8 @@ static bool conninfo_uri_parse_options(PQconninfoOption* options, const char* ur
      */
     if (*p == '[') {
         host = ++p;
-        while (*p && *p != ']') {
+        while (*p && *p != ']')
             ++p;
-        }
         if (!*p) {
             printfPQExpBuffer(errorMessage,
                 libpq_gettext(
@@ -5324,9 +5142,8 @@ static bool conninfo_uri_parse_options(PQconninfoOption* options, const char* ur
          * Look for port specifier (colon) or end of host specifier (slash),
          * or query (question mark).
          */
-        while (*p && *p != ':' && *p != '/' && *p != '?') {
+        while (*p && *p != ':' && *p != '/' && *p != '?')
             ++p;
-        }
     }
 
     /* Save the hostname terminator before we null it */
@@ -5339,9 +5156,8 @@ static bool conninfo_uri_parse_options(PQconninfoOption* options, const char* ur
     if (prevchar == ':') {
         const char* port = ++p; /* advance past host terminator */
 
-        while (*p && *p != '/' && *p != '?') {
+        while (*p && *p != '/' && *p != '?')
             ++p;
-        }
 
         prevchar = *p;
         *p = '\0';
@@ -5354,9 +5170,8 @@ static bool conninfo_uri_parse_options(PQconninfoOption* options, const char* ur
         const char* dbname = ++p; /* advance past host terminator */
 
         /* Look for query parameters */
-        while (*p && *p != '?') {
+        while (*p && *p != '?')
             ++p;
-        }
 
         prevchar = *p;
         *p = '\0';
@@ -5438,9 +5253,8 @@ static bool conninfo_uri_parse_params(char* params, PQconninfoOption* connOption
                  * If not at the end, advance; now pointing to start of the
                  * next parameter, if any.
                  */
-                if (prevchar != '\0') {
+                if (prevchar != '\0')
                     ++p;
-                }
                 break;
             } else
                 ++p; /* Advance over all other bytes. */
@@ -5577,15 +5391,14 @@ static char* conninfo_uri_decode(const char* str, PQExpBuffer errorMessage)
  */
 static bool get_hexdigit(char digit, unsigned int* value)
 {
-    if ('0' <= digit && digit <= '9') {
+    if ('0' <= digit && digit <= '9')
         *value = digit - '0';
-    } else if (digit >='A'   && digit <= 'F') {
+    else if ('A' <= digit && digit <= 'F')
         *value = digit - 'A' + 10;
-    } else if (digit >= 'a' && digit <= 'f') {
+    else if ('a' <= digit && digit <= 'f')
         *value = digit - 'a' + 10;
-    } else {
+    else
         return false;
-    }
 
     return true;
 }
@@ -5667,8 +5480,9 @@ static PQconninfoOption* conninfo_find(PQconninfoOption* connOptions, const char
 
     for (option = connOptions; option->keyword != NULL; option++) {
         if (strcmp(option->keyword, keyword) == 0) {
-            if (option->val != NULL) {
-                Assert(option->valsize == strlen(option->val));
+            if ((option->val != NULL) && (option->valsize != strlen(option->val))) {
+                Assert(false);
+                return NULL;
             }
 
             return option;
@@ -5686,6 +5500,12 @@ void PQconninfoFree(PQconninfoOption* connOptions)
         return;
 
     for (option = connOptions; option->keyword != NULL; option++) {
+        if (strcmp(option->keyword, "password") == 0 && option->val != NULL) {
+            /* clear password */
+            int passWordLength = strlen(option->val);
+            errno_t rc = memset_s(option->val, passWordLength, 0, passWordLength);
+            securec_check_c(rc, "\0", "\0");
+        }
         libpq_free(option->val);
         option->valsize = 0;
     }
@@ -6111,10 +5931,7 @@ static char* PasswordFromFile(char* hostname, char* port, char* dbname, char* us
         return NULL;
 
     while (!feof(fp) && !ferror(fp)) {
-        char *t = buf,
-             *ret = NULL,
-             *p1 = NULL,
-             *p2 = NULL;
+        char *t = buf, *ret = NULL, *p1 = NULL, *p2 = NULL;
         int len;
 
         if (fgets(buf, sizeof(buf), fp) == NULL)

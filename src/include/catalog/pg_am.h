@@ -116,12 +116,6 @@ typedef FormData_pg_am *Form_pg_am;
 #define Anum_pg_am_amoptions			31
 
 /* ----------------
- *		compiler constant for amtype
- * ----------------
- */
-#define AMTYPE_INDEX 'i' /* index access method */
-
-/* ----------------
  *		initial contents of pg_am
  * ----------------
  */
@@ -146,7 +140,7 @@ DATA(insert OID = 4039 (  psort		5 1 f f f f t t f t f f f 0 - - psortgettuple p
 DESCR("psort index access method");
 #define PSORT_AM_OID 4039
 
-DATA(insert OID = 4239 (  cbtree	5 1 f f f f t t f t f f t 0 btinsert btbeginscan cbtreegettuple cbtreegetbitmap btrescan btendscan - - - cbtreebuild btbuildempty - - cbtreecanreturn cbtreecostestimate cbtreeoptions ));
+DATA(insert OID = 4239 (  cbtree		5 1 f f f f t t f t f f t 0 btinsert btbeginscan cbtreegettuple cbtreegetbitmap btrescan btendscan - - - cbtreebuild btbuildempty - - cbtreecanreturn cbtreecostestimate cbtreeoptions ));
 DESCR("cstore btree index access method");
 #define CBTREE_AM_OID 4239
 

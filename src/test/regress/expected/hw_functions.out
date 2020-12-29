@@ -299,7 +299,7 @@ SELECT numtodsinterval(123456789.123456789, 'DAY')from dual;
 (1 row)
 
 SELECT '2147483647 days 24 hours'::interval;
-ERROR:  the interval value is overflow, it can not perform as a db interval-style
+ERROR:  the interval value is overflow, it can not perform as A db interval-style
 set intervalstyle=postgres;
 -- tests for datalength
 SELECT * from type;

@@ -48,4 +48,3 @@ extern Oid AlterTypeNamespaceInternal(
     Oid typeOid, Oid nspOid, bool isImplicitArray, bool errorOnTableType, ObjectAddresses* objsMoved);
 
 #endif /* TYPECMDS_H */
-

@@ -25,8 +25,8 @@
 #ifndef BCM_H
 #define BCM_H
 
-#include "storage/block.h"
-#include "storage/buf.h"
+#include "storage/buf/block.h"
+#include "storage/buf/buf.h"
 #include "storage/relfilenode.h"
 #include "utils/relcache.h"
 
@@ -102,11 +102,6 @@ typedef struct BCMHeader {
 #define HEAPBLK_TO_BCMBYTE(x) (((x) % BCM_BLOCKS_PER_PAGE) / BCM_BLOCKS_PER_BYTE)
 #define HEAPBLK_TO_BCMBIT(x) ((x) % BCM_BLOCKS_PER_BYTE)
 
-#define CSTORE_OFFSET_TO_CSTOREBLOCK(x) ((x) / ALIGNOF_CUSIZE)
-
-#define CSTORE_OFFSET_TO_BCMBLOCK(x) \
-    ((CSTORE_OFFSET_TO_CSTOREBLOCK(x) / BCM_BLOCKS_PER_PAGE) + UNITBLK_TO_BCMGROUP(CSTORE_OFFSET_TO_CSTOREBLOCK(x)) + 2)
-
 #define SET_SYNC_BYTE_STATUS(byte, status, bshift)               \
     do {                                                         \
         unsigned char byteval = byte;                            \
@@ -155,11 +150,9 @@ extern void BCMSetStatusBit(Relation rel, uint64 heapBlk, Buffer buf, BCMBitStat
 extern void BCMClearRel(Relation rel, int col = 0);
 extern void BCM_truncate(Relation rel);
 
-#ifdef ENABLE_MULTIPLE_NODES
 /* BCM Traversal */
 extern void GetBcmFileList(bool clear);
 extern void GetIncrementalBcmFileList();
-#endif
 
 /* BCM xlog for setStatusBit is (RM_HEAP2_ID, XLOG_HEAP2_BCM) type */
 /* Functions in heapam.cpp: log_heap_bcm(...);heap_xlog_bcm(...)*/
@@ -169,7 +162,10 @@ extern void BCM_pin(Relation rel, BlockNumber heapBlk, Buffer* bcmbuf);
 
 extern void BCM_CStore_pin(Relation rel, int col, uint64 offset, Buffer* buf);
 
-extern void check_cu_block(char* mem, int size);
+extern void check_cu_block(char* mem, int size, int alignSize);
+
+extern uint64 cstore_offset_to_cstoreblock(uint64 offset, uint64 align_size);
+
+extern uint64 cstore_offset_to_bcmblock(uint64 offset, uint64 align_size);
 
 #endif
-

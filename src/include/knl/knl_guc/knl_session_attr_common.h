@@ -76,6 +76,7 @@ typedef struct knl_session_attr_common {
     int XLogArchiveTimeout;
     int Log_file_mode;
     int bbox_dump_count;
+    int session_sequence_cache;
     int max_stack_depth;
     int max_query_retry_times;
     int StatementTimeout;
@@ -91,7 +92,6 @@ typedef struct knl_session_attr_common {
     int tcp_keepalives_idle;
     int tcp_keepalives_interval;
     int tcp_keepalives_count;
-    int tcpRecvTimeout;
     int GinFuzzySearchLimit;
     int server_version_num;
     int log_temp_files;
@@ -125,8 +125,11 @@ typedef struct knl_session_attr_common {
     char* session_authorization_string;
     char* log_destination_string;
     char* Log_directory;
+    char* asp_flush_mode;
+    char* asp_log_filename;
     char* Perf_log;
     char* Log_filename;
+    char* query_log_file;
     char* syslog_ident_str;
     char* timezone_string;
     struct pg_tz* session_timezone;
@@ -162,25 +165,44 @@ typedef struct knl_session_attr_common {
     bool assert_enabled;
     int AlarmReportInterval;
     int xmloption;
-    bool enable_tsdb;
+    bool enable_ts_compaction;    
+    bool ts_adaptive_threads;
+    char* ts_compaction_strategy;
+    int ts_consumer_workers;
 
     /* instrumentation guc parameters */
     int instr_unique_sql_count;
     bool enable_instr_cpu_timer;
     int unique_sql_track_type;
     bool enable_instr_track_wait;
+    bool enable_slow_query_log;
 
     int instr_rt_percentile_interval;
     bool enable_instr_rt_percentile;
     char* percentile_values;
 
+    /* instr - full sql/slow sql */
+    bool enable_stmt_track;
+    int track_stmt_session_slot;
+    char *track_stmt_stat_level;
+    int64 track_stmt_details_size;
+    char* track_stmt_retention_time;
+
     bool enable_wdr_snapshot;
+    bool enable_asp;
     int wdr_snapshot_interval;
     int wdr_snapshot_retention_days;
+    int asp_sample_interval;
+    int asp_flush_rate;
+    int asp_retention_days;
     int max_datanode_for_plan;
     int upgrade_mode;
     int wdr_snapshot_query_timeout;
     int dn_heartbeat_interval;
+    bool enable_full_encryption;
+
+    char* router_att;
+    bool enable_router;
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

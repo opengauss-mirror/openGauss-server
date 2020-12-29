@@ -1,13 +1,13 @@
 /* -------------------------------------------------------------------------
  *
  * quote.c
- *    Functions for quoting identifiers and literals
+ *	  Functions for quoting identifiers and literals
  *
  * Portions Copyright (c) 2000-2012, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
- *    src/backend/utils/adt/quote.c
+ *	  src/backend/utils/adt/quote.c
  *
  * -------------------------------------------------------------------------
  */
@@ -19,22 +19,22 @@
 
 /*
  * quote_ident -
- *    returns a properly quoted identifier
+ *	  returns a properly quoted identifier
  */
 Datum quote_ident(PG_FUNCTION_ARGS)
 {
     text* t = PG_GETARG_TEXT_PP(0);
-    const char* q_str = NULL;
+    const char* qstr = NULL;
     char* str = NULL;
 
     str = text_to_cstring(t);
-    q_str = quote_identifier(str);
-    PG_RETURN_TEXT_P(cstring_to_text(q_str));
+    qstr = quote_identifier(str);
+    PG_RETURN_TEXT_P(cstring_to_text(qstr));
 }
 
 /*
  * quote_literal_internal -
- *    helper function for quote_literal and quote_literal_cstr
+ *	  helper function for quote_literal and quote_literal_cstr
  *
  * NOTE: think not to make this function's behavior change with
  * standard_conforming_strings.  We don't know where the result
@@ -45,8 +45,8 @@ Datum quote_ident(PG_FUNCTION_ARGS)
 static size_t quote_literal_internal(char* dst, const char* src, size_t len)
 {
     const char* s = NULL;
-    char* save_dst = dst;
-    int char_len;
+    char* savedst = dst;
+    int charlen;
 
     s = src;
     while (s < src + len) {
@@ -61,21 +61,21 @@ static size_t quote_literal_internal(char* dst, const char* src, size_t len)
     while (len > 0) {
         if (SQL_STR_DOUBLE(*src, true))
             *dst++ = *src;
-        char_len = pg_mblen(src);
+        charlen = pg_mblen(src);
 
-        for (int i = 0; i < char_len; i++)
+        for (int i = 0; i < charlen; i++)
             *dst++ = *src++;
 
-        len -= char_len;
+        len -= charlen;
     }
     *dst++ = '\'';
 
-    return dst - save_dst;
+    return dst - savedst;
 }
 
 /*
  * quote_literal -
- *    returns a properly quoted literal
+ *	  returns a properly quoted literal
  */
 Datum quote_literal(PG_FUNCTION_ARGS)
 {
@@ -83,8 +83,9 @@ Datum quote_literal(PG_FUNCTION_ARGS)
     text* result = NULL;
     char* cp1 = NULL;
     char* cp2 = NULL;
+    int len;
 
-    int len = VARSIZE(t) - VARHDRSZ;
+    len = VARSIZE(t) - VARHDRSZ;
     if (unlikely(len < 0)) {
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("The length should not be nagative: %d.\n", len)));
     }
@@ -101,28 +102,28 @@ Datum quote_literal(PG_FUNCTION_ARGS)
 
 /*
  * quote_literal_cstr -
- *    returns a properly quoted literal
+ *	  returns a properly quoted literal
  */
-char* quote_literal_cstr(const char* raw_str)
+char* quote_literal_cstr(const char* rawstr)
 {
     char* result = NULL;
     int len;
-    int new_len;
+    int newlen;
 
-    len = strlen(raw_str);
+    len = strlen(rawstr);
     /* We make a worst-case result area; wasting a little space is OK */
     result = (char*)palloc(len * 2 + 3 + 1);
 
-    new_len = quote_literal_internal(result, raw_str, len);
-    result[new_len] = '\0';
+    newlen = quote_literal_internal(result, rawstr, len);
+    result[newlen] = '\0';
 
     return result;
 }
 
 /*
  * quote_nullable -
- *    Returns a properly quoted literal, with null values returned
- *    as the text string 'NULL'.
+ *	  Returns a properly quoted literal, with null values returned
+ *	  as the text string 'NULL'.
  */
 Datum quote_nullable(PG_FUNCTION_ARGS)
 {

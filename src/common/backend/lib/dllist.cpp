@@ -239,8 +239,19 @@ void DllistWithLock::Remove(Dlelem* e)
 {
     START_CRIT_SECTION();
     SpinLockAcquire(&(m_lock));
-	if(e->dle_list != NULL && e->dle_list == &m_list) {
+	if (e->dle_list == &m_list) {
         DLRemove(e);
+    }
+    SpinLockRelease(&(m_lock));
+    END_CRIT_SECTION();
+}
+
+void DllistWithLock::AddHead(Dlelem* e)
+{
+    START_CRIT_SECTION();
+    SpinLockAcquire(&(m_lock));
+    if (e->dle_list == NULL) {
+        DLAddHead(&m_list, e);
     }
     SpinLockRelease(&(m_lock));
     END_CRIT_SECTION();
@@ -250,7 +261,9 @@ void DllistWithLock::AddTail(Dlelem* e)
 {
     START_CRIT_SECTION();
     SpinLockAcquire(&(m_lock));
-    DLAddTail(&m_list, e);
+    if (e->dle_list == NULL) {
+        DLAddTail(&m_list, e);
+    }
     SpinLockRelease(&(m_lock));
     END_CRIT_SECTION();
 }

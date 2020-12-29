@@ -79,4 +79,3 @@ void RemoveConn(HeartbeatConnection* con);
 void UpdateLastHeartbeatTime(const char* remoteHost, int remotePort, TimestampTz timestamp);
 
 #endif /* _HEARTBEAT_CONN_H */
-

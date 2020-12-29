@@ -24,6 +24,7 @@
 /*****************************************************************************
  *	 USER I/O ROUTINES														 *
  *****************************************************************************/
+
 /*
  *		charin			- converts "x" to 'x'
  *
@@ -83,6 +84,7 @@ Datum charsend(PG_FUNCTION_ARGS)
 /*****************************************************************************
  *	 PUBLIC ROUTINES														 *
  *****************************************************************************/
+
 /*
  * NOTE: comparisons are done as though char is unsigned (uint8).
  * Conversions to and from integer are done as though char is signed (int8).
@@ -149,9 +151,9 @@ Datum i4tochar(PG_FUNCTION_ARGS)
 {
     int32 arg1 = PG_GETARG_INT32(0);
 
-    if (arg1 < SCHAR_MIN || arg1 > SCHAR_MAX) {
+    if (arg1 < SCHAR_MIN || arg1 > SCHAR_MAX)
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("\"char\" out of range")));
-    }
+
     PG_RETURN_CHAR((int8)arg1);
 }
 
@@ -165,11 +167,10 @@ Datum text_char(PG_FUNCTION_ARGS)
      * If the input is longer than one character, the excess data is silently
      * discarded.
      */
-    if (VARSIZE(arg1) > VARHDRSZ) {
+    if (VARSIZE(arg1) > VARHDRSZ)
         result = *(VARDATA(arg1));
-    } else {
+    else
         result = '\0';
-    }
 
     PG_RETURN_CHAR(result);
 }
@@ -186,9 +187,8 @@ Datum char_text(PG_FUNCTION_ARGS)
     if (arg1 != '\0') {
         SET_VARSIZE(result, VARHDRSZ + 1);
         *(VARDATA(result)) = arg1;
-    } else {
+    } else
         SET_VARSIZE(result, VARHDRSZ);
-    }
 
     PG_RETURN_TEXT_P(result);
 }

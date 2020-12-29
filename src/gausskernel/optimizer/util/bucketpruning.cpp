@@ -28,12 +28,19 @@
 #include "pgxc/locator.h"
 #include "optimizer/bucketinfo.h"
 #include "optimizer/bucketpruning.h"
+#include "optimizer/dynsmp.h"
+#include "optimizer/planner.h"
 #include "nodes/bitmapset.h"
 #include "nodes/makefuncs.h"
 #include "nodes/relation.h"
+#include "nodes/pg_list.h"
+#include "nodes/nodeFuncs.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "pgxc/groupmgr.h"
+#include "utils/plancache.h"
 #include "pgxc/pgxc.h"
+#include "executor/executor.h"
 
 /*
  * BucketPruningContext
@@ -84,6 +91,7 @@ static BucketPruningResult* BucketPruningForExpr(BucketPruningContext* bpcxt, Ex
 static int getConstBucketId(Const* val);
 static BucketPruningResult* BucketPruningForBoolExpr(BucketPruningContext* bpcxt, BoolExpr* expr);
 static BucketPruningResult* BucketPruningForOpExpr(BucketPruningContext* bpcxt, OpExpr* expr);
+static int GetExecBucketId(ExecNodes* exec_nodes, ParamListInfo params);
 
 /*
  * @Description: make a pruning result based on the PruningStatus
@@ -101,6 +109,10 @@ static BucketPruningResult* makePruningResult(PruningStatus status)
 
     result->buckets = NULL;
     result->status = status;
+
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
 
     if (status == BUCKETS_FULL) {
         for (int i = 0; i < BUCKETDATALEN; i++) {
@@ -126,6 +138,10 @@ static BucketPruningResult* makePruningResult(Bitmapset* buckets)
 
     BucketPruningResult* result = (BucketPruningResult*)palloc0(sizeof(BucketPruningResult));
 
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
+
     if (bms_num_members(buckets) == BUCKETDATALEN) {
         result->status = BUCKETS_FULL;
     } else {
@@ -147,6 +163,10 @@ static BucketPruningResult* makePruningResult(Bitmapset* buckets)
 static BucketPruningResult* makePruningResult(int x, bool exclude = false)
 {
     BucketPruningResult* result = (BucketPruningResult*)palloc0(sizeof(BucketPruningResult));
+
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
 
     if (exclude) {
         for (int i = 0; i < BUCKETDATALEN; i++) {
@@ -175,6 +195,9 @@ static BucketPruningResult* makePruningResult(int x, bool exclude = false)
  */
 bool isFullPruningResult(BucketPruningResult* result)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     if (result->status == BUCKETS_FULL || bms_num_members(result->buckets) == BUCKETDATALEN) {
         return true;
     }
@@ -667,6 +690,10 @@ static int getConstBucketId(Const* val)
         return 0;
     }
 
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
+
     hashval = compute_hash(val->consttype, val->constvalue, LOCATOR_TYPE_HASH);
 
     bucketid = compute_modulo((unsigned int)(abs((int)hashval)), BUCKETDATALEN);
@@ -687,7 +714,201 @@ double getBucketPruningRatio(BucketInfo* bucket_info)
         /* NIL means all buckets */
         return 1.0;
     } else {
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
         /* some buckets are pruned */
         return (double)list_length(bucket_info->buckets) / (double)BUCKETDATALEN;
     }
+}
+
+void setCachedPlanBucketId(CachedPlan *cplan, ParamListInfo boundParams)
+{
+    /* run time bucket purning for generic plan */
+    ListCell *p = NULL;
+
+    /* not support global plan cache yet */
+    if (g_instance.attr.attr_common.enable_global_plancache) {
+        return;
+    }
+
+    foreach (p, cplan->stmt_list) {
+        PlannedStmt* pstmt = (PlannedStmt*)lfirst(p);
+        if (IsA(pstmt, PlannedStmt)){
+            /* set the main plan */
+            setPlanBucketId(pstmt->planTree, boundParams, cplan->context);
+            /* also the sub plans */
+            if (pstmt->initPlan != NIL && pstmt->subplans != NIL) {
+                ListCell* lc = NULL;
+                foreach (lc, pstmt->initPlan) {
+                    SubPlan* subPlan = (SubPlan*)lfirst(lc);
+                    Plan* plan = (Plan*)list_nth(pstmt->subplans, subPlan->plan_id - 1);
+                    setPlanBucketId(plan, boundParams, cplan->context);
+                }
+            }
+        }
+    }
+}
+
+static void setScanPlanBucketId(Plan* plan, ParamListInfo params, MemoryContext cxt)
+{
+    Scan* scan = (Scan*)plan;
+
+    /* free the previous results */
+    if (scan->bucketInfo->buckets != NIL) {
+        list_free(scan->bucketInfo->buckets);
+        scan->bucketInfo->buckets = NIL;
+    }
+    
+    /* try runtime purning */
+    int bucketid = GetExecBucketId(plan->exec_nodes, params);
+    if (bucketid != INVALID_BUCKET_ID) {
+       /* for cached plan , buckets lives in a longer memory context */
+       MemoryContext oldcxt = MemoryContextSwitchTo(cxt);
+       scan->bucketInfo->buckets = lappend_int(scan->bucketInfo->buckets, bucketid);
+       MemoryContextSwitchTo(oldcxt);
+    }
+}
+
+/*
+ * Execution time determining of target bucket id
+ */
+void setPlanBucketId(Plan* plan, ParamListInfo params, MemoryContext cxt)
+{
+    if (plan == NULL)
+        return;
+
+    /* Guard against stack overflow due to overly complex expressions */
+    check_stack_depth();
+
+    /* nodes we are interested */
+    switch (nodeTag(plan)) {
+        case T_SeqScan:
+        case T_CStoreScan:
+        case T_IndexScan:
+        case T_IndexOnlyScan:
+        case T_BitmapHeapScan:
+        case T_BitmapIndexScan:
+        case T_TidScan:
+        case T_CStoreIndexScan:
+        case T_CStoreIndexCtidScan:
+        case T_CStoreIndexHeapScan: {
+            Scan* scan = (Scan*)plan;
+            /* quit if not a hashbucket relation */
+            if (scan->bucketInfo == NULL) {
+                break;
+            }
+            setScanPlanBucketId(plan, params, cxt);
+            break;
+        }
+        case T_SubqueryScan:
+        case T_VecSubqueryScan: {
+            SubqueryScan* sc = (SubqueryScan*)plan;
+
+            setPlanBucketId(sc->subplan, params, cxt);
+            break;
+        }
+        default: {
+            /* recurse the left tree and right tree */
+            setPlanBucketId(plan->lefttree, params, cxt);
+            setPlanBucketId(plan->righttree, params, cxt);
+            break;
+        }
+    }
+
+    ListCell* lc = NULL;
+
+    foreach(lc, get_plan_list(plan)) {
+        setPlanBucketId((Plan*)lfirst(lc), params, cxt);
+    }
+
+    return;
+}
+
+
+static int GetExecBucketId(ExecNodes* exec_nodes, ParamListInfo params)
+{
+    bool isnull = false;
+    MemoryContext oldContext;
+
+    if (exec_nodes == NULL || exec_nodes->bucketexpr == NULL)
+        return INVALID_BUCKET_ID;
+
+    RelationLocInfo* rel_loc_info = NULL;
+
+    if (IS_PGXC_DATANODE) {
+        rel_loc_info = GetRelationLocInfoDN(exec_nodes->bucketrelid);
+    } else {
+        rel_loc_info = GetRelationLocInfo(exec_nodes->bucketrelid);
+    }
+
+    if (rel_loc_info == NULL) {
+        return INVALID_BUCKET_ID;
+    }
+
+    int len = list_length(rel_loc_info->partAttrNum);
+    /* It should switch memctx to ExprContext for makenode in ExecInitExpr */
+    Datum* values = (Datum*)palloc(len * sizeof(Datum));
+    bool* null = (bool*)palloc(len * sizeof(bool));
+    Oid* typOid = (Oid*)palloc(len * sizeof(Oid));
+    List* dist_col = NULL;
+    int i = 0;
+
+    EState* estate = CreateExecutorState();
+    estate->es_param_list_info = params;
+    ExprContext* exprcontext = CreateExprContext(estate);
+
+    ListCell* cell = NULL;
+    foreach (cell, exec_nodes->bucketexpr) {
+        Expr* expr = (Expr*)lfirst(cell);
+        oldContext = MemoryContextSwitchTo(estate->es_query_cxt);
+
+        ExprState* exprstate = ExecInitExpr(expr, NULL);
+
+        Datum partvalue = ExecEvalExpr(exprstate, exprcontext, &isnull, NULL);
+
+        MemoryContextSwitchTo(oldContext);
+
+        values[i] = partvalue;
+        null[i] = isnull;
+        typOid[i] = exprType((Node*)expr);
+        dist_col = lappend_int(dist_col, i);
+        i++;
+    }
+
+    ExecNodes* nodes = GetRelationNodes(rel_loc_info,
+                                        values, null,
+                                        typOid,
+                                        dist_col,
+                                        exec_nodes->accesstype,
+                                        false,
+                                        false);
+
+    FreeExprContext(exprcontext, true);
+    FreeExecutorState(estate);
+    FreeRelationLocInfo(rel_loc_info);
+    pfree_ext(values);
+    pfree_ext(null);
+    pfree_ext(typOid);
+    list_free_ext(dist_col);
+
+    return nodes->bucketid;
+}
+
+BucketInfo* CalBucketInfo(ScanState* state)
+{
+    Assert(state != NULL);
+    if (unlikely((state->ps.plan == NULL) || (state->ps.state == NULL))) {
+        return NULL;
+    }
+
+    BucketInfo* bkinfo = NULL;
+    int bucketid = GetExecBucketId(state->ps.plan->exec_nodes, state->ps.state->es_param_list_info);
+    if (bucketid != INVALID_BUCKET_ID) {
+        bkinfo = (BucketInfo*)palloc0(sizeof(BucketInfo));
+        bkinfo->buckets = NIL;
+        bkinfo->buckets = lappend_int(bkinfo->buckets, bucketid);
+    }
+
+    return bkinfo;
 }

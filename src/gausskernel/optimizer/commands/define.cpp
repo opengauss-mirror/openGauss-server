@@ -31,19 +31,30 @@
  *
  * -------------------------------------------------------------------------
  */
+#ifndef FRONTEND_PARSER
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#else
+#include "postgres_fe.h"
+#endif
 
 #include <ctype.h>
 #include <math.h>
-
+#ifdef FRONTEND_PARSER
+#include "nodes/parsenodes_common.h"
+#include "commands/defrem.h"
+#include "nodes/makefuncs.h"
+#include "parser/scansup.h"
+#else
 #include "catalog/namespace.h"
 #include "commands/defrem.h"
 #include "nodes/makefuncs.h"
 #include "parser/parse_type.h"
 #include "parser/scansup.h"
 #include "utils/int8.h"
+#endif
 
+#ifndef FRONTEND_PARSER
 const int INTEGER_SIZE = 64;
 
 /*
@@ -251,6 +262,7 @@ int defGetTypeLength(DefElem* def)
         (errcode(ERRCODE_SYNTAX_ERROR), errmsg("invalid argument for %s: \"%s\"", def->defname, defGetString(def))));
     return 0; /* keep compiler quiet */
 }
+#endif /* !FRONTEND_PARSER */
 
 /*
  * Create a DefElem setting "oids" to the specified value.
@@ -274,9 +286,13 @@ List* defSetOption(List* options, const char* name, Node* value)
             break;
         }
     }
+#ifndef FRONTEND_PARSER
     if (lc == NULL)
         options = lappend(options, makeDefElem(pstrdup(name), value));
+#else
+    if (lc == NULL)
+        options = lappend(options, makeDefElem(strdup(name), value));
+#endif 
 
     return options;
 }
-

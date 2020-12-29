@@ -1,0 +1,25 @@
+create user test_fterror_user password 'Gauss@123';
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_fterror_user -W Gauss@123 -c "CREATE TABLE LINEITEM(L_ORDERKEY    BIGINT NOT NULL, L_PARTKEY     BIGINT NOT NULL, L_SUPPKEY     BIGINT NOT NULL, L_LINENUMBER  BIGINT NOT NULL, L_QUANTITY    DECIMAL(15,2) NOT NULL, L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL, L_DISCOUNT    DECIMAL(15,2) NOT NULL, L_TAX     DECIMAL(15,2) NOT NULL, L_RETURNFLAG  CHAR(1) NOT NULL, L_LINESTATUS  CHAR(1) NOT NULL, L_SHIPDATE    DATE NOT NULL, L_COMMITDATE  DATE NOT NULL, L_RECEIPTDATE DATE NOT NULL, L_SHIPINSTRUCT CHAR(25) NOT NULL, L_SHIPMODE     CHAR(10) NOT NULL, L_COMMENT      VARCHAR(44) NOT NULL ) distribute by hash(L_ORDERKEY);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_fterror_user -W Gauss@123 -c "CREATE FOREIGN TABLE EXT_LINEITEM (L_ORDERKEY    BIGINT NOT NULL, L_PARTKEY     BIGINT NOT NULL, L_SUPPKEY     BIGINT NOT NULL, L_LINENUMBER  BIGINT NOT NULL, L_QUANTITY    DECIMAL(15,2) NOT NULL, L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL, L_DISCOUNT    DECIMAL(15,2) NOT NULL, L_TAX     DECIMAL(15,2) NOT NULL, L_RETURNFLAG  CHAR(1) NOT NULL, L_LINESTATUS  CHAR(1) NOT NULL, L_SHIPDATE    DATE NOT NULL, L_COMMITDATE  DATE NOT NULL, L_RECEIPTDATE DATE NOT NULL, L_SHIPINSTRUCT CHAR(25) NOT NULL, L_SHIPMODE     CHAR(10) NOT NULL, L_COMMENT      VARCHAR(44) NOT NULL )SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/lineitem.data', delimiter '|', mode 'normal');"
+ERROR:  permission denied to create foreign table in security mode
+alter user test_fterror_user useft;
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_fterror_user -W Gauss@123 -c "CREATE FOREIGN TABLE EXT_LINEITEM (L_ORDERKEY    BIGINT NOT NULL, L_PARTKEY     BIGINT NOT NULL, L_SUPPKEY     BIGINT NOT NULL, L_LINENUMBER  BIGINT NOT NULL, L_QUANTITY    DECIMAL(15,2) NOT NULL, L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL, L_DISCOUNT    DECIMAL(15,2) NOT NULL, L_TAX     DECIMAL(15,2) NOT NULL, L_RETURNFLAG  CHAR(1) NOT NULL, L_LINESTATUS  CHAR(1) NOT NULL, L_SHIPDATE    DATE NOT NULL, L_COMMITDATE  DATE NOT NULL, L_RECEIPTDATE DATE NOT NULL, L_SHIPINSTRUCT CHAR(25) NOT NULL, L_SHIPMODE     CHAR(10) NOT NULL, L_COMMENT      VARCHAR(44) NOT NULL )SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/lineitem.data', delimiter '|', mode 'normal');"
+CREATE FOREIGN TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_fterror_user -W Gauss@123 -c "CREATE FOREIGN TABLE EXT_LINEITEM_W (L_ORDERKEY    BIGINT NOT NULL, L_PARTKEY     BIGINT NOT NULL, L_SUPPKEY     BIGINT NOT NULL, L_LINENUMBER  BIGINT NOT NULL, L_QUANTITY    DECIMAL(15,2) NOT NULL, L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL, L_DISCOUNT    DECIMAL(15,2) NOT NULL, L_TAX     DECIMAL(15,2) NOT NULL, L_RETURNFLAG  CHAR(1) NOT NULL, L_LINESTATUS  CHAR(1) NOT NULL, L_SHIPDATE    DATE NOT NULL, L_COMMITDATE  DATE NOT NULL, L_RECEIPTDATE DATE NOT NULL, L_SHIPINSTRUCT CHAR(25) NOT NULL, L_SHIPMODE     CHAR(10) NOT NULL, L_COMMENT      VARCHAR(44) NOT NULL )SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/', delimiter '|', mode 'normal');"
+CREATE FOREIGN TABLE
+alter user test_fterror_user nouseft;
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_fterror_user -W Gauss@123 -c "ALTER foreign table EXT_LINEITEM options (set format 'csv');"
+ERROR:  permission denied to alter foreign table in security mode
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_fterror_user -W Gauss@123 -c "INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;"
+ERROR:  permission denied to select from foreign table in security mode
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_fterror_user -W Gauss@123 -c "insert into EXT_LINEITEM_W select * from LINEITEM;"
+ERROR:  permission denied to insert into foreign table in security mode
+alter user test_fterror_user useft;
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_fterror_user -W Gauss@123 -c "DROP TABLE LINEITEM;"
+DROP TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_fterror_user -W Gauss@123 -c "DROP FOREIGN TABLE EXT_LINEITEM;"
+DROP FOREIGN TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U test_fterror_user -W Gauss@123 -c "DROP FOREIGN TABLE EXT_LINEITEM_W;"
+DROP FOREIGN TABLE
+drop user test_fterror_user cascade;

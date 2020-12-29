@@ -32,18 +32,17 @@
 #define SOCK_ERRNO errno
 #define SOCK_ERRNO_SET(e) (errno = (e))
 
-#define FREE_AND_RESET(ptr)  \
-    do {                     \
-        if (NULL != (ptr)) { \
-            free(ptr);       \
-            (ptr) = NULL;    \
-        }                    \
-    } while (0)
+#define FREE_AND_RESET(ptr) do { \
+    if (NULL != (ptr)) { \
+        free(ptr);       \
+        (ptr) = NULL;    \
+    }                    \
+} while (0)
 
 namespace PureLibpq {
 typedef struct PQconninfoOption {
-    char* keyword; /* The keyword of the option */
-    char* val;     /* Option's current value, or NULL */
+    char *keyword; /* The keyword of the option */
+    char *val;     /* Option's current value, or NULL */
 } PQconninfoOption;
 
 /* ----------
@@ -56,34 +55,36 @@ typedef struct PQconninfoOption {
  * array is freed (see PQconninfoFree).
  * ----------
  */
-static const PQconninfoOption PQconninfoOptions[] = {{"connect_timeout", NULL},
-    {"host", NULL},
-    {"hostaddr", NULL},
-    {"port", NULL},
-    {"localhost", NULL},
-    {"localport", NULL},
-    {"node_id", NULL},
-    {"node_name", NULL},
-    {"remote_type", NULL},
-    {"postmaster", NULL},
-    {"user", NULL},
+static const PQconninfoOption PQconninfoOptions[] = {
+    { "connect_timeout", NULL },
+    { "host", NULL },
+    { "hostaddr", NULL },
+    { "port", NULL },
+    { "localhost", NULL },
+    { "localport", NULL },
+    { "node_id", NULL },
+    { "node_name", NULL },
+    { "remote_type", NULL },
+    { "postmaster", NULL },
+    { "user", NULL },
     /* Terminating entry --- MUST BE LAST */
-    {NULL, NULL}};
+    { NULL, NULL }
+};
 
 typedef struct ConnParam {
-    char* remoteIp;
+    char *remoteIp;
     int remotePort;
-    char* localIp;
+    char *localIp;
     int connTimeout;
 } ConnParam;
 
-static PQconninfoOption* conninfo_parse(const char* conninfo, bool use_defaults);
-static char* conninfo_getval(PQconninfoOption* connOptions, const char* keyword);
-static bool parseConnParam(const char* conninfo, ConnParam* param);
-static int internalConnect(ConnParam* param);
-static void PQconninfoFree(PQconninfoOption* connOptions);
+static PQconninfoOption *conninfo_parse(const char *conninfo, bool use_defaults);
+static char *conninfo_getval(PQconninfoOption *connOptions, const char *keyword);
+static bool parseConnParam(const char *conninfo, ConnParam *param);
+static int internalConnect(ConnParam *param);
+static void PQconninfoFree(PQconninfoOption *connOptions);
 static int connectNoDelay(int sock);
-static void ConnParamFree(ConnParam* param);
+static void ConnParamFree(ConnParam *param);
 
 /*
  *		PQconnect
@@ -91,10 +92,10 @@ static void ConnParamFree(ConnParam* param);
  * Returns a Port*.  If NULL is returned, a error has occurred.
  *
  */
-Port* PQconnect(const char* conninfo)
+Port *PQconnect(const char *conninfo)
 {
-    Port* port = NULL;
-    ConnParam* param = (ConnParam*)palloc0(sizeof(ConnParam));
+    Port *port = NULL;
+    ConnParam *param = (ConnParam *)palloc0(sizeof(ConnParam));
 
     /*
      * Parse the conninfo string
@@ -110,10 +111,10 @@ Port* PQconnect(const char* conninfo)
         return NULL;
     }
 
-    port = (Port*)palloc0(sizeof(Port));
+    port = (Port *)palloc0(sizeof(Port));
     /* fill in the server (remote) address */
     port->raddr.salen = sizeof(port->raddr.addr);
-    if (getpeername(sock, (struct sockaddr*)&port->raddr.addr, (socklen_t*)&port->raddr.salen) < 0) {
+    if (getpeername(sock, (struct sockaddr *)&port->raddr.addr, (socklen_t *)&port->raddr.salen) < 0) {
         ereport(COMMERROR, (errmsg("getsockname() failed.")));
         close(sock);
         pfree(port);
@@ -125,7 +126,7 @@ Port* PQconnect(const char* conninfo)
 }
 
 /* Only support IPV4 now */
-static int internalConnect(ConnParam* param)
+static int internalConnect(ConnParam *param)
 {
     int sock = -1;
     errno_t rc = 0;
@@ -150,7 +151,7 @@ static int internalConnect(ConnParam* param)
     localaddr.sin_addr.s_addr = inet_addr(param->localIp);
     localaddr.sin_port = 0; /* Any local port will do */
 
-    rc = bind(sock, (struct sockaddr*)&localaddr, sizeof(localaddr));
+    rc = bind(sock, (struct sockaddr *)&localaddr, sizeof(localaddr));
     if (rc != 0) {
         ereport(COMMERROR, (errmsg("could not bind localhost:%s, result is %d", param->localIp, rc)));
         close(sock);
@@ -174,7 +175,7 @@ static int internalConnect(ConnParam* param)
     if (!IS_AF_UNIX(remoteAddr.sin_family)) {
         int on = 1;
 
-        if ((setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char*)&on, sizeof(on))) == -1) {
+        if ((setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&on, sizeof(on))) == -1) {
             ereport(COMMERROR, (errmsg("could not set socket(FD_CLOEXEC): %d", SOCK_ERRNO)));
             close(sock);
             return -1;
@@ -194,7 +195,7 @@ static int internalConnect(ConnParam* param)
     }
 
     if (param->connTimeout > 0) {
-        struct timeval timeout = {0, 0};
+        struct timeval timeout = { 0, 0 };
         timeout.tv_sec = param->connTimeout;
         (void)setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
     }
@@ -203,7 +204,7 @@ static int internalConnect(ConnParam* param)
      * Start/make connection.  This should not block, since we
      * are in nonblock mode.  If it does, well, too bad.
      */
-    if (connect(sock, (struct sockaddr*)&remoteAddr, sizeof(struct sockaddr)) < 0) {
+    if (connect(sock, (struct sockaddr *)&remoteAddr, sizeof(struct sockaddr)) < 0) {
         ereport(COMMERROR, (errmsg("Connect failed.")));
         close(sock);
         return -1;
@@ -220,10 +221,10 @@ static int internalConnect(ConnParam* param)
  *
  * Returns true if OK, false if trouble.
  */
-static bool parseConnParam(const char* conninfo, ConnParam* param)
+static bool parseConnParam(const char *conninfo, ConnParam *param)
 {
-    PQconninfoOption* connOptions = NULL;
-    char* tmp = NULL;
+    PQconninfoOption *connOptions = NULL;
+    char *tmp = NULL;
     const int CONN_TIMED_OUT = 2;
     bool ret = false;
 
@@ -294,7 +295,7 @@ static int connectNoDelay(int sock)
 #ifdef TCP_NODELAY
     int on = 1;
 
-    if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char*)&on, sizeof(on)) < 0) {
+    if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char *)&on, sizeof(on)) < 0) {
         ereport(COMMERROR, (errmsg("could not set socket to TCP no delay mode.")));
         return 0;
     }
@@ -312,19 +313,19 @@ static int connectNoDelay(int sock)
  * Defaults are supplied (from a service file, environment variables, etc)
  * for unspecified options, but only if use_defaults is TRUE.
  */
-static PQconninfoOption* conninfo_parse(const char* conninfo, bool use_defaults)
+static PQconninfoOption *conninfo_parse(const char *conninfo, bool use_defaults)
 {
-    char* pname = NULL;
-    char* pval = NULL;
-    char* buf = NULL;
-    char* cp = NULL;
-    char* cp2 = NULL;
-    PQconninfoOption* options = NULL;
-    PQconninfoOption* option = NULL;
+    char *pname = NULL;
+    char *pval = NULL;
+    char *buf = NULL;
+    char *cp = NULL;
+    char *cp2 = NULL;
+    PQconninfoOption *options = NULL;
+    PQconninfoOption *option = NULL;
     errno_t rc;
 
     /* Make a working copy of PQconninfoOptions */
-    options = (PQconninfoOption*)malloc(sizeof(PQconninfoOptions));
+    options = (PQconninfoOption *)malloc(sizeof(PQconninfoOptions));
     if (options == NULL) {
         ereport(COMMERROR, (errmsg("out of memory.")));
         return NULL;
@@ -472,9 +473,9 @@ static PQconninfoOption* conninfo_parse(const char* conninfo, bool use_defaults)
     return options;
 }
 
-static char* conninfo_getval(PQconninfoOption* connOptions, const char* keyword)
+static char *conninfo_getval(PQconninfoOption *connOptions, const char *keyword)
 {
-    PQconninfoOption* option = NULL;
+    PQconninfoOption *option = NULL;
 
     for (option = connOptions; option->keyword != NULL; option++) {
         if (strcmp(option->keyword, keyword) == 0) {
@@ -485,9 +486,9 @@ static char* conninfo_getval(PQconninfoOption* connOptions, const char* keyword)
     return NULL;
 }
 
-static void PQconninfoFree(PQconninfoOption* connOptions)
+static void PQconninfoFree(PQconninfoOption *connOptions)
 {
-    PQconninfoOption* option = NULL;
+    PQconninfoOption *option = NULL;
 
     if (connOptions == NULL) {
         return;
@@ -499,7 +500,7 @@ static void PQconninfoFree(PQconninfoOption* connOptions)
     free(connOptions);
 }
 
-static void ConnParamFree(ConnParam* param)
+static void ConnParamFree(ConnParam *param)
 {
     if (param == NULL) {
         return;

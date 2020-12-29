@@ -27,21 +27,25 @@
 #include "catalog/pg_partition_fn.h"
 #include "catalog/storage.h"
 #include "utils/rel.h"
+#include "utils/inval.h"
 #include "utils/builtins.h"
 #include "catalog/indexing.h"
+#include "catalog/pgxc_class.h"
 #include "pgxc/redistrib.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "tcop/utility.h"
 #include "utils/syscache.h"
 #include "utils/fmgroids.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "utils/snapmgr.h"
 #include "access/xact.h"
 #include "access/hash.h"
+#include "pgxc/groupmgr.h"
 #include "pgxc/pgxc.h"
 #include "access/reloptions.h"
 #include "access/hbucket_am.h"
 #include "executor/nodeModifyTable.h"
+#include "nodes/makefuncs.h"
 
 
 #define INITBUCKETCACHESIZE 16
@@ -414,6 +418,52 @@ Oid searchHashBucketByBucketid(oidvector *bucketlist, Oid bucketid)
     return ret;
 }
 
+/*
+ * @@GaussDB@@
+ * Target        : merge list string
+ * Brief        :
+ * Description    : give the reloid ,return merge list which storage in pgxc_class
+ * Notes        :
+ */
+text* searchMergeListByRelid(Oid reloid, bool *find, bool retresult)
+{
+    Relation pgxc_class_rel = NULL;
+    ScanKeyData key[1];
+    SysScanDesc scan = NULL;
+    HeapTuple tuple = NULL;
+    text *ret = NULL;
+    *find = false;
+    pgxc_class_rel = heap_open(PgxcClassRelationId, AccessShareLock);
+
+    ScanKeyInit(&key[0],
+                Anum_pgxc_class_pcrelid,
+                BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(reloid));
+
+    scan = systable_beginscan(pgxc_class_rel, PgxcClassPgxcRelIdIndexId, true, SnapshotNow, 1, key);
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        Datum      pgxcDatum;
+        bool      isnull = false;
+
+        pgxcDatum = heap_getattr(tuple, Anum_pgxc_class_option,
+                                   RelationGetDescr(pgxc_class_rel),
+                                   &isnull);
+        Assert(!isnull);
+        if (isnull) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), 
+                errmsg("got null for pgxc_class option %u", reloid)));
+        }
+        if (retresult) {
+            ret = DatumGetTextPCopy(pgxcDatum);
+        }
+        *find = true;
+        break;
+    }
+    systable_endscan(scan);
+    heap_close(pgxc_class_rel, AccessShareLock);
+    return ret;
+}
+
 List *relationGetBucketRelList(Relation rel, Partition part)
 {
     List       *relList = NIL;
@@ -453,12 +503,12 @@ Partition bucketGetPartition(Partition part, int2 bucketid)
     bucket->pd_node.bucketNode = bucketid;
     bucket->pd_lockInfo.lockRelId.bktId = bucketid+1;
 
-    /* just reuse partition's stat info*/ 
+    /* just reuse partition's stat info */
     bucket->pd_pgstat_info = part->pd_pgstat_info;
-
-    bucket->pd_smgr = NULL;
-    PartitionOpenSmgr(bucket); /*reopen each time, need to cache bucket smgr in relation*/
     
+    bucket->pd_smgr = NULL;
+    PartitionOpenSmgr(bucket); /* reopen each time, need to cache bucket smgr in relation */
+
     (void) MemoryContextSwitchTo(oldcxt);
 
     return bucket;
@@ -481,7 +531,9 @@ void bucketClosePartition(Partition bucket)
     {
         pfree_ext(bucket->pd_part);
     }
-
+    if(PartitionIsBucket(bucket)) {
+        pfree_ext(bucket->pd_smgr);
+    }
     pfree_ext(bucket);
 }
 
@@ -493,10 +545,13 @@ bytea* merge_rel_bucket_reloption(Relation rel, int2 bucketid)
 
     List* rel_reloptions_list = NIL;
     List* merged_reloptions_list = NIL;
-    ListCell* lc = NULL;
 
     bytea* merged_rd_options = NULL;
     bool isnull = false;
+    char *merge_list = NULL;
+    text *merge_list_text = NULL;
+    RedisMergeItem *item = NULL;
+    bool find_in_pgxcclass = false;
 
     if(!RelationIsPartition(rel)) {
         rel_tuple = SearchSysCache1WithLogLevel(RELOID, ObjectIdGetDatum(RelationGetRelid(rel)), LOG);
@@ -508,38 +563,34 @@ bytea* merge_rel_bucket_reloption(Relation rel, int2 bucketid)
     if (!HeapTupleIsValid(rel_tuple))
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), 
         errmsg("cache lookup failed for relation %u", RelationGetRelid(rel))));
-    
 
     /* datum ==> list */
     rel_reloptions_list = untransformRelOptions(rel_reloptions);
 
     ReleaseSysCache(rel_tuple);
     merged_reloptions_list = rel_reloptions_list;
-    RedisMergeItem *item = NULL;
-    foreach (lc, rel_reloptions_list) {
-        DefElem* d = (DefElem*)lfirst(lc);
-        if (pg_strncasecmp(d->defname, "merge_list", strlen(d->defname)) == 0) {
-            RedisMergeItemOrderArray *arr = hbkt_get_merge_list_from_str(defGetString(d));
-            if(arr == NULL) {
-                break ;
-            }
-            item = search_redis_merge_item(arr, bucketid);
-            if(item == NULL) {
-                freeRedisMergeItemOrderArray(arr);
-                break;
-            }
-            break;
-         }
+
+    merge_list_text = searchMergeListByRelid(RelationGetRelid(rel), &find_in_pgxcclass);
+
+    if(merge_list_text != NULL) {
+        merge_list = VARDATA_ANY(merge_list_text);
+        item = hbkt_get_merge_item_from_str(merge_list, VARSIZE_ANY_EXHDR(merge_list_text), bucketid);
+        pfree_ext(merge_list_text);
     }
 
     ItemPointerData     start_ctid, end_ctid;
     if(item != NULL) {
         ItemPointerSet(&start_ctid, item->start/BLOCKSIZE, item->start%BLOCKSIZE);
         ItemPointerSet(&end_ctid, item->end/BLOCKSIZE, item->end%BLOCKSIZE);
+        pfree(item);
     } else {
         /* not exist in merge_list, we return -1 to ignore it */
         ItemPointerSet(&start_ctid, -1, -1);
         ItemPointerSet(&end_ctid, -1, -1);
+        /* if not found in merge_list, means need not append only mode */
+        RemoveRedisRelOptionsFromList(&merged_reloptions_list);
+        merged_reloptions_list =
+            lappend(merged_reloptions_list, makeDefElem(pstrdup("append_mode_internal"), (Node*)makeInteger(REDIS_REL_NORMAL)));
     }
     merged_reloptions_list = list_delete_name(merged_reloptions_list, "start_ctid_internal");
     merged_reloptions_list = list_delete_name(merged_reloptions_list, "start_ctid_internal");
@@ -559,8 +610,7 @@ Relation bucketGetRelation(Relation rel, Partition part, int2 bucketId)
     MemoryContext oldcxt;
     errno_t rc = 0;
     bytea *merge_reloption = NULL;
-
-    Assert(bucketId != InvalidBktId);
+    Assert(BUCKET_NODE_IS_VALID(bucketId));
     Assert(!RelationIsBucket(rel));
 
     /*
@@ -583,8 +633,14 @@ Relation bucketGetRelation(Relation rel, Partition part, int2 bucketId)
 
     oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
     bucket = (Relation)palloc0(sizeof(RelationData));
-
     *bucket = *rel;
+    /*
+     * Init bucket relation to avoid double free in releaseDummyRelation()
+     * for bucket relation is copied from main relation.
+     */
+    bucket->rd_node.bucketNode = bucketId;
+    bucket->rd_rel = NULL;
+    bucket->rd_options = NULL;
 
     if (!IsBootstrapProcessingMode()) {
         ResourceOwnerRememberFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, bucket);
@@ -616,8 +672,7 @@ Relation bucketGetRelation(Relation rel, Partition part, int2 bucketId)
     bucket->rd_bucketoid = InvalidOid;
     bucket->rd_bucketkey = NULL;
     bucket->rd_smgr = NULL;
-    RelationOpenSmgr(bucket); /*reopen each time, need to cache bucket smgr in relation*/
-
+    RelationOpenSmgr(bucket);
     /* just reuse relatition or partition's stat info */    
     bucket->pgstat_info = (part == NULL) ? rel->pgstat_info : part->pd_pgstat_info; 
 
@@ -660,6 +715,9 @@ Datum set_hashbucket_info(PG_FUNCTION_ARGS)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_NAME),
                  errmsg("invalid hashbucketId syntax")));
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
 
     if (idList->length == 0 || idList->length > BUCKETDATALEN)
     {
@@ -669,7 +727,8 @@ Datum set_hashbucket_info(PG_FUNCTION_ARGS)
     }
 
     u_sess->storage_cxt.dumpHashbucketIdNum = idList->length;
-    u_sess->storage_cxt.dumpHashbucketIds = (int2 *)MemoryContextAllocZero(TopMemoryContext, idList->length * sizeof(int2));
+    u_sess->storage_cxt.dumpHashbucketIds = (int2 *)MemoryContextAllocZero(
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), idList->length * sizeof(int2));
 
     i = 0;
     foreach(l, idList)
@@ -714,8 +773,8 @@ HeapTuple update_reltuple_bucketoid(HeapTuple tuple, Oid bucketOid)
     replaces[Anum_pg_class_relbucket - 1] = true;
     values[Anum_pg_class_relbucket - 1] = ObjectIdGetDatum(bucketOid);
 
-        ntup = heap_modify_tuple(tuple, GetDefaultPgClassDesc(),
-                                 values, nulls, replaces);
+    ntup = heap_modify_tuple(tuple, GetDefaultPgClassDesc(),
+                             values, nulls, replaces);
     return ntup;
 }
 
@@ -799,9 +858,9 @@ static List *get_drop_bucketlist(Oid relOid1, Oid relOid2)
     for (int i = 0; i < blist1->dim1; i++) {
         int pos = lookupHBucketid(blist2, start, blist1->values[i]);
         if (pos != -1) {
-            start = pos+1;
+            start = pos;
         } else {
-            lappend_oid(droplist, blist1->values[i]);
+            droplist = lappend_oid(droplist, blist1->values[i]);
         }
     }
     relation_close(rel1, NoLock);
@@ -831,6 +890,9 @@ static Oid get_merge_bucketlist(Oid relOid1, Oid relOid2)
 
     int len = blist1->dim1 + blist2->dim1;
     int cur = 0;
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
     Assert(len <= BUCKETDATALEN);
     bucket = (Oid *)palloc0(len * sizeof(Oid));
     while (it1 < blist1->dim1 && it2 < blist2->dim1) {
@@ -937,6 +999,10 @@ dropBucketList(Relation rel, List *bucketIdList)
     if (RelationIsPartitioned(rel) || !bucketIdList) {
         return;
     }
+#ifdef ENABLE_MULTIPLE_NODES
+    CheckBucketMapLenValid();
+#endif
+
     if (bucketIdList->length >= BUCKETDATALEN)
     {
         ereport(ERROR,
@@ -973,6 +1039,7 @@ static void RelationUpdateIndexBuckets(Relation heapRelation, List *bucket_list,
         dropBucketList(currentIndex, bucket_list);
         /* Update the bucketoid */
         update_relation_bucket(indexId, bucketOid);
+        CacheInvalidateRelcache(currentIndex);
         index_close(currentIndex, NoLock);
     }
 }
@@ -987,6 +1054,7 @@ static void RelationUpdateBuckets(Oid relOid, List *bucket_list, Oid bucketOid)
     RelationUpdateIndexBuckets(relation, bucket_list, bucketOid);
     /* Update the bucketoid */
     update_relation_bucket(relOid, bucketOid);
+    CacheInvalidateRelcache(relation);
     relation_close(relation, NoLock);
 
     toastrelid = relation->rd_rel->reltoastrelid;
@@ -1086,7 +1154,7 @@ int64 execute_drop_bucketlist(Oid relOid1, Oid relOid2, bool isPart)
 int64 execute_move_bucketlist(Oid relOid1, Oid relOid2, bool isPart)
 {
     Oid bucketOid = get_merge_bucketlist(relOid1, relOid2);
-
     RelationSwitchBucket(relOid1, bucketOid, NULL, isPart);
+    RelationSwitchBucket(relOid2, VirtualBktOid, NULL, isPart);
     return  1;
 }

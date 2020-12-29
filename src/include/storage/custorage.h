@@ -28,7 +28,7 @@
 #include "storage/cu.h"
 #include "storage/relfilenode.h"
 #include "storage/fd.h"
-#include "storage/cstorealloc.h"
+#include "storage/cstore/cstorealloc.h"
 
 class CUFile;
 
@@ -59,7 +59,7 @@ public:
 
     int WSLoad(_in_ uint64 offset, _in_ int size, __inout char* outbuf, bool direct_flag);
 
-    void GetFileName(_out_ char* fileName, _in_ int size, _in_ int fileId) const;
+    void GetFileName(_out_ char* fileName, _in_ const size_t capacity, _in_ const int fileId) const;
     bool IsDataFileExist(int fileId) const;
 
     void GetBcmFileName(_out_ char* bcmfile, _in_ int fileId) const;
@@ -97,12 +97,15 @@ public:
     void FastExtendFile(uint64 extend_offset, uint32 size, bool keep_size);
     void TruncateDataFile();
     void TruncateBcmFile();
+    void Set2ByteAlign(bool is_2byte_align);
+    bool Is2ByteAlign();
 
 private:
     void InitFileNamePrefix(_in_ const CFileNode& cFileNode);
     File CreateFile(_in_ char* file_name, _in_ int fileId, bool isRedo) const;
     File OpenFile(_in_ char* file_name, _in_ int fileId, bool direct_flag);
     File WSOpenFile(_in_ char* file_name, _in_ int fileId, bool direct_flag);
+    void InitCstoreFreeSpace(CStoreAllocateStrategy strategy);
     void CloseFile(_in_ File fd) const;
 
 public:
@@ -125,6 +128,8 @@ private:
     CStoreAllocateStrategy m_strategy;
 
     bool append_only;
+
+    bool is_2byte_align;
 };
 
 // Notice: the following functions are in physical/low level.
@@ -135,7 +140,7 @@ public:
     CUFile(const RelFileNode& fileNode, int col);
     virtual void Destroy();
     virtual ~CUFile();
-    char* Read(uint64 offset, int wantSize, int* realSize);
+    char* Read(uint64 offset, int wantSize, int* realSize, int align_size);
 
 private:
     CUStorage* m_colStorage;
@@ -165,4 +170,3 @@ extern const uint64 MAX_FILE_SIZE;
 #define relcolpath(custorage_ptr) ((custorage_ptr)->GetColumnFileName())
 
 #endif
-

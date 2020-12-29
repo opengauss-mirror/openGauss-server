@@ -1,0 +1,2 @@
+---clean additional nodes
+\! python @abs_srcdir@/addnode.py -t clean -s @abs_srcdir@ -b @abs_bindir@

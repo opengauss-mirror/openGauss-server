@@ -1,0 +1,35 @@
+ALTER NODE coordinator1 WITH (nodeis_central=false);
+ALTER NODE coordinator2 WITH (nodeis_central=true);
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator2 -c "autovacuum" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "autovacuum" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator3 -c "autovacuum" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator2 -c "autovacuum_mode" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "autovacuum_mode" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator3 -c "autovacuum_mode" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator2 -c "autovacuum_naptime" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "autovacuum_naptime" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator3 -c "autovacuum_naptime" >/dev/null 2>&1
+SHOW autovacuum;
+ autovacuum 
+------------
+ on
+(1 row)
+
+SHOW autovacuum_mode;
+ autovacuum_mode 
+-----------------
+ mix
+(1 row)
+
+SHOW autovacuum_naptime;
+ autovacuum_naptime 
+--------------------
+ 10min
+(1 row)
+
+DROP PROCEDURE sleep_loop_autoanalyze_count;
+DROP PROCEDURE sleep_loop_autovacuum_count;
+DROP TABLE t1;
+DROP TABLE t1_part;
+DROP TABLE t2;
+DROP TABLE t2_part;

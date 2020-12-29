@@ -1,0 +1,270 @@
+set enable_global_stats = true;
+/*
+ * This file is used to create public table for vector engine tests
+ */
+create schema vector_engine;
+set current_schema=vector_engine; 
+ 
+CREATE TABLE lineitem_vec
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+with (orientation = orc) tablespace hdfs_ts
+distribute by hash(L_ORDERKEY);
+COPY lineitem_vec FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
+
+CREATE TABLE LINEITEM_partition
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+with (orientation = column)
+distribute by hash(L_ORDERKEY)
+partition by range (L_ORDERKEY)
+(
+     partition CstorePartition1 values less than (1000),
+     partition CstorePartition2 values less than (2000),
+	 partition CstorePartition3 values less than (3000),
+	 partition CstorePartition4 values less than (4000),
+	 partition CstorePartition5 values less than (5000),
+	 partition CstorePartition6 values less than (6000),
+	 partition CstorePartition7 values less than (100000)
+);
+COPY LINEITEM_partition FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
+
+---- 
+--- tables used for tpch
+----
+drop table if exists customer;
+drop table if exists lineitem;
+drop table if exists nation;
+drop table if exists orders;
+drop table if exists part;
+drop table if exists partsupp;
+drop table if exists region;
+drop table if exists supplier;
+CREATE TABLE customer (
+    c_custkey integer NOT NULL,
+    c_name character varying(25) NOT NULL,
+    c_address character varying(40) NOT NULL,
+    c_nationkey integer NOT NULL,
+    c_phone character(15) NOT NULL,
+    c_acctbal numeric(15,2) NOT NULL,
+    c_mktsegment character(10) NOT NULL,
+    c_comment character varying(117) NOT NULL
+)
+with (orientation = orc) tablespace hdfs_ts
+DISTRIBUTE BY HASH (c_custkey);
+
+CREATE TABLE lineitem (
+    l_orderkey integer NOT NULL,
+    l_partkey integer NOT NULL,
+    l_suppkey integer NOT NULL,
+    l_linenumber integer NOT NULL,
+    l_quantity numeric(15,2) NOT NULL,
+    l_extendedprice numeric(15,2) NOT NULL,
+    l_discount numeric(15,2) NOT NULL,
+    l_tax numeric(15,2) NOT NULL,
+    l_returnflag character(1) NOT NULL,
+    l_linestatus character(1) NOT NULL,
+    l_shipdate date NOT NULL,
+    l_commitdate date NOT NULL,
+    l_receiptdate date NOT NULL,
+    l_shipinstruct character(25) NOT NULL,
+    l_shipmode character(10) NOT NULL,
+    l_comment character varying(44) NOT NULL
+)
+with (orientation = orc) tablespace hdfs_ts
+DISTRIBUTE BY HASH (l_orderkey);
+
+CREATE TABLE nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25) NOT NULL,
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)
+with (orientation = column)
+DISTRIBUTE BY REPLICATION;
+
+CREATE TABLE orders (
+    o_orderkey integer NOT NULL,
+    o_custkey integer NOT NULL,
+    o_orderstatus character(1) NOT NULL,
+    o_totalprice numeric(15,2) NOT NULL,
+    o_orderdate date NOT NULL,
+    o_orderpriority character(15) NOT NULL,
+    o_clerk character(15) NOT NULL,
+    o_shippriority integer NOT NULL,
+    o_comment character varying(79) NOT NULL
+)
+with (orientation = orc) tablespace hdfs_ts
+DISTRIBUTE BY HASH (o_orderkey);
+
+CREATE TABLE part (
+    p_partkey integer NOT NULL,
+    p_name character varying(55) NOT NULL,
+    p_mfgr character(25) NOT NULL,
+    p_brand character(10) NOT NULL,
+    p_type character varying(25) NOT NULL,
+    p_size integer NOT NULL,
+    p_container character(10) NOT NULL,
+    p_retailprice numeric(15,2) NOT NULL,
+    p_comment character varying(23) NOT NULL
+)
+with (orientation = orc) tablespace hdfs_ts
+DISTRIBUTE BY HASH (p_partkey);
+
+CREATE TABLE partsupp (
+    ps_partkey integer NOT NULL,
+    ps_suppkey integer NOT NULL,
+    ps_availqty integer NOT NULL,
+    ps_supplycost numeric(15,2) NOT NULL,
+    ps_comment character varying(199) NOT NULL
+)
+with (orientation = orc) tablespace hdfs_ts
+DISTRIBUTE BY HASH (ps_partkey);
+
+CREATE TABLE region (
+    r_regionkey integer NOT NULL,
+    r_name character(25) NOT NULL,
+    r_comment character varying(152)
+)
+with (orientation = column)
+DISTRIBUTE BY REPLICATION;
+
+CREATE TABLE supplier (
+    s_suppkey integer NOT NULL,
+    s_name character(25) NOT NULL,
+    s_address character varying(40) NOT NULL,
+    s_nationkey integer NOT NULL,
+    s_phone character(15) NOT NULL,
+    s_acctbal numeric(15,2) NOT NULL,
+    s_comment character varying(101) NOT NULL
+)
+with (orientation = orc) tablespace hdfs_ts
+DISTRIBUTE BY HASH (s_suppkey);
+\i @abs_srcdir@/data/tpch.data
+
+----
+--- tables for ICBC
+----
+create schema dwSumData_act;
+CREATE TABLE dwSumData_act.C03_SEMI_CRDT_CARD_ACCT
+(
+Data_Dt date,
+Agt_Num VARCHAR(60) ,
+Agt_Modif_Num VARCHAR(60) ,
+Party_Id VARCHAR(30) ,
+Proc_Org_Num VARCHAR(30) ,
+Int_Org_Num VARCHAR(30) ,
+Curr_Cd CHAR(4) ,
+Open_Dt DATE ,
+Year_Dpsit_Accum DECIMAL(18,2) ,
+Party_Class_Cd CHAR(4) 
+)with (orientation = orc) tablespace hdfs_ts;
+
+copy dwSumData_act.C03_SEMI_CRDT_CARD_ACCT from '@abs_srcdir@/data/vec_casewhen_1.data' delimiter ',' NULL '';
+copy dwSumData_act.C03_SEMI_CRDT_CARD_ACCT from '@abs_srcdir@/data/vec_casewhen_2.data' delimiter ',' NULL '';
+
+--test for semi join
+create table ETL_JOB_DEPENDENCY
+(
+ etl_system         character varying(20)      ,
+ etl_job            character varying(50)      ,
+ dependency_system  character varying(20)      ,
+ dependency_job     character varying(50)      ,
+ description        character varying(200)     ,
+ enable             character varying(1) 
+) 
+with (orientation = orc) tablespace hdfs_ts 
+Distribute By HASH(etl_job) ;                                           
+                      
+create index idx_etl_dependency_job2 on etl_job_dependency(dependency_job);
+  
+create table ETL_JOB_PRIORITY
+(
+ etl_system  character varying(20),
+ etl_job     character varying(50),
+ priority    numeric(5,0)  
+) with (orientation = orc) tablespace hdfs_ts
+Distribute By HASH(etl_job);
+
+
+create table ETL_JOB
+(
+ etl_system      character varying(20)         ,
+ etl_job         character varying(50)         ,
+ batch_no        numeric(5,0)                  ,
+ batch_sum       numeric(5,0)                  ,
+ etl_server      character varying(50)         ,
+ description     character varying(200)        ,
+ frequency       character varying(30)         ,
+ jobtype         character varying(2)          ,
+ batch_type      character varying(1)          ,
+ enable          character varying(1)          ,
+ last_starttime  character varying(19)         ,
+ last_endtime    character varying(19)         ,
+ last_jobstatus  character varying(20)         ,
+ last_txdate     timestamp without time zone   ,
+ last_filecnt    numeric(5,0)                  ,
+ last_cubestatus character varying(20)         ,
+ cubeflag        character varying(1)          ,
+ checkflag       character varying(1)          ,
+ autooff         character varying(1)          ,
+ checkcalendar   character varying(1)          ,
+ calendarbu      character varying(15)         ,
+ runningscript   character varying(200)        ,
+ jobsessionid    numeric(8,0)                  ,
+ expectedrecord  numeric(5,0)                  ,
+ checklaststatus character varying(1)          ,
+ timetrigger     character varying(1)          ,
+ jobresweight    numeric(5,0)                
+) with (orientation = orc) tablespace hdfs_ts
+Distribute By HASH(etl_job);
+
+copy etl_job from '@abs_srcdir@/data/ETL_JOB.data' delimiter '|';
+
+copy etl_job_dependency from '@abs_srcdir@/data/ETL_JOB_DEPENDENCY.data' delimiter '|';
+
+copy etl_job_priority from '@abs_srcdir@/data/ETL_JOB_PRIORITY.data' delimiter '|';
+copy etl_job_priority from '@abs_srcdir@/data/ETL_JOB_PRIORITY.data' delimiter '|';
+copy etl_job_priority from '@abs_srcdir@/data/ETL_JOB_PRIORITY.data' delimiter '|';
+copy etl_job_priority from '@abs_srcdir@/data/ETL_JOB_PRIORITY.data' delimiter '|';
+
+analyze etl_job_priority;
+
+--test explain_dna_file
+show explain_dna_file;
+set explain_dna_file = 'data';
+set explain_dna_file = '@abs_srcdir@/data';
+set explain_dna_file = '@abs_srcdir@/data/test.csv';
+reset explain_dna_file;

@@ -1,0 +1,891 @@
+GRANT CREATE ON SCHEMA public TO PUBLIC;
+-- pg_regress should ensure that this default value applies; however
+-- we can't rely on any specific default value of vacuum_cost_delay
+-- SET random_page_cost
+SET random_page_cost = +4;
+SET random_page_cost = 4000000000;
+SET random_page_cost = +4000000000; -- 4000000000 is too large to be an ICONST
+RESET random_page_cost;
+SHOW datestyle;
+   DateStyle   
+---------------
+ Postgres, MDY
+(1 row)
+
+-- SET to some nondefault value
+SET vacuum_cost_delay TO 40;
+SET datestyle = 'ISO, YMD';
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 40ms
+(1 row)
+
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+-- SET LOCAL has no effect outside of a transaction
+SET LOCAL vacuum_cost_delay TO 50;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 40ms
+(1 row)
+
+SET LOCAL datestyle = 'SQL';
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+-- SET LOCAL within a transaction that commits
+START TRANSACTION;
+SET LOCAL vacuum_cost_delay TO 50;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 50ms
+(1 row)
+
+SET LOCAL datestyle = 'SQL';
+SHOW datestyle;
+ DateStyle 
+-----------
+ SQL, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+       timestamptz       
+-------------------------
+ 08/13/2006 12:34:56 PDT
+(1 row)
+
+COMMIT;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 40ms
+(1 row)
+
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+-- SET should be reverted after ROLLBACK
+START TRANSACTION;
+SET vacuum_cost_delay TO 60;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 60ms
+(1 row)
+
+SET datestyle = 'German';
+SHOW datestyle;
+  DateStyle  
+-------------
+ German, DMY
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+       timestamptz       
+-------------------------
+ 13.08.2006 12:34:56 PDT
+(1 row)
+
+ROLLBACK;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 40ms
+(1 row)
+
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+-- Some tests with subtransactions
+START TRANSACTION;
+SET vacuum_cost_delay TO 70;
+SET datestyle = 'MDY';
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, MDY
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+SAVEPOINT first_sp;
+SET vacuum_cost_delay TO 80;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 80ms
+(1 row)
+
+SET datestyle = 'German, DMY';
+SHOW datestyle;
+  DateStyle  
+-------------
+ German, DMY
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+       timestamptz       
+-------------------------
+ 13.08.2006 12:34:56 PDT
+(1 row)
+
+ROLLBACK TO first_sp;
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, MDY
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+SAVEPOINT second_sp;
+SET vacuum_cost_delay TO 90;
+SET datestyle = 'SQL, YMD';
+SHOW datestyle;
+ DateStyle 
+-----------
+ SQL, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+       timestamptz       
+-------------------------
+ 08/13/2006 12:34:56 PDT
+(1 row)
+
+SAVEPOINT third_sp;
+SET vacuum_cost_delay TO 100;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 100ms
+(1 row)
+
+SET datestyle = 'Postgres, MDY';
+SHOW datestyle;
+   DateStyle   
+---------------
+ Postgres, MDY
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+         timestamptz          
+------------------------------
+ Sun Aug 13 12:34:56 2006 PDT
+(1 row)
+
+ROLLBACK TO third_sp;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 90ms
+(1 row)
+
+SHOW datestyle;
+ DateStyle 
+-----------
+ SQL, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+       timestamptz       
+-------------------------
+ 08/13/2006 12:34:56 PDT
+(1 row)
+
+ROLLBACK TO second_sp;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 70ms
+(1 row)
+
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, MDY
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+ROLLBACK;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 40ms
+(1 row)
+
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+-- SET LOCAL with Savepoints
+START TRANSACTION;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 40ms
+(1 row)
+
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+SAVEPOINT sp;
+SET LOCAL vacuum_cost_delay TO 30;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 30ms
+(1 row)
+
+SET LOCAL datestyle = 'Postgres, MDY';
+SHOW datestyle;
+   DateStyle   
+---------------
+ Postgres, MDY
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+         timestamptz          
+------------------------------
+ Sun Aug 13 12:34:56 2006 PDT
+(1 row)
+
+ROLLBACK TO sp;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 40ms
+(1 row)
+
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+ROLLBACK;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 40ms
+(1 row)
+
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+-- SET LOCAL persists through RELEASE (which was not true in 8.0-8.2)
+START TRANSACTION;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 40ms
+(1 row)
+
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+SAVEPOINT sp;
+SET LOCAL vacuum_cost_delay TO 30;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 30ms
+(1 row)
+
+SET LOCAL datestyle = 'Postgres, MDY';
+SHOW datestyle;
+   DateStyle   
+---------------
+ Postgres, MDY
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+         timestamptz          
+------------------------------
+ Sun Aug 13 12:34:56 2006 PDT
+(1 row)
+
+RELEASE SAVEPOINT sp;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 30ms
+(1 row)
+
+SHOW datestyle;
+   DateStyle   
+---------------
+ Postgres, MDY
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+         timestamptz          
+------------------------------
+ Sun Aug 13 12:34:56 2006 PDT
+(1 row)
+
+ROLLBACK;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 40ms
+(1 row)
+
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+-- SET followed by SET LOCAL
+START TRANSACTION;
+SET vacuum_cost_delay TO 40;
+SET LOCAL vacuum_cost_delay TO 50;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 50ms
+(1 row)
+
+SET datestyle = 'ISO, DMY';
+SET LOCAL datestyle = 'Postgres, MDY';
+SHOW datestyle;
+   DateStyle   
+---------------
+ Postgres, MDY
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+         timestamptz          
+------------------------------
+ Sun Aug 13 12:34:56 2006 PDT
+(1 row)
+
+COMMIT;
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 40ms
+(1 row)
+
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, DMY
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+--
+-- Test RESET.  We use datestyle because the reset value is forced by
+-- pg_regress, so it doesn't depend on the installation's configuration.
+--
+SET datestyle = iso, ymd;
+SHOW datestyle;
+ DateStyle 
+-----------
+ ISO, YMD
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+      timestamptz       
+------------------------
+ 2006-08-13 12:34:56-07
+(1 row)
+
+RESET datestyle;
+SHOW datestyle;
+   DateStyle   
+---------------
+ Postgres, MDY
+(1 row)
+
+SELECT '2006-08-13 12:34:56'::timestamptz;
+         timestamptz          
+------------------------------
+ Sun Aug 13 12:34:56 2006 PDT
+(1 row)
+
+-- Test some simple error cases
+SET seq_page_cost TO 'NaN';
+ERROR:  parameter "seq_page_cost" requires a numeric value
+SET vacuum_cost_delay TO '10s';
+ERROR:  10000 is outside the valid range for parameter "vacuum_cost_delay" (0 .. 100)
+--
+-- Test DISCARD TEMP
+--
+CREATE TEMP TABLE reset_test_1 ( data text ) ON COMMIT DELETE ROWS;
+CREATE TEMP TABLE reset_test ( data text ) ON COMMIT PRESERVE ROWS;
+SELECT relname FROM pg_class WHERE relname = 'reset_test';
+  relname   
+------------
+ reset_test
+(1 row)
+
+DISCARD TEMP;
+ERROR:  DISCARD statement is not yet supported.
+SELECT relname FROM pg_class WHERE relname = 'reset_test';
+  relname   
+------------
+ reset_test
+(1 row)
+
+--
+-- Test DISCARD ALL
+--
+-- do changes
+CURSOR foo WITH HOLD FOR SELECT 1;
+PREPARE foo AS SELECT 1;
+LISTEN foo_event;
+ERROR:  LISTEN statement is not yet supported.
+SET vacuum_cost_delay = 13;
+CREATE TEMP TABLE tmp_foo_1 (data text) ON COMMIT DELETE ROWS;
+CREATE TEMP TABLE tmp_foo (data text) ON COMMIT PRESERVE ROWS;
+CREATE ROLE temp_reset_user PASSWORD 'gauss@123';
+SET SESSION AUTHORIZATION temp_reset_user PASSWORD 'gauss@123';
+-- look changes
+SELECT pg_listening_channels();
+ pg_listening_channels 
+-----------------------
+(0 rows)
+
+SELECT name FROM pg_prepared_statements;
+ name 
+------
+ foo
+(1 row)
+
+SELECT name FROM pg_cursors;
+ name 
+------
+ foo
+(1 row)
+
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 13ms
+(1 row)
+
+SELECT relname from pg_class where relname = 'tmp_foo';
+ relname 
+---------
+ tmp_foo
+(1 row)
+
+SELECT current_user = 'temp_reset_user';
+ ?column? 
+----------
+ t
+(1 row)
+
+RESET SESSION AUTHORIZATION;
+DROP TABLE tmp_foo_1; -- Need to release the ON COMMIT actions
+DROP TABLE tmp_foo; -- Need to release the ON COMMIT actions
+SET SESSION AUTHORIZATION temp_reset_user PASSWORD 'gauss@123';
+-- discard everything
+DISCARD ALL;
+ERROR:  DISCARD statement is not yet supported.
+-- look again
+SELECT pg_listening_channels();
+ pg_listening_channels 
+-----------------------
+(0 rows)
+
+SELECT name FROM pg_prepared_statements;
+ name 
+------
+ foo
+(1 row)
+
+SELECT name FROM pg_cursors;
+ name 
+------
+ foo
+(1 row)
+
+SHOW vacuum_cost_delay;
+ vacuum_cost_delay 
+-------------------
+ 13ms
+(1 row)
+
+SELECT relname from pg_class where relname = 'tmp_foo';
+ relname 
+---------
+(0 rows)
+
+SELECT current_user = 'temp_reset_user';
+ ?column? 
+----------
+ t
+(1 row)
+
+DROP ROLE temp_reset_user;
+ERROR:  Permission denied.
+--
+-- search_path should react to changes in pg_namespace
+--
+set search_path = foo, public, not_there_initially;
+select current_schemas(false);
+ current_schemas 
+-----------------
+ {public}
+(1 row)
+
+create schema not_there_initially;
+ERROR:  permission denied for database regression
+select current_schemas(false);
+ current_schemas 
+-----------------
+ {public}
+(1 row)
+
+drop schema not_there_initially;
+ERROR:  schema "not_there_initially" does not exist
+select current_schemas(false);
+ current_schemas 
+-----------------
+ {public}
+(1 row)
+
+reset search_path;
+--
+-- Tests for function-local GUC settings
+--
+set work_mem = '3MB';
+create function report_guc(text) returns text as
+$$ select current_setting($1) $$ language sql
+set work_mem = '1MB';
+select report_guc('work_mem'), current_setting('work_mem');
+ report_guc | current_setting 
+------------+-----------------
+ 1MB        | 3MB
+(1 row)
+
+alter function report_guc(text) set work_mem = '2MB';
+select report_guc('work_mem'), current_setting('work_mem');
+ report_guc | current_setting 
+------------+-----------------
+ 2MB        | 3MB
+(1 row)
+
+alter function report_guc(text) reset all;
+select report_guc('work_mem'), current_setting('work_mem');
+ report_guc | current_setting 
+------------+-----------------
+ 3MB        | 3MB
+(1 row)
+
+-- SET LOCAL is restricted by a function SET option
+create or replace function myfunc(int) returns text as $$
+begin
+  set local work_mem = '2MB';
+  return current_setting('work_mem');
+end $$
+language plpgsql
+set work_mem = '1MB';
+select myfunc(0), current_setting('work_mem');
+ myfunc | current_setting 
+--------+-----------------
+ 2MB    | 3MB
+(1 row)
+
+alter function myfunc(int) reset all;
+select myfunc(0), current_setting('work_mem');
+ myfunc | current_setting 
+--------+-----------------
+ 2MB    | 2MB
+(1 row)
+
+set work_mem = '3MB';
+-- but SET isn't
+create or replace function myfunc(int) returns text as $$
+begin
+  set work_mem = '2MB';
+  return current_setting('work_mem');
+end $$
+language plpgsql
+set work_mem = '1MB';
+select myfunc(0), current_setting('work_mem');
+ myfunc | current_setting 
+--------+-----------------
+ 2MB    | 2MB
+(1 row)
+
+set work_mem = '3MB';
+-- it should roll back on error, though
+create or replace function myfunc(int) returns text as $$
+begin
+  set work_mem = '2MB';
+  perform 1/$1;
+  return current_setting('work_mem');
+end $$
+language plpgsql
+set work_mem = '1MB';
+select myfunc(0);
+ERROR:  division by zero
+CONTEXT:  SQL statement "SELECT 1/$1"
+PL/pgSQL function myfunc(integer) line 4 at PERFORM
+referenced column: myfunc
+select current_setting('work_mem');
+ current_setting 
+-----------------
+ 3MB
+(1 row)
+
+select myfunc(1), current_setting('work_mem');
+ myfunc | current_setting 
+--------+-----------------
+ 2MB    | 2MB
+(1 row)
+
+--
+-- GUC logging_module
+--
+SHOW logging_module;
+                                                                                                                                                                                            logging_module                                                                                                                                                                                             
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ ALL,on(),off(DFS,GUC,HDFS,ORC,SLRU,MEM_CTL,AUTOVAC,CACHE,ADIO,SSL,GDS,TBLSPC,WLM,OBS,EXECUTOR,OPFUSION,VEC_EXECUTOR,STREAM,LLVM,OPT,OPT_REWRITE,OPT_JOIN,OPT_AGG,OPT_SUBPLAN,OPT_SETOP,OPT_SKEW,UDF,COOP_ANALYZE,WLMCP,ACCELERATE,PARQUET,PLANHINT,SNAPSHOT,XACT,HANDLE,CLOG,EC,REMOTE,CN_RETRY,PLSQL,TEXTSEARCH,SEQ,REDO,FUNCTION,PARSER,INSTR,INCRE_CKPT,DBL_WRT,RTO,HEARTBEAT,COMM_IPC,COMM_PARAM)
+(1 row)
+
+-- error input
+set logging_module= "";
+ERROR:  zero-length delimited identifier at or near """"
+LINE 1: set logging_module= "";
+                            ^
+set logging_module= "o";
+ERROR:  missing keywords "on" or "off"
+DETAIL:  Must begin with keyword "on" or "off".
+set logging_module= "on";
+ERROR:  module list not found
+DETAIL:  '(' is not found.
+HINT:  Module list begins with '(', ends with ')', and is delimited with ','.
+set logging_module= "off";
+ERROR:  module list not found
+DETAIL:  '(' is not found.
+HINT:  Module list begins with '(', ends with ')', and is delimited with ','.
+set logging_module= "on off";
+ERROR:  module list not found
+DETAIL:  '(' is not found.
+HINT:  Module list begins with '(', ends with ')', and is delimited with ','.
+set logging_module= "on [";
+ERROR:  module list not found
+DETAIL:  '(' is not found.
+HINT:  Module list begins with '(', ends with ')', and is delimited with ','.
+set logging_module= "off  (";
+ERROR:  module list not found
+HINT:  Module list begins with '(', ends with ')', and is delimited with ','.
+set logging_module= "off  ()";
+ERROR:  empty module list
+DETAIL:  Must one or more modules are given, and delimited with ','.
+set logging_module= "on  (ALL)  ";
+set logging_module= 'on  (ALL)  ';
+set logging_module= "off  (,)";
+ERROR:  empty module name
+DETAIL:  Module name cannot be empty.
+HINT:  Query all the existing modules by SHOW logging_module.
+set logging_module= "on  (ALL,)  ";
+ERROR:  empty module name
+DETAIL:  The last module name is empty.
+HINT:  Module name must be given between ',' and ')'.
+set logging_module= "on  (,ALL,)  ";
+ERROR:  empty module name
+DETAIL:  Module name cannot be empty.
+HINT:  Query all the existing modules by SHOW logging_module.
+set logging_module= "off  (ALLLLLLLLLLLLLLLLLLLLLL)";
+ERROR:  module name "ALLLLLLLLLLLLLLLLLLLLLL" not found
+HINT:  Query all the existing modules by SHOW logging_module.
+set logging_module= "off  (A,)";
+ERROR:  module name "A" not found
+HINT:  Query all the existing modules by SHOW logging_module.
+set logging_module= "off  (ALL,  , SLRU  )";
+ERROR:  empty module name
+DETAIL:  Module name cannot be empty.
+HINT:  Module name must be given between ','.
+set logging_module= "off  (slru)";
+set logging_module= "on  (backend)  ";
+ERROR:  module name "backend" not found
+HINT:  Query all the existing modules by SHOW logging_module.
+set logging_module= "on(GUC) $ ";
+ERROR:  extra text found after the first list of module names
+HINT:  Remove the extra text after the first list of module names.
+-- reset (all)
+set logging_module = 'on(all)';
+set logging_module = 'off(slru)';
+SHOW logging_module;
+                                                                                                                                                                                            logging_module                                                                                                                                                                                            
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ ALL,on(DFS,GUC,HDFS,ORC,MEM_CTL,AUTOVAC,CACHE,ADIO,SSL,GDS,TBLSPC,WLM,OBS,EXECUTOR,OPFUSION,VEC_EXECUTOR,STREAM,LLVM,OPT,OPT_REWRITE,OPT_JOIN,OPT_AGG,OPT_SUBPLAN,OPT_SETOP,OPT_SKEW,UDF,COOP_ANALYZE,WLMCP,ACCELERATE,PARQUET,PLANHINT,SNAPSHOT,XACT,HANDLE,CLOG,EC,REMOTE,CN_RETRY,PLSQL,TEXTSEARCH,SEQ,REDO,FUNCTION,PARSER,INSTR,INCRE_CKPT,DBL_WRT,RTO,HEARTBEAT,COMM_IPC,COMM_PARAM),off(SLRU)
+(1 row)
+
+RESET  logging_module;
+SHOW logging_module;
+                                                                                                                                                                                            logging_module                                                                                                                                                                                             
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ ALL,on(),off(DFS,GUC,HDFS,ORC,SLRU,MEM_CTL,AUTOVAC,CACHE,ADIO,SSL,GDS,TBLSPC,WLM,OBS,EXECUTOR,OPFUSION,VEC_EXECUTOR,STREAM,LLVM,OPT,OPT_REWRITE,OPT_JOIN,OPT_AGG,OPT_SUBPLAN,OPT_SETOP,OPT_SKEW,UDF,COOP_ANALYZE,WLMCP,ACCELERATE,PARQUET,PLANHINT,SNAPSHOT,XACT,HANDLE,CLOG,EC,REMOTE,CN_RETRY,PLSQL,TEXTSEARCH,SEQ,REDO,FUNCTION,PARSER,INSTR,INCRE_CKPT,DBL_WRT,RTO,HEARTBEAT,COMM_IPC,COMM_PARAM)
+(1 row)
+
+---
+-- GUC analysis_options
+---
+show analysis_options;
+                      analysis_options                      
+------------------------------------------------------------
+ ALL,on(),off(LLVM_COMPILE,HASH_CONFLICT,STREAM_DATA_CHECK)
+(1 row)
+
+set analysis_options = "";
+ERROR:  zero-length delimited identifier at or near """"
+LINE 1: set analysis_options = "";
+                               ^
+set analysis_options = "on";
+ERROR:  module list not found
+DETAIL:  '(' is not found.
+HINT:  Module list begins with '(', ends with ')', and is delimited with ','.
+set analysis_options = "on(all)";
+show analysis_options;
+                      analysis_options                      
+------------------------------------------------------------
+ ALL,on(LLVM_COMPILE,HASH_CONFLICT,STREAM_DATA_CHECK),off()
+(1 row)
+
+set analysis_options = "on  (,ALL,) ";
+ERROR:  empty module name
+DETAIL:  analysis option name cannot be empty.
+HINT:  Query all the existing modules by SHOW logging_module.
+set analysis_options = "off (ALL, , LLVM_COMPILE)";
+ERROR:  empty module name
+DETAIL:  Module name cannot be empty.
+HINT:  Module name must be given between ','.
+set analysis_options = "on (backend)";
+ERROR:  module name "backend" not found
+HINT:  Query all the existing modules by SHOW logging_module.
+set analysis_options = "on(LLVM_COMPILE, HASH_CONFLICT)";
+show analysis_options;
+                      analysis_options                      
+------------------------------------------------------------
+ ALL,on(LLVM_COMPILE,HASH_CONFLICT,STREAM_DATA_CHECK),off()
+(1 row)
+
+set analysis_options = "on(LLVM_COMPILE), off(HASH_CONFLICT)";
+ERROR:  extra text found after the first list of module names
+HINT:  Remove the extra text after the first list of module names.
+set analysis_options = "on(STREAM_DATA_CHECK)";
+show analysis_options;
+                      analysis_options                      
+------------------------------------------------------------
+ ALL,on(LLVM_COMPILE,HASH_CONFLICT,STREAM_DATA_CHECK),off()
+(1 row)
+
+reset analysis_options;
+show analysis_options;
+                      analysis_options                      
+------------------------------------------------------------
+ ALL,on(),off(LLVM_COMPILE,HASH_CONFLICT,STREAM_DATA_CHECK)
+(1 row)
+

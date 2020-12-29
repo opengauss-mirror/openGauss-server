@@ -18,38 +18,33 @@
 
 #include "storage/standby.h"
 
-void standby_desc(StringInfo buf, XLogReaderState* record)
+void standby_desc(StringInfo buf, XLogReaderState *record)
 {
-    char* rec = XLogRecGetData(record);
+    char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     if (info == XLOG_STANDBY_LOCK) {
-        xl_standby_locks* xlrec = (xl_standby_locks*)rec;
+        xl_standby_locks *xlrec = (xl_standby_locks *)rec;
         int i;
 
         appendStringInfo(buf, "AccessExclusive locks: nlocks %d ", xlrec->nlocks);
 
         for (i = 0; i < xlrec->nlocks; i++)
-            appendStringInfo(buf,
-                " xid " XID_FMT " db %u rel %u",
-                xlrec->locks[i].xid,
-                xlrec->locks[i].dbOid,
-                xlrec->locks[i].relOid);
+            appendStringInfo(buf, " xid " XID_FMT " db %u rel %u", xlrec->locks[i].xid, xlrec->locks[i].dbOid,
+                             xlrec->locks[i].relOid);
     } else if (info == XLOG_RUNNING_XACTS) {
         appendStringInfo(buf, " XLOG_RUNNING_XACTS");
     } else if (info == XLOG_STANDBY_CSN) {
         appendStringInfo(buf, " XLOG_STANDBY_CSN");
     } else if (info == XLOG_STANDBY_UNLOCK) {
-        xl_standby_locks* xlrec = (xl_standby_locks*)rec;
+        xl_standby_locks *xlrec = (xl_standby_locks *)rec;
         int i;
 
         appendStringInfo(buf, "release AccessExclusive locks: nlocks %d ", xlrec->nlocks);
 
-        for (i = 0; i < xlrec->nlocks; i++)
-            appendStringInfo(buf,
-                " xid " XID_FMT " db %u rel %u",
-                xlrec->locks[i].xid,
-                xlrec->locks[i].dbOid,
-                xlrec->locks[i].relOid);
+        for (i = 0; i < xlrec->nlocks; i++) {
+            appendStringInfo(buf, " xid " XID_FMT " db %u rel %u", xlrec->locks[i].xid, xlrec->locks[i].dbOid,
+                             xlrec->locks[i].relOid);
+        }
 #ifndef ENABLE_MULTIPLE_NODES
     } else if (info == XLOG_STANDBY_CSN_COMMITTING) {
         uint64* id = ((uint64 *)XLogRecGetData(record));
@@ -61,4 +56,3 @@ void standby_desc(StringInfo buf, XLogReaderState* record)
     } else
         appendStringInfo(buf, "UNKNOWN");
 }
-

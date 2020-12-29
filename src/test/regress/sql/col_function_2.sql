@@ -21,7 +21,7 @@ CALLED ON NULL INPUT
 SECURITY INVOKER
 COST 100;
 
-explain (verbose, costs off, nodes off) select * from test_function_immutable();
+explain (verbose, costs off) select * from test_function_immutable();
 select * from test_function_immutable();
 CREATE VIEW functionview AS SELECT f1,f2,left(f3,test_function_immutable()::INT) f3 FROM function_table_01;
 
@@ -42,10 +42,10 @@ CALLED ON NULL INPUT
 SECURITY INVOKER
 COST 100;
 
-explain (verbose on, costs off, nodes off) select * from test_function_volatile();
+explain (verbose on, costs off) select * from test_function_volatile();
 select * from test_function_volatile();
 
-explain (verbose on, costs off, nodes off) select test_function_volatile();
+explain (verbose on, costs off) select test_function_volatile();
 select test_function_volatile();
 
 --targetlist

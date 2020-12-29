@@ -44,10 +44,11 @@ Datum gin_cmp_prefix(PG_FUNCTION_ARGS)
     Pointer extra_data = PG_GETARG_POINTER(3);
 #endif
     int cmp;
+
     cmp = tsCompareString(VARDATA_ANY(a), VARSIZE_ANY_EXHDR(a), VARDATA_ANY(b), VARSIZE_ANY_EXHDR(b), true);
-    if (cmp < 0) {
+
+    if (cmp < 0)
         cmp = 1; /* prevent continue scan */
-    }
 
     PG_FREE_IF_COPY(a, 0);
     PG_FREE_IF_COPY(b, 1);
@@ -86,10 +87,10 @@ Datum gin_extract_tsquery(PG_FUNCTION_ARGS)
     TSQuery query = PG_GETARG_TSQUERY(0);
     int32* nentries = (int32*)PG_GETARG_POINTER(1);
 
-    bool** ptr_partial_match = (bool**)PG_GETARG_POINTER(3);
+    bool** ptr_partialmatch = (bool**)PG_GETARG_POINTER(3);
     Pointer** extra_data = (Pointer**)PG_GETARG_POINTER(4);
 
-    int32* search_mode = (int32*)PG_GETARG_POINTER(6);
+    int32* searchMode = (int32*)PG_GETARG_POINTER(6);
     Datum* entries = NULL;
 
     *nentries = 0;
@@ -97,7 +98,7 @@ Datum gin_extract_tsquery(PG_FUNCTION_ARGS)
     if (query->size > 0) {
         QueryItem* item = GETQUERY(query);
         int4 i, j;
-        bool* partial_match = NULL;
+        bool* partialmatch = NULL;
         int* map_item_operand = NULL;
 
         /*
@@ -106,9 +107,9 @@ Datum gin_extract_tsquery(PG_FUNCTION_ARGS)
          * scan.
          */
         if (tsquery_requires_match(item))
-            *search_mode = GIN_SEARCH_MODE_DEFAULT;
+            *searchMode = GIN_SEARCH_MODE_DEFAULT;
         else
-            *search_mode = GIN_SEARCH_MODE_ALL;
+            *searchMode = GIN_SEARCH_MODE_ALL;
 
         /* count number of VAL items */
         j = 0;
@@ -119,7 +120,7 @@ Datum gin_extract_tsquery(PG_FUNCTION_ARGS)
         *nentries = j;
 
         entries = (Datum*)palloc(sizeof(Datum) * j);
-        partial_match = *ptr_partial_match = (bool*)palloc(sizeof(bool) * j);
+        partialmatch = *ptr_partialmatch = (bool*)palloc(sizeof(bool) * j);
 
         /*
          * Make map to convert item's number to corresponding operand's (the
@@ -138,7 +139,7 @@ Datum gin_extract_tsquery(PG_FUNCTION_ARGS)
 
                 txt = cstring_to_text_with_len(GETOPERAND(query) + val->distance, val->length);
                 entries[j] = PointerGetDatum(txt);
-                partial_match[j] = val->prefix;
+                partialmatch[j] = val->prefix;
                 (*extra_data)[j] = (Pointer)map_item_operand;
                 map_item_operand[i] = j;
                 j++;
@@ -285,10 +286,12 @@ Datum gin_tsquery_triconsistent(PG_FUNCTION_ARGS)
     Pointer* extra_data = (Pointer*)PG_GETARG_POINTER(4);
     GinTernaryValue res = GIN_FALSE;
     bool recheck = false;
+
     /* The query requires recheck only if it involves weights */
     if (query->size > 0) {
         QueryItem* item = NULL;
         GinChkVal gcv;
+
         /*
          * check-parameter array has one entry for each value (operand) in the
          * query.
@@ -297,7 +300,9 @@ Datum gin_tsquery_triconsistent(PG_FUNCTION_ARGS)
         gcv.check = check;
         gcv.map_item_operand = (int*)(extra_data[0]);
         gcv.need_recheck = &recheck;
+
         res = TS_execute_ternary(GETQUERY(query), &gcv, checkcondition_gin);
+
         if (res == GIN_TRUE && recheck)
             res = GIN_MAYBE;
     }

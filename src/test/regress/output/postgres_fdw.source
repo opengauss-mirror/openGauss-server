@@ -487,27 +487,6 @@ EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = t1.c2;
    Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1" WHERE (("C 1" = c2))
 (3 rows)
 
--- don't do parallel query with foreign table
-set force_parallel_mode=on;
-set parallel_setup_cost=0;
-set parallel_tuple_cost=0.000005;
-set max_parallel_workers_per_gather=2;
-set min_parallel_table_scan_size=0;
-set parallel_leader_participation=on;
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1;
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- Foreign Scan on public.ft1
-   Output: c1, c2, c3, c4, c5, c6, c7, c8
-   Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1"
-(3 rows)
-
-reset force_parallel_mode;
-reset parallel_setup_cost;
-reset parallel_tuple_cost;
-reset max_parallel_workers_per_gather;
-reset min_parallel_table_scan_size;
-reset parallel_leader_participation;
 -- ===================================================================
 -- WHERE with remotely-executable conditions
 -- ===================================================================

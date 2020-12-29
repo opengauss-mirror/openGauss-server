@@ -25,13 +25,14 @@
 
 #include "obs_connector.h"
 #include "foreign/foreign.h"
+#include "pgstat.h"
 #include "utils/memutils.h"
 #include "utils/plog.h"
 
 #if defined(__LP64__) || defined(__64BIT__)
-typedef unsigned int GS_UINT32;
+    typedef unsigned int GS_UINT32;
 #else
-typedef unsigned long GS_UINT32;
+    typedef unsigned long GS_UINT32;
 #endif
 
 #define OBS_NOT_IMPLEMENT \
@@ -271,7 +272,9 @@ List *OBSConnector::listObjectsStat(char *searchPath, const char *primitivePrefi
     Assert(prefix != NULL);
 
     PROFILING_OBS_START();
+    pgstat_report_waitevent(WAIT_EVENT_OBS_LIST);
     objectList = list_bucket_objects_for_query(m_handler, bucket, prefix);
+    pgstat_report_waitevent(WAIT_EVENT_END);
     PROFILING_OBS_END_LIST(list_length(objectList));
 
     if (0 == list_length(objectList)) {

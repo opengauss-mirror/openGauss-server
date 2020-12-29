@@ -14,6 +14,7 @@
 #ifndef DEFREM_H
 #define DEFREM_H
 
+#ifndef FRONTEND_PARSER
 #include "nodes/parsenodes.h"
 
 /* commands/dropcmds.c */
@@ -52,7 +53,7 @@ extern void CreateCast(CreateCastStmt* stmt);
 extern void DropCastById(Oid castOid);
 extern void AlterFunctionNamespace(List* name, List* argtypes, bool isagg, const char* newschema);
 extern Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid);
-extern void ExecuteDoStmt(const DoStmt* stmt, bool atomic);
+extern void ExecuteDoStmt(DoStmt* stmt, bool atomic);
 extern Oid get_cast_oid(Oid sourcetypeid, Oid targettypeid, bool missing_ok);
 
 /* commands/operatorcmds.c */
@@ -80,11 +81,11 @@ extern void RenameOpClass(List* name, const char* access_method, const char* new
 extern void RenameOpFamily(List* name, const char* access_method, const char* newname);
 extern void AlterOpClassOwner(List* name, const char* access_method, Oid newOwnerId);
 extern void AlterOpClassOwner_oid(Oid opclassOid, Oid newOwnerId);
-extern void AlterOpClassNamespace(List* name, char* access_method, const char* newschema);
+extern void AlterOpClassNamespace(List* name, const char* access_method, const char* newschema);
 extern Oid AlterOpClassNamespace_oid(Oid opclassOid, Oid newNspOid);
 extern void AlterOpFamilyOwner(List* name, const char* access_method, Oid newOwnerId);
 extern void AlterOpFamilyOwner_oid(Oid opfamilyOid, Oid newOwnerId);
-extern void AlterOpFamilyNamespace(List* name, char* access_method, const char* newschema);
+extern void AlterOpFamilyNamespace(List* name, const char* access_method, const char* newschema);
 extern Oid AlterOpFamilyNamespace_oid(Oid opfamilyOid, Oid newNspOid);
 extern Oid get_am_oid(const char* amname, bool missing_ok);
 extern Oid get_opclass_oid(Oid amID, List* opclassname, bool missing_ok);
@@ -123,6 +124,10 @@ extern Oid AlterTSConfigurationNamespace_oid(Oid cfgId, Oid newNspOid);
 extern text* serialize_deflist(List* deflist);
 extern List* deserialize_deflist(Datum txt);
 
+/* commands/weak_password_dictioanry.c */
+extern void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt);
+extern void DropWeakPasswordDictionary();
+
 /* commands/foreigncmds.c */
 extern void RenameForeignServer(const char* oldname, const char* newname);
 extern void RenameForeignDataWrapper(const char* oldname, const char* newname);
@@ -141,12 +146,15 @@ extern void AlterUserMapping(AlterUserMappingStmt* stmt);
 extern void RemoveUserMapping(DropUserMappingStmt* stmt);
 extern void RemoveUserMappingById(Oid umId);
 extern void CreateForeignTable(CreateForeignTableStmt* stmt, Oid relid);
+#ifdef ENABLE_MOT
 extern void CreateForeignIndex(IndexStmt* stmt, Oid indexRelationId);
+#endif
 extern Datum transformGenericOptions(Oid catalogId, Datum oldOptions, List* options, Oid fdwvalidator);
 extern Datum optionListToArray(List* options);
 extern List* FindOrRemoveForeignTableOption(List* optList, const char* optName, bool remove, bool* found);
 
 /* support routines in commands/define.c */
+
 extern char* defGetString(DefElem* def);
 extern double defGetNumeric(DefElem* def);
 extern bool defGetBoolean(DefElem* def);
@@ -154,7 +162,6 @@ extern int64 defGetInt64(DefElem* def);
 extern List* defGetQualifiedName(DefElem* def);
 extern TypeName* defGetTypeName(DefElem* def);
 extern int defGetTypeLength(DefElem* def);
-extern DefElem* defWithOids(bool value);
 extern List* defSetOption(List* options, const char* name, Node* value);
 extern void delete_file_handle(const char* library_path);
 extern int libraryGetPendingDeletes(bool forCommit, char** str_ptr, int* libraryLen);
@@ -171,5 +178,6 @@ extern Oid GetFunctionNodeGroup(CreateFunctionStmt* stmt, bool* multi_group);
 extern Oid GetFunctionNodeGroupByFuncid(Oid funcid);
 extern Oid GetFunctionNodeGroup(AlterFunctionStmt* stmt);
 
+#endif /* !FRONTEND_PARSER */
+extern DefElem* defWithOids(bool value);
 #endif /* DEFREM_H */
-

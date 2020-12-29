@@ -25,10 +25,10 @@ CREATE TABLE LINEITEM_RC
 with (orientation = column)
  ;
 
-COPY LINEITEM_RC FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem_index.data' DELIMITER '|';
+COPY LINEITEM_RC FROM '@abs_srcdir@/data/lineitem_index.data' DELIMITER '|';
 
 CREATE TABLE RC_TEST2(C1 INT, C2 OID, C3 SMALLINT, C4 TIMESTAMP WITH TIME ZONE, C5 TIME) with (orientation = column);
-COPY RC_TEST2 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/roughcheck_small.data' DELIMITER '|';
+COPY RC_TEST2 FROM '@abs_srcdir@/data/roughcheck_small.data' DELIMITER '|';
 analyze RC_TEST2;
 analyze RC_TEST2;
 analyze RC_TEST2;
@@ -215,7 +215,7 @@ select * from pg_buffercache_pages();
 \o
 
 -- verify date and timestamp in td compatibility
-create database rc_td_db DBCOMPATIBILITY='C';
+create database rc_td_db DBCOMPATIBILITY='TD';
 \c rc_td_db
 set time zone 'PRC';
 create table rc_date (a int,b date) with (orientation=column)  ;

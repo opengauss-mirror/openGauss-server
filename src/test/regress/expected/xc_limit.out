@@ -17,7 +17,7 @@ select count(*) from (select * from xc_limit_tab1 limit 2) a;
      2
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit 2;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -32,7 +32,7 @@ select count(*) from (select * from xc_limit_tab1 limit 2 + length('some')) q;
      6
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2 + length('some');
+explain (costs off, verbose on) select * from xc_limit_tab1 limit 2 + length('some');
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -47,7 +47,7 @@ select count(*) from (select * from xc_limit_tab1 limit 2 offset 3) q;
      2
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2 offset 3;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit 2 offset 3;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -62,7 +62,7 @@ select count(*) from (select * from xc_limit_tab1 offset 3) q;
      7
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 offset 3;
+explain (costs off, verbose on) select * from xc_limit_tab1 offset 3;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -77,7 +77,7 @@ select count(*) from (select * from xc_limit_tab1 limit all) q;
     10
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit all;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit all;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -92,7 +92,7 @@ select count(*) from (select * from xc_limit_tab1 limit null) q;
     10
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit null;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit null;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -107,7 +107,7 @@ select count(*) from (select * from xc_limit_tab1 offset 0) q;
     10
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 offset 0;
+explain (costs off, verbose on) select * from xc_limit_tab1 offset 0;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -117,7 +117,7 @@ explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 offset 0;
 (4 rows)
 
 -- unshippable LIMIT or OFFSET clauses
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit random() * 10;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit random() * 10;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -126,7 +126,7 @@ explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit ran
          Output: val, val2
 (4 rows)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit random() * 10;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit random() * 10;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -142,7 +142,7 @@ select count(*) from (select count(*) from xc_limit_tab1 group by val2 % 4 limit
      2
 (1 row)
 
-explain (costs off, verbose on, nodes off) select count(*) from xc_limit_tab1 group by val2 % 4 limit 2;
+explain (costs off, verbose on) select count(*) from xc_limit_tab1 group by val2 % 4 limit 2;
                    QUERY PLAN                   
 ------------------------------------------------
  Limit
@@ -161,7 +161,7 @@ select val, val2 from xc_limit_tab1 order by val2 limit 2;
    2 |    2
 (2 rows)
 
-explain (costs off, verbose on, nodes off) select val, val2 from xc_limit_tab1 order by val2 limit 2;
+explain (costs off, verbose on) select val, val2 from xc_limit_tab1 order by val2 limit 2;
                   QUERY PLAN                  
 ----------------------------------------------
  Limit
@@ -180,7 +180,7 @@ select count(*) from (select * from xc_limit_tab1 join xc_limit_tab2 using (val)
      2
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 join xc_limit_tab2 using (val) limit 2;
+explain (costs off, verbose on) select * from xc_limit_tab1 join xc_limit_tab2 using (val) limit 2;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Limit
@@ -210,7 +210,7 @@ select count(*) from (select * from xc_limit_tab1 limit 2) a;
      2
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit 2;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -225,7 +225,7 @@ select count(*) from (select * from xc_limit_tab1 limit 2 + length('some')) q;
      6
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2 + length('some');
+explain (costs off, verbose on) select * from xc_limit_tab1 limit 2 + length('some');
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -240,7 +240,7 @@ select count(*) from (select * from xc_limit_tab1 limit 2 offset 3) q;
      2
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2 offset 3;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit 2 offset 3;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -255,7 +255,7 @@ select count(*) from (select * from xc_limit_tab1 offset 3) q;
      7
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 offset 3;
+explain (costs off, verbose on) select * from xc_limit_tab1 offset 3;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -270,7 +270,7 @@ select count(*) from (select * from xc_limit_tab1 limit all) q;
     10
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit all;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit all;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -285,7 +285,7 @@ select count(*) from (select * from xc_limit_tab1 limit null) q;
     10
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit null;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit null;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -300,7 +300,7 @@ select count(*) from (select * from xc_limit_tab1 offset 0) q;
     10
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 offset 0;
+explain (costs off, verbose on) select * from xc_limit_tab1 offset 0;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -310,7 +310,7 @@ explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 offset 0;
 (4 rows)
 
 -- unshippable LIMIT or OFFSET clauses
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit random() * 10;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit random() * 10;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -319,7 +319,7 @@ explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit ran
          Output: val, val2
 (4 rows)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit random() * 10;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit random() * 10;
                QUERY PLAN               
 ----------------------------------------
  Limit
@@ -335,7 +335,7 @@ select count(*) from (select count(*) from xc_limit_tab1 group by val2 % 4 limit
      2
 (1 row)
 
-explain (costs off, verbose on, nodes off) select count(*) from xc_limit_tab1 group by val2 % 4 limit 2;
+explain (costs off, verbose on) select count(*) from xc_limit_tab1 group by val2 % 4 limit 2;
                    QUERY PLAN                   
 ------------------------------------------------
  Limit
@@ -354,7 +354,7 @@ select val, val2 from xc_limit_tab1 order by val2 limit 2;
    2 |    2
 (2 rows)
 
-explain (costs off, verbose on, nodes off) select val, val2 from xc_limit_tab1 order by val2 limit 2;
+explain (costs off, verbose on) select val, val2 from xc_limit_tab1 order by val2 limit 2;
                   QUERY PLAN                  
 ----------------------------------------------
  Limit
@@ -373,7 +373,7 @@ select count(*) from (select * from xc_limit_tab1 join xc_limit_tab2 using (val)
      2
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 join xc_limit_tab2 using (val) limit 2;
+explain (costs off, verbose on) select * from xc_limit_tab1 join xc_limit_tab2 using (val) limit 2;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Limit
@@ -400,7 +400,7 @@ select count(*) from (select * from xc_limit_tab1 limit 2) q;
      2
 (1 row)
 
-explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2;
+explain (costs off, verbose on) select * from xc_limit_tab1 limit 2;
                QUERY PLAN               
 ----------------------------------------
  Limit

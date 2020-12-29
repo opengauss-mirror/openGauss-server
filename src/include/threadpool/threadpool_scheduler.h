@@ -17,7 +17,7 @@
  *
  *
  * IDENTIFICATION
- *        src/include/threadpool/threadpool_scheduler.h
+ *        /src/include/threadpool/threadpool_scheduler.h
  *
  *---------------------------------------------------------------------------------------
  */
@@ -28,19 +28,37 @@
 class ThreadPoolScheduler : public BaseObject{
 public:
     ThreadPoolScheduler(int groupNum, ThreadPoolGroup** groups);
+    ~ThreadPoolScheduler();
     int StartUp();
     void DynamicAdjustThreadPool();
-
+    void GPCScheduleCleaner(int* gpc_count);
+    void CNGPCScheduleCleaner(int* gpc_count);
+    void ShutDown() const;
+    inline ThreadId GetThreadId()
+    {
+        return m_tid;
+    }
+    inline void SetShutDown(bool has_shutdown)
+    {
+        m_has_shutdown = has_shutdown;
+    }
+    inline bool HasShutDown()
+    {
+        return m_has_shutdown;
+    }
 private:
+    void AdjustWorkerPool(int idx);
+    void AdjustStreamPool(int idx);
     void ReduceWorkerIfNecessary(int groupIdx);
     void EnlargeWorkerIfNecessage(int groupIdx);
-
 private:
     ThreadId m_tid;
     int m_groupNum;
     ThreadPoolGroup** m_groups;
     uint* m_hangTestCount;
     uint* m_freeTestCount;
+    uint* m_freeStreamCount;
+    volatile bool  m_has_shutdown;
 };
 
 #define THREAD_SCHEDULER_STEP 8

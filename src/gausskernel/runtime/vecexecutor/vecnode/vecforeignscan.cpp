@@ -37,8 +37,8 @@
 #include "vecexecutor/vecexecutor.h"
 #include "executor/nodeForeignscan.h"
 
-static VectorBatch* vec_foreign_next(VecForeignScanState* node);
-static bool vec_foreign_recheck(ForeignScanState* node, VectorBatch* batch);
+static VectorBatch* VecForeignNext(VecForeignScanState* node);
+static bool VecForeignRecheck(ForeignScanState* node, VectorBatch* batch);
 
 /* ----------------------------------------------------------------
  *		ExecVecForeignScan(node)
@@ -52,7 +52,7 @@ static bool vec_foreign_recheck(ForeignScanState* node, VectorBatch* batch);
 VectorBatch* ExecVecForeignScan(VecForeignScanState* node)
 {
     return ExecVecScan(
-        (ScanState*)node, (ExecVecScanAccessMtd)vec_foreign_next, (ExecVecScanRecheckMtd)vec_foreign_recheck);
+        (ScanState*)node, (ExecVecScanAccessMtd)VecForeignNext, (ExecVecScanRecheckMtd)VecForeignRecheck);
 }
 
 /* ----------------------------------------------------------------
@@ -118,7 +118,7 @@ void ExecEndVecForeignScan(VecForeignScanState* node)
  *		This is a workhorse for ExecForeignScan
  * ----------------------------------------------------------------
  */
-static VectorBatch* vec_foreign_next(VecForeignScanState* node)
+static VectorBatch* VecForeignNext(VecForeignScanState* node)
 {
     VectorBatch* batch = NULL;
     ExprContext* expr_context = node->ss.ps.ps_ExprContext;
@@ -132,7 +132,7 @@ static VectorBatch* vec_foreign_next(VecForeignScanState* node)
     return batch;
 }
 
-static bool vec_foreign_recheck(ForeignScanState* node, VectorBatch* batch)
+static bool VecForeignRecheck(ForeignScanState* node, VectorBatch* batch)
 {
     /* There are no access-method-specific conditions to recheck. */
     return true;

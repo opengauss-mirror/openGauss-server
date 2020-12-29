@@ -1,5 +1,5 @@
 -------------------------------------------------------
--- Test A DB style procedure and Function Defination
+-- Test A db style procedure and Function Defination
 -------------------------------------------------------
 SET CHECK_FUNCTION_BODIES TO ON;
 CREATE PROCEDURE test_proc_define
@@ -352,7 +352,7 @@ CALL test_multi_level();
 -------------------------------------------------------
 -- Test Privilage
 -------------------------------------------------------
---CREATE USER  USER1 PASSWORD 'ttest@123';
+--CREATE USER  USER1 PASSWORD 'gauss@123';
 CREATE TABLE t_priv(id INTEGER);
 CREATE OR REPLACE PROCEDURE proc_callas_definer
 AUTHID DEFINER
@@ -368,26 +368,7 @@ BEGIN
 	INSERT INTO t_priv VALUES(2);
 END;
 /
---CREATE USER  USER2 PASSWORD 'ttest@123';
--------------------------------------------------------
--- Test COMMIT/ROLLBACK
--------------------------------------------------------
-CREATE TABLE t_transaction(id INTEGER);
-CREATE OR REPLACE PROCEDURE proc_callas_transaction
-AS
-BEGIN
-    INSERT INTO t_transaction VALUES(1);
-    COMMIT;
-    INSERT INTO t_transaction VALUES(10);
-    ROLLBACK;
-END;
-/
-CALL proc_callas_transaction();
- proc_callas_transaction 
--------------------------
- 
-(1 row)
-
+--CREATE USER  USER2 PASSWORD 'gauss@123';
 -------------------------------------------------------
 -- Clean up Test envirment
 -------------------------------------------------------
@@ -396,9 +377,7 @@ DROP FUNCTION func_def_arg;
 DROP PROCEDURE test_multi_level;
 DROP PROCEDURE proc_callas_definer;
 DROP PROCEDURE proc_callas_curr_user;
-DROP PROCEDURE proc_callas_transaction;
 DROP TABLE t_priv;
-DROP TABLE t_transaction;
 create or replace procedure test_blank (a int)
 as
 
@@ -716,9 +695,9 @@ drop procedure sp_comment9;
 drop procedure sp_comment10;
 --user with create privilege on some schema should create function successfully on that schema
 CREATE SCHEMA FVT_OBJ_DEFINE;
-CREATE USER SCHEMA_AUTHORITY_USER_005 PASSWORD 'Ttest@123';
+CREATE USER SCHEMA_AUTHORITY_USER_005 PASSWORD 'Gauss@123';
 GRANT CREATE ON SCHEMA FVT_OBJ_DEFINE TO SCHEMA_AUTHORITY_USER_005;
-SET ROLE SCHEMA_AUTHORITY_USER_005 PASSWORD 'Ttest@123';
+SET ROLE SCHEMA_AUTHORITY_USER_005 PASSWORD 'Gauss@123';
 CREATE FUNCTION FVT_OBJ_DEFINE.SCHEMA_AUTHORITY_FUNCTION_005() RETURN INT
 AS
 BEGIN
@@ -747,7 +726,7 @@ DROP USER SCHEMA_AUTHORITY_USER_005 CASCADE;
 CREATE OR REPLACE PROCEDURE PRO_NO_EXP_001_1() AS
 DECLARE
 BEGIN
-CREATE USER U_PRO_NO_EXP_001_1 PASSWORD 'Ttest_234';
+CREATE USER U_PRO_NO_EXP_001_1 PASSWORD 'Gauss_234';
 DROP USER U_PRO_NO_EXP_001_1 CASCADE;
 END;
 /

@@ -16,7 +16,7 @@ create table  vector_material_engine_002.fvt_distribute_query_tables_01(
         w_name  char(10),
         w_street_1      character varying(20),
         w_zip   char(9),
-        w_id    integer , partial cluster key(w_name)) with (orientation=column) 
+        w_id    integer , partial cluster key(w_name)) with (orientation=column) distribute by hash(w_name)
 partition by range (w_id)
 (
         partition fvt_distribute_query_tables_01_p1 values less than (6),
@@ -30,25 +30,25 @@ create table  vector_material_engine_002.fvt_distribute_query_tables_02(
         c_zip   varchar(9),
         c_d_id  numeric,
         c_w_id  text , partial cluster key(c_id)) with (orientation=column)
-;
+distribute by hash(c_id);
 create table  vector_material_engine_002.fvt_distribute_query_tables_03(
         d_w_id  integer,
         d_name  character varying(10),
         d_street_2      character varying(20),
         d_city  character varying(20),
         d_id    integer) with (orientation=column)
-;
+distribute by hash(d_w_id);
 create table  vector_material_engine_002.fvt_distribute_query_tables_04(
         w_id    integer,
         w_name  varchar(20),
-        w_zip   integer, partial cluster key(w_id)) with (orientation=column) ;
+        w_zip   integer, partial cluster key(w_id)) with (orientation=column) distribute by hash(w_id);
 create table  vector_material_engine_002.fvt_distribute_query_tables_05(
         c_w_id  integer,
         c_street_1      varchar(20),
         c_city  varchar(20),
         c_zip   char(9),
         c_d_id  integer,
-      c_id    integer, partial cluster key(c_w_id,c_id,c_d_id)) with (orientation=column) 
+      c_id    integer, partial cluster key(c_w_id,c_id,c_d_id)) with (orientation=column) distribute by hash(c_id)
 partition by range (c_w_id)
 (
         partition fvt_distribute_query_tables_05_p1 values less than (6),
@@ -63,7 +63,7 @@ create table  vector_material_engine_002.fvt_distribute_query_tables_06(
         d_w_id  integer,
         d_city  character varying(20)
  ) with (orientation=column)
-;
+distribute by hash(d_id);
 create table  vector_material_engine_002.fvt_distribute_query_tables_07(
         c_id    integer,
         c_first         varchar(20),
@@ -75,7 +75,7 @@ create table  vector_material_engine_002.fvt_distribute_query_tables_07(
         c_w_id  integer,
         c_street_2      character varying(20)
         ) with (orientation=column)
-;
+distribute by hash(c_id);
 \parallel off
 \parallel on
 create index fvt_distribute_query_indexes_01 on vector_material_engine_002.fvt_distribute_query_tables_01(w_id) local;
@@ -153,7 +153,6 @@ having table_07.c_d_id < 10 or table_07.c_d_id is null
           min(table_05.c_id),
           max(table_06.d_id),
           table_07.c_d_id NULLS FIRST;
-WARNING:  [VecSonicHashAgg(0)]:The minimum memory needed is 911104, but only have 65536.
  max | min |  sum   | count  | min | max | c_d_id 
 -----+-----+--------+--------+-----+-----+--------
    7 |   1 | 166992 |  47140 |   4 |  10 |      1
@@ -172,11 +171,11 @@ WARNING:  [VecSonicHashAgg(0)]:The minimum memory needed is 911104, but only hav
 --- Clean Table and Resource 
 ----
 RESET log_min_messages;
-drop table if exists fvt_distribute_query_tables_01  cascade;
-drop table if exists  fvt_distribute_query_tables_02 cascade;
-drop table if exists  fvt_distribute_query_tables_03 cascade;
-drop table if exists  fvt_distribute_query_tables_04 cascade;
-drop table if exists  fvt_distribute_query_tables_05 cascade;
-drop table if exists  fvt_distribute_query_tables_06 cascade;
-drop table if exists  fvt_distribute_query_tables_07 cascade;
-drop schema if exists  vector_material_engine_002    cascade;
+drop table fvt_distribute_query_tables_01;
+drop table fvt_distribute_query_tables_02;
+drop table fvt_distribute_query_tables_03;
+drop table fvt_distribute_query_tables_04;
+drop table fvt_distribute_query_tables_05;
+drop table fvt_distribute_query_tables_06;
+drop table fvt_distribute_query_tables_07;
+drop schema vector_material_engine_002 cascade;

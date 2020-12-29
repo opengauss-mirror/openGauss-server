@@ -17,6 +17,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
@@ -41,7 +42,7 @@ static void AlterCollationOwner_internal(Relation rel, Oid collationOid, Oid new
 /*
  * CREATE COLLATION
  */
-void DefineCollation(const List* names, const List* parameters)
+void DefineCollation(List* names, List* parameters)
 {
     char* collName = NULL;
     Oid collNamespace;
@@ -59,7 +60,7 @@ void DefineCollation(const List* names, const List* parameters)
 
     aclresult = pg_namespace_aclcheck(collNamespace, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(collNamespace, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(collNamespace));
 
     foreach (pl, parameters) {
         DefElem* defel = (DefElem*)lfirst(pl);
@@ -151,22 +152,25 @@ void RenameCollation(List* name, const char* newname)
             (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for collation %u", collationOid)));
 
     namespaceOid = ((Form_pg_collation)GETSTRUCT(tup))->collnamespace;
+
     /* make sure the new name doesn't exist */
-    if (SearchSysCacheExists3(COLLNAMEENCNSP, CStringGetDatum(newname),Int32GetDatum(GetDatabaseEncoding()),
-        ObjectIdGetDatum(namespaceOid)))
+    if (SearchSysCacheExists3(COLLNAMEENCNSP,
+            CStringGetDatum(newname),
+            Int32GetDatum(GetDatabaseEncoding()),
+            ObjectIdGetDatum(namespaceOid)))
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_OBJECT),
                 errmsg("collation \"%s\" for encoding \"%s\" already exists in schema \"%s\"",
                     newname,
                     GetDatabaseEncodingName(),
-                    get_namespace_name(namespaceOid, true))));
+                    get_namespace_name(namespaceOid))));
 
     /* mustn't match an any-encoding entry, either */
     if (SearchSysCacheExists3(
             COLLNAMEENCNSP, CStringGetDatum(newname), Int32GetDatum(-1), ObjectIdGetDatum(namespaceOid)))
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_OBJECT),
-                errmsg("collation \"%s\" already exists in schema \"%s\"", newname, get_namespace_name(namespaceOid, true))));
+                errmsg("collation \"%s\" already exists in schema \"%s\"", newname, get_namespace_name(namespaceOid))));
 
     /* must be owner */
     if (!pg_collation_ownercheck(collationOid, GetUserId()))
@@ -175,14 +179,14 @@ void RenameCollation(List* name, const char* newname)
     /* must have CREATE privilege on namespace */
     aclresult = pg_namespace_aclcheck(namespaceOid, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid, true));
+        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceOid));
 
     /* rename */
     (void)namestrcpy(&(((Form_pg_collation)GETSTRUCT(tup))->collname), newname);
     simple_heap_update(rel, &tup->t_self, tup);
     CatalogUpdateIndexes(rel, tup);
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 
     heap_close(rel, RowExclusiveLock);
 }
@@ -237,6 +241,7 @@ static void AlterCollationOwner_internal(Relation rel, Oid collationOid, Oid new
             (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for collation %u", collationOid)));
 
     collForm = (Form_pg_collation)GETSTRUCT(tup);
+
     /*
      * If the new owner is the same as the existing owner, consider the
      * command to have succeeded.  This is for dump restoration purposes.
@@ -256,7 +261,7 @@ static void AlterCollationOwner_internal(Relation rel, Oid collationOid, Oid new
             /* New owner must have CREATE privilege on namespace */
             aclresult = pg_namespace_aclcheck(collForm->collnamespace, newOwnerId, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(collForm->collnamespace, true));
+                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(collForm->collnamespace));
         }
 
         /*
@@ -272,7 +277,7 @@ static void AlterCollationOwner_internal(Relation rel, Oid collationOid, Oid new
         changeDependencyOnOwner(CollationRelationId, collationOid, newOwnerId);
     }
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -310,14 +315,16 @@ Oid AlterCollationNamespace_oid(Oid collOid, Oid newNspOid)
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for collation %u", collOid)));
 
     /* make sure the name doesn't already exist in new schema */
-    if (SearchSysCacheExists3(COLLNAMEENCNSP, CStringGetDatum(collation_name), Int32GetDatum(GetDatabaseEncoding()),
-        ObjectIdGetDatum(newNspOid)))
+    if (SearchSysCacheExists3(COLLNAMEENCNSP,
+            CStringGetDatum(collation_name),
+            Int32GetDatum(GetDatabaseEncoding()),
+            ObjectIdGetDatum(newNspOid)))
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_OBJECT),
                 errmsg("collation \"%s\" for encoding \"%s\" already exists in schema \"%s\"",
                     collation_name,
                     GetDatabaseEncodingName(),
-                    get_namespace_name(newNspOid, true))));
+                    get_namespace_name(newNspOid))));
 
     /* mustn't match an any-encoding entry, either */
     if (SearchSysCacheExists3(
@@ -326,7 +333,7 @@ Oid AlterCollationNamespace_oid(Oid collOid, Oid newNspOid)
             (errcode(ERRCODE_DUPLICATE_OBJECT),
                 errmsg("collation \"%s\" already exists in schema \"%s\"",
                     collation_name,
-                    get_namespace_name(newNspOid, true))));
+                    get_namespace_name(newNspOid))));
 
     /* OK, do the work */
     oldNspOid = AlterObjectNamespace(rel,

@@ -18,20 +18,20 @@
 
 #include "common/config/cm_config.h"
 #include "gtm/gtm_c.h"
-#include "gtm/palloc.h"
+#include "gtm/utils/palloc.h"
 #include "gtm/gtm_lock.h"
 #include "gtm/gtm_conn.h"
-#include "gtm/elog.h"
+#include "gtm/utils/elog.h"
 #include "gtm/gtm_list.h"
 #include "gtm/gtm_semaphore.h"
 
-extern char *GTMLogFileName;
-extern FILE *gtmlogFile;
+extern char* GTMLogFileName;
+extern FILE* gtmlogFile;
 
 extern volatile long int NumThreadAdded;
 extern volatile long int NumThreadRemoved;
 
-extern char *Log_directory;
+extern char* Log_directory;
 extern GTM_RWLock gtmlogFileLock;
 
 #define MAXLISTEN 64
@@ -74,7 +74,7 @@ struct GTM_ConnectionInfo;
 #define ERRORDATA_STACK_SIZE 20
 
 #define GTM_MAX_PATH 1024
-#define INVALID_GROUP_NEXT (0x7FFFFFFF) /* int32 max value */
+#define INVALID_GROUP_NEXT (0x7FFFFFFF) /* int32 max value*/
 
 /*
  * This struct is for counting messages send and receive of gtm thread between primary and standby
@@ -82,10 +82,10 @@ struct GTM_ConnectionInfo;
  * uint32(overflow uint32), this may have problem, some thread counter will be started from zero again.
  */
 typedef struct GTM_ThreadStat {
-    uint32 thr_send_count;    /* current thread send message count */
-    uint32 thr_receive_count; /* current thread receive message count */
-    uint32 thr_localid;       /* the location of current thread in global thread stat array */
-    bool thr_used;            /* mark this thread stat slot is used or not. */
+    uint32 thr_send_count;    /*current thread send message count */
+    uint32 thr_receive_count; /*current thread receive message count */
+    uint32 thr_localid;       /*the location of current thread in global thread stat array */
+    bool thr_used;            /*mark this thread stat slot is used or not. */
 } GTM_ThreadStat;
 
 typedef struct GTM_ThreadInfo {
@@ -95,8 +95,8 @@ typedef struct GTM_ThreadInfo {
     GTM_ThreadID thr_id;
     uint32 thr_localid;
     bool is_main_thread;
-    void *(*thr_startroutine)(void *);
-    void (*thr_cleanuproutine)(void *);
+    void* (*thr_startroutine)(void*);
+    void (*thr_cleanuproutine)(void*);
 
     MemoryContext thr_thread_context;
     MemoryContext thr_message_context;
@@ -104,7 +104,7 @@ typedef struct GTM_ThreadInfo {
     MemoryContext thr_error_context;
     MemoryContext thr_parent_context;
 
-    sigjmp_buf *thr_sigjmp_buf;
+    sigjmp_buf* thr_sigjmp_buf;
 
     ErrorData thr_error_data[ERRORDATA_STACK_SIZE];
     int thr_error_stack_depth;
@@ -112,13 +112,15 @@ typedef struct GTM_ThreadInfo {
     int thr_criticalsec_count;
 
     GTM_ThreadStatus thr_status;
-    GTM_ConnectionInfo *thr_conn;
+    GTM_ConnectionInfo* thr_conn;
+    /* unique client identifier */
+    uint32 thr_client_id;
     bool thr_need_bkup;
     bool thr_seq_bkup;
     bool thr_thread_over;
 
     GTM_RWLock thr_lock;
-    gtm_List *thr_cached_txninfo;
+    gtm_List* thr_cached_txninfo;
 
     /* main thread set other thread sema_key. */
     int sema_key;
@@ -149,33 +151,35 @@ typedef struct GTM_Threads {
     uint32 gt_thread_count;
     uint32 gt_array_size;
     bool gt_standby_ready;
-    GTM_ThreadInfo **gt_threads;
+    GTM_ThreadInfo** gt_threads;
     GTM_RWLock gt_lock;
     pg_atomic_uint32 thread_group_first;
 } GTM_Threads;
 
-extern volatile GTM_Threads *GTMThreads;
+extern volatile GTM_Threads* GTMThreads;
 extern int get_gtm_port();
 
-GTM_ThreadStat *GTM_GetThreadStatSlot(uint32 localid);
-int GTM_ThreadAdd(GTM_ThreadInfo *thrinfo);
-int GTM_ThreadRemove(GTM_ThreadInfo *thrinfo);
-int GTM_ThreadJoin(GTM_ThreadInfo *thrinfo);
+GTM_ThreadStat* GTM_GetThreadStatSlot(uint32 localid);
+int GTM_ThreadAdd(GTM_ThreadInfo* thrinfo);
+int GTM_ThreadRemove(GTM_ThreadInfo* thrinfo);
+int GTM_ThreadJoin(GTM_ThreadInfo* thrinfo);
 void GTM_ThreadExit(void);
-void ConnFree(Port *port);
+void ConnFree(Port* port);
 void GTM_LockAllOtherThreads(void);
 void GTM_UnlockAllOtherThreads(void);
-void GTM_DoForAllOtherThreads(void (*process_routine)(GTM_ThreadInfo *));
-void FlushPort(Port *myport);
-void CollectGTMStatus(Port *myport, bool is_backup);
+void GTM_DoForAllOtherThreads(void (*process_routine)(GTM_ThreadInfo*));
+void FlushPort(Port* myport);
+void CollectGTMStatus(Port* myport, bool is_backup);
 
-extern GTM_ThreadInfo *GTM_ThreadCreate(GTM_ConnectionInfo *conninfo, bool normal_thread, void *(*startroutine)(void *),
-                                        void (*cleanuproutine)(void *argp));
-extern void GTM_ThreadCleanup(void *argp);
+extern GTM_ThreadInfo* GTM_ThreadCreate(
+    GTM_ConnectionInfo* conninfo, bool normal_thread, void* (*startroutine)(void*), void (*cleanuproutine)(void* argp));
+extern GTM_ThreadInfo *GTM_ThreadCreateNoBlock(bool normal_thread, pthread_attr_t *pThreadAttr,
+    void* (*startroutine)(void*), void (*cleanuproutine)(void* argp));
+extern void GTM_ThreadCleanup(void* argp);
 extern void GTM_CsnSyncCleanup(void *argp);
-extern void GTM_AlarmCheckerCleanup(void *argp);
+extern void GTM_AlarmCheckerCleanup(void* argp);
 
-GTM_ThreadInfo *GTM_GetThreadInfo(GTM_ThreadID thrid);
+GTM_ThreadInfo* GTM_GetThreadInfo(GTM_ThreadID thrid);
 
 extern void DestroyConnectControlTable(void);
 extern void RebuildConnectControlTable(void);
@@ -187,20 +191,20 @@ extern pthread_key_t threadinfo_key;
 extern MemoryContext TopMostMemoryContext;
 extern GTM_ThreadID TopMostThreadID;
 
-extern char *ListenAddresses;
+extern char* ListenAddresses;
 extern int GTMPortNumber;
-extern GTM_HOST_IP *ListenArray;
+extern GTM_HOST_IP* ListenArray;
 extern int ListenLength;
 
-extern char *active_addr;
+extern char* active_addr;
 extern int active_port;
-extern GTM_HOST_IP *ActAddressArray;
+extern GTM_HOST_IP* ActAddressArray;
 extern int ActAddressLength;
 extern int standby_connection_timeout;
 
-extern char *HALocalHost;
+extern char* HALocalHost;
 extern int HALocalPort;
-extern GTM_HOST_IP *HaAddressArray;
+extern GTM_HOST_IP* HaAddressArray;
 extern int HaAddressLength;
 extern bool LocalAddressChanged;
 extern bool LocalPortChanged;
@@ -215,17 +219,17 @@ extern int RestoreDuration;
 extern volatile int Backup_synchronously;
 extern int guc_standby_only;
 
-extern char *NodeName;
+extern char* NodeName;
 extern char GTMControlFile[GTM_MAX_PATH];
 extern char GTMSequenceFile[GTM_MAX_PATH];
 extern volatile bool GTMPreAbortPending;
 extern volatile bool primary_switchover_processing;
 extern bool switchover_processing;
 
-extern GTM_RWLock *mainThreadLock;
+extern GTM_RWLock* mainThreadLock;
 
 #define SetMyThreadInfo(thrinfo) pthread_setspecific(threadinfo_key, (thrinfo))
-#define GetMyThreadInfo ((GTM_ThreadInfo *)pthread_getspecific(threadinfo_key))
+#define GetMyThreadInfo ((GTM_ThreadInfo*)pthread_getspecific(threadinfo_key))
 
 #define TopMemoryContext (GetMyThreadInfo->thr_thread_context)
 #define ThreadTopContext (GetMyThreadInfo->thr_thread_context)

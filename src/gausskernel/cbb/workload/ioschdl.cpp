@@ -42,6 +42,7 @@
 #include "utils/ps_status.h"
 #include "workload/commgr.h"
 #include "workload/workload.h"
+#include "workload/statctl.h"
 #include <mntent.h>
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -761,7 +762,6 @@ static void WLMmonitor_reset_user_ioinfo(int type)
  */
 static void WLMmonitor_reset_session_iostat(int type)
 {
-    int num = 0;
     long intval_secs = 0;
     int intval_microsecs = 0;
 
@@ -784,21 +784,29 @@ static void WLMmonitor_reset_session_iostat(int type)
 
     HASH_SEQ_STATUS* hash_seq = &g_instance.wlm_cxt->stat_manager.iostat_info_seq;
 
-    USE_AUTO_LWLOCK(WorkloadIoStatHashLock, LW_EXCLUSIVE);
+    for (size_t bucketId = 0; bucketId < NUM_IO_STAT_PARTITIONS; ++bucketId) {
+        int lockId = GetIoStatLockId(bucketId);
+        (void)LWLockAcquire(GetMainLWLockByIndex(lockId), LW_EXCLUSIVE);
 
-    /* no record to update */
-    if ((num = hash_get_num_entries(g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl)) <= 0) {
-        return;
-    }
+        /* no record to update */
+        if ((hash_get_num_entries(g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl[bucketId].hashTable)) <= 0) {
+            LWLockRelease(GetMainLWLockByIndex(lockId));
+            continue;
+        }
 
-    WLMDNodeIOInfo* info = NULL;
+        WLMDNodeIOInfo* info = NULL;
 
-    // scan collectinfo hashtable
-    hash_seq_init(hash_seq, g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl);
+        // scan collectinfo hashtable
+        hash_seq_init(hash_seq, g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl[bucketId].hashTable);
 
-    /* get all info to update with data node info */
-    while ((info = (WLMDNodeIOInfo*)hash_seq_search(hash_seq)) != NULL) {
-        WLMmonitor_update_ioinfo_internal(info->io_priority, info->io_state, &info->io_geninfo, type);
+        /* get all info to update with data node info */
+        while ((info = (WLMDNodeIOInfo*)hash_seq_search(hash_seq)) != NULL) {
+            WLMmonitor_update_ioinfo_internal(info->io_priority, info->io_state, &info->io_geninfo, type);
+            ereport(DEBUG2, (errmodule(MOD_WLM),
+                errmsg("[IOSTAT] queryId is: %lu, current iops is: %d",
+                info->qid.queryId, info->io_geninfo.curr_iops)));
+        }
+        LWLockRelease(GetMainLWLockByIndex(lockId));
     }
 }
 
@@ -986,9 +994,7 @@ static void WLMmonitor_MainLoop(void)
 
         if (IS_PGXC_COORDINATOR) {
             // update iostat for each query
-            if (hash_get_num_entries(g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl) > 0) {
-                WLMCleanUpIoInfo();
-            }
+            WLMCleanUpIoInfo();
 
             if (u_sess->attr.attr_resource.enable_resource_track) {
                 WLMUpdateSessionIops();
@@ -1104,7 +1110,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    knl_thread_set_name("WlmMonitor");
+    t_thrd.proc_cxt.MyProgName = "WLMmonitor";
 
     if (u_sess->proc_cxt.MyProcPort->remote_host) {
         pfree(u_sess->proc_cxt.MyProcPort->remote_host);
@@ -1113,7 +1119,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
     u_sess->proc_cxt.MyProcPort->remote_host = pstrdup("localhost");
 
     /* Identify myself via ps */
-    init_ps_display("WlmMonitor worker process", "", "", "");
+    init_ps_display("wlm monitor worker process", "", "", "");
 
     SetProcessingMode(InitProcessing);
 
@@ -1134,9 +1140,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
 
     t_thrd.wlm_cxt.collect_info->sdetail.statement = "WLM monitor update and verify local info";
 
-    if (!StringIsValid(u_sess->attr.attr_common.application_name)) {
-        u_sess->attr.attr_common.application_name = pstrdup("WorkloadMonitor");
-    }
+    u_sess->attr.attr_common.application_name = pstrdup("WorkloadMonitor");
 
     t_thrd.wlm_cxt.parctl_state.special = 1;
 
@@ -1184,6 +1188,8 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
 
     /* Early initialization */
     BaseInit();
+
+    WLMInitPostgres();
 
     SetProcessingMode(NormalProcessing);
 
@@ -1241,7 +1247,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
          * Now return to normal top-level context and clear ErrorContext for
          * next time.
          */
-        MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+        MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
         FlushErrorState();
 
         /* Now we can allow interrupts again */
@@ -1278,7 +1284,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
     /* wait until g_statManager is available */
     while (!WLMIsInfoInit()) {
         if (t_thrd.wlm_cxt.wlm_got_sigterm) {
-            ereport(LOG, (errmsg("WlmMonitor thread exit!")));
+            ereport(LOG, (errmsg("WLMmonitor thread exit!")));
             t_thrd.wlm_cxt.wlm_got_sigterm = false;
             proc_exit(0);
         }
@@ -1288,7 +1294,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
     /*
      * Identify myself via ps
      */
-    ereport(LOG, (errmsg("WlmMonitor thread is starting up.")));
+    ereport(LOG, (errmsg("WLMmonitor thread is starting up.")));
 
     // initialize thread
     WLMmonitor_init();
@@ -1411,7 +1417,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    knl_thread_set_name("WlmArbiter");
+    t_thrd.proc_cxt.MyProgName = "WLMarbiter";
 
     if (u_sess->proc_cxt.MyProcPort->remote_host != NULL) {
         pfree(u_sess->proc_cxt.MyProcPort->remote_host);
@@ -1420,7 +1426,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
     u_sess->proc_cxt.MyProcPort->remote_host = pstrdup("localhost");
 
     /* Identify myself via ps */
-    init_ps_display("WlmArbiter worker process", "", "", "");
+    init_ps_display("wlm arbiter worker process", "", "", "");
 
     SetProcessingMode(InitProcessing);
 
@@ -1441,9 +1447,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
 
     t_thrd.wlm_cxt.collect_info->sdetail.statement = "WLM arbiter sync info by CCN and CNs";
 
-    if (!StringIsValid(u_sess->attr.attr_common.application_name)) {
-        u_sess->attr.attr_common.application_name = pstrdup("WLMArbiter");
-    }
+    u_sess->attr.attr_common.application_name = pstrdup("WLMArbiter");
 
     t_thrd.wlm_cxt.parctl_state.special = 1;
 
@@ -1492,6 +1496,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
 
     /* Early initialization */
     BaseInit();
+    WLMInitPostgres();
 
     SetProcessingMode(NormalProcessing);
 
@@ -1549,7 +1554,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
          * Now return to normal top-level context and clear ErrorContext for
          * next time.
          */
-        MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+        MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
         FlushErrorState();
 
         /* Now we can allow interrupts again */
@@ -1586,7 +1591,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
     /* wait until g_statManager is available */
     while (!WLMIsInfoInit()) {
         if (t_thrd.wlm_cxt.wlm_got_sigterm) {
-            ereport(LOG, (errmsg("WlmArbiter thread exit!")));
+            ereport(LOG, (errmsg("WLMarbiter thread exit!")));
             t_thrd.wlm_cxt.wlm_got_sigterm = false;
             proc_exit(0);
         }
@@ -1596,7 +1601,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
     /*
      * Identify myself via ps
      */
-    ereport(LOG, (errmsg("WlmArbiter thread is starting up.")));
+    ereport(LOG, (errmsg("WLMarbiter thread is starting up.")));
 
     // main loop of the thread
     WLMarbiter_MainLoop();
@@ -1944,7 +1949,9 @@ bool IsIOCostNode(NodeTag node)
     switch (node) {
         case T_SeqScan:
         case T_CStoreScan:
+#ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
             return true;
         default:
             return false;
@@ -1963,7 +1970,6 @@ bool IsIOCostNode(NodeTag node)
  */
 void WLMmonitor_check_and_update_IOCost(PlannerInfo* root, NodeTag node, Cost IOcost)
 {
-#ifdef ENABLE_MULTIPLE_NODES
     if (IsIOCostNode(node)) {
         root->glob->IOTotalCost += IOcost;
     }
@@ -1971,6 +1977,4 @@ void WLMmonitor_check_and_update_IOCost(PlannerInfo* root, NodeTag node, Cost IO
     if (!t_thrd.wlm_cxt.parctl_state.iocomplex && root->glob->IOTotalCost >= IO_MIN_COST) {
         t_thrd.wlm_cxt.parctl_state.iocomplex = 1;
     }
-#endif
-
 }

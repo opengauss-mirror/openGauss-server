@@ -444,11 +444,13 @@ static Node* replaceExprAliasIfNecessary(ParseState* pstate, char* colname, Colu
                     (errcode(ERRCODE_UNDEFINED_COLUMN),
                         errmsg("Alias \"%s\" reference with window function included is not supported.", colname),
                         parser_errposition(pstate, cref->location)));
+#ifndef ENABLE_MULTIPLE_NODES
             } else if (contain_rownum_expr((Node*)tle->expr)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_COLUMN),
                      errmsg("Alias \"%s\" reference with ROWNUM included is invalid.", colname),
                      parser_errposition(pstate, cref->location)));
+#endif					 
             } else if (contain_volatile_functions((Node*)tle->expr)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_COLUMN),
@@ -738,8 +740,7 @@ static Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
             /*
              * We check the catalog name and then ignore it.
              */
-            const char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-            if (!dbname || strcmp(catname, dbname) != 0) {
+            if (strcmp(catname, get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true)) != 0) {
                 crerr = CRERR_WRONG_DB;
                 break;
             }
@@ -815,17 +816,7 @@ static Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
     if (node == NULL) {
         switch (crerr) {
             case CRERR_NO_COLUMN:
-                if (relname != NULL) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_UNDEFINED_COLUMN),
-                            errmsg("column %s.%s does not exist", relname, colname),
-                            parser_errposition(pstate, cref->location)));
-                } else {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_UNDEFINED_COLUMN),
-                            errmsg("column \"%s\" does not exist", colname),
-                            parser_errposition(pstate, cref->location)));
-                }    
+                errorMissingColumn(pstate, relname, colname, cref->location);
                 break;
             case CRERR_NO_RTE:
                 errorMissingRTE(pstate, makeRangeVar(nspname, relname, cref->location), hasplus);
@@ -911,11 +902,8 @@ static Node* transformAExprOp(ParseState* pstate, A_Expr* a)
 
         n->nulltesttype = IS_NULL;
 
-        if (exprIsNullConstant(lexpr)) {
-            n->arg = (Expr*)rexpr;
-        } else {
-            n->arg = (Expr*)lexpr;
-        }
+        n->arg = exprIsNullConstant(lexpr) ? (Expr *)rexpr : (Expr *)lexpr;
+
         result = transformExpr(pstate, (Node*)n);
     } else if (lexpr && IsA(lexpr, RowExpr) && rexpr && IsA(rexpr, SubLink) &&
                ((SubLink*)rexpr)->subLinkType == EXPR_SUBLINK) {

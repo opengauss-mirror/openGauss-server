@@ -51,10 +51,10 @@ public:
     bool parser(std::string serizial_str);
 
     /* Use name, cipher, length to assemble the message needed by FI KMS.Returns the result of serialization of JSON
-     * information. */
+     * information.*/
     std::string create(std::string name, std::string cipher, int length);
     /* Use name, iv, material to assemble the message needed by FI KMS.Returns the result of serialization of JSON
-     * information. */
+     * information.*/
     std::string create(std::string name, std::string iv, std::string material);
 
     /* Parsing Create CEK Messages. */

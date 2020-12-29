@@ -1,0 +1,226 @@
+---
+--case 5: copy data
+---
+set client_min_messages = 'ERROR';
+drop table if EXISTS cpu;
+
+CREATE TABLE IF NOT EXISTS CPU(
+scope_name text TSTag,
+server_ip text TSTag,
+group_path text TSTag,
+time timestamptz TSTime,
+ idle numeric TSField,
+system numeric TSField,
+ util numeric TSField,
+vcpu_num numeric TSField,
+guest numeric TSField,
+iowait numeric TSField,
+ users numeric TSField) with (orientation=TIMESERIES) distribute by hash(server_ip)
+  PARTITION BY RANGE(time)
+(
+partition p1 values less than('2020-04-06'),
+partition p2 values less than('2020-04-07'),
+partition p3 values less than('2020-04-08')
+);
+COPY CPU FROM '@abs_srcdir@/data/cpu.data';
+
+
+-------
+--case 6: select data
+------
+select avg(util) from cpu;
+select avg(idle) from cpu where scope_name = '0';
+
+select avg(idle) from cpu where scope_name = '1' and server_ip = 'saetataetaeta' and group_path = 'saetataetaeta';
+select * from cpu order by time limit 10;
+select * from cpu where time > '2020-04-07' order by idle limit 2;
+select * from cpu where time > '2020-04-07' and time < '2020-04-08' order by idle limit 2;
+
+select count(system) from cpu;
+select scope_name from cpu order by scope_name limit 1;
+select scope_name from cpu order by scope_name desc limit 1;
+
+
+
+select * from cpu partition(p3) order by users;
+
+COPY CPU FROM '@abs_srcdir@/data/cpu.data';
+
+select avg(util) from cpu;
+select avg(idle) from cpu where scope_name = '0';
+select avg(idle) from cpu where scope_name = '1' and server_ip = 'saetataetaeta' and group_path = 'saetataetaeta';
+select * from cpu order by time;
+select * from cpu where time > '2020-04-07';
+select * from cpu where time > '2020-04-07 16:00' and time < '2020-04-07 17:13:00' order  by util limit 10;
+select avg(system) from cpu where time > '2020-04-07 16:00' and time < '2020-04-07 17:13:00' group by scope_name;
+
+select * from cpu partition(p3) order by users limit 15;
+
+select scope_name from cpu limit 1;
+select * from cpu order by system limit 10;
+
+
+
+drop table if EXISTS cpu;
+-------
+--case 6: insert data
+------
+CREATE TABLE IF NOT EXISTS CPU(
+scope_name text TSTag,
+server_ip text TSTag,
+group_path text TSTag,
+time timestamptz TSTime,
+ idle numeric TSField,
+system numeric TSField,
+ util numeric TSField,
+vcpu_num numeric TSField,
+guest numeric TSField,
+iowait numeric TSField,
+ users numeric TSField) with (orientation=TIMESERIES) distribute by hash(server_ip)
+  PARTITION BY RANGE(time)
+(
+partition p1 values less than('2020-04-14'),
+partition p2 values less than('2020-04-15'),
+partition p3 values less than('2020-04-16')
+);
+
+insert into cpu values('aet', 'stee', 'set', '2020-04-15 19:00:00', 1, 2, 3, 4, 5, 6, 7);
+select * from cpu;
+insert into cpu values('aet', 'stee', 'set', '2020-04-15 19:01:00', 1, 2, 3, 4, 5, 6, 7);
+select avg(util) from cpu;
+select avg(idle) from cpu where scope_name = 'aet';
+select avg(idle) from cpu where scope_name = 'aet' and server_ip = 'stee' and group_path = 'set';
+select avg(idle) from cpu where scope_name = 'aet' and server_ip = 'stee' or group_path = 'set';
+select * from cpu order by time;
+select * from cpu where time > '2020-04-14';
+
+
+select * from cpu;
+select scope_name from cpu limit 1;
+select * from cpu partition(p3) order by users limit 15;
+
+drop table if EXISTS CPU_copy;
+CREATE TABLE IF NOT EXISTS CPU_copy(
+scope_name text TSTag,
+server_ip text TSTag,
+group_path text TSTag,
+time timestamptz TSTime,
+ idle numeric TSField,
+system numeric TSField,
+ util numeric TSField,
+vcpu_num numeric TSField,
+guest numeric TSField,
+iowait numeric TSField,
+ users numeric TSField) with (orientation=column) distribute by hash(server_ip)
+   PARTITION BY RANGE(time)
+(
+partition p1 values less than('2020-04-14'),
+partition p2 values less than('2020-04-15'),
+partition p3 values less than('2020-04-16')
+);
+COPY CPU_copy FROM '@abs_srcdir@/data/cpu1.data';
+
+insert into cpu (select * from CPU_copy);
+
+
+select avg(util) from cpu;
+select avg(idle) from cpu where scope_name = '0';
+select avg(idle) from cpu where scope_name = '0' and server_ip = 'UfF8JkHY03NQw1O7' and group_path = 'MPT1J7onBSqgVG8d';
+select * from cpu order by time;
+select * from cpu where time > '2020-04-07';
+select * from cpu where time > '2020-04-07 16:00' and time < '2020-04-14 17:13:00' order  by util limit 10;
+select avg(system) from cpu where time > '2020-04-07 16:00' and time < '2020-04-14 17:13:00' group by scope_name;
+
+select * from cpu partition(p3) order by users limit 15;
+
+select scope_name from cpu limit 1;
+select * from cpu order by system limit 10;
+
+
+------------------------------
+--case 6: select
+------
+
+select avg(idle) from cpu where scope_name like 'aet'; --like
+
+--select into
+drop table if EXISTS cup_into;
+select * into cup_into from cpu where scope_name = 'aet';
+drop table if EXISTS cup_into;
+
+-- select disinct
+SELECT DISTINCT scope_name FROM cpu ORDER BY 1;
+SELECT DISTINCT scope_name, group_path, server_ip FROM cpu ORDER BY scope_name using <, group_path using <, server_ip using <;
+SELECT DISTINCT ON (scope_name, group_path) server_ip FROM cpu ORDER BY scope_name using <, group_path using <, server_ip using <;
+SELECT count(*) FROM cpu x, CPU_copy y	WHERE x.users = y.users;
+-- select_having
+SELECT util, system FROM cpu GROUP BY util, system HAVING count(*) = 1 ORDER BY util, system;
+SELECT util, max(users) FROM cpu GROUP BY util HAVING count(*) > 2 OR min(users) = max(users) ORDER BY util;
+SELECT min(users), max(users) FROM cpu HAVING min(users) < max(users);
+
+--subselect
+select util, float8(count(*)) / (select count(util) from cpu) from cpu group by util;
+select * from CPU_copy   where util in (select util from cpu)   ORDER BY system;
+
+--union
+select * from cpu union all select * from cpu_copy order by server_ip, group_path, scope_name limit 10;
+select * from (select * from cpu union all select * from cpu_copy order by server_ip) t where scope_name = '0'  
+order by server_ip, group_path, scope_name limit 10;
+ 
+--case  fail case
+SELECT CASE WHEN util > 100 THEN 1 ELSE 0 END FROM cpu;
+SELECT CASE WHEN util > 100 THEN 'one' ELSE 'two' END FROM cpu;
+select COALESCE(server_ip,scope_name) from cpu;"
+SELECT * FROM cpu WHERE COALESCE(server_ip,scope_name) = 4;
+SELECT NULLIF(server_ip,scope_name) FROM cpu;
+SELECT * FROM cpu WHERE NULLIF(server_ip,scope_name) = 2;
+
+
+-- AGGREGATES
+select sum(idle) from cpu where scope_name = 'aet' and server_ip = 'stee' and group_path = 'set';
+select stddev_pop(idle) from cpu where scope_name = 'aet' and server_ip = 'stee' and group_path = 'set';
+select stddev_pop(idle) from cpu;
+select stddev_samp(idle) from cpu;
+select var_pop(idle) from cpu;
+select var_samp(idle) from cpu;
+select stddev_pop(util::numeric) from cpu;
+select stddev_samp(idle::numeric) from cpu;
+select var_pop(idle::numeric) from cpu;
+select var_samp(idle::numeric) from cpu;
+select regr_count(idle,util) from cpu;
+select regr_sxx(idle,util) from cpu;
+select regr_syy(idle,util) from cpu;
+select regr_avgx(idle,util) from cpu;
+select regr_r2(idle,util) from cpu;
+select regr_slope(idle,util),regr_intercept(idle, util) from cpu;
+select covar_pop(idle,util),covar_samp(idle, util) from cpu;
+select corr(idle,util) from cpu;
+SELECT count(DISTINCT idle) AS cnt_4 FROM cpu;
+
+--- gs_aggregate fail
+select regexp_split_to_table(scope_name::text||server_ip::text,group_path::text) from cpu;
+
+--with
+WITH RECURSIVE subcpu AS
+(
+	SELECT server_ip as root_name, * FROM cpu WHERE server_ip = 'stee'
+
+	UNION ALL
+
+	SELECT sd.root_name, d.* FROM cpu AS d, subcpu AS sd
+		WHERE d.server_ip = sd.server_ip
+)
+SELECT * FROM subcpu ORDER BY root_name;
+
+
+drop table if EXISTS cpu;
+drop table CPU_copy;
+
+-------
+--case 6: insert data
+--select avg(idle) from cpu where scope_name = '1' and server_ip = '' and group_path = '';
+------
+
+
+drop table CPU_copy;
+drop table CPU;

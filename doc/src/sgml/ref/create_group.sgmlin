@@ -10,10 +10,13 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-CREATE GROUP group_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { PASSWORD | IDENTIFIED BY } { 'password' | DISABLE };
+CREATE GROUP group_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { PASSWORD | IDENTIFIED BY } { 'password' [ EXPIRED ] | DISABLE };
 
 where option can be:
 {SYSADMIN | NOSYSADMIN}
+    | {MONADMIN | NOMONADMIN}
+    | {OPRADMIN | NOOPRADMIN}
+    | {POLADMIN | NOPOLADMIN}
     | {AUDITADMIN | NOAUDITADMIN}
     | {CREATEDB | NOCREATEDB}
     | {USEFT | NOUSEFT}
@@ -23,12 +26,15 @@ where option can be:
     | {REPLICATION | NOREPLICATION}
     | {INDEPENDENT | NOINDEPENDENT}
     | {VCADMIN | NOVCADMIN}
+    | {PERSISTENCE | NOPERSISTENCE}
     | CONNECTION LIMIT connlimit
     | VALID BEGIN 'timestamp'
     | VALID UNTIL 'timestamp'
     | RESOURCE POOL 'respool'
     | USER GROUP 'groupuser'
     | PERM SPACE 'spacelimit'
+    | TEMP SPACE 'tmpspacelimit'
+    | SPILL SPACE 'spillspacelimit'
     | NODE GROUP logic_group_name
     | IN ROLE role_name [, ...]
     | IN GROUP role_name [, ...]

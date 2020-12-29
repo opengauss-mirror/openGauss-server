@@ -32,8 +32,8 @@ ifneq "$(MAKECMDGOALS)" "clean"
      endif
   endif
 endif
-OBJS = barrier.o bufpage.o clog.o csnlog.o dbcommands.o ginxlog.o gistxlog.o hash.o heapam.o nbtpage.o nbtxlog.o pruneheap.o \
-	relmapper.o sequence.o slotfuncs.o spgxlog.o storage.o tablespace.o transam.o visibilitymap.o xact.o xlog.o \
-	xlogreader_common.o xlogutils.o 
+OBJS = redo_barrier.o redo_bufpage.o redo_clog.o redo_csnlog.o redo_dbcommands.o redo_ginxlog.o redo_gistxlog.o redo_hash.o redo_heapam.o redo_nbtpage.o redo_nbtxlog.o redo_pruneheap.o \
+	redo_relmapper.o redo_sequence.o redo_slotfuncs.o redo_spgxlog.o redo_storage.o redo_tablespace.o redo_transam.o redo_visibilitymap.o redo_xact.o redo_xlog.o \
+	xlogreader_common.o redo_xlogutils.o 
 
 include $(top_srcdir)/src/gausskernel/common.mk

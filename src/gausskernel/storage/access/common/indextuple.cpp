@@ -18,6 +18,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/itup.h"
 #include "access/tuptoaster.h"
 #include "utils/rel.h"
@@ -33,30 +34,35 @@
  *		tuplesort_putindextuplevalues() will be very unhappy.
  * ----------------
  */
-IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const bool* isnull)
+IndexTuple index_form_tuple(TupleDesc tupleDescriptor, Datum *values, const bool *isnull)
 {
-    char* tp = NULL;         /* tuple pointer */
+    char *tp = NULL;         /* tuple pointer */
     IndexTuple tuple = NULL; /* return tuple */
     Size size, data_size, hoff;
     int i;
     unsigned short infomask = 0;
     bool hasnull = false;
     uint16 tupmask = 0;
-    int attribute_num = tuple_descriptor->natts;
+    int numberOfAttributes = tupleDescriptor->natts;
+
+    Size (*computedatasize_tuple)(TupleDesc tuple_desc, Datum* values, const bool* isnull);
+    void (*filltuple)(TupleDesc tuple_desc, Datum* values, const bool* isnull, char* data, Size data_size, uint16* infomask, bits8* bit);
+
+    computedatasize_tuple = &heap_compute_data_size;
+    filltuple = &heap_fill_tuple;
 
 #ifdef TOAST_INDEX_HACK
     Datum untoasted_values[INDEX_MAX_KEYS];
     bool untoasted_free[INDEX_MAX_KEYS];
 #endif
 
-    if (attribute_num > INDEX_MAX_KEYS)
-        ereport(ERROR,
-            (errcode(ERRCODE_TOO_MANY_COLUMNS),
-                errmsg("number of index columns (%d) exceeds limit (%d)", attribute_num, INDEX_MAX_KEYS)));
+    if (numberOfAttributes > INDEX_MAX_KEYS)
+        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                        errmsg("number of index columns (%d) exceeds limit (%d)", numberOfAttributes, INDEX_MAX_KEYS)));
 
 #ifdef TOAST_INDEX_HACK
-    for (i = 0; i < attribute_num; i++) {
-        Form_pg_attribute att = tuple_descriptor->attrs[i];
+    for (i = 0; i < numberOfAttributes; i++) {
+        Form_pg_attribute att = tupleDescriptor->attrs[i];
 
         untoasted_values[i] = values[i];
         untoasted_free[i] = false;
@@ -70,7 +76,7 @@ IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const boo
          * on outside storage.	This should be improved someday.
          */
         if (VARATT_IS_EXTERNAL(DatumGetPointer(values[i]))) {
-            untoasted_values[i] = PointerGetDatum(heap_tuple_fetch_attr((struct varlena*)DatumGetPointer(values[i])));
+            untoasted_values[i] = PointerGetDatum(heap_tuple_fetch_attr((struct varlena *)DatumGetPointer(values[i])));
             untoasted_free[i] = true;
         }
 
@@ -93,7 +99,7 @@ IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const boo
     }
 #endif
 
-    for (i = 0; i < attribute_num; i++) {
+    for (i = 0; i < numberOfAttributes; i++) {
         if (isnull[i]) {
             hasnull = true;
             break;
@@ -105,30 +111,27 @@ IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const boo
 
     hoff = IndexInfoFindDataOffset(infomask);
 #ifdef TOAST_INDEX_HACK
-    data_size = heap_compute_data_size(tuple_descriptor, untoasted_values, isnull);
+    data_size = computedatasize_tuple(tupleDescriptor, untoasted_values, isnull);
 #else
-    data_size = heap_compute_data_size(tuple_descriptor, values, isnull);
+    data_size = computedatasize_tuple(tupleDescriptor, values, isnull);
 #endif
     size = hoff + data_size;
     size = MAXALIGN(size); /* be conservative */
 
-    tp = (char*)palloc0(size);
+    tp = (char *)palloc0(size);
     tuple = (IndexTuple)tp;
 
-    heap_fill_tuple(tuple_descriptor,
+    filltuple(tupleDescriptor,
 #ifdef TOAST_INDEX_HACK
-        untoasted_values,
+                    untoasted_values,
 #else
-        values,
+                    values,
 #endif
-        isnull,
-        (char*)tp + hoff,
-        data_size,
-        &tupmask,
-        (hasnull ? (bits8*)tp + sizeof(IndexTupleData) : NULL));
+                    isnull, (char *)tp + hoff, data_size, &tupmask,
+                    (hasnull ? (bits8 *)tp + sizeof(IndexTupleData) : NULL));
 
 #ifdef TOAST_INDEX_HACK
-    for (i = 0; i < attribute_num; i++) {
+    for (i = 0; i < numberOfAttributes; i++) {
         if (untoasted_free[i])
             pfree(DatumGetPointer(untoasted_values[i]));
     }
@@ -149,10 +152,8 @@ IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const boo
      */
     if ((size & INDEX_SIZE_MASK) != size)
         ereport(ERROR,
-            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                errmsg("index row requires %lu bytes, maximum size is %lu",
-                    (unsigned long)size,
-                    (unsigned long)INDEX_SIZE_MASK)));
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("index row requires %lu bytes, maximum size is %lu",
+                                                                 (unsigned long)size, (unsigned long)INDEX_SIZE_MASK)));
 
     infomask |= size;
 
@@ -182,11 +183,11 @@ IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const boo
  *		the same attribute descriptor will go much quicker. -cim 5/4/91
  * ----------------
  */
-Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
+Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tupleDesc)
 {
-    Form_pg_attribute* att = tuple_desc->attrs;
-    char* tp = NULL;   /* ptr to data part of tuple */
-    bits8* bp = NULL;  /* ptr to null bitmap in tuple */
+    Form_pg_attribute *att = tupleDesc->attrs;
+    char *tp = NULL;   /* ptr to data part of tuple */
+    bits8 *bp = NULL;  /* ptr to null bitmap in tuple */
     bool slow = false; /* do we have to walk attrs? */
     int data_off;      /* tuple data offset */
     int off;           /* current offset within data */
@@ -208,7 +209,7 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
      */
     if (IndexTupleHasNulls(tup)) {
         /* XXX "knows" t_bits are just after fixed tuple header! */
-        bp = (bits8*)((char*)tup + sizeof(IndexTupleData));
+        bp = (bits8 *)((char *)tup + sizeof(IndexTupleData));
 
         /*
          * Now check to see if any preceding bits are null...
@@ -234,7 +235,7 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
         }
     }
 
-    tp = (char*)tup + data_off;
+    tp = (char *)tup + data_off;
 
     if (!slow) {
         /*
@@ -263,7 +264,7 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
     }
 
     if (!slow) {
-        uint32 natts = tuple_desc->natts;
+        uint32 natts = tupleDesc->natts;
         uint32 j = 1;
 
         /*
@@ -361,15 +362,15 @@ Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc)
  * The caller must allocate sufficient storage for the output arrays.
  * (INDEX_MAX_KEYS entries should be enough.)
  */
-void index_deform_tuple(IndexTuple tup, TupleDesc tuple_descriptor, Datum* values, bool* isnull)
+void index_deform_tuple(IndexTuple tup, TupleDesc tupleDescriptor, Datum *values, bool *isnull)
 {
     int i;
 
     /* Assert to protect callers who allocate fixed-size arrays */
-    Assert(tuple_descriptor->natts <= INDEX_MAX_KEYS);
+    Assert(tupleDescriptor->natts <= INDEX_MAX_KEYS);
 
-    for (i = 0; i < tuple_descriptor->natts; i++) {
-        values[i] = index_getattr(tup, i + 1, tuple_descriptor, &isnull[i]);
+    for (i = 0; i < tupleDescriptor->natts; i++) {
+        values[i] = index_getattr(tup, i + 1, tupleDescriptor, &isnull[i]);
     }
 }
 
@@ -398,6 +399,7 @@ IndexTuple index_truncate_tuple(TupleDesc tupleDescriptor, IndexTuple olditup, i
     TupleDesc itupdesc = CreateTupleDescCopyConstr(tupleDescriptor);
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
+    IndexTuple newitup;
 
     Assert(tupleDescriptor->natts <= INDEX_MAX_KEYS);
     Assert(new_indnatts > 0);
@@ -407,7 +409,7 @@ IndexTuple index_truncate_tuple(TupleDesc tupleDescriptor, IndexTuple olditup, i
 
     /* form new tuple that will contain only key attributes */
     itupdesc->natts = new_indnatts;
-    IndexTuple newitup = index_form_tuple(itupdesc, values, isnull);
+    newitup = index_form_tuple(itupdesc, values, isnull);
     newitup->t_tid = olditup->t_tid;
 
     FreeTupleDesc(itupdesc);

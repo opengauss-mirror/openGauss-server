@@ -14,16 +14,15 @@ test -f regression.diffs.hacheck.mot && rm regression.diffs.hacheck.mot
 total_starttime=`date +"%Y-%m-%d %H:%M:%S"`
 total_startvalue=`date -d  "$total_starttime" +%s`
 
-if [ ! -d "./results" ]; then
-	mkdir ./results
-fi
+array=("multi_standby_single")
+for element in ${array[@]}
+do
+  mkdir -vp ./results/$element
+done
 
 #init and start the database
 printf "init and start the database\n"
 sh deploy_multi_single_mot.sh > ./results/deploy_standby_multi_single_mot.log 2>&1
-
-#cp the data file to datanode dir, for COPY cmd
-cp $scripts_dir/data/* $g_data_path/datanode1/pg_copydir
 
 for((i=1;i<=$loop_num;i++))
 do
@@ -33,11 +32,6 @@ do
 	do
 		printf "%-50s" $line
 		starttime=`date +"%Y-%m-%d %H:%M:%S"` 
-		logfilepath=./results/$line
-		logfiledir=${logfilepath%/*}
-		if [ ! -d $logfiledir ]; then
-			mkdir -p $logfiledir
-		fi
 		sh ./testcase/$line.sh > ./results/$line.log 2>&1
 		count=`expr $count + 1`
 		endtime=`date +"%Y-%m-%d %H:%M:%S"` 

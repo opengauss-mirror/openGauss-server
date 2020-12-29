@@ -4,6 +4,7 @@
  *	  postgres transaction system definitions
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
@@ -35,6 +36,9 @@
 #define XACT_READ_COMMITTED 1
 #define XACT_REPEATABLE_READ 2
 #define XACT_SERIALIZABLE 3
+
+#define SNAPSHOT_UPDATE_NEED_SYNC (1 << 0)
+#define SNAPSHOT_NOW_NEED_SYNC (1 << 1)
 
 /*
  * start- and end-of-transaction callbacks for dynamically loaded modules
@@ -128,9 +132,9 @@ typedef struct xl_xact_assignment {
 #define MinSizeOfXactAssignment offsetof(xl_xact_assignment, xsub)
 
 typedef struct xl_xact_commit_compact {
-    TimestampTz xact_time;  /* time of commit */
-    uint64 csn;             /* commit sequence number */
-    int nsubxacts;          /* number of subtransaction XIDs */
+    TimestampTz xact_time; /* time of commit */
+    uint64 csn;            /* commit sequence number */
+    int nsubxacts;         /* number of subtransaction XIDs */
     /* ARRAY OF COMMITTED SUBTRANSACTION XIDs FOLLOWS */
     TransactionId subxacts[FLEXIBLE_ARRAY_MEMBER]; /* VARIABLE LENGTH ARRAY */
 } xl_xact_commit_compact;
@@ -250,14 +254,37 @@ typedef struct {
 #define STCSaveElem(dest, src) ((dest) = (src))
 #define STCRestoreElem(dest, src) ((src) = (dest))
 
+#ifdef ENABLE_MOT
 typedef void (*RedoCommitCallback)(TransactionId xid, void* arg);
 void RegisterRedoCommitCallback(RedoCommitCallback callback, void* arg);
 void CallRedoCommitCallback(TransactionId xid);
+#endif
+
+typedef enum SavepointStmtType
+{
+    SUB_STMT_SAVEPOINT,
+    SUB_STMT_RELEASE,
+    SUB_STMT_ROLLBACK_TO
+} SavepointStmtType;
+
+/*
+ * savepoint sent state structure
+ * It record whether the savepoint cmd has been sent to non-execution cn.
+ */
+typedef struct SavepointData
+{
+    char*                cmd;
+    char*                name;
+    bool                 hasSent;
+    SavepointStmtType    stmtType;
+    GlobalTransactionId  transactionId;
+} SavepointData;
 
 /* ----------------
  *		extern definitions
  * ----------------
  */
+extern void InitTopTransactionState(void);
 extern void InitCurrentTransactionState(void);
 extern bool IsTransactionState(void);
 extern bool IsAbortedTransactionBlockState(void);
@@ -273,7 +300,7 @@ extern GTM_TransactionHandle GetTransactionHandleIfAny(TransactionState s);
 extern GTM_TransactionHandle GetCurrentTransactionHandleIfAny(void);
 extern GTM_Timeline GetCurrentTransactionTimeline(void);
 extern TransactionState GetCurrentTransactionState(void);
-
+extern TransactionId GetParentTransactionIdIfAny(TransactionState s);
 extern void ResetTransactionInfo(void);
 
 #ifdef PGXC /* PGXC_COORD */
@@ -311,12 +338,18 @@ extern void CopyTransactionIdLoggedIfAny(TransactionState state);
 extern bool TransactionIdIsCurrentTransactionId(TransactionId xid);
 extern void CommandCounterIncrement(void);
 extern void ForceSyncCommit(void);
-extern void StartTransactionCommand(bool stpRollback = false);
-extern void CommitTransactionCommand(bool stpCommit = false);
+extern void StartTransactionCommand(bool STP_rollback = false);
+extern void CommitTransactionCommand(bool STP_commit = false);
+extern bool CommitSubTransactionExpectionCheck(void);
+extern void SaveCurrentSTPTopTransactionState();
+extern void RestoreCurrentSTPTopTransactionState();
+extern bool IsStpInOuterSubTransaction();
 #ifdef PGXC
 extern void AbortCurrentTransactionOnce(void);
 #endif
-extern void AbortCurrentTransaction(bool stpRollback = false);
+extern void AbortCurrentTransaction(bool STP_rollback = false);
+extern void AbortSubTransaction(bool STP_rollback = false);
+extern void CleanupSubTransaction(void);
 extern void BeginTransactionBlock(void);
 extern bool EndTransactionBlock(void);
 extern bool PrepareTransactionBlock(const char* gid);
@@ -328,10 +361,6 @@ extern void BeginInternalSubTransaction(const char* name);
 extern void ReleaseCurrentSubTransaction(void);
 extern void RollbackAndReleaseCurrentSubTransaction(void);
 extern bool IsSubTransaction(void);
-extern void SerializeTransactionState(ParallelInfoContext *cxt);
-extern void StartParallelWorkerTransaction(ParallelInfoContext *cxt);
-extern void EndParallelWorkerTransaction(void);
-extern void SetParallelStartTimestamps(TimestampTz xact_ts, TimestampTz stmt_ts);
 extern void SetCurrentTransactionId(TransactionId tid);
 extern bool IsTransactionBlock(void);
 extern bool IsTransactionOrTransactionBlock(void);
@@ -388,15 +417,21 @@ extern bool IsInLiveSubtransaction();
 extern void ExtendCsnlogForSubtrans(TransactionId parent_xid, int nsub_xid, TransactionId* sub_xids);
 extern CommitSeqNo SetXact2CommitInProgress(TransactionId xid, CommitSeqNo csn);
 extern void XactGetRelFiles(XLogReaderState* record, ColFileNodeRel** xnodesPtr, int* nrelsPtr);
-extern CommitSeqNo GetLocalNextCSN();
+extern HTAB* relfilenode_hashtbl_create();
+extern CommitSeqNo getLocalNextCSN();
+#ifdef ENABLE_MOT
 extern bool IsMOTEngineUsed();
 extern bool IsMOTEngineUsedInParentTransaction();
 extern bool IsPGEngineUsed();
 extern bool IsMixedEngineUsed();
 extern void SetCurrentTransactionStorageEngine(StorageEngineType storageEngineType);
+#endif
 
-extern void EnterParallelMode(void);
-extern void ExitParallelMode(void);
-extern bool IsInParallelMode(void);
+extern char* GetSavepointName(List* options);
+extern void RecordSavepoint(const char* cmd, const char* name, bool hasSent, SavepointStmtType stmtType);
+extern void SendSavepointToRemoteCoordinator();
+extern void HandleReleaseOrRollbackSavepoint(const char* cmd, const char* name, SavepointStmtType stmtType);
+extern void FreeSavepointList();
+extern TransactionState CopyTxnStateByCurrentMcxt(TransactionState state);
 
 #endif /* XACT_H */

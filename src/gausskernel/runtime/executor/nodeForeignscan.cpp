@@ -30,7 +30,9 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/memutils.h"
+#ifdef ENABLE_MOT
 #include "storage/mot/jit_exec.h"
+#endif
 
 #ifdef PGXC
 #include "utils/lsyscache.h"
@@ -126,9 +128,13 @@ ForeignScanState* ExecInitForeignScan(ForeignScan* node, EState* estate, int efl
      *
      * create expression context for node
      */
+#ifdef ENABLE_MOT
     if ((estate->mot_jit_context == NULL) || IS_PGXC_COORDINATOR || !JitExec::IsMotCodegenEnabled()) {
+#endif
         ExecAssignExprContext(estate, &scanstate->ss.ps);
+#ifdef ENABLE_MOT
     }
+#endif
 
     scanstate->ss.ps.ps_TupFromTlist = false;
 
@@ -174,8 +180,11 @@ ForeignScanState* ExecInitForeignScan(ForeignScan* node, EState* estate, int efl
     /*
      * Initialize result tuple type and projection info.
      */
-    ExecAssignResultTypeFromTL(&scanstate->ss.ps);
+    ExecAssignResultTypeFromTL(
+            &scanstate->ss.ps,
+            scanstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
     ExecAssignScanProjectionInfo(&scanstate->ss);
+    Assert(scanstate->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
 
     /*
      * Acquire function pointers from the FDW's handler, and init fdw_state.
@@ -202,7 +211,9 @@ ForeignScanState* ExecInitForeignScan(ForeignScan* node, EState* estate, int efl
     scanstate->fdwroutine = fdwroutine;
     scanstate->fdw_state = NULL;
 
+#ifdef ENABLE_MOT
     if ((estate->mot_jit_context == NULL) || IS_PGXC_COORDINATOR || !JitExec::IsMotCodegenEnabled()) {
+#endif
         scanstate->scanMcxt = AllocSetContextCreate(CurrentMemoryContext,
             "Foreign Scan",
             ALLOCSET_DEFAULT_MINSIZE,
@@ -213,7 +224,9 @@ ForeignScanState* ExecInitForeignScan(ForeignScan* node, EState* estate, int efl
          * Tell the FDW to initiate the scan.
          */
         fdwroutine->BeginForeignScan(scanstate, eflags);
+#ifdef ENABLE_MOT
     }
+#endif
 
     return scanstate;
 }
@@ -227,9 +240,13 @@ ForeignScanState* ExecInitForeignScan(ForeignScan* node, EState* estate, int efl
 void ExecEndForeignScan(ForeignScanState* node)
 {
     /* Let the FDW shut down */
+#ifdef ENABLE_MOT
     if (node->fdw_state != NULL) {
+#endif
         node->fdwroutine->EndForeignScan(node);
+#ifdef ENABLE_MOT
     }
+#endif
 
     /* Free the exprcontext */
     ExecFreeExprContext(&node->ss.ps);
@@ -245,6 +262,16 @@ void ExecEndForeignScan(ForeignScanState* node)
     } else {
         if (false == scan->in_compute_pool) {
             ExecCloseScanRelation(node->ss.ss_currentRelation);
+        }
+    }
+
+    /* clear obs sk key */
+    if (node->options != NULL) {
+        char* obskey = getFTOptionValue(node->options->fOptions, OPTION_NAME_OBSKEY);
+        if (obskey != NULL) {
+            errno_t rc = EOK;
+            rc = memset_s(obskey, strlen(obskey), 0, strlen(obskey));
+            securec_check(rc, "\0", "\0");
         }
     }
 }

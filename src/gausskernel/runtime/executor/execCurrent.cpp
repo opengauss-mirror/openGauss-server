@@ -16,6 +16,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "catalog/pg_type.h"
 #include "executor/executor.h"
 #include "utils/builtins.h"
@@ -28,10 +29,10 @@
 #include "pgxc/execRemote.h"
 #endif
 
-static char *fetch_cursor_param_value(ExprContext *econtext, int paramId);
+static char* fetch_cursor_param_value(ExprContext *econtext, int paramId);
 
 #ifndef PGXC
-static ScanState *search_plan_tree(PlanState *node, Oid table_oid);
+static ScanState* search_plan_tree(PlanState *node, Oid table_oid);
 #endif
 
 /*
@@ -121,7 +122,7 @@ bool execCurrentOf(CurrentOfExpr *cexpr, ExprContext *econtext, Relation relatio
                 errmsg("cursor \"%s\" does not have a FOR UPDATE/SHARE reference to table \"%s\"", cursor_name,
                 RelationGetRelationName(relation))));
         }
-
+            
         /*
          * The cursor must have a current result row: per the SQL spec, it's
          * an error if not.
@@ -184,10 +185,10 @@ bool execCurrentOf(CurrentOfExpr *cexpr, ExprContext *econtext, Relation relatio
         }
 
         /* Use slot_getattr to catch any possible mistakes */
-        tuple_tableoid = DatumGetObjectId(slot_getattr(scanstate->ss_ScanTupleSlot, TableOidAttributeNumber, &lisnull));
+        tuple_tableoid = DatumGetObjectId(tableam_tslot_getattr(scanstate->ss_ScanTupleSlot, TableOidAttributeNumber, &lisnull));
         Assert(!lisnull);
         tuple_tid = (ItemPointer)DatumGetPointer(
-            slot_getattr(scanstate->ss_ScanTupleSlot, SelfItemPointerAttributeNumber, &lisnull));
+            tableam_tslot_getattr(scanstate->ss_ScanTupleSlot, SelfItemPointerAttributeNumber, &lisnull));
         Assert(!lisnull);
         if (RELATION_IS_PARTITIONED(relation)) {
             Assert(tuple_tableoid == RelationGetRelid(scanstate->ss_currentPartition));
@@ -243,9 +244,9 @@ static char *fetch_cursor_param_value(ExprContext *econtext, int paramId)
  * Return NULL if not found or multiple candidates.
  */
 #ifdef PGXC
-ScanState *search_plan_tree(PlanState *node, Oid table_oid)
+ScanState* search_plan_tree(PlanState* node, Oid table_oid)
 #else
-static ScanState *search_plan_tree(PlanState *node, Oid table_oid)
+static ScanState* search_plan_tree(PlanState* node, Oid table_oid)
 #endif
 {
     if (node == NULL) {

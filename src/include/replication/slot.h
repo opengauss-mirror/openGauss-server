@@ -17,19 +17,22 @@
 
 #include "fmgr.h"
 #include "access/xlog.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "storage/shmem.h"
 #include "storage/spin.h"
+extern const uint32 EXTRA_SLOT_VERSION_NUM;
+
 /*
  * Behaviour of replication slots, upon release or crash.
  *
  * Slots marked as PERSISTENT are crashsafe and will not be dropped when
  * released. Slots marked as EPHEMERAL will be dropped when released or after
- * restarts.
+ * restarts. BACKUP is basically similar to PERSISTENT, except that such slots are
+ * taken into consideration when computing restart_lsn or delay_ddl_lsn even if inactive.
  *
  * EPHEMERAL slots can be made PERSISTENT by calling ReplicationSlotPersist().
  */
-typedef enum ReplicationSlotPersistency { RS_PERSISTENT, RS_EPHEMERAL } ReplicationSlotPersistency;
+typedef enum ReplicationSlotPersistency { RS_PERSISTENT, RS_EPHEMERAL, RS_BACKUP } ReplicationSlotPersistency;
 
 /*
  * On-Disk data of a replication slot, preserved across restarts.
@@ -44,6 +47,7 @@ typedef struct ReplicationSlotPersistentData {
     /*
      * The slot's behaviour when being dropped (or restored after a crash).
      */
+     /* !!!!!!!!!!!!!!!!!!we steal two bytes from persistency for extra content length in new version */
     ReplicationSlotPersistency persistency;
     bool isDummyStandby;
 
@@ -86,6 +90,14 @@ typedef struct ReplicationSlotOnDisk {
 
     ReplicationSlotPersistentData slotdata;
 } ReplicationSlotOnDisk;
+
+typedef struct ObsArchiveConfig {
+    char *obs_address;
+    char *obs_bucket;
+    char *obs_ak;
+    char *obs_sk;
+    char *obs_prefix;
+} ObsArchiveConfig;
 
 /*
  * Shared memory state of a single replication slot.
@@ -136,25 +148,34 @@ typedef struct ReplicationSlot {
     XLogRecPtr candidate_xmin_lsn;
     XLogRecPtr candidate_restart_valid;
     XLogRecPtr candidate_restart_lsn;
+    ObsArchiveConfig* archive_obs;
+    char* extra_content;
 } ReplicationSlot;
 
+
+#define ReplicationSlotPersistentDataConstSize sizeof(ReplicationSlotPersistentData)
 /* size of the part of the slot that is version independent */
 #define ReplicationSlotOnDiskConstantSize offsetof(ReplicationSlotOnDisk, slotdata)
 /* size of the slots that is not version indepenent */
 #define ReplicationSlotOnDiskDynamicSize sizeof(ReplicationSlotOnDisk) - ReplicationSlotOnDiskConstantSize
 #define SLOT_MAGIC 0x1051CA1 /* format identifier */
 #define SLOT_VERSION 1       /* version for new files */
+#define SLOT_VERSION_TWO 2       /* version for new files */
+
 
 #define XLOG_SLOT_CREATE 0x00
 #define XLOG_SLOT_ADVANCE 0x10
 #define XLOG_SLOT_DROP 0x20
 #define XLOG_SLOT_CHECK 0x30
 #define XLOG_TERM_LOG 0x40
+#define INT32_HIGH_MASK 0xFF00
+#define INT32_LOW_MASK 0x00FF
 
-typedef struct xl_slot_header {
-    ReplicationSlotPersistentData data;
-} xl_slot_header;
-#define SizeOfSlotHeader (offsetof(xl_slot_header, data) + sizeof(ReplicationSlotPersistentData))
+/* we steal two bytes from persistency for updagrade */
+#define GET_SLOT_EXTRA_DATA_LENGTH(data) (((int)((data).persistency)) >> 16)
+#define SET_SLOT_EXTRA_DATA_LENGTH(data, length) ((data).persistency = (ReplicationSlotPersistency)((int)(((data).persistency) & INT32_LOW_MASK) | ((length) << 16)))
+#define GET_SLOT_PERSISTENCY(data) (ReplicationSlotPersistency(int16((data).persistency)))
+#define SET_SLOT_PERSISTENCY(data, mypersistency) ((data).persistency = (ReplicationSlotPersistency)((int)(((data).persistency) & INT32_HIGH_MASK) | (int16(mypersistency))))
 /*
  * Shared memory control area for all of replication slots.
  */
@@ -183,9 +204,9 @@ extern void ReplicationSlotsShmemInit(void);
 
 /* management of individual slots */
 extern void ReplicationSlotCreate(const char* name, ReplicationSlotPersistency persistency, bool isDummyStandby,
-    Oid databaseId, XLogRecPtr restart_lsn);
+    Oid databaseId, XLogRecPtr restart_lsn, char* extra_content = NULL, bool encrypted = false);
 extern void ReplicationSlotPersist(void);
-extern void ReplicationSlotDrop(const char* name);
+extern void ReplicationSlotDrop(const char* name, bool for_backup = false);
 extern void ReplicationSlotAcquire(const char* name, bool isDummyStandby);
 bool ReplicationSlotFind(const char* name);
 extern void ReplicationSlotRelease(void);
@@ -198,11 +219,13 @@ extern bool ReplicationSlotValidateName(const char* name, int elevel);
 extern void ValidateName(const char* name);
 extern void ReplicationSlotsComputeRequiredXmin(bool already_locked);
 extern void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState* repl_slt_state);
+extern XLogRecPtr ReplicationSlotsComputeConfirmedLSN(void);
 extern void ReplicationSlotReportRestartLSN(void);
 extern void StartupReplicationSlots();
 extern void CheckPointReplicationSlots(void);
 extern void SetDummyStandbySlotLsnInvalid(void);
-
+extern XLogRecPtr slot_advance_confirmed_lsn(const char *slotname, XLogRecPtr target_lsn);
+extern bool slot_reset_confirmed_lsn(const char *slotname, XLogRecPtr *start_lsn);
 extern void CheckSlotRequirements(void);
 
 /* SQL callable functions */
@@ -212,6 +235,7 @@ extern void create_logical_replication_slot(
 extern XLogRecPtr ReplicationSlotsComputeLogicalRestartLSN(void);
 extern bool ReplicationSlotsCountDBSlots(Oid dboid, int* nslots, int* nactive);
 extern Datum pg_create_physical_replication_slot(PG_FUNCTION_ARGS);
+extern Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS);
 extern Datum pg_create_logical_replication_slot(PG_FUNCTION_ARGS);
 extern Datum pg_drop_replication_slot(PG_FUNCTION_ARGS);
 extern Datum pg_get_replication_slot_name(PG_FUNCTION_ARGS);
@@ -222,9 +246,16 @@ extern void slot_desc(StringInfo buf, XLogReaderState* record);
 extern void redo_slot_advance(const ReplicationSlotPersistentData* slotInfo);
 extern void log_slot_advance(const ReplicationSlotPersistentData* slotInfo);
 extern void log_slot_drop(const char* name);
-extern void log_slot_create(const ReplicationSlotPersistentData* data);
 extern void LogCheckSlot();
 extern Size GetAllLogicalSlot(LogicalPersistentData*& LogicalSlot);
 extern char* get_my_slot_name();
-#endif /* SLOT_H */
+extern ObsArchiveConfig* formObsConfigFromStr(char *content, bool encrypted);
+extern char *formObsConfigStringFromStruct(ObsArchiveConfig *obs_config);
+extern bool is_archive_slot(ReplicationSlotPersistentData data);
+extern void log_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra_content = NULL);
+extern ReplicationSlot *getObsReplicationSlot();
+extern void advanceObsSlot(XLogRecPtr restart_pos);
+extern void redo_slot_reset_for_backup(const ReplicationSlotPersistentData *xlrec);
+extern void markObsSlotOperate(int p_slot_num);
 
+#endif /* SLOT_H */

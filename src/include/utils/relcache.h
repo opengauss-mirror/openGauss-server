@@ -18,8 +18,13 @@
 #include "nodes/bitmapset.h"
 #include "utils/hsearch.h"
 
+#define IsValidCatalogParam(catalogDesc) (catalogDesc.oid != InvalidOid)
+
 typedef struct RelationData* Relation;
 typedef struct PartitionData* Partition;
+struct HeapTupleData;
+typedef HeapTupleData* HeapTuple;
+typedef int LOCKMODE;
 
 /* ----------------
  *		RelationPtr is used in the executor to support index scans
@@ -30,7 +35,7 @@ typedef struct PartitionData* Partition;
 typedef Relation* RelationPtr;
 
 typedef struct CatalogRelationBuildParam {
-    Oid oId;
+    Oid oid;
     const char* relationName;
     Oid relationReltype;
     bool isshared;
@@ -58,9 +63,10 @@ extern int RelationGetIndexNum(Relation relation);
 extern Oid RelationGetOidIndex(Relation relation);
 extern Oid RelationGetReplicaIndex(Relation relation);
 extern List* RelationGetIndexExpressions(Relation relation);
+extern List* RelationGetIndexExpressions(Relation relation);
 extern List* RelationGetDummyIndexExpressions(Relation relation);
 extern List* RelationGetIndexPredicate(Relation relation);
-
+extern void AtEOXact_FreeTupleDesc();
 
 typedef enum IndexAttrBitmapKind {
     INDEX_ATTR_BITMAP_ALL,
@@ -81,7 +87,7 @@ extern void RelationGetExclusionInfo(Relation indexRelation, Oid** operators, Oi
 
 extern void RelationSetIndexList(Relation relation, List* indexIds, Oid oidIndex);
 
-extern void RelationInitIndexAccessInfo(Relation relation);
+extern void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple = NULL);
 
 /*
  * Routines for backend startup
@@ -95,7 +101,7 @@ extern void RelationCacheInitializePhase3(void);
  */
 extern Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, TupleDesc tupDesc, Oid relid,
     Oid relfilenode, Oid reltablespace, bool shared_relation, bool mapped_relation, char relpersistence, char relkind,
-    int8 row_compress);
+    int8 row_compress, TableAmType tam_type);
 
 /*
  * Routine to manage assignment of new relfilenode to a relation
@@ -137,7 +143,11 @@ extern bool CheckRelationInRedistribution(Oid rel_oid);
 
 extern CatalogRelationBuildParam GetCatalogParam(Oid id);
 
-extern void InsertIntoSyscache();
+extern HeapTuple ScanPgRelation(Oid targetRelId, bool indexOK, bool force_non_historic);
 
+/*
+ * this function is used for timeseries database, do not call this function directly!!!
+ */
+extern Relation tuple_get_rel(HeapTuple pg_class_tuple, LOCKMODE lockmode, TupleDesc tuple_desc, HeapTuple pg_indextuple = NULL);
 extern THR_LOCAL bool needNewLocalCacheFile;
 #endif /* RELCACHE_H */

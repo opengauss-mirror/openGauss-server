@@ -1,0 +1,485 @@
+--test orc foreign data wrapper.
+--
+-- Settings to make the result deterministic
+SET datestyle = "ISO, YMD";
+set enable_hdfs_predicate_pushdown=false;
+--Unit 1. test plan without distributed clause
+DROP FOREIGN TABLE IF EXISTS lineitem;
+NOTICE:  foreign table "lineitem" does not exist, skipping
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS nation;
+NOTICE:  foreign table "nation" does not exist, skipping
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/nation_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS region;
+NOTICE:  foreign table "region" does not exist, skipping
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/region_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS part;
+NOTICE:  foreign table "part" does not exist, skipping
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT,
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/part_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS supplier;
+NOTICE:  foreign table "supplier" does not exist, skipping
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS partsupp;
+NOTICE:  foreign table "partsupp" does not exist, skipping
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/000000_0') distribute by roundrobin;
+analyze foreign tables;
+explain (verbose, costs off) SELECT L_SHIPDATE FROM lineitem WHERE L_orderkey BETWEEN 509050 AND 509070;
+                                                                      QUERY PLAN                                                                       
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: l_shipdate
+   ->  Vector Streaming (type: GATHER)
+         Output: l_shipdate
+         ->  Vector Foreign Scan on public.lineitem
+               Output: l_shipdate
+               Filter: ((lineitem.l_orderkey >= 509050) AND (lineitem.l_orderkey <= 509070))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0
+(9 rows)
+
+explain (verbose, costs off) SELECT count(L_SHIPDATE) FROM lineitem WHERE L_orderkey BETWEEN 509050 AND 509070;
+                                                                            QUERY PLAN                                                                             
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count((count(l_shipdate))))
+   ->  Vector Aggregate
+         Output: count((count(l_shipdate)))
+         ->  Vector Streaming (type: GATHER)
+               Output: (count(l_shipdate))
+               ->  Vector Aggregate
+                     Output: count(l_shipdate)
+                     ->  Vector Foreign Scan on public.lineitem
+                           Output: l_shipdate
+                           Filter: ((lineitem.l_orderkey >= 509050) AND (lineitem.l_orderkey <= 509070))
+                           Server Type: hdfs
+                           Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0
+(13 rows)
+
+explain (verbose, costs off) select n_name, r_name from nation join region on n_regionkey=r_regionkey;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: nation.n_name, region.r_name
+   ->  Vector Streaming (type: GATHER)
+         Output: nation.n_name, region.r_name
+         ->  Vector Sonic Hash Join
+               Output: nation.n_name, region.r_name
+               Hash Cond: (nation.n_regionkey = region.r_regionkey)
+               Generate Bloom Filter On Expr: region.r_regionkey
+               Generate Bloom Filter On Index: 0
+               ->  Vector Foreign Scan on public.nation
+                     Output: nation.n_name, nation.n_regionkey
+                     Server Type: hdfs
+                     Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/000000_0
+                     Filter By Bloom Filter On Expr: nation.n_regionkey
+                     Filter By Bloom Filter On Index: 0
+               ->  Vector Streaming(type: BROADCAST)
+                     Output: region.r_name, region.r_regionkey
+                     ->  Vector Foreign Scan on public.region
+                           Output: region.r_name, region.r_regionkey
+                           Server Type: hdfs
+                           Orc File: /user/hive/warehouse/mppdb.db/region_orc11_64stripe/000000_0
+(21 rows)
+
+explain (verbose, costs off)
+select
+  s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+from
+  nation n join region r
+on
+  n.n_regionkey = r.r_regionkey and n.n_name = 'FRANCE'
+join
+  supplier s
+on
+  s.s_nationkey = n.n_nationkey
+join
+  partsupp ps
+on
+  s.s_suppkey = ps.ps_suppkey
+join
+  part p
+on
+  p.p_partkey = ps.ps_partkey and p.p_size = 15 and p.p_type like '%BRASS';
+                                                                        QUERY PLAN                                                                        
+----------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+   ->  Vector Streaming (type: GATHER)
+         Output: s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+         ->  Vector Nest Loop
+               Output: s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+               Join Filter: (n.n_regionkey = r.r_regionkey)
+               ->  Vector Sonic Hash Join
+                     Output: n.n_name, n.n_regionkey, s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, ps.ps_supplycost, p.p_partkey, p.p_mfgr
+                     Hash Cond: (ps.ps_suppkey = s.s_suppkey)
+                     Generate Bloom Filter On Expr: s.s_suppkey
+                     Generate Bloom Filter On Index: 2
+                     ->  Vector Sonic Hash Join
+                           Output: ps.ps_supplycost, ps.ps_suppkey, p.p_partkey, p.p_mfgr
+                           Hash Cond: (ps.ps_partkey = p.p_partkey)
+                           Generate Bloom Filter On Expr: p.p_partkey
+                           Generate Bloom Filter On Index: 0
+                           ->  Vector Foreign Scan on public.partsupp ps
+                                 Output: ps.ps_supplycost, ps.ps_suppkey, ps.ps_partkey
+                                 Server Type: hdfs
+                                 Orc File: /user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/000000_0
+                                 Filter By Bloom Filter On Expr: ps.ps_partkey, ps.ps_suppkey
+                                 Filter By Bloom Filter On Index: 0, 2
+                           ->  Vector Streaming(type: BROADCAST)
+                                 Output: p.p_partkey, p.p_mfgr
+                                 ->  Vector Foreign Scan on public.part p
+                                       Output: p.p_partkey, p.p_mfgr
+                                       Filter: ((p.p_type ~~ '%BRASS'::text) AND (p.p_size = 15))
+                                       Server Type: hdfs
+                                       Orc File: /user/hive/warehouse/mppdb.db/part_orc11_64stripe/000000_0
+                     ->  Vector Streaming(type: BROADCAST)
+                           Output: n.n_name, n.n_regionkey, s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, s.s_suppkey
+                           ->  Vector Sonic Hash Join
+                                 Output: n.n_name, n.n_regionkey, s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, s.s_suppkey
+                                 Hash Cond: (s.s_nationkey = n.n_nationkey)
+                                 Generate Bloom Filter On Expr: n.n_nationkey
+                                 Generate Bloom Filter On Index: 1
+                                 ->  Vector Foreign Scan on public.supplier s
+                                       Output: s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, s.s_nationkey, s.s_suppkey
+                                       Server Type: hdfs
+                                       Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/000000_0
+                                       Filter By Bloom Filter On Expr: s.s_nationkey
+                                       Filter By Bloom Filter On Index: 1
+                                 ->  Vector Streaming(type: BROADCAST)
+                                       Output: n.n_name, n.n_regionkey, n.n_nationkey
+                                       ->  Vector Foreign Scan on public.nation n
+                                             Output: n.n_name, n.n_regionkey, n.n_nationkey
+                                             Filter: (n.n_name = 'FRANCE'::text)
+                                             Server Type: hdfs
+                                             Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/000000_0
+               ->  Vector Materialize
+                     Output: r.r_regionkey
+                     ->  Vector Streaming(type: BROADCAST)
+                           Output: r.r_regionkey
+                           ->  Vector Foreign Scan on public.region r
+                                 Output: r.r_regionkey
+                                 Server Type: hdfs
+                                 Orc File: /user/hive/warehouse/mppdb.db/region_orc11_64stripe/000000_0
+(58 rows)
+
+--Test Unit 2: distributed foreign table
+DROP FOREIGN TABLE IF EXISTS lineitem;
+Create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS customer;
+NOTICE:  foreign table "customer" does not exist, skipping
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/customer_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS orders;
+NOTICE:  foreign table "orders" does not exist, skipping
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/orders_orc11_64stripe')
+distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS part;
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT, 
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/part_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS supplier;
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS partsupp;
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS nation;
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/nation_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS region;
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/region_orc11_64stripe/000000_0') distribute by roundrobin;
+analyze foreign tables;
+-- there are bugs for the following three queries. cause EOF error from datanode
+explain (verbose, costs off) SELECT L_shipdate FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: l_shipdate
+   ->  Vector Streaming (type: GATHER)
+         Output: l_shipdate
+         ->  Vector Foreign Scan on public.lineitem
+               Output: l_shipdate
+               Filter: ((lineitem.l_orderkey >= 2125190) AND (lineitem.l_orderkey <= 2125200))
+               Server Type: hdfs
+               Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe
+(9 rows)
+
+explain (verbose, costs off) SELECT count(L_shipdate) FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count((count(l_shipdate))))
+   ->  Vector Aggregate
+         Output: count((count(l_shipdate)))
+         ->  Vector Streaming (type: GATHER)
+               Output: (count(l_shipdate))
+               ->  Vector Aggregate
+                     Output: count(l_shipdate)
+                     ->  Vector Foreign Scan on public.lineitem
+                           Output: l_shipdate
+                           Filter: ((lineitem.l_orderkey >= 2125190) AND (lineitem.l_orderkey <= 2125200))
+                           Server Type: hdfs
+                           Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe
+(13 rows)
+
+set enable_broadcast=off;
+-- TPCH - Q1
+explain (verbose, costs off) SELECT 
+  L_RETURNFLAG, L_LINESTATUS, SUM(L_QUANTITY), SUM(L_EXTENDEDPRICE), SUM(L_EXTENDEDPRICE*(1-L_DISCOUNT)), SUM(L_EXTENDEDPRICE*(1-L_DISCOUNT)*(1+L_TAX)), AVG(L_QUANTITY), AVG(L_EXTENDEDPRICE), AVG(L_DISCOUNT), COUNT(1) 
+FROM 
+  lineitem 
+WHERE 
+  L_SHIPDATE<='1998-09-02' 
+GROUP BY L_RETURNFLAG, L_LINESTATUS 
+ORDER BY L_RETURNFLAG, L_LINESTATUS;
+                                                                                                                                                                                                            QUERY PLAN                                                                                                                                                                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: l_returnflag, l_linestatus, (sum((sum(l_quantity)))), (sum((sum(l_extendedprice)))), (sum((sum((l_extendedprice * (1::double precision - l_discount)))))), (sum((sum(((l_extendedprice * (1::double precision - l_discount)) * (1::double precision + l_tax)))))), (pg_catalog.avg((avg(l_quantity)))), (pg_catalog.avg((avg(l_extendedprice)))), (pg_catalog.avg((avg(l_discount)))), (count((count(1))))
+   ->  Vector Streaming (type: GATHER)
+         Output: l_returnflag, l_linestatus, (sum((sum(l_quantity)))), (sum((sum(l_extendedprice)))), (sum((sum((l_extendedprice * (1::double precision - l_discount)))))), (sum((sum(((l_extendedprice * (1::double precision - l_discount)) * (1::double precision + l_tax)))))), (pg_catalog.avg((avg(l_quantity)))), (pg_catalog.avg((avg(l_extendedprice)))), (pg_catalog.avg((avg(l_discount)))), (count((count(1))))
+         Merge Sort Key: lineitem.l_returnflag, lineitem.l_linestatus
+         ->  Vector Sort
+               Output: l_returnflag, l_linestatus, (sum((sum(l_quantity)))), (sum((sum(l_extendedprice)))), (sum((sum((l_extendedprice * (1::double precision - l_discount)))))), (sum((sum(((l_extendedprice * (1::double precision - l_discount)) * (1::double precision + l_tax)))))), (pg_catalog.avg((avg(l_quantity)))), (pg_catalog.avg((avg(l_extendedprice)))), (pg_catalog.avg((avg(l_discount)))), (count((count(1))))
+               Sort Key: lineitem.l_returnflag, lineitem.l_linestatus
+               ->  Vector Hash Aggregate
+                     Output: l_returnflag, l_linestatus, sum((sum(l_quantity))), sum((sum(l_extendedprice))), sum((sum((l_extendedprice * (1::double precision - l_discount))))), sum((sum(((l_extendedprice * (1::double precision - l_discount)) * (1::double precision + l_tax))))), pg_catalog.avg((avg(l_quantity))), pg_catalog.avg((avg(l_extendedprice))), pg_catalog.avg((avg(l_discount))), count((count(1)))
+                     Group By Key: lineitem.l_returnflag, lineitem.l_linestatus
+                     Skew Agg Optimized by Statistic
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Output: l_returnflag, l_linestatus, (sum(l_quantity)), (sum(l_extendedprice)), (sum((l_extendedprice * (1::double precision - l_discount)))), (sum(((l_extendedprice * (1::double precision - l_discount)) * (1::double precision + l_tax)))), (avg(l_quantity)), (avg(l_extendedprice)), (avg(l_discount)), (count(1))
+                           Distribute Key: l_returnflag, l_linestatus
+                           ->  Vector Hash Aggregate
+                                 Output: l_returnflag, l_linestatus, sum(l_quantity), sum(l_extendedprice), sum((l_extendedprice * (1::double precision - l_discount))), sum(((l_extendedprice * (1::double precision - l_discount)) * (1::double precision + l_tax))), avg(l_quantity), avg(l_extendedprice), avg(l_discount), count(1)
+                                 Group By Key: lineitem.l_returnflag, lineitem.l_linestatus
+                                 ->  Vector Foreign Scan on public.lineitem
+                                       Output: l_returnflag, l_linestatus, l_quantity, l_extendedprice, l_discount, l_tax
+                                       Filter: (lineitem.l_shipdate <= '1998-09-02'::text)
+                                       Server Type: hdfs
+                                       Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe
+(23 rows)
+
+--TPCH - Q2
+explain (verbose, costs off) select 
+  s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment 
+from 
+  nation n join region r 
+on 
+  n.n_regionkey = r.r_regionkey and n.n_name = 'FRANCE' 
+join 
+  supplier s 
+on 
+  s.s_nationkey = n.n_nationkey 
+join 
+  partsupp ps 
+on  
+  s.s_suppkey = ps.ps_suppkey 
+join 
+  part p 
+on 
+  p.p_partkey = ps.ps_partkey and p.p_size = 15 and p.p_type like '%BRASS';
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+   ->  Vector Streaming (type: GATHER)
+         Output: s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+         ->  Vector Sonic Hash Join
+               Output: s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+               Hash Cond: (ps.ps_suppkey = s.s_suppkey)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Output: ps.ps_supplycost, ps.ps_suppkey, p.p_partkey, p.p_mfgr
+                     Distribute Key: ps.ps_suppkey
+                     ->  Vector Sonic Hash Join
+                           Output: ps.ps_supplycost, ps.ps_suppkey, p.p_partkey, p.p_mfgr
+                           Hash Cond: (ps.ps_partkey = p.p_partkey)
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: ps.ps_supplycost, ps.ps_suppkey, ps.ps_partkey
+                                 Distribute Key: ps.ps_partkey
+                                 ->  Vector Foreign Scan on public.partsupp ps
+                                       Output: ps.ps_supplycost, ps.ps_suppkey, ps.ps_partkey
+                                       Server Type: hdfs
+                                       Orc File: /user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/000000_0
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: p.p_partkey, p.p_mfgr
+                                 Distribute Key: p.p_partkey
+                                 ->  Vector Foreign Scan on public.part p
+                                       Output: p.p_partkey, p.p_mfgr
+                                       Filter: ((p.p_type ~~ '%BRASS'::text) AND (p.p_size = 15))
+                                       Server Type: hdfs
+                                       Orc File: /user/hive/warehouse/mppdb.db/part_orc11_64stripe/000000_0
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Output: n.n_name, s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, s.s_suppkey
+                     Distribute Key: s.s_suppkey
+                     ->  Vector Sonic Hash Join
+                           Output: n.n_name, s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, s.s_suppkey
+                           Hash Cond: (s.s_nationkey = n.n_nationkey)
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, s.s_nationkey, s.s_suppkey
+                                 Distribute Key: s.s_nationkey
+                                 ->  Vector Foreign Scan on public.supplier s
+                                       Output: s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, s.s_nationkey, s.s_suppkey
+                                       Server Type: hdfs
+                                       Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/000000_0
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: n.n_name, n.n_nationkey
+                                 Distribute Key: n.n_nationkey
+                                 ->  Vector Nest Loop
+                                       Output: n.n_name, n.n_nationkey
+                                       Join Filter: (n.n_regionkey = r.r_regionkey)
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+                                             Output: n.n_name, n.n_regionkey, n.n_nationkey
+                                             Distribute Key: n.n_regionkey
+                                             ->  Vector Foreign Scan on public.nation n
+                                                   Output: n.n_name, n.n_regionkey, n.n_nationkey
+                                                   Filter: (n.n_name = 'FRANCE'::text)
+                                                   Server Type: hdfs
+                                                   Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/000000_0
+                                       ->  Vector Materialize
+                                             Output: r.r_regionkey
+                                             ->  Vector Streaming(type: REDISTRIBUTE)
+                                                   Output: r.r_regionkey
+                                                   Distribute Key: r.r_regionkey
+                                                   ->  Vector Foreign Scan on public.region r
+                                                         Output: r.r_regionkey
+                                                         Server Type: hdfs
+                                                         Orc File: /user/hive/warehouse/mppdb.db/region_orc11_64stripe/000000_0
+(64 rows)
+
+reset enable_broadcast;
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+DROP SERVER hdfs_server CASCADE;

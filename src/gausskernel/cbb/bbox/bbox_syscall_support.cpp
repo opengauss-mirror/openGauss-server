@@ -1,25 +1,14 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 2005-2008, Google Inc.
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * bbox_syscall_support.cpp
  *
  * IDENTIFICATION
  *    src/gausskernel/cbb/bbox/bbox_syscall_support.cpp
  *
- * -------------------------------------------------------------------------
+ *
  */
 #include "bbox_syscall_support.h"
 #include "../../src/include/securec.h"
@@ -159,9 +148,10 @@ int SYS_NAME(sysconf)(int name)
             if (sys_getrlimit(RLIMIT_NOFILE, &limit) >= 0) {
                 return limit.rlim_cur;
             } else {
+                /* Default maximum open files for per process */
                 return 8192;
             }
-        } break;
+        }
         default:
             errno = ENOSYS;
             return -1;
@@ -177,7 +167,7 @@ int SYS_NAME(sigemptyset)(struct kernel_sigset_t* set)
 
 int SYS_NAME(sigfillset)(struct kernel_sigset_t* set)
 {
-    errno_t rc = memset_s(set->sig, sizeof(set->sig), -1, sizeof(set->sig));
+    errno_t rc = memset_s(set->sig, sizeof(set->sig), 0xFF, sizeof(set->sig));
     securec_check_c(rc, "\0", "\0");
     return 0;
 }
@@ -240,7 +230,6 @@ long SYS_NAME(waitpid)(pid_t pid, int* status, int options)
 long SYS_NAME(signal)(int __signum, void (*handler)(int))
 {
     struct kernel_sigaction sa;
-    struct kernel_sigaction old;
 
     errno_t rc = memset_s(&sa, sizeof(sa), 0, sizeof(sa));
     securec_check_c(rc, "\0", "\0");
@@ -249,7 +238,7 @@ long SYS_NAME(signal)(int __signum, void (*handler)(int))
     sa.sa_flags |= SA_RESTORER | SA_RESTART;
     sa.handle.sa_handler_ = handler;
 
-    return SYS_NAME(rt_sigaction)(__signum, &sa, &old, (KERNEL_NSIG + 7) / 8);
+    return SYS_NAME(rt_sigaction)(__signum, &sa, NULL, (KERNEL_NSIG + 7) / 8);
 }
 
 #define CLONE_SYSCALL_X86_64 \

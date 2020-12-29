@@ -19,7 +19,7 @@
 #include "utils/fmgroids.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 void AlterSetting(Oid databaseid, Oid roleid, VariableSetStmt* setstmt)
 {
@@ -163,7 +163,7 @@ void AlterSetting(Oid databaseid, Oid roleid, VariableSetStmt* setstmt)
 void DropSetting(Oid databaseid, Oid roleid)
 {
     Relation relsetting = NULL;
-    HeapScanDesc scan = NULL;
+    TableScanDesc scan = NULL;
     ScanKeyData keys[2];
     HeapTuple tup = NULL;
     int numkeys = 0;

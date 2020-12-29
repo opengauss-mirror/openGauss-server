@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *
- * parse_func.cpp
+ * parse_func.c
  *		handle function calls in parser
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -8,7 +8,7 @@
  *
  *
  * IDENTIFICATION
- *	  src/common/backend/parser/parse_func.cpp
+ *	  src/backend/parser/parse_func.c
  *
  * -------------------------------------------------------------------------
  */
@@ -93,7 +93,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
      * against array overruns, etc.  Of course, this may not be a function,
      * but the test doesn't hurt.
      */
-    if (list_length(fargs) > FUNC_MAX_ARGS) {
+    if (list_length(fargs) > FUNC_MAX_ARGS)
         ereport(ERROR,
             (errcode(ERRCODE_TOO_MANY_ARGUMENTS),
                 errmsg_plural("cannot pass more than %d argument to a function",
@@ -101,7 +101,6 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
                     FUNC_MAX_ARGS,
                     FUNC_MAX_ARGS),
                 parser_errposition(pstate, location)));
-    }
 
     /*
      * Extract arg type info in preparation for function lookup.
@@ -145,21 +144,19 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
 
             /* Reject duplicate arg names */
             foreach (lc, argnames) {
-                if (strcmp(na->name, (char*)lfirst(lc)) == 0) {
+                if (strcmp(na->name, (char*)lfirst(lc)) == 0)
                     ereport(ERROR,
                         (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("argument name \"%s\" used more than once", na->name),
                             parser_errposition(pstate, na->location)));
-                }
             }
             argnames = lappend(argnames, na->name);
         } else {
-            if (argnames != NIL) {
+            if (argnames != NIL)
                 ereport(ERROR,
                     (errcode(ERRCODE_SYNTAX_ERROR),
                         errmsg("positional argument cannot follow named argument"),
                         parser_errposition(pstate, exprLocation(arg))));
-            }
         }
     }
 
@@ -180,9 +177,9 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
 
         if (argtype == RECORDOID || ISCOMPLEX(argtype)) {
             retval = ParseComplexProjection(pstate, strVal(linitial(funcname)), first_arg, location);
-            if (retval != NULL) {
+            if (retval != NULL)
                 return retval;
-            }
+
             /*
              * If ParseComplexProjection doesn't recognize it as a projection,
              * just press on.
@@ -240,36 +237,31 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
          * Normal function found; was there anything indicating it must be an
          * aggregate?
          */
-        if (agg_star) {
+        if (agg_star)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("%s(*) specified, but %s is not an aggregate function", name_string, name_string),
                     parser_errposition(pstate, location)));
-        }
-        if (agg_distinct) {
+        if (agg_distinct)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("DISTINCT specified, but %s is not an aggregate function", name_string),
                     parser_errposition(pstate, location)));
-        }
-        if (agg_within_group) {
+        if (agg_within_group)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("WITHIN GROUP specified, but %s is not an aggregate function", name_string),
                     parser_errposition(pstate, location)));
-        }
-        if (agg_order != NIL) {
+        if (agg_order != NIL)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("ORDER BY specified, but %s is not an aggregate function", name_string),
                     parser_errposition(pstate, location)));
-        }
-        if (over != NULL) {
+        if (over != NULL)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("OVER specified, but %s is not a window function nor an aggregate function", name_string),
                     parser_errposition(pstate, location)));
-        }
     } else if (fdresult == FUNCDETAIL_AGGREGATE) {
         /* It's an aggregate; fetch needed info from the pg_aggregate entry. */
         HeapTuple tup;
@@ -279,14 +271,12 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
         bool isnull = false;
 
         tup = SearchSysCache1(AGGFNOID, ObjectIdGetDatum(funcid));
-        if (!HeapTupleIsValid(tup)) { /* should not happen */
+        if (!HeapTupleIsValid(tup)) /* should not happen */
             elog(ERROR, "cache lookup failed for aggregate %u", funcid);
-        }
         /* 91269 version support orderedset agg  */
         aggkind = DatumGetChar(SysCacheGetAttr(AGGFNOID, tup, Anum_pg_aggregate_aggkind, &isnull));
-        if (!AGGKIND_IS_ORDERED_SET(aggkind)) {
+        if (!AGGKIND_IS_ORDERED_SET(aggkind))
             aggkind = 'n';
-        }
         isOrderedSet = AGGKIND_IS_ORDERED_SET(aggkind);
         catDirectArgs = DatumGetInt8(SysCacheGetAttr(AGGFNOID, tup, Anum_pg_aggregate_aggnumdirectargs, &isnull));
         ReleaseSysCache(tup);
@@ -295,30 +285,29 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
         if (isOrderedSet) {
             int numDirectArgs = 0;
 
-            if (!agg_within_group) {
+            if (!agg_within_group)
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("WITHIN GROUP is required for ordered-set aggregate %s", name_string),
                         parser_errposition(pstate, location)));
-            }
-            if (over != NULL) {
+            if (over != NULL)
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("OVER is not supported for ordered-set aggregate %s", name_string),
                         parser_errposition(pstate, location)));
-            }
-            if (agg_distinct) {
+
+            if (agg_distinct)
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("DISTINCT + WITHIN GROUP is not supported for ordered-set aggregate %s", name_string),
                         parser_errposition(pstate, location)));
-            }
-            if (func_variadic) {
+
+            if (func_variadic)
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("VARIADIC + WITHIN GROUP is not supported for ordered-set aggregate %s", name_string),
                         parser_errposition(pstate, location)));
-            }
+
             /*
              * func_get_detail might have selected an aggregate that doesn't
              * really match because it requires a different division of direct
@@ -329,12 +318,11 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
              */
             numDirectArgs = nargs - list_length(agg_order);
             Assert(numDirectArgs >= 0);
-            if (nvargs > 1) {
+            if (nvargs > 1)
                 pronargs -= nvargs - 1;
-            }
             /* If it isn't variadic or the agg was "... ORDER BY VARIADIC" */
             if (!OidIsValid(vatype) || catDirectArgs < pronargs) {
-                if (numDirectArgs != catDirectArgs) {
+                if (numDirectArgs != catDirectArgs)
                     ereport(ERROR,
                         (errcode(ERRCODE_UNDEFINED_FUNCTION),
                             errmsg("function %s does not exist",
@@ -344,10 +332,9 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
                                 catDirectArgs,
                                 numDirectArgs),
                             parser_errposition(pstate, location)));
-                }
             } else {
                 /* the agg was "..., VARIADIC ORDER BY VARIADIC" */
-                if (nvargs <= list_length(agg_order)) {
+                if (nvargs <= list_length(agg_order))
                     ereport(ERROR,
                         (errcode(ERRCODE_UNDEFINED_FUNCTION),
                             errmsg("function %s does not exist",
@@ -356,35 +343,31 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
                                 name_string,
                                 catDirectArgs),
                             parser_errposition(pstate, location)));
-                }
             }
         } else {
             /* Normal aggregate, so it can't have WITHIN GROUP */
-            if (agg_within_group) {
+            if (agg_within_group)
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("%s is not an ordered-set aggregate, so it cannot have WITHIN GROUP", name_string),
                         parser_errposition(pstate, location)));
-            }
         }
     } else if (fdresult == FUNCDETAIL_WINDOWFUNC) {
         /*
          * A true window function should be called with a window definition,
          * which is assigned by over().
          */
-        if (over == NULL) {
+        if (over == NULL)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("window function %s requires an OVER clause", name_string),
                     parser_errposition(pstate, location)));
-        }
         /* And, per spec, WITHIN GROUP isn't allowed */
-        if (agg_within_group) {
+        if (agg_within_group)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("window function %s cannot have WITHIN GROUP", name_string),
                     parser_errposition(pstate, location)));
-        }
     } else {
         /*
          * Oops.  Time to die.
@@ -392,13 +375,13 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
          * If we are dealing with the attribute notation rel.function, let the
          * caller handle failure.
          */
-        if (is_column) {
+        if (is_column)
             return NULL;
-        }
+
         /*
          * Else generate a detailed complaint for a function
          */
-        if (fdresult == FUNCDETAIL_MULTIPLE) {
+        if (fdresult == FUNCDETAIL_MULTIPLE)
             ereport(ERROR,
                 (errcode(ERRCODE_AMBIGUOUS_FUNCTION),
                     errmsg("function %s is not unique",
@@ -406,7 +389,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
                     errhint("Could not choose a best candidate function. "
                             "You might need to add explicit type casts."),
                     parser_errposition(pstate, location)));
-        } else if (list_length(agg_order) > 1 && !agg_within_group) {
+        else if (list_length(agg_order) > 1 && !agg_within_group) {
             /* It's agg(x, ORDER BY y,z) ... perhaps misplaced ORDER BY */
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_FUNCTION),
@@ -438,7 +421,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
         Node* expr = (Node*)lfirst(l);
 
         /* probably shouldn't happen ... */
-        if (nargsplusdefs >= FUNC_MAX_ARGS) {
+        if (nargsplusdefs >= FUNC_MAX_ARGS)
             ereport(ERROR,
                 (errcode(ERRCODE_TOO_MANY_ARGUMENTS),
                     errmsg_plural("cannot pass more than %d argument to a function",
@@ -446,7 +429,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
                         FUNC_MAX_ARGS,
                         FUNC_MAX_ARGS),
                     parser_errposition(pstate, location)));
-        }
+
         actual_arg_types[nargsplusdefs++] = exprType(expr);
     }
 
@@ -477,12 +460,11 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
         /* assume all the variadic arguments were coerced to the same type */
         newa->element_typeid = exprType((Node*)linitial(vargs));
         newa->array_typeid = get_array_type(newa->element_typeid);
-        if (!OidIsValid(newa->array_typeid)) {
+        if (!OidIsValid(newa->array_typeid))
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_OBJECT),
                     errmsg("could not find array type for data type %s", format_type_be(newa->element_typeid)),
                     parser_errposition(pstate, exprLocation((Node*)vargs))));
-        }
         /* array_collid will be set by parse_collate.c */
         newa->multidims = false;
         newa->location = exprLocation((Node*)vargs);
@@ -506,8 +488,8 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
         funcexpr->refSynOid = refSynOid;
 
         retval = (Node*)funcexpr;
-        /* Return type of to_date function  will be changed from timestamp to date type in DB_CMPT_C */
-        if (DB_IS_CMPT(DB_CMPT_B | DB_CMPT_C) &&
+        /*Return type of to_date function  will be changed from timestamp to date type in C_FORMAT*/
+        if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT &&
             (funcid == TODATEFUNCOID || funcid == TODATEDEFAULTFUNCOID)) {
             FuncExpr* timestamp_date_fun = makeNode(FuncExpr);
 
@@ -537,30 +519,30 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
          * Reject attempt to call a parameterless aggregate without (*)
          * syntax.	This is mere pedantry but some folks insisted ...
          */
-        if (fargs == NIL && !agg_star && !agg_within_group) {
+        if (fargs == NIL && !agg_star && !agg_within_group)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("%s(*) must be used to call a parameterless aggregate function", NameListToString(funcname)),
                     parser_errposition(pstate, location)));
-        }
-        if (retset) {
+
+        if (retset)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                     errmsg("aggregates cannot return sets"),
                     parser_errposition(pstate, location)));
-        }
+
         /*
          * Currently it's not possible to define an aggregate with named
          * arguments, so this case should be impossible.  Check anyway because
          * the planner and executor wouldn't cope with NamedArgExprs in an
          * Aggref node.
          */
-        if (argnames != NIL) {
+        if (argnames != NIL)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("aggregates cannot use named arguments"),
                     parser_errposition(pstate, location)));
-        }
+
         /* parse_agg.c does additional aggregate-specific processing */
         transformAggregateCall(pstate, aggref, fargs, agg_order, agg_distinct);
 
@@ -572,12 +554,12 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
         /*
          * True window functions must be called with a window definition.
          */
-        if (over == NULL) {
+        if (over == NULL)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("window function call requires an OVER clause"),
                     parser_errposition(pstate, location)));
-        }
+
         Assert(!agg_within_group);
 
         wfunc->winfnoid = funcid;
@@ -592,49 +574,49 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
         /*
          * agg_star is allowed for aggregate functions but distinct isn't
          */
-        if (agg_distinct) {
+        if (agg_distinct)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("DISTINCT is not implemented for window functions"),
                     parser_errposition(pstate, location)));
-        }
+
         /*
          * Reject attempt to call a parameterless aggregate without (*)
          * syntax.	This is mere pedantry but some folks insisted ...
          */
-        if (wfunc->winagg && fargs == NIL && !agg_star) {
+        if (wfunc->winagg && fargs == NIL && !agg_star)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("%s(*) must be used to call a parameterless aggregate function", NameListToString(funcname)),
                     parser_errposition(pstate, location)));
-        }
+
         /*
          * ordered aggs not allowed in windows yet, execpt listagg
          */
-        if (pg_strcasecmp(NameListToString(funcname), "listagg") != 0 && agg_order != NIL) {
+        if (pg_strcasecmp(NameListToString(funcname), "listagg") != 0 && agg_order != NIL)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("aggregate ORDER BY is not implemented for window functions"),
                     parser_errposition(pstate, location)));
-        }
-        if (retset) {
+
+        if (retset)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                     errmsg("window functions cannot return sets"),
                     parser_errposition(pstate, location)));
-        }
+
         /*
          * We might want to support this later, but for now reject it because
          * the planner and executor wouldn't cope with NamedArgExprs in a
          * WindowFunc node.
          */
-        if (argnames != NIL) {
+        if (argnames != NIL)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("window functions cannot use named arguments"),
                     parser_errposition(pstate, location)));
-        }
-        /* For listagg, multiple different order info is not allowed. */
+
+        /* For listagg, multiple different order info is not allowed.*/
         ListCell* lc = NULL;
         bool isInvalidOrder = false;
 
@@ -646,16 +628,14 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
             }
         }
 
-        if (isInvalidOrder) {
+        if (isInvalidOrder)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("window functions cannot allow multiple different order info"),
                     parser_errposition(pstate, location)));
-        }
 
-        if (over->orderClause == NIL) {
+        if (over->orderClause == NIL)
             over->orderClause = agg_order;
-        }
 
         /* parse_agg.c does additional window-func-specific processing */
         transformWindowFuncCall(pstate, wfunc, over);
@@ -698,7 +678,7 @@ int func_match_argtypes(
     }
 
     return ncandidates;
-}
+} /* func_match_argtypes() */
 
 /* get category priority
  *
@@ -716,16 +696,16 @@ static int GetCategoryPriority(TYPCATEGORY categoryoid)
 
     if (u_sess->attr.attr_sql.convert_string_to_digit) {
         switch (categoryoid) {
-            case ('N'): /* Numeric */
+            case ('N'): /*Numeric*/
                 result = 4;
                 break;
-            case ('T'): /* Timespan */
+            case ('T'): /*Timespan*/
                 result = 3;
                 break;
-            case ('D'): /* Datetime */
+            case ('D'): /*Datetime*/
                 result = 2;
                 break;
-            case ('S'): /* String */
+            case ('S'): /*String*/
                 result = 1;
                 break;
             default:
@@ -734,16 +714,16 @@ static int GetCategoryPriority(TYPCATEGORY categoryoid)
         }
     } else {
         switch (categoryoid) {
-            case ('D'): /* Datetime */
+            case ('D'): /*Datetime*/
                 result = 1;
                 break;
-            case ('T'): /* Timespan */
+            case ('T'): /*Timespan*/
                 result = 2;
                 break;
-            case ('N'): /* Numeric */
+            case ('N'): /*Numeric*/
                 result = 3;
                 break;
-            case ('S'): /* String */
+            case ('S'): /*String*/
                 result = 4;
                 break;
             default:
@@ -1021,17 +1001,14 @@ static void keep_candidate(int nmatch, int& nbestMatch, FuncCandidateList curren
  */
 FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandidateList candidates)
 {
-    FuncCandidateList current_candidate;
-    FuncCandidateList first_candidate;
-    FuncCandidateList last_candidate;
+    FuncCandidateList current_candidate, first_candidate, last_candidate;
     Oid* current_typeids = NULL;
     Oid current_type;
     int i;
     int ncandidates;
     int nbestMatch, nmatch, nunknowns;
     Oid input_base_typeids[FUNC_MAX_ARGS];
-    TYPCATEGORY slot_category[FUNC_MAX_ARGS];
-    TYPCATEGORY current_category = TYPCATEGORY_INVALID;
+    TYPCATEGORY slot_category[FUNC_MAX_ARGS], current_category = TYPCATEGORY_INVALID;
     bool current_is_preferred = false;
     bool slot_has_preferred_type[FUNC_MAX_ARGS];
     bool resolved_unknowns = false;
@@ -1039,14 +1016,14 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
     bool different_category = false;
 
     /* protect local fixed-size arrays */
-    if (nargs > FUNC_MAX_ARGS) {
+    if (nargs > FUNC_MAX_ARGS)
         ereport(ERROR,
             (errcode(ERRCODE_TOO_MANY_ARGUMENTS),
                 errmsg_plural("cannot pass more than %d argument to a function",
                     "cannot pass more than %d arguments to a function",
                     FUNC_MAX_ARGS,
                     FUNC_MAX_ARGS)));
-    }
+
     /*
      * If any input types are domains, reduce them to their base types. This
      * ensures that we will consider functions on the base type to be "exact
@@ -1062,9 +1039,9 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
      */
     nunknowns = 0;
     for (i = 0; i < nargs; i++) {
-        if (input_typeids[i] != UNKNOWNOID) {
+        if (input_typeids[i] != UNKNOWNOID)
             input_base_typeids[i] = getBaseType(input_typeids[i]);
-        } else {
+        else {
             /* no need to call getBaseType on UNKNOWNOID */
             input_base_typeids[i] = UNKNOWNOID;
             nunknowns++;
@@ -1075,20 +1052,20 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
      * Run through all candidates and keep those with the most matches on
      * exact types. Keep all candidates if none match.
      */
-    for (i = 0; i < nargs; i++) { /* avoid multiple lookups */
+    for (i = 0; i < nargs; i++) /* avoid multiple lookups */
+    {
         slot_category[i] = TypeCategory(input_base_typeids[i]);
         /*
-         * For td, we should choose numeric + numeric for varchar + int,
+         * For C, we should choose numeric + numeric for varchar + int,
          * so we should also admit highest type conversion for operations
          * between different type categories
          */
-        if (DB_IS_CMPT(DB_CMPT_C) && !different_category &&
+        if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && !different_category &&
             slot_category[i] != TYPCATEGORY_UNKNOWN) {
-            if (current_category == TYPCATEGORY_INVALID) {
+            if (current_category == TYPCATEGORY_INVALID)
                 current_category = slot_category[i];
-            } else if (slot_category[i] != current_category) {
+            else if (slot_category[i] != current_category)
                 different_category = true;
-            }
         }
     }
 
@@ -1096,25 +1073,24 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
     nbestMatch = 0;
     last_candidate = NULL;
     for (current_candidate = candidates; current_candidate != NULL; current_candidate = current_candidate->next) {
+
         current_typeids = current_candidate->args;
         nmatch = 0;
         for (i = 0; i < nargs; i++) {
             if (input_base_typeids[i] != UNKNOWNOID &&
                 (current_typeids[i] == input_base_typeids[i] ||
-                    (different_category && current_typeids[i] == get_highest_type(slot_category[i])))) {
-                    nmatch++;
-            }
+                    (different_category && current_typeids[i] == get_highest_type(slot_category[i]))))
+                nmatch++;
         }
+
         keep_candidate(nmatch, nbestMatch, current_candidate, last_candidate, candidates, ncandidates);
     }
 
-    if (last_candidate) { /* terminate rebuilt list */
+    if (last_candidate) /* terminate rebuilt list */
         last_candidate->next = NULL;
-    }
 
-    if (ncandidates == 1) {
+    if (ncandidates == 1)
         return candidates;
-    }
 
     /*
      * Still too many candidates? Now look for candidates which have either
@@ -1133,23 +1109,19 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
             if (input_base_typeids[i] != UNKNOWNOID) {
                 if (current_typeids[i] == input_base_typeids[i] ||
                     IsPreferredType(slot_category[i], current_typeids[i]) ||
-                    (different_category && current_typeids[i] == get_highest_type(slot_category[i]))) {
+                    (different_category && current_typeids[i] == get_highest_type(slot_category[i])))
                     nmatch++;
-                }
             }
         }
 
         keep_candidate(nmatch, nbestMatch, current_candidate, last_candidate, candidates, ncandidates);
     }
 
-    if (last_candidate) { /* terminate rebuilt list */
+    if (last_candidate) /* terminate rebuilt list */
         last_candidate->next = NULL;
-    }
 
-    if (ncandidates == 1) {
+    if (ncandidates == 1)
         return candidates;
-    }
-
 
     /*
      * Still too many candidates?  Try assigning types for the unknown inputs.
@@ -1162,35 +1134,35 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
     // 1) Try to use the priority,for example , in numeric type family,we have the priority
     // from low to high like int2->int4->int8->numeric->float4->float8
     // 2) Still too many candidates,try to use category priority
-    for (i = 0; i < nargs; i++) {
+    for (i = 0; i < nargs; i++)
         type_priority[i] = GetPriority(input_base_typeids[i]); /* get priority in type family */
-    }
 
     ncandidates = 0;
     nbestMatch = 0;
     last_candidate = NULL;
     for (current_candidate = candidates; current_candidate != NULL; current_candidate = current_candidate->next) {
+
         current_typeids = current_candidate->args;
         nmatch = 0;
         for (i = 0; i < nargs; i++) {
+
             if (input_base_typeids[i] != UNKNOWNOID) {
+
                 if (current_typeids[i] == input_base_typeids[i] ||
                     (slot_category[i] == TypeCategory(current_typeids[i]) &&
-                        GetPriority(current_typeids[i]) > type_priority[i])) {
+                        GetPriority(current_typeids[i]) > type_priority[i]))
                     nmatch++;
-                }
             }
         }
+
         keep_candidate(nmatch, nbestMatch, current_candidate, last_candidate, candidates, ncandidates);
     }
 
-    if (last_candidate) { /* terminate rebuilt list */
+    if (last_candidate) /* terminate rebuilt list */
         last_candidate->next = NULL;
-    }
 
-    if (ncandidates == 1) {
+    if (ncandidates == 1)
         return candidates;
-    }
 
     /*
      * The next step examines each unknown argument position to see if we can
@@ -1215,9 +1187,8 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
     for (i = 0; i < nargs; i++) {
         bool have_conflict = false;
 
-        if (input_base_typeids[i] != UNKNOWNOID) {
+        if (input_base_typeids[i] != UNKNOWNOID)
             continue;
-        }
         resolved_unknowns = true; /* assume we can do it */
         slot_category[i] = TYPCATEGORY_INVALID;
         slot_has_preferred_type[i] = false;
@@ -1263,9 +1234,8 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
             bool keepit = true;
             current_typeids = current_candidate->args;
             for (i = 0; i < nargs; i++) {
-                if (input_base_typeids[i] != UNKNOWNOID) {
+                if (input_base_typeids[i] != UNKNOWNOID)
                     continue;
-                }
                 current_type = current_typeids[i];
                 get_type_category_preferred(current_type, &current_category, &current_is_preferred);
                 if (current_category != slot_category[i]) {
@@ -1297,9 +1267,8 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
             last_candidate->next = NULL;
         }
 
-        if (ncandidates == 1) {
+        if (ncandidates == 1)
             return candidates;
-        }
     }
 
     /*
@@ -1316,12 +1285,11 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
         Oid known_type = UNKNOWNOID;
 
         for (i = 0; i < nargs; i++) {
-            if (input_base_typeids[i] == UNKNOWNOID) {
+            if (input_base_typeids[i] == UNKNOWNOID)
                 continue;
-            }
-            if (known_type == UNKNOWNOID) { /* first known arg? */
+            if (known_type == UNKNOWNOID) /* first known arg? */
                 known_type = input_base_typeids[i];
-            } else if (known_type != input_base_typeids[i]) {
+            else if (known_type != input_base_typeids[i]) {
                 /* oops, not all match */
                 known_type = UNKNOWNOID;
                 break;
@@ -1330,18 +1298,16 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
 
         if (known_type != UNKNOWNOID) {
             /* okay, just one known type, apply the heuristic */
-            for (i = 0; i < nargs; i++) {
+            for (i = 0; i < nargs; i++)
                 input_base_typeids[i] = known_type;
-            }
             ncandidates = 0;
             last_candidate = NULL;
             for (current_candidate = candidates; current_candidate != NULL;
                  current_candidate = current_candidate->next) {
                 current_typeids = current_candidate->args;
                 if (can_coerce_type(nargs, input_base_typeids, current_typeids, COERCION_IMPLICIT)) {
-                    if (++ncandidates > 1) {
+                    if (++ncandidates > 1)
                         break; /* not unique, give up */
-                    }
                     last_candidate = current_candidate;
                 }
             }
@@ -1368,7 +1334,7 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
             maxTyp[i] = UNKNOWNOID;
         }
 
-        /* Find out in type category which has the highest priority */
+        /* Find out in type category which has the highest priority*/
         for (current_candidate = candidates; current_candidate != NULL; current_candidate = current_candidate->next) {
             current_typeids = current_candidate->args;
             for (i = 0; i < nargs; i++) {
@@ -1382,7 +1348,7 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
             }
         }
 
-        /* If the input parameter's priority is higher than the biggest priority, the biggest priority shall prevail */
+        /* If the input parameter's priority is higher than the biggest priority, the biggest priority shall prevail*/
         for (i = 0; i < nargs; i++) {
             if ((GetCategoryPriority(slot_category[i]) > GetCategoryPriority(maxCatalog[i])) ||
                 (slot_category[i] == 'X')) {
@@ -1401,6 +1367,7 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
         }
 
         for (current_candidate = candidates; current_candidate != NULL; current_candidate = current_candidate->next) {
+
             current_typeids = current_candidate->args;
             nmatch = 0;
 
@@ -1426,7 +1393,7 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
         return candidates;
 
     return NULL; /* failed to select a best candidate */
-}
+} /* func_select_candidate() */
 
 /* func_get_detail()
  *
@@ -1479,9 +1446,8 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
     *retset = false;
     *nvargs = 0;
     *true_typeids = NULL;
-    if (argdefaults != NULL) {
+    if (argdefaults != NULL)
         *argdefaults = NIL;
-    }
 
     if (refSynOid != NULL) {
         *refSynOid = InvalidOid;
@@ -1513,9 +1479,8 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
      * can be only one)
      */
     for (best_candidate = raw_candidates; best_candidate != NULL; best_candidate = best_candidate->next) {
-        if (memcmp(argtypes, best_candidate->args, nargs * sizeof(Oid)) == 0) {
+        if (memcmp(argtypes, best_candidate->args, nargs * sizeof(Oid)) == 0)
             break;
-        }
     }
 
     if (best_candidate == NULL) {
@@ -1560,6 +1525,7 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
          */
         if (nargs == 1 && fargs != NIL && fargnames == NIL) {
             Oid targetType = FuncNameAsType(funcname);
+
             if (OidIsValid(targetType)) {
                 Oid sourceType = argtypes[0];
                 Node* arg1 = (Node*)linitial(fargs);
@@ -1579,11 +1545,10 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
                             break;
                         case COERCION_PATH_COERCEVIAIO:
                             if ((sourceType == RECORDOID || ISCOMPLEX(sourceType)) &&
-                                TypeCategory(targetType) == TYPCATEGORY_STRING) {
-                                    iscoercion = false;
-                            } else {
-                                    iscoercion = true;
-                            }
+                                TypeCategory(targetType) == TYPCATEGORY_STRING)
+                                iscoercion = false;
+                            else
+                                iscoercion = true;
                             break;
                         default:
                             iscoercion = false;
@@ -1609,11 +1574,12 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
         if (raw_candidates != NULL) {
             FuncCandidateList current_candidates;
             int ncandidates;
+
             ncandidates = func_match_argtypes(nargs, argtypes, raw_candidates, &current_candidates);
+
             /* one match only? then run with it... */
-            if (ncandidates == 1) {
+            if (ncandidates == 1)
                 best_candidate = current_candidates;
-             }
 
             /*
              * multiple candidates? then better decide or throw an error...
@@ -1624,9 +1590,8 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
                  * If we were able to choose a best candidate, we're done.
                  * Otherwise, ambiguous function call.
                  */
-                if (!best_candidate) {
+                if (!best_candidate)
                     return FUNCDETAIL_MULTIPLE;
-                }
             }
         }
     }
@@ -1674,19 +1639,17 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
             foreach (lc, fargs) {
                 NamedArgExpr* na = (NamedArgExpr*)lfirst(lc);
 
-                if (IsA(na, NamedArgExpr)) {
+                if (IsA(na, NamedArgExpr))
                     na->argnumber = best_candidate->argnumbers[i];
-                }
                 i++;
             }
         }
 
         ftup = SearchSysCache1(PROCOID, ObjectIdGetDatum(best_candidate->oid));
-        if (!HeapTupleIsValid(ftup)) { /* should not happen */
+        if (!HeapTupleIsValid(ftup)) /* should not happen */
             ereport(ERROR,
                 (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                     errmsg("cache lookup failed for function %u", best_candidate->oid)));
-        }
         pform = (Form_pg_proc)GETSTRUCT(ftup);
         *rettype = pform->prorettype;
         *retset = pform->proretset;
@@ -1694,19 +1657,18 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
         /* fetch default args if caller wants 'em */
         if (argdefaults != NULL && best_candidate->ndargs > 0) {
             /* shouldn't happen, FuncnameGetCandidates messed up */
-            if (best_candidate->ndargs > pform->pronargdefaults) {
+            if (best_candidate->ndargs > pform->pronargdefaults)
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_FUNCTION), errmodule(MOD_OPT), errmsg("not enough default arguments")));
-            }
+
             *argdefaults = GetDefaultVale(*funcid, best_candidate->argnumbers, best_candidate->ndargs);
         }
-        if (PROC_IS_AGG(pform->prokind)) {
+        if (pform->proisagg)
             result = FUNCDETAIL_AGGREGATE;
-        } else if (PROC_IS_WIN(pform->prokind)) {
+        else if (pform->proiswindow)
             result = FUNCDETAIL_WINDOWFUNC;
-        } else {
+        else
             result = FUNCDETAIL_NORMAL;
-        }
         ReleaseSysCache(ftup);
         return result;
     }
@@ -1785,11 +1747,11 @@ static Oid FuncNameAsType(List* funcname)
     if (typtup == NULL)
         return InvalidOid;
 
-    if (((Form_pg_type)GETSTRUCT(typtup))->typisdefined && !OidIsValid(typeTypeRelid(typtup))) {
+    if (((Form_pg_type)GETSTRUCT(typtup))->typisdefined && !OidIsValid(typeTypeRelid(typtup)))
         result = typeTypeId(typtup);
-    } else {
+    else
         result = InvalidOid;
-    }
+
     ReleaseSysCache(typtup);
     return result;
 }
@@ -1830,11 +1792,10 @@ static Node* ParseComplexProjection(ParseState* pstate, char* funcname, Node* fi
      * find what the Var refers to, and pass that to get_expr_result_type.
      * That task is handled by expandRecordVariable().
      */
-    if (IsA(first_arg, Var) && ((Var*)first_arg)->vartype == RECORDOID) {
+    if (IsA(first_arg, Var) && ((Var*)first_arg)->vartype == RECORDOID)
         tupdesc = expandRecordVariable(pstate, (Var*)first_arg, 0);
-    } else if (get_expr_result_type(first_arg, NULL, &tupdesc) != TYPEFUNC_COMPOSITE) {
+    else if (get_expr_result_type(first_arg, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
         return NULL; /* unresolvable RECORD type */
-    }
     AssertEreport(tupdesc, MOD_OPT, "");
 
     for (i = 0; i < tupdesc->natts; i++) {
@@ -1884,9 +1845,8 @@ const char* funcname_signature_string(const char* funcname, int nargs, List* arg
     lc = list_head(argnames);
 
     for (i = 0; i < nargs; i++) {
-        if (i) {
+        if (i)
             appendStringInfoString(&argbuf, ", ");
-        }
         if (i >= numposargs) {
             appendStringInfo(&argbuf, "%s := ", (char*)lfirst(lc));
             lc = lnext(lc);
@@ -1926,17 +1886,16 @@ Oid LookupFuncName(List* funcname, int nargs, const Oid* argtypes, bool noError)
     clist = FuncnameGetCandidates(funcname, nargs, NIL, false, false, false);
 
     while (clist) {
-        if (memcmp(argtypes, clist->args, nargs * sizeof(Oid)) == 0) {
+        if (memcmp(argtypes, clist->args, nargs * sizeof(Oid)) == 0)
             return clist->oid;
-        }
         clist = clist->next;
     }
 
-    if (!noError) {
+    if (!noError)
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_FUNCTION),
                 errmsg("function %s does not exist", func_signature_string(funcname, nargs, NIL, argtypes))));
-    }
+
     return InvalidOid;
 }
 
@@ -1950,10 +1909,9 @@ static Oid LookupTypeNameOid(const TypeName* typname)
     Type typtup;
 
     typtup = LookupTypeName(NULL, typname, NULL);
-    if (typtup == NULL) {
+    if (typtup == NULL)
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("type \"%s\" does not exist", TypeNameToString(typname))));
-    }
     result = typeTypeId(typtup);
     ReleaseSysCache(typtup);
     return result;
@@ -1972,14 +1930,14 @@ Oid LookupFuncNameTypeNames(List* funcname, List* argtypes, bool noError)
     ListCell* args_item = NULL;
 
     argcount = list_length(argtypes);
-    if (argcount > FUNC_MAX_ARGS) {
+    if (argcount > FUNC_MAX_ARGS)
         ereport(ERROR,
             (errcode(ERRCODE_TOO_MANY_ARGUMENTS),
                 errmsg_plural("functions cannot have more than %d argument",
                     "functions cannot have more than %d arguments",
                     FUNC_MAX_ARGS,
                     FUNC_MAX_ARGS)));
-    }
+
     args_item = list_head(argtypes);
     for (i = 0; i < argcount; i++) {
         TypeName* t = (TypeName*)lfirst(args_item);
@@ -1995,23 +1953,22 @@ Oid LookupFuncNameTypeNames(List* funcname, List* argtypes, bool noError)
 //
 // This function is like LookupFuncNameTypeNames, used in
 // drop function, when no argument specified, compatible
-// with a db
+// with A db
 Oid LookupFuncNameOptTypeNames(List* funcname, List* argtypes, bool noError)
 {
     FuncCandidateList cnddt_func_list = NULL;
 
-    if (argtypes != NIL) {
+    if (argtypes != NIL)
         return LookupFuncNameTypeNames(funcname, argtypes, noError);
-    }
 
-    /* If argument is not specified (compitable with a db) */
+    /* If argument is not specified (compitable with A db)*/
     cnddt_func_list = FuncnameGetCandidates(funcname, -1, NULL, false, false, false);
     if (cnddt_func_list == NULL) {
-        if (!noError) {
+        if (!noError)
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_FUNCTION),
                     errmsg("function %s does not exist", NameListToString(funcname))));
-        }
+
         return InvalidOid;
     }
 
@@ -2021,29 +1978,27 @@ Oid LookupFuncNameOptTypeNames(List* funcname, List* argtypes, bool noError)
      */
     if (cnddt_func_list->next) {
         while (cnddt_func_list) {
-            if (cnddt_func_list->nargs == 0) {
+            if (0 == cnddt_func_list->nargs)
                 break;
-            }
             cnddt_func_list = cnddt_func_list->next;
         }
 
-        if (cnddt_func_list == NULL) {
+        if (cnddt_func_list == NULL)
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_FUNCTION),
                     errmsg("function %s asks parameters", NameListToString(funcname))));
-        }
     }
 
     if (OidIsValid(cnddt_func_list->oid)) {
         return cnddt_func_list->oid;
     }
-    /* In concurrence, can appear invalid Oid. */
+    /* In concurrence, can appear invalid Oid.*/
     else {
-        if (!noError) {
+        if (!noError)
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_FUNCTION),
                     errmsg("function %s does not exist", NameListToString(funcname))));
-        }
+
         return InvalidOid;
     }
 }
@@ -2067,14 +2022,14 @@ Oid LookupAggNameTypeNames(List* aggname, List* argtypes, bool noError)
     Form_pg_proc pform;
 
     argcount = list_length(argtypes);
-    if (argcount > FUNC_MAX_ARGS) {
+    if (argcount > FUNC_MAX_ARGS)
         ereport(ERROR,
             (errcode(ERRCODE_TOO_MANY_ARGUMENTS),
                 errmsg_plural("functions cannot have more than %d argument",
                     "functions cannot have more than %d arguments",
                     FUNC_MAX_ARGS,
                     FUNC_MAX_ARGS)));
-    }
+
     i = 0;
     foreach (lc, argtypes) {
         TypeName* t = (TypeName*)lfirst(lc);
@@ -2084,29 +2039,27 @@ Oid LookupAggNameTypeNames(List* aggname, List* argtypes, bool noError)
     }
 
     oid = LookupFuncName(aggname, argcount, argoids, true);
+
     if (!OidIsValid(oid)) {
-        if (noError) {
+        if (noError)
             return InvalidOid;
-        }
-        if (argcount == 0) {
+        if (argcount == 0)
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_FUNCTION),
                     errmsg("aggregate %s(*) does not exist", NameListToString(aggname))));
-        } else {
+        else
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_FUNCTION),
                     errmsg("aggregate %s does not exist", func_signature_string(aggname, argcount, NIL, argoids))));
-        }
     }
 
     /* Make sure it's an aggregate */
     ftup = SearchSysCache1(PROCOID, ObjectIdGetDatum(oid));
-    if (!HeapTupleIsValid(ftup)) { /* should not happen */
+    if (!HeapTupleIsValid(ftup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", oid)));
-    }
 
     pform = (Form_pg_proc)GETSTRUCT(ftup);
-    if (!PROC_IS_AGG(pform->prokind)) {
+    if (!pform->proisagg) {
         ReleaseSysCache(ftup);
         if (noError)
             return InvalidOid;
@@ -2215,17 +2168,14 @@ static List* GetDefaultVale(Oid funcoid, const int* argnumbers, int ndargs)
         }
     }
 
-    if (argtypes != NULL) {
+    if (argtypes != NULL)
         pfree_ext(argtypes);
-    }
-    if (argmodes != NULL) {
+    if (argmodes != NULL)
         pfree_ext(argmodes);
-    }
     if (argnames != NULL) {
         for (counter1 = 0; counter1 < pronallargs; counter1++) {
-            if (argnames[counter1]) {
+            if (argnames[counter1])
                 pfree_ext(argnames[counter1]);
-            }
         }
         pfree_ext(argnames);
     }

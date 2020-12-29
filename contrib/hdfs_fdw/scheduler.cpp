@@ -3,7 +3,13 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
+#include "access/dfs/dfs_common.h"
 #include "access/dfs/dfs_query.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "access/dfs/carbondata_index_reader.h"
+#endif
+#include "access/dfs/dfs_stream.h"
+#include "access/dfs/dfs_stream_factory.h"
 #include "hdfs_fdw.h"
 #include "scheduler.h"
 #include "access/hash.h"
@@ -13,12 +19,13 @@
 #include "commands/defrem.h"
 #include "foreign/foreign.h"
 #include "nodes/nodes.h"
+#include "optimizer/cost.h"
 #include "optimizer/predtest.h"
 #include "pgxc/pgxcnode.h"
 #include "pgxc/pgxc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "utils/syscache.h"
 #include "dfs_adaptor.h"
 
@@ -52,7 +59,7 @@ typedef struct partition_string_context {
     Oid foreignTblOid;
 } partition_string_context;
 
-extern char* sctp_link_addr;
+extern char* tcp_link_addr;
 
 static void AssignReplicaNode(HTAB* htab, const Oid* dnOids, const uint32_t nodeNum, const List* fileList);
 static bool AssignRemoteNode(HTAB* htab, int nodeNum, Oid* dnOids, SplitInfo* currentFile, bool isAnalyze);
@@ -62,6 +69,10 @@ static int getAnalyzeFilesNum(int dataNodeNum, int totalFilesNum);
 static bool isNodeLocalToFile(Form_pgxc_node nodeForm, const char* blLocation);
 static List* GetAllFiles(dfs::DFSConnector* conn, Oid foreignTableId, ServerTypeOption srvType, List* columnList = NIL,
     List* scanClauseList = NIL);
+static List* GetObsAllFiles(dfs::DFSConnector* conn, Oid foreignTableId, List* columnList, List*& prunningResult,
+    List*& partList, List* scanClauses);
+static List* GetHdfsAllFiles(dfs::DFSConnector* conn, Oid foreignTableId, List* columnList, List*& prunningResult,
+    List*& partList, List* scanClauses);
 static List* GetSubFiles(dfs::DFSConnector* conn, SplitInfo* split, int colNo);
 static List* DigFiles(dfs::DFSConnector* conn, SplitInfo* split);
 static List* PartitionPruneProcess(dfs::DFSConnector* conn, List* partitionRelatedList, List* scanClauses,
@@ -86,7 +97,6 @@ static void SpillToDisk(Index relId, List* allTask, dfs::DFSConnector* conn);
 static char* getPrefixPath(dfs::DFSConnector* conn);
 static void flushToRemote(SplitMap* dnTask, const char* buffer, dfs::DFSConnector* conn);
 static void loadDiskSplits(SplitMap* dnTask, dfs::DFSConnector* conn);
-
 void scan_expression_tree_walker(Node* node, bool (*walker)(), void* context);
 void getPartitionClause(Node* node, partition_context* context);
 void getPartitionString(Node* node, partition_string_context* context);
@@ -94,10 +104,16 @@ bool isEquivalentExpression(Oid opno);
 
 extern List* CNSchedulingForDistOBSFt(Oid foreignTableId);
 
+#ifdef ENABLE_MULTIPLE_NODES
+static List* ExtractNonParamRestriction(List* opExpressionList);
+List* CarbonDataFile(dfs::DFSConnector* conn, List* fileList, List* allColumnList, List* restrictColumnList,
+                     List* scanClauses, int16 attrNum);
+#endif
+
 uint32 best_effort_use_cahce = 0;  // not use
 
 List* CNScheduling(Oid foreignTableId, Index relId, List* columnList, List* scanClauses, List*& prunningResult,
-    List*& partList, char locatorType, bool isAnalyze, int64* fileNum)
+    List*& partList, char locatorType, bool isAnalyze, List* allColumnList, int16 attrNum, int64* fileNum)
 {
     int numOfNodes = 0;
 
@@ -133,8 +149,23 @@ List* CNScheduling(Oid foreignTableId, Index relId, List* columnList, List* scan
 
     dfs::DFSConnector* conn = dfs::createConnector(CurrentMemoryContext, foreignTableId);
 
-    /* Get the list of files into allFiles*/
-    FileList = GetAllFiles(conn, foreignTableId, srvType, columnList, scanClauses);
+    /* get file list */
+    switch (srvType) {
+        case T_OBS_SERVER: {
+            /* get all obs files need to be schedule */
+            FileList = GetObsAllFiles(conn, foreignTableId, columnList, prunningResult, partList, scanClauses);
+            break;
+        }
+        case T_HDFS_SERVER: {
+            /* get all hdfs files need to be schedule */
+            FileList = GetHdfsAllFiles(conn, foreignTableId, columnList, prunningResult, partList, scanClauses);
+            break;
+        }
+        default: {
+            Assert(0);
+            break;
+        }
+    }
 
     if (0 == list_length(FileList)) {
         delete (conn);
@@ -148,9 +179,26 @@ List* CNScheduling(Oid foreignTableId, Index relId, List* columnList, List* scan
     /* Process the diretories of each layer of partition in order. */
     FileList = PartitionPruneProcess(
         conn, PartitionRelatedList, scanClauses, foreignTableId, prunningResult, partList, srvType);
+
+#ifdef ENABLE_MULTIPLE_NODES
+    char* format = HdfsGetOptionValue(foreignTableId, OPTION_NAME_FORMAT);
+    /* check data format is carbondata, if is carbondata, analysis and filter */
+    if (0 == pg_strcasecmp(format, DFS_FORMAT_CARBONDATA)) {
+        FileList = CarbonDataFile(conn, FileList, allColumnList, columnList, scanClauses, attrNum);
+    }
+#endif
+
+    if (0 == list_length(FileList)) {
+        delete (conn);
+        conn = NULL;
+        return NIL;
+    }
+
     if (NULL != fileNum) {
         *fileNum = list_length(FileList);
     }
+
+    /* file schedule */
     switch (srvType) {
         case T_OBS_SERVER: {
             /* Check if the file list is empty again after the partition prunning. */
@@ -335,11 +383,13 @@ static void hdfsFileScheduling(
 
             if (needPredicate) {
                 dfs::DFSBlockInfo* BlInf = conn->getBlockLocations(CurrentFileName);
+                Assert(BlInf != NULL);
                 int ReplNum = BlInf->getNumOfReplica();
                 const char* pName = NULL;
 
                 for (int Loop = 0; Loop < ReplNum; Loop++) {
                     pName = BlInf->getNames(0, Loop);
+                    Assert(pName != NULL);
                     Ret = strcpy_s(szIp, (sizeof(szIp) - 1), pName);
                     securec_check(Ret, "", "");
                     /*remove port info*/
@@ -552,7 +602,7 @@ static int GetDnIpAddrByOid(Oid* DnOid, uint32 OidSize, uint64* OidIp, uint32 Oi
         if ((strncmp(NodeForm->node_host.data, LOCAL_IP, ::strlen(LOCAL_IP)) == 0) ||
             (strncmp(NodeForm->node_host.data, LOCAL_HOST, ::strlen(LOCAL_HOST)) == 0)) {
 
-            TmpVal = inet_addr(sctp_link_addr);
+            TmpVal = inet_addr(tcp_link_addr);
         } else {
             TmpVal = inet_addr(NodeForm->node_host.data);
         }
@@ -674,8 +724,17 @@ List* CNSchedulingForAnalyze(unsigned int* totalFilesNum, unsigned int* numOfDns
                         errmodule(MOD_HDFS),
                         errmsg("could not get locator information for relation with OID %u", foreignTableId)));
             }
-            allTask = CNScheduling(
-                foreignTableId, 0, columnList, NULL, prunningResult, partList, rel_loc_info->locatorType, true);
+            allTask = CNScheduling(foreignTableId,
+                0,
+                columnList,
+                NULL,
+                prunningResult,
+                partList,
+                rel_loc_info->locatorType,
+                true,
+                columnList,
+                tupleDescriptor->natts,
+                NULL);
         }
         pfree_ext(rel_loc_info);
         return allTask;
@@ -700,6 +759,7 @@ List* CNSchedulingForAnalyze(unsigned int* totalFilesNum, unsigned int* numOfDns
     if (0 == list_length(fileList)) {
         delete (conn);
         conn = NULL;
+        list_free_deep(columnList);
         return NIL;
     }
 
@@ -972,7 +1032,7 @@ static bool isNodeLocalToFile(Form_pgxc_node nodeForm, const char* blLocation)
      */
     if (((strncmp(nodeForm->node_host.data, LOCAL_IP, strlen(LOCAL_IP)) == 0) ||
             (strncmp(nodeForm->node_host.data, LOCAL_HOST, strlen(LOCAL_HOST)) == 0)) &&
-        (strncmp(sctp_link_addr, blLocation, strlen(blLocation)) == 0)) {
+        (strncmp(tcp_link_addr, blLocation, strlen(blLocation)) == 0)) {
         return true;
     }
 
@@ -1241,6 +1301,82 @@ void scan_expression_tree_walker(Node* node, void (*walker)(), void* context)
  * restriction clause.
  * @return
  */
+static void GetPartitionClauseOpExpr(Node* node, partition_context* context)
+{
+    OpExpr* op_clause = (OpExpr*)node;
+    Node* leftop = NULL;
+    Node* rightop = NULL;
+    Var* var = NULL;
+    if (list_length(op_clause->args) != 2) {
+        return;
+    }
+    leftop = get_leftop((Expr*)op_clause);
+    rightop = get_rightop((Expr*)op_clause);
+    
+    Assert(NULL != rightop);
+    Assert(NULL != leftop);
+    
+    if (rightop == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FDW_ERROR),
+                errmodule(MOD_HDFS),
+                errmsg("The right operate expression of partition column cannot be NULL.")));
+        return;
+    }
+
+    if (leftop == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FDW_ERROR),
+                errmodule(MOD_HDFS),
+                errmsg("The left operate expression of partition column cannot be NULL.")));
+        return;
+    }
+    
+    if (IsVarNode(rightop) && IsA(leftop, Const)) {
+        if (IsA(rightop, RelabelType)) {
+            rightop = (Node*)((RelabelType*)rightop)->arg;
+        }
+        var = (Var*)rightop;
+    } else if (IsVarNode(leftop) && IsA(rightop, Const)) {
+        if (IsA(leftop, RelabelType)) {
+            leftop = (Node*)((RelabelType*)leftop)->arg;
+        }
+        var = (Var*)leftop;
+    }
+    
+    if (NULL != var) {
+        ListCell* cell = NULL;
+        foreach (cell, context->partColList) {
+            if (lfirst_int(cell) == var->varattno) {
+                /* we find one partition restriction calues and put it into partColList. */
+                context->partClauseList = lappend(context->partClauseList, node);
+                break;
+            }
+        }
+    }
+}
+
+static void GetPartitionClauseNullTest(Node* node, partition_context* context)
+{
+    NullTest* nullExpr = (NullTest*)node;
+    if (IS_NOT_NULL == nullExpr->nulltesttype) {
+        return;
+    }
+    if (!IsA(nullExpr->arg, Var)) {
+        return;
+    }
+    Var* var = (Var*)nullExpr->arg;
+    if (NULL != var) {
+        ListCell* cell = NULL;
+        foreach (cell, context->partColList) {
+            if (lfirst_int(cell) == var->varattno) {
+                context->partClauseList = lappend(context->partClauseList, node);
+                break;
+            }
+        }
+    }
+}
+
 void getPartitionClause(Node* node, partition_context* context)
 {
     if (NULL == node) {
@@ -1254,77 +1390,12 @@ void getPartitionClause(Node* node, partition_context* context)
             break;
         }
         case T_OpExpr: {
-            OpExpr* op_clause = (OpExpr*)node;
-            Node* leftop = NULL;
-            Node* rightop = NULL;
-            Var* var = NULL;
-            if (list_length(op_clause->args) != 2) {
-                return;
-            }
-            leftop = get_leftop((Expr*)op_clause);
-            rightop = get_rightop((Expr*)op_clause);
-
-            Assert(NULL != rightop);
-            Assert(NULL != leftop);
-
-            if (rightop == NULL) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FDW_ERROR),
-                        errmodule(MOD_HDFS),
-                        errmsg("The right operate expression of partition column cannot be NULL.")));
-                break;
-            }
-            if (leftop == NULL) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FDW_ERROR),
-                        errmodule(MOD_HDFS),
-                        errmsg("The left operate expression of partition column cannot be NULL.")));
-                break;
-            }
-
-            if (IsVarNode(rightop) && IsA(leftop, Const)) {
-                if (IsA(rightop, RelabelType)) {
-                    rightop = (Node*)((RelabelType*)rightop)->arg;
-                }
-                var = (Var*)rightop;
-            } else if (IsVarNode(leftop) && IsA(rightop, Const)) {
-                if (IsA(leftop, RelabelType)) {
-                    leftop = (Node*)((RelabelType*)leftop)->arg;
-                }
-                var = (Var*)leftop;
-            }
-
-            if (NULL != var) {
-                ListCell* cell = NULL;
-                foreach (cell, context->partColList) {
-                    if (lfirst_int(cell) == var->varattno) {
-                        /* we find one partition restriction calues and put it into partColList. */
-                        context->partClauseList = lappend(context->partClauseList, node);
-                        break;
-                    }
-                }
-            }
+            GetPartitionClauseOpExpr(node, context);
             break;
         }
         case T_NullTest: {
             /* Only optimize the "column Is NULL" NullTest expression. */
-            NullTest* nullExpr = (NullTest*)node;
-            if (IS_NOT_NULL == nullExpr->nulltesttype) {
-                return;
-            }
-            if (!IsA(nullExpr->arg, Var)) {
-                return;
-            }
-            Var* var = (Var*)nullExpr->arg;
-            if (NULL != var) {
-                ListCell* cell = NULL;
-                foreach (cell, context->partColList) {
-                    if (lfirst_int(cell) == var->varattno) {
-                        context->partClauseList = lappend(context->partClauseList, node);
-                        break;
-                    }
-                }
-            }
+            GetPartitionClauseNullTest(node, context);
             break;
         }
         default: {
@@ -1343,68 +1414,75 @@ void getPartitionClause(Node* node, partition_context* context)
  * of context.
  * @return none.
  */
+static void getPartitionStringOpExpr(Node* node, partition_string_context* context)
+{
+    OpExpr* op_clause = (OpExpr*)node;
+    bool equalExpr = isEquivalentExpression(op_clause->opno);
+    Var* var = NULL;
+    Const* constant = NULL;
+    Node* leftop = get_leftop((Expr*)op_clause);
+    Node* rightop = get_rightop((Expr*)op_clause);
+    if (equalExpr) {
+        if (rightop && IsVarNode(rightop) && leftop && IsA(leftop, Const)) {
+            if (IsA(rightop, RelabelType)) {
+                rightop = (Node*)((RelabelType*)rightop)->arg;
+            }
+            var = (Var*)rightop;
+            constant = (Const*)leftop;
+        } else if (leftop && IsVarNode(leftop) && rightop && IsA(rightop, Const)) {
+            if (IsA(leftop, RelabelType)) {
+                leftop = (Node*)((RelabelType*)leftop)->arg;
+            }
+            var = (Var*)leftop;
+            constant = (Const*)rightop;
+        }
+        if (NULL == var) {
+            return;
+        }
+    
+        char* relName = get_relid_attribute_name(context->foreignTblOid, var->varattno);
+        StringInfo partitionDir = makeStringInfo();
+        appendStringInfo(partitionDir, "%s=", relName);
+        GetStringFromDatum(constant->consttype, constant->consttypmod, constant->constvalue, partitionDir);
+        appendStringInfo(partitionDir, "/");
+        context->partColNoList = lappend_int(context->partColNoList, var->varattno);
+        context->partColStrList = lappend(context->partColStrList, partitionDir);
+    }
+}
+
+static void getPartitionStringNullTest(Node* node, partition_string_context* context)
+{
+    NullTest* nullExpr = (NullTest*)node;
+    if (IS_NOT_NULL == nullExpr->nulltesttype) {
+        return;
+    }
+    if (!IsA(nullExpr->arg, Var)) {
+        return;
+    }
+    
+    Var* var = (Var*)nullExpr->arg;
+    if (NULL != var) {
+        char* relName = get_relid_attribute_name(context->foreignTblOid, var->varattno);
+        StringInfo partitionDir = makeStringInfo();
+        appendStringInfo(partitionDir, "%s=%s", relName, DEFAULT_HIVE_NULL);
+        appendStringInfo(partitionDir, "/");
+        context->partColNoList = lappend_int(context->partColNoList, var->varattno);
+        context->partColStrList = lappend(context->partColStrList, partitionDir);
+    }
+}
+
 void getPartitionString(Node* node, partition_string_context* context)
 {
-    Node* rightop = NULL;
-    Node* leftop = NULL;
-
     if (NULL == node) {
         return;
     }
     switch (nodeTag(node)) {
         case T_OpExpr: {
-            OpExpr* op_clause = (OpExpr*)node;
-            bool equalExpr = isEquivalentExpression(op_clause->opno);
-            Var* var = NULL;
-            Const* constant = NULL;
-            leftop = get_leftop((Expr*)op_clause);
-            rightop = get_rightop((Expr*)op_clause);
-            if (equalExpr) {
-                if (rightop && IsVarNode(rightop) && leftop && IsA(leftop, Const)) {
-                    if (IsA(rightop, RelabelType)) {
-                        rightop = (Node*)((RelabelType*)rightop)->arg;
-                    }
-                    var = (Var*)rightop;
-                    constant = (Const*)leftop;
-                } else if (leftop && IsVarNode(leftop) && rightop && IsA(rightop, Const)) {
-                    if (IsA(leftop, RelabelType)) {
-                        leftop = (Node*)((RelabelType*)leftop)->arg;
-                    }
-                    var = (Var*)leftop;
-                    constant = (Const*)rightop;
-                }
-                if (NULL == var) {
-                    return;
-                }
-
-                char* relName = get_relid_attribute_name(context->foreignTblOid, var->varattno);
-                StringInfo partitionDir = makeStringInfo();
-                appendStringInfo(partitionDir, "%s=", relName);
-                GetStringFromDatum(constant->consttype, constant->consttypmod, constant->constvalue, partitionDir);
-                appendStringInfo(partitionDir, "/");
-                context->partColNoList = lappend_int(context->partColNoList, var->varattno);
-                context->partColStrList = lappend(context->partColStrList, partitionDir);
-            }
+            getPartitionStringOpExpr(node, context);
             break;
         }
         case T_NullTest: {
-            NullTest* nullExpr = (NullTest*)node;
-            if (IS_NOT_NULL == nullExpr->nulltesttype) {
-                return;
-            }
-            if (!IsA(nullExpr->arg, Var)) {
-                return;
-            }
-
-            Var* var = (Var*)nullExpr->arg;
-            if (NULL != var) {
-                char* relName = get_relid_attribute_name(context->foreignTblOid, var->varattno);
-                StringInfo partitionDir = makeStringInfo();
-                appendStringInfo(partitionDir, "%s=%s", relName, DEFAULT_HIVE_NULL);
-                appendStringInfo(partitionDir, "/");
-                context->partColNoList = lappend_int(context->partColNoList, var->varattno);
-                context->partColStrList = lappend(context->partColStrList, partitionDir);
-            }
+            getPartitionStringNullTest(node, context);
             break;
         }
         default: {
@@ -1582,6 +1660,7 @@ static List* GetAllFiles(
                         fileList = list_concat(fileList, conn->listObjectsStat(fixedPath->data, currentFile));
                     }
                 }
+                list_free_ext(fixedPathList);
             }
 
             break;
@@ -1630,6 +1709,94 @@ static List* GetAllFiles(
 
     list_free(entryList);
     entryList = NIL;
+    return fileList;
+}
+
+static List* GetObsAllFiles(dfs::DFSConnector* conn, Oid foreignTableId, List* columnList, List*& prunningResult,
+    List*& partList, List* scanClauses)
+{
+    List* fileList = NIL;
+    char* currentFile = NULL;
+
+    char* multiBucketsFolder = HdfsGetOptionValue(foreignTableId, OPTION_NAME_FOLDERNAME);
+    char* multiBucketsRegion = HdfsGetOptionValue(foreignTableId, OPTION_NAME_LOCATION);
+
+    while (NULL != multiBucketsFolder || NULL != multiBucketsRegion) {
+        if (NULL != multiBucketsFolder) {
+            currentFile = parseMultiFileNames(&multiBucketsFolder, false, ',');
+        } else {
+            /* As for region option, each region path will stat from "obs://".	So we add strlen(obs:/) length for
+             * multiBuckets.  */
+            multiBucketsRegion = multiBucketsRegion + strlen("obs:/");
+            currentFile = parseMultiFileNames(&multiBucketsRegion, false, '|');
+        }
+
+        List* fixedPathList = NIL;
+        if (u_sess->attr.attr_sql.enable_valuepartition_pruning) {
+            fixedPathList = addPartitionPath(foreignTableId, scanClauses, currentFile);
+        }
+
+        if (0 == list_length(fixedPathList)) {
+            fileList = list_concat(fileList, conn->listObjectsStat(currentFile, currentFile));
+        } else {
+            ListCell* cell = NULL;
+            foreach (cell, fixedPathList) {
+                StringInfo fixedPath = (StringInfo)lfirst(cell);
+                fileList = list_concat(fileList, conn->listObjectsStat(fixedPath->data, currentFile));
+            }
+        }
+        list_free_ext(fixedPathList);
+    }
+
+    if (0 == list_length(fileList)) {
+        return NIL;
+    }
+    return fileList;
+}
+
+static List* GetHdfsAllFiles(dfs::DFSConnector* conn, Oid foreignTableId, List* columnList, List*& prunningResult,
+    List*& partList, List* scanClauses)
+{
+    List* fileList = NIL;
+    char* currentFile = NULL;
+
+    HdfsFdwOptions* options = HdfsGetOptions(foreignTableId);
+    if (options->foldername) {
+        /*
+         * If the foldername is a file path, the funtion hdfsListDirectory do not validity check,
+         * so calling IsHdfsFile to judge whether the foldername is not a file path.
+         */
+        if (conn->isDfsFile(options->foldername)) {
+            delete (conn);
+            conn = NULL;
+            ereport(ERROR,
+                (errcode(ERRCODE_FDW_INVALID_OPTOIN_DATA),
+                    errmodule(MOD_HDFS),
+                    errmsg("The foldername option cannot be a file path.")));
+        }
+
+        fileList = conn->listObjectsStat(options->foldername);
+    } else {
+        while (NULL != options->filename) {
+            currentFile = parseMultiFileNames(&options->filename, true, ',');
+
+            /* If the option use filenames, then all the entries defined must be file. */
+            if (!conn->isDfsFile(currentFile)) {
+                delete (conn);
+                conn = NULL;
+                ereport(ERROR,
+                    (errcode(ERRCODE_FDW_INVALID_OPTOIN_DATA),
+                        errmodule(MOD_HDFS),
+                        errmsg("The entries in the options fileNames must be file!")));
+            }
+
+            fileList = list_concat(fileList, conn->listObjectsStat(currentFile));
+        }
+    }
+
+    if (0 == list_length(fileList)) {
+        return NIL;
+    }
     return fileList;
 }
 
@@ -1687,6 +1854,7 @@ static List* GetSubFiles(dfs::DFSConnector* conn, SplitInfo* split, int colNo)
 
     pfree_ext(split->fileName);
     pfree_ext(split->filePath);
+    list_free(newPartContentList);
     list_free(entryList);
     entryList = NIL;
 
@@ -1778,7 +1946,7 @@ void fillPartitionValueInSplitInfo(dfs::DFSConnector* conn, SplitInfo* splitObje
     int ibegin = find_Nth(splitObject->filePath, partColNum, "/");
     int iend = find_Nth(splitObject->filePath, partColNum + 1, "/");
     char* partitionStr = (char*)palloc0(iend - ibegin);
-    errno_t rc = EOK;
+    error_t rc = EOK;
     rc = memcpy_s(partitionStr, iend - ibegin, splitObject->filePath + ibegin + 1, iend - ibegin - 1);
     securec_check(rc, "\0", "\0");
 
@@ -2046,7 +2214,8 @@ static bool PartitionFilterClause(SplitInfo* split, List* scanClauses, Var* valu
     } else {
         /* Convert the string value to datum value. */
         datumValue = GetDatumFromString(value->vartype, value->vartypmod, UriDecode(partValue + 1));
-        baseRestriction = BuildConstraintConst(equalExpr, datumValue, false);
+        BuildConstraintConst(equalExpr, datumValue, false);
+        baseRestriction = (Node*)equalExpr;
     }
 
     partRestriction = lappend(partRestriction, baseRestriction);
@@ -2067,7 +2236,8 @@ static bool PartitionFilterClause(SplitInfo* split, List* scanClauses, Var* valu
      * is true then we can skip the current split(file), otherwise we need it.
      */
     partSkipped = predicate_refuted_by(partRestriction, tempScanClauses, true);
-
+    list_free_ext(opExprList);
+    list_free_ext(partRestriction);
     list_free_deep(tempScanClauses);
     tempScanClauses = NIL;
 
@@ -2150,3 +2320,148 @@ static List* DrillDown(dfs::DFSConnector* conn, List* fileList)
 
     return fileListList;
 }
+
+#ifdef ENABLE_MULTIPLE_NODES
+/*
+ * @Description: filter *.carbondata from fileList
+ * @IN conn: dfs connection
+ * @IN fileList: all file list to be filter
+ * @IN allColumnList: column list for query
+ * @IN restrictColumnList: restrict column list
+ * @IN scanClauses: scan clause
+ * @IN attrNum: attr num
+ * @Return: *.carbondata file list for query
+ */
+List* CarbonDataFile(dfs::DFSConnector* conn, List* fileList, List* allColumnList, List* restrictColumnList,
+    List* scanClauses, int16 attrNum)
+{
+    Assert(NIL != fileList);
+
+    if (0 == list_length(fileList)) {
+        return NIL;
+    }
+
+    /* if no where condition, do not read *.carbonindex file */
+    /* if (enable_indexscan == false), do not read *.carbonindex file */
+    if ((0 == list_length(restrictColumnList)) || (u_sess->attr.attr_sql.enable_indexscan == false)) {
+        List* dataFileList = dfs::CarbonFileFilter(fileList, CARBONDATA_DATA);
+        list_free(fileList);
+
+        ereport(DEBUG1, (errmodule(MOD_CARBONDATA), errmsg("Ignore *.carbonindex file.")));
+
+        return dataFileList;
+    }
+
+    /* get .carbonindex file from obs file list */
+    List* indexFileList = dfs::CarbonFileFilter(fileList, CARBONDATA_INDEX);
+
+    /* init readerState for inputstream */
+    dfs::reader::ReaderState* readerState = (dfs::reader::ReaderState*)palloc0(sizeof(dfs::reader::ReaderState));
+
+    readerState->persistCtx = AllocSetContextCreate(CurrentMemoryContext,
+        "carbon index reader context",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+
+    /* switch MemoryContext */
+    MemoryContext oldcontext = MemoryContextSwitchTo(readerState->persistCtx);
+
+    /* init restrictRequired and readRequired */
+    bool* restrictRequired = (bool*)palloc0(sizeof(bool) * attrNum);
+    bool* readRequired = (bool*)palloc0(sizeof(bool) * attrNum);
+
+    ListCell* lc = NULL;
+    Var* variable = NULL;
+
+    foreach (lc, restrictColumnList) {
+        variable = (Var*)lfirst(lc);
+        Assert(variable->varattno <= attrNum);
+        restrictRequired[variable->varattno - 1] = true;
+    }
+
+    foreach (lc, allColumnList) {
+        variable = (Var*)lfirst(lc);
+        Assert(variable->varattno <= attrNum);
+        readRequired[variable->varattno - 1] = true;
+    }
+
+    /* init queryRestrictionList */
+    List* queryRestrictionList = ExtractNonParamRestriction((List*)copyObject(scanClauses));
+
+    /* get .carbondata file from .carbonindex file */
+    List* dataFileList = NIL;
+    ListCell* cell = NULL;
+
+    for (cell = list_head(indexFileList); cell != NULL; cell = lnext(cell)) {
+        void* data = lfirst(cell);
+        if (IsA(data, SplitInfo)) {
+            SplitInfo* splitinfo = (SplitInfo*)data;
+            char* filePath = splitinfo->filePath;
+
+            readerState->currentSplit = splitinfo;
+            readerState->currentFileSize = splitinfo->ObjectSize;
+            readerState->currentFileID = -1;
+
+            std::unique_ptr<dfs::GSInputStream> gsInputStream =
+                dfs::InputStreamFactory(conn, filePath, readerState, false);
+
+            dfs::reader::CarbondataIndexReader indexFileReader(
+                allColumnList, queryRestrictionList, restrictRequired, readRequired, attrNum);
+
+            indexFileReader.init(std::move(gsInputStream));
+
+            indexFileReader.readIndex();
+
+            /* Data File Deduplication from indexfile  */
+            dataFileList = list_concat(dataFileList, indexFileReader.getDataFileDeduplication());
+        }
+    }
+
+    fileList = dfs::CarbonDataFileMatch(fileList, dataFileList);
+
+    /* release memory */
+    (void)MemoryContextSwitchTo(oldcontext);
+    if (NULL != readerState->persistCtx && readerState->persistCtx != CurrentMemoryContext) {
+        MemoryContextDelete(readerState->persistCtx);
+        pfree(readerState);
+        readerState = NULL;
+    }
+
+    return fileList;
+}
+
+/*
+ * @Description: extract non-param restriction
+ * @IN opExpressionList: operate expression list
+ * @Return: non-param restriction list
+ */
+static List* ExtractNonParamRestriction(List* opExpressionList)
+{
+    ListCell* lc = NULL;
+    Expr* expr = NULL;
+    List* retRestriction = NIL;
+
+    foreach (lc, opExpressionList) {
+        expr = (Expr*)lfirst(lc);
+        if (IsA(expr, OpExpr)) {
+            Node* leftop = get_leftop(expr);
+            Node* rightop = get_rightop(expr);
+            Assert(leftop != NULL);
+            Assert(rightop != NULL);
+            if ((IsVarNode(leftop) && IsParamConst(rightop)) || (IsVarNode(rightop) && IsParamConst(leftop))) {
+                continue;
+            }
+        }
+        retRestriction = lappend(retRestriction, expr);
+    }
+
+    List* opExprList = pull_opExpr((Node*)retRestriction);
+    foreach (lc, opExprList) {
+        OpExpr* opExpr = (OpExpr*)lfirst(lc);
+        opExpr->inputcollid = C_COLLATION_OID;
+    }
+    list_free_ext(opExprList);
+    return retRestriction;
+}
+#endif

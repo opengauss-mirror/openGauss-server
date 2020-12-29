@@ -14,7 +14,7 @@ CREATE TABLE cmpr_smallint_raw (
 	R8_ID smallint NOT NULL,
 	R9_ID smallint NOT NULL
 );
-COPY cmpr_smallint_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+COPY cmpr_smallint_raw FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 CREATE TABLE cmpr_smallint_auto (
 	RS_ID smallint,
 	R0_ID smallint NOT NULL,
@@ -27,8 +27,8 @@ CREATE TABLE cmpr_smallint_auto (
 	R7_ID smallint NOT NULL,
 	R8_ID smallint NOT NULL,
 	R9_ID smallint NOT NULL
-)  COMPRESS;
-COPY cmpr_smallint_auto FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+)  ;
+COPY cmpr_smallint_auto FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 SELECT (SELECT COUNT(*) FROM cmpr_smallint_raw) - (SELECT COUNT(*) FROM cmpr_smallint_auto);
  ?column? 
 ----------
@@ -58,8 +58,8 @@ CREATE TABLE cmpr_smallint_dict (
 	R7_ID smallint dictionary NOT NULL,
 	R8_ID smallint dictionary NOT NULL,
 	R9_ID smallint dictionary NOT NULL
-)  COMPRESS;
-COPY cmpr_smallint_dict FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+)  ;
+COPY cmpr_smallint_dict FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 SELECT (SELECT COUNT(*) FROM cmpr_smallint_raw) - (SELECT COUNT(*) FROM cmpr_smallint_dict);
  ?column? 
 ----------
@@ -89,8 +89,8 @@ CREATE TABLE cmpr_smallint_delta (
 	R7_ID smallint delta NOT NULL,
 	R8_ID smallint delta NOT NULL,
 	R9_ID smallint delta NOT NULL
-)  COMPRESS;
-COPY cmpr_smallint_delta FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+)  ;
+COPY cmpr_smallint_delta FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 SELECT (SELECT COUNT(*) FROM cmpr_smallint_raw) - (SELECT COUNT(*) FROM cmpr_smallint_delta);
  ?column? 
 ----------

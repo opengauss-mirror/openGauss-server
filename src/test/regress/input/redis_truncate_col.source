@@ -18,7 +18,8 @@ create unlogged table data_redis.pg_delete_delta_12345
         dnrelid int,
         block_number bigint,
         block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset);
 
 insert into t3 select * from source_table;
 
@@ -66,7 +67,8 @@ create unlogged table data_redis.pg_delete_delta_54321
         dnrelid int,
         block_number bigint,
         block_offset int
-);
+)
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset);
 
 -- error with no new temp table is found
 truncate table t4;

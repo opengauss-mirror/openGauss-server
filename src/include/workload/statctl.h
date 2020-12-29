@@ -77,7 +77,7 @@
 #define WLM_INSTANCE_HISTORY "gs_wlm_instance_history"
 #define WLM_EC_OPERATOR_INFO "gs_wlm_ec_operator_info"
 #define WLM_OPERATOR_INFO "gs_wlm_operator_info"
-#define WLM_SESSION_INFO "gs_wlm_session_info"
+#define WLM_SESSION_INFO "gs_wlm_session_query_info_all"
 
 enum WLMActionTag {
     WLM_ACTION_REMAIN = 0, /* keep thread running */
@@ -134,8 +134,8 @@ struct WLMUserInfo {
     Oid rpoid;         /* resource pool id */
     Oid parentid;      /* parent user id */
     int childcount;    /* count of the child user */
-    uint64 space;      /* user space */
-    uint64 spacelimit; /* user space limit */
+    int64 space;      /* user space */
+    int64 spacelimit; /* user space limit */
     int used;          /* user info is used */
     bool admin;        /* user is admin user? */
     char* children;    /* child list string */
@@ -189,15 +189,15 @@ struct WLMUserCollInfoDetail {
     int cpuUsedCnt;                       /* cpu core counts used */
     int cpuTotalCnt;                      /* cpu core counts used */
     int nodeCount;                        /* node count */
-    uint64 totalSpace;                    /* total used space */
+    int64 totalSpace;                    /* total used space */
     /* IO flow data */
     uint64 readBytes;   /* current readKb for all DN */
     uint64 writeBytes;  /* current writeKb for all DN */
     uint64 readCounts;  /* current read counts for all DN */
     uint64 writeCounts; /* current write counts for all DN */
 
-    uint64 tmpSpace;   /* total used temp space*/
-    uint64 spillSpace; /* total used spill space*/
+    int64 tmpSpace;   /* total used temp space*/
+    int64 spillSpace; /* total used spill space*/
 };
 
 /* collect realtime info detail */
@@ -274,6 +274,9 @@ struct WLMGeneralData {
     uint64 totalSpace;             /* total table space */
     WLMTopDnList* WLMCPUTopDnInfo; /* top5 cpu dn list */
     WLMTopDnList* WLMMEMTopDnInfo; /* top5 mem dn list */
+    SlowQueryInfo slowQueryInfo;
+    List* query_plan;
+    int tag;
 };
 
 struct WLMIoGeninfo {
@@ -324,6 +327,7 @@ struct WLMStmtDetail {
     Oid databaseid;              /* database id */
     Oid userid;                  /* user id */
     uint64 debug_query_id;       /* debug query id */
+    uint64 plan_size;            /* plan size */
     Oid rpoid;                   /* resource pool oid */
     char respool[NAMEDATALEN];   /* resource pool */
     char cgroup[NAMEDATALEN];    /* cgroup name */
@@ -341,6 +345,7 @@ struct WLMStmtDetail {
 
     WLMGeneralInfo geninfo; /* general session info */
     WLMIoGeninfo ioinfo;    /* session IO info */
+    SlowQueryInfo slowQueryInfo; /* slow query info */
 
     ThreadId threadid; /* thread id */
     bool valid;        /* detail info is valid? */
@@ -374,7 +379,7 @@ struct WLMDNodeInfo {
     char* statement;             /* sql statement text */
     char* qband;                 /* query band string */
     ThreadId tid;                /* cn pid */
-    int threadCount;             /* a counter of thread */
+    volatile int threadCount;             /* a counter of thread */
     unsigned char cpuctrl;       /* reference counter */
     unsigned char restrack;      /* resource track flag */
     unsigned char flags[2];      /* reserve flags */
@@ -400,7 +405,7 @@ struct WLMDNodeIOInfo {
     void* userptr; /* UserData pointer in the htab */
 
     int io_state;    /* IOSTATE_WRITE? IOSTATE_READ? */
-    int threadCount; /* thread attached for the query */
+    volatile int threadCount; /* thread attached for the query */
 
     WLMIoGeninfo io_geninfo; /* io general info for query */
 };
@@ -478,6 +483,11 @@ struct WLMIoStatisticsGenenral {
     int curr_iops_limit; /* iops_limit calculated from io_priority*/
 };
 
+struct WLMIoStatisticsList {
+    WLMIoStatisticsGenenral* node;
+    WLMIoStatisticsList* next;
+};
+
 /* query runtime info for pg_session_wlmstat */
 struct WLMStatistics {
     char stmt[KBYTES];           /* statement */
@@ -501,7 +511,7 @@ struct WLMStatistics {
     char groupname[NAMEDATALEN]; /* node group name */
 };
 
-/* session history resource info for gs_wlm_session_info */
+/* session history resource info for gs_wlm_session_query_info_all */
 struct WLMSessionStatistics {
     char respool[NAMEDATALEN];   /* resource pool */
     char cgroup[NAMEDATALEN];    /* cgroup name */
@@ -534,6 +544,7 @@ struct WLMSessionStatistics {
     void* clientaddr;    /* client address */
     bool remove;         /* remove info from hash table */
     int estimate_memory; /* estimate total memory */
+    uint64 n_returned_rows;
 };
 
 struct WLMSigReceiveData {
@@ -542,6 +553,11 @@ struct WLMSigReceiveData {
     int priority;             /* priority of cgroup */
     int used;                 /* slot is used */
 };
+
+typedef struct IOHashCtrl {
+    int lockId;         /* lock id */
+    HTAB* hashTable;    /* hash tables */
+} IOHashCtrl;
 
 /* statistics control */
 struct WLMStatManager {
@@ -575,7 +591,7 @@ struct WLMStatManager {
     HTAB* collect_info_hashtbl;       /* collect information hash table */
     HTAB* session_info_hashtbl;       /* session fino hash table for the query finished */
     HTAB* user_info_hashtbl;          /* user info hash tbale */
-    HTAB* iostat_info_hashtbl;        /* iostat info hash table */
+    IOHashCtrl* iostat_info_hashtbl;  /* iostat info control */
     HTAB* node_group_hashtbl;         /* node group hash table */
     HASH_SEQ_STATUS collect_info_seq; /* collect info hash table seq */
     HASH_SEQ_STATUS iostat_info_seq;  /* collect info hash table seq */
@@ -666,6 +682,10 @@ typedef struct WLMInstanceStatManager {
 
 /* process wlm workload manager */
 extern int WLMProcessWorkloadManager();
+/* get hashCode of io statistics from qid */
+extern uint32 GetIoStatBucket(const Qid* qid);
+/* get lockId of io statistics from hashCode */
+extern int GetIoStatLockId(const uint32 bucket);
 /* initialize stat info */
 extern void WLMInitializeStatInfo();
 /* set stat info */
@@ -674,6 +694,8 @@ extern void WLMSetStatInfo(const char*);
 extern void WLMResetStatInfo4Exception();
 /* generate a hash code by a key */
 extern uint32 WLMHashCode(const void* key, Size keysize);
+/* set collect info status to finished */
+extern void WLMSetCollectInfoStatusFinish();
 /* set collect info status */
 extern void WLMSetCollectInfoStatus(WLMStatusTag);
 /* create collect info on datanodes */
@@ -686,13 +708,14 @@ extern WLMStatistics* WLMGetStatistics(int*);
 extern void WLMWorkerInitialize(struct Port*);
 /* worker thread main function */
 extern int WLMProcessThreadMain();
-extern void WLMCalSpaceInfoThread(void);
 /* shut down the worker thread*/
 extern void WLMProcessThreadShutDown();
 /* get session info */
 extern void* WLMGetSessionInfo(const Qid* qid, int removed, int* num);
 /* get instance info */
 extern void* WLMGetInstanceInfo(int* num, bool isCleanup);
+/* plan list format string */
+extern char* PlanListToString(const List* query_plan);
 /* get session info from each data nodes */
 extern char* WLMGetSessionLevelInfoInternal(Qid* qid, WLMGeneralInfo* geninfo);
 /* get wlm session statistics */
@@ -731,10 +754,11 @@ extern bool IsQidEqual(const Qid* qid1, const Qid* qid2);
 extern void WLMLocalInfoCollector(StringInfo msg);
 extern void WLMAdjustCGroup4EachThreadOnDN(WLMDNodeInfo* info);
 extern void WLMCreateIOInfoOnDN(void);
-extern WLMIoStatisticsGenenral* WLMGetIOStatisticsGeneral(int* num);
+extern WLMIoStatisticsList* WLMGetIOStatisticsGeneral();
 extern void WLMCleanUpIoInfo(void);
 extern void WLMUpdateCgroupCPUInfo(void);
 extern void WLMInitTransaction(bool* backinit);
+extern void WLMInitPostgres();
 extern void WLMCleanIOHashTable();
 extern void WLMSetBuildHashStat(int status);
 extern bool WLMIsQueryFinished(void);
@@ -759,6 +783,7 @@ extern bool WLMChoosePlanA(PlannedStmt* stmt);
 extern void WLMGetWorkloadStruct(StringInfo strinfo);
 extern void WLMDefaultXactReadOnlyCheckAndHandle(void);
 extern void WLMTopSQLReady(QueryDesc* queryDesc);
+extern void WLMReleaseIoInfoFromHash(void);
 
 #define WORKLOAD_STAT_HASH_SIZE 64
 // default database name

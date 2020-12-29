@@ -19,7 +19,7 @@
  * IDENTIFICATION
  *    src/gausskernel/runtime/vecexecutor/vecprimitive/date.inl
  *
- * -------------------------------------------------------------------------
+ *-------------------------------------------------------------------------
  */
 
 #ifndef DATE_INL

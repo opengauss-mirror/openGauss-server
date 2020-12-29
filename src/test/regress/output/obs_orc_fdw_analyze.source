@@ -1,0 +1,324 @@
+-- DDL
+drop server obs_server cascade;
+ERROR:  server "obs_server" does not exist
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+NOTICE:  foreign table "lineitem" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+NOTICE:  foreign table "customer" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+NOTICE:  foreign table "orders" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+NOTICE:  foreign table "part" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+NOTICE:  foreign table "partsupp" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+NOTICE:  foreign table "supplier" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+NOTICE:  foreign table "nation" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+NOTICE:  foreign table "region" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS part_1 CASCADE;
+NOTICE:  foreign table "part_1" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS part_2 CASCADE;
+NOTICE:  foreign table "part_2" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS part_3 CASCADE;
+NOTICE:  foreign table "part_3" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS part_4 CASCADE;
+NOTICE:  foreign table "part_4" does not exist, skipping
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (address '@obshostname@', type 'obs', access_key '@ak@', secret_access_key '@sk@');
+Create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/lineitem_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/orders_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT, 
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/part_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/supplier_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/partsupp_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+set log_min_messages=debug1;
+analyze nation(n_name, n_regionkey);
+select tablename,attname,null_frac,avg_width,n_distinct,n_dndistinct from pg_stats where tablename='nation' order by attname;
+ tablename |   attname   | null_frac | avg_width | n_distinct | n_dndistinct 
+-----------+-------------+-----------+-----------+------------+--------------
+ nation    | n_name      |         0 |         8 |         -1 |         -.52
+ nation    | n_regionkey |         0 |         4 |        -.2 |          -.2
+(2 rows)
+
+delete from pg_statistic where exists(select 1 from pg_class where  oid=starelid and relname = 'nation');
+set default_statistics_target=-2;
+analyze nation(n_name, n_regionkey);
+select tablename,attname,null_frac,avg_width,n_distinct,n_dndistinct from pg_stats where tablename='nation' order by attname;
+ tablename |   attname   | null_frac | avg_width | n_distinct | n_dndistinct 
+-----------+-------------+-----------+-----------+------------+--------------
+ nation    | n_name      |         0 |         8 |         -1 |         -.52
+ nation    | n_regionkey |         0 |         4 |        -.2 |          -.2
+(2 rows)
+
+reset default_statistics_target;
+reset log_min_messages;
+vacuum analyze nation;
+WARNING:  skipping "nation" --- cannot vacuum a foreign table
+select reltuples,relpages from pg_class where relname='nation'; 
+ reltuples | relpages 
+-----------+----------
+        25 |        1
+(1 row)
+
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+create foreign table part_1 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/partition.db/part_1/', totalrows '5000')
+distribute by roundrobin
+partition by (b) automapped;
+create foreign table part_2 (a int, b text, c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/partition.db/part_2/', totalrows '5000')
+distribute by roundrobin
+partition by (c) automapped;
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/partition.db/part_3/', totalrows '5000')
+distribute by roundrobin
+partition by (b, c) automapped;
+create foreign table part_4 (p_partkey int, p_name text, p_mfgr text, p_brand text, p_type text, p_size int, p_container text, p_retailprice float8, p_comment text) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/partition.db/part_4/', totalrows '5000')
+distribute by roundrobin
+partition by (p_mfgr) automapped;
+--?unordered: start
+analyze verbose foreign tables;
+--?NOTICE:  analyzing "public.part".*
+--?NOTICE:  analyzing "public.part".*
+--?NOTICE:  "part": scanned 200000 tuples and sampled 30000 tuples.*
+--?INFO:  analyzing "public.part".*
+--?INFO:  "part": scanned 0 tuples and sampled 0 tuples.*
+--?NOTICE:  analyzing "public.supplier".*
+--?NOTICE:  analyzing "public.supplier".*
+--?NOTICE:  "supplier": scanned 10000 tuples and sampled 10000 tuples.*
+--?INFO:  analyzing "public.supplier".*
+--?INFO:  "supplier": scanned 0 tuples and sampled 0 tuples.*
+--?NOTICE:  analyzing "public.partsupp".*
+--?NOTICE:  analyzing "public.partsupp".*
+--?NOTICE:  "partsupp": scanned 800000 tuples and sampled 30000 tuples.*
+--?INFO:  analyzing "public.partsupp".*
+--?INFO:  "partsupp": scanned 0 tuples and sampled 0 tuples.*
+--?NOTICE:  analyzing "public.nation".*
+--?NOTICE:  analyzing "public.nation".*
+--?NOTICE:  "nation": scanned 25 tuples and sampled 25 tuples.*
+--?INFO:  analyzing "public.nation".*
+--?INFO:  "nation": scanned 0 tuples and sampled 0 tuples.*
+--?NOTICE:  analyzing "public.region".*
+--?NOTICE:  analyzing "public.region".*
+--?NOTICE:  "region": scanned 5 tuples and sampled 5 tuples.*
+--?INFO:  analyzing "public.region".*
+--?INFO:  "region": scanned 0 tuples and sampled 0 tuples.*
+--?NOTICE:  analyzing "public.part_1".*
+--?NOTICE:  analyzing "public.part_1".*
+--?NOTICE:  analyzing "public.part_1".*
+--?NOTICE:  "part_1": scanned 2 tuples and sampled 2 tuples.*
+--?NOTICE:  analyzing "public.part_1".*
+--?NOTICE:  "part_1": scanned 2 tuples and sampled 2 tuples.*
+--?INFO:  analyzing "public.part_1".*
+--?INFO:  "part_1": scanned 0 tuples and sampled 0 tuples.*
+--?NOTICE:  analyzing "public.lineitem".*
+--?NOTICE:  analyzing "public.lineitem".*
+--?NOTICE:  analyzing "public.lineitem".*
+--?NOTICE:  analyzing "public.lineitem".*
+--?NOTICE:  "lineitem": scanned 2817136 tuples and sampled 30000 tuples.*
+--?NOTICE:  "lineitem": scanned 3184079 tuples and sampled 30000 tuple.*
+--?INFO:  analyzing "public.lineitem".*
+--?INFO:  "lineitem": scanned 0 tuples and sampled 0 tuples.*
+--?NOTICE:  analyzing "public.customer".*
+--?NOTICE:  analyzing "public.customer".*
+--?NOTICE:  "customer": scanned 150000 tuples and sampled 30000 tuples.*
+--?INFO:  analyzing "public.customer".*
+--?INFO:  "customer": scanned 0 tuples and sampled 0 tuples..*
+--?NOTICE:  analyzing "public.orders".*
+--?NOTICE:  analyzing "public.orders".*
+--?NOTICE:  analyzing "public.orders".*
+--?NOTICE:  analyzing "public.orders".*
+--?NOTICE:  "orders": scanned 328782 tuples and sampled 30000 tuples.*
+--?NOTICE:  "orders": scanned 1171218 tuples and sampled 30000 tuples.*
+--?INFO:  analyzing "public.orders".*
+--?INFO:  "orders": scanned 0 tuples and sampled 0 tuples.*
+--?NOTICE:  analyzing "public.part_2".*
+--?NOTICE:  analyzing "public.part_2".*
+--?NOTICE:  analyzing "public.part_2".*
+--?NOTICE:  "part_2": scanned 2 tuples and sampled 2 tuples.*
+--?NOTICE:  analyzing "public.part_2".*
+--?NOTICE:  "part_2": scanned 2 tuples and sampled 2 tuples.*
+--?INFO:  analyzing "public.part_2".*
+--?INFO:  "part_2": scanned 0 tuples and sampled 0 tuples..*
+--?NOTICE:  analyzing "public.part_3".*
+--?NOTICE:  analyzing "public.part_3".*
+--?NOTICE:  analyzing "public.part_3".*
+--?NOTICE:  "part_3": scanned 2 tuples and sampled 2 tuples.*
+--?NOTICE:  analyzing "public.part_3".*
+--?NOTICE:  "part_3": scanned 2 tuples and sampled 2 tuples.*
+--?INFO:  analyzing "public.part_3".*
+--?INFO:  "part_3": scanned 0 tuples and sampled 0 tuples.*
+--?NOTICE:  analyzing "public.part_4".*
+--?NOTICE:  analyzing "public.part_4".*
+--?NOTICE:  analyzing "public.part_4".*
+--?NOTICE:  analyzing "public.part_4".*
+--?NOTICE:  "part_4": scanned 120523 tuples and sampled 30000 tuples.*
+--?NOTICE:  "part_4": scanned 79477 tuples and sampled 30000 tuples.*
+--?INFO:  analyzing "public.part_4".*
+--?INFO:  "part_4": scanned 0 tuples and sampled 0 tuples.*
+--?unordered: end
+create foreign table elk_analyze_table_002 (
+                        c_id int, 
+                        c_d_id int, 
+                        c_w_id int, 
+                        c_first text, 
+                        c_middle text, 
+                        c_last text, 
+                        c_street_1 text, 
+                        c_street_2 text, 
+                        c_city text, 
+                        c_state text, 
+                        c_zip text, 
+                        c_phone text, 
+                        c_since timestamp, 
+                        c_credit text, 
+                        c_credit_lim float8, 
+                        c_discount float8, 
+                        c_balance float8, 
+                        c_ytd_payment float8, 
+                        c_payment_cnt int, 
+                        c_delivery_cnt int, 
+                        c_data text) 
+server obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_analyze_orc_table_002/', totalrows '5000') distribute by roundrobin;
+analyze verbose elk_analyze_table_002;
+--?NOTICE:  analyzing "public.elk_analyze_table_002".*
+--?NOTICE:  analyzing "public.elk_analyze_table_002".*
+--?NOTICE:  "elk_analyze_table_002": scanned 5000 tuples and sampled 5000 tuples.*
+--?INFO:  analyzing "public.elk_analyze_table_002".*
+--?INFO:  "elk_analyze_table_002": scanned 0 tuples and sampled 0 tuples.*
+create foreign table elk_analyze_table_017_2 (
+                        c_id int, 
+                        c_d_id int, 
+                        c_w_id int, 
+                        c_first text, 
+                        c_middle text, 
+                        c_last text, 
+                        c_street_1 text, 
+                        c_street_2 text, 
+                        c_city text, 
+                        c_state text, 
+                        c_zip text, 
+                        c_phone text, 
+                        c_since timestamp, 
+                        c_credit text, 
+                        c_credit_lim float8, 
+                        c_discount float8, 
+                        c_balance float8, 
+                        c_ytd_payment float8, 
+                        c_payment_cnt int, 
+                        c_delivery_cnt int, 
+                        c_data text) 
+server obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_analyze_orc_table_017_2/', totalrows '5000') distribute by roundrobin;
+analyze verbose elk_analyze_table_017_2;
+--?NOTICE:  analyzing "public.elk_analyze_table_017_2".*
+--?NOTICE:  "elk_analyze_table_017_2": scanned 0 tuples and sampled 0 tuples.*
+--?NOTICE:  analyzing "public.elk_analyze_table_017_2".*
+--?NOTICE:  "elk_analyze_table_017_2": scanned 0 tuples and sampled 0 tuples.*
+--?INFO:  analyzing "public.elk_analyze_table_017_2".*
+--?INFO:  "elk_analyze_table_017_2": scanned 0 tuples and sampled 0 tuples.*
+--add llt
+analyze foreign tables;
+DROP SERVER obs_server CASCADE;
+NOTICE:  drop cascades to 14 other objects
+DETAIL:  drop cascades to foreign table lineitem
+drop cascades to foreign table customer
+drop cascades to foreign table orders
+drop cascades to foreign table part
+drop cascades to foreign table supplier
+drop cascades to foreign table partsupp
+drop cascades to foreign table nation
+drop cascades to foreign table region
+drop cascades to foreign table part_1
+drop cascades to foreign table part_2
+drop cascades to foreign table part_3
+drop cascades to foreign table part_4
+drop cascades to foreign table elk_analyze_table_002
+drop cascades to foreign table elk_analyze_table_017_2

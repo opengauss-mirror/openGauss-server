@@ -48,6 +48,10 @@ typedef struct AclItem {
     AclMode ai_privs; /* privilege bits */
 } AclItem;
 
+/* type of privileges */
+typedef enum { DML_PRIVS_INDEX = 0, DDL_PRIVS_INDEX } PRIVS_INDEX;
+#define PRIVS_ATTR_NUM 2
+
 /*
  * The upper 16 bits of the ai_privs field of an AclItem are the grant option
  * bits, and the lower 16 bits are the actual privileges.  We use "rights"
@@ -59,6 +63,12 @@ typedef struct AclItem {
 
 #define ACL_GRANT_OPTION_FOR(privs) (((AclMode)(privs)&0xFFFF) << 16)
 #define ACL_OPTION_TO_PRIVS(privs) (((AclMode)(privs) >> 16) & 0xFFFF)
+
+#define ACLMODE_FOR_DDL(privs) (((privs) & FLAG_FOR_DDL_ACL) == 0 ? false : true)
+/* remove ddl privileges flag from Aclitem */
+#define REMOVE_DDL_FLAG(privs) ((privs) & (~((AclMode)FLAG_FOR_DDL_ACL & 0xFFFF)))
+/* add ddl privileges flag to Aclitem */
+#define ADD_DDL_FLAG(privs) ((privs) | ((AclMode)FLAG_FOR_DDL_ACL & 0xFFFF))
 
 #define ACLITEM_SET_PRIVS(item, privs) \
     ((item).ai_privs = ((item).ai_privs & ~((AclMode)0xFFFF)) | ((AclMode)(privs)&0xFFFF))
@@ -156,6 +166,36 @@ typedef ArrayType Acl;
 #define ACL_ALL_RIGHTS_TYPE (ACL_USAGE)
 #define ACL_ALL_RIGHTS_DATA_SOURCE (ACL_USAGE)
 #define ACL_ALL_RIGHTS_DIRECTORY (ACL_READ | ACL_WRITE)
+#define ACL_ALL_RIGHTS_KEY (ACL_USAGE)
+
+/* External representations of the ddl privilege bits --- aclitemin/aclitemout */
+#define ACL_ALTER_CHR 'A' /* known as "modify" */
+#define ACL_DROP_CHR 'P' /* known as "remove" */
+#define ACL_COMMENT_CHR 'm' /* known as "statement" */
+#define ACL_INDEX_CHR 'i'
+#define ACL_VACUUM_CHR 'v'
+
+/* string holding all ddl privilege code chars, in order by bitmask position */
+#define ACL_ALL_DDL_RIGHTS_STR "APmiv"
+
+/* Bitmasks defining "all ddl rights" for each supported object type */
+#define ACL_ALL_DDL_RIGHTS_COLUMN (ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_RELATION (ACL_ALTER | ACL_DROP | ACL_COMMENT | ACL_INDEX | ACL_VACUUM)
+#define ACL_ALL_DDL_RIGHTS_SEQUENCE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_NODEGROUP (ACL_ALTER | ACL_DROP)
+#define ACL_ALL_DDL_RIGHTS_DATABASE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_TABLESPACE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_NAMESPACE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_FUNCTION (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_TYPE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_FOREIGN_SERVER (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_FDW (ACL_NO_DDL_RIGHTS)
+#define ACL_ALL_DDL_RIGHTS_DATA_SOURCE (ACL_NO_DDL_RIGHTS)
+#define ACL_ALL_DDL_RIGHTS_DIRECTORY (ACL_NO_DDL_RIGHTS)
+#define ACL_ALL_DDL_RIGHTS_LARGEOBJECT (ACL_NO_DDL_RIGHTS)
+#define ACL_ALL_DDL_RIGHTS_LANGUAGE (ACL_NO_DDL_RIGHTS)
+#define ACL_ALL_DDL_RIGHTS_DOMAIN (ACL_NO_DDL_RIGHTS)
+#define ACL_ALL_DDL_RIGHTS_KEY (ACL_DROP)
 
 /* operation codes for pg_*_aclmask */
 typedef enum {
@@ -165,6 +205,11 @@ typedef enum {
 
 /* result codes for pg_*_aclcheck */
 typedef enum { ACLCHECK_OK = 0, ACLCHECK_NO_PRIV, ACLCHECK_NOT_OWNER } AclResult;
+
+typedef struct {
+    const char* name;
+    AclMode value;
+} priv_map;
 
 /* this enum covers all object types that can have privilege errors */
 /* currently it's only used to tell aclcheck_error what to say */
@@ -192,6 +237,8 @@ typedef enum AclObjectKind {
     ACL_KIND_EXTENSION,       /* pg_extension */
     ACL_KIND_DATA_SOURCE,     /* data source */
     ACL_KIND_DIRECTORY,       /* pg_directory */
+    ACL_KIND_COLUMN_SETTING,  /* column setting */
+    ACL_KIND_GLOBAL_SETTING,  /* master client key */
     MAX_ACL_KIND              /* MUST BE LAST */
 } AclObjectKind;
 
@@ -211,6 +258,7 @@ extern void aclitemsort(Acl* acl);
 extern bool aclequal(const Acl* left_acl, const Acl* right_acl);
 
 extern AclMode aclmask(const Acl* acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHow how);
+extern AclMode aclmask_dbe_perf(const Acl* acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHow how);
 extern int aclmembers(const Acl* acl, Oid** roleids);
 
 extern bool has_privs_of_role(Oid member, Oid role);
@@ -221,7 +269,8 @@ extern void check_is_member_of_role(Oid member, Oid role);
 extern Oid get_role_oid(const char* rolname, bool missing_ok);
 
 extern void select_best_grantor(
-    Oid roleId, AclMode privileges, const Acl* acl, Oid ownerId, Oid* grantorId, AclMode* grantOptions);
+    Oid roleId, AclMode privileges, AclMode ddl_privileges, const Acl* acl, Oid ownerId,
+        Oid* grantorId, AclMode* grantOptions, AclMode* ddl_grantOptions, bool is_dbe_perf = false);
 
 extern void initialize_acl(void);
 
@@ -264,6 +313,8 @@ extern AclMode pg_foreign_data_wrapper_aclmask(Oid fdw_oid, Oid roleid, AclMode 
 extern AclMode pg_foreign_server_aclmask(Oid srv_oid, Oid roleid, AclMode mask, AclMaskHow how);
 extern AclMode pg_extension_data_source_aclmask(Oid src_oid, Oid roleid, AclMode mask, AclMaskHow how);
 extern AclMode pg_type_aclmask(Oid type_oid, Oid roleid, AclMode mask, AclMaskHow how);
+extern AclMode gs_sec_cmk_aclmask(Oid key_oid, Oid roleid, AclMode mask, AclMaskHow how, bool check_nodegroup = true);
+extern AclMode gs_sec_cek_aclmask(Oid key_oid, Oid roleid, AclMode mask, AclMaskHow how, bool check_nodegroup = true);
 
 extern AclResult pg_attribute_aclcheck(Oid table_oid, AttrNumber attnum, Oid roleid, AclMode mode);
 extern AclResult pg_attribute_aclcheck_all(Oid table_oid, Oid roleid, AclMode mode, AclMaskHow how);
@@ -280,6 +331,8 @@ extern AclResult pg_foreign_data_wrapper_aclcheck(Oid fdw_oid, Oid roleid, AclMo
 extern AclResult pg_foreign_server_aclcheck(Oid srv_oid, Oid roleid, AclMode mode);
 extern AclResult pg_extension_data_source_aclcheck(Oid src_oid, Oid roleid, AclMode mode);
 extern AclResult pg_type_aclcheck(Oid type_oid, Oid roleid, AclMode mode);
+extern AclResult gs_sec_cmk_aclcheck(Oid key_oid, Oid roleid, AclMode mode, bool check_nodegroup = false);
+extern AclResult gs_sec_cek_aclcheck(Oid key_oid, Oid roleid, AclMode mode, bool check_nodegroup = false);
 
 extern void aclcheck_error(AclResult aclerr, AclObjectKind objectkind, const char* objectname);
 
@@ -307,6 +360,8 @@ extern bool pg_ts_config_ownercheck(Oid cfg_oid, Oid roleid);
 extern bool pg_foreign_data_wrapper_ownercheck(Oid srv_oid, Oid roleid);
 extern bool pg_foreign_server_ownercheck(Oid srv_oid, Oid roleid);
 extern bool pg_extension_ownercheck(Oid ext_oid, Oid roleid);
+extern bool gs_sec_cmk_ownercheck(Oid key_oid, Oid roleid);
+extern bool gs_sec_cek_ownercheck(Oid key_oid, Oid roleid);
 extern bool pg_extension_data_source_ownercheck(Oid src_oid, Oid roleid);
 extern bool pg_synonym_ownercheck(Oid synOid, Oid roleId);
 extern bool has_createrole_privilege(Oid roleid);

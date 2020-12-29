@@ -150,8 +150,8 @@ typedef struct _restoreOptions {
  * Main archiver interface.
  */
 
-extern void ConnectDatabase(Archive* AH, const char* dbname, const char* pghost, const char* pgport,
-    const char* username, enum trivalue prompt_password);
+extern char* ConnectDatabase(Archive* AH, const char* dbname, const char* pghost, const char* pgport,
+    const char* username, enum trivalue prompt_password, bool exitOnError = true);
 extern void DisconnectDatabase(Archive* AHX);
 
 #ifdef DUMPSSYSLOG

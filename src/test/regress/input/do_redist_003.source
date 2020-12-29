@@ -1,0 +1,9 @@
+---do redistribute
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -r -u $USER -d regression -p $PGPORT -f 2>@abs_srcdir@/tmp_check/redis_003.log ; echo $?
+update pgxc_group set in_redistribution = 'n';
+\d+ redis_status;
+\d+ redis_progress_detail;
+DROP TABLE IF EXISTS redis_status CASCADE;
+DROP TABLE IF EXISTS redis_progress_detail CASCADE;
+\d+ redis_status;
+\d+ redis_progress_detail;

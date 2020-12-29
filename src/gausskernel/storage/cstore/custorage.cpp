@@ -35,7 +35,7 @@
 #include "catalog/catalog.h"
 #include "commands/tablespace.h"
 #include "service/rpc_client.h"
-#include "storage/cstorealloc.h"
+#include "storage/cstore/cstorealloc.h"
 #include "storage/cu.h"
 #include "storage/custorage.h"
 #include "storage/lmgr.h"
@@ -51,15 +51,11 @@
 const uint64 MAX_FILE_SIZE = (uint64)RELSEG_SIZE * BLCKSZ;
 
 CUStorage::CUStorage(const CFileNode& cFileNode, CStoreAllocateStrategy strategy)
-    : m_cnode(cFileNode), m_fd(FILE_INVALID), m_strategy(strategy), append_only(false)
+    : m_cnode(cFileNode), m_fd(FILE_INVALID), m_strategy(strategy), append_only(false), is_2byte_align(false)
 {
     InitFileNamePrefix(cFileNode);
     m_fileName[0] = '\0';  // empty string
-
-    if (USING_FREE_SPACE == m_strategy)
-        m_freespace = New(CurrentMemoryContext) CStoreFreeSpace();
-    else
-        m_freespace = NULL;
+    InitCstoreFreeSpace(m_strategy);
 }
 
 void CUStorage::Destroy()
@@ -118,7 +114,7 @@ File CUStorage::OpenFile(char* file_name, int fileId, bool direct_flag)
     if (fd < 0) {
         ereport(ERROR, (errcode_for_file_access(), errmsg("Could not open file \"%s\": %m", file_name)));
     }
-    
+
     return fd;
 }
 
@@ -147,7 +143,11 @@ File CUStorage::WSOpenFile(char* file_name, int fileId, bool direct_flag)
     filenode.rnode.backend = InvalidBackendId;
     filenode.segno = fileId;
     filenode.storage = COLUMN_STORE;
-    filenode.forknumber = (ForkNumber)ColumnId2ColForkNum(m_cnode.m_attid);
+    if (m_cnode.m_attid <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_ATTRIBUTE),
+                        errmsg("validate user defined attribute failed!")));
+    }
+    filenode.forknumber = (ForkNumber)(m_cnode.m_attid + FirstColForkNum);
 
     return DataFileIdOpenFile(file_name, filenode, (int)fileFlags, 0600);
 }
@@ -179,23 +179,33 @@ const char* CUStorage::GetColumnFileName() const
     return (const char*)m_fileNamePrefix;
 }
 
-void CUStorage::GetFileName(_out_ char* fileName, _in_ int size, _in_ int fileId) const
+void CUStorage::GetFileName(_out_ char* fileName, _in_ const size_t capacity, _in_ const int fileId) const
 {
     Assert(fileId >= 0);
 
     // it means a cu file for one column of a reltaion.
     // it's different from bcm file name, its file list:
     //   16385_C1.0 16385_C1.1 16385_C1.2 ...
-    int rc = snprintf_s(fileName, static_cast<uint32>(size),
-        static_cast<uint32>(size) - 1, "%s.%d", m_fileNamePrefix, fileId);
+    int rc = snprintf_s(fileName, capacity, capacity - 1, "%s.%d", m_fileNamePrefix, fileId);
     securec_check_ss(rc, "", "");
-    fileName[size - 1] = '\0';
+    fileName[capacity - 1] = '\0';
+}
+
+
+void CUStorage::InitCstoreFreeSpace(CStoreAllocateStrategy strategy)
+{
+    if (USING_FREE_SPACE == strategy) {
+        m_freespace = New(CurrentMemoryContext) CStoreFreeSpace();
+    } else {
+        m_freespace = NULL;
+    }
 }
 
 // Get common FileName prefix only once.
 //
 void CUStorage::InitFileNamePrefix(_in_ const CFileNode& cFileNode)
 {
+    int pathlen;
     char attr_name[32];
     errno_t rc = EOK;
 
@@ -212,66 +222,67 @@ void CUStorage::InitFileNamePrefix(_in_ const CFileNode& cFileNode)
     if (spcoid == GLOBALTABLESPACE_OID) {
         /* Shared system relations live in {datadir}/global */
         Assert(dboid == 0);
-        rc = snprintf_s(m_fileNamePrefix, sizeof(m_fileNamePrefix), sizeof(m_fileNamePrefix) - 1,
-            "global/%u_%s", reloid, attr_name);
+        pathlen = strlen("global") + 1 + OIDCHARS + 1 + strlen(attr_name) + 1;
+        rc = snprintf_s(m_fileNamePrefix, sizeof(m_fileNamePrefix), pathlen, "global/%u_%s", reloid, attr_name);
         securec_check_ss(rc, "", "");
     } else if (spcoid == DEFAULTTABLESPACE_OID) {
         /* The default tablespace is {datadir}/base */
-        rc = snprintf_s(m_fileNamePrefix, sizeof(m_fileNamePrefix), sizeof(m_fileNamePrefix) - 1,
-            "base/%u/%u_%s", dboid, reloid, attr_name);
+        pathlen = strlen("base") + 1 + OIDCHARS + 1 + OIDCHARS + 1 + strlen(attr_name) + 1;
+        rc = snprintf_s(m_fileNamePrefix, sizeof(m_fileNamePrefix), pathlen, "base/%u/%u_%s", dboid, reloid, attr_name);
         securec_check_ss(rc, "", "");
     } else {
         /* All other tablespaces are accessed via symlinks */
         rc = snprintf_s(m_fileNamePrefix,
-            sizeof(m_fileNamePrefix),
-            sizeof(m_fileNamePrefix) - 1,
-            "pg_tblspc/%u/%s_%s/%u/%u_%s",
-            spcoid,
-            TABLESPACE_VERSION_DIRECTORY,
-            g_instance.attr.attr_common.PGXCNodeName,
-            dboid,
-            reloid,
-            attr_name);
+                        sizeof(m_fileNamePrefix),
+                        sizeof(m_fileNamePrefix) - 1,
+                        "pg_tblspc/%u/%s_%s/%u/%u_%s",
+                        spcoid,
+                        TABLESPACE_VERSION_DIRECTORY,
+                        g_instance.attr.attr_common.PGXCNodeName,
+                        dboid,
+                        reloid,
+                        attr_name);
         securec_check_ss(rc, "", "");
     }
 }
 
 static void SaveCUReportIOError(
-    const char* fileName, uint64 writeOffset, int writtenBtyes, int expectedBytes, int expectedTotalBytes)
+    const char* fileName, uint64 writeOffset, int writtenBtyes, int expectedBytes, int expectedTotalBytes, int align_size)
 {
     if (writtenBtyes > 0) {
-        if (writtenBtyes % ALIGNOF_CUSIZE != 0) {
+        Assert(align_size > 0);
+        if (writtenBtyes % align_size != 0) {
             /* later load will report error about not-matched align */
             ereport(ERROR,
-                (errcode_for_file_access(),
-                    errmsg("CU partial write, file \"%s\", offset(%lu), total(%d), expected(%d), actual(%d): %m",
-                        fileName,
-                        writeOffset,
-                        expectedTotalBytes,
-                        expectedBytes,
-                        writtenBtyes),
-                    errhint("CU file will be not page aligned, Check free disk space")));
+                    (errcode_for_file_access(),
+                     errmsg("CU partial write, file \"%s\", offset(%lu), total(%d), expected(%d), actual(%d): %m",
+                            fileName,
+                            writeOffset,
+                            expectedTotalBytes,
+                            expectedBytes,
+                            writtenBtyes),
+                     errhint("CU file will be not page aligned, Check free disk space")));
         } else {
             ereport(ERROR,
-                (errcode_for_file_access(),
-                    errmsg("CU partial write, file \"%s\", offset(%lu), total(%d), expected(%d), actual(%d): %m",
-                        fileName,
-                        writeOffset,
-                        expectedTotalBytes,
-                        expectedBytes,
-                        writtenBtyes),
-                    errhint("Check free disk space.")));
+                    (errcode_for_file_access(),
+                     errmsg("CU partial write, file \"%s\", offset(%lu), total(%d), expected(%d), actual(%d): %m",
+                            fileName,
+                            writeOffset,
+                            expectedTotalBytes,
+                            expectedBytes,
+                            writtenBtyes),
+                     errhint("Check free disk space.")));
         }
     } else {
         ereport(ERROR,
-            (errcode_for_file_access(),
-                errmsg("could not extend file \"%s\", offset(%lu), total(%d), expected(%d), actual(%d): %m",
-                    fileName,
-                    writeOffset,
-                    expectedTotalBytes,
-                    expectedBytes,
-                    writtenBtyes),
-                errhint("Check free disk space.")));
+                (errcode_for_file_access(),
+                 errmsg("could not extend file \"%s\", offset(%lu), total(%d), expected(%d), actual(%d): %m",
+                        fileName,
+                        writeOffset,
+                        expectedTotalBytes,
+                        expectedBytes,
+                        writtenBtyes),
+                 errhint("Check free disk space.")));
     }
 }
 
@@ -281,49 +292,49 @@ static void LoadCUReportIOError(
     if (errno == ENOENT) {
         /* file not exists */
         ereport(ERROR,
-            (errcode_for_file_access(),
-                errmsg("read file \"%s\" failed, %m", fileName),
-                errdetail("offset(%lu), load size(%d), expected read(%d), actual read(%d)",
-                    readOffset,
-                    expectedTotalBytes,
-                    expectedBytes,
-                    readBytes)));
+                (errcode_for_file_access(),
+                 errmsg("read file \"%s\" failed, %m", fileName),
+                 errdetail("offset(%lu), load size(%d), expected read(%d), actual read(%d)",
+                           readOffset,
+                           expectedTotalBytes,
+                           expectedBytes,
+                           readBytes)));
     } else if (readBytes >= 0) {
         if (readBytes == 0) {
             /* no data is read from */
             ereport(ERROR,
+                    (errcode_for_file_access(),
+                     errmsg(
+                         "no data is read from \"%s\", offset(%lu), load size(%d), expected read(%d), actual read(%d)",
+                         fileName,
+                         readOffset,
+                         expectedTotalBytes,
+                         expectedBytes,
+                         readBytes)));
+        } else {
+            /* only some data is read from */
+            ereport(ERROR,
+                    (errcode_for_file_access(),
+                     errmsg("some data are read from \"%s\", offset(%lu), load size(%d), expected read(%d), actual "
+                            "read(%d)",
+                            fileName,
+                            readOffset,
+                            expectedTotalBytes,
+                            expectedBytes,
+                            readBytes),
+                     errdetail("maybe CU file is not page aligned, or with not-completed CU data"),
+                     errhint(
+                         "maybe you should upgrade cstore data files first, or there were CU written IO error before")));
+        }
+    } else {
+        ereport(ERROR,
                 (errcode_for_file_access(),
-                    errmsg(
-                        "no data is read from \"%s\", offset(%lu), load size(%d), expected read(%d), actual read(%d)",
+                 errmsg("could not read file \"%s\", offset(%lu), load size(%d), expected read(%d), actual read(%d): %m",
                         fileName,
                         readOffset,
                         expectedTotalBytes,
                         expectedBytes,
                         readBytes)));
-        } else {
-            /* only some data is read from */
-            ereport(ERROR,
-                (errcode_for_file_access(),
-                    errmsg("some data are read from \"%s\", offset(%lu), load size(%d), expected read(%d), actual "
-                           "read(%d)",
-                        fileName,
-                        readOffset,
-                        expectedTotalBytes,
-                        expectedBytes,
-                        readBytes),
-                    errdetail("maybe CU file is not page aligned, or with not-completed CU data"),
-                    errhint(
-                        "maybe you should upgrade cstore data files first, or there were CU written IO error before")));
-        }
-    } else {
-        ereport(ERROR,
-            (errcode_for_file_access(),
-                errmsg("could not read file \"%s\", offset(%lu), load size(%d), expected read(%d), actual read(%d): %m",
-                    fileName,
-                    readOffset,
-                    expectedTotalBytes,
-                    expectedBytes,
-                    readBytes)));
     }
 }
 
@@ -368,7 +379,8 @@ void CUStorage::SaveCU(char* write_buf, _in_ uint64 offset, _in_ int size, bool 
 
         int writtenBytes = FilePWrite(m_fd, write_buf, write_size, writeOffset);
         if (writtenBytes != write_size) {
-            SaveCUReportIOError(tmpFileName, writeOffset, writtenBytes, write_size, size);
+            int align_size = is_2byte_align ? ALIGNOF_TIMESERIES_CUSIZE : ALIGNOF_CUSIZE;
+            SaveCUReportIOError(tmpFileName, writeOffset, writtenBytes, write_size, size, align_size);
         }
 
         ++writeFileId;
@@ -378,7 +390,10 @@ void CUStorage::SaveCU(char* write_buf, _in_ uint64 offset, _in_ int size, bool 
         left_size -= write_size;
     }
 
-    Assert(left_size == 0);
+    if (left_size != 0) {
+        ereport(ERROR, (errcode_for_file_access(),
+                        errmsg("write file  \"%s\" failed in savecu!", tmpFileName)));
+    }
 }
 
 // After remote read CU, need overwrite local CU
@@ -420,15 +435,15 @@ void CUStorage::OverwriteCU(
         if ((nbytes = FilePWrite(m_fd, write_buf, write_size, writeOffset)) != write_size) {
             // just warning
             ereport(WARNING,
-                (errcode_for_file_access(),
-                    errmsg("Overwrite CU failed. file \"%s\" , offset(%lu), size(%d), expect_write_size(%d), "
-                           "acture_write_size(%d): %m",
-                        tmpFileName,
-                        writeOffset,
-                        size,
-                        write_size,
-                        nbytes),
-                    handle_in_client(true)));
+                    (errcode_for_file_access(),
+                     errmsg("Overwrite CU failed. file \"%s\" , offset(%lu), size(%d), expect_write_size(%d), "
+                            "acture_write_size(%d): %m",
+                            tmpFileName,
+                            writeOffset,
+                            size,
+                            write_size,
+                            nbytes),
+                     handle_in_client(true)));
         }
         ++writeFileId;
         writeOffset = 0;
@@ -437,7 +452,10 @@ void CUStorage::OverwriteCU(
         left_size -= write_size;
     }
 
-    Assert(left_size == 0);
+    if (left_size != 0) {
+        ereport(ERROR, (errcode_for_file_access(),
+                        errmsg("write file \"%s\" failed in OverwriteCU!", tmpFileName)));
+    }
 }
 
 void CUStorage::Load(_in_ uint64 offset, _in_ int size, __inout char* outbuf, bool direct_flag)
@@ -458,7 +476,10 @@ void CUStorage::Load(_in_ uint64 offset, _in_ int size, __inout char* outbuf, bo
                 FileClose(m_fd);
             m_fd = OpenFile(tmpFileName, readFileId, direct_flag);
 
-            Assert(m_fd != FILE_INVALID);
+            if (m_fd == FILE_INVALID) {
+                ereport(ERROR, (errcode_for_file_access(), errmsg("Could not open file \"%s\"", tmpFileName)));
+            }
+
             rc = strcpy_s(m_fileName, MAXPGPATH, tmpFileName);
             securec_check_c(rc, "\0", "\0");
         }
@@ -474,7 +495,10 @@ void CUStorage::Load(_in_ uint64 offset, _in_ int size, __inout char* outbuf, bo
         read_size = (((unsigned int)left_size > MAX_FILE_SIZE) ? MAX_FILE_SIZE : left_size);
         left_size -= read_size;
     }
-    Assert(left_size == 0);
+    if (left_size != 0) {
+        ereport(ERROR, (errcode_for_file_access(),
+                        errmsg("read file \"%s\" failed in load!", tmpFileName)));
+    }
 }
 
 int CUStorage::WSLoad(_in_ uint64 offset, _in_ int size, __inout char* outbuf, bool direct_flag)
@@ -489,19 +513,19 @@ int CUStorage::WSLoad(_in_ uint64 offset, _in_ int size, __inout char* outbuf, b
     char tmpFileName[MAXPGPATH];
     bool isCUReadSizeValid = false;
 
-    isCUReadSizeValid = (read_size > 0 && 0 == read_size % ALIGNOF_CUSIZE);
+    const int CUALIGNSIZE = is_2byte_align ? ALIGNOF_TIMESERIES_CUSIZE : ALIGNOF_CUSIZE;
+    isCUReadSizeValid = (read_size > 0 && 0 == read_size % CUALIGNSIZE);
 
     if (!isCUReadSizeValid) {
-        Assert(false);
         ereport(ERROR,
-            (errcode_for_file_access(),
-                errmsg("unexpected cu file read info: offset(%lu), size(%d), readFileId(%d), readOffset(%lu), "
-                       "expect_read_size(%d).",
-                    offset,
-                    size,
-                    readFileId,
-                    readOffset,
-                    read_size)));
+                (errcode_for_file_access(),
+                 errmsg("unexpected cu file read info: offset(%lu), size(%d), readFileId(%d), readOffset(%lu), "
+                        "expect_read_size(%d).",
+                        offset,
+                        size,
+                        readFileId,
+                        readOffset,
+                        read_size)));
 
         return -1;
     }
@@ -530,34 +554,32 @@ int CUStorage::WSLoad(_in_ uint64 offset, _in_ int size, __inout char* outbuf, b
             if (0 == nbytes) {
                 if (u_sess->attr.attr_storage.HaModuleDebug)
                     ereport(NOTICE,
-                        (errcode_for_file_access(),
-                            errmsg("HA-WSLoad: read file \"%s\" to get 0 byte, please check the according cu file.",
-                                tmpFileName)));
+                            (errcode_for_file_access(),
+                             errmsg("HA-WSLoad: read file \"%s\" to get 0 byte, please check the according cu file.",
+                                    tmpFileName)));
                 return 0;
             }
 
-            if (nbytes % ALIGNOF_CUSIZE != 0) {
-                Assert(false);
+            if (nbytes % CUALIGNSIZE != 0) {
                 ereport(ERROR,
-                    (errcode_for_file_access(),
-                        errmsg("read file \"%s\" failed, offset(%lu), size(%d), expect_read_size(%d), "
-                               "acture_read_size(%d), maybe you should upgrade cstore data files first",
-                            tmpFileName,
-                            offset,
-                            size,
-                            read_size,
-                            nbytes)));
+                        (errcode_for_file_access(),
+                         errmsg("read file \"%s\" failed, offset(%lu), size(%d), expect_read_size(%d), "
+                                "acture_read_size(%d), maybe you should upgrade cstore data files first",
+                                tmpFileName,
+                                offset,
+                                size,
+                                read_size,
+                                nbytes)));
             } else {
-                Assert(false);
                 ereport(ERROR,
-                    (errcode_for_file_access(),
-                        errmsg("could not read file \"%s\", offset(%lu), size(%d), expect_read_size(%d), "
-                               "acture_read_size(%d): %m",
-                            tmpFileName,
-                            offset,
-                            size,
-                            read_size,
-                            nbytes)));
+                        (errcode_for_file_access(),
+                         errmsg("could not read file \"%s\", offset(%lu), size(%d), expect_read_size(%d), "
+                                "acture_read_size(%d): %m",
+                                tmpFileName,
+                                offset,
+                                size,
+                                read_size,
+                                nbytes)));
             }
         }
 
@@ -567,7 +589,11 @@ int CUStorage::WSLoad(_in_ uint64 offset, _in_ int size, __inout char* outbuf, b
         read_size = (((unsigned int)left_size > MAX_FILE_SIZE) ? MAX_FILE_SIZE : left_size);
         left_size -= read_size;
     }
-    Assert(left_size == 0);
+
+    if (left_size != 0) {
+        ereport(ERROR, (errcode_for_file_access(),
+                        errmsg("read file \"%s\" failed in wsload!", tmpFileName)));
+    }
 
     return size;
 }
@@ -657,13 +683,14 @@ void CUStorage::FastExtendFile(uint64 extend_offset, uint32 size, bool keep_size
  */
 uint64 CUStorage::GetAlignCUOffset(uint64 offset) const
 {
+    const int CUALIGNSIZE = is_2byte_align ? ALIGNOF_TIMESERIES_CUSIZE : ALIGNOF_CUSIZE;
     uint64 readOffset = CU_FILE_OFFSET(offset);
-    uint64 remainder = readOffset % ALIGNOF_CUSIZE;
+    uint64 remainder = readOffset % CUALIGNSIZE;
     if (remainder != 0) {
         ereport(DEBUG1, (errmodule(MOD_ADIO), errmsg("GetAlignCUOffset: find un align offset(%lu)", offset)));
-        if (readOffset > ALIGNOF_CUSIZE) {
+        if (readOffset > (uint64)CUALIGNSIZE) {
             return offset - remainder;
-        } else if (readOffset < ALIGNOF_CUSIZE) {
+        } else if (readOffset < (uint64)CUALIGNSIZE) {
             return offset - readOffset;
         } else {
             Assert(0);
@@ -680,10 +707,11 @@ uint64 CUStorage::GetAlignCUOffset(uint64 offset) const
  */
 int CUStorage::GetAlignCUSize(int size) const
 {
-    int remainder = size % ALIGNOF_CUSIZE;
+    const int CUALIGNSIZE = is_2byte_align ? ALIGNOF_TIMESERIES_CUSIZE : ALIGNOF_CUSIZE;
+    int remainder = size % CUALIGNSIZE;
     if (remainder != 0) {
         ereport(DEBUG1, (errmodule(MOD_ADIO), errmsg("GetAlignCUOffset: find un align size(%d)", size)));
-        return size + ALIGNOF_CUSIZE - remainder;
+        return size + CUALIGNSIZE - remainder;
     }
     return size;
 }
@@ -699,9 +727,15 @@ int CUStorage::GetAlignCUSize(int size) const
  */
 void CUStorage::LoadCU(_in_ CU* cuPtr, _in_ uint64 offset, _in_ int size, bool direct_flag, bool inCUCache)
 {
+    if (size < 0 || (uint64)size > MAX_FILE_SIZE) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                        errmsg("invalid size(%u) in CUStorage::LoadCU", size)));
+    }
+
     if (size == 0) {
         cuPtr->m_compressedBufSize = 0;
-        Assert(0);
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                        errmsg("CUStorage::LoadCU size = 0")));
         return;
     }
 
@@ -721,9 +755,6 @@ void CUStorage::LoadCU(_in_ CU* cuPtr, _in_ uint64 offset, _in_ int size, bool d
     // the complete CU data has been loaded, so set the cu size.
     // we will check this value during decompressing cu data.
     //
-    if (load_size + 8 < cuPtr->m_head_padding_size) {
-        ereport(ERROR, (errcode(ERRCODE_OUT_OF_BUFFER), errmsg("out of CU buffer")));
-    }
     cuPtr->m_compressedBuf = cuPtr->m_compressedLoadBuf + cuPtr->m_head_padding_size;
     cuPtr->SetCUSize(size);
     cuPtr->m_compressedBufSize = size;
@@ -753,8 +784,8 @@ void CUStorage::RemoteLoadCU(_in_ CU* cuPtr, _in_ uint64 offset, _in_ int size, 
     XLogRecPtr cur_lsn = GetInsertRecPtr();
 
     /* get remote address */
-    char remote_address1[MAXPGPATH] = {0}; /* remote_address1[0] = '\0'; */
-    char remote_address2[MAXPGPATH] = {0}; /* remote_address2[0] = '\0'; */
+    char remote_address1[MAXPGPATH] = { 0 }; /* remote_address1[0] = '\0'; */
+    char remote_address2[MAXPGPATH] = { 0 }; /* remote_address2[0] = '\0'; */
     GetRemoteReadAddress(remote_address1, remote_address2, MAXPGPATH);
 
     const char* remote_address = remote_address1;
@@ -765,40 +796,40 @@ retry:
         ereport(ERROR, (errcode(ERRCODE_IO_ERROR), (errmodule(MOD_REMOTE), errmsg("remote not available"))));
 
     ereport(LOG,
-        (errmodule(MOD_REMOTE),
-            errmsg("remote read CU file, %s offset %lu size %d from %s",
-                GetColumnFileName(),
-                offset,
-                size,
-                remote_address)));
+            (errmodule(MOD_REMOTE),
+             errmsg("remote read CU file, %s offset %lu size %d from %s",
+                    GetColumnFileName(),
+                    offset,
+                    size,
+                    remote_address)));
 
     PROFILING_REMOTE_START();
 
     int ret_code = ::RemoteGetCU(remote_address,
-        m_cnode.m_rnode.spcNode,
-        m_cnode.m_rnode.dbNode,
-        m_cnode.m_rnode.relNode,
-        m_cnode.m_attid,
-        load_offset,
-        load_size,
-        cur_lsn,
-        cuPtr->m_compressedLoadBuf);
+                                 m_cnode.m_rnode.spcNode,
+                                 m_cnode.m_rnode.dbNode,
+                                 m_cnode.m_rnode.relNode,
+                                 m_cnode.m_attid,
+                                 load_offset,
+                                 load_size,
+                                 cur_lsn,
+                                 cuPtr->m_compressedLoadBuf);
 
     PROFILING_REMOTE_END_READ(size, (ret_code == REMOTE_READ_OK));
 
     if (ret_code != REMOTE_READ_OK) {
         if (IS_DN_DUMMY_STANDYS_MODE() || retry_times >= 1) {
             ereport(ERROR,
-                (errcode(ERRCODE_IO_ERROR),
-                    (errmodule(MOD_REMOTE),
-                        errmsg("remote read failed from %s, %s", remote_address, RemoteReadErrMsg(ret_code)))));
+                    (errcode(ERRCODE_IO_ERROR),
+                     (errmodule(MOD_REMOTE),
+                      errmsg("remote read failed from %s, %s", remote_address, RemoteReadErrMsg(ret_code)))));
         } else
 
         {
             ereport(WARNING,
-                (errmodule(MOD_REMOTE),
-                    errmsg("remote read failed from %s, %s, try another", remote_address, RemoteReadErrMsg(ret_code)),
-                    handle_in_client(true)));
+                    (errmodule(MOD_REMOTE),
+                     errmsg("remote read failed from %s, %s, try another", remote_address, RemoteReadErrMsg(ret_code)),
+                     handle_in_client(true)));
 
             /* Check interrupts */
             CHECK_FOR_INTERRUPTS();
@@ -833,18 +864,17 @@ void CUStorage::FlushDataFile() const
 uint64 CUStorage::AllocSpace(_in_ int size)
 {
     uint64 offset = InvalidCStoreOffset;
-
+    int align_size = is_2byte_align ? ALIGNOF_TIMESERIES_CUSIZE : ALIGNOF_CUSIZE;
     switch (m_strategy) {
         case USING_FREE_SPACE:
-            offset = CStoreAllocator::TryAcquireSpaceFromFSM(m_freespace, size);
+            offset = CStoreAllocator::TryAcquireSpaceFromFSM(m_freespace, size, align_size);
             if (offset != InvalidCStoreOffset) {
                 append_only = false;
                 break;
             }
-            /* fall-through */
-            /* if no free space fits, use the APPEND_ONLY way */
+        /* if no free space fits, use the APPEND_ONLY way */
         case APPEND_ONLY:
-            offset = CStoreAllocator::AcquireSpace(m_cnode, size);
+            offset = CStoreAllocator::AcquireSpace(m_cnode, size, align_size);
             append_only = true;
             break;
         default:
@@ -934,6 +964,16 @@ void CUStorage::TruncateBcmFile()
     }
 }
 
+void CUStorage::Set2ByteAlign(bool is_2byte_align)
+{
+    this->is_2byte_align = is_2byte_align;
+}
+
+bool CUStorage::Is2ByteAlign()
+{
+    return is_2byte_align;
+}
+
 CUFile::CUFile(const RelFileNode& fileNode, int col)
 {
     CFileNode cFileNode(fileNode, col, MAIN_FORKNUM);
@@ -977,10 +1017,11 @@ void CUFile::Destroy()
     ADIO_END();
 }
 
-char* CUFile::Read(uint64 offset, int wantSize, int* realSize)
+char* CUFile::Read(uint64 offset, int wantSize, int* realSize, int align_size)
 {
-    Assert(wantSize % ALIGNOF_CUSIZE == 0);
-    Assert(CUFILE_MAX_BUF_SIZE % ALIGNOF_CUSIZE == 0);
+    Assert(align_size > 0);
+    Assert(wantSize % align_size == 0);
+    Assert(CUFILE_MAX_BUF_SIZE % align_size == 0);
 
     const bool notInited = (-1 == m_fileId);
     bool switchId = (m_fileId != (int)(CU_FILE_ID(offset)));

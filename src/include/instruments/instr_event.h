@@ -25,7 +25,6 @@
 
 #ifndef INSTR_EVENT_H
 #define INSTR_EVENT_H
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 void LWLockReportWaitFailed(LWLock *lock);
 #endif
-

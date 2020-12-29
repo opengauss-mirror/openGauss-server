@@ -21,7 +21,7 @@
 subdir = src/gausskernel/runtime/vecexecutor/vecnode
 top_builddir = ../../../../..
 include $(top_builddir)/src/Makefile.global
-
+override CPPFLAGS:=-std=c++14 $(CPPFLAGS)
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"
     ifneq "$(shell which g++ |grep hutaf_llt |wc -l)" "1"
@@ -34,7 +34,7 @@ OBJS = vechashtable.o vecagg.o vecplainagg.o vecsortagg.o vechashagg.o  vecsort.
 	  vecforeignscan.o vecmodifytable.o vecremotequery.o vecresult.o  vecscan.o vecsubqueryscan.o vecpartiterator.o \
 	   vecrescan.o vecappend.o veclimit.o vecconstraints.o vecsetop.o vecgroup.o vecunique.o vecgrpuniq.o vecmaterial.o vecnestloop.o \
        vecstore.o vecmergejoin.o vecwindowagg.o veccstoreindexheapscan.o veccstoreindexctidscan.o veccstoreindexand.o veccstoreindexor.o \
-	   dfsscan.o vecsubplan.o vecdfsindexscan.o vecmergeinto.o
+	   dfsscan.o vecsubplan.o vecdfsindexscan.o vecmergeinto.o vectsstorescan.o
 override CPPFLAGS += -D__STDC_FORMAT_MACROS	  
  
 include $(top_srcdir)/src/gausskernel/common.mk

@@ -1,0 +1,33 @@
+set enable_global_stats = true;
+set enable_vector_engine=on;
+-- problem:
+-- basic test for local dictionary compression, excluding conficts testing
+CREATE TABLE colcmpr_dict_00
+(
+	distKey int,
+	name varchar(20),
+	city char(20),
+	gender char,
+	postcode char(10),
+	coutry varchar(20),
+	telephone varchar(15)
+)  with (orientation = orc) tablespace hdfs_ts  DISTRIBUTE BY hash(distKey);
+COPY colcmpr_dict_00 FROM '@abs_srcdir@/data/colcmpr_dict_00.data';
+SELECT * FROM colcmpr_dict_00;
+DROP TABLE colcmpr_dict_00;
+
+-- problem:
+-- datatype: numeric text char(1) 
+CREATE TABLE colcmpr_dict_01
+(
+	distKey int,
+	myname text,
+	city text,
+	gender char(1),
+	postcode text,
+	coutry text,
+	telephone numeric(15,2)
+) with (orientation = orc) tablespace hdfs_ts ;
+COPY colcmpr_dict_01 FROM '@abs_srcdir@/data/colcmpr_dict_01.data';
+SELECT * FROM colcmpr_dict_01;
+DROP TABLE colcmpr_dict_01;

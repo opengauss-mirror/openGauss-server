@@ -1,7 +1,7 @@
 -- the date tyte of the compatible B/C/PG version is different from the A compatible version
 
-create database pg_db dbcompatibility 'PG';
-\c pg_db
+create database td_db dbcompatibility 'C';
+\c td_db
 
 CREATE TABLE interval_tab1 (
     city_id         int not null,
@@ -32,7 +32,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition;
 
 select * from interval_tab1 where logdate >= '2020-3-1' and logdate < '2020-3-7';
 
-explain (costs off, verbose on, nodes off) select * from interval_tab1 where logdate >= '2020-3-1' and logdate < '2020-3-7';
+explain (costs off, verbose on) select * from interval_tab1 where logdate >= '2020-3-1' and logdate < '2020-3-7';
 
 alter table interval_tab1 drop partition p1;
 
@@ -85,4 +85,4 @@ INTERVAL ('1 hour')
 );
 
 \c regression
-drop database pg_db;
+drop database td_db;

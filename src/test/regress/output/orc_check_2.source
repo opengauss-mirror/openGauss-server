@@ -1,0 +1,2384 @@
+--test orc foreign data wrapper.
+--
+-- Settings to make the result deterministic
+SET datestyle = "ISO, YMD";
+set enable_vector_engine=false;
+set enable_hdfs_predicate_pushdown=false;
+drop server hdfs_server cascade;
+--Unit 1. test plan without distributed clause
+DROP FOREIGN TABLE IF EXISTS lineitem;
+NOTICE:  foreign table "lineitem" does not exist, skipping
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS nation;
+NOTICE:  foreign table "nation" does not exist, skipping
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/nation_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS region;
+NOTICE:  foreign table "region" does not exist, skipping
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/region_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS part;
+NOTICE:  foreign table "part" does not exist, skipping
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT,
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/part_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS supplier;
+NOTICE:  foreign table "supplier" does not exist, skipping
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/000000_0') distribute by roundrobin;
+DROP FOREIGN TABLE IF EXISTS partsupp;
+NOTICE:  foreign table "partsupp" does not exist, skipping
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/000000_0') distribute by roundrobin;
+explain (verbose, costs off) SELECT L_SHIPDATE FROM lineitem WHERE L_orderkey BETWEEN 509050 AND 509070;
+WARNING:  Statistics in some tables or columns(public.lineitem.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                   QUERY PLAN                                                                    
+-------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: l_shipdate
+   ->  Foreign Scan on public.lineitem
+         Output: l_shipdate
+         Filter: ((lineitem.l_orderkey >= 509050) AND (lineitem.l_orderkey <= 509070))
+         Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0
+(6 rows)
+
+explain (verbose, costs off) SELECT count(L_SHIPDATE) FROM lineitem WHERE L_orderkey BETWEEN 509050 AND 509070;
+WARNING:  Statistics in some tables or columns(public.lineitem.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                         QUERY PLAN                                                                          
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count((count(l_shipdate)))
+   ->  Streaming (type: GATHER)
+         Output: (count(l_shipdate))
+         ->  Aggregate
+               Output: count(l_shipdate)
+               ->  Foreign Scan on public.lineitem
+                     Output: l_shipdate
+                     Filter: ((lineitem.l_orderkey >= 509050) AND (lineitem.l_orderkey <= 509070))
+                     Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0
+(10 rows)
+
+explain (verbose, costs off) select n_name, r_name from nation join region on n_regionkey=r_regionkey;
+WARNING:  Statistics in some tables or columns(public.nation.n_regionkey, public.region.r_regionkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: nation.n_name, region.r_name
+   ->  Hash Join
+         Output: nation.n_name, region.r_name
+         Hash Cond: (nation.n_regionkey = region.r_regionkey)
+         ->  Streaming(type: BROADCAST)
+               Output: nation.n_name, nation.n_regionkey
+               ->  Foreign Scan on public.nation
+                     Output: nation.n_name, nation.n_regionkey
+                     Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/000000_0
+         ->  Hash
+               Output: region.r_name, region.r_regionkey
+               ->  Foreign Scan on public.region
+                     Output: region.r_name, region.r_regionkey
+                     Orc File: /user/hive/warehouse/mppdb.db/region_orc11_64stripe/000000_0
+(15 rows)
+
+explain (verbose, costs off)
+select
+  s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+from
+  nation n join region r
+on
+  n.n_regionkey = r.r_regionkey and n.n_name = 'FRANCE'
+join
+  supplier s
+on
+  s.s_nationkey = n.n_nationkey
+join
+  partsupp ps
+on
+  s.s_suppkey = ps.ps_suppkey
+join
+  part p
+on
+  p.p_partkey = ps.ps_partkey and p.p_size = 15 and p.p_type like '%BRASS';
+WARNING:  Statistics in some tables or columns(public.nation.n_name, public.nation.n_regionkey, public.nation.n_nationkey, public.region.r_regionkey, public.supplier.s_nationkey, public.supplier.s_suppkey, public.partsupp.ps_suppkey, public.partsupp.ps_partkey, public.part.p_type, public.part.p_size, public.part.p_partkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                           QUERY PLAN                                                                           
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+   ->  Hash Join
+         Output: s.s_acctbal, s.s_name, n.n_name, p.p_partkey, ps.ps_supplycost, p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+         Hash Cond: (r.r_regionkey = n.n_regionkey)
+         ->  Foreign Scan on public.region r
+               Output: r.r_regionkey
+               Orc File: /user/hive/warehouse/mppdb.db/region_orc11_64stripe/000000_0
+         ->  Hash
+               Output: n.n_name, n.n_regionkey, s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, ps.ps_supplycost, p.p_partkey, p.p_mfgr
+               ->  Streaming(type: BROADCAST)
+                     Output: n.n_name, n.n_regionkey, s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, ps.ps_supplycost, p.p_partkey, p.p_mfgr
+                     ->  Nested Loop
+                           Output: n.n_name, n.n_regionkey, s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, ps.ps_supplycost, p.p_partkey, p.p_mfgr
+                           Join Filter: (s.s_suppkey = ps.ps_suppkey)
+                           ->  Streaming(type: BROADCAST)
+                                 Output: ps.ps_supplycost, ps.ps_suppkey, p.p_partkey, p.p_mfgr
+                                 ->  Hash Join
+                                       Output: ps.ps_supplycost, ps.ps_suppkey, p.p_partkey, p.p_mfgr
+                                       Hash Cond: (ps.ps_partkey = p.p_partkey)
+                                       ->  Foreign Scan on public.partsupp ps
+                                             Output: ps.ps_supplycost, ps.ps_suppkey, ps.ps_partkey
+                                             Orc File: /user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/000000_0
+                                       ->  Hash
+                                             Output: p.p_partkey, p.p_mfgr
+                                             ->  Streaming(type: BROADCAST)
+                                                   Output: p.p_partkey, p.p_mfgr
+                                                   ->  Foreign Scan on public.part p
+                                                         Output: p.p_partkey, p.p_mfgr
+                                                         Filter: ((p.p_type ~~ '%BRASS'::text) AND (p.p_size = 15))
+                                                         Orc File: /user/hive/warehouse/mppdb.db/part_orc11_64stripe/000000_0
+                           ->  Materialize
+                                 Output: n.n_name, n.n_regionkey, s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, s.s_suppkey
+                                 ->  Hash Join
+                                       Output: n.n_name, n.n_regionkey, s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, s.s_suppkey
+                                       Hash Cond: (s.s_nationkey = n.n_nationkey)
+                                       ->  Foreign Scan on public.supplier s
+                                             Output: s.s_acctbal, s.s_name, s.s_address, s.s_phone, s.s_comment, s.s_nationkey, s.s_suppkey
+                                             Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/000000_0
+                                       ->  Hash
+                                             Output: n.n_name, n.n_regionkey, n.n_nationkey
+                                             ->  Streaming(type: BROADCAST)
+                                                   Output: n.n_name, n.n_regionkey, n.n_nationkey
+                                                   ->  Foreign Scan on public.nation n
+                                                         Output: n.n_name, n.n_regionkey, n.n_nationkey
+                                                         Filter: (n.n_name = 'FRANCE'::text)
+                                                         Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/000000_0
+(47 rows)
+
+--Test Unit 2: distributed foreign table
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+NOTICE:  foreign table "customer" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+NOTICE:  foreign table "orders" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+Create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/')
+distribute by roundrobin;
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/customer_orc11_64stripe/')
+distribute by roundrobin;
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/orders_orc11_64stripe/')
+distribute by roundrobin;
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT, 
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/part_orc11_64stripe/')
+distribute by roundrobin;
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/')
+distribute by roundrobin;
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/')
+distribute by roundrobin;
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/nation_orc11_64stripe/')
+distribute by roundrobin;
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe/')
+distribute by roundrobin;
+-- there are bugs for the following three queries. cause EOF error from datanode
+explain (verbose, costs off) SELECT L_shipdate FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+WARNING:  Statistics in some tables or columns(public.lineitem.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: l_shipdate
+   ->  Foreign Scan on public.lineitem
+         Output: l_shipdate
+         Filter: ((lineitem.l_orderkey >= 2125190) AND (lineitem.l_orderkey <= 2125200))
+         Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+(6 rows)
+
+explain (verbose, costs off) SELECT count(L_shipdate) FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+WARNING:  Statistics in some tables or columns(public.lineitem.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count((count(l_shipdate)))
+   ->  Streaming (type: GATHER)
+         Output: (count(l_shipdate))
+         ->  Aggregate
+               Output: count(l_shipdate)
+               ->  Foreign Scan on public.lineitem
+                     Output: l_shipdate
+                     Filter: ((lineitem.l_orderkey >= 2125190) AND (lineitem.l_orderkey <= 2125200))
+                     Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+(10 rows)
+
+-- TPCH - Q1
+explain (verbose, costs off) 
+SELECT 
+  L_RETURNFLAG, L_LINESTATUS, CAST(SUM(L_QUANTITY) AS INT8), CAST(SUM(L_EXTENDEDPRICE) AS INT8) , CAST(SUM(L_EXTENDEDPRICE*(1-L_DISCOUNT)) AS INT8), CAST(SUM(L_EXTENDEDPRICE*(1-L_DISCOUNT)*(1+L_TAX)) AS INT8), CAST(AVG(L_QUANTITY) AS INT8), CAST(AVG(L_EXTENDEDPRICE) as INT8), CAST(AVG(L_DISCOUNT) AS INT8), COUNT(1) 
+FROM 
+  lineitem 
+WHERE 
+  L_SHIPDATE<='1998-09-02' 
+GROUP BY L_RETURNFLAG, L_LINESTATUS 
+ORDER BY L_RETURNFLAG, L_LINESTATUS;
+WARNING:  Statistics in some tables or columns(public.lineitem.l_shipdate, public.lineitem.l_returnflag, public.lineitem.l_linestatus) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                                                                                                                                                         QUERY PLAN                                                                                                                                                                                                                                         
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: l_returnflag, l_linestatus, ((sum((sum(l_quantity))))::bigint), ((sum((sum(l_extendedprice))))::bigint), ((sum((sum((l_extendedprice * (1::double precision - l_discount))))))::bigint), ((sum((sum(((l_extendedprice * (1::double precision - l_discount)) * (1::double precision + l_tax))))))::bigint), ((pg_catalog.avg((avg(l_quantity))))::bigint), ((pg_catalog.avg((avg(l_extendedprice))))::bigint), ((pg_catalog.avg((avg(l_discount))))::bigint), (count((count(1))))
+   Sort Key: lineitem.l_returnflag, lineitem.l_linestatus
+   ->  HashAggregate
+         Output: l_returnflag, l_linestatus, (sum((sum(l_quantity))))::bigint, (sum((sum(l_extendedprice))))::bigint, (sum((sum((l_extendedprice * (1::double precision - l_discount))))))::bigint, (sum((sum(((l_extendedprice * (1::double precision - l_discount)) * (1::double precision + l_tax))))))::bigint, (pg_catalog.avg((avg(l_quantity))))::bigint, (pg_catalog.avg((avg(l_extendedprice))))::bigint, (pg_catalog.avg((avg(l_discount))))::bigint, count((count(1)))
+         Group By Key: lineitem.l_returnflag, lineitem.l_linestatus
+         ->  Streaming (type: GATHER)
+               Output: l_returnflag, l_linestatus, (sum(l_quantity)), (sum(l_extendedprice)), (sum((l_extendedprice * (1::double precision - l_discount)))), (sum(((l_extendedprice * (1::double precision - l_discount)) * (1::double precision + l_tax)))), (avg(l_quantity)), (avg(l_extendedprice)), (avg(l_discount)), (count(1))
+               ->  HashAggregate
+                     Output: l_returnflag, l_linestatus, sum(l_quantity), sum(l_extendedprice), sum((l_extendedprice * (1::double precision - l_discount))), sum(((l_extendedprice * (1::double precision - l_discount)) * (1::double precision + l_tax))), avg(l_quantity), avg(l_extendedprice), avg(l_discount), count(1)
+                     Group By Key: lineitem.l_returnflag, lineitem.l_linestatus
+                     ->  Foreign Scan on public.lineitem
+                           Output: l_returnflag, l_linestatus, l_quantity, l_extendedprice, l_discount, l_tax
+                           Filter: (lineitem.l_shipdate <= '1998-09-02'::text)
+                           Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+(15 rows)
+
+--TPCH - Q2
+explain (verbose, costs off) 
+select
+        s_acctbal,
+        s_name,
+        n_name,
+        p_partkey,
+        p_mfgr,
+        s_address,
+        s_phone,
+        s_comment
+from
+        part,
+        supplier,
+        partsupp,
+        nation,
+        region,
+        (
+                select
+                        ps_partkey as temp_ps_partkey, min(ps_supplycost) as temp_min_ps_supplycost
+                from
+                        partsupp,
+                        supplier,
+                        nation,
+                        region
+                where
+                        s_suppkey = ps_suppkey
+                        and s_nationkey = n_nationkey
+                        and n_regionkey = r_regionkey
+                        and r_name = 'EUROPE'
+            group by ps_partkey
+        ) as temp
+where
+    p_partkey = temp_ps_partkey
+        and p_partkey = ps_partkey
+        and s_suppkey = ps_suppkey
+        and p_size = 15
+        and p_type like '%BRASS'
+        and s_nationkey = n_nationkey
+		and r_name = 'EUROPE'
+        and ps_supplycost = temp_min_ps_supplycost
+order by
+        s_acctbal desc,
+        n_name,
+        s_name,
+        p_partkey
+limit 100
+;
+WARNING:  Statistics in some tables or columns(public.part.p_type, public.part.p_size, public.part.p_partkey, public.supplier.s_suppkey, public.supplier.s_nationkey, public.partsupp.ps_suppkey, public.partsupp.ps_partkey, public.partsupp.ps_supplycost, public.nation.n_nationkey, public.nation.n_regionkey, public.region.r_name, public.region.r_regionkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                                                         QUERY PLAN                                                                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: public.supplier.s_acctbal, public.supplier.s_name, public.nation.n_name, part.p_partkey, part.p_mfgr, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment
+   ->  Streaming (type: GATHER)
+         Output: public.supplier.s_acctbal, public.supplier.s_name, public.nation.n_name, part.p_partkey, part.p_mfgr, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment
+         ->  Limit
+               Output: public.supplier.s_acctbal, public.supplier.s_name, public.nation.n_name, part.p_partkey, part.p_mfgr, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment
+               ->  Sort
+                     Output: public.supplier.s_acctbal, public.supplier.s_name, public.nation.n_name, part.p_partkey, part.p_mfgr, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment
+                     Sort Key: public.supplier.s_acctbal DESC, public.nation.n_name, public.supplier.s_name, part.p_partkey
+                     ->  Nested Loop
+                           Output: public.supplier.s_acctbal, public.supplier.s_name, public.nation.n_name, part.p_partkey, part.p_mfgr, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment
+                           Join Filter: (part.p_partkey = public.partsupp.ps_partkey)
+                           ->  Nested Loop
+                                 Output: part.p_partkey, part.p_mfgr
+                                 ->  Streaming(type: BROADCAST)
+                                       Output: part.p_partkey, part.p_mfgr
+                                       ->  Foreign Scan on public.part
+                                             Output: part.p_partkey, part.p_mfgr
+                                             Filter: ((part.p_type ~~ '%BRASS'::text) AND (part.p_size = 15))
+                                             Orc File: /user/hive/warehouse/mppdb.db/part_orc11_64stripe/
+                                 ->  Foreign Scan on public.region
+                                       Filter: (public.region.r_name = 'EUROPE'::text)
+                                       Orc File: /user/hive/warehouse/mppdb.db/region_orc11_64stripe/
+                           ->  Materialize
+                                 Output: public.supplier.s_acctbal, public.supplier.s_name, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment, public.partsupp.ps_partkey, public.nation.n_name, public.partsupp.ps_partkey
+                                 ->  Streaming(type: BROADCAST)
+                                       Output: public.supplier.s_acctbal, public.supplier.s_name, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment, public.partsupp.ps_partkey, public.nation.n_name, public.partsupp.ps_partkey
+                                       ->  Hash Join
+                                             Output: public.supplier.s_acctbal, public.supplier.s_name, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment, public.partsupp.ps_partkey, public.nation.n_name, public.partsupp.ps_partkey
+                                             Hash Cond: (public.nation.n_nationkey = public.supplier.s_nationkey)
+                                             ->  Foreign Scan on public.nation
+                                                   Output: public.nation.n_name, public.nation.n_nationkey
+                                                   Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+                                             ->  Hash
+                                                   Output: public.supplier.s_acctbal, public.supplier.s_name, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment, public.supplier.s_nationkey, public.partsupp.ps_partkey, public.partsupp.ps_partkey
+                                                   ->  Streaming(type: BROADCAST)
+                                                         Output: public.supplier.s_acctbal, public.supplier.s_name, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment, public.supplier.s_nationkey, public.partsupp.ps_partkey, public.partsupp.ps_partkey
+                                                         ->  Nested Loop
+                                                               Output: public.supplier.s_acctbal, public.supplier.s_name, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment, public.supplier.s_nationkey, public.partsupp.ps_partkey, public.partsupp.ps_partkey
+                                                               Join Filter: (public.partsupp.ps_suppkey = public.supplier.s_suppkey)
+                                                               ->  Foreign Scan on public.supplier
+                                                                     Output: public.supplier.s_acctbal, public.supplier.s_name, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment, public.supplier.s_suppkey, public.supplier.s_nationkey
+                                                                     Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/
+                                                               ->  Materialize
+                                                                     Output: public.partsupp.ps_partkey, public.partsupp.ps_suppkey, public.partsupp.ps_partkey
+                                                                     ->  Streaming(type: BROADCAST)
+                                                                           Output: public.partsupp.ps_partkey, public.partsupp.ps_suppkey, public.partsupp.ps_partkey
+                                                                           ->  Hash Join
+                                                                                 Output: public.partsupp.ps_partkey, public.partsupp.ps_suppkey, public.partsupp.ps_partkey
+                                                                                 Hash Cond: ((public.partsupp.ps_partkey = public.partsupp.ps_partkey) AND (public.partsupp.ps_supplycost = (min((min(public.partsupp.ps_supplycost))))))
+                                                                                 ->  Foreign Scan on public.partsupp
+                                                                                       Output: public.partsupp.ps_partkey, public.partsupp.ps_suppkey, public.partsupp.ps_supplycost
+                                                                                       Orc File: /user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/
+                                                                                 ->  Hash
+                                                                                       Output: public.partsupp.ps_partkey, (min((min(public.partsupp.ps_supplycost))))
+                                                                                       ->  Streaming(type: BROADCAST)
+                                                                                             Output: public.partsupp.ps_partkey, (min((min(public.partsupp.ps_supplycost))))
+                                                                                             ->  HashAggregate
+                                                                                                   Output: public.partsupp.ps_partkey, min((min(public.partsupp.ps_supplycost)))
+                                                                                                   Group By Key: public.partsupp.ps_partkey
+                                                                                                   ->  Streaming(type: REDISTRIBUTE)
+                                                                                                         Output: public.partsupp.ps_partkey, (min(public.partsupp.ps_supplycost))
+                                                                                                         Distribute Key: public.partsupp.ps_partkey
+                                                                                                         ->  HashAggregate
+                                                                                                               Output: public.partsupp.ps_partkey, min(public.partsupp.ps_supplycost)
+                                                                                                               Group By Key: public.partsupp.ps_partkey
+                                                                                                               ->  Merge Join
+                                                                                                                     Output: public.partsupp.ps_partkey, public.partsupp.ps_supplycost
+                                                                                                                     Merge Cond: (public.supplier.s_suppkey = public.partsupp.ps_suppkey)
+                                                                                                                     ->  Sort
+                                                                                                                           Output: public.supplier.s_suppkey
+                                                                                                                           Sort Key: public.supplier.s_suppkey
+                                                                                                                           ->  Hash Join
+                                                                                                                                 Output: public.supplier.s_suppkey
+                                                                                                                                 Hash Cond: (public.supplier.s_nationkey = public.nation.n_nationkey)
+                                                                                                                                 ->  Foreign Scan on public.supplier
+                                                                                                                                       Output: public.supplier.s_suppkey, public.supplier.s_nationkey
+                                                                                                                                       Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/
+                                                                                                                                 ->  Hash
+                                                                                                                                       Output: public.nation.n_nationkey
+                                                                                                                                       ->  Streaming(type: BROADCAST)
+                                                                                                                                             Output: public.nation.n_nationkey
+                                                                                                                                             ->  Hash Join
+                                                                                                                                                   Output: public.nation.n_nationkey
+                                                                                                                                                   Hash Cond: (public.nation.n_regionkey = public.region.r_regionkey)
+                                                                                                                                                   ->  Foreign Scan on public.nation
+                                                                                                                                                         Output: public.nation.n_nationkey, public.nation.n_regionkey
+                                                                                                                                                         Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+                                                                                                                                                   ->  Hash
+                                                                                                                                                         Output: public.region.r_regionkey
+                                                                                                                                                         ->  Streaming(type: BROADCAST)
+                                                                                                                                                               Output: public.region.r_regionkey
+                                                                                                                                                               ->  Foreign Scan on public.region
+                                                                                                                                                                     Output: public.region.r_regionkey
+                                                                                                                                                                     Filter: (public.region.r_name = 'EUROPE'::text)
+                                                                                                                                                                     Orc File: /user/hive/warehouse/mppdb.db/region_orc11_64stripe/
+                                                                                                                     ->  Sort
+                                                                                                                           Output: public.partsupp.ps_partkey, public.partsupp.ps_supplycost, public.partsupp.ps_suppkey
+                                                                                                                           Sort Key: public.partsupp.ps_suppkey
+                                                                                                                           ->  Streaming(type: BROADCAST)
+                                                                                                                                 Output: public.partsupp.ps_partkey, public.partsupp.ps_supplycost, public.partsupp.ps_suppkey
+                                                                                                                                 ->  Foreign Scan on public.partsupp
+                                                                                                                                       Output: public.partsupp.ps_partkey, public.partsupp.ps_supplycost, public.partsupp.ps_suppkey
+                                                                                                                                       Orc File: /user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/
+(104 rows)
+
+--TPCH -Q3
+explain (verbose, costs off)
+select
+        l_orderkey,
+        sum(l_extendedprice * (1 - l_discount)) as revenue,
+        o_orderdate,
+        o_shippriority
+from
+        customer,
+        orders,
+        lineitem
+where
+        c_mktsegment = 'BUILDING'
+        and c_custkey = o_custkey
+        and l_orderkey = o_orderkey
+        and o_orderdate < '1995-03-15'
+        and l_shipdate > '1995-03-15'
+group by
+        l_orderkey,
+        o_orderdate,
+        o_shippriority
+order by
+        revenue desc,
+        o_orderdate
+limit 10
+;
+WARNING:  Statistics in some tables or columns(public.customer.c_mktsegment, public.customer.c_custkey, public.orders.o_orderdate, public.orders.o_custkey, public.orders.o_orderkey, public.orders.o_shippriority, public.lineitem.l_shipdate, public.lineitem.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                   QUERY PLAN                                                                                    
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: lineitem.l_orderkey, (sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))))), orders.o_orderdate, orders.o_shippriority
+   ->  Sort
+         Output: lineitem.l_orderkey, (sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))))), orders.o_orderdate, orders.o_shippriority
+         Sort Key: (sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))))) DESC, orders.o_orderdate
+         ->  HashAggregate
+               Output: lineitem.l_orderkey, sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))))), orders.o_orderdate, orders.o_shippriority
+               Group By Key: lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority
+               ->  Streaming (type: GATHER)
+                     Output: lineitem.l_orderkey, (sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))), orders.o_orderdate, orders.o_shippriority
+                     ->  HashAggregate
+                           Output: lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority
+                           Group By Key: lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority
+                           ->  Hash Join
+                                 Output: orders.o_orderdate, orders.o_shippriority, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount
+                                 Hash Cond: (orders.o_orderkey = lineitem.l_orderkey)
+                                 ->  Streaming(type: BROADCAST)
+                                       Output: orders.o_orderdate, orders.o_shippriority, orders.o_orderkey
+                                       ->  Hash Join
+                                             Output: orders.o_orderdate, orders.o_shippriority, orders.o_orderkey
+                                             Hash Cond: (customer.c_custkey = orders.o_custkey)
+                                             ->  Streaming(type: BROADCAST)
+                                                   Output: customer.c_custkey
+                                                   ->  Foreign Scan on public.customer
+                                                         Output: customer.c_custkey
+                                                         Filter: (customer.c_mktsegment = 'BUILDING'::text)
+                                                         Orc File: /user/hive/warehouse/mppdb.db/customer_orc11_64stripe/
+                                             ->  Hash
+                                                   Output: orders.o_orderdate, orders.o_shippriority, orders.o_custkey, orders.o_orderkey
+                                                   ->  Foreign Scan on public.orders
+                                                         Output: orders.o_orderdate, orders.o_shippriority, orders.o_custkey, orders.o_orderkey
+                                                         Filter: (orders.o_orderdate < '1995-03-15'::text)
+                                                         Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+                                 ->  Hash
+                                       Output: lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount
+                                       ->  Foreign Scan on public.lineitem
+                                             Output: lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount
+                                             Filter: (lineitem.l_shipdate > '1995-03-15'::text)
+                                             Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+(39 rows)
+
+  
+--TPCH -Q4
+explain (verbose, costs off)
+select
+        o_orderpriority,
+        count(*) as order_count
+from
+        orders
+where
+        o_orderdate >= '1993-07-01'
+        and o_orderdate < '1993-10-01'
+        and exists (
+                select
+                        *
+                from
+                        lineitem
+                where
+                        l_orderkey = o_orderkey
+                        and l_commitdate < l_receiptdate
+        )
+group by
+        o_orderpriority
+order by
+        o_orderpriority;
+WARNING:  Statistics in some tables or columns(public.orders.o_orderdate, public.orders.o_orderkey, public.orders.o_orderpriority, public.lineitem.l_commitdate, public.lineitem.l_receiptdate, public.lineitem.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: orders.o_orderpriority, (pg_catalog.count(*))
+   Sort Key: orders.o_orderpriority
+   ->  HashAggregate
+         Output: orders.o_orderpriority, pg_catalog.count(*)
+         Group By Key: orders.o_orderpriority
+         ->  Streaming (type: GATHER)
+               Output: orders.o_orderpriority, (count(*))
+               ->  HashAggregate
+                     Output: orders.o_orderpriority, count(*)
+                     Group By Key: orders.o_orderpriority
+                     ->  Hash Join
+                           Output: orders.o_orderpriority
+                           Hash Cond: (orders.o_orderkey = lineitem.l_orderkey)
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: orders.o_orderpriority, orders.o_orderkey
+                                 Distribute Key: orders.o_orderkey
+                                 ->  Foreign Scan on public.orders
+                                       Output: orders.o_orderpriority, orders.o_orderkey
+                                       Filter: ((orders.o_orderdate >= '1993-07-01'::text) AND (orders.o_orderdate < '1993-10-01'::text))
+                                       Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+                           ->  Hash
+                                 Output: lineitem.l_orderkey
+                                 ->  HashAggregate
+                                       Output: lineitem.l_orderkey
+                                       Group By Key: lineitem.l_orderkey
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             Output: lineitem.l_orderkey
+                                             Distribute Key: lineitem.l_orderkey
+                                             ->  HashAggregate
+                                                   Output: lineitem.l_orderkey
+                                                   Group By Key: lineitem.l_orderkey
+                                                   ->  Foreign Scan on public.lineitem
+                                                         Output: lineitem.l_orderkey
+                                                         Filter: (lineitem.l_commitdate < lineitem.l_receiptdate)
+                                                         Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+(36 rows)
+
+		
+--TPCH -Q5
+explain (verbose, costs off)
+select
+        n_name,
+        sum(l_extendedprice * (1 - l_discount)) as revenue
+from
+        customer,
+        orders,
+        lineitem,
+        supplier,
+        nation,
+        region
+where
+        c_custkey = o_custkey
+        and l_orderkey = o_orderkey
+        and l_suppkey = s_suppkey
+        and c_nationkey = s_nationkey
+        and s_nationkey = n_nationkey
+        and n_regionkey = r_regionkey
+        and r_name = 'ASIA'
+        and o_orderdate >= '1994-01-01'
+        and o_orderdate < '1995-01-01'
+group by
+        n_name
+order by
+        revenue desc;
+WARNING:  Statistics in some tables or columns(public.customer.c_custkey, public.customer.c_nationkey, public.orders.o_orderdate, public.orders.o_custkey, public.orders.o_orderkey, public.lineitem.l_orderkey, public.lineitem.l_suppkey, public.supplier.s_nationkey, public.supplier.s_suppkey, public.nation.n_nationkey, public.nation.n_regionkey, public.nation.n_name, public.region.r_name, public.region.r_regionkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                           QUERY PLAN                                                                                           
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: nation.n_name, (sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))))))
+   Sort Key: (sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))))) DESC
+   ->  HashAggregate
+         Output: nation.n_name, sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))))
+         Group By Key: nation.n_name
+         ->  Streaming (type: GATHER)
+               Output: nation.n_name, (sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))))
+               ->  HashAggregate
+                     Output: nation.n_name, sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))
+                     Group By Key: nation.n_name
+                     ->  Merge Join
+                           Output: lineitem.l_extendedprice, lineitem.l_discount, nation.n_name
+                           Merge Cond: ((lineitem.l_suppkey = supplier.s_suppkey) AND (customer.c_nationkey = supplier.s_nationkey))
+                           ->  Sort
+                                 Output: customer.c_nationkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, nation.n_name, nation.n_nationkey
+                                 Sort Key: lineitem.l_suppkey, customer.c_nationkey
+                                 ->  Streaming(type: BROADCAST)
+                                       Output: customer.c_nationkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, nation.n_name, nation.n_nationkey
+                                       ->  Hash Join
+                                             Output: customer.c_nationkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, nation.n_name, nation.n_nationkey
+                                             Hash Cond: (lineitem.l_orderkey = orders.o_orderkey)
+                                             ->  Foreign Scan on public.lineitem
+                                                   Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_suppkey
+                                                   Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+                                             ->  Hash
+                                                   Output: customer.c_nationkey, orders.o_orderkey, nation.n_name, nation.n_nationkey
+                                                   ->  Streaming(type: BROADCAST)
+                                                         Output: customer.c_nationkey, orders.o_orderkey, nation.n_name, nation.n_nationkey
+                                                         ->  Hash Join
+                                                               Output: customer.c_nationkey, orders.o_orderkey, nation.n_name, nation.n_nationkey
+                                                               Hash Cond: (customer.c_nationkey = nation.n_nationkey)
+                                                               ->  Streaming(type: BROADCAST)
+                                                                     Output: customer.c_nationkey, orders.o_orderkey
+                                                                     ->  Hash Join
+                                                                           Output: customer.c_nationkey, orders.o_orderkey
+                                                                           Hash Cond: (customer.c_custkey = orders.o_custkey)
+                                                                           ->  Foreign Scan on public.customer
+                                                                                 Output: customer.c_custkey, customer.c_nationkey
+                                                                                 Orc File: /user/hive/warehouse/mppdb.db/customer_orc11_64stripe/
+                                                                           ->  Hash
+                                                                                 Output: orders.o_custkey, orders.o_orderkey
+                                                                                 ->  Streaming(type: BROADCAST)
+                                                                                       Output: orders.o_custkey, orders.o_orderkey
+                                                                                       ->  Foreign Scan on public.orders
+                                                                                             Output: orders.o_custkey, orders.o_orderkey
+                                                                                             Filter: ((orders.o_orderdate >= '1994-01-01'::text) AND (orders.o_orderdate < '1995-01-01'::text))
+                                                                                             Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+                                                               ->  Hash
+                                                                     Output: nation.n_name, nation.n_nationkey
+                                                                     ->  Hash Join
+                                                                           Output: nation.n_name, nation.n_nationkey
+                                                                           Hash Cond: (nation.n_regionkey = region.r_regionkey)
+                                                                           ->  Foreign Scan on public.nation
+                                                                                 Output: nation.n_name, nation.n_nationkey, nation.n_regionkey
+                                                                                 Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+                                                                           ->  Hash
+                                                                                 Output: region.r_regionkey
+                                                                                 ->  Streaming(type: BROADCAST)
+                                                                                       Output: region.r_regionkey
+                                                                                       ->  Foreign Scan on public.region
+                                                                                             Output: region.r_regionkey
+                                                                                             Filter: (region.r_name = 'ASIA'::text)
+                                                                                             Orc File: /user/hive/warehouse/mppdb.db/region_orc11_64stripe/
+                           ->  Sort
+                                 Output: supplier.s_suppkey, supplier.s_nationkey
+                                 Sort Key: supplier.s_suppkey, supplier.s_nationkey
+                                 ->  Foreign Scan on public.supplier
+                                       Output: supplier.s_suppkey, supplier.s_nationkey
+                                       Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/
+(70 rows)
+
+  
+--TPCH -Q6
+explain (verbose, costs off)  
+select
+        sum(l_extendedprice * l_discount) as revenue
+from
+        lineitem
+where
+        l_shipdate >= '1994-01-01'
+        and l_shipdate < '1995-01-01'
+        and l_discount between 0.06 - 0.01 and 0.06 + 0.01
+        and l_quantity < 24;  
+WARNING:  Statistics in some tables or columns(public.lineitem.l_shipdate, public.lineitem.l_discount, public.lineitem.l_quantity) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                                                   QUERY PLAN                                                                                                                                    
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: sum((sum((l_extendedprice * l_discount))))
+   ->  Streaming (type: GATHER)
+         Output: (sum((l_extendedprice * l_discount)))
+         ->  Aggregate
+               Output: sum((l_extendedprice * l_discount))
+               ->  Foreign Scan on public.lineitem
+                     Output: l_extendedprice, l_discount
+                     Filter: ((lineitem.l_shipdate >= '1994-01-01'::text) AND (lineitem.l_shipdate < '1995-01-01'::text) AND (lineitem.l_discount >= .05::double precision) AND (lineitem.l_discount <= .07::double precision) AND (lineitem.l_quantity < 24::double precision))
+                     Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+(10 rows)
+
+  
+--TPCH -Q7
+explain (verbose, costs off)    
+select
+        supp_nation,
+        cust_nation,
+        l_year,
+        sum(volume) as revenue
+from
+        (
+                select
+                        n1.n_name as supp_nation,
+                        n2.n_name as cust_nation,
+                        extract(year from l_shipdate) as l_year,
+                        l_extendedprice * (1 - l_discount) as volume
+                from
+                        supplier,
+                        lineitem,
+                        orders,
+                        customer,
+                        nation n1,
+                        nation n2
+                where
+                        s_suppkey = l_suppkey
+                        and o_orderkey = l_orderkey
+                        and c_custkey = o_custkey
+                        and s_nationkey = n1.n_nationkey
+                        and c_nationkey = n2.n_nationkey
+                        and (
+                                (n1.n_name = 'FRANCE' and n2.n_name = 'GERMANY')
+                                or (n1.n_name = 'GERMANY' and n2.n_name = 'FRANCE')
+                        )
+                        and l_shipdate between '1995-01-01' and '1996-12-31'
+        ) as shipping
+group by
+        supp_nation,
+        cust_nation,
+        l_year
+order by
+        supp_nation,
+        cust_nation,
+        l_year;		
+WARNING:  Statistics in some tables or columns(public.supplier.s_suppkey, public.supplier.s_nationkey, public.lineitem.l_shipdate, public.lineitem.l_suppkey, public.lineitem.l_orderkey, public.orders.o_orderkey, public.orders.o_custkey, public.customer.c_custkey, public.customer.c_nationkey, public.nation.n_nationkey, public.nation.n_name) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                      QUERY PLAN                                                                                                       
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: n1.n_name, n2.n_name, (date_part('year'::text, (lineitem.l_shipdate)::timestamp without time zone)), (sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))))))
+   Sort Key: n1.n_name, n2.n_name, (date_part('year'::text, (lineitem.l_shipdate)::timestamp without time zone))
+   ->  HashAggregate
+         Output: n1.n_name, n2.n_name, (date_part('year'::text, (lineitem.l_shipdate)::timestamp without time zone)), sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))))
+         Group By Key: n1.n_name, n2.n_name, (date_part('year'::text, (lineitem.l_shipdate)::timestamp without time zone))
+         ->  Streaming (type: GATHER)
+               Output: n1.n_name, n2.n_name, (date_part('year'::text, (lineitem.l_shipdate)::timestamp without time zone)), (sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))))
+               ->  HashAggregate
+                     Output: n1.n_name, n2.n_name, (date_part('year'::text, (lineitem.l_shipdate)::timestamp without time zone)), sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))
+                     Group By Key: n1.n_name, n2.n_name, date_part('year'::text, (lineitem.l_shipdate)::timestamp without time zone)
+                     ->  Merge Join
+                           Output: n1.n_name, n2.n_name, date_part('year'::text, (lineitem.l_shipdate)::timestamp without time zone), lineitem.l_extendedprice, lineitem.l_discount
+                           Merge Cond: (orders.o_custkey = customer.c_custkey)
+                           Join Filter: (((n1.n_name = 'FRANCE'::text) AND (n2.n_name = 'GERMANY'::text)) OR ((n1.n_name = 'GERMANY'::text) AND (n2.n_name = 'FRANCE'::text)))
+                           ->  Sort
+                                 Output: lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, orders.o_custkey, n1.n_name
+                                 Sort Key: orders.o_custkey
+                                 ->  Streaming(type: BROADCAST)
+                                       Output: lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, orders.o_custkey, n1.n_name
+                                       ->  Hash Join
+                                             Output: lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, orders.o_custkey, n1.n_name
+                                             Hash Cond: (orders.o_orderkey = lineitem.l_orderkey)
+                                             ->  Foreign Scan on public.orders
+                                                   Output: orders.o_orderkey, orders.o_custkey
+                                                   Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+                                             ->  Hash
+                                                   Output: lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, n1.n_name
+                                                   ->  Streaming(type: BROADCAST)
+                                                         Output: lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, n1.n_name
+                                                         ->  Hash Join
+                                                               Output: lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, n1.n_name
+                                                               Hash Cond: (n1.n_nationkey = supplier.s_nationkey)
+                                                               ->  Foreign Scan on public.nation n1
+                                                                     Output: n1.n_name, n1.n_nationkey
+                                                                     Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+                                                               ->  Hash
+                                                                     Output: supplier.s_nationkey, lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey
+                                                                     ->  Streaming(type: BROADCAST)
+                                                                           Output: supplier.s_nationkey, lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey
+                                                                           ->  Hash Join
+                                                                                 Output: supplier.s_nationkey, lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey
+                                                                                 Hash Cond: (supplier.s_suppkey = lineitem.l_suppkey)
+                                                                                 ->  Foreign Scan on public.supplier
+                                                                                       Output: supplier.s_suppkey, supplier.s_nationkey
+                                                                                       Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/
+                                                                                 ->  Hash
+                                                                                       Output: lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, lineitem.l_orderkey
+                                                                                       ->  Streaming(type: BROADCAST)
+                                                                                             Output: lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, lineitem.l_orderkey
+                                                                                             ->  Foreign Scan on public.lineitem
+                                                                                                   Output: lineitem.l_shipdate, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, lineitem.l_orderkey
+                                                                                                   Filter: ((lineitem.l_shipdate >= '1995-01-01'::text) AND (lineitem.l_shipdate <= '1996-12-31'::text))
+                                                                                                   Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+                           ->  Sort
+                                 Output: customer.c_custkey, n2.n_name
+                                 Sort Key: customer.c_custkey
+                                 ->  Merge Join
+                                       Output: customer.c_custkey, n2.n_name
+                                       Merge Cond: (customer.c_nationkey = n2.n_nationkey)
+                                       ->  Sort
+                                             Output: customer.c_custkey, customer.c_nationkey
+                                             Sort Key: customer.c_nationkey
+                                             ->  Foreign Scan on public.customer
+                                                   Output: customer.c_custkey, customer.c_nationkey
+                                                   Orc File: /user/hive/warehouse/mppdb.db/customer_orc11_64stripe/
+                                       ->  Sort
+                                             Output: n2.n_name, n2.n_nationkey
+                                             Sort Key: n2.n_nationkey
+                                             ->  Streaming(type: BROADCAST)
+                                                   Output: n2.n_name, n2.n_nationkey
+                                                   ->  Foreign Scan on public.nation n2
+                                                         Output: n2.n_name, n2.n_nationkey
+                                                         Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+(74 rows)
+
+  
+--TPCH -Q8
+explain (verbose, costs off)     
+select
+        o_year,
+        sum(case
+                when nation = 'BRAZIL' then volume
+                else 0
+        end) / sum(volume) as mkt_share
+from
+        (
+                select
+                        extract(year from o_orderdate) as o_year,
+                        l_extendedprice * (1 - l_discount) as volume,
+                        n2.n_name as nation
+                from
+                        part,
+                        supplier,
+                        lineitem,
+                        orders,
+                        customer,
+                        nation n1,
+                        nation n2,
+                        region
+                where
+                        p_partkey = l_partkey
+                        and s_suppkey = l_suppkey
+                        and l_orderkey = o_orderkey
+                        and o_custkey = c_custkey
+                        and c_nationkey = n1.n_nationkey
+                        and n1.n_regionkey = r_regionkey
+                        and r_name = 'AMERICA'
+                        and s_nationkey = n2.n_nationkey
+                        and o_orderdate between '1995-01-01' and '1996-12-31'
+                        and p_type = 'ECONOMY ANODIZED STEEL'
+        ) as all_nations
+group by
+        o_year
+order by
+        o_year;  
+WARNING:  Statistics in some tables or columns(public.part.p_type, public.part.p_partkey, public.supplier.s_suppkey, public.supplier.s_nationkey, public.lineitem.l_partkey, public.lineitem.l_suppkey, public.lineitem.l_orderkey, public.orders.o_orderdate, public.orders.o_orderkey, public.orders.o_custkey, public.customer.c_custkey, public.customer.c_nationkey, public.nation.n_nationkey, public.nation.n_regionkey, public.region.r_name, public.region.r_regionkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                                                                                      QUERY PLAN                                                                                                                                                                      
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (date_part('year'::text, (orders.o_orderdate)::timestamp without time zone)), ((sum((sum(CASE WHEN (n2.n_name = 'BRAZIL'::text) THEN (lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)) ELSE 0::double precision END))) / sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))))))
+   Sort Key: (date_part('year'::text, (orders.o_orderdate)::timestamp without time zone))
+   ->  HashAggregate
+         Output: (date_part('year'::text, (orders.o_orderdate)::timestamp without time zone)), (sum((sum(CASE WHEN (n2.n_name = 'BRAZIL'::text) THEN (lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)) ELSE 0::double precision END))) / sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))))))
+         Group By Key: (date_part('year'::text, (orders.o_orderdate)::timestamp without time zone))
+         ->  Streaming (type: GATHER)
+               Output: (date_part('year'::text, (orders.o_orderdate)::timestamp without time zone)), (sum(CASE WHEN (n2.n_name = 'BRAZIL'::text) THEN (lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)) ELSE 0::double precision END)), (sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))))
+               ->  HashAggregate
+                     Output: (date_part('year'::text, (orders.o_orderdate)::timestamp without time zone)), sum(CASE WHEN (n2.n_name = 'BRAZIL'::text) THEN (lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)) ELSE 0::double precision END), sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))
+                     Group By Key: date_part('year'::text, (orders.o_orderdate)::timestamp without time zone)
+                     ->  Hash Join
+                           Output: date_part('year'::text, (orders.o_orderdate)::timestamp without time zone), n2.n_name, lineitem.l_extendedprice, lineitem.l_discount
+                           Hash Cond: (supplier.s_nationkey = n2.n_nationkey)
+                           ->  Streaming(type: BROADCAST)
+                                 Output: lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, orders.o_orderdate
+                                 ->  Hash Join
+                                       Output: lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, orders.o_orderdate
+                                       Hash Cond: (supplier.s_suppkey = lineitem.l_suppkey)
+                                       ->  Foreign Scan on public.supplier
+                                             Output: supplier.s_suppkey, supplier.s_nationkey
+                                             Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/
+                                       ->  Hash
+                                             Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate
+                                             ->  Streaming(type: BROADCAST)
+                                                   Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate
+                                                   ->  Hash Join
+                                                         Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate
+                                                         Hash Cond: (n1.n_nationkey = customer.c_nationkey)
+                                                         ->  Hash Join
+                                                               Output: n1.n_nationkey
+                                                               Hash Cond: (n1.n_regionkey = region.r_regionkey)
+                                                               ->  Foreign Scan on public.nation n1
+                                                                     Output: n1.n_nationkey, n1.n_regionkey
+                                                                     Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+                                                               ->  Hash
+                                                                     Output: region.r_regionkey
+                                                                     ->  Streaming(type: BROADCAST)
+                                                                           Output: region.r_regionkey
+                                                                           ->  Foreign Scan on public.region
+                                                                                 Output: region.r_regionkey
+                                                                                 Filter: (region.r_name = 'AMERICA'::text)
+                                                                                 Orc File: /user/hive/warehouse/mppdb.db/region_orc11_64stripe/
+                                                         ->  Hash
+                                                               Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate, customer.c_nationkey
+                                                               ->  Streaming(type: BROADCAST)
+                                                                     Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate, customer.c_nationkey
+                                                                     ->  Hash Join
+                                                                           Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate, customer.c_nationkey
+                                                                           Hash Cond: (customer.c_custkey = orders.o_custkey)
+                                                                           ->  Foreign Scan on public.customer
+                                                                                 Output: customer.c_custkey, customer.c_nationkey
+                                                                                 Orc File: /user/hive/warehouse/mppdb.db/customer_orc11_64stripe/
+                                                                           ->  Hash
+                                                                                 Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate, orders.o_custkey
+                                                                                 ->  Streaming(type: BROADCAST)
+                                                                                       Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate, orders.o_custkey
+                                                                                       ->  Hash Join
+                                                                                             Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_suppkey, orders.o_orderdate, orders.o_custkey
+                                                                                             Hash Cond: (part.p_partkey = lineitem.l_partkey)
+                                                                                             ->  Streaming(type: BROADCAST)
+                                                                                                   Output: part.p_partkey
+                                                                                                   ->  Foreign Scan on public.part
+                                                                                                         Output: part.p_partkey
+                                                                                                         Filter: (part.p_type = 'ECONOMY ANODIZED STEEL'::text)
+                                                                                                         Orc File: /user/hive/warehouse/mppdb.db/part_orc11_64stripe/
+                                                                                             ->  Hash
+                                                                                                   Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_partkey, lineitem.l_suppkey, orders.o_orderdate, orders.o_custkey
+                                                                                                   ->  Hash Join
+                                                                                                         Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_partkey, lineitem.l_suppkey, orders.o_orderdate, orders.o_custkey
+                                                                                                         Hash Cond: (lineitem.l_orderkey = orders.o_orderkey)
+                                                                                                         ->  Foreign Scan on public.lineitem
+                                                                                                               Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_orderkey
+                                                                                                               Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+                                                                                                         ->  Hash
+                                                                                                               Output: orders.o_orderdate, orders.o_orderkey, orders.o_custkey
+                                                                                                               ->  Streaming(type: BROADCAST)
+                                                                                                                     Output: orders.o_orderdate, orders.o_orderkey, orders.o_custkey
+                                                                                                                     ->  Foreign Scan on public.orders
+                                                                                                                           Output: orders.o_orderdate, orders.o_orderkey, orders.o_custkey
+                                                                                                                           Filter: ((orders.o_orderdate >= '1995-01-01'::text) AND (orders.o_orderdate <= '1996-12-31'::text))
+                                                                                                                           Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+                           ->  Hash
+                                 Output: n2.n_name, n2.n_nationkey
+                                 ->  Foreign Scan on public.nation n2
+                                       Output: n2.n_name, n2.n_nationkey
+                                       Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+(87 rows)
+
+  
+--TPCH -Q9
+explain (verbose, costs off)
+select
+        nation,
+        o_year,
+        sum(amount) as sum_profit
+from
+        (
+                select
+                        n_name as nation,
+                        extract(year from o_orderdate) as o_year,
+                        l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount
+                from
+                        part,
+                        supplier,
+                        lineitem,
+                        partsupp,
+                        orders,
+                        nation
+                where
+                        s_suppkey = l_suppkey
+                        and ps_suppkey = l_suppkey
+                        and ps_partkey = l_partkey
+                        and p_partkey = l_partkey
+                        and o_orderkey = l_orderkey
+                        and s_nationkey = n_nationkey
+                        and p_name like '%green%'
+        ) as profit
+group by
+        nation,
+        o_year
+order by
+        nation,
+        o_year desc;
+WARNING:  Statistics in some tables or columns(public.part.p_name, public.part.p_partkey, public.supplier.s_suppkey, public.supplier.s_nationkey, public.lineitem.l_partkey, public.lineitem.l_suppkey, public.lineitem.l_orderkey, public.partsupp.ps_partkey, public.partsupp.ps_suppkey, public.orders.o_orderkey, public.orders.o_orderdate, public.nation.n_nationkey, public.nation.n_name) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                                        QUERY PLAN                                                                                                                         
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: nation.n_name, (date_part('year'::text, (orders.o_orderdate)::timestamp without time zone)), (sum((sum(((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))))))
+   Sort Key: nation.n_name, (date_part('year'::text, (orders.o_orderdate)::timestamp without time zone)) DESC
+   ->  HashAggregate
+         Output: nation.n_name, (date_part('year'::text, (orders.o_orderdate)::timestamp without time zone)), sum((sum(((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)))))
+         Group By Key: nation.n_name, (date_part('year'::text, (orders.o_orderdate)::timestamp without time zone))
+         ->  Streaming (type: GATHER)
+               Output: nation.n_name, (date_part('year'::text, (orders.o_orderdate)::timestamp without time zone)), (sum(((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))))
+               ->  HashAggregate
+                     Output: nation.n_name, (date_part('year'::text, (orders.o_orderdate)::timestamp without time zone)), sum(((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)))
+                     Group By Key: nation.n_name, date_part('year'::text, (orders.o_orderdate)::timestamp without time zone)
+                     ->  Hash Join
+                           Output: nation.n_name, date_part('year'::text, (orders.o_orderdate)::timestamp without time zone), lineitem.l_extendedprice, lineitem.l_discount, partsupp.ps_supplycost, lineitem.l_quantity
+                           Hash Cond: (supplier.s_nationkey = nation.n_nationkey)
+                           ->  Streaming(type: BROADCAST)
+                                 Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, supplier.s_nationkey, partsupp.ps_supplycost, orders.o_orderdate
+                                 ->  Hash Join
+                                       Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, supplier.s_nationkey, partsupp.ps_supplycost, orders.o_orderdate
+                                       Hash Cond: (supplier.s_suppkey = lineitem.l_suppkey)
+                                       ->  Foreign Scan on public.supplier
+                                             Output: supplier.s_suppkey, supplier.s_nationkey
+                                             Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/
+                                       ->  Hash
+                                             Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, partsupp.ps_supplycost, partsupp.ps_suppkey, orders.o_orderdate
+                                             ->  Streaming(type: BROADCAST)
+                                                   Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, partsupp.ps_supplycost, partsupp.ps_suppkey, orders.o_orderdate
+                                                   ->  Hash Join
+                                                         Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, partsupp.ps_supplycost, partsupp.ps_suppkey, orders.o_orderdate
+                                                         Hash Cond: (orders.o_orderkey = lineitem.l_orderkey)
+                                                         ->  Foreign Scan on public.orders
+                                                               Output: orders.o_orderdate, orders.o_orderkey
+                                                               Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+                                                         ->  Hash
+                                                               Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_orderkey, partsupp.ps_supplycost, partsupp.ps_suppkey
+                                                               ->  Streaming(type: BROADCAST)
+                                                                     Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_orderkey, partsupp.ps_supplycost, partsupp.ps_suppkey
+                                                                     ->  Hash Join
+                                                                           Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_orderkey, partsupp.ps_supplycost, partsupp.ps_suppkey
+                                                                           Hash Cond: ((partsupp.ps_suppkey = lineitem.l_suppkey) AND (partsupp.ps_partkey = lineitem.l_partkey))
+                                                                           ->  Foreign Scan on public.partsupp
+                                                                                 Output: partsupp.ps_supplycost, partsupp.ps_suppkey, partsupp.ps_partkey
+                                                                                 Orc File: /user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/
+                                                                           ->  Hash
+                                                                                 Output: part.p_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_partkey, lineitem.l_orderkey
+                                                                                 ->  Streaming(type: BROADCAST)
+                                                                                       Output: part.p_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_partkey, lineitem.l_orderkey
+                                                                                       ->  Hash Join
+                                                                                             Output: part.p_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_partkey, lineitem.l_orderkey
+                                                                                             Hash Cond: (lineitem.l_partkey = part.p_partkey)
+                                                                                             ->  Foreign Scan on public.lineitem
+                                                                                                   Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_suppkey, lineitem.l_partkey, lineitem.l_orderkey
+                                                                                                   Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+                                                                                             ->  Hash
+                                                                                                   Output: part.p_partkey
+                                                                                                   ->  Streaming(type: BROADCAST)
+                                                                                                         Output: part.p_partkey
+                                                                                                         ->  Foreign Scan on public.part
+                                                                                                               Output: part.p_partkey
+                                                                                                               Filter: (part.p_name ~~ '%green%'::text)
+                                                                                                               Orc File: /user/hive/warehouse/mppdb.db/part_orc11_64stripe/
+                           ->  Hash
+                                 Output: nation.n_name, nation.n_nationkey
+                                 ->  Foreign Scan on public.nation
+                                       Output: nation.n_name, nation.n_nationkey
+                                       Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+(65 rows)
+
+--TPCH -Q10
+explain (verbose, costs off)		
+select
+        c_custkey,
+        c_name,
+        sum(l_extendedprice * (1 - l_discount)) as revenue,
+        c_acctbal,
+        n_name,
+        c_address,
+        c_phone,
+        c_comment
+from
+        customer,
+        orders,
+        lineitem,
+        nation
+where
+        c_custkey = o_custkey
+        and l_orderkey = o_orderkey
+        and o_orderdate >= '1993-10-01'
+        and o_orderdate < '1994-01-01'
+        and l_returnflag = 'R'
+        and c_nationkey = n_nationkey
+group by
+        c_custkey,
+        c_name,
+        c_acctbal,
+        c_phone,
+        n_name,
+        c_address,
+        c_comment
+order by
+        revenue desc
+limit 20
+;  
+WARNING:  Statistics in some tables or columns(public.customer.c_custkey, public.customer.c_nationkey, public.customer.c_name, public.customer.c_acctbal, public.customer.c_phone, public.customer.c_address, public.customer.c_comment, public.orders.o_orderdate, public.orders.o_custkey, public.orders.o_orderkey, public.lineitem.l_returnflag, public.lineitem.l_orderkey, public.nation.n_nationkey, public.nation.n_name) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                                    QUERY PLAN                                                                                                                     
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: customer.c_custkey, customer.c_name, (sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment
+   ->  Sort
+         Output: customer.c_custkey, customer.c_name, (sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment
+         Sort Key: (sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))))) DESC
+         ->  HashAggregate
+               Output: customer.c_custkey, customer.c_name, sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment
+               Group By Key: customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment
+               ->  Streaming (type: GATHER)
+                     Output: customer.c_custkey, customer.c_name, (sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment
+                     ->  HashAggregate
+                           Output: customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment
+                           Group By Key: customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment
+                           ->  Hash Join
+                                 Output: customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_address, customer.c_phone, customer.c_comment, lineitem.l_extendedprice, lineitem.l_discount, nation.n_name
+                                 Hash Cond: (nation.n_nationkey = customer.c_nationkey)
+                                 ->  Foreign Scan on public.nation
+                                       Output: nation.n_name, nation.n_nationkey
+                                       Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+                                 ->  Hash
+                                       Output: customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_address, customer.c_phone, customer.c_comment, customer.c_nationkey, lineitem.l_extendedprice, lineitem.l_discount
+                                       ->  Streaming(type: BROADCAST)
+                                             Output: customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_address, customer.c_phone, customer.c_comment, customer.c_nationkey, lineitem.l_extendedprice, lineitem.l_discount
+                                             ->  Hash Join
+                                                   Output: customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_address, customer.c_phone, customer.c_comment, customer.c_nationkey, lineitem.l_extendedprice, lineitem.l_discount
+                                                   Hash Cond: (orders.o_custkey = customer.c_custkey)
+                                                   ->  Streaming(type: BROADCAST)
+                                                         Output: orders.o_custkey, lineitem.l_extendedprice, lineitem.l_discount
+                                                         ->  Nested Loop
+                                                               Output: orders.o_custkey, lineitem.l_extendedprice, lineitem.l_discount
+                                                               Join Filter: (orders.o_orderkey = lineitem.l_orderkey)
+                                                               ->  Streaming(type: BROADCAST)
+                                                                     Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey
+                                                                     ->  Foreign Scan on public.lineitem
+                                                                           Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey
+                                                                           Filter: (lineitem.l_returnflag = 'R'::text)
+                                                                           Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+                                                               ->  Materialize
+                                                                     Output: orders.o_custkey, orders.o_orderkey
+                                                                     ->  Foreign Scan on public.orders
+                                                                           Output: orders.o_custkey, orders.o_orderkey
+                                                                           Filter: ((orders.o_orderdate >= '1993-10-01'::text) AND (orders.o_orderdate < '1994-01-01'::text))
+                                                                           Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+                                                   ->  Hash
+                                                         Output: customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_address, customer.c_phone, customer.c_comment, customer.c_nationkey
+                                                         ->  Foreign Scan on public.customer
+                                                               Output: customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_address, customer.c_phone, customer.c_comment, customer.c_nationkey
+                                                               Orc File: /user/hive/warehouse/mppdb.db/customer_orc11_64stripe/
+(48 rows)
+
+  
+--TPCH -Q11
+explain (verbose, costs off)	  
+select * from (
+  select
+    ps_partkey,
+    round(sum(ps_supplycost * ps_availqty), 1) as value
+  from
+    partsupp,
+    supplier,
+    nation
+  where
+    ps_suppkey = s_suppkey
+    and s_nationkey = n_nationkey
+    and n_name = 'GERMANY'
+  group by
+    ps_partkey
+) as inner_query
+where
+  value > (
+    select
+      sum(ps_supplycost * ps_availqty) * 0.0001
+    from
+      partsupp,
+      supplier,
+      nation
+    where
+      ps_suppkey = s_suppkey
+      and s_nationkey = n_nationkey
+      and n_name = 'GERMANY'
+  )
+order by
+  value desc;
+WARNING:  Statistics in some tables or columns(public.partsupp.ps_suppkey, public.partsupp.ps_partkey, public.supplier.s_suppkey, public.supplier.s_nationkey, public.nation.n_name, public.nation.n_nationkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                              QUERY PLAN                                                                              
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: public.partsupp.ps_partkey, (round((sum((sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::double precision)))))::numeric, 1))
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           Output: (sum((sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::double precision)))) * .0001::double precision)
+           ->  Streaming(type: BROADCAST)
+                 Output: (sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::double precision)))
+                 ->  Aggregate
+                       Output: sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::double precision))
+                       ->  Hash Join
+                             Output: public.partsupp.ps_supplycost, public.partsupp.ps_availqty
+                             Hash Cond: (public.partsupp.ps_suppkey = public.supplier.s_suppkey)
+                             ->  Foreign Scan on public.partsupp
+                                   Output: public.partsupp.ps_supplycost, public.partsupp.ps_availqty, public.partsupp.ps_suppkey
+                                   Orc File: /user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/
+                             ->  Hash
+                                   Output: public.supplier.s_suppkey
+                                   ->  Streaming(type: BROADCAST)
+                                         Output: public.supplier.s_suppkey
+                                         ->  Hash Join
+                                               Output: public.supplier.s_suppkey
+                                               Hash Cond: (public.supplier.s_nationkey = public.nation.n_nationkey)
+                                               ->  Foreign Scan on public.supplier
+                                                     Output: public.supplier.s_suppkey, public.supplier.s_nationkey
+                                                     Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/
+                                               ->  Hash
+                                                     Output: public.nation.n_nationkey
+                                                     ->  Streaming(type: BROADCAST)
+                                                           Output: public.nation.n_nationkey
+                                                           ->  Foreign Scan on public.nation
+                                                                 Output: public.nation.n_nationkey
+                                                                 Filter: (public.nation.n_name = 'GERMANY'::text)
+                                                                 Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+   ->  Sort
+         Output: public.partsupp.ps_partkey, (round((sum((sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::double precision)))))::numeric, 1))
+         Sort Key: (round((sum((sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::double precision)))))::numeric, 1)) DESC
+         ->  HashAggregate
+               Output: public.partsupp.ps_partkey, round((sum((sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::double precision)))))::numeric, 1)
+               Group By Key: public.partsupp.ps_partkey
+               Filter: ((round((sum((sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::double precision)))))::numeric, 1))::double precision > $0)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: public.partsupp.ps_partkey, (sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::double precision)))
+                     Distribute Key: public.partsupp.ps_partkey
+                     ->  HashAggregate
+                           Output: public.partsupp.ps_partkey, sum((public.partsupp.ps_supplycost * (public.partsupp.ps_availqty)::double precision))
+                           Group By Key: public.partsupp.ps_partkey
+                           ->  Hash Join
+                                 Output: public.partsupp.ps_partkey, public.partsupp.ps_supplycost, public.partsupp.ps_availqty
+                                 Hash Cond: (public.partsupp.ps_suppkey = public.supplier.s_suppkey)
+                                 ->  Foreign Scan on public.partsupp
+                                       Output: public.partsupp.ps_partkey, public.partsupp.ps_supplycost, public.partsupp.ps_availqty, public.partsupp.ps_suppkey
+                                       Orc File: /user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/
+                                 ->  Hash
+                                       Output: public.supplier.s_suppkey
+                                       ->  Streaming(type: BROADCAST)
+                                             Output: public.supplier.s_suppkey
+                                             ->  Hash Join
+                                                   Output: public.supplier.s_suppkey
+                                                   Hash Cond: (public.supplier.s_nationkey = public.nation.n_nationkey)
+                                                   ->  Foreign Scan on public.supplier
+                                                         Output: public.supplier.s_suppkey, public.supplier.s_nationkey
+                                                         Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/
+                                                   ->  Hash
+                                                         Output: public.nation.n_nationkey
+                                                         ->  Streaming(type: BROADCAST)
+                                                               Output: public.nation.n_nationkey
+                                                               ->  Foreign Scan on public.nation
+                                                                     Output: public.nation.n_nationkey
+                                                                     Filter: (public.nation.n_name = 'GERMANY'::text)
+                                                                     Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+(70 rows)
+
+--TPCH -Q12
+explain (verbose, costs off)	  
+select
+        l_shipmode,
+        sum(case
+                when o_orderpriority = '1-URGENT'
+                        or o_orderpriority = '2-HIGH'
+                        then 1
+                else 0
+        end) as high_line_count,
+        sum(case
+                when o_orderpriority <> '1-URGENT'
+                        and o_orderpriority <> '2-HIGH'
+                        then 1
+                else 0
+        end) as low_line_count
+from
+        orders,
+        lineitem
+where
+        o_orderkey = l_orderkey
+        and l_shipmode in ('MAIL', 'SHIP')
+        and l_commitdate < l_receiptdate
+        and l_shipdate < l_commitdate
+        and l_receiptdate >= '1994-01-01'
+        and l_receiptdate < '1995-01-01'
+group by
+        l_shipmode
+order by
+        l_shipmode;
+WARNING:  Statistics in some tables or columns(public.orders.o_orderkey, public.lineitem.l_shipmode, public.lineitem.l_commitdate, public.lineitem.l_receiptdate, public.lineitem.l_shipdate, public.lineitem.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                                                                              QUERY PLAN                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: lineitem.l_shipmode, (pg_catalog.sum((sum(CASE WHEN ((orders.o_orderpriority = '1-URGENT'::text) OR (orders.o_orderpriority = '2-HIGH'::text)) THEN 1 ELSE 0 END)))), (pg_catalog.sum((sum(CASE WHEN ((orders.o_orderpriority <> '1-URGENT'::text) AND (orders.o_orderpriority <> '2-HIGH'::text)) THEN 1 ELSE 0 END))))
+   Sort Key: lineitem.l_shipmode
+   ->  HashAggregate
+         Output: lineitem.l_shipmode, pg_catalog.sum((sum(CASE WHEN ((orders.o_orderpriority = '1-URGENT'::text) OR (orders.o_orderpriority = '2-HIGH'::text)) THEN 1 ELSE 0 END))), pg_catalog.sum((sum(CASE WHEN ((orders.o_orderpriority <> '1-URGENT'::text) AND (orders.o_orderpriority <> '2-HIGH'::text)) THEN 1 ELSE 0 END)))
+         Group By Key: lineitem.l_shipmode
+         ->  Streaming (type: GATHER)
+               Output: lineitem.l_shipmode, (sum(CASE WHEN ((orders.o_orderpriority = '1-URGENT'::text) OR (orders.o_orderpriority = '2-HIGH'::text)) THEN 1 ELSE 0 END)), (sum(CASE WHEN ((orders.o_orderpriority <> '1-URGENT'::text) AND (orders.o_orderpriority <> '2-HIGH'::text)) THEN 1 ELSE 0 END))
+               ->  HashAggregate
+                     Output: lineitem.l_shipmode, sum(CASE WHEN ((orders.o_orderpriority = '1-URGENT'::text) OR (orders.o_orderpriority = '2-HIGH'::text)) THEN 1 ELSE 0 END), sum(CASE WHEN ((orders.o_orderpriority <> '1-URGENT'::text) AND (orders.o_orderpriority <> '2-HIGH'::text)) THEN 1 ELSE 0 END)
+                     Group By Key: lineitem.l_shipmode
+                     ->  Hash Join
+                           Output: orders.o_orderpriority, lineitem.l_shipmode
+                           Hash Cond: (orders.o_orderkey = lineitem.l_orderkey)
+                           ->  Foreign Scan on public.orders
+                                 Output: orders.o_orderpriority, orders.o_orderkey
+                                 Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+                           ->  Hash
+                                 Output: lineitem.l_shipmode, lineitem.l_orderkey
+                                 ->  Streaming(type: BROADCAST)
+                                       Output: lineitem.l_shipmode, lineitem.l_orderkey
+                                       ->  Foreign Scan on public.lineitem
+                                             Output: lineitem.l_shipmode, lineitem.l_orderkey
+                                             Filter: ((lineitem.l_shipmode = ANY ('{MAIL,SHIP}'::text[])) AND (lineitem.l_commitdate < lineitem.l_receiptdate) AND (lineitem.l_shipdate < lineitem.l_commitdate) AND (lineitem.l_receiptdate >= '1994-01-01'::text) AND (lineitem.l_receiptdate < '1995-01-01'::text))
+                                             Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+(25 rows)
+
+		
+--TPCH -Q13
+explain (verbose, costs off)	 
+select
+        c_count,
+        count(*) as custdist
+from
+        (
+                select
+                        c_custkey,
+                        count(*) as c_count
+                from
+                        customer left outer join orders on
+                                c_custkey = o_custkey
+                                and o_comment not like '%special%request%'
+                group by
+                        c_custkey
+        ) as c_orders
+group by
+        c_count
+order by
+        custdist desc,
+        c_count desc;
+WARNING:  Statistics in some tables or columns(public.customer.c_custkey, public.orders.o_comment, public.orders.o_custkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: c_orders.c_count, (pg_catalog.count(*))
+   Sort Key: (pg_catalog.count(*)) DESC, c_orders.c_count DESC
+   ->  HashAggregate
+         Output: c_orders.c_count, pg_catalog.count(*)
+         Group By Key: c_orders.c_count
+         ->  Streaming (type: GATHER)
+               Output: c_orders.c_count, (count(*))
+               ->  HashAggregate
+                     Output: c_orders.c_count, count(*)
+                     Group By Key: c_orders.c_count
+                     ->  Subquery Scan on c_orders
+                           Output: c_orders.c_count
+                           ->  GroupAggregate
+                                 Output: customer.c_custkey, pg_catalog.count(*)
+                                 Group By Key: customer.c_custkey
+                                 ->  Sort
+                                       Output: customer.c_custkey, (count(*))
+                                       Sort Key: customer.c_custkey
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             Output: customer.c_custkey, (count(*))
+                                             Distribute Key: customer.c_custkey
+                                             ->  GroupAggregate
+                                                   Output: customer.c_custkey, count(*)
+                                                   Group By Key: customer.c_custkey
+                                                   ->  Merge Left Join
+                                                         Output: customer.c_custkey
+                                                         Merge Cond: (customer.c_custkey = orders.o_custkey)
+                                                         ->  Sort
+                                                               Output: customer.c_custkey
+                                                               Sort Key: customer.c_custkey
+                                                               ->  Foreign Scan on public.customer
+                                                                     Output: customer.c_custkey
+                                                                     Orc File: /user/hive/warehouse/mppdb.db/customer_orc11_64stripe/
+                                                         ->  Sort
+                                                               Output: orders.o_custkey
+                                                               Sort Key: orders.o_custkey
+                                                               ->  Streaming(type: BROADCAST)
+                                                                     Output: orders.o_custkey
+                                                                     ->  Foreign Scan on public.orders
+                                                                           Output: orders.o_custkey
+                                                                           Filter: (orders.o_comment !~~ '%special%request%'::text)
+                                                                           Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+(43 rows)
+
+		
+--TPCH -Q14
+explain (verbose, costs off)	 
+select
+        100.00 * sum(case
+                when p_type like 'PROMO%'
+                        then l_extendedprice * (1 - l_discount)
+                else 0
+        end) / sum(l_extendedprice * (1 - l_discount)) as promo_revenue
+from
+        lineitem,
+        part
+where
+        l_partkey = p_partkey
+        and l_shipdate >= '1995-09-01'
+        and l_shipdate < '1995-10-01';
+WARNING:  Statistics in some tables or columns(public.lineitem.l_shipdate, public.lineitem.l_partkey, public.part.p_partkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                                                          QUERY PLAN                                                                                                                                           
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: ((100::double precision * sum((sum(CASE WHEN (part.p_type ~~ 'PROMO%'::text) THEN (lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)) ELSE 0::double precision END)))) / sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))))))
+   ->  Streaming (type: GATHER)
+         Output: (sum(CASE WHEN (part.p_type ~~ 'PROMO%'::text) THEN (lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)) ELSE 0::double precision END)), (sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))))
+         ->  Aggregate
+               Output: sum(CASE WHEN (part.p_type ~~ 'PROMO%'::text) THEN (lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)) ELSE 0::double precision END), sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))
+               ->  Hash Join
+                     Output: lineitem.l_extendedprice, lineitem.l_discount, part.p_type
+                     Hash Cond: (part.p_partkey = lineitem.l_partkey)
+                     ->  Foreign Scan on public.part
+                           Output: part.p_type, part.p_partkey
+                           Orc File: /user/hive/warehouse/mppdb.db/part_orc11_64stripe/
+                     ->  Hash
+                           Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_partkey
+                           ->  Streaming(type: BROADCAST)
+                                 Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_partkey
+                                 ->  Foreign Scan on public.lineitem
+                                       Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_partkey
+                                       Filter: ((lineitem.l_shipdate >= '1995-09-01'::text) AND (lineitem.l_shipdate < '1995-10-01'::text))
+                                       Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+(20 rows)
+
+--TPCH -Q15
+explain (verbose, costs off)	 
+with revenue as
+(
+        select
+                l_suppkey as supplier_no,
+                sum(l_extendedprice * (1 - l_discount)) total_revenue
+        from
+                lineitem
+        where
+                l_shipdate >= '1996-01-01'
+                and l_shipdate < '1996-04-01'
+        group by
+                l_suppkey
+)
+select
+        s_suppkey,
+        s_name,
+        s_address,
+        s_phone,
+        total_revenue
+from
+        supplier,
+        revenue
+where
+        s_suppkey = supplier_no
+        and total_revenue = (
+                select
+                        max(total_revenue)
+                from
+                        revenue
+        )
+order by
+        s_suppkey;
+WARNING:  Statistics in some tables or columns(public.lineitem.l_shipdate, public.lineitem.l_suppkey, public.supplier.s_suppkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                    QUERY PLAN                                                                                    
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, revenue.total_revenue
+   InitPlan 2 (returns $1)
+     ->  Aggregate
+           Output: max((max((sum((sum((public.lineitem.l_extendedprice * (1::double precision - public.lineitem.l_discount)))))))))
+           ->  Streaming(type: BROADCAST)
+                 Output: (max((sum((sum((public.lineitem.l_extendedprice * (1::double precision - public.lineitem.l_discount))))))))
+                 ->  Aggregate
+                       Output: max((sum((sum((public.lineitem.l_extendedprice * (1::double precision - public.lineitem.l_discount)))))))
+                       ->  HashAggregate
+                             Output: public.lineitem.l_suppkey, sum((sum((public.lineitem.l_extendedprice * (1::double precision - public.lineitem.l_discount)))))
+                             Group By Key: public.lineitem.l_suppkey
+                             ->  Streaming(type: REDISTRIBUTE)
+                                   Output: public.lineitem.l_suppkey, (sum((public.lineitem.l_extendedprice * (1::double precision - public.lineitem.l_discount))))
+                                   Distribute Key: public.lineitem.l_suppkey
+                                   ->  HashAggregate
+                                         Output: public.lineitem.l_suppkey, sum((public.lineitem.l_extendedprice * (1::double precision - public.lineitem.l_discount)))
+                                         Group By Key: public.lineitem.l_suppkey
+                                         ->  Foreign Scan on public.lineitem
+                                               Output: public.lineitem.l_suppkey, public.lineitem.l_extendedprice, public.lineitem.l_discount
+                                               Filter: ((public.lineitem.l_shipdate >= '1996-01-01'::text) AND (public.lineitem.l_shipdate < '1996-04-01'::text))
+                                               Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+   ->  Sort
+         Output: supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, revenue.total_revenue
+         Sort Key: supplier.s_suppkey
+         ->  Hash Join
+               Output: supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, revenue.total_revenue
+               Hash Cond: (supplier.s_suppkey = revenue.supplier_no)
+               ->  Foreign Scan on public.supplier
+                     Output: supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone
+                     Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/
+               ->  Hash
+                     Output: revenue.total_revenue, revenue.supplier_no
+                     ->  Streaming(type: BROADCAST)
+                           Output: revenue.total_revenue, revenue.supplier_no
+                           ->  Subquery Scan on revenue
+                                 Output: revenue.total_revenue, revenue.supplier_no
+                                 ->  HashAggregate
+                                       Output: public.lineitem.l_suppkey, sum((sum((public.lineitem.l_extendedprice * (1::double precision - public.lineitem.l_discount)))))
+                                       Group By Key: public.lineitem.l_suppkey
+                                       Filter: (sum((sum((public.lineitem.l_extendedprice * (1::double precision - public.lineitem.l_discount))))) = $1)
+                                       ->  Streaming(type: REDISTRIBUTE)
+                                             Output: public.lineitem.l_suppkey, (sum((public.lineitem.l_extendedprice * (1::double precision - public.lineitem.l_discount))))
+                                             Distribute Key: public.lineitem.l_suppkey
+                                             ->  HashAggregate
+                                                   Output: public.lineitem.l_suppkey, sum((public.lineitem.l_extendedprice * (1::double precision - public.lineitem.l_discount)))
+                                                   Group By Key: public.lineitem.l_suppkey
+                                                   ->  Foreign Scan on public.lineitem
+                                                         Output: public.lineitem.l_suppkey, public.lineitem.l_extendedprice, public.lineitem.l_discount
+                                                         Filter: ((public.lineitem.l_shipdate >= '1996-01-01'::text) AND (public.lineitem.l_shipdate < '1996-04-01'::text))
+                                                         Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+(51 rows)
+
+		
+--TPCH -Q16
+explain (verbose, costs off)	
+select
+        p_brand,
+        p_type,
+        p_size,
+        count(ps_suppkey) as supplier_cnt --remove distinct
+from
+        partsupp,
+        part
+where
+        p_partkey = ps_partkey
+        and p_brand <> 'Brand#45'
+        and p_type not like 'MEDIUM POLISHED%'
+        and p_size in (49, 14, 23, 45, 19, 3, 36, 9)
+        and ps_suppkey not in (
+                select
+                        s_suppkey
+                from
+                        supplier
+                where
+                        s_comment like '%Customer%Complaints%'
+        )
+group by
+        p_brand,
+        p_type,
+        p_size
+order by
+        supplier_cnt desc,
+        p_brand,
+        p_type,
+        p_size
+limit 100
+;
+WARNING:  Statistics in some tables or columns(public.partsupp.ps_partkey, public.partsupp.ps_suppkey, public.part.p_brand, public.part.p_type, public.part.p_size, public.part.p_partkey, public.supplier.s_comment, public.supplier.s_suppkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                     QUERY PLAN                                                                                                     
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: part.p_brand, part.p_type, part.p_size, (count((count(partsupp.ps_suppkey))))
+   ->  Sort
+         Output: part.p_brand, part.p_type, part.p_size, (count((count(partsupp.ps_suppkey))))
+         Sort Key: (count((count(partsupp.ps_suppkey)))) DESC, part.p_brand, part.p_type, part.p_size
+         ->  HashAggregate
+               Output: part.p_brand, part.p_type, part.p_size, count((count(partsupp.ps_suppkey)))
+               Group By Key: part.p_brand, part.p_type, part.p_size
+               ->  Streaming (type: GATHER)
+                     Output: part.p_brand, part.p_type, part.p_size, (count(partsupp.ps_suppkey))
+                     ->  HashAggregate
+                           Output: part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey)
+                           Group By Key: part.p_brand, part.p_type, part.p_size
+                           ->  Nested Loop Anti Join
+                                 Output: partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size
+                                 Join Filter: ((partsupp.ps_suppkey = supplier.s_suppkey) OR (partsupp.ps_suppkey IS NULL) OR (supplier.s_suppkey IS NULL))
+                                 ->  Hash Join
+                                       Output: partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size
+                                       Hash Cond: (partsupp.ps_partkey = part.p_partkey)
+                                       ->  Foreign Scan on public.partsupp
+                                             Output: partsupp.ps_suppkey, partsupp.ps_partkey
+                                             Orc File: /user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/
+                                       ->  Hash
+                                             Output: part.p_brand, part.p_type, part.p_size, part.p_partkey
+                                             ->  Streaming(type: BROADCAST)
+                                                   Output: part.p_brand, part.p_type, part.p_size, part.p_partkey
+                                                   ->  Foreign Scan on public.part
+                                                         Output: part.p_brand, part.p_type, part.p_size, part.p_partkey
+                                                         Filter: ((part.p_brand <> 'Brand#45'::text) AND (part.p_type !~~ 'MEDIUM POLISHED%'::text) AND (part.p_size = ANY ('{49,14,23,45,19,3,36,9}'::integer[])))
+                                                         Orc File: /user/hive/warehouse/mppdb.db/part_orc11_64stripe/
+                                 ->  Materialize
+                                       Output: supplier.s_suppkey
+                                       ->  Streaming(type: BROADCAST)
+                                             Output: supplier.s_suppkey
+                                             ->  Foreign Scan on public.supplier
+                                                   Output: supplier.s_suppkey
+                                                   Filter: (supplier.s_comment ~~ '%Customer%Complaints%'::text)
+                                                   Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/
+(38 rows)
+
+--TPCH -Q17
+explain (verbose, costs off)
+select
+        sum(l_extendedprice) / 7.0 as avg_yearly
+from
+        lineitem,
+        part,
+        (select
+            l_partkey as temp_l_partkey, 0.2 * avg(l_quantity) as temp_avg
+         from
+                lineitem
+         group by l_partkey
+        ) as temp
+where
+        p_partkey = l_partkey
+        and p_brand = 'Brand#23'
+        and p_container = 'MED BOX'
+        and l_quantity < temp_avg
+        and p_partkey = temp_l_partkey;
+WARNING:  Statistics in some tables or columns(public.lineitem.l_partkey, public.part.p_brand, public.part.p_container, public.part.p_partkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                              QUERY PLAN                                                                               
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: (sum((sum(public.lineitem.l_extendedprice))) / 7::double precision)
+   ->  Streaming (type: GATHER)
+         Output: (sum(public.lineitem.l_extendedprice))
+         ->  Aggregate
+               Output: sum(public.lineitem.l_extendedprice)
+               ->  Nested Loop
+                     Output: public.lineitem.l_extendedprice
+                     Join Filter: (public.lineitem.l_partkey = part.p_partkey)
+                     ->  Streaming(type: BROADCAST)
+                           Output: part.p_partkey
+                           ->  Foreign Scan on public.part
+                                 Output: part.p_partkey
+                                 Filter: ((part.p_brand = 'Brand#23'::text) AND (part.p_container = 'MED BOX'::text))
+                                 Orc File: /user/hive/warehouse/mppdb.db/part_orc11_64stripe/
+                     ->  Materialize
+                           Output: public.lineitem.l_extendedprice, public.lineitem.l_partkey, temp.temp_l_partkey
+                           ->  Hash Join
+                                 Output: public.lineitem.l_extendedprice, public.lineitem.l_partkey, temp.temp_l_partkey
+                                 Hash Cond: (public.lineitem.l_partkey = temp.temp_l_partkey)
+                                 Join Filter: (public.lineitem.l_quantity < temp.temp_avg)
+                                 ->  Foreign Scan on public.lineitem
+                                       Output: public.lineitem.l_extendedprice, public.lineitem.l_partkey, public.lineitem.l_quantity
+                                       Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+                                 ->  Hash
+                                       Output: temp.temp_avg, temp.temp_l_partkey
+                                       ->  Streaming(type: BROADCAST)
+                                             Output: temp.temp_avg, temp.temp_l_partkey
+                                             ->  Subquery Scan on temp
+                                                   Output: temp.temp_avg, temp.temp_l_partkey
+                                                   ->  HashAggregate
+                                                         Output: public.lineitem.l_partkey, (.2::double precision * pg_catalog.avg((avg(public.lineitem.l_quantity))))
+                                                         Group By Key: public.lineitem.l_partkey
+                                                         ->  Streaming(type: REDISTRIBUTE)
+                                                               Output: public.lineitem.l_partkey, (avg(public.lineitem.l_quantity))
+                                                               Distribute Key: public.lineitem.l_partkey
+                                                               ->  HashAggregate
+                                                                     Output: public.lineitem.l_partkey, avg(public.lineitem.l_quantity)
+                                                                     Group By Key: public.lineitem.l_partkey
+                                                                     ->  Foreign Scan on public.lineitem
+                                                                           Output: public.lineitem.l_partkey, public.lineitem.l_quantity
+                                                                           Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+(42 rows)
+
+		
+--TPCH -Q18
+explain (verbose, costs off) 
+select
+        c_name,
+        c_custkey,
+        o_orderkey,
+        o_orderdate,
+        o_totalprice,
+        sum(l_quantity)
+from
+        customer,
+        orders,
+        lineitem
+where
+        o_orderkey in (
+                select
+                        l_orderkey
+                from
+                        lineitem
+                group by
+                        l_orderkey having
+                                sum(l_quantity) > 300
+        )
+        and c_custkey = o_custkey
+        and o_orderkey = l_orderkey
+group by
+        c_name,
+        c_custkey,
+        o_orderkey,
+        o_orderdate,
+        o_totalprice
+order by
+        o_totalprice desc,
+        o_orderdate
+limit 100;
+WARNING:  Statistics in some tables or columns(public.customer.c_custkey, public.customer.c_name, public.orders.o_custkey, public.orders.o_orderkey, public.orders.o_totalprice, public.orders.o_orderdate, public.lineitem.l_orderkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                   QUERY PLAN                                                                                    
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, (sum((sum(public.lineitem.l_quantity))))
+   ->  Sort
+         Output: customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, (sum((sum(public.lineitem.l_quantity))))
+         Sort Key: orders.o_totalprice DESC, orders.o_orderdate
+         ->  HashAggregate
+               Output: customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum((sum(public.lineitem.l_quantity)))
+               Group By Key: orders.o_totalprice, orders.o_orderdate, customer.c_name, customer.c_custkey, orders.o_orderkey
+               ->  Streaming (type: GATHER)
+                     Output: customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, (sum(public.lineitem.l_quantity))
+                     ->  HashAggregate
+                           Output: customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(public.lineitem.l_quantity)
+                           Group By Key: orders.o_totalprice, orders.o_orderdate, customer.c_name, customer.c_custkey, orders.o_orderkey
+                           ->  Merge Join
+                                 Output: customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, public.lineitem.l_quantity
+                                 Merge Cond: (orders.o_orderkey = public.lineitem.l_orderkey)
+                                 ->  Sort
+                                       Output: customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, public.lineitem.l_orderkey
+                                       Sort Key: orders.o_orderkey
+                                       ->  Hash Join
+                                             Output: customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, public.lineitem.l_orderkey
+                                             Hash Cond: (orders.o_custkey = customer.c_custkey)
+                                             ->  Streaming(type: BROADCAST)
+                                                   Output: orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, orders.o_custkey, public.lineitem.l_orderkey
+                                                   ->  Hash Join
+                                                         Output: orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, orders.o_custkey, public.lineitem.l_orderkey
+                                                         Hash Cond: (orders.o_orderkey = public.lineitem.l_orderkey)
+                                                         ->  Foreign Scan on public.orders
+                                                               Output: orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, orders.o_custkey
+                                                               Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+                                                         ->  Hash
+                                                               Output: public.lineitem.l_orderkey
+                                                               ->  Streaming(type: BROADCAST)
+                                                                     Output: public.lineitem.l_orderkey
+                                                                     ->  HashAggregate
+                                                                           Output: public.lineitem.l_orderkey
+                                                                           Group By Key: public.lineitem.l_orderkey
+                                                                           Filter: (sum((sum(public.lineitem.l_quantity))) > 300::double precision)
+                                                                           ->  Streaming(type: REDISTRIBUTE)
+                                                                                 Output: public.lineitem.l_orderkey, (sum(public.lineitem.l_quantity))
+                                                                                 Distribute Key: public.lineitem.l_orderkey
+                                                                                 ->  HashAggregate
+                                                                                       Output: public.lineitem.l_orderkey, sum(public.lineitem.l_quantity)
+                                                                                       Group By Key: public.lineitem.l_orderkey
+                                                                                       ->  Foreign Scan on public.lineitem
+                                                                                             Output: public.lineitem.l_orderkey, public.lineitem.l_quantity
+                                                                                             Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+                                             ->  Hash
+                                                   Output: customer.c_name, customer.c_custkey
+                                                   ->  Foreign Scan on public.customer
+                                                         Output: customer.c_name, customer.c_custkey
+                                                         Orc File: /user/hive/warehouse/mppdb.db/customer_orc11_64stripe/
+                                 ->  Sort
+                                       Output: public.lineitem.l_quantity, public.lineitem.l_orderkey
+                                       Sort Key: public.lineitem.l_orderkey
+                                       ->  Streaming(type: BROADCAST)
+                                             Output: public.lineitem.l_quantity, public.lineitem.l_orderkey
+                                             ->  Foreign Scan on public.lineitem
+                                                   Output: public.lineitem.l_quantity, public.lineitem.l_orderkey
+                                                   Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+(60 rows)
+
+--TPCH -Q19
+explain (verbose, costs off) 
+select
+  round(sum(l_extendedprice * (1 - l_discount)), 5) as revenue
+from
+  lineitem,
+  part
+where
+  p_partkey = l_partkey
+  and (
+    (
+      p_brand = 'Brand#12'
+      and p_container in ('SM CASE', 'SM BOX', 'SM PACK', 'SM PKG')
+      and l_quantity >= 1 and l_quantity <= 11
+      and p_size between 1 and 5
+      and l_shipmode in ('AIR', 'AIR REG')
+      and l_shipinstruct = 'DELIVER IN PERSON'
+    )
+    or
+    (
+      p_brand = 'Brand#23'
+      and p_container in ('MED BAG', 'MED BOX', 'MED PKG', 'MED PACK')
+      and l_quantity >= 10 and l_quantity <= 20
+      and p_size between 1 and 10
+      and l_shipmode in ('AIR', 'AIR REG')
+      and l_shipinstruct = 'DELIVER IN PERSON'
+    )
+    or
+    (
+      p_brand = 'Brand#34'
+      and p_container in ('LG CASE', 'LG BOX', 'LG PACK', 'LG PKG')
+      and l_quantity >= 20 and l_quantity <= 30
+      and p_size between 1 and 15
+      and l_shipmode in ('AIR', 'AIR REG')
+      and l_shipinstruct = 'DELIVER IN PERSON'
+    )
+  )
+;
+WARNING:  Statistics in some tables or columns(public.lineitem.l_shipmode, public.lineitem.l_shipinstruct, public.lineitem.l_quantity, public.lineitem.l_partkey, public.part.p_size, public.part.p_brand, public.part.p_container, public.part.p_partkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                                                                                                                                                                                                                                                                                                                          QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                          
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: round((sum((sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))))))::numeric, 5)
+   ->  Streaming (type: GATHER)
+         Output: (sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount))))
+         ->  Aggregate
+               Output: sum((lineitem.l_extendedprice * (1::double precision - lineitem.l_discount)))
+               ->  Hash Join
+                     Output: lineitem.l_extendedprice, lineitem.l_discount
+                     Hash Cond: (lineitem.l_partkey = part.p_partkey)
+                     Join Filter: (((part.p_brand = 'Brand#12'::text) AND (part.p_container = ANY ('{"SM CASE","SM BOX","SM PACK","SM PKG"}'::text[])) AND (lineitem.l_quantity >= 1::double precision) AND (lineitem.l_quantity <= 11::double precision) AND (part.p_size <= 5)) OR ((part.p_brand = 'Brand#23'::text) AND (part.p_container = ANY ('{"MED BAG","MED BOX","MED PKG","MED PACK"}'::text[])) AND (lineitem.l_quantity >= 10::double precision) AND (lineitem.l_quantity <= 20::double precision) AND (part.p_size <= 10)) OR ((part.p_brand = 'Brand#34'::text) AND (part.p_container = ANY ('{"LG CASE","LG BOX","LG PACK","LG PKG"}'::text[])) AND (lineitem.l_quantity >= 20::double precision) AND (lineitem.l_quantity <= 30::double precision) AND (part.p_size <= 15)))
+                     ->  Streaming(type: BROADCAST)
+                           Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_partkey, lineitem.l_quantity
+                           ->  Foreign Scan on public.lineitem
+                                 Output: lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_partkey, lineitem.l_quantity
+                                 Filter: ((lineitem.l_shipmode = ANY ('{AIR,"AIR REG"}'::text[])) AND (lineitem.l_shipinstruct = 'DELIVER IN PERSON'::text))
+                                 Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+                     ->  Hash
+                           Output: part.p_partkey, part.p_brand, part.p_container, part.p_size
+                           ->  Foreign Scan on public.part
+                                 Output: part.p_partkey, part.p_brand, part.p_container, part.p_size
+                                 Filter: (part.p_size >= 1)
+                                 Orc File: /user/hive/warehouse/mppdb.db/part_orc11_64stripe/
+(22 rows)
+
+--TPCH -Q20
+explain (verbose, costs off)   
+select
+    s_name,
+    s_address
+from
+    supplier,
+    nation
+where
+    s_suppkey in (
+        select
+            ps_suppkey
+        from
+            partsupp,
+            (
+                select
+                    l_partkey as temp_l_partkey, l_suppkey as temp_l_suppkey, 0.5 * sum(l_quantity) as temp_l_quantity
+                from
+                    lineitem
+                where
+                    l_shipdate >= '1994-01-01'
+                    and l_shipdate < '1995-01-01'
+                group by l_partkey, l_suppkey
+            ) as temp
+        where
+            temp_l_partkey = ps_partkey
+            and temp_l_suppkey = ps_suppkey
+            and ps_partkey in (
+                select
+                    p_partkey
+                from
+                    part
+                where
+                    p_name like 'forest%'
+            )
+            and ps_availqty > temp_l_quantity
+    )  
+    and s_nationkey = n_nationkey
+    and n_name = 'CANADA'
+order by
+    s_name; 
+WARNING:  Statistics in some tables or columns(public.supplier.s_nationkey, public.supplier.s_suppkey, public.nation.n_name, public.nation.n_nationkey, public.partsupp.ps_partkey, public.partsupp.ps_suppkey, public.part.p_name, public.part.p_partkey, public.lineitem.l_shipdate, public.lineitem.l_partkey, public.lineitem.l_suppkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                   QUERY PLAN                                                                                   
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Output: supplier.s_name, supplier.s_address
+   ->  Sort
+         Output: supplier.s_name, supplier.s_address
+         Sort Key: supplier.s_name
+         ->  Hash Semi Join
+               Output: supplier.s_name, supplier.s_address
+               Hash Cond: (supplier.s_suppkey = lineitem.l_suppkey)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Output: supplier.s_name, supplier.s_address, supplier.s_suppkey
+                     Distribute Key: supplier.s_suppkey
+                     ->  Hash Join
+                           Output: supplier.s_name, supplier.s_address, supplier.s_suppkey
+                           Hash Cond: (supplier.s_nationkey = nation.n_nationkey)
+                           ->  Foreign Scan on public.supplier
+                                 Output: supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_suppkey
+                                 Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/
+                           ->  Hash
+                                 Output: nation.n_nationkey
+                                 ->  Streaming(type: BROADCAST)
+                                       Output: nation.n_nationkey
+                                       ->  Foreign Scan on public.nation
+                                             Output: nation.n_nationkey
+                                             Filter: (nation.n_name = 'CANADA'::text)
+                                             Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+               ->  Hash
+                     Output: partsupp.ps_suppkey, lineitem.l_suppkey
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Output: partsupp.ps_suppkey, lineitem.l_suppkey
+                           Distribute Key: lineitem.l_suppkey
+                           ->  Nested Loop Semi Join
+                                 Output: partsupp.ps_suppkey, lineitem.l_suppkey
+                                 Join Filter: (lineitem.l_partkey = part.p_partkey)
+                                 ->  Hash Join
+                                       Output: partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_partkey, lineitem.l_suppkey
+                                       Hash Cond: ((partsupp.ps_partkey = lineitem.l_partkey) AND (partsupp.ps_suppkey = lineitem.l_suppkey))
+                                       Join Filter: ((partsupp.ps_availqty)::double precision > ((.5::double precision * sum((sum(lineitem.l_quantity))))))
+                                       ->  Foreign Scan on public.partsupp
+                                             Output: partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty
+                                             Orc File: /user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe/
+                                       ->  Hash
+                                             Output: lineitem.l_partkey, lineitem.l_suppkey, ((.5::double precision * sum((sum(lineitem.l_quantity)))))
+                                             ->  Streaming(type: BROADCAST)
+                                                   Output: lineitem.l_partkey, lineitem.l_suppkey, ((.5::double precision * sum((sum(lineitem.l_quantity)))))
+                                                   ->  HashAggregate
+                                                         Output: lineitem.l_partkey, lineitem.l_suppkey, (.5::double precision * sum((sum(lineitem.l_quantity))))
+                                                         Group By Key: lineitem.l_partkey, lineitem.l_suppkey
+                                                         ->  Streaming(type: REDISTRIBUTE)
+                                                               Output: lineitem.l_partkey, lineitem.l_suppkey, (sum(lineitem.l_quantity))
+                                                               Distribute Key: lineitem.l_partkey, lineitem.l_suppkey
+                                                               ->  HashAggregate
+                                                                     Output: lineitem.l_partkey, lineitem.l_suppkey, sum(lineitem.l_quantity)
+                                                                     Group By Key: lineitem.l_partkey, lineitem.l_suppkey
+                                                                     ->  Foreign Scan on public.lineitem
+                                                                           Output: lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity
+                                                                           Filter: ((lineitem.l_shipdate >= '1994-01-01'::text) AND (lineitem.l_shipdate < '1995-01-01'::text))
+                                                                           Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+                                 ->  Materialize
+                                       Output: part.p_partkey
+                                       ->  Streaming(type: BROADCAST)
+                                             Output: part.p_partkey
+                                             ->  Foreign Scan on public.part
+                                                   Output: part.p_partkey
+                                                   Filter: (part.p_name ~~ 'forest%'::text)
+                                                   Orc File: /user/hive/warehouse/mppdb.db/part_orc11_64stripe/
+(65 rows)
+
+	
+--TPCH -Q21
+explain (verbose, costs off) 	
+select
+        s_name,
+        count(*) as numwait
+from
+        supplier,
+        lineitem l1,
+        orders,
+        nation
+where
+        s_suppkey = l1.l_suppkey
+        and o_orderkey = l1.l_orderkey
+        and o_orderstatus = 'F'
+        and l1.l_receiptdate > l1.l_commitdate
+        and exists (
+                select
+                        *
+                from
+                        lineitem l2
+                where
+                        l2.l_orderkey = l1.l_orderkey
+                        and l2.l_suppkey <> l1.l_suppkey
+        )
+        and not exists (
+                select
+                        *
+                from
+                        lineitem l3
+                where
+                        l3.l_orderkey = l1.l_orderkey
+                        and l3.l_suppkey <> l1.l_suppkey
+                        and l3.l_receiptdate > l3.l_commitdate
+        )	
+        and s_nationkey = n_nationkey
+        and n_name = 'SAUDI ARABIA'
+group by
+        s_name
+order by
+        numwait desc,
+        s_name
+limit 100;	
+WARNING:  Statistics in some tables or columns(public.supplier.s_suppkey, public.supplier.s_nationkey, public.supplier.s_name, public.lineitem.l_receiptdate, public.lineitem.l_commitdate, public.lineitem.l_suppkey, public.lineitem.l_orderkey, public.orders.o_orderstatus, public.orders.o_orderkey, public.nation.n_name, public.nation.n_nationkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                   QUERY PLAN                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: supplier.s_name, (pg_catalog.count(*))
+   ->  Sort
+         Output: supplier.s_name, (pg_catalog.count(*))
+         Sort Key: (pg_catalog.count(*)) DESC, supplier.s_name
+         ->  HashAggregate
+               Output: supplier.s_name, pg_catalog.count(*)
+               Group By Key: supplier.s_name
+               ->  Streaming (type: GATHER)
+                     Output: supplier.s_name, (count(*))
+                     ->  HashAggregate
+                           Output: supplier.s_name, count(*)
+                           Group By Key: supplier.s_name
+                           ->  Hash Join
+                                 Output: supplier.s_name
+                                 Hash Cond: (l1.l_suppkey = supplier.s_suppkey)
+                                 ->  Streaming(type: BROADCAST)
+                                       Output: l1.l_suppkey
+                                       ->  Hash Anti Join
+                                             Output: l1.l_suppkey
+                                             Hash Cond: (l1.l_orderkey = l3.l_orderkey)
+                                             Join Filter: (l3.l_suppkey <> l1.l_suppkey)
+                                             ->  Hash Semi Join
+                                                   Output: l1.l_suppkey, l1.l_orderkey
+                                                   Hash Cond: (orders.o_orderkey = l2.l_orderkey)
+                                                   Join Filter: (l2.l_suppkey <> l1.l_suppkey)
+                                                   ->  Streaming(type: REDISTRIBUTE)
+                                                         Output: l1.l_suppkey, l1.l_orderkey, orders.o_orderkey
+                                                         Distribute Key: l1.l_orderkey
+                                                         ->  Hash Join
+                                                               Output: l1.l_suppkey, l1.l_orderkey, orders.o_orderkey
+                                                               Hash Cond: (l1.l_orderkey = orders.o_orderkey)
+                                                               ->  Foreign Scan on public.lineitem l1
+                                                                     Output: l1.l_suppkey, l1.l_orderkey
+                                                                     Filter: (l1.l_receiptdate > l1.l_commitdate)
+                                                                     Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+                                                               ->  Hash
+                                                                     Output: orders.o_orderkey
+                                                                     ->  Streaming(type: BROADCAST)
+                                                                           Output: orders.o_orderkey
+                                                                           ->  Foreign Scan on public.orders
+                                                                                 Output: orders.o_orderkey
+                                                                                 Filter: (orders.o_orderstatus = 'F'::text)
+                                                                                 Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+                                                   ->  Hash
+                                                         Output: l2.l_orderkey, l2.l_suppkey
+                                                         ->  Streaming(type: REDISTRIBUTE)
+                                                               Output: l2.l_orderkey, l2.l_suppkey
+                                                               Distribute Key: l2.l_orderkey
+                                                               ->  Foreign Scan on public.lineitem l2
+                                                                     Output: l2.l_orderkey, l2.l_suppkey
+                                                                     Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+                                             ->  Hash
+                                                   Output: l3.l_orderkey, l3.l_suppkey
+                                                   ->  Streaming(type: REDISTRIBUTE)
+                                                         Output: l3.l_orderkey, l3.l_suppkey
+                                                         Distribute Key: l3.l_orderkey
+                                                         ->  Foreign Scan on public.lineitem l3
+                                                               Output: l3.l_orderkey, l3.l_suppkey
+                                                               Filter: (l3.l_receiptdate > l3.l_commitdate)
+                                                               Orc File: /user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/
+                                 ->  Hash
+                                       Output: supplier.s_name, supplier.s_suppkey
+                                       ->  Hash Join
+                                             Output: supplier.s_name, supplier.s_suppkey
+                                             Hash Cond: (supplier.s_nationkey = nation.n_nationkey)
+                                             ->  Foreign Scan on public.supplier
+                                                   Output: supplier.s_name, supplier.s_suppkey, supplier.s_nationkey
+                                                   Orc File: /user/hive/warehouse/mppdb.db/supplier_orc11_64stripe/
+                                             ->  Hash
+                                                   Output: nation.n_nationkey
+                                                   ->  Streaming(type: BROADCAST)
+                                                         Output: nation.n_nationkey
+                                                         ->  Foreign Scan on public.nation
+                                                               Output: nation.n_nationkey
+                                                               Filter: (nation.n_name = 'SAUDI ARABIA'::text)
+                                                               Orc File: /user/hive/warehouse/mppdb.db/nation_orc11_64stripe/
+(77 rows)
+
+	
+--TPCH -Q22
+explain (verbose, costs off) 	
+select
+  cntrycode,
+  count(*) as numcust,
+  round(sum(c_acctbal), 4) as totacctbal
+from (
+  select
+    substr(c_phone, 1, 2) as cntrycode, c_acctbal
+  from customer
+  where
+    substr(c_phone, 1, 2) in ('13', '31', '23', '29', '30', '18', '17')
+    and c_acctbal > (
+      select avg(c_acctbal)
+      from customer
+      where
+        c_acctbal > 0.00
+        and substr(c_phone, 1, 2) in ('13', '31', '23', '29', '30', '18', '17')
+      )
+    and not exists (
+      select *
+      from orders
+      where
+        o_custkey = c_custkey
+    )
+  ) as custsale
+group by cntrycode
+order by cntrycode
+;	
+WARNING:  Statistics in some tables or columns(public.customer.c_acctbal, public.customer.c_custkey, public.customer.c_phone, public.orders.o_custkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                  QUERY PLAN                                                                                  
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (substr(public.customer.c_phone, 1, 2)), (pg_catalog.count(*)), (round((sum((sum(public.customer.c_acctbal))))::numeric, 4))
+   Sort Key: (substr(public.customer.c_phone, 1, 2))
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           Output: pg_catalog.avg((avg(public.customer.c_acctbal)))
+           ->  Streaming(type: BROADCAST)
+                 Output: (avg(public.customer.c_acctbal))
+                 ->  Aggregate
+                       Output: avg(public.customer.c_acctbal)
+                       ->  Foreign Scan on public.customer
+                             Output: public.customer.c_acctbal
+                             Filter: ((public.customer.c_acctbal > 0::double precision) AND (substr(public.customer.c_phone, 1, 2) = ANY ('{13,31,23,29,30,18,17}'::text[])))
+                             Orc File: /user/hive/warehouse/mppdb.db/customer_orc11_64stripe/
+   ->  HashAggregate
+         Output: (substr(public.customer.c_phone, 1, 2)), pg_catalog.count(*), round((sum((sum(public.customer.c_acctbal))))::numeric, 4)
+         Group By Key: (substr(public.customer.c_phone, 1, 2))
+         ->  Streaming (type: GATHER)
+               Output: (substr(public.customer.c_phone, 1, 2)), (count(*)), (sum(public.customer.c_acctbal))
+               ->  HashAggregate
+                     Output: (substr(public.customer.c_phone, 1, 2)), count(*), sum(public.customer.c_acctbal)
+                     Group By Key: substr(public.customer.c_phone, 1, 2)
+                     ->  Hash Anti Join
+                           Output: substr(public.customer.c_phone, 1, 2), public.customer.c_acctbal
+                           Hash Cond: (public.customer.c_custkey = orders.o_custkey)
+                           ->  Foreign Scan on public.customer
+                                 Output: public.customer.c_phone, public.customer.c_acctbal, public.customer.c_custkey
+                                 Filter: ((public.customer.c_acctbal > $0) AND (substr(public.customer.c_phone, 1, 2) = ANY ('{13,31,23,29,30,18,17}'::text[])))
+                                 Orc File: /user/hive/warehouse/mppdb.db/customer_orc11_64stripe/
+                           ->  Hash
+                                 Output: orders.o_custkey
+                                 ->  Streaming(type: BROADCAST)
+                                       Output: orders.o_custkey
+                                       ->  Foreign Scan on public.orders
+                                             Output: orders.o_custkey
+                                             Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+(36 rows)
+
+explain (verbose, costs off) 
+select
+        cntrycode,
+        count(*) as numcust,
+        CAST(sum(c_acctbal) AS INT8) as totacctbal
+from 
+        (
+                select
+                        substring(c_phone from 1 for 2) as cntrycode,
+                        c_acctbal
+                from
+                        customer
+                where
+                        substring(c_phone from 1 for 2) in
+                                ('13', '31', '23', '29', '30', '18', '17')
+                        and c_acctbal > (
+                                select
+                                        avg(c_acctbal)
+                                from
+                                        customer
+                                where
+                                        c_acctbal > 0.00
+                                        and substring(c_phone from 1 for 2) in
+                                                ('13', '31', '23', '29', '30', '18', '17')
+                        )
+        ) as custsale
+group by
+        cntrycode
+order by
+        cntrycode;
+WARNING:  Statistics in some tables or columns(public.customer.c_acctbal, public.customer.c_phone) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                                                    QUERY PLAN                                                                                     
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: ("substring"(public.customer.c_phone, 1, 2)), (pg_catalog.count(*)), ((sum((sum(public.customer.c_acctbal))))::bigint)
+   Sort Key: ("substring"(public.customer.c_phone, 1, 2))
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           Output: pg_catalog.avg((avg(public.customer.c_acctbal)))
+           ->  Streaming(type: BROADCAST)
+                 Output: (avg(public.customer.c_acctbal))
+                 ->  Aggregate
+                       Output: avg(public.customer.c_acctbal)
+                       ->  Foreign Scan on public.customer
+                             Output: public.customer.c_acctbal
+                             Filter: ((public.customer.c_acctbal > 0::double precision) AND ("substring"(public.customer.c_phone, 1, 2) = ANY ('{13,31,23,29,30,18,17}'::text[])))
+                             Orc File: /user/hive/warehouse/mppdb.db/customer_orc11_64stripe/
+   ->  HashAggregate
+         Output: ("substring"(public.customer.c_phone, 1, 2)), pg_catalog.count(*), (sum((sum(public.customer.c_acctbal))))::bigint
+         Group By Key: ("substring"(public.customer.c_phone, 1, 2))
+         ->  Streaming (type: GATHER)
+               Output: ("substring"(public.customer.c_phone, 1, 2)), (count(*)), (sum(public.customer.c_acctbal))
+               ->  HashAggregate
+                     Output: ("substring"(public.customer.c_phone, 1, 2)), count(*), sum(public.customer.c_acctbal)
+                     Group By Key: "substring"(public.customer.c_phone, 1, 2)
+                     ->  Foreign Scan on public.customer
+                           Output: "substring"(public.customer.c_phone, 1, 2), public.customer.c_acctbal
+                           Filter: ((public.customer.c_acctbal > $0) AND ("substring"(public.customer.c_phone, 1, 2) = ANY ('{13,31,23,29,30,18,17}'::text[])))
+                           Orc File: /user/hive/warehouse/mppdb.db/customer_orc11_64stripe/
+(26 rows)
+
+explain (verbose, costs off) 
+select
+        cntrycode,
+        count(*) as numcust,
+        CAST(sum(c_acctbal) AS INT8) as totacctbal
+from 
+        (
+                select
+                        substring(c_phone from 1 for 2) as cntrycode,
+                        c_acctbal
+                from
+                        customer
+                where
+                        substring(c_phone from 1 for 2) in
+                                ('13', '31', '23', '29', '30', '18', '17')
+                        and not exists (
+                                select
+                                        *
+                                from
+                                        orders
+                                where
+                                        o_custkey = c_custkey
+                        )
+        ) as custsale
+group by
+        cntrycode
+order by
+        cntrycode;
+WARNING:  Statistics in some tables or columns(public.customer.c_custkey, public.customer.c_phone, public.orders.o_custkey) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: ("substring"(customer.c_phone, 1, 2)), (pg_catalog.count(*)), ((sum((sum(customer.c_acctbal))))::bigint)
+   Sort Key: ("substring"(customer.c_phone, 1, 2))
+   ->  HashAggregate
+         Output: ("substring"(customer.c_phone, 1, 2)), pg_catalog.count(*), (sum((sum(customer.c_acctbal))))::bigint
+         Group By Key: ("substring"(customer.c_phone, 1, 2))
+         ->  Streaming (type: GATHER)
+               Output: ("substring"(customer.c_phone, 1, 2)), (count(*)), (sum(customer.c_acctbal))
+               ->  HashAggregate
+                     Output: ("substring"(customer.c_phone, 1, 2)), count(*), sum(customer.c_acctbal)
+                     Group By Key: "substring"(customer.c_phone, 1, 2)
+                     ->  Hash Anti Join
+                           Output: "substring"(customer.c_phone, 1, 2), customer.c_acctbal
+                           Hash Cond: (customer.c_custkey = orders.o_custkey)
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 Output: customer.c_phone, customer.c_acctbal, customer.c_custkey
+                                 Distribute Key: customer.c_custkey
+                                 ->  Foreign Scan on public.customer
+                                       Output: customer.c_phone, customer.c_acctbal, customer.c_custkey
+                                       Filter: ("substring"(customer.c_phone, 1, 2) = ANY ('{13,31,23,29,30,18,17}'::text[]))
+                                       Orc File: /user/hive/warehouse/mppdb.db/customer_orc11_64stripe/
+                           ->  Hash
+                                 Output: orders.o_custkey
+                                 ->  Streaming(type: REDISTRIBUTE)
+                                       Output: orders.o_custkey
+                                       Distribute Key: orders.o_custkey
+                                       ->  Foreign Scan on public.orders
+                                             Output: orders.o_custkey
+                                             Orc File: /user/hive/warehouse/mppdb.db/orders_orc11_64stripe/
+(29 rows)
+
+	  
+set datestyle to iso;SET IntervalStyle to postgres;
+reset enable_vector_engine;
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+DROP SERVER hdfs_server CASCADE;

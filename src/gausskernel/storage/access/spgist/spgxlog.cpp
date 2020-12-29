@@ -32,14 +32,14 @@
  * At present, all we need is enough info to support spgFormDeadTuple(),
  * plus the isBuild flag.
  */
-void fillFakeState(SpGistState* state, const spgxlogState& stateSrc)
+void fillFakeState(SpGistState *state, const spgxlogState &stateSrc)
 {
     errno_t rc = memset_s(state, sizeof(*state), 0, sizeof(*state));
     securec_check(rc, "\0", "\0");
 
     state->myXid = stateSrc.myXid;
     state->isBuild = stateSrc.isBuild;
-    state->deadTupleStorage = (char*)palloc0(SGDTSIZE);
+    state->deadTupleStorage = (char *)palloc0(SGDTSIZE);
 }
 
 /*
@@ -54,8 +54,8 @@ void addOrReplaceTuple(Page page, Item tuple, int size, OffsetNumber offset)
         SpGistDeadTuple dt = (SpGistDeadTuple)PageGetItem(page, PageGetItemId(page, offset));
 
         if (dt->tupstate != SPGIST_PLACEHOLDER)
-            ereport(
-                ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("SPGiST tuple to be replaced is not a placeholder")));
+            ereport(ERROR,
+                    (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("SPGiST tuple to be replaced is not a placeholder")));
 
         Assert(SpGistPageGetOpaque(page)->nPlaceholder > 0);
         SpGistPageGetOpaque(page)->nPlaceholder--;
@@ -67,10 +67,10 @@ void addOrReplaceTuple(Page page, Item tuple, int size, OffsetNumber offset)
 
     if (PageAddItem(page, tuple, size, offset, false, false) != offset)
         ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("failed to add item of size %d to SPGiST index page", size)));
+                (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("failed to add item of size %d to SPGiST index page", size)));
 }
 
-static void spgRedoCreateIndex(XLogReaderState* record)
+static void spgRedoCreateIndex(XLogReaderState *record)
 {
     RedoBufferInfo buffer;
 
@@ -90,10 +90,10 @@ static void spgRedoCreateIndex(XLogReaderState* record)
     UnlockReleaseBuffer(buffer.buf);
 }
 
-static void spgRedoAddLeaf(XLogReaderState* record)
+static void spgRedoAddLeaf(XLogReaderState *record)
 {
-    char* ptr = XLogRecGetData(record);
-    spgxlogAddLeaf* xldata = (spgxlogAddLeaf*)ptr;
+    char *ptr = XLogRecGetData(record);
+    spgxlogAddLeaf *xldata = (spgxlogAddLeaf *)ptr;
     RedoBufferInfo buffer;
     XLogRedoAction action;
 
@@ -108,7 +108,7 @@ static void spgRedoAddLeaf(XLogReaderState* record)
     } else
         action = XLogReadBufferForRedo(record, 0, &buffer);
     if (action == BLK_NEEDS_REDO) {
-        spgRedoAddLeafOperatorPage(&buffer, (void*)ptr);
+        spgRedoAddLeafOperatorPage(&buffer, (void *)ptr);
 
         MarkBufferDirty(buffer.buf);
     }
@@ -121,7 +121,7 @@ static void spgRedoAddLeaf(XLogReaderState* record)
         if (XLogReadBufferForRedo(record, 1, &buffer) == BLK_NEEDS_REDO) {
             BlockNumber blknoLeaf;
             XLogRecGetBlockTag(record, 0, NULL, NULL, &blknoLeaf);
-            spgRedoAddLeafOperatorParent(&buffer, (void*)ptr, blknoLeaf);
+            spgRedoAddLeafOperatorParent(&buffer, (void *)ptr, blknoLeaf);
 
             MarkBufferDirty(buffer.buf);
         }
@@ -131,12 +131,12 @@ static void spgRedoAddLeaf(XLogReaderState* record)
     }
 }
 
-static void spgRedoMoveLeafs(XLogReaderState* record)
+static void spgRedoMoveLeafs(XLogReaderState *record)
 {
-    char* ptr = XLogRecGetData(record);
-    spgxlogMoveLeafs* xldata = (spgxlogMoveLeafs*)ptr;
-    OffsetNumber* toDelete = NULL;
-    OffsetNumber* toInsert = NULL;
+    char *ptr = XLogRecGetData(record);
+    spgxlogMoveLeafs *xldata = (spgxlogMoveLeafs *)ptr;
+    OffsetNumber *toDelete = NULL;
+    OffsetNumber *toInsert = NULL;
     int nInsert;
     RedoBufferInfo buffer;
     XLogRedoAction action;
@@ -147,9 +147,9 @@ static void spgRedoMoveLeafs(XLogReaderState* record)
     nInsert = xldata->replaceDead ? 1 : xldata->nMoves + 1;
 
     ptr += SizeOfSpgxlogMoveLeafs;
-    toDelete = (OffsetNumber*)ptr;
+    toDelete = (OffsetNumber *)ptr;
     ptr += sizeof(OffsetNumber) * xldata->nMoves;
-    toInsert = (OffsetNumber*)ptr;
+    toInsert = (OffsetNumber *)ptr;
     ptr += sizeof(OffsetNumber) * nInsert;
 
     /* now ptr points to the list of leaf tuples
@@ -158,7 +158,7 @@ static void spgRedoMoveLeafs(XLogReaderState* record)
      * parent) locked simultaneously; but in WAL replay it should be safe to
      * update them one at a time, as long as we do it in the right order.
      *
-     * Insert tuples on the dest page (do first, so redirect is valid) 
+     * Insert tuples on the dest page (do first, so redirect is valid)
      */
     if (xldata->newPage) {
         XLogInitBufferForRedo(record, 1, &buffer);
@@ -167,7 +167,7 @@ static void spgRedoMoveLeafs(XLogReaderState* record)
         action = XLogReadBufferForRedo(record, 1, &buffer);
 
     if (action == BLK_NEEDS_REDO) {
-        spgRedoMoveLeafsOpratorDstPage(&buffer, (void*)xldata, (void*)toInsert, (void*)ptr);
+        spgRedoMoveLeafsOpratorDstPage(&buffer, (void *)xldata, (void *)toInsert, (void *)ptr);
         MarkBufferDirty(buffer.buf);
     }
     if (BufferIsValid(buffer.buf))
@@ -175,7 +175,7 @@ static void spgRedoMoveLeafs(XLogReaderState* record)
 
     /* Delete tuples from the source page, inserting a redirection pointer */
     if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
-        spgRedoMoveLeafsOpratorSrcPage(&buffer, (void*)xldata, (void*)toInsert, (void*)toDelete, blknoDst, nInsert);
+        spgRedoMoveLeafsOpratorSrcPage(&buffer, (void *)xldata, (void *)toInsert, (void *)toDelete, blknoDst, nInsert);
 
         MarkBufferDirty(buffer.buf);
     }
@@ -184,7 +184,7 @@ static void spgRedoMoveLeafs(XLogReaderState* record)
 
     /* And update the parent downlink */
     if (XLogReadBufferForRedo(record, 2, &buffer) == BLK_NEEDS_REDO) {
-        spgRedoMoveLeafsOpratorParentPage(&buffer, (void*)xldata, (void*)toInsert, blknoDst, nInsert);
+        spgRedoMoveLeafsOpratorParentPage(&buffer, (void *)xldata, (void *)toInsert, blknoDst, nInsert);
         MarkBufferDirty(buffer.buf);
     }
     if (BufferIsValid(buffer.buf)) {
@@ -192,11 +192,11 @@ static void spgRedoMoveLeafs(XLogReaderState* record)
     }
 }
 
-static void spgRedoAddNode(XLogReaderState* record)
+static void spgRedoAddNode(XLogReaderState *record)
 {
-    char* ptr = XLogRecGetData(record);
-    spgxlogAddNode* xldata = (spgxlogAddNode*)ptr;
-    char* innerTuple = NULL;
+    char *ptr = XLogRecGetData(record);
+    spgxlogAddNode *xldata = (spgxlogAddNode *)ptr;
+    char *innerTuple = NULL;
     SpGistInnerTupleData innerTupleHdr;
     RedoBufferInfo buffer;
     XLogRedoAction action;
@@ -213,7 +213,7 @@ static void spgRedoAddNode(XLogReaderState* record)
         /* update in place */
         Assert(xldata->parentBlk == -1);
         if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
-            spgRedoAddNodeUpdateSrcPage(&buffer, (void*)xldata, (void*)innerTuple, (void*)&innerTupleHdr);
+            spgRedoAddNodeUpdateSrcPage(&buffer, (void *)xldata, (void *)innerTuple, (void *)&innerTupleHdr);
             MarkBufferDirty(buffer.buf);
         }
         if (BufferIsValid(buffer.buf)) {
@@ -230,7 +230,7 @@ static void spgRedoAddNode(XLogReaderState* record)
          * order. We must insert the new tuple before replacing the old tuple
          * with the redirect tuple.
          *
-         * Install new tuple first so redirect is valid 
+         * Install new tuple first so redirect is valid
          */
         if (xldata->newPage) {
             XLogInitBufferForRedo(record, 1, &buffer);
@@ -239,7 +239,8 @@ static void spgRedoAddNode(XLogReaderState* record)
             action = XLogReadBufferForRedo(record, 1, &buffer);
 
         if (action == BLK_NEEDS_REDO) {
-            spgRedoAddNodeOperatorDestPage(&buffer, (void*)xldata, (void*)innerTuple, (void*)&innerTupleHdr, blknoNew);
+            spgRedoAddNodeOperatorDestPage(&buffer, (void *)xldata, (void *)innerTuple, (void *)&innerTupleHdr,
+                                           blknoNew);
             MarkBufferDirty(buffer.buf);
         }
         if (BufferIsValid(buffer.buf)) {
@@ -248,7 +249,7 @@ static void spgRedoAddNode(XLogReaderState* record)
 
         /* Delete old tuple, replacing it with redirect or placeholder tuple */
         if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
-            spgRedoAddNodeOperatorSrcPage(&buffer, (void*)xldata, blknoNew);
+            spgRedoAddNodeOperatorSrcPage(&buffer, (void *)xldata, blknoNew);
             MarkBufferDirty(buffer.buf);
         }
         if (BufferIsValid(buffer.buf)) {
@@ -261,7 +262,7 @@ static void spgRedoAddNode(XLogReaderState* record)
          */
         if (xldata->parentBlk == 2) {
             if (XLogReadBufferForRedo(record, 2, &buffer) == BLK_NEEDS_REDO) {
-                spgRedoAddNodeOperatorParentPage(&buffer, (void*)xldata, blknoNew);
+                spgRedoAddNodeOperatorParentPage(&buffer, (void *)xldata, blknoNew);
                 MarkBufferDirty(buffer.buf);
             }
             if (BufferIsValid(buffer.buf)) {
@@ -271,10 +272,10 @@ static void spgRedoAddNode(XLogReaderState* record)
     }
 }
 
-static void spgRedoSplitTuple(XLogReaderState* record)
+static void spgRedoSplitTuple(XLogReaderState *record)
 {
-    char* ptr = XLogRecGetData(record);
-    spgxlogSplitTuple* xldata = (spgxlogSplitTuple*)ptr;
+    char *ptr = XLogRecGetData(record);
+    spgxlogSplitTuple *xldata = (spgxlogSplitTuple *)ptr;
     SpGistInnerTuple prefixTuple;
     SpGistInnerTuple postfixTuple;
     RedoBufferInfo buffer;
@@ -291,7 +292,7 @@ static void spgRedoSplitTuple(XLogReaderState* record)
      * in WAL replay it should be safe to update them one at a time, as long
      * as we do it in the right order.
      *
-     * insert postfix tuple first to avoid dangling link 
+     * insert postfix tuple first to avoid dangling link
      */
     if (!xldata->postfixBlkSame) {
         if (xldata->newPage) {
@@ -301,7 +302,7 @@ static void spgRedoSplitTuple(XLogReaderState* record)
             action = XLogReadBufferForRedo(record, 1, &buffer);
 
         if (action == BLK_NEEDS_REDO) {
-            spgRedoSplitTupleOperatorDestPage(&buffer, (void*)xldata, (void*)postfixTuple);
+            spgRedoSplitTupleOperatorDestPage(&buffer, (void *)xldata, (void *)postfixTuple);
             MarkBufferDirty(buffer.buf);
         }
         if (BufferIsValid(buffer.buf)) {
@@ -311,7 +312,7 @@ static void spgRedoSplitTuple(XLogReaderState* record)
 
     /* now handle the original page */
     if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
-        spgRedoSplitTupleOperatorSrcPage(&buffer, (void*)xldata, (void*)prefixTuple, (void*)postfixTuple);
+        spgRedoSplitTupleOperatorSrcPage(&buffer, (void *)xldata, (void *)prefixTuple, (void *)postfixTuple);
         MarkBufferDirty(buffer.buf);
     }
     if (BufferIsValid(buffer.buf)) {
@@ -319,15 +320,15 @@ static void spgRedoSplitTuple(XLogReaderState* record)
     }
 }
 
-static void spgRedoPickSplit(XLogReaderState* record)
+static void spgRedoPickSplit(XLogReaderState *record)
 {
-    char* ptr = XLogRecGetData(record);
-    spgxlogPickSplit* xldata = (spgxlogPickSplit*)ptr;
-    char* innerTuple = NULL;
+    char *ptr = XLogRecGetData(record);
+    spgxlogPickSplit *xldata = (spgxlogPickSplit *)ptr;
+    char *innerTuple = NULL;
     SpGistInnerTupleData innerTupleHdr;
-    OffsetNumber* toDelete = NULL;
-    OffsetNumber* toInsert = NULL;
-    uint8* leafPageSelect = NULL;
+    OffsetNumber *toDelete = NULL;
+    OffsetNumber *toInsert = NULL;
+    uint8 *leafPageSelect = NULL;
     RedoBufferInfo srcBuffer;
     RedoBufferInfo destBuffer;
     RedoBufferInfo innerBuffer;
@@ -339,11 +340,11 @@ static void spgRedoPickSplit(XLogReaderState* record)
     XLogRecGetBlockTag(record, 2, NULL, NULL, &blknoInner);
 
     ptr += SizeOfSpgxlogPickSplit;
-    toDelete = (OffsetNumber*)ptr;
+    toDelete = (OffsetNumber *)ptr;
     ptr += sizeof(OffsetNumber) * xldata->nDelete;
-    toInsert = (OffsetNumber*)ptr;
+    toInsert = (OffsetNumber *)ptr;
     ptr += sizeof(OffsetNumber) * xldata->nInsert;
-    leafPageSelect = (uint8*)ptr;
+    leafPageSelect = (uint8 *)ptr;
     ptr += sizeof(uint8) * xldata->nInsert;
 
     innerTuple = ptr;
@@ -372,8 +373,8 @@ static void spgRedoPickSplit(XLogReaderState* record)
         }
 
         if (redoaction == BLK_NEEDS_REDO) {
-            spgRedoPickSplitOperatorSrcPage(
-                &srcBuffer, (void*)xldata, (void*)toDelete, blknoInner, (void*)leafPageSelect, (void*)toInsert);
+            spgRedoPickSplitOperatorSrcPage(&srcBuffer, (void *)xldata, (void *)toDelete, blknoInner,
+                                            (void *)leafPageSelect, (void *)toInsert);
         }
     }
 
@@ -390,7 +391,7 @@ static void spgRedoPickSplit(XLogReaderState* record)
         }
 
         if (redoaction == BLK_NEEDS_REDO) {
-            spgRedoPickSplitOperatorDestPage(&destBuffer, (void*)xldata, (void*)leafPageSelect, (void*)toInsert);
+            spgRedoPickSplitOperatorDestPage(&destBuffer, (void *)xldata, (void *)leafPageSelect, (void *)toInsert);
         }
 
         /* don't update LSN etc till we're done with it */
@@ -412,8 +413,8 @@ static void spgRedoPickSplit(XLogReaderState* record)
         action = XLogReadBufferForRedo(record, 2, &innerBuffer);
 
     if (action == BLK_NEEDS_REDO) {
-        spgRedoPickSplitOperatorInnerPage(
-            &innerBuffer, (void*)xldata, (void*)innerTuple, (void*)&innerTupleHdr, blknoInner);
+        spgRedoPickSplitOperatorInnerPage(&innerBuffer, (void *)xldata, (void *)innerTuple, (void *)&innerTupleHdr,
+                                          blknoInner);
         MarkBufferDirty(innerBuffer.buf);
     }
     if (BufferIsValid(innerBuffer.buf)) {
@@ -434,7 +435,7 @@ static void spgRedoPickSplit(XLogReaderState* record)
         RedoBufferInfo parentBuffer;
 
         if (XLogReadBufferForRedo(record, 3, &parentBuffer) == BLK_NEEDS_REDO) {
-            spgRedoPickSplitOperatorParentPage(&parentBuffer, (void*)xldata, blknoInner);
+            spgRedoPickSplitOperatorParentPage(&parentBuffer, (void *)xldata, blknoInner);
             MarkBufferDirty(parentBuffer.buf);
         }
         if (BufferIsValid(parentBuffer.buf)) {
@@ -444,13 +445,13 @@ static void spgRedoPickSplit(XLogReaderState* record)
         Assert(xldata->innerIsParent || xldata->isRootSplit);
 }
 
-static void spgRedoVacuumLeaf(XLogReaderState* record)
+static void spgRedoVacuumLeaf(XLogReaderState *record)
 {
-    char* ptr = XLogRecGetData(record);
+    char *ptr = XLogRecGetData(record);
     RedoBufferInfo buffer;
 
     if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
-        spgRedoVacuumLeafOperatorPage(&buffer, (void*)ptr);
+        spgRedoVacuumLeafOperatorPage(&buffer, (void *)ptr);
 
         MarkBufferDirty(buffer.buf);
     }
@@ -459,13 +460,13 @@ static void spgRedoVacuumLeaf(XLogReaderState* record)
     }
 }
 
-static void spgRedoVacuumRoot(XLogReaderState* record)
+static void spgRedoVacuumRoot(XLogReaderState *record)
 {
-    char* ptr = XLogRecGetData(record);
+    char *ptr = XLogRecGetData(record);
     RedoBufferInfo buffer;
 
     if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
-        spgRedoVacuumRootOperatorPage(&buffer, (void*)ptr);
+        spgRedoVacuumRootOperatorPage(&buffer, (void *)ptr);
         MarkBufferDirty(buffer.buf);
     }
     if (BufferIsValid(buffer.buf)) {
@@ -473,7 +474,7 @@ static void spgRedoVacuumRoot(XLogReaderState* record)
     }
 }
 
-bool IsSpgistVacuum(XLogReaderState* record)
+bool IsSpgistVacuum(XLogReaderState *record)
 {
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
 
@@ -487,17 +488,17 @@ bool IsSpgistVacuum(XLogReaderState* record)
     return false;
 }
 
-static void spgRedoVacuumRedirect(XLogReaderState* record)
+static void spgRedoVacuumRedirect(XLogReaderState *record)
 {
-    char* ptr = XLogRecGetData(record);
+    char *ptr = XLogRecGetData(record);
     RedoBufferInfo buffer;
 
     /*
      * If any redirection tuples are being removed, make sure there are no
      * live Hot Standby transactions that might need to see them.
      */
-    if (InHotStandby && SUPPORT_HOT_STANDBY) {
-        spgxlogVacuumRedirect* xldata = (spgxlogVacuumRedirect*)ptr;
+    if (InHotStandby && g_supportHotStandby) {
+        spgxlogVacuumRedirect *xldata = (spgxlogVacuumRedirect *)ptr;
         if (TransactionIdIsValid(xldata->newestRedirectXid)) {
             RelFileNode node;
 
@@ -507,7 +508,7 @@ static void spgRedoVacuumRedirect(XLogReaderState* record)
     }
 
     if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
-        spgRedoVacuumRedirectOperatorPage(&buffer, (void*)ptr);
+        spgRedoVacuumRedirectOperatorPage(&buffer, (void *)ptr);
         MarkBufferDirty(buffer.buf);
     }
     if (BufferIsValid(buffer.buf)) {
@@ -515,7 +516,7 @@ static void spgRedoVacuumRedirect(XLogReaderState* record)
     }
 }
 
-void spg_redo(XLogReaderState* record)
+void spg_redo(XLogReaderState *record)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     MemoryContext oldCxt;
@@ -559,11 +560,9 @@ void spg_redo(XLogReaderState* record)
 
 void spg_xlog_startup(void)
 {
-    t_thrd.xlog_cxt.spg_opCtx = AllocSetContextCreate(CurrentMemoryContext,
-        "SP-GiST temporary context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    t_thrd.xlog_cxt.spg_opCtx = AllocSetContextCreate(CurrentMemoryContext, "SP-GiST temporary context",
+                                                      ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+                                                      ALLOCSET_DEFAULT_MAXSIZE);
 }
 
 void spg_xlog_cleanup(void)
@@ -573,4 +572,3 @@ void spg_xlog_cleanup(void)
         t_thrd.xlog_cxt.spg_opCtx = NULL;
     }
 }
-

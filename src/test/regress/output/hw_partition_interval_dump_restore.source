@@ -47,10 +47,10 @@ select count(1) from t_part_auto;
 
 -- dump data
 \! @abs_bindir@/gs_dump interval_db -p @portstring@ -t t_part_auto -f @abs_bindir@/backup.sql
---?gs_dump[port='@portstring@'][interval_db][.*]: The total objects number is 374.
---?gs_dump[port='@portstring@'][interval_db][.*]: [100.00%] 374 objects have been dumped.
---?gs_dump[port='@portstring@'][interval_db][.*]: dump database interval_db successfully
---?gs_dump[port='@portstring@'][interval_db][.*]: total time: .*  ms
+--?.*
+--?.*
+--?.*
+--?.*
 drop table t_part_auto;
 -- restore data
 \! @abs_bindir@/gsql -p @portstring@ -d interval_db -f @abs_bindir@/backup.sql
@@ -119,10 +119,10 @@ end;
 /
 -- dump data
 \! @abs_bindir@/gs_dump interval_db -p @portstring@ -t t_part_auto -f @abs_bindir@/backup.sql
---?gs_dump[port='@portstring@'][interval_db][.*]: The total objects number is 374.
---?gs_dump[port='@portstring@'][interval_db][.*]: [100.00%] 374 objects have been dumped.
---?gs_dump[port='@portstring@'][interval_db][.*]: dump database interval_db successfully
---?gs_dump[port='@portstring@'][interval_db][.*]: total time: .*  ms
+--?.*
+--?.*
+--?.*
+--?.*
 drop table t_part_auto;
 -- restore data
 \! @abs_bindir@/gsql -p @portstring@ -d interval_db -f @abs_bindir@/backup.sql

@@ -1,0 +1,508 @@
+--
+-- GiST (rtree-equivalent opclasses only)
+--
+CREATE INDEX grect2ind ON fast_emp4000 USING gist (home_base);
+
+CREATE INDEX gpolygonind ON polygon_tbl USING gist (f1);
+
+CREATE INDEX gcircleind ON circle_tbl USING gist (f1);
+
+INSERT INTO POINT_TBL(f1) VALUES (NULL);
+
+CREATE INDEX gpointind ON point_tbl USING gist (f1);
+
+-- SET enforce_two_phase_commit TO off;
+
+--CREATE TABLE gpolygon_tbl AS
+--    SELECT polygon(home_base) AS f1 FROM slow_emp4000;
+--INSERT INTO gpolygon_tbl VALUES ( '(1000,0,0,1000)' );
+--INSERT INTO gpolygon_tbl VALUES ( '(0,1000,1000,1000)' );
+
+--CREATE TABLE gcircle_tbl AS
+--    SELECT circle(home_base) AS f1 FROM slow_emp4000;
+
+--CREATE INDEX ggpolygonind ON gpolygon_tbl USING gist (f1);
+
+--CREATE INDEX ggcircleind ON gcircle_tbl USING gist (f1);
+
+
+--
+-- Test GiST indexes
+--
+
+-- get non-indexed results for comparison purposes
+
+SET enable_seqscan = ON;
+SET enable_indexscan = OFF;
+SET enable_bitmapscan = OFF;
+
+SELECT * FROM fast_emp4000
+    WHERE home_base @ '(200,200),(2000,1000)'::box
+    ORDER BY (home_base[0])[0];
+       home_base       
+-----------------------
+ (337,455),(240,359)
+ (1444,403),(1346,344)
+(2 rows)
+
+
+SELECT count(*) FROM fast_emp4000 WHERE home_base && '(1000,1000,0,0)'::box;
+ count 
+-------
+     2
+(1 row)
+
+
+SELECT count(*) FROM fast_emp4000 WHERE home_base IS NULL;
+ count 
+-------
+   278
+(1 row)
+
+
+SELECT * FROM polygon_tbl WHERE f1 ~ '((1,1),(2,2),(2,1))'::polygon
+    ORDER BY (poly_center(f1))[0];
+ERROR:  type "line" not yet implemented
+
+SELECT * FROM circle_tbl WHERE f1 && circle(point(1,-2), 1)
+    ORDER BY area(f1);
+      f1       
+---------------
+ <(1,2),3>
+ <(1,3),5>
+ <(1,2),100>
+ <(100,1),115>
+(4 rows)
+
+
+--SELECT count(*) FROM gpolygon_tbl WHERE f1 && '(1000,1000,0,0)'::polygon;
+
+--SELECT count(*) FROM gcircle_tbl WHERE f1 && '<(500,500),500>'::circle;
+
+SELECT count(*) FROM point_tbl WHERE f1 <@ box '(0,0,100,100)';
+ count 
+-------
+     3
+(1 row)
+
+
+SELECT count(*) FROM point_tbl WHERE box '(0,0,100,100)' @> f1;
+ count 
+-------
+     3
+(1 row)
+
+
+SELECT count(*) FROM point_tbl WHERE f1 <@ polygon '(0,0),(0,100),(100,100),(50,50),(100,0),(0,0)';
+ count 
+-------
+     3
+(1 row)
+
+
+SELECT count(*) FROM point_tbl WHERE f1 <@ circle '<(50,50),50>';
+ count 
+-------
+     1
+(1 row)
+
+
+SELECT count(*) FROM point_tbl p WHERE p.f1 << '(0.0, 0.0)';
+ count 
+-------
+     3
+(1 row)
+
+
+SELECT count(*) FROM point_tbl p WHERE p.f1 >> '(0.0, 0.0)';
+ count 
+-------
+     2
+(1 row)
+
+
+SELECT count(*) FROM point_tbl p WHERE p.f1 <^ '(0.0, 0.0)';
+ count 
+-------
+     1
+(1 row)
+
+
+SELECT count(*) FROM point_tbl p WHERE p.f1 >^ '(0.0, 0.0)';
+ count 
+-------
+     3
+(1 row)
+
+
+SELECT count(*) FROM point_tbl p WHERE p.f1 ~= '(-5, -12)';
+ count 
+-------
+     1
+(1 row)
+
+
+SELECT * FROM point_tbl ORDER BY f1 <-> '0,1';
+     f1     
+------------
+ (0,0)
+ (-3,4)
+ (-10,0)
+ (10,10)
+ (-5,-12)
+ (5.1,34.5)
+ 
+(7 rows)
+
+
+SELECT * FROM point_tbl WHERE f1 IS NULL;
+ f1 
+----
+ 
+(1 row)
+
+
+SELECT * FROM point_tbl WHERE f1 IS NOT NULL ORDER BY f1 <-> '0,1';
+     f1     
+------------
+ (0,0)
+ (-3,4)
+ (-10,0)
+ (10,10)
+ (-5,-12)
+ (5.1,34.5)
+(6 rows)
+
+
+SELECT * FROM point_tbl WHERE f1 <@ '(-10,-10),(10,10)':: box ORDER BY f1 <-> '0,1';
+   f1    
+---------
+ (0,0)
+ (-3,4)
+ (-10,0)
+ (10,10)
+(4 rows)
+
+
+-- Now check the results from plain indexscan
+SET enable_seqscan = OFF;
+SET enable_indexscan = ON;
+SET enable_bitmapscan = OFF;
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT * FROM fast_emp4000
+    WHERE home_base @ '(200,200),(2000,1000)'::box
+    ORDER BY (home_base[0])[0];
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: ((fast_emp4000.home_base[0])[0])
+   ->  Data Node Scan on fast_emp4000 "_REMOTE_TABLE_QUERY_"
+(3 rows)
+
+SELECT * FROM fast_emp4000
+    WHERE home_base @ '(200,200),(2000,1000)'::box
+    ORDER BY (home_base[0])[0];
+       home_base       
+-----------------------
+ (337,455),(240,359)
+ (1444,403),(1346,344)
+(2 rows)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT count(*) FROM fast_emp4000 WHERE home_base && '(1000,1000,0,0)'::box;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   ->  Data Node Scan on "__REMOTE_GROUP_QUERY__"
+(2 rows)
+
+SELECT count(*) FROM fast_emp4000 WHERE home_base && '(1000,1000,0,0)'::box;
+ count 
+-------
+     2
+(1 row)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT count(*) FROM fast_emp4000 WHERE home_base IS NULL;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   ->  Data Node Scan on "__REMOTE_GROUP_QUERY__"
+(2 rows)
+
+SELECT count(*) FROM fast_emp4000 WHERE home_base IS NULL;
+ count 
+-------
+   278
+(1 row)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT * FROM polygon_tbl WHERE f1 ~ '((1,1),(2,2),(2,1))'::polygon
+    ORDER BY (poly_center(f1))[0];
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Sort
+         Sort Key: ((poly_center(f1))[0])
+         ->  Index Scan using gpolygonind on polygon_tbl
+               Index Cond: (f1 ~ '((1,1),(2,2),(2,1))'::polygon)
+(5 rows)
+
+SELECT * FROM polygon_tbl WHERE f1 ~ '((1,1),(2,2),(2,1))'::polygon
+    ORDER BY (poly_center(f1))[0];
+ERROR:  type "line" not yet implemented
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT * FROM circle_tbl WHERE f1 && circle(point(1,-2), 1)
+    ORDER BY area(f1);
+                   QUERY PLAN                    
+-------------------------------------------------
+ Sort
+   Sort Key: (area(circle_tbl.f1))
+   ->  Data Node Scan on "__REMOTE_SORT_QUERY__"
+(3 rows)
+
+SELECT * FROM circle_tbl WHERE f1 && circle(point(1,-2), 1)
+    ORDER BY area(f1);
+      f1       
+---------------
+ <(1,2),3>
+ <(1,3),5>
+ <(1,2),100>
+ <(100,1),115>
+(4 rows)
+
+
+--EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+--SELECT count(*) FROM gpolygon_tbl WHERE f1 && '(1000,1000,0,0)'::polygon;
+--SELECT count(*) FROM gpolygon_tbl WHERE f1 && '(1000,1000,0,0)'::polygon;
+
+--EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+--SELECT count(*) FROM gcircle_tbl WHERE f1 && '<(500,500),500>'::circle;
+--SELECT count(*) FROM gcircle_tbl WHERE f1 && '<(500,500),500>'::circle;
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT count(*) FROM point_tbl WHERE f1 <@ box '(0,0,100,100)';
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT count(*) FROM point_tbl WHERE f1 <@ box '(0,0,100,100)';
+ count 
+-------
+     3
+(1 row)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT count(*) FROM point_tbl WHERE box '(0,0,100,100)' @> f1;
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT count(*) FROM point_tbl WHERE box '(0,0,100,100)' @> f1;
+ count 
+-------
+     3
+(1 row)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT count(*) FROM point_tbl WHERE f1 <@ polygon '(0,0),(0,100),(100,100),(50,50),(100,0),(0,0)';
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT count(*) FROM point_tbl WHERE f1 <@ polygon '(0,0),(0,100),(100,100),(50,50),(100,0),(0,0)';
+ count 
+-------
+     3
+(1 row)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT count(*) FROM point_tbl WHERE f1 <@ circle '<(50,50),50>';
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT count(*) FROM point_tbl WHERE f1 <@ circle '<(50,50),50>';
+ count 
+-------
+     1
+(1 row)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT count(*) FROM point_tbl p WHERE p.f1 << '(0.0, 0.0)';
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT count(*) FROM point_tbl p WHERE p.f1 << '(0.0, 0.0)';
+ count 
+-------
+     3
+(1 row)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT count(*) FROM point_tbl p WHERE p.f1 >> '(0.0, 0.0)';
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT count(*) FROM point_tbl p WHERE p.f1 >> '(0.0, 0.0)';
+ count 
+-------
+     2
+(1 row)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT count(*) FROM point_tbl p WHERE p.f1 <^ '(0.0, 0.0)';
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT count(*) FROM point_tbl p WHERE p.f1 <^ '(0.0, 0.0)';
+ count 
+-------
+     1
+(1 row)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT count(*) FROM point_tbl p WHERE p.f1 >^ '(0.0, 0.0)';
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT count(*) FROM point_tbl p WHERE p.f1 >^ '(0.0, 0.0)';
+ count 
+-------
+     3
+(1 row)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT count(*) FROM point_tbl p WHERE p.f1 ~= '(-5, -12)';
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT count(*) FROM point_tbl p WHERE p.f1 ~= '(-5, -12)';
+ count 
+-------
+     1
+(1 row)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT * FROM point_tbl ORDER BY f1 <-> '0,1';
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT * FROM point_tbl ORDER BY f1 <-> '0,1';
+     f1     
+------------
+ (0,0)
+ (-3,4)
+ (-10,0)
+ (10,10)
+ (-5,-12)
+ (5.1,34.5)
+ 
+(7 rows)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT * FROM point_tbl WHERE f1 IS NULL;
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT * FROM point_tbl WHERE f1 IS NULL;
+ f1 
+----
+ 
+(1 row)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT * FROM point_tbl WHERE f1 IS NOT NULL ORDER BY f1 <-> '0,1';
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT * FROM point_tbl WHERE f1 IS NOT NULL ORDER BY f1 <-> '0,1';
+     f1     
+------------
+ (0,0)
+ (-3,4)
+ (-10,0)
+ (10,10)
+ (-5,-12)
+ (5.1,34.5)
+(6 rows)
+
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT * FROM point_tbl WHERE f1 <@ '(-10,-10),(10,10)':: box ORDER BY f1 <-> '0,1';
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT * FROM point_tbl WHERE f1 <@ '(-10,-10),(10,10)':: box ORDER BY f1 <-> '0,1';
+   f1    
+---------
+ (0,0)
+ (-3,4)
+ (-10,0)
+ (10,10)
+(4 rows)
+
+
+-- Now check the results from bitmap indexscan
+SET enable_seqscan = OFF;
+SET enable_indexscan = OFF;
+SET enable_bitmapscan = ON;
+
+EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
+SELECT * FROM point_tbl WHERE f1 <@ '(-10,-10),(10,10)':: box ORDER BY f1 <-> '0,1';
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+SELECT * FROM point_tbl WHERE f1 <@ '(-10,-10),(10,10)':: box ORDER BY f1 <-> '0,1';
+   f1    
+---------
+ (0,0)
+ (-3,4)
+ (-10,0)
+ (10,10)
+(4 rows)
+
+
+RESET enable_seqscan;
+RESET enable_indexscan;
+RESET enable_bitmapscan;

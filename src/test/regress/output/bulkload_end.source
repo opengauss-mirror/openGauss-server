@@ -23,7 +23,7 @@ CREATE TABLE LINEITEM_C
   , L_SHIPMODE     CHAR(10) NOT NULL
   , L_COMMENT      VARCHAR(44) NOT NULL
 )
-compress;
+compress distribute by hash(L_ORDERKEY);
 CREATE TABLE LINEITEM_CP
 (
     L_ORDERKEY    BIGINT NOT NULL
@@ -44,36 +44,246 @@ CREATE TABLE LINEITEM_CP
   , L_COMMENT      VARCHAR(44) NOT NULL
 )
 compress
+distribute by hash(L_ORDERKEY)
 partition by range(L_ORDERKEY)
 (
 	partition p1 values less than (500),
 	partition p2 values less than (90000000)
 );
+CREATE FOREIGN TABLE EXT_LINEITEM (
+	L_ORDERKEY    BIGINT ,        
+	L_PARTKEY     BIGINT ,        
+	L_SUPPKEY     BIGINT ,        
+	L_LINENUMBER  BIGINT ,        
+	L_QUANTITY    DECIMAL(15,2) ,        
+	L_EXTENDEDPRICE  DECIMAL(15,2) ,        
+	L_DISCOUNT    DECIMAL(15,2) ,        
+	L_TAX     DECIMAL(15,2) ,        
+	L_RETURNFLAG  CHAR(1) ,        
+	L_LINESTATUS  CHAR(1) ,        
+	L_SHIPDATE    DATE ,        
+	L_COMMITDATE  DATE ,        
+	L_RECEIPTDATE DATE ,        
+	L_SHIPINSTRUCT CHAR(25) ,        
+	L_SHIPMODE     CHAR(10) ,        
+	L_COMMENT      VARCHAR(44) 
+)SERVER gsmpp_server OPTIONS(format 'text', location
+	'@abs_srcdir@/data/lineitem_10.data', delimiter '|', mode 'shared');
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
 SELECT COUNT(*) FROM LINEITEM;
  count 
 -------
-     0
+    50
 (1 row)
 
 TRUNCATE LINEITEM;
 ----
 --4. INSERT INTO COMPRESS TABLE
 ----
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_C SELECT * FROM EXT_LINEITEM;
 SELECT COUNT(*) FROM LINEITEM_C;
  count 
 -------
-     0
+    50
 (1 row)
 
 ----
 --5. INSERT INTO COMPRESS PARTITION TABLE
 ----
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM_CP SELECT * FROM EXT_LINEITEM;
 SELECT COUNT(*) FROM LINEITEM_CP;
  count 
 -------
-     0
+    50
 (1 row)
 
+DROP FOREIGN TABLE EXT_LINEITEM;
+----
+--6. LOAD DATA IN PRIVATE MODE
+----
+CREATE FOREIGN TABLE EXT_LINEITEM (
+	L_ORDERKEY    BIGINT NOT NULL,        
+	L_PARTKEY     BIGINT NOT NULL,        
+	L_SUPPKEY     BIGINT NOT NULL,        
+	L_LINENUMBER  BIGINT NOT NULL,        
+	L_QUANTITY    DECIMAL(15,2) NOT NULL,        
+	L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,        
+	L_DISCOUNT    DECIMAL(15,2) NOT NULL,        
+	L_TAX     DECIMAL(15,2) NOT NULL,        
+	L_RETURNFLAG  CHAR(1) NOT NULL,        
+	L_LINESTATUS  CHAR(1) NOT NULL,        
+	L_SHIPDATE    DATE NOT NULL,        
+	L_COMMITDATE  DATE NOT NULL,        
+	L_RECEIPTDATE DATE NOT NULL,        
+	L_SHIPINSTRUCT CHAR(25) NOT NULL,        
+	L_SHIPMODE     CHAR(10) NOT NULL,        
+	L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'csv', location '@abs_srcdir@/data/lineitem_10.data', delimiter '|', mode 'private');
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+SELECT COUNT(*) FROM LINEITEM;
+ count 
+-------
+    50
+(1 row)
+
+----
+--7. Load data in SHARED mode
+----
+CREATE FOREIGN TABLE DATA_TYPE_TABLE_001
+(
+ C_CHAR_3 INT,
+ CAAA   INT
+)
+SERVER gsmpp_server
+OPTIONS(location 'file://@abs_srcdir@/data/DATA_TYPE_TABLE_001',
+FORMAT 'TEXT',
+MODE 'SHARED'
+);
+SELECT * FROM DATA_TYPE_TABLE_001;
+ c_char_3 | caaa 
+----------+------
+(0 rows)
+
+----
+--8. Create foreign table with reject_limit < -1
+----
+CREATE FOREIGN TABLE CREATE_REJECT_LIMIT_006
+(
+ C_INT INTEGER
+)
+SERVER gsmpp_server
+OPTIONS(location '/dat/split100/*',
+FORMAT 'CSV',
+MODE 'PRIVATE'
+) LOG INTO DATA_TYPE_TABLE_001_ERROR
+PER NODE REJECT LIMIT '-1';
+ERROR:  PER NODE REJECT LIMIT must be greater than 0
+----
+--9. escape outside quote
+----
+CREATE FOREIGN TABLE  ESCAPE_TABLE_009
+(
+C_CHAR_3 CHAR(102400),  
+C_VARCHAR_3 VARCHAR(1024), 
+C_INT INTEGER,  
+C_NUMERIC numeric(10,5),  
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
+)
+SERVER gsmpp_server
+OPTIONS(location '@abs_srcdir@/data/ESCAPE_TABLE_009',
+FORMAT 'csv',
+DELIMITER ',', 
+QUOTE '&',
+ESCAPE 'a',
+MODE 'private'
+);
+SELECT * FROM ESCAPE_TABLE_009;
+ERROR:  unterminated CSV quoted field
+CONTEXT:  LOAD escape_table_009, line 1: "ABCDEFG,a&bcdefga&,111,1.11,2000-01-01"
+----
+--10. specify null string.
+----
+CREATE FOREIGN TABLE CREATE_NULL_024
+(
+ C_CHAR_3 CHAR(10),
+ C_VARCHAR_3 VARCHAR(1024),
+ C_INT INTEGER,
+ C_NUMERIC numeric(10,5),
+ C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
+)
+SERVER gsmpp_server
+OPTIONS(location '@abs_srcdir@/data/NULL_024',
+FORMAT 'csv',
+DELIMITER ',',
+ENCODING 'UTF-8',
+NULL '\r\n',
+MODE 'private'
+);
+SELECT * FROM CREATE_NULL_024;
+ c_char_3 | c_varchar_3 | c_int | c_numeric | c_ts_without 
+----------+-------------+-------+-----------+--------------
+          |             |       |           | 
+(1 row)
+
+----
+--11. INSERT INTO TABLE WITH OID
+----
+EXPLAIN INSERT INTO PG_CLASS(RELPAGES) SELECT C_INT FROM ESCAPE_TABLE_009;
+ERROR:  Un-support feature
+DETAIL:  statements contains unsupport feature to foreign table
+----
+--12. empty string equal null
+----
+CREATE FOREIGN TABLE STR_EMPTY
+(
+ S1 VARCHAR,
+ S2 VARCHAR2,
+ S3 NVARCHAR2,
+ S4 CHAR,
+ S5 TSVECTOR,
+ S6 RAW,
+ S7 TEXT
+)
+SERVER gsmpp_server
+OPTIONS(LOCATION '@abs_srcdir@/data/str_empty.csv',
+FORMAT 'csv',
+MODE 'private'
+);
+SELECT * FROM STR_EMPTY WHERE S1 IS NULL AND S2 IS NULL AND S3 IS NULL AND S4 IS NULL AND S5 IS NULL AND S6 IS NULL AND S7 IS NULL;
+ s1 | s2 | s3 | s4 | s5 | s6 | s7 
+----+----+----+----+----+----+----
+    |    |    |    |    |    | 
+    |    |    |    |    |    | 
+(2 rows)
+
+CREATE FOREIGN TABLE STR_EMPTY_COL_NOT_NULL
+(
+ S1 VARCHAR NOT NULL,
+ S2 VARCHAR2 NOT NULL,
+ S3 NVARCHAR2 NOT NULL,
+ S4 CHAR NOT NULL,
+ S5 TSVECTOR NOT NULL,
+ S6 RAW NOT NULL,
+ S7 TEXT NOT NULL
+)
+SERVER gsmpp_server
+OPTIONS(LOCATION '@abs_srcdir@/data/str_empty.csv',
+FORMAT 'csv',
+MODE 'private'
+);
+SELECT * FROM STR_EMPTY_COL_NOT_NULL WHERE S1 IS NULL AND S2 IS NULL AND S3 IS NULL AND S4 IS NULL AND S5 IS NULL AND S6 IS NULL AND S7 IS NULL;
+ s1 | s2 | s3 | s4 | s5 | s6 | s7 
+----+----+----+----+----+----+----
+    |    |    |    |    |    | 
+    |    |    |    |    |    | 
+(2 rows)
+
+DROP FOREIGN TABLE STR_EMPTY_COL_NOT_NULL;
+----
+--13. execute on remote
+----
+EXECUTE DIRECT ON(datanode1) 'SELECT * FROM STR_EMPTY';
+ERROR:  Un-support feature
+DETAIL:  foreign table scan can not direct execute on datanode
+EXECUTE DIRECT ON(datanode2) 'SELECT * FROM STR_EMPTY';
+ERROR:  Un-support feature
+DETAIL:  foreign table scan can not direct execute on datanode
 ----
 --14. Foreign table with SUBQUERY
 ----
@@ -106,15 +316,100 @@ partition LOAD_PARTITION_TABLE_001_2_2  values less than (3,30,300,400.3),
 partition LOAD_PARTITION_TABLE_001_2_3  values less than (6,60,600,800.6),
 partition LOAD_PARTITION_TABLE_001_2_4  values less than (10,100,1000,1100.2)
 );
+create foreign table  LOAD_PARTITION_TABLE_001_1
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(100), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp with time zone,
+c_timestamp_2 timestamp without time zone,
+c_date date
+)
+SERVER gsmpp_server
+OPTIONS(location '@abs_srcdir@/data/LOAD_PARTITION_TABLE_001',
+format 'text',
+delimiter ',', mode 'shared'
+);
+DELETE FROM LOAD_PARTITION_TABLE_001_1;
+ERROR:  cannot delete from foreign table "load_partition_table_001_1"
+insert into  LOAD_PARTITION_TABLE_001_2 
+    select 
+	c_smallint,
+	c_integer,
+	c_bigint ,
+	c_decimal ,
+	c_numeric ,
+	c_real ,
+	c_double ,
+	c_character_1 ,
+	c_varchar ,
+	trim(c_character_2) , 
+	trim(c_char_1) ,
+	c_character_3 ,
+	c_char_2 ,
+	c_text ,
+	c_nvarchar2 ,
+	c_name ,
+	c_timestamp_1 ,
+	c_timestamp_2 ,
+	c_date  
+    from LOAD_PARTITION_TABLE_001_1 order by 1,2,3,4,5,6,7,8,9,10;
 SELECT * FROM LOAD_PARTITION_TABLE_001_2 ORDER BY c_smallint;
- c_smallint | c_integer | c_bigint | c_decimal | c_numeric | c_real | c_double | c_character_1 | c_varchar | c_character_2 | c_char_1 | c_character_3 | c_char_2 | c_text | c_nvarchar2 | c_name | c_timestamp_1 | c_timestamp_2 | c_date 
-------------+-----------+----------+-----------+-----------+--------+----------+---------------+-----------+---------------+----------+---------------+----------+--------+-------------+--------+---------------+---------------+--------
-(0 rows)
+ c_smallint | c_integer | c_bigint | c_decimal | c_numeric | c_real | c_double | c_character_1 | c_varchar |                                            c_character_2                                             |                                               c_char_1                                               | c_character_3 | c_char_2 | c_text | c_nvarchar2 | c_name |        c_timestamp_1         |         c_timestamp_2         |          c_date          
+------------+-----------+----------+-----------+-----------+--------+----------+---------------+-----------+------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------+---------------+----------+--------+-------------+--------+------------------------------+-------------------------------+--------------------------
+          0 |         0 |        0 |         0 |         0 |      0 |       20 | jklm          | JKLM      | JKL                                                                                                  | MNO                                                                                                  | J             | J        | RK     | kkkk        | l      | Fri Feb 05 08:00:30 2044 PST | Sat Feb 06 23:12:12.2356 2044 | Sat Feb 06 13:12:12 2044
+          1 |        10 |      100 |     100.3 |      10.3 |   10.2 |  1000.25 | abcd          | ABCD      | ABC                                                                                                  | DEF                                                                                                  | A             | A        | HK     | aaaa        | b      | Fri Feb 05 08:00:30 1954 PST | Sat Feb 06 23:12:12.2356 1954 | Sat Feb 06 13:12:12 1954
+          2 |        20 |      200 |     200.3 |      20.3 |   20.2 |  2000.25 | bcde          | BCDE      | BCD                                                                                                  | EFG                                                                                                  | B             | B        | IK     | bbbb        | d      | Wed Feb 05 08:00:30 1964 PST | Thu Feb 06 23:12:12.2356 1964 | Thu Feb 06 13:12:12 1964
+          3 |        30 |      300 |     300.3 |      30.3 |   30.2 |  3000.25 | cdef          | CDEF      | CDE                                                                                                  | FGH                                                                                                  | C             | C        | JK     | cccc        | e      | Tue Feb 05 09:00:30 1974 PDT | Wed Feb 06 23:12:12.2356 1974 | Wed Feb 06 13:12:12 1974
+          4 |        40 |      400 |     400.3 |      40.3 |   40.2 |  4000.25 | defg          | DEFG      | DEF                                                                                                  | GHI                                                                                                  | D             | D        | LK     | dddd        | f      | Sun Feb 05 08:00:30 1984 PST | Mon Feb 06 23:12:12.2356 1984 | Mon Feb 06 13:12:12 1984
+          5 |        50 |      500 |     500.3 |      50.3 |   50.2 |  5000.25 | efgh          | EFGH      | EFG                                                                                                  | HIJ                                                                                                  | E             | E        | MK     | eeee        | g      | Sat Feb 05 08:00:30 1994 PST | Sun Feb 06 23:12:12.2356 1994 | Sun Feb 06 13:12:12 1994
+          6 |        60 |      600 |     600.3 |      60.3 |   60.2 |  6000.25 | fghi          | FGHI      | FGH                                                                                                  | IJK                                                                                                  | F             | F        | NK     | ffff        | h      | Thu Feb 05 08:00:30 2004 PST | Fri Feb 06 23:12:12.2356 2004 | Fri Feb 06 13:12:12 2004
+          7 |        70 |      700 |     700.3 |      70.3 |   70.2 |  7000.25 | ghij          | GHIJ      | GHI                                                                                                  | JKL                                                                                                  | G             | G        | OK     | hhhh        | i      | Wed Feb 05 08:00:30 2014 PST | Thu Feb 06 23:12:12.2356 2014 | Thu Feb 06 13:12:12 2014
+          8 |        80 |      800 |     800.3 |      80.3 |   80.2 |  8000.25 | hijk          | HIJK      | HIJ                                                                                                  | KLM                                                                                                  | H             | H        | PK     | iiii        | j      | Mon Feb 05 08:00:30 2024 PST | Tue Feb 06 23:12:12.2356 2024 | Tue Feb 06 13:12:12 2024
+          9 |        90 |      900 |     900.3 |      90.3 |   90.2 |  9000.25 | ijkl          | IJKL      | IJK                                                                                                  | LMN                                                                                                  | I             | I        | QK     | jjjj        | k      | Sun Feb 05 08:00:30 2034 PST | Mon Feb 06 23:12:12.2356 2034 | Mon Feb 06 13:12:12 2034
+(10 rows)
 
 DROP TABLE LINEITEM;
 DROP TABLE LINEITEM_C;
 DROP TABLE LINEITEM_CP;
+DROP FOREIGN TABLE EXT_LINEITEM;
+DROP FOREIGN TABLE DATA_TYPE_TABLE_001;
+DROP FOREIGN TABLE ESCAPE_TABLE_009;
+DROP FOREIGN TABLE CREATE_NULL_024;
+DROP FOREIGN TABLE STR_EMPTY;
+DROP FOREIGN TABLE LOAD_PARTITION_TABLE_001_1;
 DROP TABLE LOAD_PARTITION_TABLE_001_2;
+----
+--15. Notice from Stream
+----
+create foreign table FULL_TEXT_TABLE_010
+(
+C_CHAR_3 CHAR(102400),  
+C_VARCHAR_3 VARCHAR(1024),  
+C_INT INTEGER,  
+C_NUMERIC numeric(10,5),  
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+C_TEXT  TEXT
+)
+SERVER gsmpp_server
+OPTIONS(location '@abs_srcdir@/data/FULL_TEXT_TABLE_010',
+format 'text',
+delimiter ',',
+mode 'shared'
+);
 create table FULL_TEXT_TABLE_010_2 
 (
 C_CHAR_3 CHAR(102400),  
@@ -124,20 +419,231 @@ C_NUMERIC numeric(10,5),
 C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
 C_tsvector  tsvector
 );
-select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT,C_tsvector from FULL_TEXT_TABLE_010_2 order by 1,2,3,4,5;
- btrim | btrim | c_int | c_numeric | c_ts_without | c_tsvector 
--------+-------+-------+-----------+--------------+------------
-(0 rows)
+insert into FULL_TEXT_TABLE_010_2 select C_CHAR_3,C_VARCHAR_3,C_INT,C_NUMERIC,C_TS_WITHOUT,to_tsvector_for_batch(C_TEXT) from FULL_TEXT_TABLE_010;
+NOTICE:  word is too long to be indexed
+DETAIL:  Words longer than 2047 characters are ignored.
+select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT,C_text from FULL_TEXT_TABLE_010 order by 1,2,3,4,5;
+  btrim  |  btrim  | c_int | c_numeric  |       c_ts_without       |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     c_text                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
+---------+---------+-------+------------+--------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ ABCDEFG | abcdefg | 10000 | 2013.25600 | Thu Feb 04 10:12:59 1802 | 'abc def ghi jklabc012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012'
+(1 row)
 
+select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT,C_tsvector from FULL_TEXT_TABLE_010_2 order by 1,2,3,4,5;
+  btrim  |  btrim  | c_int | c_numeric  |       c_ts_without       |       c_tsvector        
+---------+---------+-------+------------+--------------------------+-------------------------
+ ABCDEFG | abcdefg | 10000 | 2013.25600 | Thu Feb 04 10:12:59 1802 | 'abc':1 'def':2 'ghi':3
+(1 row)
+
+DROP FOREIGN TABLE FULL_TEXT_TABLE_010;
 DROP TABLE FULL_TEXT_TABLE_010_2;
+----
+--17. Format in FIXED but no specify FORMATTER
+----
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer,
+n_name character(25),
+n_regionkey integer,
+n_comment character varying(152)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation.fixed', FORMAT 'fixed');
+WARNING:  The above Read-Only foreign table is using FIXED mode without specifying 'fix' option.
+HINT:  Please use 'fix' option to specify expected fixed record length in order to parser the data file correctly.
+ERROR:  FORMATTER must be specified in FIXED mode
+----
+--18. Format in FIXED with error FORMATTER (fields overlap)
+----
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer position(0,2),
+n_name character(25) position(2,25),
+n_regionkey integer position(10, 2),
+n_comment character varying(152) position(28, 128)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation.fixed', FORMAT 'fixed');
+WARNING:  The above Read-Only foreign table is using FIXED mode without specifying 'fix' option.
+HINT:  Please use 'fix' option to specify expected fixed record length in order to parser the data file correctly.
+ERROR:  pre-field "n_name" can not be covered by field "n_regionkey"
+----
+--20. Format in FIXED and length of data row > 1GB
+----
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer position(0,2),
+n_name character(25) position(2,25),
+n_regionkey integer position(28, 2),
+n_comment character varying(152) position(30, 1073741828)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation.fixed', FORMAT 'fixed');
+WARNING:  The above Read-Only foreign table is using FIXED mode without specifying 'fix' option.
+HINT:  Please use 'fix' option to specify expected fixed record length in order to parser the data file correctly.
+ERROR:  max length of data row cannot greater than 1GB
+----
+--21. Format in FIXED and POSITION < 0
+----
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer position(-1,2),
+n_name character(25) position(2,25),
+n_regionkey integer position(28, 2),
+n_comment character varying(152) position(30, 1073741828)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation.fixed', FORMAT 'fixed');
+ERROR:  syntax error at or near "-"
+LINE 3: n_nationkey integer position(-1,2),
+                                     ^
+----
+--23. Format in FIXED and specify FIX < length of data row
+----
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer position(0,2),
+n_name character(25),
+n_regionkey integer position(28, 2),
+n_comment character varying(152) position(30, 152)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation.fixed', FORMAT 'fixed', FIX '177');
+ERROR:  invalid value of FIX
+----
+--24. Format in FIXED and specify FIX < 0
+----
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer position(0,2),
+n_name character(25),
+n_regionkey integer position(28, 2),
+n_comment character varying(152) position(30, 152)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation.fixed', FORMAT 'fixed', FIX '-1');
+ERROR:  invalid value of FIX
 ----
 --25. Can not find encoding converter
 ----
 CREATE DATABASE latin1db TEMPLATE template0 ENCODING 'latin1' LC_CTYPE 'C' LC_COLLATE 'C';
 \c latin1db
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer position(0,2),
+n_name character(25),
+n_regionkey integer position(28, 2),
+n_comment character varying(152) position(30, 152)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation.fixed', FORMAT 'fixed', ENCODING 'GBK');
+WARNING:  The above Read-Only foreign table is using FIXED mode without specifying 'fix' option.
+HINT:  Please use 'fix' option to specify expected fixed record length in order to parser the data file correctly.
+ERROR:  default conversion function for encoding "GBK" to "LATIN1" does not exist
 \c regression
 DROP DATABASE latin1db;
+----
+--26. Invalid url
+----
+CREATE FOREIGN TABLE INVALID_TBL
+(
+n_nationkey integer position(0,2),
+n_name character(25),
+n_regionkey integer position(28, 2),
+n_comment character varying(152) position(30, 152)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/AAAAAA/nation.fixed', FORMAT 'fixed', ENCODING 'GBK');
+WARNING:  The above Read-Only foreign table is using FIXED mode without specifying 'fix' option.
+HINT:  Please use 'fix' option to specify expected fixed record length in order to parser the data file correctly.
+select * from INVALID_TBL;
+ERROR:  Failed to open directory "@abs_srcdir@/data/datanode1/AAAAAA".
+drop foreign table INVALID_TBL;
+---
+--27. NULL value in FIXED format
+---
+CREATE FOREIGN TABLE NULL_VAL
+(
+c1 int position(0, 5),
+c2 varchar(10) position(6, 6)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/null_val.fixed', FORMAT 'fixed');
+WARNING:  The above Read-Only foreign table is using FIXED mode without specifying 'fix' option.
+HINT:  Please use 'fix' option to specify expected fixed record length in order to parser the data file correctly.
+SELECT * FROM null_val;
+ c1 |   c2   
+----+--------
+    | aaaaaa
+    | aaaaaa
+(2 rows)
+
+DROP FOREIGN TABLE NULL_VAL;
+---
+--28. No files found
+---
+CREATE FOREIGN TABLE NOFILES_FOUND
+(
+c1 int position(0, 5),
+c2 varchar(10) position(6, 6)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/AAAA.dat | gsfs://127.0.0.1:8901/bbb.dat', FORMAT 'fixed');
+WARNING:  The above Read-Only foreign table is using FIXED mode without specifying 'fix' option.
+HINT:  Please use 'fix' option to specify expected fixed record length in order to parser the data file correctly.
+SELECT * FROM NOFILES_FOUND;
+ c1 | c2 
+----+----
+(0 rows)
+
+set raise_errors_if_no_files=true;
+SELECT * FROM NOFILES_FOUND;
+ERROR:  no files found to import
+DROP FOREIGN TABLE NOFILES_FOUND;
 DROP TABLE tmp_nation;
+---
+--29. Alter Foreign Table
+---
+CREATE FOREIGN TABLE FT_ALTER
+(
+c1 int,
+c2 varchar(10)
+)
+SERVER GSMPP_SERVER
+OPTIONS(location 'gsfs://127.0.0.1:8900/*', format 'text', mode 'normal', delimiter ',', reject_limit 'unlimited')
+WITH err_ft_alter;
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(set location 'gsfs://127.0.0.1:8901/*');
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(set format 'csv', set delimiter '|');
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(drop reject_limit);
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(drop error_table);
+ERROR:  Invalid option error_table
+ALTER FOREIGN TABLE FT_ALTER OPTIONS(add reject_limit 'unlimited');
+CREATE FOREIGN TABLE FT_ALTER_WRITE_ONLY_1
+(
+c1 int,
+c2 varchar(10)
+)
+SERVER GSMPP_SERVER
+OPTIONS(location 'gsfs://127.0.0.1:8900/*', format 'text', delimiter ',') WRITE ONLY;
+CREATE FOREIGN TABLE FT_ALTER_WRITE_ONLY_2
+(
+c1 int,
+c2 varchar(10)
+)
+SERVER GSMPP_SERVER
+OPTIONS(location 'gsfs://127.0.0.1:8900/*', format 'text', delimiter ',') WRITE ONLY;
+ALTER FOREIGN TABLE FT_ALTER_WRITE_ONLY_1 OPTIONS (add eol '0x0D0A');
+ALTER FOREIGN TABLE FT_ALTER_WRITE_ONLY_1 OPTIONS (set eol '0x0A');
+ALTER FOREIGN TABLE FT_ALTER_WRITE_ONLY_1 OPTIONS (drop eol);
+ALTER FOREIGN TABLE FT_ALTER_WRITE_ONLY_1 OPTIONS (set write_only 'false');
+ERROR:  Invalid option write_only
+ALTER FOREIGN TABLE FT_ALTER_WRITE_ONLY_2 OPTIONS (add eol '0x0A');
+ALTER FOREIGN TABLE FT_ALTER_WRITE_ONLY_2 OPTIONS (set eol '0x0D0A');
+ALTER FOREIGN TABLE FT_ALTER_WRITE_ONLY_2 OPTIONS (drop eol);
+ALTER FOREIGN TABLE FT_ALTER_WRITE_ONLY_2 OPTIONS (drop write_only);
+ERROR:  Invalid option write_only
+DROP FOREIGN TABLE FT_ALTER;
+DROP FOREIGN TABLE FT_ALTER_WRITE_ONLY_1;
+DROP FOREIGN TABLE FT_ALTER_WRITE_ONLY_2;
 ----
 --31.Check Duplicated GDS URI Info
 ---
@@ -146,6 +652,46 @@ CREATE TABLE CHECK_DUPLICATED_GDS_URI_INFO (
         L_PARTKEY     BIGINT NOT NULL,
         L_SUPPKEY     BIGINT NOT NULL
 );
+CREATE FOREIGN TABLE FT_CHECK_DUPLICATED_GDS_URI_INFO (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL
+)SERVER gsmpp_server
+OPTIONS (format 'text', location 'gsfs://127.0.0.1:8900/ft_check_duplicated_gds_uri_info.data|gsfs://127.0.0.1:8900/ft_check_duplicated_gds_uri_info.data', delimiter '|', mode 'normal');
+ERROR:  duplicated URL "gsfs://127.0.0.1:8900/ft_check_duplicated_gds_uri_info.data" in LOCATION
+CREATE FOREIGN TABLE FT_CHECK_DUPLICATED_GDS_URI_INFO (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL
+)SERVER gsmpp_server
+OPTIONS (format 'text', location 'gsfs://127.0.0.1:8900/ft_check_duplicated_gds_uri_info.data', delimiter '|', mode 'normal');
+ALTER FOREIGN TABLE FT_CHECK_DUPLICATED_GDS_URI_INFO OPTIONS (SET location 'gsfs://127.0.0.1:8900/ft_check_duplicated_gds_uri_info.data|gsfs://8900/ft_check_duplicated_gds_uri_info.data');
+INSERT INTO CHECK_DUPLICATED_GDS_URI_INFO SELECT * FROM FT_CHECK_DUPLICATED_GDS_URI_INFO;
+ERROR:  invalid URI "gsfs://8900/ft_check_duplicated_gds_uri_info.data"
+ALTER FOREIGN TABLE FT_CHECK_DUPLICATED_GDS_URI_INFO OPTIONS (SET location 'gsfs://127.0.0.1:8900/ft_check_duplicated_gds_uri_info.data|gsfs://127.0.0.1:8900/ft_check_duplicated_gds_uri_info.data');
+ERROR:  duplicated URL "gsfs://127.0.0.1:8900/ft_check_duplicated_gds_uri_info.data" in LOCATION
+ALTER FOREIGN TABLE FT_CHECK_DUPLICATED_GDS_URI_INFO OPTIONS (SET location 'gsfs://data:1234|gsfs://data:1234');
+ERROR:  duplicated URL "gsfs://data:1234" in LOCATION
+DROP FOREIGN TABLE FT_CHECK_DUPLICATED_GDS_URI_INFO;
+CREATE FOREIGN TABLE FT_CHECK_DUPLICATED_GDS_URI_INFO (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL
+)SERVER gsmpp_server
+OPTIONS (format 'text', location 'gsfs://127.0.0.1:8900/|gsfs://127.0.0.1:8900/') write only;
+ERROR:  duplicated URL "gsfs://127.0.0.1:8900/" in LOCATION
+CREATE FOREIGN TABLE FT_CHECK_DUPLICATED_GDS_URI_INFO (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL
+)SERVER gsmpp_server
+OPTIONS (format 'text', location 'gsfs://127.0.0.1:8900/') write only;
+ALTER FOREIGN TABLE FT_CHECK_DUPLICATED_GDS_URI_INFO OPTIONS (SET location 'gsfs://127.0.0.1:8900/|gsfs://127.0.0.1:8900/');
+ERROR:  duplicated URL "gsfs://127.0.0.1:8900/" in LOCATION
+ALTER FOREIGN TABLE FT_CHECK_DUPLICATED_GDS_URI_INFO OPTIONS (SET location 'gsfs://127.0.0.1:8900/|gsfs://8900/');
+INSERT INTO FT_CHECK_DUPLICATED_GDS_URI_INFO SELECT * FROM CHECK_DUPLICATED_GDS_URI_INFO;
+ERROR:  invalid URI "gsfs://8900/"
+DROP FOREIGN TABLE FT_CHECK_DUPLICATED_GDS_URI_INFO;
 DROP TABLE CHECK_DUPLICATED_GDS_URI_INFO;
 \! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 34
 \! sleep 5

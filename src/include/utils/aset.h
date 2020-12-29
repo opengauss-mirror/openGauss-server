@@ -129,22 +129,22 @@ public:
         _in_ Size minContextSize, _in_ Size initBlockSize, _in_ Size maxBlockSize, _in_ Size maxSize,
         _in_ bool isShared, _in_ bool isSession);
 
-    template <bool memoryprotect_enable, bool is_shared, bool is_tracked>
+    template <bool is_shared, bool is_tracked>
     static void* AllocSetAlloc(_in_ MemoryContext context, _in_ Size align, _in_ Size size, const char* file, int line);
 
-    template <bool memoryprotect_enable, bool is_shared, bool is_tracked>
+    template <bool is_shared, bool is_tracked>
     static void AllocSetFree(_in_ MemoryContext context, _in_ void* pointer);
 
-    template <bool memoryprotect_enable, bool is_shared, bool is_tracked>
+    template <bool is_shared, bool is_tracked>
     static void* AllocSetRealloc(
         _in_ MemoryContext context, _in_ void* pointer, _in_ Size align, _in_ Size size, const char* file, int line);
 
     static void AllocSetInit(_in_ MemoryContext context);
 
-    template <bool memoryprotect_enable, bool is_shared, bool is_tracked>
+    template <bool is_shared, bool is_tracked>
     static void AllocSetReset(_in_ MemoryContext context);
 
-    template <bool memoryprotect_enable, bool is_shared, bool is_tracked>
+    template <bool is_shared, bool is_tracked>
     static void AllocSetDelete(_in_ MemoryContext context);
 
     static Size AllocSetGetChunkSpace(_in_ MemoryContext context, _in_ void* pointer);
@@ -160,7 +160,7 @@ public:
 private:
     static void AllocSetContextSetMethods(_in_ unsigned long value, MemoryContextMethods* method);
 
-    template <bool memoryprotect_enable, bool is_shared, bool is_tracked>
+    template <bool is_shared, bool is_tracked>
     static void AllocSetMethodDefinition(MemoryContextMethods* method);
 };
 
@@ -174,7 +174,7 @@ public:
         _in_ Size minContextSize, _in_ Size initBlockSize, _in_ Size maxBlockSize, _in_ Size maxSize,
         _in_ bool isShared, _in_ bool isSession);
 
-    template <bool memoryprotect_enable, bool is_tracked>
+    template <bool is_tracked>
     static void* AllocSetAlloc(
         _in_ MemoryContext context, _in_ Size align, _in_ Size size, _in_ const char* file, _in_ int line);
 
@@ -185,10 +185,10 @@ public:
 
     static void AllocSetInit(_in_ MemoryContext context);
 
-    template <bool memoryprotect_enable, bool is_tracked>
+    template <bool is_tracked>
     static void AllocSetReset(_in_ MemoryContext context);
 
-    template <bool memoryprotect_enable, bool is_tracked>
+    template <bool is_tracked>
     static void AllocSetDelete(_in_ MemoryContext context);
 
     static Size AllocSetGetChunkSpace(_in_ MemoryContext context, _in_ void* pointer);
@@ -204,23 +204,23 @@ public:
 private:
     static void AllocSetContextSetMethods(_in_ unsigned long value, MemoryContextMethods* method);
 
-    template <bool memoryprotect_enable, bool is_tracked>
+    template <bool is_tracked>
     static void AllocSetMethodDefinition(MemoryContextMethods* method);
 };
 
 class MemoryProtectFunctions {
 public:
     template <MemType mem_type>
-    static void* gs_memprot_malloc(Size sz);
+    static void* gs_memprot_malloc(Size sz, bool needProtect);
 
     template <MemType mem_type>
     static void gs_memprot_free(void* ptr, Size sz);
 
     template <MemType mem_type>
-    static void* gs_memprot_realloc(void* ptr, Size sz, Size newsz);
+    static void* gs_memprot_realloc(void* ptr, Size sz, Size newsz, bool needProtect);
 
     template <MemType mem_type>
-    static int gs_posix_memalign(void** memptr, Size alignment, Size sz);
+    static int gs_posix_memalign(void** memptr, Size alignment, Size sz, bool needProtect);
 };
 
 extern int alloc_trunk_size(int width);

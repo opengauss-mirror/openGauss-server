@@ -32,7 +32,8 @@
 #include "utils/builtins.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
+#include "access/tableam.h"
 
 #define DatumGetItemPointer(X) ((ItemPointer)DatumGetPointer(X))
 #define ItemPointerGetDatum(X) PointerGetDatum(X)
@@ -55,39 +56,35 @@ Datum tidin(PG_FUNCTION_ARGS)
     char* coord[NTIDARGS];
     int i;
     ItemPointer result;
-    BlockNumber block_number;
-    OffsetNumber offset_number;
+    BlockNumber blockNumber;
+    OffsetNumber offsetNumber;
     char* badp = NULL;
     int hold_offset;
 
-    for (i = 0, p = str; *p && i < NTIDARGS && *p != RDELIM; p++) {
-        if (*p == DELIM || (*p == LDELIM && !i)) {
+    for (i = 0, p = str; *p && i < NTIDARGS && *p != RDELIM; p++)
+        if (*p == DELIM || (*p == LDELIM && !i))
             coord[i++] = p + 1;
-        }
-    }
 
-    if (i < NTIDARGS) {
+    if (i < NTIDARGS)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type tid: \"%s\"", str)));
-    }
 
     errno = 0;
-    block_number = strtoul(coord[0], &badp, 10);
-    if (errno || *badp != DELIM) {
+    blockNumber = strtoul(coord[0], &badp, 10);
+    if (errno || *badp != DELIM)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type tid: \"%s\"", str)));
-    }
 
     hold_offset = strtol(coord[1], &badp, 10);
-    if (errno || *badp != RDELIM || hold_offset > USHRT_MAX || hold_offset < 0) {
+    if (errno || *badp != RDELIM || hold_offset > USHRT_MAX || hold_offset < 0)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type tid: \"%s\"", str)));
-    }
-    offset_number = hold_offset;
+
+    offsetNumber = hold_offset;
 
     result = (ItemPointer)palloc(sizeof(ItemPointerData));
 
-    ItemPointerSet(result, block_number, offset_number);
+    ItemPointerSet(result, blockNumber, offsetNumber);
 
     PG_RETURN_ITEMPOINTER(result);
 }
@@ -98,18 +95,17 @@ Datum tidin(PG_FUNCTION_ARGS)
  */
 Datum tidout(PG_FUNCTION_ARGS)
 {
-    ItemPointer item_ptr = PG_GETARG_ITEMPOINTER(0);
-    BlockNumber block_number;
-    OffsetNumber offset_number;
-    char buf[32];
+    ItemPointer itemPtr = PG_GETARG_ITEMPOINTER(0);
+    BlockNumber blockNumber;
+    OffsetNumber offsetNumber;
+    char buf[32] = {0};
 
-    block_number = BlockIdGetBlockNumber(&(item_ptr->ip_blkid));
-    offset_number = item_ptr->ip_posid;
+    blockNumber = BlockIdGetBlockNumber(&(itemPtr->ip_blkid));
+    offsetNumber = itemPtr->ip_posid;
 
     /* Perhaps someday we should output this as a record. */
-    errno_t errorno = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, "(%u,%u)", block_number, offset_number);
+    errno_t errorno = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, "(%u,%u)", blockNumber, offsetNumber);
     securec_check_ss(errorno, "\0", "\0");
-
     PG_RETURN_CSTRING(pstrdup(buf));
 }
 
@@ -120,15 +116,15 @@ Datum tidrecv(PG_FUNCTION_ARGS)
 {
     StringInfo buf = (StringInfo)PG_GETARG_POINTER(0);
     ItemPointer result;
-    BlockNumber block_number;
-    OffsetNumber offset_number;
+    BlockNumber blockNumber;
+    OffsetNumber offsetNumber;
 
-    block_number = pq_getmsgint(buf, sizeof(block_number));
-    offset_number = pq_getmsgint(buf, sizeof(offset_number));
+    blockNumber = pq_getmsgint(buf, sizeof(blockNumber));
+    offsetNumber = pq_getmsgint(buf, sizeof(offsetNumber));
 
     result = (ItemPointer)palloc(sizeof(ItemPointerData));
 
-    ItemPointerSet(result, block_number, offset_number);
+    ItemPointerSet(result, blockNumber, offsetNumber);
 
     PG_RETURN_ITEMPOINTER(result);
 }
@@ -138,21 +134,25 @@ Datum tidrecv(PG_FUNCTION_ARGS)
  */
 Datum tidsend(PG_FUNCTION_ARGS)
 {
-    ItemPointer item_ptr = PG_GETARG_ITEMPOINTER(0);
-    BlockId block_id;
-    BlockNumber block_number;
-    OffsetNumber offset_number;
+    ItemPointer itemPtr = PG_GETARG_ITEMPOINTER(0);
+    BlockId blockId;
+    BlockNumber blockNumber;
+    OffsetNumber offsetNumber;
     StringInfoData buf;
 
-    block_id = &(item_ptr->ip_blkid);
-    block_number = BlockIdGetBlockNumber(block_id);
-    offset_number = item_ptr->ip_posid;
+    blockId = &(itemPtr->ip_blkid);
+    blockNumber = BlockIdGetBlockNumber(blockId);
+    offsetNumber = itemPtr->ip_posid;
 
     pq_begintypsend(&buf);
-    pq_sendint32(&buf, block_number);
-    pq_sendint16(&buf, offset_number);
+    pq_sendint32(&buf, blockNumber);
+    pq_sendint16(&buf, offsetNumber);
     PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
+
+/*****************************************************************************
+ *	 PUBLIC ROUTINES														 *
+ *****************************************************************************/
 
 Datum tideq(PG_FUNCTION_ARGS)
 {
@@ -215,7 +215,7 @@ Datum tidlarger(PG_FUNCTION_ARGS)
     ItemPointer arg1 = PG_GETARG_ITEMPOINTER(0);
     ItemPointer arg2 = PG_GETARG_ITEMPOINTER(1);
 
-    PG_RETURN_ITEMPOINTER(ItemPointerCompare(arg1, arg2) >= 0 ? arg1 : arg2);
+    PG_RETURN_ITEMPOINTER((ItemPointerCompare(arg1, arg2) >= 0) ? arg1 : arg2);
 }
 
 Datum tidsmaller(PG_FUNCTION_ARGS)
@@ -223,7 +223,7 @@ Datum tidsmaller(PG_FUNCTION_ARGS)
     ItemPointer arg1 = PG_GETARG_ITEMPOINTER(0);
     ItemPointer arg2 = PG_GETARG_ITEMPOINTER(1);
 
-    PG_RETURN_ITEMPOINTER(ItemPointerCompare(arg1, arg2) <= 0 ? arg1 : arg2);
+    PG_RETURN_ITEMPOINTER((ItemPointerCompare(arg1, arg2) <= 0) ? arg1 : arg2);
 }
 
 /*
@@ -234,11 +234,11 @@ Datum bigint_tid(PG_FUNCTION_ARGS)
     int64 val = PG_GETARG_INT64(0);
     ItemPointer item_ptr = (ItemPointer)&val;
 
-    BlockNumber block_number = BlockIdGetBlockNumber(&(item_ptr)->ip_blkid);
-    OffsetNumber offset_number = (item_ptr)->ip_posid;
+    BlockNumber blockNumber = BlockIdGetBlockNumber(&(item_ptr)->ip_blkid);
+    OffsetNumber offsetNumber = (item_ptr)->ip_posid;
 
     ItemPointer result = (ItemPointer)palloc(sizeof(ItemPointerData));
-    ItemPointerSet(result, block_number, offset_number);
+    ItemPointerSet(result, blockNumber, offsetNumber);
     PG_RETURN_ITEMPOINTER(result);
 }
 
@@ -250,11 +250,11 @@ Datum cstore_tid_out(PG_FUNCTION_ARGS)
     int64 val = PG_GETARG_INT64(0);
     ItemPointer item_ptr = (ItemPointer)&val;
 
-    BlockNumber block_number = BlockIdGetBlockNumber(&(item_ptr)->ip_blkid);
-    OffsetNumber offset_number = (item_ptr)->ip_posid;
+    BlockNumber blockNumber = BlockIdGetBlockNumber(&(item_ptr)->ip_blkid);
+    OffsetNumber offsetNumber = (item_ptr)->ip_posid;
 
     char buf[32];  // 9 + 9 + '(' + ', '+ ')' + '\0' = 32
-    int rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, "(%u,%u)", block_number, offset_number);
+    int rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, "(%u,%u)", blockNumber, offsetNumber);
     securec_check_ss(rc, "", "");
 
     PG_RETURN_CSTRING(pstrdup(buf));
@@ -278,41 +278,33 @@ void setLastTid(const ItemPointer tid)
 static Datum currtid_for_view(Relation viewrel, ItemPointer tid)
 {
     TupleDesc att = RelationGetDescr(viewrel);
-    RuleLock* rule_lock = NULL;
+    RuleLock* rulelock = NULL;
     RewriteRule* rewrite = NULL;
-    int i;
-    int natts = att->natts;
-    int tididx = -1;
+    int i, natts = att->natts, tididx = -1;
 
     for (i = 0; i < natts; i++) {
         if (strcmp(NameStr(att->attrs[i]->attname), "ctid") == 0) {
-            if (att->attrs[i]->atttypid != TIDOID) {
+            if (att->attrs[i]->atttypid != TIDOID)
                 ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("ctid isn't of type TID")));
-            }
             tididx = i;
             break;
         }
     }
-    if (tididx < 0) {
+    if (tididx < 0)
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("currtid cannot handle views with no CTID")));
-    }
-
-    rule_lock = viewrel->rd_rules;
-    if (rule_lock == NULL) {
+    rulelock = viewrel->rd_rules;
+    if (rulelock == NULL)
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("the view has no rules")));
-    }
-
-    for (i = 0; i < rule_lock->numLocks; i++) {
-        rewrite = rule_lock->rules[i];
+    for (i = 0; i < rulelock->numLocks; i++) {
+        rewrite = rulelock->rules[i];
         if (rewrite->event == CMD_SELECT) {
             Query* query = NULL;
             TargetEntry* tle = NULL;
 
-            if (list_length(rewrite->actions) != 1) {
+            if (list_length(rewrite->actions) != 1)
                 ereport(ERROR,
                     (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
                         errmsg("only one select rule is allowed in views")));
-            }
             query = (Query*)linitial(rewrite->actions);
             tle = get_tle_by_resno(query->targetList, tididx + 1);
             if ((tle != NULL) && (tle->expr != NULL) && IsA(tle->expr, Var)) {
@@ -342,7 +334,7 @@ Datum currtid_byreloid(PG_FUNCTION_ARGS)
     ItemPointer tid = PG_GETARG_ITEMPOINTER(1);
     ItemPointer result;
     Relation rel;
-    AclResult acl_result;
+    AclResult aclresult;
 
     result = (ItemPointer)palloc(sizeof(ItemPointerData));
     if (!reloid) {
@@ -352,17 +344,15 @@ Datum currtid_byreloid(PG_FUNCTION_ARGS)
 
     rel = heap_open(reloid, AccessShareLock);
 
-    acl_result = pg_class_aclcheck(RelationGetRelid(rel), GetUserId(), ACL_SELECT);
-    if (acl_result != ACLCHECK_OK) {
-        aclcheck_error(acl_result, ACL_KIND_CLASS, RelationGetRelationName(rel));
-    }
+    aclresult = pg_class_aclcheck(RelationGetRelid(rel), GetUserId(), ACL_SELECT);
+    if (aclresult != ACLCHECK_OK)
+        aclcheck_error(aclresult, ACL_KIND_CLASS, RelationGetRelationName(rel));
 
-    if (rel->rd_rel->relkind == RELKIND_VIEW) {
+    if (rel->rd_rel->relkind == RELKIND_VIEW || rel->rd_rel->relkind == RELKIND_CONTQUERY)
         return currtid_for_view(rel, tid);
-    }
 
     ItemPointerCopy(tid, result);
-    heap_get_latest_tid(rel, SnapshotNow, result);
+    tableam_tuple_get_latest_tid(rel, SnapshotNow, result);
 
     heap_close(rel, AccessShareLock);
 
@@ -371,28 +361,31 @@ Datum currtid_byreloid(PG_FUNCTION_ARGS)
 
 Datum currtid_byrelname(PG_FUNCTION_ARGS)
 {
-    text* rel_name = PG_GETARG_TEXT_P(0);
+    text* relname = PG_GETARG_TEXT_P(0);
     ItemPointer tid = PG_GETARG_ITEMPOINTER(1);
     ItemPointer result;
     RangeVar* relrv = NULL;
     Relation rel;
-    AclResult acl_result;
+    AclResult aclresult;
+    List* names = NIL;
 
-    relrv = makeRangeVarFromNameList(textToQualifiedNameList(rel_name));
+    names = textToQualifiedNameList(relname);
+    relrv = makeRangeVarFromNameList(names);
     rel = heap_openrv(relrv, AccessShareLock);
 
-    acl_result = pg_class_aclcheck(RelationGetRelid(rel), GetUserId(), ACL_SELECT);
-    if (acl_result != ACLCHECK_OK) {
-        aclcheck_error(acl_result, ACL_KIND_CLASS, RelationGetRelationName(rel));
-    }
-    if (rel->rd_rel->relkind == RELKIND_VIEW) {
+    aclresult = pg_class_aclcheck(RelationGetRelid(rel), GetUserId(), ACL_SELECT);
+    if (aclresult != ACLCHECK_OK)
+        aclcheck_error(aclresult, ACL_KIND_CLASS, RelationGetRelationName(rel));
+
+    if (rel->rd_rel->relkind == RELKIND_VIEW || rel->rd_rel->relkind == RELKIND_CONTQUERY)
         return currtid_for_view(rel, tid);
-    }
 
     result = (ItemPointer)palloc(sizeof(ItemPointerData));
     ItemPointerCopy(tid, result);
 
-    heap_get_latest_tid(rel, SnapshotNow, result);
+    tableam_tuple_get_latest_tid(rel, SnapshotNow, result);
+
+    list_free_ext(names);
 
     heap_close(rel, AccessShareLock);
 

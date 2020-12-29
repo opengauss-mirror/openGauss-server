@@ -14,8 +14,8 @@
  *---------------------------------------------------------------------------------------
  *
  *  gs_log_dump.cpp
- *	        core interface and implements of log dumping.
- *	        split control flow, data processing and output view.
+ *		core interface and implements of log dumping.
+ *		split control flow, data processing and output view.
  *          tools for binary logs, now including profile log.
  *
  * IDENTIFICATION
@@ -72,6 +72,7 @@ static void plog_dump_line_hdp(FILE* fd, char* buf);
 static const logdump_f logdump_tbl[PROFILE_LOG_VERSION][LOG_TYPE_NUM] = {
     /* version 1 */
     {
+        NULL,       /* => LOG_TYPE_ELOG */
         &parse_plog /* => LOG_TYPE_PLOG */
     }
     /* version 2 */
@@ -290,7 +291,8 @@ int gslog_dumper::dump(void)
         m_log_buflen += result;
 
         /* dump different log type */
-        if ((*logdump_tbl[m_log_version][m_logtype])(this) != 0) {
+        if (logdump_tbl[m_log_version][m_logtype] == NULL ||
+            (*logdump_tbl[m_log_version][m_logtype])(this) != 0) {
             return m_error_no;
         }
     }
@@ -361,13 +363,25 @@ int gslog_dumper::parse_file_head(void)
     uint8 hostname_len = *(uint8*)(m_log_buffer + off);
     off += sizeof(hostname_len);
 
+    if (hostname_len == 0) {
+        return -1;
+    }
+
     /* node name length */
     uint8 nodename_len = *(uint8*)(m_log_buffer + off);
     off += sizeof(nodename_len);
 
+    if (nodename_len == 0) {
+        return -1;
+    }
+
     /* time zone length */
     uint16 timezone_len = *(uint16*)(m_log_buffer + off);
     off += sizeof(timezone_len);
+
+    if (timezone_len == 0) {
+        return -1;
+    }
 
     /* compute the total length of file head */
     size_t hd_total_len = sizeof(LogFileHeader) + hostname_len + nodename_len + timezone_len;
@@ -389,6 +403,9 @@ int gslog_dumper::parse_file_head(void)
     ret = memcpy_s(m_host_name, LOG_MAX_NODENAME_LEN, m_log_buffer + off, hostname_len);
     secure_check_ret(ret);
     ASSERT(m_host_name[hostname_len - 1] == '\0');
+    if (m_host_name[hostname_len - 1] != '\0') {
+        return -1;
+    }
     off += hostname_len;
 
     g_log_hostname = m_host_name; /* set global host name */
@@ -397,6 +414,9 @@ int gslog_dumper::parse_file_head(void)
     ret = memcpy_s(m_node_name, LOG_MAX_NODENAME_LEN, m_log_buffer + off, nodename_len);
     secure_check_ret(ret);
     ASSERT(m_node_name[nodename_len - 1] == '\0');
+    if (m_node_name[nodename_len - 1] != '\0') {
+        return -1;
+    }
     off += nodename_len;
 
     g_log_nodename = m_node_name; /* set global node name */
@@ -481,6 +501,9 @@ int parse_plog(gslog_dumper* parser)
         }
 
         const int msglen = (*plog_msglen_tbl[(int)ds])(entry);
+        if (msglen < 0) {
+            return 0;
+        }
         if (parser->m_log_buflen - cur < msglen) {
             break;
         }

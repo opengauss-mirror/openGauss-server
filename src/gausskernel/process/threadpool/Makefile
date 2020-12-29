@@ -29,6 +29,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS= threadpool_controler.o threadpool_group.o threadpool_listener.o threadpool_scheduler.o threadpool_sessctl.o threadpool_worker.o  knl_thread.o knl_guc.o knl_instance.o knl_session.o
+OBJS= threadpool_controler.o threadpool_group.o threadpool_listener.o threadpool_scheduler.o threadpool_sessctl.o threadpool_stream.o threadpool_worker.o  knl_thread.o knl_guc.o knl_instance.o knl_session.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

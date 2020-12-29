@@ -1,0 +1,101 @@
+/*
+ * This file is used to test the function of ExecVecHashJoin()---(2)
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_hashjoin_engine_second;
+set current_schema to vector_hashjoin_engine_second;
+-----
+-----
+\parallel on  4
+create table vector_hashjoin_engine_second.ROW_HASHJOIN_TABLE_07
+(
+   c_int int
+  ,c_smallint smallint
+  ,c3 char(100)
+)distribute by hash(c_int);
+
+create table vector_hashjoin_engine_second.ROW_HASHJOIN_TABLE_08
+(
+   c_int int
+  ,c_bigint bigint
+  ,c3 char(100)
+)distribute by hash(c_int);
+
+create table vector_hashjoin_engine_second.vector_hashjoin_table_07
+(
+   c_int int
+  ,c_smallint smallint
+  ,c3 char(100)
+)with (orientation = column) distribute by hash(c_int);
+    
+create table vector_hashjoin_engine_second.vector_hashjoin_table_08
+(
+   c_int int
+  ,c_bigint bigint
+  ,c3 char(100)
+)with (orientation = column) distribute by hash(c_int);
+\parallel off
+
+\parallel on  8
+--insert into ROW_HASHJOIN_TABLE_07 select generate_series(-2000,-1), generate_series(-2000,-1), 'vector_hashjoin_row'|| generate_series(1,2000);
+copy ROW_HASHJOIN_TABLE_07 from '@abs_srcdir@/data/vec_hashjoin2_data1.txt' delimiter as ' ';
+insert into ROW_HASHJOIN_TABLE_07 values(1,2,NULL);
+insert into ROW_HASHJOIN_TABLE_07 values(NULL,-2,NULL);
+insert into ROW_HASHJOIN_TABLE_07 values(-3,NULL,NULL);
+--insert into ROW_HASHJOIN_TABLE_08 select generate_series(-2000,-1000), generate_series(-2000,-1000), 'vector_hashjoin_row'|| generate_series(1,1001);
+copy ROW_HASHJOIN_TABLE_08 from '@abs_srcdir@/data/vec_hashjoin2_data1.txt' delimiter as ' ';
+insert into ROW_HASHJOIN_TABLE_08 values(1,2,NULL);
+insert into ROW_HASHJOIN_TABLE_08 values(NULL,-2,NULL);
+insert into ROW_HASHJOIN_TABLE_08 values(-3,NULL,NULL);
+\parallel off
+
+\parallel on  5
+insert into vector_hashjoin_engine_second.vector_hashjoin_table_07 select * from vector_hashjoin_engine_second.ROW_HASHJOIN_TABLE_07;
+insert into vector_hashjoin_engine_second.vector_hashjoin_table_08 select * from vector_hashjoin_engine_second.ROW_HASHJOIN_TABLE_08;
+insert into vector_hashjoin_engine_second.vector_hashjoin_table_07 select * from vector_hashjoin_engine_second.ROW_HASHJOIN_TABLE_07;
+insert into vector_hashjoin_engine_second.vector_hashjoin_table_08 select * from vector_hashjoin_engine_second.ROW_HASHJOIN_TABLE_08;
+insert into vector_hashjoin_engine_second.vector_hashjoin_table_08 select * from vector_hashjoin_engine_second.ROW_HASHJOIN_TABLE_08;
+\parallel off
+
+analyze vector_hashjoin_engine_second.vector_hashjoin_table_07;
+analyze vector_hashjoin_engine_second.vector_hashjoin_table_08;
+
+--select * from VECTOR_HASHJOIN_TABLE_07 A join VECTOR_HASHJOIN_TABLE_08 B on a.c_int=b.c_bigint order by 1,2,3,4,5,6 limit 100;
+--select * from VECTOR_HASHJOIN_TABLE_07 A join VECTOR_HASHJOIN_TABLE_08 B on a.c_int=b.c_int and a.c_smallint=b.c_bigint order by 1,2,3,4,5,6 limit 100;
+--select * from VECTOR_HASHJOIN_TABLE_07 A join VECTOR_HASHJOIN_TABLE_08 B on a.c_int=b.c_int +1 order by 1,2,3,4,5,6 limit 50;
+--select * from VECTOR_HASHJOIN_TABLE_07 A right join VECTOR_HASHJOIN_TABLE_08 B on a.c_smallint=b.c_int order by 1,2,3,4,5,6 limit 100;
+--select * from VECTOR_HASHJOIN_TABLE_07 A right join VECTOR_HASHJOIN_TABLE_08 B on substring(A.c3, 2) = substring(B.c3, 2) order by 1,2,3,4,5,6 limit 50;
+--select * from VECTOR_HASHJOIN_TABLE_07 A right join VECTOR_HASHJOIN_TABLE_08 B on substring(A.c3, 2) = substring(B.c3, 2) and a.c_smallint=b.c_bigint order by 1,2,3,4,5,6 limit 50;
+
+set work_mem=64;
+set query_dop = 1;
+set enable_compress_spill = on;
+select * from VECTOR_HASHJOIN_TABLE_07 A join VECTOR_HASHJOIN_TABLE_08 B on a.c_int=b.c_bigint order by 1,2,3,4,5,6 limit 100;
+select * from VECTOR_HASHJOIN_TABLE_07 A join VECTOR_HASHJOIN_TABLE_08 B on a.c_int=b.c_int and a.c_smallint=b.c_bigint order by 1,2,3,4,5,6 limit 100;
+select * from VECTOR_HASHJOIN_TABLE_07 A join VECTOR_HASHJOIN_TABLE_08 B on a.c_int=b.c_int +1 order by 1,2,3,4,5,6 limit 50;
+select * from VECTOR_HASHJOIN_TABLE_07 A right join VECTOR_HASHJOIN_TABLE_08 B on a.c_smallint=b.c_int order by 1,2,3,4,5,6 limit 100;
+select * from VECTOR_HASHJOIN_TABLE_07 A right join VECTOR_HASHJOIN_TABLE_08 B on substring(A.c3, 2) = substring(B.c3, 2) order by 1,2,3,4,5,6 limit 50;
+select * from VECTOR_HASHJOIN_TABLE_07 A right join VECTOR_HASHJOIN_TABLE_08 B on substring(A.c3, 2) = substring(B.c3, 2) and a.c_smallint=b.c_bigint order by 1,2,3,4,5,6 limit 50;
+
+set enable_compress_spill = off;
+select * from VECTOR_HASHJOIN_TABLE_07 A join VECTOR_HASHJOIN_TABLE_08 B on a.c_int=b.c_bigint order by 1,2,3,4,5,6 limit 100;
+select * from VECTOR_HASHJOIN_TABLE_07 A join VECTOR_HASHJOIN_TABLE_08 B on a.c_int=b.c_int and a.c_smallint=b.c_bigint order by 1,2,3,4,5,6 limit 100;
+select * from VECTOR_HASHJOIN_TABLE_07 A join VECTOR_HASHJOIN_TABLE_08 B on a.c_int=b.c_int +1 order by 1,2,3,4,5,6 limit 50;
+select * from VECTOR_HASHJOIN_TABLE_07 A right join VECTOR_HASHJOIN_TABLE_08 B on a.c_smallint=b.c_int order by 1,2,3,4,5,6 limit 100;
+select * from VECTOR_HASHJOIN_TABLE_07 A right join VECTOR_HASHJOIN_TABLE_08 B on substring(A.c3, 2) = substring(B.c3, 2) order by 1,2,3,4,5,6 limit 50;
+select * from VECTOR_HASHJOIN_TABLE_07 A right join VECTOR_HASHJOIN_TABLE_08 B on substring(A.c3, 2) = substring(B.c3, 2) and a.c_smallint=b.c_bigint order by 1,2,3,4,5,6 limit 50;
+
+
+reset enable_compress_spill;
+\o xml_explain_temp.txt
+explain (analyze on, timing off, format xml) select * from VECTOR_HASHJOIN_TABLE_07 A right join VECTOR_HASHJOIN_TABLE_08 B on substring(A.c3, 2) = substring(B.c3, 2) and a.c_smallint=b.c_bigint;
+\o
+explain (analyze on, detail on, timing off) select * from VECTOR_HASHJOIN_TABLE_07 A right join VECTOR_HASHJOIN_TABLE_08 B on substring(A.c3, 2) = substring(B.c3, 2) and a.c_smallint=b.c_bigint order by 1,2,3,4,5,6 limit 50;
+
+reset work_mem;
+----
+--- Clean table and resource
+----
+drop schema vector_hashjoin_engine_second cascade;

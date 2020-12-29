@@ -32,7 +32,7 @@ CFLAGS ?=
 
 subdir=src/gausskernel/storage/mot/core/src
 top_builddir ?= ../../../../../../
-MASSTREE_MEGRED_SOURCES_DIR=$(top_builddir)/third_party/dependency/masstree/code
+MASSTREE_MEGRED_SOURCES_DIR=$(MASSTREE_HOME)/code
 
 ifeq ($(UNDERPG),yes)
 include $(top_builddir)/src/Makefile.global

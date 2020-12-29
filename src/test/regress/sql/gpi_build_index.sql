@@ -109,7 +109,7 @@ Create table hw_global_index_t1
 );
 
 Create unique index t1_unique_index_1 on hw_global_index_t1 (c1) global;
---fail non-partitioned table does not support global global index
+--fail non-partitioned table does not support global partitioned indexes
 
 drop table hw_global_index_t1;
 

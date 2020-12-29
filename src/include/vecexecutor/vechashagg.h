@@ -48,7 +48,7 @@ public:
 
 private:
     /* Different build function, if we exceed the threshold in memory row number,we need to flush to the disk.*/
-    template <bool simple>
+    template <bool simple, bool unique_check>
     void buildAggTbl(VectorBatch* batch);
 
     void Build();
@@ -69,7 +69,7 @@ private:
 
     FORCE_INLINE uint32 get_bucket(uint32 hashvalue)
     {
-        return hashvalue & (m_hashSize - 1);
+        return hashvalue & (uint32)(m_hashSize - 1);
     }
 
     template <bool simple>

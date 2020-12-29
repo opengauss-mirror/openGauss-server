@@ -48,7 +48,8 @@ else
 install_pldebugger:
 endif
 
-
+#enable_privategauss supports the package feature,
+#and openGauss does not hold the package feature
 ifeq ($(enable_multiple_nodes), yes)
 install:
 	$(MAKE) install_mysql_fdw
@@ -56,20 +57,33 @@ install:
 	$(MAKE) -C contrib/hstore $@
 	$(MAKE) -C src/distribute/kernel/extension/packages $@
 	$(MAKE) -C contrib/pagehack $@
-	$(MAKE) -C contrib/pg_stat_statements $@
 	$(MAKE) -C contrib/pg_xlogdump $@
 	$(MAKE) -C contrib/gsredistribute $@
 	$(MAKE) -C src/distribute/kernel/extension/dimsearch $@
+	$(MAKE) -C contrib/security_plugin $@
 	$(MAKE) -C src/distribute/kernel/extension/tsdb $@
 	+@echo "PostgreSQL installation complete."
+else
+ifeq ($(enable_privategauss), yes)
+install:
+	$(MAKE) install_mysql_fdw
+	$(MAKE) install_oracle_fdw
+	$(MAKE) install_pldebugger
+	$(MAKE) -C contrib/postgres_fdw $@
+	$(MAKE) -C contrib/hstore $@
+	$(MAKE) -C src/distribute/kernel/extension/packages $@
+	$(MAKE) -C contrib/gsredistribute $@
+	+@echo "openGauss installation complete."
 else
 install:
 	$(MAKE) install_mysql_fdw
 	$(MAKE) install_oracle_fdw
 	$(MAKE) install_pldebugger
 	$(MAKE) -C contrib/postgres_fdw $@
-	$(MAKE) -C contrib/pg_stat_statements $@
+	$(MAKE) -C contrib/hstore $@
+	$(MAKE) -C contrib/gsredistribute $@
 	+@echo "openGauss installation complete."
+endif
 endif
 
 install-docs:
@@ -117,8 +131,6 @@ qunitcheck: all
 
 fastcheck_single: all
 
-fastcheck_single_mot: all
-
 redocheck: all
 
 redochecksmall: all
@@ -143,7 +155,7 @@ securitycheck: all
 
 parquetchecksmall: all
 
-check fastcheck fastcheck_inplace fastcheck_parallel_initdb qunitcheck redischeck redocheck redochecksmall orccheckxian orccheckusa orcchecksmall parquetchecksmall dfscheck obscheck obsorccheck securitycheck dfsredischeck installcheck installcheck-parallel 2pccheck fastcheck_single fastcheck_single_mot:
+check fastcheck fastcheck_inplace fastcheck_parallel_initdb qunitcheck redischeck redocheck redochecksmall orccheckxian orccheckusa orcchecksmall parquetchecksmall dfscheck obscheck obsorccheck securitycheck dfsredischeck installcheck installcheck-parallel 2pccheck fastcheck_single:
 	$(MAKE) -C src/distribute/test/regress $@
 
 #llt include all low level test
@@ -187,7 +199,11 @@ $(call recurse,check-world,src/distribute/test src/pl src/interfaces/ecpg contri
 $(call recurse,installcheck-world,src/distribute/test src/pl src/interfaces/ecpg contrib,installcheck)
 
 else
+ifeq ($(enable_mot), yes)
 check fastcheck fastcheck_parallel_initdb fastcheck_single fastcheck_single_mot:
+else
+check fastcheck fastcheck_parallel_initdb fastcheck_single:
+endif
 	$(MAKE) -C src/test/regress $@
 
 $(call recurse,check-world,src/test src/pl src/interfaces/ecpg contrib,check)

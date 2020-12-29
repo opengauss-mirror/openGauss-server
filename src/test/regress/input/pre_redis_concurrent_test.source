@@ -1,0 +1,191 @@
+DROP TABLE IF EXISTS mpp_col CASCADE; 
+DROP TABLE IF EXISTS mpp_col_rep CASCADE; 
+DROP TABLE IF EXISTS mpp_row CASCADE; 
+DROP TABLE IF EXISTS mpp_row_rep CASCADE; 
+DROP TABLE IF EXISTS mpp_zxf CASCADE; 
+DROP TABLE IF EXISTS redis_table_003_normal CASCADE; 
+
+create table test_row_like_default(a int, b int, c serial);
+alter table test_row_like_default drop column b;
+create table test_col_like_default(a int, b int, c serial);
+alter table test_col_like_default drop column b;
+create table test_row_partition_like_default(a int, b int, c serial)
+distribute by hash (a)
+PARTITION BY RANGE (a)
+(
+    partition p0 values less than (10),
+    partition p1 values less than (20),
+    partition p2 values less than (30),
+    partition p3 values less than (maxvalue)
+);
+alter table test_row_partition_like_default drop column b;
+create table test_col_partition_like_default(a int, b int, c serial)
+with(orientation = column)
+distribute by hash (a)
+PARTITION BY RANGE (a)
+(
+    partition p0 values less than (10),
+    partition p1 values less than (20),
+    partition p2 values less than (30),
+    partition p3 values less than (maxvalue)
+);
+alter table test_col_partition_like_default drop column b;
+
+create foreign table fx
+(
+    a int,
+    b int
+)
+SERVER gsmpp_server
+OPTIONS (
+    delimiter '|',
+    encoding 'utf8',
+    format 'text',
+    location 'gsfs://192.168.168.4:21111/customer.dat',
+    mode 'Normal'
+);
+
+--create insert table
+CREATE TABLE tbl_insert_during_redis(id INT,name VARCHAR(15) NOT NULL);
+CREATE TABLE tbl_insert_copy_during_redis(id INT,name VARCHAR(15) NOT NULL);
+CREATE TABLE tbl_insert_rep_during_redis(id INT,name VARCHAR(15) NOT NULL)distribute by replication;
+CREATE TABLE tbl_insert_during_redis_cp(id INT,name VARCHAR(15) NOT NULL);
+CREATE TABLE tbl_insert_rep_during_redis_cp(id INT,name VARCHAR(15) NOT NULL)distribute by replication;
+
+--create update table
+CREATE TABLE tbl_update_during_redis(id INT,name VARCHAR(15) NOT NULL);
+CREATE TABLE tbl_update_rep_during_redis(id INT,name VARCHAR(15) NOT NULL)distribute by replication;
+
+--create delete table
+CREATE TABLE tbl_delete_during_redis(id INT,name VARCHAR(15) NOT NULL);
+CREATE TABLE tbl_delete_rep_during_redis(id INT,name VARCHAR(15) NOT NULL)distribute by replication;
+
+--create base table
+CREATE TABLE tbl_base_during_redis(id INT,name VARCHAR(15) NOT NULL);
+CREATE TABLE tbl_base_rep_during_redis(id INT,name VARCHAR(15) NOT NULL)distribute by replication;
+
+--insert table 
+insert into tbl_insert_during_redis_cp values(1,'a');
+
+
+copy tbl_insert_rep_during_redis from '@abs_srcdir@/data/redis.data4';
+
+copy tbl_insert_rep_during_redis_cp from '@abs_srcdir@/data/redis.data4';
+
+
+--update table
+copy tbl_update_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_update_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_update_during_redis from '@abs_srcdir@/data/redis.data1';
+
+copy tbl_update_rep_during_redis from '@abs_srcdir@/data/redis.data4';
+
+--delete table
+
+copy tbl_delete_during_redis from '@abs_srcdir@/data/redis.data1';
+
+copy tbl_delete_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_delete_during_redis from '@abs_srcdir@/data/redis.data1';
+
+copy tbl_delete_rep_during_redis from '@abs_srcdir@/data/redis.data4';
+
+--base table
+
+copy tbl_base_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_base_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_base_during_redis from '@abs_srcdir@/data/redis.data1';
+
+copy tbl_base_rep_during_redis from '@abs_srcdir@/data/redis.data4';
+
+--multiple test table
+CREATE TABLE tbl_update_multiple_during_redis(id INT,name VARCHAR(15) NOT NULL);
+copy tbl_update_multiple_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_update_multiple_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_update_multiple_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_update_multiple_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_update_multiple_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_update_multiple_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_update_multiple_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_update_multiple_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_update_multiple_during_redis from '@abs_srcdir@/data/redis.data1';
+copy tbl_update_multiple_during_redis from '@abs_srcdir@/data/redis.data1';
+
+--complex table
+create table tbl_insert_001 (c_int integer, c_smallint smallint, c_bigint bigint, c_decimal decimal , c_numeric numeric , c_real real , c_double double precision , c_money money , c_character_varying character varying(10) , c_varchar varchar(10) , c_char char(10) , c_text text , c_bytea bytea , c_timestamp_without  timestamp without time zone , c_timestamp_with timestamp with time zone , c_boolean boolean ,  c_cidr cidr , c_inet inet ,c_macaddr macaddr , c_bit bit(20) , c_bit_varying bit varying(20) , c_oid oid , c_regproc regproc , c_regprocedure regprocedure , c_regoperator regoperator , c_regclass regclass , c_regtype regtype , c_character character(10) , c_interval interval , c_date date , c_time_without time without time zone, c_time_with time with time zone,c_binary_integer binary_integer,c_binary_double binary_double,c_dec dec(18,9),c_numeric_1 numeric(19,9),c_raw raw,c_varchar2 varchar2) distribute by replication;
+create index redis_index_001 on tbl_insert_001(c_int,c_bigint);
+create table tbl_insert_002 (c_int integer, c_smallint smallint, c_bigint bigint, c_decimal decimal , c_numeric numeric , c_real real , c_double double precision , c_money money , c_character_varying character varying(10) , c_varchar varchar(10) , c_char char(10) , c_text text , c_bytea bytea , c_timestamp_without  timestamp without time zone , c_timestamp_with timestamp with time zone , c_boolean boolean ,  c_cidr cidr , c_inet inet ,c_macaddr macaddr , c_bit bit(20) , c_bit_varying bit varying(20) , c_oid oid , c_regproc regproc , c_regprocedure regprocedure , c_regoperator regoperator , c_regclass regclass , c_regtype regtype , c_character character(10) , c_interval interval , c_date date , c_time_without time without time zone, c_time_with time with time zone,c_binary_integer binary_integer,c_binary_double binary_double,c_dec dec(18,9),c_numeric_1 numeric(19,9),c_raw raw,c_varchar2 varchar2) distribute by replication;
+create index redis_index_002 on tbl_insert_001(c_int,c_bigint);
+
+
+declare
+ col_num integer := 210;
+ star_date date  := '2010-10-01';
+begin
+for i in 1..col_num loop
+insert into tbl_insert_001 values(i,i-35,i+10000,'3.'||i+4096||'','21.'||i+10088||'',9999-i*16,1234+i,cast(''||i+4090||'.'||i*21||'' as money),'a~'||i*2||'','b!@#'||i+21||'','c$%'||656-i||'','turkey^&*'||i+4080||'',cast('mpp'||i||'' as bytea),(select timestamp without time zone 'epoch' +  (i*1024) * interval '31 second')::timestamp without time zone,(select timestamp with time zone 'epoch' +  (i*4096) * interval '61 second')::timestamp without time zone,i%2,cast(''||(i*45)%255||'.'||i%198||'.'||(i*45)%255||'.'||(i*102)%255||'/32' as cidr),cast('2001:'||i%99||'f8:'||i%155+1||':2d4:fe'||(i*45)%25+2||':23f:a'||i%55+3||':'||(i*145)%125+4||'/128' as inet),cast(''||i%12+1||':'||i%12+34||':'||i%12+56||':'||i%78||':'||i%90+3||':ab' as macaddr),(i+4087)::bit(20),(i+1000)::bit(20),i+10,'int8and','to_timestamp(double precision)','*(integer,integer)','pg_type','integer','abc'||i+190||'',cast(''||i+4090||'.4096' as interval),star_date-666+i,(select timestamp 'epoch' +  (i*2121) * interval '11 second')::time without time zone,(select timestamp with time zone 'epoch' +  (i*1024) * interval '21 second')::time with time zone,i+22,'101.'||i+2048||'',''||i+4093||'.'||i+5401||'',''||i+1013||'.'||i+1687||'',cast('e'||i||'' as raw),'gau/:'||i+6754||'');
+end loop; 
+for i in 1..col_num loop
+insert into tbl_insert_002 values(i,i-35,i+10000,'3.'||i+4096||'','21.'||i+10088||'',9999-i*16,1234+i,cast(''||i+4090||'.'||i*21||'' as money),'a~'||i*2||'','b!@#'||i+21||'','c$%'||656-i||'','turkey^&*'||i+4080||'',cast('mpp'||i||'' as bytea),(select timestamp without time zone 'epoch' +  (i*1024) * interval '31 second')::timestamp without time zone,(select timestamp with time zone 'epoch' +  (i*4096) * interval '61 second')::timestamp without time zone,i%2,cast(''||(i*45)%255||'.'||i%198||'.'||(i*45)%255||'.'||(i*102)%255||'/32' as cidr),cast('2001:'||i%99||'f8:'||i%155+1||':2d4:fe'||(i*45)%25+2||':23f:a'||i%55+3||':'||(i*145)%125+4||'/128' as inet),cast(''||i%12+1||':'||i%12+34||':'||i%12+56||':'||i%78||':'||i%90+3||':ab' as macaddr),(i+4087)::bit(20),(i+1000)::bit(20),i+10,'int8and','to_timestamp(double precision)','*(integer,integer)','pg_type','integer','abc'||i+190||'',cast(''||i+4090||'.4096' as interval),star_date-666+i,(select timestamp 'epoch' +  (i*2121) * interval '11 second')::time without time zone,(select timestamp with time zone 'epoch' +  (i*1024) * interval '21 second')::time with time zone,i+22,'101.'||i+2048||'',''||i+4093||'.'||i+5401||'',''||i+1013||'.'||i+1687||'',cast('e'||i||'' as raw),'gau/:'||i+6754||'');
+end loop; 
+
+end;
+
+CREATE TABLE tbl_insert_003(
+    RS_ID int,
+    R0_ID varchar(5000) NOT NULL,
+    R1_ID varchar(5000) NOT NULL,
+    R2_ID varchar(5000) NOT NULL,
+    R3_ID varchar(5000) NOT NULL,
+    R4_ID varchar(5000) NOT NULL,
+    R5_ID varchar(5000) NOT NULL,
+    R6_ID varchar(5000) NOT NULL
+);
+COPY tbl_insert_003 FROM '@abs_srcdir@/data/cmpr_numstr.data';
+CREATE TABLE tbl_insert_004(
+    RS_ID int,
+    R0_ID varchar(5000) NOT NULL,
+    R1_ID varchar(5000) NOT NULL,
+    R2_ID varchar(5000) NOT NULL,
+    R3_ID varchar(5000) NOT NULL,
+    R4_ID varchar(5000) NOT NULL,
+    R5_ID varchar(5000) NOT NULL,
+    R6_ID varchar(5000) NOT NULL
+);
+COPY tbl_insert_004 FROM '@abs_srcdir@/data/cmpr_numstr.data';
+
+create table tbl_insert_row_during_redis(c1 int, c2 text);
+insert into tbl_insert_row_during_redis values(generate_series(0,99), 'hello ' || generate_series(0,99));
+select * from tbl_insert_row_during_redis order by c1;
+
+create table tbl_insert_row_replication_during_redis(c1 int, c2 text) distribute by replication;
+insert into tbl_insert_row_replication_during_redis values(generate_series(0,99), 'hello ' || generate_series(0,99));
+select * from tbl_insert_row_replication_during_redis order by c1;
+
+create table tbl_insert_partition_during_redis(c1 int, c2 text) partition by range (c1)
+(
+partition tbl_insert_partition_during_redis_p1 values less than (10),
+partition tbl_insert_partition_during_redis_p2 values less than (20),
+partition tbl_insert_partition_during_redis_p3 values less than (100)
+);
+insert into tbl_insert_partition_during_redis values(generate_series(0,99), 'hello ' || generate_series(0,99));
+select * from tbl_insert_partition_during_redis order by c1;
+
+create table tbl_insert_partition_replication_during_redis(c1 int, c2 text) distribute by replication partition by range (c1)
+(
+partition tbl_insert_partition_during_redis_p1 values less than (10),
+partition tbl_insert_partition_during_redis_p2 values less than (20),
+partition tbl_insert_partition_during_redis_p3 values less than (100)
+);
+insert into tbl_insert_partition_replication_during_redis values(generate_series(0,99), 'hello ' || generate_series(0,99));
+select * from tbl_insert_partition_replication_during_redis order by c1;
+
+create table tbl_insert_column_during_redis(c1 int, c2 text) with(orientation = column);
+insert into tbl_insert_column_during_redis values(generate_series(0,99), 'hello ' || generate_series(0,99));
+select * from tbl_insert_column_during_redis order by c1;
+
+create table tbl_insert_column_replication_during_redis(c1 int, c2 text) with(orientation = column) distribute by replication;
+insert into tbl_insert_column_replication_during_redis values(generate_series(0,99), 'hello ' || generate_series(0,99));
+select * from tbl_insert_column_replication_during_redis order by c1;
+
+create table tbl_priority(c1 int, c2 text);
+create table tbl_drop_during_redis(c1 int, c2 text);

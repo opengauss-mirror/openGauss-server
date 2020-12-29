@@ -12,7 +12,7 @@ CREATE TABLE colcmpr_str_00
 	L_SHIPMODE     CHAR(10) NOT NULL,
 	L_COMMENT      VARCHAR(44) NOT NULL
 ) with (orientation = column)  ;
-COPY colcmpr_str_00 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_str_00.data' delimiter '|';
+COPY colcmpr_str_00 FROM '@abs_srcdir@/data/colcmpr_str_00.data' delimiter '|';
 SELECT * FROM colcmpr_str_00 ORDER BY 1, 2, 3, 4, 5, 6, 7, 8;
  distkey | l_quantity | l_extendedprice | l_discount | l_tax |      l_shipinstruct       | l_shipmode |                  l_comment                  
 ---------+------------+-----------------+------------+-------+---------------------------+------------+---------------------------------------------
@@ -10032,7 +10032,7 @@ CREATE TABLE colcmpr_str_01
 	L_SHIPMODE     CHAR(10) NOT NULL,
 	L_COMMENT      VARCHAR(44) NOT NULL
 ) with (orientation = column, compression=high)  ;
-COPY colcmpr_str_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_str_00.data' delimiter '|';
+COPY colcmpr_str_01 FROM '@abs_srcdir@/data/colcmpr_str_00.data' delimiter '|';
 SELECT L_DISCOUNT, L_SHIPMODE, L_COMMENT FROM colcmpr_str_01 ORDER BY 1, 2, 3;
  l_discount | l_shipmode |                  l_comment                  
 ------------+------------+---------------------------------------------
@@ -20066,7 +20066,7 @@ CREATE TABLE colcmpr_numeric_lineitem
 with (orientation = column)
  
 ;
-COPY colcmpr_numeric_lineitem FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem.data' delimiter '|';
+COPY colcmpr_numeric_lineitem FROM '@abs_srcdir@/data/lineitem.data' delimiter '|';
 INSERT INTO colcmpr_numeric_00 SELECT 1, L_EXTENDEDPRICE FROM colcmpr_numeric_lineitem;
 INSERT INTO colcmpr_numeric_00 SELECT 1, L_QUANTITY FROM colcmpr_numeric_lineitem;
 INSERT INTO colcmpr_numeric_00 SELECT 1, L_DISCOUNT FROM colcmpr_numeric_lineitem;

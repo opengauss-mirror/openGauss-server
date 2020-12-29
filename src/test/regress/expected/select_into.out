@@ -1,0 +1,133 @@
+--
+-- SELECT_INTO
+--
+SELECT *
+   INTO TABLE tmp1
+   FROM onek
+   WHERE onek.unique1 < 2;
+DROP TABLE tmp1;
+SELECT *
+   INTO TABLE tmp1
+   FROM onek2
+   WHERE onek2.unique1 < 2;
+DROP TABLE tmp1;
+--
+-- SELECT INTO and INSERT permission, if owner is not allowed to insert.
+--
+CREATE SCHEMA selinto_schema;
+CREATE USER selinto_user PASSWORD 'ttest@123';
+ALTER DEFAULT PRIVILEGES FOR ROLE selinto_user
+	  REVOKE INSERT ON TABLES FROM selinto_user;
+GRANT ALL ON SCHEMA selinto_schema TO public;
+SET SESSION AUTHORIZATION selinto_user PASSWORD 'ttest@123';
+SELECT * INTO TABLE selinto_schema.tmp1
+	  FROM pg_class WHERE relname like '%a%';	-- Error
+ERROR:  permission denied for relation tmp1
+SELECT oid AS clsoid, relname, relnatts + 10 AS x
+	  INTO selinto_schema.tmp2
+	  FROM pg_class WHERE relname like '%b%';	-- Error
+ERROR:  permission denied for relation tmp2
+CREATE TABLE selinto_schema.tmp3 (a,b,c)
+	   AS SELECT oid,relname,relacl FROM pg_class
+	   WHERE relname like '%c%';	-- Error
+ERROR:  permission denied for relation tmp3
+RESET SESSION AUTHORIZATION;
+ALTER DEFAULT PRIVILEGES FOR ROLE selinto_user
+	  GRANT INSERT ON TABLES TO selinto_user;
+SET SESSION AUTHORIZATION selinto_user PASSWORD 'ttest@123';
+SELECT * INTO TABLE selinto_schema.tmp1
+	  FROM pg_class WHERE relname like '%a%';	-- OK
+SELECT oid AS clsoid, relname, relnatts + 10 AS x
+	  INTO selinto_schema.tmp2
+	  FROM pg_class WHERE relname like '%b%';	-- OK
+CREATE TABLE selinto_schema.tmp3 (a,b,c)
+	   AS SELECT oid,relname,relacl FROM pg_class
+	   WHERE relname like '%c%';	-- OK
+RESET SESSION AUTHORIZATION;
+DROP SCHEMA selinto_schema CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table selinto_schema.tmp1
+drop cascades to table selinto_schema.tmp2
+drop cascades to table selinto_schema.tmp3
+DROP USER selinto_user;
+--
+-- CREATE TABLE AS/SELECT INTO as last command in a SQL function
+-- have been known to cause problems
+--
+CREATE FUNCTION make_table() RETURNS VOID
+AS $$
+  CREATE TABLE created_table AS SELECT * FROM int8_tbl;
+$$ LANGUAGE SQL;
+ERROR:  In XC, SQL functions cannot contain utility statements
+CONTEXT:  SQL function "make_table"
+SELECT make_table();
+ERROR:  function make_table() does not exist
+LINE 1: SELECT make_table();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: make_table
+SELECT * FROM created_table;
+ERROR:  relation "created_table" does not exist on datanode1
+LINE 1: SELECT * FROM created_table;
+                      ^
+DROP TABLE created_table;
+ERROR:  table "created_table" does not exist
+--
+-- Disallowed uses of SELECT ... INTO.  All should fail
+--
+CURSOR foo FOR SELECT 1 INTO b;
+ERROR:  SELECT ... INTO is not allowed here
+LINE 1: CURSOR foo FOR SELECT 1 INTO b;
+                                     ^
+COPY (SELECT 1 INTO frak UNION SELECT 2) TO 'blob';
+ERROR:  COPY (SELECT INTO) is not supported
+SELECT * FROM (SELECT 1 INTO f) bar;
+ERROR:  SELECT ... INTO is not allowed here
+LINE 1: SELECT * FROM (SELECT 1 INTO f) bar;
+                                     ^
+CREATE VIEW foo AS SELECT 1 INTO b;
+ERROR:  views must not contain SELECT INTO
+INSERT INTO b SELECT 1 INTO f;
+ERROR:  relation "b" does not exist on datanode1
+LINE 1: INSERT INTO b SELECT 1 INTO f;
+                    ^
+--
+-- EXPLAIN ANALYZE CREATE TABLE AS/SELECT INTO
+--
+CREATE TABLE tmp_table(a int, b int);
+INSERT INTO tmp_table VALUES (1,1),(2,2);
+EXPLAIN SELECT * INTO select_into_tbl FROM tmp_table;
+ERROR:  EXPLAIN SELECT INTO requires ANALYZE
+EXPLAIN ANALYZE SELECT * INTO select_into_tbl FROM tmp_table;
+--?.*
+--?.*
+--? Insert on select_into_tbl  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Seq Scan on tmp_table  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .*
+(3 rows)
+
+SELECT count(*) FROM select_into_tbl;
+ count 
+-------
+     2
+(1 row)
+
+DROP TABLE select_into_tbl;
+EXPLAIN CREATE TABLE ctas_tbl AS SELECT * FROM tmp_table;
+ERROR:  EXPLAIN CREATE TABLE AS SELECT requires ANALYZE
+EXPLAIN ANALYZE CREATE TABLE ctas_tbl AS SELECT * FROM tmp_table;
+--?.*
+--?.*
+--? Insert on ctas_tbl  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Seq Scan on tmp_table  (cost=0.00..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .*
+(3 rows)
+
+SELECT count(*) FROM ctas_tbl;
+ count 
+-------
+     2
+(1 row)
+
+DROP TABLE ctas_tbl;
+DROP TABLE tmp_table;

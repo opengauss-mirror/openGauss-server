@@ -1,0 +1,339 @@
+set enable_global_stats = true;
+/*
+ * This file is used to test the function of Vector Cursor
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_cursor_engine;
+set current_schema=vector_cursor_engine;
+create table vector_cursor_engine.VECTOR_CURSOR_TABLE_01
+(
+	a	int
+)with (orientation = orc) tablespace hdfs_ts;
+COPY VECTOR_CURSOR_TABLE_01(a) FROM stdin; 
+create table vector_cursor_engine.VECTOR_CURSOR_TABLE_02
+(
+	a	int
+)with (orientation = orc) tablespace hdfs_ts;
+COPY VECTOR_CURSOR_TABLE_02(a) FROM stdin; 
+create table vector_cursor_engine.VECTOR_CURSOR_TABLE_03
+(
+	a	int
+)with (orientation = orc) tablespace hdfs_ts;
+COPY VECTOR_CURSOR_TABLE_03(a) FROM stdin; 
+create table vector_cursor_engine.VECTOR_CURSOR_TABLE_04
+(
+	a	int
+)with (orientation = orc) tablespace hdfs_ts;
+insert into VECTOR_CURSOR_TABLE_04 select * from VECTOR_CURSOR_TABLE_03;
+analyze vector_cursor_table_01;
+analyze vector_cursor_table_02;
+analyze vector_cursor_table_03;
+analyze vector_cursor_table_04;
+----
+--- test 1: rescan of Unique
+----
+set enable_material=off;
+start transaction;
+cursor cur1 with hold for select a from vector_cursor_table_01 union select a from vector_cursor_table_02 order by a;
+fetch from cur1;
+ a 
+---
+ 0
+(1 row)
+
+end;
+fetch all from cur1;
+ a  
+----
+  3
+  5
+  8
+  9
+ 11
+ 15
+ 22
+(7 rows)
+
+fetch backward all from cur1;
+ERROR:  Cursor can only scan forward
+close cur1;
+start transaction;
+cursor cur1 for select a from vector_cursor_table_01 order by a;
+fetch 1 from cur1;
+ a 
+---
+ 0
+(1 row)
+
+fetch all from cur1;
+ a  
+----
+  3
+  5
+  8
+  9
+ 11
+ 15
+ 22
+(7 rows)
+
+end;
+set enable_material=on;
+set enable_hashagg=on;
+----
+--- test 2: forward scan
+----
+start transaction;
+cursor cur2 for select * from vector_cursor_table_01,vector_cursor_table_02,vector_cursor_table_03, vector_cursor_table_04 where vector_cursor_table_01.a=vector_cursor_table_02.a and vector_cursor_table_03.a = vector_cursor_table_04.a  order by 1, 2, 3, 4;
+fetch forward 6 from cur2;
+ a | a | a | a 
+---+---+---+---
+ 0 | 0 | 1 | 1
+ 0 | 0 | 2 | 2
+ 0 | 0 | 3 | 3
+ 0 | 0 | 4 | 4
+ 0 | 0 | 5 | 5
+ 3 | 3 | 1 | 1
+(6 rows)
+
+close cur2;
+end;
+----
+--- test 3: scroll
+----
+start transaction;
+cursor foo scroll for select * from vector_cursor_table_03  order by a offset 1 limit 3;
+ERROR:  SCROLL CURSOR is not yet supported.
+end;
+---
+---
+ CREATE TABLE APPEND_BATCH_5000_036_1(
+ C_CHAR_1 CHAR(1),
+ C_CHAR_2 CHAR(10),
+ C_CHAR_3 CHAR(100),
+ C_VARCHAR_1 VARCHAR(1),
+ C_VARCHAR_2 VARCHAR(10),
+ C_VARCHAR_3 VARCHAR(1024),
+ C_INT BIGINT,
+ C_BIGINT BIGINT,
+ C_SMALLINT BIGINT,
+ C_FLOAT FLOAT,
+ C_NUMERIC numeric(19,5),
+ C_DP double precision,
+ C_DATE DATE,
+ C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
+, PARTIAL CLUSTER KEY(C_INT))WITH (orientation = orc) tablespace hdfs_ts DISTRIBUTE BY replication;
+ CREATE OR REPLACE PROCEDURE APPEND_BATCH_5000_036_1()
+AS
+BEGIN
+       FOR I IN 1..202 LOOP
+         INSERT INTO APPEND_BATCH_5000_036_1  VALUES('Z', 'Uext_'||i,'ORCHAR_'||i,'d', 'extDA_'||i,'ARC_'||i,i,10000+i,i,1.012+i,2.01+i,3.01+i,'2010-10-10','2018-01-01 15:59:59');
+       END LOOP;
+END;
+/
+CALL APPEND_BATCH_5000_036_1();
+ append_batch_5000_036_1 
+-------------------------
+ 
+(1 row)
+
+START TRANSACTION;
+CURSOR APPEND_CUR_036 FOR SELECT * FROM APPEND_BATCH_5000_036_1 order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14 ;
+fetch 100 from APPEND_CUR_036;
+ c_char_1 |  c_char_2  |                                               c_char_3                                               | c_varchar_1 | c_varchar_2 | c_varchar_3 | c_int | c_bigint | c_smallint | c_float | c_numeric |  c_dp  |          c_date          |       c_ts_without       
+----------+------------+------------------------------------------------------------------------------------------------------+-------------+-------------+-------------+-------+----------+------------+---------+-----------+--------+--------------------------+--------------------------
+ Z        | Uext_1     | ORCHAR_1                                                                                             | d           | extDA_1     | ARC_1       |     1 |    10001 |          1 |   2.012 |   3.01000 |   4.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_10    | ORCHAR_10                                                                                            | d           | extDA_10    | ARC_10      |    10 |    10010 |         10 |  11.012 |  12.01000 |  13.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_100   | ORCHAR_100                                                                                           | d           | extDA_100   | ARC_100     |   100 |    10100 |        100 | 101.012 | 102.01000 | 103.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_101   | ORCHAR_101                                                                                           | d           | extDA_101   | ARC_101     |   101 |    10101 |        101 | 102.012 | 103.01000 | 104.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_102   | ORCHAR_102                                                                                           | d           | extDA_102   | ARC_102     |   102 |    10102 |        102 | 103.012 | 104.01000 | 105.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_103   | ORCHAR_103                                                                                           | d           | extDA_103   | ARC_103     |   103 |    10103 |        103 | 104.012 | 105.01000 | 106.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_104   | ORCHAR_104                                                                                           | d           | extDA_104   | ARC_104     |   104 |    10104 |        104 | 105.012 | 106.01000 | 107.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_105   | ORCHAR_105                                                                                           | d           | extDA_105   | ARC_105     |   105 |    10105 |        105 | 106.012 | 107.01000 | 108.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_106   | ORCHAR_106                                                                                           | d           | extDA_106   | ARC_106     |   106 |    10106 |        106 | 107.012 | 108.01000 | 109.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_107   | ORCHAR_107                                                                                           | d           | extDA_107   | ARC_107     |   107 |    10107 |        107 | 108.012 | 109.01000 | 110.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_108   | ORCHAR_108                                                                                           | d           | extDA_108   | ARC_108     |   108 |    10108 |        108 | 109.012 | 110.01000 | 111.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_109   | ORCHAR_109                                                                                           | d           | extDA_109   | ARC_109     |   109 |    10109 |        109 | 110.012 | 111.01000 | 112.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_11    | ORCHAR_11                                                                                            | d           | extDA_11    | ARC_11      |    11 |    10011 |         11 |  12.012 |  13.01000 |  14.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_110   | ORCHAR_110                                                                                           | d           | extDA_110   | ARC_110     |   110 |    10110 |        110 | 111.012 | 112.01000 | 113.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_111   | ORCHAR_111                                                                                           | d           | extDA_111   | ARC_111     |   111 |    10111 |        111 | 112.012 | 113.01000 | 114.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_112   | ORCHAR_112                                                                                           | d           | extDA_112   | ARC_112     |   112 |    10112 |        112 | 113.012 | 114.01000 | 115.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_113   | ORCHAR_113                                                                                           | d           | extDA_113   | ARC_113     |   113 |    10113 |        113 | 114.012 | 115.01000 | 116.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_114   | ORCHAR_114                                                                                           | d           | extDA_114   | ARC_114     |   114 |    10114 |        114 | 115.012 | 116.01000 | 117.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_115   | ORCHAR_115                                                                                           | d           | extDA_115   | ARC_115     |   115 |    10115 |        115 | 116.012 | 117.01000 | 118.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_116   | ORCHAR_116                                                                                           | d           | extDA_116   | ARC_116     |   116 |    10116 |        116 | 117.012 | 118.01000 | 119.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_117   | ORCHAR_117                                                                                           | d           | extDA_117   | ARC_117     |   117 |    10117 |        117 | 118.012 | 119.01000 | 120.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_118   | ORCHAR_118                                                                                           | d           | extDA_118   | ARC_118     |   118 |    10118 |        118 | 119.012 | 120.01000 | 121.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_119   | ORCHAR_119                                                                                           | d           | extDA_119   | ARC_119     |   119 |    10119 |        119 | 120.012 | 121.01000 | 122.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_12    | ORCHAR_12                                                                                            | d           | extDA_12    | ARC_12      |    12 |    10012 |         12 |  13.012 |  14.01000 |  15.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_120   | ORCHAR_120                                                                                           | d           | extDA_120   | ARC_120     |   120 |    10120 |        120 | 121.012 | 122.01000 | 123.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_121   | ORCHAR_121                                                                                           | d           | extDA_121   | ARC_121     |   121 |    10121 |        121 | 122.012 | 123.01000 | 124.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_122   | ORCHAR_122                                                                                           | d           | extDA_122   | ARC_122     |   122 |    10122 |        122 | 123.012 | 124.01000 | 125.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_123   | ORCHAR_123                                                                                           | d           | extDA_123   | ARC_123     |   123 |    10123 |        123 | 124.012 | 125.01000 | 126.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_124   | ORCHAR_124                                                                                           | d           | extDA_124   | ARC_124     |   124 |    10124 |        124 | 125.012 | 126.01000 | 127.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_125   | ORCHAR_125                                                                                           | d           | extDA_125   | ARC_125     |   125 |    10125 |        125 | 126.012 | 127.01000 | 128.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_126   | ORCHAR_126                                                                                           | d           | extDA_126   | ARC_126     |   126 |    10126 |        126 | 127.012 | 128.01000 | 129.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_127   | ORCHAR_127                                                                                           | d           | extDA_127   | ARC_127     |   127 |    10127 |        127 | 128.012 | 129.01000 | 130.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_128   | ORCHAR_128                                                                                           | d           | extDA_128   | ARC_128     |   128 |    10128 |        128 | 129.012 | 130.01000 | 131.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_129   | ORCHAR_129                                                                                           | d           | extDA_129   | ARC_129     |   129 |    10129 |        129 | 130.012 | 131.01000 | 132.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_13    | ORCHAR_13                                                                                            | d           | extDA_13    | ARC_13      |    13 |    10013 |         13 |  14.012 |  15.01000 |  16.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_130   | ORCHAR_130                                                                                           | d           | extDA_130   | ARC_130     |   130 |    10130 |        130 | 131.012 | 132.01000 | 133.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_131   | ORCHAR_131                                                                                           | d           | extDA_131   | ARC_131     |   131 |    10131 |        131 | 132.012 | 133.01000 | 134.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_132   | ORCHAR_132                                                                                           | d           | extDA_132   | ARC_132     |   132 |    10132 |        132 | 133.012 | 134.01000 | 135.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_133   | ORCHAR_133                                                                                           | d           | extDA_133   | ARC_133     |   133 |    10133 |        133 | 134.012 | 135.01000 | 136.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_134   | ORCHAR_134                                                                                           | d           | extDA_134   | ARC_134     |   134 |    10134 |        134 | 135.012 | 136.01000 | 137.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_135   | ORCHAR_135                                                                                           | d           | extDA_135   | ARC_135     |   135 |    10135 |        135 | 136.012 | 137.01000 | 138.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_136   | ORCHAR_136                                                                                           | d           | extDA_136   | ARC_136     |   136 |    10136 |        136 | 137.012 | 138.01000 | 139.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_137   | ORCHAR_137                                                                                           | d           | extDA_137   | ARC_137     |   137 |    10137 |        137 | 138.012 | 139.01000 | 140.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_138   | ORCHAR_138                                                                                           | d           | extDA_138   | ARC_138     |   138 |    10138 |        138 | 139.012 | 140.01000 | 141.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_139   | ORCHAR_139                                                                                           | d           | extDA_139   | ARC_139     |   139 |    10139 |        139 | 140.012 | 141.01000 | 142.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_14    | ORCHAR_14                                                                                            | d           | extDA_14    | ARC_14      |    14 |    10014 |         14 |  15.012 |  16.01000 |  17.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_140   | ORCHAR_140                                                                                           | d           | extDA_140   | ARC_140     |   140 |    10140 |        140 | 141.012 | 142.01000 | 143.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_141   | ORCHAR_141                                                                                           | d           | extDA_141   | ARC_141     |   141 |    10141 |        141 | 142.012 | 143.01000 | 144.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_142   | ORCHAR_142                                                                                           | d           | extDA_142   | ARC_142     |   142 |    10142 |        142 | 143.012 | 144.01000 | 145.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_143   | ORCHAR_143                                                                                           | d           | extDA_143   | ARC_143     |   143 |    10143 |        143 | 144.012 | 145.01000 | 146.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_144   | ORCHAR_144                                                                                           | d           | extDA_144   | ARC_144     |   144 |    10144 |        144 | 145.012 | 146.01000 | 147.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_145   | ORCHAR_145                                                                                           | d           | extDA_145   | ARC_145     |   145 |    10145 |        145 | 146.012 | 147.01000 | 148.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_146   | ORCHAR_146                                                                                           | d           | extDA_146   | ARC_146     |   146 |    10146 |        146 | 147.012 | 148.01000 | 149.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_147   | ORCHAR_147                                                                                           | d           | extDA_147   | ARC_147     |   147 |    10147 |        147 | 148.012 | 149.01000 | 150.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_148   | ORCHAR_148                                                                                           | d           | extDA_148   | ARC_148     |   148 |    10148 |        148 | 149.012 | 150.01000 | 151.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_149   | ORCHAR_149                                                                                           | d           | extDA_149   | ARC_149     |   149 |    10149 |        149 | 150.012 | 151.01000 | 152.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_15    | ORCHAR_15                                                                                            | d           | extDA_15    | ARC_15      |    15 |    10015 |         15 |  16.012 |  17.01000 |  18.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_150   | ORCHAR_150                                                                                           | d           | extDA_150   | ARC_150     |   150 |    10150 |        150 | 151.012 | 152.01000 | 153.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_151   | ORCHAR_151                                                                                           | d           | extDA_151   | ARC_151     |   151 |    10151 |        151 | 152.012 | 153.01000 | 154.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_152   | ORCHAR_152                                                                                           | d           | extDA_152   | ARC_152     |   152 |    10152 |        152 | 153.012 | 154.01000 | 155.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_153   | ORCHAR_153                                                                                           | d           | extDA_153   | ARC_153     |   153 |    10153 |        153 | 154.012 | 155.01000 | 156.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_154   | ORCHAR_154                                                                                           | d           | extDA_154   | ARC_154     |   154 |    10154 |        154 | 155.012 | 156.01000 | 157.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_155   | ORCHAR_155                                                                                           | d           | extDA_155   | ARC_155     |   155 |    10155 |        155 | 156.012 | 157.01000 | 158.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_156   | ORCHAR_156                                                                                           | d           | extDA_156   | ARC_156     |   156 |    10156 |        156 | 157.012 | 158.01000 | 159.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_157   | ORCHAR_157                                                                                           | d           | extDA_157   | ARC_157     |   157 |    10157 |        157 | 158.012 | 159.01000 | 160.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_158   | ORCHAR_158                                                                                           | d           | extDA_158   | ARC_158     |   158 |    10158 |        158 | 159.012 | 160.01000 | 161.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_159   | ORCHAR_159                                                                                           | d           | extDA_159   | ARC_159     |   159 |    10159 |        159 | 160.012 | 161.01000 | 162.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_16    | ORCHAR_16                                                                                            | d           | extDA_16    | ARC_16      |    16 |    10016 |         16 |  17.012 |  18.01000 |  19.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_160   | ORCHAR_160                                                                                           | d           | extDA_160   | ARC_160     |   160 |    10160 |        160 | 161.012 | 162.01000 | 163.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_161   | ORCHAR_161                                                                                           | d           | extDA_161   | ARC_161     |   161 |    10161 |        161 | 162.012 | 163.01000 | 164.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_162   | ORCHAR_162                                                                                           | d           | extDA_162   | ARC_162     |   162 |    10162 |        162 | 163.012 | 164.01000 | 165.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_163   | ORCHAR_163                                                                                           | d           | extDA_163   | ARC_163     |   163 |    10163 |        163 | 164.012 | 165.01000 | 166.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_164   | ORCHAR_164                                                                                           | d           | extDA_164   | ARC_164     |   164 |    10164 |        164 | 165.012 | 166.01000 | 167.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_165   | ORCHAR_165                                                                                           | d           | extDA_165   | ARC_165     |   165 |    10165 |        165 | 166.012 | 167.01000 | 168.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_166   | ORCHAR_166                                                                                           | d           | extDA_166   | ARC_166     |   166 |    10166 |        166 | 167.012 | 168.01000 | 169.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_167   | ORCHAR_167                                                                                           | d           | extDA_167   | ARC_167     |   167 |    10167 |        167 | 168.012 | 169.01000 | 170.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_168   | ORCHAR_168                                                                                           | d           | extDA_168   | ARC_168     |   168 |    10168 |        168 | 169.012 | 170.01000 | 171.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_169   | ORCHAR_169                                                                                           | d           | extDA_169   | ARC_169     |   169 |    10169 |        169 | 170.012 | 171.01000 | 172.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_17    | ORCHAR_17                                                                                            | d           | extDA_17    | ARC_17      |    17 |    10017 |         17 |  18.012 |  19.01000 |  20.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_170   | ORCHAR_170                                                                                           | d           | extDA_170   | ARC_170     |   170 |    10170 |        170 | 171.012 | 172.01000 | 173.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_171   | ORCHAR_171                                                                                           | d           | extDA_171   | ARC_171     |   171 |    10171 |        171 | 172.012 | 173.01000 | 174.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_172   | ORCHAR_172                                                                                           | d           | extDA_172   | ARC_172     |   172 |    10172 |        172 | 173.012 | 174.01000 | 175.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_173   | ORCHAR_173                                                                                           | d           | extDA_173   | ARC_173     |   173 |    10173 |        173 | 174.012 | 175.01000 | 176.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_174   | ORCHAR_174                                                                                           | d           | extDA_174   | ARC_174     |   174 |    10174 |        174 | 175.012 | 176.01000 | 177.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_175   | ORCHAR_175                                                                                           | d           | extDA_175   | ARC_175     |   175 |    10175 |        175 | 176.012 | 177.01000 | 178.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_176   | ORCHAR_176                                                                                           | d           | extDA_176   | ARC_176     |   176 |    10176 |        176 | 177.012 | 178.01000 | 179.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_177   | ORCHAR_177                                                                                           | d           | extDA_177   | ARC_177     |   177 |    10177 |        177 | 178.012 | 179.01000 | 180.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_178   | ORCHAR_178                                                                                           | d           | extDA_178   | ARC_178     |   178 |    10178 |        178 | 179.012 | 180.01000 | 181.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_179   | ORCHAR_179                                                                                           | d           | extDA_179   | ARC_179     |   179 |    10179 |        179 | 180.012 | 181.01000 | 182.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_18    | ORCHAR_18                                                                                            | d           | extDA_18    | ARC_18      |    18 |    10018 |         18 |  19.012 |  20.01000 |  21.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_180   | ORCHAR_180                                                                                           | d           | extDA_180   | ARC_180     |   180 |    10180 |        180 | 181.012 | 182.01000 | 183.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_181   | ORCHAR_181                                                                                           | d           | extDA_181   | ARC_181     |   181 |    10181 |        181 | 182.012 | 183.01000 | 184.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_182   | ORCHAR_182                                                                                           | d           | extDA_182   | ARC_182     |   182 |    10182 |        182 | 183.012 | 184.01000 | 185.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_183   | ORCHAR_183                                                                                           | d           | extDA_183   | ARC_183     |   183 |    10183 |        183 | 184.012 | 185.01000 | 186.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_184   | ORCHAR_184                                                                                           | d           | extDA_184   | ARC_184     |   184 |    10184 |        184 | 185.012 | 186.01000 | 187.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_185   | ORCHAR_185                                                                                           | d           | extDA_185   | ARC_185     |   185 |    10185 |        185 | 186.012 | 187.01000 | 188.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_186   | ORCHAR_186                                                                                           | d           | extDA_186   | ARC_186     |   186 |    10186 |        186 | 187.012 | 188.01000 | 189.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_187   | ORCHAR_187                                                                                           | d           | extDA_187   | ARC_187     |   187 |    10187 |        187 | 188.012 | 189.01000 | 190.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_188   | ORCHAR_188                                                                                           | d           | extDA_188   | ARC_188     |   188 |    10188 |        188 | 189.012 | 190.01000 | 191.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+ Z        | Uext_189   | ORCHAR_189                                                                                           | d           | extDA_189   | ARC_189     |   189 |    10189 |        189 | 190.012 | 191.01000 | 192.01 | Sun Oct 10 00:00:00 2010 | Mon Jan 01 15:59:59 2018
+(100 rows)
+
+CLOSE APPEND_CUR_036;
+END;
+explain (verbose on, costs off)   select 'datanode1'::name,c_char_1 , c_char_2 from APPEND_BATCH_5000_036_1 group by 1,2,3 order by 1,2,3;
+                                                                                                      QUERY PLAN                                                                                                      
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Data Node Scan
+   Output: ('datanode1'::name), append_batch_5000_036_1.c_char_1, append_batch_5000_036_1.c_char_2
+   Remote query: SELECT 'datanode1'::name AS name, c_char_1, c_char_2 FROM vector_cursor_engine.append_batch_5000_036_1 GROUP BY 'datanode1'::name, c_char_1, c_char_2 ORDER BY 'datanode1'::name, c_char_1, c_char_2
+(3 rows)
+
+--test expr
+select 'datanode1'::name,c_char_1 , c_char_2 from APPEND_BATCH_5000_036_1 group by 1,2,3 order by 1,2,3 limit 20;
+   name    | c_char_1 |  c_char_2  
+-----------+----------+------------
+ datanode1 | Z        | Uext_1    
+ datanode1 | Z        | Uext_10   
+ datanode1 | Z        | Uext_100  
+ datanode1 | Z        | Uext_101  
+ datanode1 | Z        | Uext_102  
+ datanode1 | Z        | Uext_103  
+ datanode1 | Z        | Uext_104  
+ datanode1 | Z        | Uext_105  
+ datanode1 | Z        | Uext_106  
+ datanode1 | Z        | Uext_107  
+ datanode1 | Z        | Uext_108  
+ datanode1 | Z        | Uext_109  
+ datanode1 | Z        | Uext_11   
+ datanode1 | Z        | Uext_110  
+ datanode1 | Z        | Uext_111  
+ datanode1 | Z        | Uext_112  
+ datanode1 | Z        | Uext_113  
+ datanode1 | Z        | Uext_114  
+ datanode1 | Z        | Uext_115  
+ datanode1 | Z        | Uext_116  
+(20 rows)
+
+---test group by
+select nameout( name(c_char_2::text)), c_char_1 , c_char_2 from  APPEND_BATCH_5000_036_1 group by  2,3 order by 2,3 limit 5;
+ nameout  | c_char_1 |  c_char_2  
+----------+----------+------------
+ Uext_1   | Z        | Uext_1    
+ Uext_10  | Z        | Uext_10   
+ Uext_100 | Z        | Uext_100  
+ Uext_101 | Z        | Uext_101  
+ Uext_102 | Z        | Uext_102  
+(5 rows)
+
+---test hashtable
+select  name(t1.c_char_2::text) from APPEND_BATCH_5000_036_1 t1 intersect select name(t2.c_char_2::text) from APPEND_BATCH_5000_036_1 t2  order by 1 limit 5;
+   name   
+----------
+ Uext_1
+ Uext_10
+ Uext_100
+ Uext_101
+ Uext_102
+(5 rows)
+
+---test mergejoin
+set enable_hashjoin=off;
+set enable_nestloop=off;
+select count(*) from APPEND_BATCH_5000_036_1 t1 join APPEND_BATCH_5000_036_1 t2 on name(t1.c_char_2::text) = name(t2.c_char_2::text);
+ count 
+-------
+   202
+(1 row)
+
+reset enable_hashjoin;
+reset enable_nestloop;
+--test windowagg
+select name(c_char_2::text) var1, name(c_char_1::text) var2 , rank() over(partition by name(c_char_2::text)  order by   name(c_char_1::text) )  from APPEND_BATCH_5000_036_1 order by 1,2 limit 5;
+   var1   | var2 | rank 
+----------+------+------
+ Uext_1   | Z    |    1
+ Uext_10  | Z    |    1
+ Uext_100 | Z    |    1
+ Uext_101 | Z    |    1
+ Uext_102 | Z    |    1
+(5 rows)
+
+----
+--- Clean Resources and Tables
+----
+drop schema vector_cursor_engine cascade;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to table vector_cursor_table_01
+drop cascades to table vector_cursor_table_02
+drop cascades to table vector_cursor_table_03
+drop cascades to table vector_cursor_table_04
+drop cascades to table append_batch_5000_036_1
+drop cascades to function append_batch_5000_036_1()

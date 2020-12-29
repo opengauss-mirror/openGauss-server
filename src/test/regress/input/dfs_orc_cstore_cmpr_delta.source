@@ -1,0 +1,23 @@
+set enable_global_stats = true;
+set enable_vector_engine=on;
+-- Problem:
+-- delta compression is applied to signed integer, which valid type is int8, int16, int32 and int64.
+-- DATABASE datatype is unknown to delta compression, for example float4/float8/timestamp is how to stored in db.
+-- my design mixes the two concepts, so data corupt happens.
+CREATE TABLE colcmpr_delta_00
+(
+	distkey INT4,
+	totalPositive INT4,
+	smallPosNegat INT4,
+	bigPosiNegati INT4
+) with (orientation = orc) tablespace hdfs_ts  DISTRIBUTE BY HASH(distkey);
+COPY colcmpr_delta_00 FROM '@abs_srcdir@/data/colcmpr_delta_00.data' delimiter '|';
+SELECT * FROM colcmpr_delta_00;
+DROP TABLE colcmpr_delta_00;
+-- problem: macaddr datatype test, whose size is 6 bytes
+-- TODO: support this datatype
+CREATE TABLE cstore_cmpr_delta_macaddr
+(
+	distkey INT4,
+	a1 macaddr
+) with ( orientation = orc, compression = zlib ) tablespace hdfs_ts distribute by hash(distkey);

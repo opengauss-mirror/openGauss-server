@@ -1,0 +1,54 @@
+set enable_global_stats = true;
+-- problem: list all unsupported feature in cstore table
+-- feature 1: CREATE TABLE name OF type_name
+CREATE TYPE cstore_person_type AS (id int, name text);
+CREATE TABLE cstore_persions OF cstore_person_type WITH (orientation = orc, COMPRESSION = zlib) tablespace hdfs_ts;
+DROP TYPE cstore_person_type;
+-- feature 2: inheritance
+CREATE TABLE cstore_parent_tbl( a1 int, a2 bool, a3 bigint) tablespace hdfs_ts;
+CREATE TABLE cstore_child_tbl( b1 bool, b2 bool, b3 bigint) INHERITS ( cstore_parent_tbl ) with (orientation = orc ) tablespace hdfs_ts;
+DROP TABLE cstore_parent_tbl;
+-- feature 3: unchange some storage parameter
+CREATE TABLE cstore_coltbl( a1 int, a2 int ) with (orientation = orc) tablespace hdfs_ts ;
+ALTER TABLE cstore_coltbl SET ( orientation = 'row' );
+ALTER TABLE cstore_coltbl SET ( compression = no );
+ALTER TABLE cstore_coltbl SET ( compression = zlib, orientation = 'row' );
+CREATE TABLE cstore_rowtbl( a1 int, a2 int ) with (orientation = 'row' );
+ALTER TABLE cstore_rowtbl SET ( orientation = orc );
+ALTER TABLE cstore_rowtbl SET ( orientation = orc, compression = zlib );
+DROP TABLE cstore_coltbl;
+DROP TABLE cstore_rowtbl;
+-- feature 4: at least 1 attribute in column orientated table
+CREATE TABLE cstore_zero_attr () with ( orientation = orc ) tablespace hdfs_ts;
+-- feature 5: don't vacuum column stored table
+CREATE TABLE cstore_vacuum_coltbl1( c_smallint smallint   null,c_double_precision double precision , c_timestamp_with_timezone timestamp with time zone) with (orientation = orc , compression=zlib) tablespace hdfs_ts distribute by hash(c_smallint) ;
+VACUUM cstore_vacuum_coltbl1;
+CREATE INDEX cstore_vacuum_coltbl1_idx ON cstore_vacuum_coltbl1 ( c_timestamp_with_timezone);
+VACUUM cstore_vacuum_coltbl1;
+DROP TABLE cstore_vacuum_coltbl1 CASCADE;
+CREATE TABLE cstore_vacuum_coltbl1( c_smallint smallint   null,c_double_precision double precision , c_timestamp_with_timezone timestamp with time zone) with (orientation = orc ,compression=zlib) tablespace hdfs_ts distribute by hash(c_smallint)  partition by range(c_smallint) (
+partition p1 values less than(100),
+partition p2 values less than(200),
+partition p3 values less than(300));
+VACUUM cstore_vacuum_coltbl1;
+CREATE INDEX cstore_vacuum_coltbl1_idx ON cstore_vacuum_coltbl1 ( c_timestamp_with_timezone) LOCAL;
+VACUUM cstore_vacuum_coltbl1;
+DROP TABLE cstore_vacuum_coltbl1 CASCADE;
+-- feature 6: alter cstore-table set schema to pg_catalog
+CREATE TABLE cstore_unsupport_tbl06 ( a int, b int , PARTIAL CLUSTER KEY(a)) with ( orientation = orc ) tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+ALTER TABLE cstore_unsupport_tbl06 SET SCHEMA pg_catalog;
+-- feature 7: rename
+ALTER TABLE cstore_unsupport_tbl06 RENAME TO cstore_unsupport_tbl07;
+ALTER TABLE cstore_unsupport_tbl07 RENAME TO cstore_unsupport_tbl06;
+ALTER TABLE cstore_unsupport_tbl06 RENAME a to c;
+ALTER TABLE cstore_unsupport_tbl06 RENAME CONSTRAINT cstore_unsupport_tbl07_cluster TO cstore_unsupport_tbl07_cluster01;
+-- feature 8: reset
+ALTER TABLE cstore_unsupport_tbl06 RESET ( ORIENTATION, MAX_BATCHROW );
+-- feature 9: LIKE INCLUDING DISTRIBUTION REPLICATION
+CREATE TABLE cstore_unsupport_tbl07 ( a int , b int , c int ) WITH ( ORIENTATION = 'ROW' ) DISTRIBUTE BY REPLICATION;
+CREATE TABLE cstore_unsupport_tbl08 ( LIKE cstore_unsupport_tbl07 INCLUDING DISTRIBUTION ) WITH ( orientation = orc ) tablespace hdfs_ts;
+CREATE TABLE cstore_unsupport_tbl09 ( a int , b int , c int ) WITH ( orientation = 'orc' ) tablespace hdfs_ts DISTRIBUTE BY REPLICATION;
+DROP TABLE cstore_unsupport_tbl06;
+DROP TABLE cstore_unsupport_tbl07;
+DROP TABLE cstore_unsupport_tbl08;
+DROP TABLE cstore_unsupport_tbl09;

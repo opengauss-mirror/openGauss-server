@@ -37,19 +37,17 @@
 
 #define PartitionIsTablePartition(partition) (PART_OBJ_TYPE_TABLE_PARTITION == (partition)->pd_part->parttype)
 
-#define PartitionIsBucket(partition) (InvalidBktId != (partition)->pd_node.bucketNode)
+#define PartitionIsBucket(partition) ((partition)->pd_node.bucketNode > InvalidBktId)
 
 #define PartitionIsIndexPartition(partition) (PART_OBJ_TYPE_INDEX_PARTITION == (partition)->pd_part->parttype)
 
 /*
  * Routines to open (lookup) and close a partcache entry
  */
-extern Partition PartitionIdGetPartition(Oid partitionId);
+extern Partition PartitionIdGetPartition(Oid partitionId, bool isbucket);
 extern void PartitionClose(Partition partition);
-
 extern char* PartitionOidGetName(Oid partOid);
 extern Oid PartitionOidGetTablespace(Oid partOid);
-
 /*
  * Routines for flushing/rebuilding relcache entries in various scenarios
  */

@@ -29,14 +29,22 @@
 #include "nodes/execnodes.h"
 #include "nodes/parsenodes.h"
 #include "pgstat.h"
+#include "instruments/unique_sql_basic.h"
 #include "utils/batchsort.h"
 
-/* Unique SQL track type */
-typedef enum {
-    UNIQUE_SQL_NONE = 0,
-    UNIQUE_SQL_TRACK_TOP, /* only top SQL will be tracked */
-    UNIQUE_SQL_TRACK_ALL  /* later maybe support parent and child SQLs */
-} UniqueSQLTrackType;
+typedef struct {
+    int64 total_time; /* total time for the unique sql entry */
+    int64 min_time;   /* min time for unique sql entry's history events */
+    int64 max_time;   /* max time for unique sql entry's history events */
+} UniqueSQLElapseTime;
+
+typedef struct UniqueSQLTime {
+    int64 TimeInfoArray[TOTAL_TIME_INFO_TYPES];
+} UniqueSQLTime;
+
+typedef struct UniqueSQLNetInfo {
+    uint64 netInfoArray[TOTAL_NET_INFO_TYPES];
+} UniqueSQLNetInfo;
 
 typedef struct UniqueSQLWorkMemInfo {
     pg_atomic_uint64 counts; /* # of operation during unique sql */
@@ -45,6 +53,38 @@ typedef struct UniqueSQLWorkMemInfo {
     pg_atomic_uint64 spill_counts; /* # of spill times during the sort/hash operation */
     pg_atomic_uint64 spill_size;    /* spill size for temp table by kbs */
 } UniqueSQLWorkMemInfo;
+
+typedef struct {
+    UniqueSQLKey key; /* CN oid + user oid + unique sql id */
+
+    /* alloc extra UNIQUE_SQL_MAX_LEN space to store unique sql string */
+    char* unique_sql; /* unique sql text */
+
+    pg_atomic_uint64 calls;          /* calling times */
+    UniqueSQLElapseTime elapse_time; /* elapst time stat in ms */
+    TimestampTz updated_time;        /* latest update time for the unique sql entry */
+    UniqueSQLTime timeInfo;
+    UniqueSQLNetInfo netInfo;
+
+    UniqueSQLRowActivity row_activity; /* row activity */
+    UniqueSQLCacheIO cache_io;         /* cache/IO */
+    UniqueSQLParse parse;              /* hard/soft parse counter */
+    bool is_local;                     /* local sql(run from current node) */
+    UniqueSQLWorkMemInfo sort_state;   /* work mem info of sort operation */
+    UniqueSQLWorkMemInfo hash_state;   /* work mem info of hash operation */
+} UniqueSQL;
+
+/* Unique SQL track type */
+typedef enum {
+    UNIQUE_SQL_NONE = 0,
+    UNIQUE_SQL_TRACK_TOP, /* only top SQL will be tracked */
+    UNIQUE_SQL_TRACK_ALL  /* later maybe support parent and child SQLs */
+} UniqueSQLTrackType;
+
+typedef struct {
+    int64* timeInfo;
+    uint64* netInfo;
+} UniqueSQLStat;
 
 extern int GetUniqueSQLTrackType();
 
@@ -115,9 +155,28 @@ extern int GetUniqueSQLTrackType();
 
 #define IS_UNIQUE_SQL_TRACK_TOP ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && GetUniqueSQLTrackType() == UNIQUE_SQL_TRACK_TOP)
 
+#define INIT_UNIQUE_SQL_CXT()                                          \
+        bool old_is_top_unique_sql = false;                            \
+        uint64 old_unique_sql_id = 0;
+
+#define BACKUP_UNIQUE_SQL_CXT()                                        \
+        old_is_top_unique_sql = IsTopUniqueSQL();                      \
+        if (old_is_top_unique_sql) {                                   \
+            SetIsTopUniqueSQL(false);                                  \
+            old_unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;  \
+        }
+
+#define RESTORE_UNIQUE_SQL_CXT()                                       \
+        if (old_is_top_unique_sql) {                                   \
+            SetIsTopUniqueSQL(true);                                   \
+            u_sess->unique_sql_cxt.unique_sql_id = old_unique_sql_id;  \
+        }
+
+#define START_TRX_UNIQUE_SQL_ID 2718638560
+
 void InitUniqueSQL();
 void UpdateUniqueSQLStat(Query* query, const char* sql, int64 elapse_start_time,
-    PgStat_TableCounts* agg_table_count = NULL, int64 timeInfo[] = NULL);
+    PgStat_TableCounts* agg_table_count = NULL, UniqueSQLStat* sql_stat = NULL);
 void ResetUniqueSQLString();
 
 void instr_unique_sql_register_hook();
@@ -144,4 +203,11 @@ bool isUniqueSQLContextInvalid();
 void UpdateSingleNodeByPassUniqueSQLStat(bool isTopLevel);
 void UpdateUniqueSQLHashStats(HashJoinTable hashtable, TimestampTz* start_time);
 void UpdateUniqueSQLVecSortStats(Batchsortstate* state, uint64 spill_count, TimestampTz* start_time);
+void FindUniqueSQL(UniqueSQLKey key, char* unique_sql);
+char* FindCurrentUniqueSQL();
+
+bool is_instr_top_portal();
+void increase_instr_portal_nesting_level();
+void decrease_instr_portal_nesting_level();
+void instr_unique_sql_handle_multi_sql(bool is_first_parsetree);
 #endif

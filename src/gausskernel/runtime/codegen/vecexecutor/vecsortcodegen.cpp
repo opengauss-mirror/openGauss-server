@@ -295,7 +295,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
         if (use_prefetch) {
             /* load instrinsic prefetch function */
             llvm::Function* fn_prefetch =
-                llvm::Intrinsic::getDeclaration(llvmCodeGen->module(), llvm::Intrinsic::prefetch);
+                llvm::Intrinsic::getDeclaration(llvmCodeGen->module(), llvm_prefetch);
             if (fn_prefetch == NULL) {
                 ereport(ERROR,
                     (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -309,6 +309,11 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
              */
             if (i == 0) {
                 if (typeOid == VARCHAROID || typeOid == TEXTOID || typeOid == BPCHAROID || typeOid == NUMERICOID) {
+                    /* llvm prefetch function : Prefetches have no effect on
+                     * the behavior of the program but can change its performance
+                     * characteristics.
+                     * llvm::prefetch(int8* ptr, int32 rw, int32 local, int32 IorD)
+                     */
                     tmpval = builder.CreateIntToPtr(datum1, int8PtrType);
                     builder.CreateCall(fn_prefetch, {tmpval, int32_0, int32_3, int32_1});
                     tmpval = builder.CreateIntToPtr(datum2, int8PtrType);
@@ -372,7 +377,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
              */
             case NUMERICOID: {
                 Assert(opno == NUMERICLTOID || opno == NUMERICGTOID);
-                desc = opno == NUMERICGTOID ? true : false;
+                desc = (opno == NUMERICGTOID) ? true : false;
 
                 llvm::Function* jitted_numericcmp = NULL;
                 bool fastpath = false;
@@ -399,7 +404,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
             case TEXTOID:
             case VARCHAROID: {
                 Assert(opno == TEXTLTOID || opno == TEXTGTOID);
-                desc = opno == TEXTGTOID ? true : false;
+                desc = (opno == TEXTGTOID) ? true : false;
 
                 llvm::Function* jitted_textcmp = NULL;
                 jitted_textcmp = llvmCodeGen->module()->getFunction("LLVMIRtextcmp_CMC");
@@ -411,7 +416,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
             case BPCHAROID: {
                 int len = attr->atttypmod - VARHDRSZ;
                 Assert(opno == BPCHARLTOID || opno == BPCHARGTOID);
-                desc = opno == BPCHARGTOID ? true : false;
+                desc = (opno == BPCHARGTOID) ? true : false;
 
                 llvm::Function* jitted_bpcharcmp = NULL;
                 /*
@@ -434,7 +439,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
             } break;
             case INT4OID: {
                 Assert(opno == INT4LTOID || opno == INT4GTOID);
-                desc = opno == INT4GTOID ? true : false;
+                desc = (opno == INT4GTOID) ? true : false;
 
                 datum1 = builder.CreateTrunc(datum1, int32Type);
                 datum2 = builder.CreateTrunc(datum2, int32Type);
@@ -445,7 +450,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
             } break;
             case INT8OID: {
                 Assert(opno == INT8LTOID || opno == INT8GTOID);
-                desc = opno == INT8GTOID ? true : false;
+                desc = (opno == INT8GTOID) ? true : false;
 
                 tmpval = builder.CreateICmpEQ(datum1, datum2);
                 result1 = builder.CreateICmpSGT(datum1, datum2);
@@ -633,7 +638,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
         if (use_prefetch) {
             /* prefetch current key if it is bpchar or numeric data */
             llvm::Function* fn_prefetch =
-                llvm::Intrinsic::getDeclaration(llvmCodeGen->module(), llvm::Intrinsic::prefetch);
+                llvm::Intrinsic::getDeclaration(llvmCodeGen->module(), llvm_prefetch);
             if (fn_prefetch == NULL) {
                 ereport(ERROR,
                     (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),
@@ -701,7 +706,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
         switch (typeOid) {
             case NUMERICOID: {
                 Assert(opno == NUMERICLTOID || opno == NUMERICGTOID);
-                desc = opno == NUMERICGTOID ? true : false;
+                desc = (opno == NUMERICGTOID) ? true : false;
 
                 llvm::Function* jitted_numericcmp = NULL;
                 bool fastpath = false;
@@ -728,7 +733,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
             case TEXTOID:
             case VARCHAROID: {
                 Assert(opno == TEXTLTOID || opno == TEXTGTOID);
-                desc = opno == TEXTGTOID ? true : false;
+                desc = (opno == TEXTGTOID) ? true : false;
 
                 llvm::Function* jitted_textcmp = NULL;
                 jitted_textcmp = llvmCodeGen->module()->getFunction("LLVMIRtextcmp_CMC");
@@ -740,7 +745,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
             case BPCHAROID: {
                 int len = attr->atttypmod - VARHDRSZ;
                 Assert(opno == BPCHARLTOID || opno == BPCHARGTOID);
-                desc = opno == BPCHARGTOID ? true : false;
+                desc = (opno == BPCHARGTOID) ? true : false;
 
                 /*
                  * When the length of bpchar is less than 2 byte, we could compare
@@ -763,7 +768,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
             } break;
             case INT4OID: {
                 Assert(opno == INT4LTOID || opno == INT4GTOID);
-                desc = opno == INT4GTOID ? true : false;
+                desc = (opno == INT4GTOID) ? true : false;
 
                 datum1 = builder.CreateTrunc(datum1, int32Type);
                 datum2 = builder.CreateTrunc(datum2, int32Type);
@@ -774,7 +779,7 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
             } break;
             case INT8OID: {
                 Assert(opno == INT8LTOID || opno == INT8GTOID);
-                desc = opno == INT8GTOID ? true : false;
+                desc = (opno == INT8GTOID) ? true : false;
 
                 tmpval = builder.CreateICmpEQ(datum1, datum2);
                 result1 = builder.CreateICmpSGT(datum1, datum2);
@@ -905,6 +910,13 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen()
     DEFINE_BLOCK(bb_pfree2, jitted_numericcmp);
     DEFINE_BLOCK(bb_ret2, jitted_numericcmp);
 
+    /*
+     * call PG_GETARG_NUMERIC(arg1), which turn to call pg_detoast_datum(arg1):
+     * if (VARATT_IS_EXTENDED(datum))
+     * 		return heap_tuple_untoast_attr(datum);
+     * else
+     *		return datum;
+     */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
     value1 = builder.CreateAlignedLoad(value1, 1, "header1");
@@ -1171,6 +1183,13 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen_fastpath()
     DEFINE_BLOCK(bb_pfree2, jitted_numericcmp);
     DEFINE_BLOCK(bb_ret2, jitted_numericcmp);
 
+    /*
+     * call PG_GETARG_NUMERIC(arg1), which turn to call pg_detoast_datum(arg1):
+     * if (VARATT_IS_EXTENDED(datum))
+     * 		return heap_tuple_untoast_attr(datum);
+     * else
+     *		return datum;
+     */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
     value1 = builder.CreateAlignedLoad(value1, 1, "header1");
@@ -1337,6 +1356,21 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen_fastpath()
     return jitted_numericcmp;
 }
 
+/*
+ * @Description	: Codegen on memcmp function that is called by bpcharcmp function
+ * The generated function LLVMIRmemcmp_CMC compares each byte until it finds
+ * the difference or reach the end of the strings, and returns -1, 0, or
+ * 1 according to the comparison, the codegeneration is corresponding to:
+ * LLVMIRmemcmp_CMC(char *a, char *b, int length)
+ * {
+ * 		for (i = 0; i < length; i++)
+ * 		{
+ *			if (a[i] != b[i])
+ *				rerturn a[i] > b[i] ? 1 : -1;
+ * 		}
+ * 		return 0;
+ * }
+ */
 llvm::Function* VecSortCodeGen::LLVMIRmemcmp_CMC_CodeGen()
 {
     Assert(NULL != (GsCodeGen*)t_thrd.codegen_cxt.thr_codegen_obj);
@@ -1426,6 +1460,37 @@ llvm::Function* VecSortCodeGen::LLVMIRmemcmp_CMC_CodeGen()
     return jitted_memcmp;
 }
 
+/* @Description	: Codegen on bpcharcmp function with long bpchar length
+ * (the length is greater than 16 bytes). We inline the pg_detoast_datum_packed,
+ * bcTruelen and varstr_cmp (jittable have checked lc_collate_is_c is true).
+ * Only Support lc_collate_is_c is true, or need to call a wrapped function
+ * of varstr_cmp, which will be fixed in the future.
+ * @Notes	: Different from bpcharcmpCodeGen_short function, the inlined
+ * bcTruelen function has the following optimized code:
+ * bcTruelen(char *a, int len)
+ * {
+ *		while (len >= 8)
+ *		{
+ *			uint64 t = *((uint64*)(a+len-8));
+ *			if ( t != 0x2020202020202020)
+ *			{
+ *				uint32 tt = t >> 32;
+ *				if (tt == 0x20202020)
+ *				{
+ *					len -= 4;
+ *					break;
+ *				}
+ *			}
+ *			len -= 8;
+ *		}
+ *      for (int i = len - 1; i >= 0; i--)
+ *      {
+ *			if (a[i] != ' ')
+ *				break;
+ *      }
+ *		return i+1;
+ * }
+ */
 llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
 {
     Assert(NULL != (GsCodeGen*)t_thrd.codegen_cxt.thr_codegen_obj);
@@ -1522,6 +1587,15 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     DEFINE_BLOCK(bb_pfree2, jitted_bpcharcmp);
     DEFINE_BLOCK(bb_ret2, jitted_bpcharcmp);
 
+    /* Start codegen on entry basic block.
+     * First, get the input argument by calling PG_GETARG_BPCHAR_PP.
+     *
+     * pg_detoast_datum_packed((struct varlena *) DatumGetPointer(datum)):
+     * if (VARATT_IS_COMPRESSED(datum) || VARATT_IS_EXTERNAL(datum))
+     *		return heap_tuple_untoast_attr(datum);
+     * else
+     *		return datum;
+     */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
     value1 = builder.CreateAlignedLoad(value1, 1, "header1");
@@ -1565,6 +1639,9 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     llvm::Value* untoast_value2 = builder.CreateCall(wrap_untoast, value2);
     builder.CreateBr(bb_data1);
 
+    /* char *s = VARDATA_ANY(arg1):
+     * (VARATT_IS_1B(PTR) ? VARDATA_1B(PTR) : VARDATA_4B(PTR))
+     */
     builder.SetInsertPoint(bb_data1);
     llvm::PHINode* Phi_arg2 = builder.CreatePHI(varlenaPtrType, 2);
     Phi_arg2->addIncoming(value2, bb_nextVal);
@@ -1614,6 +1691,13 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     Vals2[1] = int32_1;
     llvm::Value* data2_long = builder.CreateInBoundsGEP(Phi_arg2, Vals2);
     builder.CreateBr(bb_prehead_a1);
+
+    /*
+     * Corresponding to for loop in bcTurelen:
+     * for (i = len - 1; i >= 0; i--)
+     *		if (s[i] != ' ') break;
+     * return i + 1;
+     */
     builder.SetInsertPoint(bb_prehead_a1);
     /* get VARDATA_ANY(arg2) */
     llvm::PHINode* Phi_data2 = builder.CreatePHI(int8ArrayPtrType, 2);
@@ -1693,6 +1777,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     llvm::Value* len_less4 = NULL;
     llvm::Value* len_less8 = NULL;
 
+    /* calculate len2 = bcTruelen(arg2) */
     builder.SetInsertPoint(bb_prehead_b1);
     tmpval = builder.CreateICmpSGT(parm3, int32_7);
     builder.CreateCondBr(tmpval, bb_loop_len_b1, bb_prehead_b2);
@@ -1782,6 +1867,11 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     tmpval = builder.CreateAnd(tmpval, tmpval2);
     builder.CreateCondBr(tmpval, bb_update_result, bb_ret);
 
+    /*
+     * if compare == 0, the longer one win, which means:
+     * if (compare == 0) && (len1 != len2), compare result is
+     * 	(len1 < len2) ? -1 : 1;
+     */
     builder.SetInsertPoint(bb_update_result);
     llvm::Value* updated_res = builder.CreateSelect(smaller_len1, int32_m1, int32_1);
     builder.CreateBr(bb_ret);
@@ -1826,6 +1916,22 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     return jitted_bpcharcmp;
 }
 
+/*
+ * @Description	: Codegen on bpcharcmp function with short bpchar length
+ * (less than or equal to 16 bytes). We inline the pg_detoast_datum_packed,
+ * bcTruelen and varstr_cmp (jittable have checked lc_collate_is_c is true).
+ * If lc_collate_is_c is not true, need to call a wrapped function of
+ * varstr_cmp. The inlined bcTruelen is different from the long version:
+ * bcTruelen(char *a, int len)
+ * {
+ * 		for (int i = len - 1; i >= 0; i--)
+ *		{
+ * 			if (s[i] != ' ')
+ *				break;
+ *		}
+ *		return i+1;
+ * }
+ */
 llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_short()
 {
     Assert(NULL != (GsCodeGen*)t_thrd.codegen_cxt.thr_codegen_obj);
@@ -1904,6 +2010,15 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_short()
     DEFINE_BLOCK(bb_pfree2, jitted_bpcharcmp);
     DEFINE_BLOCK(bb_ret2, jitted_bpcharcmp);
 
+    /* Start codegen on entry basic block.
+     * First, get the input argument by calling PG_GETARG_BPCHAR_PP.
+     *
+     * pg_detoast_datum_packed((struct varlena *) DatumGetPointer(datum)):
+     * if (VARATT_IS_COMPRESSED(datum) || VARATT_IS_EXTERNAL(datum))
+     *		return heap_tuple_untoast_attr(datum);
+     * else
+     *		return datum;
+     */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
     value1 = builder.CreateAlignedLoad(value1, 1, "header1");
@@ -1947,6 +2062,9 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_short()
     llvm::Value* untoast_value2 = builder.CreateCall(wrap_untoast, value2);
     builder.CreateBr(bb_data1);
 
+    /* char *s = VARDATA_ANY(arg1):
+     * (VARATT_IS_1B(PTR) ? VARDATA_1B(PTR) : VARDATA_4B(PTR))
+     */
     builder.SetInsertPoint(bb_data1);
     llvm::PHINode* Phi_arg2 = builder.CreatePHI(varlenaPtrType, 2);
     Phi_arg2->addIncoming(value2, bb_nextVal);
@@ -2007,6 +2125,12 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_short()
     llvm::Value* loopIdx = builder.CreateSExt(parm3, int64Type);
     builder.CreateBr(bb_loopBody_a);
 
+    /*
+     * Corresponding to for loop in bcTurelen:
+     * for (i = len - 1; i >= 0; i--)
+     *		if (s[i] != ' ') break;
+     * return i + 1;
+     */
     builder.SetInsertPoint(bb_loopBody_a);
     llvm::PHINode* Phi_loopIdx = builder.CreatePHI(int64Type, 2);
     llvm::PHINode* Phi_len_a = builder.CreatePHI(int32Type, 2);
@@ -2069,6 +2193,11 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_short()
     }
     llvm::Value* compare = builder.CreateCall(jitted_memcmp, {val_data1, val_data2, min_len});
 
+    /*
+     * if compare == 0, the longer one win, which means:
+     * if (compare == 0) && (len1 != len2), compare result is
+     * 	(len1 < len2) ? -1 : 1;
+     */
     compare = builder.CreateTrunc(compare, int32Type);
     tmpval = builder.CreateICmpEQ(compare, int32_0);
     llvm::Value* tmpval2 = builder.CreateICmpNE(Phi_len_a, Phi_len_b);
@@ -2194,6 +2323,15 @@ llvm::Function* VecSortCodeGen::textcmpCodeGen()
     DEFINE_BLOCK(bb_pfree2, jitted_textcmp);
     DEFINE_BLOCK(bb_ret2, jitted_textcmp);
 
+    /* Start codegen on entry basic block.
+     * First, get the input argument by calling PG_GETARG_BPCHAR_PP.
+     *
+     * pg_detoast_datum_packed((struct varlena *) DatumGetPointer(datum)):
+     * if (VARATT_IS_COMPRESSED(datum) || VARATT_IS_EXTERNAL(datum))
+     *		return heap_tuple_untoast_attr(datum);
+     * else
+     *		return datum;
+     */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
     value1 = builder.CreateAlignedLoad(value1, 1, "header1");
@@ -2336,6 +2474,9 @@ llvm::Function* VecSortCodeGen::textcmpCodeGen()
     tmpval = builder.CreateAnd(tmpval, tmpval2);
     builder.CreateCondBr(tmpval, bb_update_result, bb_ret);
 
+    /* if ((compare == 0) && (len1 != len2))
+     *     compare = (len1 < len2) ? -1 : 1;
+     */
     builder.SetInsertPoint(bb_update_result);
     llvm::Value* updated_res = builder.CreateSelect(smaller_len1, int32_m1, int32_1);
     builder.CreateBr(bb_ret);
@@ -2378,6 +2519,69 @@ llvm::Function* VecSortCodeGen::textcmpCodeGen()
     return jitted_textcmp;
 }
 
+/* @Description	: Codegen on memcmp function that is called by bpchareq
+ * 				  function in Sort Aggregation. The generated function is
+ *				  optimized for the case where bpchar length is greater
+ *				  than or equal to 16 bytes.
+ * @Notes		: SortAggMemcmp(char *a, char *b, int length) returns true
+ *				  if the two memory blocks have the same data, otherwise,
+ *				  it returns false.
+ *
+ * The optimized memcmp code:
+ * bool SortAggMemcmp_long(char *a, char *b, int length)
+ * {
+ * 		while (length >= 16)
+ *		{
+ *			int128 t1 = *((int128*)a);
+ *			int128 t2 = *((int128*)b);
+ *			if (t1 != t2)
+ *				return false;
+ *			a += 16;
+ *			b += 16;
+ *			length -= 16;
+ * 		}
+ *
+ *		if (length >= 8)
+ *		{
+ *			uint64 t1 = *((uint64*)a);
+ *			uint64 t2 = *((uint64*)b);
+ *			if (t1 != t2)
+ *				return false;
+ *			a += 8;
+ *			b += 8;
+ *			length -= 8;
+ *		}
+ *
+ *		if (length >= 4)
+ *		{
+ *			uint32 t1 = *((uint32*)a);
+ *			uint32 t2 = *((uint32*)b);
+ *			if (t1 != t2)
+ *				return false;
+ *			a += 4;
+ *			b += 4;
+ *			length -= 4;
+ *		}
+ *
+ *		if (length >= 2)
+ *		{
+ *			uint16 t1 = *((uint16*)a);
+ *			uint16 t2 = *((uint16*)b);
+ *			if (t1 != t2)
+ *				return false;
+ *			a += 2;
+ *			b += 2;
+ *			length -= 2;
+ *		}
+ *
+ *		if (length > 0)
+ *		{
+ *			if (*a != *b)
+ *				return false;
+ *		}
+ *		return true;
+ * }
+ */
 llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_long()
 {
     Assert(NULL != (GsCodeGen*)t_thrd.codegen_cxt.thr_codegen_obj);
@@ -2601,6 +2805,58 @@ llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_long()
     return jitted_memcmp;
 }
 
+/*
+ * @Description	: Codegen on memcmp function that is called by bpchareq function
+ *				  for Sort Aggregation. We make a special case here since the
+ *				  bpchar length is less than 16 bytes.
+ * @return		: SortAggMemcmp_short(char *a, char *b, int length) returns
+ *				  true if the two memory blocks have the same data, otherwise,
+ *				  it returns false.
+ * @Notes		: The optimized memcmp code:
+ *
+ * bool SortAggMemcmp_short(char *a, char *b, int length)
+ * {
+ *		if (length >= 8)
+ *		{
+ *			uint64 t1 = *((uint64*)a);
+ *			uint64 t2 = *((uint64*)b);
+ *			if (t1 != t2)
+ *				return false;
+ *			a += 8;
+ *			b += 8;
+ *			length -= 8;
+ *		}
+ *
+ *		if (length >= 4)
+ *		{
+ *			uint32 t1 = *((uint32*)a);
+ *			uint32 t2 = *((uint32*)b);
+ *			if (t1 != t2)
+ *				return false;
+ *			a += 4;
+ *			b += 4;
+ *			length -= 4;
+ *		}
+ *
+ *		if (length >= 2)
+ *		{
+ *			uint16 t1 = *((uint16*)a);
+ *			uint16 t2 = *((uint16*)b);
+ *			if (t1 != t2)
+ *				return false;
+ *			a += 2;
+ *			b += 2;
+ *			length -= 2;
+ *		}
+ *
+ *		if (length > 0)
+ *		{
+ *			if (*a != *b)
+ *				return false;
+ *		}
+ *		return true;
+ * }
+ */
 llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_short()
 {
     Assert(NULL != (GsCodeGen*)t_thrd.codegen_cxt.thr_codegen_obj);
@@ -3085,6 +3341,15 @@ llvm::Function* VecSortCodeGen::SortAggTexteqCodeGen()
     DEFINE_BLOCK(bb_pfree2, jitted_texteq);
     DEFINE_BLOCK(bb_ret, jitted_texteq);
 
+    /* Start codegen on entry basic block.
+     * First, get the input argument by calling PG_GETARG_BPCHAR_PP.
+     *
+     * pg_detoast_datum_packed((struct varlena *) DatumGetPointer(datum)):
+     * if (VARATT_IS_COMPRESSED(datum) || VARATT_IS_EXTERNAL(datum))
+     *		return heap_tuple_untoast_attr(datum);
+     * else
+     *		return datum;
+     */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
     value1 = builder.CreateAlignedLoad(value1, 1, "header1");

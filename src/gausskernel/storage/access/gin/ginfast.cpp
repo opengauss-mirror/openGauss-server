@@ -12,7 +12,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *			src/gausskernel/storage/access/gin/ginfast.cpp
+ *    src/gausskernel/storage/access/gin/ginfast.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -35,8 +35,8 @@
 #define GIN_PAGE_FREESIZE (BLCKSZ - MAXALIGN(SizeOfPageHeaderData) - MAXALIGN(sizeof(GinPageOpaqueData)))
 
 typedef struct KeyArray {
-    Datum* keys;                 /* expansible array */
-    GinNullCategory* categories; /* another expansible array */
+    Datum *keys;                 /* expansible array */
+    GinNullCategory *categories; /* another expansible array */
     int32 nvalues;               /* current number of valid entries */
     int32 maxvalues;             /* allocated size of arrays */
 } KeyArray;
@@ -46,25 +46,25 @@ typedef struct KeyArray {
  *
  * Returns amount of free space left on the page.
  */
-static int32 writeListPage(Relation index, Buffer buffer, IndexTuple* tuples, int32 ntuples, BlockNumber rightlink)
+static int32 writeListPage(Relation index, Buffer buffer, IndexTuple *tuples, int32 ntuples, BlockNumber rightlink)
 {
     Page page = BufferGetPage(buffer);
     int32 i = 0;
     int32 freesize = 0;
     int32 size = 0;
     OffsetNumber l, off;
-    char* workspace = NULL;
-    char* ptr = NULL;
+    char *workspace = NULL;
+    char *ptr = NULL;
     errno_t ret = EOK;
 
     /* workspace could be a local array; we use palloc for alignment */
     ADIO_RUN()
     {
-        workspace = (char*)adio_align_alloc(BLCKSZ);
+        workspace = (char *)adio_align_alloc(BLCKSZ);
     }
     ADIO_ELSE()
     {
-        workspace = (char*)palloc(BLCKSZ);
+        workspace = (char *)palloc(BLCKSZ);
     }
     ADIO_END();
 
@@ -85,9 +85,8 @@ static int32 writeListPage(Relation index, Buffer buffer, IndexTuple* tuples, in
 
         l = PageAddItem(page, (Item)tuples[i], this_size, off, false, false);
         if (l == InvalidOffsetNumber)
-            ereport(ERROR,
-                (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("failed to add item to index page in \"%s\"", RelationGetRelationName(index))));
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                            errmsg("failed to add item to index page in \"%s\"", RelationGetRelationName(index))));
 
         off++;
     }
@@ -119,7 +118,7 @@ static int32 writeListPage(Relation index, Buffer buffer, IndexTuple* tuples, in
 
         XLogBeginInsert();
 
-        XLogRegisterData((char*)&data, sizeof(ginxlogInsertListPage));
+        XLogRegisterData((char *)&data, sizeof(ginxlogInsertListPage));
 
         XLogRegisterBuffer(0, buffer, REGBUF_WILL_INIT);
         XLogRegisterBufData(0, workspace, size);
@@ -149,7 +148,7 @@ static int32 writeListPage(Relation index, Buffer buffer, IndexTuple* tuples, in
     return freesize;
 }
 
-static void makeSublist(Relation index, IndexTuple* tuples, int32 ntuples, GinMetaPageData* res)
+static void makeSublist(Relation index, IndexTuple *tuples, int32 ntuples, GinMetaPageData *res)
 {
     Buffer curBuffer = InvalidBuffer;
     Buffer prevBuffer = InvalidBuffer;
@@ -206,12 +205,12 @@ static void makeSublist(Relation index, IndexTuple* tuples, int32 ntuples, GinMe
  * Function guarantees that all these tuples will be inserted consecutively,
  * preserving order
  */
-void ginHeapTupleFastInsert(GinState* ginstate, GinTupleCollector* collector)
+void ginHeapTupleFastInsert(GinState *ginstate, GinTupleCollector *collector)
 {
     Relation index = ginstate->index;
     Buffer metabuffer;
     Page metapage;
-    GinMetaPageData* metadata = NULL;
+    GinMetaPageData *metadata = NULL;
     Buffer buffer = InvalidBuffer;
     Page page = NULL;
     ginxlogUpdateMeta data;
@@ -318,8 +317,8 @@ void ginHeapTupleFastInsert(GinState* ginstate, GinTupleCollector* collector)
          */
         OffsetNumber l, off;
         uint32 i, tupsize;
-        char* ptr = NULL;
-        char* collectordata = NULL;
+        char *ptr = NULL;
+        char *collectordata = NULL;
 
         buffer = ReadBuffer(index, metadata->tail);
         LockBuffer(buffer, GIN_EXCLUSIVE);
@@ -327,7 +326,7 @@ void ginHeapTupleFastInsert(GinState* ginstate, GinTupleCollector* collector)
 
         off = (PageIsEmpty(page)) ? FirstOffsetNumber : OffsetNumberNext(PageGetMaxOffsetNumber(page));
 
-        collectordata = ptr = (char*)palloc(collector->sumsize);
+        collectordata = ptr = (char *)palloc(collector->sumsize);
 
         data.ntuples = collector->ntuples;
 
@@ -347,9 +346,8 @@ void ginHeapTupleFastInsert(GinState* ginstate, GinTupleCollector* collector)
             tupsize = IndexTupleSize(collector->tuples[i]);
             l = PageAddItem(page, (Item)collector->tuples[i], tupsize, off, false, false);
             if (l == InvalidOffsetNumber)
-                ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("failed to add item to index page in \"%s\"", RelationGetRelationName(index))));
+                ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                errmsg("failed to add item to index page in \"%s\"", RelationGetRelationName(index))));
 
             ret = memcpy_s(ptr, collector->sumsize - (ptr - collectordata), collector->tuples[i], tupsize);
             securec_check(ret, "", "");
@@ -381,7 +379,7 @@ void ginHeapTupleFastInsert(GinState* ginstate, GinTupleCollector* collector)
         securec_check(ret, "", "");
 
         XLogRegisterBuffer(0, metabuffer, REGBUF_WILL_INIT);
-        XLogRegisterData((char*)&data, sizeof(ginxlogUpdateMeta));
+        XLogRegisterData((char *)&data, sizeof(ginxlogUpdateMeta));
 
         recptr = XLogInsert(RM_GIN_ID, XLOG_GIN_UPDATE_META_PAGE);
         PageSetLSN(metapage, recptr);
@@ -413,7 +411,7 @@ void ginHeapTupleFastInsert(GinState* ginstate, GinTupleCollector* collector)
     END_CRIT_SECTION();
 
     if (needCleanup)
-        ginInsertCleanup(ginstate, false, true, NULL);
+        ginInsertCleanup(ginstate, false, true, false, NULL);
 }
 
 /*
@@ -424,11 +422,11 @@ void ginHeapTupleFastInsert(GinState* ginstate, GinTupleCollector* collector)
  * temp tuples for a given heap tuple must be written in one call to
  * ginHeapTupleFastInsert.
  */
-void ginHeapTupleFastCollect(GinState* ginstate, GinTupleCollector* collector, OffsetNumber attnum, Datum value,
-    bool isNull, ItemPointer ht_ctid)
+void ginHeapTupleFastCollect(GinState *ginstate, GinTupleCollector *collector, OffsetNumber attnum, Datum value,
+                             bool isNull, ItemPointer ht_ctid)
 {
-    Datum* entries = NULL;
-    GinNullCategory* categories = NULL;
+    Datum *entries = NULL;
+    GinNullCategory *categories = NULL;
     int32 i, nentries;
 
     /*
@@ -441,12 +439,12 @@ void ginHeapTupleFastCollect(GinState* ginstate, GinTupleCollector* collector, O
      */
     if (collector->tuples == NULL) {
         collector->lentuples = nentries * ginstate->origTupdesc->natts;
-        collector->tuples = (IndexTuple*)palloc(sizeof(IndexTuple) * collector->lentuples);
+        collector->tuples = (IndexTuple *)palloc(sizeof(IndexTuple) * collector->lentuples);
     }
 
     while (collector->ntuples + nentries > collector->lentuples) {
         collector->lentuples *= 2;
-        collector->tuples = (IndexTuple*)repalloc(collector->tuples, sizeof(IndexTuple) * collector->lentuples);
+        collector->tuples = (IndexTuple *)repalloc(collector->tuples, sizeof(IndexTuple) * collector->lentuples);
     }
 
     /*
@@ -469,11 +467,11 @@ void ginHeapTupleFastCollect(GinState* ginstate, GinTupleCollector* collector, O
  *
  * metapage is pinned and exclusive-locked throughout this function.
  */
-static void shiftList(
-    Relation index, Buffer metabuffer, BlockNumber newHead, bool fill_fsm, IndexBulkDeleteResult* stats)
+static void shiftList(Relation index, Buffer metabuffer, BlockNumber newHead, bool fill_fsm,
+                      IndexBulkDeleteResult *stats)
 {
     Page metapage;
-    GinMetaPageData* metadata = NULL;
+    GinMetaPageData *metadata = NULL;
     BlockNumber blknoToDelete;
     errno_t ret = EOK;
 
@@ -550,7 +548,7 @@ static void shiftList(
             ret = memcpy_s(&data.metadata, sizeof(GinMetaPageData), metadata, sizeof(GinMetaPageData));
             securec_check(ret, "", "");
 
-            XLogRegisterData((char*)&data, sizeof(ginxlogDeleteListPages));
+            XLogRegisterData((char *)&data, sizeof(ginxlogDeleteListPages));
 
             recptr = XLogInsert(RM_GIN_ID, XLOG_GIN_DELETE_LISTPAGE);
             PageSetLSN(metapage, recptr);
@@ -572,21 +570,21 @@ static void shiftList(
 }
 
 /* Initialize empty KeyArray */
-static void initKeyArray(KeyArray* keys, int32 maxvalues)
+static void initKeyArray(KeyArray *keys, int32 maxvalues)
 {
-    keys->keys = (Datum*)palloc(sizeof(Datum) * maxvalues);
-    keys->categories = (GinNullCategory*)palloc(sizeof(GinNullCategory) * maxvalues);
+    keys->keys = (Datum *)palloc(sizeof(Datum) * maxvalues);
+    keys->categories = (GinNullCategory *)palloc(sizeof(GinNullCategory) * maxvalues);
     keys->nvalues = 0;
     keys->maxvalues = maxvalues;
 }
 
 /* Add datum to KeyArray, resizing if needed */
-static void addDatum(KeyArray* keys, Datum datum, GinNullCategory category)
+static void addDatum(KeyArray *keys, Datum datum, GinNullCategory category)
 {
     if (keys->nvalues >= keys->maxvalues) {
         keys->maxvalues *= 2;
-        keys->keys = (Datum*)repalloc(keys->keys, sizeof(Datum) * keys->maxvalues);
-        keys->categories = (GinNullCategory*)repalloc(keys->categories, sizeof(GinNullCategory) * keys->maxvalues);
+        keys->keys = (Datum *)repalloc(keys->keys, sizeof(Datum) * keys->maxvalues);
+        keys->categories = (GinNullCategory *)repalloc(keys->categories, sizeof(GinNullCategory) * keys->maxvalues);
     }
 
     keys->keys[keys->nvalues] = datum;
@@ -603,7 +601,7 @@ static void addDatum(KeyArray* keys, Datum datum, GinNullCategory category)
  * Note that ka is just workspace --- it does not carry any state across
  * calls.
  */
-static void processPendingPage(BuildAccumulator* accum, KeyArray* ka, Page page, OffsetNumber startoff)
+static void processPendingPage(BuildAccumulator *accum, KeyArray *ka, Page page, OffsetNumber startoff)
 {
     ItemPointerData heapptr;
     OffsetNumber i, maxoff;
@@ -664,12 +662,13 @@ static void processPendingPage(BuildAccumulator* accum, KeyArray* ka, Page page,
  *
  * If stats isn't null, we count deleted pending pages into the counts.
  */
-void ginInsertCleanup(GinState* ginstate, bool full_clean, bool fill_fsm, IndexBulkDeleteResult* stats)
+void ginInsertCleanup(GinState *ginstate, bool full_clean, bool fill_fsm, bool forceCleanup,
+                      IndexBulkDeleteResult *stats)
 {
     Relation index = ginstate->index;
     Buffer metabuffer, buffer;
     Page metapage, page;
-    GinMetaPageData* metadata = NULL;
+    GinMetaPageData *metadata = NULL;
     MemoryContext opCtx, oldCtx;
     BuildAccumulator accum;
     KeyArray datums;
@@ -677,7 +676,6 @@ void ginInsertCleanup(GinState* ginstate, bool full_clean, bool fill_fsm, IndexB
     bool cleanupFinish = false;
     bool fsm_vac = false;
     Size workMemory;
-    bool inVacuum = (stats == NULL);
 
     /*
      * We would like to prevent concurrent cleanup process. For that we will
@@ -685,7 +683,7 @@ void ginInsertCleanup(GinState* ginstate, bool full_clean, bool fill_fsm, IndexB
      * will use that lock for metapage, so we keep possibility of concurrent
      * insertion into pending list
      */
-    if (inVacuum) {
+    if (forceCleanup) {
         /*
          * We are called from [auto]vacuum/analyze or gin_clean_pending_list()
          * and we would like to wait concurrent cleanup to finish.
@@ -733,11 +731,8 @@ void ginInsertCleanup(GinState* ginstate, bool full_clean, bool fill_fsm, IndexB
     /*
      * Initialize.  All temporary space will be in opCtx
      */
-    opCtx = AllocSetContextCreate(CurrentMemoryContext,
-        "GIN insert cleanup temporary context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    opCtx = AllocSetContextCreate(CurrentMemoryContext, "GIN insert cleanup temporary context",
+                                  ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
     oldCtx = MemoryContextSwitchTo(opCtx);
 
@@ -776,7 +771,7 @@ void ginInsertCleanup(GinState* ginstate, bool full_clean, bool fill_fsm, IndexB
          */
         if (GinPageGetOpaque(page)->rightlink == InvalidBlockNumber ||
             (GinPageHasFullRow(page) && (accum.allocatedMemory >= workMemory * 1024L))) {
-            ItemPointerData* list = NULL;
+            ItemPointerData *list = NULL;
             uint32 nlist;
             Datum key;
             GinNullCategory category;
@@ -899,17 +894,14 @@ Datum gin_clean_pending_list(PG_FUNCTION_ARGS)
     errno_t rc = EOK;
 
     if (RecoveryInProgress())
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("recovery is in progress"),
-                errhint("GIN pending list cannot be cleaned up during recovery.")));
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
+                        errhint("GIN pending list cannot be cleaned up during recovery.")));
 
     /* Must be a GIN index */
     if (indexRel->rd_rel->relkind != RELKIND_INDEX ||
         (indexRel->rd_rel->relam != GIN_AM_OID && indexRel->rd_rel->relam != CGIN_AM_OID))
-        ereport(ERROR,
-            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                errmsg("\"%s\" is not a GIN index", RelationGetRelationName(indexRel))));
+        ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("\"%s\" is not a GIN index", RelationGetRelationName(indexRel))));
 
     /*
      * Reject attempts to read non-local temporary relations; we would be
@@ -918,7 +910,7 @@ Datum gin_clean_pending_list(PG_FUNCTION_ARGS)
      */
     if (RELATION_IS_OTHER_TEMP(indexRel))
         ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot access temporary indexes of other sessions")));
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot access temporary indexes of other sessions")));
 
     /* User must own the index (comparable to privileges needed for VACUUM) */
     if (!pg_class_ownercheck(indexoid, GetUserId()))
@@ -927,7 +919,7 @@ Datum gin_clean_pending_list(PG_FUNCTION_ARGS)
     rc = memset_s(&stats, sizeof(stats), 0, sizeof(stats));
     securec_check(rc, "", "");
     initGinState(&ginstate, indexRel);
-    ginInsertCleanup(&ginstate, true, true, &stats);
+    ginInsertCleanup(&ginstate, true, true, true, &stats);
 
     index_close(indexRel, AccessShareLock);
 

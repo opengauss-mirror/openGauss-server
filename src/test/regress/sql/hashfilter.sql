@@ -244,105 +244,105 @@ analyze hf_t4;
 analyze hf_t5;
 analyze hf_t6;
 --SetOp for append between replication and hash
-explain (costs off, nodes off) select b from hashfilter_t1 union all (select b from hashfilter_t2) order by b;
+explain (costs off) select b from hashfilter_t1 union all (select b from hashfilter_t2) order by b;
 select b from hashfilter_t1 union all (select b from hashfilter_t2) order by b;
 
-explain (costs off, nodes off) select b from hashfilter_t1 union all (select b from hashfilter_t1 union all (select b from hashfilter_t2)) order by b;
+explain (costs off) select b from hashfilter_t1 union all (select b from hashfilter_t1 union all (select b from hashfilter_t2)) order by b;
 select b from hashfilter_t1 union all (select b from hashfilter_t1 union all (select b from hashfilter_t2)) order by b;
 
-explain (costs off, nodes off) select b from hashfilter_t4 union all (select b from hashfilter_t5) order by b;
+explain (costs off) select b from hashfilter_t4 union all (select b from hashfilter_t5) order by b;
 select b from hashfilter_t4 union all (select b from hashfilter_t5) order by b;
 
-explain (costs off, nodes off) select b from hashfilter_t1 union (select b from hashfilter_t2) order by b;
+explain (costs off) select b from hashfilter_t1 union (select b from hashfilter_t2) order by b;
 select b from hashfilter_t1 union (select b from hashfilter_t2) order by b;
 
-explain (costs off, nodes off) select b from hashfilter_t4 union (select b from hashfilter_t5) order by b;
+explain (costs off) select b from hashfilter_t4 union (select b from hashfilter_t5) order by b;
 select b from hashfilter_t4 union (select b from hashfilter_t5) order by b;
 
-explain (costs off, nodes off) select a from hashfilter_t1 intersect all (select a from hashfilter_t3) order by a;
+explain (costs off) select a from hashfilter_t1 intersect all (select a from hashfilter_t3) order by a;
 select a from hashfilter_t1 intersect all (select a from hashfilter_t3) order by a;
 
-explain (costs off, nodes off) select a from hashfilter_t4 intersect all (select a from hashfilter_t6) order by a;
+explain (costs off) select a from hashfilter_t4 intersect all (select a from hashfilter_t6) order by a;
 select a from hashfilter_t4 intersect all (select a from hashfilter_t6) order by a;
 
-explain (costs off, nodes off) select a from hashfilter_t1 except all (select a from hashfilter_t3) order by a;
+explain (costs off) select a from hashfilter_t1 except all (select a from hashfilter_t3) order by a;
 select a from hashfilter_t1 except all (select a from hashfilter_t3) order by a;
 
-explain (costs off, nodes off) select a from hashfilter_t4 except all (select a from hashfilter_t6) order by a;
+explain (costs off) select a from hashfilter_t4 except all (select a from hashfilter_t6) order by a;
 select a from hashfilter_t4 except all (select a from hashfilter_t6) order by a;
 
-explain (costs off, nodes off) (select a from hashfilter_t1 order by 1) intersect all (select a from hashfilter_t1 order by 1) except all select a from hashfilter_t2 order by 1;
+explain (costs off) (select a from hashfilter_t1 order by 1) intersect all (select a from hashfilter_t1 order by 1) except all select a from hashfilter_t2 order by 1;
 (select a from hashfilter_t1 order by 1) intersect all (select a from hashfilter_t1 order by 1) except all select a from hashfilter_t2 order by 1;
 
-explain (costs off, nodes off) (select a from hashfilter_t1 order by 1) intersect all (select a from hashfilter_t1 order by 1 limit 6) except all (select a from hashfilter_t2 order by 1 limit 3) order by 1;
+explain (costs off) (select a from hashfilter_t1 order by 1) intersect all (select a from hashfilter_t1 order by 1 limit 6) except all (select a from hashfilter_t2 order by 1 limit 3) order by 1;
 (select a from hashfilter_t1 order by 1) intersect all (select a from hashfilter_t1 order by 1 limit 6) except all (select a from hashfilter_t2 order by 1 limit 3) order by 1;
 
 create view v1 as (select a from hashfilter_t1 order by 1) intersect all (select a from hashfilter_t1 order by 1 limit 6);
-explain (costs off, nodes off) select v1.a from v1 left join (select a from hashfilter_t2 order by 1 limit 3) t2 on v1.a=t2.a order by 1;
+explain (costs off) select v1.a from v1 left join (select a from hashfilter_t2 order by 1 limit 3) t2 on v1.a=t2.a order by 1;
 select v1.a from v1 left join (select a from hashfilter_t2 order by 1 limit 3) t2 on v1.a=t2.a order by 1;
 
 --two table join between replication and hash
-explain (costs off, nodes off) select t1.a from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a=t2.b order by t1.a;
+explain (costs off) select t1.a from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a=t2.b order by t1.a;
 select t1.a from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a=t2.b order by t1.a;
 
-explain (costs off, nodes off) select t1.a from hashfilter_t4 t1 left join hashfilter_t6 t2 on t1.a=t2.b order by t1.a;
+explain (costs off) select t1.a from hashfilter_t4 t1 left join hashfilter_t6 t2 on t1.a=t2.b order by t1.a;
 select t1.a from hashfilter_t4 t1 left join hashfilter_t6 t2 on t1.a=t2.b order by t1.a;
 
-explain (costs off, nodes off) select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.b=t2.a order by t1.b;
+explain (costs off) select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.b=t2.a order by t1.b;
 select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.b=t2.a order by t1.b;
 
-explain (costs off, nodes off) select t1.b from hashfilter_t4 t1 left join hashfilter_t6 t2 on t1.b=t2.a order by t1.b;
+explain (costs off) select t1.b from hashfilter_t4 t1 left join hashfilter_t6 t2 on t1.b=t2.a order by t1.b;
 select t1.b from hashfilter_t4 t1 left join hashfilter_t6 t2 on t1.b=t2.a order by t1.b;
 
-explain (costs off, nodes off) select t1.b from hashfilter_t1 t1 full join hashfilter_t2 t2 on t1.b=t2.b order by t1.b;
+explain (costs off) select t1.b from hashfilter_t1 t1 full join hashfilter_t2 t2 on t1.b=t2.b order by t1.b;
 select t1.b from hashfilter_t1 t1 full join hashfilter_t2 t2 on t1.b=t2.b order by t1.b;
 
-explain (costs off, nodes off) select t1.b from hashfilter_t4 t1 full join hashfilter_t6 t2 on t1.b=t2.b order by t1.b;
+explain (costs off) select t1.b from hashfilter_t4 t1 full join hashfilter_t6 t2 on t1.b=t2.b order by t1.b;
 select t1.b from hashfilter_t4 t1 full join hashfilter_t6 t2 on t1.b=t2.b order by t1.b;
 
-explain (costs off, nodes off) select t2.b from hashfilter_t2 t2 full join hashfilter_t1 t1 on t1.b=t2.b order by t2.b; 
+explain (costs off) select t2.b from hashfilter_t2 t2 full join hashfilter_t1 t1 on t1.b=t2.b order by t2.b; 
 select t2.b from hashfilter_t2 t2 full join hashfilter_t1 t1 on t1.b=t2.b order by t2.b; 
 
-explain (costs off, nodes off) select t2.a from hashfilter_t2 t2 right join hashfilter_t1 t1 on t1.a=t2.b order by t2.a;
+explain (costs off) select t2.a from hashfilter_t2 t2 right join hashfilter_t1 t1 on t1.a=t2.b order by t2.a;
 select t2.a from hashfilter_t2 t2 right join hashfilter_t1 t1 on t1.a=t2.b order by t2.a;
 
-explain (costs off, nodes off) select t1.a from hashfilter_t6 t1 right join hashfilter_t4 t2 on t1.a=t2.b order by t1.a;
+explain (costs off) select t1.a from hashfilter_t6 t1 right join hashfilter_t4 t2 on t1.a=t2.b order by t1.a;
 select t1.a from hashfilter_t4 t1 left join hashfilter_t6 t2 on t1.a=t2.b order by t1.a;
 
-explain (costs off, nodes off) select t1.* from hashfilter_t1 t1 where t1.b in (select t2.b from hashfilter_t2 t2) order by t1.b; 
+explain (costs off) select t1.* from hashfilter_t1 t1 where t1.b in (select t2.b from hashfilter_t2 t2) order by t1.b; 
 select t1.b from hashfilter_t1 t1 where t1.b in (select t2.b from hashfilter_t2 t2) order by t1.b;
 
-explain (costs off, nodes off) select t1.b from hashfilter_t4 t1 where t1.b in (select t2.b from hashfilter_t6 t2) order by t1.b;  
+explain (costs off) select t1.b from hashfilter_t4 t1 where t1.b in (select t2.b from hashfilter_t6 t2) order by t1.b;  
 select t1.b from hashfilter_t4 t1 where t1.b in (select t2.b from hashfilter_t6 t2) order by t1.b;
 
-explain (costs off, nodes off) select t1.* from hashfilter_t1 t1 where t1.a not in (select t2.a from hashfilter_t2 t2) order by t1.a;
+explain (costs off) select t1.* from hashfilter_t1 t1 where t1.a not in (select t2.a from hashfilter_t2 t2) order by t1.a;
 select t1.* from hashfilter_t1 t1 where t1.a not in (select t2.a from hashfilter_t2 t2) order by t1.a;
 
-explain (costs off, nodes off) select t1.* from hashfilter_t1 t1 where not exists (select * from hashfilter_t2 t2 where t2.a=t1.b) order by t1.b; 
+explain (costs off) select t1.* from hashfilter_t1 t1 where not exists (select * from hashfilter_t2 t2 where t2.a=t1.b) order by t1.b; 
 select t1.* from hashfilter_t1 t1 where not exists (select * from hashfilter_t2 t2 where t2.a=t1.b) order by 1, 2, 3; 
 
-explain (costs off, nodes off) select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.b=t2.a and t1.a=t2.b order by t1.a,t1.b; 
+explain (costs off) select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.b=t2.a and t1.a=t2.b order by t1.a,t1.b; 
 select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.b=t2.a and t1.a=t2.b order by t1.a,t1.b; 
 
-explain (costs off, nodes off) select t1.a,t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a+222=t2.b order by t1.a,t1.b; 
+explain (costs off) select t1.a,t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a+222=t2.b order by t1.a,t1.b; 
 select t1.a,t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a+222=t2.b order by t1.a,t1.b;
 
 --unsupport data type redistribute
-explain (costs off, nodes off) select t1.c from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.c=t2.c order by t1.c;
+explain (costs off) select t1.c from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.c=t2.c order by t1.c;
 select t1.c from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.c=t2.c order by t1.c;
 --multiply table join between replication and hash
-explain (costs off, nodes off) select t1.a from hashfilter_t1 t1 where t1.b in (select t3.b from hashfilter_t1 t3 left join hashfilter_t2 t2 on t3.a=t2.b) order by t1.a;
+explain (costs off) select t1.a from hashfilter_t1 t1 where t1.b in (select t3.b from hashfilter_t1 t3 left join hashfilter_t2 t2 on t3.a=t2.b) order by t1.a;
 select t1.a from hashfilter_t1 t1 where t1.b in (select t3.b from hashfilter_t1 t3 left join hashfilter_t2 t2 on t3.a=t2.b) order by t1.a;
 
 --setop and join combination
-explain (costs off, nodes off) select b from hashfilter_t1 intersect (select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a=t2.a) order by b;
+explain (costs off) select b from hashfilter_t1 intersect (select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a=t2.a) order by b;
 select b from hashfilter_t1 intersect (select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a=t2.a) order by b;
 
 --partition replication table join with hash table
-explain (costs off, nodes off) select min(table_01.b) from hashfilter_t7 as table_01 full outer join hashfilter_t8 as table_02 on table_01.b = table_02.b;
+explain (costs off) select min(table_01.b) from hashfilter_t7 as table_01 full outer join hashfilter_t8 as table_02 on table_01.b = table_02.b;
 
 --the side which add hashfilter need add remote query because other side has gather on CN
-explain (costs off, nodes off) select * from hashfilter_t1 t1 where t1.a in (select t2.a from hashfilter_t2 t2 where t2.a in (select t3.a from hashfilter_t1 t13 left join hashfilter_t3 t3 on t13.a=t3.b order by 1 limit 10) order by 1 limit 7) order by 1 limit 6;
+explain (costs off) select * from hashfilter_t1 t1 where t1.a in (select t2.a from hashfilter_t2 t2 where t2.a in (select t3.a from hashfilter_t1 t13 left join hashfilter_t3 t3 on t13.a=t3.b order by 1 limit 10) order by 1 limit 7) order by 1 limit 6;
 select * from hashfilter_t1 t1 where t1.a in (select t2.a from hashfilter_t2 t2 where t2.a in (select t3.a from hashfilter_t1 t13 left join hashfilter_t3 t3 on t13.a=t3.b order by 1 limit 10) order by 1 limit 7) order by 1 limit 6;
 
 --query for mutiple distribute key
@@ -366,7 +366,7 @@ reset plan_mode_seed;
 set enable_seqscan=off;
 set enable_indexscan=off;
 alter table hf_t3 add primary key (a, b, c, d);
-explain (costs off, nodes off) update hf_t3 set c=t2.a from hashfilter_t2 t2 where hf_t3.a=t2.a and t2.a<=5;
+explain (costs off) update hf_t3 set c=t2.a from hashfilter_t2 t2 where hf_t3.a=t2.a and t2.a<=5;
 
 --clean up
 reset current_schema;

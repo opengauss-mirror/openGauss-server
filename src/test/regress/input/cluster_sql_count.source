@@ -1,0 +1,187 @@
+
+-------------------------------THERE IS FOR QPS : CLUSTER SQL COUNT -------------------------------------------
+
+/* QPS guc parameter test . 
+ */
+/*track_sql_count default value is on*/
+SHOW track_sql_count;
+SET track_sql_count=off;
+/* test 1 : track_activities is on but track_sql_count is off */
+SHOW track_activities;
+SHOW track_sql_count;
+SELECT * FROM gs_sql_count;
+
+/* test 2 : track_activities is off but track_sql_count is on */
+SET track_activities=off;
+SET track_sql_count=on;
+SELECT * FROM gs_sql_count;
+
+/* test 3 : track_activities is off but track_sql_count is off */
+SET track_activities=off;
+SET track_sql_count=off;
+SELECT * FROM gs_sql_count;
+
+/* test 4 : track_activities is on but track_sql_count is on */
+SET track_activities=on;
+SET track_sql_count=on;
+SELECT * FROM gs_sql_count;
+SELECT * FROM pgxc_sql_count order by node_name;
+
+/* QPS sql ddl count test . 
+ */
+/* test 5 : track_sql_count is on, ddl and dcl test */
+DROP TABLE IF EXISTS t CASCADE;
+CREATE TABLE t(a int, b int);
+DROP USER IF EXISTS qps CASCADE;
+CREATE USER qps PASSWORD 'GAUSS@123';
+GRANT INSERT on TABLE t to qps;
+GRANT SELECT on TABLE t to qps;
+GRANT UPDATE on TABLE t to qps;
+GRANT DELETE on TABLE t to qps;
+SELECT * FROM gs_sql_count;
+
+/* QPS sql dml count test .
+ */
+/* test 6 : track_sql_count is on, dml-insert */
+SET track_sql_count=on;
+SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';
+INSERT INTO t values(generate_series(1, 10), generate_series(1,10));
+SELECT * FROM gs_sql_count;
+
+/* test 7 :track_sql_count is on, dml-select */
+SELECT * FROM t order by a;
+SELECT * FROM gs_sql_count;
+
+/* test 8 : track_sql_count is on, dml-update */
+update t set b = 11 where b = 1;
+SELECT * FROM gs_sql_count;
+
+/* test 9 : track_sql_count is on, dml-delete */
+delete from t where b =11;
+SELECT * FROM gs_sql_count;
+
+/* test 10 : doesn`t count if dml error */
+INSERT INTO t1 values(generate_series(1, 10), generate_series(1,10));
+SELECT * FROM gs_sql_count;
+
+/* QPS user test .
+ */ 
+/* test 11 : superuer and ordinary user */
+SELECT * FROM pgxc_sql_count;
+SELECT * FROM gs_sql_count;
+
+/* test 12 : ordinary user can not set */
+SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';
+SET track_sql_count= off;
+ 
+/* QPS  guc parameter value type test .
+ */
+/* test 13 : track_sql_count can not set non-bool*/
+RESET SESSION AUTHORIZATION;
+SET track_sql_count= a;
+
+/* test for merge into count */
+/* test 14 : mergeinto in the case that merge can be pushed down 
+ */
+SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';
+SET track_sql_count= on;
+
+CREATE TABLE products_row
+(
+product_id INTEGER DEFAULT 0,
+product_name VARCHAR(60) DEFAULT 'null',
+category VARCHAR(60) DEFAULT 'unknown',
+total INTEGER DEFAULT '0'
+);
+
+CREATE TABLE newproducts_row
+(
+product_id INTEGER DEFAULT 0,
+product_name VARCHAR(60) DEFAULT 'null',
+category VARCHAR(60) DEFAULT 'unknown',
+total INTEGER DEFAULT '0'
+);
+
+INSERT INTO products_row VALUES (1501, 'vivitar 35mm', 'electrncs', 100);
+INSERT INTO products_row VALUES (1502, 'olympus is50', 'electrncs', 100);
+INSERT INTO newproducts_row VALUES (1502, 'olympus camera', 'electrncs', 200);
+INSERT INTO newproducts_row VALUES (1601, 'lamaze', 'toys', 200);
+
+ANALYZE products_row;
+ANALYZE newproducts_row;
+
+/* before merge into */
+RESET SESSION AUTHORIZATION;
+SELECT * FROM pgxc_sql_count where user_name='qps' order by node_name;
+SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';
+
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+
+/* after merge into */
+RESET SESSION AUTHORIZATION;
+SELECT * FROM pgxc_sql_count where user_name='qps' order by node_name;
+
+/* test 15 : merge can not be pushed down */
+SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';
+
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+
+RESET SESSION AUTHORIZATION;
+SELECT * FROM pgxc_sql_count where user_name='qps' order by node_name;
+
+/* reset */
+SET track_sql_count= off;
+
+/* clean resources */
+DROP TABLE t;
+DROP USER qps CASCADE;
+
+/* user name longer then 56 */
+create user cross_gjfgvnfjgniorejngviernhgrwenhgvikrvnerngerjngoirwejm PASSWORD 'test_123';
+set track_sql_count=on;
+select * from gs_sql_count where user_name='cross_gjfgvnfjgniorejngviernhgrwenhgvikrvnerngerjngoirwejm';
+select * from pgxc_sql_count where user_name='cross_gjfgvnfjgniorejngviernhgrwenhgvikrvnerngerjngoirwejm' and node_name='coordinator1';
+select workload from DBE_PERF.workload_sql_count;
+drop user cross_gjfgvnfjgniorejngviernhgrwenhgvikrvnerngerjngoirwejm;
+SET track_sql_count= off;
+/* execute */
+create user sql_count_tuser2 sysadmin password "test_123";
+SET track_sql_count= on;
+ALTER SESSION SET SESSION AUTHORIZATION sql_count_tuser2 PASSWORD 'test_123';
+prepare execute_test as select relname from pg_class where oid=$1;
+execute execute_test(1259);
+deallocate execute_test;
+execute direct on (datanode1) 'select relname from pg_class where oid=1259;';
+select user_name,select_count,update_count,insert_count,delete_count,mergeinto_count,ddl_count,dml_count,dcl_count from gs_sql_count where user_name='sql_count_tuser2';
+\c
+SET track_sql_count= off;
+drop user sql_count_tuser2 cascade;
+/* drop user rollback */
+create user sql_count_tuser1 password "test_123";
+SET track_sql_count= on;
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "track_sql_count=on" > /dev/null 2>&1
+select pg_sleep(3);
+show track_sql_count;
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -U sql_count_tuser1 -W test_123 -c "select select_count from gs_sql_count;"
+begin;
+drop user sql_count_tuser1 cascade;
+rollback;
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -U sql_count_tuser1 -W test_123 -c "select select_count from gs_sql_count;"
+select user_name from gs_sql_count where user_name='sql_count_tuser1';
+drop user sql_count_tuser1 cascade;
+select user_name from gs_sql_count where user_name='sql_count_tuser1';
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1/ -c "track_sql_count=off" > /dev/null 2>&1
+select pg_sleep(3);
+SET track_sql_count= off;

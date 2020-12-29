@@ -36,7 +36,7 @@
 #include "nodes/primnodes.h"
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rewriteRlsPolicy.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "utils/acl.h"
 #include "utils/rel.h"
 #include "utils/relcache.h"
@@ -54,7 +54,7 @@ static bool CheckRoleForRlsPolicy(const RlsPolicy* policy, Oid roleid);
 static void PullRlsPoliciesForRel(CmdType cmd, Oid roleid, const List* relRlsPolicies, List** permissivePolicies,
     List** restrictivePolicies, bool& hasSubLink);
 static void AddRlsUsingQuals(
-    int rtIndex, const List* permissivePolicies, const List* restrictivePolicies, List** rlsUsingQuals);
+    CmdType cmd, int rtIndex, const List* permissivePolicies, const List* restrictivePolicies, List** rlsUsingQuals);
 /*
  * CheckRoleForRlsPolicy
  *     Check policy applied to this role or not.
@@ -126,6 +126,10 @@ static void PullRlsPoliciesForRel(CmdType cmd, Oid roleid, const List* relRlsPol
                     if ((policy->cmdName == ACL_DELETE_CHR) || (policy->cmdName == RLS_CMD_ALL_CHR))
                         cmdMatch = true;
                     break;
+                case CMD_MERGE:
+                    if ((policy->cmdName == ACL_UPDATE_CHR) || (policy->cmdName == RLS_CMD_ALL_CHR))
+                        cmdMatch = true;
+                    break;
                 default:
                     ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("unsupported command type: %d.", cmd)));
                     break;
@@ -159,7 +163,7 @@ static void PullRlsPoliciesForRel(CmdType cmd, Oid roleid, const List* relRlsPol
  * @return: void.
  */
 static void AddRlsUsingQuals(
-    int rtIndex, const List* permissivePolicies, const List* restrictivePolicies, List** rlsUsingQuals)
+    CmdType cmd, int rtIndex, const List* permissivePolicies, const List* restrictivePolicies, List** rlsUsingQuals)
 {
     ListCell* item = NULL;
     List* permissiveQuals = NIL;
@@ -264,7 +268,7 @@ void GetRlsPolicies(const Query* query, const RangeTblEntry* rte, const Relation
      */
     PullRlsPoliciesForRel(cmdType, roleid, relation->rd_rlsdesc->rlsPolicies, &rlsPermissivePolicies, 
                           &rlsRestrictivePolicies, hasSubLink);
-    AddRlsUsingQuals(rtIndex, rlsPermissivePolicies, rlsRestrictivePolicies, rlsQuals);
+    AddRlsUsingQuals(cmdType, rtIndex, rlsPermissivePolicies, rlsRestrictivePolicies, rlsQuals);
 
     /*
      * For SQL Statement: SELECT ... FOR UPDATE|SHARE statement, need to collect up all
@@ -283,7 +287,7 @@ void GetRlsPolicies(const Query* query, const RangeTblEntry* rte, const Relation
             &updateRestrictivePolicies,
             hasSubLink);
 
-        AddRlsUsingQuals(rtIndex, updateMermissivePolicies, updateRestrictivePolicies, rlsQuals);
+        AddRlsUsingQuals(CMD_UPDATE, rtIndex, updateMermissivePolicies, updateRestrictivePolicies, rlsQuals);
     }
 
     /*
@@ -304,7 +308,7 @@ void GetRlsPolicies(const Query* query, const RangeTblEntry* rte, const Relation
             &selectRestrictivePolicies,
             hasSubLink);
 
-        AddRlsUsingQuals(rtIndex, selectPermissivePolicies, selectRestrictivePolicies, rlsQuals);
+        AddRlsUsingQuals(CMD_SELECT, rtIndex, selectPermissivePolicies, selectRestrictivePolicies, rlsQuals);
     }
 
     return;

@@ -308,10 +308,10 @@ const PGLZ_Strategy* const PGLZ_strategy_always = &strategy_always_data;
         if ((_len) > 17) {                                                                   \
             (_buf)[0] = (unsigned char)((((uint32)(_off)&0xf00) >> 4) | 0x0f);               \
             (_buf)[1] = (unsigned char)(((uint32)(_off)&0xff));                              \
-            (_buf)[2] = (unsigned char)((_len) - 18);                                          \
+            (_buf)[2] = (unsigned char)((_len)-18);                                          \
             (_buf) += 3;                                                                     \
         } else {                                                                             \
-            (_buf)[0] = (unsigned char)((((uint32)(_off)&0xf00) >> 4) | ((uint32)(_len) - 3)); \
+            (_buf)[0] = (unsigned char)((((uint32)(_off)&0xf00) >> 4) | ((uint32)(_len)-3)); \
             (_buf)[1] = (unsigned char)((uint32)(_off)&0xff);                                \
             (_buf) += 2;                                                                     \
         }                                                                                    \
@@ -447,17 +447,15 @@ bool pglz_compress(const char* source, int32 slen, PGLZ_Header* dest, const PGLZ
     /*
      * Our fallback strategy is the default.
      */
-    if (strategy == NULL) {
+    if (strategy == NULL)
         strategy = PGLZ_strategy_default;
-    }
 
     /*
      * If the strategy forbids compression (at all or if source chunk size out
      * of range), fail.
      */
-    if (strategy->match_size_good <= 0 || slen < strategy->min_input_size || slen > strategy->max_input_size) {
+    if (strategy->match_size_good <= 0 || slen < strategy->min_input_size || slen > strategy->max_input_size)
         return false;
-    }
 
     /*
      * Save the original source size in the header.
@@ -468,25 +466,22 @@ bool pglz_compress(const char* source, int32 slen, PGLZ_Header* dest, const PGLZ
      * Limit the match parameters to the supported range.
      */
     good_match = strategy->match_size_good;
-    if (good_match > PGLZ_MAX_MATCH) {
+    if (good_match > PGLZ_MAX_MATCH)
         good_match = PGLZ_MAX_MATCH;
-    } else if (good_match < 17) {
+    else if (good_match < 17)
         good_match = 17;
-    }
 
     good_drop = strategy->match_size_drop;
-    if (good_drop < 0) {
+    if (good_drop < 0)
         good_drop = 0;
-    } else if (good_drop > 100) {
+    else if (good_drop > 100)
         good_drop = 100;
-    }
 
     need_rate = strategy->min_comp_rate;
-    if (need_rate < 0) {
+    if (need_rate < 0)
         need_rate = 0;
-    } else if (need_rate > 99) {
+    else if (need_rate > 99)
         need_rate = 99;
-    }
 
     /*
      * Compute the maximum result size allowed by the strategy, namely the
@@ -496,9 +491,8 @@ bool pglz_compress(const char* source, int32 slen, PGLZ_Header* dest, const PGLZ
     if (slen > (INT_MAX / 100)) {
         /* Approximate to avoid overflow */
         result_max = (slen / 100) * (100 - need_rate);
-    } else {
+    } else
         result_max = (slen * (100 - need_rate)) / 100;
-    }
 
     /*
      * Initialize the history lists to empty.  We do not need to zero the
@@ -518,9 +512,8 @@ bool pglz_compress(const char* source, int32 slen, PGLZ_Header* dest, const PGLZ
          * bytes (a control byte and 3-byte tag), PGLZ_MAX_OUTPUT() had better
          * allow 4 slop bytes.
          */
-        if (bp - bstart >= result_max) {
+        if (bp - bstart >= result_max)
             return false;
-        }
 
         /*
          * If we've emitted more than first_success_by bytes without finding
@@ -528,9 +521,8 @@ bool pglz_compress(const char* source, int32 slen, PGLZ_Header* dest, const PGLZ
          * reasonably quickly when looking at incompressible input (such as
          * pre-compressed data).
          */
-        if (!found_match && bp - bstart >= strategy->first_success_by) {
+        if (!found_match && bp - bstart >= strategy->first_success_by)
             return false;
-        }
 
         /*
          * Try to find a match in the history
@@ -566,9 +558,8 @@ bool pglz_compress(const char* source, int32 slen, PGLZ_Header* dest, const PGLZ
      */
     *ctrlp = ctrlb;
     result_size = bp - bstart;
-    if (result_size >= result_max) {
+    if (result_size >= result_max)
         return false;
-    }
 
     /*
      * Success - need only fill in the actual length of the compressed datum.
@@ -619,9 +610,8 @@ void pglz_decompress(const PGLZ_Header* source, char* dest)
                 len = (sp[0] & 0x0f) + 3;
                 off = ((sp[0] & 0xf0) << 4) | sp[1];
                 sp += 2;
-                if (len == 18) {
+                if (len == 18)
                     len += *sp++;
-                }
 
                 /*
                  * Check for output buffer overrun, to ensure we don't clobber
@@ -642,6 +632,7 @@ void pglz_decompress(const PGLZ_Header* source, char* dest)
                  * extremely!
                  */
                 while (len--) {
+                    Assert((long)dp - off >= (long)dest);
                     *dp = dp[-off];
                     dp++;
                 }
@@ -650,9 +641,9 @@ void pglz_decompress(const PGLZ_Header* source, char* dest)
                  * An unset control bit means LITERAL BYTE. So we just copy
                  * one from INPUT to OUTPUT.
                  */
-                if (dp >= destend) { /* check for buffer overrun */
+                if (dp >= destend) /* check for buffer overrun */
                     break;         /* do not clobber memory */
-                }
+
                 *dp++ = *sp++;
             }
 
@@ -666,7 +657,10 @@ void pglz_decompress(const PGLZ_Header* source, char* dest)
     /*
      * Check we decompressed the right amount.
      */
-    if (dp != destend || sp != srcend) {
+    if (dp != destend || sp != srcend)
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("compressed data is corrupt")));
-    }
+
+    /*
+     * That's it.
+     */
 }

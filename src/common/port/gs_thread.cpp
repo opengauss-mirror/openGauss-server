@@ -33,28 +33,32 @@
 #endif
 
 #include <signal.h>
-#include <unistd.h>
 
 #include "access/gtm.h"
 #include "access/xlog.h"
-#include "distributelayer/streamCore.h"
 #include "access/multi_redo_api.h"
+#include "distributelayer/streamCore.h"
+#include "distributelayer/streamMain.h"
 #include "miscadmin.h"
 #include "libpq/libpq-be.h"
 #include "storage/smgr.h"
 #include "storage/latch.h"
 #include "storage/spin.h"
-#include "storage/cstore_mem_alloc.h"
+#include "storage/cstore/cstore_mem_alloc.h"
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
 #include "gs_thread.h"
 #include "gssignal/gs_signal.h"
 #include "utils/pg_locale.h"
+#include "gs_policy/policy_common.h"
+#include "krb5.h"
 #ifndef WIN32_ONLY_COMPILER
 #include "dynloader.h"
 #else
 #include "port/dynloader/win32.h"
 #endif
+
+THR_LOCAL ReseThreadValuesPtr reset_policy_thr_hook = NULL;
 
 /* keep the args of each thread */
 typedef struct tag_gs_thread_pool {
@@ -70,8 +74,6 @@ static volatile gs_thread_args_pool thread_args_pool;
 extern bool IsPostmasterEnvironment;
 
 extern volatile ThreadId PostmasterPid;
-
-extern const char* GaussdbThreadName[];
 
 extern void EarlyBindingTLSVariables(void);
 
@@ -111,13 +113,15 @@ extern void CodeGenThreadTearDown();
 
 extern void CancelAutoAnalyze();
 
-extern bool StreamThreadAmI();
 extern void uuid_struct_destroy_function();
+
+static void clean_kerberos_cache();
 
 typedef void (*uuid_struct_destroy_hook_type)(int which);
 THR_LOCAL uuid_struct_destroy_hook_type uuid_struct_destroy_hook = NULL;
 
 /* =================== static functions =================== */
+
 static void check_backend_name(const char* argv, char** name_thread)
 {
     if (*name_thread != NULL) {
@@ -125,7 +129,7 @@ static void check_backend_name(const char* argv, char** name_thread)
     }
 
     if (strncmp(argv, "--forkbackend", strlen("--forkbackend")) == 0) {
-        *name_thread = "gaussdb";
+        *name_thread = "postgres";
     }
 
     return;
@@ -190,7 +194,7 @@ static void check_jobworker_name(const char* argv, char** name_thread)
     }
 
     if (strncmp(argv, "--forkjobworker", strlen("--forkjobworker")) == 0) {
-        *name_thread = "JobExecutor";
+        *name_thread = "JobExecuteWorker";
     }
 
     return;
@@ -216,7 +220,7 @@ static void check_arch_name(const char* argv, char** name_thread)
     }
 
     if (strncmp(argv, "--forkarch", strlen("--forkarch")) == 0) {
-        *name_thread = "Archiver";
+        *name_thread = "PgArchiver";
     }
 
     return;
@@ -229,7 +233,7 @@ static void check_col_name(const char* argv, char** name_thread)
     }
 
     if (strncmp(argv, "--forkcol", strlen("--forkcol")) == 0) {
-        *name_thread = "StatCollector";
+        *name_thread = "PgstatCollector";
     }
 
     return;
@@ -268,53 +272,12 @@ static void check_audit_name(const char* argv, char** name_thread)
     }
 
     if (strncmp(argv, "--forkaudit", strlen("--forkaudit")) == 0) {  // exp: @suppress("Function cannot be resolved")
-        *name_thread = "Auditor";
+        *name_thread = "PgAuditor";
     }
 
     return;
 }
 
-static void check_boot_name_internel(AuxProcType aux_thread_type, char** name_thread)
-{
-    switch (aux_thread_type) {
-        case StartupProcess: {
-            *name_thread = "StartupProcess";
-            break;
-        }
-        case BgWriterProcess: {
-            *name_thread = "BgWriter";
-            break;
-        }
-        case CheckpointerProcess: {
-            *name_thread = "Checkpointer";
-            break;
-        }
-        case WalWriterProcess: {
-            *name_thread = "WalWriter";
-            break;
-        }
-        case WalWriterAuxiliaryProcess: {
-            *name_thread = "WalWriterAuxiliary";
-            break;
-        }
-        case WalReceiverProcess: {
-            *name_thread = "WalReceiver";
-            break;
-        }
-        case CBMWriterProcess: {
-            *name_thread = "CBMWriter";
-            break;
-        }
-        case RemoteServiceProcess: {
-            *name_thread = "RemoteSrv";
-            break;
-        }
-        default: {
-            *name_thread = "??? process";
-            break;
-        }
-    }
-}
 static void check_boot_name(char** argv, int argc, char** name_thread)
 {
     char** tmp_argv = NULL;
@@ -349,7 +312,32 @@ static void check_boot_name(char** argv, int argc, char** name_thread)
         }
     }
 
-    check_boot_name_internel(aux_thread_type, name_thread);
+    switch (aux_thread_type) {
+        case StartupProcess:
+            *name_thread = "Startup";
+            break;
+        case BgWriterProcess:
+            *name_thread = "BgWriter";
+            break;
+        case CheckpointerProcess:
+            *name_thread = "Checkpointer";
+            break;
+        case WalWriterProcess:
+            *name_thread = "WalWriter";
+            break;
+        case WalReceiverProcess:
+            *name_thread = "WalReceiver";
+            break;
+        case CBMWriterProcess:
+            *name_thread = "CBMWriter";
+            break;
+        case RemoteServiceProcess:
+            *name_thread = "RemoteService";
+            break;
+        default:
+            *name_thread = "??? process";
+            break;
+    }
 
     return;
 }
@@ -380,6 +368,7 @@ static void* ThreadStarterFunc(void* arg)
 
     /* Initialize thread IDs only once */
     t_thrd.port_cxt.m_pThreadArg = (ThreadArg*)arg;
+    t_thrd.port_cxt.m_pThreadArg->m_thd_arg.t_thrd = &t_thrd;
 
     /* register the signal handler for this thread */
     return (*t_thrd.port_cxt.m_pThreadArg->m_taskRoutine)(&(t_thrd.port_cxt.m_pThreadArg->m_thd_arg));
@@ -442,6 +431,18 @@ void gs_thread_exit(int code)
         t_thrd.port_cxt.m_pThreadArg = NULL;
     }
 
+    /* 
+     * policy plugin is released when PM thread exit(existing as last one) 
+     * so that we can make sure reset_policy_thr_hook is valid in gs_thread_exit
+     */
+    Assert(t_thrd.proc_cxt.MyProcPid != PostmasterPid);
+    if (reset_policy_thr_hook) {
+        reset_policy_thr_hook();
+    }
+
+    /* release the memory of kerberos */
+    clean_kerberos_cache();
+
     /* release the memory of uuid_t struct */
     uuid_struct_destroy_function();
 
@@ -472,21 +473,9 @@ void gs_thread_exit(int code)
 
     CancelAutoAnalyze();
 
-    /*
-     * We should restoreStreamEnter after release the memory context.
-     * Make sure top consumer thread exit after stream thread.
-     */
-    if (StreamThreadAmI() && u_sess->stream_cxt.global_obj) {
-        /*
-         * Set CurrentResourceOwner to NULL or will core dumped in ResourceOwnerEnlargePthreadMutex
-         * case t_thrd.top_mem_cxt has been set NULL.
-         */
-        t_thrd.utils_cxt.CurrentResourceOwner = NULL;
-        u_sess->stream_cxt.global_obj->restoreStreamEnter();
-        u_sess->stream_cxt.global_obj = NULL;
-    }
-	
-	if (t_thrd.bn != NULL) {
+    RestoreStream();
+
+    if (t_thrd.bn != NULL) {
         t_thrd.bn->dead_end = true;
     }
 
@@ -879,6 +868,17 @@ void ThreadExitCXX(int code)
     }
 }
 
+int ShowThreadName(const char* name)
+{
+    int rc;
+    t_thrd.proc_cxt.MyProgName = const_cast<char*>(name);
+#ifndef WIN32
+    rc = pthread_setname_np(gs_thread_self(), name);
+    Assert(rc == 0);
+#endif
+    return rc;
+}
+
 void uuid_struct_destroy_function()
 {
     if (uuid_struct_destroy_hook != NULL) {
@@ -886,6 +886,14 @@ void uuid_struct_destroy_function()
         uuid_struct_destroy_hook(1);
         uuid_struct_destroy_hook = NULL;
     }
+}
+
+/* release kerberos profile path which is thread local var */
+static void clean_kerberos_cache()
+{
+#ifdef ENABLE_GSS
+    krb5_clean_cache_profile_path();
+#endif
 }
 
 #endif

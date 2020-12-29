@@ -16,8 +16,11 @@
 #include "parser/parse_node.h"
 
 extern void parse_fixed_parameters(ParseState* pstate, Oid* paramTypes, int numParams);
+#ifdef ENABLE_MULTIPLE_NODES
+extern void parse_variable_parameters(ParseState* pstate, Oid** paramTypes, int* numParams);
+#else
 extern void parse_variable_parameters(ParseState* pstate, Oid** paramTypes, int* numParams, char** paramTypeNames);
+#endif
 extern void check_variable_parameters(ParseState* pstate, Query* query);
-extern bool query_contains_extern_params(Query* query);
 
 #endif /* PARSE_PARAM_H */

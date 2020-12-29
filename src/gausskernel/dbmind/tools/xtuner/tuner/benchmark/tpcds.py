@@ -16,7 +16,7 @@ import time
 
 # WARN: You need to import data into the database and SQL statements in the following path will be executed.
 # The program automatically collects the total execution duration of these SQL statements.
-path = '/home/opengauss/project/tpcds/queries'  # modify this path
+path = '/path/to/tpcds/queries'  # modify this path
 cmd = "gsql -U {user} -W {password} -d {db} -p {port} -f {file}"
 
 

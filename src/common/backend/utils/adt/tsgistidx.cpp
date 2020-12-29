@@ -45,6 +45,7 @@ typedef char* BITVECP;
 /*
  * type of GiST index key
  */
+
 typedef struct {
     int32 vl_len_; /* varlena header (do not touch directly!) */
     int4 flag;
@@ -98,9 +99,9 @@ Datum gtsvectorout(PG_FUNCTION_ARGS)
 
     outbuf = (char*)palloc(outbuf_maxlen);
 
-    if (ISARRKEY(key)) {
+    if (ISARRKEY(key))
         rc = sprintf_s(outbuf, outbuf_maxlen, ARROUTSTR, (int)ARRNELEM(key));
-    } else {
+    else {
         int cnttrue = (ISALLTRUE(key)) ? SIGLENBIT : sizebitvec(GETSIGN(key));
 
         rc = sprintf_s(outbuf, outbuf_maxlen, SINGOUTSTR, cnttrue, (int)SIGLENBIT - cnttrue);
@@ -116,9 +117,8 @@ static int compareint(const void* va, const void* vb)
     int4 a = *((const int4*)va);
     int4 b = *((const int4*)vb);
 
-    if (a == b) {
+    if (a == b)
         return 0;
-    }
     return (a > b) ? 1 : -1;
 }
 
@@ -131,35 +131,32 @@ static int uniqueint(int4* a, int4 l)
     int4* ptr = NULL;
     int4* res = NULL;
 
-    if (l <= 1) {
+    if (l <= 1)
         return l;
-    }
 
     ptr = res = a;
 
     qsort((void*)a, l, sizeof(int4), compareint);
 
-    while (ptr - a < l) {
-        if (*ptr != *res) {
+    while (ptr - a < l)
+        if (*ptr != *res)
             *(++res) = *ptr++;
-        } else {
+        else
             ptr++;
-        }
-    }
     return res + 1 - a;
 }
 
 static void makesign(BITVECP sign, SignTSVector* a)
 {
-    int4 k;
-    int4 len = ARRNELEM(a);
+    int4 k, len = ARRNELEM(a);
     int4* ptr = GETARR(a);
-    errno_t rc = memset_s((void*)sign, sizeof(BITVEC), 0, sizeof(BITVEC));
+    errno_t rc = 0;
+
+    rc = memset_s((void*)sign, sizeof(BITVEC), 0, sizeof(BITVEC));
     securec_check(rc, "\0", "\0");
 
-    for (k = 0; k < len; k++) {
+    for (k = 0; k < len; k++)
         HASH(sign, ptr[k]);
-    }
 }
 
 Datum gtsvector_compress(PG_FUNCTION_ARGS)
@@ -221,15 +218,14 @@ Datum gtsvector_compress(PG_FUNCTION_ARGS)
         retval = (GISTENTRY*)palloc(sizeof(GISTENTRY));
         gistentryinit(*retval, PointerGetDatum(res), entry->rel, entry->page, entry->offset, FALSE);
     } else if (ISSIGNKEY(DatumGetPointer(entry->key)) && !ISALLTRUE(DatumGetPointer(entry->key))) {
-        uint32 i;
-        uint32 len;
+        uint32 i, len;
         SignTSVector* res = NULL;
         BITVECP sign = GETSIGN(DatumGetPointer(entry->key));
 
-        LOOPBYTE {
-            if ((sign[i] & 0xff) != 0xff) {
+        LOOPBYTE
+        {
+            if ((sign[i] & 0xff) != 0xff)
                 PG_RETURN_POINTER(retval);
-            }
         }
 
         len = CALCGTSIZE(SIGNKEY | ALLISTRUE, 0);
@@ -247,6 +243,7 @@ Datum gtsvector_decompress(PG_FUNCTION_ARGS)
 {
     GISTENTRY* entry = (GISTENTRY*)PG_GETARG_POINTER(0);
     SignTSVector* key = (SignTSVector*)DatumGetPointer(PG_DETOAST_DATUM(entry->key));
+
     if (key != (SignTSVector*)DatumGetPointer(entry->key)) {
         GISTENTRY* retval = (GISTENTRY*)palloc(sizeof(GISTENTRY));
 
@@ -273,23 +270,23 @@ static bool checkcondition_arr(const void* checkval, QueryOperand* val)
     int4* StopMiddle = NULL;
 
     /* Loop invariant: StopLow <= val < StopHigh */
+
     /*
      * we are not able to find a a prefix by hash value
      */
-    if (val->prefix) {
+    if (val->prefix)
         return true;
-    }
 
     while (StopLow < StopHigh) {
         StopMiddle = StopLow + (StopHigh - StopLow) / 2;
-        if (*StopMiddle == val->valcrc) {
+        if (*StopMiddle == val->valcrc)
             return (true);
-        } else if (*StopMiddle < val->valcrc) {
+        else if (*StopMiddle < val->valcrc)
             StopLow = StopMiddle + 1;
-        } else {
+        else
             StopHigh = StopMiddle;
-        }
     }
+
     return (false);
 }
 
@@ -298,9 +295,8 @@ static bool checkcondition_bit(const void* checkval, QueryOperand* val)
     /*
      * we are not able to find a a prefix in signature tree
      */
-    if (val->prefix) {
+    if (val->prefix)
         return true;
-    }
     return GETBIT(checkval, (unsigned int)HASHVAL(val->valcrc));
 }
 
@@ -319,9 +315,8 @@ Datum gtsvector_consistent(PG_FUNCTION_ARGS)
         PG_RETURN_BOOL(false);
 
     if (ISSIGNKEY(key)) {
-        if (ISALLTRUE(key)) {
+        if (ISALLTRUE(key))
             PG_RETURN_BOOL(true);
-        }
 
         PG_RETURN_BOOL(TS_execute(GETQUERY(query), (void*)GETSIGN(key), false, checkcondition_bit));
     } else { /* only leaf pages */
@@ -340,18 +335,16 @@ static int4 unionkey(BITVECP sbase, SignTSVector* add)
     if (ISSIGNKEY(add)) {
         BITVECP sadd = GETSIGN(add);
 
-        if (ISALLTRUE(add)) {
+        if (ISALLTRUE(add))
             return 1;
-        }
 
         LOOPBYTE
         sbase[i] |= sadd[i];
     } else {
         int4* ptr = GETARR(add);
 
-        for (i = 0; i < ARRNELEM(add); i++) {
+        for (i = 0; i < ARRNELEM(add); i++)
             HASH(sbase, ptr[i]);
-        }
     }
     return 0;
 }
@@ -361,11 +354,12 @@ Datum gtsvector_union(PG_FUNCTION_ARGS)
     GistEntryVector* entryvec = (GistEntryVector*)PG_GETARG_POINTER(0);
     int* size = (int*)PG_GETARG_POINTER(1);
     BITVEC base;
-    int4 i;
-    int4 len;
+    int4 i, len;
     int4 flag = 0;
     SignTSVector* result = NULL;
-    errno_t rc = memset_s((void*)base, sizeof(BITVEC), 0, sizeof(BITVEC));
+    errno_t rc;
+
+    rc = memset_s((void*)base, sizeof(BITVEC), 0, sizeof(BITVEC));
     securec_check(rc, "\0", "\0");
     for (i = 0; i < entryvec->n; i++) {
         if (unionkey(base, GETENTRY(entryvec, i))) {
@@ -394,18 +388,19 @@ Datum gtsvector_same(PG_FUNCTION_ARGS)
     bool* result = (bool*)PG_GETARG_POINTER(2);
 
     if (ISSIGNKEY(a)) { /* then b also ISSIGNKEY */
-        if (ISALLTRUE(a) && ISALLTRUE(b)) {
+        if (ISALLTRUE(a) && ISALLTRUE(b))
             *result = true;
-        } else if (ISALLTRUE(a)) {
+        else if (ISALLTRUE(a))
             *result = false;
-        } else if (ISALLTRUE(b)) {
+        else if (ISALLTRUE(b))
             *result = false;
-        } else {
+        else {
             uint32 i;
-            BITVECP sa = GETSIGN(a);
-            BITVECP sb = GETSIGN(b);
+            BITVECP sa = GETSIGN(a), sb = GETSIGN(b);
+
             *result = true;
-            LOOPBYTE {
+            LOOPBYTE
+            {
                 if (sa[i] != sb[i]) {
                     *result = false;
                     break;
@@ -413,23 +408,23 @@ Datum gtsvector_same(PG_FUNCTION_ARGS)
             }
         }
     } else { /* a and b ISARRKEY */
-        int4 lena = ARRNELEM(a);
-        int4 lenb = ARRNELEM(b);
-        if (lena != lenb) {
+        int4 lena = ARRNELEM(a), lenb = ARRNELEM(b);
+
+        if (lena != lenb)
             *result = false;
-        } else {
-            int4 *ptra = GETARR(a);
-            int4 *ptrb = GETARR(b);
+        else {
+            int4 *ptra = GETARR(a), *ptrb = GETARR(b);
             int4 i;
+
             *result = true;
-            for (i = 0; i < lena; i++) {
+            for (i = 0; i < lena; i++)
                 if (ptra[i] != ptrb[i]) {
                     *result = false;
                     break;
                 }
-            }
         }
     }
+
     PG_RETURN_POINTER(result);
 }
 
@@ -445,10 +440,11 @@ static int4 sizebitvec(BITVECP sign)
 
 static int hemdistsign(BITVECP a, BITVECP b)
 {
-    uint32 i;
-    uint32 diff;
+    uint32 i, diff;
     int dist = 0;
-    LOOPBYTE {
+
+    LOOPBYTE
+    {
         diff = (unsigned char)((unsigned char)a[i] ^ (unsigned char)b[i]);
         dist += number_of_ones[diff];
     }
@@ -458,14 +454,13 @@ static int hemdistsign(BITVECP a, BITVECP b)
 static int hemdist(SignTSVector* a, SignTSVector* b)
 {
     if (ISALLTRUE(a)) {
-        if (ISALLTRUE(b)) {
+        if (ISALLTRUE(b))
             return 0;
-        } else {
+        else
             return SIGLENBIT - sizebitvec(GETSIGN(b));
-        }
-    } else if (ISALLTRUE(b)) {
+    } else if (ISALLTRUE(b))
         return SIGLENBIT - sizebitvec(GETSIGN(a));
-    }
+
     return hemdistsign(GETSIGN(a), GETSIGN(b));
 }
 
@@ -485,14 +480,12 @@ Datum gtsvector_penalty(PG_FUNCTION_ARGS)
 
         makesign(sign, newval);
 
-        if (ISALLTRUE(origval)) {
+        if (ISALLTRUE(origval))
             *penalty = ((float)(SIGLENBIT - sizebitvec(sign))) / (float)(SIGLENBIT + 1);
-        } else {
+        else
             *penalty = hemdistsign(sign, orig);
-        }
-    } else {
+    } else
         *penalty = hemdist(origval, newval);
-    }
     PG_RETURN_POINTER(penalty);
 }
 
@@ -504,11 +497,11 @@ typedef struct {
 static void fillcache(CACHESIGN* item, SignTSVector* key)
 {
     item->allistrue = false;
-    if (ISARRKEY(key)) {
+    if (ISARRKEY(key))
         makesign(item->sign, key);
-    } else if (ISALLTRUE(key)) {
+    else if (ISALLTRUE(key))
         item->allistrue = true;
-    } else {
+    else {
         errno_t rc = EOK;
         rc = memcpy_s((void*)item->sign, sizeof(BITVEC), (void*)GETSIGN(key), sizeof(BITVEC));
         securec_check(rc, "\0", "\0");
@@ -526,24 +519,22 @@ static int comparecost(const void* va, const void* vb)
     const SPLITCOST* a = (const SPLITCOST*)va;
     const SPLITCOST* b = (const SPLITCOST*)vb;
 
-    if (a->cost == b->cost) {
+    if (a->cost == b->cost)
         return 0;
-    } else {
+    else
         return (a->cost > b->cost) ? 1 : -1;
-    }
 }
 
 static int hemdistcache(CACHESIGN* a, CACHESIGN* b)
 {
     if (a->allistrue) {
-        if (b->allistrue) {
+        if (b->allistrue)
             return 0;
-        } else {
+        else
             return SIGLENBIT - sizebitvec(b->sign);
-        }
-    } else if (b->allistrue) {
+    } else if (b->allistrue)
         return SIGLENBIT - sizebitvec(a->sign);
-    }
+
     return hemdistsign(a->sign, b->sign);
 }
 
@@ -551,19 +542,15 @@ Datum gtsvector_picksplit(PG_FUNCTION_ARGS)
 {
     GistEntryVector* entryvec = (GistEntryVector*)PG_GETARG_POINTER(0);
     GIST_SPLITVEC* v = (GIST_SPLITVEC*)PG_GETARG_POINTER(1);
-    OffsetNumber k;
-    OffsetNumber j;
+    OffsetNumber k, j;
     SignTSVector* datum_l = NULL;
     SignTSVector* datum_r = NULL;
     BITVECP union_l = NULL;
     BITVECP union_r = NULL;
-    int4 size_alpha;
-    int4 size_beta;
-    int4 size_waste;
-    int4 waste = -1;
+    int4 size_alpha, size_beta;
+    int4 size_waste, waste = -1;
     int4 nbytes;
-    OffsetNumber seed_1 = 0;
-    OffsetNumber seed_2 = 0;
+    OffsetNumber seed_1 = 0, seed_2 = 0;
     OffsetNumber* left = NULL;
     OffsetNumber* right = NULL;
     OffsetNumber maxoff;
@@ -583,9 +570,9 @@ Datum gtsvector_picksplit(PG_FUNCTION_ARGS)
 
     for (k = FirstOffsetNumber; k < maxoff; k = OffsetNumberNext(k)) {
         for (j = OffsetNumberNext(k); j <= maxoff; j = OffsetNumberNext(j)) {
-            if (k == FirstOffsetNumber) {
+            if (k == FirstOffsetNumber)
                 fillcache(&cache[j], GETENTRY(entryvec, j));
-            }
+
             size_waste = hemdistcache(&(cache[j]), &(cache[k]));
             if (size_waste > waste) {
                 waste = size_waste;
@@ -656,24 +643,20 @@ Datum gtsvector_picksplit(PG_FUNCTION_ARGS)
         }
 
         if (ISALLTRUE(datum_l) || cache[j].allistrue) {
-            if (ISALLTRUE(datum_l) && cache[j].allistrue) {
+            if (ISALLTRUE(datum_l) && cache[j].allistrue)
                 size_alpha = 0;
-            } else {
+            else
                 size_alpha = SIGLENBIT - sizebitvec((cache[j].allistrue) ? GETSIGN(datum_l) : GETSIGN(cache[j].sign));
-            }
-        } else {
+        } else
             size_alpha = hemdistsign(cache[j].sign, GETSIGN(datum_l));
-        }
 
         if (ISALLTRUE(datum_r) || cache[j].allistrue) {
-            if (ISALLTRUE(datum_r) && cache[j].allistrue) {
+            if (ISALLTRUE(datum_r) && cache[j].allistrue)
                 size_beta = 0;
-            } else {
+            else
                 size_beta = SIGLENBIT - sizebitvec((cache[j].allistrue) ? GETSIGN(datum_r) : GETSIGN(cache[j].sign));
-            }
-        } else {
+        } else
             size_beta = hemdistsign(cache[j].sign, GETSIGN(datum_r));
-        }
 
         if (size_alpha < size_beta + WISH_F(v->spl_nleft, v->spl_nright, 0.1)) {
             if (ISALLTRUE(datum_l) || cache[j].allistrue) {

@@ -35,13 +35,17 @@ def bytes2text(bs):
     :param bs: Bytes or array-like of bytes.
     :return: Converted text.
     """
-    if type(bs) in (list, tuple):
-        if len(bs) > 0 and type(bs[0]) is bytes:
+    if type(bs) in (list, tuple) and len(bs) > 0:
+        if isinstance(bs[0], bytes):
             return b''.join(bs).decode(errors='ignore').strip()
+        if isinstance(bs[0], str):
+            return ''.join(bs).strip()
         else:
-            return ''
-    else:
+            raise TypeError
+    elif isinstance(bs, bytes):
         return bs.decode(errors='ignore').strip()
+    else:
+        return ''
 
 
 class ExecutorFactory:
@@ -55,8 +59,8 @@ class ExecutorFactory:
         self.host = None
         self.pwd = None
         self.port = 22
-        self.me = getpass.getuser()  # current executing user
-        self.user = self.me  # default user is current user.
+        self.me = getpass.getuser()  # Current executing user.
+        self.user = self.me  # Default user is current user.
 
     def set_host(self, host):
         self.host = host
@@ -88,7 +92,7 @@ class ExecutorFactory:
 
     def _is_remote(self):
         if not self.host:
-            return False  # not setting host is treated as local.
+            return False  # Not setting host is treated as local.
 
         hostname = socket.gethostname()
         _, _, ip_address_list = socket.gethostbyname_ex(hostname)
@@ -159,21 +163,29 @@ class SSH(Executor):
                 chan = self.client.get_transport().open_session()
                 chan.invoke_shell()
 
-                buff_size = 65535
+                buff_size = 32768
+                timeout = kwargs.get('timeout', None)
                 stdout = list()
                 stderr = list()
-                for line in command:
+                cmds = list(command)
+                # In interactive mode,
+                # we cannot determine whether the process exits. We need to exit the shell manually.
+                cmds.append('exit $?')
+                for line in cmds:
                     chan.send(line + '\n')
-                    # Block here to fetch execution result from channel.
-                    while True:
-                        if chan.recv_ready():
-                            stdout.append(chan.recv(buff_size))
-                        elif chan.recv_stderr_ready():
-                            stderr.append(chan.recv_stderr(buff_size))
-                        else:
-                            time.sleep(0.5)
-                            if not (chan.recv_ready() or chan.recv_stderr_ready()):
-                                break
+                    while not chan.send_ready():  # Wait until the sending is complete.
+                        time.sleep(0.1)
+
+                # Wait until all commands are executed.
+                start_ts = time.time()
+                while not chan.exit_status_ready():
+                    if chan.recv_ready():
+                        stdout.append(chan.recv(buff_size))
+                    if chan.recv_stderr_ready():
+                        stderr.append(chan.recv_stderr(buff_size))
+                    if timeout and (time.time() - start_ts) > timeout:
+                        break
+                    time.sleep(0.1)
 
                 chan.close()
                 self._exit_status.value = chan.recv_exit_status()
@@ -183,7 +195,7 @@ class SSH(Executor):
 
                 chan = self.client.exec_command(command=command, **kwargs)
                 while not chan[blocking_fd].channel.exit_status_ready():  # Blocking here.
-                    pass
+                    time.sleep(0.1)
 
                 self._exit_status.value = chan[blocking_fd].channel.recv_exit_status()
                 result_tup = (bytes2text(chan[n_stdout].read()), bytes2text(chan[n_stderr].read()))
@@ -239,8 +251,9 @@ class LocalExec(Executor):
 
     @staticmethod
     def exec_command_sync(command, *args, **kwargs):
-        proc = None
         if type(command) in (list, tuple):
+            stdout = list()
+            stderr = list()
             cwd = None
             for line in command:
                 # Have to use the `cwd` argument.
@@ -254,6 +267,13 @@ class LocalExec(Executor):
                                         stderr=subprocess.PIPE,
                                         shell=False,
                                         cwd=cwd)
+                outs, errs = proc.communicate(timeout=kwargs.get('timeout', None))
+                LocalExec._exit_status.value = proc.returncode  # Get the last one.
+                if outs:
+                    stdout.append(outs)
+                if errs:
+                    stderr.append(errs)
+            return [bytes2text(stdout), bytes2text(stderr)]
         else:
             # Pipeline does not support running in shell=False, so we run it with the 'bash -c' command.
             split_cmd = ['bash', '-c', command] if command.find('|') >= 0 else shlex.split(command)
@@ -261,11 +281,9 @@ class LocalExec(Executor):
                                     stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE,
                                     shell=False)
-        streams = proc.communicate()
-
-        LocalExec._exit_status.value = proc.returncode
-        ret = [stream.decode(errors='ignore').strip() if stream else '' for stream in streams]
-        return ret
+            streams = proc.communicate(timeout=kwargs.get('timeout', None))
+            LocalExec._exit_status.value = proc.returncode
+            return [bytes2text(stream) for stream in streams]
 
     @property
     def exit_status(self):

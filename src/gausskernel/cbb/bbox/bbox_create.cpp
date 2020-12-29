@@ -21,7 +21,6 @@
  * -------------------------------------------------------------------------
  */
 #include "bbox_elf_dump_base.h"
-#define __ASM_PTRACE_H
 #include "bbox_create.h"
 #include "bbox.h"
 #include "../../src/include/securec.h"
@@ -89,19 +88,19 @@ s32 BBOX_GetDefaultCoreName(char* szFileName, s32 iSize, const char* szAddText)
         szAddText = "";
     }
 
-    struct kernel_timeval stProgramCoreDumpTime;
+    struct kernel_timeval stProgramCoreDumpTime = {0};
     sys_gettimeofday(&stProgramCoreDumpTime, NULL);
 
-    bbox_snprintf(szFileName,
+    s32 ret = bbox_snprintf(szFileName,
         iSize,
-        "%s/%s.%d.%s.%s.gz",
+        "%s/core-%s-%d-%s-%s.lz4",
         g_szBboxCorePath,
-        program_invocation_short_name,
+        progname,
         sys_getpid(),
         g_acDateTime,
         szAddText);
 
-    return RET_OK;
+    return (ret > 0) ? RET_OK : RET_ERR;
 }
 
 /*
@@ -120,16 +119,16 @@ s32 BBOX_GetTmpCoreName(char* szFileName, s32 iSize)
     g_iCoreDumpBeginTime = stProgramCoreDumpTime.tv_sec;
     bbox_print(PRINT_TIP, "coredump begin at %ld\n", stProgramCoreDumpTime.tv_sec);
 
-    bbox_snprintf(szFileName,
+    s32 ret = bbox_snprintf(szFileName,
         iSize,
-        "%s/%s.%d.%s.%s",
+        "%s/%s-%d-%s-%s",
         g_szBboxCorePath,
-        program_invocation_short_name,
+        progname,
         sys_getpid(),
         g_acDateTime,
         BBOX_TMP_FILE_ADD_NAME);
 
-    return RET_OK;
+    return (ret > 0) ? RET_OK : RET_ERR;
 }
 
 /*
@@ -152,13 +151,13 @@ s32 BBOX_GetBBoxFileCount(const char* pszPath, const char* pszName, void* pArgs)
     }
 
     /* ignore the file which not belong to bbox */
-    if ((0 == bbox_strstr(pszName, BBOX_SNAP_FILE_ADD_NAME ".gz")) &&
-        (0 == bbox_strstr(pszName, BBOX_CORE_FILE_ADD_NAME ".gz"))) {
+    if ((0 == bbox_strstr(pszName, BBOX_SNAP_FILE_ADD_NAME ".lz4")) &&
+        (0 == bbox_strstr(pszName, BBOX_CORE_FILE_ADD_NAME ".lz4"))) {
         return RET_OK;
     }
 
-    /* ignode the file which not created by this process. */
-    if (0 != bbox_strncmp(pszName, program_invocation_short_name, bbox_strlen(program_invocation_short_name))) {
+    /* ignore the file which not created by this process. */
+    if (bbox_strstr(pszName, progname) == 0) {
         return RET_OK;
     }
 
@@ -195,17 +194,21 @@ s32 BBOX_GetBBoxOldiestName(const char* pszPath, const char* pszName, void* pArg
     }
 
     /* ignore the file which not belong to bbox */
-    if ((0 == bbox_strstr(pszName, BBOX_SNAP_FILE_ADD_NAME ".gz")) &&
-        (0 == bbox_strstr(pszName, BBOX_CORE_FILE_ADD_NAME ".gz"))) {
+    if ((0 == bbox_strstr(pszName, BBOX_SNAP_FILE_ADD_NAME ".lz4")) &&
+        (0 == bbox_strstr(pszName, BBOX_CORE_FILE_ADD_NAME ".lz4"))) {
         return RET_OK;
     }
 
-    /* ignode the file which not created by this process. */
-    if (0 != bbox_strncmp(pszName, program_invocation_short_name, bbox_strlen(program_invocation_short_name))) {
+    /* ignore the file which not created by this process. */
+    if (bbox_strstr(pszName, progname) == 0) {
         return RET_OK;
     }
 
-    (void)bbox_snprintf(szFileName, sizeof(szFileName), "%s/%s", pszPath, pszName);
+    if (bbox_snprintf(szFileName, sizeof(szFileName), "%s/%s", pszPath, pszName) <= 0) {
+        bbox_print(PRINT_ERR, "bbox_snprintf is failed, errno = %d.\n", errno);
+        return RET_ERR;
+    }
+
     if (sys_stat(szFileName, &stCurrState) < 0) {
         bbox_print(PRINT_ERR, "Get stat of '%s' failed, errno = %d\n", szFileName, errno);
         return RET_ERR;
@@ -215,7 +218,10 @@ s32 BBOX_GetBBoxOldiestName(const char* pszPath, const char* pszName, void* pArg
     if (stCurrState.st_mtime_ < pstOldiestState->st_mtime_) {
         /* record the oldiest file information */
         *pstOldiestState = stCurrState;
-        (void)bbox_snprintf(pszOldName, BBOX_NAME_PATH_LEN, "%s/%s", pszPath, pszName);
+        if (bbox_snprintf(pszOldName, BBOX_NAME_PATH_LEN, "%s/%s", pszPath, pszName) <= 0) {
+            bbox_print(PRINT_ERR, "bbox_snprintf is failed, errno = %d.\n", errno);
+            return RET_ERR;
+        }
     }
 
     return RET_OK;
@@ -228,7 +234,7 @@ void BBOX_RemoveOldiestBBoxFile(void)
 {
     s32 iRet = 0;
     struct kernel_stat stOldiestState;
-    struct BBOX_ListDirParam stArgs;
+    struct BBOX_ListDirParam stArgs = {0};
     char szFileName[BBOX_NAME_PATH_LEN];
     errno_t rc = EOK;
 
@@ -294,12 +300,16 @@ s32 BBOX_DoRemoveTempBBoxFile(const char* pszPath, const char* pszName, void* pA
         return RET_OK;
     }
 
-    /* ignode the file which not created by this process. */
-    if (0 != bbox_strncmp(pszName, program_invocation_short_name, bbox_strlen(program_invocation_short_name))) {
+    /* ignore the file which not created by this process. */
+    if (0 != bbox_strncmp(pszName, progname, bbox_strlen(progname))) {
         return RET_OK;
     }
 
-    bbox_snprintf(szFileName, sizeof(szFileName), "%s/%s", pszPath, pszName);
+    if (bbox_snprintf(szFileName, sizeof(szFileName), "%s/%s", pszPath, pszName) <= 0) {
+        bbox_print(PRINT_ERR, "bbox_snprintf is failed, errno = %d.\n", errno);
+        return RET_ERR;
+    }
+
     if (sys_stat(szFileName, &stCurrState) < 0) {
         bbox_print(PRINT_ERR, "Get stat of '%s' failed, errno = %d\n", szFileName, errno);
         return RET_ERR;
@@ -387,7 +397,7 @@ s32 BBOX_CreateCoredump(char* file_name)
     s32 iRet = 0;
     char szFileName[BBOX_NAME_PATH_LEN];
     char szTmpName[BBOX_NAME_PATH_LEN];
-    struct BBOX_ListDirParam stArgs;
+    struct BBOX_ListDirParam stArgs = {0};
     char* file_tmp = file_name;
     FRAME(frame);
 
@@ -401,6 +411,7 @@ s32 BBOX_CreateCoredump(char* file_name)
     }
 
     if (bbox_mkdir(g_szBboxCorePath) < 0) {
+        bbox_print(PRINT_ERR, "bbox_mkdir is failed, errno = %d.\n", errno);
         return RET_ERR;
     }
 
@@ -408,6 +419,9 @@ s32 BBOX_CreateCoredump(char* file_name)
     if (file_name == NULL) {
         if (BBOX_GetDefaultCoreName(szFileName, BBOX_NAME_PATH_LEN, BBOX_CORE_FILE_ADD_NAME) == RET_OK) {
             file_name = szFileName;
+        } else {
+            bbox_print(PRINT_ERR, "BBOX_GetDefaultCoreName is failed, errno = %d.\n", errno);
+            return RET_ERR;
         }
     }
 
@@ -415,6 +429,9 @@ s32 BBOX_CreateCoredump(char* file_name)
 
     if (BBOX_GetTmpCoreName(szTmpName, BBOX_NAME_PATH_LEN) == RET_OK) {
         file_tmp = szTmpName;
+    } else {
+        bbox_print(PRINT_ERR, "BBOX_GetTmpCoreName is failed, errno = %d.\n", errno);
+        return RET_ERR;
     }
 
     stArgs.pArg1 = file_name;
@@ -432,7 +449,12 @@ s32 BBOX_CreateCoredump(char* file_name)
 s32 BBOX_SetCoredumpPath(const char* pszPath)
 {
     if (NULL != pszPath) {
-        bbox_snprintf(g_szBboxCorePath, sizeof(g_szBboxCorePath), "%s", pszPath);
+        if (bbox_snprintf(g_szBboxCorePath, sizeof(g_szBboxCorePath), "%s", pszPath) <= 0) {
+            bbox_print(PRINT_ERR, "bbox_snprintf is failed, errno = %d.\n", errno);
+            return RET_ERR;
+        }
+    } else {
+        return RET_ERR;
     }
 
     if (0 == bbox_strlen(g_szBboxCorePath)) {
@@ -440,6 +462,7 @@ s32 BBOX_SetCoredumpPath(const char* pszPath)
     }
 
     if (bbox_mkdir(g_szBboxCorePath) < 0) {
+        bbox_print(PRINT_ERR, "bbox_mkdir is failed, errno = %d.\n", errno);
         return RET_ERR;
     }
 
@@ -460,3 +483,35 @@ s32 BBOX_SetCoreFileCount(s32 iCount)
 
     return RET_OK;
 }
+
+/*
+ * add an blacklist item to exclude it from core file.
+ *      void *pAddress : the head address of excluded memory
+ *      u64 uilen : memory size
+ * return RET_OK if success else RET_ERR.
+ */
+s32 BBOX_AddBlackListAddress(void* pAddress, u64 uiLen)
+{
+    if (pAddress == NULL || uiLen == 0) {
+        bbox_print(PRINT_ERR, "parameter pAddress(******) uiLen(%llu) is invaild.\n", uiLen);
+        return RET_ERR;
+    }
+
+    return _BBOX_AddBlackListAddress(pAddress, uiLen);
+}
+
+/*
+ * remove an blacklist item.
+ *      void *pAddress : the head address of excluded memory
+ * return RET_OK if success else RET_ERR.
+ */
+s32 BBOX_RmvBlackListAddress(void* pAddress)
+{
+    if (pAddress == NULL) {
+        bbox_print(PRINT_ERR, "parameter pAddress(******) is invaild.\n");
+        return RET_ERR;
+    }
+
+    return _BBOX_RmvBlackListAddress(pAddress);
+}
+

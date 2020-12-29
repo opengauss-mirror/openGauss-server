@@ -76,31 +76,14 @@ static void WriteEmptyXLOG(void);
 static void usage(void);
 
 #define XLOG_NAME_LENGTH 24
+const uint64 FREEZE_MAX_AGE = 2000000000;
 
-/*
- * TransactionIdLogicallyPrecedes --- is id1 logically < id2?
- */
-bool TransactionIdLogicallyPrecedes(TransactionId id1, TransactionId id2)
-{
-    /*
-     * If either ID is a permanent XID then we can just do unsigned
-     * comparison.	If both are normal, do a modulo-2^31 comparison.
-     */
-    int32 diff;
-
-    if (!TransactionIdIsNormal(id1) || !TransactionIdIsNormal(id2))
-        return (id1 < id2);
-
-    diff = (int32)(id1 - id2);
-    return (diff < 0);
-}
 
 int main(int argc, char* argv[])
 {
     int c;
     bool force = false;
     bool noupdate = false;
-    uint32 set_xid_epoch = (uint32)-1;
     TransactionId set_xid = 0;
     Oid set_oid = 0;
     MultiXactId set_mxid = 0;
@@ -127,7 +110,7 @@ int main(int argc, char* argv[])
 #ifdef ENABLE_MULTIPLE_NODES
             puts("pg_resetxlog (PostgreSQL) " PG_VERSION);
 #else
-            puts("pg_resetxlog " DEF_GS_VERSION);
+            puts("pg_resetxlog (openGauss) " PG_VERSION);
 #endif
             exit(0);
         }
@@ -150,7 +133,6 @@ int main(int argc, char* argv[])
                     fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
                     exit(1);
                 }
-                set_xid_epoch = (uint32)tmpValue;
                 break;
 
             case 'x':
@@ -307,9 +289,12 @@ int main(int argc, char* argv[])
          * reasonably safe.  The magic constant here corresponds to the
          * maximum allowed value of autovacuum_freeze_max_age.
          */
-        ControlFile.checkPointCopy.oldestXid = set_xid - 2000000000;
-        if (TransactionIdLogicallyPrecedes(ControlFile.checkPointCopy.oldestXid, FirstNormalTransactionId))
+
+        if (set_xid > (FREEZE_MAX_AGE + FirstNormalTransactionId)) {
+            ControlFile.checkPointCopy.oldestXid = set_xid - FREEZE_MAX_AGE;
+        } else { 
             ControlFile.checkPointCopy.oldestXid = FirstNormalTransactionId;
+        }
         ControlFile.checkPointCopy.oldestXidDB = InvalidOid;
     }
 
@@ -448,6 +433,7 @@ static bool ReadControlFile(void)
     /* Looks like it's a mess. */
     fprintf(stderr, _("%s: pg_control exists but is broken or unknown version; ignoring it\n"), progname);
     free(buffer);
+    buffer = NULL;
     return false;
 }
 
@@ -497,6 +483,7 @@ static void GuessControlValues(void)
     ControlFile.checkPoint = ControlFile.checkPointCopy.redo;
 
     /* minRecoveryPoint, backupStartPoint and backupEndPoint can be left zero */
+
     ControlFile.wal_level = WAL_LEVEL_MINIMAL;
     ControlFile.MaxConnections = 100;
     ControlFile.max_prepared_xacts = 0;
@@ -695,6 +682,10 @@ static void FindEndOfXLOG(void)
     uint64 segs_per_xlogid = 0;
     uint64 xlogbytepos = 0;
 
+    if (ControlFile.xlog_seg_size == 0) {
+        fprintf(stderr, _("%s: xlog segment size(%u) is invalid "), progname, ControlFile.xlog_seg_size);
+        exit(1);
+    }
     /*
      * Initialize the max() computation using the last checkpoint address from
      * old pg_control.	Note that for the moment we are working with segment
@@ -765,6 +756,13 @@ static void FindEndOfXLOG(void)
      * are in virgin territory.
      */
     xlogbytepos = newXlogSegNo * ControlFile.xlog_seg_size;
+
+    if (xlogbytepos / ControlFile.xlog_seg_size != newXlogSegNo) {
+        fprintf(stderr, _("%s: newXlogSegNo(%lu) * ControlFile.xlog_seg_size(%u) is overflow"), progname, newXlogSegNo, 
+            ControlFile.xlog_seg_size);
+        exit(1);
+    }
+    
     newXlogSegNo = (xlogbytepos + XLogSegSize - 1) / XLogSegSize;
     newXlogSegNo++;
 }
@@ -989,6 +987,7 @@ static void WriteEmptyXLOG(void)
     close(fd);
     fd = -1;
     free(buffer);
+    buffer = NULL;
 }
 
 static void usage(void)

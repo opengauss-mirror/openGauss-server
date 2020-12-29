@@ -1,18 +1,8 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
  *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * gds_stream.cpp
  *
@@ -33,6 +23,7 @@
 #include "miscadmin.h"
 #include "port.h"
 #include "libpq/pqformat.h"
+#include "pgstat.h"
 
 
 /* extend size for GDS stream input buffer */
@@ -144,9 +135,13 @@ void GDSStream::InitSSL(void)
     char* homedir = gs_getenv_r("GAUSSHOME");
     if (NULL == homedir) {
         ereport(ERROR,
-            (errmodule(MOD_SSL), errcode_for_file_access(), errmsg("env GAUSSHOME not found, please set it first")));
+            (errmodule(MOD_SSL), errcode_for_file_access(), errmsg("env $GAUSSHOME not found, please set it first")));
     }
-    check_backend_env(homedir);
+    if (backend_env_valid(homedir, "GAUSSHOME") == false) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("Incorrect backend environment variable $GAUSSHOME"),
+            errdetail("Please refer to the backend instance log for the detail")));
+    }
     /* Load the ROOT CA files */
     int nRet = snprintf_s(ssl_dir, MAXPGPATH, MAXPGPATH - 1, "%s/share/sslcert/gds/", homedir);
     securec_check_ss_c(nRet, "\0", "\0");
@@ -236,6 +231,11 @@ retry:
     ufds[0].events = POLLIN | POLLPRI;
     retval = poll(ufds, 1, -1);
 #else
+    if ((m_fd + 1) > FD_SETSIZE) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("m_fd + 1 cannot be greater than FD_SETSIZE")));
+    }
     FD_SET(m_fd, &readfds);
     retval = select(m_fd + 1, &readfds, NULL, NULL, -1);
 #endif
@@ -288,7 +288,10 @@ int GDSStream::InternalRead()
         ereport(ERROR, (errcode_for_socket_access(), errmsg("Bad socket.")));
 
 retry:
+    PGSTAT_INIT_TIME_RECORD();
+    PGSTAT_START_TIME_RECORD();
     nread = recv(m_fd, m_inBuf->data + m_inBuf->len, m_inBuf->maxlen - m_inBuf->len, 0);
+    END_NET_RECV_INFO(nread);
     if (nread < 0) {
         if (errno == EINTR)
             goto retry;
@@ -470,15 +473,10 @@ void GDSStream::Flush()
 
 #define HAS_DATA_BUFFERED(buf)         \
     ((buf)->cursor + 4 < (buf)->len && \
-        (buf)->cursor + 4 + ntohl(*(uint32*)((buf)->data + (buf)->cursor + 1)) < (size_t)(buf)->len)
+       (size_t)((buf)->cursor + 4) + (size_t)ntohl(*(uint32*)((buf)->data + (buf)->cursor + 1)) < (size_t)(buf)->len)
 
 int GDSStream::ReadMessage(StringInfoData& dst)
 {
-
-#ifndef ENABLE_MULTIPLE_NODES
-        ereport(ERROR, (errmodule(MOD_GDS), (errmsg("No GDS service available in single-node mode."))));
-#endif
-
     int retval = 0;
 
     resetStringInfo(&dst);
@@ -488,17 +486,23 @@ int GDSStream::ReadMessage(StringInfoData& dst)
 
     if (retval != EOF) {
         int length = ntohl(*(uint32*)(m_inBuf->data + m_inBuf->cursor + 1));
-        if (length < 0 || (uint32)length > MaxAllocSize + 4)
+
+        if (length > m_inBuf->len - m_inBuf->cursor) {
+            ereport(ERROR, (errmodule(MOD_GDS), errcode(ERRCODE_LOG),
+                errmsg("Unexpected length of data coming supposedly from GDS. Could be an forged attack package.")));
+        }
+        if (length < 0 || (uint32)length > MaxAllocSize + 4) {
             ereport(ERROR,
                 (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED),
-                    errmsg("Message size exceeds the maximum allowed (%ld)", (int64)MaxAllocSize + 4)));
-        
+                    errmsg("Message size exceeds the maximum allowed (%d)", (int)MaxAllocSize + 4)));
+        }
         length += GDSCmdHeaderSize;
         appendBinaryStringInfo(&dst, m_inBuf->data + m_inBuf->cursor, length);
         m_inBuf->cursor += length;
 
-    } else
+    } else {
         ereport(ERROR, (errcode(ERRCODE_OPERATE_RESULT_NOT_EXPECTED), errmsg("Incomplete Message from GDS .")));
+    }
 
     return dst.len;
 }
@@ -644,9 +648,6 @@ static int _ReadResult(CmdQueryResult* cmd, const char* msg)
 
 CmdBase* DeserializeCmd(StringInfo buf)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    ereport(ERROR, (errmodule(MOD_GDS), (errmsg("No GDS service available in single-node mode."))));
-#endif
     /* 1 byte: message type */
     char type = *(buf->data + buf->cursor++);
     /* 4 bytes: message body length */
@@ -657,9 +658,15 @@ CmdBase* DeserializeCmd(StringInfo buf)
     buf->cursor += sizeof(uint32);
     length = ntohl(length);
 
+    if (length > (uint32)(buf->len - buf->cursor)) {
+        ereport(ERROR, (errmodule(MOD_GDS), errcode(ERRCODE_LOG),
+            errmsg("Unexpected length of data coming supposedly from GDS. Could be an forged attack package.")));
+    }
+
     const int cmdtypeSize = 30;
     char cmdtype[cmdtypeSize];
     errno_t ret = 0;
+    int errorCheck = 0;
 
     /* length bytes: message body data */
     switch (type) {
@@ -669,7 +676,11 @@ CmdBase* DeserializeCmd(StringInfo buf)
 
             strcmd = pnstrdup(buf->data + buf->cursor, length);
             cmd = (CmdError*)palloc(sizeof(CmdError));
-            _ReadError((CmdError*)cmd, strcmd);
+            errorCheck = _ReadError((CmdError*)cmd, strcmd);
+            if (unlikely(errorCheck) != 0) {
+                ereport(ERROR, (errmodule(MOD_GDS), errcode(ERRCODE_LOG),
+                    errmsg("Failed to _ReadError in CMD_TYPE_ERROR, could be a forged package.")));
+            }
             pfree_ext(strcmd);
             cmd->m_type = CMD_TYPE_ERROR;
             break;
@@ -679,7 +690,11 @@ CmdBase* DeserializeCmd(StringInfo buf)
 
             strcmd = pnstrdup(buf->data + buf->cursor, length);
             cmd = (CmdFileSwitch*)palloc(sizeof(CmdFileSwitch));
-            _ReadFileSwitch((CmdFileSwitch*)cmd, strcmd);
+            errorCheck = _ReadFileSwitch((CmdFileSwitch*)cmd, strcmd);
+            if (unlikely(errorCheck) != 0) {
+                ereport(ERROR, (errmodule(MOD_GDS), errcode(ERRCODE_LOG),
+                    errmsg("Failed to _ReadFileSwitch in CMD_TYPE_FILE_SWITCH, could be a forged package.")));
+            }
             pfree_ext(strcmd);
             cmd->m_type = CMD_TYPE_FILE_SWITCH;
             break;
@@ -689,7 +704,11 @@ CmdBase* DeserializeCmd(StringInfo buf)
 
             strcmd = pnstrdup(buf->data + buf->cursor, length);
             cmd = (CmdResponse*)palloc(sizeof(CmdResponse));
-            _ReadResponse((CmdResponse*)cmd, strcmd);
+            errorCheck = _ReadResponse((CmdResponse*)cmd, strcmd);
+            if (unlikely(errorCheck) != 0) {
+                ereport(ERROR, (errmodule(MOD_GDS), errcode(ERRCODE_LOG),
+                    errmsg("Failed to _ReadResponse in CMD_TYPE_RESPONSE, could be a forged package.")));
+            }
             pfree_ext(strcmd);
             cmd->m_type = CMD_TYPE_RESPONSE;
             break;
@@ -726,7 +745,11 @@ CmdBase* DeserializeCmd(StringInfo buf)
 
             strcmd = pnstrdup(buf->data + buf->cursor, length);
             cmd = (CmdQueryResult*)palloc(sizeof(CmdQueryResult));
-            _ReadResult((CmdQueryResult*)cmd, strcmd);
+            errorCheck = _ReadResult((CmdQueryResult*)cmd, strcmd);
+            if (unlikely(errorCheck) != 0) {
+                ereport(ERROR, (errmodule(MOD_GDS), errcode(ERRCODE_LOG),
+                    errmsg("Failed to _ReadResult in CMD_TYPE_QUERY_RESULT_V1, could be a forged package.")));
+            }
             pfree_ext(strcmd);
             cmd->m_type = CMD_TYPE_QUERY_RESULT_V1;
             break;
@@ -745,4 +768,3 @@ CmdBase* DeserializeCmd(StringInfo buf)
 
     return cmd;
 }
-

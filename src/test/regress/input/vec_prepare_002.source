@@ -19,15 +19,15 @@ Year_Dpsit_Accum DECIMAL(18,2) ,
 Party_Class_Cd CHAR(4) 
 )with (orientation = column);
 
-copy dwSumData_act.C03_SEMI_CRDT_CARD_ACCT from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_casewhen_1.data' delimiter ',' NULL '';
-copy dwSumData_act.C03_SEMI_CRDT_CARD_ACCT from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_casewhen_2.data' delimiter ',' NULL '';
+copy dwSumData_act.C03_SEMI_CRDT_CARD_ACCT from '@abs_srcdir@/data/vec_casewhen_1.data' delimiter ',' NULL '';
+copy dwSumData_act.C03_SEMI_CRDT_CARD_ACCT from '@abs_srcdir@/data/vec_casewhen_2.data' delimiter ',' NULL '';
 ANALYZE dwSumData_act.C03_SEMI_CRDT_CARD_ACCT;
 
 --test explain_dna_file
 show explain_dna_file;
 set explain_dna_file = 'data';
-set explain_dna_file = '@abs_srcdir@/tmp_check/datanode1/pg_copydir';
-set explain_dna_file = '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test.csv';
+set explain_dna_file = '@abs_srcdir@/data';
+set explain_dna_file = '@abs_srcdir@/data/test.csv';
 reset explain_dna_file;
 /*
  * Create Table to test the function of ExecVecSetOp for vec_setop_001~vec_setop_004

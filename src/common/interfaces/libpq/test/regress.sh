@@ -1,12 +1,11 @@
 #!/bin/bash
-#-------------------------------------------------------------------------
-#
-# regress.sh
-# 
-# IDENTIFICATION
-#    src/common/interfaces/libpq/test/regress.sh
-#
-#-------------------------------------------------------------------------
+# ***********************************************************************
+# Copyright: (c) Huawei Technologies Co., Ltd. 2019. All rights reserved.
+# Generate regress diff report
+# version: 1.0.0
+# change log:
+# ***********************************************************************
+
 set -e
 
 while read line

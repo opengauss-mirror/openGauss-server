@@ -1,20 +1,26 @@
 # ---------------------------
 # test cases for CStore
 # ---------------------------
-test: hw_cstore_alter hw_cstore_alter1 cstore_alter_table cstore_alter_table1 cstore_alter_table2 cstore_alter_table3 cstore_alter_table4 cstore_alter_table5 cstore_alter_table6 cstore_alter_table7 cstore_alter_table8 cstore_alter_table9 cstore_alter_table10 hw_alter_table_instant hw_cstore_copy hw_cstore_copy1
-  
-test: hw_cstore_tablespace hw_cstore_truncate hw_cstore_update
-test: hw_cstore_roughcheck
-test: hw_cstore_partition_update hw_cstore_partition_update1 hw_cstore_partition_update2
+#hw_cstore_alter1 cstore_alter_table cstore_alter_table1 
+test: hw_cstore_alter cstore_alter_table2 cstore_alter_table5 cstore_alter_table6 cstore_alter_table7 cstore_alter_table9 cstore_alter_table10 hw_cstore_copy
+
+#cstore_alter_table3 cstore_alter_table4 cstore_alter_table8 hw_alter_table_instant hw_cstore_copy1
+#test: cstore_alter_table_1
+#test: temp__1
+#test: hw_cstore_copy hw_cstore_copy1
+#test: hw_cstore_load hw_cstore_load1 hw_cstore_load2
+#test: hw_cstore_index hw_cstore_index1 hw_cstore_index2
+#test: hw_cstore_vacuum
+#test: hw_cstore_insert
+#test: hw_cstore_delete
+#test: hw_cstore_unsupport
+test: hw_cstore_tablespace
+#test: hw_cstore_truncate
+#test: hw_cstore_roughcheck
+#test: hw_cstore_update
+#test: hw_cstore_partition_update hw_cstore_partition_update1 hw_cstore_partition_update2
 
 #------------------------------
 # CStore compression test cases
 #-----------------------------
-test: cstore_cmpr_delta cstore_cmpr_date cstore_cmpr_timestamp_with_timezone cstore_cmpr_time_with_timezone cstore_cmpr_delta_nbits cstore_cmpr_delta_int cstore_cmpr_str cstore_cmpr_dict_00 cstore_cmpr_rle_2byte_runs 
-test: cstore_cmpr_every_datatype cstore_cmpr_zlib cstore_unsupported_feature cstore_unsupported_feature1 cstore_cmpr_rle_bound cstore_cmpr_rle_bound1 cstore_nan cstore_infinity cstore_log2_error cstore_create_clause cstore_create_clause1 cstore_nulls_00 cstore_partial_cluster_info
-test: cstore_replication_table_delete
-
-test: hw_cstore_index hw_cstore_index1 hw_cstore_index2
-test: hw_cstore_vacuum
-test: hw_cstore_insert hw_cstore_delete hw_cstore_unsupport
-
+#test: cstore_cmpr_delta cstore_cmpr_date cstore_cmpr_timestamp_with_timezone cstore_cmpr_time_with_timezone cstore_cmpr_delta_nbits cstore_cmpr_delta_int cstore_cmpr_str cstore_cmpr_dict_00 cstore_cmpr_rle_2byte_runs 

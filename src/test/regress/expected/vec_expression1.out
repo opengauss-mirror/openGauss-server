@@ -1,0 +1,2520 @@
+/*
+ * This file is used to test the function of vecexpression.cpp --- test（1）
+ */
+/*******************************
+Expression Type:
+	T_Var,
+	T_Const,
+	T_Param,
+	T_Aggref,
+	T_WindowFunc,
+	T_ArrayRef,
+	T_FuncExpr,
+	T_NamedArgExpr,
+	T_OpExpr,
+	T_DistinctExpr,
+	T_NullIfExpr,
+	T_ScalarArrayOpExpr,
+	T_BoolExpr,
+	T_SubLink,
+	T_SubPlan,
+	T_AlternativeSubPlan,
+	T_FieldSelect,
+	T_FieldStore,
+	T_RelabelType,
+	T_CoerceViaIO,
+	T_ArrayCoerceExpr,
+	T_ConvertRowtypeExpr,
+	T_CollateExpr,
+	T_CaseExpr,
+	T_CaseWhen,
+	T_CaseTestExpr,
+	T_ArrayExpr,
+	T_RowExpr,
+	T_RowCompareExpr,
+	T_CoalesceExpr,
+	T_MinMaxExpr,
+	T_XmlExpr,
+	T_NullTest,
+	T_BooleanTest
+	
+Using Type:
+	qual
+	targetlist
+*********************************/
+----
+--- Create Table and Insert Data
+----
+create schema vector_expression_engine_first;
+set current_schema=vector_expression_engine_first;
+create table vector_expression_engine_first.VECTOR_EXPR_TABLE_01
+(
+   a	bool
+  ,b	bool
+  ,c	int
+)with (orientation=column);
+COPY VECTOR_EXPR_TABLE_01(a, b, c) FROM stdin;
+create table vector_expression_engine_first.VECTOR_EXPR_TABLE_02
+(
+   col_int	int
+  ,col_int2	int
+  ,col_char	char(20)
+  ,col_varchar	varchar(30)
+  ,col_date	date
+  ,col_num	numeric(10,2)
+  ,col_num2	numeric(10,4)
+  ,col_float	float4
+  ,col_float2	float8
+)with (orientation=column);
+COPY VECTOR_EXPR_TABLE_02(col_int, col_int2, col_char, col_varchar, col_date, col_num, col_num2, col_float, col_float2) FROM stdin;
+CREATE TABLE vector_expression_engine_first.VECTOR_EXPR_TABLE_03(
+    a      int,
+    b      int,
+    c      int 
+) WITH (orientation=column) distribute by hash (a);
+COPY VECTOR_EXPR_TABLE_03(a, b, c) FROM stdin;
+CREATE TABLE vector_expression_engine_first.VECTOR_EXPR_TABLE_04
+(
+   a varchar
+  ,b char(10)
+  ,c varchar(10)
+  ,d text
+) with(orientation=column);
+COPY VECTOR_EXPR_TABLE_04(a, b, c, d) FROM stdin;
+CREATE TABLE vector_expression_engine_first.VECTOR_EXPR_TABLE_05
+(
+   a bool
+  ,b int
+  ,c bool
+) with (orientation=column);
+COPY VECTOR_EXPR_TABLE_05(a, b, c) FROM stdin;
+CREATE TABLE vector_expression_engine_first.VECTOR_EXPR_TABLE_06
+(
+   a varchar
+  ,b char(10)
+  ,c text
+) with(orientation=column);
+COPY VECTOR_EXPR_TABLE_06(a, b, c) FROM stdin;
+CREATE TABLE vector_expression_engine_first.VECTOR_EXPR_TABLE_07
+(
+   col_num	numeric(5, 0)
+  ,col_int	int
+  ,col_timestamptz	timestamptz
+  ,col_varchar	varchar
+  ,col_char	char(2)
+  ,col_interval	interval
+  ,col_timetz	timetz
+  ,col_tinterval	tinterval
+) with(orientation=column);
+COPY VECTOR_EXPR_TABLE_07(col_num, col_int, col_timestamptz, col_varchar, col_char, col_interval, col_timetz, col_tinterval) FROM stdin;
+CREATE TABLE vector_expression_engine_first.VECTOR_EXPR_TABLE_08
+(
+   col_num	numeric(3,0)
+  ,col_int	int
+)with(orientation=column);
+COPY VECTOR_EXPR_TABLE_08(col_num, col_int) FROM stdin;
+analyze vector_expr_table_01;
+analyze vector_expr_table_02;
+analyze vector_expr_table_03;
+analyze vector_expr_table_04;
+analyze vector_expr_table_05;
+analyze vector_expr_table_06;
+analyze vector_expr_table_07;
+analyze vector_expr_table_08;
+select * from VECTOR_EXPR_TABLE_03 where (CASE
+                         WHEN (SELECT distinct -5
+                                 FROM VECTOR_EXPR_TABLE_04
+                                ) NOT LIKE '%C%'   THEN
+                          VECTOR_EXPR_TABLE_03.a else NULL end) = 0;
+ a | b | c 
+---+---+---
+(0 rows)
+
+----
+--- case 1: AND OR NOT
+----
+explain (verbose on, costs off) select a, b, a and b, a or b, not a from vector_expr_table_01;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, ((a AND b)), ((a OR b)), ((NOT a))
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, ((a AND b)), ((a OR b)), ((NOT a))
+         Node/s: All datanodes
+         ->  CStore Scan on vector_expression_engine_first.vector_expr_table_01
+               Output: a, b, (a AND b), (a OR b), (NOT a)
+               Distribute Key: a
+(8 rows)
+
+select a, b, a and b, a or b, not a from vector_expr_table_01 order by 1, 2, 3, 4, 5;
+ a | b | ?column? | ?column? | ?column? 
+---+---+----------+----------+----------
+ f | f | f        | f        | t
+ f | t | f        | t        | t
+ f |   | f        |          | t
+ t | f | f        | t        | f
+ t | t | t        | t        | f
+ t |   |          | t        | f
+   | f | f        |          | 
+   | t |          | t        | 
+   |   |          |          | 
+(9 rows)
+
+--NULL Test
+explain (verbose on, costs off) select * from vector_expr_table_01 where a is NULL order by 1, 2;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, c
+         Node/s: datanode1
+         ->  Vector Sort
+               Output: a, b, c
+               Sort Key: vector_expr_table_01.a, vector_expr_table_01.b
+               ->  CStore Scan on vector_expression_engine_first.vector_expr_table_01
+                     Output: a, b, c
+                     Distribute Key: a
+                     Filter: (vector_expr_table_01.a IS NULL)
+(12 rows)
+
+select * from vector_expr_table_01 where a is NULL order by 1, 2;
+ a | b | c 
+---+---+---
+   | f | 1
+   | t | 1
+   |   | 1
+(3 rows)
+
+select * from vector_expr_table_01 where a is not NULL order by 1, 2;
+ a | b | c 
+---+---+---
+ f | f | 1
+ f | t | 1
+ f |   | 1
+ t | f | 1
+ t | t | 1
+ t |   | 1
+(6 rows)
+
+select a from vector_expr_table_01 where a is NULL order by 1;
+ a 
+---
+ 
+ 
+ 
+(3 rows)
+
+select a from vector_expr_table_01 where a is not NULL order by 1;
+ a 
+---
+ f
+ f
+ f
+ t
+ t
+ t
+(6 rows)
+
+select * from vector_expr_table_01 where b is not NULL order by 1, 2;
+ a | b | c 
+---+---+---
+ f | f | 1
+ f | t | 1
+ t | f | 1
+ t | t | 1
+   | f | 1
+   | t | 1
+(6 rows)
+
+select * from vector_expr_table_01 where a is NULL and b is not NULL order by 1, 2;
+ a | b | c 
+---+---+---
+   | f | 1
+   | t | 1
+(2 rows)
+
+select * from vector_expr_table_01 where a is not NULL and b is NULL order by 1, 2;
+ a | b | c 
+---+---+---
+ f |   | 1
+ t |   | 1
+(2 rows)
+
+select * from vector_expr_table_01 where a is not NULL and b is not NULL order by 1, 2;
+ a | b | c 
+---+---+---
+ f | f | 1
+ f | t | 1
+ t | f | 1
+ t | t | 1
+(4 rows)
+
+select a is not NULL, a from vector_expr_table_01 order by 1, 2;
+ ?column? | a 
+----------+---
+ f        | 
+ f        | 
+ f        | 
+ t        | f
+ t        | f
+ t        | f
+ t        | t
+ t        | t
+ t        | t
+(9 rows)
+
+select a is NULL, a from vector_expr_table_01 order by 1, 2;
+ ?column? | a 
+----------+---
+ f        | f
+ f        | f
+ f        | f
+ f        | t
+ f        | t
+ f        | t
+ t        | 
+ t        | 
+ t        | 
+(9 rows)
+
+select a is not NULL, a from vector_expr_table_01 where a is not NULL order by 1, 2;
+ ?column? | a 
+----------+---
+ t        | f
+ t        | f
+ t        | f
+ t        | t
+ t        | t
+ t        | t
+(6 rows)
+
+select a is NULL, a from vector_expr_table_01 where a is NULL order by 1, 2;
+ ?column? | a 
+----------+---
+ t        | 
+ t        | 
+ t        | 
+(3 rows)
+
+--Operation
+explain (verbose on, costs off) select * from vector_expr_table_02 where col_int = 1;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: col_int, col_int2, col_char, col_varchar, col_date, col_num, col_num2, col_float, col_float2
+   ->  Vector Streaming (type: GATHER)
+         Output: col_int, col_int2, col_char, col_varchar, col_date, col_num, col_num2, col_float, col_float2
+         Node/s: datanode8
+         ->  CStore Scan on vector_expression_engine_first.vector_expr_table_02
+               Output: col_int, col_int2, col_char, col_varchar, col_date, col_num, col_num2, col_float, col_float2
+               Distribute Key: col_int
+               Filter: (vector_expr_table_02.col_int = 1)
+(9 rows)
+
+select * from vector_expr_table_02 where col_int = 1;
+ col_int |  col_int2  |       col_char       | col_varchar |         col_date         | col_num | col_num2 | col_float | col_float2 
+---------+------------+----------------------+-------------+--------------------------+---------+----------+-----------+------------
+       1 | 1345971420 | abccd                | abccd       | Fri Nov 02 00:00:00 2012 |   11.18 |   1.1181 |    55.555 |     55.555
+(1 row)
+
+select col_int, col_int2, col_int + col_int2 from vector_expr_table_02 where col_int = 1;
+ col_int |  col_int2  |  ?column?  
+---------+------------+------------
+       1 | 1345971420 | 1345971421
+(1 row)
+
+--Date
+select col_date, sum(1) from vector_expr_table_02 where col_date between date '2012-11-02'  and date '2012-12-20' group by col_date order by 1, 2; 
+         col_date         | sum 
+--------------------------+-----
+ Fri Nov 02 00:00:00 2012 |  16
+ Sat Nov 03 00:00:00 2012 |   8
+ Sat Dec 01 00:00:00 2012 |   8
+ Sun Dec 02 00:00:00 2012 |  14
+(4 rows)
+
+select A.col_date, sum(1) s from vector_expr_table_02 A where extract(year from A.col_date) >= 2012 group by A.col_date order by A.col_date, s;
+         col_date         | s  
+--------------------------+----
+ Thu Nov 01 00:00:00 2012 |  8
+ Fri Nov 02 00:00:00 2012 | 16
+ Sat Nov 03 00:00:00 2012 |  8
+ Sat Dec 01 00:00:00 2012 |  8
+ Sun Dec 02 00:00:00 2012 | 14
+ Tue Nov 12 00:00:00 2013 | 16
+(6 rows)
+
+explain (verbose on, costs off) select A.col_date, extract(year from B.col_date) y from vector_expr_table_02 A join vector_expr_table_02 B on A.col_char=B.col_char group by A.col_date,extract(year from B.col_date) order by 1, y;
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a.col_date, (date_part('year'::text, b.col_date))
+   ->  Vector Streaming (type: GATHER)
+         Output: a.col_date, (date_part('year'::text, b.col_date))
+         Merge Sort Key: a.col_date, (date_part('year'::text, b.col_date))
+         Node/s: All datanodes
+         ->  Vector Sort
+               Output: a.col_date, (date_part('year'::text, b.col_date))
+               Sort Key: a.col_date, (date_part('year'::text, b.col_date))
+               ->  Vector Sonic Hash Aggregate
+                     Output: a.col_date, (date_part('year'::text, b.col_date))
+                     Group By Key: a.col_date, (date_part('year'::text, b.col_date))
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Output: a.col_date, (date_part('year'::text, b.col_date))
+                           Distribute Key: a.col_date, (date_part('year'::text, b.col_date))
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Vector Sonic Hash Aggregate
+                                 Output: a.col_date, (date_part('year'::text, b.col_date))
+                                 Group By Key: a.col_date, date_part('year'::text, b.col_date)
+                                 ->  Vector Sonic Hash Join
+                                       Output: a.col_date, date_part('year'::text, b.col_date)
+                                       Hash Cond: (a.col_char = b.col_char)
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+                                             Output: a.col_date, a.col_char
+                                             Distribute Key: a.col_char
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  CStore Scan on vector_expression_engine_first.vector_expr_table_02 a
+                                                   Output: a.col_date, a.col_char
+                                                   Distribute Key: a.col_int
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+                                             Output: b.col_date, b.col_char
+                                             Distribute Key: b.col_char
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  CStore Scan on vector_expression_engine_first.vector_expr_table_02 b
+                                                   Output: b.col_date, b.col_char
+                                                   Distribute Key: b.col_int
+(39 rows)
+
+select A.col_date, extract(year from B.col_date) y from vector_expr_table_02 A join vector_expr_table_02 B on A.col_char=B.col_char group by A.col_date,extract(year from B.col_date) order by 1, y;
+         col_date         |  y   
+--------------------------+------
+ Tue Nov 01 00:00:00 2011 | 2011
+ Tue Nov 01 00:00:00 2011 |     
+ Thu Nov 01 00:00:00 2012 | 2012
+ Fri Nov 02 00:00:00 2012 | 2012
+ Fri Nov 02 00:00:00 2012 | 2013
+ Sat Nov 03 00:00:00 2012 | 2012
+ Sat Dec 01 00:00:00 2012 | 2012
+ Sat Dec 01 00:00:00 2012 | 2013
+ Sun Dec 02 00:00:00 2012 | 2012
+ Sun Dec 02 00:00:00 2012 |     
+ Tue Nov 12 00:00:00 2013 | 2012
+ Tue Nov 12 00:00:00 2013 | 2013
+                          | 2011
+                          | 2012
+                          |     
+(15 rows)
+
+explain (verbose on, costs off) select A.col_date, substring(B.col_varchar, 1, 2) y from vector_expr_table_02 A join vector_expr_table_02 B on A.col_char = B.col_char group by A.col_date,substring(B.col_varchar, 1, 2) order by A.col_date, y;
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a.col_date, ("substring"((b.col_varchar)::text, 1, 2))
+   ->  Vector Streaming (type: GATHER)
+         Output: a.col_date, ("substring"((b.col_varchar)::text, 1, 2))
+         Merge Sort Key: a.col_date, ("substring"((b.col_varchar)::text, 1, 2))
+         Node/s: All datanodes
+         ->  Vector Sort
+               Output: a.col_date, ("substring"((b.col_varchar)::text, 1, 2))
+               Sort Key: a.col_date, ("substring"((b.col_varchar)::text, 1, 2))
+               ->  Vector Hash Aggregate
+                     Output: a.col_date, ("substring"((b.col_varchar)::text, 1, 2))
+                     Group By Key: a.col_date, ("substring"((b.col_varchar)::text, 1, 2))
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Output: a.col_date, ("substring"((b.col_varchar)::text, 1, 2))
+                           Distribute Key: a.col_date, ("substring"((b.col_varchar)::text, 1, 2))
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  Vector Hash Aggregate
+                                 Output: a.col_date, ("substring"((b.col_varchar)::text, 1, 2))
+                                 Group By Key: a.col_date, "substring"((b.col_varchar)::text, 1, 2)
+                                 ->  Vector Sonic Hash Join
+                                       Output: a.col_date, "substring"((b.col_varchar)::text, 1, 2)
+                                       Hash Cond: (a.col_char = b.col_char)
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+                                             Output: a.col_date, a.col_char
+                                             Distribute Key: a.col_char
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  CStore Scan on vector_expression_engine_first.vector_expr_table_02 a
+                                                   Output: a.col_date, a.col_char
+                                                   Distribute Key: a.col_int
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+                                             Output: b.col_varchar, b.col_char
+                                             Distribute Key: b.col_char
+                                             Spawn on: All datanodes
+                                             Consumer Nodes: All datanodes
+                                             ->  CStore Scan on vector_expression_engine_first.vector_expr_table_02 b
+                                                   Output: b.col_varchar, b.col_char
+                                                   Distribute Key: b.col_int
+(39 rows)
+
+select A.col_date, substring(B.col_varchar, 1, 2) y from vector_expr_table_02 A join vector_expr_table_02 B on A.col_char = B.col_char group by A.col_date,substring(B.col_varchar, 1, 2) order by A.col_date, y;
+         col_date         | y  
+--------------------------+----
+ Tue Nov 01 00:00:00 2011 | aa
+ Thu Nov 01 00:00:00 2012 | ac
+ Fri Nov 02 00:00:00 2012 | ab
+ Fri Nov 02 00:00:00 2012 | 
+ Sat Nov 03 00:00:00 2012 | aa
+ Sat Dec 01 00:00:00 2012 | ab
+ Sat Dec 01 00:00:00 2012 | 
+ Sun Dec 02 00:00:00 2012 | aa
+ Tue Nov 12 00:00:00 2013 | ab
+ Tue Nov 12 00:00:00 2013 | 
+                          | aa
+(11 rows)
+
+select A.col_date, sum(1) s from vector_expr_table_02 A where abs(-extract(year from A.col_date)) >= 2012 group by A.col_date order by A.col_date, s;
+         col_date         | s  
+--------------------------+----
+ Thu Nov 01 00:00:00 2012 |  8
+ Fri Nov 02 00:00:00 2012 | 16
+ Sat Nov 03 00:00:00 2012 |  8
+ Sat Dec 01 00:00:00 2012 |  8
+ Sun Dec 02 00:00:00 2012 | 14
+ Tue Nov 12 00:00:00 2013 | 16
+(6 rows)
+
+-- String ops does not require special plan, FIXME: IN-list is still not right) 
+select col_int, sum(1) from vector_expr_table_02 where col_char like '%cc%' group by col_int order by col_int; 
+ col_int | sum 
+---------+-----
+       0 |   1
+       1 |   1
+       2 |   5
+       8 |   6
+      87 |   9
+     123 |   1
+         |  48
+(7 rows)
+
+select col_int, sum(1) from vector_expr_table_02 where col_varchar like '%cc%' group by col_int order by col_int;
+ col_int | sum 
+---------+-----
+       0 |   1
+       1 |   1
+       2 |   5
+       8 |   6
+      87 |   9
+         |  48
+(6 rows)
+
+select col_int, sum(1) from vector_expr_table_02 where col_char like 'ab%' group by col_int order by col_int;
+ col_int | sum 
+---------+-----
+       1 |   1
+       2 |   2
+       8 |   3
+      87 |   8
+     123 |   1
+         |  24
+(6 rows)
+
+select col_int, sum(1) from vector_expr_table_02 where col_varchar like 'ab%' group by col_int order by col_int;
+ col_int | sum 
+---------+-----
+       1 |   1
+       2 |   2
+       8 |   3
+      87 |   8
+         |  24
+(5 rows)
+
+select col_char, sum(1) from vector_expr_table_02 where col_char not like '%d' group by col_char order by col_char;
+       col_char       | sum 
+----------------------+-----
+ aabbcd               |   7
+ aabccd               |   8
+ aaccccd              |  16
+ abbccd               |  32
+ abccd                |   7
+ acbccd               |   8
+(6 rows)
+
+select col_varchar, sum(1) from vector_expr_table_02 where col_varchar not like '%d' group by col_varchar order by col_varchar;
+ col_varchar | sum 
+-------------+-----
+ aabbcd      |   1
+(1 row)
+
+select col_int, sum(1) from vector_expr_table_02 where col_char = 'aabccd' group by col_int order by col_int; 
+ col_int | sum 
+---------+-----
+       0 |   1
+       2 |   3
+       8 |   3
+      87 |   1
+(4 rows)
+
+select col_int, sum(1) from vector_expr_table_02 where col_varchar = 'aabccd' group by col_int order by col_int; 
+ col_int | sum 
+---------+-----
+       0 |   1
+       2 |   3
+       8 |   3
+      87 |   1
+(4 rows)
+
+select col_int, sum(1) from vector_expr_table_02 where col_char <> 'aabccd' group by col_int order by col_int; 
+ col_int | sum 
+---------+-----
+       1 |   1
+       2 |   2
+       8 |   3
+      87 |   8
+     123 |   7
+         |  49
+(6 rows)
+
+select col_int, sum(1) from vector_expr_table_02 where col_varchar <> 'aabccd' group by col_int order by col_int; 
+ col_int | sum 
+---------+-----
+       1 |   1
+       2 |   2
+       8 |   3
+      87 |   8
+     123 |   7
+         |  49
+(6 rows)
+
+select col_int, sum(1) from vector_expr_table_02 where substring(col_char from 1 for 2) <> 'aa' group by col_int order by col_int;
+ col_int | sum 
+---------+-----
+       1 |   1
+       2 |   2
+       8 |   3
+      87 |   8
+     123 |   1
+         |  32
+(6 rows)
+
+select col_int, sum(1) from vector_expr_table_02 where substring(col_char from 1 for 2) <> 'aa' group by col_int order by col_int;
+ col_int | sum 
+---------+-----
+       1 |   1
+       2 |   2
+       8 |   3
+      87 |   8
+     123 |   1
+         |  32
+(6 rows)
+
+select col_int, sum(1) from vector_expr_table_02 where substring(col_char, 1, 2) <> 'aa' group by col_int order by col_int;
+ col_int | sum 
+---------+-----
+       1 |   1
+       2 |   2
+       8 |   3
+      87 |   8
+     123 |   1
+         |  32
+(6 rows)
+
+select col_int, 'OkThisSoundsGood' from vector_expr_table_02 where substring(col_char from 1 for 2) <> 'aa' order by col_int;
+ col_int |     ?column?     
+---------+------------------
+       1 | OkThisSoundsGood
+       2 | OkThisSoundsGood
+       2 | OkThisSoundsGood
+       8 | OkThisSoundsGood
+       8 | OkThisSoundsGood
+       8 | OkThisSoundsGood
+      87 | OkThisSoundsGood
+      87 | OkThisSoundsGood
+      87 | OkThisSoundsGood
+      87 | OkThisSoundsGood
+      87 | OkThisSoundsGood
+      87 | OkThisSoundsGood
+      87 | OkThisSoundsGood
+      87 | OkThisSoundsGood
+     123 | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+         | OkThisSoundsGood
+(47 rows)
+
+--Float, Integer
+select min(col_int),min(col_int2),min(col_char),min(col_varchar),min(col_date),min(col_num),min(col_num2),min(col_float),min(col_float2) from vector_expr_table_02;
+ min |   min    |         min          |  min   |           min            | min  |  min   | min | min 
+-----+----------+----------------------+--------+--------------------------+------+--------+-----+-----
+   0 | 66302641 | aabbcd               | aabbcd | Tue Nov 01 00:00:00 2011 | 1.20 | 1.1181 | 1.1 | 1.1
+(1 row)
+
+select max(col_int),max(col_int2),max(col_char),max(col_varchar),max(col_date),max(col_num),max(col_num2),max(col_float),max(col_float2) from vector_expr_table_02;
+ max |    max     |         max          |  max   |           max            |  max   |   max    |   max   |    max    
+-----+------------+----------------------+--------+--------------------------+--------+----------+---------+-----------
+ 123 | 1935401906 | acbccd               | acbccd | Tue Nov 12 00:00:00 2013 | 221.70 | 131.1100 | 13822.2 | 13822.237
+(1 row)
+
+select count(col_int),count(col_int2),count(col_char),count(col_varchar),count(col_date),count(col_num),count(col_num2),count(col_float),count(col_float2) from vector_expr_table_02;
+ count | count | count | count | count | count | count | count | count 
+-------+-------+-------+-------+-------+-------+-------+-------+-------
+    31 |    31 |    78 |    78 |    77 |    78 |    79 |    76 |    78
+(1 row)
+
+select sum(col_int),sum(col_int2),sum(col_num),sum(col_num2),sum(col_float),sum(col_float2) from vector_expr_table_02;
+ sum  |     sum     |   sum   |    sum    |   sum   |     sum      
+------+-------------+---------+-----------+---------+--------------
+ 1834 | 31992362024 | 3579.70 | 2095.7820 | 97701.1 | 111525.45336
+(1 row)
+
+select col_int,sum(col_int) from vector_expr_table_02 group by col_int order by col_int;
+ col_int | sum 
+---------+-----
+       0 |   0
+       1 |   1
+       2 |  10
+       8 |  56
+      87 | 783
+     123 | 984
+         |    
+(7 rows)
+
+select col_int2,sum(col_int2) from vector_expr_table_02 group by col_int2 order by col_int2;
+  col_int2  |    sum     
+------------+------------
+   66302641 |   66302641
+   74070078 |   74070078
+  189351248 |  189351248
+  435456494 |  435456494
+  539384293 |  539384293
+  556726251 |  556726251
+  634715959 |  634715959
+  649132105 |  649132105
+  656473370 | 1969420110
+  843938989 |  843938989
+  846480997 |  846480997
+  886008616 |  886008616
+  915852158 |  915852158
+  961711400 |  961711400
+ 1102020422 | 1102020422
+ 1156776517 | 1156776517
+ 1269710788 | 1269710788
+ 1289013296 | 1289013296
+ 1345971420 | 4037914260
+ 1388679963 | 1388679963
+ 1415564928 | 1415564928
+ 1489080225 | 1489080225
+ 1533442662 | 1533442662
+ 1935401906 | 7741607624
+            |           
+(25 rows)
+
+select col_num,sum(col_num) from vector_expr_table_02 group by col_num order by col_num;
+ col_num |   sum   
+---------+---------
+    1.20 |    9.60
+    1.62 |   12.96
+    3.78 |   56.70
+    5.10 |   40.80
+   11.18 |   89.44
+   29.00 |  203.00
+   87.10 | 1393.60
+  221.70 | 1773.60
+         |        
+(9 rows)
+
+select col_num2,sum(col_num2) from vector_expr_table_02 group by col_num2 order by col_num2;
+ col_num2 |    sum    
+----------+-----------
+   1.1181 |    8.9448
+   1.8700 |   28.0500
+   6.2110 |   49.6880
+  10.0000 |   80.0000
+  11.1700 |   89.3600
+  24.1100 |  192.8800
+  37.3737 |  597.9792
+ 131.1100 | 1048.8800
+          |          
+(9 rows)
+
+select col_float,sum(col_float) from vector_expr_table_02 group by col_float order by col_float;
+ col_float |   sum   
+-----------+---------
+       1.1 |     7.7
+       2.2 |    17.6
+      2.58 |    38.7
+      3.33 |   23.31
+   3.67233 | 58.7573
+      44.4 |   355.2
+    55.555 |  444.44
+   13822.2 | 96755.4
+           |        
+(9 rows)
+
+select col_float2,sum(col_float2) from vector_expr_table_02 group by col_float2 order by col_float2;
+ col_float2 |    sum     
+------------+------------
+        1.1 |        8.8
+        2.2 |       17.6
+       2.58 |      36.12
+       3.33 |      26.64
+   3.672335 |   58.75736
+       44.4 |      355.2
+     55.555 |     444.44
+  13822.237 | 110577.896
+            |           
+(9 rows)
+
+select col_int, col_int2, sum(abs(-col_int!)+abs(col_int-col_int2!)) as a from vector_expr_table_02 where col_int < 25 AND col_int > 2 AND col_int2 <= 1935401906 group by col_int, col_int2 order by col_int, col_int2;
+ col_int |  col_int2  | a 
+---------+------------+---
+       8 |   66302641 | 2
+       8 |   74070078 | 2
+       8 |  435456494 | 2
+       8 |  915852158 | 2
+       8 |  961711400 | 2
+       8 | 1345971420 | 4
+(6 rows)
+
+select col_int, col_int2, sum(abs(-col_int)+width_bucket(5.35, 0.024, 10.06, col_int)) as a from vector_expr_table_02 where col_int < 25 AND col_int > 2 AND col_int2 <= 2036166893 group by col_int, col_int2 order by col_int, col_int2;
+ col_int |  col_int2  | a  
+---------+------------+----
+       8 |   66302641 | 13
+       8 |   74070078 | 13
+       8 |  435456494 | 13
+       8 |  915852158 | 13
+       8 |  961711400 | 13
+       8 | 1345971420 | 26
+(6 rows)
+
+select col_int, col_int2, sum(abs(-col_int)+abs(-col_int2)) as a from vector_expr_table_02 where col_int < 25 AND col_int > 2 AND col_int2 <= 2036166893 group by col_int, col_int2 order by col_int, col_int2;
+ col_int |  col_int2  |     a      
+---------+------------+------------
+       8 |   66302641 |   66302649
+       8 |   74070078 |   74070086
+       8 |  435456494 |  435456502
+       8 |  915852158 |  915852166
+       8 |  961711400 |  961711408
+       8 | 1345971420 | 2691942856
+(6 rows)
+
+select col_int, col_int2, sum(width_bucket(5.35::float, 0.024::float, 10.06::float, col_int)) as a from vector_expr_table_02 where col_int < 25 AND col_int > 2 AND col_int2 <= 1935401906 group by col_int, col_int2 order by col_int, col_int2;
+ col_int |  col_int2  | a  
+---------+------------+----
+       8 |   66302641 |  5
+       8 |   74070078 |  5
+       8 |  435456494 |  5
+       8 |  915852158 |  5
+       8 |  961711400 |  5
+       8 | 1345971420 | 10
+(6 rows)
+
+select col_float,avg(col_float) from vector_expr_table_02 group by col_float order by col_float;
+ col_float |       avg        
+-----------+------------------
+       1.1 | 1.10000002384186
+       2.2 | 2.20000004768372
+      2.58 | 2.57999992370605
+      3.33 | 3.32999992370605
+   3.67233 | 3.67232990264893
+      44.4 | 44.4000015258789
+    55.555 | 55.5550003051758
+   13822.2 | 13822.2001953125
+           |                 
+(9 rows)
+
+select col_float2,avg(col_float2) from vector_expr_table_02 group by col_float2 order by col_float2;
+ col_float2 |    avg    
+------------+-----------
+        1.1 |       1.1
+        2.2 |       2.2
+       2.58 |      2.58
+       3.33 |      3.33
+   3.672335 |  3.672335
+       44.4 |      44.4
+     55.555 |    55.555
+  13822.237 | 13822.237
+            |          
+(9 rows)
+
+select count(col_int) + 2, avg(col_num) - 3 from vector_expr_table_02;
+ ?column? |      ?column?       
+----------+---------------------
+       33 | 42.8935897435897436
+(1 row)
+
+select count(col_num2),min(col_char),max(col_varchar),sum(col_float),avg(col_num2) from vector_expr_table_02;
+ count |         min          |  max   |   sum   |         avg         
+-------+----------------------+--------+---------+---------------------
+    79 | aabbcd               | acbccd | 97701.1 | 26.5288860759493671
+(1 row)
+
+select count(col_num2),min(col_char),max(col_varchar),sum(col_float),avg(col_num2) from vector_expr_table_02 group by col_float2 order by col_float2;
+ count |         min          |   max   |   sum   |          avg           
+-------+----------------------+---------+---------+------------------------
+     8 | aabccd               | aabccd  |     7.7 |    10.0000000000000000
+     8 | abbccd               | abbccd  |    17.6 |     6.2110000000000000
+    14 | aaccccd              | aaccccd |   33.54 |    37.3737000000000000
+     8 | aabbcd               | aabbcd  |   23.31 |    24.1100000000000000
+    15 | abbccd               | abbccd  | 58.7573 |     1.8700000000000000
+     8 | acbccd               | acbccd  |   355.2 |   131.1100000000000000
+     8 | abccd                | abccd   |  444.44 | 1.11810000000000000000
+     8 | abbccd               | abbccd  | 96755.4 |    11.1700000000000000
+     2 | aaccccd              | aaccccd |    5.16 |    37.3737000000000000
+(9 rows)
+
+select col_int, col_int2, substring(col_varchar, 1, 2), count(*) from vector_expr_table_02 where col_date > '2012-10-1' group by col_int, col_int2, substring(col_varchar, 1, 2) order by col_int, col_int2, 4;
+ col_int |  col_int2  | substring | count 
+---------+------------+-----------+-------
+       1 | 1345971420 | ab        |     1
+       2 | 1269710788 | ab        |     1
+       2 | 1289013296 | ab        |     1
+       8 |   66302641 | ab        |     1
+       8 |   74070078 |           |     1
+       8 | 1345971420 | ab        |     2
+      87 |  189351248 | ab        |     1
+      87 |  556726251 | ab        |     1
+      87 |  634715959 | ab        |     1
+      87 |  649132105 | ab        |     1
+      87 |  843938989 | ab        |     1
+      87 |  886008616 | ab        |     1
+      87 | 1388679963 | ab        |     1
+      87 | 1489080225 | ab        |     1
+     123 |  539384293 | aa        |     1
+     123 |  656473370 | aa        |     1
+     123 |  846480997 | aa        |     1
+     123 | 1102020422 | aa        |     1
+     123 | 1533442662 | aa        |     1
+     123 | 1935401906 |           |     1
+     123 | 1935401906 | aa        |     2
+         |            | ac        |     8
+         |            | aa        |    15
+         |            | ab        |    24
+(24 rows)
+
+----
+--- test 2: Test Case Expression
+----
+explain (verbose on, costs off) select col_int2, sum(case when col_int in (1, 7, 229, 993, 81, 6) then 1 else 0 end) as a, 'myConstString' from vector_expr_table_02 group by col_int2 order by col_int2;
+                                                                   QUERY PLAN                                                                    
+-------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: col_int2, (sum(CASE WHEN (col_int = ANY ('{1,7,229,993,81,6}'::integer[])) THEN 1 ELSE 0 END)), ('myConstString'::text)
+   ->  Vector Streaming (type: GATHER)
+         Output: col_int2, (sum(CASE WHEN (col_int = ANY ('{1,7,229,993,81,6}'::integer[])) THEN 1 ELSE 0 END)), ('myConstString'::text)
+         Merge Sort Key: vector_expr_table_02.col_int2
+         Node/s: All datanodes
+         ->  Vector Sort
+               Output: col_int2, (sum(CASE WHEN (col_int = ANY ('{1,7,229,993,81,6}'::integer[])) THEN 1 ELSE 0 END)), ('myConstString'::text)
+               Sort Key: vector_expr_table_02.col_int2
+               ->  Vector Hash Aggregate
+                     Output: col_int2, sum(CASE WHEN (col_int = ANY ('{1,7,229,993,81,6}'::integer[])) THEN 1 ELSE 0 END), 'myConstString'::text
+                     Group By Key: vector_expr_table_02.col_int2
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Output: col_int2, col_int
+                           Distribute Key: col_int2
+                           Spawn on: All datanodes
+                           Consumer Nodes: All datanodes
+                           ->  CStore Scan on vector_expression_engine_first.vector_expr_table_02
+                                 Output: col_int2, col_int
+                                 Distribute Key: col_int
+(20 rows)
+
+select col_int2, sum(case when col_int in (1, 7, 229, 993, 81, 6) then 1 else 0 end) as a from vector_expr_table_02 group by col_int2 order by col_int2;
+  col_int2  | a 
+------------+---
+   66302641 | 0
+   74070078 | 0
+  189351248 | 0
+  435456494 | 0
+  539384293 | 0
+  556726251 | 0
+  634715959 | 0
+  649132105 | 0
+  656473370 | 0
+  843938989 | 0
+  846480997 | 0
+  886008616 | 0
+  915852158 | 0
+  961711400 | 0
+ 1102020422 | 0
+ 1156776517 | 0
+ 1269710788 | 0
+ 1289013296 | 0
+ 1345971420 | 1
+ 1388679963 | 0
+ 1415564928 | 0
+ 1489080225 | 0
+ 1533442662 | 0
+ 1935401906 | 0
+            | 0
+(25 rows)
+
+select col_int2, sum(case when col_int < 17 or col_int > 37 then 1 else 0 end) as a from vector_expr_table_02 group by col_int2 order by col_int2;
+  col_int2  | a 
+------------+---
+   66302641 | 1
+   74070078 | 1
+  189351248 | 1
+  435456494 | 1
+  539384293 | 1
+  556726251 | 1
+  634715959 | 1
+  649132105 | 1
+  656473370 | 3
+  843938989 | 1
+  846480997 | 1
+  886008616 | 1
+  915852158 | 1
+  961711400 | 1
+ 1102020422 | 1
+ 1156776517 | 1
+ 1269710788 | 1
+ 1289013296 | 1
+ 1345971420 | 3
+ 1388679963 | 1
+ 1415564928 | 1
+ 1489080225 | 1
+ 1533442662 | 1
+ 1935401906 | 4
+            | 0
+(25 rows)
+
+explain (verbose on, costs off) select col_int, col_int2, sum(case when col_int < 17 AND col_int > 7 AND col_int2 <= 1935401906 then 1 else 0 end) as a from vector_expr_table_02   where col_int < 25 AND col_int > 2 AND col_int2 <= 2036973298 group by col_int, col_int2 order by col_int, col_int2;
+                                                                            QUERY PLAN                                                                            
+------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: col_int, col_int2, (sum(CASE WHEN ((col_int < 17) AND (col_int > 7) AND (col_int2 <= 1935401906)) THEN 1 ELSE 0 END))
+   ->  Vector Streaming (type: GATHER)
+         Output: col_int, col_int2, (sum(CASE WHEN ((col_int < 17) AND (col_int > 7) AND (col_int2 <= 1935401906)) THEN 1 ELSE 0 END))
+         Merge Sort Key: vector_expr_table_02.col_int, vector_expr_table_02.col_int2
+         Node/s: All datanodes
+         ->  Vector Sort Aggregate
+               Output: col_int, col_int2, sum(CASE WHEN ((col_int < 17) AND (col_int > 7) AND (col_int2 <= 1935401906)) THEN 1 ELSE 0 END)
+               Group By Key: vector_expr_table_02.col_int, vector_expr_table_02.col_int2
+               ->  Vector Sort
+                     Output: col_int, col_int2
+                     Sort Key: vector_expr_table_02.col_int, vector_expr_table_02.col_int2
+                     ->  CStore Scan on vector_expression_engine_first.vector_expr_table_02
+                           Output: col_int, col_int2
+                           Distribute Key: col_int
+                           Filter: ((vector_expr_table_02.col_int < 25) AND (vector_expr_table_02.col_int > 2) AND (vector_expr_table_02.col_int2 <= 2036973298))
+(16 rows)
+
+explain (verbose on, costs off) select col_int, col_int2, sum(case when col_int < 17 OR (col_int > 37 AND col_int2 > 10) then 1 else 0 end) as a from vector_expr_table_02   where col_int < 19 OR (col_int > 37 AND col_int2 > 2) group by col_int, col_int2 order by col_int, col_int2;
+                                                                        QUERY PLAN                                                                        
+----------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: col_int, col_int2, (sum(CASE WHEN ((col_int < 17) OR ((col_int > 37) AND (col_int2 > 10))) THEN 1 ELSE 0 END))
+   ->  Vector Streaming (type: GATHER)
+         Output: col_int, col_int2, (sum(CASE WHEN ((col_int < 17) OR ((col_int > 37) AND (col_int2 > 10))) THEN 1 ELSE 0 END))
+         Merge Sort Key: vector_expr_table_02.col_int, vector_expr_table_02.col_int2
+         Node/s: All datanodes
+         ->  Vector Sort Aggregate
+               Output: col_int, col_int2, sum(CASE WHEN ((col_int < 17) OR ((col_int > 37) AND (col_int2 > 10))) THEN 1 ELSE 0 END)
+               Group By Key: vector_expr_table_02.col_int, vector_expr_table_02.col_int2
+               ->  Vector Sort
+                     Output: col_int, col_int2
+                     Sort Key: vector_expr_table_02.col_int, vector_expr_table_02.col_int2
+                     ->  CStore Scan on vector_expression_engine_first.vector_expr_table_02
+                           Output: col_int, col_int2
+                           Distribute Key: col_int
+                           Filter: ((vector_expr_table_02.col_int < 19) OR ((vector_expr_table_02.col_int > 37) AND (vector_expr_table_02.col_int2 > 2)))
+(16 rows)
+
+explain (verbose on, costs off) select col_int, col_int2, sum(case when col_int < 17 OR NOT (col_int > 7 AND col_int2 > 2) then 1 else 0 end) as a from vector_expr_table_02 where col_int < 19 OR NOT (col_int > 2 AND col_int2 > 1) AND NOT (col_int > 10 AND col_int2 < 10) group by col_int2, col_int order by col_int, col_int2;
+                                                                                                                   QUERY PLAN                                                                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: col_int, col_int2, (sum(CASE WHEN ((col_int < 17) OR (col_int <= 7) OR (col_int2 <= 2)) THEN 1 ELSE 0 END))
+   ->  Vector Streaming (type: GATHER)
+         Output: col_int, col_int2, (sum(CASE WHEN ((col_int < 17) OR (col_int <= 7) OR (col_int2 <= 2)) THEN 1 ELSE 0 END))
+         Merge Sort Key: vector_expr_table_02.col_int, vector_expr_table_02.col_int2
+         Node/s: All datanodes
+         ->  Vector Sort Aggregate
+               Output: col_int, col_int2, sum(CASE WHEN ((col_int < 17) OR (col_int <= 7) OR (col_int2 <= 2)) THEN 1 ELSE 0 END)
+               Group By Key: vector_expr_table_02.col_int, vector_expr_table_02.col_int2
+               ->  Vector Sort
+                     Output: col_int, col_int2
+                     Sort Key: vector_expr_table_02.col_int, vector_expr_table_02.col_int2
+                     ->  CStore Scan on vector_expression_engine_first.vector_expr_table_02
+                           Output: col_int, col_int2
+                           Distribute Key: col_int
+                           Filter: ((vector_expr_table_02.col_int < 19) OR (((vector_expr_table_02.col_int <= 2) OR (vector_expr_table_02.col_int2 <= 1)) AND ((vector_expr_table_02.col_int <= 10) OR (vector_expr_table_02.col_int2 >= 10))))
+(16 rows)
+
+select col_int, col_int2, 'myConstString', sum(case when col_int < 17 AND col_int > 7 AND col_int2 <= 1935401906 then 1 else 0 end) as a, 'my2ndConstString' from vector_expr_table_02 where col_int < 25 AND col_int > 2 AND col_int2 <= 2036973298 group by col_int, col_int2 order by col_int, col_int2;
+ col_int |  col_int2  |   ?column?    | a |     ?column?     
+---------+------------+---------------+---+------------------
+       8 |   66302641 | myConstString | 1 | my2ndConstString
+       8 |   74070078 | myConstString | 1 | my2ndConstString
+       8 |  435456494 | myConstString | 1 | my2ndConstString
+       8 |  915852158 | myConstString | 1 | my2ndConstString
+       8 |  961711400 | myConstString | 1 | my2ndConstString
+       8 | 1345971420 | myConstString | 2 | my2ndConstString
+(6 rows)
+
+select col_int, col_int2, sum(case when col_int < 17 AND col_int > 7 AND col_int2 <= 1935401906 then 1 else 0 end) as a from vector_expr_table_02   where col_int < 25 AND col_int > 2 AND col_int2 <= 2036973298 group by col_int, col_int2 order by col_int, col_int2;
+ col_int |  col_int2  | a 
+---------+------------+---
+       8 |   66302641 | 1
+       8 |   74070078 | 1
+       8 |  435456494 | 1
+       8 |  915852158 | 1
+       8 |  961711400 | 1
+       8 | 1345971420 | 2
+(6 rows)
+
+select col_int, col_int2, sum(case when col_int < 17 OR (col_int > 37 AND col_int2 > 10) then 1 else 0 end) as a from vector_expr_table_02 where col_int < 19 OR (col_int > 37 AND col_int2 > 2) group by col_int, col_int2 order by col_int, col_int2;
+ col_int |  col_int2  | a 
+---------+------------+---
+       0 | 1935401906 | 1
+       1 | 1345971420 | 1
+       2 |  656473370 | 1
+       2 | 1156776517 | 1
+       2 | 1269710788 | 1
+       2 | 1289013296 | 1
+       2 | 1415564928 | 1
+       8 |   66302641 | 1
+       8 |   74070078 | 1
+       8 |  435456494 | 1
+       8 |  915852158 | 1
+       8 |  961711400 | 1
+       8 | 1345971420 | 2
+      87 |  189351248 | 1
+      87 |  556726251 | 1
+      87 |  634715959 | 1
+      87 |  649132105 | 1
+      87 |  656473370 | 1
+      87 |  843938989 | 1
+      87 |  886008616 | 1
+      87 | 1388679963 | 1
+      87 | 1489080225 | 1
+     123 |  539384293 | 1
+     123 |  656473370 | 1
+     123 |  846480997 | 1
+     123 | 1102020422 | 1
+     123 | 1533442662 | 1
+     123 | 1935401906 | 3
+(28 rows)
+
+select col_int, col_int2, sum(case when col_int < 17 OR NOT (col_int > 7 AND col_int2 > 2) then 1 else 0 end) as a from vector_expr_table_02 where col_int < 19 OR NOT (col_int > 2 AND col_int2 > 1) AND NOT (col_int > 10 AND col_int2 < 10) group by col_int2, col_int order by col_int, col_int2;
+ col_int |  col_int2  | a 
+---------+------------+---
+       0 | 1935401906 | 1
+       1 | 1345971420 | 1
+       2 |  656473370 | 1
+       2 | 1156776517 | 1
+       2 | 1269710788 | 1
+       2 | 1289013296 | 1
+       2 | 1415564928 | 1
+       8 |   66302641 | 1
+       8 |   74070078 | 1
+       8 |  435456494 | 1
+       8 |  915852158 | 1
+       8 |  961711400 | 1
+       8 | 1345971420 | 2
+(13 rows)
+
+select col_int, col_int2, sum(case when col_int < 17 OR NOT (col_int > 7 AND col_int2 > 2) then 1 else 0 end) as a from vector_expr_table_02 where col_int < 19 OR NOT (col_int > 2 AND col_int2 > 1) AND NOT (col_int > 10 AND col_int2 < 10) group by col_int2, col_int order by col_int, col_int2;
+ col_int |  col_int2  | a 
+---------+------------+---
+       0 | 1935401906 | 1
+       1 | 1345971420 | 1
+       2 |  656473370 | 1
+       2 | 1156776517 | 1
+       2 | 1269710788 | 1
+       2 | 1289013296 | 1
+       2 | 1415564928 | 1
+       8 |   66302641 | 1
+       8 |   74070078 | 1
+       8 |  435456494 | 1
+       8 |  915852158 | 1
+       8 |  961711400 | 1
+       8 | 1345971420 | 2
+(13 rows)
+
+select col_int2, sum(case when col_int < 17 or col_int > 37 then 100*col_num + 10.0*col_num +col_num*col_num2-col_num*col_num2 when col_int > 17 and col_int < 37 then col_num2-col_num else 6 end), sum (col_num-col_num2+col_num/col_num2+10) as a from vector_expr_table_02 group by col_int2 order by col_int2;
+  col_int2  |     sum     |             a             
+------------+-------------+---------------------------
+   66302641 | 1229.800000 |       30.0610056256148824
+   74070078 | 1229.800000 |       30.0610056256148824
+  189351248 |  178.200000 |    5.66982756399935598132
+  435456494 |  132.000000 |    1.32000000000000000000
+  539384293 | 3190.000000 |       16.0928204064703443
+  556726251 |  178.200000 |    5.66982756399935598132
+  634715959 |  178.200000 |    5.66982756399935598132
+  649132105 |  178.200000 |    5.66982756399935598132
+  656473370 | 3454.000000 |   18.73282040647034430000
+  843938989 | 1229.800000 |       30.0610056256148824
+  846480997 | 3190.000000 |       16.0928204064703443
+  886008616 |  178.200000 |    5.66982756399935598132
+  915852158 |  132.000000 |    1.32000000000000000000
+  961711400 |  132.000000 |    1.32000000000000000000
+ 1102020422 | 3190.000000 |       16.0928204064703443
+ 1156776517 |  132.000000 |    1.32000000000000000000
+ 1269710788 | 1229.800000 |       30.0610056256148824
+ 1289013296 | 1229.800000 |       30.0610056256148824
+ 1345971420 | 3689.400000 |       90.1830168768446472
+ 1388679963 |  178.200000 |    5.66982756399935598132
+ 1415564928 |  132.000000 |    1.32000000000000000000
+ 1489080225 |  178.200000 |    5.66982756399935598132
+ 1533442662 |             |                          
+ 1935401906 | 6690.200000 |   39.17546837694004458132
+            |         294 | 2786.07117371294443922700
+(25 rows)
+
+     
+select col_char, sum(1) from vector_expr_table_02 where col_char in ('aabccd', 'abccd', 'abbccd') group by col_char order by col_char; 
+       col_char       | sum 
+----------------------+-----
+ aabccd               |   8
+ abbccd               |  32
+ abccd                |   7
+(3 rows)
+
+select col_varchar, sum(1) from vector_expr_table_02 where col_varchar in ('aabccd', 'abccd', 'abbccd') group by col_varchar order by col_varchar; 
+ col_varchar | sum 
+-------------+-----
+ aabccd      |   8
+ abbccd      |  31
+ abccd       |   7
+(3 rows)
+
+select overlay(col_varchar placing  'test' from 2) from vector_expr_table_02 order by col_varchar limit 1;
+ overlay 
+---------
+ atestd
+(1 row)
+
+----
+--- test 3: Test Multi-Level Case Expression
+----
+--simple one level
+explain (verbose on, costs off) select a, b, case 
+													when a = 1 then '1X'
+													when a = 2 then '2X'
+													when a = 3 then '3X'
+													end
+										from vector_expr_table_03;
+                                                                 QUERY PLAN                                                                  
+---------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, (CASE WHEN (a = 1) THEN '1X'::text WHEN (a = 2) THEN '2X'::text WHEN (a = 3) THEN '3X'::text ELSE NULL::text END)
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, (CASE WHEN (a = 1) THEN '1X'::text WHEN (a = 2) THEN '2X'::text WHEN (a = 3) THEN '3X'::text ELSE NULL::text END)
+         Node/s: All datanodes
+         ->  CStore Scan on vector_expression_engine_first.vector_expr_table_03
+               Output: a, b, CASE WHEN (a = 1) THEN '1X'::text WHEN (a = 2) THEN '2X'::text WHEN (a = 3) THEN '3X'::text ELSE NULL::text END
+               Distribute Key: a
+(8 rows)
+
+select a, b, case 
+				when a = 1 then '1X'
+				when a = 2 then '2X'
+				when a = 3 then '3X'
+				end
+		from vector_expr_table_03 order by 1, 2;
+ a | b | case 
+---+---+------
+ 1 | 1 | 1X
+ 1 | 1 | 1X
+ 1 | 1 | 1X
+ 1 | 1 | 1X
+ 1 | 2 | 1X
+ 1 | 2 | 1X
+ 1 | 2 | 1X
+ 2 | 1 | 2X
+ 2 | 1 | 2X
+ 2 | 1 | 2X
+ 2 | 1 | 2X
+ 2 | 1 | 2X
+ 2 | 2 | 2X
+ 2 | 2 | 2X
+ 2 | 2 | 2X
+ 2 | 2 | 2X
+ 2 | 3 | 2X
+ 2 | 3 | 2X
+ 2 | 3 | 2X
+ 3 | 1 | 3X
+ 3 | 1 | 3X
+ 3 | 1 | 3X
+ 3 | 1 | 3X
+ 3 | 2 | 3X
+ 3 | 2 | 3X
+ 4 | 0 | 
+(26 rows)
+
+--one level with default value
+select a, b, case 
+				when a = 1 then '1X'
+				when a = 2 then '2X'
+				when a = 3 then '3X'
+				else 'other'
+				end
+		from vector_expr_table_03 order by 1, 2;
+ a | b | case  
+---+---+-------
+ 1 | 1 | 1X
+ 1 | 1 | 1X
+ 1 | 1 | 1X
+ 1 | 1 | 1X
+ 1 | 2 | 1X
+ 1 | 2 | 1X
+ 1 | 2 | 1X
+ 2 | 1 | 2X
+ 2 | 1 | 2X
+ 2 | 1 | 2X
+ 2 | 1 | 2X
+ 2 | 1 | 2X
+ 2 | 2 | 2X
+ 2 | 2 | 2X
+ 2 | 2 | 2X
+ 2 | 2 | 2X
+ 2 | 3 | 2X
+ 2 | 3 | 2X
+ 2 | 3 | 2X
+ 3 | 1 | 3X
+ 3 | 1 | 3X
+ 3 | 1 | 3X
+ 3 | 1 | 3X
+ 3 | 2 | 3X
+ 3 | 2 | 3X
+ 4 | 0 | other
+(26 rows)
+
+--simple 2 level
+explain (verbose on, costs off)
+select a, b, case 
+				when a = 1 then 
+							case 
+								when b = 1 then '11' 
+								when b = 2 then '12'
+								when b = 3 then '13'
+								end
+				when a = 2 then 
+							case
+								when b = 1 then '21' 
+								when b = 2 then '22'
+								when b = 3 then '23'
+							end
+		  end from vector_expr_table_03;
+                                                                                                                                                        QUERY PLAN                                                                                                                                                        
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, (CASE WHEN (a = 1) THEN CASE WHEN (b = 1) THEN '11'::text WHEN (b = 2) THEN '12'::text WHEN (b = 3) THEN '13'::text ELSE NULL::text END WHEN (a = 2) THEN CASE WHEN (b = 1) THEN '21'::text WHEN (b = 2) THEN '22'::text WHEN (b = 3) THEN '23'::text ELSE NULL::text END ELSE NULL::text END)
+   ->  Vector Streaming (type: GATHER)
+         Output: a, b, (CASE WHEN (a = 1) THEN CASE WHEN (b = 1) THEN '11'::text WHEN (b = 2) THEN '12'::text WHEN (b = 3) THEN '13'::text ELSE NULL::text END WHEN (a = 2) THEN CASE WHEN (b = 1) THEN '21'::text WHEN (b = 2) THEN '22'::text WHEN (b = 3) THEN '23'::text ELSE NULL::text END ELSE NULL::text END)
+         Node/s: All datanodes
+         ->  CStore Scan on vector_expression_engine_first.vector_expr_table_03
+               Output: a, b, CASE WHEN (a = 1) THEN CASE WHEN (b = 1) THEN '11'::text WHEN (b = 2) THEN '12'::text WHEN (b = 3) THEN '13'::text ELSE NULL::text END WHEN (a = 2) THEN CASE WHEN (b = 1) THEN '21'::text WHEN (b = 2) THEN '22'::text WHEN (b = 3) THEN '23'::text ELSE NULL::text END ELSE NULL::text END
+               Distribute Key: a
+(8 rows)
+
+select a, b, case 
+				when a = 1 then 
+							case 
+								when b = 1 then '11' 
+								when b = 2 then '12'
+								when b = 3 then '13'
+								end
+				when a = 2 then 
+							case
+								when b = 1 then '21' 
+								when b = 2 then '22'
+								when b = 3 then '23'
+							end
+				end from vector_expr_table_03 order by 1, 2;
+ a | b | case 
+---+---+------
+ 1 | 1 | 11
+ 1 | 1 | 11
+ 1 | 1 | 11
+ 1 | 1 | 11
+ 1 | 2 | 12
+ 1 | 2 | 12
+ 1 | 2 | 12
+ 2 | 1 | 21
+ 2 | 1 | 21
+ 2 | 1 | 21
+ 2 | 1 | 21
+ 2 | 1 | 21
+ 2 | 2 | 22
+ 2 | 2 | 22
+ 2 | 2 | 22
+ 2 | 2 | 22
+ 2 | 3 | 23
+ 2 | 3 | 23
+ 2 | 3 | 23
+ 3 | 1 | 
+ 3 | 1 | 
+ 3 | 1 | 
+ 3 | 1 | 
+ 3 | 2 | 
+ 3 | 2 | 
+ 4 | 0 | 
+(26 rows)
+
+--2 level with default value
+select a, b, case 
+				when a = 1 then 
+							case 
+								when b = 1 then '11' 
+								when b = 2 then '12'
+								when b = 3 then '13'
+								else '1X other'
+								end
+				when a = 2 then 
+							case
+								when b = 1 then '21' 
+								when b = 2 then '22'
+								when b = 3 then '23'
+								else '2X other'
+							end
+				else 'other'
+				end from vector_expr_table_03 order by 1, 2;
+ a | b | case  
+---+---+-------
+ 1 | 1 | 11
+ 1 | 1 | 11
+ 1 | 1 | 11
+ 1 | 1 | 11
+ 1 | 2 | 12
+ 1 | 2 | 12
+ 1 | 2 | 12
+ 2 | 1 | 21
+ 2 | 1 | 21
+ 2 | 1 | 21
+ 2 | 1 | 21
+ 2 | 1 | 21
+ 2 | 2 | 22
+ 2 | 2 | 22
+ 2 | 2 | 22
+ 2 | 2 | 22
+ 2 | 3 | 23
+ 2 | 3 | 23
+ 2 | 3 | 23
+ 3 | 1 | other
+ 3 | 1 | other
+ 3 | 1 | other
+ 3 | 1 | other
+ 3 | 2 | other
+ 3 | 2 | other
+ 4 | 0 | other
+(26 rows)
+
+--3 level
+select a, b, c, case 
+				when a = 1 then 
+							case 
+								when b = 1 then case
+													when c = 1 then '111'
+													when c = 2 then '112'
+													end
+								when b = 2 then '12'
+								when b = 3 then case
+													when c = 1 then '131'
+													when c = 3 then '133'
+													else '13X other'
+													end
+								else '1X other'
+								end
+				when a = 2 then 
+							case
+								when b = 1 then '21' 
+								when b = 2 then case
+													when c = 2 then '222'
+													when c = 3 then '223'
+													else '22X other'
+													end
+								when b = 3 then '23'
+								else '2X other'
+							end
+				else 'other'
+				end from vector_expr_table_03 order by 1, 2, 3; 
+ a | b | c |   case    
+---+---+---+-----------
+ 1 | 1 | 1 | 111
+ 1 | 1 | 2 | 112
+ 1 | 1 | 3 | 
+ 1 | 1 | 4 | 
+ 1 | 2 | 1 | 12
+ 1 | 2 | 2 | 12
+ 1 | 2 | 3 | 12
+ 2 | 1 | 1 | 21
+ 2 | 1 | 2 | 21
+ 2 | 1 | 3 | 21
+ 2 | 1 | 3 | 21
+ 2 | 1 | 4 | 21
+ 2 | 2 | 1 | 22X other
+ 2 | 2 | 2 | 222
+ 2 | 2 | 3 | 223
+ 2 | 2 | 4 | 22X other
+ 2 | 3 | 2 | 23
+ 2 | 3 | 3 | 23
+ 2 | 3 | 4 | 23
+ 3 | 1 | 1 | other
+ 3 | 1 | 2 | other
+ 3 | 1 | 3 | other
+ 3 | 1 | 4 | other
+ 3 | 2 | 1 | other
+ 3 | 2 | 3 | other
+ 4 | 0 | 0 | other
+(26 rows)
+
+select a, b, case a when true then case b when true then '11' else '10' end else case b when true then '01' else '00' end end from vector_expr_table_05 order by 1, 2;
+ a | b | case 
+---+---+------
+ f | 0 | 00
+ f | 0 | 00
+ f | 1 | 01
+ f | 1 | 01
+ t | 0 | 10
+ t | 0 | 10
+ t | 1 | 11
+ t | 1 | 11
+ t |   | 10
+   | 0 | 00
+(10 rows)
+
+select a, b, c, case a > b 
+				when true then 
+							case b > ( case c when true then 1 when false then 0 end) 
+									when true then  'a>b b>c' 
+									when false then 'a>b b<=c'
+									end
+				when false then
+							case b > ( case c when true then 1 when false then 0 end) 
+									when true then  'a<=b b>c' 
+									when false then 'a<=b b<=c'
+									end
+				end
+				from vector_expr_table_05 order by 1, 2, 3;
+ a | b | c |   case    
+---+---+---+-----------
+ f | 0 | f | a<=b b<=c
+ f | 0 | t | a<=b b<=c
+ f | 1 | f | a<=b b>c
+ f | 1 | t | a<=b b<=c
+ t | 0 | f | a>b b<=c
+ t | 0 | t | a>b b<=c
+ t | 1 | f | a<=b b>c
+ t | 1 | t | a<=b b<=c
+ t |   | f | 
+   | 0 | f | 
+(10 rows)
+
+select a, b, c, case a > b 
+				when b > c then 
+							case b > ( case c when true then 1 when false then 0 end) 
+									when true then  'a>b == b>c == 1' 
+									when false then 'a>b == b>c == 0'
+									end
+				when b <= c then
+							case a > ( case c when true then 1 when false then 0 end) 
+									when true then  'a>b == b<=c  a>c==1'
+									when false then 'a>b == b<=c a>c==0'
+									end
+				end
+				from vector_expr_table_05 order by 1, 2, 3;
+ a | b | c |        case         
+---+---+---+---------------------
+ f | 0 | f | a>b == b>c == 0
+ f | 0 | t | a>b == b>c == 0
+ f | 1 | f | a>b == b<=c a>c==0
+ f | 1 | t | a>b == b>c == 0
+ t | 0 | f | a>b == b<=c  a>c==1
+ t | 0 | t | a>b == b<=c a>c==0
+ t | 1 | f | a>b == b<=c  a>c==1
+ t | 1 | t | a>b == b>c == 0
+ t |   | f | 
+   | 0 | f | 
+(10 rows)
+
+select a, b, c, case a > b 
+				when true then 
+							case b > ( case c>'b' when true then '1' when false then '0' end) 
+									when true then  'a>b b>c' 
+									when false then 'a>b b<=c'
+									end
+				when false then
+							case b > ( case c <='b' when true then '1' when false then '0' end) 
+									when true then  'a<=b b>c' 
+									when false then 'a<=b b<=c'
+									end
+				end
+				from vector_expr_table_06 order by 1, 2, 3;
+    a     |     b      |    c     | case 
+----------+------------+----------+------
+ abc      | abb        |          | 
+ abc      |            | aabcdefg | 
+ abcdefgh |            | abcdefgg | 
+          | abb        | abc      | 
+          |            |          | 
+(5 rows)
+
+select a, b, c, case a > b 
+				when b > c then 
+							case b > ( case c when true then 1 when false then 0 end) 
+									when true then  'a>b == b>c == 1' 
+									when false then 'a>b == b>c == 0'
+									else 'a>b == b>c'
+									end
+				when b <= c then
+							case a > ( case c when true then 1 when false then 0 end) 
+									when true then  'a>b == b<=c  a>c==1'
+									when false then 'a>b == b<=c a>c==0'
+									else 'a>b ==b<=c'
+									end
+				else 'other'
+				end
+				from vector_expr_table_05 order by 1, 2, 3;
+ a | b | c |        case         
+---+---+---+---------------------
+ f | 0 | f | a>b == b>c == 0
+ f | 0 | t | a>b == b>c == 0
+ f | 1 | f | a>b == b<=c a>c==0
+ f | 1 | t | a>b == b>c == 0
+ t | 0 | f | a>b == b<=c  a>c==1
+ t | 0 | t | a>b == b<=c a>c==0
+ t | 1 | f | a>b == b<=c  a>c==1
+ t | 1 | t | a>b == b>c == 0
+ t |   | f | other
+   | 0 | f | other
+(10 rows)
+
+				
+				
+----
+--- test 4: Scarlar Array OP( ANY & ALL)
+----
+--OP ANY
+explain (verbose on, costs off) select col_int from vector_expr_table_02 where col_int = ANY(array[NULL]) order by 1;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Row Adapter
+   Output: col_int
+   ->  Vector Streaming (type: GATHER)
+         Output: col_int
+         Merge Sort Key: vector_expr_table_02.col_int
+         Node/s: All datanodes
+         ->  Vector Sort
+               Output: col_int
+               Sort Key: vector_expr_table_02.col_int
+               ->  CStore Scan on vector_expression_engine_first.vector_expr_table_02
+                     Output: col_int
+                     Distribute Key: col_int
+                     Filter: (vector_expr_table_02.col_int = ANY ('{NULL}'::bigint[]))
+(13 rows)
+
+select col_int from vector_expr_table_02 where col_int = ANY(array[NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int = ANY(array[NULL, 0]) order by 1;
+ col_int 
+---------
+       0
+(1 row)
+
+select col_int from vector_expr_table_02 where col_int = ANY(array[0, NULL]) order by 1;
+ col_int 
+---------
+       0
+(1 row)
+
+select col_int from vector_expr_table_02 where col_int = ANY(array[NULL, 1]) order by 1;
+ col_int 
+---------
+       1
+(1 row)
+
+select col_int from vector_expr_table_02 where col_int = ANY(array[1, NULL]) order by 1;
+ col_int 
+---------
+       1
+(1 row)
+
+select col_int from vector_expr_table_02 where col_int > ANY(array[NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int > ANY(array[NULL, 0]) order by 1;
+ col_int 
+---------
+       1
+       2
+       2
+       2
+       2
+       2
+       8
+       8
+       8
+       8
+       8
+       8
+       8
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+     123
+     123
+     123
+     123
+     123
+     123
+     123
+     123
+(30 rows)
+
+select col_int from vector_expr_table_02 where col_int > ANY(array[0, NULL]) order by 1;
+ col_int 
+---------
+       1
+       2
+       2
+       2
+       2
+       2
+       8
+       8
+       8
+       8
+       8
+       8
+       8
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+     123
+     123
+     123
+     123
+     123
+     123
+     123
+     123
+(30 rows)
+
+select col_int from vector_expr_table_02 where col_int > ANY(array[NULL, 1]) order by 1;
+ col_int 
+---------
+       2
+       2
+       2
+       2
+       2
+       8
+       8
+       8
+       8
+       8
+       8
+       8
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+     123
+     123
+     123
+     123
+     123
+     123
+     123
+     123
+(29 rows)
+
+select col_int from vector_expr_table_02 where col_int > ANY(array[1, NULL]) order by 1;
+ col_int 
+---------
+       2
+       2
+       2
+       2
+       2
+       8
+       8
+       8
+       8
+       8
+       8
+       8
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+     123
+     123
+     123
+     123
+     123
+     123
+     123
+     123
+(29 rows)
+
+select col_int from vector_expr_table_02 where col_int < ANY(array[NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int < ANY(array[NULL, 0]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int < ANY(array[0, NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int < ANY(array[NULL, 1]) order by 1;
+ col_int 
+---------
+       0
+(1 row)
+
+select col_int from vector_expr_table_02 where col_int < ANY(array[1, NULL]) order by 1;
+ col_int 
+---------
+       0
+(1 row)
+
+select col_int from vector_expr_table_02 where col_int = ANY(array[1, 2, 3]) order by 1;
+ col_int 
+---------
+       1
+       2
+       2
+       2
+       2
+       2
+(6 rows)
+
+select col_int from vector_expr_table_02 where col_int > ANY(array[-1, 2, 0]) order by 1;
+ col_int 
+---------
+       0
+       1
+       2
+       2
+       2
+       2
+       2
+       8
+       8
+       8
+       8
+       8
+       8
+       8
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+     123
+     123
+     123
+     123
+     123
+     123
+     123
+     123
+(31 rows)
+
+select col_int from vector_expr_table_02 where col_int < ANY(array[8, -1, 0]) order by 1;
+ col_int 
+---------
+       0
+       1
+       2
+       2
+       2
+       2
+       2
+(7 rows)
+
+--OP ALL
+select col_int from vector_expr_table_02 where col_int = ALL(array[NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int = ALL(array[NULL, 0]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int = ALL(array[0, NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int = ALL(array[NULL, 1]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int = ALL(array[1, NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int > ALL(array[NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int > ALL(array[NULL, 0]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int > ALL(array[0, NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int > ALL(array[NULL, 1]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int > ALL(array[1, NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int < ALL(array[NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int < ALL(array[NULL, 0]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int < ALL(array[0, NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int < ALL(array[NULL, 1]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int < ALL(array[1, NULL]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int = ALL(array[1, 2, 3]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+select col_int from vector_expr_table_02 where col_int > ALL(array[-1, 2, 0]) order by 1;
+ col_int 
+---------
+       8
+       8
+       8
+       8
+       8
+       8
+       8
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+      87
+     123
+     123
+     123
+     123
+     123
+     123
+     123
+     123
+(24 rows)
+
+select col_int from vector_expr_table_02 where col_int < ALL(array[8, -1, 0]) order by 1;
+ col_int 
+---------
+(0 rows)
+
+--in expr
+set enable_codegen=off;
+select col_tinterval from vector_expr_table_07 where col_tinterval in ('["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]', '["May 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]') order by 1;
+                          col_tinterval                          
+-----------------------------------------------------------------
+ ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+ ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+(2 rows)
+
+select col_interval from vector_expr_table_07 where col_interval in ('2 day 13:34:56', '1 day 18:34:56') order by 1; 
+           col_interval            
+-----------------------------------
+ @ 1 day 18 hours 34 mins 56 secs
+ @ 2 days 13 hours 34 mins 56 secs
+(2 rows)
+
+select col_timetz from vector_expr_table_07 where col_timetz in ('08:00:30+08', '00:00:30+08', '12:00:30+08') order by 1;
+ col_timetz  
+-------------
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 08:00:30+08
+ 12:00:30+08
+(5 rows)
+
+reset enable_codegen;
+----
+--- test 5: Coalesce Expression
+----
+select a, b, c, d, coalesce(a, b, c, d) abcd, coalesce(a, b, c) abc, coalesce(a, b) ab, coalesce(a, c) ac, coalesce(b, c) bc, coalesce(a) a, coalesce(b) b, coalesce(c) c, coalesce(d) d from vector_expr_table_04 order by 1, 2, 3, 4;
+  a  |     b      |  c  |  d  | abcd | abc | ab  | ac  |     bc     |  a  |     b      |  c  |  d  
+-----+------------+-----+-----+------+-----+-----+-----+------------+-----+------------+-----+-----
+ abc |            |     |     | abc  | abc | abc | abc |            | abc |            |     | 
+     | 1          | 2.0 |     | 1    | 1   | 1   | 2.0 | 1          |     | 1          | 2.0 | 
+     | 2          |     |     | 2    | 2   | 2   |     | 2          |     | 2          |     | 
+     |            | 2.0 |     | 2.0  | 2.0 |     | 2.0 | 2.0        |     |            | 2.0 | 
+     |            |     | def | def  |     |     |     |            |     |            |     | def
+     |            |     |     |      |     |     |     |            |     |            |     | 
+(6 rows)
+
+select a, b, c, coalesce(a, coalesce(a)),  coalesce(a, coalesce(a, coalesce(a))), coalesce(a, coalesce(b, coalesce(c))), coalesce(a, coalesce(a, b, c)) from vector_expr_table_04 order by 1, 2, 3;
+  a  |     b      |  c  | coalesce | coalesce | coalesce | coalesce 
+-----+------------+-----+----------+----------+----------+----------
+ abc |            |     | abc      | abc      | abc      | abc
+     | 1          | 2.0 |          |          | 1        | 1
+     | 2          |     |          |          | 2        | 2
+     |            | 2.0 |          |          | 2.0      | 2.0
+     |            |     |          |          |          | 
+     |            |     |          |          |          | 
+(6 rows)
+
+----
+--- test 6: Boolean Expression
+----
+select a, a is true from vector_expr_table_05 order by a;
+ a | ?column? 
+---+----------
+ f | f
+ f | f
+ f | f
+ f | f
+ t | t
+ t | t
+ t | t
+ t | t
+ t | t
+   | f
+(10 rows)
+
+select a, a is true from vector_expr_table_05 where a is true order by a;
+ a | ?column? 
+---+----------
+ t | t
+ t | t
+ t | t
+ t | t
+ t | t
+(5 rows)
+
+select a, a is true from vector_expr_table_05 where b is true order by a;
+ a | ?column? 
+---+----------
+ f | f
+ f | f
+ t | t
+ t | t
+(4 rows)
+
+select a, a is not true from vector_expr_table_05 order by a;
+ a | ?column? 
+---+----------
+ f | t
+ f | t
+ f | t
+ f | t
+ t | f
+ t | f
+ t | f
+ t | f
+ t | f
+   | t
+(10 rows)
+
+select a, a is not true from vector_expr_table_05 where a is not true order by a;
+ a | ?column? 
+---+----------
+ f | t
+ f | t
+ f | t
+ f | t
+   | t
+(5 rows)
+
+select a, a is not true from vector_expr_table_05 where b is true order by a;
+ a | ?column? 
+---+----------
+ f | t
+ f | t
+ t | f
+ t | f
+(4 rows)
+
+select a, a is false from vector_expr_table_05 order by a;
+ a | ?column? 
+---+----------
+ f | t
+ f | t
+ f | t
+ f | t
+ t | f
+ t | f
+ t | f
+ t | f
+ t | f
+   | f
+(10 rows)
+
+select a, a is false from vector_expr_table_05 where a is false order by a;
+ a | ?column? 
+---+----------
+ f | t
+ f | t
+ f | t
+ f | t
+(4 rows)
+
+select a, a is false from vector_expr_table_05 where b is false order by a;
+ a | ?column? 
+---+----------
+ f | t
+ f | t
+ t | f
+ t | f
+   | f
+(5 rows)
+
+select a, a is not false from vector_expr_table_05 order by a;
+ a | ?column? 
+---+----------
+ f | f
+ f | f
+ f | f
+ f | f
+ t | t
+ t | t
+ t | t
+ t | t
+ t | t
+   | t
+(10 rows)
+
+select a, a is not false from vector_expr_table_05 where a is not false order by a;
+ a | ?column? 
+---+----------
+ t | t
+ t | t
+ t | t
+ t | t
+ t | t
+   | t
+(6 rows)
+
+select a, a is not false from vector_expr_table_05 where b is false order by a;
+ a | ?column? 
+---+----------
+ f | f
+ f | f
+ t | t
+ t | t
+   | t
+(5 rows)
+
+select a, a is unknown from vector_expr_table_05 order by a;
+ a | ?column? 
+---+----------
+ f | f
+ f | f
+ f | f
+ f | f
+ t | f
+ t | f
+ t | f
+ t | f
+ t | f
+   | t
+(10 rows)
+
+select a, a is unknown from vector_expr_table_05 where a is unknown order by a;
+ a | ?column? 
+---+----------
+   | t
+(1 row)
+
+select a, a is unknown from vector_expr_table_05 where b is unknown order by a;
+ a | ?column? 
+---+----------
+ t | f
+(1 row)
+
+select a, a is not unknown from vector_expr_table_05 order by a;
+ a | ?column? 
+---+----------
+ f | t
+ f | t
+ f | t
+ f | t
+ t | t
+ t | t
+ t | t
+ t | t
+ t | t
+   | f
+(10 rows)
+
+select a, a is not unknown from vector_expr_table_05 where a is not unknown order by a;
+ a | ?column? 
+---+----------
+ f | t
+ f | t
+ f | t
+ f | t
+ t | t
+ t | t
+ t | t
+ t | t
+ t | t
+(9 rows)
+
+select a, a is not unknown from vector_expr_table_05 where b is unknown order by a;
+ a | ?column? 
+---+----------
+ t | t
+(1 row)
+
+--nvl 
+select nvl(b, 0) from VECTOR_EXPR_TABLE_05 order by 1;
+ nvl 
+-----
+   0
+   0
+   0
+   0
+   0
+   0
+   1
+   1
+   1
+   1
+(10 rows)
+
+----
+--- test 7: Min-Max Expression
+----
+select a, b, c, greatest(a::int, b), least(a::int, b), greatest(a, c), least(a, c), greatest(b::bool, c), least(b::bool, c), greatest(a::int, b, c::int), least(a::int, b, c::int) from  vector_expr_table_05 order by 1, 2, 3;
+ a | b | c | greatest | least | greatest | least | greatest | least | greatest | least 
+---+---+---+----------+-------+----------+-------+----------+-------+----------+-------
+ f | 0 | f |        0 |     0 | f        | f     | f        | f     |        0 |     0
+ f | 0 | t |        0 |     0 | t        | f     | t        | f     |        1 |     0
+ f | 1 | f |        1 |     0 | f        | f     | t        | f     |        1 |     0
+ f | 1 | t |        1 |     0 | t        | f     | t        | t     |        1 |     0
+ t | 0 | f |        1 |     0 | t        | f     | f        | f     |        1 |     0
+ t | 0 | t |        1 |     0 | t        | t     | t        | f     |        1 |     0
+ t | 1 | f |        1 |     1 | t        | f     | t        | f     |        1 |     0
+ t | 1 | t |        1 |     1 | t        | t     | t        | t     |        1 |     1
+ t |   | f |        1 |     1 | t        | f     | f        | f     |        1 |     0
+   | 0 | f |        0 |     0 | f        | f     | f        | f     |        0 |     0
+(10 rows)
+
+select a, b, c, greatest(a, b), least(a, b), greatest(a, c), least(a, c), greatest(b, c), least(b, c), greatest(a, b, c), least(a, b, c) from  vector_expr_table_06 order by 1, 2, 3;
+    a     |     b      |    c     | greatest |  least   | greatest |  least   |  greatest  |   least    | greatest |  least   
+----------+------------+----------+----------+----------+----------+----------+------------+------------+----------+----------
+ abc      | abb        |          | abc      | abb      | abc      | abc      | abb        | abb        | abc      | abb
+ abc      |            | aabcdefg | abc      | abc      | abc      | aabcdefg | aabcdefg   | aabcdefg   | abc      | aabcdefg
+ abcdefgh |            | abcdefgg | abcdefgh | abcdefgh | abcdefgh | abcdefgg | abcdefgg   | abcdefgg   | abcdefgh | abcdefgg
+          | abb        | abc      | abb      | abb      | abc      | abc      | abc        | abb        | abc      | abb
+          |            |          |          |          |          |          |            |            |          | 
+(5 rows)
+
+SELECT a, GREATEST(CASE WHEN (a > '0') THEN a ELSE ('-1') END, '1') AS greatest FROM vector_expr_table_06 order by 1, 2;
+    a     | greatest 
+----------+----------
+ abc      | abc
+ abc      | abc
+ abcdefgh | abcdefgh
+          | -1
+          | -1
+(5 rows)
+
+select greatest(a::int, b), least(a::int, b) from  vector_expr_table_05 where greatest(a::int, b)*2 > 0 and least(a::int, b)*2<10 order by 1,2;
+ greatest | least 
+----------+-------
+        1 |     0
+        1 |     0
+        1 |     0
+        1 |     0
+        1 |     1
+        1 |     1
+        1 |     1
+(7 rows)
+
+----
+--- test 8: CoerceViaIO Expression
+----
+select col_int::numeric from vector_expr_table_07 where col_int = 5;
+ col_int 
+---------
+       5
+(1 row)
+
+select col_num::int from vector_expr_table_07 where col_int = 5;
+ col_num 
+---------
+     123
+(1 row)
+
+select col_int::varchar from vector_expr_table_07 where col_int = 5;
+ col_int 
+---------
+ 5
+(1 row)
+
+select col_num::varchar from vector_expr_table_07 where col_int = 5;
+ col_num 
+---------
+ 123
+(1 row)
+
+select col_timestamptz::varchar from vector_expr_table_07 where col_int = 5;
+       col_timestamptz        
+------------------------------
+ Sat Sep 09 19:45:37 2017 PDT
+(1 row)
+
+select col_timestamptz::text from vector_expr_table_07 where col_int = 5;
+       col_timestamptz        
+------------------------------
+ Sat Sep 09 19:45:37 2017 PDT
+(1 row)
+
+select col_varchar::timestamp with time zone from vector_expr_table_07 where col_int = 5;
+         col_varchar          
+------------------------------
+ Sat Sep 09 19:45:37 2017 PDT
+(1 row)
+
+select col_char::text from vector_expr_table_07 order by 1;
+ col_char 
+----------
+ a
+ a
+ c
+ d
+ g
+ h
+ l
+ m
+ 
+(9 rows)
+
+select col_interval::text from vector_expr_table_07 order by 1;
+            col_interval            
+------------------------------------
+ @ 18 days 14 hours 34 mins 56 secs
+ @ 18 days 15 hours 34 mins 56 secs
+ @ 1 day 13 hours 34 mins 56 secs
+ @ 1 day 18 hours 34 mins 56 secs
+ @ 21 days 13 hours 34 mins 56 secs
+ @ 22 days 13 hours 34 mins 56 secs
+ @ 2 days 13 hours 34 mins 56 secs
+ @ 7 days 16 hours 34 mins 56 secs
+ 
+(9 rows)
+
+select col_timetz::text from vector_expr_table_07 order by 1;
+ col_timetz  
+-------------
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 01:00:30+08
+ 03:00:30+08
+ 06:00:30+08
+ 08:00:30+08
+ 12:00:30+08
+ 
+(9 rows)
+
+select col_tinterval::text from vector_expr_table_07 order by 1; 
+                          col_tinterval                          
+-----------------------------------------------------------------
+ ["-infinity" "infinity"]
+ ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+ ["Thu Feb 15 12:15:03 1990 PST" "Sun Sep 23 11:12:13 2001 PDT"]
+ ["Wed Dec 31 16:00:00 1969 PST" "Mon May 01 00:30:30 1995 PDT"]
+ 
+(9 rows)
+
+select (col_tinterval::text)::tinterval from vector_expr_table_07 order by 1;
+                          col_tinterval                          
+-----------------------------------------------------------------
+ ["-infinity" "infinity"]
+ ["Sun Sep 04 23:59:12 1983 PDT" "Tue Oct 04 23:59:12 1983 PDT"]
+ ["Thu Feb 15 12:15:03 1990 PST" "Sun Sep 23 11:12:13 2001 PDT"]
+ ["Wed Dec 31 16:00:00 1969 PST" "Mon May 01 00:30:30 1995 PDT"]
+ ["Sat May 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ ["Mon Feb 10 23:59:12 1947 PST" "Sun Jan 14 03:14:21 1973 PST"]
+ 
+(9 rows)
+
+select (col_timetz::text)::timetz from vector_expr_table_07 order by 1;
+ col_timetz  
+-------------
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 01:00:30+08
+ 03:00:30+08
+ 06:00:30+08
+ 08:00:30+08
+ 12:00:30+08
+ 
+(9 rows)
+
+select (col_interval::varchar)::interval from vector_expr_table_07 order by 1;
+            col_interval            
+------------------------------------
+ @ 1 day 13 hours 34 mins 56 secs
+ @ 1 day 18 hours 34 mins 56 secs
+ @ 2 days 13 hours 34 mins 56 secs
+ @ 7 days 16 hours 34 mins 56 secs
+ @ 18 days 14 hours 34 mins 56 secs
+ @ 18 days 15 hours 34 mins 56 secs
+ @ 21 days 13 hours 34 mins 56 secs
+ @ 22 days 13 hours 34 mins 56 secs
+ 
+(9 rows)
+
+delete from vector_expr_table_07 where col_varchar='2017-09-09 19:45:37';
+insert into vector_expr_table_07 values (123, 5, '2017-09-09 19:45:37', '1');
+set enable_hashjoin=off;
+explain (verbose on, costs off) select * from (select substr(col_varchar, 0,1) col1 from vector_expr_table_07 ) table1 left join vector_expr_table_08 on table1.col1=vector_expr_table_08.col_num;
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (substr((vector_expr_table_07.col_varchar)::text, 0, 1)), vector_expr_table_08.col_num, vector_expr_table_08.col_int
+   ->  Vector Streaming (type: GATHER)
+         Output: (substr((vector_expr_table_07.col_varchar)::text, 0, 1)), vector_expr_table_08.col_num, vector_expr_table_08.col_int
+         Node/s: All datanodes
+         ->  Vector Nest Loop Left Join
+               Output: substr((vector_expr_table_07.col_varchar)::text, 0, 1), vector_expr_table_08.col_num, vector_expr_table_08.col_int
+               Join Filter: (((substr((vector_expr_table_07.col_varchar)::text, 0, 1))::numeric) = vector_expr_table_08.col_num)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Output: vector_expr_table_07.col_varchar, ((substr((vector_expr_table_07.col_varchar)::text, 0, 1))::numeric)
+                     Distribute Key: ((substr((vector_expr_table_07.col_varchar)::text, 0, 1))::numeric)
+                     Spawn on: All datanodes
+                     Consumer Nodes: All datanodes
+                     ->  CStore Scan on vector_expression_engine_first.vector_expr_table_07
+                           Output: vector_expr_table_07.col_varchar, substr((vector_expr_table_07.col_varchar)::text, 0, 1)
+                           Distribute Key: vector_expr_table_07.col_num
+               ->  Vector Materialize
+                     Output: vector_expr_table_08.col_num, vector_expr_table_08.col_int
+                     ->  CStore Scan on vector_expression_engine_first.vector_expr_table_08
+                           Output: vector_expr_table_08.col_num, vector_expr_table_08.col_int
+                           Distribute Key: vector_expr_table_08.col_num
+(21 rows)
+
+select * from (select substr(col_varchar, 0,1) col1 from vector_expr_table_07 ) table1 left join vector_expr_table_08 on table1.col1=vector_expr_table_08.col_num where col_num is not null;
+ col1 | col_num | col_int 
+------+---------+---------
+ 1    |       1 |       1
+(1 row)
+
+reset enable_hashjoin;
+----
+--- Clean Resource and Tables
+----
+drop schema vector_expression_engine_first cascade;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to table vector_expr_table_01
+drop cascades to table vector_expr_table_02
+drop cascades to table vector_expr_table_03
+drop cascades to table vector_expr_table_04
+drop cascades to table vector_expr_table_05
+drop cascades to table vector_expr_table_06
+drop cascades to table vector_expr_table_07
+drop cascades to table vector_expr_table_08

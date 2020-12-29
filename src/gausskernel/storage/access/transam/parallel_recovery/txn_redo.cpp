@@ -44,35 +44,27 @@
 
 namespace parallel_recovery {
 
-static inline void redoLogTrace(RedoItem* item)
+static inline void redoLogTrace(RedoItem *item)
 {
-    ereport(LOG,
-        (errmodule(MOD_REDO),
-            errcode(ERRCODE_LOG),
-            errmsg("[REDO_LOG_TRACE]pendingHead : sharewithtrxn %u, blockbytrxn %u, imcheckpoint %u, "
-                   "shareCount %u, designatedWorker %u, refCount %u, replayed %u, ReadRecPtr %lu, "
-                   "EndRecPtr %lu",
-                (uint32)item->sharewithtrxn,
-                (uint32)item->blockbytrxn,
-                (uint32)item->imcheckpoint,
-                item->shareCount,
-                item->designatedWorker,
-                item->refCount,
-                item->replayed,
-                item->record.ReadRecPtr,
-                item->record.EndRecPtr)));
+    ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                  errmsg("[REDO_LOG_TRACE]pendingHead : sharewithtrxn %u, blockbytrxn %u, imcheckpoint %u, "
+                         "shareCount %u, designatedWorker %u, refCount %u, replayed %u, ReadRecPtr %lu, "
+                         "EndRecPtr %lu",
+                         (uint32)item->sharewithtrxn, (uint32)item->blockbytrxn, (uint32)item->imcheckpoint,
+                         item->shareCount, item->designatedWorker, item->refCount, item->replayed,
+                         item->record.ReadRecPtr, item->record.EndRecPtr)));
 }
 
 struct TxnRedoWorker {
-    RedoItem* pendingHead; /* The head of the RedoItem list. */
-    RedoItem* pendingTail; /* The tail of the RedoItem list. */
-    RedoItem* procHead;
-    RedoItem* procTail;
+    RedoItem *pendingHead; /* The head of the RedoItem list. */
+    RedoItem *pendingTail; /* The tail of the RedoItem list. */
+    RedoItem *procHead;
+    RedoItem *procTail;
 };
 
-TxnRedoWorker* StartTxnRedoWorker()
+TxnRedoWorker *StartTxnRedoWorker()
 {
-    TxnRedoWorker* worker = (TxnRedoWorker*)palloc(sizeof(TxnRedoWorker));
+    TxnRedoWorker *worker = (TxnRedoWorker *)palloc(sizeof(TxnRedoWorker));
     worker->pendingHead = NULL;
     worker->pendingTail = NULL;
 
@@ -81,17 +73,17 @@ TxnRedoWorker* StartTxnRedoWorker()
     return worker;
 }
 
-bool IsTxnWorkerIdle(TxnRedoWorker* worker)
+bool IsTxnWorkerIdle(TxnRedoWorker *worker)
 {
     return ((worker->procHead == NULL) && (worker->procTail == NULL));
 }
 
-void DestroyTxnRedoWorker(TxnRedoWorker* worker)
+void DestroyTxnRedoWorker(TxnRedoWorker *worker)
 {
     pfree(worker);
 }
 
-void AddTxnRedoItem(TxnRedoWorker* worker, RedoItem* item)
+void AddTxnRedoItem(TxnRedoWorker *worker, RedoItem *item)
 {
     /*
      * TxnRedoItems are never shared with other workers.
@@ -106,17 +98,14 @@ void AddTxnRedoItem(TxnRedoWorker* worker, RedoItem* item)
     worker->pendingTail = item;
 }
 
-void ApplyReadyTxnShareLogRecords(RedoItem* item)
+void ApplyReadyTxnShareLogRecords(RedoItem *item)
 {
     if (item->shareCount <= 1) {
-        ereport(PANIC,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]ApplyReadyTxnShareLogRecords encounter fatal error:rmgrID:%u, "
-                       "info:%u, sharcount:%u",
-                    (uint32)XLogRecGetRmid(&item->record),
-                    (uint32)XLogRecGetInfo(&item->record),
-                    item->shareCount)));
+        ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                        errmsg("[REDO_LOG_TRACE]ApplyReadyTxnShareLogRecords encounter fatal error:rmgrID:%u, "
+                               "info:%u, sharcount:%u",
+                               (uint32)XLogRecGetRmid(&item->record), (uint32)XLogRecGetInfo(&item->record),
+                               item->shareCount)));
     }
 
     uint32 refCount = pg_atomic_add_fetch_u32(&item->refCount, 1);
@@ -130,17 +119,15 @@ void ApplyReadyTxnShareLogRecords(RedoItem* item)
             refCount = pg_atomic_read_u32(&item->refCount);
 
             if ((waitCount & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
-                ereport(PANIC,
-                    (errmodule(MOD_REDO),
-                        errcode(ERRCODE_LOG),
-                        errmsg("[REDO_LOG_TRACE]ApplyReadyTxnShareLogRecords encounter fatal error:rmgrID:%u, info:%u, "
-                               "sharcount:%u, refcount:%u",
-                            (uint32)XLogRecGetRmid(&item->record),
-                            (uint32)XLogRecGetInfo(&item->record),
-                            item->shareCount,
-                            refCount)));
+                ereport(
+                    PANIC,
+                    (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                     errmsg("[REDO_LOG_TRACE]ApplyReadyTxnShareLogRecords encounter fatal error:rmgrID:%u, info:%u, "
+                            "sharcount:%u, refcount:%u",
+                            (uint32)XLogRecGetRmid(&item->record), (uint32)XLogRecGetInfo(&item->record),
+                            item->shareCount, refCount)));
             }
-            HandleStartupProcInterrupts();
+            RedoInterruptCallBack();
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
 
@@ -153,14 +140,11 @@ void ApplyReadyTxnShareLogRecords(RedoItem* item)
         pg_atomic_write_u32(&item->replayed, 1); /* notify other pageworker continue */
     } else {
         /* panic error */
-        ereport(PANIC,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]ApplyReadyTxnShareLogRecords encounter fatal error:rmgrID:%u, "
-                       "info:%u, designatedWorker:%u",
-                    (uint32)XLogRecGetRmid(&item->record),
-                    (uint32)XLogRecGetInfo(&item->record),
-                    item->designatedWorker)));
+        ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                        errmsg("[REDO_LOG_TRACE]ApplyReadyTxnShareLogRecords encounter fatal error:rmgrID:%u, "
+                               "info:%u, designatedWorker:%u",
+                               (uint32)XLogRecGetRmid(&item->record), (uint32)XLogRecGetInfo(&item->record),
+                               item->designatedWorker)));
     }
 
     /*
@@ -172,18 +156,15 @@ void ApplyReadyTxnShareLogRecords(RedoItem* item)
     }
 }
 
-void ApplyReadyAllShareLogRecords(RedoItem* item)
+void ApplyReadyAllShareLogRecords(RedoItem *item)
 {
     if (item->shareCount != (GetPageWorkerCount() + 1)) {
         /* panic */
-        ereport(PANIC,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("[REDO_LOG_TRACE]ApplyReadyAllShareLogRecords encounter fatal error:rmgrID:%u, "
-                       "info:%u, sharcount:%u",
-                    (uint32)XLogRecGetRmid(&item->record),
-                    (uint32)XLogRecGetInfo(&item->record),
-                    item->shareCount)));
+        ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                        errmsg("[REDO_LOG_TRACE]ApplyReadyAllShareLogRecords encounter fatal error:rmgrID:%u, "
+                               "info:%u, sharcount:%u",
+                               (uint32)XLogRecGetRmid(&item->record), (uint32)XLogRecGetInfo(&item->record),
+                               item->shareCount)));
     }
 
     uint32 refCount = pg_atomic_add_fetch_u32(&item->refCount, 1);
@@ -198,16 +179,13 @@ void ApplyReadyAllShareLogRecords(RedoItem* item)
 
         if ((waitCount & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
             ereport(PANIC,
-                (errmodule(MOD_REDO),
-                    errcode(ERRCODE_LOG),
-                    errmsg("[REDO_LOG_TRACE]ApplyReadyAllShareLogRecords encounter fatal error:rmgrID:%u, info:%u, "
-                           "sharcount:%u, refcount:%u",
-                        (uint32)XLogRecGetRmid(&item->record),
-                        (uint32)XLogRecGetInfo(&item->record),
-                        item->shareCount,
-                        refCount)));
+                    (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                     errmsg("[REDO_LOG_TRACE]ApplyReadyAllShareLogRecords encounter fatal error:rmgrID:%u, info:%u, "
+                            "sharcount:%u, refcount:%u",
+                            (uint32)XLogRecGetRmid(&item->record), (uint32)XLogRecGetInfo(&item->record),
+                            item->shareCount, refCount)));
         }
-        HandleStartupProcInterrupts();
+        RedoInterruptCallBack();
     }
     pgstat_report_waitevent(WAIT_EVENT_END);
     MemoryContext oldCtx = MemoryContextSwitchTo(g_dispatcher->oldCtx);
@@ -217,7 +195,7 @@ void ApplyReadyAllShareLogRecords(RedoItem* item)
     FreeRedoItem(item);
 }
 
-void MoveTxnItemToApplyQueue(TxnRedoWorker* worker)
+void MoveTxnItemToApplyQueue(TxnRedoWorker *worker)
 {
     if (worker->pendingHead == NULL) {
         return;
@@ -233,9 +211,9 @@ void MoveTxnItemToApplyQueue(TxnRedoWorker* worker)
     worker->pendingTail = NULL;
 }
 
-static RedoItem* ProcTxnItem(RedoItem* item)
+static RedoItem *ProcTxnItem(RedoItem *item)
 {
-    RedoItem* nextitem = item->nextByWorker[0];
+    RedoItem *nextitem = item->nextByWorker[0];
     XLogRecPtr ReadRecPtr = item->record.ReadRecPtr; /* start of last record read */
     XLogRecPtr EndRecPtr = item->record.EndRecPtr;   /* end+1 of last record read */
     TimestampTz recordXTime = item->recordXTime;
@@ -269,12 +247,12 @@ static RedoItem* ProcTxnItem(RedoItem* item)
     return nextitem;
 }
 
-void ApplyReadyTxnLogRecords(TxnRedoWorker* worker, bool forceAll)
+void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
 {
-    RedoItem* item = worker->procHead;
+    RedoItem *item = worker->procHead;
 
     while (item != NULL) {
-        XLogReaderState* record = &item->record;
+        XLogReaderState *record = &item->record;
         XLogRecPtr lrRead; /* lastReplayedReadPtr */
         XLogRecPtr lrEnd;
 
@@ -290,7 +268,7 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker* worker, bool forceAll)
                     oldReplayedPageLSN = lrEnd;
                 }
                 GetReplayedRecPtrFromWorkers(&lrRead, &lrEnd);
-                HandleStartupProcInterrupts();
+                RedoInterruptCallBack();
             }
         }
 
@@ -323,7 +301,7 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker* worker, bool forceAll)
                 SetXLogReplayRecPtr(lrRead, lrEnd);
                 oldReplayedPageLSN = lrEnd;
             }
-            HandleStartupProcInterrupts();
+            RedoInterruptCallBack();
         } while (forceAll && XLByteLT(lrEnd, t_thrd.xlog_cxt.EndRecPtr));
     }
 
@@ -333,7 +311,7 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker* worker, bool forceAll)
     }
 }
 
-void DumpTxnWorker(TxnRedoWorker* txnWorker)
+void DumpTxnWorker(TxnRedoWorker *txnWorker)
 {
     if (txnWorker->pendingHead != NULL) {
         redoLogTrace(txnWorker->pendingHead);
@@ -344,6 +322,20 @@ void DumpTxnWorker(TxnRedoWorker* txnWorker)
     }
 
     DumpXlogCtl();
+}
+
+void FreeTxnItem()
+{
+    MoveTxnItemToApplyQueue(g_dispatcher->txnWorker);
+    RedoItem *item = g_dispatcher->txnWorker->procHead;
+    RedoItem *nextitem = NULL;
+    while (item != NULL) {
+        nextitem = item->nextByWorker[0];
+        OnlyFreeRedoItem(item);
+        item = nextitem;
+    }
+    g_dispatcher->txnWorker->procHead = NULL;
+    g_dispatcher->txnWorker->procTail = NULL;
 }
 
 }  // namespace parallel_recovery

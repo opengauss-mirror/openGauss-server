@@ -1,0 +1,53 @@
+--test dummy server 
+--Positive testing
+--create server
+drop server if exists dummy_server;
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7200', username 'hanfeng', password 'Gauss@123', type 'dummy');
+--alter server
+alter server dummy_server options (set address '10.185.178.241:25001');
+alter server dummy_server options (set username 'newuser', set password 'Gauss@123');
+
+--negative test
+--create server
+drop server if exists dummy_server;
+create server dummy_server foreign data wrapper dfs_fdw options(username 'hanfeng', password 'Gauss@123', type 'dummy');
+
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', password 'Gauss@123', type 'dummy');
+
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', type 'dummy');
+
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', password 'Gauss@123');
+
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', password 'Gauss@123', type 'dummy', foldername '/data/data001');
+
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', password 'Gauss@123', type 'dummy', encrypt 'encrypt123');
+
+create server dummy_server foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', password 'Gauss@123', type 'dummy', hdfscfgpath '/opt/config');
+
+drop SERVER hdfs_server_test;
+CREATE SERVER hdfs_server_test FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (address '10.185.178.241:25000,10.185.178.239:25000',hdfscfgpath '/opt/config', type 'hdfs', username 'hanfeng', password 'Gauss@123');
+
+--do not create two dummy server 
+create server dummy_server001 foreign data wrapper hdfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', password 'Gauss@123', type 'dummy');
+create server dummy_server002 foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', username 'hanfeng', password 'Gauss@123', type 'dummy');
+
+--alter server
+alter server dummy_server001 options (add username 'Gauss@123');
+alter server dummy_server001 options (add password 'Gauss@123');
+alter server dummy_server001 options (add address 'Gauss@123');
+alter server dummy_server001 options (drop type);
+alter server dummy_server001 options (drop username);
+alter server dummy_server001 options (drop password);
+alter server dummy_server001 options (drop address);
+
+--add other option
+alter server dummy_server001 options (add hdfscfgpath '/opt/config', encrypt 'encrypt123');
+
+--failed to create dummy server, do not print password in log
+create server dummy_server003 foreign data wrapper dfs_fdw options(address '10.185.178.241:7201', password 'Gauss@123', type 'dummy');
+
+--do not create foreign table on dummy server
+create foreign table obd_foreign_tbl_error(a int) server dummy_server001 options( type 'obs');
+
+--clean enviroment
+drop server dummy_server001;

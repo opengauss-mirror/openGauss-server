@@ -331,9 +331,7 @@ select * from pg_shdepend where classid = 3254 and refclassid = 1260 and refobji
 DROP USER regress_rls_bob;
 ALTER POLICY p01 ON document_row USING (dauthor = current_user);
 ALTER POLICY p01 ON document_row RENAME TO p12;
-ALTER POLICY IF EXISTS p01 on document_row RENAME to p13;
 ALTER POLICY p12 ON document_row RENAME TO p13;
-ALTER ROW LEVEL SECURITY POLICY IF EXISTS p12 ON document_row RENAME TO p01;
 ALTER POLICY p13 ON document_row RENAME TO p01;
 SELECT * FROM pg_rlspolicies ORDER BY tablename, policyname;
 -- enable private object

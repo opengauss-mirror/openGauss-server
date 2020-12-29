@@ -45,8 +45,6 @@ extern char* nodeTagToString(NodeTag type);
  */
 #define RUSYNC_MSGTYPE_NODE_FINISH 'R'
 
-extern THR_LOCAL int global_iteration;
-
 /*
  * Base class for syncup controller
  */

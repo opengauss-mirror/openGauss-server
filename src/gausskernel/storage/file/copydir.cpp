@@ -33,10 +33,10 @@
  *	CurrentMemoryContext in this file because of PGDLLIMPORT conflict.
  */
 #if defined(WIN32) || defined(__CYGWIN__)
-#undef palloc
-#undef pstrdup
-#define palloc(sz) pgport_palloc(sz)
-#define pstrdup(str) pgport_pstrdup(str)
+    #undef palloc
+    #undef pstrdup
+    #define palloc(sz) pgport_palloc(sz)
+    #define pstrdup(str) pgport_pstrdup(str)
 #endif
 
 static int fsync_fname_ext(const char* fname, bool isdir, bool ignore_perm, int elevel);
@@ -300,7 +300,7 @@ int durable_rename(const char* oldfile, const char* newfile, int elevel)
     /* Time to do the real deal... */
     if (rename(oldfile, newfile) < 0) {
         ereport(elevel,
-            (errcode_for_file_access(), errmsg("could not rename file \"%s\" to \"%s\": %m", oldfile, newfile)));
+                (errcode_for_file_access(), errmsg("could not rename file \"%s\" to \"%s\": %m", oldfile, newfile)));
         return -1;
     }
 
@@ -354,7 +354,7 @@ int durable_link_or_rename(const char* oldfile, const char* newfile, int elevel)
     /* XXX: Add racy file existence check? */
     if (rename(oldfile, newfile) < 0) {
         ereport(elevel,
-            (errcode_for_file_access(), errmsg("could not rename file \"%s\" to \"%s\": %m", oldfile, newfile)));
+                (errcode_for_file_access(), errmsg("could not rename file \"%s\" to \"%s\": %m", oldfile, newfile)));
         return -1;
     }
 #endif
@@ -404,7 +404,6 @@ static int fsync_fname_ext(const char* fname, bool isdir, bool ignore_perm, int 
 
     errno = 0;
     fd = BasicOpenFile((char*)fname, flags, 0);
-
     /*
      * Some OSs don't allow us to open directories at all (Windows returns
      * EACCES), just ignore the error in that case.  If desired also silently
@@ -420,7 +419,6 @@ static int fsync_fname_ext(const char* fname, bool isdir, bool ignore_perm, int 
     }
 
     returncode = pg_fsync(fd);
-
     /*
      * Some OSes don't allow us to fsync directories at all, so we can ignore
      * those errors. Anything else needs to be logged.

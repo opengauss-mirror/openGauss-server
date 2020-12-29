@@ -1,0 +1,27 @@
+--for LLT
+--test gsql outer help
+\! @abs_bindir@/gs_initdb --help
+\! rm -f @abs_bindir@/test_initdb.log
+\! mkdir -p @testtablespace@/test2
+\! mkdir -p @testtablespace@/test2/pg_location
+\! @abs_bindir@/gs_initdb -S -D @testtablespace@/test2 --nodename coorn2 -U test_initdb -w test@123 --locale=LOCALE  --lc-collate=C --lc-ctype==C --lc-messages=LOCALE --encoding=UTF-8 >> @abs_bindir@/test_initdb2.log 2>&1
+\! cat @abs_bindir@/test_initdb2.log | grep ok
+\! rm -f @abs_bindir@/test_initdb2.log
+\! rm -rf @testtablespace@/test2
+\! mkdir -p @testtablespace@/test4
+\! mkdir -p @testtablespace@/test4/pg_location
+\! mkdir -p @testtablespace@/test4/pg_location/full_upgrade_bak
+\! @abs_bindir@/gs_initdb -S -D @testtablespace@/test4 --nodename coorn4 -U test_initdb -w test@123 -w test@123 --lc-monetary='C' --lc-numeric='C' --lc-time='C' --auth-host='ident' --auth-local='peer' -T CFG >> @abs_bindir@/test_initdb4.log 2>&1
+\! cat @abs_bindir@/test_initdb4.log | grep ok
+\! rm -f @abs_bindir@/test_initdb4.log
+\! rm -rf @testtablespace@/test4
+\! mkdir -p @testtablespace@/test7
+\! @abs_bindir@/gs_initdb -S -D @testtablespace@/test7 --nodename coorn7 -U test_initdb -w test@123 -X @testtablespace@/test7 -d >> /dev/null 2>&1
+\! rm -rf @testtablespace@/test7
+\! mkdir -p @testtablespace@/test8
+\! touch @testtablespace@/passwd.txt
+\! echo "test@123" > @testtablespace@/passwd.txt
+\! @abs_bindir@/gs_initdb -S -A trust --auth-host='ident' --auth-local='peer' --auth-host='ident' --auth-local='peer' -D @testtablespace@/test8 --nodename coorn8 -U test_initdb --pwfile=@testtablespace@/passwd.txt >> /dev/null 2>&1
+\! rm -rf @testtablespace@/passwd.txt
+\! rm -rf @testtablespace@/test8
+

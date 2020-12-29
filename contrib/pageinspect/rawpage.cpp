@@ -22,7 +22,7 @@
 #include "funcapi.h"
 #include "lib/stringinfo.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/checksum.h"
 #include "storage/pagecompress.h"
 #include "utils/builtins.h"
@@ -112,6 +112,11 @@ static bytea* get_raw_page_internal(text* relname, ForkNumber forknum, BlockNumb
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("cannot get raw page from view \"%s\"", RelationGetRelationName(rel))));
+    if (rel->rd_rel->relkind == RELKIND_CONTQUERY)
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot get raw page from contview for streaming engine \"%s\"", 
+                       RelationGetRelationName(rel))));
     if (rel->rd_rel->relkind == RELKIND_COMPOSITE_TYPE)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -120,6 +125,12 @@ static bytea* get_raw_page_internal(text* relname, ForkNumber forknum, BlockNumb
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("cannot get raw page from foreign table \"%s\"", RelationGetRelationName(rel))));
+
+    if (rel->rd_rel->relkind == RELKIND_STREAM)
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot get raw page from stream for streaming engine \"%s\"", 
+                       RelationGetRelationName(rel))));
 
     /*
      * Reject attempts to read non-local temporary relations; we would be
@@ -333,6 +344,10 @@ static void check(Relation rel)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("cannot get raw page from view \"%s\"", RelationGetRelationName(rel))));
+    if (rel->rd_rel->relkind == RELKIND_CONTQUERY)
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot get raw page from contview \"%s\"", RelationGetRelationName(rel))));
     if (rel->rd_rel->relkind == RELKIND_COMPOSITE_TYPE)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -341,6 +356,11 @@ static void check(Relation rel)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("cannot get raw page from foreign table \"%s\"", RelationGetRelationName(rel))));
+
+    if (rel->rd_rel->relkind == RELKIND_STREAM)
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot get raw page from stream \"%s\"", RelationGetRelationName(rel))));
 
     /*
      * Reject attempts to read non-local temporary relations; we would be

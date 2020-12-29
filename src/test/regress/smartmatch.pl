@@ -413,14 +413,6 @@ while( 1 )
 						$matched = 0;
 					}
 				}
-				elsif ($re =~ /[.*]/)
-				{
-					$re_1 = quotemeta($1);
-					if ($result !~ /$re_1.*/)
-					{
-						$matched = 0;
-					}
-				}
 				elsif ($re =~ /(.*)<Actual-Startup-Time>.*/)
 				{
 					$re_1 = quotemeta($1);
@@ -492,6 +484,7 @@ while( 1 )
 						$matched = 0;
 					}
 				}
+
 
 				elsif ($re =~ /Total runtime:.*/)
 				{

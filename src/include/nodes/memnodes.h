@@ -15,6 +15,7 @@
 #define MEMNODES_H
 
 #include "nodes/nodes.h"
+#include "nodes/pg_list.h"
 
 /*
  * MemoryContext
@@ -60,7 +61,7 @@ typedef struct MemoryTrackData {
     Size allBytesPeak;      /* the peak bytes allocated by this and its children's context */
     Size allBytesAlloc;     /* all bytes allocated by this and its children's context */
     Size allBytesFreed;     /* all bytes freed by this and its children's context */
-    int sequentCount;       /* the sequent count when creating in the thread */
+    int sequentCount;       /* the sequent count when creating in the thread */   
 #ifdef MEMORY_CONTEXT_CHECKING
     bool isTracking; /* flag to indicate which is tracked by memory_detail_tracking setting */
 #endif
@@ -75,19 +76,23 @@ typedef struct MemoryContextData {
     MemoryContext nextchild;       /* next child of same parent */
     char* name;                    /* context name (just for debugging) */
     pthread_rwlock_t lock;         /* lock to protect members if the context is shared */
+    bool is_sealed;				   /* sealed context prevent any memory change */
     bool is_shared;                /* context is shared by threads */
     bool isReset;                  /* T = no space alloced since last reset */
     int level;                     /* context level */
     uint64 session_id;             /* session id of context owner */
-    ThreadId thread_id;            /* thread id of context owner */
+    ThreadId thread_id;            /* thread id of context owner */   
+    ListCell cell;                 /* cell to pointer to this context*/
 } MemoryContextData;
 
 #define MemoryContextIsShared(context) (((MemoryContextData*)(context))->is_shared)
 
 #define MemoryContextLock(context)                                                                       \
     do {                                                                                                 \
+        START_CRIT_SECTION();                                                                            \
         int err = pthread_rwlock_wrlock(&((MemoryContextData*)(context))->lock);                         \
         if (err != 0) {                                                                                  \
+            END_CRIT_SECTION();                                                                          \
             ereport(ERROR,                                                                               \
                     (errcode(ERRCODE_LOCK_NOT_AVAILABLE),                                                \
                      errmsg("system call failed when lock, errno:%d.", err)));                           \
@@ -98,10 +103,12 @@ typedef struct MemoryContextData {
     do {                                                                                                 \
         int unlock_err = pthread_rwlock_unlock(&((MemoryContextData*)(context))->lock);                  \
         if (unlock_err != 0) {                                                                           \
-            ereport(ERROR,                                                                               \
+            END_CRIT_SECTION();                                                                          \
+            ereport(PANIC,                                                                               \
                     (errcode(ERRCODE_LOCK_NOT_AVAILABLE),                                                \
                      errmsg("system call failed when unlock, errno:%d.", unlock_err)));                  \
         }                                                                                                \
+        END_CRIT_SECTION();                                                                              \
     } while (0)
 
 typedef struct AllocBlockData* AllocBlock; /* forward reference */
@@ -234,10 +241,10 @@ typedef struct StackSetContext {
 } StackSetContext;
 
 typedef struct MemoryProtectFuncDef {
-    void* (*malloc)(Size sz);
+    void* (*malloc)(Size sz, bool needProtect);
     void (*free)(void* ptr, Size sz);
-    void* (*realloc)(void* ptr, Size oldsz, Size newsz);
-    int (*memalign)(void** memptr, Size alignment, Size sz);
+    void* (*realloc)(void* ptr, Size oldsz, Size newsz, bool needProtect);
+    int (*memalign)(void** memptr, Size alignment, Size sz, bool needProtect);
 } MemoryProtectFuncDef;
 
 extern MemoryProtectFuncDef GenericFunctions;
@@ -257,6 +264,5 @@ extern MemoryProtectFuncDef SharedFunctions;
             IsA((context), MemalignSharedAllocSetContext)))
 
 #define AllocSetContextUsedSpace(aset) ((aset)->totalSpace - (aset)->freeSpace)
-
 #endif /* MEMNODES_H */
 

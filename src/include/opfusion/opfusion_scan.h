@@ -29,7 +29,7 @@
 #include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
 #include "pgxc/pgxcnode.h"
-#include "storage/buf.h"
+#include "storage/buf/buf.h"
 #include "utils/plancache.h"
 #include "utils/syscache.h"
 
@@ -56,7 +56,7 @@ public:
 
     virtual bool EpqCheck(Datum* values, const bool* isnull) = 0;
 
-    virtual Relation getCurrentRel() = 0;
+    virtual void UpdateCurrentRel(Relation* rel) = 0;
 
     virtual void setAttrNo() = 0;
 
@@ -67,6 +67,10 @@ public:
     PlannedStmt* m_planstmt;
 
     Relation m_rel;
+
+    Relation m_parentRel;
+
+    Partition m_partRel;
 
     TupleTableSlot* m_reslot;
 
@@ -94,19 +98,19 @@ public:
 
     virtual void End(bool isCompleted) = 0;
 
-    virtual void setAttrNo();
+    void setAttrNo();
 
     virtual TupleTableSlot* getTupleSlot() = 0;
 
     bool EpqCheck(Datum* values, const bool* isnull);
 
-    Relation getCurrentRel();
+    void UpdateCurrentRel(Relation* rel);
     
     Relation m_index; /* index relation */
 
     Oid m_reloid; /* relation oid of range table */
 
-    AbsIdxScanDesc m_scandesc;
+    IndexScanDesc m_scandesc;
 
     List* m_epq_indexqual; /* indexqual list */
 
@@ -131,6 +135,7 @@ public:
     List* m_targetList;
 
     int16* m_attrno; /* target attribute number, length is m_tupDesc->natts */
+
 };
 
 class IndexScanFusion : public IndexFusion {
@@ -176,115 +181,5 @@ private:
 
     Buffer m_VMBuffer;
 };
-
-#if 0
-class RScanFusion : public BaseObject {
-public:
-    RScanFusion();
-
-    RScanFusion(ParamListInfo params, PlannedStmt* planstmt);
-
-    static RScanFusion* getScanFusion(Node* node, PlannedStmt* planstmt, ParamListInfo params);
-
-    void refreshParameter(ParamListInfo params);
-
-    virtual void Init(long max_rows) = 0;
-
-    virtual HeapTuple getTuple() = 0;
-
-    virtual void End() = 0;
-
-    virtual bool EpqCheck(Datum* values, const bool* isnull) = 0;
-
-    virtual void setAttrNo() = 0;
-
-    virtual TupleTableSlot* getTupleSlot() = 0;
-
-    PlannedStmt* m_planstmt;
-
-    TupleDesc m_tupDesc;
-};
-
-class RIndexFusion : public RScanFusion {
-public:
-    RIndexFusion(ParamListInfo params, PlannedStmt* planstmt);
-
-    RIndexFusion()
-    {}
-
-    void refreshParameterIfNecessary();
-
-    void BuildNullTestScanKey(Expr* clause, Expr* leftop, ScanKey this_scan_key);
-
-    void IndexBuildScanKey(List* indexqual);
-
-    virtual void Init(long max_rows) = 0;
-
-    virtual HeapTuple getTuple() = 0;
-
-    virtual void End() = 0;
-
-    virtual void setAttrNo();
-
-    virtual TupleTableSlot* getTupleSlot() = 0;
-
-    bool EpqCheck(Datum* values, const bool* isnull);
-
-    Oid m_reloid; /* relation oid of range table */
-
-    List* m_epq_indexqual; /* indexqual list */
-
-    int m_keyNum; /* num of scan key */
-
-    ParamLoc* m_paramLoc; /* location of m_params, include paramId and the location in indexqual */
-
-    int m_paramNum; 
-
-    List* m_targetList;
-
-    int16* m_attrno; /* target attribute number, length is m_tupDesc->natts */ 
-};
-
-class RIndexScanFusion : public RIndexFusion {
-public:
-    RIndexScanFusion()
-    {}
-
-    ~RIndexScanFusion(){};
-
-    RIndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamListInfo params);
-
-    void Init(long max_rows);
-
-    HeapTuple getTuple();
-
-    void End();
-
-    TupleTableSlot* getTupleSlot();
-
-private:
-    struct IndexScan* m_node;
-};
-
-class RIndexOnlyScanFusion : public RIndexFusion {
-public:
-    RIndexOnlyScanFusion()
-    {}
-
-    ~RIndexOnlyScanFusion(){};
-
-    RIndexOnlyScanFusion(IndexOnlyScan* node, PlannedStmt* planstmt, ParamListInfo params);
-
-    void Init(long max_rows);
-
-    HeapTuple getTuple();
-
-    void End();
-
-    TupleTableSlot* getTupleSlot();
-
-private:
-    struct IndexOnlyScan* m_node;
-};
-#endif
 #endif /* SRC_INCLUDE_OPFUSION_OPFUSION_SCAN_H_ */
+

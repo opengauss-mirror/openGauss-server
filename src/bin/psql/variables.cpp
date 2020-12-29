@@ -229,11 +229,9 @@ bool SetVariableAssignHook(VariableSpace space, const char* name, VariableAssign
     return true;
 }
 
-void SetVariableBool(VariableSpace space, const char* name)
+bool SetVariableBool(VariableSpace space, const char* name)
 {
-    if (!SetVariable(space, name, "on")) {
-        psql_error("set variable %s failed.\n", name);
-    }
+    return SetVariable(space, name, "on");
 }
 
 bool DeleteVariable(VariableSpace space, const char* name)

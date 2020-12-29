@@ -1,0 +1,1034 @@
+set enable_global_stats = true;
+/*
+ * This file is used to test the function of ExecVecSetOp
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_setop_engine;
+set current_schema=vector_setop_engine;
+create table vector_setop_engine.VECTOR_SETOP_TABLE_01
+(
+   col_inta	int
+  ,col_intb	int
+  ,col_num	numeric
+  ,col_char	char
+  ,col_varchar	varchar
+  ,col_text	text
+  ,col_time	time
+  ,col_interval	interval
+) with (orientation = orc) tablespace hdfs_ts  distribute by hash(col_inta);
+COPY VECTOR_SETOP_TABLE_01(col_inta, col_intb, col_num, col_char, col_varchar, col_text, col_time, col_interval) FROM stdin;
+create table vector_setop_engine.VECTOR_SETOP_TABLE_02
+(
+   col_inta	int
+  ,col_intb	int
+  ,col_num	numeric
+  ,col_char	char
+  ,col_varchar	varchar
+  ,col_text	text
+  ,col_time	time
+  ,col_interval	interval
+) with (orientation = orc) tablespace hdfs_ts  distribute by hash(col_inta);
+COPY VECTOR_SETOP_TABLE_02(col_inta, col_intb, col_num, col_char, col_varchar, col_text, col_time, col_interval) FROM stdin;
+create table vector_setop_engine.VECTOR_SETOP_TABLE_03
+(
+   col_inta	int
+  ,col_intb	int
+  ,col_num	numeric
+  ,col_char	char
+  ,col_varchar	varchar
+  ,col_text	text
+  ,col_time	time
+  ,col_interval	interval
+) with (orientation = orc) tablespace hdfs_ts  distribute by hash(col_intb);
+COPY VECTOR_SETOP_TABLE_03(col_inta, col_intb, col_num, col_char, col_varchar, col_text, col_time, col_interval) FROM stdin;
+create table vector_setop_engine.VECTOR_SETOP_TABLE_04
+(
+   col_inta	smallint
+  ,col_intb	bigint
+  ,col_num	numeric
+  ,col_char	char
+  ,col_varchar	varchar
+  ,col_text	text
+  ,col_time	time
+  ,col_interval	interval
+) with (orientation = orc) tablespace hdfs_ts  distribute by hash(col_inta);
+COPY VECTOR_SETOP_TABLE_04(col_inta, col_intb, col_num, col_char, col_varchar, col_text, col_time, col_interval) FROM stdin;
+analyze vector_setop_table_01;
+analyze vector_setop_table_02;
+analyze vector_setop_table_03;
+analyze vector_setop_table_04;
+create view setop_12 as select vector_setop_table_01.col_inta as ta1, vector_setop_table_01.col_intb as tb1, vector_setop_table_02.col_inta as ta2, vector_setop_table_01.col_intb as tb2 from vector_setop_table_01 inner join vector_setop_table_02 on vector_setop_table_01.col_inta = vector_setop_table_02.col_inta; 
+create view setop_23 as select vector_setop_table_02.col_inta as ta2, vector_setop_table_02.col_intb as tb2, vector_setop_table_03.col_inta as ta3, vector_setop_table_03.col_intb as tb3 from vector_setop_table_02 inner join vector_setop_table_03 on vector_setop_table_02.col_inta = vector_setop_table_03.col_inta; 
+create view setop_31 as select vector_setop_table_03.col_inta as ta3, vector_setop_table_03.col_intb as tb3, vector_setop_table_01.col_inta as ta1, vector_setop_table_01.col_intb as tb1 from vector_setop_table_03 inner join vector_setop_table_01 on vector_setop_table_03.col_inta = vector_setop_table_01.col_inta; 
+----
+--- test 1: Basic Test: INTERSECT ALL
+----
+-- hash + hash + same distributeKey + Append executes on all DNs
+explain (verbose on, costs off)
+select * from vector_setop_table_01 intersect all select * from vector_setop_table_02 order by 1, 2, 3;
+                                                                                                                                                                                                                                           QUERY PLAN                                                                                                                                                                                                                                           
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+   ->  Vector Streaming (type: GATHER)
+         Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+         Merge Sort Key: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num
+         ->  Vector Sort
+               Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+               Sort Key: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num
+               ->  Vector HashSetOp Intersect All
+                     Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+                     ->  Vector Append
+                           ->  Vector Subquery Scan on "*SELECT* 1"
+                                 Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, 0
+                                 ->  Vector Result
+                                       Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_setop_engine.vector_setop_table_01
+                                                   Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                                                   Distribute Key: vector_setop_engine.vector_setop_table_01.col_inta
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_setop_table_01.col_inta, cstore.vector_setop_table_01.col_intb, cstore.vector_setop_table_01.col_num, cstore.vector_setop_table_01.col_char, cstore.vector_setop_table_01.col_varchar, cstore.vector_setop_table_01.col_text, cstore.vector_setop_table_01.col_time, cstore.vector_setop_table_01.col_interval
+                                                   ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_01 vector_setop_table_01
+                                                         Output: cstore.vector_setop_table_01.col_inta, cstore.vector_setop_table_01.col_intb, cstore.vector_setop_table_01.col_num, cstore.vector_setop_table_01.col_char, cstore.vector_setop_table_01.col_varchar, cstore.vector_setop_table_01.col_text, cstore.vector_setop_table_01.col_time, cstore.vector_setop_table_01.col_interval
+                                                         Distribute Key: cstore.vector_setop_table_01.col_inta
+                           ->  Vector Subquery Scan on "*SELECT* 2"
+                                 Output: "*SELECT* 2".col_inta, "*SELECT* 2".col_intb, "*SELECT* 2".col_num, "*SELECT* 2".col_char, "*SELECT* 2".col_varchar, "*SELECT* 2".col_text, "*SELECT* 2".col_time, "*SELECT* 2".col_interval, 1
+                                 ->  Vector Result
+                                       Output: vector_setop_engine.vector_setop_table_02.col_inta, vector_setop_engine.vector_setop_table_02.col_intb, vector_setop_engine.vector_setop_table_02.col_num, vector_setop_engine.vector_setop_table_02.col_char, vector_setop_engine.vector_setop_table_02.col_varchar, vector_setop_engine.vector_setop_table_02.col_text, vector_setop_engine.vector_setop_table_02.col_time, vector_setop_engine.vector_setop_table_02.col_interval
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_setop_engine.vector_setop_table_02
+                                                   Output: vector_setop_engine.vector_setop_table_02.col_inta, vector_setop_engine.vector_setop_table_02.col_intb, vector_setop_engine.vector_setop_table_02.col_num, vector_setop_engine.vector_setop_table_02.col_char, vector_setop_engine.vector_setop_table_02.col_varchar, vector_setop_engine.vector_setop_table_02.col_text, vector_setop_engine.vector_setop_table_02.col_time, vector_setop_engine.vector_setop_table_02.col_interval
+                                                   Distribute Key: vector_setop_engine.vector_setop_table_02.col_inta
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_setop_table_02.col_inta, cstore.vector_setop_table_02.col_intb, cstore.vector_setop_table_02.col_num, cstore.vector_setop_table_02.col_char, cstore.vector_setop_table_02.col_varchar, cstore.vector_setop_table_02.col_text, cstore.vector_setop_table_02.col_time, cstore.vector_setop_table_02.col_interval
+                                                   ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_02 vector_setop_table_02
+                                                         Output: cstore.vector_setop_table_02.col_inta, cstore.vector_setop_table_02.col_intb, cstore.vector_setop_table_02.col_num, cstore.vector_setop_table_02.col_char, cstore.vector_setop_table_02.col_varchar, cstore.vector_setop_table_02.col_text, cstore.vector_setop_table_02.col_time, cstore.vector_setop_table_02.col_interval
+                                                         Distribute Key: cstore.vector_setop_table_02.col_inta
+(37 rows)
+
+select * from vector_setop_table_01 intersect all select * from vector_setop_table_02 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        2 |        3 |     2.3 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+select * from vector_setop_table_01 where col_inta = 1 intersect all select * from vector_setop_table_02 where col_intb = 1 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time | col_interval 
+----------+----------+---------+----------+-------------+----------+----------+--------------
+(0 rows)
+
+select col_num, col_time from vector_setop_table_01 intersect all select col_num, col_time from vector_setop_table_03 order by 1, 2;
+ col_num | col_time 
+---------+----------
+     1.2 | 11:18:00
+     1.2 | 11:28:00
+     2.3 | 11:18:00
+     2.3 | 11:28:00
+(4 rows)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 intersect all select col_intb, col_inta from vector_setop_table_03 where col_inta = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+(0 rows)
+
+-- hash + hash + same distributeKey + Append executes on special DN
+select * from vector_setop_table_01 where col_inta = 1 intersect all select * from vector_setop_table_02 where col_inta = 1 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(1 row)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 intersect all select col_intb, col_inta from vector_setop_table_03 where col_intb = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+(0 rows)
+
+select col_time, col_interval from vector_setop_table_01 where col_inta = 1 intersect all select col_time, col_interval from vector_setop_table_03 where col_intb = 1 order by 1, 2; 
+ col_time | col_interval 
+----------+--------------
+(0 rows)
+
+-- hash + hash + different distributeKey + Append executes on all DNs
+select * from vector_setop_table_01 intersect all select * from vector_setop_table_03 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        2 |        3 |     2.3 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 intersect all select col_intb, col_inta from vector_setop_table_02 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+(0 rows)
+
+-- hash + hash + different distributeKey + Append executes on special DN
+select * from vector_setop_table_01 where col_inta = 1 intersect all select * from vector_setop_table_03 where col_intb = 1 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time | col_interval 
+----------+----------+---------+----------+-------------+----------+----------+--------------
+(0 rows)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 intersect all select col_intb, col_inta from vector_setop_table_02 where col_inta = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+(0 rows)
+
+-- hash + hash + type cast
+select * from vector_setop_table_01 intersect all select * from vector_setop_table_04 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        2 |        3 |     2.3 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 intersect all select col_intb, col_inta from vector_setop_table_04 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+(0 rows)
+
+-- execute on cn + hash
+select 1 from pg_auth_members intersect all select col_intb from vector_setop_table_02 order by 1;
+ ?column? 
+----------
+(0 rows)
+
+-- targetlist dosenot contains distributeKey
+select col_inta from vector_setop_table_01 intersect all select col_intb from vector_setop_table_02 order by 1;
+ col_inta 
+----------
+        2
+        2
+(2 rows)
+
+select col_intb from vector_setop_table_01 intersect all select col_intb from vector_setop_table_02 order by 1;
+ col_intb 
+----------
+        2
+        2
+        3
+        3
+(4 rows)
+
+select col_interval from vector_setop_table_01 intersect all select col_interval from vector_setop_table_02 order by 1;
+           col_interval            
+-----------------------------------
+ @ 2 days 13 hours 24 mins 56 secs
+ @ 2 days 13 hours 24 mins 56 secs
+ @ 2 days 13 hours 25 mins 56 secs
+ @ 2 days 13 hours 25 mins 56 secs
+(4 rows)
+
+select * from setop_12 intersect all select * from setop_23 order by 1, 2, 3;
+ ta1 | tb1 | ta2 | tb2 
+-----+-----+-----+-----
+   1 |   2 |   1 |   2
+   1 |   2 |   1 |   2
+   1 |   2 |   1 |   2
+   1 |   2 |   1 |   2
+   2 |   3 |   2 |   3
+   2 |   3 |   2 |   3
+   2 |   3 |   2 |   3
+   2 |   3 |   2 |   3
+(8 rows)
+
+SELECT 1 AS one intersect all SELECT 1.1::float8 order by 1;
+ one 
+-----
+(0 rows)
+
+(select * from vector_setop_table_01) minus (select * from vector_setop_table_01);
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time | col_interval 
+----------+----------+---------+----------+-------------+----------+----------+--------------
+(0 rows)
+
+--Since column table does not support replication, the following tests should be fixed later
+-- hash + replication  + Append executes on special DN
+--select * from vector_setop_table_01 intersect all select * from replication_t1 order by 1, 2, 3;
+-- replication + replication
+--select * from replication_t1 intersect all select * from replication_t2 order by 1, 2, 3;
+----
+--- test 2: Basic Test: INTERSECT
+----
+-- hash + hash + same distributeKey + Append executes on all DNs
+select * from vector_setop_table_01 intersect select * from vector_setop_table_02 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        2 |        3 |     2.3 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+select col_varchar, col_time from vector_setop_table_01 intersect select col_varchar, col_time from vector_setop_table_03 order by 1, 2;
+ col_varchar | col_time 
+-------------+----------
+ t           | 11:28:00
+(1 row)
+
+select * from vector_setop_table_01 where col_inta = 1 intersect select * from vector_setop_table_02 where col_intb = 1 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time | col_interval 
+----------+----------+---------+----------+-------------+----------+----------+--------------
+(0 rows)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 intersect all select col_intb, col_inta from vector_setop_table_03 where col_inta = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+(0 rows)
+
+-- hash + hash + same distributeKey + Append executes on special DN
+select * from vector_setop_table_01 where col_inta = 1 intersect select * from vector_setop_table_02 where col_inta = 1 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(1 row)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 intersect select col_intb, col_inta from vector_setop_table_03 where col_intb = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+(0 rows)
+
+select col_time, col_interval from vector_setop_table_01 where col_inta = 1 intersect select col_time, col_interval from vector_setop_table_03 where col_intb = 1 order by 1, 2; 
+ col_time | col_interval 
+----------+--------------
+(0 rows)
+
+-- hash + hash + different distributeKey + Append executes on all DNs
+select * from vector_setop_table_01 intersect select * from vector_setop_table_03 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        2 |        3 |     2.3 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 intersect select col_intb, col_inta from vector_setop_table_02 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+(0 rows)
+
+-- hash + hash + different distributeKey + Append executes on special DN
+select * from vector_setop_table_01 where col_inta = 1 intersect select * from vector_setop_table_03 where col_intb = 1 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time | col_interval 
+----------+----------+---------+----------+-------------+----------+----------+--------------
+(0 rows)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 intersect select col_intb, col_inta from vector_setop_table_02 where col_inta = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+(0 rows)
+
+-- hash + hash + type cast
+select * from vector_setop_table_01 intersect select * from vector_setop_table_04 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        2 |        3 |     2.3 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 intersect select col_intb, col_inta from vector_setop_table_04 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+(0 rows)
+
+-- execute on cn + hash
+select 1 from pg_auth_members intersect all select col_intb from vector_setop_table_02 order by 1;
+ ?column? 
+----------
+(0 rows)
+
+-- targetlist dosenot contains distributeKey
+select col_inta from vector_setop_table_01 intersect select col_intb from vector_setop_table_02 order by 1;
+ col_inta 
+----------
+        2
+(1 row)
+
+select col_intb from vector_setop_table_01 intersect select col_intb from vector_setop_table_02 order by 1;
+ col_intb 
+----------
+        2
+        3
+(2 rows)
+
+select col_interval from vector_setop_table_01 intersect select col_interval from vector_setop_table_02 order by 1;
+           col_interval            
+-----------------------------------
+ @ 2 days 13 hours 24 mins 56 secs
+ @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+select * from setop_12 intersect select * from setop_23 order by 1, 2, 3;
+ ta1 | tb1 | ta2 | tb2 
+-----+-----+-----+-----
+   1 |   2 |   1 |   2
+   2 |   3 |   2 |   3
+(2 rows)
+
+SELECT 1 AS one intersect SELECT 1.1::float8 order by 1;
+ one 
+-----
+(0 rows)
+
+--Since column table does not support replication, the following tests should be fixed later
+-- hash + replication  + Append executes on special DN
+--select * from hash_t1 intersect select * from replication_t1 order by 1, 2;
+-- replication + replication
+--select * from replication_t1 intersect select * from replication_t2 order by 1, 2;
+----
+--- test 3: Basic Test: EXCEPT ALL 
+----
+select * from vector_setop_table_01 except all select * from vector_setop_table_02 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_varchar, col_time from vector_setop_table_01 except all select col_varchar, col_time from vector_setop_table_03 order by 1, 2;
+ col_varchar | col_time 
+-------------+----------
+ hash_t1     | 11:18:00
+ hash_t1     | 11:18:00
+(2 rows)
+
+select * from vector_setop_table_01 where col_inta = 1 except all select * from vector_setop_table_02 where col_intb = 1 order by 1, 2, 3, 4;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 except all select col_intb, col_inta from vector_setop_table_03 where col_inta = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        1 |        2
+(2 rows)
+
+-- hash + hash + same distributeKey + Append executes on special DN
+select * from vector_setop_table_01 where col_inta = 1 except all select * from vector_setop_table_02 where col_inta = 1 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(1 row)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 except all select col_intb, col_inta from vector_setop_table_03 where col_intb = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        1 |        2
+(2 rows)
+
+select col_time, col_interval from vector_setop_table_01 where col_inta = 1 except all select col_time, col_interval from vector_setop_table_03 where col_intb = 1 order by 1, 2; 
+ col_time |           col_interval            
+----------+-----------------------------------
+ 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+ 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+-- hash + hash + different distributeKey + Append executes on all DNs
+select * from vector_setop_table_01 except all select * from vector_setop_table_03 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 except all select col_intb, col_inta from vector_setop_table_02 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        1 |        2
+        2 |        3
+        2 |        3
+(4 rows)
+
+-- hash + hash + different distributeKey + Append executes on special DN
+select * from vector_setop_table_01 where col_inta = 1 except all select * from vector_setop_table_03 where col_intb = 1 order by 1, 2, 3, 4;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 except all select col_intb, col_inta from vector_setop_table_02 where col_inta = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        1 |        2
+(2 rows)
+
+-- hash + hash + type cast
+select * from vector_setop_table_01 except all select * from vector_setop_table_04 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 except all select col_intb, col_inta from vector_setop_table_04 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        1 |        2
+        2 |        3
+        2 |        3
+(4 rows)
+
+-- execute on cn + hash
+select 1 from pg_auth_members except all select col_intb from vector_setop_table_02 order by 1;
+ ?column? 
+----------
+(0 rows)
+
+-- targetlist dosenot contains distributeKey
+select col_inta from vector_setop_table_01 except all select col_intb from vector_setop_table_02 order by 1;
+ col_inta 
+----------
+        1
+        1
+(2 rows)
+
+select col_intb from vector_setop_table_01 except all select col_intb from vector_setop_table_02 order by 1;
+ col_intb 
+----------
+(0 rows)
+
+select col_interval from vector_setop_table_01 except all select col_interval from vector_setop_table_02 order by 1;
+ col_interval 
+--------------
+(0 rows)
+
+select * from setop_12 except all select * from setop_23 order by 1, 2, 3;
+ ta1 | tb1 | ta2 | tb2 
+-----+-----+-----+-----
+(0 rows)
+
+SELECT 1 AS one except all SELECT 1.1::float8 order by 1;
+ one 
+-----
+   1
+(1 row)
+
+--Since column table does not support replication, the following tests should be fixed later
+-- hash + replication  + Append executes on special DN
+--select * from hash_t1 except all select * from replication_t1 order by 1, 2, 3;
+-- replication + replication
+--select * from replication_t1 except all select * from replication_t2 order by 1, 2, 3;
+----
+--- test 4: Basic Test: EXCEPT 
+----
+select * from vector_setop_table_01 except select * from vector_setop_table_02 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_varchar, col_time from vector_setop_table_01 except select col_varchar, col_time from vector_setop_table_03 order by 1, 2;
+ col_varchar | col_time 
+-------------+----------
+ hash_t1     | 11:18:00
+(1 row)
+
+select * from vector_setop_table_01 where col_inta = 1 except select * from vector_setop_table_02 where col_intb = 1 order by 1, 2, 3, 4;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 except all select col_intb, col_inta from vector_setop_table_03 where col_inta = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        1 |        2
+(2 rows)
+
+-- hash + hash + same distributeKey + Append executes on special DN
+select * from vector_setop_table_01 where col_inta = 1 except all select * from vector_setop_table_02 where col_inta = 1 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(1 row)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 except select col_intb, col_inta from vector_setop_table_03 where col_intb = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+(1 row)
+
+select col_time, col_interval from vector_setop_table_01 where col_inta = 1 except select col_time, col_interval from vector_setop_table_03 where col_intb = 1 order by 1, 2; 
+ col_time |           col_interval            
+----------+-----------------------------------
+ 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+ 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+-- hash + hash + different distributeKey + Append executes on all DNs
+select * from vector_setop_table_01 except select * from vector_setop_table_03 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 except select col_intb, col_inta from vector_setop_table_02 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        2 |        3
+(2 rows)
+
+-- hash + hash + different distributeKey + Append executes on special DN
+select * from vector_setop_table_01 where col_inta = 1 except all select * from vector_setop_table_03 where col_intb = 1 order by 1, 2, 3, 4;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 except all select col_intb, col_inta from vector_setop_table_02 where col_inta = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        1 |        2
+(2 rows)
+
+-- hash + hash + type cast
+select * from vector_setop_table_01 except select * from vector_setop_table_04 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 except select col_intb, col_inta from vector_setop_table_04 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        2 |        3
+(2 rows)
+
+-- execute on cn + hash
+select 1 from pg_auth_members except all select col_intb from vector_setop_table_02 order by 1;
+ ?column? 
+----------
+(0 rows)
+
+-- targetlist dosenot contains distributeKey
+select col_inta from vector_setop_table_01 except select col_intb from vector_setop_table_02 order by 1;
+ col_inta 
+----------
+        1
+(1 row)
+
+select col_intb from vector_setop_table_01 except select col_intb from vector_setop_table_02 order by 1;
+ col_intb 
+----------
+(0 rows)
+
+select col_interval from vector_setop_table_01 except select col_interval from vector_setop_table_02 order by 1;
+ col_interval 
+--------------
+(0 rows)
+
+select * from setop_12 except select * from setop_23 order by 1, 2, 3;
+ ta1 | tb1 | ta2 | tb2 
+-----+-----+-----+-----
+(0 rows)
+
+SELECT 1 AS one except SELECT 1.1::float8 order by 1;
+ one 
+-----
+   1
+(1 row)
+
+--Since column table does not support replication, the following tests should be fixed later
+-- hash + replication  + Append executes on special DN
+--select * from hash_t1 except select * from replication_t1 order by 1, 2, 3;
+-- replication + replication
+--select * from replication_t1 except select * from replication_t2 order by 1, 2, 3;
+----
+--- test 5: SetOp with RunSort
+----
+set enable_hashagg=off;
+explain (verbose, costs off) select * from vector_setop_table_01 intersect all select * from vector_setop_table_02 order by 1, 2, 3;
+                                                                                                                                                                                                                                           QUERY PLAN                                                                                                                                                                                                                                           
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+   ->  Vector Streaming (type: GATHER)
+         Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+         Merge Sort Key: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval
+         ->  Vector SetOp Intersect All
+               Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+               ->  Vector Sort
+                     Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+                     Sort Key: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval
+                     ->  Vector Append
+                           ->  Vector Subquery Scan on "*SELECT* 1"
+                                 Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, 0
+                                 ->  Vector Result
+                                       Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_setop_engine.vector_setop_table_01
+                                                   Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                                                   Distribute Key: vector_setop_engine.vector_setop_table_01.col_inta
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_setop_table_01.col_inta, cstore.vector_setop_table_01.col_intb, cstore.vector_setop_table_01.col_num, cstore.vector_setop_table_01.col_char, cstore.vector_setop_table_01.col_varchar, cstore.vector_setop_table_01.col_text, cstore.vector_setop_table_01.col_time, cstore.vector_setop_table_01.col_interval
+                                                   ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_01 vector_setop_table_01
+                                                         Output: cstore.vector_setop_table_01.col_inta, cstore.vector_setop_table_01.col_intb, cstore.vector_setop_table_01.col_num, cstore.vector_setop_table_01.col_char, cstore.vector_setop_table_01.col_varchar, cstore.vector_setop_table_01.col_text, cstore.vector_setop_table_01.col_time, cstore.vector_setop_table_01.col_interval
+                                                         Distribute Key: cstore.vector_setop_table_01.col_inta
+                           ->  Vector Subquery Scan on "*SELECT* 2"
+                                 Output: "*SELECT* 2".col_inta, "*SELECT* 2".col_intb, "*SELECT* 2".col_num, "*SELECT* 2".col_char, "*SELECT* 2".col_varchar, "*SELECT* 2".col_text, "*SELECT* 2".col_time, "*SELECT* 2".col_interval, 1
+                                 ->  Vector Result
+                                       Output: vector_setop_engine.vector_setop_table_02.col_inta, vector_setop_engine.vector_setop_table_02.col_intb, vector_setop_engine.vector_setop_table_02.col_num, vector_setop_engine.vector_setop_table_02.col_char, vector_setop_engine.vector_setop_table_02.col_varchar, vector_setop_engine.vector_setop_table_02.col_text, vector_setop_engine.vector_setop_table_02.col_time, vector_setop_engine.vector_setop_table_02.col_interval
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_setop_engine.vector_setop_table_02
+                                                   Output: vector_setop_engine.vector_setop_table_02.col_inta, vector_setop_engine.vector_setop_table_02.col_intb, vector_setop_engine.vector_setop_table_02.col_num, vector_setop_engine.vector_setop_table_02.col_char, vector_setop_engine.vector_setop_table_02.col_varchar, vector_setop_engine.vector_setop_table_02.col_text, vector_setop_engine.vector_setop_table_02.col_time, vector_setop_engine.vector_setop_table_02.col_interval
+                                                   Distribute Key: vector_setop_engine.vector_setop_table_02.col_inta
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_setop_table_02.col_inta, cstore.vector_setop_table_02.col_intb, cstore.vector_setop_table_02.col_num, cstore.vector_setop_table_02.col_char, cstore.vector_setop_table_02.col_varchar, cstore.vector_setop_table_02.col_text, cstore.vector_setop_table_02.col_time, cstore.vector_setop_table_02.col_interval
+                                                   ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_02 vector_setop_table_02
+                                                         Output: cstore.vector_setop_table_02.col_inta, cstore.vector_setop_table_02.col_intb, cstore.vector_setop_table_02.col_num, cstore.vector_setop_table_02.col_char, cstore.vector_setop_table_02.col_varchar, cstore.vector_setop_table_02.col_text, cstore.vector_setop_table_02.col_time, cstore.vector_setop_table_02.col_interval
+                                                         Distribute Key: cstore.vector_setop_table_02.col_inta
+(37 rows)
+
+select * from vector_setop_table_01 intersect all select * from vector_setop_table_02 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        2 |        3 |     2.3 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+explain (verbose, costs off) select * from vector_setop_table_01 intersect select * from vector_setop_table_02 order by 1, 2, 3;
+                                                                                                                                                                                                                                           QUERY PLAN                                                                                                                                                                                                                                           
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+   ->  Vector Streaming (type: GATHER)
+         Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+         Merge Sort Key: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval
+         ->  Vector SetOp Intersect
+               Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+               ->  Vector Sort
+                     Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+                     Sort Key: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval
+                     ->  Vector Append
+                           ->  Vector Subquery Scan on "*SELECT* 1"
+                                 Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, 0
+                                 ->  Vector Result
+                                       Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_setop_engine.vector_setop_table_01
+                                                   Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                                                   Distribute Key: vector_setop_engine.vector_setop_table_01.col_inta
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_setop_table_01.col_inta, cstore.vector_setop_table_01.col_intb, cstore.vector_setop_table_01.col_num, cstore.vector_setop_table_01.col_char, cstore.vector_setop_table_01.col_varchar, cstore.vector_setop_table_01.col_text, cstore.vector_setop_table_01.col_time, cstore.vector_setop_table_01.col_interval
+                                                   ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_01 vector_setop_table_01
+                                                         Output: cstore.vector_setop_table_01.col_inta, cstore.vector_setop_table_01.col_intb, cstore.vector_setop_table_01.col_num, cstore.vector_setop_table_01.col_char, cstore.vector_setop_table_01.col_varchar, cstore.vector_setop_table_01.col_text, cstore.vector_setop_table_01.col_time, cstore.vector_setop_table_01.col_interval
+                                                         Distribute Key: cstore.vector_setop_table_01.col_inta
+                           ->  Vector Subquery Scan on "*SELECT* 2"
+                                 Output: "*SELECT* 2".col_inta, "*SELECT* 2".col_intb, "*SELECT* 2".col_num, "*SELECT* 2".col_char, "*SELECT* 2".col_varchar, "*SELECT* 2".col_text, "*SELECT* 2".col_time, "*SELECT* 2".col_interval, 1
+                                 ->  Vector Result
+                                       Output: vector_setop_engine.vector_setop_table_02.col_inta, vector_setop_engine.vector_setop_table_02.col_intb, vector_setop_engine.vector_setop_table_02.col_num, vector_setop_engine.vector_setop_table_02.col_char, vector_setop_engine.vector_setop_table_02.col_varchar, vector_setop_engine.vector_setop_table_02.col_text, vector_setop_engine.vector_setop_table_02.col_time, vector_setop_engine.vector_setop_table_02.col_interval
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_setop_engine.vector_setop_table_02
+                                                   Output: vector_setop_engine.vector_setop_table_02.col_inta, vector_setop_engine.vector_setop_table_02.col_intb, vector_setop_engine.vector_setop_table_02.col_num, vector_setop_engine.vector_setop_table_02.col_char, vector_setop_engine.vector_setop_table_02.col_varchar, vector_setop_engine.vector_setop_table_02.col_text, vector_setop_engine.vector_setop_table_02.col_time, vector_setop_engine.vector_setop_table_02.col_interval
+                                                   Distribute Key: vector_setop_engine.vector_setop_table_02.col_inta
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_setop_table_02.col_inta, cstore.vector_setop_table_02.col_intb, cstore.vector_setop_table_02.col_num, cstore.vector_setop_table_02.col_char, cstore.vector_setop_table_02.col_varchar, cstore.vector_setop_table_02.col_text, cstore.vector_setop_table_02.col_time, cstore.vector_setop_table_02.col_interval
+                                                   ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_02 vector_setop_table_02
+                                                         Output: cstore.vector_setop_table_02.col_inta, cstore.vector_setop_table_02.col_intb, cstore.vector_setop_table_02.col_num, cstore.vector_setop_table_02.col_char, cstore.vector_setop_table_02.col_varchar, cstore.vector_setop_table_02.col_text, cstore.vector_setop_table_02.col_time, cstore.vector_setop_table_02.col_interval
+                                                         Distribute Key: cstore.vector_setop_table_02.col_inta
+(37 rows)
+
+select * from vector_setop_table_01 intersect select * from vector_setop_table_02 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        2 |        3 |     2.3 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+explain (verbose, costs off) select * from vector_setop_table_01 except all select * from vector_setop_table_02 order by 1, 2, 3;
+                                                                                                                                                                                                                                           QUERY PLAN                                                                                                                                                                                                                                           
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+   ->  Vector Streaming (type: GATHER)
+         Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+         Merge Sort Key: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval
+         ->  Vector SetOp Except All
+               Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+               ->  Vector Sort
+                     Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+                     Sort Key: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval
+                     ->  Vector Append
+                           ->  Vector Subquery Scan on "*SELECT* 1"
+                                 Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, 0
+                                 ->  Vector Result
+                                       Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_setop_engine.vector_setop_table_01
+                                                   Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                                                   Distribute Key: vector_setop_engine.vector_setop_table_01.col_inta
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_setop_table_01.col_inta, cstore.vector_setop_table_01.col_intb, cstore.vector_setop_table_01.col_num, cstore.vector_setop_table_01.col_char, cstore.vector_setop_table_01.col_varchar, cstore.vector_setop_table_01.col_text, cstore.vector_setop_table_01.col_time, cstore.vector_setop_table_01.col_interval
+                                                   ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_01 vector_setop_table_01
+                                                         Output: cstore.vector_setop_table_01.col_inta, cstore.vector_setop_table_01.col_intb, cstore.vector_setop_table_01.col_num, cstore.vector_setop_table_01.col_char, cstore.vector_setop_table_01.col_varchar, cstore.vector_setop_table_01.col_text, cstore.vector_setop_table_01.col_time, cstore.vector_setop_table_01.col_interval
+                                                         Distribute Key: cstore.vector_setop_table_01.col_inta
+                           ->  Vector Subquery Scan on "*SELECT* 2"
+                                 Output: "*SELECT* 2".col_inta, "*SELECT* 2".col_intb, "*SELECT* 2".col_num, "*SELECT* 2".col_char, "*SELECT* 2".col_varchar, "*SELECT* 2".col_text, "*SELECT* 2".col_time, "*SELECT* 2".col_interval, 1
+                                 ->  Vector Result
+                                       Output: vector_setop_engine.vector_setop_table_02.col_inta, vector_setop_engine.vector_setop_table_02.col_intb, vector_setop_engine.vector_setop_table_02.col_num, vector_setop_engine.vector_setop_table_02.col_char, vector_setop_engine.vector_setop_table_02.col_varchar, vector_setop_engine.vector_setop_table_02.col_text, vector_setop_engine.vector_setop_table_02.col_time, vector_setop_engine.vector_setop_table_02.col_interval
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_setop_engine.vector_setop_table_02
+                                                   Output: vector_setop_engine.vector_setop_table_02.col_inta, vector_setop_engine.vector_setop_table_02.col_intb, vector_setop_engine.vector_setop_table_02.col_num, vector_setop_engine.vector_setop_table_02.col_char, vector_setop_engine.vector_setop_table_02.col_varchar, vector_setop_engine.vector_setop_table_02.col_text, vector_setop_engine.vector_setop_table_02.col_time, vector_setop_engine.vector_setop_table_02.col_interval
+                                                   Distribute Key: vector_setop_engine.vector_setop_table_02.col_inta
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_setop_table_02.col_inta, cstore.vector_setop_table_02.col_intb, cstore.vector_setop_table_02.col_num, cstore.vector_setop_table_02.col_char, cstore.vector_setop_table_02.col_varchar, cstore.vector_setop_table_02.col_text, cstore.vector_setop_table_02.col_time, cstore.vector_setop_table_02.col_interval
+                                                   ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_02 vector_setop_table_02
+                                                         Output: cstore.vector_setop_table_02.col_inta, cstore.vector_setop_table_02.col_intb, cstore.vector_setop_table_02.col_num, cstore.vector_setop_table_02.col_char, cstore.vector_setop_table_02.col_varchar, cstore.vector_setop_table_02.col_text, cstore.vector_setop_table_02.col_time, cstore.vector_setop_table_02.col_interval
+                                                         Distribute Key: cstore.vector_setop_table_02.col_inta
+(37 rows)
+
+select * from vector_setop_table_01 except all select * from vector_setop_table_02 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+explain (verbose, costs off) select * from vector_setop_table_01 except select * from vector_setop_table_02 order by 1, 2, 3;
+                                                                                                                                                                                                                                           QUERY PLAN                                                                                                                                                                                                                                           
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+   ->  Vector Streaming (type: GATHER)
+         Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+         Merge Sort Key: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval
+         ->  Vector SetOp Except
+               Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+               ->  Vector Sort
+                     Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, (0)
+                     Sort Key: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval
+                     ->  Vector Append
+                           ->  Vector Subquery Scan on "*SELECT* 1"
+                                 Output: "*SELECT* 1".col_inta, "*SELECT* 1".col_intb, "*SELECT* 1".col_num, "*SELECT* 1".col_char, "*SELECT* 1".col_varchar, "*SELECT* 1".col_text, "*SELECT* 1".col_time, "*SELECT* 1".col_interval, 0
+                                 ->  Vector Result
+                                       Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_setop_engine.vector_setop_table_01
+                                                   Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                                                   Distribute Key: vector_setop_engine.vector_setop_table_01.col_inta
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_setop_table_01.col_inta, cstore.vector_setop_table_01.col_intb, cstore.vector_setop_table_01.col_num, cstore.vector_setop_table_01.col_char, cstore.vector_setop_table_01.col_varchar, cstore.vector_setop_table_01.col_text, cstore.vector_setop_table_01.col_time, cstore.vector_setop_table_01.col_interval
+                                                   ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_01 vector_setop_table_01
+                                                         Output: cstore.vector_setop_table_01.col_inta, cstore.vector_setop_table_01.col_intb, cstore.vector_setop_table_01.col_num, cstore.vector_setop_table_01.col_char, cstore.vector_setop_table_01.col_varchar, cstore.vector_setop_table_01.col_text, cstore.vector_setop_table_01.col_time, cstore.vector_setop_table_01.col_interval
+                                                         Distribute Key: cstore.vector_setop_table_01.col_inta
+                           ->  Vector Subquery Scan on "*SELECT* 2"
+                                 Output: "*SELECT* 2".col_inta, "*SELECT* 2".col_intb, "*SELECT* 2".col_num, "*SELECT* 2".col_char, "*SELECT* 2".col_varchar, "*SELECT* 2".col_text, "*SELECT* 2".col_time, "*SELECT* 2".col_interval, 1
+                                 ->  Vector Result
+                                       Output: vector_setop_engine.vector_setop_table_02.col_inta, vector_setop_engine.vector_setop_table_02.col_intb, vector_setop_engine.vector_setop_table_02.col_num, vector_setop_engine.vector_setop_table_02.col_char, vector_setop_engine.vector_setop_table_02.col_varchar, vector_setop_engine.vector_setop_table_02.col_text, vector_setop_engine.vector_setop_table_02.col_time, vector_setop_engine.vector_setop_table_02.col_interval
+                                       ->  Vector Append
+                                             ->  Dfs Scan on vector_setop_engine.vector_setop_table_02
+                                                   Output: vector_setop_engine.vector_setop_table_02.col_inta, vector_setop_engine.vector_setop_table_02.col_intb, vector_setop_engine.vector_setop_table_02.col_num, vector_setop_engine.vector_setop_table_02.col_char, vector_setop_engine.vector_setop_table_02.col_varchar, vector_setop_engine.vector_setop_table_02.col_text, vector_setop_engine.vector_setop_table_02.col_time, vector_setop_engine.vector_setop_table_02.col_interval
+                                                   Distribute Key: vector_setop_engine.vector_setop_table_02.col_inta
+                                             ->  Vector Adapter
+                                                   Output: cstore.vector_setop_table_02.col_inta, cstore.vector_setop_table_02.col_intb, cstore.vector_setop_table_02.col_num, cstore.vector_setop_table_02.col_char, cstore.vector_setop_table_02.col_varchar, cstore.vector_setop_table_02.col_text, cstore.vector_setop_table_02.col_time, cstore.vector_setop_table_02.col_interval
+                                                   ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_02 vector_setop_table_02
+                                                         Output: cstore.vector_setop_table_02.col_inta, cstore.vector_setop_table_02.col_intb, cstore.vector_setop_table_02.col_num, cstore.vector_setop_table_02.col_char, cstore.vector_setop_table_02.col_varchar, cstore.vector_setop_table_02.col_text, cstore.vector_setop_table_02.col_time, cstore.vector_setop_table_02.col_interval
+                                                         Distribute Key: cstore.vector_setop_table_02.col_inta
+(37 rows)
+
+select * from vector_setop_table_01 except select * from vector_setop_table_02 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+explain (verbose, costs off) select col_interval from vector_setop_table_01 intersect select col_interval from vector_setop_table_02 order by 1;
+                                                                       QUERY PLAN                                                                        
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: "*SELECT* 2".col_interval, (1)
+   ->  Vector Streaming (type: GATHER)
+         Output: "*SELECT* 2".col_interval, (1)
+         Merge Sort Key: "*SELECT* 2".col_interval
+         ->  Vector SetOp Intersect
+               Output: "*SELECT* 2".col_interval, (1)
+               ->  Vector Sort
+                     Output: "*SELECT* 2".col_interval, (1)
+                     Sort Key: "*SELECT* 2".col_interval
+                     ->  Vector Append
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: "*SELECT* 2".col_interval, (1)
+                                 Distribute Key: "*SELECT* 2".col_interval
+                                 ->  Vector Subquery Scan on "*SELECT* 2"
+                                       Output: "*SELECT* 2".col_interval, 1
+                                       ->  Vector Result
+                                             Output: vector_setop_engine.vector_setop_table_02.col_interval
+                                             ->  Vector Append
+                                                   ->  Dfs Scan on vector_setop_engine.vector_setop_table_02
+                                                         Output: vector_setop_engine.vector_setop_table_02.col_interval
+                                                         Distribute Key: vector_setop_engine.vector_setop_table_02.col_inta
+                                                   ->  Vector Adapter
+                                                         Output: cstore.vector_setop_table_02.col_interval
+                                                         ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_02 vector_setop_table_02
+                                                               Output: cstore.vector_setop_table_02.col_interval
+                                                               Distribute Key: cstore.vector_setop_table_02.col_inta
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 Output: "*SELECT* 1".col_interval, (0)
+                                 Distribute Key: "*SELECT* 1".col_interval
+                                 ->  Vector Subquery Scan on "*SELECT* 1"
+                                       Output: "*SELECT* 1".col_interval, 0
+                                       ->  Vector Result
+                                             Output: vector_setop_engine.vector_setop_table_01.col_interval
+                                             ->  Vector Append
+                                                   ->  Dfs Scan on vector_setop_engine.vector_setop_table_01
+                                                         Output: vector_setop_engine.vector_setop_table_01.col_interval
+                                                         Distribute Key: vector_setop_engine.vector_setop_table_01.col_inta
+                                                   ->  Vector Adapter
+                                                         Output: cstore.vector_setop_table_01.col_interval
+                                                         ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_01 vector_setop_table_01
+                                                               Output: cstore.vector_setop_table_01.col_interval
+                                                               Distribute Key: cstore.vector_setop_table_01.col_inta
+(43 rows)
+
+select col_interval from vector_setop_table_01 intersect select col_interval from vector_setop_table_02 order by 1;
+           col_interval            
+-----------------------------------
+ @ 2 days 13 hours 24 mins 56 secs
+ @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+explain (verbose, costs off) select 1 from (select * from vector_setop_table_01 union all select * from vector_setop_table_01) order by 1;
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (1)
+   ->  Vector Streaming (type: GATHER)
+         Output: (1)
+         ->  Vector Result
+               Output: 1
+               ->  Vector Append
+                     ->  Dfs Scan on vector_setop_engine.vector_setop_table_01
+                           Output: 'Dummy'
+                           Distribute Key: vector_setop_engine.vector_setop_table_01.col_inta
+                     ->  Vector Adapter
+                           Output: ('Dummy')
+                           ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_01 vector_setop_table_01
+                                 Output: 'Dummy'
+                                 Distribute Key: cstore.vector_setop_table_01.col_inta
+                     ->  Dfs Scan on vector_setop_engine.vector_setop_table_01
+                           Output: 'Dummy'
+                           Distribute Key: vector_setop_engine.vector_setop_table_01.col_inta
+                     ->  Vector Adapter
+                           Output: ('Dummy')
+                           ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_01 vector_setop_table_01
+                                 Output: 'Dummy'
+                                 Distribute Key: cstore.vector_setop_table_01.col_inta
+(23 rows)
+
+select 1 from (select * from vector_setop_table_01 union all select * from vector_setop_table_01) order by 1;
+ ?column? 
+----------
+        1
+        1
+        1
+        1
+        1
+        1
+        1
+        1
+(8 rows)
+
+reset enable_hashagg;
+-- Setop with size large than 1000
+select * from lineitem_mergesort except all select * from lineitem order by 1, 2, 3, 4 limit 5;
+ERROR:  relation "lineitem_mergesort" does not exist
+LINE 1: select * from lineitem_mergesort except all select * from li...
+                      ^
+----
+--- test 6: SetOp With Null Element
+----
+COPY VECTOR_SETOP_TABLE_01(col_inta, col_intb, col_num, col_char, col_varchar, col_text, col_time, col_interval) FROM stdin;
+select * from vector_setop_table_01 intersect all select * from vector_setop_table_01 order by 1, 2, 3, 4;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        2 |        3 |     2.3 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+          |        3 |     2.3 | T        | hash_t1     | hash_t1  |          | @ 2 days 13 hours 24 mins 56 secs
+          |          |         |          |             |          |          | 
+(6 rows)
+
+----
+--- test 7: Test append_merge_exec_nodes of SetOp
+----
+explain (verbose, costs off) select * from vector_setop_table_01 where col_inta = 2 union all select * from vector_setop_table_03 where col_intb = 5 order by 1, 2, 4;
+                                                                                                                                                                                                                                        QUERY PLAN                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+   ->  Vector Streaming (type: GATHER)
+         Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+         Merge Sort Key: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_char
+         ->  Vector Sort
+               Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+               Sort Key: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_char
+               ->  Vector Result
+                     Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                     ->  Vector Append
+                           ->  Vector Result
+                                 Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                                 ->  Vector Append
+                                       ->  Dfs Scan on vector_setop_engine.vector_setop_table_01
+                                             Output: vector_setop_engine.vector_setop_table_01.col_inta, vector_setop_engine.vector_setop_table_01.col_intb, vector_setop_engine.vector_setop_table_01.col_num, vector_setop_engine.vector_setop_table_01.col_char, vector_setop_engine.vector_setop_table_01.col_varchar, vector_setop_engine.vector_setop_table_01.col_text, vector_setop_engine.vector_setop_table_01.col_time, vector_setop_engine.vector_setop_table_01.col_interval
+                                             Distribute Key: vector_setop_engine.vector_setop_table_01.col_inta
+                                             Pushdown Predicate Filter: (vector_setop_engine.vector_setop_table_01.col_inta = 2)
+                                       ->  Vector Adapter
+                                             Output: cstore.vector_setop_table_01.col_inta, cstore.vector_setop_table_01.col_intb, cstore.vector_setop_table_01.col_num, cstore.vector_setop_table_01.col_char, cstore.vector_setop_table_01.col_varchar, cstore.vector_setop_table_01.col_text, cstore.vector_setop_table_01.col_time, cstore.vector_setop_table_01.col_interval
+                                             ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_01 vector_setop_table_01
+                                                   Output: cstore.vector_setop_table_01.col_inta, cstore.vector_setop_table_01.col_intb, cstore.vector_setop_table_01.col_num, cstore.vector_setop_table_01.col_char, cstore.vector_setop_table_01.col_varchar, cstore.vector_setop_table_01.col_text, cstore.vector_setop_table_01.col_time, cstore.vector_setop_table_01.col_interval
+                                                   Distribute Key: cstore.vector_setop_table_01.col_inta
+                                                   Filter: (cstore.vector_setop_table_01.col_inta = 2)
+                           ->  Vector Result
+                                 Output: vector_setop_engine.vector_setop_table_03.col_inta, vector_setop_engine.vector_setop_table_03.col_intb, vector_setop_engine.vector_setop_table_03.col_num, vector_setop_engine.vector_setop_table_03.col_char, vector_setop_engine.vector_setop_table_03.col_varchar, vector_setop_engine.vector_setop_table_03.col_text, vector_setop_engine.vector_setop_table_03.col_time, vector_setop_engine.vector_setop_table_03.col_interval
+                                 ->  Vector Append
+                                       ->  Dfs Scan on vector_setop_engine.vector_setop_table_03
+                                             Output: vector_setop_engine.vector_setop_table_03.col_inta, vector_setop_engine.vector_setop_table_03.col_intb, vector_setop_engine.vector_setop_table_03.col_num, vector_setop_engine.vector_setop_table_03.col_char, vector_setop_engine.vector_setop_table_03.col_varchar, vector_setop_engine.vector_setop_table_03.col_text, vector_setop_engine.vector_setop_table_03.col_time, vector_setop_engine.vector_setop_table_03.col_interval
+                                             Distribute Key: vector_setop_engine.vector_setop_table_03.col_intb
+                                             Pushdown Predicate Filter: (vector_setop_engine.vector_setop_table_03.col_intb = 5)
+                                       ->  Vector Adapter
+                                             Output: cstore.vector_setop_table_03.col_inta, cstore.vector_setop_table_03.col_intb, cstore.vector_setop_table_03.col_num, cstore.vector_setop_table_03.col_char, cstore.vector_setop_table_03.col_varchar, cstore.vector_setop_table_03.col_text, cstore.vector_setop_table_03.col_time, cstore.vector_setop_table_03.col_interval
+                                             ->  Seq Scan on cstore.pg_delta_vector_setop_engine_vector_setop_table_03 vector_setop_table_03
+                                                   Output: cstore.vector_setop_table_03.col_inta, cstore.vector_setop_table_03.col_intb, cstore.vector_setop_table_03.col_num, cstore.vector_setop_table_03.col_char, cstore.vector_setop_table_03.col_varchar, cstore.vector_setop_table_03.col_text, cstore.vector_setop_table_03.col_time, cstore.vector_setop_table_03.col_interval
+                                                   Distribute Key: cstore.vector_setop_table_03.col_intb
+                                                   Filter: (cstore.vector_setop_table_03.col_intb = 5)
+(37 rows)
+
+select * from vector_setop_table_01 where col_inta = 2 union all select * from vector_setop_table_03 where col_intb = 5 order by 1, 2, 4;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        2 |        3 |     2.3 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        4 |        5 |     4.5 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        4 |        5 |     4.5 | T        | hash_t3     | hash_t3  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(4 rows)
+
+----
+--- Clean Resources and Tables
+----
+drop schema vector_setop_engine cascade;
+NOTICE:  drop cascades to 7 other objects
+DETAIL:  drop cascades to table vector_setop_table_01
+drop cascades to table vector_setop_table_02
+drop cascades to table vector_setop_table_03
+drop cascades to table vector_setop_table_04
+drop cascades to view setop_12
+drop cascades to view setop_23
+drop cascades to view setop_31

@@ -1,0 +1,1342 @@
+/*---------------------------------------------------------------------------------------
+ *
+ * Test basic nodegroup dml
+ *        #0. misc
+ *        #1. insert ... select ...
+ *        #2. update ... where in ...
+ *        #3. delete ... where in ...
+ *        #4. to be continue...
+ *
+ * Portions Copyright (c) 2017, Huawei
+ *
+ *
+ * IDENTIFICATION
+ *	  src/test/regress/sql/nodegroup_misc.sql
+ *---------------------------------------------------------------------------------------
+ */
+set query_dop = 1002;
+create schema nodegroup_misc;
+set current_schema = nodegroup_misc;
+set expected_computing_nodegroup='group1';
+-- create node group
+create node group ng1 with(datanode1, datanode11, datanode2, datanode12);
+create node group ng2 with(datanode4, datanode8, datanode5, datanode10);
+create node group ng3 with(datanode1,datanode2,datanode3,datanode4,datanode5,datanode6,datanode7,datanode8,datanode9,datanode10,datanode11,datanode12);
+create node group ng4 with(datanode7);
+select group_name, array_upper(group_members,1)+1 as member_count from pgxc_group order by 1,2;
+ group_name | member_count 
+------------+--------------
+ group1     |           12
+ ng1        |            4
+ ng2        |            4
+ ng3        |           12
+ ng4        |            1
+(5 rows)
+
+/*
+ * Checkpoint 0
+ * misc
+ */
+-- test ereport create table like
+create node group ng5 with(datanode1,datanode2,datanode3,datanode4,datanode5,datanode6,datanode7,datanode8,datanode9);
+create table t1(id int, y int) to  group ng5;
+create table t2 (like t1) to group ng1;
+drop table t2;
+create table t2 (like t1);
+drop table t2;
+create table t2 (like t1) to group ng5;
+\d+ t2;
+                      Table "nodegroup_misc.t2"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ id     | integer |           | plain   |              | 
+ y      | integer |           | plain   |              | 
+Has OIDs: no
+Distribute By: HASH(id)
+Location Nodes: datanode1, datanode2, datanode3, datanode4, datanode5, datanode6, datanode7, datanode8, datanode9
+Options: orientation=row, compression=no
+
+drop table t1, t2;
+-- test alter node
+create table a(id int) to group ng5;
+insert into a select generate_series(1, 40);
+alter table a add node(datanode10);
+ERROR:  AlTER TABLE ADD/DELETE NODE can only be altered up-to installation group.
+alter table a add node(datanode10, datanode12);
+ERROR:  AlTER TABLE ADD/DELETE NODE can only be altered up-to installation group.
+alter table a add node(datanode10, datanode11, datanode12);
+-- drop table a
+set xc_maintenance_mode = on;
+execute direct on (datanode10) 'create table a(id int)';
+execute direct on (datanode11) 'create table a(id int)';
+execute direct on (datanode12) 'create table a(id int)';
+reset xc_maintenance_mode;
+drop table a;
+\dt;
+           List of relations
+ Schema | Name | Type | Owner | Storage 
+--------+------+------+-------+---------
+(0 rows)
+
+drop node group ng5;
+-- test set default_storage_nodegroup
+create node group ng5 with(datanode2, datanode3);
+set default_storage_nodegroup='ng5';
+create table t5(x int);
+\d+ t5;
+                      Table "nodegroup_misc.t5"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ x      | integer |           | plain   |              | 
+Has OIDs: no
+Distribute By: HASH(x)
+Location Nodes: datanode2, datanode3
+Options: orientation=row, compression=no
+
+reset default_storage_nodegroup;
+create table t6(x int);
+\d+ t6;
+                      Table "nodegroup_misc.t6"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ x      | integer |           | plain   |              | 
+Has OIDs: no
+Distribute By: HASH(x)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no
+
+drop table t5;
+drop table t6;
+drop node group ng5;
+-- test drop node group
+create node group test_group with(datanode2);
+create database test_database;
+\c test_database
+create table test_table(x int) to group test_group;
+\c regression
+drop node group test_group;
+ERROR:  cannot drop 'test_group' because other objects depend on it
+drop database test_database;
+drop node group test_group;
+create table DISTINCT_034(COL_DP DOUBLE PRECISION)distribute by replication;
+insert into DISTINCT_034 values(pi()),(3.14159265358979);
+select distinct COL_DP from DISTINCT_034 order by 1;
+      col_dp      
+------------------
+ 3.14159265358979
+ 3.14159265358979
+(2 rows)
+
+drop table DISTINCT_034;
+create foreign table customer_load
+(
+    a int,
+    b int
+)
+SERVER gsmpp_server
+OPTIONS (
+    delimiter '|',
+    encoding 'utf8',
+    format 'text',
+    location 'gsfs://192.168.168.4:21111/customer.dat',
+    mode 'Normal'
+) to group ng4;
+ERROR:  It is unsupported to create foreign table with to group option.
+-- test create sequence owned by a table which is not installation group
+create table t1(x int) to group ng4;
+create sequence s1
+    increment by 1
+    minvalue 1 maxvalue 30
+    start 1
+    cache 5
+    owned by t1.x;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+drop table t1;
+-- should fail : test create sequence to group
+create sequence s1 to group group1;
+ERROR:  syntax error at or near "to"
+LINE 1: create sequence s1 to group group1;
+                           ^
+create node group ng5 with(datanode1);
+create user user1 password 'huawei@123';
+grant create on node group ng5 to user1;
+drop node group ng5;
+drop user user1;
+-- test to node : should fail
+create table t5 (x int) to node (datanode1);
+ERROR:  CREATE TABLE ... TO NODE is not yet supported.
+-- test function
+create table x(x int) to group ng1;
+create table y(x int);
+-- should fail: test create table using table type not in installation group
+create table z(x x, y int);
+ERROR:  type 'x' must be in installation group
+-- should fail: test create plpgsql function using return table type not in installation group
+ CREATE FUNCTION fx() returns setof x as '
+DECLARE
+ rec RECORD;
+BEGIN
+ FOR rec IN (select * from x where x<=4)   LOOP
+  RETURN NEXT rec;
+ END LOOP;
+ RETURN;
+END;' language plpgsql;
+ERROR:  return type 'x' must be in installation group
+-- should fail: test create sql function using return table type not in installation group
+ CREATE FUNCTION fx() returns setof x as '
+DECLARE
+ rec RECORD;
+BEGIN
+ FOR rec IN (select * from x where x<=4)   LOOP
+  RETURN NEXT rec;
+ END LOOP;
+ RETURN;
+END;' language 'sql';
+ERROR:  return type 'x' must be in installation group
+-- should fail: test create plpgsql function using declare table type not in installation group
+ CREATE FUNCTION fx() returns setof y as '
+DECLARE
+ rec x;
+BEGIN
+ FOR rec IN (select * from x where x<=4)   LOOP
+  RETURN NEXT rec;
+ END LOOP;
+ RETURN;
+END;' language plpgsql;
+ERROR:  type 'x' must be in installation group
+LINE 3:  rec x;
+             ^
+-- should fail: test create plpgsql function using argument table type not in installation group
+ CREATE FUNCTION fx(x x) returns setof y as '
+DECLARE
+ rec RECORD;
+BEGIN
+ FOR rec IN (select * from x where x<=4)   LOOP
+  RETURN NEXT rec;
+ END LOOP;
+ RETURN;
+END;' language plpgsql;
+ERROR:  argument type 'x' must be in installation group
+-- should fail: test create sql function using argument table type not in installation group
+ CREATE FUNCTION fx(x x) returns setof y as '
+DECLARE
+ rec RECORD;
+BEGIN
+ FOR rec IN (select * from x where x<=4)   LOOP
+  RETURN NEXT rec;
+ END LOOP;
+ RETURN;
+END;' language 'sql';
+ERROR:  argument type 'x' must be in installation group
+-- should fail: test create procedure using argument table type not in installation group
+CREATE OR REPLACE PROCEDURE prc_add
+(
+    param1    IN   INTEGER,
+    param2    IN OUT  INTEGER,
+    param4    OUT  x
+)
+AS
+BEGIN
+   param2:= param1 + param2;
+END;
+/
+ERROR:  argument type 'x' must be in installation group
+drop table x;
+drop table y;
+create table x(x int) to group ng1;
+insert into x select generate_series(1, 100);
+create schema scheme_skewness;
+ERROR:  schema "scheme_skewness" already exists
+create table scheme_skewness.x(x int);
+insert into scheme_skewness.x select generate_series(1, 100);
+select table_skewness('x');
+           table_skewness            
+-------------------------------------
+ ("datanode11          ",31,31.000%)
+ ("datanode2           ",27,27.000%)
+ ("datanode1           ",23,23.000%)
+ ("datanode12          ",19,19.000%)
+(4 rows)
+
+select table_skewness('scheme_skewness.x');
+           table_skewness            
+-------------------------------------
+ ("datanode7           ",9,9.000%)
+ ("datanode9           ",9,9.000%)
+ ("datanode1           ",8,8.000%)
+ ("datanode5           ",7,7.000%)
+ ("datanode4           ",5,5.000%)
+ ("datanode6           ",5,5.000%)
+ ("datanode11          ",4,4.000%)
+ ("datanode10          ",12,12.000%)
+ ("datanode12          ",11,11.000%)
+ ("datanode2           ",10,10.000%)
+ ("datanode3           ",10,10.000%)
+ ("datanode8           ",10,10.000%)
+(12 rows)
+
+drop table x;
+drop table scheme_skewness.x;
+/*
+ * Checkpoint 1
+ * insert
+ */
+------------------------------------------------------------
+-- test "insert ... select ..." 
+-- from two different kinds of table on the same nodegroup
+------------------------------------------------------------
+-- create table
+create table t1(x int, y int) distribute by hash(x) to group ng2;
+create table t2(x int, y int) distribute by replication to group ng2;
+create table t3(x int, y int) with(orientation = column) distribute by hash(x) to group ng2;
+create table t4(x int, y int) with(orientation = column, compression=middle) distribute by replication to group ng2;
+-- insert 
+insert into t1 select v, v*10 from generate_series(1,20) as v;
+insert into t2 select v, v*10 from generate_series(1,10) as v;
+insert into t3 select v, v*10 from generate_series(11,20) as v;
+insert into t4 select v, v*10 from generate_series(6,15) as v;
+insert into t1 select x, y from t1;
+insert into t1 select x, y from t2;
+insert into t1 select x, y from t3;
+insert into t1 select x, y from t4;
+insert into t2 select x, y from t1;
+insert into t2 select x, y from t2;
+insert into t2 select x, y from t3;
+insert into t2 select x, y from t4;
+insert into t3 select x, y from t1;
+insert into t3 select x, y from t2;
+insert into t3 select x, y from t3;
+insert into t3 select x, y from t4;
+insert into t4 select x, y from t1;
+insert into t4 select x, y from t2;
+insert into t4 select x, y from t3;
+insert into t4 select x, y from t4;
+select count(*) from t1;
+ count 
+-------
+    70
+(1 row)
+
+select count(*) from t2;
+ count 
+-------
+   180
+(1 row)
+
+select count(*) from t3;
+ count 
+-------
+   530
+(1 row)
+
+select count(*) from t4;
+ count 
+-------
+  1580
+(1 row)
+
+-- drop table
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4;
+------------------------------------------------------------
+-- test "insert ... select ..." 
+-- from two different kinds of table on different nodegroup
+------------------------------------------------------------
+-- create table
+create table t1(x int, y int) distribute by hash(x) to group ng1;
+create table t2(x int, y int) distribute by replication to group ng2;
+create table t3(x int, y int) with(orientation = column) distribute by hash(x) to group ng3;
+create table t4(x int, y int) with(orientation = column, compression=middle) distribute by replication to group ng4;
+-- insert
+insert into t1 select v, v*10 from generate_series(1,20) as v;
+insert into t2 select v, v*10 from generate_series(1,10) as v;
+insert into t3 select v, v*10 from generate_series(11,20) as v;;
+insert into t4 select v, v*10 from generate_series(6,15) as v;;
+insert into t1 select x, y from t2;
+insert into t1 select x, y from t3;
+insert into t1 select x, y from t4;
+insert into t2 select x, y from t1;
+insert into t2 select x, y from t3;
+insert into t2 select x, y from t4;
+insert into t3 select x, y from t1;
+insert into t3 select x, y from t2;
+insert into t3 select x, y from t4;
+insert into t4 select x, y from t1;
+insert into t4 select x, y from t2;
+insert into t4 select x, y from t3;
+select count(*) from t1;
+ count 
+-------
+    50
+(1 row)
+
+select count(*) from t2;
+ count 
+-------
+    80
+(1 row)
+
+select count(*) from t3;
+ count 
+-------
+   150
+(1 row)
+
+select count(*) from t4;
+ count 
+-------
+   290
+(1 row)
+
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4;
+------------------------------------------------------------
+-- test "insert ... select ..." 
+-- from the two same kinds of table on different nodegroup
+------------------------------------------------------------
+create table t1(x int, y int) distribute by hash(x) to group ng1;
+create table t2(x int, y int) distribute by hash(x) to group ng2;
+insert into t2 select v, v*10 from generate_series(1,20) as v;
+insert into t1 select x, y from t2;
+select count(*) from t1;
+ count 
+-------
+    20
+(1 row)
+
+drop table t1;
+drop table t2;
+create table t1(x int, y int) distribute by replication to group ng1;
+create table t2(x int, y int) distribute by replication to group ng2;
+insert into t2 select v, v*10 from generate_series(1,20) as v;
+insert into t1 select x, y from t2;
+select count(*) from t1;
+ count 
+-------
+    20
+(1 row)
+
+drop table t1;
+drop table t2;
+create table t1(x int, y int) with(orientation = column) distribute by hash(x) to group ng1;
+create table t2(x int, y int) with(orientation = column) distribute by hash(x) to group ng2;
+insert into t2 select v, v*10 from generate_series(1,20) as v;
+insert into t1 select x, y from t2;
+select count(*) from t1;
+ count 
+-------
+    20
+(1 row)
+
+drop table t1;
+drop table t2;
+create table t1(x int, y int) with(orientation = column, compression=middle) to group ng1;
+create table t2(x int, y int) with(orientation = column, compression=middle) to group ng2;
+insert into t2 select v, v*10 from generate_series(1,20) as v;
+insert into t1 select x, y from t2;
+select count(*) from t1;
+ count 
+-------
+    20
+(1 row)
+
+drop table t1;
+drop table t2;
+/*
+ * Checkpoint 2
+ * update
+ */
+------------------------------------------------------------
+-- test "update .. where in ..." 
+-- from two different kinds of table on the same nodegroup
+------------------------------------------------------------
+create table t1(x int, y int) distribute by hash(x) to group ng1;
+create table t2(x int primary key, y int) distribute by replication to group ng1;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t2_pkey" for table "t2"
+create table t3(x int, y int) with(orientation = column) distribute by hash(x) to group ng1;
+insert into t1 select v, v from generate_series(1,40) as v;
+insert into t2 select v, v from generate_series(21,40) as v;
+insert into t3 select * from t1 where x%2 = 0;
+update t1 set y = y*10 where x in(select x from t1);
+update t1 set y = y*10 where x in(select x from t2);
+update t1 set y = y*10 where x in(select x from t3);
+update t2 set y = y*10 where x in(select x from t1);
+update t2 set y = y*10 where x in(select x from t2);
+update t2 set y = y*10 where x in(select x from t3);
+update t3 set y = y*10 where x in(select x from t1);
+update t3 set y = y*10 where x in(select x from t2);
+update t3 set y = y*10 where x in(select x from t3);
+select * from t1 order by 1;
+ x  |   y   
+----+-------
+  1 |    10
+  2 |   200
+  3 |    30
+  4 |   400
+  5 |    50
+  6 |   600
+  7 |    70
+  8 |   800
+  9 |    90
+ 10 |  1000
+ 11 |   110
+ 12 |  1200
+ 13 |   130
+ 14 |  1400
+ 15 |   150
+ 16 |  1600
+ 17 |   170
+ 18 |  1800
+ 19 |   190
+ 20 |  2000
+ 21 |  2100
+ 22 | 22000
+ 23 |  2300
+ 24 | 24000
+ 25 |  2500
+ 26 | 26000
+ 27 |  2700
+ 28 | 28000
+ 29 |  2900
+ 30 | 30000
+ 31 |  3100
+ 32 | 32000
+ 33 |  3300
+ 34 | 34000
+ 35 |  3500
+ 36 | 36000
+ 37 |  3700
+ 38 | 38000
+ 39 |  3900
+ 40 | 40000
+(40 rows)
+
+select * from t2 order by 1;
+ x  |   y   
+----+-------
+ 21 |  2100
+ 22 | 22000
+ 23 |  2300
+ 24 | 24000
+ 25 |  2500
+ 26 | 26000
+ 27 |  2700
+ 28 | 28000
+ 29 |  2900
+ 30 | 30000
+ 31 |  3100
+ 32 | 32000
+ 33 |  3300
+ 34 | 34000
+ 35 |  3500
+ 36 | 36000
+ 37 |  3700
+ 38 | 38000
+ 39 |  3900
+ 40 | 40000
+(20 rows)
+
+select * from t3 order by 1;
+ x  |   y   
+----+-------
+  2 |   200
+  4 |   400
+  6 |   600
+  8 |   800
+ 10 |  1000
+ 12 |  1200
+ 14 |  1400
+ 16 |  1600
+ 18 |  1800
+ 20 |  2000
+ 22 | 22000
+ 24 | 24000
+ 26 | 26000
+ 28 | 28000
+ 30 | 30000
+ 32 | 32000
+ 34 | 34000
+ 36 | 36000
+ 38 | 38000
+ 40 | 40000
+(20 rows)
+
+drop table t1;
+drop table t2;
+drop table t3;
+------------------------------------------------------------
+-- test "update .. where in ..." 
+-- from two different kinds of table on different nodegroup
+------------------------------------------------------------
+create table t1(x int, y int) distribute by hash(x) to group ng1;
+create table t2(x int primary key, y int) distribute by replication to group ng2;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t2_pkey" for table "t2"
+create table t3(x int, y int) with(orientation = column) distribute by hash(x) to group ng3;
+insert into t1 select v, v from generate_series(1,40) as v;
+insert into t2 select v, v from generate_series(21,40) as v;
+insert into t3 select * from t1 where x%2 = 0;
+update t1 set y = y*10 where x in(select x from t2);
+update t1 set y = y*10 where x in(select x from t3);
+update t2 set y = y*10 where x in(select x from t1);
+update t2 set y = y*10 where x in(select x from t3);
+update t3 set y = y*10 where x in(select x from t1);
+update t3 set y = y*10 where x in(select x from t2);
+select * from t1 order by 1;
+ x  |  y   
+----+------
+  1 |    1
+  2 |   20
+  3 |    3
+  4 |   40
+  5 |    5
+  6 |   60
+  7 |    7
+  8 |   80
+  9 |    9
+ 10 |  100
+ 11 |   11
+ 12 |  120
+ 13 |   13
+ 14 |  140
+ 15 |   15
+ 16 |  160
+ 17 |   17
+ 18 |  180
+ 19 |   19
+ 20 |  200
+ 21 |  210
+ 22 | 2200
+ 23 |  230
+ 24 | 2400
+ 25 |  250
+ 26 | 2600
+ 27 |  270
+ 28 | 2800
+ 29 |  290
+ 30 | 3000
+ 31 |  310
+ 32 | 3200
+ 33 |  330
+ 34 | 3400
+ 35 |  350
+ 36 | 3600
+ 37 |  370
+ 38 | 3800
+ 39 |  390
+ 40 | 4000
+(40 rows)
+
+select * from t2 order by 1;
+ x  |  y   
+----+------
+ 21 |  210
+ 22 | 2200
+ 23 |  230
+ 24 | 2400
+ 25 |  250
+ 26 | 2600
+ 27 |  270
+ 28 | 2800
+ 29 |  290
+ 30 | 3000
+ 31 |  310
+ 32 | 3200
+ 33 |  330
+ 34 | 3400
+ 35 |  350
+ 36 | 3600
+ 37 |  370
+ 38 | 3800
+ 39 |  390
+ 40 | 4000
+(20 rows)
+
+select * from t3 order by 1;
+ x  |  y   
+----+------
+  2 |   20
+  4 |   40
+  6 |   60
+  8 |   80
+ 10 |  100
+ 12 |  120
+ 14 |  140
+ 16 |  160
+ 18 |  180
+ 20 |  200
+ 22 | 2200
+ 24 | 2400
+ 26 | 2600
+ 28 | 2800
+ 30 | 3000
+ 32 | 3200
+ 34 | 3400
+ 36 | 3600
+ 38 | 3800
+ 40 | 4000
+(20 rows)
+
+drop table t1;
+drop table t2;
+drop table t3;
+------------------------------------------------------------
+-- test "update .. where in ..." 
+-- from the two same kinds of table on different nodegroup
+------------------------------------------------------------
+create table t1(x int, y int) distribute by hash(x) to group ng1;
+create table t2(x int, y int) distribute by hash(x) to group ng2;
+insert into t2 select v, v*10 from generate_series(1,20) as v;
+insert into t1 select x, y from t2;
+update t1 set y = y*10 where x in(select x from t2);
+select * from t1 order by 1;
+ x  |  y   
+----+------
+  1 |  100
+  2 |  200
+  3 |  300
+  4 |  400
+  5 |  500
+  6 |  600
+  7 |  700
+  8 |  800
+  9 |  900
+ 10 | 1000
+ 11 | 1100
+ 12 | 1200
+ 13 | 1300
+ 14 | 1400
+ 15 | 1500
+ 16 | 1600
+ 17 | 1700
+ 18 | 1800
+ 19 | 1900
+ 20 | 2000
+(20 rows)
+
+drop table t1;
+drop table t2;
+create table t1(x int primary key, y int) distribute by replication to group ng1;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+create table t2(x int primary key, y int) distribute by replication to group ng2;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t2_pkey" for table "t2"
+insert into t2 select v, v*10 from generate_series(1,20) as v;
+insert into t1 select x, y from t2;
+update t1 set y = y*10 where x in(select x from t2);
+select * from t1 order by 1;
+ x  |  y   
+----+------
+  1 |  100
+  2 |  200
+  3 |  300
+  4 |  400
+  5 |  500
+  6 |  600
+  7 |  700
+  8 |  800
+  9 |  900
+ 10 | 1000
+ 11 | 1100
+ 12 | 1200
+ 13 | 1300
+ 14 | 1400
+ 15 | 1500
+ 16 | 1600
+ 17 | 1700
+ 18 | 1800
+ 19 | 1900
+ 20 | 2000
+(20 rows)
+
+drop table t1;
+drop table t2;
+create table t1(x int, y int) with(orientation = column) distribute by hash(x) to group ng1;
+create table t2(x int, y int) with(orientation = column) distribute by hash(x) to group ng2;
+insert into t2 select v, v*10 from generate_series(1,20) as v;
+insert into t1 select x, y from t2;
+update t1 set y = y*10 where x in(select x from t2);
+select * from t1 order by 1;
+ x  |  y   
+----+------
+  1 |  100
+  2 |  200
+  3 |  300
+  4 |  400
+  5 |  500
+  6 |  600
+  7 |  700
+  8 |  800
+  9 |  900
+ 10 | 1000
+ 11 | 1100
+ 12 | 1200
+ 13 | 1300
+ 14 | 1400
+ 15 | 1500
+ 16 | 1600
+ 17 | 1700
+ 18 | 1800
+ 19 | 1900
+ 20 | 2000
+(20 rows)
+
+drop table t1;
+drop table t2;
+/*
+ * Checkpoint 3
+ * delete && truncate
+ */
+ ------------------------------------------------------------
+-- test "delete ... where in ..."
+-- from two different kinds of table on the same nodegroup
+------------------------------------------------------------
+create table t1(x int, y int) distribute by hash(x) to group ng1;
+create table t2(x int, y int) distribute by replication to group ng1;
+create table t3(x int, y int) with(orientation = column) distribute by hash(x) to group ng1;
+create table t4(x int, y int) with(orientation = column) distribute by replication to group ng1;
+insert into t1 select v, v from generate_series(1,40) as v;
+insert into t2 select v, v from generate_series(21,40) as v;
+insert into t3 select * from t1 where x%2 = 0;
+insert into t4 select * from t2 where x%2 = 0;
+delete from t1 where x in(select x from t1);
+insert into t1 select v, v from generate_series(1,40) as v;
+delete from t1 where x in(select x from t2);
+insert into t1 select v, v from generate_series(1,40) as v;
+delete from t1 where x in(select x from t3);
+insert into t1 select v, v from generate_series(1,40) as v;
+delete from t1 where x in(select x from t4);
+insert into t1 select v, v from generate_series(1,40) as v;
+delete from t2 where x in(select x from t1);
+insert into t2 select v, v from generate_series(21,40) as v;
+delete from t2 where x in(select x from t2);
+insert into t2 select v, v from generate_series(21,40) as v;
+delete from t2 where x in(select x from t3);
+insert into t2 select v, v from generate_series(21,40) as v;
+delete from t2 where x in(select x from t4);
+delete from t3 where x in(select x from t1);
+insert into t3 select * from t1 where x%2 = 0;
+delete from t3 where x in(select x from t2);
+insert into t3 select * from t1 where x%2 = 0;
+delete from t3 where x in(select x from t3);
+insert into t3 select * from t1 where x%2 = 0;
+delete from t3 where x in(select x from t4);
+insert into t3 select * from t1 where x%2 = 0;
+delete from t4 where x in(select x from t1);
+insert into t4 select * from t1 where x%2 = 0;
+delete from t4 where x in(select x from t2);
+insert into t4 select * from t1 where x%2 = 0;
+delete from t4 where x in(select x from t3);
+insert into t4 select * from t1 where x%2 = 0;
+delete from t4 where x in(select x from t4);
+insert into t4 select * from t1 where x%2 = 0;
+select * from t1 order by 1;
+ x  | y  
+----+----
+  1 |  1
+  1 |  1
+  1 |  1
+  1 |  1
+  2 |  2
+  2 |  2
+  3 |  3
+  3 |  3
+  3 |  3
+  3 |  3
+  4 |  4
+  4 |  4
+  5 |  5
+  5 |  5
+  5 |  5
+  5 |  5
+  6 |  6
+  6 |  6
+  7 |  7
+  7 |  7
+  7 |  7
+  7 |  7
+  8 |  8
+  8 |  8
+  9 |  9
+  9 |  9
+  9 |  9
+  9 |  9
+ 10 | 10
+ 10 | 10
+ 11 | 11
+ 11 | 11
+ 11 | 11
+ 11 | 11
+ 12 | 12
+ 12 | 12
+ 13 | 13
+ 13 | 13
+ 13 | 13
+ 13 | 13
+ 14 | 14
+ 14 | 14
+ 15 | 15
+ 15 | 15
+ 15 | 15
+ 15 | 15
+ 16 | 16
+ 16 | 16
+ 17 | 17
+ 17 | 17
+ 17 | 17
+ 17 | 17
+ 18 | 18
+ 18 | 18
+ 19 | 19
+ 19 | 19
+ 19 | 19
+ 19 | 19
+ 20 | 20
+ 20 | 20
+ 21 | 21
+ 21 | 21
+ 21 | 21
+ 22 | 22
+ 23 | 23
+ 23 | 23
+ 23 | 23
+ 24 | 24
+ 25 | 25
+ 25 | 25
+ 25 | 25
+ 26 | 26
+ 27 | 27
+ 27 | 27
+ 27 | 27
+ 28 | 28
+ 29 | 29
+ 29 | 29
+ 29 | 29
+ 30 | 30
+ 31 | 31
+ 31 | 31
+ 31 | 31
+ 32 | 32
+ 33 | 33
+ 33 | 33
+ 33 | 33
+ 34 | 34
+ 35 | 35
+ 35 | 35
+ 35 | 35
+ 36 | 36
+ 37 | 37
+ 37 | 37
+ 37 | 37
+ 38 | 38
+ 39 | 39
+ 39 | 39
+ 39 | 39
+ 40 | 40
+(100 rows)
+
+select * from t2 order by 1;
+ x  | y  
+----+----
+ 21 | 21
+ 21 | 21
+ 23 | 23
+ 23 | 23
+ 25 | 25
+ 25 | 25
+ 27 | 27
+ 27 | 27
+ 29 | 29
+ 29 | 29
+ 31 | 31
+ 31 | 31
+ 33 | 33
+ 33 | 33
+ 35 | 35
+ 35 | 35
+ 37 | 37
+ 37 | 37
+ 39 | 39
+ 39 | 39
+(20 rows)
+
+select * from t3 order by 1;
+ x  | y  
+----+----
+  2 |  2
+  2 |  2
+  2 |  2
+  2 |  2
+  4 |  4
+  4 |  4
+  4 |  4
+  4 |  4
+  6 |  6
+  6 |  6
+  6 |  6
+  6 |  6
+  8 |  8
+  8 |  8
+  8 |  8
+  8 |  8
+ 10 | 10
+ 10 | 10
+ 10 | 10
+ 10 | 10
+ 12 | 12
+ 12 | 12
+ 12 | 12
+ 12 | 12
+ 14 | 14
+ 14 | 14
+ 14 | 14
+ 14 | 14
+ 16 | 16
+ 16 | 16
+ 16 | 16
+ 16 | 16
+ 18 | 18
+ 18 | 18
+ 18 | 18
+ 18 | 18
+ 20 | 20
+ 20 | 20
+ 20 | 20
+ 20 | 20
+ 22 | 22
+ 24 | 24
+ 26 | 26
+ 28 | 28
+ 30 | 30
+ 32 | 32
+ 34 | 34
+ 36 | 36
+ 38 | 38
+ 40 | 40
+(50 rows)
+
+select * from t4 order by 1;
+ x  | y  
+----+----
+  2 |  2
+  2 |  2
+  4 |  4
+  4 |  4
+  6 |  6
+  6 |  6
+  8 |  8
+  8 |  8
+ 10 | 10
+ 10 | 10
+ 12 | 12
+ 12 | 12
+ 14 | 14
+ 14 | 14
+ 16 | 16
+ 16 | 16
+ 18 | 18
+ 18 | 18
+ 20 | 20
+ 20 | 20
+ 22 | 22
+ 24 | 24
+ 26 | 26
+ 28 | 28
+ 30 | 30
+ 32 | 32
+ 34 | 34
+ 36 | 36
+ 38 | 38
+ 40 | 40
+(30 rows)
+
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4;
+------------------------------------------------------------
+-- test "delete ... where in ..." 
+-- from two different kinds of table on different nodegroup
+------------------------------------------------------------
+create table t1(x int, y int) distribute by hash(x) to group ng1;
+create table t2(x int, y int) distribute by replication to group ng2;
+create table t3(x int, y int) with(orientation = column) distribute by hash(x) to group ng3;
+create table t4(x int, y int) with(orientation = column) distribute by replication to group ng4;
+insert into t1 select v, v from generate_series(1,40) as v;
+insert into t2 select v, v from generate_series(21,40) as v;
+insert into t3 select * from t1 where x%2 = 0;
+insert into t3 select * from t2 where x%2 = 0;
+delete from t1 where x in(select x from t2);
+insert into t1 select v, v from generate_series(1,40) as v;
+delete from t1 where x in(select x from t3);
+insert into t1 select v, v from generate_series(1,40) as v;
+delete from t1 where x in(select x from t4);
+insert into t1 select v, v from generate_series(1,40) as v;
+delete from t2 where x in(select x from t1);
+insert into t2 select v, v from generate_series(21,40) as v;
+delete from t2 where x in(select x from t3);
+insert into t2 select v, v from generate_series(21,40) as v;
+delete from t2 where x in(select x from t4);
+delete from t3 where x in(select x from t1);
+insert into t3 select * from t1 where x%2 = 0;
+delete from t3 where x in(select x from t2);
+insert into t3 select * from t1 where x%2 = 0;
+delete from t3 where x in(select x from t4);
+insert into t3 select * from t1 where x%2 = 0;
+delete from t3 where x in(select x from t1);
+insert into t3 select * from t2 where x%2 = 0;
+delete from t3 where x in(select x from t2);
+insert into t3 select * from t2 where x%2 = 0;
+delete from t3 where x in(select x from t3);
+insert into t3 select * from t2 where x%2 = 0;
+select * from t1 order by 1;
+ x  | y  
+----+----
+  1 |  1
+  1 |  1
+  1 |  1
+  1 |  1
+  2 |  2
+  2 |  2
+  3 |  3
+  3 |  3
+  3 |  3
+  3 |  3
+  4 |  4
+  4 |  4
+  5 |  5
+  5 |  5
+  5 |  5
+  5 |  5
+  6 |  6
+  6 |  6
+  7 |  7
+  7 |  7
+  7 |  7
+  7 |  7
+  8 |  8
+  8 |  8
+  9 |  9
+  9 |  9
+  9 |  9
+  9 |  9
+ 10 | 10
+ 10 | 10
+ 11 | 11
+ 11 | 11
+ 11 | 11
+ 11 | 11
+ 12 | 12
+ 12 | 12
+ 13 | 13
+ 13 | 13
+ 13 | 13
+ 13 | 13
+ 14 | 14
+ 14 | 14
+ 15 | 15
+ 15 | 15
+ 15 | 15
+ 15 | 15
+ 16 | 16
+ 16 | 16
+ 17 | 17
+ 17 | 17
+ 17 | 17
+ 17 | 17
+ 18 | 18
+ 18 | 18
+ 19 | 19
+ 19 | 19
+ 19 | 19
+ 19 | 19
+ 20 | 20
+ 20 | 20
+ 21 | 21
+ 21 | 21
+ 21 | 21
+ 22 | 22
+ 22 | 22
+ 23 | 23
+ 23 | 23
+ 23 | 23
+ 24 | 24
+ 24 | 24
+ 25 | 25
+ 25 | 25
+ 25 | 25
+ 26 | 26
+ 26 | 26
+ 27 | 27
+ 27 | 27
+ 27 | 27
+ 28 | 28
+ 28 | 28
+ 29 | 29
+ 29 | 29
+ 29 | 29
+ 30 | 30
+ 30 | 30
+ 31 | 31
+ 31 | 31
+ 31 | 31
+ 32 | 32
+ 32 | 32
+ 33 | 33
+ 33 | 33
+ 33 | 33
+ 34 | 34
+ 34 | 34
+ 35 | 35
+ 35 | 35
+ 35 | 35
+ 36 | 36
+ 36 | 36
+ 37 | 37
+ 37 | 37
+ 37 | 37
+ 38 | 38
+ 38 | 38
+ 39 | 39
+ 39 | 39
+ 39 | 39
+ 40 | 40
+ 40 | 40
+(110 rows)
+
+select * from t2 order by 1;
+ x  | y  
+----+----
+ 21 | 21
+ 21 | 21
+ 22 | 22
+ 23 | 23
+ 23 | 23
+ 24 | 24
+ 25 | 25
+ 25 | 25
+ 26 | 26
+ 27 | 27
+ 27 | 27
+ 28 | 28
+ 29 | 29
+ 29 | 29
+ 30 | 30
+ 31 | 31
+ 31 | 31
+ 32 | 32
+ 33 | 33
+ 33 | 33
+ 34 | 34
+ 35 | 35
+ 35 | 35
+ 36 | 36
+ 37 | 37
+ 37 | 37
+ 38 | 38
+ 39 | 39
+ 39 | 39
+ 40 | 40
+(30 rows)
+
+select * from t3 order by 1;
+ x  | y  
+----+----
+ 22 | 22
+ 24 | 24
+ 26 | 26
+ 28 | 28
+ 30 | 30
+ 32 | 32
+ 34 | 34
+ 36 | 36
+ 38 | 38
+ 40 | 40
+(10 rows)
+
+select * from t4 order by 1;
+ x | y 
+---+---
+(0 rows)
+
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4;
+------------------------------------------------------------
+-- test "delete ... where in ..." 
+-- from two different kinds of table on the same nodegroup
+------------------------------------------------------------
+create table t1(x int, y int) distribute by hash(x) to group ng1;
+create table t2(x int, y int) distribute by hash(x) to group ng2;
+insert into t2 select v, v*10 from generate_series(1,20) as v;
+insert into t1 select x, y from t2 where x%2=0;
+delete from t1 where x in(select x from t2);
+select * from t1 order by 1;
+ x | y 
+---+---
+(0 rows)
+
+drop table t1;
+drop table t2;
+create table t1(x int primary key, y int) distribute by replication to group ng1;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+create table t2(x int primary key, y int) distribute by replication to group ng2;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t2_pkey" for table "t2"
+insert into t2 select v, v*10 from generate_series(1,20) as v;
+insert into t1 select x, y from t2 where x%2=0;
+delete from t1 where x in(select x from t2);
+select * from t1 order by 1;
+ x | y 
+---+---
+(0 rows)
+
+drop table t1;
+drop table t2;
+create table t1(x int, y int) with(orientation = column) distribute by hash(x) to group ng1;
+create table t2(x int, y int) with(orientation = column) distribute by hash(x) to group ng2;
+insert into t2 select v, v*10 from generate_series(1,20) as v;
+insert into t1 select x, y from t2 where x%2=0;
+delete from t1 where x in(select x from t2);
+select * from t1 order by 1;
+ x | y 
+---+---
+(0 rows)
+
+drop table t1;
+drop table t2;
+create table t1(x int, y int) with(orientation = column) distribute by replication to group ng1;
+create table t2(x int, y int) with(orientation = column) distribute by replication to group ng2;
+insert into t2 select v, v*10 from generate_series(1,20) as v;
+insert into t1 select x, y from t2 where x%2=0;
+delete from t1 where x in(select x from t2);
+select * from t1 order by 1;
+ x | y 
+---+---
+(0 rows)
+
+drop table t1;
+drop table t2;
+-- drop ng
+drop node group ng1;
+drop node group ng2;
+drop node group ng3;
+drop node group ng4;
+drop schema nodegroup_misc cascade;
+reset query_dop;
+-- test preserved group names
+create node group query with(datanode1);
+ERROR:  NodeGroup name query can not be preserved group name
+create node group optimal with(datanode1);
+ERROR:  NodeGroup name optimal can not be preserved group name
+create node group installation with(datanode1);
+ERROR:  NodeGroup name installation can not be preserved group name
+drop node group query;
+ERROR:  PGXC Group query: group not defined
+drop node group optimal;
+ERROR:  PGXC Group optimal: group not defined
+drop node group installation;
+ERROR:  PGXC Group installation: group not defined

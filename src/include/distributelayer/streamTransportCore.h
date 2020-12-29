@@ -26,7 +26,7 @@
 #ifndef STREAMTRANSPORTCORE_H_
 #define STREAMTRANSPORTCORE_H_
 
-enum StreamTransType { STREAM_TCP, STREAM_SCTP, STREAM_MEM, STREAM_BUFFER, STREAM_MIX };
+enum StreamTransType { STREAM_COMM, STREAM_MEM };
 
 class StreamTransport : public BaseObject {
 public:
@@ -84,6 +84,7 @@ public:
         Assert(false);
     }
 
+public:
     /* Node name of data node sending data, only for consumer currently. */
     char m_nodeName[NAMEDATALEN];
 
@@ -104,4 +105,3 @@ public:
 };
 
 #endif /* STREAMTRANSPORTCORE_H_ */
-

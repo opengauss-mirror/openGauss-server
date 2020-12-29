@@ -21,6 +21,7 @@ extern bool check_log_timezone(char** newval, void** extra, GucSource source);
 extern void assign_log_timezone(const char* newval, void* extra);
 extern const char* show_log_timezone(void);
 extern bool check_transaction_read_only(bool* newval, void** extra, GucSource source);
+extern bool check_default_transaction_read_only(bool* newval, void** extra, GucSource source);
 extern bool check_XactIsoLevel(char** newval, void** extra, GucSource source);
 extern void assign_XactIsoLevel(const char* newval, void* extra);
 extern const char* show_XactIsoLevel(void);
@@ -36,7 +37,5 @@ extern void assign_session_authorization(const char* newval, void* extra);
 extern bool check_role(char** newval, void** extra, GucSource source);
 extern void assign_role(const char* newval, void* extra);
 extern const char* show_role(void);
-extern const char* show_bbox_dump_path(void);
 
 #endif /* VARIABLE_H */
-

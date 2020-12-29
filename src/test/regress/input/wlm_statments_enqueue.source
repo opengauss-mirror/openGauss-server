@@ -1,0 +1,87 @@
+--create resource pool success.
+CREATE RESOURCE POOL respool_temp15 WITH(ACTIVE_STATEMENTS=2,MAX_DOP=10,MEMORY_LIMIT='2GB');
+CREATE WORKLOAD GROUP  wlgroup_15 USING RESOURCE POOL respool_temp15 WITH(ACT_STATEMENTS=1);
+CREATE APP WORKLOAD GROUP MAPPING GSQL WITH (WORKLOAD_GPNAME=wlgroup_15);
+SELECT * FROM pg_resource_pool;
+SELECT * FROM pg_workload_group;
+SELECT * FROM pg_app_workloadgroup_mapping;
+
+CREATE USER test_wlm_role WITH login resource pool 'respool_temp15' password 'abc123ABC';
+ALTER RESOURCE POOL respool_temp15 WITH(ACTIVE_STATEMENTS=1,MAX_DOP=20,MEMORY_LIMIT='5GB',IO_PRIORITY='High',IO_limits=10);
+SELECT * FROM pg_resource_pool;
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "CREATE TABLE t1 (id int);"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "CREATE TABLE t2 (id int);"
+
+--wlm statments enqueue.
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "select * from pg_sleep(10),(select * from t1 ,t2 where t1.id > t2.id);" &
+select * from pg_sleep(1);
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "select * from pg_sleep(4),(select * from t1 ,t2 where t1.id > t2.id);" &
+select * from pg_sleep(1);
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "select * from pg_sleep(4),(select * from t1 ,t2 where t1.id > t2.id);" &
+select * from pg_sleep(1);
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "select * from pg_sleep(4),(select * from t1 ,t2 where t1.id > t2.id);" &
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_wlm_session_statistics;" > /dev/null 2>&1
+
+select * from pg_sleep(25);
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_wlm_session_statistics;"  > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_stat_get_resource_pool_info('respool_temp15');"  > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_wlm_session_info_all;"  > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pg_total_user_resource_info;"  > /dev/null 2>&1
+
+ALTER RESOURCE POOL respool_temp15 WITH(ACTIVE_STATEMENTS=5);
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -S class1 -G wg1 -g 30 -c -E "allcputime=3,cpuskewpercent=10,qualificationtime=10" > /dev/null 2>&1
+--wlm statments enqueue.
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -N class1:wg1 -E "blocktime=3" -a > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "set cgroup_name=\"class1:Low\";select * from pg_sleep(25),(select * from t1 ,t2 where t1.id > t2.id);" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "set cgroup_name=\"class1:wg1\";select * from pg_sleep(7),(select * from t1 ,t2 where t1.id > t2.id);" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "set cgroup_name=\"class1:wg1\";select * from pg_sleep(7),(select * from t1 ,t2 where t1.id > t2.id);" > /dev/null 2>&1 &
+select * from pg_sleep(1);
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "DROP RESOURCE POOL respool_temp15;" > /dev/null 2>&1
+select * from pg_sleep(60);
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -N class1:wg1 -E "blocktime=0,elapsedtime=3" -a > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -S class1 -E "blocktime=3,allcputime=10,qualificationtime=10" -a > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pg_control_group_config;" > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -d -S class1 -G wg1 -g 30 > /dev/null 2>&1
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -d -S class1 > /dev/null 2>&1
+
+--insert into table values
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "insert into t1 select generate_series(1, 10000);"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "insert into t1 select * from t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "insert into t1 select * from t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "insert into t1 select * from t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "insert into t1 select * from t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "insert into t1 select * from t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "insert into t1 select * from t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "insert into t1 select * from t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "insert into t1 select * from t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "insert into t1 select * from t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "insert into t1 select * from t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "insert into t1 select * from t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "set io_limits = 10; insert into t1 select * from t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "set io_priority = Low; insert into t1 select * from t1;"
+
+--test session_respool
+CREATE RESOURCE POOL session_rp WITH(IO_limits=10, IO_PRIORITY = 'High');
+alter resource pool session_rp with(io_limits=0, IO_PRIORITY = 'None');
+alter resource pool session_rp with(io_limits=0, IO_PRIORITY = 'Low');
+alter resource pool session_rp with(io_limits=0, IO_PRIORITY = 'Medium');
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "create table t3 (a int) with (orientation='column');"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "SET session_respool = session_rp; insert into t3 select * from t1; "  > /dev/null 2>&1 &
+select * from pg_sleep(1);
+select io_limits, io_priority from pg_session_iostat where query = 'insert into t3 select * from t1;';
+select io_limits, io_priority from pg_user_iostat('test_wlm_role');
+
+--drop resource pool success.
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "DROP TABLE t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "DROP TABLE t2;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "DROP TABLE t3;"
+DROP APP WORKLOAD GROUP MAPPING GSQL;
+DROP WORKLOAD GROUP wlgroup_15;
+DROP USER test_wlm_role;
+DROP RESOURCE POOL respool_temp15;
+DROP RESOURCE POOL session_rp;
+SELECT * FROM pg_resource_pool;
+SELECT * FROM pg_workload_group;
+SELECT * FROM pg_app_workloadgroup_mapping;

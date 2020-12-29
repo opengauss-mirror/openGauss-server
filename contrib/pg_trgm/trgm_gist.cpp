@@ -315,8 +315,10 @@ static void makesign(BITVECP sign, TRGM* a)
     int4 k, len = ARRNELEM(a);
     trgm* ptr = GETARR(a);
     int4 tmp = 0;
+    errno_t rc;
 
-    MemSet((void*)sign, 0, sizeof(BITVEC));
+    rc = memset_s((void*)sign, sizeof(BITVEC), 0, sizeof(BITVEC));
+    securec_check_ss_c(rc, "\0", "\0");
     SETBIT(sign, SIGLENBIT); /* set last unused bit */
     for (k = 0; k < len; k++) {
         CPTRGM(((char*)&tmp), ptr + k);
@@ -398,7 +400,6 @@ Datum gtrgm_consistent(PG_FUNCTION_ARGS)
     text* query = PG_GETARG_TEXT_P(1);
     StrategyNumber strategy = (StrategyNumber)PG_GETARG_UINT16(2);
 
-    /* Oid		subtype = PG_GETARG_OID(3); */
     bool* recheck = (bool*)PG_GETARG_POINTER(4);
     TRGM* key = (TRGM*)DatumGetPointer(entry->key);
     TRGM* qtrg = NULL;
@@ -521,7 +522,6 @@ Datum gtrgm_distance(PG_FUNCTION_ARGS)
     text* query = PG_GETARG_TEXT_P(1);
     StrategyNumber strategy = (StrategyNumber)PG_GETARG_UINT16(2);
 
-    /* Oid		subtype = PG_GETARG_OID(3); */
     TRGM* key = (TRGM*)DatumGetPointer(entry->key);
     TRGM* qtrg = NULL;
     float8 res;
@@ -559,7 +559,7 @@ Datum gtrgm_distance(PG_FUNCTION_ARGS)
                 int4 count = cnt_sml_sign_common(qtrg, GETSIGN(key));
                 int4 len = ARRNELEM(qtrg);
 
-                res = (len == 0) ? -1.0 : 1.0 - ((float8)count) / ((float8)len);
+                res = (len == 0) ? -1.0 : (1.0 - (((float8)count) / ((float8)len)));
             }
             break;
         default:
@@ -604,8 +604,11 @@ Datum gtrgm_union(PG_FUNCTION_ARGS)
     int4 i;
     int4 flag = 0;
     TRGM* result = NULL;
+    errno_t rc;
 
-    MemSet((void*)base, 0, sizeof(BITVEC));
+    rc = memset_s((void*)base, sizeof(BITVEC), 0, sizeof(BITVEC));
+    securec_check_ss_c(rc, "\0", "\0");
+
     for (i = 0; i < len; i++) {
         if (unionkey(base, GETENTRY(entryvec, i))) {
             flag = ALLISTRUE;
@@ -802,17 +805,21 @@ Datum gtrgm_picksplit(PG_FUNCTION_ARGS)
     OffsetNumber maxoff = entryvec->n - 2;
     GIST_SPLITVEC* v = (GIST_SPLITVEC*)PG_GETARG_POINTER(1);
     OffsetNumber k, j;
-    TRGM *datum_l, *datum_r;
-    BITVECP union_l, union_r;
+    TRGM *datum_l = NULL;
+    TRGM *datum_r = NULL;
+    BITVECP union_l = NULL;
+    BITVECP union_r = NULL;
     int4 size_alpha, size_beta;
     int4 size_waste, waste = -1;
     int4 nbytes;
     OffsetNumber seed_1 = 0, seed_2 = 0;
-    OffsetNumber *left, *right;
-    BITVECP ptr;
+    OffsetNumber *left = NULL;
+    OffsetNumber *right = NULL;
+    BITVECP ptr = NULL;
     int i;
     CACHESIGN* cache = NULL;
     SPLITCOST* costvector = NULL;
+    errno_t rc;
 
     /* cache the sign data for each existing item */
     cache = (CACHESIGN*)palloc(sizeof(CACHESIGN) * (maxoff + 2));
@@ -910,8 +917,10 @@ Datum gtrgm_picksplit(PG_FUNCTION_ARGS)
 
         if (size_alpha < size_beta + WISH_F(v->spl_nleft, v->spl_nright, 0.1)) {
             if (ISALLTRUE(datum_l) || cache[j].allistrue) {
-                if (!ISALLTRUE(datum_l))
-                    MemSet((void*)GETSIGN(datum_l), 0xff, sizeof(BITVEC));
+                if (!ISALLTRUE(datum_l)) {
+                    rc = memset_s(GETSIGN(datum_l), sizeof(BITVEC), 0xff, sizeof(BITVEC));
+                    securec_check_ss_c(rc, "\0", "\0");
+                }
             } else {
                 ptr = cache[j].sign;
                 LOOPBYTE
@@ -921,8 +930,10 @@ Datum gtrgm_picksplit(PG_FUNCTION_ARGS)
             v->spl_nleft++;
         } else {
             if (ISALLTRUE(datum_r) || cache[j].allistrue) {
-                if (!ISALLTRUE(datum_r))
-                    MemSet((void*)GETSIGN(datum_r), 0xff, sizeof(BITVEC));
+                if (!ISALLTRUE(datum_r)) {
+                    rc = memset_s(GETSIGN(datum_r), sizeof(BITVEC), 0xff, sizeof(BITVEC));
+                    securec_check_ss_c(rc, "\0", "\0");
+                }
             } else {
                 ptr = cache[j].sign;
                 LOOPBYTE

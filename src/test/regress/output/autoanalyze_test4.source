@@ -1,0 +1,40 @@
+/*row+partition table*/
+insert into t2_part values (generate_series(1,51),generate_series(1,51),generate_series(1,51));
+CALL sleep_loop_autoanalyze_count(1, 't2_part', 0.1);
+ sleep_loop_autoanalyze_count 
+------------------------------
+ 
+(1 row)
+
+copy t2_part from '@abs_srcdir@/data/autoanalyze_test_data.txt';
+CALL sleep_loop_autoanalyze_count(2, 't2_part', 0.1);
+ sleep_loop_autoanalyze_count 
+------------------------------
+ 
+(1 row)
+
+update t2_part set a = 3,b = 2 where a < 35 AND a > 0;
+CALL sleep_loop_autoanalyze_count(3, 't2_part', 0.1);
+ sleep_loop_autoanalyze_count 
+------------------------------
+ 
+(1 row)
+
+delete from t2_part where a < 50 AND a > 0;
+CALL sleep_loop_autoanalyze_count(4, 't2_part', 0.1);
+ sleep_loop_autoanalyze_count 
+------------------------------
+ 
+(1 row)
+
+select
+	pg_stat_get_analyze_count('t2_part'::regclass) as analyze_count,
+	pg_stat_get_autoanalyze_count('t2_part'::regclass) as autoanalyze_count,
+	pg_stat_get_vacuum_count('t2_part'::regclass) as vacuum_count,
+	pg_stat_get_autovacuum_count('t2_part'::regclass) as autovacuum_count
+from dual;
+ analyze_count | autoanalyze_count | vacuum_count | autovacuum_count 
+---------------+-------------------+--------------+------------------
+             4 |                 4 |            0 |                0
+(1 row)
+

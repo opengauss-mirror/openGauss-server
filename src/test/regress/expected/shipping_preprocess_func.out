@@ -1,0 +1,135 @@
+set current_schema='shipping_schema';
+---------------current_user/getpgusername shipping case1-----------------
+---case1 shipping---
+explain (num_costs off) select current_user, getpgusername(), sum(t4.a) from t4, t5 where t4.b = t5.a; 
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: (t4.b = t5.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Seq Scan on t4
+                     ->  Hash
+                           ->  Seq Scan on t5
+(9 rows)
+
+---case2 shipping---
+explain (num_costs off) select sum(t4.a) from t4, t5 where t4.b = t5.a and t5.c = current_user or t5.c = getpgusername();
+--?.*QUERY PLAN
+--?.*
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Aggregate
+               ->  Nested Loop
+                     ->  Streaming(type: BROADCAST)
+                           ->  Seq Scan on t5
+--?.*
+                     ->  Seq Scan on t4
+(8 rows)
+
+select sum(t4.a) from t4, t5 where t4.b = t5.a and t5.c = current_user or t5.c = getpgusername();
+ sum 
+-----
+    
+(1 row)
+
+---case3 shipping---
+explain (num_costs off) select current_user,t4.a from t4;
+   QUERY PLAN   
+----------------
+ Data Node Scan
+(1 row)
+
+explain (num_costs off) select current_user, getpgusername(), t4.a from t4 order by 1,2,3 limit 1;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   ->  Streaming (type: GATHER)
+         Merge Sort Key: a
+         ->  Limit
+               ->  Sort
+                     Sort Key: a
+                     ->  Seq Scan on t4
+(7 rows)
+
+-------------current_scheam/session_user/current_databse/pg_client_encoding ------------
+---case1 shipping---
+explain (costs off) select current_schema, session_user, current_database() ,pg_client_encoding() ,
+sum(t4.a) from t4, t5 where t4.b = t5.a;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: (t4.b = t5.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Seq Scan on t4
+                     ->  Hash
+                           ->  Seq Scan on t5
+(11 rows)
+
+---case2 shipping---
+explain (costs off) select sum(t4.a) from t4, t5 where t4.b = t5.a and 
+session_user = current_user or current_database() = current_schema and pg_client_encoding()='UTF-8';
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: (t4.b = t5.a)
+                     ->  Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Seq Scan on t4
+                     ->  Hash
+                           ->  Seq Scan on t5
+(11 rows)
+
+select sum(t4.a) from t4, t5 where t4.b = t5.a and 
+session_user = current_user or current_database() = current_schema and pg_client_encoding()='UTF-8';
+ sum 
+-----
+  55
+(1 row)
+
+------timenow/current_timestamp/sysdate/statement_timestamp/pg_systimestamp---
+---case1 shipping---
+explain (costs off) select timenow(), current_timestamp, sysdate,statement_timestamp() ,pg_systimestamp(),
+t4.a from t4, t5 where t4.b = t5.a;
+                QUERY PLAN                 
+-------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (t4.b = t5.a)
+         ->  Streaming(type: REDISTRIBUTE)
+               Spawn on: All datanodes
+               ->  Seq Scan on t4
+         ->  Hash
+               ->  Seq Scan on t5
+(9 rows)
+
+----case2 shipping---
+explain (costs off) select t4.a from t4, t5 where t4.b = t5.a and timenow()::timestamp(0)=sysdate::timestamp(0)
+and pg_systimestamp()::timestamp(0)= statement_timestamp()::timestamp(0) and current_timestamp < '9999-12-01';
+--?.*QUERY PLAN                                                                                                                                                                        
+--?.*
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Result
+--?.*
+         ->  Hash Join
+               Hash Cond: (t4.b = t5.a)
+               ->  Streaming(type: REDISTRIBUTE)
+                     Spawn on: All datanodes
+                     ->  Seq Scan on t4
+               ->  Hash
+                     ->  Seq Scan on t5
+(11 rows)
+

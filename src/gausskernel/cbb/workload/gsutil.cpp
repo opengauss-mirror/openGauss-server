@@ -79,6 +79,17 @@ void* gsutil_filemap(const char* fname, size_t nbytes, int prot, int flags, stru
     int file_flags = O_RDWR;
     int fmode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
     void* vadd = NULL;
+    int ret;
+    struct stat statbuf;
+    errno_t rc;
+        
+    rc = memset_s(&statbuf, sizeof(statbuf), 0, sizeof(statbuf));
+    securec_check_c(rc, "\0", "\0");
+    ret = lstat(fname, &statbuf);
+    if ((ret == 0) && S_ISLNK(statbuf.st_mode)) {
+        fprintf(stderr, "ERROR: The file name is a symbol link [%s]!\n", fname);
+        return NULL;
+    }
 
     fsize = gsutil_filesize(fname);
     if (-1 == fsize) {

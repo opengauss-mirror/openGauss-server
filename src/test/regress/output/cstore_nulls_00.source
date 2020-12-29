@@ -8,7 +8,7 @@ CREATE TABLE cstore_nulls_00
 	b int,
 	c int
 ) with ( orientation = column, compression = no )  ;
-copy cstore_nulls_00 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_nulls_00.data' with (delimiter '|', null '');
+copy cstore_nulls_00 from '@abs_srcdir@/data/cstore_nulls_00.data' with (delimiter '|', null '');
 SELECT * FROM cstore_nulls_00 ORDER BY 1, 2, 3;
  a | b | c 
 ---+---+---

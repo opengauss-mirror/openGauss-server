@@ -13,7 +13,7 @@
 [ WITH [ RECURSIVE ] with_query [, ...] ]
 INSERT INTO table_name [ ( column_name [, ...] ) ]
     { DEFAULT VALUES | VALUES {( { expression | DEFAULT } [, ...] ) }[, ...] | query }
-    [ ON DUPLICATE KEY UPDATE { column_name = { expression | DEFAULT } } [, ...] ]
+    [ ON DUPLICATE KEY UPDATE { NOTHING | { column_name = { expression | DEFAULT } } [, ...] } ]
     [ RETURNING {* | {output_expression [ [ AS ] output_name ] }[, ...]} ];
 </synopsis>
 </refsynopsisdiv>

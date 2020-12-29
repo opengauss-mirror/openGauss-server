@@ -19,15 +19,15 @@ SELECT lo_unlink(oid) FROM pg_largeobject_metadata;
 
 RESET client_min_messages;
 -- test proper begins here
-CREATE USER regressuser1 PASSWORD 'ttest@123';
-CREATE USER regressuser2 PASSWORD 'ttest@123';
-CREATE USER regressuser3 PASSWORD 'ttest@123';
-CREATE USER regressuser4 PASSWORD 'ttest@123';
-CREATE USER regressuser5 PASSWORD 'ttest@123';
-CREATE USER regressuser5 PASSWORD 'ttest@123';	-- duplicate
+CREATE USER regressuser1 PASSWORD 'gauss@123';
+CREATE USER regressuser2 PASSWORD 'gauss@123';
+CREATE USER regressuser3 PASSWORD 'gauss@123';
+CREATE USER regressuser4 PASSWORD 'gauss@123';
+CREATE USER regressuser5 PASSWORD 'gauss@123';
+CREATE USER regressuser5 PASSWORD 'gauss@123';	-- duplicate
 ERROR:  role "regressuser5" already exists
-CREATE GROUP regressgroup1 PASSWORD 'ttest@123';
-CREATE GROUP regressgroup2 WITH USER regressuser1, regressuser2 PASSWORD 'ttest@123';
+CREATE GROUP regressgroup1 PASSWORD 'gauss@123';
+CREATE GROUP regressgroup2 WITH USER regressuser1, regressuser2 PASSWORD 'gauss@123';
 ALTER GROUP regressgroup1 ADD USER regressuser4;
 ALTER GROUP regressgroup2 ADD USER regressuser2;	-- duplicate
 NOTICE:  role "regressuser2" is already a member of role "regressgroup2"
@@ -1223,7 +1223,7 @@ SELECT has_table_privilege('regressuser1', 'testns.acltest1', 'INSERT'); -- no
 (1 row)
 
 ALTER DEFAULT PRIVILEGES FOR ROLE regressuser1 REVOKE EXECUTE ON FUNCTIONS FROM public;
-SET ROLE regressuser1 PASSWORD 'ttest@123';
+SET ROLE regressuser1 PASSWORD 'gauss@123';
 CREATE FUNCTION testns.foo() RETURNS int AS 'select 1' LANGUAGE sql;
 SELECT has_function_privilege('regressuser2', 'testns.foo()', 'EXECUTE'); -- no
  has_function_privilege 
@@ -1333,15 +1333,15 @@ DROP SCHEMA testns CASCADE;
 RESET client_min_messages;
 -- test that dependent privileges are revoked (or not) properly
 \c -
-set session role regressuser1 PASSWORD 'ttest@123';
+set session role regressuser1 PASSWORD 'gauss@123';
 create table dep_priv_test (a int);
 grant select on dep_priv_test to regressuser2 with grant option;
 grant select on dep_priv_test to regressuser3 with grant option;
-set session role regressuser2 PASSWORD 'ttest@123';
+set session role regressuser2 PASSWORD 'gauss@123';
 grant select on dep_priv_test to regressuser4 with grant option;
-set session role regressuser3 PASSWORD 'ttest@123';
+set session role regressuser3 PASSWORD 'gauss@123';
 grant select on dep_priv_test to regressuser4 with grant option;
-set session role regressuser4 PASSWORD 'ttest@123';
+set session role regressuser4 PASSWORD 'gauss@123';
 grant select on dep_priv_test to regressuser5;
 \dp dep_priv_test
                                        Access privileges
@@ -1355,7 +1355,7 @@ grant select on dep_priv_test to regressuser5;
         |               |       | regressuser5=r/regressuser4       | 
 (1 row)
 
-set session role regressuser2 PASSWORD 'ttest@123';
+set session role regressuser2 PASSWORD 'gauss@123';
 revoke select on dep_priv_test from regressuser4 cascade;
 \dp dep_priv_test
                                        Access privileges
@@ -1368,7 +1368,7 @@ revoke select on dep_priv_test from regressuser4 cascade;
         |               |       | regressuser5=r/regressuser4       | 
 (1 row)
 
-set session role regressuser3 PASSWORD 'ttest@123';
+set session role regressuser3 PASSWORD 'gauss@123';
 revoke select on dep_priv_test from regressuser4 cascade;
 \dp dep_priv_test
                                        Access privileges
@@ -1379,7 +1379,7 @@ revoke select on dep_priv_test from regressuser4 cascade;
         |               |       | regressuser3=r*/regressuser1      | 
 (1 row)
 
-set session role regressuser1 PASSWORD 'ttest@123';
+set session role regressuser1 PASSWORD 'gauss@123';
 drop table dep_priv_test;
 -- clean up
 \c

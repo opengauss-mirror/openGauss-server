@@ -66,6 +66,7 @@ static void free_copy_options(struct copy_options* ptr)
     free(ptr->file);
     ptr->file = NULL;
     free(ptr);
+    ptr = NULL;
 }
 
 /* concatenate "more" onto "var", freeing the original value of *var */

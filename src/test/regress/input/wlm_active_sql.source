@@ -1,0 +1,57 @@
+create database wlm_active_sql;
+\c wlm_active_sql
+set resource_track_duration=0;
+set query_band='active_sql_test';
+create table tb1(x int, y int) with (orientation = column);
+create table tb2(x int, y int) with (orientation = column);
+
+--insert into
+insert into tb1 select v, v*2 from generate_series(1, 2000) as v;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select query from gs_wlm_session_history where query='insert into tb1 select v, v*2 from generate_series(1, 2000) as v;' and length(query_plan) > 0;"
+insert into tb2 select v, v*2 from generate_series(1001, 3000) as v;
+--select
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select count(*) from tb1, tb2 where tb1.x > tb2.x;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select query from gs_wlm_session_history where query='select count(*) from tb1, tb2 where tb1.x > tb2.x;' and length(query_plan) > 0;"
+
+--explain performance
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "explain performance select count(*) from tb1, tb2 where tb1.x > tb2.x;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select query from gs_wlm_session_history where query='explain performance select count(*) from tb1, tb2 where tb1.x > tb2.x;' and length(query_plan) > 0;"
+
+--explain analyze
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "set query_band='active_sql_test';explain analyze select count(*) from tb1, tb2 where tb1.x > tb2.x;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select query, query_band from gs_wlm_session_history where query='explain analyze select count(*) from tb1, tb2 where tb1.x > tb2.x;' and length(query_plan) > 0;"
+
+--create table as
+create table tb3 as select tb1.* from tb1 ,tb2 where tb1.x > tb2.x;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select query, query_band from gs_wlm_session_history where query='create table tb3 as select tb1.* from tb1 ,tb2 where tb1.x > tb2.x;' and length(query_plan) > 0;"
+
+--EXECUTE
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "set query_band='active_sql_test';PREPARE execute_test AS select count(*) from tb1, tb2 where tb1.x > \$1 and tb2.x > \$2;EXECUTE execute_test(1000,2000);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select query, query_band from gs_wlm_session_history where query='EXECUTE execute_test(1000,2000);' and length(query_plan) > 0;"
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "set query_band='active_sql_test';PREPARE execute_test AS select count(*) from tb1, tb2 where tb1.x > \$1 and tb2.x > \$2;explain performance EXECUTE execute_test(1000,2000);" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select query, query_band from gs_wlm_session_history where query='explain performance EXECUTE execute_test(1000,2000);' and length(query_plan) > 0;"
+
+--begin
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "begin;set query_band='active_sql_test';select count(*) from tb1, tb2 where tb1.x >= tb2.x;select * from pg_sleep(1);end;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select query, query_band from gs_wlm_session_history where query='select count(*) from tb1, tb2 where tb1.x >= tb2.x;' and length(query_plan) > 0;"
+
+--start transaction
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "start transaction;set query_band='active_sql_test';select count(*) from tb1, tb2 where tb1.y > tb2.y;select * from pg_sleep(1);end;" > /dev/null 2>&1
+--\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select query, query_band from gs_wlm_session_history where query='select count(*) from tb1, tb2 where tb1.y > tb2.y;' and length(query_plan) > 0;"
+--fetch
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "start transaction; set query_band='fetch_test'; CURSOR cursor1 FOR select * from tb1, tb2 where tb1.y > tb2.y ORDER BY 1; fetch 5 from cursor1; CLOSE cursor1; end;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select query, query_band from gs_wlm_session_history where query_band='fetch_test' and length(query_plan) > 0;"
+
+--delete
+delete from tb3 using tb1 where tb3.x = tb1.x;
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select query from gs_wlm_session_history where query='delete from tb3 using tb1 where tb3.x = tb1.x;' and length(query_plan) > 0;"
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select * from gs_wlm_session_statistics;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select * from pgxc_wlm_session_statistics;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_active_sql -c "select * from pgxc_wlm_session_history;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select * from gs_wlm_session_info;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select * from pgxc_wlm_session_info;" > /dev/null 2>&1
+\c regression
+drop database wlm_active_sql;
+--end of test

@@ -1,0 +1,395 @@
+--Test LLVM optimization operator about int8 data type
+drop foreign table if exists t_bigint;
+NOTICE:  foreign table "t_bigint" does not exist, skipping
+Create foreign table t_bigint (c_bigint int8) SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/t_bigint_orc/') distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+--test "=" operator
+set enable_codegen = off;
+select * from t_bigint where  2 = c_bigint;
+ c_bigint 
+----------
+        2
+(1 row)
+
+set enable_codegen = on;
+select * from t_bigint where  2 = c_bigint;
+ c_bigint 
+----------
+        2
+(1 row)
+
+set enable_codegen = off;
+select * from t_bigint where  c_bigint = 2;
+ c_bigint 
+----------
+        2
+(1 row)
+
+set enable_codegen = on;
+select * from t_bigint where  c_bigint = 2 ;
+ c_bigint 
+----------
+        2
+(1 row)
+
+select * from t_bigint where  c_bigint = 2::int2 ;
+ c_bigint 
+----------
+        2
+(1 row)
+
+select * from t_bigint where  c_bigint = 2::int8 ;
+ c_bigint 
+----------
+        2
+(1 row)
+
+--test ">" operator
+set enable_codegen = off;
+select * from t_bigint where  2 > c_bigint;
+ c_bigint 
+----------
+        1
+        1
+(2 rows)
+
+set enable_codegen = on;
+select * from t_bigint where  2 > c_bigint;
+ c_bigint 
+----------
+        1
+        1
+(2 rows)
+
+set enable_codegen = off;
+select * from t_bigint where  c_bigint > 2;
+ c_bigint 
+----------
+        3
+        5
+        8
+(3 rows)
+
+set enable_codegen = on;
+select * from t_bigint where  c_bigint > 2 ;
+ c_bigint 
+----------
+        3
+        5
+        8
+(3 rows)
+
+select * from t_bigint where  c_bigint > 2::int2 ;
+ c_bigint 
+----------
+        3
+        5
+        8
+(3 rows)
+
+select * from t_bigint where  c_bigint > 2::int8 ;
+ c_bigint 
+----------
+        3
+        5
+        8
+(3 rows)
+
+--test ">=" operator
+set enable_codegen = off;
+select * from t_bigint where  2 >= c_bigint;
+ c_bigint 
+----------
+        1
+        1
+        2
+(3 rows)
+
+set enable_codegen = on;
+select * from t_bigint where  2 >= c_bigint;
+ c_bigint 
+----------
+        1
+        1
+        2
+(3 rows)
+
+set enable_codegen = off;
+select * from t_bigint where  c_bigint >= 2;
+ c_bigint 
+----------
+        2
+        3
+        5
+        8
+(4 rows)
+
+set enable_codegen = on;
+select * from t_bigint where  c_bigint >= 2 ;
+ c_bigint 
+----------
+        2
+        3
+        5
+        8
+(4 rows)
+
+select * from t_bigint where  c_bigint >= 2::int2 ;
+ c_bigint 
+----------
+        2
+        3
+        5
+        8
+(4 rows)
+
+select * from t_bigint where  c_bigint >= 2::int8 ;
+ c_bigint 
+----------
+        2
+        3
+        5
+        8
+(4 rows)
+
+--test "<" operator
+set enable_codegen = off;
+select * from t_bigint where  2 < c_bigint;
+ c_bigint 
+----------
+        3
+        5
+        8
+(3 rows)
+
+set enable_codegen = on;
+select * from t_bigint where  2 < c_bigint;
+ c_bigint 
+----------
+        3
+        5
+        8
+(3 rows)
+
+set enable_codegen = off;
+select * from t_bigint where  c_bigint < 2;
+ c_bigint 
+----------
+        1
+        1
+(2 rows)
+
+set enable_codegen = on;
+select * from t_bigint where  c_bigint < 2 ;
+ c_bigint 
+----------
+        1
+        1
+(2 rows)
+
+select * from t_bigint where  c_bigint < 2::int2 ;
+ c_bigint 
+----------
+        1
+        1
+(2 rows)
+
+select * from t_bigint where  c_bigint < 2::int8 ;
+ c_bigint 
+----------
+        1
+        1
+(2 rows)
+
+--test "<=" operator
+set enable_codegen = off;
+select * from t_bigint where  2 <= c_bigint;
+ c_bigint 
+----------
+        2
+        3
+        5
+        8
+(4 rows)
+
+set enable_codegen = on;
+select * from t_bigint where  2 <= c_bigint;
+ c_bigint 
+----------
+        2
+        3
+        5
+        8
+(4 rows)
+
+set enable_codegen = off;
+select * from t_bigint where  c_bigint <= 2;
+ c_bigint 
+----------
+        1
+        1
+        2
+(3 rows)
+
+set enable_codegen = on;
+select * from t_bigint where  c_bigint <= 2 ;
+ c_bigint 
+----------
+        1
+        1
+        2
+(3 rows)
+
+select * from t_bigint where  c_bigint <= 2::int2 ;
+ c_bigint 
+----------
+        1
+        1
+        2
+(3 rows)
+
+select * from t_bigint where  c_bigint <= 2::int8 ;
+ c_bigint 
+----------
+        1
+        1
+        2
+(3 rows)
+
+--test "<>" operator
+set enable_codegen = off;
+select * from t_bigint where  2 <> c_bigint;
+ c_bigint 
+----------
+        1
+        1
+        3
+        5
+        8
+(5 rows)
+
+set enable_codegen = on;
+select * from t_bigint where  2 <> c_bigint;
+ c_bigint 
+----------
+        1
+        1
+        3
+        5
+        8
+(5 rows)
+
+set enable_codegen = off;
+select * from t_bigint where  c_bigint <> 2;
+ c_bigint 
+----------
+        1
+        1
+        3
+        5
+        8
+(5 rows)
+
+set enable_codegen = on;
+select * from t_bigint where  c_bigint <> 2 ;
+ c_bigint 
+----------
+        1
+        1
+        3
+        5
+        8
+(5 rows)
+
+select * from t_bigint where  c_bigint <> 2::int2 ;
+ c_bigint 
+----------
+        1
+        1
+        3
+        5
+        8
+(5 rows)
+
+select * from t_bigint where  c_bigint <> 2::int8 ;
+ c_bigint 
+----------
+        1
+        1
+        3
+        5
+        8
+(5 rows)
+
+--test "!=" operator
+set enable_codegen = off;
+select * from t_bigint where  2 != c_bigint;
+ c_bigint 
+----------
+        1
+        1
+        3
+        5
+        8
+(5 rows)
+
+set enable_codegen = on;
+select * from t_bigint where  2 != c_bigint;
+ c_bigint 
+----------
+        1
+        1
+        3
+        5
+        8
+(5 rows)
+
+set enable_codegen = off;
+select * from t_bigint where  c_bigint != 2;
+ c_bigint 
+----------
+        1
+        1
+        3
+        5
+        8
+(5 rows)
+
+set enable_codegen = on;
+select * from t_bigint where  c_bigint != 2 ;
+ c_bigint 
+----------
+        1
+        1
+        3
+        5
+        8
+(5 rows)
+
+--add llt
+explain performance select * from t_bigint where  c_bigint != 2 ;
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*

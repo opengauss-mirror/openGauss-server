@@ -1,0 +1,1492 @@
+--Test informational constraint on planner phase
+Drop server if exists obs_server cascade;
+NOTICE:  server "obs_server" does not exist, skipping
+set enable_constraint_optimization = on;
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (address '@obshostname@', type 'obs', access_key '@ak@', secret_access_key '@sk@');
+drop foreign table region;
+ERROR:  foreign table "region" does not exist
+create foreign table region  (
+ R_REGIONKEY  int,
+ R_NAME TEXT,
+ R_COMMENT TEXT
+  , primary key (R_REGIONKEY) not enforced)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "region_pkey" for foreign table "region"
+drop foreign table nation;
+ERROR:  foreign table "nation" does not exist
+create foreign table nation  (
+ N_NATIONKEY INT4 unique not enforced,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "nation_pkey" for foreign table "nation"
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "nation_n_nationkey_key" for foreign table "nation"
+----First£¬test foreign scan qual
+------ mode 1, [const1 operator ] col1 [operator const2]= const operator const, the operator are '+', '-' and '*'
+set enable_hdfs_predicate_pushdown =off;
+explain (costs off) select * from region where r_regionkey = 5 ;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter(Informational Constraint Optimization): (r_regionkey = 5)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where 5 = r_regionkey ;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter(Informational Constraint Optimization): (5 = r_regionkey)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where r_regionkey  * 4  = 5 ;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: ((r_regionkey * 4) = 5)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where 5  = 4  *  r_regionkey ;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: (5 = (4 * r_regionkey))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where 5  = 4  *  r_regionkey * 7 ;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: (5 = ((4 * r_regionkey) * 7))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where  4  *  r_regionkey * 7  = 5;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: (((4 * r_regionkey) * 7) = 5)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+------ mode 2, [const1 operator ] col1 [operator const2] = const and expressioin (expressioin is not or clause ).
+explain (costs off) select * from region where r_regionkey = 5 and R_NAME = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter(Informational Constraint Optimization): ((r_regionkey = 5) AND (r_name = 'top'::text))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where  R_NAME = 'top' and r_regionkey = 5;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter(Informational Constraint Optimization): ((r_name = 'top'::text) AND (r_regionkey = 5))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where r_regionkey * 3 = 5 and R_NAME = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: ((r_name = 'top'::text) AND ((r_regionkey * 3) = 5))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where r_regionkey = 5 +3;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter(Informational Constraint Optimization): (r_regionkey = 8)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where 4 * r_regionkey * 3 = 5 and R_NAME = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: ((r_name = 'top'::text) AND (((4 * r_regionkey) * 3) = 5))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where  R_NAME = 'top' and 4 * r_regionkey * 3 = 5;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: ((r_name = 'top'::text) AND (((4 * r_regionkey) * 3) = 5))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where r_regionkey * 3 =5 and R_NAME = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: ((r_name = 'top'::text) AND ((r_regionkey * 3) = 5))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where 6 * r_regionkey * 3 =5 and R_NAME = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: ((r_name = 'top'::text) AND (((6 * r_regionkey) * 3) = 5))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where 6 - r_regionkey + 3 =5 and R_NAME = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter(Informational Constraint Optimization): ((r_name = 'top'::text) AND (((6 - r_regionkey) + 3) = 5))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select N_nationkey from nation  where 9 = 3 + 3 * N_REGIONKEY +1;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: (9 = ((3 + (3 * n_regionkey)) + 1))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select N_nationkey from nation  where 3 + 3 * N_REGIONKEY +1 = 9;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: (((3 + (3 * n_regionkey)) + 1) = 9)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select N_nationkey from nation  where 3 + 3 * N_REGIONKEY +1 = 9 and N_REGIONKEY = 9;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter(Informational Constraint Optimization): ((n_regionkey = 9) AND (((3 + (3 * n_regionkey)) + 1) = 9))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select N_nationkey from nation  where 9 = 3 * N_REGIONKEY +1;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: (9 = ((3 * n_regionkey) + 1))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select N_nationkey from nation  where N_REGIONKEY *7 = 8; 
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: ((n_regionkey * 7) = 8)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+------ test unnormal cases
+------this case do not optimization currently, if two informational constraint columns of one table appear in expression
+explain (costs off) select N_nationkey from nation  where 3 + 3 * N_REGIONKEY +1 = N_NATIONKEY;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: (((3 + (3 * n_regionkey)) + 1) = n_nationkey)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+drop foreign table nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 unique not enforced,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 ,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "nation_n_nationkey_key" for foreign table "nation"
+------this case do not optimization, if one cloumn is defined informational constaint, another is normal column
+explain (costs off) select * from nation where n_nationkey = N_REGIONKEY;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: (n_nationkey = n_regionkey)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select N_nationkey from nation  where N_REGIONKEY+n_nationkey =9;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: ((n_regionkey + n_nationkey) = 9)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select N_nationkey from nation  where N_REGIONKEY+n_nationkey*0 = 9; 
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: ((n_regionkey + (n_nationkey * 0)) = 9)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+------illegal operator
+explain (costs off) select * from region where  4  *  r_regionkey / 7  = 5;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: (((4 * r_regionkey) / 7) = 5::double precision)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select N_nationkey from nation  where 9 = N_REGIONKEY %2;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: (9 = (n_regionkey % 2))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+------- if the operator is the '*', the const can not be a 0.
+explain (costs off) select * from region where  4  *  r_regionkey * 0  = 5;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: (((4 * r_regionkey) * 0) = 5)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select N_nationkey from nation  where 9 = N_REGIONKEY *0;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: (9 = (n_regionkey * 0))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+------ the express must be and clause
+explain (costs off) select * from region where (r_regionkey =5 or R_NAME = 'top') and R_COMMENT = 'tup';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: ((r_comment = 'tup'::text) AND ((r_regionkey = 5) OR (r_name = 'top'::text)))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where r_regionkey =5 or R_NAME = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: ((r_regionkey = 5) OR (r_name = 'top'::text))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from region where r_regionkey =5 and R_NAME = 'top' or R_COMMENT = 'tup';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on region
+               Filter: (((r_regionkey = 5) AND (r_name = 'top'::text)) OR (r_comment = 'tup'::text))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(6 rows)
+
+---- second, test join qual case
+set enable_hashjoin =off;
+drop foreign table nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 unique not enforced,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "nation_pkey" for foreign table "nation"
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "nation_n_nationkey_key" for foreign table "nation"
+--case1. [const1 operator ] col1 [operator const2] = [const3 operator ] col2 [operator const4]
+explain (costs off) select * from nation, region where nation.n_regionkey = region.r_regionkey;  --(n_regionkey and r_regionkey are Informational Constaint column. )
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter(Informational Constraint Optimization): (nation.n_regionkey = region.r_regionkey)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where nation.n_regionkey * 3 = 3 + region. r_regionkey ;   --(n_regionkey and r_regionkey are Informational Constaint column. )
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter(Informational Constraint Optimization): ((nation.n_regionkey * 3) = (3 + region.r_regionkey))
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where 3 * nation.n_regionkey + 1 = region.r_regionkey + 4;  --(n_regionkey and r_regionkey are Informational Constaint column. )
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter(Informational Constraint Optimization): (((3 * nation.n_regionkey) + 1) = (region.r_regionkey + 4))
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where nation.n_regionkey %4 = region.r_regionkey * 4;   --(r_regionkey is Informational Constraint column, and is a inner table)
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: ((nation.n_regionkey % 4) = (region.r_regionkey * 4))
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where 7*nation.n_regionkey + 1 = 6+ 9*region.r_regionkey + 4;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: (((7 * nation.n_regionkey) + 1) = ((6 + (9 * region.r_regionkey)) + 4))
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+------ the sub-expression which involved clumn of outer table may contain all operator.
+explain (costs off) select * from nation, region where nation.n_regionkey %4 = region.r_regionkey * 4;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: ((nation.n_regionkey % 4) = (region.r_regionkey * 4))
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+------case2. [const1 operator ] col1 [operator const2]  operator [const3 operator] col2 [operator const4]= const
+drop foreign table region;
+create foreign table region  (
+ R_REGIONKEY  int,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+explain (costs off) select * from nation, region where nation.n_regionkey + region.r_regionkey = 3;  --(n_regionkey is Informational Constraint column, and is a inner table)
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: ((nation.n_regionkey + region.r_regionkey) = 3)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where 3 + nation.n_regionkey + 8* region.r_regionkey = 0;  --(n_regionkey is Informational Constraint column, and is a inner table)
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: (((3 + nation.n_regionkey) + (8 * region.r_regionkey)) = 0)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where nation.n_regionkey - region.r_regionkey = 3;  --(n_regionkey is Informational Constraint column, and is a inner table)
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: ((nation.n_regionkey - region.r_regionkey) = 3)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where nation.n_regionkey * region.r_regionkey = 3;  --(n_regionkey is Informational Constraint column, and is a inner table)
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: ((nation.n_regionkey * region.r_regionkey) = 3)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where 1 = region.r_regionkey+1  + nation.n_regionkey; --(n_regionkey is Informational Constraint column, and is a inner table)
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: (((region.r_regionkey + 1) + nation.n_regionkey) = 1)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where nation.n_regionkey + 1 - region.r_regionkey - 4 =3;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: ((((nation.n_regionkey + 1) - region.r_regionkey) - 4) = 3)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where nation.n_regionkey +region.r_regionkey + 1 = region.r_regionkey + 4;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: (((nation.n_regionkey + region.r_regionkey) + 1) = (region.r_regionkey + 4))
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where nation.n_regionkey * 4 + region.r_regionkey = 3;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: (((nation.n_regionkey * 4) + region.r_regionkey) = 3)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where nation.n_regionkey + region.r_regionkey * 4 = 3;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: ((nation.n_regionkey + (region.r_regionkey * 4)) = 3)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+------ this sql, if the n_regionkey value is 0, the result will be error, but the custotmer could not do such operator.
+explain (costs off) select * from nation, region where 8*nation.n_regionkey*region.r_regionkey  = 5;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: (((8 * nation.n_regionkey) * region.r_regionkey) = 5)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+------ test unnormal cases
+explain (costs off) select * from nation, region where 8*nation.n_regionkey*region.r_regionkey  = 0;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: (((8 * nation.n_regionkey) * region.r_regionkey) = 0)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where nation.n_regionkey / region.r_regionkey = 3;  
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: ((nation.n_regionkey / region.r_regionkey) = 3::double precision)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where region.r_regionkey / nation.n_regionkey = 3; 
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: ((region.r_regionkey / nation.n_regionkey) = 3::double precision)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+--------currently, this case do not optimize. 
+explain (costs off) select * from nation, region where 8*nation.n_regionkey*6 + 6*region.r_regionkey/5 +67=8;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: ((((((8 * nation.n_regionkey) * 6))::double precision + ((6 * region.r_regionkey) / 5)) + 67::double precision) = 8::double precision)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where 8*nation.n_regionkey*6 + 6*region.r_regionkey/5 =8;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: (((((8 * nation.n_regionkey) * 6))::double precision + ((6 * region.r_regionkey) / 5)) = 8::double precision)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+-------- if the informational constraint column exist in two sides, currenty, do not optimize
+explain (costs off) select * from nation, region where nation.n_regionkey %4 = region.r_regionkey * 4+ nation.N_NATIONKEY;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: (((region.r_regionkey * 4) + nation.n_nationkey) = (nation.n_regionkey % 4))
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where nation.n_regionkey*6 + region.r_regionkey * 4= nation.n_nationkey;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: (((nation.n_regionkey * 6) + (region.r_regionkey * 4)) = nation.n_nationkey)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where nation.n_regionkey*6 + region.r_regionkey = nation.n_nationkey;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: (((nation.n_regionkey * 6) + region.r_regionkey) = nation.n_nationkey)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+------illegal operator
+explain (costs off) select * from nation, region where nation.n_regionkey * 4 = region.r_regionkey % 4;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: ((nation.n_regionkey * 4) = (region.r_regionkey % 4))
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+explain (costs off) select * from nation, region where nation.n_regionkey / region.r_regionkey = 3;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop
+               Join Filter: ((nation.n_regionkey / region.r_regionkey) = 3::double precision)
+               ->  Vector Foreign Scan on nation
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on region
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+(12 rows)
+
+set enable_hdfs_predicate_pushdown=off;
+--test in not null qual remove case
+explain (costs off) select * from nation  where N_REGIONKEY is not null ;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(5 rows)
+
+explain (costs off) select * from nation  where N_REGIONKEY is not null and n_name ='test';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: (n_name = 'test'::text)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from nation  where N_REGIONKEY is not null or n_name ='test';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(5 rows)
+
+explain (costs off) select * from nation  where n_name ='test' or N_REGIONKEY is not null;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(5 rows)
+
+explain (costs off) select * from nation  where N_REGIONKEY is not null or n_name ='test' and n_name ='test' or N_COMMENT = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(5 rows)
+
+explain (costs off) select * from nation  where N_REGIONKEY is not null and n_name ='test' and N_COMMENT = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: ((n_name = 'test'::text) AND (n_comment = 'top'::text))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from nation  where N_REGIONKEY is not null or n_name ='test' and N_COMMENT = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(5 rows)
+
+explain (costs off) select * from nation  where N_REGIONKEY is not null and n_name ='test' or N_COMMENT = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: ((n_name = 'test'::text) OR (n_comment = 'top'::text))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from nation  where N_REGIONKEY is not null and n_name ='test' or N_COMMENT = 'top' or N_REGIONKEY is not null;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(5 rows)
+
+explain (costs off) select * from nation  where N_REGIONKEY is not null or n_name ='test' or N_COMMENT = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(5 rows)
+
+explain (costs off) select * from nation  where N_NATIONKEY is not null or N_REGIONKEY is not null;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(5 rows)
+
+explain (costs off) select * from nation  where N_REGIONKEY is not null and n_name ='test' and N_COMMENT = 'top';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter: ((n_name = 'test'::text) AND (n_comment = 'top'::text))
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+explain (costs off) select * from nation  where N_REGIONKEY is not null or n_name ='test';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(5 rows)
+
+drop foreign table nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 not null,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "nation_pkey" for foreign table "nation"
+explain (costs off) select * from nation  where N_NATIONKEY is not null or n_name ='test';
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(5 rows)
+
+--test group by optimization
+drop foreign table nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 not null,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "nation_pkey" for foreign table "nation"
+explain (costs off) select N_REGIONKEY from nation group by n_regionkey; 
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: n_regionkey
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: n_regionkey
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(9 rows)
+
+explain (costs off) select N_REGIONKEY + 1 from nation group by n_regionkey + 1;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: ((n_regionkey + 1))
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: (n_regionkey + 1)
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(9 rows)
+
+explain (costs off) select N_REGIONKEY, max(n_nationkey) from nation group by n_regionkey; 
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: n_regionkey
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: n_regionkey
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(9 rows)
+
+explain (costs off) select N_REGIONKEY, min(n_nationkey) from nation group by n_regionkey; 
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: n_regionkey
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: n_regionkey
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(9 rows)
+
+explain (costs off) select N_REGIONKEY, sum(n_nationkey) from nation group by n_regionkey; 
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: n_regionkey
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: n_regionkey
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(9 rows)
+
+explain (costs off) select sum(N_REGIONKEY), avg(n_nationkey) from nation group by n_regionkey;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: n_regionkey
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(8 rows)
+
+explain (costs off) select N_REGIONKEY, sum(n_nationkey) from nation group by n_regionkey having n_regionkey < 10; 
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: n_regionkey
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: n_regionkey
+                     ->  Vector Foreign Scan on nation
+                           Filter: (n_regionkey < 10)
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(10 rows)
+
+explain (costs off) select N_REGIONKEY, sum(n_nationkey) from nation group by n_regionkey having n_nationkey < 10; 
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: n_regionkey
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: n_regionkey
+                     ->  Vector Foreign Scan on nation
+                           Filter: (n_nationkey < 10)
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(10 rows)
+
+explain (costs off) select n_regionkey, sum(n_nationkey)  from nation group by n_regionkey, n_nationkey ;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: n_regionkey, n_nationkey
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: n_regionkey, n_nationkey
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(9 rows)
+
+--this case dose not optimized
+explain (costs off) select N_REGIONKEY + n_nationkey from nation group by n_regionkey + n_nationkey;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: ((n_regionkey + n_nationkey))
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: (n_regionkey + n_nationkey)
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(9 rows)
+
+explain (costs off) select N_REGIONKEY, count(n_nationkey) from nation group by n_regionkey; 
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: n_regionkey
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: n_regionkey
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(9 rows)
+
+explain (costs off) select sum(N_REGIONKEY), count(n_nationkey) from nation group by n_regionkey;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: n_regionkey
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: n_regionkey
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(9 rows)
+
+explain (costs off) select N_REGIONKEY, sum(n_nationkey) from nation group by n_regionkey having sum(n_nationkey) < 10; 
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: n_regionkey
+               Filter: (sum(n_nationkey) < 10)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(9 rows)
+
+--test group by optimization
+explain (costs off) select n_regionkey, sum(n_nationkey)  from nation group by n_nationkey, n_regionkey;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: n_nationkey, n_regionkey
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: n_nationkey, n_regionkey
+                     ->  Vector Foreign Scan on nation
+                           Server Type: obs
+                           Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(9 rows)
+
+----test not in, the Anti Join scan will appear in plan tree.
+drop foreign table region;
+create foreign table region  (
+ R_REGIONKEY  int,
+ R_NAME TEXT,
+ R_COMMENT TEXT
+  , primary key (R_REGIONKEY) not enforced)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "region_pkey" for foreign table "region"
+drop foreign table nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 ,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "nation_pkey" for foreign table "nation"
+explain (costs off) select * from region where R_REGIONKEY not in (select N_REGIONKEY from nation );
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop Anti Join
+               Join Filter: (region.r_regionkey = nation.n_regionkey)
+               ->  Vector Foreign Scan on region
+                     Server Type: obs
+                     Orc File: /@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  Vector Foreign Scan on nation
+                                 Server Type: obs
+                                 Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(12 rows)
+
+--test distinct optimization
+----explain select distinct (n_regionkey) from nation;
+----explain select distinct on (n_regionkey) n_nationkey from nation;
+----explain select distinct on (n_regionkey + 1) n_regionkey + 1 from nation ;
+----explain select distinct on (n_regionkey + 1) n_nationkey from nation ;
+----explain select distinct on (n_regionkey + 1) n_nationkey + 3 from nation ;
+----explain select distinct on (n_regionkey - 1) n_regionkey from nation ;
+----explain select distinct on (n_regionkey * 1) n_regionkey from nation ;
+----explain select distinct on (n_regionkey * 1 + 9) n_regionkey from nation ;
+----explain select distinct on (n_regionkey % 6 + 9) n_regionkey from nation ;
+----
+----explain select distinct (n_regionkey ,n_nationkey) from nation;
+------this case dose not optimized
+----explain select distinct on (n_regionkey * 0 + 9) n_regionkey from nation;
+----explain select distinct (n_regionkey + n_nationkey) from nation;
+----explain select distinct n_regionkey, n_nationkey from nation;
+--add llt
+set enable_hdfs_predicate_pushdown = on;
+drop foreign table if exists nation;
+create foreign table nation  (
+ N_NATIONKEY INT4 unique not enforced,
+ N_NAME TEXT,
+ N_REGIONKEY INT4 primary key  not enforced,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/')
+distribute by roundrobin;
+WARNING:  It is not specified totalrows option for the foreign table.
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "nation_pkey" for foreign table "nation"
+NOTICE:  CREATE FOREIGN TABLE / UNIQUE will create constraint "nation_n_nationkey_key" for foreign table "nation"
+explain (costs off) select * from nation where N_NATIONKEY = 5 and N_REGIONKEY+5 = 7;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Filter(Informational Constraint Optimization): ((n_regionkey + 5) = 7)
+               Pushdown Predicate Filter(Informational Constraint Optimization): (n_nationkey = 5)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(7 rows)
+
+explain (costs off) select * from nation where N_NATIONKEY = 5 ;
+--?.*
+--?.*
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Foreign Scan on nation
+               Pushdown Predicate Filter(Informational Constraint Optimization): (n_nationkey = 5)
+               Server Type: obs
+               Orc File: /@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/
+(6 rows)
+
+set explain_perf_mode=pretty;
+explain (costs off) select * from nation where N_NATIONKEY = 5 and N_REGIONKEY+5 = 7;
+ id |                operation                
+----+-----------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Foreign Scan on nation
+(3 rows)
+
+                        Predicate Information (identified by plan id)                        
+--?.*
+   3 --Vector Foreign Scan on nation
+         Filter(Informational Constraint Optimization): ((n_regionkey + 5) = 7)
+         Pushdown Predicate Filter(Informational Constraint Optimization): (n_nationkey = 5)
+         Server Type: obs
+(4 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+explain (costs off) select * from nation where N_NATIONKEY = 5 ;
+ id |                operation                
+----+-----------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Foreign Scan on nation
+(3 rows)
+
+                        Predicate Information (identified by plan id)                        
+--?.*
+   3 --Vector Foreign Scan on nation
+         Pushdown Predicate Filter(Informational Constraint Optimization): (n_nationkey = 5)
+         Server Type: obs
+(3 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+explain performance select * from  nation where N_NATIONKEY = 9;
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(13 rows)
+
+       Targetlist Information (identified by plan id)        
+--?.*
+   1 --Row Adapter
+         Output: n_nationkey, n_name, n_regionkey, n_comment
+   2 --Vector Streaming (type: GATHER)
+         Output: n_nationkey, n_name, n_regionkey, n_comment
+         Node/s: All datanodes
+   3 --Vector Foreign Scan on public.nation
+         Output: n_nationkey, n_name, n_regionkey, n_comment
+(7 rows)
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(16 rows)
+
+--?.*
+--?.*
+--?.*
+--?.*
+(2 rows)
+
+--?.*
+--?.*
+--? Datanode executor start time.*
+--? Datanode executor end time.*
+--? Remote query poll time.*
+--?.*
+--?.*
+--?.*
+--? Coordinator executor start time.*
+--? Coordinator executor run time.*
+--? Coordinator executor end time.*
+--? Planner runtime.*
+--? Query Id:.*
+--? Total runtime.*
+(12 rows)
+
+set enable_indexscan=off;
+set enable_indexonlyscan=off;
+set enable_bitmapscan=off;
+explain (costs off) select c.relname
+from pg_class as c
+left join 
+(
+select p.oid as rel
+from pg_class as p
+group by 1
+) as tt on (c.oid = tt.rel)
+where (c.relname = 'storage_para_t1' or tt.rel is not null)
+order by c.reloptions;
+--?.*
+--?.*
+ Sort
+   Sort Key: c.reloptions
+   ->  Merge Left Join
+         Merge Cond: (c.oid = p.oid)
+         Filter: ((c.relname = 'storage_para_t1'::name) OR (p.oid IS NOT NULL))
+         ->  Sort
+               Sort Key: c.oid
+               ->  Seq Scan on pg_class c
+         ->  Sort
+               Sort Key: p.oid
+               ->  HashAggregate
+                     Group By Key: p.oid
+                     ->  Seq Scan on pg_class p
+(13 rows)
+
+drop server if exists obs_server cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to foreign table region
+drop cascades to foreign table nation
+set enable_constraint_optimization = off;

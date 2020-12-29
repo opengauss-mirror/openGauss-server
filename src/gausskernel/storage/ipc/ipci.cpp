@@ -29,15 +29,15 @@
 #include "catalog/storage_gtt.h"
 #include "commands/tablespace.h"
 #include "commands/async.h"
+#include "commands/matview.h"
 #include "foreign/dummyserver.h"
 #include "job/job_scheduler.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #ifdef PGXC
-#include "pgxc/nodemgr.h"
+    #include "pgxc/nodemgr.h"
 #endif
 #include "postmaster/autovacuum.h"
-#include "postmaster/bgworker_internals.h"
 #include "postmaster/bgwriter.h"
 #include "postmaster/pagewriter.h"
 #include "postmaster/postmaster.h"
@@ -49,7 +49,7 @@
 #include "replication/datareceiver.h"
 #include "replication/datasender.h"
 #include "replication/dataqueue.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/pg_shmem.h"
@@ -59,14 +59,17 @@
 #include "storage/procsignal.h"
 #include "storage/sinvaladt.h"
 #include "storage/spin.h"
-#include "storage/cstorealloc.h"
+#include "storage/cstore/cstorealloc.h"
 #include "storage/cucache_mgr.h"
 #include "storage/dfs/dfs_connector.h"
 #include "utils/memprot.h"
+#ifdef ENABLE_MULTIPLE_NODES
+    #include "tsdb/cache/queryid_cachemgr.h"
+#endif   /* ENABLE_MULTIPLE_NODES */
+
 
 /* we use semaphore not LWLOCK, because when thread InitGucConfig, it does not get a t_thrd.proc */
 pthread_mutex_t gLocaleMutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t gVfdMutex = PTHREAD_MUTEX_INITIALIZER;
 
 extern void SetShmemCxt(void);
 
@@ -135,11 +138,9 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         size = add_size(size, PredicateLockShmemSize());
         size = add_size(size, ProcGlobalShmemSize());
         size = add_size(size, XLOGShmemSize());
-        size = add_size(size, XLogStatShmemSize());
         size = add_size(size, CLOGShmemSize());
         size = add_size(size, CSNLOGShmemSize());
         size = add_size(size, TwoPhaseShmemSize());
-        size = add_size(size, BackgroundWorkerShmemSize());
         size = add_size(size, MultiXactShmemSize());
         size = add_size(size, LWLockShmemSize());
         size = add_size(size, ProcArrayShmemSize());
@@ -174,6 +175,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         size = add_size(size, TableSpaceUsageManager::ShmemSize());
         size = add_size(size, LsnXlogFlushChkShmemSize());
         size = add_size(size, heartbeat_shmem_size());
+        size = add_size(size, MatviewShmemSize());
 
         /* freeze the addin request size and include it */
         t_thrd.storage_cxt.addin_request_allowed = false;
@@ -199,7 +201,6 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
          */
         numSemas = ProcGlobalSemas();
         numSemas += SpinlockSemas();
-        numSemas += XLogSemas();
 
 #ifdef ENABLED_DEBUG_SYNC
         numSemas += 1; /* For debug sync handling */
@@ -243,8 +244,6 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
      * Set up xlog, clog, and buffers
      */
     XLOGShmemInit();
-    XLogStatShmemInit();
-    dw_shmem_init();
 
     {
         CLOGShmemInit();
@@ -281,7 +280,6 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     {
         TwoPhaseShmemInit();
     }
-	BackgroundWorkerShmemInit();
 
     /*
      * Set up shared-inval messaging
@@ -301,12 +299,6 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     }
     ReplicationSlotsShmemInit();
     WalSndShmemInit();
-    /*
-    * Set up WAL semaphores. This must be done after WalSndShmemInit().
-    */
-    if (!IsUnderPostmaster) {
-        InitWalSemaphores();
-    }
     WalRcvShmemInit();
     DataSndShmemInit();
     DataRcvShmemInit();
@@ -314,6 +306,8 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     DataWriterQueueShmemInit();
     HaShmemInit();
     heartbeat_shmem_init();
+    MatviewShmemInit();
+
     {
         NotifySignalShmemInit();
 
@@ -345,8 +339,17 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
      */
     CStoreAllocator::InitColSpaceCache();
 
+#ifdef ENABLE_MULTIPLE_NODES
     /*
-     * Set up dfsConnector cache
+     * Set up TableStatusCache
+     */
+    if (g_instance.attr.attr_common.enable_tsdb) {
+        Tsdb::TableStatus::GetInstance().init();
+    }
+#endif   /* ENABLE_MULTIPLE_NODES */
+
+    /*
+     * Set up DfsConnector cache
      */
     dfs::InitOBSConnectorCacheLock();
 
@@ -358,16 +361,16 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
      */
     DfsInsert::InitDfsSpaceCache();
 
-    LsnXlogFlushChkShmInit();
+    LsnXlogFlushChkShmInit();   
 
     if (g_instance.pid_cxt.PageWriterPID == NULL) {
         MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
         g_instance.pid_cxt.PageWriterPID =
             (ThreadId*)palloc0(sizeof(ThreadId) * g_instance.attr.attr_storage.pagewriter_thread_num);
-        if (g_instance.attr.attr_storage.bgwriter_thread_num > 0) {
-            g_instance.pid_cxt.CkptBgWriterPID =
-                (ThreadId*)palloc0(sizeof(ThreadId) * g_instance.attr.attr_storage.bgwriter_thread_num);
-        }
+
+        int thread_num = g_instance.attr.attr_storage.bgwriter_thread_num;
+        thread_num = thread_num > 0 ? thread_num : 1;
+        g_instance.pid_cxt.CkptBgWriterPID = (ThreadId*)palloc0(sizeof(ThreadId) * thread_num);
         (void)MemoryContextSwitchTo(oldcontext);
     }
 
@@ -376,7 +379,6 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         incre_ckpt_pagewriter_cxt_init();
     }
     if (g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
-        g_instance.attr.attr_storage.bgwriter_thread_num > 0 &&
         g_instance.bgwriter_cxt.bgwriter_procs == NULL) {
         incre_ckpt_bgwriter_cxt_init();
     }

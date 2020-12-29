@@ -21,7 +21,6 @@
  * -------------------------------------------------------------------------
  */
 
-
 #ifndef DFS_WRITER_H
 #define DFS_WRITER_H
 
@@ -30,7 +29,6 @@
 
 namespace dfs {
 namespace writer {
-
 /* The interface for all kinds of reader with diffrent file types. */
 class ColumnWriter : public BaseObject {
 public:
@@ -111,7 +109,6 @@ public:
  */
 ColumnWriter *createORCColWriter(MemoryContext context, Relation rel, Relation destRel,
                                  IndexInsertInfo *indexInsertInfo, DFSConnector *conn, char const *parsig);
-
 }  // namespace writer
 }  // namespace dfs
 

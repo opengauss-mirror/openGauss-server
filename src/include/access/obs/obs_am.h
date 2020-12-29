@@ -28,7 +28,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "nodes/pg_list.h"
-#include "storage/buffile.h"
+#include "storage/buf/buffile.h"
+#include "replication/slot.h"
 #include "eSDKOBS.h"
 
 /* OBS operation types */
@@ -47,34 +48,34 @@ typedef enum {
 
 typedef struct ObsOptions {
     Oid serverOid;
-    char *address;
+    char* address;
     bool encrypt;
-    char *access_key;
-    char *secret_access_key;
-    char *bucket;
-    char *prefix;
+    char* access_key;
+    char* secret_access_key;
+    char* bucket;
+    char* prefix;
     uint32_t chunksize;
 } ObsOptions;
 
 typedef struct ObsCopyOptions {
     bool encrypt;
     uint32_t chunksize;
-    char *access_key;
-    char *secret_access_key;
+    char* access_key;
+    char* secret_access_key;
 } ObsCopyOptions;
 
 typedef struct OBSReadWriteHandler {
-    char *m_url;
-    char *m_hostname;
-    char *m_bucket;
+    char* m_url;
+    char* m_hostname;
+    char* m_bucket;
+    /* char		*m_prefix;	=>m_object_info.key */
 
-    /* char *m_prefix;	=>m_object_info.key */
-    ObsOptions *m_obs_options;
+    ObsOptions* m_obs_options;
     OBSHandlerType m_type;
     bool in_computing;
-
     /* size_t	m_offset;	=>get_cond.start_byte */
     /* obs_bucket_context m_bucketCtx; =>m_option.bucket_options */
+
     obs_options m_option;
     obs_object_info m_object_info;
 
@@ -116,7 +117,7 @@ extern List *list_obs_bucket_objects(const char *uri, bool encrypt, const char *
 extern List *list_bucket_objects_analyze(const char *uri, bool encrypt, const char *access_key,
                                          const char *secret_access_key);
 extern List *list_bucket_objects_for_query(OBSReadWriteHandler *handler, const char *bucket, char *prefix);
-extern int writeObsTempFile(OBSReadWriteHandler *handler, const char *bufferData, int64 dataSize);
+extern int writeObsTempFile(OBSReadWriteHandler *handler, const char *bufferData, int dataSize);
 extern size_t read_bucket_object(OBSReadWriteHandler *handler, char *output_buffer, uint32_t len);
 extern size_t write_bucket_object(OBSReadWriteHandler *handler, BufFile *buffile, uint32_t total_len);
 extern void release_object_list(List *object_list);
@@ -133,12 +134,21 @@ extern int deleteOBSObject(OBSReadWriteHandler *handler);
  */
 extern void initOBSCacheObject();
 
-extern int find_Nth(const char *str, unsigned N, const char *find);
+extern int find_Nth(const char* str, unsigned N, const char* find);
 
-extern void checkOBSServerValidity(char *addres, char *ak, char *sk, bool encrypt);
+extern void checkOBSServerValidity(char* addres, char* ak, char* sk, bool encrypt);
 
-ObsOptions *copyObsOptions(ObsOptions *from);
+ObsOptions* copyObsOptions(ObsOptions* from);
 
-void freeObsOptions(ObsOptions *obsOptions, bool freeUseIpsiFree);
+void freeObsOptions(ObsOptions* obsOptions, bool freeUseIpsiFree);
 
+extern bool is_ip_address_format(const char * addr);
+extern void encryptKeyString(char* keyStr, char destplainStr[], uint32 destplainLength);
+extern void decryptKeyString(const char *keyStr, char destplainStr[], uint32 destplainLength, const char *obskey);
+
+ObsArchiveConfig *getObsArchiveConfig();
+size_t obsRead(const char* fileName, int offset, char *buffer, int length, ObsArchiveConfig *obs_config = NULL);
+int obsWrite(const char* fileName, const char *buffer, const int bufferLength, ObsArchiveConfig *obs_config = NULL);
+int obsDelete(const char* fileName, ObsArchiveConfig *obs_config = NULL);
+List* obsList(const char* prefix, ObsArchiveConfig *obs_config = NULL);
 #endif /* OBS_AM_H */

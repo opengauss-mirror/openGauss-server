@@ -8,6 +8,7 @@
  * needed by rmgr routines (redo support for individual record types).
  * So the XLogRecord typedef and associated stuff appear in xlogrecord.h.
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -22,9 +23,9 @@
 #include "datatype/timestamp.h"
 #include "fmgr.h"
 #include "pgtime.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
-#include "storage/buf.h"
+#include "storage/buf/buf.h"
 
 /*
  * if ValidateXlogRecord Failed in XLOG_FROM_STREAM source, the unexpected
@@ -34,7 +35,7 @@
 #define XLOG_STREAM_READREC_INTERVAL 100 * 1000L
 
 #ifndef FRONTEND
-/* Compute the xlog filename with timelineId and segment number. */
+/* Compute the xlog filename with timelineId and segment number.*/
 #define XLogFileName(fname, tli, logSegNo)                 \
     do {                                                   \
         int nRet;                                          \
@@ -144,7 +145,7 @@
         securec_check_ss(nRet, "\0", "\0");                                                              \
     } while (0)
 
-/* compute backup history filename with timelineID, segment number and offset. */
+/*compute backup history filename with timelineID, segment number and offset. */
 #define BackupHistoryFileName(fname, tli, logSegNo, offset) \
     do {                                                    \
         int nRet = 0;                                       \
@@ -159,7 +160,7 @@
         securec_check_ss(nRet, "\0", "\0");                 \
     } while (0)
 
-
+/**/
 #define BackupHistoryFilePath(path, tli, logSegNo, offset) \
     do {                                                   \
         int nRet = 0;                                      \
@@ -219,20 +220,6 @@ typedef struct RmgrData {
     bool (*rm_safe_restartpoint)(void);
 } RmgrData;
 
-/*
- * New XLogCtlInsert Structure.
- */
-struct Combined128 {
-    uint64 currentBytePos;
-    uint32 byteSize;
-    int32  LRC;
-};
-
-union Union128 {
-    uint128_u value;
-    struct Combined128 struct128;
-};
-
 extern const RmgrData RmgrTable[];
 
 /*
@@ -251,7 +238,9 @@ extern void XLogArchiveForceDone(const char* xlog);
  */
 extern Datum pg_start_backup(PG_FUNCTION_ARGS);
 extern Datum pg_stop_backup(PG_FUNCTION_ARGS);
+extern Datum gs_roach_stop_backup(PG_FUNCTION_ARGS);
 extern Datum pg_switch_xlog(PG_FUNCTION_ARGS);
+extern Datum gs_roach_switch_xlog(PG_FUNCTION_ARGS);
 extern Datum pg_create_restore_point(PG_FUNCTION_ARGS);
 extern Datum pg_current_xlog_location(PG_FUNCTION_ARGS);
 extern Datum pg_current_xlog_insert_location(PG_FUNCTION_ARGS);
@@ -268,9 +257,6 @@ extern Datum pg_xlog_location_diff(PG_FUNCTION_ARGS);
 
 int XLogPageRead(XLogReaderState* xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
     char* readBuf, TimeLineID* readTLI);
-bool XLogReadFromWriteBufferForFirst(XLogRecPtr targetPagePtr,              int reqLen, char* readBuf);
-bool XLogReadFromWriteBuffer(XLogRecPtr targetStartPtr,            int reqLen, char* readBuf, uint32 *rereadlen);
-
+bool XLogReadFromWriteBuffer(XLogRecPtr targetStartPtr, int reqLen, char* readBuf, uint32 *rereadlen);
 
 #endif /* XLOG_INTERNAL_H */
-

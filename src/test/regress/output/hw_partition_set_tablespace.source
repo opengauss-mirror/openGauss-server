@@ -1,0 +1,202 @@
+-- 1.non-partitioned table
+-- 2.range partitioned table
+-- 3.interval partitioned table
+\! rm -fr '@testtablespace@/ts_old0'
+\! mkdir '@testtablespace@/ts_old0'
+\! rm -fr '@testtablespace@/ts_old1'
+\! mkdir '@testtablespace@/ts_old1'
+\! rm -fr '@testtablespace@/ts_old2'
+\! mkdir '@testtablespace@/ts_old2'
+\! rm -fr '@testtablespace@/ts_new'
+\! mkdir '@testtablespace@/ts_new'
+CREATE TABLESPACE ts_old0 LOCATION '@testtablespace@/ts_old0';
+CREATE TABLESPACE ts_old1 LOCATION '@testtablespace@/ts_old1';
+CREATE TABLESPACE ts_old2 LOCATION '@testtablespace@/ts_old2';
+CREATE TABLESPACE ts_new LOCATION '@testtablespace@/ts_new';
+--section 1: non-partitioned table
+create table hw_partition_set_tablespace_nonPartTable (c1 int, c2 float, c3 real, c4 text) 
+TABLESPACE ts_old0;
+create index index_nonPartTable  on hw_partition_set_tablespace_nonPartTable  (c1, c2)
+TABLESPACE ts_old0;
+-- ok, set tablespace for non-partitioned table
+ALTER TABLE hw_partition_set_tablespace_nonPartTable 
+	SET TABLESPACE ts_new;
+ALTER TABLE hw_partition_set_tablespace_nonPartTable
+	MOVE PARTITION p1_8 TABLESPACE ts_new;
+ERROR:  "hw_partition_set_tablespace_nonparttable" must be a partitioned table for 'MOVE PARTITION CLAUSE'
+ALTER INDEX index_nonPartTable 
+	SET TABLESPACE ts_new;
+--section 2: range partitioned table
+--create table and index
+create table hw_partition_set_tablespace_rangePartTable (c1 int, c2 float, c3 real, c4 text) 
+tablespace ts_old0
+partition by range (c1, c2, c3, c4)
+(
+	partition hw_partition_set_tablespace_rangePartTable_p1 values less than (10, 10.00, 19.156, 'h'),
+	partition hw_partition_set_tablespace_rangePartTable_p2 values less than (20, 20.89, 23.75, 'k') 
+		tablespace ts_old1,
+	partition hw_partition_set_tablespace_rangePartTable_p3 values less than (30, 30.45, 32.706, 's') 
+		tablespace ts_old2
+);
+create   index  index_rangePartTable_local1  on hw_partition_set_tablespace_rangePartTable  (c1, c2)  local
+(
+	partition 	   hw_partition_set_tablespace_rangePartTable_p1_index_local1 tablespace ts_old0,
+    partition      hw_partition_set_tablespace_rangePartTable_p2_index_local1 tablespace ts_old0,
+   	partition      hw_partition_set_tablespace_rangePartTable_p3_index_local1 tablespace ts_old0
+);
+-- insert values
+insert into hw_partition_set_tablespace_nonPartTable values (9, 9.99, 18.88, 'f');
+insert into hw_partition_set_tablespace_nonPartTable values (19, 19.99, 20.88, 'i');
+insert into hw_partition_set_tablespace_nonPartTable values (29, 29.99, 30.68, 'r');
+insert into hw_partition_set_tablespace_rangePartTable values (9, 9.99, 18.88, 'f');
+insert into hw_partition_set_tablespace_rangePartTable values (19, 19.99, 20.88, 'i');
+insert into hw_partition_set_tablespace_rangePartTable values (29, 29.99, 30.68, 'r');
+--2.1 alter table: set new tabelspace
+--fail, could not set table space for partitioned table
+ALTER TABLE hw_partition_set_tablespace_rangePartTable SET TABLESPACE ts_new;
+ERROR:  can not set tablespace for partitioned relation
+DETAIL:  set tablespace for partition instead
+ALTER TABLE hw_partition_set_tablespace_rangePartTable ADD COLUMN C5 int default 100, SET TABLESPACE ts_new;
+ERROR:  can not set tablespace for partitioned relation
+DETAIL:  set tablespace for partition instead
+--ok, set tablespace for a table partition
+ALTER TABLE hw_partition_set_tablespace_rangePartTable MOVE PARTITION hw_partition_set_tablespace_rangePartTablep1 TABLESPACE ts_new;
+ERROR:  partition "hw_partition_set_tablespace_rangeparttablep1" does not exist
+--fail
+ALTER TABLE hw_partition_set_tablespace_rangePartTable MOVE PARTITION FOR (10, 10.01, 20.05, 'j') TABLESPACE ts_new;
+--fail, mutiple set tablespace
+ALTER TABLE hw_partition_set_tablespace_rangePartTable 
+	SET TABLESPACE ts_new,
+	MOVE PARTITION hw_partition_set_tablespace_rangePartTablep2 TABLESPACE ts_new;
+ERROR:  syntax error at or near "MOVE"
+LINE 3:  MOVE PARTITION hw_partition_set_tablespace_rangePartTablep2...
+         ^
+--fail, mutiple set tablespace
+ALTER TABLE hw_partition_set_tablespace_rangePartTable 
+	MOVE PARTITION hw_partition_set_tablespace_rangePartTablep2 TABLESPACE ts_new,
+	MOVE PARTITION hw_partition_set_tablespace_rangePartTablep3 TABLESPACE ts_new;
+ERROR:  syntax error at or near "MOVE"
+LINE 3:  MOVE PARTITION hw_partition_set_tablespace_rangePartTablep3...
+         ^
+--2.2 ALTER INDEX: set new tabelspace
+--fail, could not set table space for partitioned index
+ALTER INDEX index_rangePartTable_local1 
+	SET TABLESPACE ts_new;
+ERROR:  can not set tablespace for partitioned relation
+DETAIL:  set tablespace for partition instead
+--ok, set tablespace for a index partition
+ALTER INDEX index_rangePartTable_local1 
+	MOVE PARTITION hw_partition_set_tablespace_rangePartTable_p1_index_local1 TABLESPACE ts_new;
+--fail
+ALTER INDEX index_rangePartTable_local1 
+	MOVE PARTITION FOR (1, 2, 3, 4) TABLESPACE ts_new;
+ERROR:  can not specify 'PARTITION FOR (value,,,)' for 'MOVE PARTITION CLAUSE'
+--fail, mutiple set tablespace
+ALTER INDEX index_rangePartTable_local1 
+	SET TABLESPACE ts_new,
+	MOVE PARTITION hw_partition_set_tablespace_rangePartTable_p2_index_local1 TABLESPACE ts_new;
+ERROR:  syntax error at or near "MOVE"
+LINE 3:  MOVE PARTITION hw_partition_set_tablespace_rangePartTable_p...
+         ^
+--fail, mutiple set tablespace
+ALTER INDEX index_rangePartTable_local1 
+	MOVE PARTITION hw_partition_set_tablespace_rangePartTable_p2_index_local1 TABLESPACE ts_new,
+	MOVE PARTITION hw_partition_set_tablespace_rangePartTable_p3_index_local1 TABLESPACE ts_new;
+ERROR:  syntax error at or near "MOVE"
+LINE 3:  MOVE PARTITION hw_partition_set_tablespace_rangePartTable_p...
+         ^
+-- /* skip the case for pgxc */
+-- section 3: interval partitioned table
+-- create table and index
+--create table intervalPartTable (c1 timestamp, c2 float, c3 real, c4 text) 
+--tablespace ts_old0
+--partition by range (c1)
+--interval (interval '2 23:56:45' day to second)
+--(
+--	partition p1_intervalPartTable values less than ('2012-01-01') ,
+--	partition p2_intervalPartTable values less than ('2012-02-01') ,
+--	partition p3_intervalPartTable values less than ('2012-03-01')
+--);
+--create index index_intervalPartTable_local1 on intervalPartTable (c1, c2)  local
+--(
+--	partition intervalPartTable_p1_index_local1 tablespace ts_old0,
+--	partition intervalPartTable_p2_index_local1 tablespace ts_old0,
+--	partition intervalPartTable_p3_index_local1 tablespace ts_old0
+--); 
+-- insert values
+--insert into intervalPartTable values ('2011-12-25', 1.00, 1.11, 'record_1');
+--insert into intervalPartTable values ('2012-01-25', 2.00, 2.22, 'record_2');
+--insert into intervalPartTable values ('2012-02-25', 3.00, 3.33, 'record_3');
+--insert into intervalPartTable values ('2012-03-25', 4.00, 4.44, 'record_4');
+--insert into intervalPartTable values ('2012-04-25', 5.00, 5.55, 'record_5');
+--insert into intervalPartTable values ('2012-05-25', 6.00, 6.66, 'record_6');
+--3.1 alter table: set new tabelspace
+--ALTER TABLE intervalPartTable 
+--	SET TABLESPACE ts_new;
+--ok
+--ALTER TABLE intervalPartTable
+--	MOVE PARTITION p1_intervalPartTable TABLESPACE ts_new;
+--fail
+--ALTER TABLE intervalPartTable
+--	SET TABLESPACE ts_new,
+--	MOVE PARTITION p2_intervalPartTable TABLESPACE ts_new;
+--ALTER TABLE intervalPartTable
+--	MOVE PARTITION p2_intervalPartTable TABLESPACE ts_new,
+--	MOVE PARTITION p3_intervalPartTable TABLESPACE ts_new;
+--ok
+--ALTER TABLE intervalPartTable
+--	MOVE PARTITION p2_intervalPartTable TABLESPACE ts_new;
+--ALTER TABLE intervalPartTable
+--	MOVE PARTITION p3_intervalPartTable TABLESPACE ts_new;
+--ALTER TABLE intervalPartTable
+--	MOVE PARTITION FOR ('2012-03-25') TABLESPACE ts_new;
+--ALTER TABLE intervalPartTable
+--	MOVE PARTITION FOR ('2012-04-25') TABLESPACE ts_new;
+--ALTER TABLE intervalPartTable
+--	MOVE PARTITION FOR ('2012-05-25') TABLESPACE ts_new;
+--3.2 ALTER INDEX: set new tabelspace
+--fail, could not set table space for partitioned index
+--ALTER INDEX index_intervalPartTable_local1 
+--	SET TABLESPACE ts_new;
+--ok, set tablespace for a index partition
+--ALTER INDEX index_intervalPartTable_local1 
+--	MOVE PARTITION intervalPartTable_p1_index_local1 TABLESPACE ts_new;
+--fail
+--ALTER INDEX index_intervalPartTable_local1 
+--	MOVE PARTITION FOR (1, 2, 3, 4) TABLESPACE ts_new;
+--fail, mutiple set tablespace
+--ALTER INDEX index_intervalPartTable_local1 
+--	SET TABLESPACE ts_new,
+--	MOVE PARTITION intervalPartTable_p2_index_local1 TABLESPACE ts_new;
+--fail, mutiple set tablespace
+--ALTER INDEX index_intervalPartTable_local1 
+--	MOVE PARTITION intervalPartTable_p2_index_local1 TABLESPACE ts_new,
+--	MOVE PARTITION intervalPartTable_p3_index_local1 TABLESPACE ts_new;
+--4. COLUMN TABLE' CHANGE TABLESPACE
+create table col_partition_set_tablespace_rangePartTable (c1 int, c2 float, c3 real, c4 text) with (orientation = column)
+tablespace ts_old0
+partition by range (c1, c2, c3, c4)
+(
+partition p1 values less than (10, 10.00, 19.156, 'h'),
+partition p2 values less than (20, 20.89, 23.75, 'k') 
+tablespace ts_old1,
+partition p3 values less than (30, 30.45, 32.706, 's') 
+tablespace ts_old2
+)  ;
+--4.1 alter table: set new tabelspace
+--fail, could not set table space for partitioned table
+ALTER TABLE col_partition_set_tablespace_rangePartTable SET TABLESPACE ts_new;
+ERROR:  can not set tablespace for partitioned relation
+DETAIL:  set tablespace for partition instead
+ALTER TABLE col_partition_set_tablespace_rangePartTable ADD COLUMN C5 int default 100, SET TABLESPACE ts_new;
+ERROR:  can not set tablespace for partitioned relation
+DETAIL:  set tablespace for partition instead
+--cleanup
+drop table col_partition_set_tablespace_rangePartTable;
+drop table hw_partition_set_tablespace_nonPartTable cascade;
+drop table hw_partition_set_tablespace_rangePartTable cascade;
+--drop table intervalPartTable cascade;
+drop tablespace ts_old0;
+drop tablespace ts_old1;
+drop tablespace ts_old2;
+drop tablespace ts_new;

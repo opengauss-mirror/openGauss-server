@@ -1,0 +1,88 @@
+\c carbondata
+SET DATESTYLE='ISO, MDY';
+--ORDER BY
+SELECT c_int, c_date, c_float, c_double, c_string1 FROM data_filter_snappy_sort_invert ORDER BY c_int DESC LIMIT 30;
+SELECT c_int, c_date, c_float, c_string1, c_string2 FROM data_filter_snappy_sort_invert ORDER BY c_int ASC LIMIT 30;
+
+SELECT c_int, c_date, c_float, c_double, c_string1 FROM data_filter_zstd_sort_invert ORDER BY c_int DESC LIMIT 30;
+SELECT c_int, c_date, c_float, c_string1, c_string2 FROM data_filter_zstd_sort_invert ORDER BY c_int ASC LIMIT 30;
+
+SELECT c_int, c_date, c_float, c_double, c_string1 FROM data_filter_gzip_sort_invert ORDER BY c_int DESC LIMIT 30;
+SELECT c_int, c_date, c_float, c_string1, c_string2 FROM data_filter_gzip_sort_invert ORDER BY c_int ASC LIMIT 30;
+
+--UNION ALL
+SELECT c_int, c_double, c_string1 FROM table_attribute UNION ALL SELECT c_int, c_double, c_string1 FROM data_filter_snappy_sort_invert LIMIT 20;
+SELECT c_int, c_double, c_string1 FROM table_attribute UNION ALL SELECT c_int, c_double, c_string1 FROM data_filter_snappy_sort_invert LIMIT 20;
+
+SELECT c_date, c_float, c_timestamp FROM table_attribute UNION ALL SELECT c_date, c_float, c_timestamp FROM data_filter_snappy_sort_invert LIMIT 20;
+SELECT c_date, c_float, c_timestamp FROM table_attribute UNION ALL SELECT c_date, c_float, c_timestamp FROM data_filter_snappy_sort_invert LIMIT 20;
+
+SELECT c_int, c_double, c_string1 FROM table_attribute UNION ALL SELECT c_int, c_double, c_string1 FROM data_filter_zstd_sort_invert LIMIT 20;
+SELECT c_int, c_double, c_string1 FROM table_attribute UNION ALL SELECT c_int, c_double, c_string1 FROM data_filter_zstd_sort_invert LIMIT 20;
+
+SELECT c_date, c_float, c_timestamp FROM table_attribute UNION ALL SELECT c_date, c_float, c_timestamp FROM data_filter_zstd_sort_invert LIMIT 20;
+SELECT c_date, c_float, c_timestamp FROM table_attribute UNION ALL SELECT c_date, c_float, c_timestamp FROM data_filter_zstd_sort_invert LIMIT 20;
+
+SELECT c_int, c_double, c_string1 FROM table_attribute UNION ALL SELECT c_int, c_double, c_string1 FROM data_filter_gzip_sort_invert LIMIT 20;
+SELECT c_int, c_double, c_string1 FROM table_attribute UNION ALL SELECT c_int, c_double, c_string1 FROM data_filter_gzip_sort_invert LIMIT 20;
+
+SELECT c_date, c_float, c_timestamp FROM table_attribute UNION ALL SELECT c_date, c_float, c_timestamp FROM data_filter_zstd_sort_invert LIMIT 20;
+SELECT c_date, c_float, c_timestamp FROM table_attribute UNION ALL SELECT c_date, c_float, c_timestamp FROM data_filter_zstd_sort_invert LIMIT 20;
+
+--SUM VALUE
+SELECT SUM(c_int) FROM data_filter_snappy_sort_invert;
+SELECT SUM(c_byte) FROM data_filter_snappy_sort_invert;
+SELECT SUM(c_short) FROM data_filter_snappy_sort_invert;
+SELECT SUM(c_long) FROM data_filter_snappy_sort_invert;
+SELECT SUM(c_decimal1) FROM data_filter_snappy_sort_invert;
+SELECT SUM(c_bool) FROM data_filter_snappy_sort_invert;
+SELECT SUM(c_int) FROM data_filter_zstd_sort_invert;
+SELECT SUM(c_byte) FROM data_filter_zstd_sort_invert;
+SELECT SUM(c_short) FROM data_filter_zstd_sort_invert;
+SELECT SUM(c_long) FROM data_filter_zstd_sort_invert;
+SELECT SUM(c_decimal1) FROM data_filter_zstd_sort_invert;
+SELECT SUM(c_bool) FROM data_filter_zstd_sort_invert;
+SELECT SUM(c_int) FROM data_filter_zstd_sort_invert;
+SELECT SUM(c_byte) FROM data_filter_zstd_sort_invert;
+SELECT SUM(c_short) FROM data_filter_zstd_sort_invert;
+SELECT SUM(c_long) FROM data_filter_zstd_sort_invert;
+SELECT SUM(c_decimal1) FROM data_filter_zstd_sort_invert;
+SELECT SUM(c_bool) FROM data_filter_zstd_sort_invert;
+
+--MIN MAX VALUE
+SELECT MIN(c_int), MAX(c_int) FROM data_filter_snappy_sort_invert;
+SELECT MIN(c_date), MAX(c_date) FROM data_filter_snappy_sort_invert;
+SELECT MIN(c_string1), MAX(c_string1) FROM data_filter_snappy_sort_invert;
+SELECT MIN(c_timestamp), MAX(c_timestamp) FROM data_filter_snappy_sort_invert;
+SELECT MIN(c_varchar1), MAX(c_varchar1) FROM data_filter_snappy_sort_invert;
+SELECT MIN(c_byte), MAX(c_byte) FROM data_filter_snappy_sort_invert;
+SELECT MIN(c_short), MAX(c_short) FROM data_filter_snappy_sort_invert;
+SELECT MIN(c_long), MAX(c_long) FROM data_filter_snappy_sort_invert;
+SELECT MIN(c_float), MAX(c_float) FROM data_filter_snappy_sort_invert;
+SELECT MIN(c_double), MAX(c_double) FROM data_filter_snappy_sort_invert;
+SELECT MIN(c_decimal1), MAX(c_decimal1) FROM data_filter_snappy_sort_invert;
+SELECT MIN(c_bool), MAX(c_bool) FROM data_filter_snappy_sort_invert;
+SELECT MIN(c_int), MAX(c_int) FROM data_filter_zstd_sort_invert;
+SELECT MIN(c_date), MAX(c_date) FROM data_filter_zstd_sort_invert;
+SELECT MIN(c_string1), MAX(c_string1) FROM data_filter_zstd_sort_invert;
+SELECT MIN(c_timestamp), MAX(c_timestamp) FROM data_filter_zstd_sort_invert;
+SELECT MIN(c_varchar1), MAX(c_varchar1) FROM data_filter_zstd_sort_invert;
+SELECT MIN(c_byte), MAX(c_byte) FROM data_filter_zstd_sort_invert;
+SELECT MIN(c_short), MAX(c_short) FROM data_filter_zstd_sort_invert;
+SELECT MIN(c_long), MAX(c_long) FROM data_filter_zstd_sort_invert;
+SELECT MIN(c_float), MAX(c_float) FROM data_filter_zstd_sort_invert;
+SELECT MIN(c_double), MAX(c_double) FROM data_filter_zstd_sort_invert;
+SELECT MIN(c_decimal1), MAX(c_decimal1) FROM data_filter_zstd_sort_invert;
+SELECT MIN(c_bool), MAX(c_bool) FROM data_filter_zstd_sort_invert;
+SELECT MIN(c_int), MAX(c_int) FROM data_filter_gzip_sort_invert;
+SELECT MIN(c_date), MAX(c_date) FROM data_filter_gzip_sort_invert;
+SELECT MIN(c_string1), MAX(c_string1) FROM data_filter_gzip_sort_invert;
+SELECT MIN(c_timestamp), MAX(c_timestamp) FROM data_filter_gzip_sort_invert;
+SELECT MIN(c_varchar1), MAX(c_varchar1) FROM data_filter_gzip_sort_invert;
+SELECT MIN(c_byte), MAX(c_byte) FROM data_filter_gzip_sort_invert;
+SELECT MIN(c_short), MAX(c_short) FROM data_filter_gzip_sort_invert;
+SELECT MIN(c_long), MAX(c_long) FROM data_filter_gzip_sort_invert;
+SELECT MIN(c_float), MAX(c_float) FROM data_filter_gzip_sort_invert;
+SELECT MIN(c_double), MAX(c_double) FROM data_filter_gzip_sort_invert;
+SELECT MIN(c_decimal1), MAX(c_decimal1) FROM data_filter_gzip_sort_invert;
+SELECT MIN(c_bool), MAX(c_bool) FROM data_filter_gzip_sort_invert;

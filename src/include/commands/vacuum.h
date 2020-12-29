@@ -19,9 +19,9 @@
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_type.h"
 #include "nodes/parsenodes.h"
-#include "storage/buf.h"
+#include "storage/buf/buf.h"
 #include "storage/cu.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "utils/relcache.h"
 
 typedef enum DELETE_STATS_OPTION {
@@ -105,7 +105,7 @@ typedef struct VacAttrStats {
     float4 stanullfrac;   /* fraction of entries that are NULL */
     int4 stawidth;        /* average width of column values */
     float4 stadistinct;   /* # distinct values */
-    float4 stadndistinct; /* # distinct value of dn1 */
+    float4 stadndistinct; /* # distinct value of dn1*/
     int2 stakind[STATISTIC_NUM_SLOTS];
     Oid staop[STATISTIC_NUM_SLOTS];
     int numnumbers[STATISTIC_NUM_SLOTS];
@@ -147,8 +147,8 @@ typedef enum VacuumFlags {
     VACFLG_MAIN_PARTITION_BTREE = 1 << 3, /* no use, btree index on partitioned table */
     VACFLG_SUB_PARTITION = 1 << 4,        /* table partition */
     VACFLG_SUB_PARTITION_BTREE = 1 << 5,  /* no use, btree index on table partition */
-    VACFLG_TOAST = 1 << 6,                /* no use */
-    VACFLG_TOAST_BTREE = 1 << 7           /* no use */
+    VACFLG_TOAST = 1 << 6,                /* no use*/
+    VACFLG_TOAST_BTREE = 1 << 7           /* no use*/
 } VacuumFlags;
 
 typedef struct vacuum_object {
@@ -164,8 +164,9 @@ typedef struct vacuum_object {
     bool dovacuum;
     bool dovacuum_toast; /* flags for vacuum toast table, do vacuum on toast if true */
     bool doanalyze;
-    bool need_freeze;          /* flag to freeze old tuple for recycle clog */
+    bool need_freeze;   /* flag to freeze old tuple for recycle clog */
     bool is_internal_relation; /* flag to mark if it is an internal relation */
+    bool is_tsdb_deltamerge;    /* flag to mark if it is a tsdb deltamerge task */
     int flags;                 /* flags for vacuum object */
 } vacuum_object;
 
@@ -194,14 +195,14 @@ typedef struct {
     int64 count; /* how many duplicate values */
 } SampleItem;
 
-/* Mcv list for compute statistic. */
+/* Mcv list for compute statistic.*/
 typedef struct {
     int stattarget; /* how many most common values we should save. */
     int64 rows_mcv; /* sum of rows of all the  most common values */
     int num_mcv;    /* num of mcv for the current saved */
 } McvInfo;
 
-/* Histgram list for compute statistic. */
+/* Histgram list for compute statistic.*/
 typedef struct {
     bool is_last_value; /* indentify the value is the last value. */
     int stattarget;     /* how many histgrams we should save. */
@@ -224,8 +225,8 @@ typedef struct {
     int64 nmultiple;        /* duplicate num of distinct values more than 1. */
     int64 null_cnt;         /* count of null value */
     int64 nonnull_cnt;      /* count of non-null values for all samples. */
-    McvInfo mcv_list;       /* mcv list for compute stats. */
-    HistgramInfo hist_list; /* histgram list for compute stats. */
+    McvInfo mcv_list;       /* mcv list for compute stats.*/
+    HistgramInfo hist_list; /* histgram list for compute stats.*/
     char** v_alias;         /* alias for column v in temp table. */
     VacAttrStats* stats;    /* the statistics of attribute for update to pg_staitsitc. */
 } AnalyzeSampleTableSpecInfo;
@@ -244,6 +245,7 @@ typedef struct {
     StringInfo relname;
     StringInfo schemaname;
     bool is_hdfs;
+
 } MergeInfo;
 
 #define vacuumRelation(flag) (((flag)&VACFLG_SIMPLE_HEAP) == VACFLG_SIMPLE_HEAP)
@@ -268,7 +270,8 @@ typedef struct {
 typedef bool (*EqualFunc)(const void*, const void*);
 
 /* GUC parameters */
-extern THR_LOCAL PGDLLIMPORT int default_statistics_target; /* PGDLLIMPORT for PostGIS */
+extern THR_LOCAL PGDLLIMPORT int default_statistics_target; /* PGDLLIMPORT for
+                                                             * PostGIS */
 
 #define DEBUG_START_TIMER                       \
     struct timeval stStartTime;                 \
@@ -327,7 +330,7 @@ extern THR_LOCAL PGDLLIMPORT int default_statistics_target; /* PGDLLIMPORT for P
             appendStringInfo(&str1, fmt, ##__VA_ARGS__);                                                          \
             ereport(DEBUG2,                                                                                       \
                 (errmodule(MOD),                                                                                  \
-                    errmsg("%s for queryid[%lu]: %s  --- elapse time: [%9.3lfs] \n",                              \
+                    errmsg("%s for queryid[%lu]: %s  --- elapse time: [%9.6lfs] \n",                              \
                         g_instance.attr.attr_common.PGXCNodeName,                                                 \
                         u_sess->debug_query_id,                                                                   \
                         str1.data,                                                                                \
@@ -337,6 +340,7 @@ extern THR_LOCAL PGDLLIMPORT int default_statistics_target; /* PGDLLIMPORT for P
             pfree(str1.data);                                                                                     \
         }                                                                                                         \
     } while (0)
+
 /* Time elapse stats end */
 
 /* in commands/vacuum.c */
@@ -365,12 +369,10 @@ extern const char* get_sample_tblname(AnalyzeMode analyzemode, List* tmpSampleTb
 extern VacAttrStats* examine_attribute(Relation onerel, Bitmapset* bms_attnums, bool isLog);
 extern void update_attstats(
     Oid relid, char relkind, bool inh, int natts, VacAttrStats** vacattrstats, char relpersistence);
+extern void update_attstats(Oid relid, char relkind, bool inh, int natts, VacAttrStats** vacattrstats);
 /* we should delete all records in pg_statistic when the data is dirty and current totalrows is null. */
 extern void delete_attstats(Oid relid, char relkind, bool inh, int natts, VacAttrStats** vacattrstats,
     unsigned int delete_stats_option = DELETE_STATS_SINGLE);
-
-/*  in postmaster/autovacuum.c */
-extern bool enable_page_prune(void);
 
 /* get one relation by relid before do analyze */
 extern Relation analyze_get_relation(Oid relid, VacuumStmt* vacstmt);
@@ -427,4 +429,3 @@ extern void analyze_concurrency_process(Oid relid, int16 attnum, MemoryContext o
 extern int GetOneTupleSize(VacuumStmt* stmt, Relation rel);
 
 #endif /* VACUUM_H */
-

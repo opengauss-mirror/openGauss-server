@@ -71,12 +71,19 @@
 /* Helper for obtaining username for user mapping */
 #define MappingUserName(userid) (OidIsValid(userid) ? GetUserNameFromId(userid) : "public")
 
+#define DFS_FORMAT_TEXT "text"
+#define DFS_FORMAT_CSV "csv"
+#define DFS_FORMAT_ORC "orc"
+#define DFS_FORMAT_PARQUET "parquet"
+#define DFS_FORMAT_CARBONDATA "carbondata"
+
 typedef enum DFSFileType {
     DFS_INVALID = -1,
     DFS_ORC = 0,
     DFS_PARQUET = 1,
     DFS_TEXT = 2,
-    DFS_CSV = 3
+    DFS_CSV = 3,
+    DFS_CARBONDATA = 4
 } DFSFileType;
 
 /*
@@ -136,7 +143,8 @@ typedef enum ServerTypeOption {
     T_HDFS_SERVER,
     T_MOT_SERVER,
     T_DUMMY_SERVER,
-    T_TXT_CSV_OBS_SERVER, /* mark the txt/csv foramt OBS foreign server. the fdw is dist_fdw. */
+    T_TXT_CSV_OBS_SERVER, /* mark the txt/csv foramt OBS foreign server. the fdw
+                        is dist_fdw. */
     T_PGFDW_SERVER
 } ServerTypeOption;
 
@@ -199,6 +207,7 @@ extern DefElem* getFTOptionDefElemFromList(List* optionList, const char* optionN
 
 extern double convertFTOptionValue(const char* s);
 extern char* GetForeignServerName(Oid serverid);
+extern ColumnDef* makeColumnDef(const char* colname, char* coltype);
 
 /**
  * @Description: Jude whether type of the foreign table equal to the specified type or not.

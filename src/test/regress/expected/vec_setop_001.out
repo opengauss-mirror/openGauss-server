@@ -6,7 +6,7 @@ set current_schema=vector_setop_engine;
 --- test 1: Basic Test: INTERSECT ALL
 ----
 -- hash + hash + same distributeKey + Append executes on all DNs
-explain (verbose on, costs off, nodes off)
+explain (verbose on, costs off)
 select * from vector_setop_table_01 intersect all select * from vector_setop_table_02 order by 1, 2, 3;
                                                                                                                                                   QUERY PLAN                                                                                                                                                  
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------

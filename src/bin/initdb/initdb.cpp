@@ -57,7 +57,14 @@
 #include "getopt_long.h"
 #include "miscadmin.h"
 #include "bin/elog.h"
-#include "pgxc/nodemgr.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "distribute_core.h"
+#endif
+
+#ifdef PGXC
+#define PGXC_NODENAME_LENGTH 64
+#endif
+
 
 #define PROG_NAME "gs_initdb"
 
@@ -161,7 +168,9 @@ static char* shdesc_file;
 static char* hba_file;
 static char* ident_file;
 static char* conf_file;
+#ifdef ENABLE_MOT
 static char* mot_conf_file;
+#endif
 static char* conversion_file;
 static char* dictionary_file;
 static char* info_schema_file;
@@ -183,6 +192,15 @@ static char depasswd[RANDOM_LEN + 1];
 /* defaults */
 static int n_connections = 10;
 static int n_buffers = 50;
+
+#ifndef ENABLE_MULTIPLE_NODES
+DB_CompatibilityAttr g_dbCompatArray[] = {
+    {DB_CMPT_A, "A"},
+    {DB_CMPT_B, "B"},
+    {DB_CMPT_C, "C"},
+    {DB_CMPT_PG, "PG"}
+};
+#endif
 
 /*
  * Warning messages for authentication methods
@@ -258,17 +276,21 @@ static void setup_dictionary(void);
 static void setup_privileges(void);
 static void set_info_version(void);
 static void setup_schema(void);
+static void setup_bucketmap_len(void);
 static void load_plpgsql(void);
 static void load_supported_extension(void);
-#ifdef ENABLE_MULTIPLE_NODES
 static void load_dist_fdw(void);
 static void load_hdfs_fdw(void);
-#endif
-
+#ifdef ENABLE_MOT
 static void load_mot_fdw(void); /* load MOT fdw */
-#ifdef ENABLE_MULTIPLE_NODES
+#endif
 static void load_hstore_extension(void);
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
 static void load_packages_extension(void);
+#endif
+#ifdef ENABLE_MULTIPLE_NODES
+static void load_gsredistribute_extension(void);
+
 #endif
 static void vacuum_db(void);
 static void make_template0(void);
@@ -311,25 +333,25 @@ static int CreateRestrictedProcess(char* cmd, PROCESS_INFORMATION* processInfo);
 
 #define PG_CMD_PUTS(line)                                \
     do {                                                 \
-        if (fputs(line, cmdfd) < 0 || fflush(cmdfd) < 0) \
+        if (fputs((line), cmdfd) < 0 || fflush(cmdfd) < 0) \
             output_failed = true, output_errno = errno;  \
     } while (0)
 
 #define PG_CMD_PRINTF1(fmt, arg1)                               \
     do {                                                        \
-        if (fprintf(cmdfd, fmt, arg1) < 0 || fflush(cmdfd) < 0) \
+        if (fprintf(cmdfd, (fmt), (arg1)) < 0 || fflush(cmdfd) < 0) \
             output_failed = true, output_errno = errno;         \
     } while (0)
 
 #define PG_CMD_PRINTF2(fmt, arg1, arg2)                               \
     do {                                                              \
-        if (fprintf(cmdfd, fmt, arg1, arg2) < 0 || fflush(cmdfd) < 0) \
+        if (fprintf(cmdfd, (fmt), (arg1), (arg2)) < 0 || fflush(cmdfd) < 0) \
             output_failed = true, output_errno = errno;               \
     } while (0)
 
 #define PG_CMD_PRINTF3(fmt, arg1, arg2, arg3)                               \
     do {                                                                    \
-        if (fprintf(cmdfd, fmt, arg1, arg2, arg3) < 0 || fflush(cmdfd) < 0) \
+        if (fprintf(cmdfd, (fmt), (arg1), (arg2), (arg3)) < 0 || fflush(cmdfd) < 0) \
             output_failed = true, output_errno = errno;                     \
     } while (0)
 
@@ -344,6 +366,14 @@ static int CreateRestrictedProcess(char* cmd, PROCESS_INFORMATION* processInfo);
 #ifndef ERROR_LIMIT_LEN
 #define ERROR_LIMIT_LEN 256
 #endif
+
+/* Macro about bucket length blow must keep same with kernel code */
+#define DEFAULT_BUCKETSLEN 16384
+#define MIN_BUCKETSLEN 32
+#define MAX_BUCKETSLEN DEFAULT_BUCKETSLEN
+int g_bucket_len = DEFAULT_BUCKETSLEN;
+
+#define INSERT_BUCKET_SQL_LEN 512
 
 void check_env_value(const char* input_env_value)
 {
@@ -1193,6 +1223,7 @@ static void setup_config(void)
 
     FREE_AND_RESET(conflines);
 
+#ifdef ENABLE_MOT
     /* mot.conf */
 
     conflines = readfile(mot_conf_file);
@@ -1203,6 +1234,7 @@ static void setup_config(void)
     (void)chmod(path, S_IRUSR | S_IWUSR);
 
     FREE_AND_RESET(conflines);
+#endif
 
     /* pg_hba.conf */
 
@@ -1369,17 +1401,21 @@ static void bootstrap_template1(void)
     /*
      * "--dbcompatibility" is a required argument to set installed database compatibility.
      * We can choose --dbcompatibility=A\B\C.
-     * If we do not assign compatibility, A is default.
+     * If we do not assign compatibility, B is default for distribution, A is default for single.
      * Invalid input is avoided.
      */
-    if (pg_strcasecmp(dbcompatibility, DB_CMPT_OPT_A) == 0 ||
-        pg_strcasecmp(dbcompatibility, DB_CMPT_OPT_C) == 0 ||
-        pg_strcasecmp(dbcompatibility, DB_CMPT_OPT_B) == 0 ||
-        pg_strcasecmp(dbcompatibility, DB_CMPT_OPT_PG) == 0) {
+    if (pg_strcasecmp(dbcompatibility, g_dbCompatArray[DB_CMPT_A].name) == 0 ||
+        pg_strcasecmp(dbcompatibility, g_dbCompatArray[DB_CMPT_B].name) == 0 ||
+        pg_strcasecmp(dbcompatibility, g_dbCompatArray[DB_CMPT_C].name) == 0 ||
+        pg_strcasecmp(dbcompatibility, g_dbCompatArray[DB_CMPT_PG].name) == 0) {
         bki_lines = replace_token(bki_lines, "DB_COMPATIBILITY", dbcompatibility);
     } else if (strlen(dbcompatibility) == 0) {
-        /* If we do not specify database compatibility, set A defaultly */
-        bki_lines = replace_token(bki_lines, "DB_COMPATIBILITY", DB_CMPT_OPT_A);
+        /* If we do not specify database compatibility, set B defaultly for distribution, A defaultly for single. */
+#ifdef ENABLE_MULTIPLE_NODES
+        bki_lines = replace_token(bki_lines, "DB_COMPATIBILITY", g_dbCompatArray[DB_CMPT_B].name);
+#else
+        bki_lines = replace_token(bki_lines, "DB_COMPATIBILITY", g_dbCompatArray[DB_CMPT_A].name);
+#endif
     } else {
         write_stderr(_("dbcompatibility \"%s\" is invalid\n"), dbcompatibility);
         exit_nicely();
@@ -1511,14 +1547,14 @@ static void get_set_pwd(void)
     /* Database Security: Support password complexity */
     else {
         if (pwprompt) {
-            /*if pwpasswd is not NULL, use it as password for the new superuser*/
+            /* if pwpasswd is not NULL, use it as password for the new superuser */
             if (pwpasswd != NULL) {
                 pwd1 = pwpasswd;
                 if (!CheckInitialPasswd(username, pwd1)) {
                     exit_nicely();
                 }
             }
-            /*else get password from readline*/
+            /* else get password from readline */
             else {
                 for (i = 0; i != 3; ++i) {
                     pwd1 = simple_prompt("Enter new system admin password: ", 1024, false);
@@ -1574,6 +1610,9 @@ static void get_set_pwd(void)
 
     buf_pwd1 = escape_quotes(pwd1);
     PG_CMD_PRINTF2("ALTER USER \"%s\" WITH PASSWORD E'%s';\n", username, buf_pwd1);
+    rc = memset_s(buf_pwd1, strlen(buf_pwd1), 0, strlen(buf_pwd1));
+    securec_check_c(rc, "\0", "\0");
+    FREE_AND_RESET(buf_pwd1);
 
     /* MM: pwd1 is no longer needed, freeing it */
     if (pwd1 != NULL) {
@@ -1584,7 +1623,6 @@ static void get_set_pwd(void)
     }
     PG_CMD_CLOSE;
 
-    FREE_AND_RESET(buf_pwd1);
 
     check_ok();
 }
@@ -2170,7 +2208,7 @@ static void setup_privileges(void)
     PG_CMD_DECL;
     char** line;
     char** priv_lines;
-    static char** privileges_setup = (char**)pg_malloc(sizeof(char*) * 9);
+    static char** privileges_setup = (char**)pg_malloc(sizeof(char*) * 17);
     int nRet = 0;
 
     privileges_setup[0] = xstrdup("UPDATE pg_class "
@@ -2182,7 +2220,16 @@ static void setup_privileges(void)
     privileges_setup[4] = xstrdup("REVOKE ALL on pg_user_status FROM public;\n");
     privileges_setup[5] = xstrdup("REVOKE ALL on pg_auth_history FROM public;\n");
     privileges_setup[6] = xstrdup("REVOKE ALL on pg_extension_data_source FROM public;\n");
-    privileges_setup[7] = privileges_setup[8] = NULL;
+    privileges_setup[7] = NULL;
+    privileges_setup[8] = xstrdup("REVOKE ALL on gs_auditing_policy FROM public;\n");
+    privileges_setup[9] = xstrdup("REVOKE ALL on gs_auditing_policy_access FROM public;\n");
+    privileges_setup[10] = xstrdup("REVOKE ALL on gs_auditing_policy_filters FROM public;\n");
+    privileges_setup[11] = xstrdup("REVOKE ALL on gs_auditing_policy_privileges FROM public;\n");
+    privileges_setup[12] = xstrdup("REVOKE ALL on gs_policy_label FROM public;\n");
+    privileges_setup[13] = xstrdup("REVOKE ALL on gs_masking_policy FROM public;\n");
+    privileges_setup[14] = xstrdup("REVOKE ALL on gs_masking_policy_actions FROM public;\n");
+    privileges_setup[15] = xstrdup("REVOKE ALL on gs_masking_policy_filters FROM public;\n");
+    privileges_setup[16] = NULL;
     /* In security mode, we will revoke privilege of public on schema public. */
     if (security) {
         privileges_setup[7] = xstrdup("REVOKE ALL on schema public FROM public;\n");
@@ -2302,6 +2349,66 @@ static void setup_schema(void)
 
     PG_CMD_CLOSE;
 
+    /*
+     * "mnt" schema is set up to hold tables created for internal maintenance purpose.
+     * Use the schema with the following rules:
+     * 1. no initdb table in mnt. Table has to be created by user, which means
+     *	its Oid > 16384 and it comes with valid "distribute by" option.
+     * 2. User are allowed to create their own tables too in mnt.
+     * 3. gs_dump, gs_restore, and roach are not to ignore/skip this schema
+     *	in their functionalities.
+     */
+
+    /*
+
+    Notice: The following code was commented out for the following reason:
+    1. Adding a schema is never a easy job. OM and CM must make sync changes. And pushing them
+        to make those changes requires tedious negotiation and certain amount of efforts and
+        pacience.
+    2. Various issues with upgrade and expansion might come with it, such as but not limited to:
+        (1) There will always be a risk since users can use any name for their own schemas. If
+             the name overlap, upgrade fails.
+        (2) Expansion (dump/restore) needs to either dump all or none of the infomation in this
+             schema, otherwise expansion yields the wrong results and the whole cluster became
+             degraded.
+        (3) Access control.
+        (4) etc.
+
+    so good luck.
+    */
+
+    check_ok();
+}
+
+/*
+ * Initialize length of bucketmap
+ */
+static void setup_bucketmap_len(void)
+{
+    PG_CMD_DECL;
+    int nRet = 0;
+    char sql[INSERT_BUCKET_SQL_LEN] = { 0 };
+
+    fputs(_("initialize global configure for bucketmap length ... "), stdout);
+    (void)fflush(stdout);
+
+    nRet = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1,
+                "\"%s\" %s template1 >%s",
+                backend_exec, backend_options,
+                DEVNULL);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    nRet = sprintf_s(sql, sizeof(sql),
+               "INSERT INTO gs_global_config VALUES ('buckets_len', '%d');\n",
+               g_bucket_len);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    PG_CMD_OPEN;
+
+    PG_CMD_PUTS(sql);
+
+    PG_CMD_CLOSE;
+
     check_ok();
 }
 
@@ -2329,7 +2436,6 @@ static void load_plpgsql(void)
     check_ok();
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 static void load_dist_fdw(void)
 {
     PG_CMD_DECL;
@@ -2352,7 +2458,9 @@ static void load_dist_fdw(void)
 
     PG_CMD_PUTS("CREATE SERVER gsmpp_errorinfo_server FOREIGN DATA WRAPPER file_fdw;\n");
 
+#ifdef ENABLE_MULTIPLE_NODES
     PG_CMD_PUTS("CREATE EXTENSION roach_api;\n");
+#endif
 
     PG_CMD_CLOSE;
 
@@ -2383,6 +2491,7 @@ static void load_hdfs_fdw(void)
     check_ok();
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
 static void load_gc_fdw(void)
 {
     int nRet = 0;
@@ -2403,7 +2512,9 @@ static void load_gc_fdw(void)
 
     check_ok();
 }
+#endif
 
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
 static void load_packages_extension(void)
 {
     PG_CMD_DECL;
@@ -2422,7 +2533,36 @@ static void load_packages_extension(void)
 
     PG_CMD_CLOSE;
 
-    check_ok();
+    check_ok();   
+}
+#endif
+
+#ifdef ENABLE_MULTIPLE_NODES
+/*
+ * the gsredistribute extenstion used in OM command gs_expand, it will revoke kernel command gs_redis,
+ * some function used in gs_redis, some functions for tsdb used in gs_expand, you can use 
+ * drop extension gsredistribute cascade;create extension if not exists gsredistribute; 
+ * in upgrade sql file to upgrade it, add by upgrade version 20205
+ */
+static void load_gsredistribute_extension(void)
+{
+    PG_CMD_DECL;
+    int nRet = 0;
+
+    fputs(_("loading gsredistribute extension ... "), stdout);
+    (void)fflush(stdout);
+
+    nRet = snprintf_s(
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    PG_CMD_OPEN;
+
+    PG_CMD_PUTS("CREATE EXTENSION gsredistribute;\n");
+
+    PG_CMD_CLOSE;
+
+    check_ok();   
 }
 
 /*
@@ -2470,8 +2610,31 @@ static void load_tsdb_extension(void)
     check_ok();
 }
 
+static void load_streaming_extension(void)
+{
+    PG_CMD_DECL;
+    int nRet = 0;
+
+    fputs(_("loading streaming extension ... "), stdout);
+    (void)fflush(stdout);
+
+    nRet = snprintf_s(cmd, sizeof(cmd), sizeof(cmd)-1,
+             "\"%s\" %s template1 >%s",
+             backend_exec, backend_options,
+             DEVNULL);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    PG_CMD_OPEN;
+
+    PG_CMD_PUTS("CREATE EXTENSION streaming;\n");
+
+    PG_CMD_CLOSE;
+
+    check_ok();
+}
 #endif
 
+#ifdef ENABLE_MOT
 static void load_mot_fdw(void)
 {
     int nRet = 0;
@@ -2496,8 +2659,8 @@ static void load_mot_fdw(void)
 
     check_ok();
 }
+#endif
 
-#ifdef ENABLE_MULTIPLE_NODES
 static void load_hstore_extension(void)
 {
     PG_CMD_DECL;
@@ -2534,36 +2697,64 @@ static void load_log_extension(void)
     PG_CMD_CLOSE;
     check_ok();
 }
-#endif
+
+static void load_security_plugin()
+{
+    fputs(_("loading security plugin ... "), stdout);
+    (void)fflush(stdout);
+
+    PG_CMD_DECL;
+    int nRet = snprintf_s(
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    PG_CMD_OPEN;
+    PG_CMD_PUTS("CREATE EXTENSION security_plugin;\n");
+    PG_CMD_CLOSE;
+    check_ok();
+}
 
 static void load_supported_extension(void)
 {
-#ifdef ENABLE_MULTIPLE_NODES
     /* loading foreign-data wrapper for distfs access */
     load_dist_fdw();
     /* loading foreign-data wrapper for hdfs access */
     load_hdfs_fdw();
 
     /* loading foreign-data wrapper for postgres access */
+#ifdef ENABLE_MULTIPLE_NODES
     load_gc_fdw();
+#endif
 
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))    
     /* loading packages extension */
     load_packages_extension();
+#endif
+
+#ifdef ENABLE_MULTIPLE_NODES
+
+    load_gsredistribute_extension();
 
     load_searchserver_extension();
 
     load_tsdb_extension();
 
+    load_streaming_extension();
+#endif
 
     /* loading foreign-data wrapper for log access */
     load_log_extension();
 
     /* loading hstore extension */
     load_hstore_extension();
+
+#ifdef ENABLE_MOT
+    /* loading foreign-data wrapper for mot in-memory data access */
+    load_mot_fdw();
 #endif
 
-    /* loading foreign-data wrapper for mot in-memory data access*/
-    load_mot_fdw();
+    /* load security policy extension */
+    load_security_plugin();
 }
 
 #ifdef PGXC
@@ -3111,6 +3302,7 @@ static void usage(const char* prog_name)
     printf(_(" [-D, --pgdata=]DATADIR     location for this database cluster\n"));
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("      --nodename=NODENAME   name of Postgres-XC node initialized\n"));
+    printf(_("      --bucketlength=LENGTH length of bucketmap\n"));
 #else
     printf(_("      --nodename=NODENAME   name of single node initialized\n"));
 #endif
@@ -3137,9 +3329,7 @@ static void usage(const char* prog_name)
     printf(_("  -n, --noclean             do not clean up after errors\n"));
     printf(_("  -s, --show                show internal settings\n"));
     printf(_("\nOther options:\n"));
-#ifdef ENABLE_MULTIPLE_NODES
     printf(_("  -H, --host-ip             node_host of Postgres-XC node initialized\n"));
-#endif
     printf(_("  -V, --version             output version information, then exit\n"));
     printf(_("  -?, --help                show this help, then exit\n"));
     printf(_("\nIf the data directory is not specified, the environment variable PGDATA\n"
@@ -3230,6 +3420,7 @@ int main(int argc, char* argv[])
         {"nodename", required_argument, NULL, 12},
 #endif
         {"dbcompatibility", required_argument, NULL, 13},
+        {"bucketlength", required_argument, NULL, 14},
         {NULL, 0, NULL, 0}};
 
     int c, i, ret;
@@ -3257,7 +3448,6 @@ int main(int argc, char* argv[])
         "pg_xlog",
         "pg_xlog/archive_status",
         "pg_clog",
-        "pg_copydir",
         "pg_csnlog",
         "pg_notify",
         "pg_serial",
@@ -3285,7 +3475,11 @@ int main(int argc, char* argv[])
             exit(0);
         }
         if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0) {
+#ifdef ENABLE_MULTIPLE_NODES
             puts("gs_initdb " DEF_GS_VERSION);
+#else
+            puts("gs_initdb (openGauss) " PG_VERSION);
+#endif
             exit(0);
         }
     }
@@ -3342,6 +3536,7 @@ int main(int argc, char* argv[])
                 FREE_NOT_STATIC_ZERO_STRING(enpwdfiledir);
                 enpwdfiledir = xstrdup(optarg);
                 decode_cipher_files(SERVER_MODE, NULL, enpwdfiledir, (unsigned char*)depasswd, true);
+                FREE_NOT_STATIC_ZERO_STRING(pwpasswd);
                 pwpasswd = xstrdup(depasswd);
                 FREE_AND_RESET(enpwdfiledir);
                 break;
@@ -3400,6 +3595,7 @@ int main(int argc, char* argv[])
                 lc_messages = xstrdup(optarg);
                 break;
             case 8:
+                FREE_NOT_STATIC_ZERO_STRING(locale);
                 locale = "C";
                 break;
             case 9:
@@ -3421,12 +3617,10 @@ int main(int argc, char* argv[])
                 security = true;
                 printf(_("Running in security mode.\n"));
                 break;
-#ifdef ENABLE_MULTIPLE_NODES
             case 'H':
                 FREE_NOT_STATIC_ZERO_STRING(host_ip);
                 host_ip = xstrdup(optarg);
                 break;
-#endif
 #ifdef PGXC
             case 12:
                 FREE_NOT_STATIC_ZERO_STRING(nodename);
@@ -3436,6 +3630,14 @@ int main(int argc, char* argv[])
             case 13:
                 FREE_NOT_STATIC_ZERO_STRING(dbcompatibility);
                 dbcompatibility = xstrdup(optarg);
+                break;
+           case 14:
+                if (atoi(optarg) < MIN_BUCKETSLEN || atoi(optarg) > MAX_BUCKETSLEN) {
+                    write_stderr(_("unexpected buckets length specified, valid range is %d - %d.\n"),
+                        MIN_BUCKETSLEN, MAX_BUCKETSLEN);
+                    exit(1);
+                }
+                g_bucket_len = atoi(optarg);
                 break;
 
             default:
@@ -3482,9 +3684,10 @@ int main(int argc, char* argv[])
 
     if (!is_valid_nodename(nodename)) {
         write_stderr(_("%s: Postgres-XC node name:%s is invalid.\nThe node name must consist of lowercase letters "
-            "(a-z), underscores (_), special characters #, digits (0-9), or dollar ($).\n"
-            "The node name must start with a lowercase letter (a-z),"
-            " or an underscore (_).\nThe max length of nodename is %d.\n"), progname, nodename, PGXC_NODENAME_LENGTH);
+                        "(a-z), underscores (_), special characters #, digits (0-9), or dollar ($).\n"
+                        "The node name must start with a lowercase letter (a-z),"
+                        " or an underscore (_).\nThe max length of nodename is %d.\n"),
+            progname, nodename, PGXC_NODENAME_LENGTH);
         exit(1);
     }
 
@@ -3503,6 +3706,7 @@ int main(int argc, char* argv[])
         if ((pgdenv != NULL) && strlen(pgdenv)) {
             /* PGDATA found */
             check_env_value(pgdenv);
+            FREE_AND_RESET(pg_data);
             pg_data = xstrdup(pgdenv);
         } else {
             write_stderr(_("%s: no data directory specified\n"
@@ -3537,6 +3741,7 @@ int main(int argc, char* argv[])
         if (!CreateRestrictedProcess(cmdline, &pi)) {
             write_stderr(
                 _("%s: could not re-execute with restricted token: error code %lu\n"), progname, GetLastError());
+            FREE_AND_RESET(cmdline);
         } else {
             /*
              * Successfully re-execed. Now wait for child process to capture
@@ -3550,8 +3755,10 @@ int main(int argc, char* argv[])
             if (!GetExitCodeProcess(pi.hProcess, &x)) {
                 write_stderr(
                     _("%s: could not get exit code from subprocess: error code %lu\n"), progname, GetLastError());
+                FREE_AND_RESET(cmdline);
                 exit(1);
             }
+            FREE_AND_RESET(cmdline);
             exit(x);
         }
     }
@@ -3621,7 +3828,9 @@ int main(int argc, char* argv[])
     set_input(&hba_file, "pg_hba.conf.sample");
     set_input(&ident_file, "pg_ident.conf.sample");
     set_input(&conf_file, "postgresql.conf.sample");
+#ifdef ENABLE_MOT
     set_input(&mot_conf_file, "mot.conf.sample");
+#endif
     set_input(&conversion_file, "conversion_create.sql");
     set_input(&dictionary_file, "snowball_create.sql");
     set_input(&info_schema_file, "information_schema.sql");
@@ -3637,7 +3846,9 @@ int main(int argc, char* argv[])
                      "POSTGRES_SUPERUSERNAME=%s\nPOSTGRES_BKI=%s\n"
                      "POSTGRES_DESCR=%s\nPOSTGRES_SHDESCR=%s\n"
                      "POSTGRESQL_CONF_SAMPLE=%s\n"
+#ifdef ENABLE_MOT
                      "MOT_CONF_SAMPLE=%s\n"
+#endif
                      "PG_HBA_SAMPLE=%s\nPG_IDENT_SAMPLE=%s\n",
             PG_VERSION,
             pg_data,
@@ -3648,7 +3859,9 @@ int main(int argc, char* argv[])
             desc_file,
             shdesc_file,
             conf_file,
+#ifdef ENABLE_MOT
             mot_conf_file,
+#endif
             hba_file,
             ident_file);
         if (show_setting)
@@ -3661,7 +3874,9 @@ int main(int argc, char* argv[])
     check_input(hba_file);
     check_input(ident_file);
     check_input(conf_file);
+#ifdef ENABLE_MOT
     check_input(mot_conf_file);
+#endif
     check_input(conversion_file);
     check_input(dictionary_file);
     check_input(info_schema_file);
@@ -4068,6 +4283,8 @@ int main(int argc, char* argv[])
 
     setup_privileges();
 
+    setup_bucketmap_len();
+
     setup_schema();
 
     load_supported_extension();
@@ -4133,9 +4350,9 @@ int main(int argc, char* argv[])
         QUOTE_PATH);
 #else
     printf(_("\nSuccess. You can now start the database server of single node using:\n\n"
-             "    %s%s%sgaussdb%s -D %s%s%s\n"
+             "    %s%s%sgaussdb%s -D %s%s%s --single_node\n"
              "or\n"
-             "    %s%s%sgs_ctl%s start -D %s%s%s -l logfile\n\n"),
+             "    %s%s%sgs_ctl%s start -D %s%s%s -Z single_node -l logfile\n\n"),
         QUOTE_PATH,
         bin_dir,
         (strlen(bin_dir) > 0) ? DIR_SEP : "",

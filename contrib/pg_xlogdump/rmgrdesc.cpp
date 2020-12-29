@@ -32,7 +32,9 @@
 #include "storage/standby.h"
 #include "utils/relmapper.h"
 #include "replication/slot.h"
+#ifdef ENABLE_MOT
 #include "storage/mot/mot_xlog.h"
+#endif
 
 #define PG_RMGR(symname, name, redo, desc, startup, cleanup, safe_restartpoint) {name, desc},
 

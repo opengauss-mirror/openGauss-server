@@ -1,0 +1,2247 @@
+drop schema index_test cascade;
+ERROR:  schema "index_test" does not exist
+create schema index_test;
+set current_schema=index_test;
+set enable_hashjoin=off;
+set enable_nestloop=on;
+set enable_mergejoin=off;
+set enable_seqscan=off;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+ERROR:  server "hdfs_server" already exists
+--prepare
+create table number_data1(a int, c1 int, c2 smallint, c3 tinyint, c4 bigint, c5 float4, c6 float8, c7 bool, c8 numeric(7,2)) tablespace hdfs_ts;
+create table number_data2(a int, c1 int, c2 smallint, c3 tinyint, c4 bigint, c5 float4, c6 float8, c7 bool, c8 numeric(7,2)) tablespace hdfs_ts partition by values(a,c3);
+create table number_data3(a int, c1 int, c2 smallint, c3 tinyint, c4 bigint, c5 float4, c6 float8, c7 bool, c8 numeric(7,2)) tablespace hdfs_ts;
+create table string_data1(a int, c1 char, c2 char(10), c3 varchar, c4 varchar(20), c41 varchar2(20), c42 nvarchar2(20), c5 text, c6 "char", c7 clob, c8 numeric, c9 numeric(30,5)) tablespace hdfs_ts;
+create table other_data1(a int, c1 date, c2 time with time zone, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), c9 oid, c10 money) tablespace hdfs_ts;
+create table replication_data1(a int, b float4, c float8, d varchar(20)) with(orientation=column) distribute by replication;
+insert into replication_data1 values(1,1.05,-1.05,'123');
+insert into replication_data1 values(100,100.05,-100.05,'456');
+insert into replication_data1 values(10200,0.05,100.0,'abc');
+insert into replication_data1 values(9300, 50.05, -50.05, '法国');
+create table number_rowdata(a int, c1 int, c2 smallint, c3 tinyint, c4 bigint, c5 float4, c6 float8, c7 bool, c8 numeric(7,2));
+insert into number_rowdata values(1, generate_series(1,100), generate_series(10001,10100), 10,generate_series(10001,10100),generate_series(1,100)+0.05,generate_series(-100,-1)+0.05, false, generate_series(1,100)+0.05);
+insert into number_rowdata values(1, 10200, 9300, 0, 15000, 0.05, 100.0, true, 1055.55);
+insert into number_rowdata values(1,null,null,null,null,null,null,null,null);
+insert into number_rowdata values(1, generate_series(1,100), generate_series(10001,10100), 5,generate_series(10001,10100),generate_series(1,100)+0.05,generate_series(-100,-1)+0.05, false, generate_series(1,100)+0.05);
+create table string_rowdata(a int, c1 char, c2 char(10), c3 varchar, c4 varchar(20), c41 varchar2(20), c42 nvarchar2(20), c5 text, c6 "char", c7 clob, c8 numeric, c9 numeric(30,5));
+insert into string_rowdata values(2,'1','123','124','123','123','123','123','123','中国',12345.678,12345.678);
+insert into string_rowdata values(2,'4','456','456','456','456','456','456','456','法国',9876.123,9876.123);
+insert into string_rowdata values(2,'1','123','1234567890123456789012345678901234567890','125','125','125','123','123','中国',12345.678,12345.678);
+create table other_rowdata(a int, c1 date, c2 time with time zone, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), c9 oid, c10 money);
+insert into other_rowdata values(1, date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+insert into other_rowdata values(1, null,null,null,null,null,null,null,null,null,null);
+insert into other_rowdata values(1,date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+create table pck_data1(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money) tablespace hdfs_ts;
+create table pck_data2(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real, a11 float8, b1 char, b2 char(40), b3 character(40), b4 nchar(30), b5 varchar(50), b6 character varying(50), b7 nvarchar2(40), b8 varchar2(50), b9 text, b10 text, c1 date, c2 time, c3 time without time zone, c4 Timestamp, c5 Timestamp without time zone, c6 Timestamp with time zone, c7 Smalldatetime, c8 interval year (6), d1 oid, d2 money, partial cluster key(a1,a2,a3)) tablespace hdfs_ts;
+--DDL test
+-- create single index
+create index on number_data1 using btree(c1);
+create index on number_data1 using btree(c2);
+create index on number_data1 using btree(c3);
+create index on number_data1 using btree(c4);
+create index on number_data1 using btree(c5);
+create index on number_data1 using btree(c6);
+create index on number_data1 using btree(c7);
+create index on number_data1 using btree(c8);
+create index on number_data2 using btree(c1);
+create index on number_data2 using btree(c2);
+create index on number_data2 using btree(c3);
+ERROR:  user-defined indexes on value partition columns are not supported
+create index on number_data2 using btree(c4);
+create index on number_data2 using btree(c5);
+create index on number_data2 using btree(c6);
+create index on number_data2 using btree(c7);
+create index on number_data2 using btree(c8);
+create index on number_data2 using btree(c3,c2);
+ERROR:  user-defined indexes on value partition columns are not supported
+create index on string_data1 using btree(c1);
+create index on string_data1 using btree(c2);
+create index on string_data1 using btree(c3);
+create index on string_data1 using btree(c4);
+create index on string_data1 using btree(c5);
+create index on string_data1 using btree(c6);
+ERROR:  data type "char" has no default operator class for access method "cbtree"
+HINT:  You must specify an operator class for the index or define a default operator class for the data type.
+create index on string_data1 using btree(c7);
+create index on string_data1 using btree(c8);
+create index on string_data1 using btree(c9);
+create index on string_data1 using btree(c1,c2,c3);
+create index on other_data1 using btree(c1);
+create index on other_data1 using btree(c2);
+create index on other_data1 using btree(c3);
+create index on other_data1 using btree(c4);
+create index on other_data1 using btree(c5);
+create index on other_data1 using btree(c6);
+create index on other_data1 using btree(c7);
+create index on other_data1 using btree(c8);
+create index on other_data1 using btree(c9);
+create index on other_data1 using btree(c10);
+--insert data
+set cstore_insert_mode='main';
+insert into number_data1 select * from number_rowdata;
+insert into number_data2 select * from number_rowdata;
+insert into number_data3 select * from number_rowdata;
+set cstore_insert_mode='delta';
+insert into number_data1 values(-1,103,10,100,1.05,1000.987, 256.8, true, 100.5);
+insert into number_data2 values(-1,103,10,100,1.05,1000.987, 256.8, true, 100.5);
+insert into number_data3 values(-1,103,10,100,1.05,1000.987, 256.8, true, 100.5);
+set cstore_insert_mode='main';
+insert into string_data1 select * from string_rowdata;
+set cstore_insert_mode='delta';
+insert into string_data1 values(2,'5','a','abc','abcdifue','abcdifue','abcdifue','ajkdlfus','ioerer','美国',1.1,2.2);
+set cstore_insert_mode='main';
+insert into other_data1 select * from other_rowdata;
+reset cstore_insert_mode;
+analyze number_data1;
+analyze number_data2;
+analyze number_data3;
+analyze string_data1;
+analyze other_data1;
+analyze replication_data1;
+-- create multi-col index
+create index on number_data2 using btree(c1,c2);
+create index on number_data2 using btree(c4, c2);
+create index idx1 on number_data1 using btree(c1,c3,c5,c7);
+create index idx1 on number_data1 using btree(c1,c3,c5,c7);
+ERROR:  relation "idx1" already exists
+create index on string_data1 using btree(substr(c4,0,2));
+ERROR:  access method "cbtree" does not support index expressions
+create index on string_data1 using btree(c1) where a=2;
+ERROR:  access method "cbtree" does not support WHERE clause
+create index on pck_data2 using btree(a5,a1);
+-- drop index
+create table temp1(a int, b int) tablespace hdfs_ts;
+create index idx_tmp1 on temp1 using btree(a);
+set cstore_insert_mode='main';
+insert into temp1 values(1,1);
+reset cstore_insert_mode;
+insert into temp1 values(2,2);
+drop index idx_tmp1;
+create index idx_tmp1 on temp1(b);
+drop table temp1;
+-- alter index
+alter index idx1 rename to idx2;
+alter index idx2 set tablespace hdfs_ts;
+ERROR:  Un-support feature
+DETAIL:  It is not supported to alter DFS tablespace.
+alter index idx2 set tablespace pg_default;
+alter index idx2 set (fillfactor=75);
+reindex index idx2;
+-- pck test
+set cstore_insert_mode='main';
+alter table pck_data1 add constraint a1 partial cluster key(a1);
+insert into pck_data1 values(true, 2, 3, 4, 5, 6.66, 7.77, 8.88, 9.99999, 10.45, 10.45, 'a', 'a2', '333', '444', '55555', '6666', '777', '888', '9999', '10101010', date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+alter table pck_data1 add constraint a2 partial cluster key(a1);
+ERROR:  cluster key for relation "pck_data1" already exists
+alter table pck_data1 drop constraint a1;
+alter table pck_data1 drop constraint a1;
+ERROR:  constraint "a1" of relation "pck_data1" does not exist
+alter table pck_data1 add constraint a1 partial cluster key(a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+insert into pck_data1 values(true, 2, 3, 4, 5, 6.66, 7.77, 8.88, 9.99999, 10.45, 10.45, 'a', 'a2', '333', '444', '55555', '6666', '777', '888', '9999', '10101010', date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+alter table pck_data1 drop constraint a1;
+alter table pck_data1 add constraint a1 partial cluster key(b1,b2,b3,b4,b5,b6,b7,b8,b9,b10);
+insert into pck_data1 values(true, 2, 3, 4, 5, 6.66, 7.77, 8.88, 9.99999, 10.45, 10.45, 'a', 'a2', '333', '444', '55555', '6666', '777', '888', '9999', '10101010', date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+alter table pck_data1 drop constraint a1;
+alter table pck_data1 add constraint a1 partial cluster key(c1,c2,c3,c4,c5,c6,c7,c8,d1,d2);
+insert into pck_data1 values(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+alter table pck_data1 drop constraint a1;
+insert into pck_data2 values(true, 2, 3, 4, 5, 6.66, 7.77, 8.88, 9.99999, 10.45, 10.45, 'a', 'a2', '333', '444', '55555', '6666', '777', '888', '9999', '10101010', date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year, 234, '100'::money);
+reset cstore_insert_mode;
+-- test foreign table
+drop foreign table  item;
+ERROR:  foreign table "item" does not exist
+create foreign table  item ( 
+       i_item_sk        int          ,
+       i_item_id        char(16)     ,
+       i_rec_start_date date         ,
+       i_rec_end_date   date         ,
+       i_item_desc      varchar(200) ,
+       i_current_price  decimal(7,2) ,
+       i_wholesale_cost decimal(7,2) ,
+       i_brand_id       int          ,
+       i_brand          char(50)     ,
+       i_class_id       int          ,
+       i_class          char(50)     ,
+       i_category_id    int          ,
+       i_category       char(50)     ,
+       i_manufact_id    int          ,
+       i_manufact       char(50)     ,
+       i_size           char(20)     ,
+       i_formulation    char(20)     ,
+       i_color          char(20)     ,
+       i_units          char(10)     ,
+       i_container      char(10)     ,
+       i_manager_id     int          ,
+       i_product_name   char(50)     ,
+	   partial cluster key(i_item_sk)) 
+server hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/tpcds_10x.db/item')
+distribute by replication;
+ERROR:  Only the primary key, unique, not null and null be supported.
+create foreign table  item ( 
+       i_item_sk        int          ,
+       i_item_id        char(16)     ,
+       i_rec_start_date date         ,
+       i_rec_end_date   date         ,
+       i_item_desc      varchar(200) ,
+       i_current_price  decimal(7,2) ,
+       i_wholesale_cost decimal(7,2) ,
+       i_brand_id       int          ,
+       i_brand          char(50)     ,
+       i_class_id       int          ,
+       i_class          char(50)     ,
+       i_category_id    int          ,
+       i_category       char(50)     ,
+       i_manufact_id    int          ,
+       i_manufact       char(50)     ,
+       i_size           char(20)     ,
+       i_formulation    char(20)     ,
+       i_color          char(20)     ,
+       i_units          char(10)     ,
+       i_container      char(10)     ,
+       i_manager_id     int          ,
+       i_product_name   char(50)     ) 
+server hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/tpcds_10x.db/item')
+distribute by replication;
+create index on item using btree(i_item_sk);
+ERROR:  cannot create index on foreign table "item"
+drop foreign table item;
+-- test plan
+explain (verbose, costs off) select * from number_data1 where c1=5;
+                                                                                                                                         QUERY PLAN                                                                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   ->  Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+         ->  Vector Result
+               Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+               ->  Vector Append
+                     ->  Dfs Index Scan using idx2 on index_test.number_data1
+                           Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+                           Index Cond: (index_test.number_data1.c1 = 5)
+                     ->  Vector Adapter
+                           Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                           ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+                                 Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                                 Distribute Key: cstore.number_data1.a
+                                 Filter: (cstore.number_data1.c1 = 5)
+(16 rows)
+
+set enable_indexscan=off;
+explain (verbose, costs off) select * from number_data1 where c1=5;
+                                                                                                                                         QUERY PLAN                                                                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   ->  Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+         ->  Vector Result
+               Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+               ->  Vector Append
+                     ->  Dfs Scan on index_test.number_data1
+                           Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+                           Distribute Key: index_test.number_data1.a
+                           Pushdown Predicate Filter: (index_test.number_data1.c1 = 5)
+                     ->  Vector Adapter
+                           Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                           ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+                                 Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                                 Distribute Key: cstore.number_data1.a
+                                 Filter: (cstore.number_data1.c1 = 5)
+(17 rows)
+
+reset enable_indexscan;
+explain (verbose, costs off) select * from number_data1 where c5=5.05;
+                                                                                                                                         QUERY PLAN                                                                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   ->  Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+         ->  Vector Result
+               Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+               ->  Vector Append
+                     ->  Dfs Index Scan using idx2 on index_test.number_data1
+                           Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+                           Index Cond: (index_test.number_data1.c5 = 5.05::double precision)
+                     ->  Vector Adapter
+                           Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                           ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+                                 Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                                 Distribute Key: cstore.number_data1.a
+                                 Filter: (cstore.number_data1.c5 = 5.05::double precision)
+(16 rows)
+
+explain (verbose, costs off) select * from number_data1 where c5<5.05;
+                                                                                                                                         QUERY PLAN                                                                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   ->  Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+         ->  Vector Result
+               Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+               ->  Vector Append
+                     ->  Dfs Index Scan using idx2 on index_test.number_data1
+                           Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+                           Index Cond: (index_test.number_data1.c5 < 5.05::double precision)
+                     ->  Vector Adapter
+                           Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                           ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+                                 Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                                 Distribute Key: cstore.number_data1.a
+                                 Filter: (cstore.number_data1.c5 < 5.05::double precision)
+(16 rows)
+
+explain (verbose, costs off) select * from number_data1 where c5>5.05;
+                                                                                                                                         QUERY PLAN                                                                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   ->  Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+         ->  Vector Result
+               Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+               ->  Vector Append
+                     ->  Dfs Index Scan using idx2 on index_test.number_data1
+                           Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+                           Index Cond: (index_test.number_data1.c5 > 5.05::double precision)
+                     ->  Vector Adapter
+                           Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                           ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+                                 Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                                 Distribute Key: cstore.number_data1.a
+                                 Filter: (cstore.number_data1.c5 > 5.05::double precision)
+(16 rows)
+
+explain (verbose, costs off) select * from number_data1 where c5<=5.05;
+                                                                                                                                         QUERY PLAN                                                                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   ->  Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+         ->  Vector Result
+               Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+               ->  Vector Append
+                     ->  Dfs Index Scan using idx2 on index_test.number_data1
+                           Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+                           Index Cond: (index_test.number_data1.c5 <= 5.05::double precision)
+                     ->  Vector Adapter
+                           Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                           ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+                                 Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                                 Distribute Key: cstore.number_data1.a
+                                 Filter: (cstore.number_data1.c5 <= 5.05::double precision)
+(16 rows)
+
+explain (verbose, costs off) select * from number_data1 where c5>=5.05;
+                                                                                                                                         QUERY PLAN                                                                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   ->  Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+         ->  Vector Result
+               Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+               ->  Vector Append
+                     ->  Dfs Index Scan using idx2 on index_test.number_data1
+                           Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+                           Index Cond: (index_test.number_data1.c5 >= 5.05::double precision)
+                     ->  Vector Adapter
+                           Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                           ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+                                 Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                                 Distribute Key: cstore.number_data1.a
+                                 Filter: (cstore.number_data1.c5 >= 5.05::double precision)
+(16 rows)
+
+explain (verbose, costs off) select * from number_data1 where c5!=5.05;
+                                                                                                                                         QUERY PLAN                                                                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   ->  Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+         ->  Vector Result
+               Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+               ->  Vector Append
+                     ->  Dfs Scan on index_test.number_data1
+                           Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+                           Distribute Key: index_test.number_data1.a
+                           Pushdown Predicate Filter: (index_test.number_data1.c5 <> 5.05::double precision)
+                     ->  Vector Adapter
+                           Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                           ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+                                 Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                                 Distribute Key: cstore.number_data1.a
+                                 Filter: (cstore.number_data1.c5 <> 5.05::double precision)
+(17 rows)
+
+explain (verbose, costs off) select * from number_data1 where c5 is null;
+                                                                                                                                         QUERY PLAN                                                                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   ->  Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+         ->  Vector Result
+               Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+               ->  Vector Append
+                     ->  Dfs Index Scan using idx2 on index_test.number_data1
+                           Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+                           Index Cond: (index_test.number_data1.c5 IS NULL)
+                     ->  Vector Adapter
+                           Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                           ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+                                 Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                                 Distribute Key: cstore.number_data1.a
+                                 Filter: (cstore.number_data1.c5 IS NULL)
+(16 rows)
+
+explain (verbose, costs off) select * from number_data1 where c5 is not null;
+                                                                                                                                         QUERY PLAN                                                                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   ->  Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+         ->  Vector Result
+               Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+               ->  Vector Append
+                     ->  Dfs Index Scan using idx2 on index_test.number_data1
+                           Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+                           Index Cond: (index_test.number_data1.c5 IS NOT NULL)
+                     ->  Vector Adapter
+                           Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                           ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+                                 Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                                 Distribute Key: cstore.number_data1.a
+                                 Filter: (cstore.number_data1.c5 IS NOT NULL)
+(16 rows)
+
+explain (verbose, costs off) select * from number_data1,replication_data1 where number_data1.c1=replication_data1.a and replication_data1.c > 0;
+                                                                                                                                                                             QUERY PLAN                                                                                                                                                                              
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8, replication_data1.a, replication_data1.b, replication_data1.c, replication_data1.d
+   ->  Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8, replication_data1.a, replication_data1.b, replication_data1.c, replication_data1.d
+         ->  Vector Nest Loop
+               Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8, replication_data1.a, replication_data1.b, replication_data1.c, replication_data1.d
+               ->  CStore Scan on index_test.replication_data1
+                     Output: replication_data1.a, replication_data1.b, replication_data1.c, replication_data1.d
+                     Filter: (replication_data1.c > 0::double precision)
+               ->  Vector Append
+                     ->  Dfs Index Scan using idx2 on index_test.number_data1
+                           Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+                           Index Cond: (index_test.number_data1.c1 = $0)
+                     ->  Vector Adapter
+                           Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                           ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+                                 Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                                 Distribute Key: cstore.number_data1.a
+                                 Filter: ($0 = cstore.number_data1.c1)
+(19 rows)
+
+explain (verbose, costs off) select * from number_data1 where c1=(select max(a) from replication_data1);
+                                                                                                                                         QUERY PLAN                                                                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   ->  Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+         InitPlan 1 (returns $0)
+           ->  Row Adapter
+                 Output: (max(replication_data1.a))
+                 ->  Vector Aggregate
+                       Output: max(replication_data1.a)
+                       ->  CStore Scan on index_test.replication_data1 (min-max optimization)
+                             Output: replication_data1.a
+         ->  Vector Result
+               Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+               ->  Vector Append
+                     ->  Dfs Index Scan using idx2 on index_test.number_data1
+                           Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+                           Index Cond: (index_test.number_data1.c1 = $0)
+                     ->  Vector Adapter
+                           Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                           ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+                                 Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+                                 Distribute Key: cstore.number_data1.a
+                                 Filter: (cstore.number_data1.c1 = $0)
+(23 rows)
+
+-- test explain
+set explain_perf_mode='pretty';
+explain (verbose, costs off) select * from number_data1 where c1=5;
+ id |                                      operation                                      
+----+-------------------------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Result
+  4 |          ->  Vector Append(5, 6)
+  5 |             ->  Dfs Index Scan using idx2 on index_test.number_data1
+  6 |             ->  Vector Adapter
+  7 |                ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+(7 rows)
+
+             Predicate Information (identified by plan id)              
+------------------------------------------------------------------------
+   5 --Dfs Index Scan using idx2 on index_test.number_data1
+         Index Cond: (index_test.number_data1.c1 = 5)
+   7 --Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+         Filter: (cstore.number_data1.c1 = 5)
+(4 rows)
+
+                                                                                                              Targetlist Information (identified by plan id)                                                                                                               
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   1 --Row Adapter
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   2 --Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   3 --Vector Result
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   4 --Vector Append(5, 6)
+   5 --Dfs Index Scan using idx2 on index_test.number_data1
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   6 --Vector Adapter
+         Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+   7 --Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+         Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+         Distribute Key: cstore.number_data1.a
+(14 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+ System available mem: 262144KB
+ Query Max mem: 262144KB
+--? Query estimated mem: .*
+(3 rows)
+
+set explain_perf_mode='summary';
+explain (verbose, costs off) select * from number_data1 where c1=5;
+ id |                                      operation                                      
+----+-------------------------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Result
+  4 |          ->  Vector Append(5, 6)
+  5 |             ->  Dfs Index Scan using idx2 on index_test.number_data1
+  6 |             ->  Vector Adapter
+  7 |                ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+(7 rows)
+
+             Predicate Information (identified by plan id)              
+------------------------------------------------------------------------
+   5 --Dfs Index Scan using idx2 on index_test.number_data1
+         Index Cond: (index_test.number_data1.c1 = 5)
+   7 --Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+         Filter: (cstore.number_data1.c1 = 5)
+(4 rows)
+
+                                                                                                              Targetlist Information (identified by plan id)                                                                                                               
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   1 --Row Adapter
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   2 --Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   3 --Vector Result
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   4 --Vector Append(5, 6)
+   5 --Dfs Index Scan using idx2 on index_test.number_data1
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   6 --Vector Adapter
+         Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+   7 --Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+         Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+         Distribute Key: cstore.number_data1.a
+(14 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+ System available mem: 262144KB
+ Query Max mem: 262144KB
+--? Query estimated mem: .*
+(3 rows)
+
+set explain_perf_mode='run';
+explain (verbose, costs off) select * from number_data1 where c1=5;
+ id |                                      operation                                      
+----+-------------------------------------------------------------------------------------
+  1 | ->  Row Adapter
+  2 |    ->  Vector Streaming (type: GATHER)
+  3 |       ->  Vector Result
+  4 |          ->  Vector Append(5, 6)
+  5 |             ->  Dfs Index Scan using idx2 on index_test.number_data1
+  6 |             ->  Vector Adapter
+  7 |                ->  Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+(7 rows)
+
+             Predicate Information (identified by plan id)              
+------------------------------------------------------------------------
+   5 --Dfs Index Scan using idx2 on index_test.number_data1
+         Index Cond: (index_test.number_data1.c1 = 5)
+   7 --Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+         Filter: (cstore.number_data1.c1 = 5)
+(4 rows)
+
+                                                                                                              Targetlist Information (identified by plan id)                                                                                                               
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+   1 --Row Adapter
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   2 --Vector Streaming (type: GATHER)
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   3 --Vector Result
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   4 --Vector Append(5, 6)
+   5 --Dfs Index Scan using idx2 on index_test.number_data1
+         Output: index_test.number_data1.a, index_test.number_data1.c1, index_test.number_data1.c2, index_test.number_data1.c3, index_test.number_data1.c4, index_test.number_data1.c5, index_test.number_data1.c6, index_test.number_data1.c7, index_test.number_data1.c8
+   6 --Vector Adapter
+         Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+   7 --Seq Scan on cstore.pg_delta_index_test_number_data1 number_data1
+         Output: cstore.number_data1.a, cstore.number_data1.c1, cstore.number_data1.c2, cstore.number_data1.c3, cstore.number_data1.c4, cstore.number_data1.c5, cstore.number_data1.c6, cstore.number_data1.c7, cstore.number_data1.c8
+         Distribute Key: cstore.number_data1.a
+(14 rows)
+
+   ====== Query Summary =====   
+--------------------------------
+ System available mem: 262144KB
+ Query Max mem: 262144KB
+--? Query estimated mem: .*
+(3 rows)
+
+reset explain_perf_mode;
+-- test result
+select * from number_data1 where c6=-5.95 order by 1,2,3,4,5,6,7;
+ a | c1 |  c2   | c3 |  c4   |  c5   |  c6   | c7 |  c8   
+---+----+-------+----+-------+-------+-------+----+-------
+ 1 | 95 | 10095 | 5  | 10095 | 95.05 | -5.95 | f  | 95.05
+ 1 | 95 | 10095 | 10 | 10095 | 95.05 | -5.95 | f  | 95.05
+(2 rows)
+
+select * from number_data1 where c6<-5.95 order by 1,2,3,4,5,6,7;
+ a | c1 |  c2   | c3 |  c4   |  c5   |   c6   | c7 |  c8   
+---+----+-------+----+-------+-------+--------+----+-------
+ 1 |  1 | 10001 | 5  | 10001 |  1.05 | -99.95 | f  |  1.05
+ 1 |  1 | 10001 | 10 | 10001 |  1.05 | -99.95 | f  |  1.05
+ 1 |  2 | 10002 | 5  | 10002 |  2.05 | -98.95 | f  |  2.05
+ 1 |  2 | 10002 | 10 | 10002 |  2.05 | -98.95 | f  |  2.05
+ 1 |  3 | 10003 | 5  | 10003 |  3.05 | -97.95 | f  |  3.05
+ 1 |  3 | 10003 | 10 | 10003 |  3.05 | -97.95 | f  |  3.05
+ 1 |  4 | 10004 | 5  | 10004 |  4.05 | -96.95 | f  |  4.05
+ 1 |  4 | 10004 | 10 | 10004 |  4.05 | -96.95 | f  |  4.05
+ 1 |  5 | 10005 | 5  | 10005 |  5.05 | -95.95 | f  |  5.05
+ 1 |  5 | 10005 | 10 | 10005 |  5.05 | -95.95 | f  |  5.05
+ 1 |  6 | 10006 | 5  | 10006 |  6.05 | -94.95 | f  |  6.05
+ 1 |  6 | 10006 | 10 | 10006 |  6.05 | -94.95 | f  |  6.05
+ 1 |  7 | 10007 | 5  | 10007 |  7.05 | -93.95 | f  |  7.05
+ 1 |  7 | 10007 | 10 | 10007 |  7.05 | -93.95 | f  |  7.05
+ 1 |  8 | 10008 | 5  | 10008 |  8.05 | -92.95 | f  |  8.05
+ 1 |  8 | 10008 | 10 | 10008 |  8.05 | -92.95 | f  |  8.05
+ 1 |  9 | 10009 | 5  | 10009 |  9.05 | -91.95 | f  |  9.05
+ 1 |  9 | 10009 | 10 | 10009 |  9.05 | -91.95 | f  |  9.05
+ 1 | 10 | 10010 | 5  | 10010 | 10.05 | -90.95 | f  | 10.05
+ 1 | 10 | 10010 | 10 | 10010 | 10.05 | -90.95 | f  | 10.05
+ 1 | 11 | 10011 | 5  | 10011 | 11.05 | -89.95 | f  | 11.05
+ 1 | 11 | 10011 | 10 | 10011 | 11.05 | -89.95 | f  | 11.05
+ 1 | 12 | 10012 | 5  | 10012 | 12.05 | -88.95 | f  | 12.05
+ 1 | 12 | 10012 | 10 | 10012 | 12.05 | -88.95 | f  | 12.05
+ 1 | 13 | 10013 | 5  | 10013 | 13.05 | -87.95 | f  | 13.05
+ 1 | 13 | 10013 | 10 | 10013 | 13.05 | -87.95 | f  | 13.05
+ 1 | 14 | 10014 | 5  | 10014 | 14.05 | -86.95 | f  | 14.05
+ 1 | 14 | 10014 | 10 | 10014 | 14.05 | -86.95 | f  | 14.05
+ 1 | 15 | 10015 | 5  | 10015 | 15.05 | -85.95 | f  | 15.05
+ 1 | 15 | 10015 | 10 | 10015 | 15.05 | -85.95 | f  | 15.05
+ 1 | 16 | 10016 | 5  | 10016 | 16.05 | -84.95 | f  | 16.05
+ 1 | 16 | 10016 | 10 | 10016 | 16.05 | -84.95 | f  | 16.05
+ 1 | 17 | 10017 | 5  | 10017 | 17.05 | -83.95 | f  | 17.05
+ 1 | 17 | 10017 | 10 | 10017 | 17.05 | -83.95 | f  | 17.05
+ 1 | 18 | 10018 | 5  | 10018 | 18.05 | -82.95 | f  | 18.05
+ 1 | 18 | 10018 | 10 | 10018 | 18.05 | -82.95 | f  | 18.05
+ 1 | 19 | 10019 | 5  | 10019 | 19.05 | -81.95 | f  | 19.05
+ 1 | 19 | 10019 | 10 | 10019 | 19.05 | -81.95 | f  | 19.05
+ 1 | 20 | 10020 | 5  | 10020 | 20.05 | -80.95 | f  | 20.05
+ 1 | 20 | 10020 | 10 | 10020 | 20.05 | -80.95 | f  | 20.05
+ 1 | 21 | 10021 | 5  | 10021 | 21.05 | -79.95 | f  | 21.05
+ 1 | 21 | 10021 | 10 | 10021 | 21.05 | -79.95 | f  | 21.05
+ 1 | 22 | 10022 | 5  | 10022 | 22.05 | -78.95 | f  | 22.05
+ 1 | 22 | 10022 | 10 | 10022 | 22.05 | -78.95 | f  | 22.05
+ 1 | 23 | 10023 | 5  | 10023 | 23.05 | -77.95 | f  | 23.05
+ 1 | 23 | 10023 | 10 | 10023 | 23.05 | -77.95 | f  | 23.05
+ 1 | 24 | 10024 | 5  | 10024 | 24.05 | -76.95 | f  | 24.05
+ 1 | 24 | 10024 | 10 | 10024 | 24.05 | -76.95 | f  | 24.05
+ 1 | 25 | 10025 | 5  | 10025 | 25.05 | -75.95 | f  | 25.05
+ 1 | 25 | 10025 | 10 | 10025 | 25.05 | -75.95 | f  | 25.05
+ 1 | 26 | 10026 | 5  | 10026 | 26.05 | -74.95 | f  | 26.05
+ 1 | 26 | 10026 | 10 | 10026 | 26.05 | -74.95 | f  | 26.05
+ 1 | 27 | 10027 | 5  | 10027 | 27.05 | -73.95 | f  | 27.05
+ 1 | 27 | 10027 | 10 | 10027 | 27.05 | -73.95 | f  | 27.05
+ 1 | 28 | 10028 | 5  | 10028 | 28.05 | -72.95 | f  | 28.05
+ 1 | 28 | 10028 | 10 | 10028 | 28.05 | -72.95 | f  | 28.05
+ 1 | 29 | 10029 | 5  | 10029 | 29.05 | -71.95 | f  | 29.05
+ 1 | 29 | 10029 | 10 | 10029 | 29.05 | -71.95 | f  | 29.05
+ 1 | 30 | 10030 | 5  | 10030 | 30.05 | -70.95 | f  | 30.05
+ 1 | 30 | 10030 | 10 | 10030 | 30.05 | -70.95 | f  | 30.05
+ 1 | 31 | 10031 | 5  | 10031 | 31.05 | -69.95 | f  | 31.05
+ 1 | 31 | 10031 | 10 | 10031 | 31.05 | -69.95 | f  | 31.05
+ 1 | 32 | 10032 | 5  | 10032 | 32.05 | -68.95 | f  | 32.05
+ 1 | 32 | 10032 | 10 | 10032 | 32.05 | -68.95 | f  | 32.05
+ 1 | 33 | 10033 | 5  | 10033 | 33.05 | -67.95 | f  | 33.05
+ 1 | 33 | 10033 | 10 | 10033 | 33.05 | -67.95 | f  | 33.05
+ 1 | 34 | 10034 | 5  | 10034 | 34.05 | -66.95 | f  | 34.05
+ 1 | 34 | 10034 | 10 | 10034 | 34.05 | -66.95 | f  | 34.05
+ 1 | 35 | 10035 | 5  | 10035 | 35.05 | -65.95 | f  | 35.05
+ 1 | 35 | 10035 | 10 | 10035 | 35.05 | -65.95 | f  | 35.05
+ 1 | 36 | 10036 | 5  | 10036 | 36.05 | -64.95 | f  | 36.05
+ 1 | 36 | 10036 | 10 | 10036 | 36.05 | -64.95 | f  | 36.05
+ 1 | 37 | 10037 | 5  | 10037 | 37.05 | -63.95 | f  | 37.05
+ 1 | 37 | 10037 | 10 | 10037 | 37.05 | -63.95 | f  | 37.05
+ 1 | 38 | 10038 | 5  | 10038 | 38.05 | -62.95 | f  | 38.05
+ 1 | 38 | 10038 | 10 | 10038 | 38.05 | -62.95 | f  | 38.05
+ 1 | 39 | 10039 | 5  | 10039 | 39.05 | -61.95 | f  | 39.05
+ 1 | 39 | 10039 | 10 | 10039 | 39.05 | -61.95 | f  | 39.05
+ 1 | 40 | 10040 | 5  | 10040 | 40.05 | -60.95 | f  | 40.05
+ 1 | 40 | 10040 | 10 | 10040 | 40.05 | -60.95 | f  | 40.05
+ 1 | 41 | 10041 | 5  | 10041 | 41.05 | -59.95 | f  | 41.05
+ 1 | 41 | 10041 | 10 | 10041 | 41.05 | -59.95 | f  | 41.05
+ 1 | 42 | 10042 | 5  | 10042 | 42.05 | -58.95 | f  | 42.05
+ 1 | 42 | 10042 | 10 | 10042 | 42.05 | -58.95 | f  | 42.05
+ 1 | 43 | 10043 | 5  | 10043 | 43.05 | -57.95 | f  | 43.05
+ 1 | 43 | 10043 | 10 | 10043 | 43.05 | -57.95 | f  | 43.05
+ 1 | 44 | 10044 | 5  | 10044 | 44.05 | -56.95 | f  | 44.05
+ 1 | 44 | 10044 | 10 | 10044 | 44.05 | -56.95 | f  | 44.05
+ 1 | 45 | 10045 | 5  | 10045 | 45.05 | -55.95 | f  | 45.05
+ 1 | 45 | 10045 | 10 | 10045 | 45.05 | -55.95 | f  | 45.05
+ 1 | 46 | 10046 | 5  | 10046 | 46.05 | -54.95 | f  | 46.05
+ 1 | 46 | 10046 | 10 | 10046 | 46.05 | -54.95 | f  | 46.05
+ 1 | 47 | 10047 | 5  | 10047 | 47.05 | -53.95 | f  | 47.05
+ 1 | 47 | 10047 | 10 | 10047 | 47.05 | -53.95 | f  | 47.05
+ 1 | 48 | 10048 | 5  | 10048 | 48.05 | -52.95 | f  | 48.05
+ 1 | 48 | 10048 | 10 | 10048 | 48.05 | -52.95 | f  | 48.05
+ 1 | 49 | 10049 | 5  | 10049 | 49.05 | -51.95 | f  | 49.05
+ 1 | 49 | 10049 | 10 | 10049 | 49.05 | -51.95 | f  | 49.05
+ 1 | 50 | 10050 | 5  | 10050 | 50.05 | -50.95 | f  | 50.05
+ 1 | 50 | 10050 | 10 | 10050 | 50.05 | -50.95 | f  | 50.05
+ 1 | 51 | 10051 | 5  | 10051 | 51.05 | -49.95 | f  | 51.05
+ 1 | 51 | 10051 | 10 | 10051 | 51.05 | -49.95 | f  | 51.05
+ 1 | 52 | 10052 | 5  | 10052 | 52.05 | -48.95 | f  | 52.05
+ 1 | 52 | 10052 | 10 | 10052 | 52.05 | -48.95 | f  | 52.05
+ 1 | 53 | 10053 | 5  | 10053 | 53.05 | -47.95 | f  | 53.05
+ 1 | 53 | 10053 | 10 | 10053 | 53.05 | -47.95 | f  | 53.05
+ 1 | 54 | 10054 | 5  | 10054 | 54.05 | -46.95 | f  | 54.05
+ 1 | 54 | 10054 | 10 | 10054 | 54.05 | -46.95 | f  | 54.05
+ 1 | 55 | 10055 | 5  | 10055 | 55.05 | -45.95 | f  | 55.05
+ 1 | 55 | 10055 | 10 | 10055 | 55.05 | -45.95 | f  | 55.05
+ 1 | 56 | 10056 | 5  | 10056 | 56.05 | -44.95 | f  | 56.05
+ 1 | 56 | 10056 | 10 | 10056 | 56.05 | -44.95 | f  | 56.05
+ 1 | 57 | 10057 | 5  | 10057 | 57.05 | -43.95 | f  | 57.05
+ 1 | 57 | 10057 | 10 | 10057 | 57.05 | -43.95 | f  | 57.05
+ 1 | 58 | 10058 | 5  | 10058 | 58.05 | -42.95 | f  | 58.05
+ 1 | 58 | 10058 | 10 | 10058 | 58.05 | -42.95 | f  | 58.05
+ 1 | 59 | 10059 | 5  | 10059 | 59.05 | -41.95 | f  | 59.05
+ 1 | 59 | 10059 | 10 | 10059 | 59.05 | -41.95 | f  | 59.05
+ 1 | 60 | 10060 | 5  | 10060 | 60.05 | -40.95 | f  | 60.05
+ 1 | 60 | 10060 | 10 | 10060 | 60.05 | -40.95 | f  | 60.05
+ 1 | 61 | 10061 | 5  | 10061 | 61.05 | -39.95 | f  | 61.05
+ 1 | 61 | 10061 | 10 | 10061 | 61.05 | -39.95 | f  | 61.05
+ 1 | 62 | 10062 | 5  | 10062 | 62.05 | -38.95 | f  | 62.05
+ 1 | 62 | 10062 | 10 | 10062 | 62.05 | -38.95 | f  | 62.05
+ 1 | 63 | 10063 | 5  | 10063 | 63.05 | -37.95 | f  | 63.05
+ 1 | 63 | 10063 | 10 | 10063 | 63.05 | -37.95 | f  | 63.05
+ 1 | 64 | 10064 | 5  | 10064 | 64.05 | -36.95 | f  | 64.05
+ 1 | 64 | 10064 | 10 | 10064 | 64.05 | -36.95 | f  | 64.05
+ 1 | 65 | 10065 | 5  | 10065 | 65.05 | -35.95 | f  | 65.05
+ 1 | 65 | 10065 | 10 | 10065 | 65.05 | -35.95 | f  | 65.05
+ 1 | 66 | 10066 | 5  | 10066 | 66.05 | -34.95 | f  | 66.05
+ 1 | 66 | 10066 | 10 | 10066 | 66.05 | -34.95 | f  | 66.05
+ 1 | 67 | 10067 | 5  | 10067 | 67.05 | -33.95 | f  | 67.05
+ 1 | 67 | 10067 | 10 | 10067 | 67.05 | -33.95 | f  | 67.05
+ 1 | 68 | 10068 | 5  | 10068 | 68.05 | -32.95 | f  | 68.05
+ 1 | 68 | 10068 | 10 | 10068 | 68.05 | -32.95 | f  | 68.05
+ 1 | 69 | 10069 | 5  | 10069 | 69.05 | -31.95 | f  | 69.05
+ 1 | 69 | 10069 | 10 | 10069 | 69.05 | -31.95 | f  | 69.05
+ 1 | 70 | 10070 | 5  | 10070 | 70.05 | -30.95 | f  | 70.05
+ 1 | 70 | 10070 | 10 | 10070 | 70.05 | -30.95 | f  | 70.05
+ 1 | 71 | 10071 | 5  | 10071 | 71.05 | -29.95 | f  | 71.05
+ 1 | 71 | 10071 | 10 | 10071 | 71.05 | -29.95 | f  | 71.05
+ 1 | 72 | 10072 | 5  | 10072 | 72.05 | -28.95 | f  | 72.05
+ 1 | 72 | 10072 | 10 | 10072 | 72.05 | -28.95 | f  | 72.05
+ 1 | 73 | 10073 | 5  | 10073 | 73.05 | -27.95 | f  | 73.05
+ 1 | 73 | 10073 | 10 | 10073 | 73.05 | -27.95 | f  | 73.05
+ 1 | 74 | 10074 | 5  | 10074 | 74.05 | -26.95 | f  | 74.05
+ 1 | 74 | 10074 | 10 | 10074 | 74.05 | -26.95 | f  | 74.05
+ 1 | 75 | 10075 | 5  | 10075 | 75.05 | -25.95 | f  | 75.05
+ 1 | 75 | 10075 | 10 | 10075 | 75.05 | -25.95 | f  | 75.05
+ 1 | 76 | 10076 | 5  | 10076 | 76.05 | -24.95 | f  | 76.05
+ 1 | 76 | 10076 | 10 | 10076 | 76.05 | -24.95 | f  | 76.05
+ 1 | 77 | 10077 | 5  | 10077 | 77.05 | -23.95 | f  | 77.05
+ 1 | 77 | 10077 | 10 | 10077 | 77.05 | -23.95 | f  | 77.05
+ 1 | 78 | 10078 | 5  | 10078 | 78.05 | -22.95 | f  | 78.05
+ 1 | 78 | 10078 | 10 | 10078 | 78.05 | -22.95 | f  | 78.05
+ 1 | 79 | 10079 | 5  | 10079 | 79.05 | -21.95 | f  | 79.05
+ 1 | 79 | 10079 | 10 | 10079 | 79.05 | -21.95 | f  | 79.05
+ 1 | 80 | 10080 | 5  | 10080 | 80.05 | -20.95 | f  | 80.05
+ 1 | 80 | 10080 | 10 | 10080 | 80.05 | -20.95 | f  | 80.05
+ 1 | 81 | 10081 | 5  | 10081 | 81.05 | -19.95 | f  | 81.05
+ 1 | 81 | 10081 | 10 | 10081 | 81.05 | -19.95 | f  | 81.05
+ 1 | 82 | 10082 | 5  | 10082 | 82.05 | -18.95 | f  | 82.05
+ 1 | 82 | 10082 | 10 | 10082 | 82.05 | -18.95 | f  | 82.05
+ 1 | 83 | 10083 | 5  | 10083 | 83.05 | -17.95 | f  | 83.05
+ 1 | 83 | 10083 | 10 | 10083 | 83.05 | -17.95 | f  | 83.05
+ 1 | 84 | 10084 | 5  | 10084 | 84.05 | -16.95 | f  | 84.05
+ 1 | 84 | 10084 | 10 | 10084 | 84.05 | -16.95 | f  | 84.05
+ 1 | 85 | 10085 | 5  | 10085 | 85.05 | -15.95 | f  | 85.05
+ 1 | 85 | 10085 | 10 | 10085 | 85.05 | -15.95 | f  | 85.05
+ 1 | 86 | 10086 | 5  | 10086 | 86.05 | -14.95 | f  | 86.05
+ 1 | 86 | 10086 | 10 | 10086 | 86.05 | -14.95 | f  | 86.05
+ 1 | 87 | 10087 | 5  | 10087 | 87.05 | -13.95 | f  | 87.05
+ 1 | 87 | 10087 | 10 | 10087 | 87.05 | -13.95 | f  | 87.05
+ 1 | 88 | 10088 | 5  | 10088 | 88.05 | -12.95 | f  | 88.05
+ 1 | 88 | 10088 | 10 | 10088 | 88.05 | -12.95 | f  | 88.05
+ 1 | 89 | 10089 | 5  | 10089 | 89.05 | -11.95 | f  | 89.05
+ 1 | 89 | 10089 | 10 | 10089 | 89.05 | -11.95 | f  | 89.05
+ 1 | 90 | 10090 | 5  | 10090 | 90.05 | -10.95 | f  | 90.05
+ 1 | 90 | 10090 | 10 | 10090 | 90.05 | -10.95 | f  | 90.05
+ 1 | 91 | 10091 | 5  | 10091 | 91.05 |  -9.95 | f  | 91.05
+ 1 | 91 | 10091 | 10 | 10091 | 91.05 |  -9.95 | f  | 91.05
+ 1 | 92 | 10092 | 5  | 10092 | 92.05 |  -8.95 | f  | 92.05
+ 1 | 92 | 10092 | 10 | 10092 | 92.05 |  -8.95 | f  | 92.05
+ 1 | 93 | 10093 | 5  | 10093 | 93.05 |  -7.95 | f  | 93.05
+ 1 | 93 | 10093 | 10 | 10093 | 93.05 |  -7.95 | f  | 93.05
+ 1 | 94 | 10094 | 5  | 10094 | 94.05 |  -6.95 | f  | 94.05
+ 1 | 94 | 10094 | 10 | 10094 | 94.05 |  -6.95 | f  | 94.05
+(188 rows)
+
+select * from number_data1 where c6>-5.95 order by 1,2,3,4,5,6,7;
+ a  |  c1   |  c2   | c3  |  c4   |   c5    |  c6   | c7 |   c8    
+----+-------+-------+-----+-------+---------+-------+----+---------
+ -1 |   103 |    10 | 100 |     1 | 1000.99 | 256.8 | t  |  100.50
+  1 |    96 | 10096 | 5   | 10096 |   96.05 | -4.95 | f  |   96.05
+  1 |    96 | 10096 | 10  | 10096 |   96.05 | -4.95 | f  |   96.05
+  1 |    97 | 10097 | 5   | 10097 |   97.05 | -3.95 | f  |   97.05
+  1 |    97 | 10097 | 10  | 10097 |   97.05 | -3.95 | f  |   97.05
+  1 |    98 | 10098 | 5   | 10098 |   98.05 | -2.95 | f  |   98.05
+  1 |    98 | 10098 | 10  | 10098 |   98.05 | -2.95 | f  |   98.05
+  1 |    99 | 10099 | 5   | 10099 |   99.05 | -1.95 | f  |   99.05
+  1 |    99 | 10099 | 10  | 10099 |   99.05 | -1.95 | f  |   99.05
+  1 |   100 | 10100 | 5   | 10100 |  100.05 |  -.95 | f  |  100.05
+  1 |   100 | 10100 | 10  | 10100 |  100.05 |  -.95 | f  |  100.05
+  1 | 10200 |  9300 | 0   | 15000 |     .05 |   100 | t  | 1055.55
+(12 rows)
+
+select * from number_data1 where c6<=-5.95 order by 1,2,3,4,5,6,7;
+ a | c1 |  c2   | c3 |  c4   |  c5   |   c6   | c7 |  c8   
+---+----+-------+----+-------+-------+--------+----+-------
+ 1 |  1 | 10001 | 5  | 10001 |  1.05 | -99.95 | f  |  1.05
+ 1 |  1 | 10001 | 10 | 10001 |  1.05 | -99.95 | f  |  1.05
+ 1 |  2 | 10002 | 5  | 10002 |  2.05 | -98.95 | f  |  2.05
+ 1 |  2 | 10002 | 10 | 10002 |  2.05 | -98.95 | f  |  2.05
+ 1 |  3 | 10003 | 5  | 10003 |  3.05 | -97.95 | f  |  3.05
+ 1 |  3 | 10003 | 10 | 10003 |  3.05 | -97.95 | f  |  3.05
+ 1 |  4 | 10004 | 5  | 10004 |  4.05 | -96.95 | f  |  4.05
+ 1 |  4 | 10004 | 10 | 10004 |  4.05 | -96.95 | f  |  4.05
+ 1 |  5 | 10005 | 5  | 10005 |  5.05 | -95.95 | f  |  5.05
+ 1 |  5 | 10005 | 10 | 10005 |  5.05 | -95.95 | f  |  5.05
+ 1 |  6 | 10006 | 5  | 10006 |  6.05 | -94.95 | f  |  6.05
+ 1 |  6 | 10006 | 10 | 10006 |  6.05 | -94.95 | f  |  6.05
+ 1 |  7 | 10007 | 5  | 10007 |  7.05 | -93.95 | f  |  7.05
+ 1 |  7 | 10007 | 10 | 10007 |  7.05 | -93.95 | f  |  7.05
+ 1 |  8 | 10008 | 5  | 10008 |  8.05 | -92.95 | f  |  8.05
+ 1 |  8 | 10008 | 10 | 10008 |  8.05 | -92.95 | f  |  8.05
+ 1 |  9 | 10009 | 5  | 10009 |  9.05 | -91.95 | f  |  9.05
+ 1 |  9 | 10009 | 10 | 10009 |  9.05 | -91.95 | f  |  9.05
+ 1 | 10 | 10010 | 5  | 10010 | 10.05 | -90.95 | f  | 10.05
+ 1 | 10 | 10010 | 10 | 10010 | 10.05 | -90.95 | f  | 10.05
+ 1 | 11 | 10011 | 5  | 10011 | 11.05 | -89.95 | f  | 11.05
+ 1 | 11 | 10011 | 10 | 10011 | 11.05 | -89.95 | f  | 11.05
+ 1 | 12 | 10012 | 5  | 10012 | 12.05 | -88.95 | f  | 12.05
+ 1 | 12 | 10012 | 10 | 10012 | 12.05 | -88.95 | f  | 12.05
+ 1 | 13 | 10013 | 5  | 10013 | 13.05 | -87.95 | f  | 13.05
+ 1 | 13 | 10013 | 10 | 10013 | 13.05 | -87.95 | f  | 13.05
+ 1 | 14 | 10014 | 5  | 10014 | 14.05 | -86.95 | f  | 14.05
+ 1 | 14 | 10014 | 10 | 10014 | 14.05 | -86.95 | f  | 14.05
+ 1 | 15 | 10015 | 5  | 10015 | 15.05 | -85.95 | f  | 15.05
+ 1 | 15 | 10015 | 10 | 10015 | 15.05 | -85.95 | f  | 15.05
+ 1 | 16 | 10016 | 5  | 10016 | 16.05 | -84.95 | f  | 16.05
+ 1 | 16 | 10016 | 10 | 10016 | 16.05 | -84.95 | f  | 16.05
+ 1 | 17 | 10017 | 5  | 10017 | 17.05 | -83.95 | f  | 17.05
+ 1 | 17 | 10017 | 10 | 10017 | 17.05 | -83.95 | f  | 17.05
+ 1 | 18 | 10018 | 5  | 10018 | 18.05 | -82.95 | f  | 18.05
+ 1 | 18 | 10018 | 10 | 10018 | 18.05 | -82.95 | f  | 18.05
+ 1 | 19 | 10019 | 5  | 10019 | 19.05 | -81.95 | f  | 19.05
+ 1 | 19 | 10019 | 10 | 10019 | 19.05 | -81.95 | f  | 19.05
+ 1 | 20 | 10020 | 5  | 10020 | 20.05 | -80.95 | f  | 20.05
+ 1 | 20 | 10020 | 10 | 10020 | 20.05 | -80.95 | f  | 20.05
+ 1 | 21 | 10021 | 5  | 10021 | 21.05 | -79.95 | f  | 21.05
+ 1 | 21 | 10021 | 10 | 10021 | 21.05 | -79.95 | f  | 21.05
+ 1 | 22 | 10022 | 5  | 10022 | 22.05 | -78.95 | f  | 22.05
+ 1 | 22 | 10022 | 10 | 10022 | 22.05 | -78.95 | f  | 22.05
+ 1 | 23 | 10023 | 5  | 10023 | 23.05 | -77.95 | f  | 23.05
+ 1 | 23 | 10023 | 10 | 10023 | 23.05 | -77.95 | f  | 23.05
+ 1 | 24 | 10024 | 5  | 10024 | 24.05 | -76.95 | f  | 24.05
+ 1 | 24 | 10024 | 10 | 10024 | 24.05 | -76.95 | f  | 24.05
+ 1 | 25 | 10025 | 5  | 10025 | 25.05 | -75.95 | f  | 25.05
+ 1 | 25 | 10025 | 10 | 10025 | 25.05 | -75.95 | f  | 25.05
+ 1 | 26 | 10026 | 5  | 10026 | 26.05 | -74.95 | f  | 26.05
+ 1 | 26 | 10026 | 10 | 10026 | 26.05 | -74.95 | f  | 26.05
+ 1 | 27 | 10027 | 5  | 10027 | 27.05 | -73.95 | f  | 27.05
+ 1 | 27 | 10027 | 10 | 10027 | 27.05 | -73.95 | f  | 27.05
+ 1 | 28 | 10028 | 5  | 10028 | 28.05 | -72.95 | f  | 28.05
+ 1 | 28 | 10028 | 10 | 10028 | 28.05 | -72.95 | f  | 28.05
+ 1 | 29 | 10029 | 5  | 10029 | 29.05 | -71.95 | f  | 29.05
+ 1 | 29 | 10029 | 10 | 10029 | 29.05 | -71.95 | f  | 29.05
+ 1 | 30 | 10030 | 5  | 10030 | 30.05 | -70.95 | f  | 30.05
+ 1 | 30 | 10030 | 10 | 10030 | 30.05 | -70.95 | f  | 30.05
+ 1 | 31 | 10031 | 5  | 10031 | 31.05 | -69.95 | f  | 31.05
+ 1 | 31 | 10031 | 10 | 10031 | 31.05 | -69.95 | f  | 31.05
+ 1 | 32 | 10032 | 5  | 10032 | 32.05 | -68.95 | f  | 32.05
+ 1 | 32 | 10032 | 10 | 10032 | 32.05 | -68.95 | f  | 32.05
+ 1 | 33 | 10033 | 5  | 10033 | 33.05 | -67.95 | f  | 33.05
+ 1 | 33 | 10033 | 10 | 10033 | 33.05 | -67.95 | f  | 33.05
+ 1 | 34 | 10034 | 5  | 10034 | 34.05 | -66.95 | f  | 34.05
+ 1 | 34 | 10034 | 10 | 10034 | 34.05 | -66.95 | f  | 34.05
+ 1 | 35 | 10035 | 5  | 10035 | 35.05 | -65.95 | f  | 35.05
+ 1 | 35 | 10035 | 10 | 10035 | 35.05 | -65.95 | f  | 35.05
+ 1 | 36 | 10036 | 5  | 10036 | 36.05 | -64.95 | f  | 36.05
+ 1 | 36 | 10036 | 10 | 10036 | 36.05 | -64.95 | f  | 36.05
+ 1 | 37 | 10037 | 5  | 10037 | 37.05 | -63.95 | f  | 37.05
+ 1 | 37 | 10037 | 10 | 10037 | 37.05 | -63.95 | f  | 37.05
+ 1 | 38 | 10038 | 5  | 10038 | 38.05 | -62.95 | f  | 38.05
+ 1 | 38 | 10038 | 10 | 10038 | 38.05 | -62.95 | f  | 38.05
+ 1 | 39 | 10039 | 5  | 10039 | 39.05 | -61.95 | f  | 39.05
+ 1 | 39 | 10039 | 10 | 10039 | 39.05 | -61.95 | f  | 39.05
+ 1 | 40 | 10040 | 5  | 10040 | 40.05 | -60.95 | f  | 40.05
+ 1 | 40 | 10040 | 10 | 10040 | 40.05 | -60.95 | f  | 40.05
+ 1 | 41 | 10041 | 5  | 10041 | 41.05 | -59.95 | f  | 41.05
+ 1 | 41 | 10041 | 10 | 10041 | 41.05 | -59.95 | f  | 41.05
+ 1 | 42 | 10042 | 5  | 10042 | 42.05 | -58.95 | f  | 42.05
+ 1 | 42 | 10042 | 10 | 10042 | 42.05 | -58.95 | f  | 42.05
+ 1 | 43 | 10043 | 5  | 10043 | 43.05 | -57.95 | f  | 43.05
+ 1 | 43 | 10043 | 10 | 10043 | 43.05 | -57.95 | f  | 43.05
+ 1 | 44 | 10044 | 5  | 10044 | 44.05 | -56.95 | f  | 44.05
+ 1 | 44 | 10044 | 10 | 10044 | 44.05 | -56.95 | f  | 44.05
+ 1 | 45 | 10045 | 5  | 10045 | 45.05 | -55.95 | f  | 45.05
+ 1 | 45 | 10045 | 10 | 10045 | 45.05 | -55.95 | f  | 45.05
+ 1 | 46 | 10046 | 5  | 10046 | 46.05 | -54.95 | f  | 46.05
+ 1 | 46 | 10046 | 10 | 10046 | 46.05 | -54.95 | f  | 46.05
+ 1 | 47 | 10047 | 5  | 10047 | 47.05 | -53.95 | f  | 47.05
+ 1 | 47 | 10047 | 10 | 10047 | 47.05 | -53.95 | f  | 47.05
+ 1 | 48 | 10048 | 5  | 10048 | 48.05 | -52.95 | f  | 48.05
+ 1 | 48 | 10048 | 10 | 10048 | 48.05 | -52.95 | f  | 48.05
+ 1 | 49 | 10049 | 5  | 10049 | 49.05 | -51.95 | f  | 49.05
+ 1 | 49 | 10049 | 10 | 10049 | 49.05 | -51.95 | f  | 49.05
+ 1 | 50 | 10050 | 5  | 10050 | 50.05 | -50.95 | f  | 50.05
+ 1 | 50 | 10050 | 10 | 10050 | 50.05 | -50.95 | f  | 50.05
+ 1 | 51 | 10051 | 5  | 10051 | 51.05 | -49.95 | f  | 51.05
+ 1 | 51 | 10051 | 10 | 10051 | 51.05 | -49.95 | f  | 51.05
+ 1 | 52 | 10052 | 5  | 10052 | 52.05 | -48.95 | f  | 52.05
+ 1 | 52 | 10052 | 10 | 10052 | 52.05 | -48.95 | f  | 52.05
+ 1 | 53 | 10053 | 5  | 10053 | 53.05 | -47.95 | f  | 53.05
+ 1 | 53 | 10053 | 10 | 10053 | 53.05 | -47.95 | f  | 53.05
+ 1 | 54 | 10054 | 5  | 10054 | 54.05 | -46.95 | f  | 54.05
+ 1 | 54 | 10054 | 10 | 10054 | 54.05 | -46.95 | f  | 54.05
+ 1 | 55 | 10055 | 5  | 10055 | 55.05 | -45.95 | f  | 55.05
+ 1 | 55 | 10055 | 10 | 10055 | 55.05 | -45.95 | f  | 55.05
+ 1 | 56 | 10056 | 5  | 10056 | 56.05 | -44.95 | f  | 56.05
+ 1 | 56 | 10056 | 10 | 10056 | 56.05 | -44.95 | f  | 56.05
+ 1 | 57 | 10057 | 5  | 10057 | 57.05 | -43.95 | f  | 57.05
+ 1 | 57 | 10057 | 10 | 10057 | 57.05 | -43.95 | f  | 57.05
+ 1 | 58 | 10058 | 5  | 10058 | 58.05 | -42.95 | f  | 58.05
+ 1 | 58 | 10058 | 10 | 10058 | 58.05 | -42.95 | f  | 58.05
+ 1 | 59 | 10059 | 5  | 10059 | 59.05 | -41.95 | f  | 59.05
+ 1 | 59 | 10059 | 10 | 10059 | 59.05 | -41.95 | f  | 59.05
+ 1 | 60 | 10060 | 5  | 10060 | 60.05 | -40.95 | f  | 60.05
+ 1 | 60 | 10060 | 10 | 10060 | 60.05 | -40.95 | f  | 60.05
+ 1 | 61 | 10061 | 5  | 10061 | 61.05 | -39.95 | f  | 61.05
+ 1 | 61 | 10061 | 10 | 10061 | 61.05 | -39.95 | f  | 61.05
+ 1 | 62 | 10062 | 5  | 10062 | 62.05 | -38.95 | f  | 62.05
+ 1 | 62 | 10062 | 10 | 10062 | 62.05 | -38.95 | f  | 62.05
+ 1 | 63 | 10063 | 5  | 10063 | 63.05 | -37.95 | f  | 63.05
+ 1 | 63 | 10063 | 10 | 10063 | 63.05 | -37.95 | f  | 63.05
+ 1 | 64 | 10064 | 5  | 10064 | 64.05 | -36.95 | f  | 64.05
+ 1 | 64 | 10064 | 10 | 10064 | 64.05 | -36.95 | f  | 64.05
+ 1 | 65 | 10065 | 5  | 10065 | 65.05 | -35.95 | f  | 65.05
+ 1 | 65 | 10065 | 10 | 10065 | 65.05 | -35.95 | f  | 65.05
+ 1 | 66 | 10066 | 5  | 10066 | 66.05 | -34.95 | f  | 66.05
+ 1 | 66 | 10066 | 10 | 10066 | 66.05 | -34.95 | f  | 66.05
+ 1 | 67 | 10067 | 5  | 10067 | 67.05 | -33.95 | f  | 67.05
+ 1 | 67 | 10067 | 10 | 10067 | 67.05 | -33.95 | f  | 67.05
+ 1 | 68 | 10068 | 5  | 10068 | 68.05 | -32.95 | f  | 68.05
+ 1 | 68 | 10068 | 10 | 10068 | 68.05 | -32.95 | f  | 68.05
+ 1 | 69 | 10069 | 5  | 10069 | 69.05 | -31.95 | f  | 69.05
+ 1 | 69 | 10069 | 10 | 10069 | 69.05 | -31.95 | f  | 69.05
+ 1 | 70 | 10070 | 5  | 10070 | 70.05 | -30.95 | f  | 70.05
+ 1 | 70 | 10070 | 10 | 10070 | 70.05 | -30.95 | f  | 70.05
+ 1 | 71 | 10071 | 5  | 10071 | 71.05 | -29.95 | f  | 71.05
+ 1 | 71 | 10071 | 10 | 10071 | 71.05 | -29.95 | f  | 71.05
+ 1 | 72 | 10072 | 5  | 10072 | 72.05 | -28.95 | f  | 72.05
+ 1 | 72 | 10072 | 10 | 10072 | 72.05 | -28.95 | f  | 72.05
+ 1 | 73 | 10073 | 5  | 10073 | 73.05 | -27.95 | f  | 73.05
+ 1 | 73 | 10073 | 10 | 10073 | 73.05 | -27.95 | f  | 73.05
+ 1 | 74 | 10074 | 5  | 10074 | 74.05 | -26.95 | f  | 74.05
+ 1 | 74 | 10074 | 10 | 10074 | 74.05 | -26.95 | f  | 74.05
+ 1 | 75 | 10075 | 5  | 10075 | 75.05 | -25.95 | f  | 75.05
+ 1 | 75 | 10075 | 10 | 10075 | 75.05 | -25.95 | f  | 75.05
+ 1 | 76 | 10076 | 5  | 10076 | 76.05 | -24.95 | f  | 76.05
+ 1 | 76 | 10076 | 10 | 10076 | 76.05 | -24.95 | f  | 76.05
+ 1 | 77 | 10077 | 5  | 10077 | 77.05 | -23.95 | f  | 77.05
+ 1 | 77 | 10077 | 10 | 10077 | 77.05 | -23.95 | f  | 77.05
+ 1 | 78 | 10078 | 5  | 10078 | 78.05 | -22.95 | f  | 78.05
+ 1 | 78 | 10078 | 10 | 10078 | 78.05 | -22.95 | f  | 78.05
+ 1 | 79 | 10079 | 5  | 10079 | 79.05 | -21.95 | f  | 79.05
+ 1 | 79 | 10079 | 10 | 10079 | 79.05 | -21.95 | f  | 79.05
+ 1 | 80 | 10080 | 5  | 10080 | 80.05 | -20.95 | f  | 80.05
+ 1 | 80 | 10080 | 10 | 10080 | 80.05 | -20.95 | f  | 80.05
+ 1 | 81 | 10081 | 5  | 10081 | 81.05 | -19.95 | f  | 81.05
+ 1 | 81 | 10081 | 10 | 10081 | 81.05 | -19.95 | f  | 81.05
+ 1 | 82 | 10082 | 5  | 10082 | 82.05 | -18.95 | f  | 82.05
+ 1 | 82 | 10082 | 10 | 10082 | 82.05 | -18.95 | f  | 82.05
+ 1 | 83 | 10083 | 5  | 10083 | 83.05 | -17.95 | f  | 83.05
+ 1 | 83 | 10083 | 10 | 10083 | 83.05 | -17.95 | f  | 83.05
+ 1 | 84 | 10084 | 5  | 10084 | 84.05 | -16.95 | f  | 84.05
+ 1 | 84 | 10084 | 10 | 10084 | 84.05 | -16.95 | f  | 84.05
+ 1 | 85 | 10085 | 5  | 10085 | 85.05 | -15.95 | f  | 85.05
+ 1 | 85 | 10085 | 10 | 10085 | 85.05 | -15.95 | f  | 85.05
+ 1 | 86 | 10086 | 5  | 10086 | 86.05 | -14.95 | f  | 86.05
+ 1 | 86 | 10086 | 10 | 10086 | 86.05 | -14.95 | f  | 86.05
+ 1 | 87 | 10087 | 5  | 10087 | 87.05 | -13.95 | f  | 87.05
+ 1 | 87 | 10087 | 10 | 10087 | 87.05 | -13.95 | f  | 87.05
+ 1 | 88 | 10088 | 5  | 10088 | 88.05 | -12.95 | f  | 88.05
+ 1 | 88 | 10088 | 10 | 10088 | 88.05 | -12.95 | f  | 88.05
+ 1 | 89 | 10089 | 5  | 10089 | 89.05 | -11.95 | f  | 89.05
+ 1 | 89 | 10089 | 10 | 10089 | 89.05 | -11.95 | f  | 89.05
+ 1 | 90 | 10090 | 5  | 10090 | 90.05 | -10.95 | f  | 90.05
+ 1 | 90 | 10090 | 10 | 10090 | 90.05 | -10.95 | f  | 90.05
+ 1 | 91 | 10091 | 5  | 10091 | 91.05 |  -9.95 | f  | 91.05
+ 1 | 91 | 10091 | 10 | 10091 | 91.05 |  -9.95 | f  | 91.05
+ 1 | 92 | 10092 | 5  | 10092 | 92.05 |  -8.95 | f  | 92.05
+ 1 | 92 | 10092 | 10 | 10092 | 92.05 |  -8.95 | f  | 92.05
+ 1 | 93 | 10093 | 5  | 10093 | 93.05 |  -7.95 | f  | 93.05
+ 1 | 93 | 10093 | 10 | 10093 | 93.05 |  -7.95 | f  | 93.05
+ 1 | 94 | 10094 | 5  | 10094 | 94.05 |  -6.95 | f  | 94.05
+ 1 | 94 | 10094 | 10 | 10094 | 94.05 |  -6.95 | f  | 94.05
+ 1 | 95 | 10095 | 5  | 10095 | 95.05 |  -5.95 | f  | 95.05
+ 1 | 95 | 10095 | 10 | 10095 | 95.05 |  -5.95 | f  | 95.05
+(190 rows)
+
+select * from number_data1 where c6>=-5.95 order by 1,2,3,4,5,6,7;
+ a  |  c1   |  c2   | c3  |  c4   |   c5    |  c6   | c7 |   c8    
+----+-------+-------+-----+-------+---------+-------+----+---------
+ -1 |   103 |    10 | 100 |     1 | 1000.99 | 256.8 | t  |  100.50
+  1 |    95 | 10095 | 5   | 10095 |   95.05 | -5.95 | f  |   95.05
+  1 |    95 | 10095 | 10  | 10095 |   95.05 | -5.95 | f  |   95.05
+  1 |    96 | 10096 | 5   | 10096 |   96.05 | -4.95 | f  |   96.05
+  1 |    96 | 10096 | 10  | 10096 |   96.05 | -4.95 | f  |   96.05
+  1 |    97 | 10097 | 5   | 10097 |   97.05 | -3.95 | f  |   97.05
+  1 |    97 | 10097 | 10  | 10097 |   97.05 | -3.95 | f  |   97.05
+  1 |    98 | 10098 | 5   | 10098 |   98.05 | -2.95 | f  |   98.05
+  1 |    98 | 10098 | 10  | 10098 |   98.05 | -2.95 | f  |   98.05
+  1 |    99 | 10099 | 5   | 10099 |   99.05 | -1.95 | f  |   99.05
+  1 |    99 | 10099 | 10  | 10099 |   99.05 | -1.95 | f  |   99.05
+  1 |   100 | 10100 | 5   | 10100 |  100.05 |  -.95 | f  |  100.05
+  1 |   100 | 10100 | 10  | 10100 |  100.05 |  -.95 | f  |  100.05
+  1 | 10200 |  9300 | 0   | 15000 |     .05 |   100 | t  | 1055.55
+(14 rows)
+
+select * from number_data1 where c6!=5.05 order by 1,2,3,4,5,6,7;
+ a  |  c1   |  c2   | c3  |  c4   |   c5    |   c6   | c7 |   c8    
+----+-------+-------+-----+-------+---------+--------+----+---------
+ -1 |   103 |    10 | 100 |     1 | 1000.99 |  256.8 | t  |  100.50
+  1 |     1 | 10001 | 5   | 10001 |    1.05 | -99.95 | f  |    1.05
+  1 |     1 | 10001 | 10  | 10001 |    1.05 | -99.95 | f  |    1.05
+  1 |     2 | 10002 | 5   | 10002 |    2.05 | -98.95 | f  |    2.05
+  1 |     2 | 10002 | 10  | 10002 |    2.05 | -98.95 | f  |    2.05
+  1 |     3 | 10003 | 5   | 10003 |    3.05 | -97.95 | f  |    3.05
+  1 |     3 | 10003 | 10  | 10003 |    3.05 | -97.95 | f  |    3.05
+  1 |     4 | 10004 | 5   | 10004 |    4.05 | -96.95 | f  |    4.05
+  1 |     4 | 10004 | 10  | 10004 |    4.05 | -96.95 | f  |    4.05
+  1 |     5 | 10005 | 5   | 10005 |    5.05 | -95.95 | f  |    5.05
+  1 |     5 | 10005 | 10  | 10005 |    5.05 | -95.95 | f  |    5.05
+  1 |     6 | 10006 | 5   | 10006 |    6.05 | -94.95 | f  |    6.05
+  1 |     6 | 10006 | 10  | 10006 |    6.05 | -94.95 | f  |    6.05
+  1 |     7 | 10007 | 5   | 10007 |    7.05 | -93.95 | f  |    7.05
+  1 |     7 | 10007 | 10  | 10007 |    7.05 | -93.95 | f  |    7.05
+  1 |     8 | 10008 | 5   | 10008 |    8.05 | -92.95 | f  |    8.05
+  1 |     8 | 10008 | 10  | 10008 |    8.05 | -92.95 | f  |    8.05
+  1 |     9 | 10009 | 5   | 10009 |    9.05 | -91.95 | f  |    9.05
+  1 |     9 | 10009 | 10  | 10009 |    9.05 | -91.95 | f  |    9.05
+  1 |    10 | 10010 | 5   | 10010 |   10.05 | -90.95 | f  |   10.05
+  1 |    10 | 10010 | 10  | 10010 |   10.05 | -90.95 | f  |   10.05
+  1 |    11 | 10011 | 5   | 10011 |   11.05 | -89.95 | f  |   11.05
+  1 |    11 | 10011 | 10  | 10011 |   11.05 | -89.95 | f  |   11.05
+  1 |    12 | 10012 | 5   | 10012 |   12.05 | -88.95 | f  |   12.05
+  1 |    12 | 10012 | 10  | 10012 |   12.05 | -88.95 | f  |   12.05
+  1 |    13 | 10013 | 5   | 10013 |   13.05 | -87.95 | f  |   13.05
+  1 |    13 | 10013 | 10  | 10013 |   13.05 | -87.95 | f  |   13.05
+  1 |    14 | 10014 | 5   | 10014 |   14.05 | -86.95 | f  |   14.05
+  1 |    14 | 10014 | 10  | 10014 |   14.05 | -86.95 | f  |   14.05
+  1 |    15 | 10015 | 5   | 10015 |   15.05 | -85.95 | f  |   15.05
+  1 |    15 | 10015 | 10  | 10015 |   15.05 | -85.95 | f  |   15.05
+  1 |    16 | 10016 | 5   | 10016 |   16.05 | -84.95 | f  |   16.05
+  1 |    16 | 10016 | 10  | 10016 |   16.05 | -84.95 | f  |   16.05
+  1 |    17 | 10017 | 5   | 10017 |   17.05 | -83.95 | f  |   17.05
+  1 |    17 | 10017 | 10  | 10017 |   17.05 | -83.95 | f  |   17.05
+  1 |    18 | 10018 | 5   | 10018 |   18.05 | -82.95 | f  |   18.05
+  1 |    18 | 10018 | 10  | 10018 |   18.05 | -82.95 | f  |   18.05
+  1 |    19 | 10019 | 5   | 10019 |   19.05 | -81.95 | f  |   19.05
+  1 |    19 | 10019 | 10  | 10019 |   19.05 | -81.95 | f  |   19.05
+  1 |    20 | 10020 | 5   | 10020 |   20.05 | -80.95 | f  |   20.05
+  1 |    20 | 10020 | 10  | 10020 |   20.05 | -80.95 | f  |   20.05
+  1 |    21 | 10021 | 5   | 10021 |   21.05 | -79.95 | f  |   21.05
+  1 |    21 | 10021 | 10  | 10021 |   21.05 | -79.95 | f  |   21.05
+  1 |    22 | 10022 | 5   | 10022 |   22.05 | -78.95 | f  |   22.05
+  1 |    22 | 10022 | 10  | 10022 |   22.05 | -78.95 | f  |   22.05
+  1 |    23 | 10023 | 5   | 10023 |   23.05 | -77.95 | f  |   23.05
+  1 |    23 | 10023 | 10  | 10023 |   23.05 | -77.95 | f  |   23.05
+  1 |    24 | 10024 | 5   | 10024 |   24.05 | -76.95 | f  |   24.05
+  1 |    24 | 10024 | 10  | 10024 |   24.05 | -76.95 | f  |   24.05
+  1 |    25 | 10025 | 5   | 10025 |   25.05 | -75.95 | f  |   25.05
+  1 |    25 | 10025 | 10  | 10025 |   25.05 | -75.95 | f  |   25.05
+  1 |    26 | 10026 | 5   | 10026 |   26.05 | -74.95 | f  |   26.05
+  1 |    26 | 10026 | 10  | 10026 |   26.05 | -74.95 | f  |   26.05
+  1 |    27 | 10027 | 5   | 10027 |   27.05 | -73.95 | f  |   27.05
+  1 |    27 | 10027 | 10  | 10027 |   27.05 | -73.95 | f  |   27.05
+  1 |    28 | 10028 | 5   | 10028 |   28.05 | -72.95 | f  |   28.05
+  1 |    28 | 10028 | 10  | 10028 |   28.05 | -72.95 | f  |   28.05
+  1 |    29 | 10029 | 5   | 10029 |   29.05 | -71.95 | f  |   29.05
+  1 |    29 | 10029 | 10  | 10029 |   29.05 | -71.95 | f  |   29.05
+  1 |    30 | 10030 | 5   | 10030 |   30.05 | -70.95 | f  |   30.05
+  1 |    30 | 10030 | 10  | 10030 |   30.05 | -70.95 | f  |   30.05
+  1 |    31 | 10031 | 5   | 10031 |   31.05 | -69.95 | f  |   31.05
+  1 |    31 | 10031 | 10  | 10031 |   31.05 | -69.95 | f  |   31.05
+  1 |    32 | 10032 | 5   | 10032 |   32.05 | -68.95 | f  |   32.05
+  1 |    32 | 10032 | 10  | 10032 |   32.05 | -68.95 | f  |   32.05
+  1 |    33 | 10033 | 5   | 10033 |   33.05 | -67.95 | f  |   33.05
+  1 |    33 | 10033 | 10  | 10033 |   33.05 | -67.95 | f  |   33.05
+  1 |    34 | 10034 | 5   | 10034 |   34.05 | -66.95 | f  |   34.05
+  1 |    34 | 10034 | 10  | 10034 |   34.05 | -66.95 | f  |   34.05
+  1 |    35 | 10035 | 5   | 10035 |   35.05 | -65.95 | f  |   35.05
+  1 |    35 | 10035 | 10  | 10035 |   35.05 | -65.95 | f  |   35.05
+  1 |    36 | 10036 | 5   | 10036 |   36.05 | -64.95 | f  |   36.05
+  1 |    36 | 10036 | 10  | 10036 |   36.05 | -64.95 | f  |   36.05
+  1 |    37 | 10037 | 5   | 10037 |   37.05 | -63.95 | f  |   37.05
+  1 |    37 | 10037 | 10  | 10037 |   37.05 | -63.95 | f  |   37.05
+  1 |    38 | 10038 | 5   | 10038 |   38.05 | -62.95 | f  |   38.05
+  1 |    38 | 10038 | 10  | 10038 |   38.05 | -62.95 | f  |   38.05
+  1 |    39 | 10039 | 5   | 10039 |   39.05 | -61.95 | f  |   39.05
+  1 |    39 | 10039 | 10  | 10039 |   39.05 | -61.95 | f  |   39.05
+  1 |    40 | 10040 | 5   | 10040 |   40.05 | -60.95 | f  |   40.05
+  1 |    40 | 10040 | 10  | 10040 |   40.05 | -60.95 | f  |   40.05
+  1 |    41 | 10041 | 5   | 10041 |   41.05 | -59.95 | f  |   41.05
+  1 |    41 | 10041 | 10  | 10041 |   41.05 | -59.95 | f  |   41.05
+  1 |    42 | 10042 | 5   | 10042 |   42.05 | -58.95 | f  |   42.05
+  1 |    42 | 10042 | 10  | 10042 |   42.05 | -58.95 | f  |   42.05
+  1 |    43 | 10043 | 5   | 10043 |   43.05 | -57.95 | f  |   43.05
+  1 |    43 | 10043 | 10  | 10043 |   43.05 | -57.95 | f  |   43.05
+  1 |    44 | 10044 | 5   | 10044 |   44.05 | -56.95 | f  |   44.05
+  1 |    44 | 10044 | 10  | 10044 |   44.05 | -56.95 | f  |   44.05
+  1 |    45 | 10045 | 5   | 10045 |   45.05 | -55.95 | f  |   45.05
+  1 |    45 | 10045 | 10  | 10045 |   45.05 | -55.95 | f  |   45.05
+  1 |    46 | 10046 | 5   | 10046 |   46.05 | -54.95 | f  |   46.05
+  1 |    46 | 10046 | 10  | 10046 |   46.05 | -54.95 | f  |   46.05
+  1 |    47 | 10047 | 5   | 10047 |   47.05 | -53.95 | f  |   47.05
+  1 |    47 | 10047 | 10  | 10047 |   47.05 | -53.95 | f  |   47.05
+  1 |    48 | 10048 | 5   | 10048 |   48.05 | -52.95 | f  |   48.05
+  1 |    48 | 10048 | 10  | 10048 |   48.05 | -52.95 | f  |   48.05
+  1 |    49 | 10049 | 5   | 10049 |   49.05 | -51.95 | f  |   49.05
+  1 |    49 | 10049 | 10  | 10049 |   49.05 | -51.95 | f  |   49.05
+  1 |    50 | 10050 | 5   | 10050 |   50.05 | -50.95 | f  |   50.05
+  1 |    50 | 10050 | 10  | 10050 |   50.05 | -50.95 | f  |   50.05
+  1 |    51 | 10051 | 5   | 10051 |   51.05 | -49.95 | f  |   51.05
+  1 |    51 | 10051 | 10  | 10051 |   51.05 | -49.95 | f  |   51.05
+  1 |    52 | 10052 | 5   | 10052 |   52.05 | -48.95 | f  |   52.05
+  1 |    52 | 10052 | 10  | 10052 |   52.05 | -48.95 | f  |   52.05
+  1 |    53 | 10053 | 5   | 10053 |   53.05 | -47.95 | f  |   53.05
+  1 |    53 | 10053 | 10  | 10053 |   53.05 | -47.95 | f  |   53.05
+  1 |    54 | 10054 | 5   | 10054 |   54.05 | -46.95 | f  |   54.05
+  1 |    54 | 10054 | 10  | 10054 |   54.05 | -46.95 | f  |   54.05
+  1 |    55 | 10055 | 5   | 10055 |   55.05 | -45.95 | f  |   55.05
+  1 |    55 | 10055 | 10  | 10055 |   55.05 | -45.95 | f  |   55.05
+  1 |    56 | 10056 | 5   | 10056 |   56.05 | -44.95 | f  |   56.05
+  1 |    56 | 10056 | 10  | 10056 |   56.05 | -44.95 | f  |   56.05
+  1 |    57 | 10057 | 5   | 10057 |   57.05 | -43.95 | f  |   57.05
+  1 |    57 | 10057 | 10  | 10057 |   57.05 | -43.95 | f  |   57.05
+  1 |    58 | 10058 | 5   | 10058 |   58.05 | -42.95 | f  |   58.05
+  1 |    58 | 10058 | 10  | 10058 |   58.05 | -42.95 | f  |   58.05
+  1 |    59 | 10059 | 5   | 10059 |   59.05 | -41.95 | f  |   59.05
+  1 |    59 | 10059 | 10  | 10059 |   59.05 | -41.95 | f  |   59.05
+  1 |    60 | 10060 | 5   | 10060 |   60.05 | -40.95 | f  |   60.05
+  1 |    60 | 10060 | 10  | 10060 |   60.05 | -40.95 | f  |   60.05
+  1 |    61 | 10061 | 5   | 10061 |   61.05 | -39.95 | f  |   61.05
+  1 |    61 | 10061 | 10  | 10061 |   61.05 | -39.95 | f  |   61.05
+  1 |    62 | 10062 | 5   | 10062 |   62.05 | -38.95 | f  |   62.05
+  1 |    62 | 10062 | 10  | 10062 |   62.05 | -38.95 | f  |   62.05
+  1 |    63 | 10063 | 5   | 10063 |   63.05 | -37.95 | f  |   63.05
+  1 |    63 | 10063 | 10  | 10063 |   63.05 | -37.95 | f  |   63.05
+  1 |    64 | 10064 | 5   | 10064 |   64.05 | -36.95 | f  |   64.05
+  1 |    64 | 10064 | 10  | 10064 |   64.05 | -36.95 | f  |   64.05
+  1 |    65 | 10065 | 5   | 10065 |   65.05 | -35.95 | f  |   65.05
+  1 |    65 | 10065 | 10  | 10065 |   65.05 | -35.95 | f  |   65.05
+  1 |    66 | 10066 | 5   | 10066 |   66.05 | -34.95 | f  |   66.05
+  1 |    66 | 10066 | 10  | 10066 |   66.05 | -34.95 | f  |   66.05
+  1 |    67 | 10067 | 5   | 10067 |   67.05 | -33.95 | f  |   67.05
+  1 |    67 | 10067 | 10  | 10067 |   67.05 | -33.95 | f  |   67.05
+  1 |    68 | 10068 | 5   | 10068 |   68.05 | -32.95 | f  |   68.05
+  1 |    68 | 10068 | 10  | 10068 |   68.05 | -32.95 | f  |   68.05
+  1 |    69 | 10069 | 5   | 10069 |   69.05 | -31.95 | f  |   69.05
+  1 |    69 | 10069 | 10  | 10069 |   69.05 | -31.95 | f  |   69.05
+  1 |    70 | 10070 | 5   | 10070 |   70.05 | -30.95 | f  |   70.05
+  1 |    70 | 10070 | 10  | 10070 |   70.05 | -30.95 | f  |   70.05
+  1 |    71 | 10071 | 5   | 10071 |   71.05 | -29.95 | f  |   71.05
+  1 |    71 | 10071 | 10  | 10071 |   71.05 | -29.95 | f  |   71.05
+  1 |    72 | 10072 | 5   | 10072 |   72.05 | -28.95 | f  |   72.05
+  1 |    72 | 10072 | 10  | 10072 |   72.05 | -28.95 | f  |   72.05
+  1 |    73 | 10073 | 5   | 10073 |   73.05 | -27.95 | f  |   73.05
+  1 |    73 | 10073 | 10  | 10073 |   73.05 | -27.95 | f  |   73.05
+  1 |    74 | 10074 | 5   | 10074 |   74.05 | -26.95 | f  |   74.05
+  1 |    74 | 10074 | 10  | 10074 |   74.05 | -26.95 | f  |   74.05
+  1 |    75 | 10075 | 5   | 10075 |   75.05 | -25.95 | f  |   75.05
+  1 |    75 | 10075 | 10  | 10075 |   75.05 | -25.95 | f  |   75.05
+  1 |    76 | 10076 | 5   | 10076 |   76.05 | -24.95 | f  |   76.05
+  1 |    76 | 10076 | 10  | 10076 |   76.05 | -24.95 | f  |   76.05
+  1 |    77 | 10077 | 5   | 10077 |   77.05 | -23.95 | f  |   77.05
+  1 |    77 | 10077 | 10  | 10077 |   77.05 | -23.95 | f  |   77.05
+  1 |    78 | 10078 | 5   | 10078 |   78.05 | -22.95 | f  |   78.05
+  1 |    78 | 10078 | 10  | 10078 |   78.05 | -22.95 | f  |   78.05
+  1 |    79 | 10079 | 5   | 10079 |   79.05 | -21.95 | f  |   79.05
+  1 |    79 | 10079 | 10  | 10079 |   79.05 | -21.95 | f  |   79.05
+  1 |    80 | 10080 | 5   | 10080 |   80.05 | -20.95 | f  |   80.05
+  1 |    80 | 10080 | 10  | 10080 |   80.05 | -20.95 | f  |   80.05
+  1 |    81 | 10081 | 5   | 10081 |   81.05 | -19.95 | f  |   81.05
+  1 |    81 | 10081 | 10  | 10081 |   81.05 | -19.95 | f  |   81.05
+  1 |    82 | 10082 | 5   | 10082 |   82.05 | -18.95 | f  |   82.05
+  1 |    82 | 10082 | 10  | 10082 |   82.05 | -18.95 | f  |   82.05
+  1 |    83 | 10083 | 5   | 10083 |   83.05 | -17.95 | f  |   83.05
+  1 |    83 | 10083 | 10  | 10083 |   83.05 | -17.95 | f  |   83.05
+  1 |    84 | 10084 | 5   | 10084 |   84.05 | -16.95 | f  |   84.05
+  1 |    84 | 10084 | 10  | 10084 |   84.05 | -16.95 | f  |   84.05
+  1 |    85 | 10085 | 5   | 10085 |   85.05 | -15.95 | f  |   85.05
+  1 |    85 | 10085 | 10  | 10085 |   85.05 | -15.95 | f  |   85.05
+  1 |    86 | 10086 | 5   | 10086 |   86.05 | -14.95 | f  |   86.05
+  1 |    86 | 10086 | 10  | 10086 |   86.05 | -14.95 | f  |   86.05
+  1 |    87 | 10087 | 5   | 10087 |   87.05 | -13.95 | f  |   87.05
+  1 |    87 | 10087 | 10  | 10087 |   87.05 | -13.95 | f  |   87.05
+  1 |    88 | 10088 | 5   | 10088 |   88.05 | -12.95 | f  |   88.05
+  1 |    88 | 10088 | 10  | 10088 |   88.05 | -12.95 | f  |   88.05
+  1 |    89 | 10089 | 5   | 10089 |   89.05 | -11.95 | f  |   89.05
+  1 |    89 | 10089 | 10  | 10089 |   89.05 | -11.95 | f  |   89.05
+  1 |    90 | 10090 | 5   | 10090 |   90.05 | -10.95 | f  |   90.05
+  1 |    90 | 10090 | 10  | 10090 |   90.05 | -10.95 | f  |   90.05
+  1 |    91 | 10091 | 5   | 10091 |   91.05 |  -9.95 | f  |   91.05
+  1 |    91 | 10091 | 10  | 10091 |   91.05 |  -9.95 | f  |   91.05
+  1 |    92 | 10092 | 5   | 10092 |   92.05 |  -8.95 | f  |   92.05
+  1 |    92 | 10092 | 10  | 10092 |   92.05 |  -8.95 | f  |   92.05
+  1 |    93 | 10093 | 5   | 10093 |   93.05 |  -7.95 | f  |   93.05
+  1 |    93 | 10093 | 10  | 10093 |   93.05 |  -7.95 | f  |   93.05
+  1 |    94 | 10094 | 5   | 10094 |   94.05 |  -6.95 | f  |   94.05
+  1 |    94 | 10094 | 10  | 10094 |   94.05 |  -6.95 | f  |   94.05
+  1 |    95 | 10095 | 5   | 10095 |   95.05 |  -5.95 | f  |   95.05
+  1 |    95 | 10095 | 10  | 10095 |   95.05 |  -5.95 | f  |   95.05
+  1 |    96 | 10096 | 5   | 10096 |   96.05 |  -4.95 | f  |   96.05
+  1 |    96 | 10096 | 10  | 10096 |   96.05 |  -4.95 | f  |   96.05
+  1 |    97 | 10097 | 5   | 10097 |   97.05 |  -3.95 | f  |   97.05
+  1 |    97 | 10097 | 10  | 10097 |   97.05 |  -3.95 | f  |   97.05
+  1 |    98 | 10098 | 5   | 10098 |   98.05 |  -2.95 | f  |   98.05
+  1 |    98 | 10098 | 10  | 10098 |   98.05 |  -2.95 | f  |   98.05
+  1 |    99 | 10099 | 5   | 10099 |   99.05 |  -1.95 | f  |   99.05
+  1 |    99 | 10099 | 10  | 10099 |   99.05 |  -1.95 | f  |   99.05
+  1 |   100 | 10100 | 5   | 10100 |  100.05 |   -.95 | f  |  100.05
+  1 |   100 | 10100 | 10  | 10100 |  100.05 |   -.95 | f  |  100.05
+  1 | 10200 |  9300 | 0   | 15000 |     .05 |    100 | t  | 1055.55
+(202 rows)
+
+select * from number_data1 where c6 is null order by 1,2,3,4,5,6,7;
+ a | c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 
+---+----+----+----+----+----+----+----+----
+ 1 |    |    |    |    |    |    |    |   
+(1 row)
+
+select * from number_data1 where c6 is not null order by 1,2,3,4,5,6,7;
+ a  |  c1   |  c2   | c3  |  c4   |   c5    |   c6   | c7 |   c8    
+----+-------+-------+-----+-------+---------+--------+----+---------
+ -1 |   103 |    10 | 100 |     1 | 1000.99 |  256.8 | t  |  100.50
+  1 |     1 | 10001 | 5   | 10001 |    1.05 | -99.95 | f  |    1.05
+  1 |     1 | 10001 | 10  | 10001 |    1.05 | -99.95 | f  |    1.05
+  1 |     2 | 10002 | 5   | 10002 |    2.05 | -98.95 | f  |    2.05
+  1 |     2 | 10002 | 10  | 10002 |    2.05 | -98.95 | f  |    2.05
+  1 |     3 | 10003 | 5   | 10003 |    3.05 | -97.95 | f  |    3.05
+  1 |     3 | 10003 | 10  | 10003 |    3.05 | -97.95 | f  |    3.05
+  1 |     4 | 10004 | 5   | 10004 |    4.05 | -96.95 | f  |    4.05
+  1 |     4 | 10004 | 10  | 10004 |    4.05 | -96.95 | f  |    4.05
+  1 |     5 | 10005 | 5   | 10005 |    5.05 | -95.95 | f  |    5.05
+  1 |     5 | 10005 | 10  | 10005 |    5.05 | -95.95 | f  |    5.05
+  1 |     6 | 10006 | 5   | 10006 |    6.05 | -94.95 | f  |    6.05
+  1 |     6 | 10006 | 10  | 10006 |    6.05 | -94.95 | f  |    6.05
+  1 |     7 | 10007 | 5   | 10007 |    7.05 | -93.95 | f  |    7.05
+  1 |     7 | 10007 | 10  | 10007 |    7.05 | -93.95 | f  |    7.05
+  1 |     8 | 10008 | 5   | 10008 |    8.05 | -92.95 | f  |    8.05
+  1 |     8 | 10008 | 10  | 10008 |    8.05 | -92.95 | f  |    8.05
+  1 |     9 | 10009 | 5   | 10009 |    9.05 | -91.95 | f  |    9.05
+  1 |     9 | 10009 | 10  | 10009 |    9.05 | -91.95 | f  |    9.05
+  1 |    10 | 10010 | 5   | 10010 |   10.05 | -90.95 | f  |   10.05
+  1 |    10 | 10010 | 10  | 10010 |   10.05 | -90.95 | f  |   10.05
+  1 |    11 | 10011 | 5   | 10011 |   11.05 | -89.95 | f  |   11.05
+  1 |    11 | 10011 | 10  | 10011 |   11.05 | -89.95 | f  |   11.05
+  1 |    12 | 10012 | 5   | 10012 |   12.05 | -88.95 | f  |   12.05
+  1 |    12 | 10012 | 10  | 10012 |   12.05 | -88.95 | f  |   12.05
+  1 |    13 | 10013 | 5   | 10013 |   13.05 | -87.95 | f  |   13.05
+  1 |    13 | 10013 | 10  | 10013 |   13.05 | -87.95 | f  |   13.05
+  1 |    14 | 10014 | 5   | 10014 |   14.05 | -86.95 | f  |   14.05
+  1 |    14 | 10014 | 10  | 10014 |   14.05 | -86.95 | f  |   14.05
+  1 |    15 | 10015 | 5   | 10015 |   15.05 | -85.95 | f  |   15.05
+  1 |    15 | 10015 | 10  | 10015 |   15.05 | -85.95 | f  |   15.05
+  1 |    16 | 10016 | 5   | 10016 |   16.05 | -84.95 | f  |   16.05
+  1 |    16 | 10016 | 10  | 10016 |   16.05 | -84.95 | f  |   16.05
+  1 |    17 | 10017 | 5   | 10017 |   17.05 | -83.95 | f  |   17.05
+  1 |    17 | 10017 | 10  | 10017 |   17.05 | -83.95 | f  |   17.05
+  1 |    18 | 10018 | 5   | 10018 |   18.05 | -82.95 | f  |   18.05
+  1 |    18 | 10018 | 10  | 10018 |   18.05 | -82.95 | f  |   18.05
+  1 |    19 | 10019 | 5   | 10019 |   19.05 | -81.95 | f  |   19.05
+  1 |    19 | 10019 | 10  | 10019 |   19.05 | -81.95 | f  |   19.05
+  1 |    20 | 10020 | 5   | 10020 |   20.05 | -80.95 | f  |   20.05
+  1 |    20 | 10020 | 10  | 10020 |   20.05 | -80.95 | f  |   20.05
+  1 |    21 | 10021 | 5   | 10021 |   21.05 | -79.95 | f  |   21.05
+  1 |    21 | 10021 | 10  | 10021 |   21.05 | -79.95 | f  |   21.05
+  1 |    22 | 10022 | 5   | 10022 |   22.05 | -78.95 | f  |   22.05
+  1 |    22 | 10022 | 10  | 10022 |   22.05 | -78.95 | f  |   22.05
+  1 |    23 | 10023 | 5   | 10023 |   23.05 | -77.95 | f  |   23.05
+  1 |    23 | 10023 | 10  | 10023 |   23.05 | -77.95 | f  |   23.05
+  1 |    24 | 10024 | 5   | 10024 |   24.05 | -76.95 | f  |   24.05
+  1 |    24 | 10024 | 10  | 10024 |   24.05 | -76.95 | f  |   24.05
+  1 |    25 | 10025 | 5   | 10025 |   25.05 | -75.95 | f  |   25.05
+  1 |    25 | 10025 | 10  | 10025 |   25.05 | -75.95 | f  |   25.05
+  1 |    26 | 10026 | 5   | 10026 |   26.05 | -74.95 | f  |   26.05
+  1 |    26 | 10026 | 10  | 10026 |   26.05 | -74.95 | f  |   26.05
+  1 |    27 | 10027 | 5   | 10027 |   27.05 | -73.95 | f  |   27.05
+  1 |    27 | 10027 | 10  | 10027 |   27.05 | -73.95 | f  |   27.05
+  1 |    28 | 10028 | 5   | 10028 |   28.05 | -72.95 | f  |   28.05
+  1 |    28 | 10028 | 10  | 10028 |   28.05 | -72.95 | f  |   28.05
+  1 |    29 | 10029 | 5   | 10029 |   29.05 | -71.95 | f  |   29.05
+  1 |    29 | 10029 | 10  | 10029 |   29.05 | -71.95 | f  |   29.05
+  1 |    30 | 10030 | 5   | 10030 |   30.05 | -70.95 | f  |   30.05
+  1 |    30 | 10030 | 10  | 10030 |   30.05 | -70.95 | f  |   30.05
+  1 |    31 | 10031 | 5   | 10031 |   31.05 | -69.95 | f  |   31.05
+  1 |    31 | 10031 | 10  | 10031 |   31.05 | -69.95 | f  |   31.05
+  1 |    32 | 10032 | 5   | 10032 |   32.05 | -68.95 | f  |   32.05
+  1 |    32 | 10032 | 10  | 10032 |   32.05 | -68.95 | f  |   32.05
+  1 |    33 | 10033 | 5   | 10033 |   33.05 | -67.95 | f  |   33.05
+  1 |    33 | 10033 | 10  | 10033 |   33.05 | -67.95 | f  |   33.05
+  1 |    34 | 10034 | 5   | 10034 |   34.05 | -66.95 | f  |   34.05
+  1 |    34 | 10034 | 10  | 10034 |   34.05 | -66.95 | f  |   34.05
+  1 |    35 | 10035 | 5   | 10035 |   35.05 | -65.95 | f  |   35.05
+  1 |    35 | 10035 | 10  | 10035 |   35.05 | -65.95 | f  |   35.05
+  1 |    36 | 10036 | 5   | 10036 |   36.05 | -64.95 | f  |   36.05
+  1 |    36 | 10036 | 10  | 10036 |   36.05 | -64.95 | f  |   36.05
+  1 |    37 | 10037 | 5   | 10037 |   37.05 | -63.95 | f  |   37.05
+  1 |    37 | 10037 | 10  | 10037 |   37.05 | -63.95 | f  |   37.05
+  1 |    38 | 10038 | 5   | 10038 |   38.05 | -62.95 | f  |   38.05
+  1 |    38 | 10038 | 10  | 10038 |   38.05 | -62.95 | f  |   38.05
+  1 |    39 | 10039 | 5   | 10039 |   39.05 | -61.95 | f  |   39.05
+  1 |    39 | 10039 | 10  | 10039 |   39.05 | -61.95 | f  |   39.05
+  1 |    40 | 10040 | 5   | 10040 |   40.05 | -60.95 | f  |   40.05
+  1 |    40 | 10040 | 10  | 10040 |   40.05 | -60.95 | f  |   40.05
+  1 |    41 | 10041 | 5   | 10041 |   41.05 | -59.95 | f  |   41.05
+  1 |    41 | 10041 | 10  | 10041 |   41.05 | -59.95 | f  |   41.05
+  1 |    42 | 10042 | 5   | 10042 |   42.05 | -58.95 | f  |   42.05
+  1 |    42 | 10042 | 10  | 10042 |   42.05 | -58.95 | f  |   42.05
+  1 |    43 | 10043 | 5   | 10043 |   43.05 | -57.95 | f  |   43.05
+  1 |    43 | 10043 | 10  | 10043 |   43.05 | -57.95 | f  |   43.05
+  1 |    44 | 10044 | 5   | 10044 |   44.05 | -56.95 | f  |   44.05
+  1 |    44 | 10044 | 10  | 10044 |   44.05 | -56.95 | f  |   44.05
+  1 |    45 | 10045 | 5   | 10045 |   45.05 | -55.95 | f  |   45.05
+  1 |    45 | 10045 | 10  | 10045 |   45.05 | -55.95 | f  |   45.05
+  1 |    46 | 10046 | 5   | 10046 |   46.05 | -54.95 | f  |   46.05
+  1 |    46 | 10046 | 10  | 10046 |   46.05 | -54.95 | f  |   46.05
+  1 |    47 | 10047 | 5   | 10047 |   47.05 | -53.95 | f  |   47.05
+  1 |    47 | 10047 | 10  | 10047 |   47.05 | -53.95 | f  |   47.05
+  1 |    48 | 10048 | 5   | 10048 |   48.05 | -52.95 | f  |   48.05
+  1 |    48 | 10048 | 10  | 10048 |   48.05 | -52.95 | f  |   48.05
+  1 |    49 | 10049 | 5   | 10049 |   49.05 | -51.95 | f  |   49.05
+  1 |    49 | 10049 | 10  | 10049 |   49.05 | -51.95 | f  |   49.05
+  1 |    50 | 10050 | 5   | 10050 |   50.05 | -50.95 | f  |   50.05
+  1 |    50 | 10050 | 10  | 10050 |   50.05 | -50.95 | f  |   50.05
+  1 |    51 | 10051 | 5   | 10051 |   51.05 | -49.95 | f  |   51.05
+  1 |    51 | 10051 | 10  | 10051 |   51.05 | -49.95 | f  |   51.05
+  1 |    52 | 10052 | 5   | 10052 |   52.05 | -48.95 | f  |   52.05
+  1 |    52 | 10052 | 10  | 10052 |   52.05 | -48.95 | f  |   52.05
+  1 |    53 | 10053 | 5   | 10053 |   53.05 | -47.95 | f  |   53.05
+  1 |    53 | 10053 | 10  | 10053 |   53.05 | -47.95 | f  |   53.05
+  1 |    54 | 10054 | 5   | 10054 |   54.05 | -46.95 | f  |   54.05
+  1 |    54 | 10054 | 10  | 10054 |   54.05 | -46.95 | f  |   54.05
+  1 |    55 | 10055 | 5   | 10055 |   55.05 | -45.95 | f  |   55.05
+  1 |    55 | 10055 | 10  | 10055 |   55.05 | -45.95 | f  |   55.05
+  1 |    56 | 10056 | 5   | 10056 |   56.05 | -44.95 | f  |   56.05
+  1 |    56 | 10056 | 10  | 10056 |   56.05 | -44.95 | f  |   56.05
+  1 |    57 | 10057 | 5   | 10057 |   57.05 | -43.95 | f  |   57.05
+  1 |    57 | 10057 | 10  | 10057 |   57.05 | -43.95 | f  |   57.05
+  1 |    58 | 10058 | 5   | 10058 |   58.05 | -42.95 | f  |   58.05
+  1 |    58 | 10058 | 10  | 10058 |   58.05 | -42.95 | f  |   58.05
+  1 |    59 | 10059 | 5   | 10059 |   59.05 | -41.95 | f  |   59.05
+  1 |    59 | 10059 | 10  | 10059 |   59.05 | -41.95 | f  |   59.05
+  1 |    60 | 10060 | 5   | 10060 |   60.05 | -40.95 | f  |   60.05
+  1 |    60 | 10060 | 10  | 10060 |   60.05 | -40.95 | f  |   60.05
+  1 |    61 | 10061 | 5   | 10061 |   61.05 | -39.95 | f  |   61.05
+  1 |    61 | 10061 | 10  | 10061 |   61.05 | -39.95 | f  |   61.05
+  1 |    62 | 10062 | 5   | 10062 |   62.05 | -38.95 | f  |   62.05
+  1 |    62 | 10062 | 10  | 10062 |   62.05 | -38.95 | f  |   62.05
+  1 |    63 | 10063 | 5   | 10063 |   63.05 | -37.95 | f  |   63.05
+  1 |    63 | 10063 | 10  | 10063 |   63.05 | -37.95 | f  |   63.05
+  1 |    64 | 10064 | 5   | 10064 |   64.05 | -36.95 | f  |   64.05
+  1 |    64 | 10064 | 10  | 10064 |   64.05 | -36.95 | f  |   64.05
+  1 |    65 | 10065 | 5   | 10065 |   65.05 | -35.95 | f  |   65.05
+  1 |    65 | 10065 | 10  | 10065 |   65.05 | -35.95 | f  |   65.05
+  1 |    66 | 10066 | 5   | 10066 |   66.05 | -34.95 | f  |   66.05
+  1 |    66 | 10066 | 10  | 10066 |   66.05 | -34.95 | f  |   66.05
+  1 |    67 | 10067 | 5   | 10067 |   67.05 | -33.95 | f  |   67.05
+  1 |    67 | 10067 | 10  | 10067 |   67.05 | -33.95 | f  |   67.05
+  1 |    68 | 10068 | 5   | 10068 |   68.05 | -32.95 | f  |   68.05
+  1 |    68 | 10068 | 10  | 10068 |   68.05 | -32.95 | f  |   68.05
+  1 |    69 | 10069 | 5   | 10069 |   69.05 | -31.95 | f  |   69.05
+  1 |    69 | 10069 | 10  | 10069 |   69.05 | -31.95 | f  |   69.05
+  1 |    70 | 10070 | 5   | 10070 |   70.05 | -30.95 | f  |   70.05
+  1 |    70 | 10070 | 10  | 10070 |   70.05 | -30.95 | f  |   70.05
+  1 |    71 | 10071 | 5   | 10071 |   71.05 | -29.95 | f  |   71.05
+  1 |    71 | 10071 | 10  | 10071 |   71.05 | -29.95 | f  |   71.05
+  1 |    72 | 10072 | 5   | 10072 |   72.05 | -28.95 | f  |   72.05
+  1 |    72 | 10072 | 10  | 10072 |   72.05 | -28.95 | f  |   72.05
+  1 |    73 | 10073 | 5   | 10073 |   73.05 | -27.95 | f  |   73.05
+  1 |    73 | 10073 | 10  | 10073 |   73.05 | -27.95 | f  |   73.05
+  1 |    74 | 10074 | 5   | 10074 |   74.05 | -26.95 | f  |   74.05
+  1 |    74 | 10074 | 10  | 10074 |   74.05 | -26.95 | f  |   74.05
+  1 |    75 | 10075 | 5   | 10075 |   75.05 | -25.95 | f  |   75.05
+  1 |    75 | 10075 | 10  | 10075 |   75.05 | -25.95 | f  |   75.05
+  1 |    76 | 10076 | 5   | 10076 |   76.05 | -24.95 | f  |   76.05
+  1 |    76 | 10076 | 10  | 10076 |   76.05 | -24.95 | f  |   76.05
+  1 |    77 | 10077 | 5   | 10077 |   77.05 | -23.95 | f  |   77.05
+  1 |    77 | 10077 | 10  | 10077 |   77.05 | -23.95 | f  |   77.05
+  1 |    78 | 10078 | 5   | 10078 |   78.05 | -22.95 | f  |   78.05
+  1 |    78 | 10078 | 10  | 10078 |   78.05 | -22.95 | f  |   78.05
+  1 |    79 | 10079 | 5   | 10079 |   79.05 | -21.95 | f  |   79.05
+  1 |    79 | 10079 | 10  | 10079 |   79.05 | -21.95 | f  |   79.05
+  1 |    80 | 10080 | 5   | 10080 |   80.05 | -20.95 | f  |   80.05
+  1 |    80 | 10080 | 10  | 10080 |   80.05 | -20.95 | f  |   80.05
+  1 |    81 | 10081 | 5   | 10081 |   81.05 | -19.95 | f  |   81.05
+  1 |    81 | 10081 | 10  | 10081 |   81.05 | -19.95 | f  |   81.05
+  1 |    82 | 10082 | 5   | 10082 |   82.05 | -18.95 | f  |   82.05
+  1 |    82 | 10082 | 10  | 10082 |   82.05 | -18.95 | f  |   82.05
+  1 |    83 | 10083 | 5   | 10083 |   83.05 | -17.95 | f  |   83.05
+  1 |    83 | 10083 | 10  | 10083 |   83.05 | -17.95 | f  |   83.05
+  1 |    84 | 10084 | 5   | 10084 |   84.05 | -16.95 | f  |   84.05
+  1 |    84 | 10084 | 10  | 10084 |   84.05 | -16.95 | f  |   84.05
+  1 |    85 | 10085 | 5   | 10085 |   85.05 | -15.95 | f  |   85.05
+  1 |    85 | 10085 | 10  | 10085 |   85.05 | -15.95 | f  |   85.05
+  1 |    86 | 10086 | 5   | 10086 |   86.05 | -14.95 | f  |   86.05
+  1 |    86 | 10086 | 10  | 10086 |   86.05 | -14.95 | f  |   86.05
+  1 |    87 | 10087 | 5   | 10087 |   87.05 | -13.95 | f  |   87.05
+  1 |    87 | 10087 | 10  | 10087 |   87.05 | -13.95 | f  |   87.05
+  1 |    88 | 10088 | 5   | 10088 |   88.05 | -12.95 | f  |   88.05
+  1 |    88 | 10088 | 10  | 10088 |   88.05 | -12.95 | f  |   88.05
+  1 |    89 | 10089 | 5   | 10089 |   89.05 | -11.95 | f  |   89.05
+  1 |    89 | 10089 | 10  | 10089 |   89.05 | -11.95 | f  |   89.05
+  1 |    90 | 10090 | 5   | 10090 |   90.05 | -10.95 | f  |   90.05
+  1 |    90 | 10090 | 10  | 10090 |   90.05 | -10.95 | f  |   90.05
+  1 |    91 | 10091 | 5   | 10091 |   91.05 |  -9.95 | f  |   91.05
+  1 |    91 | 10091 | 10  | 10091 |   91.05 |  -9.95 | f  |   91.05
+  1 |    92 | 10092 | 5   | 10092 |   92.05 |  -8.95 | f  |   92.05
+  1 |    92 | 10092 | 10  | 10092 |   92.05 |  -8.95 | f  |   92.05
+  1 |    93 | 10093 | 5   | 10093 |   93.05 |  -7.95 | f  |   93.05
+  1 |    93 | 10093 | 10  | 10093 |   93.05 |  -7.95 | f  |   93.05
+  1 |    94 | 10094 | 5   | 10094 |   94.05 |  -6.95 | f  |   94.05
+  1 |    94 | 10094 | 10  | 10094 |   94.05 |  -6.95 | f  |   94.05
+  1 |    95 | 10095 | 5   | 10095 |   95.05 |  -5.95 | f  |   95.05
+  1 |    95 | 10095 | 10  | 10095 |   95.05 |  -5.95 | f  |   95.05
+  1 |    96 | 10096 | 5   | 10096 |   96.05 |  -4.95 | f  |   96.05
+  1 |    96 | 10096 | 10  | 10096 |   96.05 |  -4.95 | f  |   96.05
+  1 |    97 | 10097 | 5   | 10097 |   97.05 |  -3.95 | f  |   97.05
+  1 |    97 | 10097 | 10  | 10097 |   97.05 |  -3.95 | f  |   97.05
+  1 |    98 | 10098 | 5   | 10098 |   98.05 |  -2.95 | f  |   98.05
+  1 |    98 | 10098 | 10  | 10098 |   98.05 |  -2.95 | f  |   98.05
+  1 |    99 | 10099 | 5   | 10099 |   99.05 |  -1.95 | f  |   99.05
+  1 |    99 | 10099 | 10  | 10099 |   99.05 |  -1.95 | f  |   99.05
+  1 |   100 | 10100 | 5   | 10100 |  100.05 |   -.95 | f  |  100.05
+  1 |   100 | 10100 | 10  | 10100 |  100.05 |   -.95 | f  |  100.05
+  1 | 10200 |  9300 | 0   | 15000 |     .05 |    100 | t  | 1055.55
+(202 rows)
+
+select * from number_data1 where c1=5 order by 1,2,3,4,5,6,7;
+ a | c1 |  c2   | c3 |  c4   |  c5  |   c6   | c7 |  c8  
+---+----+-------+----+-------+------+--------+----+------
+ 1 |  5 | 10005 | 5  | 10005 | 5.05 | -95.95 | f  | 5.05
+ 1 |  5 | 10005 | 10 | 10005 | 5.05 | -95.95 | f  | 5.05
+(2 rows)
+
+select * from number_data1 where c2=9300 order by 1,2,3,4,5,6,7;
+ a |  c1   |  c2  | c3 |  c4   | c5  | c6  | c7 |   c8    
+---+-------+------+----+-------+-----+-----+----+---------
+ 1 | 10200 | 9300 | 0  | 15000 | .05 | 100 | t  | 1055.55
+(1 row)
+
+select * from number_data1 where c3=-1 order by 1,2,3,4,5,6,7;
+ a | c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 
+---+----+----+----+----+----+----+----+----
+(0 rows)
+
+select * from number_data1 where c4=15000 order by 1,2,3,4,5,6,7;
+ a |  c1   |  c2  | c3 |  c4   | c5  | c6  | c7 |   c8    
+---+-------+------+----+-------+-----+-----+----+---------
+ 1 | 10200 | 9300 | 0  | 15000 | .05 | 100 | t  | 1055.55
+(1 row)
+
+select * from number_data1 where c5=1.05::float4 order by 1,2,3,4,5,6,7;
+ a | c1 |  c2   | c3 |  c4   |  c5  |   c6   | c7 |  c8  
+---+----+-------+----+-------+------+--------+----+------
+ 1 |  1 | 10001 | 5  | 10001 | 1.05 | -99.95 | f  | 1.05
+ 1 |  1 | 10001 | 10 | 10001 | 1.05 | -99.95 | f  | 1.05
+(2 rows)
+
+select * from number_data1 where c6>-3 order by 1,2,3,4,5,6,7;
+ a  |  c1   |  c2   | c3  |  c4   |   c5    |  c6   | c7 |   c8    
+----+-------+-------+-----+-------+---------+-------+----+---------
+ -1 |   103 |    10 | 100 |     1 | 1000.99 | 256.8 | t  |  100.50
+  1 |    98 | 10098 | 5   | 10098 |   98.05 | -2.95 | f  |   98.05
+  1 |    98 | 10098 | 10  | 10098 |   98.05 | -2.95 | f  |   98.05
+  1 |    99 | 10099 | 5   | 10099 |   99.05 | -1.95 | f  |   99.05
+  1 |    99 | 10099 | 10  | 10099 |   99.05 | -1.95 | f  |   99.05
+  1 |   100 | 10100 | 5   | 10100 |  100.05 |  -.95 | f  |  100.05
+  1 |   100 | 10100 | 10  | 10100 |  100.05 |  -.95 | f  |  100.05
+  1 | 10200 |  9300 | 0   | 15000 |     .05 |   100 | t  | 1055.55
+(8 rows)
+
+select * from number_data1 where c7=true order by 1,2,3,4,5,6,7;
+ a  |  c1   |  c2  | c3  |  c4   |   c5    |  c6   | c7 |   c8    
+----+-------+------+-----+-------+---------+-------+----+---------
+ -1 |   103 |   10 | 100 |     1 | 1000.99 | 256.8 | t  |  100.50
+  1 | 10200 | 9300 | 0   | 15000 |     .05 |   100 | t  | 1055.55
+(2 rows)
+
+select * from number_data1 where c8 is null order by 1,2,3,4,5,6,7;
+ a | c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 
+---+----+----+----+----+----+----+----+----
+ 1 |    |    |    |    |    |    |    |   
+(1 row)
+
+select * from string_data1 where c2='123' and c7='法国' order by 1,2,3,4,5,6,7;
+ a | c1 | c2 | c3 | c4 | c41 | c42 | c5 | c6 | c7 | c8 | c9 
+---+----+----+----+----+-----+-----+----+----+----+----+----
+(0 rows)
+
+select * from string_data1 where c9=9876.123 order by 1,2,3,4,5,6,7;
+ a | c1 |     c2     | c3  | c4  | c41 | c42 | c5  | c6 |  c7  |    c8    |     c9     
+---+----+------------+-----+-----+-----+-----+-----+----+------+----------+------------
+ 2 | 4  | 456        | 456 | 456 | 456 | 456 | 456 | 4  | 法国 | 9876.123 | 9876.12300
+(1 row)
+
+select * from other_data1 where c1='12-10-2010' and c6='2013-12-11 pst' order by 1,2,3,4,5,6,7;
+ a |            c1            |     c2      |    c3    |            c4            |            c5            |              c6              |            c7            |    c8     | c9  |   c10   
+---+--------------------------+-------------+----------+--------------------------+--------------------------+------------------------------+--------------------------+-----------+-----+---------
+ 1 | Fri Dec 10 00:00:00 2010 | 21:21:21-08 | 21:21:21 | Sun Dec 12 00:00:00 2010 | Sun Dec 12 00:00:00 2010 | Wed Dec 11 00:00:00 2013 PST | Sat Apr 12 04:05:00 2003 | @ 2 years | 234 | $100.00
+ 1 | Fri Dec 10 00:00:00 2010 | 21:21:21-08 | 21:21:21 | Sun Dec 12 00:00:00 2010 | Sun Dec 12 00:00:00 2010 | Wed Dec 11 00:00:00 2013 PST | Sat Apr 12 04:05:00 2003 | @ 2 years | 234 | $100.00
+(2 rows)
+
+select * from other_data1 where c9 is not null order by 1,2,3,4,5,6,7;
+ a |            c1            |     c2      |    c3    |            c4            |            c5            |              c6              |            c7            |    c8     | c9  |   c10   
+---+--------------------------+-------------+----------+--------------------------+--------------------------+------------------------------+--------------------------+-----------+-----+---------
+ 1 | Fri Dec 10 00:00:00 2010 | 21:21:21-08 | 21:21:21 | Sun Dec 12 00:00:00 2010 | Sun Dec 12 00:00:00 2010 | Wed Dec 11 00:00:00 2013 PST | Sat Apr 12 04:05:00 2003 | @ 2 years | 234 | $100.00
+ 1 | Fri Dec 10 00:00:00 2010 | 21:21:21-08 | 21:21:21 | Sun Dec 12 00:00:00 2010 | Sun Dec 12 00:00:00 2010 | Wed Dec 11 00:00:00 2013 PST | Sat Apr 12 04:05:00 2003 | @ 2 years | 234 | $100.00
+(2 rows)
+
+select * from number_data2 where c1=10200 and c2=9300 order by 1,2,3,4,5,6,7;
+ a |  c1   |  c2  | c3 |  c4   | c5  | c6  | c7 |   c8    
+---+-------+------+----+-------+-----+-----+----+---------
+ 1 | 10200 | 9300 | 0  | 15000 | .05 | 100 | t  | 1055.55
+(1 row)
+
+select * from number_data2 where c1=10200 and c2=9300 and c4=15001 order by 1,2,3,4,5,6,7;
+ a | c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 
+---+----+----+----+----+----+----+----+----
+(0 rows)
+
+-- test multi index
+create index idx3 on number_data3 using btree(c1,c3,c5);
+select * from number_data3 where c1=5 order by 1,2,3,4,5;
+ a | c1 |  c2   | c3 |  c4   |  c5  |   c6   | c7 |  c8  
+---+----+-------+----+-------+------+--------+----+------
+ 1 |  5 | 10005 | 5  | 10005 | 5.05 | -95.95 | f  | 5.05
+ 1 |  5 | 10005 | 10 | 10005 | 5.05 | -95.95 | f  | 5.05
+(2 rows)
+
+select c5,c7 from number_data3 where c1=10200 and c3=-1 and c4=1500 order by 1,2;
+ c5 | c7 
+----+----
+(0 rows)
+
+select c5,c7 from number_data3 where c1=5 order by 1,2;
+  c5  | c7 
+------+----
+ 5.05 | f
+ 5.05 | f
+(2 rows)
+
+select c1 from number_data3 where c1=5 order by 1;
+ c1 
+----
+  5
+  5
+(2 rows)
+
+select c3 from number_data3 where c1=5 order by 1;
+ c3 
+----
+ 5
+ 10
+(2 rows)
+
+select c4 from number_data3 where c1=5 order by 1;
+  c4   
+-------
+ 10005
+ 10005
+(2 rows)
+
+select c4 from number_data3 where c2-9300 order by 1;
+  c4   
+-------
+     1
+ 10001
+ 10001
+ 10002
+ 10002
+ 10003
+ 10003
+ 10004
+ 10004
+ 10005
+ 10005
+ 10006
+ 10006
+ 10007
+ 10007
+ 10008
+ 10008
+ 10009
+ 10009
+ 10010
+ 10010
+ 10011
+ 10011
+ 10012
+ 10012
+ 10013
+ 10013
+ 10014
+ 10014
+ 10015
+ 10015
+ 10016
+ 10016
+ 10017
+ 10017
+ 10018
+ 10018
+ 10019
+ 10019
+ 10020
+ 10020
+ 10021
+ 10021
+ 10022
+ 10022
+ 10023
+ 10023
+ 10024
+ 10024
+ 10025
+ 10025
+ 10026
+ 10026
+ 10027
+ 10027
+ 10028
+ 10028
+ 10029
+ 10029
+ 10030
+ 10030
+ 10031
+ 10031
+ 10032
+ 10032
+ 10033
+ 10033
+ 10034
+ 10034
+ 10035
+ 10035
+ 10036
+ 10036
+ 10037
+ 10037
+ 10038
+ 10038
+ 10039
+ 10039
+ 10040
+ 10040
+ 10041
+ 10041
+ 10042
+ 10042
+ 10043
+ 10043
+ 10044
+ 10044
+ 10045
+ 10045
+ 10046
+ 10046
+ 10047
+ 10047
+ 10048
+ 10048
+ 10049
+ 10049
+ 10050
+ 10050
+ 10051
+ 10051
+ 10052
+ 10052
+ 10053
+ 10053
+ 10054
+ 10054
+ 10055
+ 10055
+ 10056
+ 10056
+ 10057
+ 10057
+ 10058
+ 10058
+ 10059
+ 10059
+ 10060
+ 10060
+ 10061
+ 10061
+ 10062
+ 10062
+ 10063
+ 10063
+ 10064
+ 10064
+ 10065
+ 10065
+ 10066
+ 10066
+ 10067
+ 10067
+ 10068
+ 10068
+ 10069
+ 10069
+ 10070
+ 10070
+ 10071
+ 10071
+ 10072
+ 10072
+ 10073
+ 10073
+ 10074
+ 10074
+ 10075
+ 10075
+ 10076
+ 10076
+ 10077
+ 10077
+ 10078
+ 10078
+ 10079
+ 10079
+ 10080
+ 10080
+ 10081
+ 10081
+ 10082
+ 10082
+ 10083
+ 10083
+ 10084
+ 10084
+ 10085
+ 10085
+ 10086
+ 10086
+ 10087
+ 10087
+ 10088
+ 10088
+ 10089
+ 10089
+ 10090
+ 10090
+ 10091
+ 10091
+ 10092
+ 10092
+ 10093
+ 10093
+ 10094
+ 10094
+ 10095
+ 10095
+ 10096
+ 10096
+ 10097
+ 10097
+ 10098
+ 10098
+ 10099
+ 10099
+ 10100
+ 10100
+(201 rows)
+
+select count(*) from number_data3 where c1=5;
+ count 
+-------
+     2
+(1 row)
+
+select * from number_data3,replication_data1 where number_data3.c1=replication_data1.a order by 1,2,3,4,5,6,7,8,9,10,11,12,13;
+ a |  c1   |  c2   | c3 |  c4   |   c5   |   c6   | c7 |   c8    |   a   |   b    |    c    |  d  
+---+-------+-------+----+-------+--------+--------+----+---------+-------+--------+---------+-----
+ 1 |     1 | 10001 | 5  | 10001 |   1.05 | -99.95 | f  |    1.05 |     1 |   1.05 |   -1.05 | 123
+ 1 |     1 | 10001 | 10 | 10001 |   1.05 | -99.95 | f  |    1.05 |     1 |   1.05 |   -1.05 | 123
+ 1 |   100 | 10100 | 5  | 10100 | 100.05 |   -.95 | f  |  100.05 |   100 | 100.05 | -100.05 | 456
+ 1 |   100 | 10100 | 10 | 10100 | 100.05 |   -.95 | f  |  100.05 |   100 | 100.05 | -100.05 | 456
+ 1 | 10200 |  9300 | 0  | 15000 |    .05 |    100 | t  | 1055.55 | 10200 |    .05 |     100 | abc
+(5 rows)
+
+select c5 from number_data3,replication_data1 where number_data3.c1=replication_data1.a and replication_data1.c > 0 order by 1;
+ c5  
+-----
+ .05
+(1 row)
+
+select c4 from number_data3 where c1=(select max(a) from replication_data1) order by 1;
+  c4   
+-------
+ 15000
+(1 row)
+
+-- test pck result
+select * from pck_data1 where c2 is null;
+ a1 | a2 | a3 | a4 | a5 | a6 | a7 | a8 | a9 | a10 | a11 | b1 | b2 | b3 | b4 | b5 | b6 | b7 | b8 | b9 | b10 | c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | d1 | d2 
+----+----+----+----+----+----+----+----+----+-----+-----+----+----+----+----+----+----+----+----+----+-----+----+----+----+----+----+----+----+----+----+----
+    |    |    |    |    |    |    |    |    |     |     |    |    |    |    |    |    |    |    |    |     |    |    |    |    |    |    |    |    |    |   
+(1 row)
+
+set cstore_insert_mode='main';
+drop table if exists household_demographics;
+NOTICE:  table "household_demographics" does not exist, skipping
+create table household_demographics
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         tinyint               default 255,
+    hd_buy_potential          char(15)              default '    ',
+    hd_dep_count              smallint              default -32768 ,
+    hd_vehicle_count          numeric(1,0)          default 9           
+) 
+tablespace hdfs_ts distribute by hash(hd_demo_sk,hd_income_band_sk,hd_buy_potential,hd_dep_count,hd_vehicle_count);
+insert into household_demographics(hd_demo_sk) values(2147483647);
+insert into household_demographics(hd_demo_sk) values(-2147483648);
+insert into household_demographics(hd_demo_sk) values(0);
+select hd_income_band_sk,hd_buy_potential  
+from household_demographics   
+where hd_income_band_sk<0 
+and hd_demo_sk <=10;
+ hd_income_band_sk | hd_buy_potential 
+-------------------+------------------
+(0 rows)
+
+create index i_house_demo1 on household_demographics using btree(hd_demo_sk);
+select hd_income_band_sk,hd_buy_potential  
+from household_demographics   
+where hd_income_band_sk<0 
+and hd_demo_sk <=10;
+ hd_income_band_sk | hd_buy_potential 
+-------------------+------------------
+(0 rows)
+
+reset cstore_insert_mode;
+set cstore_insert_mode='main';
+drop table if exists abort_test_row;
+NOTICE:  table "abort_test_row" does not exist, skipping
+drop table if exists abort_test;
+NOTICE:  table "abort_test" does not exist, skipping
+create table abort_test_row(a int, b char(10));
+create table abort_test(a int, b char(2)) tablespace hdfs_ts;
+insert into abort_test_row values(1,'12');
+insert into abort_test_row values(2,'12345');
+insert into abort_test select * from abort_test_row;
+ERROR:  value too long for type character(2)
+CONTEXT:  referenced column: b
+create index on abort_test using btree(b);
+insert into abort_test select * from abort_test_row;
+ERROR:  value too long for type character(2)
+CONTEXT:  referenced column: b
+reset cstore_insert_mode;
+set cstore_insert_mode='main';
+drop table if exists update_index_test1;
+NOTICE:  table "update_index_test1" does not exist, skipping
+create table update_index_test1(a int, b int) tablespace hdfs_ts;
+insert into update_index_test1 values(1,1);
+update update_index_test1 set b=2 where a=1;
+create index on update_index_test1 using btree(a);
+update update_index_test1 set b=3 where a=1;
+select * from update_index_test1;
+ a | b 
+---+---
+ 1 | 3
+(1 row)
+
+update update_index_test1 set b=4 where a=1;
+select * from update_index_test1;
+ a | b 
+---+---
+ 1 | 4
+(1 row)
+
+reset cstore_insert_mode;
+drop table if exists test6；
+drop table if exists row6;
+ERROR:  syntax error at or near "drop table"
+LINE 2: drop table if exists row6;
+        ^
+create table test6 (col int, a int,b int, c int) tablespace hdfs_ts partition by values(c);
+create index on test6 using btree(b);
+create table row6(col int, a int,b int, c int);
+insert into row6 values(1,1,2,1);
+insert into row6 values(1,3,2,1);
+set cstore_insert_mode='main';
+insert into test6 select * from row6;
+select * from test6 where b=2 and a=2;
+ col | a | b | c 
+-----+---+---+---
+(0 rows)
+
+reset cstore_insert_mode;
+drop table if exists associate_benefit_expense cascade;
+NOTICE:  table "associate_benefit_expense" does not exist, skipping
+create table associate_benefit_expense
+(
+    period_end_dt date not null ,
+    benefit_cost_amt number(18,4) 
+)tablespace hdfs_ts distribute by hash(period_end_dt);
+drop table if exists offers_20050701 cascade;
+NOTICE:  table "offers_20050701" does not exist, skipping
+create table offers_20050701
+(
+    promo_id varchar(10) not null ,
+    party_id varchar(10) null,
+    location_id integer null 
+)tablespace hdfs_ts distribute by hash(promo_id) ;
+set cstore_insert_mode='main';
+insert into associate_benefit_expense values (date '1970-01-01', 0.0);
+insert into offers_20050701 values ('a', 'a' , 0);
+select dt1.co1 column_011
+from (
+select ofe.location_id-(
+select abe.benefit_cost_amt 
+from associate_benefit_expense abe 
+order by 1 asc limit 1 ) co1 
+from offers_20050701 ofe) dt1 
+right outer join associate_benefit_expense abe1 
+on 1=1;
+ column_011 
+------------
+     0.0000
+(1 row)
+
+reset cstore_insert_mode;
+drop table if exists household_demographics;
+set cstore_insert_mode='main';
+create table household_demographics
+(
+    hd_demo_sk                integer               not null,
+    hd_vehicle_count          numeric(1,0)          default 9           
+) 
+ tablespace hdfs_ts distribute by hash(hd_demo_sk);
+insert into household_demographics(hd_demo_sk) values(0);
+select hd_vehicle_count
+from household_demographics
+where hd_vehicle_count<0.00000000000000000000000000000000000000000001;
+ hd_vehicle_count 
+------------------
+(0 rows)
+
+drop table if exists customer_demographics;
+NOTICE:  table "customer_demographics" does not exist, skipping
+create table customer_demographics
+(
+    cd_demo_sk                numeric(18,0)               not null,
+    cd_gender                 char(1)                     default NULL,
+    cd_marital_status         char(1)                     default ' ',
+    cd_education_status       char(20)                    default '9223372036854775807',
+    cd_purchase_estimate      smallint                    default 32767,
+    cd_credit_rating          varchar(10)                 default '2147483647',
+    cd_dep_count              tinyint                     default 127,
+    cd_dep_employed_count     bigint                      default 9223372036854775807,
+    cd_dep_college_count      integer                     default -2147483648
+) tablespace hdfs_ts distribute by hash(cd_demo_sk,cd_gender);
+insert into customer_demographics(cd_demo_sk) values(999999999999999999);
+insert into customer_demographics(cd_demo_sk) values(-999999999999999999);
+select distinct cd_education_status
+from customer_demographics
+where cd_demo_sk between -170141183460469231731687303715884105728.0 and 170141183460469231731687303715884105727.00; 
+ cd_education_status  
+----------------------
+ 9223372036854775807 
+(1 row)
+
+create table numeric_test11(a int, b decimal(18,5)) tablespace hdfs_ts;
+create table numeric_row11(a int, b decimal(18,5));
+insert into numeric_row11 values(1,1);
+insert into numeric_row11 values(1,1);
+insert into numeric_row11 values(1,1);
+insert into numeric_row11 values(1,2);
+insert into numeric_row11 values(1,2);
+insert into numeric_test11 select * from numeric_row11;
+select distinct b
+from numeric_test11
+where b between 1.000001 and 1.99999
+order by 1;
+ b 
+---
+(0 rows)
+
+reset cstore_insert_mode;
+drop table if exists customer_demographics;
+set cstore_insert_mode='main';
+create table customer_demographics
+(
+    cd_demo_sk                numeric(18,0)               not null,
+    cd_gender                 char(1)                     default NULL,
+    cd_marital_status         char(1)                     default ' ',
+    cd_education_status       char(20)                    default '9223372036854775807',
+    cd_purchase_estimate      smallint                    default 32767,
+    cd_credit_rating          varchar(10)                 default '2147483647',
+    cd_dep_count              tinyint                     default 127,
+    cd_dep_employed_count     bigint                      default 9223372036854775807,
+    cd_dep_college_count      integer                     default -2147483648
+) 
+tablespace hdfs_ts distribute by hash(cd_demo_sk,cd_gender); 
+create index i_cust_demo1 on customer_demographics using btree(cd_demo_sk) ;
+create index i_cust_demo on customer_demographics using btree(cd_gender,cd_demo_sk) ;
+analyze customer_demographics;
+explain (verbose, costs off) select distinct cd_gender
+from customer_demographics
+where cd_demo_sk in(14,48,62,67,90,106,115,141,146,156,159,175,219,220,225,230,345,353,361,381,
+403,405,407,409,412,416,418,432,435,438,442,450,454,459,480,482,490,500,515,525,530,535,540,
+556,560,565,570,573,378,579,600,621,624,660,780,718,778,779,780,822,823,857,888,931,967)
+and( cd_gender between 'L' and 'N'
+or not cd_gender between 'N' and 'M')
+order by 1;
+                                                                                                                                                                                                                                                                                                                           QUERY PLAN                                                                                                                                                                                                                                                                                                                            
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: index_test.customer_demographics.cd_gender
+   ->  Vector Unique
+         Output: index_test.customer_demographics.cd_gender
+         ->  Vector Sort
+               Output: index_test.customer_demographics.cd_gender
+               Sort Key: index_test.customer_demographics.cd_gender
+               ->  Vector Streaming (type: GATHER)
+                     Output: index_test.customer_demographics.cd_gender
+                     ->  Vector Unique
+                           Output: index_test.customer_demographics.cd_gender
+                           ->  Vector Sort
+                                 Output: index_test.customer_demographics.cd_gender
+                                 Sort Key: index_test.customer_demographics.cd_gender
+                                 ->  Vector Result
+                                       Output: index_test.customer_demographics.cd_gender
+                                       ->  Vector Append
+                                             ->  Dfs Index Only Scan using i_cust_demo on index_test.customer_demographics
+                                                   Output: index_test.customer_demographics.cd_gender
+                                                   Filter: ((((index_test.customer_demographics.cd_gender >= 'L'::bpchar) AND (index_test.customer_demographics.cd_gender <= 'N'::bpchar)) OR (index_test.customer_demographics.cd_gender < 'N'::bpchar) OR (index_test.customer_demographics.cd_gender > 'M'::bpchar)) AND (index_test.customer_demographics.cd_demo_sk = ANY ('{14,48,62,67,90,106,115,141,146,156,159,175,219,220,225,230,345,353,361,381,403,405,407,409,412,416,418,432,435,438,442,450,454,459,480,482,490,500,515,525,530,535,540,556,560,565,570,573,378,579,600,621,624,660,780,718,778,779,780,822,823,857,888,931,967}'::numeric[])))
+                                             ->  Vector Adapter
+                                                   Output: cstore.customer_demographics.cd_gender
+                                                   ->  Seq Scan on cstore.pg_delta_index_test_customer_demographics customer_demographics
+                                                         Output: cstore.customer_demographics.cd_gender
+                                                         Distribute Key: cstore.customer_demographics.cd_demo_sk, cstore.customer_demographics.cd_gender
+                                                         Filter: ((((cstore.customer_demographics.cd_gender >= 'L'::bpchar) AND (cstore.customer_demographics.cd_gender <= 'N'::bpchar)) OR (cstore.customer_demographics.cd_gender < 'N'::bpchar) OR (cstore.customer_demographics.cd_gender > 'M'::bpchar)) AND (cstore.customer_demographics.cd_demo_sk = ANY ('{14,48,62,67,90,106,115,141,146,156,159,175,219,220,225,230,345,353,361,381,403,405,407,409,412,416,418,432,435,438,442,450,454,459,480,482,490,500,515,525,530,535,540,556,560,565,570,573,378,579,600,621,624,660,780,718,778,779,780,822,823,857,888,931,967}'::numeric[])))
+(26 rows)
+
+reset cstore_insert_mode;
+create table hdfs_partition_table_001
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(1024000), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_timestamp_1 timestamp without time zone ,
+c_date date
+)
+tablespace hdfs_ts
+partition by values (c_smallint);
+create table hdfs_partition_table_002
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(1024000), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_timestamp_1 timestamp without time zone ,
+c_date date
+)
+tablespace hdfs_ts;
+create index hdfs_partition_index_01 on hdfs_partition_table_001 using btree(c_smallint)local; 
+ERROR:  dfs value partition table does not support local partitioned indexes 
+create index hdfs_partition_index_02 on hdfs_partition_table_002 using btree(c_smallint)local; 
+ERROR:  non-partitioned table does not support local partitioned indexes 
+drop table if exists call_center;
+NOTICE:  table "call_center" does not exist, skipping
+create table call_center
+(
+    cc_call_center_sk         integer               not null,
+    cc_call_center_id         char(16)              not null,
+    cc_rec_start_date         date                          ,
+    cc_rec_end_date           date                          ,
+    cc_closed_date_sk         integer                       ,
+    cc_open_date_sk           integer                       ,
+    cc_name                   varchar(50)                   ,
+    cc_class                  varchar(50)                   ,
+    cc_employees              integer                       ,
+    cc_sq_ft                  integer                       ,
+    cc_hours                  char(20)                      ,
+    cc_manager                varchar(40)                   ,
+    cc_mkt_id                 bigint                        ,
+    cc_mkt_class              char(50)                      ,
+    cc_mkt_desc               varchar(100)                  ,
+    cc_market_manager         varchar(40)                   ,
+    cc_division               integer                       ,
+    cc_division_name          varchar(50)                   ,
+    cc_company                integer                       ,
+    cc_company_name           char(50)                      ,
+    cc_street_number          char(10)                      ,
+    cc_street_name            varchar(60)                   ,
+    cc_street_type            char(15)                      ,
+    cc_suite_number           char(10)                      ,
+    cc_city                   text                   default 'my city',
+    cc_county                 varchar(30)            default '     ',
+    cc_state                  char(2)                default NULL,
+    cc_zip                    char(10)                      ,
+    cc_country                varchar(20)                   ,
+    cc_gmt_offset             float8                        ,
+    cc_tax_percentage         float8                  
+) 
+ tablespace hdfs_ts distribute by hash(cc_call_center_sk,cc_rec_start_date);
+set cstore_insert_mode='main';
+copy  call_center from '@abs_srcdir@/data/call_center.dat' with DELIMITER '|';
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+insert into call_center select * from call_center;
+create index i_call_center1 on call_center using btree(cc_call_center_sk);
+analyze call_center;
+explain (costs off)
+select cc_call_center_sk 
+from call_center 
+where cc_call_center_sk <= 0 
+or cc_call_center_sk=2147483647 
+order by 1;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: index_test.call_center.cc_call_center_sk
+         ->  Vector Sort
+               Sort Key: index_test.call_center.cc_call_center_sk
+               ->  Vector Result
+                     ->  Vector Append
+                           ->  Dfs Index Only Scan using i_call_center1 on call_center
+                                 Filter: ((cc_call_center_sk <= 0) OR (cc_call_center_sk = 2147483647))
+                           ->  Vector Adapter
+                                 ->  Seq Scan on pg_delta_index_test_call_center call_center
+                                       Filter: ((cc_call_center_sk <= 0) OR (cc_call_center_sk = 2147483647))
+(12 rows)
+
+select cc_call_center_sk 
+from call_center 
+where cc_call_center_sk <= 0 
+or cc_call_center_sk=2147483647 
+order by 1;
+ cc_call_center_sk 
+-------------------
+(0 rows)
+
+drop table call_center;
+reset cstore_insert_mode;
+create table pck_partition_rowdata(a int, b int);
+insert into pck_partition_rowdata values(1,1);
+insert into pck_partition_rowdata values(1,2);
+create table pck_partition_tab1(a int, b int, partial cluster key(b)) tablespace hdfs_ts partition by values(b);
+set cstore_insert_mode='main';
+insert into pck_partition_tab1 select * from pck_partition_rowdata;
+drop table pck_partition_tab1;
+drop table pck_partition_rowdata;
+reset  cstore_insert_mode;
+--clean
+drop schema index_test cascade;
+NOTICE:  drop cascades to 24 other objects
+DETAIL:  drop cascades to table number_data1
+drop cascades to table number_data2
+drop cascades to table number_data3
+drop cascades to table string_data1
+drop cascades to table other_data1
+drop cascades to table replication_data1
+drop cascades to table number_rowdata
+drop cascades to table string_rowdata
+drop cascades to table other_rowdata
+drop cascades to table pck_data1
+drop cascades to table pck_data2
+drop cascades to table abort_test_row
+drop cascades to table abort_test
+drop cascades to table update_index_test1
+drop cascades to table test6
+drop cascades to table row6
+drop cascades to table associate_benefit_expense
+drop cascades to table offers_20050701
+drop cascades to table household_demographics
+drop cascades to table numeric_test11
+drop cascades to table numeric_row11
+drop cascades to table customer_demographics
+drop cascades to table hdfs_partition_table_001
+drop cascades to table hdfs_partition_table_002

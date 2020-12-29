@@ -16,7 +16,7 @@
  *  dfs_parinsert.cpp
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/access/dfs/dfs_parinsert.cpp
+ *    src/gausskernel/storage/access/dfs/dfs_parinsert.cpp
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -27,6 +27,7 @@
 #include "access/genam.h"
 #include "access/hash.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/dfsstore_ctlg.h"
@@ -39,7 +40,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
 /*
  * Check partition signature creation exception in case of the content exceeding
@@ -405,7 +406,7 @@ inline char *DfsPartitionInsert::FormPartitionSignature(Datum *values, const boo
         curpos = (char *)m_parsigs + strlen(m_parsigs);
 
         if (nulls[attno - 1]) {
-            rc = sprintf_s(curpos, MAX_PARSIG_LENGTH, "%s=__HIVE_DEFAULT_PARTITION__/",
+            rc = sprintf_s(curpos, MAX_PARSIG_LENGTH - strlen(m_parsigs), "%s=__HIVE_DEFAULT_PARTITION__/",
                            tupdesc->attrs[attno - 1]->attname.data);
 
             CHECK_PARTITION_SIGNATURE_CREATE(rc, tupdesc->attrs[attno - 1]->attname.data, curpos);
@@ -525,7 +526,6 @@ void DfsPartitionInsert::InitInsertPartMemArg(Plan *plan, MemInfoArg *ArgmemInfo
             DEBUG2,
             "DfsPartInsert(init plan): workmem is : %dKB, all paritition sort workmem: %dKB,can spread maxMem is %dKB.",
             dfsPartMemInfo->MemInsert, dfsPartMemInfo->MemSort, dfsPartMemInfo->canSpreadmaxMem);
-
     } else if (ArgmemInfo != NULL) {
         dfsPartMemInfo->canSpreadmaxMem = ArgmemInfo->canSpreadmaxMem;
         dfsPartMemInfo->MemInsert = ArgmemInfo->MemInsert;
@@ -677,7 +677,7 @@ void DfsPartitionInsert::TupleInsert(Datum *values, bool *nulls, int option)
 
         /* insert tuple into delta table */
         HeapTuple tuple = heap_form_tuple(m_delta->rd_att, values, nulls);
-        heap_insert(m_delta, tuple, GetCurrentCommandId(true), option, NULL);
+        (void)tableam_tuple_insert(m_delta, tuple, GetCurrentCommandId(true), option, NULL);
 
         /* free the temp materialized tuple */
         heap_freetuple(tuple);
@@ -735,7 +735,8 @@ void DfsPartitionInsert::TupleInsert(Datum *values, bool *nulls, int option)
 
             /* create cache entry if first enter here */
             if (!m_SpilledPartitionSearchCache)
-                BuildPartitionSearchCache(&m_SpilledPartitionSearchCache, "Spilled Partition Cache", 4096); //max element is 4096
+                BuildPartitionSearchCache(&m_SpilledPartitionSearchCache, "Spilled Partition Cache",
+                                          4096);  // max element is 4096
 
             /*
              * insert this new partition key, please note we pass the key's
@@ -891,7 +892,6 @@ inline DfsInsert *DfsPartitionInsert::GetDfsInsert(const char *parsig)
 
     /* Search possible cached dfs_insert from cache */
     pInsert = (DfsInsert *)FindPartitionEntry(m_ActivePartitionSearchCache, parsig);
-
     /* Return it directly if we find one from cache */
     if (pInsert != NULL) {
         return pInsert;

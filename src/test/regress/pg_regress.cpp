@@ -94,8 +94,8 @@ static char* shellprog = SHELLPROG;
  * Windows-style newlines, but the comparison files might or might not.
  */
 #ifndef WIN32
-const char* basic_diff_opts = "-w";
-const char* pretty_diff_opts = "-w -C3";
+const char* basic_diff_opts = "";
+const char* pretty_diff_opts = "-C3";
 #else
 const char* basic_diff_opts = "-w";
 const char* pretty_diff_opts = "-w -C3";
@@ -299,7 +299,6 @@ static struct timeval g_stRegrStopTimeTmp[REG_MAX_NUM];
                     g_dOneGroupTotalTime,                                                                \
                     g_stResourceUsageDetails.acMemUsage);\ */                                            \
             g_dOneGroupTotalTime = 0;                                                                    \
-            /*status_end();*/                                                                            \
         }                                                                                                \
     }
 
@@ -370,11 +369,9 @@ static _stringlist* extraroles = NULL;
 static _stringlist* extra_install = NULL;
 static FILE* start_script;
 static FILE* stop_script;
-
 /* define ai engine ip and port */
-static char* aiehost = "nohostname";
-static char* aieport = "noport";
-
+static char* g_aiehost = "nohostname";
+static char* g_aieport = "noport";
 /* internal variables */
 static const char* progname;
 static char* logfilename;
@@ -618,9 +615,6 @@ static int regrGetResrcUsage(const pid_t pid, REGR_RESRC_STAT_STRU* result)
     FILE* fcstat = NULL;
     FILE* fpMemInfo = NULL;
     char stat_filepath[30] = "/proc/";
-
-    if (pid == INVALID_PID)
-        return -1;
 
     (void)snprintf(pid_s, sizeof(pid_s), "%d", pid);
 
@@ -1599,7 +1593,7 @@ static void start_thread(thread_desc* thread, bool is_cn, bool is_standby, int i
 
     (void)snprintf(args[thi],
         MAXPGPATH * 4,
-        SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"ttest@123\" -D \"%s/%s%s\" -L \"%s\" --noclean%s%s > "
+        SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s%s\" -L \"%s\" --noclean%s%s > "
                     "\"%s/log/initdb%d.log\" 2>&1" SYSTEMQUOTE,
         bindir,
         (char*)get_node_info_name(i, is_cn ? COORD : DATANODE, true),
@@ -1675,41 +1669,6 @@ static void wait_thread(thread_desc* thread)
     }
 }
 
-/* Copy data file to data dir */
-static void CopyFile()
-{
-    char dstDatadir[MAXPGPATH];
-    char cmdBuf[MAXPGPATH * 2];
-
-    errno_t rc = snprintf_s(dstDatadir, sizeof(dstDatadir), sizeof(dstDatadir) - 1, "%s/%s/pg_copydir",
-        temp_install, get_node_info_name(0, DATANODE, false));
-    securec_check_ss_c(rc, "", "");
-    rc = snprintf_s(cmdBuf, sizeof(cmdBuf), sizeof(cmdBuf) - 1,
-        SYSTEMQUOTE "cp ./data/* %s -r" SYSTEMQUOTE, dstDatadir);
-    securec_check_ss_c(rc, "", "");
-    if (regr_system(cmdBuf)) {
-        (void)fprintf(stderr,
-            _("\n%s: cp data file failed\nCommand was: %s\n"),
-            progname,
-            cmdBuf);
-        exit_nicely(2);
-    }
-
-    /* mkdir results dir */
-    rc = snprintf_s(dstDatadir, sizeof(dstDatadir), sizeof(dstDatadir) - 1, "%s/%s/pg_copydir/results",
-        temp_install, get_node_info_name(0, DATANODE, false));
-    securec_check_ss_c(rc, "", "");
-    rc = snprintf_s(cmdBuf, sizeof(cmdBuf), sizeof(cmdBuf) - 1, SYSTEMQUOTE "mkdir -p %s" SYSTEMQUOTE, dstDatadir);
-    securec_check_ss_c(rc, "", "");
-    if (regr_system(cmdBuf)) {
-        (void)fprintf(stderr,
-            _("\n%s: mkdir failed\nCommand was: %s\n"),
-            progname,
-            cmdBuf);
-        exit_nicely(2);
-    }
-}
-
 /*
  * initdb for cn and dn
  *
@@ -1745,8 +1704,6 @@ static void initdb_node_info_parallel(bool standby)
 
     /* free the memory */
     free_thread_desc(thread);
-
-    CopyFile();
 }
 
 static void initdb_node_info(bool standby)
@@ -1759,7 +1716,7 @@ static void initdb_node_info(bool standby)
         char* data_folder = get_node_info_name(i, COORD, false);
         (void)snprintf(buf,
             sizeof(buf),
-            SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"ttest@123\" -D \"%s/%s\" -L \"%s\" --noclean%s%s > "
+            SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s\" -L \"%s\" --noclean%s%s > "
                         "\"%s/log/initdb.log\" 2>&1" SYSTEMQUOTE,
             bindir,
             (char*)get_node_info_name(i, COORD, true),
@@ -1787,7 +1744,7 @@ static void initdb_node_info(bool standby)
         char* data_folder = get_node_info_name(i, DATANODE, false);
         (void)snprintf(buf,
             sizeof(buf),
-            SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"ttest@123\" -D \"%s/%s\" -L \"%s\" --noclean%s%s > "
+            SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s\" -L \"%s\" --noclean%s%s > "
                         "\"%s/log/initdb.log\" 2>&1" SYSTEMQUOTE,
             bindir,
             (char*)get_node_info_name(i, DATANODE, true),
@@ -1809,8 +1766,6 @@ static void initdb_node_info(bool standby)
         free(data_folder);
     }
 
-    CopyFile();
-
     /* no standby configed, skip to init standby. */
     if (!standby)
         return;
@@ -1821,7 +1776,7 @@ static void initdb_node_info(bool standby)
         char* data_folder = get_node_info_name(i, DATANODE, false);
         (void)snprintf(buf,
             sizeof(buf),
-            SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"ttest@123\" -D \"%s/%s_standby\" -L \"%s\" "
+            SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s_standby\" -L \"%s\" "
                         "--noclean%s%s > \"%s/log/initdb.log\" 2>&1" SYSTEMQUOTE,
             bindir,
             (char*)get_node_info_name(i, DATANODE, true),
@@ -1937,7 +1892,7 @@ static void initdb_node_config_file(bool standby)
         /* always use LLVM optimization */
         fputs("codegen_cost_threshold=0\n", pg_conf);
 
-        if (!test_single_node && dop > 0) {
+        if (dop > 0) {
             (void)snprintf(buf, sizeof(buf), "query_dop = %d\n", dop);
             fputs(buf, pg_conf);
         }
@@ -1948,11 +1903,8 @@ static void initdb_node_config_file(bool standby)
 
             extra_conf = fopen(temp_config, "r");
             if (extra_conf == NULL) {
-                fprintf(stderr,
-                    _("\n%s: could not open \"%s\" to read extra config: %s\n"),
-                    progname,
-                    temp_config,
-                    strerror(errno));
+                fprintf(stderr, _("\n%s: could not open \"%s\" to read extra config: %s\n"),
+                    progname, temp_config, strerror(errno));
                 exit_nicely(2);
             }
             while (fgets(line_buf, sizeof(line_buf), extra_conf) != NULL) {
@@ -2037,7 +1989,7 @@ static void initdb_node_config_file(bool standby)
         /* always use LLVM optimization */
         fputs("codegen_cost_threshold=0\n", pg_conf);
 
-        if (!test_single_node && dop > 0) {
+        if (dop > 0) {
             (void)snprintf(buf, sizeof(buf), "query_dop = %d\n", dop);
             fputs(buf, pg_conf);
         }
@@ -2050,18 +2002,14 @@ static void initdb_node_config_file(bool standby)
         }
 
         if (standby) {
-            (void)snprintf(buf,
-                sizeof(buf),
+            (void)snprintf(buf, sizeof(buf),
                 "replconninfo1 = 'localhost=127.0.0.1 localport=%d remotehost=127.0.0.1 remoteport=%d'\n",
-                myinfo.dn_primary_port[i],
-                myinfo.dn_standby_port[i]);
+                myinfo.dn_primary_port[i], myinfo.dn_standby_port[i]);
             fputs(buf, pg_conf);
 
-            (void)snprintf(buf,
-                sizeof(buf),
+            (void)snprintf(buf, sizeof(buf),
                 "replconninfo2 = 'localhost=127.0.0.1 localport=%d remotehost=127.0.0.1 remoteport=%d'\n",
-                myinfo.dn_primary_port[i],
-                myinfo.dn_secondary_port[i]);
+                myinfo.dn_primary_port[i], myinfo.dn_secondary_port[i]);
             fputs(buf, pg_conf);
         }
 
@@ -2071,11 +2019,8 @@ static void initdb_node_config_file(bool standby)
 
             extra_conf = fopen(temp_config, "r");
             if (extra_conf == NULL) {
-                fprintf(stderr,
-                    _("\n%s: could not open \"%s\" to read extra config: %s\n"),
-                    progname,
-                    temp_config,
-                    strerror(errno));
+                fprintf(stderr, _("\n%s: could not open \"%s\" to read extra config: %s\n"),
+                    progname, temp_config, strerror(errno));
                 exit_nicely(2);
             }
             while (fgets(line_buf, sizeof(line_buf), extra_conf) != NULL) {
@@ -2133,18 +2078,14 @@ static void initdb_node_config_file(bool standby)
         (void)snprintf(buf, sizeof(buf), "comm_sctp_port = %d\n", myinfo.dns_sctp_port[i]);
         fputs(buf, pg_conf);
 
-        (void)snprintf(buf,
-            sizeof(buf),
+        (void)snprintf(buf, sizeof(buf),
             "replconninfo1 = 'localhost=127.0.0.1 localport=%d remotehost=127.0.0.1 remoteport=%d'\n",
-            myinfo.dn_standby_port[i],
-            myinfo.dn_primary_port[i]);
+            myinfo.dn_standby_port[i], myinfo.dn_primary_port[i]);
         fputs(buf, pg_conf);
 
-        (void)snprintf(buf,
-            sizeof(buf),
+        (void)snprintf(buf, sizeof(buf),
             "replconninfo2 = 'localhost=127.0.0.1 localport=%d remotehost=127.0.0.1 remoteport=%d'\n",
-            myinfo.dn_standby_port[i],
-            myinfo.dn_secondary_port[i]);
+            myinfo.dn_standby_port[i], myinfo.dn_secondary_port[i]);
         fputs(buf, pg_conf);
 
         if (temp_config != NULL) {
@@ -2153,11 +2094,8 @@ static void initdb_node_config_file(bool standby)
 
             extra_conf = fopen(temp_config, "r");
             if (extra_conf == NULL) {
-                fprintf(stderr,
-                    _("\n%s: could not open \"%s\" to read extra config: %s\n"),
-                    progname,
-                    temp_config,
-                    strerror(errno));
+                fprintf(stderr, _("\n%s: could not open \"%s\" to read extra config: %s\n"),
+                    progname, temp_config, strerror(errno));
                 exit_nicely(2);
             }
             while (fgets(line_buf, sizeof(line_buf), extra_conf) != NULL) {
@@ -2203,7 +2141,7 @@ static void psql_command(const char* database, const char* query, ...)
         SYSTEMQUOTE "\"%s%sgsql\" -X %s -p %d -c \"%s\" \"%s\"" SYSTEMQUOTE,
         psqldir ? psqldir : "",
         psqldir ? "/" : "",
-        super_user_altered ? "" : (passwd_altered ? "-U upcheck -W Ttest@123" : "-U upcheck -W ttest@123"),
+        super_user_altered ? "" : (passwd_altered ? "-U upcheck -W Gauss@123" : "-U upcheck -W gauss@123"),
         port,
         query_escaped,
         database);
@@ -2250,7 +2188,7 @@ static void psql_command_node(const char* database, int i, int type, const char*
         SYSTEMQUOTE "\"%s%sgsql\" %s %s -X -p %d -c \"%s\" \"%s\"" SYSTEMQUOTE,
         psqldir ? psqldir : "",
         psqldir ? "/" : "",
-        super_user_altered ? "" : (passwd_altered ? "-U upcheck -W Ttest@123" : "-U upcheck -W ttest@123"),
+        super_user_altered ? "" : (passwd_altered ? "-U upcheck -W Gauss@123" : "-U upcheck -W gauss@123"),
         (type == DATANODE && !super_user_altered) ? "-m" : "",
         port,
         query_escaped,
@@ -2460,7 +2398,7 @@ static void setup_connection_information(bool standby)
         char* current_user = get_id();
         sleep(10);
         psql_command("postgres",
-            "Alter user \"%s\" identified by 'Ttest@123' replace 'ttest@123';",
+            "Alter user \"%s\" identified by 'Gauss@123' replace 'gauss@123';",
             inplace_upgrade ? "upcheck" : current_user);
         free(current_user);
         passwd_altered = true;
@@ -2650,8 +2588,10 @@ static bool string_matches_pattern(const char* str, const char* pattern)
 void replace_string(char* string, char* replace, char* replacement)
 {
     char* ptr = NULL;
+
     while ((ptr = strstr(string, replace)) != NULL) {
         char* cdup = strdup(string);
+
         (void)strlcpy(string, cdup, ptr - string + 1);
         strcat(string, replacement);
         strcat(string, cdup + (ptr - string) + strlen(replace));
@@ -2782,8 +2722,8 @@ static void exec_cmds_from_inputfiles()
                 replace_string(cmdline, "@obsbucket@", obsbucket);
                 replace_string(cmdline, "@ak@", ak);
                 replace_string(cmdline, "@sk@", sk);
-                replace_string(cmdline, "@aie_host@", aiehost);
-                replace_string(cmdline, "@aie_port@", aieport);
+                replace_string(cmdline, "@aie_host@", g_aiehost);
+                replace_string(cmdline, "@aie_port@", g_aieport);
                 replace_string(cmdline, "@abs_gausshome@", gausshomedir);
                 replace_string(cmdline, "@pgbench_dir@", pgbenchdir);
                 myinfo.shell_pid[myinfo.shell_count++] = spawn_process(cmdline);
@@ -3044,6 +2984,8 @@ static void convertSourcefilesIn(char* pcSourceSubdir, char* pcDestDir, char* pc
                 char s[16];
                 sprintf(s, "%d", get_port_number(0, DATANODE));
                 replace_string(line, "@portstring@", s);
+                sprintf(s, "%d", get_port_number(1, COORD));
+                replace_string(line, "@cn2_portstring@", s);
                 if (temp_install) {
                     char tmpdatadir[1024];
                     (void)snprintf(tmpdatadir, MAXPGPATH, "\"%s\"", temp_install);
@@ -3079,8 +3021,8 @@ static void convertSourcefilesIn(char* pcSourceSubdir, char* pcDestDir, char* pc
                 replace_string(line, "@obsbucket@", obsbucket);
                 replace_string(line, "@ak@", ak);
                 replace_string(line, "@sk@", sk);
-                replace_string(line, "@aie_host@", aiehost);
-                replace_string(line, "@aie_port@", aieport);
+                replace_string(line, "@aie_host@", g_aiehost);
+                replace_string(line, "@aie_port@", g_aieport);
                 replace_string(line, "@abs_gausshome@", gausshomedir);
                 sprintf(s, "%d", get_port_number(0, DATANODE));
                 replace_string(line, "@dn1port@", s);
@@ -3323,9 +3265,7 @@ static void initialize_environment(void)
         const char* old_pgoptions = getenv("PGOPTIONS");
         char* new_pgoptions = NULL;
 
-        if (!old_pgoptions) {
-            old_pgoptions = "";
-        }
+        old_pgoptions = old_pgoptions ? old_pgoptions : "";
         new_pgoptions = (char*)malloc(strlen(old_pgoptions) + strlen(my_pgoptions) + 12);
         (void)sprintf(new_pgoptions, "PGOPTIONS=%s %s", old_pgoptions, my_pgoptions);
         (void)putenv(new_pgoptions);
@@ -3389,9 +3329,7 @@ static void initialize_environment(void)
         pghost = getenv("PGHOST");
         pgport = getenv("PGPORT");
 #ifndef HAVE_UNIX_SOCKETS
-        if (!pghost) {
-            pghost = "localhost";
-        }
+        pghost = (pghost ? pghost : "localhost");
 #endif
 
         if (pghost && pgport) {
@@ -4980,7 +4918,36 @@ static void run_single_test(const char* test, test_function tfunc, diag_function
     REGR_PRINT_ELAPSED_TIME;
 }
 
-#define BASE_GLOBAL_VARIABLE_NUM 237
+#define GET_VARIABLE_NAME(name) (#name)
+
+static void CheckCleanCodeWarningInfo(const int baseNum, const int currentNum,
+    const char *legacyMacrosName, const char *legacyMacrosNumName)
+{
+    (void)fprintf(stdout, "======================== Clean Code Committee Warning ========================\n");
+    if (strcmp(legacyMacrosName, "THR_LOCAL") == 0) {
+        (void)fprintf(stdout, "The macro THR_LOCAL are strictly forbidden.\n");
+    } else {
+        (void)fprintf(stdout, "The only authoritative macro to isolate distribute and single node\n");
+        (void)fprintf(stdout, "logic is ENABLE_MULTIPLE_NODES, other legacy macros(PGXC/STREAMPLAN/IS_SINGLE_NODE)\n");
+        (void)fprintf(stdout, "are strictly forbidden.\n");
+    }
+    (void)fprintf(stdout, "The macro(%s) baseline are %d, current are %d.\n",
+        legacyMacrosName, baseNum, currentNum);
+
+    if (currentNum < baseNum) {
+        (void)fprintf(stdout, "Solution: Please adjust the baseline(%s:%s) to %d before run test.\n",
+            __FILE__, legacyMacrosNumName, currentNum);
+    } else {
+        (void)fprintf(stdout, "Solution: Please decrease the macros at least equal to baseline %d.\n",
+            baseNum);
+    }
+    (void)fprintf(stdout, "==============================================================================\n");
+    
+    (void)fflush(stdout);
+    return;
+}
+
+#define BASE_GLOBAL_VARIABLE_NUM 225
 static void check_global_variables()
 {
     char* cmd =
@@ -4988,24 +4955,43 @@ static void check_global_variables()
     FILE* fstream = NULL;
     char buf[50];
     int globalnum = 0;
-
     memset(buf, 0, sizeof(buf));
     fstream = popen(cmd, "r");
     if (NULL != fgets(buf, sizeof(buf), fstream)) {
         globalnum = atoi(buf);
     }
     pclose(fstream);
-
     cmd = "find ../../gausskernel/ -name \"*.cpp\" | xargs grep \"THR_LOCAL\" | grep -v \"extern THR_LOCAL\" | wc -l";
     memset(buf, 0, sizeof(buf));
     fstream = popen(cmd, "r");
     if (NULL != fgets(buf, sizeof(buf), fstream)) {
         globalnum += atoi(buf);
-        if (globalnum > BASE_GLOBAL_VARIABLE_NUM) {
-            header(_("You are not allowed to add global variables, please remove before run test"));
-            header(_("global variable baseline is %d, current global variable is %d"),
-                BASE_GLOBAL_VARIABLE_NUM,
-                globalnum);
+    }
+    pclose(fstream);
+    if (globalnum != BASE_GLOBAL_VARIABLE_NUM) {
+        CheckCleanCodeWarningInfo(BASE_GLOBAL_VARIABLE_NUM, globalnum,
+            GET_VARIABLE_NAME(THR_LOCAL), GET_VARIABLE_NAME(BASE_GLOBAL_VARIABLE_NUM));
+        exit_nicely(2);
+    }
+}
+
+#define BASE_PGXC_LIKE_MACRO_NUM 1427
+static void check_pgxc_like_macros()
+{
+    char* cmd =
+        "find ../../common/backend/ ../../gausskernel/ -name \"*.cpp\" |"
+        "xargs grep -e \"#ifdef STREAMPLAN\" -e \"#ifdef PGXC\"  -e \"IS_SINGLE_NODE\" |wc -l";
+    FILE* fstream = NULL;
+    char buf[50];
+    int macros = 0;
+
+    memset(buf, 0, sizeof(buf));
+    fstream = popen(cmd, "r");
+    if (NULL != fgets(buf, sizeof(buf), fstream)) {
+        macros = atoi(buf);
+        if (macros != BASE_PGXC_LIKE_MACRO_NUM) {
+            CheckCleanCodeWarningInfo(BASE_PGXC_LIKE_MACRO_NUM, macros,
+                GET_VARIABLE_NAME(PGXC/STREAMPLAN/IS_SINGLE_NODE), GET_VARIABLE_NAME(BASE_PGXC_LIKE_MACRO_NUM));
             exit_nicely(2);
         }
     }
@@ -5023,11 +5009,6 @@ static void open_result_files(void)
     /* create the log file (copy of running status output) */
     (void)snprintf(file, sizeof(file), "%s/regression.out", outputdir);
     logfilename = strdup(file);
-    if (logfilename == NULL) {
-        fprintf(stderr, "out of memory\n");
-        exit_nicely(2);
-    }
-
     logfile = fopen(logfilename, "w");
     if (!logfile) {
         fprintf(stderr, _("%s: could not open file \"%s\" for writing: %s\n"), progname, logfilename, strerror(errno));
@@ -5037,11 +5018,6 @@ static void open_result_files(void)
     /* create the diffs file as empty */
     (void)snprintf(file, sizeof(file), "%s/regression.diffs", outputdir);
     difffilename = strdup(file);
-    if (difffilename == NULL) {
-        fprintf(stderr, "out of memory\n");
-        exit_nicely(2);
-    }
-
     difffile = fopen(difffilename, "w");
     if (!difffile) {
         fprintf(stderr, _("%s: could not open file \"%s\" for writing: %s\n"), progname, difffilename, strerror(errno));
@@ -5124,7 +5100,7 @@ static char* make_absolute_path(const char* in)
     if (is_absolute_path(in)) {
         result = strdup(in);
     } else {
-        static char cwdbuf[MAXPGPATH] = {0};
+        static char cwdbuf[MAXPGPATH];
 
         if (!cwdbuf[0]) {
             if (!getcwd(cwdbuf, sizeof(cwdbuf))) {
@@ -5181,8 +5157,8 @@ static void help(void)
     printf(_("  --obsbucket=BucketName   obs Bucket \n"));
     printf(_("  --ak=access_key   obs server access key \n"));
     printf(_("  --sk=secret_access_key   obs server secret access key \n"));
-    printf(_("  --aiehost=host_ip           AI engine host IP \n"));
-    printf(_("  --aieport=port_number       AI engine port number \n"));
+    printf(_("  --g_aiehost=host_ip           AI engine host IP \n"));
+    printf(_("  --g_aieport=port_number       AI engine port number \n"));
     printf(_("\n"));
     printf(_("Options for using an existing installation:\n"));
     printf(_("  --host=HOST               use postmaster running on HOST\n"));
@@ -6016,8 +5992,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
     struct timeval end_time;
     double total_time;
 
-    static struct option long_options[] = {
-        {"help", no_argument, NULL, 'h'},
+    static struct option long_options[] = {{"help", no_argument, NULL, 'h'},
         {"version", no_argument, NULL, 'V'},
         {"dbname", required_argument, NULL, 1},
         {"debug", no_argument, NULL, 2},
@@ -6073,8 +6048,8 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
         {"ud", required_argument, NULL, 53},
         {"upgrade_schedule", required_argument, NULL, 54},
         {"platform", required_argument, NULL, 55},
-        {"aiehost", required_argument, NULL, 56},
-        {"aieport", required_argument, NULL, 57},
+        {"g_aiehost", required_argument, NULL, 56},
+        {"g_aieport", required_argument, NULL, 57},
         {NULL, 0, NULL, 0}
     };
 
@@ -6137,9 +6112,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 change_password = true;
                 break;
             case 'n':
-                if (!test_single_node) {
-                    dop = atoi(optarg);
-                }
+                dop = atoi(optarg);
                 break;
             case 1:
 
@@ -6155,10 +6128,6 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 break;
             case 3:
                 inputdir = strdup(optarg);
-                if (inputdir == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 4:
                 add_stringlist_item(&loadlanguage, optarg);
@@ -6168,17 +6137,9 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 break;
             case 6:
                 encoding = strdup(optarg);
-                if (encoding == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 7:
                 outputdir = strdup(optarg);
-                if (outputdir == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 8:
                 add_stringlist_item(&schedulelist, optarg);
@@ -6192,17 +6153,9 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 break;
             case 11:
                 top_builddir = strdup(optarg);
-                if (top_builddir == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 13:
                 hostname = strdup(optarg);
-                if (hostname == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 14:
                 port = atoi(optarg);
@@ -6210,47 +6163,27 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 break;
             case 15:
                 user = strdup(optarg);
-                if (user == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 16:
                 /* "--psqldir=" should mean to use PATH */
                 if (strlen(optarg)) {
                     psqldir = strdup(optarg);
-                    if (psqldir == NULL) {
-                        fprintf(stderr, "out of memory\n");
-                        exit_nicely(2);
-                    }
                 }
                 break;
             case 17:
                 dlpath = strdup(optarg);
-                if (dlpath == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 18:
                 split_to_stringlist(strdup(optarg), ", ", &extraroles);
                 break;
             case 19:
                 temp_config = strdup(optarg);
-                if (temp_config == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 20:
                 use_existing = true;
                 break;
             case 21:
                 launcher = strdup(optarg);
-                if (launcher == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 22:
                 add_stringlist_item(&loadextension, optarg);
@@ -6263,60 +6196,28 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 break;
             case 25:
                 pcRegConfFile = strdup(optarg);
-                if (pcRegConfFile == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 26:
                 hdfshostname = strdup(optarg);
-                if (hdfshostname == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 27:
                 hdfsport = strdup(optarg);
-                if (hdfsport == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 28:
                 hdfscfgpath = strdup(optarg);
-                if (hdfscfgpath == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 29:
                 hdfsstoreplus = strdup(optarg);
-                if (hdfsstoreplus == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 30:
                 obshostname = strdup(optarg);
-                if (obshostname == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 31:
                 obsbucket = strdup(optarg);
-                if (obsbucket == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 32: {
                 char* tmp_str = NULL;
                 tmp_str = strdup(optarg);
-                if (tmp_str == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 if (pg_strncasecmp(tmp_str, "true", 4) == 0) {
                     keep_last_time_data = true;
                 } else {
@@ -6330,24 +6231,12 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 break;
             case 34:
                 gausshomedir = strdup(optarg);
-                if (gausshomedir == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 35:
                 ak = strdup(optarg);
-                if (ak == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 36:
                 sk = strdup(optarg);
-                if (sk == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 37:
                 inplace_upgrade = true;
@@ -6359,20 +6248,12 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 break;
             case 39:
                 data_base_dir = strdup(optarg);
-                if (data_base_dir == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 40:
                 upgrade_from = atoi(optarg);
                 break;
             case 41:
                 upgrade_script_dir = strdup(optarg);
-                if (upgrade_script_dir == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 42:
                 ignore_exitcode = true;
@@ -6393,24 +6274,12 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 break;
             case 47:
                 qunit_module = strdup(optarg);
-                if (qunit_module == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 48:
                 qunit_level = strdup(optarg);
-                if (qunit_level == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 49:
                 old_bin_dir = strdup(optarg);
-                if (old_bin_dir == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 50:
                 grayscale_upgrade = 0;
@@ -6439,24 +6308,12 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 break;
             case 55:
                 platform = strdup(optarg);
-                if (platform == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
                 break;
             case 56:
-                aiehost = strdup(optarg);
-                if (aiehost == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
+                g_aiehost = strdup(optarg);
                 break;
             case 57:
-                aieport = strdup(optarg);
-                if (aieport == NULL) {
-                    fprintf(stderr, "out of memory\n");
-                    exit_nicely(2);
-                }
+                g_aieport = strdup(optarg);
                 break;
             default:
                 /* getopt_long already emitted a complaint */
@@ -6520,6 +6377,9 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
 
     /* Check thread local varieble's num */
     check_global_variables();
+
+    /* Check macros like STREAMLAN/PGXC/IS_SINGLE_NODE */
+    check_pgxc_like_macros();
 
     // Do not stop postmaster if we are told not to run test cases.
     if (run_test_case)
@@ -6800,7 +6660,6 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                                 }
                                 use_existing = true;
                             }
-
                             /*
                              * Ready to run the tests
                              */
@@ -6811,7 +6670,6 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                                 header(_("running regression test queries during the grayscale observe stage of the "
                                          "grayscale upgrade"));
                             }
-
                             (void)gettimeofday(&start_time, NULL);
                             // run use cases
                             for (ssl = upgrade_schedulelist; ssl != NULL; ssl = ssl->next) {
@@ -6906,7 +6764,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                     header(_("shutting down postmaster"));
                     (void)stop_postmaster();
                     upgrade_from = 0;
-                    // switch to the new binary
+                    // switch to the new binary��
                     setBinAndLibPath(false);
                     (void)start_postmaster();
                     header(_("sleeping"));

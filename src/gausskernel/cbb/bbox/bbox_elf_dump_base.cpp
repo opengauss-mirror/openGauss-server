@@ -32,7 +32,17 @@ extern "C" {
 #endif
 #endif /* __cplusplus */
 
-BBOX_ATOMIC_STRU g_stLockBlackList = BBOX_ATOMIC_INIT(0); /* black list of atomic variable */
+/* black list of atomic variable */
+BBOX_ATOMIC_STRU g_stLockBlackList = BBOX_ATOMIC_INIT(0);
+
+/* the length of black list */
+static int g_iNumBlackList = 0;
+
+/* the lookup position of black list */
+static int g_iPosBlackList = 0;
+
+/* array store for black list */
+static BBOX_BLACKLIST_STRU g_stBlackList[BBOX_BLACK_LIST_COUNT_MAX];
 
 /*
  * Determines whether the byte order of the local machine is large or small
@@ -181,6 +191,200 @@ int BBOX_SkipToLineEnd(struct BBOX_READ_FILE_IO* pstReadIO)
 }
 
 /*
+ * judge whether the range between *pStartAddress* and *pEndAddress* is in black list or not.
+ * If found, return the blacklist item which cover it, else return NULL.
+ *
+ * NOTE: this function is a thread-unsafe function since it works as an iterator.
+ */
+BBOX_BLACKLIST_STRU *_BBOX_FindAddrInBlackList(const void *pStartAddress, const void *pEndAddress)
+{
+    int i = 0;
+    int iPerformance = 0;
+    size_t  uiPageSize = sys_sysconf(_SC_PAGESIZE);
+
+    /* if the cursor reachs the end of blacklist, start a new trip. */
+    if (g_iPosBlackList >= g_iNumBlackList) {
+        g_iPosBlackList = 0;
+    }
+
+    for (i = g_iPosBlackList; i < g_iNumBlackList; i++) {
+        iPerformance++;
+
+        /*
+         * if the endAddress of segemnt is less than the startAddress of this item, it means there is
+         * no cross with the rest blacklist items since blacklist items are in increasing order.
+         */
+        if (pEndAddress <= g_stBlackList[i].pBlackStartAddr) {
+            bbox_print(PRINT_DBG, "\nFIND BL BY %d TIMES, POS = %d.\n\n", iPerformance, g_iPosBlackList);
+            bbox_print(PRINT_DBG, "not find black list in segment.\n");
+            return NULL;
+        }
+
+        if (pStartAddress <= g_stBlackList[i].pBlackStartAddr &&
+            g_stBlackList[i].pBlackStartAddr < pEndAddress) {
+            g_iPosBlackList = i;
+            bbox_print(PRINT_DBG, "\nFIND BL BY %d TIMES, POS = %d.\n\n", iPerformance, g_iPosBlackList);
+            bbox_print(PRINT_DBG, "find black list in segment.\n");
+            return &(g_stBlackList[i]);
+        }
+
+        if (pStartAddress < g_stBlackList[i].pBlackEndAddr &&
+            g_stBlackList[i].pBlackEndAddr <= pEndAddress) {
+            if (((uintptr_t)pEndAddress - (uintptr_t)(g_stBlackList[i].pBlackEndAddr)) < uiPageSize) {
+                bbox_print(PRINT_DBG, "find black list in segment, but size < 4K, do not care return.\n");
+                return NULL;
+            } else {
+                g_iPosBlackList = i;
+                bbox_print(PRINT_DBG, "\nFIND BL BY %d TIMES, POS = %d.\n\n", iPerformance, g_iPosBlackList);
+                bbox_print(PRINT_DBG, "find black list in segment.\n");
+                return &(g_stBlackList[i]);
+            }
+        }
+    }
+
+    bbox_print(PRINT_DBG, "\nFIND BL BY %d TIMES, POS = %d.\n\n", iPerformance, g_iPosBlackList);
+    bbox_print(PRINT_DBG, "not find black list in segment.\n");
+
+    /* no cross between this segment and blacklist items. */
+    return NULL;
+}
+
+/*
+ * set a blaclist item to drop it from core file.
+ *      void *pAddress : the head address of excluded memory
+ *      unsigned long long uiLen : memory size
+ * return RET_OK if success else RET_ERR.
+ */
+int _BBOX_AddBlackListAddress(void* pAddress, unsigned long long uiLen)
+{
+    unsigned int uiFound = 0;
+
+    if (pAddress == NULL || uiLen < BBOX_BLACK_LIST_MIN_LEN) {
+        bbox_print(PRINT_ERR, "parameter uiLen(%llu) is invaild.\n", uiLen);
+        return RET_ERR;
+    }
+
+    /* use atomic increment to control concurrency. */
+    while (BBOX_AtomicIncReturn(&g_stLockBlackList) > 1) {
+        BBOX_AtomicDec(&g_stLockBlackList);
+        bbox_print(PRINT_DBG, "add blacklist addr is running, waiting.\n");
+        sleep(1);
+    }
+
+    /* if too many blacklist items were added, return error while its upper limits reaches. */
+    if (g_iNumBlackList >= BBOX_BLACK_LIST_COUNT_MAX) {
+        BBOX_AtomicDec(&g_stLockBlackList);
+        bbox_print(PRINT_ERR, "blacklist addr total reach max, failed.\n");
+        return RET_ERR;
+    }
+
+    /*
+     * suppose that address became bigger and bigger, move forward from blacklist's tail,
+     * and find the proper postion to insert this address into the blacklist.
+     */
+    for (int i = g_iNumBlackList - 1; i >= 0; i--) {
+        /* if try to add the same address again, report error. */
+        if (g_stBlackList[i].pBlackStartAddr == pAddress) {
+            BBOX_AtomicDec(&g_stLockBlackList);
+
+            if (g_stBlackList[i].uiLength == uiLen) {
+                return RET_OK;
+            }
+
+            bbox_print(PRINT_ERR, "add addr has in blacklist\n");
+            return RET_ERR;
+        }
+
+        if (g_stBlackList[i].pBlackStartAddr > pAddress) {
+            g_stBlackList[i+1].pBlackStartAddr = g_stBlackList[i].pBlackStartAddr;
+            g_stBlackList[i+1].pBlackEndAddr = g_stBlackList[i].pBlackEndAddr;
+            g_stBlackList[i+1].uiLength = g_stBlackList[i].uiLength;
+        } else {
+            g_stBlackList[i+1].pBlackStartAddr = pAddress;
+            g_stBlackList[i+1].uiLength = uiLen;
+            g_stBlackList[i+1].pBlackEndAddr= (void *)((char *)pAddress + uiLen);
+            uiFound = 1;
+            break;
+        }
+    }
+
+    /* if no found, it means this address is smaller than all，put it in the head. */
+    if (uiFound == 0) {
+        g_stBlackList[0].pBlackStartAddr = pAddress;
+        g_stBlackList[0].uiLength = uiLen;
+        g_stBlackList[0].pBlackEndAddr= (void *)((char *)pAddress + uiLen);
+    }
+
+    ++g_iNumBlackList;
+
+    BBOX_AtomicDec(&g_stLockBlackList);
+    bbox_print(PRINT_DBG, "add blacklist addr successed, len = %llu.\n", uiLen);
+
+    return RET_OK;
+}
+
+/*
+ * drop a blaclist item to dump it in core file.
+ *      void *pAddress : the head address of excluded memory
+ * return RET_OK if success else RET_ERR.
+ */
+int _BBOX_RmvBlackListAddress(void* pAddress)
+{
+    unsigned int uiFound = 0;
+
+    if (pAddress == NULL) {
+        bbox_print(PRINT_ERR, "parameter pAddress is invaild.\n");
+        return RET_ERR;
+    }
+
+    /* use atomic increment to control concurrency. */
+    while (BBOX_AtomicIncReturn(&g_stLockBlackList) > 1) {
+        BBOX_AtomicDec(&g_stLockBlackList);
+        bbox_print(PRINT_DBG, "remove blacklist addr is running, waiting.\n");
+        sleep(1);
+    }
+
+    /* if blacklist is empty, return error. */
+    if (g_iNumBlackList == 0) {
+        BBOX_AtomicDec(&g_stLockBlackList);
+        bbox_print(PRINT_ERR, "blacklist addr total is zero, failed.\n");
+        return RET_ERR;
+    }
+
+    /* find the specified address and drop it from blacklist. */
+    for (int i = 0; i < g_iNumBlackList; i++) {
+        if (pAddress == g_stBlackList[i].pBlackStartAddr) {
+            uiFound = 1;
+        }
+
+        /* if found, move subsequent items a step forward. */
+        if (uiFound == 1) {
+            /* if it is the last, clear it and stop. */
+            if (i == (g_iNumBlackList - 1)) {
+                int rc = memset_s(&g_stBlackList[i], sizeof(g_stBlackList[0]), 0, sizeof(g_stBlackList[0]));
+                securec_check_c(rc, "\0", "\0");
+                break;
+            }
+            g_stBlackList[i].pBlackStartAddr = g_stBlackList[i+1].pBlackStartAddr;
+            g_stBlackList[i].pBlackEndAddr= g_stBlackList[i+1].pBlackEndAddr;
+            g_stBlackList[i].uiLength = g_stBlackList[i+1].uiLength;
+        }
+    }
+
+    if (uiFound == 0) {
+        BBOX_AtomicDec(&g_stLockBlackList);
+        bbox_print(PRINT_ERR, "remove addr not in blacklist, failed.\n");
+        return RET_ERR;
+    }
+
+    g_iNumBlackList--;
+    BBOX_AtomicDec(&g_stLockBlackList);
+    bbox_print(PRINT_DBG, "add blacklist addr successed.\n");
+
+    return RET_OK;
+}
+
+/*
  * get status information of process
  * in      : char *pBuffer - buffer to store result
  *           unsigned int uiBufLen - buffer size
@@ -201,7 +405,7 @@ int BBOX_GetStatusInfo(char* pBuffer, unsigned int uiBufLen)
 
     /* information title */
     iResult = bbox_snprintf(pBuffer, uiBufLen, "\nSTATUS INFO\n--------------------------------------------\n");
-    if (iResult < 0 || iResult > (int)uiBufLen) {
+    if (iResult <= 0 || iResult > (int)uiBufLen) {
         bbox_print(PRINT_ERR, "bbox_snprintf is failed, errno = %d.\n", errno);
         return RET_ERR;
     }
@@ -253,7 +457,7 @@ int BBOX_GetCpuInfo(char* pBuffer, unsigned int uiBufLen)
 
     /* information title */
     iResult = bbox_snprintf(pBuffer, uiBufLen, "\nCPU INFO\n--------------------------------------------\n");
-    if (iResult < 0 || iResult > (int)uiBufLen) {
+    if (iResult <= 0 || iResult > (int)uiBufLen) {
         bbox_print(PRINT_ERR, "bbox_snprintf is failed, errno = %d.\n", errno);
         return RET_ERR;
     }

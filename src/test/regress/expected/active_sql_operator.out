@@ -1,0 +1,13 @@
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select (select count(*) from gs_wlm_operator_statistics) > 0;
+ ?column? 
+----------
+ t
+(1 row)
+
+drop table tx;

@@ -46,7 +46,6 @@ extern const char* pq_getmsgbytes(StringInfo msg, int datalen);
 extern void pq_copymsgbytes(StringInfo msg, char* buf, int datalen);
 extern char* pq_getmsgtext(StringInfo msg, int rawbytes, int* nbytes);
 extern const char* pq_getmsgstring(StringInfo msg);
-extern const char* pq_getmsgrawstring(StringInfo msg);
 extern void pq_getmsgend(StringInfo msg);
 
 /*

@@ -2,9 +2,9 @@
 -------------------test pg directory-------------------
 ---------------------------------------------------------------
 CREATE SCHEMA test_directory;
-CREATE USER JACK with sysadmin IDENTIFIED BY 'Ttest@123';
-CREATE USER ROSE with sysadmin IDENTIFIED BY 'Ttest@123';
-CREATE USER LEON IDENTIFIED BY 'Ttest@123';
+CREATE USER JACK with sysadmin IDENTIFIED BY 'Gauss@123';
+CREATE USER ROSE with sysadmin IDENTIFIED BY 'Gauss@123';
+CREATE USER LEON IDENTIFIED BY 'Gauss@123';
 ---create directory
 CREATE DIRECTORY REGRESSDIR AS '@libdir@';
 CREATE DIRECTORY NormalDir AS '/home/test_directory/work/';
@@ -42,8 +42,8 @@ SHOW enable_access_server_directory;
 CREATE DIRECTORY data_dir AS '@abs_srcdir@/data';
 DROP DIRECTORY data_dir;
 
-CREATE USER CARRIE sysadmin PASSWORD 'Ttest@123';
-SET SESSION AUTHORIZATION CARRIE PASSWORD 'Ttest@123';
+CREATE USER CARRIE sysadmin PASSWORD 'Gauss@123';
+SET SESSION AUTHORIZATION CARRIE PASSWORD 'Gauss@123';
 CREATE DIRECTORY data_dir AS '@abs_srcdir@/data';
 DROP DIRECTORY data_dir;
 RESET SESSION AUTHORIZATION;

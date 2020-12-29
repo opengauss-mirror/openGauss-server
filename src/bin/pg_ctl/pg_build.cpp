@@ -29,24 +29,19 @@
 #include "utils/builtins.h"
 #include "utils/datetime.h"
 #include "common/fe_memutils.h"
+#include "libpq/libpq-fe.h"
+#include "libpq/libpq-int.h"
 
 /* global variables for con */
-char conninfo_global[MAX_REPLNODE_NUM][MAX_VALUE_LEN] = {{0}, {0}, {0}, {0}, {0},
-#ifdef ENABLE_MULTIPLE_NODES
-    {0}, {0}, {0}
-#endif
-};
+char conninfo_global[MAX_REPLNODE_NUM][MAX_VALUE_LEN] = {{0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}};
 static const char* config_para_build[MAX_REPLNODE_NUM] = {"",
     "replconninfo1",
     "replconninfo2",
     "replconninfo3",
     "replconninfo4",
-#ifdef ENABLE_MULTIPLE_NODES
     "replconninfo5",
     "replconninfo6",
-    "replconninfo7"
-#endif
-};
+    "replconninfo7"};
 
 /* Node name */
 char pgxcnodename[MAX_VALUE_LEN] = {0};
@@ -71,10 +66,7 @@ int32 pg_atoi(const char* s, int size, int c)
      * Some versions of strtol treat the empty string as an error, but some
      * seem not to.  Make an explicit test to be sure we catch it.
      */
-    if (s == NULL) {
-        exit(1);
-    }
-    if (*s == 0) {
+    if (s == NULL || *s == 0) {
         exit(1);
     }
 
@@ -656,8 +648,8 @@ void get_conninfo(const char* filename)
                 g_str_replication_type[1] = 0;
                 g_replication_type = atoi(g_str_replication_type);
                 if(g_replication_type != RT_WITH_DUMMY_STANDBY && g_replication_type != RT_WITH_MULTI_STANDBY) {
-                    write_stderr(_("replication_type invalid.\n"));
-                    exit(1);
+                     write_stderr(_("replication_type invalid.\n"));
+                     exit(1);
                 }
             } else {
                 /* set as default value */
@@ -859,8 +851,8 @@ PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term)
             repl_conn_info->localport,
             repl_conn_info->remotehost,
             repl_conn_info->remoteport,
-            standby_recv_timeout,
-            standby_connect_timeout);
+            conn_timeout,
+            recv_timeout);
         securec_check_ss_c(tnRet, "", "");
 
         free(repl_conn_info);
@@ -879,119 +871,6 @@ PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term)
     }
 
     return con_get;
-}
-
-void CheckBuildParamters(int conn_timeout, int recv_timeout, uint32 term)
-{
-    PGconn* conn = NULL;
-    int i = 0;
-    int repl_arr_length = 0;
-    ReplConnInfo* repl_conn_info = NULL;
-    char repl_conninfo[MAXPGPATH];
-    PGresult* res = NULL;
-    errno_t errorno = EOK;
-
-    /* 2. get primary host. */
-    for (i = 1; i < MAX_REPLNODE_NUM; i++) {
-        if (repl_conn_info != NULL) {
-            free(repl_conn_info);
-            repl_conn_info = NULL;
-        }
-
-        repl_conn_info = ParseReplConnInfo(conninfo_global[i - 1], &repl_arr_length);
-        if (repl_conn_info == NULL)
-            continue;
-
-        errorno = memset_s(repl_conninfo, MAXPGPATH, 0, MAXPGPATH);
-        securec_check_ss_c(errorno, "", "");
-
-        errorno = snprintf_s(repl_conninfo,
-            MAXPGPATH,
-            MAXPGPATH - 1,
-            "localhost=%s localport=%d host=%s port=%d "
-            "dbname=replication replication=true "
-            "fallback_application_name=gs_ctl "
-            "connect_timeout=%d rw_timeout=%d "
-            "options='-c remotetype=application'",
-            repl_conn_info->localhost,
-            repl_conn_info->localport,
-            repl_conn_info->remotehost,
-            repl_conn_info->remoteport,
-            conn_timeout,
-            recv_timeout);
-        securec_check_ss_c(errorno, "", "");
-        conn = check_and_get_primary_conn(repl_conninfo, term);
-        if (conn != NULL) {
-            PQfinish(conn);
-            conn = NULL;
-            g_replconn_idx = i - 1;
-            break;
-        }
-    }
-
-    if (i == MAX_REPLNODE_NUM) {
-        pg_log(PG_PRINT,
-            "%s: invalid value for parameter \"replconninfo\" in postgresql.conf,"
-            "can't find primary.\n",
-            progname);
-        exit(1);
-    }
-
-    errorno = memset_s(repl_conninfo, MAXPGPATH, 0, MAXPGPATH);
-    securec_check_ss_c(errorno, "", "");
-
-    /* conn info string */
-    errorno = snprintf_s(repl_conninfo,
-        MAXPGPATH,
-        sizeof(repl_conninfo) - 1,
-        "host=%s port=%d "
-        "dbname=replication replication=true fallback_application_name=gs_rewind connect_timeout=5",
-        repl_conn_info->remotehost,
-        repl_conn_info->remoteport);
-
-    securec_check_ss_c(errorno, "", "");
-
-    conn = PQconnectdb(repl_conninfo);
-
-    if (conn == NULL) {
-        pg_log(PG_PRINT,
-            "%s: connect the source server error: host=%s port=%d.\n",
-            progname,
-            repl_conn_info->remotehost,
-            repl_conn_info->remoteport);
-        exit(1);
-    }
-
-    if (CONNECTION_BAD == PQstatus(conn)) {
-        pg_log(PG_PRINT,
-            "%s: connect the source server error: host=%s port=%d.\n",
-            progname,
-            repl_conn_info->remotehost,
-            repl_conn_info->remoteport);
-        exit(1);
-    }
-
-    free(repl_conn_info);
-    repl_conn_info = NULL;
-
-    res = PQexec(conn, "SET xc_maintenance_mode to on");
-    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        PQclear(res);
-        res = NULL;
-        PQfinish(conn);
-        conn = NULL;
-
-        write_stderr("%s: set the connection xc_maintenance_mode to on error.\n", progname);
-        return;
-    }
-
-    PQclear(res);
-    res = NULL;
-
-    PQfinish(conn);
-    conn = NULL;
-
-    return;
 }
 
 /*
@@ -1045,10 +924,12 @@ int find_gucoption(
                 q++;
             }
         }
-        if (value_offset != NULL)
+        if (value_offset != NULL) {
             *value_offset = p - optlines[i];
-        if (value_len != NULL)
+        }
+        if (value_len != NULL) {
             *value_len = (tmp == NULL) ? 0 : (tmp - p);
+        }
         return i;
     }
 
@@ -1304,7 +1185,7 @@ void delete_datadir(const char* dirname)
                 }
             } else if (S_ISREG(st.st_mode)) {
                 if (strcmp(de->d_name, "postgresql.conf") == 0 || strcmp(de->d_name, "pg_ctl.lock") == 0 ||
-                    strcmp(de->d_name, "postgresql.conf.lock") == 0 ||
+                    strcmp(de->d_name, "postgresql.conf.lock") == 0 || strcmp(de->d_name, "postgresql.conf.bak.old") == 0 ||
                     strcmp(de->d_name, "build_completed.start") == 0 || strcmp(de->d_name, "gs_build.pid") == 0 ||
                     strcmp(de->d_name, "postmaster.opts") == 0 || strcmp(de->d_name, "gaussdb.state") == 0 ||
                     strcmp(de->d_name, "disc_readonly_test") == 0 || strcmp(de->d_name, ssl_cert_file) == 0 ||
@@ -1546,3 +1427,28 @@ void get_slot_name(char* slotname, size_t len)
     }
     return;
 }
+
+/*
+ * rotate cbm force when build.
+ */
+bool libpqRotateCbmFile(PGconn* connObj, XLogRecPtr lsn)
+{
+    PGresult* res = NULL;
+    char sql[MAX_QUERY_LEN] = {0};
+    errno_t errorno = EOK;
+    bool ec = true;
+
+    errorno = snprintf_s(sql, MAX_QUERY_LEN, MAX_QUERY_LEN - 1,
+        "select * from pg_cbm_rotate_file('%08X/%08X'); ",
+        (uint32)(lsn >> 32), (uint32)(lsn));
+    securec_check_ss_c(errorno, "\0", "\0");
+    res = PQexec(connObj, sql);
+
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        pg_log(PG_ERROR, "could not rotate cbm in 10min: %s", PQresultErrorMessage(res));
+        ec = false;
+    }
+    PQclear(res);
+    return ec;
+}
+

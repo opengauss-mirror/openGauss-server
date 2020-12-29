@@ -32,6 +32,7 @@
 #include "access/xlogreader.h"
 #include "nodes/pg_list.h"
 #include "storage/proc.h"
+#include "access/redo_statistic.h"
 
 
 
@@ -42,13 +43,7 @@ typedef enum {
     PAGE_REDO_THREAD_EXIT_ABNORMAL,
 } PageRedoExitStatus;
 
-
-#ifdef ENABLE_MULTIPLE_NODES
-const static bool SUPPORT_HOT_STANDBY = false;   /* don't support consistency view */
-#else
-const static bool SUPPORT_HOT_STANDBY = true;   /* don't support consistency view */
-#endif
-
+extern bool g_supportHotStandby;
 
 const static bool SUPPORT_FPAGE_DISPATCH = true; /*  support file dispatch if true, else support page dispatche */
 
@@ -61,9 +56,6 @@ static const uint32 PAGE_REDO_WORKER_INVALID = 0;
 static const uint32 PAGE_REDO_WORKER_START = 1;
 static const uint32 PAGE_REDO_WORKER_READY = 2;
 static const uint32 PAGE_REDO_WORKER_EXIT = 3;
-
-
-
 
 static inline int get_real_recovery_parallelism()
 {
@@ -112,10 +104,10 @@ void SwitchToDispatcherContext();
 void FreeAllocatedRedoItem();
 void** GetXLogInvalidPagesFromWorkers();
 void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code);
-
-void MultiRedoSetBufferPinWaitBufId(int bufid);
-void MultiRedoGetBufferPinWaitBufId(int *bufids, uint32 len);
-uint32 MultiRedoGetBufferPinWaitBufLen();
 bool IsExtremeRtoReadWorkerRunning();
+RedoWaitInfo GetRedoIoEvent(int32 event_id);
+void GetRedoWrokerStatistic(uint32* realNum, RedoWorkerStatsData* worker, uint32 workerLen);
+bool IsExtremeRtoSmartShutdown();
+void ExtremeRtoRedoManagerSendEndToStartup();
 
 #endif

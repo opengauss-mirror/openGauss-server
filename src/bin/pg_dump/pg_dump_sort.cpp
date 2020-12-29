@@ -15,7 +15,6 @@
  */
 #include "pg_backup_archiver.h"
 #include "dumpmem.h"
-#include "catalog/pg_class.h"
 
 #ifdef GAUSS_SFT_TEST
 #include "gauss_sft.h"
@@ -30,9 +29,8 @@ static const char* modulename = gettext_noop("sorter");
  * Objects are sorted by priority levels, and within an equal priority level
  * by OID.	(This is a relatively crude hack to provide semi-reasonable
  * behavior for old databases without full dependency info.)  Note: collations,
- * extensions, text search, foreign-data, materialized view, event trigger,
- * and default ACL objects can't really happen here, so the rather bogus
- * priorities for them don't matter.
+ * extensions, text search, foreign-data, and default ACL objects can't really
+ * happen here, so the rather bogus priorities for them don't matter.
  *
  * NOTE: object-type priorities must match the section assignments made in
  * pg_dump.c; that is, PRE_DATA objects must sort before DO_PRE_DATA_BOUNDARY,
@@ -72,8 +70,7 @@ static const int oldObjectTypePriority[] = {
     9,  /* DO_BLOB */
     12, /* DO_BLOB_DATA */
     10, /* DO_PRE_DATA_BOUNDARY */
-    13, /* DO_POST_DATA_BOUNDARY */
-    15  /* DO_REFRESH_MATVIEW */
+    13  /* DO_POST_DATA_BOUNDARY */
 };
 
 /*
@@ -119,8 +116,7 @@ static const int newObjectTypePriority[] = {
     24, /* DO_BLOB_DATA */
     22, /* DO_PRE_DATA_BOUNDARY */
     25, /* DO_POST_DATA_BOUNDARY */
-    31, /* DO_FTBL_CONSTRAINT */
-    33 /* DO_REFRESH_MATVIEW */
+    31  /* DO_FTBL_CONSTRAINT */
 };
 
 static DumpId postDataBoundId;
@@ -144,7 +140,7 @@ static void describeDumpableObject(DumpableObject* obj, char* buf, int bufsize);
 void sortDumpableObjectsByTypeName(DumpableObject** objs, int numObjs)
 {
     if (numObjs > 1)
-        qsort((void*)objs, (uint32)numObjs, sizeof(DumpableObject*), DOTypeNameCompare);
+        qsort((void*)objs, numObjs, sizeof(DumpableObject*), DOTypeNameCompare);
 }
 
 static int DOTypeNameCompare(const void* p1, const void* p2)
@@ -217,7 +213,7 @@ static int DOTypeNameCompare(const void* p1, const void* p2)
 void sortDumpableObjectsByTypeOid(DumpableObject** objs, int numObjs)
 {
     if (numObjs > 1)
-        qsort((void*)objs, (uint32)numObjs, sizeof(DumpableObject*), DOTypeOidCompare);
+        qsort((void*)objs, numObjs, sizeof(DumpableObject*), DOTypeOidCompare);
 }
 
 static int DOTypeOidCompare(const void* p1, const void* p2)
@@ -256,11 +252,11 @@ void sortDumpableObjects(DumpableObject** objs, int numObjs, DumpId preBoundaryI
      */
     postDataBoundId = postBoundaryId;
 
-    ordering = (DumpableObject**)pg_malloc((uint32)numObjs * sizeof(DumpableObject*));
+    ordering = (DumpableObject**)pg_malloc(numObjs * sizeof(DumpableObject*));
     while (!TopoSort(objs, numObjs, ordering, &nOrdering))
         findDependencyLoops(ordering, nOrdering, numObjs);
 
-    rc = memcpy_s(objs, (uint32)numObjs * sizeof(DumpableObject*), ordering, (uint32)numObjs * sizeof(DumpableObject*));
+    rc = memcpy_s(objs, (numObjs * sizeof(DumpableObject*)), ordering, numObjs * sizeof(DumpableObject*));
     securec_check_c(rc, "\0", "\0");
 
     free(ordering);
@@ -306,7 +302,6 @@ static bool TopoSort(DumpableObject** objs, int numObjs, DumpableObject** orderi
     int j = 0;
     int k = 0;
     errno_t rc = 0;
-    size_t beforeConstraintsSize;
 
     /*
      * This is basically the same algorithm shown for topological sorting in
@@ -328,7 +323,7 @@ static bool TopoSort(DumpableObject** objs, int numObjs, DumpableObject** orderi
         return true;
 
     /* Create workspace for the above-described heap */
-    pendingHeap = (int*)pg_malloc((uint32)numObjs * sizeof(int));
+    pendingHeap = (int*)pg_malloc(numObjs * sizeof(int));
 
     /*
      * Scan the constraints, and for each item in the input, generate a count
@@ -337,11 +332,10 @@ static bool TopoSort(DumpableObject** objs, int numObjs, DumpableObject** orderi
      * We also make a map showing the input-order index of the item with
      * dumpId j.
      */
-    beforeConstraintsSize = (uint32)(maxDumpId + 1) * sizeof(int);
-    beforeConstraints = (int*)pg_malloc(beforeConstraintsSize);
-    rc = memset_s(beforeConstraints, beforeConstraintsSize, 0, beforeConstraintsSize);
+    beforeConstraints = (int*)pg_malloc((maxDumpId + 1) * sizeof(int));
+    rc = memset_s(beforeConstraints, ((maxDumpId + 1) * sizeof(int)), 0, (maxDumpId + 1) * sizeof(int));
     securec_check_c(rc, "\0", "\0");
-    idMap = (int*)pg_malloc(beforeConstraintsSize);
+    idMap = (int*)pg_malloc((maxDumpId + 1) * sizeof(int));
     for (i = 0; i < numObjs; i++) {
         obj = objs[i];
         j = obj->dumpId;
@@ -524,7 +518,7 @@ static void findDependencyLoops(DumpableObject** objs, int nObjs, int totObjs)
     int i;
 
     processed = (bool*)pg_calloc(getMaxDumpId() + 1, sizeof(bool));
-    workspace = (DumpableObject**)pg_malloc((uint32)totObjs * sizeof(DumpableObject*));
+    workspace = (DumpableObject**)pg_malloc(totObjs * sizeof(DumpableObject*));
     fixedloop = false;
 
     for (i = 0; i < nObjs; i++) {
@@ -658,7 +652,6 @@ static void repairTypeFuncLoop(DumpableObject* typeobj, DumpableObject* funcobj)
  * will be an implicit dependency in the other direction, we need to break
  * the loop.  If there are no other objects in the loop then we can remove
  * the implicit dependency and leave the ON SELECT rule non-separate.
- * This applies to matviews, as well.
  */
 static void repairViewRuleLoop(DumpableObject* viewobj, DumpableObject* ruleobj)
 {
@@ -673,9 +666,7 @@ static void repairViewRuleLoop(DumpableObject* viewobj, DumpableObject* ruleobj)
  * Because findLoop() finds shorter cycles before longer ones, it's likely
  * that we will have previously fired repairViewRuleLoop() and removed the
  * rule's dependency on the view.  Put it back to ensure the rule won't be
- * emitted before the view.
- * 
- * Note: this approach does *not* work for matviews, at the moment.
+ * emitted before the view...
  */
 static void repairViewRuleMultiLoop(DumpableObject* viewobj, DumpableObject* ruleobj)
 {
@@ -697,34 +688,6 @@ static void repairViewRuleMultiLoop(DumpableObject* viewobj, DumpableObject* rul
     addObjectDependency(ruleobj, viewobj->dumpId);
     /* now that rule is separate, it must be post-data */
     addObjectDependency(ruleobj, postDataBoundId);
-}
-
-/*
- * If a matview is involved in a multi-object loop, we can't currently fix
- * that by splitting off the rule. As a stopgap, we try to fix it by
- * dropping the constraint that the matview be dumped in the pre-data section.
- * This is sufficient to handle cases where a matview depends on some unique
- * index, as can happen if it has a GROUP BY for example.
- *
- * Note that the "next object" is not necessarily the matview itself;
- * it could be the matview's rowtype, for example.  We may come through here
- * several times while removing all the pre-data linkages.  In particular,
- * if there are other matviews that depend on the one with the circularity
- * problem, we'll come through here for each such matview and mark them all
- * as postponed.  (This works because all MVs have pre-data dependencies
- * to begin with, so each of them will get visited.)
- */
-static void repairMatViewBoundaryMultiLoop(DumpableObject* boundaryobj, DumpableObject* nextobj)
-{
-    /* remove boundary's dependency on object after it in loop */
-    removeObjectDependency(boundaryobj, nextobj->dumpId);
-    /* if that object is a matview, mark it as postponed into post-data */
-    if (nextobj->objType == DO_TABLE) {
-        TableInfo* nextinfo = (TableInfo*)nextobj;
-
-        if (nextinfo->relkind == RELKIND_MATVIEW)
-            nextinfo->postponed_def = true;
-    }
 }
 
 /*
@@ -826,29 +789,24 @@ static bool repairDependencyViewLoops(DumpableObject** loop, int nLoop)
     int i = 0;
     int j = 0;
 
-    /* View (including matview) and its ON SELECT rule */
+    /* View and its ON SELECT rule */
     if (nLoop == 2 && loop[0]->objType == DO_TABLE && loop[1]->objType == DO_RULE &&
-        (((TableInfo*)loop[0])->relkind == 'v' ||     /* RELKIND_VIEW */
-        ((TableInfo*)loop[0])->relkind == 'm') &&     /* RELKIND_MATVIEW */
         ((RuleInfo*)loop[1])->ev_type == '1' && ((RuleInfo*)loop[1])->is_instead &&
         ((RuleInfo*)loop[1])->ruletable == (TableInfo*)loop[0]) {
         repairViewRuleLoop(loop[0], loop[1]);
         return true;
     }
     if (nLoop == 2 && loop[1]->objType == DO_TABLE && loop[0]->objType == DO_RULE &&
-        (((TableInfo*)loop[1])->relkind == 'v' ||     /* RELKIND_VIEW */
-        ((TableInfo*)loop[1])->relkind == 'm') &&    /* RELKIND_MATVIEW */
         ((RuleInfo*)loop[0])->ev_type == '1' && ((RuleInfo*)loop[0])->is_instead &&
         ((RuleInfo*)loop[0])->ruletable == (TableInfo*)loop[1]) {
         repairViewRuleLoop(loop[1], loop[0]);
         return true;
     }
 
-    /* Indirect loop involving view (but not matview) and ON SELECT rule */
+    /* Indirect loop involving view and ON SELECT rule */
     if (nLoop > 2) {
         for (i = 0; i < nLoop; i++) {
-            /* RELKIND_VIEW */ 
-            if (loop[i]->objType == DO_TABLE && ((TableInfo*)loop[i])->relkind == 'v') {
+            if (loop[i]->objType == DO_TABLE) {
                 for (j = 0; j < nLoop; j++) {
                     if (loop[j]->objType == DO_RULE && ((RuleInfo*)loop[j])->ev_type == '1' &&
                         ((RuleInfo*)loop[j])->is_instead && ((RuleInfo*)loop[j])->ruletable == (TableInfo*)loop[i]) {
@@ -865,21 +823,7 @@ static bool repairDependencyTblChkConstraintLoops(DumpableObject** loop, int nLo
 {
     int i = 0;
     int j = 0;
-    /* Indirect loop involving matview and data boundary */
-    if (nLoop > 2) {
-        for (i = 0; i < nLoop; i++) {
-            if (loop[i]->objType == DO_TABLE && ((TableInfo*)loop[i])->relkind == 'm') { /* RELKIND_MATVIEW */
-                for (j = 0; j < nLoop; j++) {
-                    if (loop[j]->objType == DO_PRE_DATA_BOUNDARY) {
-                        DumpableObject* nextobj;
-                        nextobj = (j < nLoop - 1) ? loop[j + 1] : loop[0];
-                        repairMatViewBoundaryMultiLoop(loop[j], nextobj);
-                        return true;
-                    }
-                }
-            }
-        }
-    }
+
     /* Table and CHECK constraint */
     if (nLoop == 2 && loop[0]->objType == DO_TABLE && loop[1]->objType == DO_CONSTRAINT &&
         ((ConstraintInfo*)loop[1])->contype == 'c' && ((ConstraintInfo*)loop[1])->contable == (TableInfo*)loop[0]) {
@@ -1124,12 +1068,6 @@ static void describeDumpableObject(DumpableObject* obj, char* buf, int bufsize)
         case DO_INDEX:
             nRet = snprintf_s(
                 buf, bufsize, bufsize - 1, "INDEX %s  (ID %d OID %u)", obj->name, obj->dumpId, obj->catId.oid);
-            securec_check_ss_c(nRet, "\0", "\0");
-            return;
-        case DO_REFRESH_MATVIEW:
-            nRet = snprintf_s(
-                buf, bufsize, bufsize - 1, "REFRESH MATERIALIZED VIEW %s  (ID %d OID %u)",
-                obj->name, obj->dumpId, obj->catId.oid);
             securec_check_ss_c(nRet, "\0", "\0");
             return;
         case DO_RULE:

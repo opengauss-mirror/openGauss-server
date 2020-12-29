@@ -1,0 +1,127 @@
+DROP USER IF EXISTS tom CASCADE;
+NOTICE:  role "tom" does not exist, skipping
+CREATE USER tom WITH PASSWORD "tom@1234";
+SET ROLE tom PASSWORD 'tom@1234';
+\! @abs_bindir@/../jre/bin/java -cp $CLASSPATH:@abs_builddir@/jdbc_test/gsjdbc400.jar:@abs_builddir@/jdbc_test/bypass_pbe/. BypassPbe @portstring@ 2>&1
+Connection succeed!
+name=name20
+
+name=name19
+
+name=name18
+
+name=name17
+
+name=name16
+
+name=name15
+
+break of a resultset of pstmt1
+id=40
+
+id=39
+
+id=38
+
+id=37
+
+id=36
+
+id=35
+
+break of a resultset of pstmt2
+start E1E1
+name=name14
+
+name=name13
+
+name=name12
+
+name=name11
+
+end E1E1
+start E2E2
+id=34
+
+id=33
+
+id=32
+
+id=31
+
+end E2E2
+aff_row=10
+id=1,class=0,name=name1
+id=2,class=0,name=name2
+id=3,class=0,name=name3
+id=4,class=0,name=name4
+id=5,class=0,name=name5
+id=6,class=0,name=name6
+id=7,class=0,name=name7
+id=8,class=0,name=name8
+id=9,class=0,name=name9
+id=10,class=0,name=name10
+id=21,class=2,name=name21
+id=22,class=2,name=name22
+id=23,class=2,name=name23
+id=24,class=2,name=name24
+id=25,class=2,name=name25
+id=26,class=2,name=name26
+id=27,class=2,name=name27
+id=28,class=2,name=name28
+id=29,class=2,name=name29
+id=30,class=2,name=name30
+id=31,class=3,name=name31
+id=32,class=3,name=name32
+id=33,class=3,name=name33
+id=34,class=3,name=name34
+id=35,class=3,name=name35
+id=36,class=3,name=name36
+id=37,class=3,name=name37
+id=38,class=3,name=name38
+id=39,class=3,name=name39
+id=40,class=3,name=name40
+id=41,class=4,name=name41
+id=42,class=4,name=name42
+id=43,class=4,name=name43
+id=44,class=4,name=name44
+id=45,class=4,name=name45
+id=46,class=4,name=name46
+id=47,class=4,name=name47
+id=48,class=4,name=name48
+id=49,class=4,name=name49
+id=50,class=4,name=name50
+id=51,class=5,name=name51
+id=52,class=5,name=name52
+id=53,class=5,name=name53
+id=54,class=5,name=name54
+id=55,class=5,name=name55
+id=56,class=5,name=name56
+id=57,class=5,name=name57
+id=58,class=5,name=name58
+id=59,class=5,name=name59
+id=60,class=5,name=name60
+id=61,class=6,name=name61
+id=62,class=6,name=name62
+id=63,class=6,name=name63
+id=64,class=6,name=name64
+id=65,class=6,name=name65
+id=66,class=6,name=name66
+id=67,class=6,name=name67
+id=68,class=6,name=name68
+id=69,class=6,name=name69
+id=70,class=6,name=name70
+id=20,class=1,name=name_k
+id=19,class=1,name=name_k
+id=18,class=1,name=name_k
+id=17,class=1,name=name_k
+id=16,class=1,name=name_k
+id=15,class=1,name=name_k
+id=14,class=1,name=name_k
+id=13,class=1,name=name_k
+id=12,class=1,name=name_k
+id=11,class=1,name=name_k
+close connection
+DROP TABLE IF EXISTS jdbcpbebypass CASCADE;
+RESET ROLE;
+DROP USER IF EXISTS tom CASCADE;

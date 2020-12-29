@@ -1,0 +1,3 @@
+-- clean up test enviroment for the compute pool.
+DROP SERVER IF EXISTS dummy_server CASCADE;
+DROP USER   IF EXISTS omm          CASCADE;

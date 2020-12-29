@@ -27,7 +27,8 @@ extern Oid ProcedureCreate(const char *procedureName,
                 Oid languageValidator,
                 const char *prosrc,
                 const char *probin,
-                char prokind,
+				bool isAgg,
+				bool isWindowFunc,
                 bool security_definer,
                 bool isLeakProof,
                 bool isStrict,
@@ -43,7 +44,8 @@ extern Oid ProcedureCreate(const char *procedureName,
                 int2vector *prodefaultargpos,
                 bool  fenced,
                 bool  shippable,
-                bool  package);
+                bool  package,
+                bool  proIsProcedure);
 
 extern bool function_parse_error_transpose(const char *prosrc);
 

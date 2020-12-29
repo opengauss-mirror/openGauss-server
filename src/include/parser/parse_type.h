@@ -42,6 +42,7 @@ extern Datum stringTypeDatum(Type tp, char* string, int32 atttypmod);
 extern Oid typeidTypeRelid(Oid type_id);
 extern bool IsTypeSupportedByCStore(_in_ Oid typeOid, _in_ int32 typeMod);
 extern bool IsTypeSupportedByORCRelation(_in_ Oid typeOid);
+extern bool IsTypeSupportedByTsStore(_in_ int kvtype, _in_ Oid typeOid);
 
 extern void parseTypeString(const char* str, Oid* typeid_p, int32* typmod_p);
 extern bool IsTypeTableInInstallationGroup(const Type type_tup);

@@ -1,0 +1,253 @@
+create foreign table  ERROR_LOADING_TABLE_011
+(
+C_CHAR_3 CHAR(102400),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT TINYINT,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
+)
+SERVER gsmpp_server
+OPTIONS(location 'gsobs://@obshostname@/@obsbucket@/obscheck/ERROR_LOADING_TABLE_011',
+format 'text',
+delimiter ',',
+reject_limit '1',
+access_key '@ak@',
+secret_access_key '@sk@'
+) with error_loading_table_011_0123456789_0123456789_0123456789_0123456789;
+NOTICE:  identifier "error_loading_table_011_0123456789_0123456789_0123456789_0123456789" will be truncated to "error_loading_table_011_0123456789_0123456789_0123456789_012345"
+create table  LOADING_TABLE_011
+(
+C_CHAR_3 CHAR(512),
+C_VARCHAR_3 VARCHAR(512),
+C_INT TINYINT,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
+);
+insert into LOADING_TABLE_011 select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT from         ERROR_LOADING_TABLE_011;
+select rownum, rawrecord, detail from error_loading_table_011_0123456789_0123456789_0123456789_0123456789;
+NOTICE:  identifier "error_loading_table_011_0123456789_0123456789_0123456789_0123456789" will be truncated to "error_loading_table_011_0123456789_0123456789_0123456789_012345"
+ rownum |        rawrecord        |                 detail                 
+--------+-------------------------+----------------------------------------
+      2 | ABCDEFG,abcdefg,25,10.2 | missing data for column "c_ts_without"
+(1 row)
+
+CREATE FOREIGN TABLE error_data_1
+(
+c varchar(2),
+id int,
+num float,
+time timestamp without time zone,
+memo text
+)
+SERVER gsmpp_server
+OPTIONS(location 'gsobs://@obshostname@/@obsbucket@/obscheck/error_data_1.txt',
+format 'text',
+delimiter ',',
+reject_limit '100',
+access_key '@ak@',
+secret_access_key '@sk@'
+) WITH error_table_1;
+CREATE FOREIGN TABLE error_data_1_1
+(
+c varchar(2),
+id int,
+num float,
+time timestamp without time zone,
+memo text
+)
+SERVER gsmpp_server
+OPTIONS(location 'gsobs://@obshostname@/@obsbucket@/obscheck/error_data_1.txt',
+format 'text',
+delimiter ',',
+reject_limit '1',
+access_key '@ak@',
+secret_access_key '@sk@'
+) WITH error_table_1_1;
+create table  data_1_1
+(
+c varchar(2),
+id int,
+num float,
+time timestamp without time zone,
+memo text
+);
+SELECT filename, rownum, rawrecord, detail FROM error_table_1_1;
+ filename | rownum | rawrecord | detail 
+----------+--------+-----------+--------
+(0 rows)
+
+SET explain_perf_mode=normal;
+explain (costs off) insert into data_1_1 select * from error_data_1 limit 1;
+--?.*
+--?.*
+ Streaming (type: GATHER)
+   ->  Insert on data_1_1
+         ->  Row Adapter
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     ->  Vector Limit
+                           ->  Vector Streaming(type: BROADCAST)
+                                 ->  Vector Limit
+                                       ->  Vector Foreign Scan on error_data_1
+                                             Foreign File: gsobs://@obshostname@/@obsbucket@/obscheck/error_data_1.txt
+(9 rows)
+
+--complex statement to foreign table
+---
+create table data_1_2 (c1 int);
+insert into data_1_2(c1) select (select id from error_data_1);
+ERROR:  more than one row returned by a subquery used as an expression
+CONTEXT:  referenced column: c1
+insert into data_1_2(c1) select (select id from error_data_1) limit 1;
+ERROR:  more than one row returned by a subquery used as an expression
+CONTEXT:  referenced column: id
+--statment contains ORDER BY
+create table  LOADING_TABLE_000(C_CHAR_3 CHAR(10),C_VARCHAR_3 VARCHAR(10),C_INT int,C_NUMERIC numeric(10,5),C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE);
+insert into LOADING_TABLE_000 select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT from ERROR_LOADING_TABLE_011 order by c_int;
+select * from LOADING_TABLE_000 order by c_int;
+  c_char_3  | c_varchar_3 | c_int | c_numeric |       c_ts_without       
+------------+-------------+-------+-----------+--------------------------
+ ABCDEFG    | abcdefg     |     3 |  10.20000 | Sun Dec 02 00:00:00 2012
+ ABCDEFG    | abcdefg     |    19 |  10.20000 | Tue Jan 01 00:00:00 2013
+ ABCDEFG    | abcdefg     |    25 |  10.20000 | Thu Sep 01 00:00:00 2011
+ ABCDEFG    | abcdefg     |   121 |  10.20000 | Mon Sep 01 00:00:00 2014
+(4 rows)
+
+--alter error table
+---
+alter table error_table_1_1 add column c1 int;
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow ALTER
+alter table error_table_1_1 rename nodeid to node_id;
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow ALTER
+--insert into error table
+---
+insert into error_table_1_1 values(11);
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow INSERT
+--update error table
+---
+update error_table_1_1 set nodeid = 0;
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow UPDATE
+---
+--Log error to remote
+--OBS table should fail with remote log
+---
+create foreign table ft_remote_log(c1 int, c2 varchar)
+server gsmpp_server options(location 'gsobs://@obshostname@/@obsbucket@/obscheck/error_data_2.data',
+delimiter '|',
+access_key '@ak@',
+secret_access_key '@sk@'
+)
+remote log 'ft_remote_log' per node reject limit '100';
+ERROR:  OBS foreign table does not support remote_log option
+---
+--Log error to remote and local
+--OBS table should fail with remote log and local
+---
+create foreign table ft_log_both(c1 int, c2 varchar)
+server gsmpp_server options(location 'gsobs://@obshostname@/@obsbucket@/obscheck/error_data_2.data',
+delimiter '|',
+access_key '@ak@',
+secret_access_key '@sk@'
+)
+log into err_ft_remote_log remote log 'err_ft_remote_log' per node reject limit '100';
+ERROR:  OBS foreign table does not support remote_log option
+DROP FOREIGN TABLE ERROR_LOADING_TABLE_011;
+DROP FOREIGN TABLE error_data_1;
+DROP FOREIGN TABLE error_data_1_1;
+DROP TABLE LOADING_TABLE_000;
+DROP TABLE data_1_2;
+DROP TABLE data_1_1;
+DROP TABLE LOADING_TABLE_011;
+\! chmod +x ./s3bin/s3
+\! ./s3bin/s3 delete  @obsbucket@/obscheck/output1/ address=@obshostname@ ak=@ak@ sk=@sk@
+create table test_1(col1 int,col2 int)
+distribute by hash(col1);
+insert into test_1 values(1,2);
+insert into test_1 values(1,2);
+--test default format
+create foreign table obs_test_1
+(col1 int,col2 int)
+SERVER gsmpp_server
+options(
+location 'gsobs://@obshostname@/@obsbucket@/obscheck/output1/'
+,delimiter ',',
+access_key '@ak@',
+secret_access_key '@sk@',
+encrypt 'off')
+write only;
+insert into obs_test_1 select * from test_1;
+--will failed insert twice
+insert into obs_test_1 select * from test_1;
+ERROR:  Write-Only table's output directory gsobs://@obshostname@/@obsbucket@/obscheck/output1/ is not empty
+create foreign table obs_test_1read
+(col1 int,col2 int)
+SERVER gsmpp_server
+options(
+location 'gsobs://@obshostname@/@obsbucket@/obscheck/output1/',
+delimiter ',',
+format 'text',
+access_key '@ak@',
+secret_access_key '@sk@',
+encrypt 'off');
+create table test_2(col1 int,col2 int)
+distribute by hash(col1);
+insert into test_2 select * from obs_test_1read;
+select count(*) from (select * from test_1 minus all select * from test_2);
+ count 
+-------
+     0
+(1 row)
+
+-- csv format
+create table test_2csv(col1 int,col2 int)
+distribute by hash(col1);
+create foreign table obs_test_2read
+(col1 int,col2 int)
+SERVER gsmpp_server
+options(
+location 'gsobs://@obshostname@/@obsbucket@/obscheck/output1/',
+delimiter ',',
+format 'csv',
+access_key '@ak@',
+secret_access_key '@sk@',
+encrypt 'off');
+insert into test_2csv select * from obs_test_2read;
+select count(*) from (select * from test_2csv minus all select * from test_1);
+ count 
+-------
+     0
+(1 row)
+
+-- fix format
+create foreign table obs_test_4read
+(col1 int,col2 int)
+SERVER gsmpp_server
+options(
+location 'gsobs://@obshostname@/@obsbucket@/obscheck/output1/',
+delimiter ',',
+format 'fixed',
+access_key '@ak@',
+secret_access_key '@sk@',
+encrypt 'off');
+ERROR:  This OBS foreign table only supports CSV/TEXT format
+-- unkown format
+create foreign table obs_test_3read
+(col1 int,col2 int)
+SERVER gsmpp_server
+options(
+location 'gsobs://@obshostname@/@obsbucket@/obscheck/output1/',
+delimiter ',',
+format 'xxx',
+access_key '@ak@',
+secret_access_key '@sk@',
+encrypt 'off');
+ERROR:  LOAD format "xxx" not recognized
+drop table test_2;
+drop table test_2csv;
+drop foreign table obs_test_2read;
+drop foreign table obs_test_1read;
+drop table test_1;
+drop foreign table obs_test_1;

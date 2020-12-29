@@ -42,7 +42,7 @@
 #include "utils/syscache.h"
 #include "utils/catcache.h"
 #include "utils/rel.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "miscadmin.h"
 
 static Oid SynonymCreate(
@@ -72,8 +72,9 @@ void CreateSynonym(CreateSynonymStmt* stmt)
 
     /* Check we have creation rights in namespace. */
     aclResult = pg_namespace_aclcheck(synNamespace, GetUserId(), ACL_CREATE);
+
     if (aclResult != ACLCHECK_OK) {
-        aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synNamespace, true));
+        aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synNamespace));
     }
 
     /* Deconstruct the referenced qualified-name. */
@@ -81,7 +82,7 @@ void CreateSynonym(CreateSynonymStmt* stmt)
 
     /* Using the default creation namespace. */
     if (objSchema == NULL) {
-        objSchema = get_namespace_name(GetOidBySchemaName(), true);
+        objSchema = get_namespace_name(GetOidBySchemaName());
     }
 
     /* Main entry to create a synonym */
@@ -104,7 +105,7 @@ void DropSynonym(DropSynonymStmt* stmt)
     /* Check we have drop privilege in namespace */
     aclResult = pg_namespace_aclcheck(synNamespace, GetUserId(), ACL_CREATE);
     if (aclResult != ACLCHECK_OK) {
-        aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synNamespace, true));
+        aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synNamespace));
     }
 
     SynonymDrop(synNamespace, synName, stmt->behavior, stmt->missing);
@@ -298,7 +299,7 @@ void AlterSynonymOwner(List* name, Oid newOwnerId)
         if (OidIsValid(synForm->synnamespace)) {
             AclResult aclResult = pg_namespace_aclcheck(synForm->synnamespace, newOwnerId, ACL_CREATE);
             if (aclResult != ACLCHECK_OK) {
-                aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synForm->synnamespace, true));
+                aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synForm->synnamespace));
             }
         }
 
@@ -423,7 +424,9 @@ char* CheckReferencedObject(Oid relOid, RangeVar* objVar, const char* synName)
     switch (get_rel_relkind(relOid)) {
         case RELKIND_RELATION:
         case RELKIND_VIEW:
+        case RELKIND_CONTQUERY:
         case RELKIND_FOREIGN_TABLE:
+        case RELKIND_STREAM:
             break;
         case RELKIND_COMPOSITE_TYPE:
             appendStringInfo(

@@ -14,7 +14,7 @@
 #ifndef PGXC_H
 #define PGXC_H
 
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"
 extern bool isRestoreMode;
@@ -35,8 +35,13 @@ typedef enum {
     REMOTE_CONN_GTM_TOOL
 } RemoteConnTypes;
 
+#ifdef ENABLE_MULTIPLE_NODES
+#define IS_PGXC_COORDINATOR (g_instance.role == VCOORDINATOR && !is_streaming_engine())
+#define IS_PGXC_DATANODE (g_instance.role == VDATANODE || g_instance.role == VSINGLENODE || is_streaming_engine())
+#else
 #define IS_PGXC_COORDINATOR (g_instance.role == VCOORDINATOR)
 #define IS_PGXC_DATANODE (g_instance.role == VDATANODE || g_instance.role == VSINGLENODE)
+#endif
 #define IS_SINGLE_NODE (g_instance.role == VSINGLENODE)
 #define REMOTE_CONN_TYPE u_sess->attr.attr_common.remoteConnType
 #define COORDINATOR_NOT_SINGLE (g_instance.role == VDATANODE && g_instance.role != VSINGLENODE)
@@ -51,7 +56,6 @@ typedef enum {
 
 /* Is the CN receive SQL statement ? */
 #define IS_MAIN_COORDINATOR (IS_PGXC_COORDINATOR && !IsConnFromCoord())
-#define IS_LOCAL_NODE (IS_MAIN_COORDINATOR || IS_SINGLE_NODE)
 
 /* key pair to be used as object id while using advisory lock for backup */
 #define XC_LOCK_FOR_BACKUP_KEY_1 0xFFFF

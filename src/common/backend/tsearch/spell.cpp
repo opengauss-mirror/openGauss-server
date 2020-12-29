@@ -1715,10 +1715,10 @@ static void mkVoidAffix(IspellDict* Conf, bool issuffix, int startsuffix)
     Affix->isvoid = 1;
 
     if (issuffix) {
-        Affix->data->node = Conf->Suffix;
+        Affix->data[0].node = Conf->Suffix;
         Conf->Suffix = Affix;
     } else {
-        Affix->data->node = Conf->Prefix;
+        Affix->data[0].node = Conf->Prefix;
         Conf->Prefix = Affix;
     }
 
@@ -1734,13 +1734,13 @@ static void mkVoidAffix(IspellDict* Conf, bool issuffix, int startsuffix)
         return;
     }
 
-    Affix->data->aff = (AFFIX**)cpalloc(sizeof(AFFIX*) * cnt);
-    Affix->data->naff = (uint32)cnt;
+    Affix->data[0].aff = (AFFIX**)cpalloc(sizeof(AFFIX*) * cnt);
+    Affix->data[0].naff = (uint32)cnt;
 
     cnt = 0;
     for (i = start; i < end; i++) {
         if (Conf->Affix[i].replen == 0) {
-            Affix->data->aff[cnt] = Conf->Affix + i;
+            Affix->data[0].aff[cnt] = Conf->Affix + i;
             cnt++;
         }
     }
@@ -1828,10 +1828,9 @@ static AffixNodeData* FindAffixes(AffixNode* node, const char* word, int wrdlen,
     uint8 symbol;
 
     if (node->isvoid) { /* search void affixes */
-        if (node->data->naff) {
+        if (node->data[0].naff)
             return node->data;
-        }
-        node = node->data->node;
+        node = node->data[0].node;
     }
 
     while (node && *level < wrdlen) {
@@ -1866,6 +1865,7 @@ static char* CheckAffix(const char* word, size_t len, AFFIX* Affix, int flagflag
     /*
      * Check compound allow flags
      */
+
     if (flagflags == 0) {
         if (Affix->flagflags & FF_COMPOUNDONLY) {
             return NULL;

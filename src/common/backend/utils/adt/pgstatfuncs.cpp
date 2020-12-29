@@ -17,7 +17,8 @@
 #include <time.h>
 
 #include "access/transam.h"
-#include "access/transam.h"
+#include "access/tableam.h"
+#include "access/redo_statistic.h"
 #include "connector.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
@@ -45,12 +46,12 @@
 #include "pgxc/nodemgr.h"
 #include "postmaster/autovacuum.h"
 #include "postmaster/postmaster.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
-#include "storage/buf_internals.h"
+#include "storage/buf/buf_internals.h"
 #include "workload/cpwlm.h"
 #include "workload/workload.h"
 #include "pgxc/pgxcnode.h"
@@ -59,14 +60,23 @@
 #include "pgxc/poolmgr.h"
 #include "pgxc/execRemote.h"
 #include "utils/elog.h"
+#include "utils/memtrace.h"
 #include "commands/user.h"
 #include "keymanagement/KeyRecord.h"
+#include "instruments/gs_stat.h"
 #include "instruments/list.h"
-#include "access/redo_statistic.h"
 #include "replication/rto_statistic.h"
+#include "utils/globalpreparestmt.h"
+#include "storage/lock/lock.h"
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
-
+#define NUM_PG_LOCKTAG_ID 12
+#define NUM_PG_LOCKMODE_ID 13
+#define NUM_PG_BLOCKSESSION_ID 14
+#define MAX_LOCKTAG_STRING 6
+#define UPPERCASE_LETTERS_ID 55
+#define LOWERCASE_LETTERS_ID 87
+#define DISPLACEMENTS_VALUE 32
 /* bogus ... these externs should be in a header file */
 extern Datum pg_stat_get_numscans(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_tuples_returned(PG_FUNCTION_ARGS);
@@ -113,6 +123,7 @@ extern Datum pg_stat_get_function_self_time(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_backend_idset(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_activity(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_activity_with_conninfo(PG_FUNCTION_ARGS);
+extern Datum pg_stat_get_activity_helper(PG_FUNCTION_ARGS, bool has_conninfo);
 extern Datum pg_stat_get_activity_ng(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_activity_for_temptable(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_status(PG_FUNCTION_ARGS);
@@ -219,7 +230,7 @@ extern Datum global_comm_get_status(PG_FUNCTION_ARGS);
 extern Datum comm_client_info(PG_FUNCTION_ARGS);
 extern Datum global_comm_get_client_info(PG_FUNCTION_ARGS);
 
-/* internal interface for pmk functions. */
+/*internal interface for pmk functions.*/
 extern Datum total_cpu(PG_FUNCTION_ARGS);
 extern Datum get_hostname(PG_FUNCTION_ARGS);
 extern Datum sessionid2pid(PG_FUNCTION_ARGS);
@@ -231,11 +242,12 @@ extern Datum mot_global_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_local_memory_detail(PG_FUNCTION_ARGS);
 extern Datum gs_total_nodegroup_memory_detail(PG_FUNCTION_ARGS);
 
+extern Datum track_memory_context_detail(PG_FUNCTION_ARGS);
+
 /* Global bgwriter statistics, from bgwriter.c */
 extern PgStat_MsgBgWriter bgwriterStats;
 
 extern GlobalNodeDefinition* global_node_definition;
-extern pthread_mutex_t nodeDefCopyLock;
 
 extern int64 MetaCacheGetCurrentUsedSize();
 extern char* getNodenameByIndex(int index);
@@ -259,9 +271,28 @@ extern bool allow_autoanalyze(HeapTuple tuple);
 extern TDE_ALGO g_tde_algo;
 
 static int64 pgxc_exec_partition_tuples_stat(HeapTuple classTuple, HeapTuple partTuple, char* funcname);
+
 static inline void InitPlanOperatorInfoTuple(int operator_plan_info_attrnum, FuncCallContext *funcctx);
-void pg_stat_get_beentry(FuncCallContext* funcctx, PgBackendStatus** beentry);
+
 void pg_stat_get_stat_list(List** stat_list, uint32* statFlag_ref, Oid relid);
+
+void insert_pg_stat_get_activity_with_conninfo(Tuplestorestate *tupStore, TupleDesc tupDesc,
+                                               const PgBackendStatus *beentry);
+void insert_pg_stat_get_activity(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry);
+void insert_pg_stat_get_activity_for_temptable(Tuplestorestate *tupStore, TupleDesc tupDesc,
+                                               const PgBackendStatus *beentry);
+void insert_pg_stat_get_activity_ng(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry);
+void insert_pg_stat_get_status(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry);
+void insert_pg_stat_get_thread(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry);
+void insert_pg_stat_get_session_wlmstat(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry);
+void insert_pg_stat_get_session_respool(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry);
+void insert_comm_client_info(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry);
+void insert_gs_stat_activity_timeout(Tuplestorestate* tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry);
+
+void insert_pv_session_time(Tuplestorestate* tupStore, TupleDesc tupDesc, const SessionTimeEntry* entry);
+void insert_pv_session_stat(Tuplestorestate* tupStore, TupleDesc tupDesc, const SessionLevelStatistic* entry);
+void insert_pv_session_memory(Tuplestorestate* tupStore, TupleDesc tupDesc, const SessionLevelMemory* entry);
+
 
 /*
  * description for WaitState enums.
@@ -350,10 +381,10 @@ static const char* WaitStatePhaseDesc[] = {
  */
 const char* pgstat_get_waitstatusdesc(uint32 wait_event_info)
 {
-    uint32 class_id;
-    class_id = wait_event_info & 0xFF000000;
+    uint32 classId;
+    classId = wait_event_info & 0xFF000000;
 
-    switch (class_id) {
+    switch (classId) {
         case PG_WAIT_LWLOCK:
             return WaitStateDesc[STATE_WAIT_LWLOCK];
         case PG_WAIT_LOCK:
@@ -370,6 +401,11 @@ const char* pgstat_get_waitstatusname(uint32 wait_event_info)
     return WaitStateDesc[wait_event_info];
 }
 
+const char* PgstatGetWaitstatephasename(uint32 waitPhaseInfo)
+{
+    return WaitStatePhaseDesc[waitPhaseInfo];
+}
+
 /*
  * compute tuples stat for table insert/update/delete
  * 1. if it is a replication table, return max value on all datanode
@@ -377,6 +413,7 @@ const char* pgstat_get_waitstatusname(uint32 wait_event_info)
  */
 static void compute_tuples_stat(ParallelFunctionState* state, bool replicated)
 {
+
     TupleTableSlot* slot = NULL;
     Datum datum;
     int64 result = 0;
@@ -399,7 +436,7 @@ static void compute_tuples_stat(ParallelFunctionState* state, bool replicated)
         if (!tuplestore_gettupleslot(state->tupstore, true, false, slot))
             break;
 
-        datum = slot_getattr(slot, 1, &isnull);
+        datum = tableam_tslot_getattr(slot, 1, &isnull);
         if (!isnull) {
             result = DatumGetInt64(datum);
 
@@ -409,22 +446,22 @@ static void compute_tuples_stat(ParallelFunctionState* state, bool replicated)
                 state->result = result;
         }
 
-        (void)ExecClearTuple(slot);
+        ExecClearTuple(slot);
     }
 }
 
-static int64 pgxc_exec_tuples_stat(Oid rel_oid, char* func_name, RemoteQueryExecType exec_type)
+static int64 pgxc_exec_tuples_stat(Oid relOid, char* funcname, RemoteQueryExecType exec_type)
 {
     Relation rel = NULL;
-    char* rel_name = NULL;
-    char* ns_pname = NULL;
+    char* relname = NULL;
+    char* nspname = NULL;
     ExecNodes* exec_nodes = NULL;
     StringInfoData buf;
     ParallelFunctionState* state = NULL;
     int64 result = 0;
     bool replicated = false;
 
-    rel = try_relation_open(rel_oid, AccessShareLock);
+    rel = try_relation_open(relOid, AccessShareLock);
     if (!rel) {
         /* it has been dropped */
         return 0;
@@ -433,16 +470,16 @@ static int64 pgxc_exec_tuples_stat(Oid rel_oid, char* func_name, RemoteQueryExec
     exec_nodes = (ExecNodes*)makeNode(ExecNodes);
     exec_nodes->baselocatortype = LOCATOR_TYPE_HASH;
     exec_nodes->accesstype = RELATION_ACCESS_READ;
-    exec_nodes->en_relid = rel_oid;
+    exec_nodes->en_relid = relOid;
     exec_nodes->primarynodelist = NIL;
     exec_nodes->en_expr = NULL;
 
-    if (exec_type == EXEC_ON_DATANODES) {
+    if (EXEC_ON_DATANODES == exec_type) {
         /* for tuples stat(insert/update/delete/changed..) count */
-        exec_nodes->en_relid = rel_oid;
+        exec_nodes->en_relid = relOid;
         exec_nodes->nodeList = NIL;
         replicated = IsRelationReplicated(RelationGetLocInfo(rel));
-    } else if (exec_type == EXEC_ON_COORDS) {
+    } else if (EXEC_ON_COORDS == exec_type) {
         /* for autovac count */
         exec_nodes->en_relid = InvalidOid;
         exec_nodes->nodeList = GetAllCoordNodes();
@@ -452,11 +489,11 @@ static int64 pgxc_exec_tuples_stat(Oid rel_oid, char* func_name, RemoteQueryExec
 
     /*
      * we awalys send some query string to datanode, Maybe it contains some object name such
-     * as table name, schema name. If the rel_name has single quotes ('), we have to replace
+     * as table name, schema name. If the relname has single quotes ('), we have to replace
      * it with two single quotes ('') to avoid syntax error when the sql string excutes in datanode
      */
-    rel_name = repairObjectName(RelationGetRelationName(rel));
-    ns_pname = repairObjectName(get_namespace_name(rel->rd_rel->relnamespace, true));
+    relname = repairObjectName(RelationGetRelationName(rel));
+    nspname = repairObjectName(get_namespace_name(rel->rd_rel->relnamespace));
     relation_close(rel, AccessShareLock);
 
     initStringInfo(&buf);
@@ -464,16 +501,16 @@ static int64 pgxc_exec_tuples_stat(Oid rel_oid, char* func_name, RemoteQueryExec
         "SELECT pg_catalog.%s(c.oid) FROM pg_class c "
         "INNER JOIN pg_namespace n on c.relnamespace = n.oid "
         "WHERE n.nspname='%s' AND relname = '%s'",
-        func_name,
-        ns_pname,
-        rel_name);
+        funcname,
+        nspname,
+        relname);
 
     state = RemoteFunctionResultHandler(buf.data, exec_nodes, NULL, true, exec_type, true);
     compute_tuples_stat(state, replicated);
     result = state->result;
 
-    pfree_ext(ns_pname);
-    pfree_ext(rel_name);
+    pfree_ext(nspname);
+    pfree_ext(relname);
     pfree_ext(buf.data);
     FreeParallelFunctionState(state);
 
@@ -481,7 +518,7 @@ static int64 pgxc_exec_tuples_stat(Oid rel_oid, char* func_name, RemoteQueryExec
 }
 
 /* get lastest autovac time */
-static void strategy_func_max_times_tamptz(ParallelFunctionState* state)
+static void StrategyFuncMaxTimestamptz(ParallelFunctionState* state)
 {
     TupleTableSlot* slot = NULL;
     TimestampTz* result = NULL;
@@ -491,7 +528,7 @@ static void strategy_func_max_times_tamptz(ParallelFunctionState* state)
     *result = 0;
 
     Assert(state && state->tupstore);
-    if (state->tupdesc == NULL) {
+    if (NULL == state->tupdesc) {
         /*
          * if there is only one coordinator, there is no remote coordinator, tupdesc
          * will be uninitialized, we just do return here
@@ -504,36 +541,34 @@ static void strategy_func_max_times_tamptz(ParallelFunctionState* state)
         bool isnull = false;
         TimestampTz tmp = 0;
 
-        if (!tuplestore_gettupleslot(state->tupstore, true, false, slot)) {
+        if (!tuplestore_gettupleslot(state->tupstore, true, false, slot))
             break;
-        }
 
-        tmp = DatumGetTimestampTz(slot_getattr(slot, 1, &isnull));
-        if (!isnull && timestamp_cmp_internal(tmp, *result) > 0) {
+        tmp = DatumGetTimestampTz(tableam_tslot_getattr(slot, 1, &isnull));
+        if (!isnull && timestamp_cmp_internal(tmp, *result) > 0) 
             *result = tmp;
-        }
 
-        (void)ExecClearTuple(slot);
+        ExecClearTuple(slot);
     }
 }
 
 /* get lastest autoanalyze/autovacuum timestamp from remote coordinator */
-static TimestampTz pgxc_last_autovac_time(Oid rel_oid, char* func_name)
+static TimestampTz pgxc_last_autovac_time(Oid relOid, char* funcname)
 {
-    Oid nspid = get_rel_namespace(rel_oid);
-    char* rel_name = NULL;
-    char* nsp_name = NULL;
+    Oid nspid = get_rel_namespace(relOid);
+    char* relname = NULL;
+    char* nspname = NULL;
     ExecNodes* exec_nodes = NULL;
     TimestampTz result = 0;
     StringInfoData buf;
     ParallelFunctionState* state = NULL;
 
-    rel_name = get_rel_name(rel_oid);
-    nsp_name = get_namespace_name(nspid);
+    relname = get_rel_name(relOid);
+    nspname = get_namespace_name(nspid);
     /* it has been dropped */
-    if ((rel_name == NULL) || (nsp_name == NULL)) {
+    if ((relname == NULL) || (nspname == NULL))
         return 0;
-    }
+
     exec_nodes = (ExecNodes*)makeNode(ExecNodes);
     exec_nodes->accesstype = RELATION_ACCESS_READ;
     exec_nodes->baselocatortype = LOCATOR_TYPE_HASH;
@@ -541,18 +576,18 @@ static TimestampTz pgxc_last_autovac_time(Oid rel_oid, char* func_name)
     exec_nodes->primarynodelist = NIL;
     exec_nodes->en_expr = NULL;
 
-    rel_name = repairObjectName(rel_name);
-    nsp_name = repairObjectName(nsp_name);
+    relname = repairObjectName(relname);
+    nspname = repairObjectName(nspname);
 
     initStringInfo(&buf);
     appendStringInfo(&buf,
         "SELECT pg_catalog.%s(c.oid) FROM pg_class c "
         "INNER JOIN pg_namespace n on c.relnamespace = n.oid "
         "WHERE n.nspname='%s' AND relname = '%s' ",
-        func_name,
-        nsp_name,
-        rel_name);
-    state = RemoteFunctionResultHandler(buf.data, exec_nodes, strategy_func_max_times_tamptz, true, EXEC_ON_COORDS, true);
+        funcname,
+        nspname,
+        relname);
+    state = RemoteFunctionResultHandler(buf.data, exec_nodes, StrategyFuncMaxTimestamptz, true, EXEC_ON_COORDS, true);
     result = *((TimestampTz*)state->resultset);
     FreeParallelFunctionState(state);
 
@@ -561,21 +596,22 @@ static TimestampTz pgxc_last_autovac_time(Oid rel_oid, char* func_name)
 
 Datum pg_stat_get_numscans(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &tab_key.statFlag, rel_id);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &tabkey.statFlag, relid);
 
     foreach (stat_cell, stat_list) {
-        tab_key.tableid = lfirst_oid(stat_cell);
-        tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-        if (!PointerIsValid(tab_entry)) {
+        tabkey.tableid = lfirst_oid(stat_cell);
+        tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+        if (!PointerIsValid(tabentry)) {
             result += 0;
         } else {
-            result += (int64)(tab_entry->numscans);
+            result += (int64)(tabentry->numscans);
         }
     }
 
@@ -586,37 +622,38 @@ Datum pg_stat_get_numscans(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(result);
 }
 
-void pg_stat_get_stat_list(List** stat_list, uint32* stat_flag_ref, Oid rel_id)
+void pg_stat_get_stat_list(List** stat_list, uint32* statFlag_ref, Oid relid)
 {
-    if (isPartitionedObject(rel_id, RELKIND_RELATION, true)) {
-        *stat_flag_ref = STATFLG_PARTITION;
-        *stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_TABLE_PARTITION);
-    } else if (isPartitionedObject(rel_id, RELKIND_INDEX, true)) {
-        *stat_flag_ref = STATFLG_PARTITION;
-        *stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_INDEX_PARTITION);
+    if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
+        *statFlag_ref = STATFLG_PARTITION;
+        *stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
+    } else if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
+        *statFlag_ref = STATFLG_PARTITION;
+        *stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
     } else {
-        *stat_flag_ref = STATFLG_RELATION;
-        *stat_list = lappend_oid(*stat_list, rel_id);
+        *statFlag_ref = STATFLG_RELATION;
+        *stat_list = lappend_oid(*stat_list, relid);
     }
 }
 
 Datum pg_stat_get_tuples_returned(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &tab_key.statFlag, rel_id);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &tabkey.statFlag, relid);
 
     foreach (stat_cell, stat_list) {
-        tab_key.tableid = lfirst_oid(stat_cell);
-        tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-        if (!PointerIsValid(tab_entry)) {
+        tabkey.tableid = lfirst_oid(stat_cell);
+        tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+        if (!PointerIsValid(tabentry)) {
             result += 0;
         } else {
-            result += (int64)(tab_entry->tuples_returned);
+            result += (int64)(tabentry->tuples_returned);
         }
     }
 
@@ -629,21 +666,22 @@ Datum pg_stat_get_tuples_returned(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_tuples_fetched(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &tab_key.statFlag, rel_id);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &tabkey.statFlag, relid);
 
     foreach (stat_cell, stat_list) {
-        tab_key.tableid = lfirst_oid(stat_cell);
-        tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-        if (!PointerIsValid(tab_entry)) {
+        tabkey.tableid = lfirst_oid(stat_cell);
+        tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+        if (!PointerIsValid(tabentry)) {
             result += 0;
         } else {
-            result += (int64)(tab_entry->tuples_fetched);
+            result += (int64)(tabentry->tuples_fetched);
         }
     }
 
@@ -656,133 +694,138 @@ Datum pg_stat_get_tuples_fetched(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_tuples_inserted(PG_FUNCTION_ARGS)
 {
-    PgStat_StatTabKey tab_key;
+    PgStat_StatTabKey tabkey;
     int64 result = 0;
-    Oid table_id = PG_GETARG_OID(0);
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid tableid = PG_GETARG_OID(0);
+    PgStat_StatTabEntry* tabentry = NULL;
 
-    /* for user-define table, fetch inserted tuples from datanode */
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo(table_id)) {
-        PG_RETURN_INT64(pgxc_exec_tuples_stat(table_id, "pg_stat_get_tuples_inserted", EXEC_ON_DATANODES));
-    }
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = table_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = (int64)(tab_entry->tuples_inserted);
-    }
+    /* for user-define table, fetch inserted tuples from datanode*/
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo(tableid))
+        PG_RETURN_INT64(pgxc_exec_tuples_stat(tableid, "pg_stat_get_tuples_inserted", EXEC_ON_DATANODES));
+
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = tableid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = (int64)(tabentry->tuples_inserted);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_tuples_updated(PG_FUNCTION_ARGS)
 {
-    PgStat_StatTabKey tab_key;
+    PgStat_StatTabKey tabkey;
     int64 result = 0;
-    Oid table_id = PG_GETARG_OID(0);
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid tableid = PG_GETARG_OID(0);
+    PgStat_StatTabEntry* tabentry = NULL;
 
-    /* for user-define table, fetch updated tuples from datanode */
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo(table_id)) {
-        PG_RETURN_INT64(pgxc_exec_tuples_stat(table_id, "pg_stat_get_tuples_updated", EXEC_ON_DATANODES));
-    }
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = table_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = (int64)(tab_entry->tuples_updated);
-    }
+    /* for user-define table, fetch updated tuples from datanode*/
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo(tableid))
+        PG_RETURN_INT64(pgxc_exec_tuples_stat(tableid, "pg_stat_get_tuples_updated", EXEC_ON_DATANODES));
+
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = tableid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = (int64)(tabentry->tuples_updated);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_tuples_deleted(PG_FUNCTION_ARGS)
 {
-    Oid table_id = PG_GETARG_OID(0);
-    PgStat_StatTabKey tab_key;
+    Oid tableid = PG_GETARG_OID(0);
+    PgStat_StatTabKey tabkey;
     int64 result = 0;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    PgStat_StatTabEntry* tabentry = NULL;
 
-    /* for user-define table, fetch deleted tuples from datanode */
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo(table_id)) {
-        PG_RETURN_INT64(pgxc_exec_tuples_stat(table_id, "pg_stat_get_tuples_deleted", EXEC_ON_DATANODES));
-    }
+    /* for user-define table, fetch deleted tuples from datanode*/
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo(tableid))
+        PG_RETURN_INT64(pgxc_exec_tuples_stat(tableid, "pg_stat_get_tuples_deleted", EXEC_ON_DATANODES));
 
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = table_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = (int64)(tab_entry->tuples_deleted);
-    }
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = tableid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+    if (tabentry != NULL)
+        result = (int64)(tabentry->tuples_deleted);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_tuples_hot_updated(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid relid = PG_GETARG_OID(0);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    /* for user-define table, fetch hot-updated tuples from datanode */
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo(rel_id)) {
-        PG_RETURN_INT64(pgxc_exec_tuples_stat(rel_id, "pg_stat_get_tuples_hot_updated", EXEC_ON_DATANODES));
-    }
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = (int64)(tab_entry->tuples_hot_updated);
-    }
+    /* for user-define table, fetch hot-updated tuples from datanode*/
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo(relid))
+        PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_tuples_hot_updated", EXEC_ON_DATANODES));
+
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = (int64)(tabentry->tuples_hot_updated);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_tuples_changed(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
-    /* for user-define table, fetch changed tuples from datanode */
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo(rel_id)) {
-        PG_RETURN_INT64(pgxc_exec_tuples_stat(rel_id, "pg_stat_get_tuples_changed", EXEC_ON_DATANODES));
-    }
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = (int64)(tab_entry->changes_since_analyze);
-    }
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
+
+    /* for user-define table, fetch changed tuples from datanode*/
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo(relid))
+        PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_tuples_changed", EXEC_ON_DATANODES));
+
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = (int64)(tabentry->changes_since_analyze);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_live_tuples(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid relid = PG_GETARG_OID(0);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    /* for user-define table, fetch live tuples from datanode */
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        PG_RETURN_INT64(pgxc_exec_tuples_stat(rel_id, "pg_stat_get_live_tuples", EXEC_ON_DATANODES));
-    }
 
-    if (isPartitionedObject(rel_id, RELKIND_INDEX, true)) {
-        tab_key.statFlag = rel_id;
-        stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_INDEX_PARTITION);
-    } else if (isPartitionedObject(rel_id, RELKIND_RELATION, true)) {
-        tab_key.statFlag = rel_id;
-        stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_TABLE_PARTITION);
+    /* for user-define table, fetch live tuples from datanode*/
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
+        PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_live_tuples", EXEC_ON_DATANODES));
+
+    if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
+        tabkey.statFlag = relid;
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
+    } else if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
+        tabkey.statFlag = relid;
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
     } else {
-        tab_key.statFlag = InvalidOid;
-        stat_list = lappend_oid(stat_list, rel_id);
+        tabkey.statFlag = InvalidOid;
+        stat_list = lappend_oid(stat_list, relid);
     }
 
     foreach (stat_cell, stat_list) {
-        tab_key.tableid = lfirst_oid(stat_cell);
-        tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-        if (PointerIsValid(tab_entry))
-            result += (int64)(tab_entry->n_live_tuples);
+        tabkey.tableid = lfirst_oid(stat_cell);
+        tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+        if (PointerIsValid(tabentry))
+            result += (int64)(tabentry->n_live_tuples);
     }
 
     list_free(stat_list);
@@ -792,60 +835,59 @@ Datum pg_stat_get_live_tuples(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_dead_tuples(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid relid = PG_GETARG_OID(0);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
 
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        PG_RETURN_INT64(pgxc_exec_tuples_stat(rel_id, "pg_stat_get_dead_tuples", EXEC_ON_DATANODES));
-    }
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
+        PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_dead_tuples", EXEC_ON_DATANODES));
 
-    if (isPartitionedObject(rel_id, RELKIND_INDEX, true)) {
-        tab_key.statFlag = rel_id;
-        stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_INDEX_PARTITION);
-    } else if (isPartitionedObject(rel_id, RELKIND_RELATION, true)) {
-        tab_key.statFlag = rel_id;
-        stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_TABLE_PARTITION);
+    if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
+        tabkey.statFlag = relid;
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
+    } else if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
+        tabkey.statFlag = relid;
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
     } else {
-        tab_key.statFlag = InvalidOid;
-        stat_list = lappend_oid(stat_list, rel_id);
+        tabkey.statFlag = InvalidOid;
+        stat_list = lappend_oid(stat_list, relid);
     }
 
     foreach (stat_cell, stat_list) {
-        tab_key.tableid = lfirst_oid(stat_cell);
-        tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-        if (PointerIsValid(tab_entry)) {
-            result += (int64)(tab_entry->n_dead_tuples);
-        }
+        tabkey.tableid = lfirst_oid(stat_cell);
+        tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+        if (PointerIsValid(tabentry))
+            result += (int64)(tabentry->n_dead_tuples);
     }
 
-    if (PointerIsValid(stat_list)) {
+    if (PointerIsValid(stat_list))
         list_free(stat_list);
-    }
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_blocks_fetched(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &tab_key.statFlag, rel_id);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &tabkey.statFlag, relid);
 
     foreach (stat_cell, stat_list) {
-        tab_key.tableid = lfirst_oid(stat_cell);
-        tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-        if (!PointerIsValid(tab_entry)) {
+        tabkey.tableid = lfirst_oid(stat_cell);
+        tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+        if (!PointerIsValid(tabentry)) {
             result += 0;
         } else {
-            result += (int64)(tab_entry->blocks_fetched);
+            result += (int64)(tabentry->blocks_fetched);
         }
     }
 
@@ -858,20 +900,21 @@ Datum pg_stat_get_blocks_fetched(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_blocks_hit(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &tab_key.statFlag, rel_id);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &tabkey.statFlag, relid);
     foreach (stat_cell, stat_list) {
-        tab_key.tableid = lfirst_oid(stat_cell);
-        tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-        if (!PointerIsValid(tab_entry)) {
+        tabkey.tableid = lfirst_oid(stat_cell);
+        tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+        if (!PointerIsValid(tabentry)) {
             result += 0;
         } else {
-            result += (int64)(tab_entry->blocks_hit);
+            result += (int64)(tabentry->blocks_hit);
         }
     }
 
@@ -888,20 +931,23 @@ Datum pg_stat_get_blocks_hit(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_cu_mem_hit(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &tab_key.statFlag, rel_id);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &tabkey.statFlag, relid);
+
     foreach (stat_cell, stat_list) {
-        tab_key.tableid = lfirst_oid(stat_cell);
-        tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-        if (PointerIsValid(tab_entry)) {
-            result += (int64)(tab_entry->cu_mem_hit);
+        tabkey.tableid = lfirst_oid(stat_cell);
+        tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+        if (PointerIsValid(tabentry)) {
+            result += (int64)(tabentry->cu_mem_hit);
         }
     }
+
     if (PointerIsValid(stat_list)) {
         list_free(stat_list);
     }
@@ -915,23 +961,27 @@ Datum pg_stat_get_cu_mem_hit(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_cu_hdd_sync(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &tab_key.statFlag, rel_id);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &tabkey.statFlag, relid);
+
     foreach (stat_cell, stat_list) {
-        tab_key.tableid = lfirst_oid(stat_cell);
-        tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-        if (PointerIsValid(tab_entry)) {
-            result += (int64)(tab_entry->cu_hdd_sync);
+        tabkey.tableid = lfirst_oid(stat_cell);
+        tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+        if (PointerIsValid(tabentry)) {
+            result += (int64)(tabentry->cu_hdd_sync);
         }
     }
+
     if (PointerIsValid(stat_list)) {
         list_free(stat_list);
     }
+
     PG_RETURN_INT64(result);
 }
 
@@ -941,58 +991,63 @@ Datum pg_stat_get_cu_hdd_sync(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_cu_hdd_asyn(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &tab_key.statFlag, rel_id);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &tabkey.statFlag, relid);
 
     foreach (stat_cell, stat_list) {
-        tab_key.tableid = lfirst_oid(stat_cell);
-        tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-        if (PointerIsValid(tab_entry)) {
-            result += (int64)(tab_entry->cu_hdd_asyn);
+        tabkey.tableid = lfirst_oid(stat_cell);
+        tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+        if (PointerIsValid(tabentry)) {
+            result += (int64)(tabentry->cu_hdd_asyn);
         }
     }
+
     if (PointerIsValid(stat_list)) {
         list_free(stat_list);
     }
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_last_data_changed_time(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     TimestampTz result = 0;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
 
-    tab_key.statFlag = STATFLG_RELATION;
-    tab_key.tableid = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (!PointerIsValid(tab_entry)) {
+    tabkey.statFlag = STATFLG_RELATION;
+    tabkey.tableid = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (!PointerIsValid(tabentry))
         result = 0;
-    } else {
-        result = tab_entry->data_changed_timestamp;
-    }
-    if (result == 0) {
+    else
+        result = tabentry->data_changed_timestamp;
+
+    if (result == 0)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TIMESTAMPTZ(result);
-    }
 }
 
 Datum pg_stat_set_last_data_changed_time(PG_FUNCTION_ARGS)
 {
-    if (!IS_PGXC_COORDINATOR && !IS_SINGLE_NODE) {
+    if (!IS_PGXC_COORDINATOR && !IS_SINGLE_NODE)
         PG_RETURN_VOID();
-    }
 
-    Oid rel_id = PG_GETARG_OID(0);
-    Relation rel = heap_open(rel_id, AccessShareLock);
-    pgstat_report_data_changed(rel_id, STATFLG_RELATION, rel->rd_rel->relisshared);
+    Oid relid = PG_GETARG_OID(0);
+
+    Relation rel = heap_open(relid, AccessShareLock);
+
+    pgstat_report_data_changed(relid, STATFLG_RELATION, rel->rd_rel->relisshared);
+
     heap_close(rel, AccessShareLock);
 
     PG_RETURN_VOID();
@@ -1000,751 +1055,1060 @@ Datum pg_stat_set_last_data_changed_time(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_last_vacuum_time(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid relid = PG_GETARG_OID(0);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     TimestampTz result = 0;
 
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = tab_entry->vacuum_timestamp;
-    }
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
 
-    if (result == 0) {
+    if (tabentry != NULL)
+        result = tabentry->vacuum_timestamp;
+
+    if (result == 0)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TIMESTAMPTZ(result);
-    }
 }
 
 Datum pg_stat_get_last_autovacuum_time(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid relid = PG_GETARG_OID(0);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     TimestampTz result = 0;
 
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        result = pgxc_last_autovac_time(rel_id, "pg_stat_get_last_autovacuum_time");
-    }
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        result = pgxc_last_autovac_time(relid, "pg_stat_get_last_autovacuum_time");
 
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
     /* get lastest autovacuum timestamp from local timestamp and remote timestamp */
-    if (tab_entry && timestamptz_cmp_internal(tab_entry->autovac_vacuum_timestamp, result) > 0) {
-        result = tab_entry->autovac_vacuum_timestamp;
-    }
-    if (result == 0) {
+    if (tabentry && timestamptz_cmp_internal(tabentry->autovac_vacuum_timestamp, result) > 0)
+        result = tabentry->autovac_vacuum_timestamp;
+
+    if (result == 0)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TIMESTAMPTZ(result);
-    }
 }
 
 Datum pg_stat_get_last_analyze_time(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid relid = PG_GETARG_OID(0);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     TimestampTz result = 0;
 
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = tab_entry->analyze_timestamp;
-    }
-    if (result == 0) {
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = tabentry->analyze_timestamp;
+
+    if (result == 0)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TIMESTAMPTZ(result);
-    }
 }
 
 Datum pg_stat_get_last_autoanalyze_time(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid relid = PG_GETARG_OID(0);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     TimestampTz result = 0;
 
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        result = pgxc_last_autovac_time(rel_id, "pg_stat_get_last_autoanalyze_time");
-    }
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        result = pgxc_last_autovac_time(relid, "pg_stat_get_last_autoanalyze_time");
 
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry && timestamptz_cmp_internal(tab_entry->autovac_analyze_timestamp, result) > 0) {
-        result = tab_entry->autovac_analyze_timestamp;
-    }
-    if (result == 0) {
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry && timestamptz_cmp_internal(tabentry->autovac_analyze_timestamp, result) > 0)
+        result = tabentry->autovac_analyze_timestamp;
+
+    if (result == 0)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TIMESTAMPTZ(result);
-    }
 }
 
 Datum pg_stat_get_vacuum_count(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid relid = PG_GETARG_OID(0);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result += (int64)(tab_entry->vacuum_count);
-    }
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result += (int64)(tabentry->vacuum_count);
 
     PG_RETURN_INT64(result);
 }
 
+/* get max autovac count from multi-node */
+static void StrategyFuncMaxCount(ParallelFunctionState* state)
+{
+    TupleTableSlot* slot = NULL;
+    int64* result = NULL;
+
+    state->resultset = (int64*)palloc(sizeof(int64));
+    result = (int64*)state->resultset;
+    *result = 0;
+
+    Assert(state && state->tupstore);
+    if (NULL == state->tupdesc) {
+        /*
+         * if there is only one coordinator, there is no remote coordinator, tupdesc
+         * will be uninitialized, we just do return here
+         */
+        return;
+    }
+
+    slot = MakeSingleTupleTableSlot(state->tupdesc);
+    for (;;) {
+        bool isnull = false;
+        int64 tmp = 0;
+
+        if (!tuplestore_gettupleslot(state->tupstore, true, false, slot))
+            break;
+
+        tmp = DatumGetInt64(tableam_tslot_getattr(slot, 1, &isnull));
+        if (!isnull && tmp > *result)
+            *result = tmp;
+
+        ExecClearTuple(slot);
+    }
+}
+
+static int64 pgxc_get_autovac_count(Oid relOid, char* funcname)
+{
+    Oid nspid = get_rel_namespace(relOid);
+    char* relname = NULL;
+    char* nspname = NULL;
+    ExecNodes* exec_nodes = NULL;
+    int64 result = 0;
+    StringInfoData buf;
+    ParallelFunctionState* state = NULL;
+
+    relname = get_rel_name(relOid);
+    nspname = get_namespace_name(nspid);
+    /* it has been dropped */
+    if ((relname == NULL) || (nspname == NULL))
+        return 0;
+
+    exec_nodes = (ExecNodes*)makeNode(ExecNodes);
+    exec_nodes->accesstype = RELATION_ACCESS_READ;
+    exec_nodes->baselocatortype = LOCATOR_TYPE_HASH;
+    exec_nodes->nodeList = GetAllCoordNodes();
+    exec_nodes->primarynodelist = NIL;
+    exec_nodes->en_expr = NULL;
+
+    relname = repairObjectName(relname);
+    nspname = repairObjectName(nspname);
+
+    initStringInfo(&buf);
+    appendStringInfo(&buf,
+        "SELECT pg_catalog.%s(c.oid) FROM pg_class c "
+        "INNER JOIN pg_namespace n on c.relnamespace = n.oid "
+        "WHERE n.nspname='%s' AND relname = '%s' ",
+        funcname,
+        nspname,
+        relname);
+    pfree(relname);
+    pfree(nspname);
+
+    state = RemoteFunctionResultHandler(buf.data, exec_nodes, StrategyFuncMaxCount, true, EXEC_ON_COORDS, true);
+    result = *((int64*)state->resultset);
+
+    FreeParallelFunctionState(state);
+    pfree(buf.data);
+    list_free(exec_nodes->nodeList);
+    pfree(exec_nodes);
+
+    return result;
+}
+
 Datum pg_stat_get_autovacuum_count(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid relid = PG_GETARG_OID(0);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        result = pgxc_exec_tuples_stat(rel_id, "pg_stat_get_autovacuum_count", EXEC_ON_COORDS);
-    }
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        result = pgxc_get_autovac_count(relid, "pg_stat_get_autovacuum_count");
 
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result += (int64)(tab_entry->autovac_vacuum_count);
-    }
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = Max(result, (int64)(tabentry->autovac_vacuum_count));
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_analyze_count(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid relid = PG_GETARG_OID(0);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if ((tab_entry = pgstat_fetch_stat_tabentry(&tab_key))) {
-        result += (int64)(tab_entry->analyze_count);
-    }
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if ((tabentry = pgstat_fetch_stat_tabentry(&tabkey)))
+        result += (int64)(tabentry->analyze_count);
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_autoanalyze_count(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid relid = PG_GETARG_OID(0);
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        result = pgxc_exec_tuples_stat(rel_id, "pg_stat_get_autoanalyze_count", EXEC_ON_COORDS);
-    }
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        result = pgxc_get_autovac_count(relid, "pg_stat_get_autoanalyze_count");
 
-    tab_key.statFlag = InvalidOid;
-    tab_key.tableid = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result += (int64)(tab_entry->autovac_analyze_count);
-    }
+    tabkey.statFlag = InvalidOid;
+    tabkey.tableid = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = Max(result, (int64)(tabentry->autovac_analyze_count));
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_function_calls(PG_FUNCTION_ARGS)
 {
-    Oid func_id = PG_GETARG_OID(0);
-    PgStat_StatFuncEntry* func_entry = NULL;
+    Oid funcid = PG_GETARG_OID(0);
+    PgStat_StatFuncEntry* funcentry = NULL;
 
-    if ((func_entry = pgstat_fetch_stat_funcentry(func_id)) == NULL) {
+    if ((funcentry = pgstat_fetch_stat_funcentry(funcid)) == NULL)
         PG_RETURN_NULL();
-    }
-    PG_RETURN_INT64(func_entry->f_numcalls);
+    PG_RETURN_INT64(funcentry->f_numcalls);
 }
 
 Datum pg_stat_get_function_total_time(PG_FUNCTION_ARGS)
 {
-    Oid func_id = PG_GETARG_OID(0);
-    PgStat_StatFuncEntry* func_entry = NULL;
+    Oid funcid = PG_GETARG_OID(0);
+    PgStat_StatFuncEntry* funcentry = NULL;
 
-    if ((func_entry = pgstat_fetch_stat_funcentry(func_id)) == NULL) {
+    if ((funcentry = pgstat_fetch_stat_funcentry(funcid)) == NULL)
         PG_RETURN_NULL();
-    }
     /* convert counter from microsec to millisec for display */
-    PG_RETURN_FLOAT8(((double)func_entry->f_total_time) / 1000.0);
+    PG_RETURN_FLOAT8(((double)funcentry->f_total_time) / 1000.0);
 }
 
 Datum pg_stat_get_function_self_time(PG_FUNCTION_ARGS)
 {
-    Oid func_id = PG_GETARG_OID(0);
-    PgStat_StatFuncEntry* func_entry = NULL;
+    Oid funcid = PG_GETARG_OID(0);
+    PgStat_StatFuncEntry* funcentry = NULL;
 
-    if ((func_entry = pgstat_fetch_stat_funcentry(func_id)) == NULL) {
+    if ((funcentry = pgstat_fetch_stat_funcentry(funcid)) == NULL)
         PG_RETURN_NULL();
-    }
     /* convert counter from microsec to millisec for display */
-    PG_RETURN_FLOAT8(((double)func_entry->f_self_time) / 1000.0);
+    PG_RETURN_FLOAT8(((double)funcentry->f_self_time) / 1000.0);
 }
 
 Datum pg_stat_get_backend_idset(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     int* fctx = NULL;
     int32 result;
+    uint32 numbackends = 0;
 
     /* stuff done only on the first call of the function */
     if (SRF_IS_FIRSTCALL()) {
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        fctx = (int*)MemoryContextAlloc(func_ctx->multi_call_memory_ctx, 2 * sizeof(int));
-        func_ctx->user_fctx = fctx;
+        fctx = (int*)MemoryContextAlloc(funcctx->multi_call_memory_ctx, 2 * sizeof(int));
+        funcctx->user_fctx = fctx;
 
         fctx[0] = 0;
-        fctx[1] = pgstat_fetch_stat_numbackends();
+        /* Only numbackends is required. */
+        numbackends = gs_stat_read_current_status(NULL, NULL, NULL);
+        fctx[1] = (int)numbackends;
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    fctx = (int*)func_ctx->user_fctx;
+    funcctx = SRF_PERCALL_SETUP();
+    fctx = (int*)funcctx->user_fctx;
 
     fctx[0] += 1;
     result = fctx[0];
 
     if (result <= fctx[1]) {
         /* do when there is more left to send */
-        SRF_RETURN_NEXT(func_ctx, Int32GetDatum(result));
+        SRF_RETURN_NEXT(funcctx, Int32GetDatum(result));
     } else {
         /* do when there is no more left */
-        SRF_RETURN_DONE(func_ctx);
-    }
-}
-
-Datum pg_stat_get_activity(PG_FUNCTION_ARGS)
-{
-    bool is_first_call = SRF_IS_FIRSTCALL();
-    Datum result_with_Info = pg_stat_get_activity_with_conninfo(fcinfo);
-
-    FuncCallContext* ctx = ((FuncCallContext*)(fcinfo->flinfo->fn_extra));
-    TupleDesc tuple_desc = NULL;
-
-    if (ctx != NULL) {
-        tuple_desc = ctx->tuple_desc;
-
-        /* Remove the last attribute(connection_info) for previous defination of
-         * pg_stat_activity in every tuple. */
-        if (is_first_call) {
-            tuple_desc->natts--;
-        }
-    }
-
-    /* It's the first return, whose descriptor will be the actual one. */
-    if (result_with_Info != (Datum)0) {
-        HeapTupleHeader td;
-        td = DatumGetHeapTupleHeader(result_with_Info);
-        tuple_desc = lookup_rowtype_tupdesc(HeapTupleHeaderGetTypeId(td), HeapTupleHeaderGetTypMod(td));
-        if (tuple_desc) {
-            tuple_desc->natts--;
-            ReleaseTupleDesc(tuple_desc);
-        }
-    }
-
-    return result_with_Info;
-}
-
-Datum pg_stat_get_activity_for_temptable(PG_FUNCTION_ARGS)
-{
-    FuncCallContext* func_ctx = NULL;
-    errno_t rc = 0;
-    const int ATT_COUNT = 4;
-
-    if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tup_desc;
-
-        func_ctx = SRF_FIRSTCALL_INIT();
-
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-
-        tup_desc = CreateTemplateTupleDesc(ATT_COUNT, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "datid", OIDOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "templineid", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "tempid", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "sessionid", INT8OID, -1, 0);
-
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-
-        /* Get all backends */
-        func_ctx->max_calls = pgstat_fetch_stat_numbackends();
-
-        MemoryContextSwitchTo(old_context);
-    }
-
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* for each row */
-        Datum values[ATT_COUNT];
-        bool nulls[ATT_COUNT] = {false};
-        HeapTuple tuple = NULL;
-        PgBackendStatus* beentry = NULL;
-
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-
-        /* Get the next one in the list */
-        beentry = pgstat_fetch_stat_beentry(func_ctx->call_cntr + 1); /* 1-based index */
-        if (beentry == NULL || beentry->st_sessionid == 0) {
-            for (int i = 0; i < ATT_COUNT; i++)
-                nulls[i] = true;
-            tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-            SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-        }
-
-        /* Values available to all callers */
-        values[0] = ObjectIdGetDatum(beentry->st_databaseid);
-        values[1] = Int32GetDatum(beentry->st_timelineid);
-        values[2] = Int32GetDatum(beentry->st_tempid);
-        values[3] = Int64GetDatum(beentry->st_sessionid);
-
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else {
-        /* nothing left */
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
 Datum pg_stat_get_activity_with_conninfo(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    return pg_stat_get_activity_helper(fcinfo, true);
+}
+
+Datum pg_stat_get_activity(PG_FUNCTION_ARGS)
+{
+    return pg_stat_get_activity_helper(fcinfo, false);
+}
+
+Datum pg_stat_get_activity_helper(PG_FUNCTION_ARGS, bool has_conninfo)
+{
+    const int ATT_COUNT = has_conninfo ? 19 : 18;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(ATT_COUNT, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_1, "datid", OIDOID, -1, 0);
+    /* This should have been called 'pid';  can't change it. 2011-06-11 */
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_2, "pid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_3, "sessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_4, "usesysid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_5, "application_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_6, "state", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_7, "query", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_8, "waiting", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_9, "xact_start", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_10, "query_start", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_11, "backend_start", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_12, "state_change", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_13, "client_addr", INETOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_14, "client_hostname", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_15, "client_port", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_16, "enqueue", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_17, "query_id", INT8OID, -1, 0);
+    if (has_conninfo) {
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARG_18, "connection_info", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARG_19, "srespool", NAMEOID, -1, 0);
+    } else {
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARG_18, "srespool", NAMEOID, -1, 0);
+    }
+
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
+
+    MemoryContextSwitchTo(oldcontext);
+
+    bool hasTID = false;
+    ThreadId tid = 0;
+    if (!PG_ARGISNULL(0)) {
+        hasTID = true;
+        tid = PG_GETARG_INT64(0);
+    }
+
+    if (u_sess->attr.attr_common.pgstat_track_activities) {
+        if (has_conninfo) {
+            (void)gs_stat_read_current_status(rsinfo->setResult, rsinfo->setDesc,
+                                              insert_pg_stat_get_activity_with_conninfo, hasTID, tid);
+        } else {
+            (void)gs_stat_read_current_status(rsinfo->setResult, rsinfo->setDesc,
+                                              insert_pg_stat_get_activity, hasTID, tid);
+        }
+    }
+
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
+
+    return (Datum) 0;
+}
+
+void insert_pg_stat_get_activity_with_conninfo(Tuplestorestate *tupStore, TupleDesc tupDesc,
+                                               const PgBackendStatus *beentry)
+{
+    const int ATT_NUM = 19;
+
+    Datum values[ATT_NUM];
+    bool nulls[ATT_NUM];
     errno_t rc = 0;
 
-    if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tup_desc;
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+    /* Values only available to same user or superuser */
+    if (superuser() || isMonitoradmin(GetUserId()) || beentry->st_userid == GetUserId()) {
+        values[ARR_0] = ObjectIdGetDatum(beentry->st_databaseid);
+        values[ARR_1] = Int64GetDatum(beentry->st_procpid);
+        values[ARR_2] = Int64GetDatum(beentry->st_sessionid);
+        values[ARR_3] = ObjectIdGetDatum(beentry->st_userid);
+        if (beentry->st_appname)
+            values[ARR_4] = CStringGetTextDatum(beentry->st_appname);
+        else
+            nulls[ARR_4] = true;
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        SockAddr zero_clientaddr;
 
-        tup_desc = CreateTemplateTupleDesc(18, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "datid", OIDOID, -1, 0);
-        /* This should have been called 'pid';  can't change it. 2011-06-11 */
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "pid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "sessionid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "usesysid", OIDOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "application_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)6, "state", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)7, "query", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)8, "waiting", BOOLOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)9, "xact_start", TIMESTAMPTZOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)10, "query_start", TIMESTAMPTZOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)11, "backend_start", TIMESTAMPTZOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)12, "state_change", TIMESTAMPTZOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)13, "client_addr", INETOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)14, "client_hostname", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)15, "client_port", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)16, "enqueue", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)17, "query_id", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)18, "connection_info", TEXTOID, -1, 0);
-
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-
-        func_ctx->user_fctx = palloc0(sizeof(int));
-        if (PG_ARGISNULL(0)) {
-            /* Get all backends */
-            func_ctx->max_calls = pgstat_fetch_stat_numbackends();
+        switch (beentry->st_state) {
+            case STATE_IDLE:
+                values[ARR_5] = CStringGetTextDatum("idle");
+                break;
+            case STATE_RUNNING:
+                values[ARR_5] = CStringGetTextDatum("active");
+                break;
+            case STATE_IDLEINTRANSACTION:
+                values[ARR_5] = CStringGetTextDatum("idle in transaction");
+                break;
+            case STATE_FASTPATH:
+                values[ARR_5] = CStringGetTextDatum("fastpath function call");
+                break;
+            case STATE_IDLEINTRANSACTION_ABORTED:
+                values[ARR_5] = CStringGetTextDatum("idle in transaction (aborted)");
+                break;
+            case STATE_DISABLED:
+                values[ARR_5] = CStringGetTextDatum("disabled");
+                break;
+            case STATE_RETRYING:
+                values[ARR_5] = CStringGetTextDatum("retrying");
+                break;
+            case STATE_COUPLED:
+                values[ARR_5] = CStringGetTextDatum("coupled to session");
+                break;
+            case STATE_DECOUPLED:
+                values[ARR_5] = CStringGetTextDatum("decoupled from session");
+                break;
+            case STATE_UNDEFINED:
+                nulls[ARR_5] = true;
+                break;
+            default:
+                break;
+        }
+        if (beentry->st_state == STATE_UNDEFINED || beentry->st_state == STATE_DISABLED) {
+            nulls[ARR_6] = true;
         } else {
-            /*
-             * Get one backend - locate by pid.
-             *
-             * We lookup the backend early, so we can return zero rows if it
-             * doesn't exist, instead of returning a single row full of NULLs.
-             */
-            ThreadId pid = PG_GETARG_INT64(0);
-            int i;
-            int n = pgstat_fetch_stat_numbackends();
+            char* mask_string = NULL;
 
-            for (i = 1; i <= n; i++) {
-                PgBackendStatus* be = pgstat_fetch_stat_beentry(i);
+            /* Mask the statement in the activity view. */
+            mask_string = maskPassword(beentry->st_activity);
+            if (mask_string == NULL)
+                mask_string = beentry->st_activity;
 
-                if (be != NULL) {
-                    if (be->st_procpid == pid) {
-                        *(int*)(func_ctx->user_fctx) = i;
-                        break;
-                    }
-                }
-            }
+            values[ARR_6] = CStringGetTextDatum(mask_string);
 
-            if (*(int*)(func_ctx->user_fctx) == 0)
-                /* Pid not found, return zero rows */
-                func_ctx->max_calls = 0;
-            else
-                func_ctx->max_calls = 1;
+            if (mask_string != beentry->st_activity)
+                pfree(mask_string);
         }
+        values[ARR_7] = BoolGetDatum(pgstat_get_waitlock(beentry->st_waitevent));
 
-        MemoryContextSwitchTo(old_context);
-    }
+        if (beentry->st_xact_start_timestamp != 0)
+            values[ARR_8] = TimestampTzGetDatum(beentry->st_xact_start_timestamp);
+        else
+            nulls[ARR_8] = true;
 
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* for each row */
-        Datum values[18];
-        bool nulls[18] = {false};
-        HeapTuple tuple = NULL;
-        PgBackendStatus* beentry = NULL;
+        if (beentry->st_activity_start_timestamp != 0)
+            values[ARR_9] = TimestampTzGetDatum(beentry->st_activity_start_timestamp);
+        else
+            nulls[ARR_9] = true;
 
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        if (beentry->st_proc_start_timestamp != 0)
+            values[ARR_10] = TimestampTzGetDatum(beentry->st_proc_start_timestamp);
+        else
+            nulls[ARR_10] = true;
+
+        if (beentry->st_state_start_timestamp != 0)
+            values[ARR_11] = TimestampTzGetDatum(beentry->st_state_start_timestamp);
+        else
+            nulls[ARR_11] = true;
+
+        /* A zeroed client addr means we don't know */
+        rc = memset_s(&zero_clientaddr, sizeof(zero_clientaddr), 0, sizeof(zero_clientaddr));
         securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-        pg_stat_get_beentry(func_ctx, &beentry);
-        if (beentry == NULL) {
-            int i;
-
-            for (i = 0; (unsigned int)(i) < sizeof(nulls) / sizeof(nulls[0]); i++) {
-                nulls[i] = true;
-            }
-
-            nulls[6] = false;
-            values[6] = CStringGetTextDatum("<backend information not available>");
-
-            tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-            SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-        }
-
-        /* Values available to all callers */
-        values[0] = ObjectIdGetDatum(beentry->st_databaseid);
-        values[1] = Int64GetDatum(beentry->st_procpid);
-        values[2] = Int64GetDatum(beentry->st_sessionid);
-        values[3] = ObjectIdGetDatum(beentry->st_userid);
-        if (beentry->st_appname) {
-            values[4] = CStringGetTextDatum(beentry->st_appname);
+        if (memcmp(&(beentry->st_clientaddr), &zero_clientaddr, sizeof(zero_clientaddr)) == 0) {
+            nulls[ARR_12] = true;
+            nulls[ARR_13] = true;
+            nulls[ARR_14] = true;
         } else {
-            nulls[4] = true;
-        }
-
-        /* Values only available to same user or superuser */
-        if (superuser() || beentry->st_userid == GetUserId()) {
-            SockAddr zero_clientaddr;
-
-            switch (beentry->st_state) {
-                case STATE_IDLE:
-                    values[5] = CStringGetTextDatum("idle");
-                    break;
-                case STATE_RUNNING:
-                    values[5] = CStringGetTextDatum("active");
-                    break;
-                case STATE_IDLEINTRANSACTION:
-                    values[5] = CStringGetTextDatum("idle in transaction");
-                    break;
-                case STATE_FASTPATH:
-                    values[5] = CStringGetTextDatum("fastpath function call");
-                    break;
-                case STATE_IDLEINTRANSACTION_ABORTED:
-                    values[5] = CStringGetTextDatum("idle in transaction (aborted)");
-                    break;
-                case STATE_DISABLED:
-                    values[5] = CStringGetTextDatum("disabled");
-                    break;
-                case STATE_RETRYING:
-                    values[5] = CStringGetTextDatum("retrying");
-                    break;
-                case STATE_COUPLED:
-                    values[5] = CStringGetTextDatum("coupled to session");
-                    break;
-                case STATE_DECOUPLED:
-                    values[5] = CStringGetTextDatum("decoupled from session");
-                    break;
-                case STATE_UNDEFINED:
-                    nulls[5] = true;
-                    break;
-                default:
-                    break;
-            }
-            if (beentry->st_state == STATE_UNDEFINED || beentry->st_state == STATE_DISABLED) {
-                nulls[6] = true;
-            } else {
-                char* mask_string = NULL;
-
-                /* Mask the statement in the activity view. */
-                mask_string = maskPassword(beentry->st_activity);
-                if (mask_string == NULL) {
-                    mask_string = beentry->st_activity;
-                }
-
-                values[6] = CStringGetTextDatum(mask_string);
-
-                if (mask_string != beentry->st_activity) {
-                    pfree(mask_string);
-                }
-            }
-            values[7] = BoolGetDatum(pgstat_get_waitlock(beentry->st_waitevent));
-
-            if (beentry->st_xact_start_timestamp != 0) {
-                values[8] = TimestampTzGetDatum(beentry->st_xact_start_timestamp);
-            } else {
-                nulls[8] = true;
-            }
-
-            if (beentry->st_activity_start_timestamp != 0) {
-                values[9] = TimestampTzGetDatum(beentry->st_activity_start_timestamp);
-            } else {
-                nulls[9] = true;
-            }
-
-            if (beentry->st_proc_start_timestamp != 0) {
-                values[10] = TimestampTzGetDatum(beentry->st_proc_start_timestamp);
-            } else {
-                nulls[10] = true;
-            }
-
-            if (beentry->st_state_start_timestamp != 0) {
-                values[11] = TimestampTzGetDatum(beentry->st_state_start_timestamp);
-            } else {
-                nulls[11] = true;
-            }
-
-            /* A zeroed client addr means we don't know */
-            rc = memset_s(&zero_clientaddr, sizeof(zero_clientaddr), 0, sizeof(zero_clientaddr));
-            securec_check(rc, "\0", "\0");
-            if (memcmp(&(beentry->st_clientaddr), &zero_clientaddr, sizeof(zero_clientaddr)) == 0) {
-                nulls[12] = true;
-                nulls[13] = true;
-                nulls[14] = true;
-            } else {
-                if (beentry->st_clientaddr.addr.ss_family == AF_INET
+            if (beentry->st_clientaddr.addr.ss_family == AF_INET
 #ifdef HAVE_IPV6
-                    || beentry->st_clientaddr.addr.ss_family == AF_INET6
+                || beentry->st_clientaddr.addr.ss_family == AF_INET6
 #endif
-                ) {
-                    char remote_host[NI_MAXHOST];
-                    char remote_port[NI_MAXSERV];
-                    int ret;
+                    ) {
+                char remote_host[NI_MAXHOST];
+                char remote_port[NI_MAXSERV];
+                int ret;
 
-                    remote_host[0] = '\0';
-                    remote_port[0] = '\0';
-                    ret = pg_getnameinfo_all(&beentry->st_clientaddr.addr,
-                        beentry->st_clientaddr.salen,
-                        remote_host,
-                        sizeof(remote_host),
-                        remote_port,
-                        sizeof(remote_port),
-                        NI_NUMERICHOST | NI_NUMERICSERV);
-                    if (ret == 0) {
-                        clean_ipv6_addr(beentry->st_clientaddr.addr.ss_family, remote_host);
-                        values[12] = DirectFunctionCall1(inet_in, CStringGetDatum(remote_host));
-                        if (beentry->st_clienthostname && beentry->st_clienthostname[0])
-                            values[13] = CStringGetTextDatum(beentry->st_clienthostname);
-                        else
-                            nulls[13] = true;
-                        values[14] = Int32GetDatum(atoi(remote_port));
-                    } else {
-                        nulls[12] = true;
-                        nulls[13] = true;
-                        nulls[14] = true;
-                    }
-                } else if (beentry->st_clientaddr.addr.ss_family == AF_UNIX) {
-                    /*
-                     * Unix sockets always reports NULL for host and -1 for
-                     * port, so it's possible to tell the difference to
-                     * connections we have no permissions to view, or with
-                     * errors.
-                     */
-                    nulls[12] = true;
-                    nulls[13] = true;
-                    values[14] = DatumGetInt32(-1);
+                remote_host[0] = '\0';
+                remote_port[0] = '\0';
+                ret = pg_getnameinfo_all(&beentry->st_clientaddr.addr,
+                                         beentry->st_clientaddr.salen,
+                                         remote_host,
+                                         sizeof(remote_host),
+                                         remote_port,
+                                         sizeof(remote_port),
+                                         NI_NUMERICHOST | NI_NUMERICSERV);
+                if (ret == 0) {
+                    clean_ipv6_addr(beentry->st_clientaddr.addr.ss_family, remote_host);
+                    values[ARR_12] = DirectFunctionCall1(inet_in, CStringGetDatum(remote_host));
+                    if (beentry->st_clienthostname && beentry->st_clienthostname[0])
+                        values[ARR_13] = CStringGetTextDatum(beentry->st_clienthostname);
+                    else
+                        nulls[ARR_13] = true;
+                    values[14] = Int32GetDatum(atoi(remote_port));
                 } else {
-                    /* Unknown address type, should never happen */
-                    nulls[12] = true;
-                    nulls[13] = true;
-                    nulls[14] = true;
+                    nulls[ARR_12] = true;
+                    nulls[ARR_13] = true;
+                    nulls[ARR_14] = true;
                 }
-            }
-
-            switch (beentry->st_waiting_on_resource) {
-                case STATE_MEMORY:
-                    values[15] = CStringGetTextDatum("memory");
-                    break;
-                case STATE_ACTIVE_STATEMENTS:
-                    values[15] = CStringGetTextDatum("waiting in queue");
-                    break;
-                case STATE_NO_ENQUEUE:
-                    nulls[15] = true;
-                    break;
-                default:
-                    break;
-            }
-
-            values[16] = Int64GetDatum(beentry->st_queryid);
-            if (beentry->st_conninfo != NULL) {
-                values[17] = CStringGetTextDatum(beentry->st_conninfo);
+            } else if (beentry->st_clientaddr.addr.ss_family == AF_UNIX) {
+                /*
+                 * Unix sockets always reports NULL for host and -1 for
+                 * port, so it's possible to tell the difference to
+                 * connections we have no permissions to view, or with
+                 * errors.
+                 */
+                nulls[ARR_12] = true;
+                nulls[ARR_13] = true;
+                values[ARR_14] = DatumGetInt32(-1);
             } else {
-                nulls[17] = true;
+                /* Unknown address type, should never happen */
+                nulls[ARR_12] = true;
+                nulls[ARR_13] = true;
+                nulls[ARR_14] = true;
             }
-        } else {
-            /* No permissions to view data about this session */
-            values[6] = CStringGetTextDatum("<insufficient privilege>");
-
-            nulls[5] = true;
-            nulls[7] = true;
-            nulls[8] = true;
-            nulls[9] = true;
-            nulls[10] = true;
-            nulls[11] = true;
-            nulls[12] = true;
-            nulls[13] = true;
-            nulls[14] = true;
-            nulls[15] = true;
-            nulls[16] = true;
-            nulls[17] = true;
         }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        switch (beentry->st_waiting_on_resource) {
+            case STATE_MEMORY:
+                values[ARR_15] = CStringGetTextDatum("memory");
+                break;
+            case STATE_ACTIVE_STATEMENTS:
+                values[ARR_15] = CStringGetTextDatum("waiting in queue");
+                break;
+            case STATE_NO_ENQUEUE:
+                nulls[ARR_15] = true;
+                break;
+            default:
+                break;
+        }
 
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        values[ARR_16] = Int64GetDatum(beentry->st_queryid);
+
+        if (beentry->st_conninfo != NULL) {
+            values[ARR_17] = CStringGetTextDatum(beentry->st_conninfo);
+        }
+        else {
+            nulls[ARR_17] = true;
+        }
+        /*use backend state to get all workload info*/
+        WLMStatistics* backstat = (WLMStatistics*)&beentry->st_backstat;
+        if (ENABLE_WORKLOAD_CONTROL && *backstat->srespool) {
+            values[ARR_18] = NameGetDatum((Name)backstat->srespool);
+        } else {
+            values[ARR_18] = DirectFunctionCall1(namein, CStringGetDatum("unknown"));
+        }
     } else {
-        /* nothing left */
-        SRF_RETURN_DONE(func_ctx);
+        /* No permissions to view data about this session */
+        values[ARR_6] = CStringGetTextDatum("<insufficient privilege>");
+
+        nulls[ARR_0] = true;
+        nulls[ARR_1] = true;
+        nulls[ARR_2] = true;
+        nulls[ARR_3] = true;
+        nulls[ARR_4] = true;
+        nulls[ARR_5] = true;
+        nulls[ARR_7] = true;
+        nulls[ARR_8] = true;
+        nulls[ARR_9] = true;
+        nulls[ARR_10] = true;
+        nulls[ARR_11] = true;
+        nulls[ARR_12] = true;
+        nulls[ARR_13] = true;
+        nulls[ARR_14] = true;
+        nulls[ARR_15] = true;
+        nulls[ARR_16] = true;
+        nulls[ARR_17] = true;
+        nulls[ARR_18] = true;
     }
+
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+}
+
+void insert_pg_stat_get_activity(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry)
+{
+    const int ATT_NUM = 18;
+
+    Datum values[ATT_NUM];
+    bool nulls[ATT_NUM];
+    errno_t rc = 0;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    /* Values only available to same user or superuser */
+    if (superuser() || isMonitoradmin(GetUserId()) || beentry->st_userid == GetUserId()) {
+        values[ARR_0] = ObjectIdGetDatum(beentry->st_databaseid);
+        values[ARR_1] = Int64GetDatum(beentry->st_procpid);
+        values[ARR_2] = Int64GetDatum(beentry->st_sessionid);
+        values[ARR_3] = ObjectIdGetDatum(beentry->st_userid);
+        if (beentry->st_appname)
+            values[ARR_4] = CStringGetTextDatum(beentry->st_appname);
+        else
+            nulls[ARR_4] = true;
+
+        SockAddr zero_clientaddr;
+
+        switch (beentry->st_state) {
+            case STATE_IDLE:
+                values[ARR_5] = CStringGetTextDatum("idle");
+                break;
+            case STATE_RUNNING:
+                values[ARR_5] = CStringGetTextDatum("active");
+                break;
+            case STATE_IDLEINTRANSACTION:
+                values[ARR_5] = CStringGetTextDatum("idle in transaction");
+                break;
+            case STATE_FASTPATH:
+                values[ARR_5] = CStringGetTextDatum("fastpath function call");
+                break;
+            case STATE_IDLEINTRANSACTION_ABORTED:
+                values[ARR_5] = CStringGetTextDatum("idle in transaction (aborted)");
+                break;
+            case STATE_DISABLED:
+                values[ARR_5] = CStringGetTextDatum("disabled");
+                break;
+            case STATE_RETRYING:
+                values[ARR_5] = CStringGetTextDatum("retrying");
+                break;
+            case STATE_COUPLED:
+                values[ARR_5] = CStringGetTextDatum("coupled to session");
+                break;
+            case STATE_DECOUPLED:
+                values[ARR_5] = CStringGetTextDatum("decoupled from session");
+                break;
+            case STATE_UNDEFINED:
+                nulls[ARR_5] = true;
+                break;
+            default:
+                break;
+        }
+        if (beentry->st_state == STATE_UNDEFINED || beentry->st_state == STATE_DISABLED) {
+            nulls[ARR_6] = true;
+        } else {
+            char* mask_string = NULL;
+
+            /* Mask the statement in the activity view. */
+            mask_string = maskPassword(beentry->st_activity);
+            if (mask_string == NULL)
+                mask_string = beentry->st_activity;
+
+            values[ARR_6] = CStringGetTextDatum(mask_string);
+
+            if (mask_string != beentry->st_activity)
+                pfree(mask_string);
+        }
+        values[ARR_7] = BoolGetDatum(pgstat_get_waitlock(beentry->st_waitevent));
+
+        if (beentry->st_xact_start_timestamp != 0)
+            values[ARR_8] = TimestampTzGetDatum(beentry->st_xact_start_timestamp);
+        else
+            nulls[ARR_8] = true;
+
+        if (beentry->st_activity_start_timestamp != 0)
+            values[ARR_9] = TimestampTzGetDatum(beentry->st_activity_start_timestamp);
+        else
+            nulls[ARR_9] = true;
+
+        if (beentry->st_proc_start_timestamp != 0)
+            values[ARR_10] = TimestampTzGetDatum(beentry->st_proc_start_timestamp);
+        else
+            nulls[ARR_10] = true;
+
+        if (beentry->st_state_start_timestamp != 0)
+            values[ARR_11] = TimestampTzGetDatum(beentry->st_state_start_timestamp);
+        else
+            nulls[ARR_11] = true;
+
+        /* A zeroed client addr means we don't know */
+        rc = memset_s(&zero_clientaddr, sizeof(zero_clientaddr), 0, sizeof(zero_clientaddr));
+        securec_check(rc, "\0", "\0");
+        if (memcmp(&(beentry->st_clientaddr), &zero_clientaddr, sizeof(zero_clientaddr)) == 0) {
+            nulls[ARR_12] = true;
+            nulls[ARR_13] = true;
+            nulls[ARR_14] = true;
+        } else {
+            if (beentry->st_clientaddr.addr.ss_family == AF_INET
+#ifdef HAVE_IPV6
+                || beentry->st_clientaddr.addr.ss_family == AF_INET6
+#endif
+                    ) {
+                char remote_host[NI_MAXHOST];
+                char remote_port[NI_MAXSERV];
+                int ret;
+
+                remote_host[0] = '\0';
+                remote_port[0] = '\0';
+                ret = pg_getnameinfo_all(&beentry->st_clientaddr.addr,
+                                         beentry->st_clientaddr.salen,
+                                         remote_host,
+                                         sizeof(remote_host),
+                                         remote_port,
+                                         sizeof(remote_port),
+                                         NI_NUMERICHOST | NI_NUMERICSERV);
+                if (ret == 0) {
+                    clean_ipv6_addr(beentry->st_clientaddr.addr.ss_family, remote_host);
+                    values[ARR_12] = DirectFunctionCall1(inet_in, CStringGetDatum(remote_host));
+                    if (beentry->st_clienthostname && beentry->st_clienthostname[0])
+                        values[ARR_13] = CStringGetTextDatum(beentry->st_clienthostname);
+                    else
+                        nulls[ARR_13] = true;
+                    values[14] = Int32GetDatum(atoi(remote_port));
+                } else {
+                    nulls[ARR_12] = true;
+                    nulls[ARR_13] = true;
+                    nulls[ARR_14] = true;
+                }
+            } else if (beentry->st_clientaddr.addr.ss_family == AF_UNIX) {
+                /*
+                 * Unix sockets always reports NULL for host and -1 for
+                 * port, so it's possible to tell the difference to
+                 * connections we have no permissions to view, or with
+                 * errors.
+                 */
+                nulls[ARR_12] = true;
+                nulls[ARR_13] = true;
+                values[ARR_14] = DatumGetInt32(-1);
+            } else {
+                /* Unknown address type, should never happen */
+                nulls[ARR_12] = true;
+                nulls[ARR_13] = true;
+                nulls[ARR_14] = true;
+            }
+        }
+
+        switch (beentry->st_waiting_on_resource) {
+            case STATE_MEMORY:
+                values[ARR_15] = CStringGetTextDatum("memory");
+                break;
+            case STATE_ACTIVE_STATEMENTS:
+                values[ARR_15] = CStringGetTextDatum("waiting in queue");
+                break;
+            case STATE_NO_ENQUEUE:
+                nulls[ARR_15] = true;
+                break;
+            default:
+                break;
+        }
+
+        values[ARR_16] = Int64GetDatum(beentry->st_queryid);
+
+        /*use backend state to get all workload info*/
+        WLMStatistics* backstat = (WLMStatistics*)&beentry->st_backstat;
+        if (ENABLE_WORKLOAD_CONTROL && *backstat->srespool) {
+            values[ARR_17] = NameGetDatum((Name)backstat->srespool);
+        } else {
+            values[ARR_17] = DirectFunctionCall1(namein, CStringGetDatum("unknown"));
+        }
+    } else {
+        /* No permissions to view data about this session */
+        values[ARR_6] = CStringGetTextDatum("<insufficient privilege>");
+
+        nulls[ARR_0] = true;
+        nulls[ARR_1] = true;
+        nulls[ARR_2] = true;
+        nulls[ARR_3] = true;
+        nulls[ARR_4] = true;
+        nulls[ARR_5] = true;
+        nulls[ARR_7] = true;
+        nulls[ARR_8] = true;
+        nulls[ARR_9] = true;
+        nulls[ARR_10] = true;
+        nulls[ARR_11] = true;
+        nulls[ARR_12] = true;
+        nulls[ARR_13] = true;
+        nulls[ARR_14] = true;
+        nulls[ARR_15] = true;
+        nulls[ARR_16] = true;
+        nulls[ARR_17] = true;
+    }
+
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+}
+
+Datum pg_stat_get_activity_for_temptable(PG_FUNCTION_ARGS)
+{
+
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+
+    const int ATT_COUNT = 4;
+    TupleDesc tupdesc = CreateTemplateTupleDesc(ATT_COUNT, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_1, "datid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_2, "templineid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_3, "tempid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_4, "sessionid", INT8OID, -1, 0);
+
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
+
+    (void)gs_stat_read_current_status(rsinfo->setResult, rsinfo->setDesc, insert_pg_stat_get_activity_for_temptable);
+
+    MemoryContextSwitchTo(oldcontext);
+
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
+
+    return (Datum) 0;
+}
+
+void insert_pg_stat_get_activity_for_temptable(Tuplestorestate *tupStore, TupleDesc tupDesc,
+                                               const PgBackendStatus *beentry)
+{
+    const int ATT_COUNT = 4;
+    errno_t rc = 0;
+
+    /* for each row */
+    Datum values[ATT_COUNT];
+    bool nulls[ATT_COUNT];
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    if (beentry == NULL || beentry->st_sessionid == 0) {
+        for (int i = 0; i < ATT_COUNT; i++)
+            nulls[i] = true;
+        tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+        return;
+    }
+
+    /* Values available to all callers */
+    values[ARR_0] = ObjectIdGetDatum(beentry->st_databaseid);
+    values[ARR_1] = Int32GetDatum(beentry->st_timelineid);
+    values[ARR_2] = Int32GetDatum(beentry->st_tempid);
+    values[ARR_3] = Int64GetDatum(beentry->st_sessionid);
+
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+}
+
+Datum gs_stat_activity_timeout(PG_FUNCTION_ARGS)
+{
+    const int ACTIVITY_TIMEOUT_ATTRS = 9;
+    int timeout_threshold = PG_GETARG_INT32(0);
+    if (timeout_threshold < 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("the timeout_threshold(%d) could not less than 0",
+            timeout_threshold)));
+    }
+    if (timeout_threshold > (INT_MAX / MSECS_PER_SEC)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("the timeout_threshold(%d) could not larger than 2147483",
+            timeout_threshold)));
+    }
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(ACTIVITY_TIMEOUT_ATTRS, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_1, "database", NAMEOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_2, "pid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_3, "sessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_4, "usesysid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_5, "application_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_6, "query", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_7, "xact_start", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_8, "query_start", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_9, "query_id", INT8OID, -1, 0);
+
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
+
+    MemoryContextSwitchTo(oldcontext);
+
+    if (u_sess->attr.attr_common.pgstat_track_activities) {
+        gs_stat_get_timeout_beentry(timeout_threshold, rsinfo->setResult, rsinfo->setDesc,
+                                    insert_gs_stat_activity_timeout);
+    }
+
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
+
+    return (Datum) 0;
+}
+
+void insert_gs_stat_activity_timeout(Tuplestorestate* tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry)
+{
+    const int ACTIVITY_TIMEOUT_ATTRS = 9;
+    int i = 0;
+
+    char* dbname = get_database_name(beentry->st_databaseid);
+    if (dbname == NULL || dbname[0] == '\0') {
+        return;
+    }
+
+    NameData database_name;
+    namestrcpy(&database_name, dbname);
+    pfree(dbname);
+
+    /* for each row */
+    Datum values[ACTIVITY_TIMEOUT_ATTRS];
+    bool nulls[ACTIVITY_TIMEOUT_ATTRS];
+    errno_t rc = 0;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    /* Values only available to same user or superuser */
+    if (superuser() || isMonitoradmin(GetUserId()) ||
+        beentry->st_userid == GetUserId()) {
+        /* Values available to all callers */
+        values[i++] = NameGetDatum(&database_name);
+        values[i++] = Int64GetDatum(beentry->st_procpid);
+        values[i++] = Int64GetDatum(beentry->st_sessionid);
+        values[i++] = ObjectIdGetDatum(beentry->st_userid);
+        if (beentry->st_appname)
+            values[i++] = CStringGetTextDatum(beentry->st_appname);
+        else
+            nulls[i++] = true;
+
+        char* mask_string = NULL;
+
+        /* Mask the statement in the activity view. */
+        mask_string = maskPassword(beentry->st_activity);
+        if (mask_string == NULL)
+            mask_string = beentry->st_activity;
+
+        values[i++] = CStringGetTextDatum(mask_string);
+
+        if (mask_string != beentry->st_activity) {
+            pfree(mask_string);
+        }
+
+        if (beentry->st_xact_start_timestamp != 0)
+            values[i++] = TimestampTzGetDatum(beentry->st_xact_start_timestamp);
+        else
+            nulls[i++] = true;
+
+        if (beentry->st_activity_start_timestamp != 0)
+            values[i++] = TimestampTzGetDatum(beentry->st_activity_start_timestamp);
+        else
+            nulls[i++] = true;
+
+        values[i++] = Int64GetDatum(beentry->st_queryid);
+    } else {
+        nulls[i++] = true;
+        nulls[i++] = true;
+        nulls[i++] = true;
+        nulls[i++] = true;
+        nulls[i++] = true;
+        /* No permissions to view data about this session */
+        values[i++] = CStringGetTextDatum("<insufficient privilege>");
+        nulls[i++] = true;
+        nulls[i++] = true;
+        nulls[i++] = true;
+    }
+
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+    return;
 }
 
 Datum pg_stat_get_activity_ng(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    const int ATT_NUM = 4;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(ATT_NUM, false);
+
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_1, "datid", OIDOID, -1, 0);
+    /* This should have been called 'pid';  can't change it. 2011-06-11 */
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_2, "pid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_3, "sessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_4, "node_group", TEXTOID, -1, 0);
+
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
+
+    bool hasTID = false;
+    ThreadId tid = 0;
+    if (!PG_ARGISNULL(0)) {
+        hasTID = true;
+        tid = PG_GETARG_INT64(0);
+    }
+
+    (void)gs_stat_read_current_status(rsinfo->setResult, rsinfo->setDesc, insert_pg_stat_get_activity_ng, hasTID, tid);
+
+    MemoryContextSwitchTo(oldcontext);
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
+
+    return (Datum) 0;
+}
+
+void insert_pg_stat_get_activity_ng(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry)
+{
+    const int ATT_NUM = 4;
+    Datum values[ATT_NUM];
+    bool nulls[ATT_NUM];
     errno_t rc = 0;
 
-    if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tupdesc;
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+    /* Values available to all callers */
+    values[ARR_0] = ObjectIdGetDatum(beentry->st_databaseid);
+    values[ARR_1] = Int64GetDatum(beentry->st_procpid);
+    values[ARR_2] = Int64GetDatum(beentry->st_sessionid);
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-
-        tupdesc = CreateTemplateTupleDesc(4, false);
-        TupleDescInitEntry(tupdesc, (AttrNumber)1, "datid", OIDOID, -1, 0);
-        /* This should have been called 'pid';  can't change it. 2011-06-11 */
-        TupleDescInitEntry(tupdesc, (AttrNumber)2, "pid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)3, "sessionid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)4, "node_group", TEXTOID, -1, 0);
-
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-
-        func_ctx->user_fctx = palloc0(sizeof(int));
-        if (PG_ARGISNULL(0)) {
-            /* Get all backends */
-            func_ctx->max_calls = pgstat_fetch_stat_numbackends();
-        } else {
-            /*
-             * Get one backend - locate by pid.
-             *
-             * We lookup the backend early, so we can return zero rows if it
-             * doesn't exist, instead of returning a single row full of NULLs.
-             */
-            ThreadId pid = PG_GETARG_INT64(0);
-            int i;
-            int n = pgstat_fetch_stat_numbackends();
-
-            for (i = 1; i <= n; i++) {
-                PgBackendStatus* be = pgstat_fetch_stat_beentry(i);
-
-                if (be != NULL) {
-                    if (be->st_procpid == pid) {
-                        *(int*)(func_ctx->user_fctx) = i;
-                        break;
-                    }
-                }
-            }
-
-            if (*(int*)(func_ctx->user_fctx) == 0) {
-                /* Pid not found, return zero rows */
-                func_ctx->max_calls = 0;
-            } else {
-                func_ctx->max_calls = 1;
-            }
-        }
-
-        MemoryContextSwitchTo(old_context);
-    }
-
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* for each row */
-        Datum values[4];
-        bool nulls[4] = {false};
-        HeapTuple tuple = NULL;
-        PgBackendStatus* beentry = NULL;
-
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-        pg_stat_get_beentry(func_ctx, &beentry);
-        if (beentry == NULL) {
-            int i;
-
-            for (i = 0; (unsigned int)(i) < sizeof(nulls) / sizeof(nulls[0]); i++) {
-                nulls[i] = true;
-            }
-
-            tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-            SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-        }
-
-        /* Values available to all callers */
-        values[0] = ObjectIdGetDatum(beentry->st_databaseid);
-        values[1] = Int64GetDatum(beentry->st_procpid);
-        values[2] = Int64GetDatum(beentry->st_sessionid);
-
-        /* Values only available to same user or superuser */
-        if (superuser() || beentry->st_userid == GetUserId()) {
-            WLMStatistics* backstat = (WLMStatistics*)&beentry->st_backstat;
-            if (StringIsValid(backstat->groupname)) {
-                values[3] = CStringGetTextDatum(backstat->groupname);
-            } else {
-                values[3] = CStringGetTextDatum("installation");
-            }
-        } else {
-            nulls[3] = true;
-        }
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+    /* Values only available to same user or superuser */
+    if (superuser() || isMonitoradmin(GetUserId()) || beentry->st_userid == GetUserId()) {
+        WLMStatistics* backstat = (WLMStatistics*)&beentry->st_backstat;
+        if (StringIsValid(backstat->groupname))
+            values[ARR_3] = CStringGetTextDatum(backstat->groupname);
+        else
+            values[ARR_3] = CStringGetTextDatum("installation");
     } else {
-        /* nothing left */
-        SRF_RETURN_DONE(func_ctx);
+        nulls[ARR_3] = true;
     }
+
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
 }
 
 char* getThreadWaitStatusDesc(PgBackendStatus* beentry)
 {
-    char* wait_status = NULL;
+    char* waitStatus = NULL;
     errno_t rc = 0;
 
     Assert(beentry);
 
-    wait_status = (char*)palloc0(WAITSTATELEN);
+    waitStatus = (char*)palloc0(WAITSTATELEN);
 
     if (beentry->st_waitevent != 0) {
-        rc = snprintf_s(wait_status,
+        rc = snprintf_s(waitStatus,
             WAITSTATELEN,
             WAITSTATELEN - 1,
             "%s: %s",
@@ -1752,7 +2116,7 @@ char* getThreadWaitStatusDesc(PgBackendStatus* beentry)
             pgstat_get_wait_event(beentry->st_waitevent));
         securec_check_ss(rc, "\0", "\0");
     } else if (beentry->st_xid != 0) {
-        rc = snprintf_s(wait_status,
+        rc = snprintf_s(waitStatus,
             WAITSTATELEN,
             WAITSTATELEN - 1,
             "%s: %lu",
@@ -1760,10 +2124,10 @@ char* getThreadWaitStatusDesc(PgBackendStatus* beentry)
             beentry->st_xid);
         securec_check_ss(rc, "\0", "\0");
     } else if (beentry->st_relname && beentry->st_relname[0] != '\0' &&
-               (beentry->st_waitstatus == STATE_VACUUM || beentry->st_waitstatus == STATE_VACUUM_FULL ||
-                   beentry->st_waitstatus == STATE_ANALYZE)) {
-        if (beentry->st_waitstatus_phase != PHASE_NONE) {
-            rc = snprintf_s(wait_status,
+               (STATE_VACUUM == beentry->st_waitstatus || STATE_VACUUM_FULL == beentry->st_waitstatus ||
+                   STATE_ANALYZE == beentry->st_waitstatus)) {
+        if (PHASE_NONE != beentry->st_waitstatus_phase) {
+            rc = snprintf_s(waitStatus,
                 WAITSTATELEN,
                 WAITSTATELEN - 1,
                 "%s: %s, %s",
@@ -1772,7 +2136,7 @@ char* getThreadWaitStatusDesc(PgBackendStatus* beentry)
                 WaitStatePhaseDesc[beentry->st_waitstatus_phase]);
             securec_check_ss(rc, "\0", "\0");
         } else {
-            rc = snprintf_s(wait_status,
+            rc = snprintf_s(waitStatus,
                 WAITSTATELEN,
                 WAITSTATELEN - 1,
                 "%s: %s",
@@ -1781,7 +2145,7 @@ char* getThreadWaitStatusDesc(PgBackendStatus* beentry)
             securec_check_ss(rc, "\0", "\0");
         }
     } else if (beentry->st_libpq_wait_nodeid != InvalidOid && beentry->st_libpq_wait_nodecount != 0) {
-        rc = snprintf_s(wait_status,
+        rc = snprintf_s(waitStatus,
             WAITSTATELEN,
             WAITSTATELEN - 1,
             "%s: %d, total %d",
@@ -1791,7 +2155,7 @@ char* getThreadWaitStatusDesc(PgBackendStatus* beentry)
         securec_check_ss(rc, "\0", "\0");
     } else if (beentry->st_nodeid != -1) {
         if (beentry->st_waitnode_count > 0) {
-            rc = snprintf_s(wait_status,
+            rc = snprintf_s(waitStatus,
                 WAITSTATELEN,
                 WAITSTATELEN - 1,
                 "%s: %d, total %d",
@@ -1799,8 +2163,8 @@ char* getThreadWaitStatusDesc(PgBackendStatus* beentry)
                 PgxcGetNodeOid(beentry->st_nodeid),
                 beentry->st_waitnode_count);
         } else {
-            if (beentry->st_waitstatus_phase != PHASE_NONE)
-                rc = snprintf_s(wait_status,
+            if (PHASE_NONE != beentry->st_waitstatus_phase)
+                rc = snprintf_s(waitStatus,
                     WAITSTATELEN,
                     WAITSTATELEN - 1,
                     "%s: %d, %s",
@@ -1808,7 +2172,7 @@ char* getThreadWaitStatusDesc(PgBackendStatus* beentry)
                     PgxcGetNodeOid(beentry->st_nodeid),
                     WaitStatePhaseDesc[beentry->st_waitstatus_phase]);
             else
-                rc = snprintf_s(wait_status,
+                rc = snprintf_s(waitStatus,
                     WAITSTATELEN,
                     WAITSTATELEN - 1,
                     "%s: %d",
@@ -1816,62 +2180,90 @@ char* getThreadWaitStatusDesc(PgBackendStatus* beentry)
                     PgxcGetNodeOid(beentry->st_nodeid));
         }
         securec_check_ss(rc, "\0", "\0");
-    } else if (beentry->st_waitstatus != STATE_WAIT_COMM) {
-        rc = snprintf_s(wait_status, WAITSTATELEN, WAITSTATELEN - 1, "%s", WaitStateDesc[beentry->st_waitstatus]);
+    } else if (STATE_WAIT_COMM != beentry->st_waitstatus) {
+        rc = snprintf_s(waitStatus, WAITSTATELEN, WAITSTATELEN - 1, "%s", WaitStateDesc[beentry->st_waitstatus]);
         securec_check_ss(rc, "\0", "\0");
     }
 
-    return wait_status;
+    return waitStatus;
+}
+
+static void GetBlockInfo(const PgBackendStatus* beentry, Datum values[], bool nulls[])
+{
+    struct LOCKTAG locktag = beentry->locallocktag.lock;
+
+    if (beentry->locallocktag.lock.locktag_lockmethodid == 0) {
+        nulls[NUM_PG_LOCKTAG_ID] = true;
+        nulls[NUM_PG_LOCKMODE_ID] = true;
+        nulls[NUM_PG_BLOCKSESSION_ID] = true;
+        return;
+    }
+
+    if ((beentry->st_waitevent & 0xFF000000) == PG_WAIT_LOCK) {
+        char* blocklocktag = LocktagToString(locktag);
+        values[NUM_PG_LOCKTAG_ID] = CStringGetTextDatum(blocklocktag);
+        values[NUM_PG_LOCKMODE_ID] = CStringGetTextDatum(
+            GetLockmodeName(beentry->locallocktag.lock.locktag_lockmethodid,
+                            beentry->locallocktag.mode));
+        values[NUM_PG_BLOCKSESSION_ID] = Int64GetDatum(beentry->st_block_sessionid);
+        pfree_ext(blocklocktag);
+    } else {
+        nulls[NUM_PG_LOCKTAG_ID] = true;
+        nulls[NUM_PG_LOCKMODE_ID] = true;
+        nulls[NUM_PG_BLOCKSESSION_ID] = true;
+    }
 }
 
 /*
- * construct_wait_status
+ * ConstructWaitStatus
  *
  * form wait status string from beentry object.
  */
-static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bool nulls[12])
+static void ConstructWaitStatus(const PgBackendStatus* beentry, Datum values[15], bool nulls[15])
 {
-    char wait_status[WAITSTATELEN];
-    errno_t rc = memset_s(wait_status, sizeof(wait_status), 0, sizeof(wait_status));
+    char waitStatus[WAITSTATELEN];
+    errno_t rc = EOK;
+
+    rc = memset_s(waitStatus, sizeof(waitStatus), 0, sizeof(waitStatus));
     securec_check(rc, "\0", "\0");
 
     /* Values available to all callers */
     if (beentry->st_databaseid != 0 && get_database_name(beentry->st_databaseid) != NULL)
-        values[1] = CStringGetTextDatum(get_database_name(beentry->st_databaseid));
+        values[ARR_1] = CStringGetTextDatum(get_database_name(beentry->st_databaseid));
     else
-        nulls[1] = true;
+        nulls[ARR_1] = true;
 
     if (beentry->st_appname)
-        values[2] = CStringGetTextDatum(beentry->st_appname);
+        values[ARR_2] = CStringGetTextDatum(beentry->st_appname);
     else
-        nulls[2] = true;
+        nulls[ARR_2] = true;
 
-    values[4] = Int64GetDatum(beentry->st_procpid);
-    values[5] = Int64GetDatum(beentry->st_sessionid);
+    values[ARR_4] = Int64GetDatum(beentry->st_procpid);
+    values[ARR_5] = Int64GetDatum(beentry->st_sessionid);
 
     /* Values only available to same user or superuser */
-    if (superuser() || beentry->st_userid == GetUserId()) {
-        values[0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
-        values[3] = Int64GetDatum(beentry->st_queryid);
-        values[6] = Int32GetDatum(beentry->st_tid);
-        if (beentry->st_parent_sessionid != 0) {
-            values[7] = Int64GetDatum(beentry->st_parent_sessionid);
-        } else {
-            nulls[7] = true;
-        }
-        values[8] = Int32GetDatum(beentry->st_thread_level);
-        values[9] = UInt32GetDatum(beentry->st_smpid);
+    if (superuser() || isMonitoradmin(GetUserId()) || beentry->st_userid == GetUserId()) {
+        values[ARR_0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
+        values[ARR_3] = Int64GetDatum(beentry->st_queryid);
+        values[ARR_6] = Int32GetDatum(beentry->st_tid);
+        if (0 != beentry->st_parent_sessionid)
+            values[ARR_7] = Int64GetDatum(beentry->st_parent_sessionid);
+        else
+            nulls[ARR_7] = true;
+        values[ARR_8] = Int32GetDatum(beentry->st_thread_level);
+        values[ARR_9] = UInt32GetDatum(beentry->st_smpid);
 
         /* wait_event info */
         if (beentry->st_waitevent != 0) {
             uint32 raw_wait_event;
             /* read only once be atomic */
             raw_wait_event = UINT32_ACCESS_ONCE(beentry->st_waitevent);
-            values[10] = CStringGetTextDatum(pgstat_get_waitstatusdesc(raw_wait_event));
-            values[11] = CStringGetTextDatum(pgstat_get_wait_event(raw_wait_event));
+            values[ARR_10] = CStringGetTextDatum(pgstat_get_waitstatusdesc(raw_wait_event));
+            values[ARR_11] = CStringGetTextDatum(pgstat_get_wait_event(raw_wait_event));
+            GetBlockInfo(beentry, values, nulls);
         } else if (beentry->st_xid != 0) {
-            if (beentry->st_waitstatus == STATE_WAIT_XACTSYNC) {
-                rc = snprintf_s(wait_status,
+            if (STATE_WAIT_XACTSYNC == beentry->st_waitstatus) {
+                rc = snprintf_s(waitStatus,
                     WAITSTATELEN,
                     WAITSTATELEN - 1,
                     "%s: %lu",
@@ -1880,16 +2272,19 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                 securec_check_ss(rc, "\0", "\0");
             } else {
                 rc =
-                    snprintf_s(wait_status, WAITSTATELEN, WAITSTATELEN - 1, "%s", WaitStateDesc[beentry->st_waitstatus]);
+                    snprintf_s(waitStatus, WAITSTATELEN, WAITSTATELEN - 1, "%s", WaitStateDesc[beentry->st_waitstatus]);
                 securec_check_ss(rc, "\0", "\0");
             }
-            values[10] = CStringGetTextDatum(wait_status);
-            nulls[11] = true;
+            values[ARR_10] = CStringGetTextDatum(waitStatus);
+            values[ARR_11] = CStringGetTextDatum(pgstat_get_waitstatusname(beentry->st_waitstatus));
+            nulls[ARR_12] = true;
+            nulls[ARR_13] = true;
+            nulls[ARR_14] = true;
         } else if (beentry->st_relname && beentry->st_relname[0] != '\0' &&
-                   (beentry->st_waitstatus == STATE_VACUUM || beentry->st_waitstatus == STATE_ANALYZE ||
-                       beentry->st_waitstatus == STATE_VACUUM_FULL)) {
-            if (beentry->st_waitstatus_phase != PHASE_NONE) {
-                rc = snprintf_s(wait_status,
+                   (STATE_VACUUM == beentry->st_waitstatus || STATE_ANALYZE == beentry->st_waitstatus ||
+                       STATE_VACUUM_FULL == beentry->st_waitstatus)) {
+            if (PHASE_NONE != beentry->st_waitstatus_phase) {
+                rc = snprintf_s(waitStatus,
                     WAITSTATELEN,
                     WAITSTATELEN - 1,
                     "%s: %s, %s",
@@ -1898,7 +2293,7 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                     WaitStatePhaseDesc[beentry->st_waitstatus_phase]);
                 securec_check_ss(rc, "\0", "\0");
             } else {
-                rc = snprintf_s(wait_status,
+                rc = snprintf_s(waitStatus,
                     WAITSTATELEN,
                     WAITSTATELEN - 1,
                     "%s: %s",
@@ -1906,17 +2301,20 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                     beentry->st_relname);
                 securec_check_ss(rc, "\0", "\0");
             }
-            values[10] = CStringGetTextDatum(wait_status);
-            nulls[11] = true;
+            values[ARR_10] = CStringGetTextDatum(waitStatus);
+            values[ARR_11] = CStringGetTextDatum(pgstat_get_waitstatusname(beentry->st_waitstatus));
+            nulls[ARR_12] = true;
+            nulls[ARR_13] = true;
+            nulls[ARR_14] = true;
         } else if (beentry->st_libpq_wait_nodeid != InvalidOid && beentry->st_libpq_wait_nodecount != 0) {
             if (IS_PGXC_COORDINATOR) {
-                NameData node_name = {{0}};
-                rc = snprintf_s(wait_status,
+                NameData nodename = {{0}};
+                rc = snprintf_s(waitStatus,
                     WAITSTATELEN,
                     WAITSTATELEN - 1,
                     "%s: %s, total %d",
                     WaitStateDesc[beentry->st_waitstatus],
-                    get_pgxc_nodename(beentry->st_libpq_wait_nodeid, &node_name),
+                    get_pgxc_nodename(beentry->st_libpq_wait_nodeid, &nodename),
                     beentry->st_libpq_wait_nodecount);
                 securec_check_ss(rc, "\0", "\0");
             } else if (IS_PGXC_DATANODE) {
@@ -1925,7 +2323,7 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                     AutoMutexLock copyLock(&nodeDefCopyLock);
                     NodeDefinition* nodeDef = global_node_definition->nodesDefinition;
                     copyLock.lock();
-                    rc = snprintf_s(wait_status,
+                    rc = snprintf_s(waitStatus,
                         WAITSTATELEN,
                         WAITSTATELEN - 1,
                         "%s: %s, total %d",
@@ -1936,19 +2334,22 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                     copyLock.unLock();
                 } else {
                     rc = snprintf_s(
-                        wait_status, WAITSTATELEN, WAITSTATELEN - 1, "%s", WaitStateDesc[beentry->st_waitstatus]);
+                        waitStatus, WAITSTATELEN, WAITSTATELEN - 1, "%s", WaitStateDesc[beentry->st_waitstatus]);
                     securec_check_ss(rc, "\0", "\0");
                 }
             }
-            values[10] = CStringGetTextDatum(wait_status);
-            nulls[11] = true;
+            values[ARR_10] = CStringGetTextDatum(waitStatus);
+            values[ARR_11] = CStringGetTextDatum(pgstat_get_waitstatusname(beentry->st_waitstatus));
+            nulls[ARR_12] = true;
+            nulls[ARR_13] = true;
+            nulls[ARR_14] = true;
         } else if (beentry->st_nodeid != -1) {
             if (IS_PGXC_COORDINATOR && (Oid)beentry->st_nodeid != InvalidOid) {
                 NameData nodename = {{0}};
 
                 if (beentry->st_waitnode_count > 0) {
-                    if (beentry->st_waitstatus_phase != PHASE_NONE) {
-                        rc = snprintf_s(wait_status,
+                    if (PHASE_NONE != beentry->st_waitstatus_phase) {
+                        rc = snprintf_s(waitStatus,
                             WAITSTATELEN,
                             WAITSTATELEN - 1,
                             "%s: %s, total %d, %s",
@@ -1958,7 +2359,7 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                             WaitStatePhaseDesc[beentry->st_waitstatus_phase]);
                         securec_check_ss(rc, "\0", "\0");
                     } else {
-                        rc = snprintf_s(wait_status,
+                        rc = snprintf_s(waitStatus,
                             WAITSTATELEN,
                             WAITSTATELEN - 1,
                             "%s: %s, total %d",
@@ -1968,8 +2369,8 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                         securec_check_ss(rc, "\0", "\0");
                     }
                 } else {
-                    if (beentry->st_waitstatus_phase != PHASE_NONE) {
-                        rc = snprintf_s(wait_status,
+                    if (PHASE_NONE != beentry->st_waitstatus_phase) {
+                        rc = snprintf_s(waitStatus,
                             WAITSTATELEN,
                             WAITSTATELEN - 1,
                             "%s: %s, %s",
@@ -1978,7 +2379,7 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                             WaitStatePhaseDesc[beentry->st_waitstatus_phase]);
                         securec_check_ss(rc, "\0", "\0");
                     } else {
-                        rc = snprintf_s(wait_status,
+                        rc = snprintf_s(waitStatus,
                             WAITSTATELEN,
                             WAITSTATELEN - 1,
                             "%s: %s",
@@ -1995,9 +2396,9 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                     copyLock.lock();
 
                     if (beentry->st_waitnode_count > 0) {
-                        if (beentry->st_waitstatus_phase != PHASE_NONE) {
+                        if (PHASE_NONE != beentry->st_waitstatus_phase) {
                             if (beentry->st_plannodeid != -1) {
-                                rc = snprintf_s(wait_status,
+                                rc = snprintf_s(waitStatus,
                                     WAITSTATELEN,
                                     WAITSTATELEN - 1,
                                     "%s: %s(%d), total %d, %s",
@@ -2008,7 +2409,7 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                                     WaitStatePhaseDesc[beentry->st_waitstatus_phase]);
                                 securec_check_ss(rc, "\0", "\0");
                             } else {
-                                rc = snprintf_s(wait_status,
+                                rc = snprintf_s(waitStatus,
                                     WAITSTATELEN,
                                     WAITSTATELEN - 1,
                                     "%s: %s, total %d, %s",
@@ -2020,7 +2421,7 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                             }
                         } else {
                             if (beentry->st_plannodeid != -1) {
-                                rc = snprintf_s(wait_status,
+                                rc = snprintf_s(waitStatus,
                                     WAITSTATELEN,
                                     WAITSTATELEN - 1,
                                     "%s: %s(%d), total %d",
@@ -2030,7 +2431,7 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                                     beentry->st_waitnode_count);
                                 securec_check_ss(rc, "\0", "\0");
                             } else {
-                                rc = snprintf_s(wait_status,
+                                rc = snprintf_s(waitStatus,
                                     WAITSTATELEN,
                                     WAITSTATELEN - 1,
                                     "%s: %s, total %d",
@@ -2041,9 +2442,9 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                             }
                         }
                     } else {
-                        if (beentry->st_waitstatus_phase != PHASE_NONE) {
+                        if (PHASE_NONE != beentry->st_waitstatus_phase) {
                             if (beentry->st_plannodeid != -1) {
-                                rc = snprintf_s(wait_status,
+                                rc = snprintf_s(waitStatus,
                                     WAITSTATELEN,
                                     WAITSTATELEN - 1,
                                     "%s: %s(%d), %s",
@@ -2053,7 +2454,7 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                                     WaitStatePhaseDesc[beentry->st_waitstatus_phase]);
                                 securec_check_ss(rc, "\0", "\0");
                             } else {
-                                rc = snprintf_s(wait_status,
+                                rc = snprintf_s(waitStatus,
                                     WAITSTATELEN,
                                     WAITSTATELEN - 1,
                                     "%s: %s, %s",
@@ -2064,7 +2465,7 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                             }
                         } else {
                             if (beentry->st_plannodeid != -1) {
-                                rc = snprintf_s(wait_status,
+                                rc = snprintf_s(waitStatus,
                                     WAITSTATELEN,
                                     WAITSTATELEN - 1,
                                     "%s: %s(%d)",
@@ -2073,7 +2474,7 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                                     beentry->st_plannodeid);
                                 securec_check_ss(rc, "\0", "\0");
                             } else {
-                                rc = snprintf_s(wait_status,
+                                rc = snprintf_s(waitStatus,
                                     WAITSTATELEN,
                                     WAITSTATELEN - 1,
                                     "%s: %s",
@@ -2086,28 +2487,187 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
                     copyLock.unLock();
                 } else {
                     rc = snprintf_s(
-                        wait_status, WAITSTATELEN, WAITSTATELEN - 1, "%s", WaitStateDesc[beentry->st_waitstatus]);
+                        waitStatus, WAITSTATELEN, WAITSTATELEN - 1, "%s", WaitStateDesc[beentry->st_waitstatus]);
                     securec_check_ss(rc, "\0", "\0");
                 }
             }
-            values[10] = CStringGetTextDatum(wait_status);
-            nulls[11] = true;
+            values[ARR_10] = CStringGetTextDatum(waitStatus);
+            values[ARR_11] = CStringGetTextDatum(pgstat_get_waitstatusname(beentry->st_waitstatus));
+            nulls[ARR_12] = true;
+            nulls[ARR_13] = true;
+            nulls[ARR_14] = true;
         } else {
-            rc = snprintf_s(wait_status, WAITSTATELEN, WAITSTATELEN - 1, "%s", WaitStateDesc[beentry->st_waitstatus]);
+            rc = snprintf_s(waitStatus, WAITSTATELEN, WAITSTATELEN - 1, "%s", WaitStateDesc[beentry->st_waitstatus]);
             securec_check_ss(rc, "\0", "\0");
-            values[10] = CStringGetTextDatum(wait_status);
-            nulls[11] = true;
+            values[ARR_10] = CStringGetTextDatum(waitStatus);
+            values[ARR_11] = CStringGetTextDatum(pgstat_get_waitstatusname(beentry->st_waitstatus));
+            nulls[ARR_12] = true;
+            nulls[ARR_13] = true;
+            nulls[ARR_14] = true;
         }
     } else {
-        nulls[0] = true;
-        nulls[3] = true;
-        nulls[6] = true;
-        nulls[7] = true;
-        nulls[8] = true;
-        nulls[9] = true;
-        nulls[10] = true;
-        nulls[11] = true;
+        nulls[ARR_0] = true;
+        nulls[ARR_3] = true;
+        nulls[ARR_6] = true;
+        nulls[ARR_7] = true;
+        nulls[ARR_8] = true;
+        nulls[ARR_9] = true;
+        nulls[ARR_10] = true;
+        nulls[ARR_11] = true;
+        nulls[ARR_12] = true;
+        nulls[ARR_13] = true;
+        nulls[ARR_14] = true;
     }
+}
+
+static int Translat(char c)
+{
+    if (c <= '9' && c >= '0') {
+        return c - '0';
+    } else if (c >= 'a' && c <= 'f') {
+        return c - LOWERCASE_LETTERS_ID;
+    } else if (c >= 'A' && c <= 'F') {
+        return c - UPPERCASE_LETTERS_ID;
+    } else {
+        return -1;
+    }
+}
+
+static int Htoi(const char* str)
+{
+    int n = 0;
+
+    for (unsigned int i = 0; i < strlen(str); i++) {
+        int stat = Translat(str[i]);
+
+        if (stat >= 0) {
+            n = n * 16 + stat;
+        } else {
+            ereport(ERROR, (errmsg("An exception occurred when the locktag data is transferred!")));
+        }
+    }
+
+    return n;
+}
+
+static char** GetLocktag(const char* locktag) 
+{
+    int i = 0;
+    int j = 0;
+    char** subStr = (char**)palloc(MAX_LOCKTAG_STRING * sizeof(char*));
+    char* strs = pstrdup(locktag);
+    int len = (int)strlen(strs);
+    int substrStart = 0;
+
+    for (; j < len; j++) {
+        if (strs[j] == ':') {
+            if (substrStart == j || i >= MAX_LOCKTAG_STRING) {
+                ereport(ERROR, (errmsg("The input parameter %s is invalid!", locktag)));
+            } else {
+                strs[j] = '\0';
+                subStr[i++] = pstrdup(strs + substrStart);
+                substrStart = j + 1;
+            }
+        }
+    }
+
+    if (substrStart < j) {
+        if (i >= MAX_LOCKTAG_STRING) {
+            ereport(ERROR, (errmsg("The input parameter %s is invalid!", locktag)));
+        }
+        subStr[i++] = pstrdup(strs + substrStart);
+
+        if (i != MAX_LOCKTAG_STRING) {
+            ereport(ERROR, (errmsg("The input parameter %s is invalid!", locktag)));
+        }
+    } else {
+        ereport(ERROR, (errmsg("The input parameter %s is invalid!", locktag)));
+    }
+
+    pfree_ext(strs);
+    return subStr;
+}
+
+static char* GetLocktagDecode(const char* locktag)
+{
+    if (locktag == NULL) {
+        ereport(ERROR, (errmsg("The input locktag is invalid!")));
+    }
+
+    char **ltag = GetLocktag(locktag);
+
+    uint32 locktagField1 = Htoi(ltag[0]);
+    uint32 locktagField2 = Htoi(ltag[1]);
+    uint32 locktagField3 = Htoi(ltag[2]);
+    uint32 locktagField4 = Htoi(ltag[3]);
+    uint32 locktagField5 = Htoi(ltag[4]);
+    uint32 locktagType = Htoi(ltag[5]);
+
+    for (int i = 0; i < MAX_LOCKTAG_STRING; i++) {
+         pfree_ext(ltag[i]);
+    }
+    pfree_ext(ltag);
+
+    StringInfoData tag;
+    initStringInfo(&tag);
+
+    if (locktagType <= LOCKTAG_LAST_TYPE) {
+        appendStringInfo(&tag, "locktype:%s, ", LockTagTypeNames[locktagType]);
+    } else {
+        appendStringInfo(&tag, "locktype:unknown %d, ", (int)locktagType);
+    }
+
+    switch ((LockTagType)locktagType) {
+        case LOCKTAG_RELATION:
+        case LOCKTAG_CSTORE_FREESPACE:
+            appendStringInfo(&tag, "database:%u, relation:%u", locktagField1, locktagField2);
+            break;
+        case LOCKTAG_RELATION_EXTEND:
+            appendStringInfo(&tag, "database:%u, relation:%u, bucket:%u",
+                locktagField1, locktagField2, locktagField5);
+            break;
+        case LOCKTAG_PAGE:
+            appendStringInfo(&tag, "database:%u, relation:%u, page:=%u, bucket:%u", locktagField1,
+                locktagField2, locktagField3, locktagField5);
+            break;
+        case LOCKTAG_TUPLE:
+            appendStringInfo(&tag, "database:%u, relation:%u, page:=%u, tuple:%u, bucket:%u", locktagField1,
+                locktagField2, locktagField3, locktagField4, locktagField5);
+            break;
+        case LOCKTAG_TRANSACTION:
+            appendStringInfo(&tag, "transactionid:%lu", TransactionIdGetDatum(
+                (TransactionId)locktagField1 | ((TransactionId)locktagField2 << DISPLACEMENTS_VALUE)));
+            break;
+        case LOCKTAG_VIRTUALTRANSACTION:
+            appendStringInfo(&tag, "virtualxid:%u/%lu", locktagField1,
+                (TransactionId)locktagField2 | ((TransactionId)locktagField3 << DISPLACEMENTS_VALUE));
+            break;
+        case LOCKTAG_OBJECT:
+        case LOCKTAG_USERLOCK:
+        case LOCKTAG_ADVISORY:
+            /* act as the same as the default */
+        default: /* treat unknown locktags like OBJECT */
+            appendStringInfo(&tag, "database:%u, classid:%u, objid:%u, objsubid:%u", locktagField1, locktagField2,
+                locktagField3, locktagField4);
+            break;
+    }  
+
+    return tag.data;
+}
+
+Datum locktag_decode(PG_FUNCTION_ARGS)
+{
+    char* locktag = TextDatumGetCString(PG_GETARG_DATUM(0));
+    char* tag = GetLocktagDecode(locktag);
+
+    text* result = cstring_to_text(tag);
+    pfree_ext(tag);
+    PG_RETURN_TEXT_P(result);
+}
+
+Datum working_version_num(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_UINT32(t_thrd.proc->workingVersionNum);
 }
 
 /*
@@ -2116,102 +2676,64 @@ static void construct_wait_status(PgBackendStatus* beentry, Datum values[12], bo
  */
 Datum pg_stat_get_status(PG_FUNCTION_ARGS)
 {
-    int i = 0;
-    FuncCallContext* func_ctx = NULL;
+    const int ATT_NUM = 15;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+
+    Assert(STATE_WAIT_NUM == sizeof(WaitStateDesc) / sizeof(WaitStateDesc[0]));
+    TupleDesc tupdesc = CreateTemplateTupleDesc(ATT_NUM, false);
+
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_2, "db_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_3, "thread_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_4, "query_id", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_5, "tid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_6, "sessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_7, "lwtid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_8, "psessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_9, "tlevel", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_10, "smpid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_11, "wait_status", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_12, "wait_event", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_13, "locktag", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_14, "lockmode", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_15, "block_sessionid", INT8OID, -1, 0);
+
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
+
+    bool hasTID = false;
+    ThreadId tid = 0;
+    if (!PG_ARGISNULL(0)) {
+        hasTID = true;
+        tid = PG_GETARG_INT64(0);
+    }
+
+    (void)gs_stat_read_current_status(rsinfo->setResult, rsinfo->setDesc, insert_pg_stat_get_status, hasTID, tid);
+
+    MemoryContextSwitchTo(oldcontext);
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
+    return (Datum) 0;
+}
+
+void insert_pg_stat_get_status(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry)
+{
+    const int ATT_NUM = 15;
     errno_t rc = 0;
 
-    if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tupdesc;
+    /* for each row */
+    Datum values[ATT_NUM];
+    bool nulls[ATT_NUM];
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
 
-        Assert(STATE_WAIT_NUM == sizeof(WaitStateDesc) / sizeof(WaitStateDesc[0]));
-
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-
-        tupdesc = CreateTemplateTupleDesc(12, false);
-
-        TupleDescInitEntry(tupdesc, (AttrNumber)1, "node_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)2, "db_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)3, "thread_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)4, "query_id", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)5, "tid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)6, "sessionid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)7, "lwtid", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)8, "psessionid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)9, "tlevel", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)10, "smpid", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)11, "wait_status", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)12, "wait_event", TEXTOID, -1, 0);
-
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-
-        func_ctx->user_fctx = palloc0(sizeof(int));
-        if (PG_ARGISNULL(0)) {
-            /* Get all backends */
-            func_ctx->max_calls = pgstat_fetch_stat_numbackends();
-        } else {
-            /*
-             * Get one backend - locate by tid.
-             *
-             * We lookup the backend early, so we can return zero rows if it
-             * doesn't exist, instead of returning a single row full of NULLs.
-             */
-            ThreadId tid = PG_GETARG_INT64(0);
-            int i;
-            int n = pgstat_fetch_stat_numbackends();
-
-            for (i = 1; i <= n; i++) {
-                PgBackendStatus* be = pgstat_fetch_stat_beentry(i);
-
-                if (be != NULL) {
-                    if (be->st_procpid == tid) {
-                        *(int*)(func_ctx->user_fctx) = i;
-                        break;
-                    }
-                }
-            }
-
-            if (*(int*)(func_ctx->user_fctx) == 0)
-                /* Pid not found, return zero rows */
-                func_ctx->max_calls = 0;
-            else
-                func_ctx->max_calls = 1;
-        }
-
-        MemoryContextSwitchTo(old_context);
-    }
-
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* for each row */
-        Datum values[12];
-        bool nulls[12] = {false};
-        HeapTuple tuple = NULL;
-        PgBackendStatus* beentry = NULL;
-
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-        pg_stat_get_beentry(func_ctx, &beentry);
-        if (beentry == NULL) {
-            for (i = 0; (unsigned int)(i) < sizeof(nulls) / sizeof(nulls[0]); i++) {
-                nulls[i] = true;
-            }
-            tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-            SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-        }
-
-        construct_wait_status(beentry, values, nulls);
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else {
-        /* nothing left */
-        SRF_RETURN_DONE(func_ctx);
-    }
+    ConstructWaitStatus(beentry, values, nulls);
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
 }
 
 /*
@@ -2221,124 +2743,66 @@ Datum pg_stat_get_status(PG_FUNCTION_ARGS)
 Datum pgxc_stat_get_status(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
         errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
-    FuncCallContext* func_ctx = NULL;
-    Datum values[12];
-    bool nulls[12] = {false};
-    HeapTuple tuple = NULL;
-
-    if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tupdesc;
-        func_ctx = SRF_FIRSTCALL_INIT();
-
-        Assert(STATE_WAIT_NUM == sizeof(WaitStateDesc) / sizeof(WaitStateDesc[0]));
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-
-        /* build tupdesc for result tuples. */
-        tupdesc = CreateTemplateTupleDesc(12, false);
-
-        TupleDescInitEntry(tupdesc, (AttrNumber)1, "node_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)2, "db_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)3, "thread_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)4, "query_id", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)5, "tid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)6, "sessionid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)7, "lwtid", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)8, "psessionid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)9, "tlevel", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)10, "smpid", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)11, "wait_status", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)12, "wait_event", TEXTOID, -1, 0);
-
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-
-        /* only for local node to fetch. */
-        func_ctx->max_calls = pgstat_fetch_stat_numbackends();
-
-        /* local fetch way. */
-        func_ctx->user_fctx = palloc0(sizeof(int));
-
-        MemoryContextSwitchTo(old_context);
-
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+    if (IS_PGXC_DATANODE && !IS_SINGLE_NODE) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+            errmsg("pgxc view cannot be executed on datanodes!")));
     }
+    Assert(STATE_WAIT_NUM == sizeof(WaitStateDesc) / sizeof(WaitStateDesc[0]));
+    const int ATT_NUM = 15;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
 
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    /* step1. local fetch way. */
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* for each row */
-        PgBackendStatus* beentry = NULL;
-        errno_t rc = 0;
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
+    /* build tupdesc for result tuples. */
+    TupleDesc tupdesc = CreateTemplateTupleDesc(ATT_NUM, false);
 
-        if (*(int*)(func_ctx->user_fctx) > 0) {
-            /* Get specific pid slot */
-            beentry = pgstat_fetch_stat_beentry(*(int*)(func_ctx->user_fctx));
-        } else {
-            /* Get the next one in the list */
-            beentry = pgstat_fetch_stat_beentry(func_ctx->call_cntr + 1); /* 1-based index */
-        }
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_1, "node_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_2, "db_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_3, "thread_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_4, "query_id", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_5, "tid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_6, "sessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_7, "lwtid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_8, "psessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_9, "tlevel", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_10, "smpid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_11, "wait_status", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_12, "wait_event", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_13, "locktag", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_14, "lockmode", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_15, "block_sessionid", INT8OID, -1, 0);
 
-        /* the last time to fetch on local node, fetch from remote nodes and reset user_fctx for parallel way. */
-        if (func_ctx->call_cntr == func_ctx->max_calls - 1) {
-            MemoryContext old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-            func_ctx->user_fctx = getGlobalThreadWaitStatus(func_ctx->tuple_desc);
-            MemoryContextSwitchTo(old_context);
-            if (func_ctx->user_fctx == NULL) {
-                SRF_RETURN_DONE(func_ctx);
-            }
-        }
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
 
-        if (beentry == NULL) {
-            for (int i = 0; (unsigned int)(i) < sizeof(nulls) / sizeof(nulls[0]); i++) {
-                nulls[i] = true;
-            }
+    (void)gs_stat_read_current_status(rsinfo->setResult, rsinfo->setDesc, insert_pg_stat_get_status);
+    /* step2. fetch way for remote nodes. */
+    ThreadWaitStatusInfo* threadWaitStatusInfo = getGlobalThreadWaitStatus(rsinfo->setDesc);
+    MemoryContextSwitchTo(oldcontext);
 
-            tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-            SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-        }
-
-        /* form values and nulls of current beentry. */
-        construct_wait_status(beentry, values, nulls);
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else if (func_ctx->user_fctx) {
-        /* step2. fetch way for remote nodes. */
-        Tuplestorestate* tupstore = ((ThreadWaitStatusInfo*)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot* slot = ((ThreadWaitStatusInfo*)func_ctx->user_fctx)->slot;
+    while (threadWaitStatusInfo != NULL) {
+        Tuplestorestate* tupstore = threadWaitStatusInfo->state->tupstore;
+        TupleTableSlot* slot = threadWaitStatusInfo->slot;
 
         if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-            FreeParallelFunctionState(((ThreadWaitStatusInfo*)func_ctx->user_fctx)->state);
+            FreeParallelFunctionState(threadWaitStatusInfo->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(threadWaitStatusInfo);
+            break;
         }
 
-        for (unsigned int i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
-            values[i] = slot_getattr(slot, i + 1, &nulls[i]);
-        }
-
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
-
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuplestore_puttupleslot(rsinfo->setResult, slot);
+        ExecClearTuple(slot);
     }
-
-    SRF_RETURN_DONE(func_ctx);
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
+    return (Datum) 0;
 #endif
 }
 
@@ -2441,29 +2905,29 @@ static PgStat_WaitCountStatus* wcslist_nthcell_array(int current_index)
  * @Description: system function for SQL count. When guc parameter 'pgstat_track_sql_count' is set on
  *			and user selcets view of pg_sql_count, the functoin wiil be called to find user`s SQL count
  *			results from g_instance.stat_cxt.WaitCountStatusList. If system admin selcet the view , the function will be
- * call many times to return all uers` SQL count results.
+ *call many times to return all uers` SQL count results.
  * @in  - PG_FUNCTION_ARGS
  * @out - Datum
  */
 Datum pg_stat_get_sql_count(PG_FUNCTION_ARGS)
 {
     const int SQL_COUNT_ATTR = 26;
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     Oid ordinary_userid = 0;
     int ordinary_user_idx = 0;
     int i;
-    MemoryContext old_context;
+    MemoryContext oldcontext;
 
     /* the first call the function  */
     if (SRF_IS_FIRSTCALL()) {
         TupleDesc tupdesc;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        funcctx = SRF_FIRSTCALL_INIT();
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
         i = 0;
 
         /* init the tuple description */
-        tupdesc = CreateTemplateTupleDesc(SQL_COUNT_ATTR, false);
+        tupdesc = CreateTemplateTupleDesc(SQL_COUNT_ATTR, false, TAM_HEAP);
 
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "node_name", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "user_name", TEXTOID, -1, 0);
@@ -2492,14 +2956,14 @@ Datum pg_stat_get_sql_count(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "max_delete_elapse", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "min_delete_elapse", INT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = palloc0(sizeof(int));
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = palloc0(sizeof(int));
         Oid userId = GetUserId();
 
-        *(int*)(func_ctx->user_fctx) = 0;
+        *(int*)(funcctx->user_fctx) = 0;
         if (u_sess->attr.attr_common.pgstat_track_activities == false ||
             u_sess->attr.attr_common.pgstat_track_sql_count == false || !CheckUserExist(userId, false)) {
-            func_ctx->max_calls = 0;
+            funcctx->max_calls = 0;
             if (u_sess->attr.attr_common.pgstat_track_activities == false) {
                 /* track_activities is off and report error */
                 ereport(LOG, (errcode(ERRCODE_WARNING), (errmsg("GUC parameter 'track_activities' is off"))));
@@ -2508,9 +2972,9 @@ Datum pg_stat_get_sql_count(PG_FUNCTION_ARGS)
                 /* track_sql_count is off and report error */
                 ereport(LOG, (errcode(ERRCODE_WARNING), (errmsg("GUC parameter 'track_sql_count' is off"))));
             }
-            pfree_ext(func_ctx->user_fctx);
-            MemoryContextSwitchTo(old_context);
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            MemoryContextSwitchTo(oldcontext);
+            SRF_RETURN_DONE(funcctx);
         }
 
         /* if g_instance.stat_cxt.WaitCountHashTbl is null, re-initSqlCount */
@@ -2519,7 +2983,7 @@ Datum pg_stat_get_sql_count(PG_FUNCTION_ARGS)
         }
 
         /* find the ordinary user`s  index in g_instance.stat_cxt.WaitCountStatusList */
-        if (!superuser()) {
+        if (!superuser() && !isMonitoradmin(GetUserId())) {
             WaitCountHashValue* WaitCountIdx = NULL;
             LWLockAcquire(WaitCountHashLock, LW_SHARED);
             WaitCountIdx =
@@ -2532,14 +2996,15 @@ Datum pg_stat_get_sql_count(PG_FUNCTION_ARGS)
         }
 
         /* function max calls is the entry numbers of g_instance.stat_cxt.WaitCountHashTbl */
-        func_ctx->max_calls = ordinary_userid ? 1 : hash_get_num_entries(g_instance.stat_cxt.WaitCountHashTbl);
+        funcctx->max_calls = ordinary_userid ? 1 : hash_get_num_entries(g_instance.stat_cxt.WaitCountHashTbl);
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
         /* for each row */
         Datum values[SQL_COUNT_ATTR];
         bool nulls[SQL_COUNT_ATTR] = {false};
@@ -2548,8 +3013,9 @@ Datum pg_stat_get_sql_count(PG_FUNCTION_ARGS)
         Oid userid;
         char user_name[NAMEDATALEN];
         errno_t ss_rc = EOK;
-        int current_idx = ordinary_userid ? ordinary_user_idx : *(int*)(func_ctx->user_fctx);
-        int i = -1;
+
+        int current_idx = ordinary_userid ? ordinary_user_idx : *(int*)(funcctx->user_fctx);
+        i = -1;
         ss_rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(ss_rc, "\0", "\0");
         ss_rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
@@ -2557,24 +3023,27 @@ Datum pg_stat_get_sql_count(PG_FUNCTION_ARGS)
         ss_rc = memset_s(user_name, NAMEDATALEN, 0, NAMEDATALEN);
         securec_check(ss_rc, "\0", "\0");
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
         LWLockAcquire(WaitCountHashLock, LW_SHARED);
+
         wcb = wcslist_nthcell_array(current_idx);
+
         /* if the user has been droped, then find the next exist user  */
         if (!CheckUserExist(wcb->userid, true)) {
             /* find the next exist user in g_instance.stat_cxt.WaitCountStatusList */
-            *(int*)(func_ctx->user_fctx) = find_next_user_idx(
-                ordinary_userid, func_ctx->call_cntr, func_ctx->max_calls, *(int*)(func_ctx->user_fctx));
+            *(int*)(funcctx->user_fctx) = find_next_user_idx(
+                ordinary_userid, funcctx->call_cntr, funcctx->max_calls, *(int*)(funcctx->user_fctx));
             /* no user left, all exist users` SQL count results are return done */
-            if (*(int*)(func_ctx->user_fctx) == 0) {
+            if (*(int*)(funcctx->user_fctx) == 0) {
                 LWLockRelease(WaitCountHashLock);
-                pfree_ext(func_ctx->user_fctx);
-                MemoryContextSwitchTo(old_context);
-                SRF_RETURN_DONE(func_ctx);
+                pfree_ext(funcctx->user_fctx);
+                MemoryContextSwitchTo(oldcontext);
+                SRF_RETURN_DONE(funcctx);
             }
 
             /* get the next exist user`s SQL count result */
-            wcb = wcslist_nthcell_array(*(int*)(func_ctx->user_fctx));
+            wcb = wcslist_nthcell_array(*(int*)(funcctx->user_fctx));
         }
 
         LWLockRelease(WaitCountHashLock);
@@ -2613,122 +3082,108 @@ Datum pg_stat_get_sql_count(PG_FUNCTION_ARGS)
         /* find the next user for the next function call  */
         LWLockAcquire(WaitCountHashLock, LW_SHARED);
 
-        (*(int*)(func_ctx->user_fctx)) =
-            find_next_user_idx(ordinary_userid, func_ctx->call_cntr, func_ctx->max_calls, *(int*)(func_ctx->user_fctx));
-        if ((*(int*)(func_ctx->user_fctx)) == 0)
-            func_ctx->call_cntr = func_ctx->max_calls;
+        (*(int*)(funcctx->user_fctx)) =
+            find_next_user_idx(ordinary_userid, funcctx->call_cntr, funcctx->max_calls, *(int*)(funcctx->user_fctx));
+        if ((*(int*)(funcctx->user_fctx)) == 0)
+            funcctx->call_cntr = funcctx->max_calls;
 
         LWLockRelease(WaitCountHashLock);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
 
-        MemoryContextSwitchTo(old_context);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        MemoryContextSwitchTo(oldcontext);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+
     } else {
         /* nothing left */
-        pfree_ext(func_ctx->user_fctx);
-        SRF_RETURN_DONE(func_ctx);
+        pfree_ext(funcctx->user_fctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
 Datum pg_stat_get_thread(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    errno_t rc = 0;
-    if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tupdesc;
+    const int ATT_NUM = 5;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+    TupleDesc tupdesc = CreateTemplateTupleDesc(ATT_NUM, false);
+    /* This should have been called 'pid';  can't change it. 2011-06-11 */
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_1, "node_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_2, "pid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_3, "lwpid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_4, "thread_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_5, "creation_time", TIMESTAMPTZOID, -1, 0);
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
 
-        tupdesc = CreateTemplateTupleDesc(5, false);
-        /* This should have been called 'pid';  can't change it. 2011-06-11 */
-        TupleDescInitEntry(tupdesc, (AttrNumber)1, "node_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)2, "pid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)3, "lwpid", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)4, "thread_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)5, "creation_time", TIMESTAMPTZOID, -1, 0);
+    (void)gs_stat_read_current_status(rsinfo->setResult, rsinfo->setDesc, insert_pg_stat_get_thread);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
+    MemoryContextSwitchTo(oldcontext);
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
 
-        func_ctx->user_fctx = palloc0(sizeof(int));
-
-        /* Get all backends */
-        func_ctx->max_calls = pgstat_fetch_stat_numbackends();
-
-        MemoryContextSwitchTo(old_context);
-    }
-
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* for each row */
-        Datum values[5];
-        bool nulls[5] = {false};
-        HeapTuple tuple = NULL;
-        PgBackendStatus* beentry = NULL;
-
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-
-        /* Get the next one in the list */
-        beentry = pgstat_fetch_stat_beentry(func_ctx->call_cntr + 1); /* 1-based index */
-        if (beentry == NULL || beentry->st_procpid == 0) {
-            int i;
-
-            for (i = 0; (unsigned int)(i) < sizeof(nulls) / sizeof(nulls[0]); i++) {
-                nulls[i] = true;
-            }
-
-            nulls[3] = false;
-            if (beentry == NULL) {
-                values[3] = CStringGetTextDatum("<backend information not available>");
-            } else {
-                Assert(beentry->st_sessionid != 0);
-                values[3] = CStringGetTextDatum("<decoupled session information not displayed>");
-            }
-
-            tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-            SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-        }
-
-        /* Values available to all callers */
-        values[0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
-
-        /* Values only available to same user or superuser */
-        if (superuser() || beentry->st_userid == GetUserId()) {
-            values[1] = Int64GetDatum(beentry->st_procpid);
-            values[2] = Int32GetDatum(beentry->st_tid);
-            if (beentry->st_appname) {
-                values[3] = CStringGetTextDatum(beentry->st_appname);
-            } else {
-                nulls[3] = true;
-            }
-            if (beentry->st_state_start_timestamp != 0) {
-                values[4] = TimestampTzGetDatum(beentry->st_proc_start_timestamp);
-            } else {
-                nulls[4] = true;
-            }
-        } else {
-            /* No permissions to view data about this session */
-            nulls[1] = true;
-            nulls[2] = true;
-            values[3] = CStringGetTextDatum("<insufficient privilege>");
-            nulls[4] = true;
-        }
-
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else {
-        /* nothing left */
-        SRF_RETURN_DONE(func_ctx);
-    }
+    return (Datum) 0;
 }
+
+void insert_pg_stat_get_thread(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry)
+{
+    const int ATT_NUM = 5;
+
+    errno_t rc = 0;
+    Datum values[ATT_NUM];
+    bool nulls[ATT_NUM];
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    if (beentry == NULL || beentry->st_procpid == 0) {
+        int i;
+
+        for (i = 0; (unsigned int)(i) < sizeof(nulls) / sizeof(nulls[0]); i++)
+            nulls[i] = true;
+
+        nulls[ARR_3] = false;
+        if (beentry == NULL)
+            values[ARR_3] = CStringGetTextDatum("<backend information not available>");
+        else {
+            Assert(beentry->st_sessionid != 0);
+            values[ARR_3] = CStringGetTextDatum("<decoupled session information not displayed>");
+        }
+        tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+        return;
+    }
+
+    /* Values available to all callers */
+    values[ARR_0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
+
+    /* Values only available to same user or superuser */
+    if (superuser() || isMonitoradmin(GetUserId()) || beentry->st_userid == GetUserId()) {
+        values[ARR_1] = Int64GetDatum(beentry->st_procpid);
+        values[ARR_2] = Int32GetDatum(beentry->st_tid);
+        if (beentry->st_appname)
+            values[ARR_3] = CStringGetTextDatum(beentry->st_appname);
+        else
+            nulls[ARR_3] = true;
+        if (beentry->st_state_start_timestamp != 0)
+            values[ARR_4] = TimestampTzGetDatum(beentry->st_proc_start_timestamp);
+        else
+            nulls[ARR_4] = true;
+    } else {
+        /* No permissions to view data about this session */
+        nulls[ARR_1] = true;
+        nulls[ARR_2] = true;
+        values[ARR_3] = CStringGetTextDatum("<insufficient privilege>");
+        nulls[ARR_4] = true;
+    }
+
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+}
+
 
 void get_network_info(char** node_host, int* node_port)
 {
@@ -2751,21 +3206,24 @@ void get_network_info(char** node_host, int* node_port)
 
 Datum pg_stat_get_env(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
 
-    if (!superuser()) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("permission denied."))));
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to get system environment"),
+                errhint("Must be system admin or monitor admin can get system environment.")));
     }
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(7, false);
+        tupdesc = CreateTemplateTupleDesc(7, false, TAM_HEAP);
         /* This should have been called 'pid';  can't change it. 2011-06-11 */
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "node_name", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "host", TEXTOID, -1, 0);
@@ -2775,28 +3233,25 @@ Datum pg_stat_get_env(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)6, "datapath", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)7, "log_directory", TEXTOID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
-        func_ctx->user_fctx = palloc0(sizeof(int));
-        func_ctx->max_calls = 1;
+        funcctx->user_fctx = palloc0(sizeof(int));
+        funcctx->max_calls = 1;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
         /* for each row */
         Datum values[7];
         bool nulls[7] = {false};
         HeapTuple tuple = NULL;
-        char *node_host = NULL;
-        char *install_path = NULL;
-        char *data_path = NULL;
-        int node_process = 0;
-        int node_port = 0;
-        char self_path[PATH_MAX] = {0};
-        char real_path[PATH_MAX] = {0};
+        char *node_host = NULL, *install_path = NULL, *data_path = NULL;
+        int node_process = 0, node_port = 0;
+        char self_path[MAXPGPATH] = {0}, real_path[MAXPGPATH] = {0};
 
         errno_t rc = 0;
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -2807,31 +3262,32 @@ Datum pg_stat_get_env(PG_FUNCTION_ARGS)
         node_process = getpid();
         /* Get envirenment of GAUSSHOME firstly, if it is null, it should get from /proc/self/exe */
         install_path = gs_getenv_r("GAUSSHOME");
-        if (install_path == NULL) {
+        if (NULL == install_path) {
             install_path = self_path;
             int r = readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
-            if (r < 0 || r >= PATH_MAX) {
+            if (r < 0 || r >= MAXPGPATH)
                 install_path = "";
-            } else {
+            else {
                 int ret = 0;
                 char* ptr = strrchr(self_path, '/');
                 if (ptr != NULL) {
                     *ptr = '\0';
-                    ret = strcat_s(self_path, PATH_MAX - strlen(self_path), "/..");
+                    ret = strcat_s(self_path, MAXPGPATH - strlen(self_path), "/..");
                     securec_check_c(ret, "\0", "\0");
                     (void)realpath(self_path, real_path);
                     install_path = real_path;
                 }
             }
         }
+
         char* tmp_install_path = (char*)palloc(strlen(install_path) + 1);
         rc = strcpy_s(tmp_install_path, strlen(install_path) + 1, install_path);
         securec_check(rc, "\0", "\0");
 
         data_path = t_thrd.proc_cxt.DataDir;
-        if (data_path == NULL) {
+        if (NULL == data_path)
             data_path = "";
-        }
+
         /* Values available to all callers */
         values[0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
         values[1] = CStringGetTextDatum(node_host);
@@ -2845,12 +3301,12 @@ Datum pg_stat_get_env(PG_FUNCTION_ARGS)
         tmp_install_path = NULL;
         install_path = NULL;
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
 
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     } else {
         /* nothing left */
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
@@ -2890,43 +3346,44 @@ Datum pg_stat_get_backend_pid(PG_FUNCTION_ARGS)
 {
     int32 beid = PG_GETARG_INT32(0);
     PgBackendStatus* beentry = NULL;
-    
-    if (!superuser()) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("permission denied."))));
-    }
+    ThreadId st_procpid;
 
-    if ((beentry = pgstat_fetch_stat_beentry(beid)) == NULL) {
+    if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL) {
         PG_RETURN_NULL();
     }
-    PG_RETURN_INT64(beentry->st_procpid);
+    st_procpid = beentry->st_procpid;
+    PG_RETURN_INT64(st_procpid);
 }
 
 Datum pg_stat_get_backend_dbid(PG_FUNCTION_ARGS)
 {
     int32 beid = PG_GETARG_INT32(0);
     PgBackendStatus* beentry = NULL;
+    Oid st_databaseid;
 
-    if ((beentry = pgstat_fetch_stat_beentry(beid)) == NULL) {
+    if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL) {
         PG_RETURN_NULL();
     }
-
-    PG_RETURN_OID(beentry->st_databaseid);
+    st_databaseid = beentry->st_databaseid;
+    PG_RETURN_OID(st_databaseid);
 }
 
 Datum pg_stat_get_backend_userid(PG_FUNCTION_ARGS)
 {
     int32 beid = PG_GETARG_INT32(0);
     PgBackendStatus* beentry = NULL;
-
-    if (!superuser()) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("permission denied."))));
-    }
-
-    if ((beentry = pgstat_fetch_stat_beentry(beid)) == NULL) {
+    Oid st_userid;
+    
+    if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL) {
         PG_RETURN_NULL();
     }
-
-    PG_RETURN_OID(beentry->st_userid);
+    if ((!superuser()) && (beentry->st_userid != GetUserId())) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("must be system admin or owner to use this function")));
+    }
+    st_userid = beentry->st_userid;
+    PG_RETURN_OID(st_userid);
 }
 
 Datum pg_stat_get_backend_activity(PG_FUNCTION_ARGS)
@@ -2934,18 +3391,19 @@ Datum pg_stat_get_backend_activity(PG_FUNCTION_ARGS)
     int32 beid = PG_GETARG_INT32(0);
     PgBackendStatus* beentry = NULL;
     const char* activity = NULL;
-
-    if ((beentry = pgstat_fetch_stat_beentry(beid)) == NULL) {
+    text *result = NULL;
+    if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL)
         activity = "<backend information not available>";
-    } else if (!superuser() && beentry->st_userid != GetUserId()) {
+    else if (!superuser() && beentry->st_userid != GetUserId())
         activity = "<insufficient privilege>";
-    } else if (*(beentry->st_activity) == '\0') {
+    else if (*(beentry->st_activity) == '\0')
         activity = "<command string not enabled>";
-    } else {
+    else
         activity = beentry->st_activity;
-    }
 
-    PG_RETURN_TEXT_P(cstring_to_text(activity));
+    result = cstring_to_text(activity);
+
+    PG_RETURN_TEXT_P(result);
 }
 
 Datum pg_stat_get_backend_waiting(PG_FUNCTION_ARGS)
@@ -2954,16 +3412,13 @@ Datum pg_stat_get_backend_waiting(PG_FUNCTION_ARGS)
     bool result = false;
     PgBackendStatus* beentry = NULL;
 
-    if ((beentry = pgstat_fetch_stat_beentry(beid)) == NULL) {
+    if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL)
         PG_RETURN_NULL();
-    }
 
-    if (!superuser() && beentry->st_userid != GetUserId()) {
+    if (!superuser() && beentry->st_userid != GetUserId())
         PG_RETURN_NULL();
-    }
 
     result = pgstat_get_waitlock(beentry->st_waitevent);
-
     PG_RETURN_BOOL(result);
 }
 
@@ -2973,23 +3428,19 @@ Datum pg_stat_get_backend_activity_start(PG_FUNCTION_ARGS)
     TimestampTz result;
     PgBackendStatus* beentry = NULL;
 
-    if ((beentry = pgstat_fetch_stat_beentry(beid)) == NULL) {
+    if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL)
         PG_RETURN_NULL();
-    }
 
-    if (!superuser() && beentry->st_userid != GetUserId()) {
+    if (!superuser() && beentry->st_userid != GetUserId())
         PG_RETURN_NULL();
-    }
 
     result = beentry->st_activity_start_timestamp;
-
     /*
      * No time recorded for start of current query -- this is the case if the
      * user hasn't enabled query-level stats collection.
      */
-    if (result == 0) {
+    if (result == 0)
         PG_RETURN_NULL();
-    }
 
     PG_RETURN_TIMESTAMPTZ(result);
 }
@@ -3000,19 +3451,16 @@ Datum pg_stat_get_backend_xact_start(PG_FUNCTION_ARGS)
     TimestampTz result;
     PgBackendStatus* beentry = NULL;
 
-    if ((beentry = pgstat_fetch_stat_beentry(beid)) == NULL) {
+    if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL)
         PG_RETURN_NULL();
-    }
 
     if (!superuser() && beentry->st_userid != GetUserId()) {
         PG_RETURN_NULL();
     }
-
     result = beentry->st_xact_start_timestamp;
 
-    if (result == 0) { /* not in a transaction */
+    if (result == 0) /* not in a transaction */
         PG_RETURN_NULL();
-    }
 
     PG_RETURN_TIMESTAMPTZ(result);
 }
@@ -3023,9 +3471,8 @@ Datum pg_stat_get_backend_start(PG_FUNCTION_ARGS)
     TimestampTz result;
     PgBackendStatus* beentry = NULL;
 
-    if ((beentry = pgstat_fetch_stat_beentry(beid)) == NULL) {
+    if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL)
         PG_RETURN_NULL();
-    }
 
     if (!superuser() && beentry->st_userid != GetUserId()) {
         PG_RETURN_NULL();
@@ -3033,9 +3480,8 @@ Datum pg_stat_get_backend_start(PG_FUNCTION_ARGS)
 
     result = beentry->st_proc_start_timestamp;
 
-    if (result == 0) { /* probably can't happen? */
+    if (result == 0) /* probably can't happen? */
         PG_RETURN_NULL();
-    }
 
     PG_RETURN_TIMESTAMPTZ(result);
 }
@@ -3049,9 +3495,8 @@ Datum pg_stat_get_backend_client_addr(PG_FUNCTION_ARGS)
     int ret;
     errno_t rc = 0;
 
-    if ((beentry = pgstat_fetch_stat_beentry(beid)) == NULL) {
+    if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL)
         PG_RETURN_NULL();
-    }
 
     if (!superuser() && beentry->st_userid != GetUserId()) {
         PG_RETURN_NULL();
@@ -3063,14 +3508,13 @@ Datum pg_stat_get_backend_client_addr(PG_FUNCTION_ARGS)
     if (memcmp(&(beentry->st_clientaddr), &zero_clientaddr, sizeof(zero_clientaddr)) == 0) {
         PG_RETURN_NULL();
     }
-
     switch (beentry->st_clientaddr.addr.ss_family) {
         case AF_INET:
 #ifdef HAVE_IPV6
         case AF_INET6:
 #endif
             break;
-        default:
+        default:            
             PG_RETURN_NULL();
             break;
     }
@@ -3086,9 +3530,7 @@ Datum pg_stat_get_backend_client_addr(PG_FUNCTION_ARGS)
     if (ret != 0) {
         PG_RETURN_NULL();
     }
-
     clean_ipv6_addr(beentry->st_clientaddr.addr.ss_family, remote_host);
-
     PG_RETURN_INET_P(DirectFunctionCall1(inet_in, CStringGetDatum(remote_host)));
 }
 
@@ -3100,28 +3542,25 @@ Datum pg_stat_get_backend_client_port(PG_FUNCTION_ARGS)
     char remote_port[NI_MAXSERV];
     int ret;
 
-    if ((beentry = pgstat_fetch_stat_beentry(beid)) == NULL) {
+    if ((beentry = gs_stat_fetch_stat_beentry(beid)) == NULL)
         PG_RETURN_NULL();
-    }
 
     if (!superuser() && beentry->st_userid != GetUserId()) {
         PG_RETURN_NULL();
     }
-
     /* A zeroed client addr means we don't know */
     errno_t rc = memset_s(&zero_clientaddr, sizeof(zero_clientaddr), 0, sizeof(zero_clientaddr));
     securec_check(rc, "\0", "\0");
     if (memcmp(&(beentry->st_clientaddr), &zero_clientaddr, sizeof(zero_clientaddr)) == 0) {
         PG_RETURN_NULL();
     }
-
     switch (beentry->st_clientaddr.addr.ss_family) {
         case AF_INET:
 #ifdef HAVE_IPV6
         case AF_INET6:
 #endif
             break;
-        case AF_UNIX:
+        case AF_UNIX:            
             PG_RETURN_INT32(-1);
         default:
             PG_RETURN_NULL();
@@ -3139,85 +3578,92 @@ Datum pg_stat_get_backend_client_port(PG_FUNCTION_ARGS)
     if (ret != 0) {
         PG_RETURN_NULL();
     }
-
     PG_RETURN_DATUM(DirectFunctionCall1(int4in, CStringGetDatum(remote_port)));
 }
 
 Datum pg_stat_get_db_numbackends(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
-    int32 result;
-    int tot_backends = pgstat_fetch_stat_numbackends();
-    int beid;
+    Oid dbid = PG_GETARG_OID(0);
+    int32 result = 0;
+    int before_changecount = 0;
+    int after_changecount = 0;
+    PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + BackendStatusArray_size - 1;
 
-    result = 0;
-    for (beid = 1; beid <= tot_backends; beid++) {
-        PgBackendStatus* beentry = pgstat_fetch_stat_beentry(beid);
+    for (int i = 1; i <= BackendStatusArray_size; i++) {
+        for (;;) {
+            bool is_same_db = false;
+            pgstat_save_changecount_before(beentry, before_changecount);
+            if ((beentry->st_procpid > 0 || beentry->st_sessionid > 0) && beentry->st_databaseid == dbid) {
+                is_same_db = true;
+            }
 
-        if ((beentry != NULL) && beentry->st_databaseid == db_id) {
-            result++;
+            pgstat_save_changecount_after(beentry, after_changecount);
+            if (before_changecount == after_changecount && ((uint)before_changecount & 1) == 0) {
+                if (is_same_db) {
+                    result++;
+                }
+                beentry--;
+                break;
+            }
+            CHECK_FOR_INTERRUPTS();
         }
     }
-
+    
     PG_RETURN_INT32(result);
 }
 
 Datum pg_stat_get_db_xact_commit(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result;
-    PgStat_StatDBEntry* db_entry = NULL;
+    PgStat_StatDBEntry* dbentry = NULL;
 
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = (int64)(db_entry->n_xact_commit);
-    }
+    else
+        result = (int64)(dbentry->n_xact_commit);
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_xact_rollback(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result;
-    PgStat_StatDBEntry* db_entry = NULL;
+    PgStat_StatDBEntry* dbentry = NULL;
 
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = (int64)(db_entry->n_xact_rollback);
-    }
+    else
+        result = (int64)(dbentry->n_xact_rollback);
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_blocks_fetched(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result;
-    PgStat_StatDBEntry* db_entry = NULL;
+    PgStat_StatDBEntry* dbentry = NULL;
 
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = (int64)(db_entry->n_blocks_fetched);
-    }
+    else
+        result = (int64)(dbentry->n_blocks_fetched);
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_blocks_hit(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result;
-    PgStat_StatDBEntry* db_entry = NULL;
+    PgStat_StatDBEntry* dbentry = NULL;
 
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = (int64)(db_entry->n_blocks_hit);
-    }
+    else
+        result = (int64)(dbentry->n_blocks_hit);
 
     PG_RETURN_INT64(result);
 }
@@ -3228,15 +3674,14 @@ Datum pg_stat_get_db_blocks_hit(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_db_cu_mem_hit(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result;
-    PgStat_StatDBEntry* db_entry = NULL;
+    PgStat_StatDBEntry* dbentry = NULL;
 
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = (int64)(db_entry->n_cu_mem_hit);
-    }
+    else
+        result = (int64)(dbentry->n_cu_mem_hit);
 
     PG_RETURN_INT64(result);
 }
@@ -3247,15 +3692,14 @@ Datum pg_stat_get_db_cu_mem_hit(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_db_cu_hdd_sync(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result;
-    PgStat_StatDBEntry* db_entry = NULL;
+    PgStat_StatDBEntry* dbentry = NULL;
 
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = (int64)(db_entry->n_cu_hdd_sync);
-    }
+    else
+        result = (int64)(dbentry->n_cu_hdd_sync);
 
     PG_RETURN_INT64(result);
 }
@@ -3266,51 +3710,48 @@ Datum pg_stat_get_db_cu_hdd_sync(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_db_cu_hdd_asyn(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result;
-    PgStat_StatDBEntry* db_entry = NULL;
+    PgStat_StatDBEntry* dbentry = NULL;
 
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = (int64)(db_entry->n_cu_hdd_asyn);
-    }
+    else
+        result = (int64)(dbentry->n_cu_hdd_asyn);
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_tuples_returned(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result;
-    PgStat_StatDBEntry* db_entry = NULL;
+    PgStat_StatDBEntry* dbentry = NULL;
 
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = (int64)(db_entry->n_tuples_returned);
-    }
+    else
+        result = (int64)(dbentry->n_tuples_returned);
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_tuples_fetched(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result;
-    PgStat_StatDBEntry* db_entry = NULL;
+    PgStat_StatDBEntry* dbentry = NULL;
 
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = (int64)(db_entry->n_tuples_fetched);
-    }
+    else
+        result = (int64)(dbentry->n_tuples_fetched);
 
     PG_RETURN_INT64(result);
 }
 
 /* fetch tuples stat info for total database */
-static int64 pgxc_exec_db_stat(Oid db_id, char* funcname, RemoteQueryExecType exec_type)
+static int64 pgxc_exec_db_stat(Oid dbid, char* funcname, RemoteQueryExecType exec_type)
 {
     ExecNodes* exec_nodes = NULL;
     StringInfoData buf;
@@ -3318,7 +3759,7 @@ static int64 pgxc_exec_db_stat(Oid db_id, char* funcname, RemoteQueryExecType ex
     int64 result = 0;
     char* databasename = NULL;
 
-    databasename = get_database_name(db_id);
+    databasename = get_database_name(dbid);
     if (databasename == NULL) {
         /* have been dropped */
         return 0;
@@ -3349,214 +3790,225 @@ static int64 pgxc_exec_db_stat(Oid db_id, char* funcname, RemoteQueryExecType ex
 
 Datum pg_stat_get_db_tuples_inserted(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result = 0;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if (IS_PGXC_COORDINATOR) {
-        PG_RETURN_INT64(pgxc_exec_db_stat(db_id, "pg_stat_get_db_tuples_inserted", EXEC_ON_DATANODES));
-    }
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) != NULL) {
-        result = (int64)(db_entry->n_tuples_inserted);
-    }
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if (IS_PGXC_COORDINATOR)
+        PG_RETURN_INT64(pgxc_exec_db_stat(dbid, "pg_stat_get_db_tuples_inserted", EXEC_ON_DATANODES));
+
+    if (NULL != (dbentry = pgstat_fetch_stat_dbentry(dbid)))
+        result = (int64)(dbentry->n_tuples_inserted);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_tuples_updated(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result = 0;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if (IS_PGXC_COORDINATOR) {
-        PG_RETURN_INT64(pgxc_exec_db_stat(db_id, "pg_stat_get_db_tuples_updated", EXEC_ON_DATANODES));
-    }
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) != NULL) {
-        result = (int64)(db_entry->n_tuples_updated);
-    }
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if (IS_PGXC_COORDINATOR)
+        PG_RETURN_INT64(pgxc_exec_db_stat(dbid, "pg_stat_get_db_tuples_updated", EXEC_ON_DATANODES));
+
+    if (NULL != (dbentry = pgstat_fetch_stat_dbentry(dbid)))
+        result = (int64)(dbentry->n_tuples_updated);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_tuples_deleted(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result = 0;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if (IS_PGXC_COORDINATOR) {
-        PG_RETURN_INT64(pgxc_exec_db_stat(db_id, "pg_stat_get_db_tuples_deleted", EXEC_ON_DATANODES));
-    }
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) != NULL) {
-        result = (int64)(db_entry->n_tuples_deleted);
-    }
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if (IS_PGXC_COORDINATOR)
+        PG_RETURN_INT64(pgxc_exec_db_stat(dbid, "pg_stat_get_db_tuples_deleted", EXEC_ON_DATANODES));
+
+    if (NULL != (dbentry = pgstat_fetch_stat_dbentry(dbid)))
+        result = (int64)(dbentry->n_tuples_deleted);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_stat_reset_time(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     TimestampTz result = 0;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) != NULL) {
-        result = db_entry->stat_reset_timestamp;
-    }
-    if (result == 0) {
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if (NULL != (dbentry = pgstat_fetch_stat_dbentry(dbid)))
+        result = dbentry->stat_reset_timestamp;
+
+    if (result == 0)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_TIMESTAMPTZ(result);
-    }
 }
 
 Datum pg_stat_get_db_temp_files(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = db_entry->n_temp_files;
-    }
+    else
+        result = dbentry->n_temp_files;
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_temp_bytes(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = db_entry->n_temp_bytes;
-    }
+    else
+        result = dbentry->n_temp_bytes;
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_conflict_tablespace(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result = 0;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        result = pgxc_exec_db_stat(db_id, "pg_stat_get_db_conflict_tablespace", EXEC_ON_ALL_NODES);
-    }
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) != NULL) {
-        result += (int64)(db_entry->n_conflict_tablespace);
-    }
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        result = pgxc_exec_db_stat(dbid, "pg_stat_get_db_conflict_tablespace", EXEC_ON_ALL_NODES);
+
+    if (NULL != (dbentry = pgstat_fetch_stat_dbentry(dbid)))
+        result += (int64)(dbentry->n_conflict_tablespace);
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_conflict_lock(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result = 0;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        result = pgxc_exec_db_stat(db_id, "pg_stat_get_db_conflict_lock", EXEC_ON_ALL_NODES);
-    }
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) != NULL) {
-        result += (int64)(db_entry->n_conflict_lock);
-    }
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        result = pgxc_exec_db_stat(dbid, "pg_stat_get_db_conflict_lock", EXEC_ON_ALL_NODES);
+
+    if (NULL != (dbentry = pgstat_fetch_stat_dbentry(dbid)))
+        result += (int64)(dbentry->n_conflict_lock);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_conflict_snapshot(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result = 0;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        result = pgxc_exec_db_stat(db_id, "pg_stat_get_db_conflict_snapshot", EXEC_ON_ALL_NODES);
-    }
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) != NULL) {
-        result += (int64)(db_entry->n_conflict_snapshot);
-    }
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        result = pgxc_exec_db_stat(dbid, "pg_stat_get_db_conflict_snapshot", EXEC_ON_ALL_NODES);
+
+    if (NULL != (dbentry = pgstat_fetch_stat_dbentry(dbid)))
+        result += (int64)(dbentry->n_conflict_snapshot);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_conflict_bufferpin(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result = 0;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        result = pgxc_exec_db_stat(db_id, "pg_stat_get_db_conflict_bufferpin", EXEC_ON_ALL_NODES);
-    }
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) != NULL) {
-        result += (int64)(db_entry->n_conflict_bufferpin);
-    }
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        result = pgxc_exec_db_stat(dbid, "pg_stat_get_db_conflict_bufferpin", EXEC_ON_ALL_NODES);
+
+    if (NULL != (dbentry = pgstat_fetch_stat_dbentry(dbid)))
+        result += (int64)(dbentry->n_conflict_bufferpin);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_conflict_startup_deadlock(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result = 0;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        result = pgxc_exec_db_stat(db_id, "pg_stat_get_db_conflict_startup_deadlock", EXEC_ON_ALL_NODES);
-    }
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) != NULL) {
-        result += (int64)(db_entry->n_conflict_startup_deadlock);
-    }
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        result = pgxc_exec_db_stat(dbid, "pg_stat_get_db_conflict_startup_deadlock", EXEC_ON_ALL_NODES);
+
+    if (NULL != (dbentry = pgstat_fetch_stat_dbentry(dbid)))
+        result += (int64)(dbentry->n_conflict_startup_deadlock);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_conflict_all(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result = 0;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        result = pgxc_exec_db_stat(db_id, "pg_stat_get_db_conflict_all", EXEC_ON_ALL_NODES);
-    }
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) != NULL) {
-        result += (int64)(db_entry->n_conflict_tablespace + db_entry->n_conflict_lock + db_entry->n_conflict_snapshot +
-                          db_entry->n_conflict_bufferpin + db_entry->n_conflict_startup_deadlock);
-    }
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        result = pgxc_exec_db_stat(dbid, "pg_stat_get_db_conflict_all", EXEC_ON_ALL_NODES);
+
+    if (NULL != (dbentry = pgstat_fetch_stat_dbentry(dbid)))
+        result += (int64)(dbentry->n_conflict_tablespace + dbentry->n_conflict_lock + dbentry->n_conflict_snapshot +
+                          dbentry->n_conflict_bufferpin + dbentry->n_conflict_startup_deadlock);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_deadlocks(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     int64 result = 0;
-    PgStat_StatDBEntry* db_entry = NULL;
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        result = pgxc_exec_db_stat(db_id, "pg_stat_get_db_deadlocks", EXEC_ON_ALL_NODES);
-    }
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) != NULL) {
-        result += (int64)(db_entry->n_deadlocks);
-    }
+    PgStat_StatDBEntry* dbentry = NULL;
+
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        result = pgxc_exec_db_stat(dbid, "pg_stat_get_db_deadlocks", EXEC_ON_ALL_NODES);
+
+    if (NULL != (dbentry = pgstat_fetch_stat_dbentry(dbid)))
+        result += (int64)(dbentry->n_deadlocks);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_db_blk_read_time(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     double result;
-    PgStat_StatDBEntry* db_entry = NULL;
+    PgStat_StatDBEntry* dbentry = NULL;
+
     /* convert counter from microsec to millisec for display */
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = ((double) db_entry->n_block_read_time) / 1000.0;
-    }
+    else
+        result = ((double)dbentry->n_block_read_time) / 1000.0;
+
     PG_RETURN_FLOAT8(result);
 }
 
 Datum pg_stat_get_db_blk_write_time(PG_FUNCTION_ARGS)
 {
-    Oid db_id = PG_GETARG_OID(0);
+    Oid dbid = PG_GETARG_OID(0);
     double result;
-    PgStat_StatDBEntry* db_entry = NULL;
+    PgStat_StatDBEntry* dbentry = NULL;
+
     /* convert counter from microsec to millisec for display */
-    if ((db_entry = pgstat_fetch_stat_dbentry(db_id)) == NULL) {
+    if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
         result = 0;
-    } else {
-        result = ((double) db_entry->n_block_write_time) / 1000.0;
-    }
+    else
+        result = ((double)dbentry->n_block_write_time) / 1000.0;
+
     PG_RETURN_FLOAT8(result);
 }
 
@@ -3565,20 +4017,27 @@ Datum pg_stat_get_mem_mbytes_reserved(PG_FUNCTION_ARGS)
     ThreadId pid = PG_GETARG_INT64(0);
     const char* result = "GetFailed";
 
-    if (pid == 0) {
+    if (pid == 0)
         pid = (IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid);
-    }
+
     StringInfoData buf;
 
-    pgstat_get_current_active_numbackends();
-
-    if (pid <= 0) {
+    if (pid <= 0)
         PG_RETURN_TEXT_P(cstring_to_text(result));
-    }
+
     initStringInfo(&buf);
 
-    /* get backend status with thread id */
-    PgBackendStatus* beentry = pgstat_get_backend_entry(pid);
+    /*get backend status with thread id*/
+    PgBackendStatus* beentry = NULL;
+    PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
+    while (node != NULL) {
+        PgBackendStatus* tmpBeentry = node->data;
+        if ((tmpBeentry != NULL) && (tmpBeentry->st_sessionid == pid)) {
+            beentry = tmpBeentry;
+            break;
+        }
+        node = node->next;
+    }
 
     if (beentry != NULL) {
         if (beentry->st_connect_info) {
@@ -3595,12 +4054,12 @@ Datum pg_stat_get_mem_mbytes_reserved(PG_FUNCTION_ARGS)
                 consume_dn + consume_cn);
         }
 
-        if (beentry->st_debug_info) {
-            WLMGetDebugInfo(&buf, (WLMDebugInfo *) beentry->st_debug_info);
-        }
-        if (beentry->st_cgname) {
+        if (beentry->st_debug_info)
+            WLMGetDebugInfo(&buf, (WLMDebugInfo*)beentry->st_debug_info);
+
+        if (beentry->st_cgname)
             appendStringInfo(&buf, _("ControlGroup: %s\n"), beentry->st_cgname);
-        }
+
         appendStringInfo(&buf, _("IOSTATE: %d\n"), beentry->st_io_state);
 
         result = buf.data;
@@ -3613,6 +4072,11 @@ Datum pg_stat_get_mem_mbytes_reserved(PG_FUNCTION_ARGS)
 Datum pg_stat_get_workload_struct_info(PG_FUNCTION_ARGS)
 {
     text* result = NULL;
+
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_workload_struct_info");
+    }
 
     if (!ENABLE_WORKLOAD_CONTROL) {
         const char* tmpresult = "FailedToGetSessionInfo";
@@ -3648,9 +4112,8 @@ Datum pg_stat_get_realtime_info_internal(PG_FUNCTION_ARGS)
         PG_RETURN_TEXT_P(cstring_to_text(result));
     }
 
-    if (result == NULL) {
+    if (result == NULL)
         result = "FailedToGetSessionInfo";
-    }
 
     PG_RETURN_TEXT_P(cstring_to_text(result));
 }
@@ -3662,19 +4125,24 @@ Datum pg_stat_get_realtime_info_internal(PG_FUNCTION_ARGS)
 Datum pg_stat_get_wlm_realtime_session_info(PG_FUNCTION_ARGS)
 {
     const int WLM_REALTIME_SESSION_INFO_ATTRNUM = 56;
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
+
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_realtime_session_info");
+    }
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-        tupdesc = CreateTemplateTupleDesc(WLM_REALTIME_SESSION_INFO_ATTRNUM, false);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        tupdesc = CreateTemplateTupleDesc(WLM_REALTIME_SESSION_INFO_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "nodename", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "threadid", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "block_time", INT8OID, -1, 0);
@@ -3731,27 +4199,29 @@ Datum pg_stat_get_wlm_realtime_session_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "mem_top5_value", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "top_mem_dn", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "top_cpu_dn", TEXTOID, -1, 0);
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = WLMGetSessionStatistics(&num);
-        func_ctx->max_calls = num;
-        MemoryContextSwitchTo(old_context);
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = WLMGetSessionStatistics(&num);
+        funcctx->max_calls = num;
+
+        MemoryContextSwitchTo(oldcontext);
+
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         const int TOP5 = 5;
         Datum values[WLM_REALTIME_SESSION_INFO_ATTRNUM];
         bool nulls[WLM_REALTIME_SESSION_INFO_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
         Datum result;
-        int i = -1;
+        i = -1;
 
         char warnstr[WARNING_INFO_LEN] = {0};
 
-        WLMSessionStatistics* statistics = (WLMSessionStatistics*)func_ctx->user_fctx + func_ctx->call_cntr;
+        WLMSessionStatistics* statistics = (WLMSessionStatistics*)funcctx->user_fctx + funcctx->call_cntr;
 
         errno_t rc = 0;
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -3777,11 +4247,10 @@ Datum pg_stat_get_wlm_realtime_session_info(PG_FUNCTION_ARGS)
         values[++i] = Int64GetDatum(statistics->estimate_time);
         values[++i] = Int64GetDatum(estimate_left_time);
         values[++i] = CStringGetTextDatum(statistics->schname);
-        if (statistics->query_band && statistics->query_band[0]) {
+        if (statistics->query_band && statistics->query_band[0])
             values[++i] = CStringGetTextDatum(statistics->query_band);
-        } else {
+        else
             nulls[++i] = true;
-        }
         values[++i] = CStringGetTextDatum(statistics->spillInfo);
         values[++i] = CStringGetTextDatum(statistics->cgroup);
         values[++i] = Int32GetDatum(statistics->estimate_memory);
@@ -3805,11 +4274,10 @@ Datum pg_stat_get_wlm_realtime_session_info(PG_FUNCTION_ARGS)
         values[++i] = Int32GetDatum(statistics->gendata.peakIopsData.max_value);
         values[++i] = Int32GetDatum(statistics->gendata.peakIopsData.avg_value);
         values[++i] = Int32GetDatum(statistics->gendata.peakIopsData.skew_percent);
-        if (warnstr[0]) {
+        if (warnstr[0])
             values[++i] = CStringGetTextDatum(warnstr);
-        } else {
+        else
             nulls[++i] = true;
-        }
         values[++i] = CStringGetTextDatum(statistics->statement);
         values[++i] = CStringGetTextDatum(statistics->query_plan);
         int CPU[TOP5] = {-1};
@@ -3855,15 +4323,15 @@ Datum pg_stat_get_wlm_realtime_session_info(PG_FUNCTION_ARGS)
         values[++i] = CStringGetTextDatum(CputopNstr.data);
         pfree_ext(MemtopNstr.data);
         pfree_ext(CputopNstr.data);
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -3873,20 +4341,24 @@ Datum pg_stat_get_wlm_realtime_session_info(PG_FUNCTION_ARGS)
 Datum pg_stat_get_wlm_realtime_ec_operator_info(PG_FUNCTION_ARGS)
 {
 #define OPERATOR_REALTIME_SESSION_EC_INFO_ATTRNUM 12
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;;
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
+
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_realtime_ec_operator_info");
+    }
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(OPERATOR_REALTIME_SESSION_EC_INFO_ATTRNUM, false);
+        tupdesc = CreateTemplateTupleDesc(OPERATOR_REALTIME_SESSION_EC_INFO_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "queryid", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "plan_node_id", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "plan_node_name", TEXTOID, -1, 0);
@@ -3900,25 +4372,27 @@ Datum pg_stat_get_wlm_realtime_ec_operator_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "ec_libodbc_type", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "ec_fetch_count", INT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = ExplainGetSessionStatistics(&num);
-        func_ctx->max_calls = num;
-        MemoryContextSwitchTo(old_context);
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = ExplainGetSessionStatistics(&num);
+        funcctx->max_calls = num;
+
+        (void)MemoryContextSwitchTo(oldcontext);
+
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         Datum values[OPERATOR_REALTIME_SESSION_EC_INFO_ATTRNUM];
         bool nulls[OPERATOR_REALTIME_SESSION_EC_INFO_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
         Datum result;
-        int i = -1;
+        i = -1;
         errno_t rc = EOK;
 
-        ExplainGeneralInfo* statistics = (ExplainGeneralInfo*)func_ctx->user_fctx + func_ctx->call_cntr;
+        ExplainGeneralInfo* statistics = (ExplainGeneralInfo*)funcctx->user_fctx + funcctx->call_cntr;
 
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "\0", "\0");
@@ -3993,15 +4467,15 @@ Datum pg_stat_get_wlm_realtime_ec_operator_info(PG_FUNCTION_ARGS)
             nulls[++i] = true;
         }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -4011,20 +4485,24 @@ Datum pg_stat_get_wlm_realtime_ec_operator_info(PG_FUNCTION_ARGS)
 Datum pg_stat_get_wlm_realtime_operator_info(PG_FUNCTION_ARGS)
 {
 #define OPERATOR_REALTIME_SESSION_INFO_ATTRNUM 23
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
+
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_realtime_operator_info");
+    }
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(OPERATOR_REALTIME_SESSION_INFO_ATTRNUM, false);
+        tupdesc = CreateTemplateTupleDesc(OPERATOR_REALTIME_SESSION_INFO_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "queryid", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "pid", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "plan_node_id", INT4OID, -1, 0);
@@ -4049,49 +4527,49 @@ Datum pg_stat_get_wlm_realtime_operator_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "cpu_skew_percent", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "warn_prof_info", TEXTOID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = ExplainGetSessionStatistics(&num);
-        func_ctx->max_calls = num;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = ExplainGetSessionStatistics(&num);
+        funcctx->max_calls = num;
 
-        MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         Datum values[OPERATOR_REALTIME_SESSION_INFO_ATTRNUM];
         bool nulls[OPERATOR_REALTIME_SESSION_INFO_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
         Datum result;
-        int i = -1;
+        i = -1;
         char warnstr[WARNING_INFO_LEN] = {0};
         errno_t rc = EOK;
 
-        ExplainGeneralInfo* statistics = (ExplainGeneralInfo*)func_ctx->user_fctx + func_ctx->call_cntr;
+        ExplainGeneralInfo* statistics = (ExplainGeneralInfo*)funcctx->user_fctx + funcctx->call_cntr;
 
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "\0", "\0");
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
+
         WLMGetWarnInfo(warnstr, sizeof(warnstr), statistics->warn_prof_info, statistics->max_spill_size, 0);
+
         values[++i] = Int64GetDatum(statistics->query_id);
         values[++i] = Int64GetDatum(statistics->tid);
         values[++i] = Int32GetDatum(statistics->plan_node_id);
         values[++i] = CStringGetTextDatum(statistics->plan_node_name);
-        if (statistics->start_time == 0) {
+        if (statistics->start_time == 0)
             nulls[++i] = true;
-        } else {
+        else
             values[++i] = TimestampTzGetDatum(statistics->start_time);
-        }
         values[++i] = Int64GetDatum(statistics->duration_time);
-        if (statistics->status) {
+        if (statistics->status)
             values[++i] = CStringGetTextDatum("finished");
-        } else {
+        else
             values[++i] = CStringGetTextDatum("running");
-        }
         values[++i] = Int32GetDatum(statistics->query_dop);
         values[++i] = Int64GetDatum(statistics->estimate_rows);
         values[++i] = Int64GetDatum(statistics->tuple_processed);
@@ -4107,21 +4585,20 @@ Datum pg_stat_get_wlm_realtime_operator_info(PG_FUNCTION_ARGS)
         values[++i] = Int64GetDatum(statistics->max_cpu_time);
         values[++i] = Int64GetDatum(statistics->total_cpu_time);
         values[++i] = Int32GetDatum(statistics->cpu_skew);
-        if (warnstr[0]) {
+        if (warnstr[0])
             values[++i] = CStringGetTextDatum(warnstr);
-        } else {
+        else
             nulls[++i] = true;
-        }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -4131,20 +4608,24 @@ Datum pg_stat_get_wlm_realtime_operator_info(PG_FUNCTION_ARGS)
 Datum pg_stat_get_wlm_statistics(PG_FUNCTION_ARGS)
 {
 #define WLM_STATISTICS_NUM 9
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
+
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_statistics");
+    }
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(WLM_STATISTICS_NUM, false);
+        tupdesc = CreateTemplateTupleDesc(WLM_STATISTICS_NUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "statement", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "block_time", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "elapsed_time", INT8OID, -1, 0);
@@ -4155,26 +4636,26 @@ Datum pg_stat_get_wlm_statistics(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "status", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "action", TEXTOID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = WLMGetStatistics(&num);
-        func_ctx->max_calls = num;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = WLMGetStatistics(&num);
+        funcctx->max_calls = num;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         Datum values[WLM_STATISTICS_NUM];
         bool nulls[WLM_STATISTICS_NUM] = {false};
         HeapTuple tuple = NULL;
         Datum result;
-        int i = -1;
+        i = -1;
 
-        WLMStatistics* statistics = (WLMStatistics*)func_ctx->user_fctx + func_ctx->call_cntr;
+        WLMStatistics* statistics = (WLMStatistics*)funcctx->user_fctx + funcctx->call_cntr;
 
         errno_t rc = 0;
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -4193,15 +4674,15 @@ Datum pg_stat_get_wlm_statistics(PG_FUNCTION_ARGS)
         values[++i] = CStringGetTextDatum(statistics->status);
         values[++i] = CStringGetTextDatum(statistics->action);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -4210,183 +4691,146 @@ Datum pg_stat_get_wlm_statistics(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_session_wlmstat(PG_FUNCTION_ARGS)
 {
-#define SESSION_WLMSTAT_NUM 21
-    FuncCallContext* func_ctx = NULL;
-    int i = 0;
+    const int SESSION_WLMSTAT_NUM = 22;
 
-    if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tupdesc;
-        i = 0;
-
-        func_ctx = SRF_FIRSTCALL_INIT();
-
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-
-        tupdesc = CreateTemplateTupleDesc(SESSION_WLMSTAT_NUM, false);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "datid", OIDOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "threadid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sessionid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "threadpid", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "usesysid", OIDOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "application_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "statement", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "priority", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "block_time", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "elapsed_time", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "total_cpu_time", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "skew_percent", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "statement_mem", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "active_points", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "dop_value", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "cgroup", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "status", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "enqueue", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "attribute", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "is_plana", BOOLOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "node_group", TEXTOID, -1, 0);
-
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-
-        func_ctx->user_fctx = palloc0(sizeof(int));
-        if (PG_ARGISNULL(0)) {
-            /* Get all backends */
-            func_ctx->max_calls = pgstat_fetch_stat_numbackends();
-        } else {
-            /*
-             * Get one backend - locate by pid.
-             *
-             * We lookup the backend early, so we can return zero rows if it
-             * doesn't exist, instead of returning a single row full of NULLs.
-             */
-            ThreadId pid = PG_GETARG_INT64(0);
-            int n = pgstat_fetch_stat_numbackends();
-
-            for (i = 1; i <= n; ++i) {
-                PgBackendStatus* be = pgstat_fetch_stat_beentry(i);
-
-                if (be != NULL) {
-                    if (be->st_procpid == pid) {
-                        *(int*)(func_ctx->user_fctx) = i;
-                        break;
-                    }
-                }
-            }
-
-            if (*(int*)(func_ctx->user_fctx) == 0) {
-                /* Pid not found, return zero rows */
-                func_ctx->max_calls = 0;
-            } else {
-                func_ctx->max_calls = 1;
-            }
-        }
-
-        MemoryContextSwitchTo(old_context);
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_session_wlmstat");
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* for each row */
-        Datum values[SESSION_WLMSTAT_NUM];
-        bool nulls[SESSION_WLMSTAT_NUM] = {false};
-        HeapTuple tuple = NULL;
-        PgBackendStatus* beentry = NULL;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
 
-        errno_t rc = 0;
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-        pg_stat_get_beentry(func_ctx, &beentry);
-        if (beentry == NULL) {
-            for (i = 0; (unsigned int) (i) < lengthof(nulls); ++i) {
-                nulls[i] = true;
-            }
-            nulls[6] = false;
-            values[6] = CStringGetTextDatum("<backend information not available>");
-            tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-            SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-        }
+    TupleDesc tupdesc = CreateTemplateTupleDesc(SESSION_WLMSTAT_NUM, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_1, "datid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_2, "threadid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_3, "sessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_4, "threadpid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_5, "usesysid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_6, "application_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_7, "statement", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_8, "priority", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_9, "block_time", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_10, "elapsed_time", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_11, "total_cpu_time", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_12, "skew_percent", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_13, "statement_mem", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_14, "active_points", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_15, "dop_value", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_16, "cgroup", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_17, "status", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_18, "enqueue", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_19, "attribute", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_20, "is_plana", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_21, "node_group", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_22, "srespool", NAMEOID, -1, 0);
 
-        i = -1;
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
 
-        /* Values available to all callers */
+    bool hasTID = false;
+    ThreadId tid = 0;
+    if (!PG_ARGISNULL(0)) {
+        hasTID = true;
+        tid = PG_GETARG_INT64(0);
+    }
+
+    (void)gs_stat_read_current_status(rsinfo->setResult, rsinfo->setDesc,
+                                      insert_pg_stat_get_session_wlmstat, hasTID, tid);
+
+    MemoryContextSwitchTo(oldcontext);
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
+
+    return (Datum) 0;
+}
+
+void insert_pg_stat_get_session_wlmstat(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry)
+{
+    const int SESSION_WLMSTAT_NUM = 22;
+    Datum values[SESSION_WLMSTAT_NUM];
+    bool nulls[SESSION_WLMSTAT_NUM];
+
+    errno_t rc = 0;
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    int i = -1;
+
+    /* Values available to all callers */
+    if (superuser() || isMonitoradmin(GetUserId()) || beentry->st_userid == GetUserId()) {
         values[++i] = ObjectIdGetDatum(beentry->st_databaseid);
         values[++i] = Int64GetDatum(beentry->st_procpid);
         values[++i] = Int64GetDatum(beentry->st_sessionid);
         values[++i] = Int32GetDatum(beentry->st_tid);
         values[++i] = ObjectIdGetDatum(beentry->st_userid);
-        if (beentry->st_appname) {
+        if (beentry->st_appname)
             values[++i] = CStringGetTextDatum(beentry->st_appname);
-        } else {
+        else
             nulls[++i] = true;
-        }
 
         /* Values only available to same user or superuser */
-        if (superuser() || beentry->st_userid == GetUserId()) {
-            pgstat_refresh_statement_wlm_time(beentry);
+        pgstat_refresh_statement_wlm_time(const_cast<PgBackendStatus *>(beentry));
 
-            if (beentry->st_state == STATE_UNDEFINED || beentry->st_state == STATE_DISABLED) {
-                nulls[++i] = true;
-            } else {
-                values[++i] = CStringGetTextDatum(beentry->st_activity);
-            }
-
-            /* use backend state to get all workload info */
-            WLMStatistics* backstat = NULL;
-            WLMStatistics backstat_init;
-            errno_t errval = memset_s(&backstat_init, sizeof(backstat_init), 0, sizeof(backstat_init));
-            securec_check_errval(errval, , LOG);
-
-            backstat = (u_sess->attr.attr_resource.use_workload_manager) ? (WLMStatistics*)&beentry->st_backstat
-                                                                         : (WLMStatistics*)&backstat_init;
-
-            values[++i] = Int64GetDatum(backstat->priority);
-            values[++i] = Int64GetDatum(backstat->blocktime);
-            values[++i] = Int64GetDatum(backstat->elapsedtime);
-            values[++i] = Int64GetDatum(backstat->totalcputime);
-            values[++i] = Int32GetDatum(backstat->skewpercent);
-            values[++i] = Int32GetDatum(backstat->stmt_mem);
-            values[++i] = Int32GetDatum(backstat->act_pts);
-            values[++i] = Int32GetDatum(backstat->dop_value);
-            values[++i] = CStringGetTextDatum(backstat->cgroup);
-            if (backstat->status) {
-                values[++i] = CStringGetTextDatum(backstat->status);
-            } else {
-                values[++i] = CStringGetTextDatum("unknown");
-            }
-            if (backstat->enqueue) {
-                values[++i] = CStringGetTextDatum(backstat->enqueue);
-            } else {
-                nulls[++i] = true;
-            }
-            if (backstat->qtype) {
-                values[++i] = CStringGetTextDatum(backstat->qtype);
-            } else {
-                values[++i] = CStringGetTextDatum("Unknown");
-            }
-            values[++i] = BoolGetDatum(backstat->is_planA);
-            if (StringIsValid(backstat->groupname)) {
-                values[++i] = CStringGetTextDatum(backstat->groupname);
-            } else {
-                values[++i] = CStringGetTextDatum("installation");
-            }
+        if (beentry->st_state == STATE_UNDEFINED || beentry->st_state == STATE_DISABLED) {
+            nulls[++i] = true;
         } else {
-            nulls[6] = false;
-            values[6] = CStringGetTextDatum("<insufficient privilege>");
-
-            for (i = 7; i < SESSION_WLMSTAT_NUM; ++i) {
-                nulls[i] = true;
-            }
+            values[++i] = CStringGetTextDatum(beentry->st_activity);
         }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        /*use backend state to get all workload info*/
+        WLMStatistics* backstat = NULL;
+        WLMStatistics backstat_init;
+        errno_t errval = memset_s(&backstat_init, sizeof(backstat_init), 0, sizeof(backstat_init));
+        securec_check_errval(errval, , LOG);
 
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        backstat = (u_sess->attr.attr_resource.use_workload_manager) ? (WLMStatistics*)&beentry->st_backstat
+            : (WLMStatistics*)&backstat_init;
+
+        values[++i] = Int64GetDatum(backstat->priority);
+        values[++i] = Int64GetDatum(backstat->blocktime);
+        values[++i] = Int64GetDatum(backstat->elapsedtime);
+        values[++i] = Int64GetDatum(backstat->totalcputime);
+        values[++i] = Int32GetDatum(backstat->skewpercent);
+        values[++i] = Int32GetDatum(backstat->stmt_mem);
+        values[++i] = Int32GetDatum(backstat->act_pts);
+        values[++i] = Int32GetDatum(backstat->dop_value);
+        values[++i] = CStringGetTextDatum(backstat->cgroup);
+        if (backstat->status)
+            values[++i] = CStringGetTextDatum(backstat->status);
+        else
+            values[++i] = CStringGetTextDatum("unknown");
+        if (backstat->enqueue)
+            values[++i] = CStringGetTextDatum(backstat->enqueue);
+        else
+            nulls[++i] = true;
+        if (backstat->qtype)
+            values[++i] = CStringGetTextDatum(backstat->qtype);
+        else
+            values[++i] = CStringGetTextDatum("Unknown");
+        values[++i] = BoolGetDatum(backstat->is_planA);
+        if (StringIsValid(backstat->groupname))
+            values[++i] = CStringGetTextDatum(backstat->groupname);
+        else
+            values[++i] = CStringGetTextDatum("installation");
+
+        if (ENABLE_WORKLOAD_CONTROL && *backstat->srespool)
+            values[++i] = NameGetDatum((Name)backstat->srespool);
+        else
+            values[++i] = DirectFunctionCall1(namein, CStringGetDatum("unknown"));
+
     } else {
-        /* nothing left */
-        SRF_RETURN_DONE(func_ctx);
+        for (i = 0; i < SESSION_WLMSTAT_NUM; ++i) {
+            nulls[i] = true;
+        }
+        nulls[ARR_6] = false;
+        values[ARR_6] = CStringGetTextDatum("<insufficient privilege>");
     }
+
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
 }
 
 /*
@@ -4395,97 +4839,75 @@ Datum pg_stat_get_session_wlmstat(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_session_respool(PG_FUNCTION_ARGS)
 {
-#define SESSION_WLMSTAT_RESPOOL_NUM 7
-    FuncCallContext* func_ctx = NULL;
-    int i = 0;
+    const int SESSION_WLMSTAT_RESPOOL_NUM = 7;
 
-    if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tupdesc;
-        i = 0;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+    TupleDesc tupdesc = CreateTemplateTupleDesc(SESSION_WLMSTAT_RESPOOL_NUM, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_1, "datid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_2, "threadid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_3, "sessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_4, "threadpid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_5, "usesysid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_6, "cgroup", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_7, "srespool", NAMEOID, -1, 0);
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
 
-        tupdesc = CreateTemplateTupleDesc(SESSION_WLMSTAT_RESPOOL_NUM, false);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "datid", OIDOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "threadid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sessionid", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "threadpid", INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "usesysid", OIDOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "cgroup", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "srespool", NAMEOID, -1, 0);
+    (void)gs_stat_read_current_status(rsinfo->setResult, rsinfo->setDesc,
+                                      insert_pg_stat_get_session_respool);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
+    MemoryContextSwitchTo(oldcontext);
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
 
-        func_ctx->user_fctx = palloc0(sizeof(int));
-
-        func_ctx->max_calls = pgstat_fetch_stat_numbackends();
-
-        MemoryContextSwitchTo(old_context);
-    }
-
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* for each row */
-        Datum values[SESSION_WLMSTAT_RESPOOL_NUM];
-        bool nulls[SESSION_WLMSTAT_RESPOOL_NUM] = {false};
-        HeapTuple tuple = NULL;
-        PgBackendStatus* beentry = NULL;
-
-        errno_t rc = 0;
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-        pg_stat_get_beentry(func_ctx, &beentry);
-        if (beentry == NULL) {
-            for (i = 0; (unsigned int)(i) < lengthof(nulls); ++i) {
-                nulls[i] = true;
-            }
-
-            tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-            SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-        }
-
-        i = -1;
-
-        /* Values available to all callers */
-        values[++i] = ObjectIdGetDatum(beentry->st_databaseid);
-        values[++i] = Int64GetDatum(beentry->st_procpid);
-        values[++i] = Int64GetDatum(beentry->st_sessionid);
-        values[++i] = Int32GetDatum(beentry->st_tid);
-        values[++i] = ObjectIdGetDatum(beentry->st_userid);
-
-        /* Values only available to same user or superuser */
-        if (superuser() || beentry->st_userid == GetUserId()) {
-            pgstat_refresh_statement_wlm_time(beentry);
-
-            /* use backend state to get all workload info */
-            WLMStatistics* backstat = (WLMStatistics*)&beentry->st_backstat;
-
-            values[++i] = CStringGetTextDatum(backstat->cgroup);
-
-            if (ENABLE_WORKLOAD_CONTROL && *backstat->srespool) {
-                values[++i] = NameGetDatum((Name)backstat->srespool);
-            } else {
-                values[++i] = DirectFunctionCall1(namein, CStringGetDatum("unknown"));
-            }
-        } else {
-            for (i = 5; i < SESSION_WLMSTAT_RESPOOL_NUM; ++i) {
-                nulls[i] = true;
-            }
-        }
-
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else {
-        /* nothing left */
-        SRF_RETURN_DONE(func_ctx);
-    }
+    return (Datum) 0;
 }
+
+void insert_pg_stat_get_session_respool(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry)
+{
+    const int SESSION_WLMSTAT_RESPOOL_NUM = 7;
+    Datum values[SESSION_WLMSTAT_RESPOOL_NUM];
+    bool nulls[SESSION_WLMSTAT_RESPOOL_NUM];
+    int i = -1;
+    errno_t rc = 0;
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    /* Values available to all callers */
+    values[++i] = ObjectIdGetDatum(beentry->st_databaseid);
+    values[++i] = Int64GetDatum(beentry->st_procpid);
+    values[++i] = Int64GetDatum(beentry->st_sessionid);
+    values[++i] = Int32GetDatum(beentry->st_tid);
+    values[++i] = ObjectIdGetDatum(beentry->st_userid);
+
+    /* Values only available to same user or superuser */
+    if (superuser() || isMonitoradmin(GetUserId()) || beentry->st_userid == GetUserId()) {
+        pgstat_refresh_statement_wlm_time(const_cast<PgBackendStatus *>(beentry));
+
+        /*use backend state to get all workload info*/
+        WLMStatistics* backstat = (WLMStatistics*)&beentry->st_backstat;
+
+        values[++i] = CStringGetTextDatum(backstat->cgroup);
+
+        if (ENABLE_WORKLOAD_CONTROL && *backstat->srespool)
+            values[++i] = NameGetDatum((Name)backstat->srespool);
+        else
+            values[++i] = DirectFunctionCall1(namein, CStringGetDatum("unknown"));
+    } else {
+        for (i = 5; i < SESSION_WLMSTAT_RESPOOL_NUM; ++i)
+            nulls[i] = true;
+    }
+
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+
+}
+
 
 /*
  * function name: pg_stat_get_wlm_session_info_internal
@@ -4495,6 +4917,10 @@ Datum pg_stat_get_session_respool(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_wlm_session_info_internal(PG_FUNCTION_ARGS)
 {
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_session_info_internal");
+    }
 #ifndef ENABLE_MULTIPLE_NODES
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported proc in single node mode.")));
     PG_RETURN_NULL();
@@ -4506,32 +4932,22 @@ Datum pg_stat_get_wlm_session_info_internal(PG_FUNCTION_ARGS)
 
     char* result = "FailedToGetSessionInfo";
 
-    if (IS_PGXC_COORDINATOR) {
+    if (IS_PGXC_COORDINATOR)
         result = "GetWLMSessionInfo";
-    }
+
     if (IS_PGXC_DATANODE) {
         Qid qid = {procId, queryId, stamp};
 
-        /* get session info with qid */
+        /*get session info with qid*/
         result = (char*)WLMGetSessionInfo(&qid, removed, NULL);
-        /* no result, failed to get session info */
-        if (result == NULL) {
+
+        /*no result, failed to get session info*/
+        if (result == NULL)
             result = "FailedToGetSessionInfo";
-        }
     }
+
     PG_RETURN_TEXT_P(cstring_to_text(result));
 #endif
-}
-
-void pg_stat_get_beentry(FuncCallContext* func_ctx, PgBackendStatus** beentry)
-{
-    if (*(int*)(func_ctx->user_fctx) > 0) {
-        /* Get specific pid slot */
-        *beentry = pgstat_fetch_stat_beentry(*(int*)(func_ctx->user_fctx));
-    } else {
-        /* Get the next one in the list */
-        *beentry = pgstat_fetch_stat_beentry(func_ctx->call_cntr + 1); /* 1-based index */
-    }
 }
 
 /*
@@ -4565,20 +4981,20 @@ Datum pg_stat_get_wlm_user_iostat_info(PG_FUNCTION_ARGS)
 #define WLM_USER_IO_RESOURCE_ATTRNUM 7
     char* name = PG_GETARG_CSTRING(0);
 
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     const int num = 1;
     int i = 0;
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(WLM_USER_IO_RESOURCE_ATTRNUM, false);
+        tupdesc = CreateTemplateTupleDesc(WLM_USER_IO_RESOURCE_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "user_id", OIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "mincurr_iops", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "maxcurr_iops", INT4OID, -1, 0);
@@ -4587,25 +5003,25 @@ Datum pg_stat_get_wlm_user_iostat_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "iops_limits", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "io_priority", TEXTOID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = GetUserResourceData(name); /* get user resource data */
-        func_ctx->max_calls = num;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = GetUserResourceData(name); /* get user resource data */
+        funcctx->max_calls = num;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
         Datum values[WLM_USER_IO_RESOURCE_ATTRNUM];
         bool nulls[WLM_USER_IO_RESOURCE_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
-        int i = -1;
+        i = -1;
 
-        UserResourceData* rsdata = (UserResourceData*)func_ctx->user_fctx + func_ctx->call_cntr;
+        UserResourceData* rsdata = (UserResourceData*)funcctx->user_fctx + funcctx->call_cntr;
 
         errno_t rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "\0", "\0");
@@ -4621,31 +5037,38 @@ Datum pg_stat_get_wlm_user_iostat_info(PG_FUNCTION_ARGS)
         values[++i] = Int32GetDatum(rsdata->maxpeak_iops);
         values[++i] = Int32GetDatum(rsdata->iops_limits);
         values[++i] = CStringGetTextDatum(IOPriorityGetString(rsdata->io_priority));
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
-    SRF_RETURN_DONE(func_ctx);
+
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
+
+    SRF_RETURN_DONE(funcctx);
 }
 
 Datum pg_stat_get_wlm_session_iostat_info(PG_FUNCTION_ARGS)
 {
 #define WLM_SESSION_IOSTAT_ATTRNUM 7
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
+    FuncCallContext* funcctx = NULL;
     int i = 0;
 
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_session_iostat_info");
+    }
+
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(WLM_SESSION_IOSTAT_ATTRNUM, false);
+        tupdesc = CreateTemplateTupleDesc(WLM_SESSION_IOSTAT_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "threadid", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "maxcurr_iops", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "mincurr_iops", INT4OID, -1, 0);
@@ -4654,26 +5077,26 @@ Datum pg_stat_get_wlm_session_iostat_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "iops_limits", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "io_priority", INT4OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = WLMGetIOStatisticsGeneral(&num);
-        func_ctx->max_calls = num;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = WLMGetIOStatisticsGeneral();
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+    WLMIoStatisticsList* list_node = (WLMIoStatisticsList*)funcctx->user_fctx;
+
+    while (list_node != NULL) {
         Datum values[WLM_SESSION_IOSTAT_ATTRNUM];
         bool nulls[WLM_SESSION_IOSTAT_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
         Datum result;
-        int i = -1;
+        i = -1;
 
-        WLMIoStatisticsGenenral* statistics = (WLMIoStatisticsGenenral*)func_ctx->user_fctx + func_ctx->call_cntr;
+        WLMIoStatisticsGenenral* statistics = list_node->node;
 
         errno_t rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "\0", "\0");
@@ -4689,15 +5112,17 @@ Datum pg_stat_get_wlm_session_iostat_info(PG_FUNCTION_ARGS)
         values[++i] = Int32GetDatum(statistics->iops_limits);
         values[++i] = Int32GetDatum(statistics->io_priority);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+
+        funcctx->user_fctx = (void*)list_node->next;
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -4707,20 +5132,25 @@ Datum pg_stat_get_wlm_session_iostat_info(PG_FUNCTION_ARGS)
 Datum pg_stat_get_wlm_node_resource_info(PG_FUNCTION_ARGS)
 {
 #define WLM_NODE_RESOURCE_ATTRNUM 7
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     const int num = 1;
     int i = 0;
 
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_node_resource_info");
+    }
+
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(WLM_NODE_RESOURCE_ATTRNUM, false);
+        tupdesc = CreateTemplateTupleDesc(WLM_NODE_RESOURCE_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "min_mem_util", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "max_mem_util", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "min_cpu_util", INT4OID, -1, 0);
@@ -4729,26 +5159,26 @@ Datum pg_stat_get_wlm_node_resource_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "max_io_util", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "phy_usemem_rate", INT4OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = dywlm_get_resource_info(&g_instance.wlm_cxt->MyDefaultNodeGroup.srvmgr);
-        func_ctx->max_calls = num;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = dywlm_get_resource_info(&g_instance.wlm_cxt->MyDefaultNodeGroup.srvmgr);
+        funcctx->max_calls = num;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         Datum values[WLM_SESSION_IOSTAT_ATTRNUM];
         bool nulls[WLM_SESSION_IOSTAT_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
         Datum result;
-        int i = -1;
+        i = -1;
 
-        DynamicNodeData* nodedata = (DynamicNodeData*)func_ctx->user_fctx;
+        DynamicNodeData* nodedata = (DynamicNodeData*)funcctx->user_fctx;
 
         errno_t errval = memset_s(&values, sizeof(values), 0, sizeof(values));
         securec_check_errval(errval, , LOG);
@@ -4763,15 +5193,15 @@ Datum pg_stat_get_wlm_node_resource_info(PG_FUNCTION_ARGS)
         values[++i] = Int32GetDatum(nodedata->max_ioutil);
         values[++i] = Int32GetDatum(nodedata->phy_usemem_rate);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -4780,22 +5210,39 @@ Datum pg_stat_get_wlm_node_resource_info(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
 {
-    const int WLM_SESSION_INFO_ATTRNUM = 68;
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_session_info");
+    }
+
+    int WLM_SESSION_INFO_ATTRNUM = 0;
+    if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION)
+        WLM_SESSION_INFO_ATTRNUM = 87;
+    else
+        WLM_SESSION_INFO_ATTRNUM = 68;
+
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("only system/monitor admin can query sql info view"))));
+    }
+
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
 
     Oid removed = PG_GETARG_OID(0); /* remove session info ? */
     Qid qid = {0, 0, 0};
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-        tupdesc = CreateTemplateTupleDesc(WLM_SESSION_INFO_ATTRNUM, false);
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        tupdesc = CreateTemplateTupleDesc(WLM_SESSION_INFO_ATTRNUM, false, TAM_HEAP);
+
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "datid", OIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "dbname", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "schemaname", TEXTOID, -1, 0);
@@ -4864,29 +5311,45 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "mem_top5_value", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "top_mem_dn", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "top_cpu_dn", TEXTOID, -1, 0);
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = WLMGetSessionInfo(&qid, removed, &num);
-        func_ctx->max_calls = num;
-        MemoryContextSwitchTo(old_context);
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
+        if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION) {
+            TupleDescInitEntry(tupdesc, (AttrNumber)++i, "n_returned_rows", INT8OID, -1, 0);
+            TupleDescInitEntry(tupdesc, (AttrNumber)++i, "n_tuples_fetched", INT8OID, -1, 0);
+            TupleDescInitEntry(tupdesc, (AttrNumber)++i, "n_tuples_returned", INT8OID, -1, 0);
+            TupleDescInitEntry(tupdesc, (AttrNumber)++i, "n_tuples_inserted", INT8OID, -1, 0);
+            TupleDescInitEntry(tupdesc, (AttrNumber)++i, "n_tuples_updated", INT8OID, -1, 0);
+            TupleDescInitEntry(tupdesc, (AttrNumber)++i, "n_tuples_deleted", INT8OID, -1, 0);
+            TupleDescInitEntry(tupdesc, (AttrNumber)++i, "t_blocks_fetched", INT8OID, -1, 0);
+            TupleDescInitEntry(tupdesc, (AttrNumber)++i, "t_blocks_hit", INT8OID, -1, 0);
+            for (num = 0; num < TOTAL_TIME_INFO_TYPES; num++) {
+                TupleDescInitEntry(tupdesc, (AttrNumber)++i, TimeInfoTypeName[num], INT8OID, -1, 0);
+            }
+            TupleDescInitEntry(tupdesc, (AttrNumber)++i, "is_slow_query", INT8OID, -1, 0);
         }
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = WLMGetSessionInfo(&qid, removed, &num);
+        funcctx->max_calls = num;
+
+        MemoryContextSwitchTo(oldcontext);
+
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         const int TOP5 = 5;
         Datum values[WLM_SESSION_INFO_ATTRNUM];
         bool nulls[WLM_SESSION_INFO_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
         Datum result;
-        int i = -1;
+        i = -1;
         errno_t rc = 0;
         char spill_info[NAMEDATALEN];
         char warnstr[WARNING_INFO_LEN] = {0};
         SockAddr zero_clientaddr;
 
-        WLMSessionStatistics* detail = (WLMSessionStatistics*)func_ctx->user_fctx + func_ctx->call_cntr;
+        WLMSessionStatistics* detail = (WLMSessionStatistics*)funcctx->user_fctx + funcctx->call_cntr;
 
         WLMGetSpillInfo(spill_info, sizeof(spill_info), detail->gendata.spillNodeCount);
         WLMGetWarnInfo(warnstr,
@@ -4903,21 +5366,25 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
         securec_check(rc, "\0", "\0");
 
         char* dbname = get_database_name(detail->databaseid);
+
         /* Locking is probably not really necessary */
         values[++i] = Int32GetDatum(detail->databaseid);
-        if (dbname != NULL) {
+        if (dbname != NULL)
             values[++i] = CStringGetTextDatum(dbname);
-        } else {
+        else
             nulls[++i] = true;
-        }
-        if (detail->schname && detail->schname[0]) {
+        if (detail->schname && detail->schname[0])
             values[++i] = CStringGetTextDatum(detail->schname);
-        } else {
+        else
             nulls[++i] = true;
-        }
         values[++i] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
-        values[++i] = CStringGetTextDatum(detail->username);
+        char* user_name = GetUserNameById(detail->userid);
+        if (user_name != NULL)
+            values[++i] = CStringGetTextDatum(user_name);
+        else
+            nulls[++i] = true;
         values[++i] = CStringGetTextDatum(detail->appname);
+
         errno_t errval = memset_s(&zero_clientaddr, sizeof(zero_clientaddr), 0, sizeof(zero_clientaddr));
         securec_check_errval(errval, , LOG);
         /* A zeroed client addr means we don't know */
@@ -4949,11 +5416,10 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
                 if (ret == 0) {
                     clean_ipv6_addr(sockaddr->addr.ss_family, remote_host);
                     values[++i] = DirectFunctionCall1(inet_in, CStringGetDatum(remote_host));
-                    if (detail->clienthostname && detail->clienthostname[0]) {
+                    if (detail->clienthostname && detail->clienthostname[0])
                         values[++i] = CStringGetTextDatum(detail->clienthostname);
-                    } else {
+                    else
                         nulls[++i] = true;
-                    }
                     values[++i] = Int32GetDatum(atoi(remote_port));
                 } else {
                     nulls[++i] = true;
@@ -4978,22 +5444,20 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
             }
         }
 
-        if (detail->query_band && detail->query_band[0]) {
+        if (detail->query_band && detail->query_band[0])
             values[++i] = CStringGetTextDatum(detail->query_band);
-        } else {
+        else
             nulls[++i] = true;
-        }
         values[++i] = Int64GetDatum(detail->block_time);
         values[++i] = TimestampTzGetDatum(detail->start_time);
         values[++i] = TimestampTzGetDatum(detail->fintime);
         values[++i] = Int64GetDatum(detail->duration);
         values[++i] = Int64GetDatum(detail->estimate_time);
         values[++i] = CStringGetTextDatum(GetStatusName(detail->status));
-        if (detail->err_msg && detail->err_msg[0]) {
+        if (detail->err_msg && detail->err_msg[0])
             values[++i] = CStringGetTextDatum(detail->err_msg);
-        } else {
+        else
             nulls[++i] = true;
-        }
         values[++i] = CStringGetTextDatum(detail->respool);
         values[++i] = CStringGetTextDatum(detail->cgroup);
         values[++i] = Int32GetDatum(detail->estimate_memory);
@@ -5018,23 +5482,26 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
         values[++i] = Int32GetDatum(detail->gendata.peakIopsData.max_value);
         values[++i] = Int32GetDatum(detail->gendata.peakIopsData.avg_value);
         values[++i] = Int32GetDatum(detail->gendata.peakIopsData.skew_percent);
-        if (warnstr[0]) {
+        if (warnstr[0])
             values[++i] = CStringGetTextDatum(warnstr);
-        } else {
+        else
             nulls[++i] = true;
-        }
         values[++i] = Int64GetDatum(detail->debug_query_id);
-        if (detail->statement && detail->statement[0]) {
+        if (detail->statement && detail->statement[0])
             values[++i] = CStringGetTextDatum(detail->statement);
-        } else {
+        else
             nulls[++i] = true;
-        }
-        values[++i] = CStringGetTextDatum(detail->query_plan);
-        if (StringIsValid(detail->nodegroup)) {
-            values[++i] = CStringGetTextDatum(detail->nodegroup);
+
+        if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION) {
+            values[++i] = CStringGetTextDatum(PlanListToString(detail->gendata.query_plan));
         } else {
-            values[++i] = CStringGetTextDatum("installation");
+            values[++i] = CStringGetTextDatum(detail->query_plan);
         }
+
+        if (StringIsValid(detail->nodegroup))
+            values[++i] = CStringGetTextDatum(detail->nodegroup);
+        else
+            values[++i] = CStringGetTextDatum("installation");
 
         int CPU[TOP5] = {-1};
         int MEM[TOP5] = {-1};
@@ -5079,15 +5546,30 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
         values[++i] = CStringGetTextDatum(CputopNstr.data);
         pfree_ext(MemtopNstr.data);
         pfree_ext(CputopNstr.data);
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION) {
+            values[++i] = Int64GetDatum(detail->n_returned_rows);
+            values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_tuples_fetched);
+            values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_tuples_returned);
+            values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_tuples_inserted);
+            values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_tuples_updated);
+            values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_tuples_deleted);
+            values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_blocks_fetched);
+            values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.current_table_counter->t_blocks_hit);
+            /* time Info */
+            for (num = 0; num < TOTAL_TIME_INFO_TYPES; num++) {
+                values[++i] = Int64GetDatum(detail->gendata.slowQueryInfo.localTimeInfoArray[num]);
+            }
+            values[++i] = Int64GetDatum(0);
+        }
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -5096,19 +5578,28 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_wlm_ec_operator_info(PG_FUNCTION_ARGS)
 {
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_ec_operator_info");
+    }
+
 #define OPERATOR_SESSION_EC_INFO_ATTRNUM 17
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
+
     Oid removed = PG_GETARG_OID(0); /* remove session info ? */
     Qpid qid = {0, 0, 0};
+
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
-        func_ctx = SRF_FIRSTCALL_INIT();
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-        tupdesc = CreateTemplateTupleDesc(OPERATOR_SESSION_EC_INFO_ATTRNUM, false);
+
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        tupdesc = CreateTemplateTupleDesc(OPERATOR_SESSION_EC_INFO_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "queryid", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "plan_node_id", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "plan_node_name", TEXTOID, -1, 0);
@@ -5127,27 +5618,27 @@ Datum pg_stat_get_wlm_ec_operator_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "ec_libodbc_type", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "ec_fetch_count", INT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = ExplainGetSessionInfo(&qid, removed, &num);
-        func_ctx->max_calls = num;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = ExplainGetSessionInfo(&qid, removed, &num);
+        funcctx->max_calls = num;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         Datum values[OPERATOR_SESSION_EC_INFO_ATTRNUM];
         bool nulls[OPERATOR_SESSION_EC_INFO_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
         Datum result;
-        int i = -1;
+        i = -1;
         errno_t rc = EOK;
 
-        ExplainGeneralInfo* statistics = (ExplainGeneralInfo*)func_ctx->user_fctx + func_ctx->call_cntr;
+        ExplainGeneralInfo* statistics = (ExplainGeneralInfo*)funcctx->user_fctx + funcctx->call_cntr;
 
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "\0", "\0");
@@ -5157,21 +5648,22 @@ Datum pg_stat_get_wlm_ec_operator_info(PG_FUNCTION_ARGS)
         values[++i] = Int64GetDatum(statistics->query_id);
         values[++i] = Int32GetDatum(statistics->plan_node_id);
         values[++i] = CStringGetTextDatum(statistics->plan_node_name);
-        if (statistics->start_time == 0) {
+        if (statistics->start_time == 0)
             nulls[++i] = true;
-        } else {
+        else
             values[++i] = TimestampGetDatum(statistics->start_time);
-        }
         values[++i] = Int64GetDatum(statistics->duration_time);
         values[++i] = Int64GetDatum(statistics->tuple_processed);
         values[++i] = Int32GetDatum(statistics->min_peak_memory);
         values[++i] = Int32GetDatum(statistics->max_peak_memory);
         values[++i] = Int32GetDatum(statistics->avg_peak_memory);
+
         if (statistics->ec_operator) {
             values[++i] = Int32GetDatum(statistics->ec_operator);
         } else {
             nulls[++i] = true;
         }
+
         if (statistics->ec_status) {
             if (statistics->ec_status == EC_STATUS_CONNECTED) {
                 values[++i] = CStringGetTextDatum("CONNECTED");
@@ -5226,18 +5718,18 @@ Datum pg_stat_get_wlm_ec_operator_info(PG_FUNCTION_ARGS)
             nulls[++i] = true;
         }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
-static inline void GetStaticValInfo(Datum *values, ExplainGeneralInfo *statistics)
+static void GetStaticValInfo(Datum *values, ExplainGeneralInfo *statistics)
 {
     int i = -1;
     values[++i] = CStringGetTextDatum(statistics->datname);
@@ -5264,8 +5756,7 @@ static inline void GetStaticValInfo(Datum *values, ExplainGeneralInfo *statistic
  * @in 1: remove data after look; 0: do not remove data
  * @out setof record in the form of gs_wlm_plan_operator_info
  */
-Datum
-gs_stat_get_wlm_plan_operator_info(PG_FUNCTION_ARGS)
+Datum gs_stat_get_wlm_plan_operator_info(PG_FUNCTION_ARGS)
 {
 #ifdef ENABLE_MULTIPLE_NODES
     ereport(ERROR, (errmodule(MOD_OPT_AI), 
@@ -5302,6 +5793,7 @@ gs_stat_get_wlm_plan_operator_info(PG_FUNCTION_ARGS)
         HeapTuple   tuple;
         Datum       result;
         errno_t rc = EOK;
+
         ExplainGeneralInfo *statistics = (ExplainGeneralInfo*)funcctx->user_fctx + funcctx->call_cntr;
 
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -5321,7 +5813,7 @@ gs_stat_get_wlm_plan_operator_info(PG_FUNCTION_ARGS)
     SRF_RETURN_DONE(funcctx);
 }
 
-static inline void InitPlanOperatorInfoTuple(int operator_plan_info_attrnum, FuncCallContext *funcctx)
+static void InitPlanOperatorInfoTuple(int operator_plan_info_attrnum, FuncCallContext *funcctx)
 {
     int i = 0;
     TupleDesc   tupdesc;
@@ -5346,26 +5838,35 @@ static inline void InitPlanOperatorInfoTuple(int operator_plan_info_attrnum, Fun
     TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "projection", TEXTOID, -1, 0);
     funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 }
+
 /*
  * @Description:  get  operator information from hashtable.
  * @return - Datum
  */
 Datum pg_stat_get_wlm_operator_info(PG_FUNCTION_ARGS)
 {
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_operator_info");
+    }
+
 #define OPERATOR_SESSION_INFO_ATTRNUM 22
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
 
     Oid removed = PG_GETARG_OID(0); /* remove session info ? */
     Qpid qid = {0, 0, 0};
+
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
-        func_ctx = SRF_FIRSTCALL_INIT();
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-        tupdesc = CreateTemplateTupleDesc(OPERATOR_SESSION_INFO_ATTRNUM, false);
+
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        tupdesc = CreateTemplateTupleDesc(OPERATOR_SESSION_INFO_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "queryid", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "pid", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "plan_node_id", INT4OID, -1, 0);
@@ -5389,44 +5890,44 @@ Datum pg_stat_get_wlm_operator_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "cpu_skew_percent", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "warn_prof_info", TEXTOID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = ExplainGetSessionInfo(&qid, removed, &num);
-        func_ctx->max_calls = num;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = ExplainGetSessionInfo(&qid, removed, &num);
+        funcctx->max_calls = num;
 
-        MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         Datum values[OPERATOR_SESSION_INFO_ATTRNUM];
         bool nulls[OPERATOR_SESSION_INFO_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
         Datum result;
-        int i = -1;
+        i = -1;
         char warnstr[WARNING_INFO_LEN] = {0};
         errno_t rc = EOK;
 
-        ExplainGeneralInfo* statistics = (ExplainGeneralInfo*)func_ctx->user_fctx + func_ctx->call_cntr;
+        ExplainGeneralInfo* statistics = (ExplainGeneralInfo*)funcctx->user_fctx + funcctx->call_cntr;
 
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "\0", "\0");
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
+
         WLMGetWarnInfo(warnstr, sizeof(warnstr), statistics->warn_prof_info, statistics->max_spill_size, 0);
 
         values[++i] = Int64GetDatum(statistics->query_id);
         values[++i] = Int64GetDatum(statistics->tid);
         values[++i] = Int32GetDatum(statistics->plan_node_id);
         values[++i] = CStringGetTextDatum(statistics->plan_node_name);
-        if (statistics->start_time == 0) {
+        if (statistics->start_time == 0)
             nulls[++i] = true;
-        } else {
+        else
             values[++i] = TimestampGetDatum(statistics->start_time);
-        }
         values[++i] = Int64GetDatum(statistics->duration_time);
         values[++i] = Int32GetDatum(statistics->query_dop);
         values[++i] = Int64GetDatum(statistics->estimate_rows);
@@ -5443,21 +5944,20 @@ Datum pg_stat_get_wlm_operator_info(PG_FUNCTION_ARGS)
         values[++i] = Int64GetDatum(statistics->max_cpu_time);
         values[++i] = Int64GetDatum(statistics->total_cpu_time);
         values[++i] = Int32GetDatum(statistics->cpu_skew);
-        if (warnstr[0]) {
+        if (warnstr[0])
             values[++i] = CStringGetTextDatum(warnstr);
-        } else {
+        else
             nulls[++i] = true;
-        }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -5466,21 +5966,25 @@ Datum pg_stat_get_wlm_operator_info(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_wlm_instance_info(PG_FUNCTION_ARGS)
 {
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_instance_info");
+    }
+
 #define WLM_INSTANCE_INFO_ATTRNUM 15
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(WLM_INSTANCE_INFO_ATTRNUM, false);
+        tupdesc = CreateTemplateTupleDesc(WLM_INSTANCE_INFO_ATTRNUM, false, TAM_HEAP);
 
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "instancename", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "timestamp", TIMESTAMPTZOID, -1, 0);
@@ -5498,30 +6002,34 @@ Datum pg_stat_get_wlm_instance_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "read_counts", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "write_counts", INT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = WLMGetInstanceInfo(&num, false);
-        func_ctx->max_calls = num;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = WLMGetInstanceInfo(&num, false);
+        funcctx->max_calls = num;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         Datum values[WLM_INSTANCE_INFO_ATTRNUM];
         bool nulls[WLM_INSTANCE_INFO_ATTRNUM];
         HeapTuple tuple;
         Datum result;
-        int i = -1;
+        i = -1;
         errno_t rc = 0;
+
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "\0", "\0");
+
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
-        WLMInstanceInfo* instanceInfo = (WLMInstanceInfo*)func_ctx->user_fctx + func_ctx->call_cntr;
+
+        WLMInstanceInfo* instanceInfo = (WLMInstanceInfo*)funcctx->user_fctx + funcctx->call_cntr;
+
         values[++i] = CStringGetTextDatum(g_instance.wlm_cxt->instance_manager.instancename);
         values[++i] = Int64GetDatum(instanceInfo->timestamp);
         values[++i] = Int32GetDatum((int)(instanceInfo->usr_cpu + instanceInfo->sys_cpu));
@@ -5538,15 +6046,15 @@ Datum pg_stat_get_wlm_instance_info(PG_FUNCTION_ARGS)
         values[++i] = Int64GetDatum(instanceInfo->read_counts);
         values[++i] = Int64GetDatum(instanceInfo->write_counts);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -5555,21 +6063,25 @@ Datum pg_stat_get_wlm_instance_info(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_wlm_instance_info_with_cleanup(PG_FUNCTION_ARGS)
 {
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_instance_info_with_cleanup");
+    }
+
 #define WLM_INSTANCE_INFO_ATTRNUM 15
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(WLM_INSTANCE_INFO_ATTRNUM, false);
+        tupdesc = CreateTemplateTupleDesc(WLM_INSTANCE_INFO_ATTRNUM, false, TAM_HEAP);
 
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "instancename", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "timestamp", TIMESTAMPTZOID, -1, 0);
@@ -5587,24 +6099,27 @@ Datum pg_stat_get_wlm_instance_info_with_cleanup(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "read_counts", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "write_counts", INT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = WLMGetInstanceInfo(&num, true);
-        func_ctx->max_calls = num;
+        ereport(DEBUG2, (errmodule(MOD_WLM),
+            errmsg("Begin to get instance info with cleanup.")));
 
-        MemoryContextSwitchTo(old_context);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = WLMGetInstanceInfo(&num, true);
+        funcctx->max_calls = num;
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        MemoryContextSwitchTo(oldcontext);
+
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         Datum values[WLM_INSTANCE_INFO_ATTRNUM];
         bool nulls[WLM_INSTANCE_INFO_ATTRNUM];
         HeapTuple tuple;
         Datum result;
-        int i = -1;
+        i = -1;
         errno_t rc = 0;
 
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -5613,7 +6128,7 @@ Datum pg_stat_get_wlm_instance_info_with_cleanup(PG_FUNCTION_ARGS)
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
-        WLMInstanceInfo* instanceInfo = (WLMInstanceInfo*)func_ctx->user_fctx + func_ctx->call_cntr;
+        WLMInstanceInfo* instanceInfo = (WLMInstanceInfo*)funcctx->user_fctx + funcctx->call_cntr;
 
         values[++i] = CStringGetTextDatum(g_instance.wlm_cxt->instance_manager.instancename);
         values[++i] = Int64GetDatum(instanceInfo->timestamp);
@@ -5631,15 +6146,18 @@ Datum pg_stat_get_wlm_instance_info_with_cleanup(PG_FUNCTION_ARGS)
         values[++i] = Int64GetDatum(instanceInfo->read_counts);
         values[++i] = Int64GetDatum(instanceInfo->write_counts);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    ereport(DEBUG2, (errmodule(MOD_WLM),
+        errmsg("Get instance info with cleanup finished.")));
+
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -5653,17 +6171,20 @@ Datum pg_stat_get_wlm_user_resource_info(PG_FUNCTION_ARGS)
 #define WLM_USER_RESOURCE_ATTRNUM 17
     char* name = PG_GETARG_CSTRING(0);
 
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     const int num = 1;
     int i = 0;
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
-        func_ctx = SRF_FIRSTCALL_INIT();
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-        tupdesc = CreateTemplateTupleDesc(WLM_USER_RESOURCE_ATTRNUM, false);
+
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        tupdesc = CreateTemplateTupleDesc(WLM_USER_RESOURCE_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "user_id", OIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "used_memory", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "total_memory", INT4OID, -1, 0);
@@ -5682,53 +6203,62 @@ Datum pg_stat_get_wlm_user_resource_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "read_speed", FLOAT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "write_speed", FLOAT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = GetUserResourceData(name); /* get user resource data */
-        func_ctx->max_calls = num;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = GetUserResourceData(name); /* get user resource data */
+        funcctx->max_calls = num;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
         Datum values[WLM_USER_RESOURCE_ATTRNUM];
         bool nulls[WLM_USER_RESOURCE_ATTRNUM];
         HeapTuple tuple;
-        int i = -1;
+        i = -1;
 
-        UserResourceData* rsdata = (UserResourceData*)func_ctx->user_fctx + func_ctx->call_cntr;
+        UserResourceData* rsdata = (UserResourceData*)funcctx->user_fctx + funcctx->call_cntr;
 
         errno_t rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
-        /* fill in all attribute value */
-        values[++i] = ObjectIdGetDatum(rsdata->userid);
-        values[++i] = Int32GetDatum(rsdata->used_memory);
-        values[++i] = Int32GetDatum(rsdata->total_memory);
-        values[++i] = Int32GetDatum(rsdata->used_cpuset * 1.0 / GROUP_ALL_PERCENT);
-        values[++i] = Int32GetDatum(rsdata->total_cpuset);
-        values[++i] = Int64GetDatum(rsdata->used_space);
-        values[++i] = Int64GetDatum(rsdata->total_space);
-        values[++i] = Int64GetDatum(rsdata->used_temp_space);
-        values[++i] = Int64GetDatum(rsdata->total_temp_space);
-        values[++i] = Int64GetDatum(rsdata->used_spill_space);
-        values[++i] = Int64GetDatum(rsdata->total_spill_space);
-        values[++i] = Int64GetDatum(rsdata->read_bytes / 1024);
-        values[++i] = Int64GetDatum(rsdata->write_bytes / 1024);
-        values[++i] = Int64GetDatum(rsdata->read_counts);
-        values[++i] = Int64GetDatum(rsdata->write_counts);
-        values[++i] = Float8GetDatum(rsdata->read_speed);
-        values[++i] = Float8GetDatum(rsdata->write_speed);
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        /* Values only available to same user or superuser */
+        if (superuser() || rsdata->userid == GetUserId()) {
+            /* fill in all attribute value */
+            values[++i] = ObjectIdGetDatum(rsdata->userid);
+            values[++i] = Int32GetDatum(rsdata->used_memory);
+            values[++i] = Int32GetDatum(rsdata->total_memory);
+            values[++i] = Int32GetDatum(rsdata->used_cpuset * 1.0 / GROUP_ALL_PERCENT);
+            values[++i] = Int32GetDatum(rsdata->total_cpuset);
+            values[++i] = Int64GetDatum(rsdata->used_space);
+            values[++i] = Int64GetDatum(rsdata->total_space);
+            values[++i] = Int64GetDatum(rsdata->used_temp_space);
+            values[++i] = Int64GetDatum(rsdata->total_temp_space);
+            values[++i] = Int64GetDatum(rsdata->used_spill_space);
+            values[++i] = Int64GetDatum(rsdata->total_spill_space);
+            values[++i] = Int64GetDatum(rsdata->read_bytes / 1024);
+            values[++i] = Int64GetDatum(rsdata->write_bytes / 1024);
+            values[++i] = Int64GetDatum(rsdata->read_counts);
+            values[++i] = Int64GetDatum(rsdata->write_counts);
+            values[++i] = Float8GetDatum(rsdata->read_speed);
+            values[++i] = Float8GetDatum(rsdata->write_speed);          
+        }else {     
+            for (int j = 0; j < WLM_USER_RESOURCE_ATTRNUM; ++j) {
+                nulls[j] = true;
+            }
+        }
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
-    SRF_RETURN_DONE(func_ctx);
+
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
+
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -5740,20 +6270,19 @@ Datum pg_stat_get_wlm_user_resource_info(PG_FUNCTION_ARGS)
 Datum pg_stat_get_resource_pool_info(PG_FUNCTION_ARGS)
 {
 #define WLM_RESOURCE_POOL_ATTRNUM 7
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(WLM_RESOURCE_POOL_ATTRNUM, false);
+        tupdesc = CreateTemplateTupleDesc(WLM_RESOURCE_POOL_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "respool_oid", OIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "ref_count", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "active_points", INT4OID, -1, 0);
@@ -5762,24 +6291,25 @@ Datum pg_stat_get_resource_pool_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "iops_limits", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "io_priority", INT4OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = WLMGetResourcePoolDataInfo(&num);
-        func_ctx->max_calls = num;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = WLMGetResourcePoolDataInfo(&num);
+        funcctx->max_calls = num;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
         Datum values[WLM_RESOURCE_POOL_ATTRNUM];
         bool nulls[WLM_RESOURCE_POOL_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
-        int i = -1;
-        ResourcePool* rp = (ResourcePool*)func_ctx->user_fctx + func_ctx->call_cntr;
+        i = -1;
+
+        ResourcePool* rp = (ResourcePool*)funcctx->user_fctx + funcctx->call_cntr;
 
         errno_t rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
@@ -5793,14 +6323,14 @@ Datum pg_stat_get_resource_pool_info(PG_FUNCTION_ARGS)
         values[++i] = Int32GetDatum(rp->iops_limits);
         values[++i] = Int32GetDatum(rp->io_priority);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -5811,21 +6341,24 @@ Datum pg_stat_get_resource_pool_info(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_wlm_user_info(PG_FUNCTION_ARGS)
 {
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "pg_stat_get_wlm_user_info");
+    }
 #define WLM_USER_INFO_ATTRNUM 8
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(WLM_USER_INFO_ATTRNUM, false);
+        tupdesc = CreateTemplateTupleDesc(WLM_USER_INFO_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "userid", OIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sysadmin", BOOLOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "rpoid", OIDOID, -1, 0);
@@ -5835,46 +6368,52 @@ Datum pg_stat_get_wlm_user_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "childcount", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "childlist", TEXTOID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = WLMGetAllUserData(&num);
-        func_ctx->max_calls = num;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = WLMGetAllUserData(&num);
+        funcctx->max_calls = num;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
         Datum values[WLM_USER_INFO_ATTRNUM];
         bool nulls[WLM_USER_INFO_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
-        int i = -1;
+        i = -1;
 
-        WLMUserInfo* info = (WLMUserInfo*)func_ctx->user_fctx + func_ctx->call_cntr;
+        WLMUserInfo* info = (WLMUserInfo*)funcctx->user_fctx + funcctx->call_cntr;
 
         errno_t rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
-        /* Locking is probably not really necessary */
-        values[++i] = ObjectIdGetDatum(info->userid);
-        values[++i] = BoolGetDatum(info->admin);
-        values[++i] = ObjectIdGetDatum(info->rpoid);
-        values[++i] = ObjectIdGetDatum(info->parentid);
-        values[++i] = Int64GetDatum(info->space);
-        values[++i] = Int64GetDatum(info->spacelimit);
-        values[++i] = Int32GetDatum(info->childcount);
-        if (info->children == NULL) {
-            info->children = "No Child";
-        }
-        values[++i] = CStringGetTextDatum(info->children);
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    }
+        if (superuser() || info->userid == GetUserId()) {
+            /* Locking is probably not really necessary */
+            values[++i] = ObjectIdGetDatum(info->userid);
+            values[++i] = BoolGetDatum(info->admin);
+            values[++i] = ObjectIdGetDatum(info->rpoid);
+            values[++i] = ObjectIdGetDatum(info->parentid);
+            values[++i] = Int64GetDatum(info->space);
+            values[++i] = Int64GetDatum(info->spacelimit);
+            values[++i] = Int32GetDatum(info->childcount);
 
-    SRF_RETURN_DONE(func_ctx);
+            if (info->children == NULL)
+                info->children = "No Child";
+
+            values[++i] = CStringGetTextDatum(info->children);
+        } else {
+            for (i = 0; i < WLM_USER_INFO_ATTRNUM; ++i) {
+                nulls[i] = true;
+            }
+        }
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -5886,21 +6425,20 @@ Datum pg_stat_get_wlm_user_info(PG_FUNCTION_ARGS)
 Datum pg_stat_get_cgroup_info(PG_FUNCTION_ARGS)
 {
 #define WLM_CGROUP_INFO_ATTRNUM 9
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
     errno_t rc;
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(WLM_CGROUP_INFO_ATTRNUM, false);
+        tupdesc = CreateTemplateTupleDesc(WLM_CGROUP_INFO_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "cgroup_name", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "percent", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "usagepct", INT4OID, -1, 0);
@@ -5911,27 +6449,27 @@ Datum pg_stat_get_cgroup_info(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "valid", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "node_group", TEXTOID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = gscgroup_get_cgroup_info(&num);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = gscgroup_get_cgroup_info(&num);
 
-        func_ctx->max_calls = num;
+        funcctx->max_calls = num;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         Datum values[WLM_CGROUP_INFO_ATTRNUM];
         bool nulls[WLM_CGROUP_INFO_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
         Datum result;
         i = -1;
 
-        gscgroup_info_t* info = (gscgroup_info_t*)func_ctx->user_fctx + func_ctx->call_cntr;
+        gscgroup_info_t* info = (gscgroup_info_t*)funcctx->user_fctx + funcctx->call_cntr;
 
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
@@ -5945,15 +6483,16 @@ Datum pg_stat_get_cgroup_info(PG_FUNCTION_ARGS)
         values[++i] = CStringGetTextDatum(info->relpath);
         values[++i] = CStringGetTextDatum(info->valid ? "YES" : "NO");
         values[++i] = CStringGetTextDatum(info->nodegroup);
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -5991,27 +6530,26 @@ Datum pg_wlm_get_user_session_info(PG_FUNCTION_ARGS)
 Datum pg_stat_get_workload_records(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
         errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
 #define WLM_WORKLOAD_RECORDS_ATTRNUM 11
-    FuncCallContext* func_ctx = NULL;
-    int num = 0;
-    int i = 0;
+    FuncCallContext* funcctx = NULL;
+    int num = 0, i = 0;
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
+        MemoryContext oldcontext;
         TupleDesc tupdesc;
         i = 0;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tupdesc = CreateTemplateTupleDesc(WLM_WORKLOAD_RECORDS_ATTRNUM, false);
+        tupdesc = CreateTemplateTupleDesc(WLM_WORKLOAD_RECORDS_ATTRNUM, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "node_idx", OIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "query_pid", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "start_time", INT8OID, -1, 0);
@@ -6024,26 +6562,26 @@ Datum pg_stat_get_workload_records(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "queue_type", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, "node_group", TEXTOID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->user_fctx = dywlm_get_records(&num);
-        func_ctx->max_calls = num;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = dywlm_get_records(&num);
+        funcctx->max_calls = num;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx && func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) {
         Datum values[WLM_WORKLOAD_RECORDS_ATTRNUM];
         bool nulls[WLM_WORKLOAD_RECORDS_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
         Datum result;
-        int i = -1;
+        i = -1;
 
-        DynamicWorkloadRecord* record = (DynamicWorkloadRecord*)func_ctx->user_fctx + func_ctx->call_cntr;
+        DynamicWorkloadRecord* record = (DynamicWorkloadRecord*)funcctx->user_fctx + funcctx->call_cntr;
 
         errno_t errval = memset_s(&values, sizeof(values), 0, sizeof(values));
         securec_check_errval(errval, , LOG);
@@ -6078,21 +6616,20 @@ Datum pg_stat_get_workload_records(PG_FUNCTION_ARGS)
         values[++i] = CStringGetTextDatum(record->nodename);
         values[++i] = CStringGetTextDatum(qstr);
 
-        if (StringIsValid(record->groupname)) {
+        if (StringIsValid(record->groupname))
             values[++i] = CStringGetTextDatum(record->groupname);
-        } else {
+        else
             values[++i] = CStringGetTextDatum("installation");
-        }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     }
 
-    pfree_ext(func_ctx->user_fctx);
-    func_ctx->user_fctx = NULL;
+    pfree_ext(funcctx->user_fctx);
+    funcctx->user_fctx = NULL;
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
 
@@ -6155,22 +6692,25 @@ Datum pg_stat_get_buf_alloc(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_xact_numscans(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
     uint32 statFlag = STATFLG_RELATION;
-    PgStat_TableStatus* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &statFlag, rel_id);
+    PgStat_TableStatus* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &statFlag, relid);
+
     foreach (stat_cell, stat_list) {
-        Oid relation_id = lfirst_oid(stat_cell);
-        tab_entry = find_tabstat_entry(relation_id, statFlag);
-        if (!PointerIsValid(tab_entry)) {
+        Oid relationid = lfirst_oid(stat_cell);
+        tabentry = find_tabstat_entry(relationid, statFlag);
+
+        if (!PointerIsValid(tabentry)) {
             result += 0;
         } else {
-            result += (int64)(tab_entry->t_counts.t_numscans);
+            result += (int64)(tabentry->t_counts.t_numscans);
         }
     }
+
     if (PointerIsValid(stat_list)) {
         list_free(stat_list);
     }
@@ -6180,21 +6720,22 @@ Datum pg_stat_get_xact_numscans(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_xact_tuples_returned(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    uint32 stat_flag = STATFLG_RELATION;
-    PgStat_TableStatus* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &stat_flag, rel_id);
+    uint32 statFlag = STATFLG_RELATION;
+    PgStat_TableStatus* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &statFlag, relid);
 
     foreach (stat_cell, stat_list) {
-        Oid relation_id = lfirst_oid(stat_cell);
-        tab_entry = find_tabstat_entry(relation_id, stat_flag);
-        if (!PointerIsValid(tab_entry)) {
+        Oid relationid = lfirst_oid(stat_cell);
+        tabentry = find_tabstat_entry(relationid, statFlag);
+
+        if (!PointerIsValid(tabentry)) {
             result += 0;
         } else {
-            result += (int64)(tab_entry->t_counts.t_tuples_returned);
+            result += (int64)(tabentry->t_counts.t_tuples_returned);
         }
     }
 
@@ -6207,22 +6748,25 @@ Datum pg_stat_get_xact_tuples_returned(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_xact_tuples_fetched(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    uint32 stat_flag = STATFLG_RELATION;
-    PgStat_TableStatus* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &stat_flag, rel_id);
+    uint32 statFlag = STATFLG_RELATION;
+    PgStat_TableStatus* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &statFlag, relid);
+
     foreach (stat_cell, stat_list) {
-        Oid relation_id = lfirst_oid(stat_cell);
-        tab_entry = find_tabstat_entry(relation_id, stat_flag);
-        if (!PointerIsValid(tab_entry)) {
+        Oid relationid = lfirst_oid(stat_cell);
+        tabentry = find_tabstat_entry(relationid, statFlag);
+
+        if (!PointerIsValid(tabentry)) {
             result += 0;
         } else {
-            result += (int64)(tab_entry->t_counts.t_tuples_fetched);
+            result += (int64)(tabentry->t_counts.t_tuples_fetched);
         }
     }
+
     if (PointerIsValid(stat_list)) {
         list_free(stat_list);
     }
@@ -6232,37 +6776,40 @@ Datum pg_stat_get_xact_tuples_fetched(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_xact_tuples_inserted(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    uint32 t_stat_flag = InvalidOid;
-    PgStat_TableStatus* tab_entry = NULL;
+    uint32 t_statFlag = InvalidOid;
+    PgStat_TableStatus* tabentry = NULL;
     PgStat_TableXactStatus* trans = NULL;
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id)))
-        PG_RETURN_INT64(pgxc_exec_tuples_stat(rel_id, "pg_stat_get_xact_tuples_inserted", EXEC_ON_DATANODES));
 
-    if (isPartitionedObject(rel_id, RELKIND_RELATION, true)) {
-        t_stat_flag = rel_id;
-        stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_TABLE_PARTITION);
-    } else if (isPartitionedObject(rel_id, RELKIND_INDEX, true)) {
-        t_stat_flag = rel_id;
-        stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_INDEX_PARTITION);
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
+        PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_xact_tuples_inserted", EXEC_ON_DATANODES));
+
+    if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
+        t_statFlag = relid;
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
+    } else if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
+        t_statFlag = relid;
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
     } else {
-        t_stat_flag = InvalidOid;
-        stat_list = lappend_oid(stat_list, rel_id);
+        t_statFlag = InvalidOid;
+        stat_list = lappend_oid(stat_list, relid);
     }
+
     foreach (stat_cell, stat_list) {
         Oid t_id = lfirst_oid(stat_cell);
-        tab_entry = find_tabstat_entry(t_id, t_stat_flag);
-        if (!PointerIsValid(tab_entry)) {
+        tabentry = find_tabstat_entry(t_id, t_statFlag);
+
+        if (!PointerIsValid(tabentry))
             continue;
-        }
-        result += tab_entry->t_counts.t_tuples_inserted;
+
+        result += tabentry->t_counts.t_tuples_inserted;
+
         /* live subtransactions' counts aren't in t_tuples_inserted yet */
-        for (trans = tab_entry->trans; trans != NULL; trans = trans->upper) {
+        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
             result += trans->tuples_inserted;
-        }
     }
 
     PG_RETURN_INT64(result);
@@ -6270,78 +6817,81 @@ Datum pg_stat_get_xact_tuples_inserted(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_xact_tuples_updated(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    uint32 t_stat_flag = InvalidOid;
-    PgStat_TableStatus* tab_entry = NULL;
+    uint32 t_statFlag = InvalidOid;
+    PgStat_TableStatus* tabentry = NULL;
     PgStat_TableXactStatus* trans = NULL;
 
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        PG_RETURN_INT64(pgxc_exec_tuples_stat(rel_id, "pg_stat_get_xact_tuples_updated", EXEC_ON_DATANODES));
-    }
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
+        PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_xact_tuples_updated", EXEC_ON_DATANODES));
 
-    if (isPartitionedObject(rel_id, RELKIND_RELATION, true)) {
-        t_stat_flag = rel_id;
-        stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_TABLE_PARTITION);
-    } else if (isPartitionedObject(rel_id, RELKIND_INDEX, true)) {
-        t_stat_flag = rel_id;
-        stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_INDEX_PARTITION);
+    if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
+        t_statFlag = relid;
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
+    } else if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
+        t_statFlag = relid;
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
     } else {
-        t_stat_flag = InvalidOid;
-        stat_list = lappend_oid(stat_list, rel_id);
+        t_statFlag = InvalidOid;
+        stat_list = lappend_oid(stat_list, relid);
     }
 
     foreach (stat_cell, stat_list) {
         Oid t_id = lfirst_oid(stat_cell);
-        tab_entry = find_tabstat_entry(t_id, t_stat_flag);
-        if (!PointerIsValid(tab_entry)) {
+        tabentry = find_tabstat_entry(t_id, t_statFlag);
+
+        if (!PointerIsValid(tabentry))
             continue;
-        }
-        result += tab_entry->t_counts.t_tuples_updated;
+
+        result += tabentry->t_counts.t_tuples_updated;
+
         /* live subtransactions' counts aren't in t_tuples_inserted yet */
-        for (trans = tab_entry->trans; trans != NULL; trans = trans->upper) {
+        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
             result += trans->tuples_updated;
-        }
     }
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_xact_tuples_deleted(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    uint32 t_stat_flag = InvalidOid;
-    PgStat_TableStatus* tab_entry = NULL;
+    uint32 t_statFlag = InvalidOid;
+    PgStat_TableStatus* tabentry = NULL;
     PgStat_TableXactStatus* trans = NULL;
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        PG_RETURN_INT64(pgxc_exec_tuples_stat(rel_id, "pg_stat_get_xact_tuples_deleted", EXEC_ON_DATANODES));
-    }
-    if (isPartitionedObject(rel_id, RELKIND_RELATION, true)) {
-        t_stat_flag = rel_id;
-        stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_TABLE_PARTITION);
-    } else if (isPartitionedObject(rel_id, RELKIND_INDEX, true)) {
-        t_stat_flag = rel_id;
-        stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_INDEX_PARTITION);
+
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
+        PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_xact_tuples_deleted", EXEC_ON_DATANODES));
+
+    if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
+        t_statFlag = relid;
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
+    } else if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
+        t_statFlag = relid;
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
     } else {
-        t_stat_flag = InvalidOid;
-        stat_list = lappend_oid(stat_list, rel_id);
+        t_statFlag = InvalidOid;
+        stat_list = lappend_oid(stat_list, relid);
     }
 
     foreach (stat_cell, stat_list) {
         Oid t_id = lfirst_oid(stat_cell);
-        tab_entry = find_tabstat_entry(t_id, t_stat_flag);
-        if (!PointerIsValid(tab_entry)) {
+        tabentry = find_tabstat_entry(t_id, t_statFlag);
+
+        if (!PointerIsValid(tabentry))
             continue;
-        }
-        result += tab_entry->t_counts.t_tuples_deleted;
+
+        result += tabentry->t_counts.t_tuples_deleted;
+
         /* live subtransactions' counts aren't in t_tuples_inserted yet */
-        for (trans = tab_entry->trans; trans != NULL; trans = trans->upper) {
+        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
             result += trans->tuples_deleted;
-        }
     }
 
     PG_RETURN_INT64(result);
@@ -6349,32 +6899,35 @@ Datum pg_stat_get_xact_tuples_deleted(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_xact_tuples_hot_updated(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    uint32 t_stat_flag = InvalidOid;
-    PgStat_TableStatus* tab_entry = NULL;
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        PG_RETURN_INT64(pgxc_exec_tuples_stat(rel_id, "pg_stat_get_xact_tuples_hot_updated", EXEC_ON_DATANODES));
-    }
-    if (isPartitionedObject(rel_id, RELKIND_RELATION, true)) {
-        t_stat_flag = rel_id;
-        stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_TABLE_PARTITION);
-    } else if (isPartitionedObject(rel_id, RELKIND_INDEX, true)) {
-        t_stat_flag = rel_id;
-        stat_list = getPartitionObjectIdList(rel_id, PART_OBJ_TYPE_INDEX_PARTITION);
+    uint32 t_statFlag = InvalidOid;
+    PgStat_TableStatus* tabentry = NULL;
+
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
+        PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_xact_tuples_hot_updated", EXEC_ON_DATANODES));
+
+    if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
+        t_statFlag = relid;
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
+    } else if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
+        t_statFlag = relid;
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
     } else {
-        t_stat_flag = InvalidOid;
-        stat_list = lappend_oid(stat_list, rel_id);
+        t_statFlag = InvalidOid;
+        stat_list = lappend_oid(stat_list, relid);
     }
+
     foreach (stat_cell, stat_list) {
         Oid t_id = lfirst_oid(stat_cell);
-        tab_entry = find_tabstat_entry(t_id, t_stat_flag);
-        if (!PointerIsValid(tab_entry)) {
+        tabentry = find_tabstat_entry(t_id, t_statFlag);
+
+        if (!PointerIsValid(tabentry))
             continue;
-        }
-        result += tab_entry->t_counts.t_tuples_hot_updated;
+
+        result += tabentry->t_counts.t_tuples_hot_updated;
     }
 
     PG_RETURN_INT64(result);
@@ -6382,22 +6935,25 @@ Datum pg_stat_get_xact_tuples_hot_updated(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_xact_blocks_fetched(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    uint32 stat_flag = STATFLG_RELATION;
-    PgStat_TableStatus* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &stat_flag, rel_id);
+    uint32 statFlag = STATFLG_RELATION;
+    PgStat_TableStatus* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &statFlag, relid);
+
     foreach (stat_cell, stat_list) {
-        Oid relation_id = lfirst_oid(stat_cell);
-        tab_entry = find_tabstat_entry(relation_id, stat_flag);
-        if (!PointerIsValid(tab_entry)) {
+        Oid relationid = lfirst_oid(stat_cell);
+        tabentry = find_tabstat_entry(relationid, statFlag);
+
+        if (!PointerIsValid(tabentry)) {
             result += 0;
         } else {
-            result += (int64)(tab_entry->t_counts.t_blocks_fetched);
+            result += (int64)(tabentry->t_counts.t_blocks_fetched);
         }
     }
+
     if (PointerIsValid(stat_list)) {
         list_free(stat_list);
     }
@@ -6407,22 +6963,25 @@ Datum pg_stat_get_xact_blocks_fetched(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_xact_blocks_hit(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    uint32 stat_flag = STATFLG_RELATION;
-    PgStat_TableStatus* tab_entry = NULL;
-    pg_stat_get_stat_list(&stat_list, &stat_flag, rel_id);
+    uint32 statFlag = STATFLG_RELATION;
+    PgStat_TableStatus* tabentry = NULL;
+    pg_stat_get_stat_list(&stat_list, &statFlag, relid);
+
     foreach (stat_cell, stat_list) {
-        Oid relation_id = lfirst_oid(stat_cell);
-        tab_entry = find_tabstat_entry(relation_id, stat_flag);
-        if (!PointerIsValid(tab_entry)) {
+        Oid relationid = lfirst_oid(stat_cell);
+        tabentry = find_tabstat_entry(relationid, statFlag);
+
+        if (!PointerIsValid(tabentry)) {
             result += 0;
         } else {
-            result += (int64)(tab_entry->t_counts.t_blocks_hit);
+            result += (int64)(tabentry->t_counts.t_blocks_hit);
         }
     }
+
     if (PointerIsValid(stat_list)) {
         list_free(stat_list);
     }
@@ -6432,45 +6991,46 @@ Datum pg_stat_get_xact_blocks_hit(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_xact_function_calls(PG_FUNCTION_ARGS)
 {
-    Oid func_id = PG_GETARG_OID(0);
-    PgStat_BackendFunctionEntry* func_entry = NULL;
-    if ((func_entry = find_funcstat_entry(func_id)) == NULL) {
+    Oid funcid = PG_GETARG_OID(0);
+    PgStat_BackendFunctionEntry* funcentry = NULL;
+
+    if ((funcentry = find_funcstat_entry(funcid)) == NULL)
         PG_RETURN_NULL();
-    }
-    PG_RETURN_INT64(func_entry->f_counts.f_numcalls);
+    PG_RETURN_INT64(funcentry->f_counts.f_numcalls);
 }
 
 Datum pg_stat_get_xact_function_total_time(PG_FUNCTION_ARGS)
 {
-    Oid func_id = PG_GETARG_OID(0);
-    PgStat_BackendFunctionEntry* func_entry = NULL;
-    if ((func_entry = find_funcstat_entry(func_id)) == NULL) {
+    Oid funcid = PG_GETARG_OID(0);
+    PgStat_BackendFunctionEntry* funcentry = NULL;
+
+    if ((funcentry = find_funcstat_entry(funcid)) == NULL)
         PG_RETURN_NULL();
-    }
-    PG_RETURN_FLOAT8(INSTR_TIME_GET_MILLISEC(func_entry->f_counts.f_total_time));
+    PG_RETURN_FLOAT8(INSTR_TIME_GET_MILLISEC(funcentry->f_counts.f_total_time));
 }
 
 Datum pg_stat_get_xact_function_self_time(PG_FUNCTION_ARGS)
 {
-    Oid func_id = PG_GETARG_OID(0);
-    PgStat_BackendFunctionEntry* func_entry = NULL;
-    if ((func_entry = find_funcstat_entry(func_id)) == NULL) {
+    Oid funcid = PG_GETARG_OID(0);
+    PgStat_BackendFunctionEntry* funcentry = NULL;
+
+    if ((funcentry = find_funcstat_entry(funcid)) == NULL)
         PG_RETURN_NULL();
-    }
-    PG_RETURN_FLOAT8(INSTR_TIME_GET_MILLISEC(func_entry->f_counts.f_self_time));
+    PG_RETURN_FLOAT8(INSTR_TIME_GET_MILLISEC(funcentry->f_counts.f_self_time));
 }
 
 /* Discard the active statistics snapshot */
 Datum pg_stat_clear_snapshot(PG_FUNCTION_ARGS)
 {
-    if (!superuser()) {
+
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
         ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), 
-                (errmsg("Must be system admin to clear snapshot.")))); 
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to clear snapshot"),
+                errhint("Must be system admin or monitor admin can clear snapshot.")));
     }
 
     pgstat_clear_snapshot();
-
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         ExecNodes* exec_nodes = NULL;
         StringInfoData buf;
@@ -6528,6 +7088,7 @@ Datum pg_stat_reset_shared(PG_FUNCTION_ARGS)
     char* target = text_to_cstring(PG_GETARG_TEXT_PP(0));
 
     pgstat_reset_shared_counters(target);
+
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         ExecNodes* exec_nodes = NULL;
         StringInfoData buf;
@@ -6558,6 +7119,7 @@ Datum pg_stat_reset_single_table_counters(PG_FUNCTION_ARGS)
     Oid p_objectid;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
+
     /* no syscache in collector thread, we just deal with all partitions here */
     if (isPartitionedObject(taboid, RELKIND_INDEX, true)) {
         p_objectid = taboid;
@@ -6575,25 +7137,26 @@ Datum pg_stat_reset_single_table_counters(PG_FUNCTION_ARGS)
         pgstat_reset_single_counter(p_objectid, lfirst_oid(stat_cell), RESET_TABLE);
     }
     list_free(stat_list);
+
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         Relation rel = NULL;
         ExecNodes* exec_nodes = NULL;
         StringInfoData buf;
         ParallelFunctionState* state = NULL;
 
-        char* rel_name = NULL;
-        char* nsp_name = NULL;
+        char* relname = NULL;
+        char* nspname = NULL;
 
         rel = try_relation_open(taboid, AccessShareLock);
-        if (!rel) {
+        if (!rel)
             PG_RETURN_NULL();
-        }
-        if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
+
+        if (RELPERSISTENCE_TEMP == rel->rd_rel->relpersistence) {
             relation_close(rel, AccessShareLock);
             return 0;
         }
-        rel_name = repairObjectName(RelationGetRelationName(rel));
-        nsp_name = repairObjectName(get_namespace_name(rel->rd_rel->relnamespace, true));
+        relname = repairObjectName(RelationGetRelationName(rel));
+        nspname = repairObjectName(get_namespace_name(rel->rd_rel->relnamespace));
         relation_close(rel, AccessShareLock);
 
         exec_nodes = (ExecNodes*)makeNode(ExecNodes);
@@ -6606,7 +7169,7 @@ Datum pg_stat_reset_single_table_counters(PG_FUNCTION_ARGS)
 
         initStringInfo(&buf);
         appendStringInfo(
-            &buf, "SELECT pg_catalog.pg_stat_reset_single_table_counters('%s.%s'::regclass);", nsp_name, rel_name);
+            &buf, "SELECT pg_catalog.pg_stat_reset_single_table_counters('%s.%s'::regclass);", nspname, relname);
         state = RemoteFunctionResultHandler(buf.data, exec_nodes, NULL, true, EXEC_ON_ALL_NODES, true);
         FreeParallelFunctionState(state);
         pfree_ext(buf.data);
@@ -6617,56 +7180,58 @@ Datum pg_stat_reset_single_table_counters(PG_FUNCTION_ARGS)
 
 Datum pg_stat_reset_single_function_counters(PG_FUNCTION_ARGS)
 {
-    Oid func_oid = PG_GETARG_OID(0);
+    Oid funcoid = PG_GETARG_OID(0);
 
-    pgstat_reset_single_counter(InvalidOid, func_oid, RESET_FUNCTION);
+    pgstat_reset_single_counter(InvalidOid, funcoid, RESET_FUNCTION);
 
     PG_RETURN_VOID();
 }
 
 Datum pv_os_run_info(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
+
     /* stuff done only on the first call of the function */
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tup_desc;
+        MemoryContext oldcontext;
+        TupleDesc tupdesc;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * switch to memory context appropriate for multiple function
          * calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* need a tuple descriptor representing 3 columns */
-        tup_desc = CreateTemplateTupleDesc(5, false);
+        tupdesc = CreateTemplateTupleDesc(5, false, TAM_HEAP);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "id", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "value", NUMERICOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "comments", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "cumulative", BOOLOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "id", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "value", NUMERICOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "comments", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "cumulative", BOOLOID, -1, 0);
 
         /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
-        /* collect system infomation */
+        /*collect system infomation*/
         getCpuNums();
         getCpuTimes();
         getVmStat();
         getTotalMem();
         getOSRunLoad();
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    while (func_ctx->call_cntr < TOTAL_OS_RUN_INFO_TYPES) {
-        /* do when there is more left to send */
+    funcctx = SRF_PERCALL_SETUP();
+
+    while (funcctx->call_cntr < TOTAL_OS_RUN_INFO_TYPES) /* do when there is more left to send */
+    {
         Datum values[5];
         bool nulls[5] = {false};
         HeapTuple tuple = NULL;
@@ -6676,26 +7241,27 @@ Datum pv_os_run_info(PG_FUNCTION_ARGS)
         securec_check(rc, "\0", "\0");
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
-        if (!u_sess->stat_cxt.osStatDescArray[func_ctx->call_cntr].got) {
+
+        if (!u_sess->stat_cxt.osStatDescArray[funcctx->call_cntr].got) {
             ereport(DEBUG3,
                 (errmsg("the %s stat has not got on this plate.",
-                    u_sess->stat_cxt.osStatDescArray[func_ctx->call_cntr].name)));
-            func_ctx->call_cntr++;
+                    u_sess->stat_cxt.osStatDescArray[funcctx->call_cntr].name)));
+            funcctx->call_cntr++;
             continue;
         }
 
-        values[0] = Int32GetDatum(func_ctx->call_cntr);
-        values[1] = CStringGetTextDatum(u_sess->stat_cxt.osStatDescArray[func_ctx->call_cntr].name);
-        values[2] = u_sess->stat_cxt.osStatDescArray[func_ctx->call_cntr].getDatum(
-            u_sess->stat_cxt.osStatDataArray[func_ctx->call_cntr]);
-        values[3] = CStringGetTextDatum(u_sess->stat_cxt.osStatDescArray[func_ctx->call_cntr].comments);
-        values[4] = BoolGetDatum(u_sess->stat_cxt.osStatDescArray[func_ctx->call_cntr].cumulative);
+        values[0] = Int32GetDatum(funcctx->call_cntr);
+        values[1] = CStringGetTextDatum(u_sess->stat_cxt.osStatDescArray[funcctx->call_cntr].name);
+        values[2] = u_sess->stat_cxt.osStatDescArray[funcctx->call_cntr].getDatum(
+            u_sess->stat_cxt.osStatDataArray[funcctx->call_cntr]);
+        values[3] = CStringGetTextDatum(u_sess->stat_cxt.osStatDescArray[funcctx->call_cntr].comments);
+        values[4] = BoolGetDatum(u_sess->stat_cxt.osStatDescArray[funcctx->call_cntr].cumulative);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
     /* do when there is no more left */
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -6707,89 +7273,39 @@ Datum pv_os_run_info(PG_FUNCTION_ARGS)
  */
 Datum pv_session_memory_detail(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    SessionMemoryDetail* entry = NULL;
-    MemoryContext old_context;
+    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
+    TupleDesc tupdesc;
+    knl_sess_control* sess = NULL;
+    MemoryContext oldcontext;
 
-    /* stuff done only on the first call of the function */
-    if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
+    oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
 
-        /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+    /* need a tuple descriptor representing 9 columns */
+    tupdesc = CreateTemplateTupleDesc(NUM_SESSION_MEMORY_DETAIL_ELEM, false, TAM_HEAP);
 
-        /*
-         * switch to memory context appropriate for multiple function
-         * calls
-         */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "sessid", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "threadid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "contextname", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "level", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "parent", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "totalsize", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "freesize", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "usedsize", INT8OID, -1, 0);
 
-        /* need a tuple descriptor representing 9 columns */
-        tup_desc = CreateTemplateTupleDesc(NUM_SESSION_MEMORY_DETAIL_ELEM, false);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "sessid", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "threadid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "contextname", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "level", INT2OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "parent", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)6, "totalsize", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)7, "freesize", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)8, "usedsize", INT8OID, -1, 0);
+    (void)MemoryContextSwitchTo(oldcontext);
 
-        /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-
-        /* total number of tuples to be returned */
-        if (ENABLE_THREAD_POOL) {
-            func_ctx->user_fctx =
-                    (void *) g_threadPoolControler->GetSessionCtrl()->getSessionMemoryDetail(&(func_ctx->max_calls));
-        } else {
-            func_ctx->max_calls = 0;
-        }
-        (void)MemoryContextSwitchTo(old_context);
+    if (ENABLE_THREAD_POOL) {
+        g_threadPoolControler->GetSessionCtrl()->getSessionMemoryDetail(rsinfo->setResult, rsinfo->setDesc, &sess);
     }
 
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
 
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* do when there is more left to send */
-        Datum values[NUM_SESSION_MEMORY_DETAIL_ELEM];
-        bool nulls[NUM_SESSION_MEMORY_DETAIL_ELEM] = {false};
-        char sessId[SESSION_ID_LEN];
-        HeapTuple tuple = NULL;
-
-        errno_t rc = 0;
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(sessId, sizeof(sessId), 0, sizeof(sessId));
-        securec_check(rc, "\0", "\0");
-
-        entry = (SessionMemoryDetail *)func_ctx->user_fctx;
-        func_ctx->user_fctx = (void *)entry->next;
-
-        getSessionID(sessId, entry->sessStartTime, entry->sessId);
-        values[0] = CStringGetTextDatum(sessId);
-        values[1] = Int64GetDatum(entry->threadId);
-        values[2] = CStringGetTextDatum(entry->contextName);
-        values[3] = Int16GetDatum(entry->level);
-        if (strlen(entry->parent) == 0) {
-            nulls[4] = true;
-        } else {
-            values[4] = CStringGetTextDatum(entry->parent);
-        }
-        values[5] = Int64GetDatum(entry->totalSize);
-        values[6] = Int64GetDatum(entry->freeSize);
-        values[7] = Int64GetDatum(entry->usedSize);
-
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else {
-        /* do when there is no more left */
-        SRF_RETURN_DONE(func_ctx);
-    }
+    return (Datum)0;
 }
 
 /*
@@ -6797,7 +7313,7 @@ Datum pv_session_memory_detail(PG_FUNCTION_ARGS)
  */
 Datum mot_session_memory_detail(PG_FUNCTION_ARGS)
 {
-#ifdef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_MOT
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("This function is not supported in cluster mode.")));
     PG_RETURN_NULL();
 #else
@@ -6876,7 +7392,7 @@ Datum mot_session_memory_detail(PG_FUNCTION_ARGS)
  */
 Datum mot_global_memory_detail(PG_FUNCTION_ARGS)
 {
-#ifdef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_MOT
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("This function is not supported in cluster mode.")));
     PG_RETURN_NULL();
 #else
@@ -6951,7 +7467,7 @@ Datum mot_global_memory_detail(PG_FUNCTION_ARGS)
  */
 Datum mot_local_memory_detail(PG_FUNCTION_ARGS)
 {
-#ifdef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_MOT
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("This function is not supported in cluster mode.")));
     PG_RETURN_NULL();
 #else
@@ -7031,87 +7547,38 @@ Datum mot_local_memory_detail(PG_FUNCTION_ARGS)
  */
 Datum pv_thread_memory_detail(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    ThreadMemoryDetail* entry = NULL;
-    MemoryContext old_context;
+    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
+    TupleDesc tupdesc = NULL;
+    uint32 procIdx = 0;
+    MemoryContext oldcontext;
 
-    /* stuff done only on the first call of the function */
-    if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
+    oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
 
-        /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+    /* need a tuple descriptor representing 9 columns */
+    tupdesc = CreateTemplateTupleDesc(NUM_THREAD_MEMORY_DETAIL_ELEM, false, TAM_HEAP);
 
-        /*
-         * switch to memory context appropriate for multiple function
-         * calls
-         */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "threadid", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "tid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "threadtype", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "contextname", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "level", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "parent", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "totalsize", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "freesize", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)9, "usedsize", INT8OID, -1, 0);
 
-        /* need a tuple descriptor representing 9 columns */
-        tup_desc = CreateTemplateTupleDesc(NUM_THREAD_MEMORY_DETAIL_ELEM, false);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "threadid", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "tid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "threadtype", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "contextname", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "level", INT2OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)6, "parent", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)7, "totalsize", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)8, "freesize", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)9, "usedsize", INT8OID, -1, 0);
+    (void)MemoryContextSwitchTo(oldcontext);
 
-        /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+    getThreadMemoryDetail(rsinfo->setResult, rsinfo->setDesc, &procIdx);
 
-        /* total number of tuples to be returned */
-        func_ctx->user_fctx = (void*)getThreadMemoryDetail(&(func_ctx->max_calls));
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
 
-        (void)MemoryContextSwitchTo(old_context);
-    }
-
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* do when there is more left to send */
-        Datum values[NUM_THREAD_MEMORY_DETAIL_ELEM];
-        bool nulls[NUM_THREAD_MEMORY_DETAIL_ELEM] = {false};
-        char thrdId[SESSION_ID_LEN];
-        HeapTuple tuple = NULL;
-
-        errno_t rc = 0;
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(thrdId, sizeof(thrdId), 0, sizeof(thrdId));
-        securec_check(rc, "\0", "\0");
-
-        entry =  (ThreadMemoryDetail *)func_ctx->user_fctx;
-        func_ctx->user_fctx = (void *)entry->next;
-
-        getSessionID(thrdId, entry->threadStartTime, entry->threadId);
-        values[0] = CStringGetTextDatum(thrdId);
-        values[1] = Int64GetDatum(entry->threadId);
-        values[2] = CStringGetTextDatum(entry->threadType);
-        values[3] = CStringGetTextDatum(entry->contextName);
-        values[4] = Int16GetDatum(entry->level);
-        if (strlen(entry->parent) == 0) {
-            nulls[5] = true;
-        } else {
-            values[5] = CStringGetTextDatum(entry->parent);
-        }
-        values[6] = Int64GetDatum(entry->totalSize);
-        values[7] = Int64GetDatum(entry->freeSize);
-        values[8] = Int64GetDatum(entry->usedSize);
-
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else {
-        /* do when there is no more left */
-        SRF_RETURN_DONE(func_ctx);
-    }
+    return (Datum)0;
 }
 
 /*
@@ -7124,77 +7591,34 @@ Datum pv_thread_memory_detail(PG_FUNCTION_ARGS)
  */
 Datum pg_shared_memory_detail(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    ThreadMemoryDetail* entry = NULL;
-    MemoryContext old_context;
+    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
+    TupleDesc tupdesc = NULL;
+    MemoryContext oldcontext;
 
-    /* stuff done only on the first call of the function */
-    if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
+    oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
 
-        /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+    /* need a tuple descriptor representing 9 columns */
+    tupdesc = CreateTemplateTupleDesc(NUM_SHARED_MEMORY_DETAIL_ELEM, false, TAM_HEAP);
 
-        /*
-         * switch to memory context appropriate for multiple function
-         * calls
-         */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "contextname", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "level", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "parent", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "totalsize", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "freesize", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "usedsize", INT8OID, -1, 0);
 
-        /* need a tuple descriptor representing 9 columns */
-        tup_desc = CreateTemplateTupleDesc(6, false);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "contextname", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "level", INT2OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "parent", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "totalsize", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "freesize", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)6, "usedsize", INT8OID, -1, 0);
+    MemoryContextSwitchTo(oldcontext);
 
-        /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+    getSharedMemoryDetail(rsinfo->setResult, rsinfo->setDesc);
 
-        /* total number of tuples to be returned */
-        func_ctx->user_fctx = (void*)getSharedMemoryDetail(&(func_ctx->max_calls));
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
 
-        (void)MemoryContextSwitchTo(old_context);
-    }
-
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* do when there is more left to send */
-        Datum values[6];
-        bool nulls[6] = {false};
-        HeapTuple tuple = NULL;
-
-        errno_t rc = 0;
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-
-        entry = (ThreadMemoryDetail *)func_ctx->user_fctx;
-        func_ctx->user_fctx = (void *)entry->next;
-
-        values[0] = CStringGetTextDatum(entry->contextName);
-        values[1] = Int16GetDatum(entry->level);
-        if (strlen(entry->parent) == 0) {
-            nulls[2] = true;
-        } else {
-            values[2] = CStringGetTextDatum(entry->parent);
-        }
-        values[3] = Int64GetDatum(entry->totalSize);
-        values[4] = Int64GetDatum(entry->freeSize);
-        values[5] = Int64GetDatum(entry->usedSize);
-
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else {
-        /* do when there is no more left */
-        SRF_RETURN_DONE(func_ctx);
-    }
+    return (Datum)0;
 }
 
 /*
@@ -7203,49 +7627,49 @@ Datum pg_shared_memory_detail(PG_FUNCTION_ARGS)
  */
 Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     Datum result;
-    MemoryContext old_context;
+    MemoryContext oldcontext;
     BufferCachePagesContext* fctx = NULL; /* User function context. */
-    TupleDesc tuple_desc;
+    TupleDesc tupledesc;
     HeapTuple tuple;
 
     if (SRF_IS_FIRSTCALL()) {
         int i;
-        BufferDesc* buf_hdr = NULL;
+        BufferDesc* bufHdr = NULL;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /* Switch context when allocating stuff to be used in later calls */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* Create a user function context for cross-call persistence */
         fctx = (BufferCachePagesContext*)palloc(sizeof(BufferCachePagesContext));
 
         /* Construct a tuple descriptor for the result rows. */
-        tuple_desc = CreateTemplateTupleDesc(NUM_BUFFERCACHE_PAGES_ELEM, false);
-        TupleDescInitEntry(tuple_desc, (AttrNumber)1, "bufferid", INT4OID, -1, 0);
-        TupleDescInitEntry(tuple_desc, (AttrNumber)2, "relfilenode", OIDOID, -1, 0);
-        TupleDescInitEntry(tuple_desc, (AttrNumber)3, "bucketid", INT2OID, -1, 0);
-        TupleDescInitEntry(tuple_desc, (AttrNumber)4, "reltablespace", OIDOID, -1, 0);
-        TupleDescInitEntry(tuple_desc, (AttrNumber)5, "reldatabase", OIDOID, -1, 0);
-        TupleDescInitEntry(tuple_desc, (AttrNumber)6, "relforknumber", INT2OID, -1, 0);
-        TupleDescInitEntry(tuple_desc, (AttrNumber)7, "relblocknumber", INT8OID, -1, 0);
-        TupleDescInitEntry(tuple_desc, (AttrNumber)8, "isdirty", BOOLOID, -1, 0);
-        TupleDescInitEntry(tuple_desc, (AttrNumber)9, "usage_count", INT2OID, -1, 0);
+        tupledesc = CreateTemplateTupleDesc(NUM_BUFFERCACHE_PAGES_ELEM, false, TAM_HEAP);
+        TupleDescInitEntry(tupledesc, (AttrNumber)1, "bufferid", INT4OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)2, "relfilenode", OIDOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)3, "bucketid", INT2OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)4, "reltablespace", OIDOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)5, "reldatabase", OIDOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)6, "relforknumber", INT2OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)7, "relblocknumber", INT8OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)8, "isdirty", BOOLOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)9, "usage_count", INT2OID, -1, 0);
 
-        fctx->tupdesc = BlessTupleDesc(tuple_desc);
+        fctx->tupdesc = BlessTupleDesc(tupledesc);
 
         /* Allocate g_instance.attr.attr_storage.NBuffers worth of BufferCachePagesRec records. */
         fctx->record =
             (BufferCachePagesRec*)palloc(sizeof(BufferCachePagesRec) * g_instance.attr.attr_storage.NBuffers);
 
         /* Set max calls and remember the user function context. */
-        func_ctx->max_calls = g_instance.attr.attr_storage.NBuffers;
-        func_ctx->user_fctx = fctx;
+        funcctx->max_calls = g_instance.attr.attr_storage.NBuffers;
+        funcctx->user_fctx = fctx;
 
         /* Return to original context when allocating transient memory */
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
         /*
          * To get a consistent picture of the buffer state, we must lock all
@@ -7253,43 +7677,42 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
          * for concurrency.  Must grab locks in increasing order to avoid
          * possible deadlocks.
          */
-        for (i = 0; i < NUM_BUFFER_PARTITIONS; i++) {
+        for (i = 0; i < NUM_BUFFER_PARTITIONS; i++)
             LWLockAcquire(GetMainLWLockByIndex(FirstBufMappingLock + i), LW_SHARED);
-        }
+
         /*
          * Scan though all the buffers, saving the relevant fields in the
          * fctx->record structure.
          */
         for (i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
+
             uint32 buf_state;
-            buf_hdr = GetBufferDescriptor(i);
+            bufHdr = GetBufferDescriptor(i);
 
             /* Lock each buffer header before inspecting. */
-            buf_state = LockBufHdr(buf_hdr);
+            buf_state = LockBufHdr(bufHdr);
 
-            fctx->record[i].bufferid = BufferDescriptorGetBuffer(buf_hdr);
-            fctx->record[i].relfilenode = buf_hdr->tag.rnode.relNode;
-            fctx->record[i].bucketnode = buf_hdr->tag.rnode.bucketNode;
-            fctx->record[i].reltablespace = buf_hdr->tag.rnode.spcNode;
-            fctx->record[i].reldatabase = buf_hdr->tag.rnode.dbNode;
-            fctx->record[i].forknum = buf_hdr->tag.forkNum;
-            fctx->record[i].blocknum = buf_hdr->tag.blockNum;
+            fctx->record[i].bufferid = BufferDescriptorGetBuffer(bufHdr);
+            fctx->record[i].relfilenode = bufHdr->tag.rnode.relNode;
+            fctx->record[i].bucketnode = bufHdr->tag.rnode.bucketNode;
+            fctx->record[i].reltablespace = bufHdr->tag.rnode.spcNode;
+            fctx->record[i].reldatabase = bufHdr->tag.rnode.dbNode;
+            fctx->record[i].forknum = bufHdr->tag.forkNum;
+            fctx->record[i].blocknum = bufHdr->tag.blockNum;
             fctx->record[i].usagecount = BUF_STATE_GET_USAGECOUNT(buf_state);
 
-            if (buf_state & BM_DIRTY) {
+            if (buf_state & BM_DIRTY)
                 fctx->record[i].isdirty = true;
-            } else {
+            else
                 fctx->record[i].isdirty = false;
-            }
 
             /* Note if the buffer is valid, and has storage created */
-            if ((buf_state & BM_VALID) && (buf_state & BM_TAG_VALID)) {
+            if ((buf_state & BM_VALID) && (buf_state & BM_TAG_VALID))
                 fctx->record[i].isvalid = true;
-            } else {
+            else
                 fctx->record[i].isvalid = false;
-            }
 
-            UnlockBufHdr(buf_hdr, buf_state);
+            UnlockBufHdr(bufHdr, buf_state);
         }
 
         /*
@@ -7299,18 +7722,17 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
          * other process until it can get all the locks it needs. (2) This
          * avoids O(N^2) behavior inside LWLockRelease.
          */
-        for (i = NUM_BUFFER_PARTITIONS; --i >= 0;) {
+        for (i = NUM_BUFFER_PARTITIONS; --i >= 0;)
             LWLockRelease(GetMainLWLockByIndex(FirstBufMappingLock + i));
-        }
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
+    funcctx = SRF_PERCALL_SETUP();
 
     /* Get the saved state */
-    fctx = (BufferCachePagesContext*)func_ctx->user_fctx;
+    fctx = (BufferCachePagesContext*)funcctx->user_fctx;
 
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        uint32 i = func_ctx->call_cntr;
+    if (funcctx->call_cntr < funcctx->max_calls) {
+        uint32 i = funcctx->call_cntr;
         Datum values[NUM_BUFFERCACHE_PAGES_ELEM];
         bool nulls[NUM_BUFFERCACHE_PAGES_ELEM] = {false};
 
@@ -7353,183 +7775,172 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
         tuple = heap_form_tuple(fctx->tupdesc, values, nulls);
         result = HeapTupleGetDatum(tuple);
 
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
     } else {
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
+
 Datum pv_session_time(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    SessionTimeEntry* array = NULL;
+    const int ATT_NUM = 4;
 
-    /* stuff done only on the first call of the function */
-    if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tup_desc;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
 
-        /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+    /* need a tuple descriptor representing 4 columns */
+    TupleDesc tupdesc = CreateTemplateTupleDesc(ATT_NUM, false);
 
-        /*
-         * switch to memory context appropriate for multiple function
-         * calls
-         */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_1, "sessid", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_2, "stat_id", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_3, "stat_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_4, "value", INT8OID, -1, 0);
 
-        /* need a tuple descriptor representing 4 columns */
-        tup_desc = CreateTemplateTupleDesc(4, false);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "sessid", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "stat_id", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "stat_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "value", INT8OID, -1, 0);
+    (void)MemoryContextSwitchTo(oldcontext);
 
-        /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
 
-        func_ctx->user_fctx = (void*)getSessionTimeStatus(&(func_ctx->max_calls));
+    getSessionTimeStatus(rsinfo->setResult, rsinfo->setDesc, insert_pv_session_time);
 
-        (void)MemoryContextSwitchTo(old_context);
-    }
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
 
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    array = (SessionTimeEntry*)func_ctx->user_fctx;
+    return (Datum) 0;
+}
 
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* do when there is more left to send */
-        Datum values[4];
-        bool nulls[4] = {false};
-        HeapTuple tuple = NULL;
-        SessionTimeEntry* entry = NULL;
-        char sessId[SESSION_ID_LEN];
-        uint32 entryIndex, statId;
-        errno_t rc = 0;
+void insert_pv_session_time(Tuplestorestate* tupStore, TupleDesc tupDesc, const SessionTimeEntry* entry)
+{
+    const int ATT_NUM = 4;
+    Datum values[ATT_NUM];
+    bool nulls[ATT_NUM];
+    char sessId[SESSION_ID_LEN];
+    uint32 statId;
+    errno_t rc = 0;
+
+    for (uint32 i = 0; i < TOTAL_TIME_INFO_TYPES; i++) /* do when there is more left to send */
+    {
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "\0", "\0");
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
-        entryIndex = func_ctx->call_cntr / (uint32)TOTAL_TIME_INFO_TYPES;
-        statId = func_ctx->call_cntr % (uint32)TOTAL_TIME_INFO_TYPES;
+        statId = i;
 
-        entry = array + entryIndex;
         getSessionID(sessId, entry->myStartTime, entry->sessionid);
-        values[0] = CStringGetTextDatum(sessId);
-        values[1] = Int32GetDatum(statId);
-        values[2] = CStringGetTextDatum(TimeInfoTypeName[statId]);
-        values[3] = Int64GetDatum(entry->array[statId]);
+        values[ARR_0] = CStringGetTextDatum(sessId);
+        values[ARR_1] = Int32GetDatum(statId);
+        values[ARR_2] = CStringGetTextDatum(TimeInfoTypeName[statId]);
+        values[ARR_3] = Int64GetDatum(entry->array[statId]);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else {
-        pfree_ext(array);
-        /* do when there is no more left */
-        SRF_RETURN_DONE(func_ctx);
+        tuplestore_putvalues(tupStore, tupDesc, values, nulls);
     }
 }
 
+
 Datum pv_instance_time(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    SessionTimeEntry* instance_entry = NULL;
+    FuncCallContext* funcctx = NULL;
+    SessionTimeEntry* instanceEntry = NULL;
 
     /* stuff done only on the first call of the function */
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tup_desc;
+        MemoryContext oldcontext;
+        TupleDesc tupdesc;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * switch to memory context appropriate for multiple function
          * calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* need a tuple descriptor representing 4 columns */
-        tup_desc = CreateTemplateTupleDesc(3, false);
+        tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "stat_id", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "stat_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "value", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "stat_id", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "stat_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "value", INT8OID, -1, 0);
 
         /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
-        func_ctx->user_fctx = (void*)getInstanceTimeStatus();
-        func_ctx->max_calls = TOTAL_TIME_INFO_TYPES;
+        funcctx->user_fctx = (void*)getInstanceTimeStatus();
+        funcctx->max_calls = TOTAL_TIME_INFO_TYPES;
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    instance_entry = (SessionTimeEntry*)func_ctx->user_fctx;
+    funcctx = SRF_PERCALL_SETUP();
+    instanceEntry = (SessionTimeEntry*)funcctx->user_fctx;
 
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* do when there is more left to send */
+    if (funcctx->call_cntr < funcctx->max_calls) /* do when there is more left to send */
+    {
         Datum values[3];
         bool nulls[3] = {false};
         HeapTuple tuple = NULL;
 
-        values[0] = Int32GetDatum(func_ctx->call_cntr);
+        values[0] = Int32GetDatum(funcctx->call_cntr);
         nulls[0] = false;
-        values[1] = CStringGetTextDatum(TimeInfoTypeName[func_ctx->call_cntr]);
+        values[1] = CStringGetTextDatum(TimeInfoTypeName[funcctx->call_cntr]);
         nulls[1] = false;
-        values[2] = Int64GetDatum(instance_entry->array[func_ctx->call_cntr]);
+        values[2] = Int64GetDatum(instanceEntry->array[funcctx->call_cntr]);
         nulls[2] = false;
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     } else {
-        pfree_ext(instance_entry);
+        pfree_ext(instanceEntry);
         /* do when there is no more left */
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
 Datum pg_stat_get_redo_stat(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    PgStat_RedoEntry* redo_entry = &redoStatistics;
+    FuncCallContext* funcctx = NULL;
+    PgStat_RedoEntry* redoEntry = &redoStatistics;
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
-        MemoryContext old_context;
+        TupleDesc tupdesc;
+        MemoryContext oldcontext;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
+        /* build tupdesc for result tuples */
         /* this had better match pv_plan view in system_views.sql */
-        tup_desc = CreateTemplateTupleDesc(7, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "phywrts", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "phyblkwrt", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "writetim", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "avgiotim", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "lstiotim", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)6, "miniotim", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)7, "maxiowtm", INT8OID, -1, 0);
+        tupdesc = CreateTemplateTupleDesc(7, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "phywrts", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "phyblkwrt", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "writetim", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "avgiotim", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "lstiotim", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)6, "miniotim", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)7, "maxiowtm", INT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-        func_ctx->max_calls = 1;
-        func_ctx->call_cntr = 0;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = 1;
+        funcctx->call_cntr = 0;
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
         /* for each row */
         Datum values[7];
         bool nulls[7] = {false};
@@ -7543,20 +7954,20 @@ Datum pg_stat_get_redo_stat(PG_FUNCTION_ARGS)
 
         LWLockAcquire(WALWriteLock, LW_SHARED);
         /* Values available to all callers */
-        values[0] = Int64GetDatum(redo_entry->writes);
-        values[1] = Int64GetDatum(redo_entry->writeBlks);
-        values[2] = Int64GetDatum(redo_entry->writeTime);
-        values[3] = Int64GetDatum(redo_entry->avgIOTime);
-        values[4] = Int64GetDatum(redo_entry->lstIOTime);
-        values[5] = Int64GetDatum(redo_entry->minIOTime);
-        values[6] = Int64GetDatum(redo_entry->maxIOTime);
+        values[0] = Int64GetDatum(redoEntry->writes);
+        values[1] = Int64GetDatum(redoEntry->writeBlks);
+        values[2] = Int64GetDatum(redoEntry->writeTime);
+        values[3] = Int64GetDatum(redoEntry->avgIOTime);
+        values[4] = Int64GetDatum(redoEntry->lstIOTime);
+        values[5] = Int64GetDatum(redoEntry->minIOTime);
+        values[6] = Int64GetDatum(redoEntry->maxIOTime);
         LWLockRelease(WALWriteLock);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     } else {
         /* nothing left */
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
@@ -7579,218 +7990,190 @@ const char* SessionStatisticsTypeName[N_TOTAL_SESSION_STATISTICS_TYPES] = {"n_co
     "n_cu_hdd_asyn_read"};
 
 const char* SessionStatisticsTypeUnit[N_TOTAL_SESSION_STATISTICS_TYPES] = {
-    "",             /* n_commit */
-    "",             /* n_rollback */
-    "",             /* n_sql */
-    "",             /* n_table_scan */
-    "",             /* n_blocks_fetched */
-    "",             /* n_physical_read_operation */
-    "",             /* n_shared_blocks_dirtied */
-    "",             /* n_local_blocks_dirtied */
-    "",             /* n_shared_blocks_read */
-    "",             /* n_local_blocks_read */
-    "microseconds", /* n_blocks_read_time */
-    "microseconds", /* n_blocks_write_time */
-    "",             /* n_sort_in_memory */
-    "",             /* n_sort_in_disk */
-    "",             /* n_cu_mem_hit */
-    "",             /* n_cu_hdd_sync_read */
-    ""              /* n_cu_hdd_asyn_read */
+    "",             /*n_commit*/
+    "",             /*n_rollback*/
+    "",             /*n_sql*/
+    "",             /*n_table_scan*/
+    "",             /*n_blocks_fetched*/
+    "",             /*n_physical_read_operation*/
+    "",             /*n_shared_blocks_dirtied*/
+    "",             /*n_local_blocks_dirtied*/
+    "",             /*n_shared_blocks_read*/
+    "",             /*n_local_blocks_read*/
+    "microseconds", /*n_blocks_read_time*/
+    "microseconds", /*n_blocks_write_time*/
+    "",             /*n_sort_in_memory*/
+    "",             /*n_sort_in_disk*/
+    "",             /*n_cu_mem_hit*/
+    "",             /*n_cu_hdd_sync_read*/
+    ""              /*n_cu_hdd_asyn_read*/
 };
 
 Datum pv_session_stat(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    SessionLevelStatistic* array = NULL;
+    const int ATT_NUM = 5;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+    /* need a tuple descriptor representing 5 columns */
+    TupleDesc tupdesc = CreateTemplateTupleDesc(ATT_NUM, false);
 
-    if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tup_desc;
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_1, "sessid", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_2, "statid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_3, "statname", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_4, "statunit", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_5, "value", INT8OID, -1, 0);
 
-        /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
 
-        /*
-         * switch to memory context appropriate for multiple function
-         * calls
-         */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+    (void)MemoryContextSwitchTo(oldcontext);
 
-        /* need a tuple descriptor representing 5 columns */
-        tup_desc = CreateTemplateTupleDesc(5, false);
+    getSessionStatistics(rsinfo->setResult, rsinfo->setDesc, insert_pv_session_stat);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "sessid", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "statid", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "statname", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "statunit", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "value", INT8OID, -1, 0);
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
 
-        /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+    return (Datum) 0;
+}
 
-        func_ctx->user_fctx = (void*)getSessionStatistics(&(func_ctx->max_calls));
+void insert_pv_session_stat(Tuplestorestate* tupStore, TupleDesc tupDesc, const SessionLevelStatistic* entry)
+{
+    const int ATT_NUM = 5;
 
-        (void)MemoryContextSwitchTo(old_context);
-    }
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    array = (SessionLevelStatistic*)func_ctx->user_fctx;
+    Datum values[ATT_NUM];
+    bool nulls[ATT_NUM];
+    char sessId[SESSION_ID_LEN];
+    uint32  statId;
+    errno_t rc = 0;
 
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        Datum values[5];
-        bool nulls[5] = {false};
-        HeapTuple tuple = NULL;
-        SessionLevelStatistic* entry = NULL;
-        char sess_Id[SESSION_ID_LEN];
-        uint32 entry_index;
-		uint32 stat_id;
-        errno_t rc = 0;
+    for (uint32 i = 0; i < N_TOTAL_SESSION_STATISTICS_TYPES; i++) {
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "\0", "\0");
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
-        entry_index = func_ctx->call_cntr / (uint32)N_TOTAL_SESSION_STATISTICS_TYPES;
-        stat_id = func_ctx->call_cntr % (uint32)N_TOTAL_SESSION_STATISTICS_TYPES;
+        statId = i;
 
-        entry = array + entry_index;
-        getSessionID(sess_Id, entry->sessionStartTime, entry->sessionid);
-        values[0] = CStringGetTextDatum(sess_Id);
-        values[1] = Int32GetDatum(stat_id);
-        values[2] = CStringGetTextDatum(SessionStatisticsTypeName[stat_id]);
-        values[3] = CStringGetTextDatum(SessionStatisticsTypeUnit[stat_id]);
-        values[4] = Int64GetDatum(entry->array[stat_id]);
+        getSessionID(sessId, entry->sessionStartTime, entry->sessionid);
+        values[ARR_0] = CStringGetTextDatum(sessId);
+        values[ARR_1] = Int32GetDatum(statId);
+        values[ARR_2] = CStringGetTextDatum(SessionStatisticsTypeName[statId]);
+        values[ARR_3] = CStringGetTextDatum(SessionStatisticsTypeUnit[statId]);
+        values[ARR_4] = Int64GetDatum(entry->array[statId]);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else {
-        SRF_RETURN_DONE(func_ctx);
+        tuplestore_putvalues(tupStore, tupDesc, values, nulls);
     }
 }
 
 Datum pv_session_memory(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    SessionLevelMemory* array = NULL;
-
+    const int ATT_NUM = 4;
     if (!t_thrd.utils_cxt.gs_mp_inited) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("unsupported view for memory protection feature is disabled.")));
     }
 
-    if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context;
-        TupleDesc tup_desc;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
 
-        /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+    /* need a tuple descriptor representing 4 columns */
+    TupleDesc tupdesc = CreateTemplateTupleDesc(ATT_NUM, false);
 
-        /*
-         * switch to memory context appropriate for multiple function
-         * calls
-         */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_1, "sessid", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_2, "init_mem", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_3, "used_mem", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_4, "peak_mem", INT4OID, -1, 0);
 
-        /* need a tuple descriptor representing 5 columns */
-        tup_desc = CreateTemplateTupleDesc(4, false);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "sessid", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "init_mem", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "used_mem", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "peak_mem", INT4OID, -1, 0);
+    (void)MemoryContextSwitchTo(oldcontext);
 
-        /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+    getSessionMemory(rsinfo->setResult, rsinfo->setDesc, insert_pv_session_memory);
 
-        func_ctx->user_fctx = (void*)getSessionMemory(&(func_ctx->max_calls));
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
 
-        (void)MemoryContextSwitchTo(old_context);
-    }
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    array = (SessionLevelMemory*)func_ctx->user_fctx;
-
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        Datum values[5];
-        bool nulls[5] = {false};
-        HeapTuple tuple = NULL;
-        SessionLevelMemory* entry = NULL;
-        uint32 entry_index;
-        char sess_id[SESSION_ID_LEN];
-
-        errno_t rc = 0;
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(sess_id, sizeof(sess_id), 0, sizeof(sess_id));
-        securec_check(rc, "\0", "\0");
-
-        entry_index = func_ctx->call_cntr;
-
-        entry = array + entry_index;
-        getSessionID(sess_id, entry->threadStartTime, entry->sessionid);
-        values[0] = CStringGetTextDatum(sess_id);
-        values[1] = Int32GetDatum(entry->initMemInChunks << (chunkSizeInBits - BITS_IN_MB));
-        values[2] = Int32GetDatum((entry->queryMemInChunks - entry->initMemInChunks) << (chunkSizeInBits - BITS_IN_MB));
-        values[3] = Int32GetDatum((entry->peakChunksQuery - entry->initMemInChunks) << (chunkSizeInBits - BITS_IN_MB));
-
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else {
-        SRF_RETURN_DONE(func_ctx);
-    }
+    return (Datum) 0;
 }
+
+void insert_pv_session_memory(Tuplestorestate* tupStore, TupleDesc tupDesc, const SessionLevelMemory* entry)
+{
+    const int ATT_NUM = 4;
+    Datum values[ATT_NUM];
+    bool nulls[ATT_NUM];
+    char sessId[SESSION_ID_LEN];
+
+    errno_t rc = 0;
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(sessId, sizeof(sessId), 0, sizeof(sessId));
+    securec_check(rc, "\0", "\0");
+
+    getSessionID(sessId, entry->threadStartTime, entry->sessionid);
+    values[ARR_0] = CStringGetTextDatum(sessId);
+    values[ARR_1] = Int32GetDatum(entry->initMemInChunks << (chunkSizeInBits - BITS_IN_MB));
+    values[ARR_2] = Int32GetDatum((entry->queryMemInChunks - entry->initMemInChunks) << (chunkSizeInBits - BITS_IN_MB));
+    values[ARR_3] = Int32GetDatum((entry->peakChunksQuery - entry->initMemInChunks) << (chunkSizeInBits - BITS_IN_MB));
+
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+}
+
 
 Datum pg_stat_get_file_stat(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    PgStat_FileEntry* file_entry = NULL;
+    FuncCallContext* funcctx = NULL;
+    PgStat_FileEntry* fileEntry = NULL;
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
-        MemoryContext old_context;
+        TupleDesc tupdesc;
+        MemoryContext oldcontext;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
+        /* build tupdesc for result tuples */
         /* this had better match pv_plan view in system_views.sql */
-        tup_desc = CreateTemplateTupleDesc(13, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "filenum", OIDOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "dbid", OIDOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "spcid", OIDOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "phyrds", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "phywrts", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)6, "phyblkrd", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)7, "phyblkwrt", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)8, "readtim", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)9, "writetim", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)10, "avgiotim", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)11, "lstiotim", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)12, "miniotim", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)13, "maxiowtm", INT8OID, -1, 0);
+        tupdesc = CreateTemplateTupleDesc(13, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "filenum", OIDOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "dbid", OIDOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "spcid", OIDOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "phyrds", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "phywrts", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)6, "phyblkrd", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)7, "phyblkwrt", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)8, "readtim", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)9, "writetim", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)10, "avgiotim", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)11, "lstiotim", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)12, "miniotim", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)13, "maxiowtm", INT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-        func_ctx->max_calls = NUM_FILES;
-        file_entry = (PgStat_FileEntry*)&pgStatFileArray[NUM_FILES - 1];
-        if (file_entry->dbid == 0) {
-            func_ctx->max_calls = fileStatCount;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = NUM_FILES;
+        fileEntry = (PgStat_FileEntry*)&pgStatFileArray[NUM_FILES - 1];
+        if (0 == fileEntry->dbid) {
+            funcctx->max_calls = fileStatCount;
         }
-        func_ctx->call_cntr = 0;
+        funcctx->call_cntr = 0;
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
         /* for each row */
         Datum values[13];
         bool nulls[13] = {false};
@@ -7803,68 +8186,68 @@ Datum pg_stat_get_file_stat(PG_FUNCTION_ARGS)
         securec_check(rc, "\0", "\0");
         LWLockAcquire(FileStatLock, LW_SHARED);
 
-        file_entry = (PgStat_FileEntry*)&pgStatFileArray[func_ctx->call_cntr];
+        fileEntry = (PgStat_FileEntry*)&pgStatFileArray[funcctx->call_cntr];
         /* Values available to all callers */
-        values[0] = ObjectIdGetDatum(file_entry->fn);
+        values[0] = ObjectIdGetDatum(fileEntry->fn);
 
-        if (file_entry->dbid == 0) {
+        if (0 == fileEntry->dbid)
             nulls[1] = true;
-        } else {
-            values[1] = ObjectIdGetDatum(file_entry->dbid);
-        }
+        else
+            values[1] = ObjectIdGetDatum(fileEntry->dbid);
 
-        values[2] = ObjectIdGetDatum(file_entry->spcid);
-        values[3] = Int64GetDatum(file_entry->reads);
-        values[4] = Int64GetDatum(file_entry->writes);
-        values[5] = Int64GetDatum(file_entry->readBlks);
-        values[6] = Int64GetDatum(file_entry->writeBlks);
-        values[7] = Int64GetDatum(file_entry->readTime);
-        values[8] = Int64GetDatum(file_entry->writeTime);
-        values[9] = Int64GetDatum(file_entry->avgIOTime);
-        values[10] = Int64GetDatum(file_entry->lstIOTime);
-        values[11] = Int64GetDatum(file_entry->minIOTime);
-        values[12] = Int64GetDatum(file_entry->maxIOTime);
+        values[2] = ObjectIdGetDatum(fileEntry->spcid);
+        values[3] = Int64GetDatum(fileEntry->reads);
+        values[4] = Int64GetDatum(fileEntry->writes);
+        values[5] = Int64GetDatum(fileEntry->readBlks);
+        values[6] = Int64GetDatum(fileEntry->writeBlks);
+        values[7] = Int64GetDatum(fileEntry->readTime);
+        values[8] = Int64GetDatum(fileEntry->writeTime);
+        values[9] = Int64GetDatum(fileEntry->avgIOTime);
+        values[10] = Int64GetDatum(fileEntry->lstIOTime);
+        values[11] = Int64GetDatum(fileEntry->minIOTime);
+        values[12] = Int64GetDatum(fileEntry->maxIOTime);
 
         LWLockRelease(FileStatLock);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     } else {
         /* nothing left */
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
 Datum get_local_rel_iostat(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
-        MemoryContext old_context;
+        TupleDesc tupdesc;
+        MemoryContext oldcontext;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
-        tup_desc = CreateTemplateTupleDesc(4, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "phyrds", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "phywrts", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "phyblkrd", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "phyblkwrt", INT8OID, -1, 0);
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-        func_ctx->max_calls = 1;
-        func_ctx->call_cntr = 0;
-        (void)MemoryContextSwitchTo(old_context);
+        /* build tupdesc for result tuples */
+        tupdesc = CreateTemplateTupleDesc(4, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "phyrds", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "phywrts", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "phyblkrd", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "phyblkwrt", INT8OID, -1, 0);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = 1;
+        funcctx->call_cntr = 0;
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
         const int colNum = 4;
         /* for each row */
         Datum values[colNum];
@@ -7890,39 +8273,39 @@ Datum get_local_rel_iostat(PG_FUNCTION_ARGS)
             CHECK_FOR_INTERRUPTS();
         }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     } else {
         /* nothing left */
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 Datum total_cpu(PG_FUNCTION_ARGS)
 {
     int fd = -1;
-    char temp_buf[512] = {0};
+    char tempbuf[512] = {0};
     char* S = NULL;
     int64 cpu_usage = 0;
     unsigned long long cpu_utime, cpu_stime;
     int num_read;
     int rc = EOK;
 
-    rc = snprintf_s(temp_buf, sizeof(temp_buf), 256, "/proc/%d/stat", getpid());
+    rc = snprintf_s(tempbuf, sizeof(tempbuf), 256, "/proc/%d/stat", getpid());
     securec_check_ss(rc, "\0", "\0");
 
-    fd = open(temp_buf, O_RDONLY, 0);
+    fd = open(tempbuf, O_RDONLY, 0);
     if (fd < 0) {
         PG_RETURN_INT64(cpu_usage);
     }
 
-    num_read = read(fd, temp_buf, sizeof(temp_buf) - 1);
+    num_read = read(fd, tempbuf, sizeof(tempbuf) - 1);
     close(fd);
 
     if (num_read < 0) {
         PG_RETURN_INT64(cpu_usage);
     }
-    temp_buf[num_read] = '\0';
-    S = temp_buf;
+    tempbuf[num_read] = '\0';
+    S = tempbuf;
 
     S = strchr(S, '(') + 1;
     S = strrchr(S, ')') + 2;
@@ -7940,13 +8323,12 @@ Datum total_cpu(PG_FUNCTION_ARGS)
                         "completely..\n",
                     __FILE__,
                     __LINE__)));
-        } else {
+        } else
             ereport(LOG,
                 (errmsg("ERROR at %s : %d : The destination buffer or format is a NULL pointer or the invalid "
                         "parameter handle is invoked..\n",
                     __FILE__,
                     __LINE__)));
-        }
     }
 
     cpu_usage = cpu_utime + cpu_stime;
@@ -7966,14 +8348,14 @@ Datum get_hostname(PG_FUNCTION_ARGS)
 Datum sessionid_to_pid(PG_FUNCTION_ARGS)
 {
     int64 pid;
-    char* session_id = PG_GETARG_CSTRING(0);
+    char* sessionid = PG_GETARG_CSTRING(0);
     char* tmp = NULL;
-    if (session_id == NULL) {
+    if (sessionid == NULL) {
         PG_RETURN_INT64(0);
     }
 
-    tmp = strrchr(session_id, '.');
-    if (tmp == NULL) {
+    tmp = strrchr(sessionid, '.');
+    if (NULL == tmp) {
         PG_RETURN_INT64(0);
     }
     tmp++;
@@ -7986,34 +8368,34 @@ Datum sessionid_to_pid(PG_FUNCTION_ARGS)
 Datum total_memory(PG_FUNCTION_ARGS)
 {
     int fd = -1;
-    char temp_buf[1024] = {0};
+    char tempbuf[1024] = {0};
     char* S = NULL;
     char* tmp = NULL;
     int64 total_vm = 0;
     int num_read;
     int rc = 0;
 
-    rc = snprintf_s(temp_buf, sizeof(temp_buf), 256, "/proc/%d/status", getpid());
+    rc = snprintf_s(tempbuf, sizeof(tempbuf), 256, "/proc/%d/status", getpid());
     securec_check_ss(rc, "\0", "\0");
 
-    fd = open(temp_buf, O_RDONLY, 0);
+    fd = open(tempbuf, O_RDONLY, 0);
     if (fd < 0) {
         PG_RETURN_INT64(total_vm);
     }
 
-    num_read = read(fd, temp_buf, sizeof(temp_buf) - 1);
+    num_read = read(fd, tempbuf, sizeof(tempbuf) - 1);
     close(fd);
 
     if (num_read < 0) {
         PG_RETURN_INT64(total_vm);
     }
-    temp_buf[num_read] = '\0';
-    S = temp_buf;
+    tempbuf[num_read] = '\0';
+    S = tempbuf;
 
     for (;;) {
         if (0 == strncmp("VmSize", S, 6)) {
             tmp = strchr(S, ':');
-            if (tmp == NULL) {
+            if (NULL == tmp) {
                 break;
             }
             tmp = tmp + 2;
@@ -8021,7 +8403,7 @@ Datum total_memory(PG_FUNCTION_ARGS)
             break;
         }
         S = strchr(S, '\n');
-        if (S == NULL) {
+        if (NULL == S) {
             break;
         }
         S++;
@@ -8034,42 +8416,47 @@ Datum table_data_skewness(PG_FUNCTION_ARGS)
 {
     Datum array = PG_GETARG_DATUM(0);
     char flag = PG_GETARG_CHAR(1);
-    int2 att_num;
+    int2 attnum;
+
+    if (IsLocatorDistributedBySlice(flag)) {
+        attnum = u_sess->pgxc_cxt.PGXCNodeId;
+        PG_RETURN_INT16(attnum);
+    }
 
     if (u_sess->exec_cxt.global_bucket_map == NULL) {
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("Bucketmap is NULL")));
     }
 
-    int bucket_index;
+    int bucketIndex;
 
-    FunctionCallInfoData func_info;
+    FunctionCallInfoData funcinfo;
 
-    InitFunctionCallInfoData(func_info, NULL, 2, InvalidOid, NULL, NULL);
+    InitFunctionCallInfoData(funcinfo, NULL, 2, InvalidOid, NULL, NULL);
 
-    func_info.arg[0] = array;
-    func_info.arg[1] = CharGetDatum(flag);
-    func_info.argnull[0] = false;
-    func_info.argnull[1] = false;
+    funcinfo.arg[0] = array;
+    funcinfo.arg[1] = CharGetDatum(flag);
+    funcinfo.argnull[0] = false;
+    funcinfo.argnull[1] = false;
 
-    bucket_index = getbucket(&func_info);
+    bucketIndex = getbucket(&funcinfo);
 
-    if (func_info.isnull) {
-        att_num = 0;
+    if (funcinfo.isnull) {
+        attnum = 0;
     } else {
-        att_num = u_sess->exec_cxt.global_bucket_map[bucket_index];
+        attnum = u_sess->exec_cxt.global_bucket_map[bucketIndex];
     }
 
-    PG_RETURN_INT16(att_num);
+    PG_RETURN_INT16(attnum);
 }
 
 ScalarVector* vtable_data_skewness(PG_FUNCTION_ARGS)
 {
     VectorBatch* batch = (VectorBatch*)PG_GETARG_DATUM(0);
-    ScalarVector* vec_flag = PG_GETARG_VECTOR(1);
+    ScalarVector* vecflag = PG_GETARG_VECTOR(1);
     int32 nvalues = PG_GETARG_INT32(2);
 
-    ScalarVector* presult_Vector = PG_GETARG_VECTOR(3);
-    uint8* pflags_res = presult_Vector->m_flag;
+    ScalarVector* presultVector = PG_GETARG_VECTOR(3);
+    uint8* pflagsRes = presultVector->m_flag;
     bool* pselection = PG_GETARG_SELECTION(4);
 
     if (u_sess->exec_cxt.global_bucket_map == NULL) {
@@ -8078,32 +8465,32 @@ ScalarVector* vtable_data_skewness(PG_FUNCTION_ARGS)
 
     ScalarVector* bucketIndex = (ScalarVector*)DirectFunctionCall5((PGFunction)vgetbucket,
         PointerGetDatum(batch),
-        PointerGetDatum(vec_flag),
+        PointerGetDatum(vecflag),
         (Datum)nvalues,
-        PointerGetDatum(presult_Vector),
+        PointerGetDatum(presultVector),
         PointerGetDatum(pselection));
 
-    int row_num = bucketIndex->m_rows;
+    int rowNum = bucketIndex->m_rows;
 
     if (pselection == NULL) {
-        for (int i = 0; i < row_num; i++) {
+        for (int i = 0; i < rowNum; i++) {
             if (!bucketIndex->IsNull(i)) {
                 int index = bucketIndex->m_vals[i];
                 bucketIndex->m_vals[i] = u_sess->exec_cxt.global_bucket_map[index];
             } else {
                 bucketIndex->m_vals[i] = 0;
-                SET_NOTNULL(pflags_res[i]);
+                SET_NOTNULL(pflagsRes[i]);
             }
         }
     } else {
-        for (int i = 0; i < row_num; i++) {
+        for (int i = 0; i < rowNum; i++) {
             if (pselection[i]) {
                 if (!bucketIndex->IsNull(i)) {
                     int index = bucketIndex->m_vals[i];
                     bucketIndex->m_vals[i] = u_sess->exec_cxt.global_bucket_map[index];
                 } else {
                     bucketIndex->m_vals[i] = 0;
-                    SET_NOTNULL(pflags_res[i]);
+                    SET_NOTNULL(pflagsRes[i]);
                 }
             }
         }
@@ -8120,25 +8507,43 @@ void gs_recursive_memctx_dump(MemoryContext context, StringInfoData* memBuf)
     appendStringInfo(
         memBuf, "%s, %lu, %lu\n", context->name, (unsigned long)set->totalSpace, (unsigned long)set->freeSpace);
 
-    /* recursive MemoryContext's child */
+    /*recursive MemoryContext's child*/
     for (child = context->firstchild; child != NULL; child = child->nextchild) {
         gs_recursive_memctx_dump(child, memBuf);
     }
 }
 
-static const char* dump_dir = "/tmp/dumpmem";
-
 /* dump the memory context tree when the thread id is specified */
-void DumpMemoryContextTree(ThreadId tid)
+void DumpMemoryContextTree(ThreadId tid, int* procIdx)
 {
-#define DUMPFILE_BUFF_SIZE 128
+    char dump_dir[MAX_PATH_LEN] = {0};
+    errno_t rc;
+    bool is_absolute = false;
+
+    // get the path of dump file
+    is_absolute = is_absolute_path(u_sess->attr.attr_common.Log_directory);
+    if (is_absolute) {
+        rc = snprintf_s(dump_dir,
+            sizeof(dump_dir),
+            sizeof(dump_dir) - 1,
+            "%s/memdump",
+            u_sess->attr.attr_common.Log_directory);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        rc = snprintf_s(dump_dir,
+            sizeof(dump_dir),
+            sizeof(dump_dir) - 1,
+            "%s/pg_log/memdump",
+            g_instance.attr.attr_common.data_directory);
+        securec_check_ss(rc, "\0", "\0");
+    }
 
     // create directory "/tmp/dumpmem" to save memory context log file
     int ret;
     struct stat info;
     if (stat(dump_dir, &info) == 0) {
-        if (!S_ISDIR(info.st_mode)) {
-            // S_ISDIR() doesn't exist on my windows
+        if (!S_ISDIR(info.st_mode))  // S_ISDIR() doesn't exist on my windows
+        {
             elog(LOG, "%s maybe not a directory.", dump_dir);
             return;
         }
@@ -8151,9 +8556,9 @@ void DumpMemoryContextTree(ThreadId tid)
     }
 
     // create file to be dump
-    char dump_file[128] = {0};
-    int rc =
-        sprintf_s(dump_file, DUMPFILE_BUFF_SIZE, "%s/%lu_%lu.log", dump_dir, (unsigned long)tid, (uint64)time(NULL));
+    char dump_file[MAX_PATH_LEN] = {0};
+    rc = sprintf_s(dump_file, MAX_PATH_LEN, "%s/%lu_%lu.log",
+                   dump_dir, (unsigned long)tid, (uint64)time(NULL));
     securec_check_ss(rc, "\0", "\0");
     FILE* dump_fp = fopen(dump_file, "w");
     if (NULL == dump_fp) {
@@ -8162,39 +8567,49 @@ void DumpMemoryContextTree(ThreadId tid)
     }
 
     // 4. walk all memory context
+    volatile PGPROC* proc = NULL;
+    int idx = 0;
     PG_TRY();
     {
-        StringInfoData mem_buf;
+        StringInfoData memBuf;
 
-        initStringInfo(&mem_buf);
+        initStringInfo(&memBuf);
 
         /* dump the top memory context */
         HOLD_INTERRUPTS();
 
-        for (int idx = 0; idx < (int)g_instance.proc_base->allProcCount; idx++) {
-            volatile PGPROC* proc = (g_instance.proc_base_all_procs[idx]);
+        for (idx = 0; idx < (int)g_instance.proc_base->allProcCount; idx++) {
+            proc = (g_instance.proc_base_all_procs[idx]);
+            *procIdx = idx;
 
             if (proc->pid == tid) {
-                /* lock this proc's delete MemoryContext action */
+                /*lock this proc's delete MemoryContext action*/
                 (void)syscalllockAcquire(&((PGPROC*)proc)->deleMemContextMutex);
                 if (NULL != proc->topmcxt)
-                    gs_recursive_memctx_dump(proc->topmcxt, &mem_buf);
+                    gs_recursive_memctx_dump(proc->topmcxt, &memBuf);
                 (void)syscalllockRelease(&((PGPROC*)proc)->deleMemContextMutex);
                 break;
             }
         }
 
         RESUME_INTERRUPTS();
-        uint64 bytes = fwrite(mem_buf.data, 1, mem_buf.len, dump_fp);
-        if (bytes != (uint64)mem_buf.len) {
-            elog(LOG, "Could not write memory usage information. Attempted to write %d", mem_buf.len);
+
+        uint64 bytes = fwrite(memBuf.data, 1, memBuf.len, dump_fp);
+
+        if (bytes != (uint64)memBuf.len) {
+            elog(LOG, "Could not write memory usage information. Attempted to write %d", memBuf.len);
         }
-        pfree(mem_buf.data);
+
+        pfree(memBuf.data);
     }
     PG_CATCH();
     {
+        if (*procIdx < (int)g_instance.proc_base->allProcCount) {
+            proc = g_instance.proc_base_all_procs[*procIdx];
+            (void)syscalllockRelease(&((PGPROC*)proc)->deleMemContextMutex);
+        }
         fclose(dump_fp);
-        return;
+        PG_RE_THROW();
     }
     PG_END_TRY();
 
@@ -8209,15 +8624,21 @@ void DumpMemoryContextTree(ThreadId tid)
 Datum pv_session_memctx_detail(PG_FUNCTION_ARGS)
 {
     ThreadId tid = PG_GETARG_INT64(0);
-    if (tid == 0 || tid == PostmasterPid) {
+    if (!superuser()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("Only system admin user can use this function")));
+    }
+
+    if (0 == tid || tid == PostmasterPid) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("invalid thread id %ld for it is 0 or postmaster pid.", tid)));
     }
 
     char* ctx_name = PG_GETARG_CSTRING(1);
-    if (ctx_name == NULL || strlen(ctx_name) == 0) {
-        DumpMemoryContextTree(tid);
+    if (NULL == ctx_name || strlen(ctx_name) == 0) {
+        int procIdx = 0;
+        DumpMemoryContextTree(tid, &procIdx);
         PG_RETURN_BOOL(true);
     }
 
@@ -8234,11 +8655,9 @@ Datum pv_session_memctx_detail(PG_FUNCTION_ARGS)
 Datum pg_shared_memctx_detail(PG_FUNCTION_ARGS)
 {
     char* ctx_name = PG_GETARG_CSTRING(0);
-    
     if (!superuser()) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), 
-                (errmsg("Must be system admin to dump memory context."))));
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("Only system admin user can use this function")));
     }
 
     if (NULL == ctx_name || strlen(ctx_name) == 0) {
@@ -8282,20 +8701,8 @@ const char* NGMemoryTypeName[] = {"ng_total_memory",
 
 Datum gs_total_nodegroup_memory_detail(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    FuncCallContext* func_ctx = NULL;
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("unsupported view in single node mode.")));
-    /* do when there is no more left */
-    SRF_RETURN_DONE(func_ctx);
-#else
-    FuncCallContext* func_ctx = NULL;
-    static int* ng_mem_size = NULL;
-    static char** ng_name = NULL;
-    static uint32 allcnt = 0;
-    static uint32 cnti = 0;
-    static uint32 cntj = 0;
+    FuncCallContext* funcctx = NULL;
+    PgStat_NgMemSize *ngmemsize_ptr = NULL;
 
     if (!t_thrd.utils_cxt.gs_mp_inited) {
         ereport(ERROR,
@@ -8304,26 +8711,26 @@ Datum gs_total_nodegroup_memory_detail(PG_FUNCTION_ARGS)
     }
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
-        MemoryContext old_context;
+        TupleDesc tupdesc;
+        MemoryContext oldcontext;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * Switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
-        tup_desc = CreateTemplateTupleDesc(3, false);
+        /* build tupdesc for result tuples */
+        tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "ngname", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "ngname", TEXTOID, -1, 0);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "memorytype", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "memorymbytes", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "memorytype", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "memorymbytes", INT4OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         USE_AUTO_LWLOCK(WorkloadNodeGroupLock, LW_SHARED);
         int num = 0;
@@ -8341,17 +8748,18 @@ Datum gs_total_nodegroup_memory_detail(PG_FUNCTION_ARGS)
         if ((unsigned int)cnt > (MaxAllocSize / elementSize)) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid size of cnt")));
         }
-
-        ng_mem_size = (int*)palloc0(cnt * NG_MEMORY_TYPES_CNT * sizeof(int));
-        ng_name = (char**)palloc0(cnt * sizeof(char*));
+        funcctx->user_fctx = (PgStat_NgMemSize*)palloc0(sizeof(PgStat_NgMemSize));
+        ngmemsize_ptr = (PgStat_NgMemSize*)funcctx->user_fctx;
+        ngmemsize_ptr->ngmemsize = (int*)palloc0(cnt * NG_MEMORY_TYPES_CNT * sizeof(int));
+        ngmemsize_ptr->ngname = (char**)palloc0(cnt * sizeof(char*));
 
         WLMNodeGroupInfo* hdata = &g_instance.wlm_cxt->MyDefaultNodeGroup;
 
-        ng_mem_size[num++] = hdata->total_memory;
-        ng_mem_size[num++] = hdata->used_memory;
-        ng_mem_size[num++] = hdata->estimate_memory;
+        ngmemsize_ptr->ngmemsize[num++] = hdata->total_memory;
+        ngmemsize_ptr->ngmemsize[num++] = hdata->used_memory;
+        ngmemsize_ptr->ngmemsize[num++] = hdata->estimate_memory;
         num += (NG_MEMORY_TYPES_CNT - 3); /* no foreign rp in default node group */
-        ng_name[i++] = pstrdup(hdata->group_name);
+        ngmemsize_ptr->ngname[i++] = pstrdup(hdata->group_name);
 
         /* search all node group to get its resource usage */
         HASH_SEQ_STATUS hash_seq;
@@ -8362,33 +8770,33 @@ Datum gs_total_nodegroup_memory_detail(PG_FUNCTION_ARGS)
                 continue;
             }
 
-            ng_mem_size[num++] = hdata->total_memory;
-            ng_mem_size[num++] = hdata->used_memory;
-            ng_mem_size[num++] = hdata->estimate_memory;
+            ngmemsize_ptr->ngmemsize[num++] = hdata->total_memory;
+            ngmemsize_ptr->ngmemsize[num++] = hdata->used_memory;
+            ngmemsize_ptr->ngmemsize[num++] = hdata->estimate_memory;
             if (hdata->foreignrp) {
-                ng_mem_size[num++] = hdata->foreignrp->memsize;
-                ng_mem_size[num++] = hdata->foreignrp->memused;
-                ng_mem_size[num++] = hdata->foreignrp->peakmem;
-                ng_mem_size[num++] = hdata->foreignrp->actpct;
-                ng_mem_size[num++] = hdata->foreignrp->estmsize;
+                ngmemsize_ptr->ngmemsize[num++] = hdata->foreignrp->memsize;
+                ngmemsize_ptr->ngmemsize[num++] = hdata->foreignrp->memused;
+                ngmemsize_ptr->ngmemsize[num++] = hdata->foreignrp->peakmem;
+                ngmemsize_ptr->ngmemsize[num++] = hdata->foreignrp->actpct;
+                ngmemsize_ptr->ngmemsize[num++] = hdata->foreignrp->estmsize;
             } else {
                 num += (NG_MEMORY_TYPES_CNT - 3);  // default as 0
             }
 
-            ng_name[i++] = pstrdup(hdata->group_name);
+            ngmemsize_ptr->ngname[i++] = pstrdup(hdata->group_name);
         }
 
-        cnti = 0;
-        cntj = 0;
-        allcnt = num;
+        ngmemsize_ptr->allcnt = num;
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
+    funcctx = SRF_PERCALL_SETUP();
+    
+    ngmemsize_ptr = (PgStat_NgMemSize*)funcctx->user_fctx;
 
-    while (func_ctx->call_cntr < allcnt) {
+    while (ngmemsize_ptr != NULL && funcctx->call_cntr < ngmemsize_ptr->allcnt) {
         Datum values[3];
         bool nulls[3] = {false};
         HeapTuple tuple = NULL;
@@ -8403,30 +8811,30 @@ Datum gs_total_nodegroup_memory_detail(PG_FUNCTION_ARGS)
         securec_check(rc, "\0", "\0");
 
         /* Locking is probably not really necessary */
-        values[0] = CStringGetTextDatum(ng_name[cntj]);
-        values[1] = CStringGetTextDatum(NGMemoryTypeName[func_ctx->call_cntr % NG_MEMORY_TYPES_CNT]);
-        values[2] = (Datum)(ng_mem_size[cnti]);
+        values[0] = CStringGetTextDatum(ngmemsize_ptr->ngname[ngmemsize_ptr->cntj]);
+        values[1] = CStringGetTextDatum(NGMemoryTypeName[funcctx->call_cntr % NG_MEMORY_TYPES_CNT]);
+        values[2] = (Datum)(ngmemsize_ptr->ngmemsize[ngmemsize_ptr->cnti]);
 
-        cnti++;
+        (ngmemsize_ptr->cnti)++;
 
-        if (cnti % NG_MEMORY_TYPES_CNT == 0) {
-            pfree_ext(ng_name[cntj]);
-            cntj++;
+        if (ngmemsize_ptr->cnti % NG_MEMORY_TYPES_CNT == 0) {
+            pfree_ext(ngmemsize_ptr->ngname[ngmemsize_ptr->cntj]);
+            (ngmemsize_ptr->cntj)++;
         }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
-    pfree_ext(ng_mem_size);
-    pfree_ext(ng_name);
+    pfree_ext(ngmemsize_ptr->ngmemsize);
+    pfree_ext(ngmemsize_ptr->ngname);
+    pfree_ext(ngmemsize_ptr);
 
     /* do when there is no more left */
-    SRF_RETURN_DONE(func_ctx);
-#endif
+    SRF_RETURN_DONE(funcctx);
 }
 
-#define MEMORY_TYPES_CNT 22
+#define MEMORY_TYPES_CNT 24
 const char* MemoryTypeName[] = {"max_process_memory",
     "process_used_memory",
     "max_dynamic_memory",
@@ -8434,6 +8842,8 @@ const char* MemoryTypeName[] = {"max_process_memory",
     "dynamic_peak_memory",
     "dynamic_used_shrctx",
     "dynamic_peak_shrctx",
+    "max_backend_memory",
+    "backend_used_memory",
     "max_shared_memory",
     "shared_used_memory",
     "max_cstore_memory",
@@ -8457,9 +8867,8 @@ const char* MemoryTypeName[] = {"max_process_memory",
  */
 Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    static int mem_size[MEMORY_TYPES_CNT];
-    errno_t rc = 0;
+    FuncCallContext* funcctx = NULL;
+    int *mem_size = NULL;
 
     if (!t_thrd.utils_cxt.gs_mp_inited) {
         ereport(ERROR,
@@ -8468,43 +8877,38 @@ Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
     }
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
-        MemoryContext old_context;
+        TupleDesc tupdesc;
+        MemoryContext oldcontext;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * Switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
-        tup_desc = CreateTemplateTupleDesc(3, false);
+        /* build tupdesc for result tuples */
+        tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "nodename", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "nodename", TEXTOID, -1, 0);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "memorytype", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "memorymbytes", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "memorytype", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "memorymbytes", INT4OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
-        (void)MemoryContextSwitchTo(old_context);
+        mem_size = (int*)palloc0(MEMORY_TYPES_CNT * sizeof(int));
+        funcctx->user_fctx = (int*)mem_size;
 
-        rc = memset_s(mem_size, sizeof(mem_size), 0, sizeof(mem_size));
-        securec_check(rc, "\0", "\0");
+        (void)MemoryContextSwitchTo(oldcontext);
 
+        int mctx_max_size = maxChunksPerProcess << (chunkSizeInBits - BITS_IN_MB);
         int mctx_used_size = processMemInChunks << (chunkSizeInBits - BITS_IN_MB);
         int cu_size = (CUCache->GetCurrentMemSize() + MetaCacheGetCurrentUsedSize()) >> BITS_IN_MB;
         int comm_size = (int)(gs_get_comm_used_memory() >> BITS_IN_MB);
         int comm_peak_size = (int)(gs_get_comm_peak_memory() >> BITS_IN_MB);
-        unsigned long total_vm = 0;
-        unsigned long res = 0;
-        unsigned long shared = 0;
-        unsigned long text = 0;
-        unsigned long lib;
-        unsigned long data;
-        unsigned long dt;
+        unsigned long total_vm = 0, res = 0, shared = 0, text = 0, lib, data, dt;
         const char* statm_path = "/proc/self/statm";
         FILE* f = fopen(statm_path, "r");
         int pageSize = getpagesize();  // get the size(bytes) for a page
@@ -8529,67 +8933,69 @@ Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
 
         mem_size[0] = (int)(g_instance.attr.attr_memory.max_process_memory >> BITS_IN_KB);
         mem_size[1] = (int)res;
-        mem_size[2] = (int)(maxChunksPerProcess << (chunkSizeInBits - BITS_IN_MB));
+        mem_size[2] = mctx_max_size;
         mem_size[3] = mctx_used_size;
-        if (mem_size[3] < MEMPROT_INIT_SIZE) {
+        if (MEMPROT_INIT_SIZE > mem_size[3])
             mem_size[3] = MEMPROT_INIT_SIZE;
-        }
         mem_size[4] = (int)(peakChunksPerProcess << (chunkSizeInBits - BITS_IN_MB));
         mem_size[5] = (int)(shareTrackedMemChunks << (chunkSizeInBits - BITS_IN_MB));
         mem_size[6] = (int)(peakChunksSharedContext << (chunkSizeInBits - BITS_IN_MB));
-        mem_size[7] = maxSharedMemory;
-        mem_size[8] = shared;
-        mem_size[9] = (int)(g_instance.attr.attr_storage.cstore_buffers >> BITS_IN_KB);
-        mem_size[10] = cu_size;
-        if (comm_size) {
-            mem_size[11] = comm_original_memory;
-        } else {
-            mem_size[11] = 0;
+        mem_size[7] = (int)(backendReservedMemInChunk << (chunkSizeInBits - BITS_IN_MB));
+        mem_size[8] = (int)(backendUsedMemInChunk << (chunkSizeInBits - BITS_IN_MB));
+        if (mem_size[8] < 0) {
+            mem_size[8] = 0;
         }
-        mem_size[12] = comm_size;
-        mem_size[13] = comm_peak_size;
+        mem_size[9] = maxSharedMemory;
+        mem_size[10] = shared;
+        mem_size[11] = (int)(g_instance.attr.attr_storage.cstore_buffers >> BITS_IN_KB);
+        mem_size[12] = cu_size;
+        if (comm_size)
+            mem_size[13] = comm_original_memory;
+        else
+            mem_size[13] = 0;
+        mem_size[14] = comm_size;
+        mem_size[15] = comm_peak_size;
 
 #ifdef ENABLE_MULTIPLE_NODES
         if (is_searchserver_api_load()) {
-            void* mem_info = get_searchlet_resource_info(&mem_size[16], &mem_size[17]);
+            void* mem_info = get_searchlet_resource_info(&mem_size[18], &mem_size[19]);
             if (mem_info != NULL) {
-                mem_size[15] = g_searchserver_memory;
+                mem_size[17] = g_searchserver_memory;
                 pfree_ext(mem_info);
             }
         }
 #else
-        mem_size[15] = 0;
+        mem_size[17] = 0;
 #endif
 
-        mem_size[14] = (int)(res - shared - text) - mctx_used_size - cu_size - mem_size[16];
-        if (mem_size[14] < 0) {
-            // res may be changed
-            mem_size[14] = 0;
-        }
+        mem_size[16] = (int)(res - shared - text) - mctx_used_size - cu_size - mem_size[16];
+        if (0 > mem_size[16])  // res may be changed
+            mem_size[16] = 0;
 
 #ifdef ENABLE_MULTIPLE_NODES
         PoolConnStat conn_stat;
         pooler_get_connection_statinfo(&conn_stat);
-        mem_size[18] = (int)(conn_stat.memory_size >> BITS_IN_MB);
-        mem_size[19] = (int)(conn_stat.free_memory_size >> BITS_IN_MB);
+        mem_size[20] = (int)(conn_stat.memory_size >> BITS_IN_MB);
+        mem_size[21] = (int)(conn_stat.free_memory_size >> BITS_IN_MB);
 #else
-        mem_size[18] = 0;
-        mem_size[19] = 0;
+        mem_size[20] = 0;
+        mem_size[21] = 0;
 #endif
-        mem_size[20] = (int)(storageTrackedBytes >> BITS_IN_MB);
+        mem_size[22] = (int)(storageTrackedBytes >> BITS_IN_MB);
 
         Assert(g_instance.attr.attr_sql.udf_memory_limit >= UDF_DEFAULT_MEMORY);
-        mem_size[21] = (int)((g_instance.attr.attr_sql.udf_memory_limit - UDF_DEFAULT_MEMORY) >> BITS_IN_KB);
-        ereport(LOG,
-            (errmsg("LLVM IR file count is %ld, total memory is %ldKB",
+        mem_size[23] = (int)((g_instance.attr.attr_sql.udf_memory_limit - UDF_DEFAULT_MEMORY) >> BITS_IN_KB);
+        ereport(DEBUG2, (errmodule(MOD_LLVM), errmsg("LLVM IR file count is %ld, total memory is %ldKB",
                 g_instance.codegen_IRload_process_count,
                 g_instance.codegen_IRload_process_count * IR_FILE_SIZE / 1024)));
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
+    funcctx = SRF_PERCALL_SETUP();
 
-    while (func_ctx->call_cntr < MEMORY_TYPES_CNT) {
+    mem_size = (int*)(funcctx->user_fctx);
+
+    while (funcctx->call_cntr < MEMORY_TYPES_CNT) {
         Datum values[3];
         bool nulls[3] = {false};
         HeapTuple tuple = NULL;
@@ -8605,63 +9011,65 @@ Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
 
         /* Locking is probably not really necessary */
         values[0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
-        values[1] = CStringGetTextDatum(MemoryTypeName[func_ctx->call_cntr]);
-        values[2] = (Datum)(mem_size[func_ctx->call_cntr]);
+        values[1] = CStringGetTextDatum(MemoryTypeName[funcctx->call_cntr]);
+        values[2] = (Datum)(mem_size[funcctx->call_cntr]);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
+    pfree_ext(mem_size);
     /* do when there is no more left */
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 Datum pg_stat_get_pooler_status(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("unsupported view in single node mode.")));
     /* do when there is no more left */
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     PoolConnectionInfo* conns_entry = NULL;
-    const int ARG_NUMS = 9;
-
+    const int ARG_NUMS = 10;
+    
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context = NULL;
-        TupleDesc tup_desc = NULL;
+        MemoryContext oldcontext = NULL;
+        TupleDesc tupdesc = NULL;
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        tup_desc = CreateTemplateTupleDesc(ARG_NUMS, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_1, "database_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_2, "user_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_3, "threadid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_4, "pgoptions", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_5, "node_oid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_6, "in_use", BOOLOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_7, "session_params", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_8, "fdsock", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_9, "remote_pid", INT8OID, -1, 0);
+        tupdesc = CreateTemplateTupleDesc(ARG_NUMS, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_1, "database_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_2, "user_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_3, "threadid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_4, "pgoptions", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_5, "node_oid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_6, "in_use", BOOLOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_7, "session_params", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_8, "fdsock", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_9, "remote_pid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_10, "used_count", INT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
-        func_ctx->max_calls = get_pool_connection_info(&conns_entry);
-        func_ctx->user_fctx = conns_entry;
+        funcctx->max_calls = get_pool_connection_info(&conns_entry);
+        funcctx->user_fctx = conns_entry;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    conns_entry = (PoolConnectionInfo*)(func_ctx->user_fctx);
+    funcctx = SRF_PERCALL_SETUP();
+    conns_entry = (PoolConnectionInfo*)(funcctx->user_fctx);
 
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
+    if (funcctx->call_cntr < funcctx->max_calls) {
         /* for each row */
         Datum values[ARG_NUMS];
         bool nulls[ARG_NUMS] = {false};
@@ -8673,45 +9081,46 @@ Datum pg_stat_get_pooler_status(PG_FUNCTION_ARGS)
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
-        PoolConnectionInfo* pool_con = conns_entry + func_ctx->call_cntr;
+        PoolConnectionInfo* poolCon = conns_entry + funcctx->call_cntr;
 
-        // pool_con never be NULL
-        values[ARR_0] = CStringGetTextDatum(pool_con->database);
+        // poolCon never be NULL
+        values[ARR_0] = CStringGetTextDatum(poolCon->database);
 
-        if (pool_con->user_name != NULL) {
-            values[ARR_1] = CStringGetTextDatum(pool_con->user_name);
+        if (poolCon->user_name != NULL) {
+            values[ARR_1] = CStringGetTextDatum(poolCon->user_name);
         } else {
             values[ARR_1] = CStringGetTextDatum("none");
         }
 
-        if (pool_con->tid > 0) {
-            values[ARR_2] = Int64GetDatum(pool_con->tid);
+        if (poolCon->tid > 0) {
+            values[ARR_2] = Int64GetDatum(poolCon->tid);
         } else {
             nulls[ARR_2] = true;
         }
 
-        if (pool_con->pgoptions != NULL) {
-            values[ARR_3] = CStringGetTextDatum(pool_con->pgoptions);
+        if (poolCon->pgoptions != NULL) {
+            values[ARR_3] = CStringGetTextDatum(poolCon->pgoptions);
         } else {
             values[ARR_3] = CStringGetTextDatum("none");
         }
 
-        values[ARR_4] = Int64GetDatum(pool_con->nodeOid);
-        values[ARR_5] = BoolGetDatum(pool_con->in_use);
-        if (pool_con->session_params != NULL) {
-            values[ARR_6] = CStringGetTextDatum(pool_con->session_params);
+        values[ARR_4] = Int64GetDatum(poolCon->nodeOid);
+        values[ARR_5] = BoolGetDatum(poolCon->in_use);
+        if (poolCon->session_params != NULL) {
+            values[ARR_6] = CStringGetTextDatum(poolCon->session_params);
         } else {
             values[ARR_6] = CStringGetTextDatum("none");
         }
-        values[ARR_7] = Int64GetDatum(pool_con->fdsock);
-        values[ARR_8] = Int64GetDatum(pool_con->remote_pid);
+        values[ARR_7] = Int64GetDatum(poolCon->fdsock);
+        values[ARR_8] = Int64GetDatum(poolCon->remote_pid);
+        values[ARR_9] = Int64GetDatum(poolCon->used_count);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
 
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     } else {
         PoolConnectionInfo* pcon = NULL;
-        for (uint32 i = 0; i < func_ctx->max_calls; i++) {
+        for (uint32 i = 0; i < funcctx->max_calls; i++) {
             pcon = conns_entry + i;
             pfree_ext(pcon->database);
 
@@ -8730,35 +9139,35 @@ Datum pg_stat_get_pooler_status(PG_FUNCTION_ARGS)
         pfree_ext(conns_entry);
 
         /* nothing left */
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 #endif
 }
 
 void init_pgxc_comm_get_recv_stream(PG_FUNCTION_ARGS, FuncCallContext *funcctx, const int argNums)
 {
-    TupleDesc tup_desc;
+    TupleDesc    tupdesc;
 
-    /* build tup_desc for result tuples */
-    tup_desc = CreateTemplateTupleDesc(argNums, false);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_2, "local_tid", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_3, "remote_name", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_4, "remote_tid", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_5, "idx", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_6, "sid", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_7, "tcp_socket", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_8, "state", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_9, "query_id", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_10, "send_smp", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_11, "recv_smp", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_12, "pn_id", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_13, "recv_bytes", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_14, "time", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_15, "speed", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_16, "quota", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_17, "buff_usize", INT8OID, -1, 0);
-    funcctx->tuple_desc = BlessTupleDesc(tup_desc);
+    /* build tupdesc for result tuples */
+    tupdesc = CreateTemplateTupleDesc(argNums, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_2, "local_tid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_3, "remote_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_4, "remote_tid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_5, "idx", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_6, "sid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_7, "tcp_socket", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_8, "state", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_9, "query_id", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_10, "send_smp", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_11, "recv_smp", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_12, "pn_id", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_13, "recv_bytes", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_14, "time", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_15, "speed", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_16, "quota", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_17, "buff_usize", INT8OID, -1, 0);
+    funcctx->tuple_desc = BlessTupleDesc(tupdesc);
     funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
     return;
 }
@@ -8771,56 +9180,57 @@ void init_pgxc_comm_get_recv_stream(PG_FUNCTION_ARGS, FuncCallContext *funcctx, 
 Datum global_comm_get_recv_stream(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
         errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
     int i;
     const int RECV_STREAM_TUPLE_NATTS = 17;
-    FuncCallContext *func_ctx = NULL;
+    FuncCallContext *funcctx = NULL;
     Datum values[RECV_STREAM_TUPLE_NATTS];
     bool nulls[RECV_STREAM_TUPLE_NATTS];
     HeapTuple tuple;
-    MemoryContext old_context;
+    MemoryContext oldcontext;
 
     if (SRF_IS_FIRSTCALL()) {
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
         /* Switch to memory context appropriate for multiple function calls */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-        init_pgxc_comm_get_recv_stream(fcinfo, func_ctx, RECV_STREAM_TUPLE_NATTS);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        init_pgxc_comm_get_recv_stream(fcinfo, funcctx, RECV_STREAM_TUPLE_NATTS);
         /* the main call for get table distribution. */
-        func_ctx->user_fctx = getGlobalCommStatus(func_ctx->tuple_desc,  "SELECT * FROM pg_comm_recv_stream;");
-        MemoryContextSwitchTo(old_context);
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
+        funcctx->user_fctx = getGlobalCommStatus(funcctx->tuple_desc,  "SELECT * FROM pg_comm_recv_stream;");
+        MemoryContextSwitchTo(oldcontext);
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
         }
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate *tupstore = ((CommInfoParallel *)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot *slot = ((CommInfoParallel *)func_ctx->user_fctx)->slot;
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate *tupstore = ((CommInfoParallel *)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot    *slot = ((CommInfoParallel *)funcctx->user_fctx)->slot;
         if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-            FreeParallelFunctionState(((CommInfoParallel *)func_ctx->user_fctx)->state);
+            FreeParallelFunctionState(((CommInfoParallel *)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
         for (i = 0; i < RECV_STREAM_TUPLE_NATTS; i++) {
-            values[i] = slot_getattr(slot, i + 1, &nulls[i]);
+            values[i] = tableam_tslot_getattr(slot, i + 1, &nulls[i]);
         }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
 
@@ -8832,56 +9242,56 @@ Datum global_comm_get_recv_stream(PG_FUNCTION_ARGS)
 Datum pg_comm_recv_stream(PG_FUNCTION_ARGS)
 {
     const int RECV_STREAM_TUPLE_NATTS = 17;
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     CommRecvStreamStatus* stream_status = NULL;
     int ii = 0;
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc = NULL;
-        MemoryContext old_context = NULL;
+        TupleDesc tupdesc = NULL;
+        MemoryContext oldcontext = NULL;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * Switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
+        /* build tupdesc for result tuples */
         ii = 1;
-        tup_desc = CreateTemplateTupleDesc(RECV_STREAM_TUPLE_NATTS, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "node_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "local_tid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "remote_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "remote_tid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "idx", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "sid", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "tcp_socket", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "state", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "query_id", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "send_smp", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "recv_smp", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "pn_id", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "recv_bytes", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "time", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "speed", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "quota", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "buff_usize", INT8OID, -1, 0);
+        tupdesc = CreateTemplateTupleDesc(RECV_STREAM_TUPLE_NATTS, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "node_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "local_tid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "remote_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "remote_tid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "idx", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "sid", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "tcp_socket", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "state", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "query_id", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "send_smp", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "recv_smp", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "pn_id", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "recv_bytes", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "time", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "speed", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "quota", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "buff_usize", INT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         stream_status = (CommRecvStreamStatus*)palloc(sizeof(CommRecvStreamStatus));
         errno_t rc = memset_s(stream_status, sizeof(CommRecvStreamStatus), 0, sizeof(CommRecvStreamStatus));
         securec_check(rc, "\0", "\0");
-        func_ctx->user_fctx = (void*)stream_status;
+        funcctx->user_fctx = (void*)stream_status;
         stream_status->stream_id = -1;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    stream_status = (CommRecvStreamStatus*)func_ctx->user_fctx;
+    funcctx = SRF_PERCALL_SETUP();
+    stream_status = (CommRecvStreamStatus*)funcctx->user_fctx;
 
     if (get_next_recv_stream_status(stream_status) == true) {
         Datum values[RECV_STREAM_TUPLE_NATTS];
@@ -8918,68 +9328,69 @@ Datum pg_comm_recv_stream(PG_FUNCTION_ARGS)
         values[ii++] = Int64GetDatum(stream_status->quota_size);
         values[ii++] = Int64GetDatum(stream_status->buff_usize);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
+
     } else {
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
 Datum pg_comm_send_stream(PG_FUNCTION_ARGS)
 {
     const int SEND_STREAM_TUPLE_NATTS = 17;
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     CommSendStreamStatus* stream_status = NULL;
     int ii = 0;
     errno_t rc = 0;
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
-        MemoryContext old_context;
+        TupleDesc tupdesc;
+        MemoryContext oldcontext;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * Switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
+        /* build tupdesc for result tuples */
         ii = 1;
-        tup_desc = CreateTemplateTupleDesc(SEND_STREAM_TUPLE_NATTS, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "node_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "local_tid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "remote_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "remote_tid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "idx", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "sid", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "tcp_socket", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "state", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "query_id", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "pn_id", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "send_smp", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "recv_smp", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "send_bytes", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "time", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "speed", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "quota", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "wait_quota", INT8OID, -1, 0);
+        tupdesc = CreateTemplateTupleDesc(SEND_STREAM_TUPLE_NATTS, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "node_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "local_tid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "remote_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "remote_tid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "idx", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "sid", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "tcp_socket", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "state", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "query_id", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "pn_id", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "send_smp", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "recv_smp", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "send_bytes", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "time", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "speed", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "quota", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "wait_quota", INT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         stream_status = (CommSendStreamStatus*)palloc(sizeof(CommSendStreamStatus));
         rc = memset_s(stream_status, sizeof(CommSendStreamStatus), 0, sizeof(CommSendStreamStatus));
         securec_check(rc, "\0", "\0");
-        func_ctx->user_fctx = (void*)stream_status;
+        funcctx->user_fctx = (void*)stream_status;
         stream_status->stream_id = -1;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    stream_status = (CommSendStreamStatus*)func_ctx->user_fctx;
+    funcctx = SRF_PERCALL_SETUP();
+    stream_status = (CommSendStreamStatus*)funcctx->user_fctx;
 
     if (get_next_send_stream_status(stream_status) == true) {
         Datum values[SEND_STREAM_TUPLE_NATTS];
@@ -9015,106 +9426,111 @@ Datum pg_comm_send_stream(PG_FUNCTION_ARGS)
         values[ii++] = Int64GetDatum(stream_status->quota_size);
         values[ii++] = Int64GetDatum(stream_status->wait_quota);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
+
     } else {
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
-void init_pgxc_comm_get_send_stream(PG_FUNCTION_ARGS, FuncCallContext *func_ctx, const int argNums)
+void init_pgxc_comm_get_send_stream(PG_FUNCTION_ARGS, FuncCallContext *funcctx, const int argNums)
 {
-    TupleDesc tup_desc;
+    TupleDesc    tupdesc;
+    
+    /* build tupdesc for result tuples */
+    tupdesc = CreateTemplateTupleDesc(argNums, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_2, "local_tid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_3, "remote_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_4, "remote_tid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_5, "idx", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_6, "sid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_7, "tcp_socket", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_8, "state",TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_9, "query_id", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_10, "pn_id", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_11, "send_smp", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_12, "recv_smp", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_13, "send_bytes", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_14, "time", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_15, "speed", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_16, "quota", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_17, "wait_quota", INT8OID, -1, 0);
 
-    /* build tup_desc for result tuples */
-    tup_desc = CreateTemplateTupleDesc(argNums, false);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_2, "local_tid", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_3, "remote_name", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_4, "remote_tid", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_5, "idx", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_6, "sid", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_7, "tcp_socket", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_8, "state", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_9, "query_id", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_10, "pn_id", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_11, "send_smp", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_12, "recv_smp", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_13, "send_bytes", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_14, "time", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_15, "speed", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_16, "quota", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_17, "wait_quota", INT8OID, -1, 0);
-
-    func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-    func_ctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
+    funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+    funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
     return;
 }
 
 Datum global_comm_get_send_stream(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
         errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
     const int SEND_STREAM_TUPLE_NATTS = 17;
-    FuncCallContext *func_ctx = NULL;
+    FuncCallContext *funcctx = NULL;
     Datum values[SEND_STREAM_TUPLE_NATTS];
     bool nulls[SEND_STREAM_TUPLE_NATTS];
     HeapTuple tuple;
-    MemoryContext old_context;
+    MemoryContext oldcontext;
 
     if (SRF_IS_FIRSTCALL()) {
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
         /*
          * Switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-        init_pgxc_comm_get_send_stream(fcinfo, func_ctx, SEND_STREAM_TUPLE_NATTS);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        init_pgxc_comm_get_send_stream(fcinfo, funcctx, SEND_STREAM_TUPLE_NATTS);
         /* the main call for get table distribution. */
-        func_ctx->user_fctx = getGlobalCommStatus(func_ctx->tuple_desc, "SELECT * FROM pg_comm_send_stream;");
-        MemoryContextSwitchTo(old_context);
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
+        funcctx->user_fctx = getGlobalCommStatus(funcctx->tuple_desc, "SELECT * FROM pg_comm_send_stream;");
+        MemoryContextSwitchTo(oldcontext);
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
         }
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate *tupstore = ((CommInfoParallel *)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot *slot = ((CommInfoParallel *)func_ctx->user_fctx)->slot;
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate *tupstore = ((CommInfoParallel *)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot    *slot = ((CommInfoParallel *)funcctx->user_fctx)->slot;
         if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-            FreeParallelFunctionState(((CommInfoParallel *)func_ctx->user_fctx)->state);
+            FreeParallelFunctionState(((CommInfoParallel *)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
         for (int i = 0; i < SEND_STREAM_TUPLE_NATTS; i++) {
-            values[i] = slot_getattr(slot, i + 1, &nulls[i]);
+            values[i] = tableam_tslot_getattr(slot, i + 1, &nulls[i]);
         }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
+
+
 
 /*
 * @Description: parallel get comm stream status in entire cluster througn ExecRemoteFunctionInParallel in RemoteFunctionResultHandler.
 * @return: one tuple slot of result set.
 */
-CommInfoParallel *getGlobalCommStatus(TupleDesc tuple_desc, char *queryString)
+CommInfoParallel *
+getGlobalCommStatus(TupleDesc tuple_desc, const char *queryString)
 {
-    StringInfoData buf;
+    StringInfoData            buf;
     CommInfoParallel* stream_info = NULL;
 
     initStringInfo(&buf);
@@ -9125,17 +9541,17 @@ CommInfoParallel *getGlobalCommStatus(TupleDesc tuple_desc, char *queryString)
     return stream_info;
 }
 
-
 Datum pg_tde_info(PG_FUNCTION_ARGS)
 {
+
     int i = 0;
     errno_t rc = 0;
 
-    TupleDesc tup_desc = CreateTemplateTupleDesc(3, false);
-    TupleDescInitEntry(tup_desc, (AttrNumber)++i, "is_encrypt", BOOLOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)++i, "g_tde_algo", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)++i, "remain", TEXTOID, -1, 0);
-    BlessTupleDesc(tup_desc);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "is_encrypt", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "g_tde_algo", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "remain", TEXTOID, -1, 0);
+    BlessTupleDesc(tupdesc);
 
     Datum values[3];
     bool nulls[3] = {false};
@@ -9159,61 +9575,61 @@ Datum pg_tde_info(PG_FUNCTION_ARGS)
     values[i++] = BoolGetDatum(isEncryptedCluster());
     values[i++] = CStringGetTextDatum(algo);
     values[i++] = CStringGetTextDatum(remain);
-    tuple = heap_form_tuple(tup_desc, values, nulls);
+    tuple = heap_form_tuple(tupdesc, values, nulls);
 
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
-void init_pg_comm_status(PG_FUNCTION_ARGS, FuncCallContext *func_ctx, const int arg_nums)
+void init_pg_comm_status(PG_FUNCTION_ARGS, FuncCallContext *funcctx, const int argNums)
 {
-    TupleDesc tup_desc = NULL;
-    MemoryContext old_context = NULL;
+    TupleDesc tupdesc = NULL;
+    MemoryContext oldcontext = NULL;
 
     /* create a function context for cross-call persistence */
-    func_ctx = SRF_FIRSTCALL_INIT();
+    funcctx = SRF_FIRSTCALL_INIT();
 
     /*
      * Switch to memory context appropriate for multiple function calls
      */
-    old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+    oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-    /* build tup_desc for result tuples */
-    tup_desc = CreateTemplateTupleDesc(arg_nums, false);
+    /* build tupdesc for result tuples */
+    tupdesc = CreateTemplateTupleDesc(argNums, false, TAM_HEAP);
 
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_2, "rxpck_rate", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_3, "txpck_rate", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_4, "rxkB_rate", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_5, "txkB_rate", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_6, "buffer", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_7, "memKB_libcomm", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_8, "memKB_libpq", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_9, "used_PM", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_10, "used_sflow", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_11, "used_rflow", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_12, "used_rloop", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_13, "stream", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_2, "rxpck_rate", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_3, "txpck_rate", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_4, "rxkB_rate", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_5, "txkB_rate", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_6, "buffer", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_7, "memKB_libcomm", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_8, "memKB_libpq", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_9, "used_PM", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_10, "used_sflow", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_11, "used_rflow", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_12, "used_rloop", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_13, "stream", INT4OID, -1, 0);
 
-    func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-    MemoryContextSwitchTo(old_context);
+    funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+    MemoryContextSwitchTo(oldcontext);
     return;
 }
 
-Datum set_pg_comm_status(PG_FUNCTION_ARGS, FuncCallContext *func_ctx, const int arg_nums)
+Datum set_pg_comm_status(PG_FUNCTION_ARGS, FuncCallContext *funcctx, const int argNums)
 {
     errno_t rc = 0;
     CommStat comm_stat;
-    Datum values[arg_nums];
-    bool nulls[arg_nums] = {false};
+    Datum values[argNums];
+    bool nulls[argNums] = {false};
     HeapTuple tuple = NULL;
     Datum result;
     int ii = 0;
 
-    func_ctx = SRF_PERCALL_SETUP();
+    funcctx = SRF_PERCALL_SETUP();
     rc = memset_s(&comm_stat, sizeof(CommStat), 0, sizeof(CommStat));
 
     if (gs_get_comm_stat(&comm_stat) == false) {
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 
     /*
@@ -9238,9 +9654,9 @@ Datum set_pg_comm_status(PG_FUNCTION_ARGS, FuncCallContext *func_ctx, const int 
     values[ii++] = Int32GetDatum(comm_stat.gs_receiver_flow);
     values[ii++] = Int32GetDatum(comm_stat.gs_receiver_loop);
     values[ii++] = Int32GetDatum(comm_stat.stream_conn_num);
-    tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+    tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
     result = HeapTupleGetDatum(tuple);
-    SRF_RETURN_NEXT(func_ctx, result);
+    SRF_RETURN_NEXT(funcctx, result);
 }
 
 /*
@@ -9252,7 +9668,7 @@ Datum pg_comm_status(PG_FUNCTION_ARGS)
 {
     const int SEND_STREAM_TUPLE_NATTS = 13;
     FuncCallContext* funcctx = NULL;
-
+    
     if (SRF_IS_FIRSTCALL()) {
         init_pg_comm_status(fcinfo, funcctx, SEND_STREAM_TUPLE_NATTS);
         return set_pg_comm_status(fcinfo, funcctx, SEND_STREAM_TUPLE_NATTS);
@@ -9262,136 +9678,97 @@ Datum pg_comm_status(PG_FUNCTION_ARGS)
     }
 }
 
-void init_pgxc_comm_get_status(PG_FUNCTION_ARGS, FuncCallContext *func_ctx, const int arg_nums)
+void init_pgxc_comm_get_status(PG_FUNCTION_ARGS, FuncCallContext *funcctx, const int argNums)
 {
-    TupleDesc tup_desc;
+    TupleDesc tupdesc;
 
-    /* build tup_desc for result tuples */
-    tup_desc = CreateTemplateTupleDesc(arg_nums, false);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_2, "rxpck_rate", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_3, "txpck_rate", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_4, "rxkB_rate", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_5, "txkB_rate", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_6, "buffer", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_7, "memKB_libcomm", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_8, "memKB_libpq", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_9, "used_PM", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_10, "used_sflow", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_11, "used_rflow", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_12, "used_rloop", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber) ARG_13, "stream", INT4OID, -1, 0);
-    func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-    func_ctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
+    /* build tupdesc for result tuples */
+    tupdesc = CreateTemplateTupleDesc(argNums, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_2, "rxpck_rate", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_3, "txpck_rate", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_4, "rxkB_rate", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_5, "txkB_rate", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_6, "buffer", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_7, "memKB_libcomm", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_8, "memKB_libpq", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_9, "used_PM", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_10, "used_sflow", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_11, "used_rflow", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_12, "used_rloop", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_13, "stream", INT4OID, -1, 0);
+    funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+    funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
     return;
 }
 
 Datum global_comm_get_status(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
         errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
     const int SEND_STREAM_TUPLE_NATTS = 13;
-    FuncCallContext *func_ctx = NULL;
+    FuncCallContext *funcctx = NULL;
     Datum values[SEND_STREAM_TUPLE_NATTS];
     bool nulls[SEND_STREAM_TUPLE_NATTS];
     HeapTuple tuple;
-    MemoryContext old_context;
+    MemoryContext oldcontext;
 
     if (SRF_IS_FIRSTCALL()) {
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
         /*
          * Switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-        init_pgxc_comm_get_status(fcinfo, func_ctx, SEND_STREAM_TUPLE_NATTS);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        init_pgxc_comm_get_status(fcinfo, funcctx, SEND_STREAM_TUPLE_NATTS);
         /* the main call for get table distribution. */
-        func_ctx->user_fctx = getGlobalCommStatus(func_ctx->tuple_desc, "SELECT * FROM pg_comm_status;");
-        MemoryContextSwitchTo(old_context);
-        if (func_ctx->user_fctx == NULL)
-            SRF_RETURN_DONE(func_ctx);
+        funcctx->user_fctx = getGlobalCommStatus(funcctx->tuple_desc, "SELECT * FROM pg_comm_status;");
+        MemoryContextSwitchTo(oldcontext);
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate *tup_store = ((CommInfoParallel *)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot *slot = ((CommInfoParallel *)func_ctx->user_fctx)->slot;
-        if (!tuplestore_gettupleslot(tup_store, true, false, slot)) {
-            FreeParallelFunctionState(((CommInfoParallel *)func_ctx->user_fctx)->state);
+    funcctx = SRF_PERCALL_SETUP();
+    if (funcctx->user_fctx) {
+        Tuplestorestate *tupstore = ((CommInfoParallel *)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot    *slot = ((CommInfoParallel *)funcctx->user_fctx)->slot;
+        if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
+            FreeParallelFunctionState(((CommInfoParallel *)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
         for (int i = 0; i < SEND_STREAM_TUPLE_NATTS; i++) {
-            values[i] = slot_getattr(slot, i + 1, &nulls[i]);
+            values[i] = tableam_tslot_getattr(slot, i + 1, &nulls[i]);
         }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
 
-void init_pg_comm_client_info(PG_FUNCTION_ARGS, FuncCallContext *func_ctx, const int arg_nums)
+#ifdef ENABLE_MULTIPLE_NODES
+Datum pgxc_node_str(PG_FUNCTION_ARGS)
 {
-    TupleDesc tup_desc;
-    tup_desc = CreateTemplateTupleDesc(arg_nums, false);
-    TupleDescInitEntry(tup_desc, (AttrNumber)ARG_1, "node_name", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)ARG_2, "app", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)ARG_3, "tid", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)ARG_4, "lwtid", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)ARG_5, "query_id", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)ARG_6, "socket", INT4OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)ARG_7, "remote_ip", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)ARG_8, "remote_port", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)ARG_9, "logic_id", INT4OID, -1, 0);
-    func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-    func_ctx->user_fctx = palloc0(sizeof(int));
-    if (PG_ARGISNULL(0)) {
-        /* Get all backends */
-        func_ctx->max_calls = pgstat_fetch_stat_numbackends();
-    } else {
-        /*
-         * Get one backend - locate by tid.
-         *
-         * We lookup the backend early, so we can return zero rows if it
-         * doesn't exist, instead of returning a single row full of NULLs.
-         */
-        ThreadId tid = PG_GETARG_INT64(0);
-        int i;
-        int n = pgstat_fetch_stat_numbackends();
-
-        for (i = 1; i <= n; i++) {
-            PgBackendStatus *be = pgstat_fetch_stat_beentry(i);
-            if (be != NULL) {
-                if (be->st_procpid == tid) {
-                    *(int *) (func_ctx->user_fctx) = i;
-                    break;
-                }
-            }
+	if (!g_instance.attr.attr_common.PGXCNodeName || g_instance.attr.attr_common.PGXCNodeName[0] == '\0') {
+		PG_RETURN_NULL();
         }
 
-        if (*(int *)(func_ctx->user_fctx) == 0) {
-            /* Pid not found, return zero rows */
-            func_ctx->max_calls = 0;
-        } else {
-            func_ctx->max_calls = 1;
-        }
-    }
-
-    return;
+	PG_RETURN_DATUM(DirectFunctionCall1(namein, CStringGetDatum(g_instance.attr.attr_common.PGXCNodeName)));
 }
+#endif
 
-void set_comm_client_info(Datum *values, bool *nulls, PgBackendStatus *beentry)
+void set_comm_client_info(Datum *values, bool *nulls, const PgBackendStatus *beentry)
 {
     /* Values only available to same user or superuser */
     if (superuser() || beentry->st_userid == GetUserId()) {
@@ -9416,50 +9793,55 @@ void set_comm_client_info(Datum *values, bool *nulls, PgBackendStatus *beentry)
 Datum comm_client_info(PG_FUNCTION_ARGS)
 {
     const int CLIENT_INFO_TUPLE_NATTS = 9;
-    FuncCallContext *func_ctx = NULL;
-    MemoryContext old_context;
+
+    if (!superuser()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("Only system admin user can use this function.")));
+    }
+
+    Assert(STATE_WAIT_NUM == sizeof(WaitStateDesc)/sizeof(WaitStateDesc[0]));
+
+
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(CLIENT_INFO_TUPLE_NATTS, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_1, "node_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_2, "app", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_3, "tid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_4, "lwtid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_5, "query_id", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_6, "socket", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_7, "remote_ip", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_8, "remote_port", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_9, "logic_id", INT4OID, -1, 0);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
+
+    (void)gs_stat_read_current_status(rsinfo->setResult, rsinfo->setDesc, insert_comm_client_info);
+
+    MemoryContextSwitchTo(oldcontext);
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
+
+    return (Datum) 0;
+}
+
+void insert_comm_client_info(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry)
+{
+    const int CLIENT_INFO_TUPLE_NATTS = 9;
     Datum values[CLIENT_INFO_TUPLE_NATTS];
-    bool nulls[CLIENT_INFO_TUPLE_NATTS] = {false};
-    PgBackendStatus *beentry = NULL;
-    char wait_status[WAITSTATELEN];
-    HeapTuple tuple;
+    bool nulls[CLIENT_INFO_TUPLE_NATTS];
+    char waitStatus[WAITSTATELEN];
     errno_t rc = 0;
-
-    if (SRF_IS_FIRSTCALL()) {
-        func_ctx = SRF_FIRSTCALL_INIT();
-        Assert(STATE_WAIT_NUM == sizeof(WaitStateDesc) / sizeof(WaitStateDesc[0]));
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
-        init_pg_comm_client_info(fcinfo, func_ctx, CLIENT_INFO_TUPLE_NATTS);
-        MemoryContextSwitchTo(old_context);
-    }
-
-    /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr >= func_ctx->max_calls) {
-        SRF_RETURN_DONE(func_ctx);
-    }
 
     rc = memset_s(values, sizeof(values), 0, sizeof(values));
     securec_check(rc, "\0", "\0");
     rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
     securec_check(rc, "\0", "\0");
-    rc = memset_s(wait_status, sizeof(wait_status), 0, sizeof(wait_status));
+    rc = memset_s(waitStatus, sizeof(waitStatus), 0, sizeof(waitStatus));
     securec_check(rc, "\0", "\0");
-
-    if (*(int *) (func_ctx->user_fctx) > 0) {
-        /* Get specific pid slot */
-        beentry = pgstat_fetch_stat_beentry(*(int *) (func_ctx->user_fctx));
-    } else {
-        /* Get the next one in the list */
-        beentry = pgstat_fetch_stat_beentry(func_ctx->call_cntr + 1);
-    }
-    if (beentry == NULL) {
-        for (int i = 0; (unsigned int)(i) < sizeof(nulls) / sizeof(nulls[0]); i++) {
-            nulls[i] = true;
-        }
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    }
 
     /* Values available to all callers */
     rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
@@ -9467,78 +9849,160 @@ Datum comm_client_info(PG_FUNCTION_ARGS)
 
     set_comm_client_info(values, nulls, beentry);
 
-    tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-    SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+}
+
+void fill_callcxt_for_comm_check_connection_status(FuncCallContext *funcctx)
+{
+    const int att_num = 5;
+    int att_idx = 1;
+    ConnectionStatus *conns_entry = NULL;
+    
+    MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+    
+    TupleDesc tupdesc = CreateTemplateTupleDesc(att_num, false);
+    
+    TupleDescInitEntry(tupdesc, (AttrNumber) att_idx++, "node_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) att_idx++, "remote_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) att_idx++, "remote_host", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) att_idx++, "remote_port", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) att_idx++, "is_connected", BOOLOID, -1, 0);
+    
+    funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+    
+    funcctx->max_calls = check_connection_status(&conns_entry);
+    funcctx->user_fctx = conns_entry;
+    
+    MemoryContextSwitchTo(oldcontext);
+    return;
+}
+
+void fill_values_for_comm_check_connection_status(Datum *values, 
+    FuncCallContext *funcctx, ConnectionStatus *conns_entry)
+{
+    int att_idx = 0;
+    
+    ConnectionStatus *poolCon = conns_entry + funcctx->call_cntr;
+    
+    values[att_idx++]  = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
+    values[att_idx++]  = CStringGetTextDatum(poolCon->remote_name);
+    values[att_idx++] = CStringGetTextDatum(poolCon->remote_host);
+    values[att_idx++] = (Datum)(poolCon->remote_port);
+    values[att_idx++] = BoolGetDatum(poolCon->is_connected);
+    return;
+}
+
+/*
+ * comm_check_connection_status
+ *		Produce a view with connections status between cn and all other active nodes.
+ *
+ */
+Datum comm_check_connection_status(PG_FUNCTION_ARGS)
+{
+    FuncCallContext *funcctx = NULL;
+    ConnectionStatus *conns_entry = NULL;
+    const int att_num = 5;
+
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+        fill_callcxt_for_comm_check_connection_status(funcctx);;
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP();
+    conns_entry = (ConnectionStatus *)(funcctx->user_fctx);
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
+        /* for each row */
+        Datum values[att_num] = {0};
+        bool nulls[att_num] = {false};
+
+        fill_values_for_comm_check_connection_status(values, funcctx, conns_entry);
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    } else {
+        ConnectionStatus *pcon = NULL;
+        for (uint32 i = 0; i < funcctx->max_calls; i++) {
+            pcon = conns_entry + i;
+            pfree_ext(pcon->remote_name);
+            pfree_ext(pcon->remote_host);
+        }
+        pfree_ext(conns_entry);
+
+        /* nothing left */
+        SRF_RETURN_DONE(funcctx);
+    }
 }
 
 Datum global_comm_get_client_info(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
         errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
     const int CLIENT_INFO_TUPLE_NATTS = 9;
-    FuncCallContext *func_ctx = NULL;
+    FuncCallContext *funcctx = NULL;
     Datum values[CLIENT_INFO_TUPLE_NATTS];
     bool nulls[CLIENT_INFO_TUPLE_NATTS];
     HeapTuple tuple;
     int i;
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
-        MemoryContext old_context;
+        TupleDesc    tupdesc;
+        MemoryContext oldcontext;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /* Switch to memory context appropriate for multiple function calls */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
-        tup_desc = CreateTemplateTupleDesc(CLIENT_INFO_TUPLE_NATTS, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_2, "app", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_3, "tid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_4, "lwtid", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_5, "query_id", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_6, "socket", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_7, "remote_ip", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_8, "remote_port", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) ARG_9, "logic_id", INT4OID, -1, 0);
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        /* build tupdesc for result tuples */
+        tupdesc = CreateTemplateTupleDesc(CLIENT_INFO_TUPLE_NATTS, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_2, "app", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_3, "tid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_4, "lwtid", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_5, "query_id", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_6, "socket", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_7, "remote_ip", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_8, "remote_port", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ARG_9, "logic_id", INT4OID, -1, 0);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
-        func_ctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
+        funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
         /* the main call for get table distribution. */
-        func_ctx->user_fctx = getGlobalCommStatus(func_ctx->tuple_desc,  "SELECT * FROM comm_client_info;");
-        MemoryContextSwitchTo(old_context);
-        if (func_ctx->user_fctx == NULL)
-            SRF_RETURN_DONE(func_ctx);
+        funcctx->user_fctx = getGlobalCommStatus(funcctx->tuple_desc,  "SELECT * FROM comm_client_info;");
+        MemoryContextSwitchTo(oldcontext);
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate *tup_store = ((CommInfoParallel *)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot *slot = ((CommInfoParallel *)func_ctx->user_fctx)->slot;
+    funcctx = SRF_PERCALL_SETUP();
+    if (funcctx->user_fctx) {
+        Tuplestorestate *tupstore = ((CommInfoParallel *)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot    *slot = ((CommInfoParallel *)funcctx->user_fctx)->slot;
 
-        if (!tuplestore_gettupleslot(tup_store, true, false, slot)) {
-            FreeParallelFunctionState(((CommInfoParallel *)func_ctx->user_fctx)->state);
+        if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
+            FreeParallelFunctionState(((CommInfoParallel *)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
         for (i = 0; i < CLIENT_INFO_TUPLE_NATTS; i++) {
-            values[i] = slot_getattr(slot, i + 1, &nulls[i]);
+            values[i] = tableam_tslot_getattr(slot, i + 1, &nulls[i]);
         }
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
 
@@ -9550,46 +10014,46 @@ Datum global_comm_get_client_info(PG_FUNCTION_ARGS)
 Datum pg_comm_delay(PG_FUNCTION_ARGS)
 {
 #define DELAY_INFO_TUPLE_NATTS 7
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     CommDelayInfo* delay_info = NULL;
     int ii = 0;
     errno_t rc = 0;
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
-        MemoryContext old_context;
+        TupleDesc tupdesc;
+        MemoryContext oldcontext;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * Switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
+        /* build tupdesc for result tuples */
         ii = 1;
-        tup_desc = CreateTemplateTupleDesc(DELAY_INFO_TUPLE_NATTS, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "node_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "remote_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "remote_host", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "stream_num", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "min_delay", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "average", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)ii++, "max_delay", INT4OID, -1, 0);
+        tupdesc = CreateTemplateTupleDesc(DELAY_INFO_TUPLE_NATTS, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "node_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "remote_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "remote_host", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "stream_num", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "min_delay", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "average", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ii++, "max_delay", INT4OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         delay_info = (CommDelayInfo*)palloc(sizeof(CommDelayInfo));
         rc = memset_s(delay_info, sizeof(CommDelayInfo), 0, sizeof(CommDelayInfo));
         securec_check(rc, "\0", "\0");
-        func_ctx->user_fctx = (void*)delay_info;
+        funcctx->user_fctx = (void*)delay_info;
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
     }
 
-    func_ctx = SRF_PERCALL_SETUP();
-    delay_info = (CommDelayInfo*)func_ctx->user_fctx;
+    funcctx = SRF_PERCALL_SETUP();
+    delay_info = (CommDelayInfo*)funcctx->user_fctx;
 
     if (get_next_comm_delay_info(delay_info) == true) {
         Datum values[DELAY_INFO_TUPLE_NATTS];
@@ -9616,11 +10080,12 @@ Datum pg_comm_delay(PG_FUNCTION_ARGS)
         values[ii++] = (Datum)(delay_info->dev_delay);
         values[ii++] = (Datum)(delay_info->max_delay);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
-        SRF_RETURN_NEXT(func_ctx, result);
+        SRF_RETURN_NEXT(funcctx, result);
+
     } else {
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
@@ -9646,6 +10111,7 @@ WLMNodeGroupInfo* gs_get_cgroup_id(const char* pool, char* name, char* clsname, 
 
     /* get the pool id */
     Oid rpoid = get_resource_pool_oid(pool);
+
     if (!OidIsValid(rpoid))
         ereport(
             ERROR, (errcode(ERRCODE_RESOURCE_POOL_ERROR), errmsg("failed to get the oid of resource pool %s!", pool)));
@@ -9666,9 +10132,9 @@ WLMNodeGroupInfo* gs_get_cgroup_id(const char* pool, char* name, char* clsname, 
                 errmsg("cgroup is not initialized or group name %s is invalid!", gname)));
 
     char* ngname = NameStr(rpdata.nodegroup);
-    if ((ng = WLMGetNodeGroupFromHTAB(ngname)) == NULL) {
+    if (NULL == (ng = WLMGetNodeGroupFromHTAB(ngname)))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("%s logical cluster doesn't exist!", ngname)));
-    }
+
     char* p = NULL;
     char* q = NULL;
 
@@ -9678,7 +10144,8 @@ WLMNodeGroupInfo* gs_get_cgroup_id(const char* pool, char* name, char* clsname, 
     q = pstrdup(gname);
 
     p = strchr(q, ':');
-    if (p == NULL) { /* Class group */
+    if (NULL == p) /* Class group */
+    {
         /* check if the class exists */
         if (-1 == (*cls = gscgroup_is_class(ng, q)))
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("class group %s doesn't exist!", gname)));
@@ -9742,67 +10209,70 @@ char* cgconf_get_group_type(group_type gtype)
  */
 Datum gs_control_group_info(PG_FUNCTION_ARGS)
 {
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "gs_control_group_info");
+    }
     char* pool = PG_GETARG_CSTRING(0);
-    if (pool == NULL || strlen(pool) == 0) {
+    if (NULL == pool || strlen(pool) == 0) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("invalid name of resource pool: NULL or \"\"")));
         PG_RETURN_BOOL(false);
     }
 
-    int cls = 0;
-    int wd = 0;
+    int cls = 0, wd = 0;
     char gname[GPNAME_LEN] = {0};
-    char cls_name[GPNAME_LEN] = {0};
-    char wd_name[GPNAME_LEN] = {0};
+    char clsname[GPNAME_LEN] = {0};
+    char wdname[GPNAME_LEN] = {0};
 
     /* get the class and workload id */
-    WLMNodeGroupInfo* ng = gs_get_cgroup_id(pool, gname, cls_name, wd_name, &cls, &wd);
+    WLMNodeGroupInfo* ng = gs_get_cgroup_id(pool, gname, clsname, wdname, &cls, &wd);
 
     gscgroup_grp_t* grp = NULL;
 
     /* parent group */
-    if (cls && 0 == wd) {
+    if (cls && 0 == wd)
         grp = ng->vaddr[cls];
-    } else if (cls && wd) {
+    else if (cls && wd)
         grp = ng->vaddr[wd];
-    }
 
-    FuncCallContext* fun_cctx = NULL;
+    FuncCallContext* funcctx = NULL;
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc = NULL;
-        MemoryContext old_context = NULL;
+        TupleDesc tupdesc = NULL;
+        MemoryContext oldcontext = NULL;
 
         /* create a function context for cross-call persistence */
-        fun_cctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(fun_cctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
+        /* build tupdesc for result tuples */
         /* this had better match pv_plan view in system_views.sql */
-        tup_desc = CreateTemplateTupleDesc(9, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "class", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "workload", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "type", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "gid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)6, "shares", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)7, "limits", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)8, "rate", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)9, "cpucores", TEXTOID, -1, 0);
+        tupdesc = CreateTemplateTupleDesc(9, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "class", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "workload", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "type", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "gid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)6, "shares", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)7, "limits", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)8, "rate", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)9, "cpucores", TEXTOID, -1, 0);
 
-        fun_cctx->tuple_desc = BlessTupleDesc(tup_desc);
-        fun_cctx->max_calls = 1;
-        fun_cctx->call_cntr = 0;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = 1;
+        funcctx->call_cntr = 0;
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    fun_cctx = SRF_PERCALL_SETUP();
-    if (fun_cctx->call_cntr < fun_cctx->max_calls) {
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
         /* for each row */
         Datum values[9];
         bool nulls[9] = {false};
@@ -9819,8 +10289,8 @@ Datum gs_control_group_info(PG_FUNCTION_ARGS)
 
         /* Locking is probably not really necessary */
         values[0] = CStringGetTextDatum(gname);
-        values[1] = CStringGetTextDatum(cls_name);
-        values[2] = CStringGetTextDatum(wd_name);
+        values[1] = CStringGetTextDatum(clsname);
+        values[2] = CStringGetTextDatum(wdname);
         values[3] = CStringGetTextDatum(cgconf_get_group_type(grp->gtype));
         values[4] = Int64GetDatum(grp->gid);
         if (cls && 0 == wd) {
@@ -9841,11 +10311,11 @@ Datum gs_control_group_info(PG_FUNCTION_ARGS)
 
         values[8] = CStringGetTextDatum(grp->cpuset);
 
-        tuple = heap_form_tuple(fun_cctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(fun_cctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     } else {
         /* nothing left */
-        SRF_RETURN_DONE(fun_cctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
@@ -9859,21 +10329,18 @@ const char* excpname[] = {
 Datum gs_respool_exception_info(PG_FUNCTION_ARGS)
 {
     char* pool = PG_GETARG_CSTRING(0);
-    if (pool == NULL || strlen(pool) == 0) {
+    if (NULL == pool || strlen(pool) == 0) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("invalid name of resource pool: NULL or \"\"")));
         PG_RETURN_BOOL(false);
     }
 
-    int cls = 0;
-    int wd = 0;
+    int cls = 0, wd = 0;
     char gname[GPNAME_LEN] = {0};
-    char cls_name[GPNAME_LEN] = {0};
-    char wd_name[GPNAME_LEN] = {0};
-
-    static unsigned int excp_value[EXCP_TYPES_CNT];
+    char clsname[GPNAME_LEN] = {0};
+    char wdname[GPNAME_LEN] = {0};
 
     /* get the class and workload id */
-    WLMNodeGroupInfo* ng = gs_get_cgroup_id(pool, gname, cls_name, wd_name, &cls, &wd);
+    WLMNodeGroupInfo* ng = gs_get_cgroup_id(pool, gname, clsname, wdname, &cls, &wd);
 
     gscgroup_grp_t* grp = NULL;
 
@@ -9890,60 +10357,63 @@ Datum gs_respool_exception_info(PG_FUNCTION_ARGS)
     else if (wd >= TSCG_START_ID && wd <= TSCG_END_ID)
         grp = ng->vaddr[cls];
 
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
+    unsigned int* excpvalue = NULL;
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
-        MemoryContext old_context;
+        TupleDesc tupdesc;
+        MemoryContext oldcontext;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * Switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
-        tup_desc = CreateTemplateTupleDesc(6, false);
+        /* build tupdesc for result tuples */
+        tupdesc = CreateTemplateTupleDesc(6, false, TAM_HEAP);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "class", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "workload", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "class", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "workload", TEXTOID, -1, 0);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "rule", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "type", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)6, "value", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "rule", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "type", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)6, "value", INT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
-        (void)MemoryContextSwitchTo(old_context);
+        excpvalue = (unsigned int*)palloc0(EXCP_TYPES_CNT * sizeof(unsigned int));
+        funcctx->user_fctx = (unsigned int*)excpvalue;
 
-        errno_t rc = memset_s(excp_value, sizeof(excp_value), 0, sizeof(excp_value));
-        securec_check(rc, "\0", "\0");
+        (void)MemoryContextSwitchTo(oldcontext);
 
-        if (grp != NULL) {
-            excp_value[0] = grp->except[EXCEPT_ABORT].blocktime;
-            excp_value[1] = grp->except[EXCEPT_ABORT].elapsedtime;
-            excp_value[2] = grp->except[EXCEPT_ABORT].allcputime;
-            excp_value[3] = grp->except[EXCEPT_ABORT].qualitime;
-            excp_value[4] = grp->except[EXCEPT_ABORT].skewpercent;
-            excp_value[5] = grp->except[EXCEPT_ABORT].spoolsize;
-            excp_value[6] = grp->except[EXCEPT_ABORT].broadcastsize;
-            excp_value[7] = grp->except[EXCEPT_PENALTY].blocktime;
-            excp_value[8] = grp->except[EXCEPT_PENALTY].elapsedtime;
-            excp_value[9] = grp->except[EXCEPT_PENALTY].allcputime;
-            excp_value[10] = grp->except[EXCEPT_PENALTY].qualitime;
-            excp_value[11] = grp->except[EXCEPT_PENALTY].skewpercent;
-            excp_value[12] = grp->except[EXCEPT_PENALTY].spoolsize;
-            excp_value[13] = grp->except[EXCEPT_PENALTY].broadcastsize;
+        if (NULL != grp) {
+            excpvalue[0] = grp->except[EXCEPT_ABORT].blocktime;
+            excpvalue[1] = grp->except[EXCEPT_ABORT].elapsedtime;
+            excpvalue[2] = grp->except[EXCEPT_ABORT].allcputime;
+            excpvalue[3] = grp->except[EXCEPT_ABORT].qualitime;
+            excpvalue[4] = grp->except[EXCEPT_ABORT].skewpercent;
+            excpvalue[5] = grp->except[EXCEPT_ABORT].spoolsize;
+            excpvalue[6] = grp->except[EXCEPT_ABORT].broadcastsize;
+            excpvalue[7] = grp->except[EXCEPT_PENALTY].blocktime;
+            excpvalue[8] = grp->except[EXCEPT_PENALTY].elapsedtime;
+            excpvalue[9] = grp->except[EXCEPT_PENALTY].allcputime;
+            excpvalue[10] = grp->except[EXCEPT_PENALTY].qualitime;
+            excpvalue[11] = grp->except[EXCEPT_PENALTY].skewpercent;
+            excpvalue[12] = grp->except[EXCEPT_PENALTY].spoolsize;
+            excpvalue[13] = grp->except[EXCEPT_PENALTY].broadcastsize;
         }
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
+    funcctx = SRF_PERCALL_SETUP();
 
-    while (func_ctx->call_cntr < EXCP_TYPES_CNT) {
+    excpvalue = (unsigned int*)funcctx->user_fctx;
+
+    while (funcctx->call_cntr < EXCP_TYPES_CNT) {
         Datum values[6];
         bool nulls[6] = {false};
         HeapTuple tuple = NULL;
@@ -9958,23 +10428,23 @@ Datum gs_respool_exception_info(PG_FUNCTION_ARGS)
 
         /* Locking is probably not really necessary */
         values[0] = CStringGetTextDatum(gname);
-        values[1] = CStringGetTextDatum(cls_name);
-        values[2] = CStringGetTextDatum(wd_name);
-        values[3] = CStringGetTextDatum(excpname[func_ctx->call_cntr % (EXCP_TYPES_CNT / 2)]);
-        if (func_ctx->call_cntr >= (EXCP_TYPES_CNT / 2)) {
+        values[1] = CStringGetTextDatum(clsname);
+        values[2] = CStringGetTextDatum(wdname);
+        values[3] = CStringGetTextDatum(excpname[funcctx->call_cntr % (EXCP_TYPES_CNT / 2)]);
+        if (funcctx->call_cntr >= (EXCP_TYPES_CNT / 2))
             values[4] = CStringGetTextDatum("Penalty");
-        } else {
+        else
             values[4] = CStringGetTextDatum("Abort");
-        }
 
-        values[5] = Int64GetDatum(excp_value[func_ctx->call_cntr]);
+        values[5] = Int64GetDatum(excpvalue[funcctx->call_cntr]);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
+    pfree_ext(excpvalue);
     /* do when there is no more left */
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -9982,30 +10452,29 @@ Datum gs_respool_exception_info(PG_FUNCTION_ARGS)
  */
 gscgroup_grp_t* getControlGroupInfo(WLMNodeGroupInfo* ng, uint32* num)
 {
-    gscgroup_grp_t* local_array = NULL;
-    gscgroup_grp_t* local_entry = NULL;
+    gscgroup_grp_t* localArray = NULL;
+    gscgroup_grp_t* localEntry = NULL;
     gscgroup_grp_t* entry = NULL;
-    int entry_index;
+    int entryIndex;
     uint32 count = 0;
 
-    local_array =
+    localArray =
         (gscgroup_grp_t*)palloc0((GSCGROUP_CLASSNUM + GSCGROUP_WDNUM + GSCGROUP_TSNUM) * sizeof(gscgroup_grp_t));
-    local_entry = local_array;
-    for (entry_index = 0; entry_index < (GSCGROUP_CLASSNUM + GSCGROUP_WDNUM + GSCGROUP_TSNUM); entry_index++) {
-        entry = ng->vaddr[CLASSCG_START_ID + entry_index];
-        errno_t rc = memcpy_s(local_entry, sizeof(gscgroup_grp_t), entry, sizeof(gscgroup_grp_t));
+    localEntry = localArray;
+    for (entryIndex = 0; entryIndex < (GSCGROUP_CLASSNUM + GSCGROUP_WDNUM + GSCGROUP_TSNUM); entryIndex++) {
+        entry = ng->vaddr[CLASSCG_START_ID + entryIndex];
+        errno_t rc = memcpy_s(localEntry, sizeof(gscgroup_grp_t), entry, sizeof(gscgroup_grp_t));
         securec_check(rc, "\0", "\0");
 
-        if (entry->used == 0 || (entry->gtype == GROUP_DEFWD && 0 == strcmp(entry->grpname, "TopWD:1"))) {
+        if (entry->used == 0 || (entry->gtype == GROUP_DEFWD && 0 == strcmp(entry->grpname, "TopWD:1")))
             continue;
-        }
 
-        local_entry++;
+        localEntry++;
         count++;
     }
 
     *num = count;
-    return local_array;
+    return localArray;
 }
 
 /*
@@ -10013,56 +10482,55 @@ gscgroup_grp_t* getControlGroupInfo(WLMNodeGroupInfo* ng, uint32* num)
  */
 Datum gs_all_control_group_info(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     gscgroup_grp_t* array = NULL;
 
-    if (g_instance.wlm_cxt->gscgroup_init_done == 0) {
+    if (g_instance.wlm_cxt->gscgroup_init_done == 0)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("cgroup is not initialized!")));
-    }
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
-        MemoryContext old_context;
+        TupleDesc tupdesc;
+        MemoryContext oldcontext;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
+        /* build tupdesc for result tuples */
         /* this had better match pv_plan view in system_views.sql */
-        tup_desc = CreateTemplateTupleDesc(10, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "type", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "gid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "classgid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "class", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)6, "workload", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)7, "shares", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)8, "limits", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)9, "wdlevel", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)10, "cpucores", TEXTOID, -1, 0);
+        tupdesc = CreateTemplateTupleDesc(10, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "type", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "gid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "classgid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "class", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)6, "workload", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)7, "shares", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)8, "limits", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)9, "wdlevel", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)10, "cpucores", TEXTOID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-        func_ctx->user_fctx = (void*)getControlGroupInfo(&g_instance.wlm_cxt->MyDefaultNodeGroup, &(func_ctx->max_calls));
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = (void*)getControlGroupInfo(&g_instance.wlm_cxt->MyDefaultNodeGroup, &(funcctx->max_calls));
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    array = (gscgroup_grp_t*)func_ctx->user_fctx;
+    funcctx = SRF_PERCALL_SETUP();
+    array = (gscgroup_grp_t*)funcctx->user_fctx;
 
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
+    if (funcctx->call_cntr < funcctx->max_calls) {
         /* for each row */
         Datum values[10];
         bool nulls[10] = {false};
         HeapTuple tuple = NULL;
         gscgroup_grp_t* entry = NULL;
-        uint32 entry_index;
+        uint32 entryIndex;
 
         /*
          * Form tuple with appropriate data.
@@ -10073,9 +10541,9 @@ Datum gs_all_control_group_info(PG_FUNCTION_ARGS)
         ss_rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(ss_rc, "\0", "\0");
 
-        entry_index = func_ctx->call_cntr;
+        entryIndex = funcctx->call_cntr;
 
-        entry = array + entry_index;
+        entry = array + entryIndex;
 
         /* Locking is probably not really necessary */
         values[0] = CStringGetTextDatum(entry->grpname);
@@ -10089,19 +10557,19 @@ Datum gs_all_control_group_info(PG_FUNCTION_ARGS)
             values[7] = Int64GetDatum(entry->ainfo.quota);
             values[8] = Int64GetDatum(0);
         } else if (entry->gtype == GROUP_DEFWD) {
-            int cls_id = entry->ginfo.wd.cgid;
-            char wld_name[GPNAME_LEN];
+            int clsid = entry->ginfo.wd.cgid;
+            char wldname[GPNAME_LEN];
             char* p = NULL;
 
-            errno_t ss_rc = strcpy_s(wld_name, GPNAME_LEN, entry->grpname);
+            ss_rc = strcpy_s(wldname, GPNAME_LEN, entry->grpname);
             securec_check(ss_rc, "\0", "\0");
             /* omit the ':' character in the name */
-            if ((p = strchr(wld_name, ':')) != NULL)
+            if (NULL != (p = strchr(wldname, ':')))
                 *p = '\0';
 
-            values[3] = Int64GetDatum(cls_id);
-            values[4] = CStringGetTextDatum(g_instance.wlm_cxt->gscgroup_vaddr[cls_id]->grpname);
-            values[5] = CStringGetTextDatum(wld_name);
+            values[3] = Int64GetDatum(clsid);
+            values[4] = CStringGetTextDatum(g_instance.wlm_cxt->gscgroup_vaddr[clsid]->grpname);
+            values[5] = CStringGetTextDatum(wldname);
             values[6] = Int64GetDatum(entry->ginfo.wd.percent);
             values[7] = Int64GetDatum(entry->ainfo.quota);
             values[8] = Int64GetDatum(entry->ginfo.wd.wdlevel);
@@ -10115,10 +10583,10 @@ Datum gs_all_control_group_info(PG_FUNCTION_ARGS)
         }
         values[9] = CStringGetTextDatum(entry->cpuset);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     } else {
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
@@ -10127,28 +10595,30 @@ Datum gs_all_control_group_info(PG_FUNCTION_ARGS)
  */
 Datum gs_all_nodegroup_control_group_info(PG_FUNCTION_ARGS)
 {
+    if (!superuser()) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "gs_all_nodegroup_control_group_info");
+    }
 #define NODEGROUP_CONTROL_GROUP_INFO_ATTRNUM 10
     char* ngname = PG_GETARG_CSTRING(0);
-    if (ngname == NULL || strlen(ngname) == 0) {
+    if (NULL == ngname || strlen(ngname) == 0)
         ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("invalid name of logical cluster: NULL or \"\"")));
-    }
 
-    if (g_instance.wlm_cxt->gscgroup_init_done == 0) {
+    if (g_instance.wlm_cxt->gscgroup_init_done == 0)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("cgroup is not initialized!")));
-    }
 
     /* get the class and workload id */
     WLMNodeGroupInfo* ng = WLMGetNodeGroupFromHTAB(ngname);
-    if (ng == NULL) {
+    if (NULL == ng)
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("%s logical cluster doesn't exist!", ngname)));
-    }
+
     FuncCallContext* funcctx = NULL;
     gscgroup_grp_t* array = NULL;
     int i = 0;
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
-        MemoryContext old_context;
+        TupleDesc tupdesc;
+        MemoryContext oldcontext;
         i = 0;
 
         /* create a function context for cross-call persistence */
@@ -10157,26 +10627,26 @@ Datum gs_all_nodegroup_control_group_info(PG_FUNCTION_ARGS)
         /*
          * switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
+        /* build tupdesc for result tuples */
         /* this had better match pv_plan view in system_views.sql */
-        tup_desc = CreateTemplateTupleDesc(NODEGROUP_CONTROL_GROUP_INFO_ATTRNUM, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber)++i, "name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)++i, "type", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)++i, "gid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)++i, "classgid", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)++i, "class", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)++i, "workload", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)++i, "shares", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)++i, "limits", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)++i, "wdlevel", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)++i, "cpucores", TEXTOID, -1, 0);
+        tupdesc = CreateTemplateTupleDesc(NODEGROUP_CONTROL_GROUP_INFO_ATTRNUM, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "type", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "gid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "classgid", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "class", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "workload", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "shares", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "limits", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "wdlevel", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)++i, "cpucores", TEXTOID, -1, 0);
 
-        funcctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
         funcctx->user_fctx = (void*)getControlGroupInfo(ng, &(funcctx->max_calls));
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
@@ -10189,8 +10659,9 @@ Datum gs_all_nodegroup_control_group_info(PG_FUNCTION_ARGS)
         bool nulls[NODEGROUP_CONTROL_GROUP_INFO_ATTRNUM] = {false};
         HeapTuple tuple = NULL;
         gscgroup_grp_t* entry = NULL;
-        uint32 entry_index;
-        int i = -1;
+        uint32 entryIndex;
+
+        i = -1;
 
         /*
          * Form tuple with appropriate data.
@@ -10201,8 +10672,8 @@ Datum gs_all_nodegroup_control_group_info(PG_FUNCTION_ARGS)
         ss_rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(ss_rc, "\0", "\0");
 
-        entry_index = funcctx->call_cntr;
-        entry = array + entry_index;
+        entryIndex = funcctx->call_cntr;
+        entry = array + entryIndex;
 
         /* Locking is probably not really necessary */
         values[++i] = CStringGetTextDatum(entry->grpname);
@@ -10216,19 +10687,19 @@ Datum gs_all_nodegroup_control_group_info(PG_FUNCTION_ARGS)
             values[++i] = Int64GetDatum(entry->ainfo.quota);
             values[++i] = Int64GetDatum(0);
         } else if (entry->gtype == GROUP_DEFWD) {
-            int cls_id = entry->ginfo.wd.cgid;
-            char wld_name[GPNAME_LEN];
+            int clsid = entry->ginfo.wd.cgid;
+            char wldname[GPNAME_LEN];
             char* p = NULL;
 
-            errno_t ss_rc = strcpy_s(wld_name, GPNAME_LEN, entry->grpname);
+            ss_rc = strcpy_s(wldname, GPNAME_LEN, entry->grpname);
             securec_check(ss_rc, "\0", "\0");
             /* omit the ':' character in the name */
-            if ((p = strchr(wld_name, ':')) != NULL) {
+            if (NULL != (p = strchr(wldname, ':')))
                 *p = '\0';
-            }
-            values[++i] = Int64GetDatum(cls_id);
-            values[++i] = CStringGetTextDatum(ng->vaddr[cls_id]->grpname);
-            values[++i] = CStringGetTextDatum(wld_name);
+
+            values[++i] = Int64GetDatum(clsid);
+            values[++i] = CStringGetTextDatum(ng->vaddr[clsid]->grpname);
+            values[++i] = CStringGetTextDatum(wldname);
             values[++i] = Int64GetDatum(entry->ginfo.wd.percent);
             values[++i] = Int64GetDatum(entry->ainfo.quota);
             values[++i] = Int64GetDatum(entry->ginfo.wd.wdlevel);
@@ -10253,8 +10724,8 @@ Datum gs_all_nodegroup_control_group_info(PG_FUNCTION_ARGS)
 
 Datum pv_compute_pool_workload(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    MemoryContext old_context = NULL;
+    FuncCallContext* funcctx = NULL;
+    MemoryContext oldcontext = NULL;
 
     if (IS_PGXC_DATANODE) {
         ereport(NOTICE, (errmodule(MOD_WLM_CP), errmsg("pv_compute_pool_workload() must run on CN.")));
@@ -10271,16 +10742,16 @@ Datum pv_compute_pool_workload(PG_FUNCTION_ARGS)
         TupleDesc tupdesc;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * switch to memory context appropriate for multiple function
          * calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* need a tuple descriptor representing 3 columns */
-        tupdesc = CreateTemplateTupleDesc(NUM_COMPUTE_POOL_WORKLOAD_ELEM, false);
+        tupdesc = CreateTemplateTupleDesc(NUM_COMPUTE_POOL_WORKLOAD_ELEM, false, TAM_HEAP);
 
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "nodename", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "rpinuse", INT4OID, -1, 0);
@@ -10288,23 +10759,24 @@ Datum pv_compute_pool_workload(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)4, "nodestate", TEXTOID, -1, 0);
 
         /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         /* total number of tuples to be returned */
         if (IS_PGXC_COORDINATOR && g_instance.attr.attr_sql.max_resource_package) {
-            func_ctx->user_fctx = get_cluster_state();
+            funcctx->user_fctx = get_cluster_state();
 
-            if (func_ctx->user_fctx)
-                func_ctx->max_calls = u_sess->pgxc_cxt.NumDataNodes;
+            if (funcctx->user_fctx)
+                funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes;
         }
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* do when there is more left to send */
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->call_cntr < funcctx->max_calls) /* do when there is more left to send */
+    {
         Datum values[NUM_COMPUTE_POOL_WORKLOAD_ELEM];
         bool nulls[NUM_COMPUTE_POOL_WORKLOAD_ELEM] = {false};
         HeapTuple tuple = NULL;
@@ -10315,13 +10787,13 @@ Datum pv_compute_pool_workload(PG_FUNCTION_ARGS)
         ss_rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(ss_rc, "\0", "\0");
 
-        char* data_node_Name = NULL;
-        data_node_Name = getNodenameByIndex(func_ctx->call_cntr);
+        char* datanodeName = NULL;
+        datanodeName = getNodenameByIndex(funcctx->call_cntr);
 
         int dn_num = 0;
         DNState* dn_state = NULL;
 
-        ComputePoolState* cps = (ComputePoolState*)func_ctx->user_fctx;
+        ComputePoolState* cps = (ComputePoolState*)funcctx->user_fctx;
         if (cps != NULL) {
             Assert(cps->dn_num);
 
@@ -10329,37 +10801,37 @@ Datum pv_compute_pool_workload(PG_FUNCTION_ARGS)
             dn_state = cps->dn_state;
         }
 
-        int dn = func_ctx->call_cntr;
+        int dn = funcctx->call_cntr;
 
         if (dn < dn_num) {
             int num_rp = dn_state[dn].num_rp;
             if (num_rp > g_instance.attr.attr_sql.max_resource_package)
                 num_rp = g_instance.attr.attr_sql.max_resource_package;
 
-            values[0] = CStringGetTextDatum(data_node_Name);
+            values[0] = CStringGetTextDatum(datanodeName);
             values[1] = Int32GetDatum(num_rp);
             values[2] = Int32GetDatum(g_instance.attr.attr_sql.max_resource_package);
             values[3] = CStringGetTextDatum(dn_state[dn].is_normal ? "normal" : "abnormal");
         } else {
-            values[0] = CStringGetTextDatum(data_node_Name);
+            values[0] = CStringGetTextDatum(datanodeName);
             values[1] = Int32GetDatum(0);
             values[2] = Int32GetDatum(g_instance.attr.attr_sql.max_resource_package);
             values[3] = CStringGetTextDatum("normal");
         }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
 
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     } else {
         /* do when there is no more left */
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
 /* on which coordinator for a special table do autovac  */
 Datum pg_autovac_coordinator(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
+    Oid relid = PG_GETARG_OID(0);
     HeapTuple tuple = NULL;
     int coor_idx;
     Datum result;
@@ -10371,7 +10843,7 @@ Datum pg_autovac_coordinator(PG_FUNCTION_ARGS)
     if (!IS_PGXC_COORDINATOR)
         PG_RETURN_NULL();
 
-    tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
+    tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
     if (!HeapTupleIsValid(tuple)) {
         /* it is droppped or does not exist */
         PG_RETURN_NULL();
@@ -10386,7 +10858,7 @@ Datum pg_autovac_coordinator(PG_FUNCTION_ARGS)
 
     coor_idx = PgxcGetCentralNodeIndex();
     LWLockAcquire(NodeTableLock, LW_SHARED);
-    if (coor_idx >= 0 && coor_idx < *t_thrd.pgxc_cxt.shmemNumCoords) {
+    if (0 <= coor_idx && coor_idx < *t_thrd.pgxc_cxt.shmemNumCoords) {
         result = CStringGetTextDatum(NameStr(t_thrd.pgxc_cxt.coDefs[coor_idx].nodename));
         LWLockRelease(NodeTableLock);
 
@@ -10398,15 +10870,15 @@ Datum pg_autovac_coordinator(PG_FUNCTION_ARGS)
     PG_RETURN_NULL();
 }
 
-static int64 pgxc_exec_partition_tuples_stat(HeapTuple class_tuple, HeapTuple part_tuple, char* func_name)
+static int64 pgxc_exec_partition_tuples_stat(HeapTuple classTuple, HeapTuple partTuple, char* funcname)
 {
     ExecNodes* exec_nodes = NULL;
     ParallelFunctionState* state = NULL;
-    Form_pg_partition part_form = NULL;
-    Form_pg_class class_form = NULL;
-    char* ns_pname = NULL;
-    char* rel_name = NULL;
-    char* part_name = NULL;
+    Form_pg_partition partForm = NULL;
+    Form_pg_class classForm = NULL;
+    char* nspname = NULL;
+    char* relname = NULL;
+    char* partname = NULL;
     bool replicated = false;
     StringInfoData buf;
     RelationLocInfo* rel_loc_info = NULL;
@@ -10417,22 +10889,22 @@ static int64 pgxc_exec_partition_tuples_stat(HeapTuple class_tuple, HeapTuple pa
     exec_nodes->primarynodelist = NIL;
     exec_nodes->nodeList = NIL;
     exec_nodes->en_expr = NULL;
-    exec_nodes->en_relid = HeapTupleGetOid(class_tuple);
+    exec_nodes->en_relid = HeapTupleGetOid(classTuple);
 
-    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
-    class_form = (Form_pg_class)GETSTRUCT(class_tuple);
-    Assert(HeapTupleGetOid(class_tuple) == part_form->parentid);
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    classForm = (Form_pg_class)GETSTRUCT(classTuple);
+    Assert(HeapTupleGetOid(classTuple) == partForm->parentid);
 
-    if (class_form->relpersistence == RELPERSISTENCE_TEMP) {
+    if (RELPERSISTENCE_TEMP == classForm->relpersistence)
         return 0;
-    }
-    rel_loc_info = GetRelationLocInfo(part_form->parentid);
+
+    rel_loc_info = GetRelationLocInfo(partForm->parentid);
     replicated = (rel_loc_info && IsRelationReplicated(rel_loc_info));
 
-    ns_pname = repairObjectName(get_namespace_name(class_form->relnamespace, true));
+    nspname = repairObjectName(get_namespace_name(classForm->relnamespace));
     ;
-    rel_name = repairObjectName(NameStr(class_form->relname));
-    part_name = repairObjectName(NameStr(part_form->relname));
+    relname = repairObjectName(NameStr(classForm->relname));
+    partname = repairObjectName(NameStr(partForm->relname));
 
     initStringInfo(&buf);
     appendStringInfo(&buf,
@@ -10440,15 +10912,18 @@ static int64 pgxc_exec_partition_tuples_stat(HeapTuple class_tuple, HeapTuple pa
         "INNER JOIN pg_namespace n ON n.oid = c.relnamespace "
         "INNER JOIN pg_partition p ON p.parentid = c.oid "
         "WHERE n.nspname = '%s' AND c.relname = '%s' AND p.relname = '%s'",
-        func_name, ns_pname, rel_name, part_name);
+        funcname,
+        nspname,
+        relname,
+        partname);
     state = RemoteFunctionResultHandler(buf.data, exec_nodes, NULL, true, EXEC_ON_DATANODES, true);
     compute_tuples_stat(state, replicated);
     result = state->result;
 
     pfree_ext(buf.data);
-    pfree_ext(ns_pname);
-    pfree_ext(rel_name);
-    pfree_ext(part_name);
+    pfree_ext(nspname);
+    pfree_ext(relname);
+    pfree_ext(partname);
     FreeRelationLocInfo(rel_loc_info);
     FreeParallelFunctionState(state);
 
@@ -10457,486 +10932,501 @@ static int64 pgxc_exec_partition_tuples_stat(HeapTuple class_tuple, HeapTuple pa
 
 Datum pg_stat_get_partition_tuples_changed(PG_FUNCTION_ARGS)
 {
-    Oid part_oid = PG_GETARG_OID(0);
-    Oid rel_id = InvalidOid;
-    HeapTuple part_tuple = NULL;
-    HeapTuple class_tuple = NULL;
-    Form_pg_partition part_form = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid partOid = PG_GETARG_OID(0);
+    Oid relid = InvalidOid;
+    HeapTuple partTuple = NULL;
+    HeapTuple classTuple = NULL;
+    Form_pg_partition partForm = NULL;
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    part_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_oid));
-    if (!HeapTupleIsValid(part_tuple)) {
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
         PG_RETURN_INT64(result);
     }
-    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
-    rel_id = part_form->parentid;
-    class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
-    if (!HeapTupleIsValid(class_tuple)) {
-        ReleaseSysCache(part_tuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        result = pgxc_exec_partition_tuples_stat(class_tuple, part_tuple, "pg_stat_get_partition_tuples_changed");
-        ReleaseSysCache(class_tuple);
-        ReleaseSysCache(part_tuple);
-
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    relid = partForm->parentid;
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple)) {
+        ReleaseSysCache(partTuple);
         PG_RETURN_INT64(result);
     }
 
-    tab_key.tableid = part_oid;
-    tab_key.statFlag = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = (int64)(tab_entry->changes_since_analyze);
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
+        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_tuples_changed");
+        ReleaseSysCache(classTuple);
+        ReleaseSysCache(partTuple);
+
+        PG_RETURN_INT64(result);
     }
-    ReleaseSysCache(class_tuple);
-    ReleaseSysCache(part_tuple);
+
+    tabkey.tableid = partOid;
+    tabkey.statFlag = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = (int64)(tabentry->changes_since_analyze);
+
+    ReleaseSysCache(classTuple);
+    ReleaseSysCache(partTuple);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_partition_tuples_inserted(PG_FUNCTION_ARGS)
 {
-    Oid part_oid = PG_GETARG_OID(0);
-    Oid rel_id = InvalidOid;
-    HeapTuple part_tuple = NULL;
-    HeapTuple class_tuple = NULL;
-    Form_pg_partition part_form = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid partOid = PG_GETARG_OID(0);
+    Oid relid = InvalidOid;
+    HeapTuple partTuple = NULL;
+    HeapTuple classTuple = NULL;
+    Form_pg_partition partForm = NULL;
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    part_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_oid));
-    if (!HeapTupleIsValid(part_tuple)) {
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
         PG_RETURN_INT64(result);
     }
-    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
-    rel_id = part_form->parentid;
-    class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
-    if (!HeapTupleIsValid(class_tuple)) {
-        ReleaseSysCache(part_tuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        result = pgxc_exec_partition_tuples_stat(class_tuple, part_tuple, "pg_stat_get_partition_tuples_inserted");
-        ReleaseSysCache(class_tuple);
-        ReleaseSysCache(part_tuple);
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    relid = partForm->parentid;
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple)) {
+        ReleaseSysCache(partTuple);
         PG_RETURN_INT64(result);
     }
 
-    tab_key.tableid = part_oid;
-    tab_key.statFlag = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = (int64)(tab_entry->tuples_inserted);
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
+        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_tuples_inserted");
+        ReleaseSysCache(classTuple);
+        ReleaseSysCache(partTuple);
+
+        PG_RETURN_INT64(result);
     }
-    ReleaseSysCache(class_tuple);
-    ReleaseSysCache(part_tuple);
+
+    tabkey.tableid = partOid;
+    tabkey.statFlag = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = (int64)(tabentry->tuples_inserted);
+
+    ReleaseSysCache(classTuple);
+    ReleaseSysCache(partTuple);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_partition_tuples_updated(PG_FUNCTION_ARGS)
 {
-    Oid part_oid = PG_GETARG_OID(0);
-    Oid rel_id = InvalidOid;
-    HeapTuple part_tuple = NULL;
-    HeapTuple class_tuple = NULL;
-    Form_pg_partition part_form = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid partOid = PG_GETARG_OID(0);
+    Oid relid = InvalidOid;
+    HeapTuple partTuple = NULL;
+    HeapTuple classTuple = NULL;
+    Form_pg_partition partForm = NULL;
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    part_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_oid));
-    if (!HeapTupleIsValid(part_tuple)) {
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
         PG_RETURN_INT64(result);
     }
-    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
-    rel_id = part_form->parentid;
-    class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
-    if (!HeapTupleIsValid(class_tuple)) {
-        ReleaseSysCache(part_tuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        result = pgxc_exec_partition_tuples_stat(class_tuple, part_tuple, "pg_stat_get_partition_tuples_updated");
-        ReleaseSysCache(class_tuple);
-        ReleaseSysCache(part_tuple);
-
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    relid = partForm->parentid;
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple)) {
+        ReleaseSysCache(partTuple);
         PG_RETURN_INT64(result);
     }
 
-    tab_key.tableid = part_oid;
-    tab_key.statFlag = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = (int64)(tab_entry->tuples_updated);
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
+        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_tuples_updated");
+        ReleaseSysCache(classTuple);
+        ReleaseSysCache(partTuple);
+
+        PG_RETURN_INT64(result);
     }
-    ReleaseSysCache(class_tuple);
-    ReleaseSysCache(part_tuple);
+
+    tabkey.tableid = partOid;
+    tabkey.statFlag = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = (int64)(tabentry->tuples_updated);
+
+    ReleaseSysCache(classTuple);
+    ReleaseSysCache(partTuple);
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_partition_tuples_deleted(PG_FUNCTION_ARGS)
 {
-    Oid part_oid = PG_GETARG_OID(0);
-    Oid rel_id = InvalidOid;
-    HeapTuple part_tuple = NULL;
-    HeapTuple class_tuple = NULL;
-    Form_pg_partition part_form = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid partOid = PG_GETARG_OID(0);
+    Oid relid = InvalidOid;
+    HeapTuple partTuple = NULL;
+    HeapTuple classTuple = NULL;
+    Form_pg_partition partForm = NULL;
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    part_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_oid));
-    if (!HeapTupleIsValid(part_tuple)) {
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
         PG_RETURN_INT64(result);
     }
-    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
-    rel_id = part_form->parentid;
-    class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
-    if (!HeapTupleIsValid(class_tuple)) {
-        ReleaseSysCache(part_tuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        result = pgxc_exec_partition_tuples_stat(class_tuple, part_tuple, "pg_stat_get_partition_tuples_deleted");
-        ReleaseSysCache(class_tuple);
-        ReleaseSysCache(part_tuple);
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    relid = partForm->parentid;
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple)) {
+        ReleaseSysCache(partTuple);
         PG_RETURN_INT64(result);
     }
 
-    tab_key.tableid = part_oid;
-    tab_key.statFlag = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = (int64)(tab_entry->tuples_deleted);
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
+        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_tuples_deleted");
+        ReleaseSysCache(classTuple);
+        ReleaseSysCache(partTuple);
+
+        PG_RETURN_INT64(result);
     }
-    ReleaseSysCache(class_tuple);
-    ReleaseSysCache(part_tuple);
+
+    tabkey.tableid = partOid;
+    tabkey.statFlag = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = (int64)(tabentry->tuples_deleted);
+
+    ReleaseSysCache(classTuple);
+    ReleaseSysCache(partTuple);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_partition_tuples_hot_updated(PG_FUNCTION_ARGS)
 {
-    Oid part_oid = PG_GETARG_OID(0);
+    Oid partOid = PG_GETARG_OID(0);
     Oid relid = InvalidOid;
-    HeapTuple part_tuple = NULL;
-    HeapTuple class_tuple = NULL;
-    Form_pg_partition part_form = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    HeapTuple partTuple = NULL;
+    HeapTuple classTuple = NULL;
+    Form_pg_partition partForm = NULL;
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    part_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_oid));
-    if (!HeapTupleIsValid(part_tuple)) {
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
         PG_RETURN_INT64(result);
     }
-    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
-    relid = part_form->parentid;
-    class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(class_tuple)) {
-        ReleaseSysCache(part_tuple);
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    relid = partForm->parentid;
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple)) {
+        ReleaseSysCache(partTuple);
         PG_RETURN_INT64(result);
     }
 
     if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
-        result = pgxc_exec_partition_tuples_stat(class_tuple, part_tuple, "pg_stat_get_partition_tuples_hot_updated");
-        ReleaseSysCache(class_tuple);
-        ReleaseSysCache(part_tuple);
+        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_tuples_hot_updated");
+        ReleaseSysCache(classTuple);
+        ReleaseSysCache(partTuple);
 
         PG_RETURN_INT64(result);
     }
 
-    tab_key.tableid = part_oid;
-    tab_key.statFlag = relid;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = (int64)(tab_entry->tuples_hot_updated);
-    }
-    ReleaseSysCache(class_tuple);
-    ReleaseSysCache(part_tuple);
+    tabkey.tableid = partOid;
+    tabkey.statFlag = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = (int64)(tabentry->tuples_hot_updated);
+
+    ReleaseSysCache(classTuple);
+    ReleaseSysCache(partTuple);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_partition_dead_tuples(PG_FUNCTION_ARGS)
 {
-    Oid part_oid = PG_GETARG_OID(0);
-    Oid rel_id = InvalidOid;
-    HeapTuple part_tuple = NULL;
-    HeapTuple class_tuple = NULL;
-    Form_pg_partition part_form = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid partOid = PG_GETARG_OID(0);
+    Oid relid = InvalidOid;
+    HeapTuple partTuple = NULL;
+    HeapTuple classTuple = NULL;
+    Form_pg_partition partForm = NULL;
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    part_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_oid));
-    if (!HeapTupleIsValid(part_tuple)) {
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
         PG_RETURN_INT64(result);
     }
-    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
-    rel_id = part_form->parentid;
-    class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
-    if (!HeapTupleIsValid(class_tuple)) {
-        ReleaseSysCache(part_tuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        result = pgxc_exec_partition_tuples_stat(class_tuple, part_tuple, "pg_stat_get_partition_dead_tuples");
-        ReleaseSysCache(class_tuple);
-        ReleaseSysCache(part_tuple);
-
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    relid = partForm->parentid;
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple)) {
+        ReleaseSysCache(partTuple);
         PG_RETURN_INT64(result);
     }
 
-    tab_key.tableid = part_oid;
-    tab_key.statFlag = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = (int64)(tab_entry->n_dead_tuples);
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
+        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_dead_tuples");
+        ReleaseSysCache(classTuple);
+        ReleaseSysCache(partTuple);
+
+        PG_RETURN_INT64(result);
     }
-    ReleaseSysCache(class_tuple);
-    ReleaseSysCache(part_tuple);
+
+    tabkey.tableid = partOid;
+    tabkey.statFlag = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = (int64)(tabentry->n_dead_tuples);
+
+    ReleaseSysCache(classTuple);
+    ReleaseSysCache(partTuple);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_partition_live_tuples(PG_FUNCTION_ARGS)
 {
-    Oid part_oid = PG_GETARG_OID(0);
-    Oid rel_id = InvalidOid;
-    HeapTuple part_tuple = NULL;
-    HeapTuple class_tuple = NULL;
-    Form_pg_partition part_form = NULL;
-    PgStat_StatTabKey tab_key;
-    PgStat_StatTabEntry* tab_entry = NULL;
+    Oid partOid = PG_GETARG_OID(0);
+    Oid relid = InvalidOid;
+    HeapTuple partTuple = NULL;
+    HeapTuple classTuple = NULL;
+    Form_pg_partition partForm = NULL;
+    PgStat_StatTabKey tabkey;
+    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    part_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_oid));
-    if (!HeapTupleIsValid(part_tuple)) {
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
         PG_RETURN_INT64(result);
     }
-    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
-    rel_id = part_form->parentid;
-    class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
-    if (!HeapTupleIsValid(class_tuple)) {
-        ReleaseSysCache(part_tuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        result = pgxc_exec_partition_tuples_stat(class_tuple, part_tuple, "pg_stat_get_partition_live_tuples");
-        ReleaseSysCache(class_tuple);
-        ReleaseSysCache(part_tuple);
-
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    relid = partForm->parentid;
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple)) {
+        ReleaseSysCache(partTuple);
         PG_RETURN_INT64(result);
     }
 
-    tab_key.tableid = part_oid;
-    tab_key.statFlag = rel_id;
-    tab_entry = pgstat_fetch_stat_tabentry(&tab_key);
-    if (tab_entry != NULL) {
-        result = (int64)(tab_entry->n_live_tuples);
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
+        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_live_tuples");
+        ReleaseSysCache(classTuple);
+        ReleaseSysCache(partTuple);
+
+        PG_RETURN_INT64(result);
     }
-    ReleaseSysCache(class_tuple);
-    ReleaseSysCache(part_tuple);
+
+    tabkey.tableid = partOid;
+    tabkey.statFlag = relid;
+    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+
+    if (tabentry != NULL)
+        result = (int64)(tabentry->n_live_tuples);
+
+    ReleaseSysCache(classTuple);
+    ReleaseSysCache(partTuple);
+
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_xact_partition_tuples_inserted(PG_FUNCTION_ARGS)
 {
-    Oid part_oid = PG_GETARG_OID(0);
-    Oid rel_id = InvalidOid;
-    HeapTuple part_tuple = NULL;
-    HeapTuple class_tuple = NULL;
-    Form_pg_partition part_form = NULL;
-    PgStat_TableStatus* tab_entry = NULL;
+    Oid partOid = PG_GETARG_OID(0);
+    Oid relid = InvalidOid;
+    HeapTuple partTuple = NULL;
+    HeapTuple classTuple = NULL;
+    Form_pg_partition partForm = NULL;
+    PgStat_TableStatus* tabentry = NULL;
     PgStat_TableXactStatus* trans = NULL;
     int64 result = 0;
 
-    part_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_oid));
-    if (!HeapTupleIsValid(part_tuple)) {
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
         PG_RETURN_INT64(result);
     }
-    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
-    rel_id = part_form->parentid;
-    class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
-    if (!HeapTupleIsValid(class_tuple)) {
-        ReleaseSysCache(part_tuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        result = pgxc_exec_partition_tuples_stat(class_tuple, part_tuple, "pg_stat_get_xact_partition_tuples_inserted");
-        ReleaseSysCache(class_tuple);
-        ReleaseSysCache(part_tuple);
-
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    relid = partForm->parentid;
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple)) {
+        ReleaseSysCache(partTuple);
         PG_RETURN_INT64(result);
     }
 
-    tab_entry = find_tabstat_entry(part_oid, rel_id);
-    if (tab_entry != NULL) {
-        result += tab_entry->t_counts.t_tuples_inserted;
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
+        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_xact_partition_tuples_inserted");
+        ReleaseSysCache(classTuple);
+        ReleaseSysCache(partTuple);
+
+        PG_RETURN_INT64(result);
+    }
+
+    tabentry = find_tabstat_entry(partOid, relid);
+    if (tabentry != NULL) {
+        result += tabentry->t_counts.t_tuples_inserted;
 
         /* live subtransactions' counts aren't in t_tuples_inserted yet */
-        for (trans = tab_entry->trans; trans != NULL; trans = trans->upper)
+        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
             result += trans->tuples_inserted;
     }
 
-    ReleaseSysCache(class_tuple);
-    ReleaseSysCache(part_tuple);
+    ReleaseSysCache(classTuple);
+    ReleaseSysCache(partTuple);
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_xact_partition_tuples_updated(PG_FUNCTION_ARGS)
 {
-    Oid part_oid = PG_GETARG_OID(0);
-    Oid rel_id = InvalidOid;
-    HeapTuple part_tuple = NULL;
-    HeapTuple class_tuple = NULL;
-    Form_pg_partition part_form = NULL;
-    PgStat_TableStatus* tab_entry = NULL;
+    Oid partOid = PG_GETARG_OID(0);
+    Oid relid = InvalidOid;
+    HeapTuple partTuple = NULL;
+    HeapTuple classTuple = NULL;
+    Form_pg_partition partForm = NULL;
+    PgStat_TableStatus* tabentry = NULL;
     PgStat_TableXactStatus* trans = NULL;
     int64 result = 0;
 
-    part_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_oid));
-    if (!HeapTupleIsValid(part_tuple)) {
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
         PG_RETURN_INT64(result);
     }
-    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
-    rel_id = part_form->parentid;
-    class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
-    if (!HeapTupleIsValid(class_tuple)) {
-        ReleaseSysCache(part_tuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        result = pgxc_exec_partition_tuples_stat(class_tuple, part_tuple, "pg_stat_get_xact_partition_tuples_updated");
-        ReleaseSysCache(class_tuple);
-        ReleaseSysCache(part_tuple);
-
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    relid = partForm->parentid;
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple)) {
+        ReleaseSysCache(partTuple);
         PG_RETURN_INT64(result);
     }
 
-    tab_entry = find_tabstat_entry(part_oid, rel_id);
-    if (PointerIsValid(tab_entry)) {
-        result += tab_entry->t_counts.t_tuples_updated;
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
+        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_xact_partition_tuples_updated");
+        ReleaseSysCache(classTuple);
+        ReleaseSysCache(partTuple);
+
+        PG_RETURN_INT64(result);
+    }
+
+    tabentry = find_tabstat_entry(partOid, relid);
+
+    if (PointerIsValid(tabentry)) {
+        result += tabentry->t_counts.t_tuples_updated;
 
         /* live subtransactions' counts aren't in t_tuples_updated yet */
-        for (trans = tab_entry->trans; trans != NULL; trans = trans->upper) {
+        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
             result += trans->tuples_updated;
-        }
     }
 
-    ReleaseSysCache(class_tuple);
-    ReleaseSysCache(part_tuple);
+    ReleaseSysCache(classTuple);
+    ReleaseSysCache(partTuple);
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_xact_partition_tuples_deleted(PG_FUNCTION_ARGS)
 {
-    Oid part_oid = PG_GETARG_OID(0);
-    Oid rel_id = InvalidOid;
-    HeapTuple part_tuple = NULL;
-    HeapTuple class_tuple = NULL;
-    Form_pg_partition part_form = NULL;
+    Oid partOid = PG_GETARG_OID(0);
+    Oid relid = InvalidOid;
+    HeapTuple partTuple = NULL;
+    HeapTuple classTuple = NULL;
+    Form_pg_partition partForm = NULL;
     int64 result = 0;
-    PgStat_TableStatus* tab_entry = NULL;
+    PgStat_TableStatus* tabentry = NULL;
     PgStat_TableXactStatus* trans = NULL;
 
-    part_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_oid));
-    if (!HeapTupleIsValid(part_tuple)) {
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
         PG_RETURN_INT64(result);
     }
-    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
-    rel_id = part_form->parentid;
-    class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
-    if (!HeapTupleIsValid(class_tuple)) {
-        ReleaseSysCache(part_tuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
-        result = pgxc_exec_partition_tuples_stat(class_tuple, part_tuple, "pg_stat_get_xact_partition_tuples_deleted");
-        ReleaseSysCache(class_tuple);
-        ReleaseSysCache(part_tuple);
-
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    relid = partForm->parentid;
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple)) {
+        ReleaseSysCache(partTuple);
         PG_RETURN_INT64(result);
     }
 
-    tab_entry = find_tabstat_entry(part_oid, rel_id);
-    if (PointerIsValid(tab_entry)) {
-        result += tab_entry->t_counts.t_tuples_deleted;
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
+        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_xact_partition_tuples_deleted");
+        ReleaseSysCache(classTuple);
+        ReleaseSysCache(partTuple);
+
+        PG_RETURN_INT64(result);
+    }
+
+    tabentry = find_tabstat_entry(partOid, relid);
+    if (PointerIsValid(tabentry)) {
+        result += tabentry->t_counts.t_tuples_deleted;
 
         /* live subtransactions' counts aren't in t_tuples_updated yet */
-        for (trans = tab_entry->trans; trans != NULL; trans = trans->upper)
+        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
             result += trans->tuples_deleted;
     }
 
-    ReleaseSysCache(class_tuple);
-    ReleaseSysCache(part_tuple);
+    ReleaseSysCache(classTuple);
+    ReleaseSysCache(partTuple);
 
     PG_RETURN_INT64(result);
 }
 
 Datum pg_stat_get_xact_partition_tuples_hot_updated(PG_FUNCTION_ARGS)
 {
-    Oid part_oid = PG_GETARG_OID(0);
-    Oid rel_id = InvalidOid;
-    HeapTuple part_tuple = NULL;
-    HeapTuple class_tuple = NULL;
-    Form_pg_partition part_form = NULL;
-    PgStat_TableStatus* tab_entry = NULL;
+    Oid partOid = PG_GETARG_OID(0);
+    Oid relid = InvalidOid;
+    HeapTuple partTuple = NULL;
+    HeapTuple classTuple = NULL;
+    Form_pg_partition partForm = NULL;
+    PgStat_TableStatus* tabentry = NULL;
     int64 result = 0;
 
-    part_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_oid));
-    if (!HeapTupleIsValid(part_tuple)) {
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
         PG_RETURN_INT64(result);
     }
 
-    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
-    rel_id = part_form->parentid;
-    class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
-    if (!HeapTupleIsValid(class_tuple)) {
-        ReleaseSysCache(part_tuple);
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    relid = partForm->parentid;
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple)) {
+        ReleaseSysCache(partTuple);
         PG_RETURN_INT64(result);
     }
 
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((rel_id))) {
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
         result =
-            pgxc_exec_partition_tuples_stat(class_tuple, part_tuple, "pg_stat_get_xact_partition_tuples_hot_updated");
-        ReleaseSysCache(class_tuple);
-        ReleaseSysCache(part_tuple);
+            pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_xact_partition_tuples_hot_updated");
+        ReleaseSysCache(classTuple);
+        ReleaseSysCache(partTuple);
 
         PG_RETURN_INT64(result);
     }
 
-    tab_entry = find_tabstat_entry(part_oid, rel_id);
-    if (PointerIsValid(tab_entry))
-        result += tab_entry->t_counts.t_tuples_hot_updated;
+    tabentry = find_tabstat_entry(partOid, relid);
+    if (PointerIsValid(tabentry))
+        result += tabentry->t_counts.t_tuples_hot_updated;
 
-    ReleaseSysCache(class_tuple);
-    ReleaseSysCache(part_tuple);
+    ReleaseSysCache(classTuple);
+    ReleaseSysCache(partTuple);
 
     PG_RETURN_INT64(result);
 }
 
-static void strategy_func_timeout(ParallelFunctionState* state)
+static void StrategyFuncTimeout(ParallelFunctionState* state)
 {
     TupleTableSlot* slot = NULL;
     Datum datum = 0;
     int64 result = 0;
 
     Assert(state && state->tupstore);
-    if (state->tupdesc == NULL) {
+    if (NULL == state->tupdesc) {
         /* if there is only one coordiantor,  tupdesc will be null */
         state->result = 0;
     }
@@ -10948,11 +11438,11 @@ static void strategy_func_timeout(ParallelFunctionState* state)
         if (!tuplestore_gettupleslot(state->tupstore, true, false, slot))
             break;
 
-        datum = slot_getattr(slot, 1, &isnull);
+        datum = tableam_tslot_getattr(slot, 1, &isnull);
         if (!isnull)
             result += DatumGetInt64(datum);
 
-        (void)ExecClearTuple(slot);
+        ExecClearTuple(slot);
     }
 
     state->result = result;
@@ -10960,9 +11450,10 @@ static void strategy_func_timeout(ParallelFunctionState* state)
 
 static int64 pgxc_exec_autoanalyze_timeout(Oid relOid, int32 coor_idx, char* funcname)
 {
+
     Relation rel = NULL;
-    char* rel_name = NULL;
-    char* ns_pname = NULL;
+    char* relname = NULL;
+    char* nspname = NULL;
     ExecNodes* exec_nodes = NULL;
     StringInfoData buf;
     ParallelFunctionState* state = NULL;
@@ -10975,18 +11466,18 @@ static int64 pgxc_exec_autoanalyze_timeout(Oid relOid, int32 coor_idx, char* fun
     exec_nodes->en_expr = NULL;
     exec_nodes->nodeList = list_make1_int(coor_idx);
 
-    rel_name = repairObjectName(RelationGetRelationName(rel));
-    ns_pname = repairObjectName(get_namespace_name(rel->rd_rel->relnamespace, true));
+    relname = repairObjectName(RelationGetRelationName(rel));
+    nspname = repairObjectName(get_namespace_name(rel->rd_rel->relnamespace));
     relation_close(rel, AccessShareLock);
 
     initStringInfo(&buf);
-    appendStringInfo(&buf, "SELECT pg_catalog.%s('%s.%s'::regclass)", funcname, ns_pname, rel_name);
-    state = RemoteFunctionResultHandler(buf.data, exec_nodes, strategy_func_timeout, true, EXEC_ON_COORDS, true);
+    appendStringInfo(&buf, "SELECT pg_catalog.%s('%s.%s'::regclass)", funcname, nspname, relname);
+    state = RemoteFunctionResultHandler(buf.data, exec_nodes, StrategyFuncTimeout, true, EXEC_ON_COORDS, true);
     result = state->result;
 
     FreeParallelFunctionState(state);
-    pfree_ext(rel_name);
-    pfree_ext(ns_pname);
+    pfree_ext(relname);
+    pfree_ext(nspname);
     pfree_ext(buf.data);
 
     return result;
@@ -10996,7 +11487,7 @@ Datum pg_autovac_timeout(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
     HeapTuple tuple = NULL;
-    Form_pg_class class_form = NULL;
+    Form_pg_class classForm = NULL;
     int coor_idx;
     int64 result = 0;
 
@@ -11009,8 +11500,8 @@ Datum pg_autovac_timeout(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 
-    class_form = (Form_pg_class)GETSTRUCT(tuple);
-    if (class_form->relpersistence != RELPERSISTENCE_PERMANENT || class_form->relkind != RELKIND_RELATION) {
+    classForm = (Form_pg_class)GETSTRUCT(tuple);
+    if (RELPERSISTENCE_PERMANENT != classForm->relpersistence || RELKIND_RELATION != classForm->relkind) {
         /*  for relation that does not support autovac, just return null */
         ReleaseSysCache(tuple);
         PG_RETURN_NULL();
@@ -11022,7 +11513,8 @@ Datum pg_autovac_timeout(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("Fail to find central coordinator")));
     }
 
-    if (u_sess->pgxc_cxt.PGXCNodeId == coor_idx + 1) { /* for central coordinator */
+    if (u_sess->pgxc_cxt.PGXCNodeId == coor_idx + 1) /* for central coordinator */
+    {
         /* just do autovac on central coordinator */
         PgStat_StatTabKey tabkey;
         PgStat_StatTabEntry* tabentry = NULL;
@@ -11030,9 +11522,10 @@ Datum pg_autovac_timeout(PG_FUNCTION_ARGS)
         tabkey.statFlag = InvalidOid;
         tabkey.tableid = relid;
         tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-        if (tabentry != NULL) {
+
+        if (tabentry != NULL)
             result = CONTINUED_TIMEOUT_COUNT(tabentry->autovac_status);
-        }
+
         PG_RETURN_INT64(result);
     } else {
         Assert(coor_idx < u_sess->pgxc_cxt.NumCoords);
@@ -11045,19 +11538,19 @@ Datum pg_autovac_timeout(PG_FUNCTION_ARGS)
 Datum pg_total_autovac_tuples(PG_FUNCTION_ARGS)
 {
     bool for_relation = PG_GETARG_BOOL(0);
-    ReturnSetInfo* rs_info = (ReturnSetInfo*)fcinfo->resultinfo;
-    TupleDesc tup_desc = NULL;
-    Tuplestorestate* tup_store = NULL;
+    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
+    TupleDesc tupdesc = NULL;
+    Tuplestorestate* tupstore = NULL;
     MemoryContext per_query_ctx;
-    MemoryContext old_context;
+    MemoryContext oldcontext;
 
     /* check to see if caller supports us returning a tuplestore */
-    if ((rs_info == NULL) || !IsA(rs_info, ReturnSetInfo)) {
+    if ((rsinfo == NULL) || !IsA(rsinfo, ReturnSetInfo)) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("set-valued function called in context that cannot accept a set")));
     }
-    if (!(rs_info->allowedModes & SFRM_Materialize)) {
+    if (!(rsinfo->allowedModes & SFRM_Materialize)) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("materialize mode required, but it is not allowed in this context")));
@@ -11065,19 +11558,19 @@ Datum pg_total_autovac_tuples(PG_FUNCTION_ARGS)
 
 #define AUTOVAC_TUPLES_ATTR_NUM 7
 
-    per_query_ctx = rs_info->econtext->ecxt_per_query_memory;
-    old_context = MemoryContextSwitchTo(per_query_ctx);
-    tup_desc = CreateTemplateTupleDesc(AUTOVAC_TUPLES_ATTR_NUM, false);
-    TupleDescInitEntry(tup_desc, (AttrNumber)1, "nodename", NAMEOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)2, "nspname", NAMEOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)3, "relname", NAMEOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)4, "partname", NAMEOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)5, "n_dead_tuples", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)6, "n_live_tuples", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)7, "changes_since_analyze", INT8OID, -1, 0);
-    tup_store =
-        tuplestore_begin_heap(rs_info->allowedModes & SFRM_Materialize_Random, false, u_sess->attr.attr_memory.work_mem);
-    MemoryContextSwitchTo(old_context);
+    per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+    oldcontext = MemoryContextSwitchTo(per_query_ctx);
+    tupdesc = CreateTemplateTupleDesc(AUTOVAC_TUPLES_ATTR_NUM, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "nodename", NAMEOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "nspname", NAMEOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "relname", NAMEOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "partname", NAMEOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "n_dead_tuples", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "n_live_tuples", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "changes_since_analyze", INT8OID, -1, 0);
+    tupstore =
+        tuplestore_begin_heap(rsinfo->allowedModes & SFRM_Materialize_Random, false, u_sess->attr.attr_memory.work_mem);
+    MemoryContextSwitchTo(oldcontext);
 
     DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
     if (IS_PGXC_COORDINATOR) {
@@ -11106,35 +11599,35 @@ Datum pg_total_autovac_tuples(PG_FUNCTION_ARGS)
         exec_nodes->baselocatortype = LOCATOR_TYPE_HASH;
         exec_nodes->nodeList = GetAllDataNodes();
 
-        old_context = MemoryContextSwitchTo(per_query_ctx);
+        oldcontext = MemoryContextSwitchTo(per_query_ctx);
         state = RemoteFunctionResultHandler(buf.data, exec_nodes, NULL, true, EXEC_ON_DATANODES, true);
-        tup_store = state->tupstore;
-        MemoryContextSwitchTo(old_context);
+        tupstore = state->tupstore;
+        MemoryContextSwitchTo(oldcontext);
         pfree_ext(buf.data);
     } else {
-        PgStat_StatDBEntry* db_entry = NULL;
+        PgStat_StatDBEntry* dbentry = NULL;
         NameData data_name;
 
         /*
          * We put all the tuples into a tuplestore in one scan of the hashtable.
          * This avoids any issue of the hashtable possibly changing between calls.
          */
-        (void)namestrcpy(&data_name, g_instance.attr.attr_common.PGXCNodeName);
-        db_entry = pgstat_fetch_stat_dbentry(u_sess->proc_cxt.MyDatabaseId);
-        if ((db_entry != NULL) && (db_entry->tables != NULL)) {
+        namestrcpy(&data_name, g_instance.attr.attr_common.PGXCNodeName);
+        dbentry = pgstat_fetch_stat_dbentry(u_sess->proc_cxt.MyDatabaseId);
+        if ((dbentry != NULL) && (dbentry->tables != NULL)) {
             HASH_SEQ_STATUS hash_seq;
             PgStat_StatTabEntry* tabentry = NULL;
 
-            hash_seq_init(&hash_seq, db_entry->tables);
-            while ((tabentry = (PgStat_StatTabEntry*)hash_seq_search(&hash_seq)) != NULL) {
-                Oid rel_id = tabentry->tablekey.tableid;
-                Oid part_id = InvalidOid;
-                HeapTuple nsp_tuple = NULL;
-                HeapTuple rel_tuple = NULL;
-                HeapTuple part_tuple = NULL;
-                Form_pg_namespace nsp_form = NULL;
-                Form_pg_class rel_form = NULL;
-                Form_pg_partition part_form = NULL;
+            hash_seq_init(&hash_seq, dbentry->tables);
+            while (NULL != (tabentry = (PgStat_StatTabEntry*)hash_seq_search(&hash_seq))) {
+                Oid relid = tabentry->tablekey.tableid;
+                Oid partid = InvalidOid;
+                HeapTuple nsptuple = NULL;
+                HeapTuple reltuple = NULL;
+                HeapTuple parttuple = NULL;
+                Form_pg_namespace nspForm = NULL;
+                Form_pg_class relForm = NULL;
+                Form_pg_partition partForm = NULL;
                 Datum values[AUTOVAC_TUPLES_ATTR_NUM];
                 bool nulls[AUTOVAC_TUPLES_ATTR_NUM] = {false};
                 bool enable_analyze = false;
@@ -11144,47 +11637,44 @@ Datum pg_total_autovac_tuples(PG_FUNCTION_ARGS)
                  * skip if changes_since_analyze/n_dead_tuples is zero
                  * skip if it is a system catalog
                  */
-                if ((tabentry->n_dead_tuples <= 0 && tabentry->changes_since_analyze <= 0) ||
-                    tabentry->tablekey.tableid < FirstNormalObjectId) {
+                if ((0 >= tabentry->n_dead_tuples && 0 >= tabentry->changes_since_analyze) ||
+                    tabentry->tablekey.tableid < FirstNormalObjectId)
                     continue;
-                }
 
                 if (tabentry->tablekey.statFlag) {
-                    if (for_relation) { /* just fetch relation's stat info */
+                    if (for_relation) /* just fetch relation's stat info */
                         continue;
-                    }
 
-                    part_id = tabentry->tablekey.tableid;
-                    rel_id = tabentry->tablekey.statFlag;
+                    partid = tabentry->tablekey.tableid;
+                    relid = tabentry->tablekey.statFlag;
                 }
 
-                rel_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
-                if (!HeapTupleIsValid(rel_tuple)) {
+                reltuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+                if (!HeapTupleIsValid(reltuple))
                     continue;
-                }
 
-                relation_support_autoavac(rel_tuple, &enable_analyze, &enable_vacuum, &is_internal_relation);
+                relation_support_autoavac(reltuple, &enable_analyze, &enable_vacuum, &is_internal_relation);
                 if (!enable_analyze && !enable_vacuum) {
-                    ReleaseSysCache(rel_tuple);
+                    ReleaseSysCache(reltuple);
                     continue;
                 }
-                rel_form = (Form_pg_class)GETSTRUCT(rel_tuple);
+                relForm = (Form_pg_class)GETSTRUCT(reltuple);
 
-                nsp_tuple = SearchSysCache1(NAMESPACEOID, ObjectIdGetDatum(rel_form->relnamespace));
-                if (!HeapTupleIsValid(nsp_tuple)) {
-                    ReleaseSysCache(rel_tuple);
+                nsptuple = SearchSysCache1(NAMESPACEOID, ObjectIdGetDatum(relForm->relnamespace));
+                if (!HeapTupleIsValid(nsptuple)) {
+                    ReleaseSysCache(reltuple);
                     continue;
                 }
-                nsp_form = (Form_pg_namespace)GETSTRUCT(nsp_tuple);
+                nspForm = (Form_pg_namespace)GETSTRUCT(nsptuple);
 
-                if (OidIsValid(part_id)) {
-                    part_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(part_id));
-                    if (!HeapTupleIsValid(part_tuple)) {
-                        ReleaseSysCache(nsp_tuple);
-                        ReleaseSysCache(rel_tuple);
+                if (OidIsValid(partid)) {
+                    parttuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partid));
+                    if (!HeapTupleIsValid(parttuple)) {
+                        ReleaseSysCache(nsptuple);
+                        ReleaseSysCache(reltuple);
                         continue;
                     }
-                    part_form = (Form_pg_partition)GETSTRUCT(part_tuple);
+                    partForm = (Form_pg_partition)GETSTRUCT(parttuple);
                 }
 
                 errno_t rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
@@ -11193,17 +11683,17 @@ Datum pg_total_autovac_tuples(PG_FUNCTION_ARGS)
                 securec_check(rc, "\0", "\0");
 
                 values[0] = NameGetDatum(&data_name);
-                values[1] = NameGetDatum(&nsp_form->nspname);
-                values[2] = NameGetDatum(&rel_form->relname);
-                if (HeapTupleIsValid(part_tuple)) {
-                    values[3] = NameGetDatum(&part_form->relname);
+                values[1] = NameGetDatum(&nspForm->nspname);
+                values[2] = NameGetDatum(&relForm->relname);
+                if (HeapTupleIsValid(parttuple)) {
+                    values[3] = NameGetDatum(&partForm->relname);
                     values[4] = Int64GetDatum(tabentry->n_dead_tuples);
                     values[5] = Int64GetDatum(tabentry->n_live_tuples);
                     values[6] = Int64GetDatum(tabentry->changes_since_analyze);
-                } else if (rel_form->parttype == PARTTYPE_PARTITIONED_RELATION) {
+                } else if (PARTTYPE_PARTITIONED_RELATION == relForm->parttype) {
                     nulls[3] = true;
-                    values[4] = DirectFunctionCall1(pg_stat_get_dead_tuples, ObjectIdGetDatum(rel_id));
-                    values[5] = DirectFunctionCall1(pg_stat_get_live_tuples, ObjectIdGetDatum(rel_id));
+                    values[4] = DirectFunctionCall1(pg_stat_get_dead_tuples, ObjectIdGetDatum(relid));
+                    values[5] = DirectFunctionCall1(pg_stat_get_live_tuples, ObjectIdGetDatum(relid));
                     values[6] = Int64GetDatum(tabentry->changes_since_analyze);
                 } else {
                     nulls[3] = true;
@@ -11212,50 +11702,54 @@ Datum pg_total_autovac_tuples(PG_FUNCTION_ARGS)
                     values[6] = Int64GetDatum(tabentry->changes_since_analyze);
                 }
 
-                tuplestore_putvalues(tup_store, tup_desc, values, nulls);
+                tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 
-                if (part_tuple)
-                    ReleaseSysCache(part_tuple);
-                ReleaseSysCache(nsp_tuple);
-                ReleaseSysCache(rel_tuple);
+                if (parttuple)
+                    ReleaseSysCache(parttuple);
+                ReleaseSysCache(nsptuple);
+                ReleaseSysCache(reltuple);
             }
         }
     }
     DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "EXECUTE pg_total_autovac_tuples");
 
     /* clean up and return the tuplestore */
-    tuplestore_donestoring(tup_store);
-    rs_info->returnMode = SFRM_Materialize;
-    rs_info->setResult = tup_store;
-    rs_info->setDesc = tup_desc;
+    tuplestore_donestoring(tupstore);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tupstore;
+    rsinfo->setDesc = tupdesc;
 
     return (Datum)0;
 }
 
 Datum pg_autovac_status(PG_FUNCTION_ARGS)
 {
-    Oid rel_id = PG_GETARG_OID(0);
-    TupleDesc tup_desc;
-    HeapTuple class_tuple;
-    Form_pg_class class_form;
+    Oid relid = PG_GETARG_OID(0);
+    TupleDesc tupdesc;
+    HeapTuple classTuple;
+    Form_pg_class classForm;
     AutoVacOpts* relopts = NULL;
     bool force_vacuum = false;
     bool av_enabled = false;
-    bool do_vacuum = false;
-    bool do_analyze = false;
+    bool dovacuum = false;
+    bool doanalyze = false;
     bool is_internal_relation = false;
-    char* nsp_name = NULL;
-    char* rel_name = NULL;
+    char* nspname = NULL;
+    char* relname = NULL;
     int coor_idx = -1;
     bool isNull = false;
-    TransactionId rel_frozenx_id = InvalidTransactionId;
+    TransactionId relfrozenxid = InvalidTransactionId;
     Relation rel = NULL;
-    Datum xid_64_datum = 0;
+    Datum xid64datum = 0;
+
+    if (!superuser()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("Only superuser can call function pg_autovac_status.")));
+    }
 
     /* If the node is DN in mpp deployment mode */
-    if (IS_PGXC_DATANODE && IS_SINGLE_NODE == false) {
+    if (IS_PGXC_DATANODE && IS_SINGLE_NODE == false)
         PG_RETURN_NULL();
-    }
 
 #define STATUS_ATTR_NUM 9
 
@@ -11268,32 +11762,32 @@ Datum pg_autovac_status(PG_FUNCTION_ARGS)
     rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
     securec_check(rc, "\0", "\0");
 
-    tup_desc = CreateTemplateTupleDesc(STATUS_ATTR_NUM, false);
-    TupleDescInitEntry(tup_desc, (AttrNumber)1, "nspname", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)2, "relname", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)3, "nodename", TEXTOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)4, "doanalyze", BOOLOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)5, "anltuples", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)6, "anlthresh", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)7, "dovacuum", BOOLOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)8, "vactuples", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)9, "vacthresh", INT8OID, -1, 0);
-    BlessTupleDesc(tup_desc);
+    tupdesc = CreateTemplateTupleDesc(STATUS_ATTR_NUM, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "nspname", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "relname", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "nodename", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "doanalyze", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)5, "anltuples", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)6, "anlthresh", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)7, "dovacuum", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)8, "vactuples", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)9, "vacthresh", INT8OID, -1, 0);
+    BlessTupleDesc(tupdesc);
 
-    class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel_id));
-    if (!HeapTupleIsValid(class_tuple)) {
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple))
+        PG_RETURN_NULL();
+
+    classForm = (Form_pg_class)GETSTRUCT(classTuple);
+    nspname = get_namespace_name(classForm->relnamespace);
+    relname = NameStr(classForm->relname);
+
+    if ((relname == NULL) || (nspname == NULL) || (classForm->relkind != RELKIND_RELATION)) {
+        ReleaseSysCache(classTuple);
         PG_RETURN_NULL();
     }
 
-    class_form = (Form_pg_class)GETSTRUCT(class_tuple);
-    nsp_name = get_namespace_name(class_form->relnamespace);
-    rel_name = NameStr(class_form->relname);
-    if ((rel_name == NULL) || (nsp_name == NULL) || (class_form->relkind != RELKIND_RELATION)) {
-        ReleaseSysCache(class_tuple);
-        PG_RETURN_NULL();
-    }
-
-    relation_support_autoavac(class_tuple, &do_analyze, &do_vacuum, &is_internal_relation);
+    relation_support_autoavac(classTuple, &doanalyze, &dovacuum, &is_internal_relation);
 
     /* constants from reloptions or GUC variables */
     int64 vac_base_thresh;
@@ -11302,87 +11796,85 @@ Datum pg_autovac_status(PG_FUNCTION_ARGS)
     float4 anl_scale_factor;
 
     /* thresholds calculated from above constants */
-    int64 vac_thresh;
-    int64 anl_thresh;
+    int64 vacthresh;
+    int64 anlthresh;
 
     /* number of vacuum (resp. analyze) tuples at this time */
-    int64 vac_tuples;
-    int64 anl_tuples;
+    int64 vactuples;
+    int64 anltuples;
 
     /* freeze parameters */
     int freeze_max_age;
-    TransactionId xid_force_limit;
+    TransactionId xidForceLimit;
 
-    relopts = extract_autovac_opts(class_tuple, GetDefaultPgClassDesc());
+    relopts = extract_autovac_opts(classTuple, GetDefaultPgClassDesc());
 
     /*
      * Determine vacuum/analyze equation parameters.  We have two possible
      * sources: the passed reloptions (which could be a main table or a toast
      * table), or the autovacuum GUC variables.
-     *
-     * -1 in autovac setting means use plain vacuum_cost_delay
      */
-    vac_scale_factor = (relopts && relopts->vacuum_scale_factor >= 0) ? relopts->vacuum_scale_factor :
-                       u_sess->attr.attr_storage.autovacuum_vac_scale;
 
-    vac_base_thresh = (relopts && relopts->vacuum_threshold >= 0) ? relopts->vacuum_threshold :
-                      u_sess->attr.attr_storage.autovacuum_vac_thresh;
+    /* -1 in autovac setting means use plain vacuum_cost_delay */
+    vac_scale_factor = (relopts && relopts->vacuum_scale_factor >= 0) ? relopts->vacuum_scale_factor
+                                                                      : u_sess->attr.attr_storage.autovacuum_vac_scale;
 
-    anl_scale_factor = (relopts && relopts->analyze_scale_factor >= 0) ? relopts->analyze_scale_factor :
-                       u_sess->attr.attr_storage.autovacuum_anl_scale;
+    vac_base_thresh = (relopts && relopts->vacuum_threshold >= 0) ? relopts->vacuum_threshold
+                                                                  : u_sess->attr.attr_storage.autovacuum_vac_thresh;
 
-    anl_base_thresh = (relopts && relopts->analyze_threshold >= 0) ? relopts->analyze_threshold :
-                      u_sess->attr.attr_storage.autovacuum_anl_thresh;
+    anl_scale_factor = (relopts && relopts->analyze_scale_factor >= 0) ? relopts->analyze_scale_factor
+                                                                       : u_sess->attr.attr_storage.autovacuum_anl_scale;
 
-    freeze_max_age = (relopts && relopts->freeze_max_age >= 0) ?
-                     Min(relopts->freeze_max_age, g_instance.attr.attr_storage.autovacuum_freeze_max_age) :
-                     g_instance.attr.attr_storage.autovacuum_freeze_max_age;
+    anl_base_thresh = (relopts && relopts->analyze_threshold >= 0) ? relopts->analyze_threshold
+                                                                   : u_sess->attr.attr_storage.autovacuum_anl_thresh;
+
+    freeze_max_age = (relopts && relopts->freeze_max_age >= 0)
+                         ? Min(relopts->freeze_max_age, g_instance.attr.attr_storage.autovacuum_freeze_max_age)
+                         : g_instance.attr.attr_storage.autovacuum_freeze_max_age;
 
     av_enabled = (relopts ? relopts->enabled : true);
 
     /* Force vacuum if table need freeze the old tuple for clog recycle */
-    if (t_thrd.autovacuum_cxt.recentXid > FirstNormalTransactionId + freeze_max_age) {
-        xid_force_limit = t_thrd.autovacuum_cxt.recentXid - freeze_max_age;
-    } else {
-        xid_force_limit = FirstNormalTransactionId;
-    }
+    if (t_thrd.autovacuum_cxt.recentXid > FirstNormalTransactionId + freeze_max_age)
+        xidForceLimit = t_thrd.autovacuum_cxt.recentXid - freeze_max_age;
+    else
+        xidForceLimit = FirstNormalTransactionId;
+
     rel = heap_open(RelationRelationId, AccessShareLock);
-    xid_64_datum = heap_getattr(class_tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
+    xid64datum = heap_getattr(classTuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
     heap_close(rel, AccessShareLock);
-    ReleaseSysCache(class_tuple);
+    ReleaseSysCache(classTuple);
 
     if (isNull) {
-        rel_frozenx_id = class_form->relfrozenxid;
-        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, rel_frozenx_id) ||
-            !TransactionIdIsNormal(rel_frozenx_id)) {
-            rel_frozenx_id = FirstNormalTransactionId;
-        }
+        relfrozenxid = classForm->relfrozenxid;
+        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, relfrozenxid) ||
+            !TransactionIdIsNormal(relfrozenxid))
+            relfrozenxid = FirstNormalTransactionId;
     } else {
-        rel_frozenx_id = DatumGetTransactionId(xid_64_datum);
+        relfrozenxid = DatumGetTransactionId(xid64datum);
     }
 
-    force_vacuum = (TransactionIdIsNormal(rel_frozenx_id) && TransactionIdPrecedes(rel_frozenx_id, xid_force_limit));
+    force_vacuum = (TransactionIdIsNormal(relfrozenxid) && TransactionIdPrecedes(relfrozenxid, xidForceLimit));
 
-    vac_thresh = (int64)(vac_base_thresh + vac_scale_factor * class_form->reltuples);
-    anl_thresh = (int64)(anl_base_thresh + anl_scale_factor * class_form->reltuples);
-    anl_tuples = DirectFunctionCall1(pg_stat_get_tuples_changed, ObjectIdGetDatum(rel_id));
-    vac_tuples = DirectFunctionCall1(pg_stat_get_dead_tuples, ObjectIdGetDatum(rel_id));
+    vacthresh = (int64)(vac_base_thresh + vac_scale_factor * classForm->reltuples);
+    anlthresh = (int64)(anl_base_thresh + anl_scale_factor * classForm->reltuples);
+    anltuples = DirectFunctionCall1(pg_stat_get_tuples_changed, ObjectIdGetDatum(relid));
+    vactuples = DirectFunctionCall1(pg_stat_get_dead_tuples, ObjectIdGetDatum(relid));
 
     /* Determine if this table needs analyze */
-    if (do_analyze) {
-        do_analyze = (anl_tuples > anl_thresh);
-    }
+    if (doanalyze)
+        doanalyze = (anltuples > anlthresh);
 
     /* Determine if this table needs vacuum */
     if (force_vacuum) {
-        do_vacuum = force_vacuum;
-    } else if (do_vacuum) {
-        do_vacuum = (vac_tuples > vac_thresh);
+        dovacuum = force_vacuum;
+    } else if (dovacuum) {
+        dovacuum = (vactuples > vacthresh);
     }
 
     coor_idx = PgxcGetCentralNodeIndex();
     LWLockAcquire(NodeTableLock, LW_SHARED);
-    if (coor_idx >= 0 && coor_idx < *t_thrd.pgxc_cxt.shmemNumCoords && IS_SINGLE_NODE == false) {
+    if (0 <= coor_idx && coor_idx < *t_thrd.pgxc_cxt.shmemNumCoords && IS_SINGLE_NODE == false) {
         /* get central coordinator name since just do autovac on central coordinator */
         values[2] = CStringGetTextDatum(NameStr(t_thrd.pgxc_cxt.coDefs[coor_idx].nodename));
     } else if (IS_SINGLE_NODE == true) {
@@ -11399,47 +11891,46 @@ Datum pg_autovac_status(PG_FUNCTION_ARGS)
         ereport(LOG, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Fail to find central coordinator")));
     }
 
-    values[0] = CStringGetTextDatum(nsp_name);
-    values[1] = CStringGetTextDatum(rel_name);
-    values[3] = BoolGetDatum(do_analyze);
-    values[4] = Int64GetDatum(anl_tuples);
-    values[5] = Int64GetDatum(anl_thresh);
-    values[6] = BoolGetDatum(do_vacuum);
-    values[7] = Int64GetDatum(vac_tuples);
-    values[8] = Int64GetDatum(vac_thresh);
+    values[0] = CStringGetTextDatum(nspname);
+    values[1] = CStringGetTextDatum(relname);
+    values[3] = BoolGetDatum(doanalyze);
+    values[4] = Int64GetDatum(anltuples);
+    values[5] = Int64GetDatum(anlthresh);
+    values[6] = BoolGetDatum(dovacuum);
+    values[7] = Int64GetDatum(vactuples);
+    values[8] = Int64GetDatum(vacthresh);
 
     /* Returns the record as Datum */
-    PG_RETURN_DATUM(HeapTupleGetDatum(heap_form_tuple(tup_desc, values, nulls)));
+    PG_RETURN_DATUM(HeapTupleGetDatum(heap_form_tuple(tupdesc, values, nulls)));
 }
 
 void check_dirty_percent_and_tuples(int dirty_pecent, int n_tuples)
 {
-    if (dirty_pecent > 100 || dirty_pecent < 0 || n_tuples < 0) {
+    if (dirty_pecent > 100 || dirty_pecent < 0 || n_tuples < 0)
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), (errmsg("out of range."))));
-    }
 }
 
-void dirty_table_init_tupdesc(TupleDesc tup_desc)
+void dirty_table_init_tupdesc(TupleDesc* tupdesc)
 {
-    tup_desc = CreateTemplateTupleDesc(7, false);
-    TupleDescInitEntry(tup_desc, (AttrNumber)1, "relname", NAMEOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)2, "schemaname", NAMEOID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)3, "n_tup_ins", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)4, "n_tup_upd", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)5, "n_tup_del", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)6, "n_live_tup", INT8OID, -1, 0);
-    TupleDescInitEntry(tup_desc, (AttrNumber)7, "n_dead_tup", INT8OID, -1, 0);
+    *tupdesc = CreateTemplateTupleDesc(7, false, TAM_HEAP);
+    TupleDescInitEntry(*tupdesc, (AttrNumber)1, "relname", NAMEOID, -1, 0);
+    TupleDescInitEntry(*tupdesc, (AttrNumber)2, "schemaname", NAMEOID, -1, 0);
+    TupleDescInitEntry(*tupdesc, (AttrNumber)3, "n_tup_ins", INT8OID, -1, 0);
+    TupleDescInitEntry(*tupdesc, (AttrNumber)4, "n_tup_upd", INT8OID, -1, 0);
+    TupleDescInitEntry(*tupdesc, (AttrNumber)5, "n_tup_del", INT8OID, -1, 0);
+    TupleDescInitEntry(*tupdesc, (AttrNumber)6, "n_live_tup", INT8OID, -1, 0);
+    TupleDescInitEntry(*tupdesc, (AttrNumber)7, "n_dead_tup", INT8OID, -1, 0);
 }
 
 void dirty_table_fill_values(Datum* values, TupleTableSlot* slot, bool* nulls)
 {
-    values[0] = slot_getattr(slot, 1, &nulls[0]);
-    values[1] = slot_getattr(slot, 2, &nulls[1]);
-    values[2] = slot_getattr(slot, 3, &nulls[2]);
-    values[3] = slot_getattr(slot, 4, &nulls[3]);
-    values[4] = slot_getattr(slot, 5, &nulls[4]);
-    values[5] = slot_getattr(slot, 6, &nulls[5]);
-    values[6] = slot_getattr(slot, 7, &nulls[6]);
+    values[0] = tableam_tslot_getattr(slot, 1, &nulls[0]);
+    values[1] = tableam_tslot_getattr(slot, 2, &nulls[1]);
+    values[2] = tableam_tslot_getattr(slot, 3, &nulls[2]);
+    values[3] = tableam_tslot_getattr(slot, 4, &nulls[3]);
+    values[4] = tableam_tslot_getattr(slot, 5, &nulls[4]);
+    values[5] = tableam_tslot_getattr(slot, 6, &nulls[5]);
+    values[6] = tableam_tslot_getattr(slot, 7, &nulls[6]);
 }
 
 /*
@@ -11448,116 +11939,119 @@ void dirty_table_fill_values(Datum* values, TupleTableSlot* slot, bool* nulls)
  */
 Datum pgxc_stat_all_dirty_tables(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     Datum values[7];
     bool nulls[7] = {false, false, false, false};
     HeapTuple tuple = NULL;
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context = NULL;
-        TupleDesc tup_desc = NULL;
+        MemoryContext oldcontext = NULL;
+        TupleDesc tupdesc = NULL;
         int dirty_pecent = PG_GETARG_INT32(0);
-        int tuples = PG_GETARG_INT32(1);
+        int n_tuples = PG_GETARG_INT32(1);
         /* check range */
-        check_dirty_percent_and_tuples(dirty_pecent, tuples);
-        func_ctx = SRF_FIRSTCALL_INIT();
+        check_dirty_percent_and_tuples(dirty_pecent, n_tuples);
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples. */
-        dirty_table_init_tupdesc(tup_desc);
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-        func_ctx->max_calls = u_sess->pgxc_cxt.NumDataNodes;
+        /* build tupdesc for result tuples. */
+        dirty_table_init_tupdesc(&tupdesc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes;
 
         /* the main call for get pgxc_stat_all_tables2 */
-        func_ctx->user_fctx = getTableStat(func_ctx->tuple_desc, dirty_pecent, tuples, NULL);
-        MemoryContextSwitchTo(old_context);
+        funcctx->user_fctx = getTableStat(funcctx->tuple_desc, dirty_pecent, n_tuples, NULL);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate* tup_store = ((TableDistributionInfo*)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot* slot = ((TableDistributionInfo*)func_ctx->user_fctx)->slot;
-        if (!tuplestore_gettupleslot(tup_store, true, false, slot)) {
-            FreeParallelFunctionState(((TableDistributionInfo*)func_ctx->user_fctx)->state);
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
+
+        if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
         dirty_table_fill_values(values, slot, nulls);
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
 
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 Datum pgxc_stat_schema_dirty_tables(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     Datum values[7];
     bool nulls[7] = {false, false, false, false};
     HeapTuple tuple = NULL;
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context = NULL;
-        TupleDesc tup_desc = NULL;
+        MemoryContext oldcontext = NULL;
+        TupleDesc tupdesc = NULL;
         int dirty_pecent = PG_GETARG_INT32(0);
-        int tuples = PG_GETARG_INT32(1);
+        int n_tuples = PG_GETARG_INT32(1);
 
         /* check range */
-        check_dirty_percent_and_tuples(dirty_pecent, tuples);
+        check_dirty_percent_and_tuples(dirty_pecent, n_tuples);
 
-        text* rel_namespace_t = PG_GETARG_TEXT_PP(2);
-        char* rel_namespace = text_to_cstring(rel_namespace_t);
+        text* relnamespace_t = PG_GETARG_TEXT_PP(2);
+        char* relnamespace = text_to_cstring(relnamespace_t);
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples. */
-        dirty_table_init_tupdesc(tup_desc);
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-        func_ctx->max_calls = u_sess->pgxc_cxt.NumDataNodes;
+        /* build tupdesc for result tuples. */
+        dirty_table_init_tupdesc(&tupdesc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes;
 
         /* the main call for get pgxc_stat_all_tables2 */
-        func_ctx->user_fctx = getTableStat(func_ctx->tuple_desc, dirty_pecent, tuples, rel_namespace);
-        PG_FREE_IF_COPY(rel_namespace_t, 2);
-        pfree(rel_namespace);
-        MemoryContextSwitchTo(old_context);
+        funcctx->user_fctx = getTableStat(funcctx->tuple_desc, dirty_pecent, n_tuples, relnamespace);
+        PG_FREE_IF_COPY(relnamespace_t, 2);
+        pfree(relnamespace);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate* tupstore = ((TableDistributionInfo*)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot* slot = ((TableDistributionInfo*)func_ctx->user_fctx)->slot;
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
+
         if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-            FreeParallelFunctionState(((TableDistributionInfo*)func_ctx->user_fctx)->state);
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
         dirty_table_fill_values(values, slot, nulls);
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 /*
@@ -11566,69 +12060,69 @@ Datum pgxc_stat_schema_dirty_tables(PG_FUNCTION_ARGS)
  */
 Datum all_table_distribution(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
     Datum values[4];
     bool nulls[4] = {false, false, false, false};
 
-    /* only system admin can view the global distribution information. */
+    /* only system admin can view the global distribution information.*/
     if (!superuser()) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be system admin to view the global information"))));
     }
 
     if (SRF_IS_FIRSTCALL()) {
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        MemoryContext oldcontext = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* build tupdesc for result tuples. */
-        TupleDesc tupdesc = CreateTemplateTupleDesc(4, false);
+        TupleDesc tupdesc = CreateTemplateTupleDesc(4, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "schemaname", NAMEOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "tablename", NAMEOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "nodename", NAMEOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)4, "dnsize", INT8OID, -1, 0);
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->max_calls = u_sess->pgxc_cxt.NumDataNodes;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes;
 
         /* the main call for get table distribution. */
-        func_ctx->user_fctx = getTableDataDistribution(func_ctx->tuple_desc);
+        funcctx->user_fctx = getTableDataDistribution(funcctx->tuple_desc);
 
         MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate* tupstore = ((TableDistributionInfo*)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot* slot = ((TableDistributionInfo*)func_ctx->user_fctx)->slot;
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
 
         if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-            FreeParallelFunctionState(((TableDistributionInfo*)func_ctx->user_fctx)->state);
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
-        values[0] = slot_getattr(slot, 1, &nulls[0]);
-        values[1] = slot_getattr(slot, 2, &nulls[1]);
-        values[2] = slot_getattr(slot, 3, &nulls[2]);
-        values[3] = slot_getattr(slot, 4, &nulls[3]);
-        HeapTuple tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
+        values[0] = tableam_tslot_getattr(slot, 1, &nulls[0]);
+        values[1] = tableam_tslot_getattr(slot, 2, &nulls[1]);
+        values[2] = tableam_tslot_getattr(slot, 3, &nulls[2]);
+        values[3] = tableam_tslot_getattr(slot, 4, &nulls[3]);
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
 
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
 
@@ -11641,131 +12135,132 @@ Datum all_table_distribution(PG_FUNCTION_ARGS)
 Datum single_table_distribution(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
         errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     Datum values[4];
     bool nulls[4] = {false, false, false, false};
     HeapTuple tuple = NULL;
 
     if (SRF_IS_FIRSTCALL()) {
-        MemoryContext old_context = NULL;
-        TupleDesc tup_desc = NULL;
-        text* rel_namespace_t = PG_GETARG_TEXT_PP(0);
-        text* rel_name_t = PG_GETARG_TEXT_PP(1);
+        MemoryContext oldcontext = NULL;
+        TupleDesc tupdesc = NULL;
+        text* relnamespace_t = PG_GETARG_TEXT_PP(0);
+        text* relname_t = PG_GETARG_TEXT_PP(1);
 
-        char* rel_namespace = text_to_cstring(rel_namespace_t);
-        char* rel_name = text_to_cstring(rel_name_t);
+        char* relnamespace = text_to_cstring(relnamespace_t);
+        char* relname = text_to_cstring(relname_t);
 
-        /* Check whether the user have SELECT privilege of the table. */
+        /* Check whether the user have SELECT privilege of the table.*/
         if (!superuser()) {
-            Oid table_oid;
-            Oid namespace_oid;
-            AclResult acl_result;
+            Oid tableoid;
+            Oid namespaceoid;
+            AclResult aclresult;
 
-            namespace_oid = get_namespace_oid(rel_namespace, false);
-            table_oid = get_relname_relid(rel_name, namespace_oid);
-            if (!OidIsValid(table_oid))
+            namespaceoid = get_namespace_oid(relnamespace, false);
+            tableoid = get_relname_relid(relname, namespaceoid);
+            if (!OidIsValid(tableoid))
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_TABLE),
-                        errmsg("relation \"%s.%s\" does not exist", rel_namespace, rel_name)));
+                        errmsg("relation \"%s.%s\" does not exist", relnamespace, relname)));
 
-            acl_result = pg_class_aclcheck(table_oid, GetUserId(), ACL_SELECT);
-            if (acl_result != ACLCHECK_OK)
+            aclresult = pg_class_aclcheck(tableoid, GetUserId(), ACL_SELECT);
+            if (aclresult != ACLCHECK_OK)
                 ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("permission denied."))));
         }
 
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples. */
-        tup_desc = CreateTemplateTupleDesc(4, false);
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "schemaname", NAMEOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "tablename", NAMEOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "nodename", NAMEOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "dnsize", INT8OID, -1, 0);
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-        func_ctx->max_calls = u_sess->pgxc_cxt.NumDataNodes;
+        /* build tupdesc for result tuples. */
+        tupdesc = CreateTemplateTupleDesc(4, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "schemaname", NAMEOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "tablename", NAMEOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "nodename", NAMEOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "dnsize", INT8OID, -1, 0);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes;
 
         /* the main call for get table distribution. */
-        func_ctx->user_fctx = getTableDataDistribution(func_ctx->tuple_desc, rel_namespace, rel_name);
-        PG_FREE_IF_COPY(rel_namespace_t, 0);
-        PG_FREE_IF_COPY(rel_name_t, 1);
-        pfree_ext(rel_namespace);
-        pfree_ext(rel_name);
+        funcctx->user_fctx = getTableDataDistribution(funcctx->tuple_desc, relnamespace, relname);
+        PG_FREE_IF_COPY(relnamespace_t, 0);
+        PG_FREE_IF_COPY(relname_t, 1);
+        pfree_ext(relnamespace);
+        pfree_ext(relname);
 
-        MemoryContextSwitchTo(old_context);
+        MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
-        }
+        if (funcctx->user_fctx == NULL)
+            SRF_RETURN_DONE(funcctx);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate* tupstore = ((TableDistributionInfo*)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot* slot = ((TableDistributionInfo*)func_ctx->user_fctx)->slot;
-        if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-            FreeParallelFunctionState(((TableDistributionInfo*)func_ctx->user_fctx)->state);
-            ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
-        }
-        values[0] = slot_getattr(slot, 1, &nulls[0]);
-        values[1] = slot_getattr(slot, 2, &nulls[1]);
-        values[2] = slot_getattr(slot, 3, &nulls[2]);
-        values[3] = slot_getattr(slot, 4, &nulls[3]);
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
+    funcctx = SRF_PERCALL_SETUP();
 
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
+
+        if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
+            ExecDropSingleTupleTableSlot(slot);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
+        }
+        values[0] = tableam_tslot_getattr(slot, 1, &nulls[0]);
+        values[1] = tableam_tslot_getattr(slot, 2, &nulls[1]);
+        values[2] = tableam_tslot_getattr(slot, 3, &nulls[2]);
+        values[3] = tableam_tslot_getattr(slot, 4, &nulls[3]);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
 
 Datum pg_stat_bad_block(PG_FUNCTION_ARGS)
 {
 #define BAD_BLOCK_STAT_NATTS 9
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     HASH_SEQ_STATUS* hash_seq = NULL;
 
     LWLockAcquire(BadBlockStatHashLock, LW_SHARED);
 
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc = NULL;
-        MemoryContext old_context = NULL;
+        TupleDesc tupdesc = NULL;
+        MemoryContext oldcontext = NULL;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * switch to memory context appropriate for multiple function calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        /* build tup_desc for result tuples */
-        tup_desc = CreateTemplateTupleDesc(BAD_BLOCK_STAT_NATTS, false);
+        /* build tupdesc for result tuples */
+        tupdesc = CreateTemplateTupleDesc(BAD_BLOCK_STAT_NATTS, false, TAM_HEAP);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "nodename", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "databaseid", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "tablespaceid", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "relfilenode", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "bucketid", INT2OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)6, "forknum", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)7, "error_count", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)8, "first_time", TIMESTAMPTZOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)9, "last_time", TIMESTAMPTZOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "nodename", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "databaseid", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "tablespaceid", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "relfilenode", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "bucketid", INT2OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)6, "forknum", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)7, "error_count", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)8, "first_time", TIMESTAMPTZOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)9, "last_time", TIMESTAMPTZOID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         if (global_bad_block_stat) {
             hash_seq = (HASH_SEQ_STATUS*)palloc0(sizeof(HASH_SEQ_STATUS));
@@ -11773,15 +12268,16 @@ Datum pg_stat_bad_block(PG_FUNCTION_ARGS)
         }
 
         /* NULL if global_bad_block_stat == NULL */
-        func_ctx->user_fctx = (void*)hash_seq;
+        funcctx->user_fctx = (void*)hash_seq;
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx != NULL) {
-        hash_seq = (HASH_SEQ_STATUS*)func_ctx->user_fctx;
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx != NULL) {
+        hash_seq = (HASH_SEQ_STATUS*)funcctx->user_fctx;
         BadBlockHashEnt* badblock_entry = (BadBlockHashEnt*)hash_seq_search(hash_seq);
 
         if (badblock_entry != NULL) {
@@ -11793,6 +12289,7 @@ Datum pg_stat_bad_block(PG_FUNCTION_ARGS)
             securec_check(rc, "\0", "\0");
 
             int i = 0;
+
             values[i++] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
             values[i++] = UInt32GetDatum(badblock_entry->key.relfilenode.dbNode);
             values[i++] = UInt32GetDatum(badblock_entry->key.relfilenode.spcNode);
@@ -11802,16 +12299,18 @@ Datum pg_stat_bad_block(PG_FUNCTION_ARGS)
             values[i++] = Int32GetDatum(badblock_entry->error_count);
             values[i++] = TimestampTzGetDatum(badblock_entry->first_time);
             values[i++] = TimestampTzGetDatum(badblock_entry->last_time);
-            tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
+
+            tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+
             LWLockRelease(BadBlockStatHashLock);
-            SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+            SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
         } else {
             LWLockRelease(BadBlockStatHashLock);
-            SRF_RETURN_DONE(func_ctx);
+            SRF_RETURN_DONE(funcctx);
         }
     } else {
         LWLockRelease(BadBlockStatHashLock);
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
@@ -11827,14 +12326,20 @@ Datum pg_stat_bad_block_clear(PG_FUNCTION_ARGS)
     PG_RETURN_VOID();
 }
 
-typedef enum FuncName { PAGEWRITER_FUNC, INCRE_CKPT_FUNC, INCRE_BGWRITER_FUNC} FuncName;
+typedef enum FuncName {
+    PAGEWRITER_FUNC,
+    INCRE_CKPT_FUNC,
+    INCRE_BGWRITER_FUNC,
+    DW_SINGLE_FUNC,
+    DW_BATCH_FUNC
+} FuncName;
 
 HeapTuple form_function_tuple(int col_num, FuncName name)
 {
-    TupleDesc tup_desc = NULL;
+    TupleDesc tupdesc = NULL;
     HeapTuple tuple = NULL;
     Datum values[col_num];
-    bool nulls[col_num] = {false};
+    bool nulls[col_num];
     errno_t rc;
     int i;
 
@@ -11843,12 +12348,12 @@ HeapTuple form_function_tuple(int col_num, FuncName name)
     rc = memset_s(nulls, sizeof(nulls), 1, sizeof(nulls));
     securec_check(rc, "\0", "\0");
 
-    tup_desc = CreateTemplateTupleDesc(col_num, false);
+    tupdesc = CreateTemplateTupleDesc(col_num, false, TAM_HEAP);
 
     switch (name) {
         case PAGEWRITER_FUNC:
             for (i = 0; i < col_num; i++) {
-                TupleDescInitEntry(tup_desc,
+                TupleDescInitEntry(tupdesc,
                     (AttrNumber)(i + 1),
                     g_pagewriter_view_col[i].name,
                     g_pagewriter_view_col[i].data_type,
@@ -11861,7 +12366,7 @@ HeapTuple form_function_tuple(int col_num, FuncName name)
         case INCRE_CKPT_FUNC:
             for (i = 0; i < col_num; i++) {
                 TupleDescInitEntry(
-                    tup_desc, (AttrNumber)(i + 1), g_ckpt_view_col[i].name, g_ckpt_view_col[i].data_type, -1, 0);
+                    tupdesc, (AttrNumber)(i + 1), g_ckpt_view_col[i].name, g_ckpt_view_col[i].data_type, -1, 0);
                 values[i] = g_ckpt_view_col[i].get_val();
                 nulls[i] = false;
             }
@@ -11869,8 +12374,24 @@ HeapTuple form_function_tuple(int col_num, FuncName name)
         case INCRE_BGWRITER_FUNC:
             for (i = 0; i < col_num; i++) {
                 TupleDescInitEntry(
-                    tup_desc, (AttrNumber)(i + 1), g_bgwriter_view_col[i].name, g_bgwriter_view_col[i].data_type, -1, 0);
+                    tupdesc, (AttrNumber)(i + 1), g_bgwriter_view_col[i].name, g_bgwriter_view_col[i].data_type, -1, 0);
                 values[i] = g_bgwriter_view_col[i].get_val();
+                nulls[i] = false;
+            }
+            break;
+        case DW_SINGLE_FUNC:
+            for (i = 0; i < col_num; i++) {
+                TupleDescInitEntry(
+                    tupdesc, (AttrNumber)(i + 1), g_dw_single_view[i].name, g_dw_single_view[i].data_type, -1, 0);
+                values[i] = g_dw_single_view[i].get_data();
+                nulls[i] = false;
+            }
+            break;
+        case DW_BATCH_FUNC:
+            for (i = 0; i < col_num; i++) {
+                TupleDescInitEntry(
+                    tupdesc, (AttrNumber)(i + 1), g_dw_view_col_arr[i].name, g_dw_view_col_arr[i].data_type, -1, 0);
+                values[i] = g_dw_view_col_arr[i].get_data();
                 nulls[i] = false;
             }
             break;
@@ -11879,8 +12400,8 @@ HeapTuple form_function_tuple(int col_num, FuncName name)
             break;
     }
 
-    tup_desc = BlessTupleDesc(tup_desc);
-    tuple = heap_form_tuple(tup_desc, values, nulls);
+    tupdesc = BlessTupleDesc(tupdesc);
+    tuple = heap_form_tuple(tupdesc, values, nulls);
     return tuple;
 }
 
@@ -11904,18 +12425,18 @@ Datum local_bgwriter_stat(PG_FUNCTION_ARGS)
 
 void xc_stat_view(FuncCallContext* funcctx, int col_num, FuncName name)
 {
-    MemoryContext old_context = NULL;
-    TupleDesc tup_desc = NULL;
+    MemoryContext oldcontext = NULL;
+    TupleDesc tupdesc = NULL;
     int i;
 
-    old_context = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+    oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-    /* build tup_desc for result tuples. */
-    tup_desc = CreateTemplateTupleDesc(col_num, false);
+    /* build tupdesc for result tuples. */
+    tupdesc = CreateTemplateTupleDesc(col_num, false, TAM_HEAP);
     switch (name) {
         case PAGEWRITER_FUNC:
             for (i = 0; i < col_num; i++) {
-                TupleDescInitEntry(tup_desc,
+                TupleDescInitEntry(tupdesc,
                     (AttrNumber)(i + 1),
                     g_pagewriter_view_col[i].name,
                     g_pagewriter_view_col[i].data_type,
@@ -11926,13 +12447,13 @@ void xc_stat_view(FuncCallContext* funcctx, int col_num, FuncName name)
         case INCRE_CKPT_FUNC:
             for (i = 0; i < col_num; i++) {
                 TupleDescInitEntry(
-                    tup_desc, (AttrNumber)(i + 1), g_ckpt_view_col[i].name, g_ckpt_view_col[i].data_type, -1, 0);
+                    tupdesc, (AttrNumber)(i + 1), g_ckpt_view_col[i].name, g_ckpt_view_col[i].data_type, -1, 0);
             }
             break;
         case INCRE_BGWRITER_FUNC:
             for (i = 0; i < col_num; i++) {
                 TupleDescInitEntry(
-                    tup_desc, (AttrNumber)(i + 1), g_bgwriter_view_col[i].name, g_bgwriter_view_col[i].data_type, -1, 0);
+                    tupdesc, (AttrNumber)(i + 1), g_bgwriter_view_col[i].name, g_bgwriter_view_col[i].data_type, -1, 0);
             }
             break;
         default:
@@ -11940,7 +12461,7 @@ void xc_stat_view(FuncCallContext* funcctx, int col_num, FuncName name)
             break;
     }
 
-    funcctx->tuple_desc = BlessTupleDesc(tup_desc);
+    funcctx->tuple_desc = BlessTupleDesc(tupdesc);
     funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
 
     switch (name) {
@@ -11958,20 +12479,20 @@ void xc_stat_view(FuncCallContext* funcctx, int col_num, FuncName name)
             break;
     }
 
-    MemoryContextSwitchTo(old_context);
+    MemoryContextSwitchTo(oldcontext);
     return;
 }
 
 Datum remote_pagewriter_stat(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
         errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     HeapTuple tuple = NULL;
     Datum values[PAGEWRITER_VIEW_COL_NUM];
     bool nulls[PAGEWRITER_VIEW_COL_NUM] = {false};
@@ -11984,36 +12505,38 @@ Datum remote_pagewriter_stat(PG_FUNCTION_ARGS)
     securec_check(rc, "\0", "\0");
 
     if (SRF_IS_FIRSTCALL()) {
-        func_ctx = SRF_FIRSTCALL_INIT();
-        xc_stat_view(func_ctx, PAGEWRITER_VIEW_COL_NUM, PAGEWRITER_FUNC);
+        funcctx = SRF_FIRSTCALL_INIT();
+        xc_stat_view(funcctx, PAGEWRITER_VIEW_COL_NUM, PAGEWRITER_FUNC);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
         }
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate* tupstore = ((TableDistributionInfo*)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot* slot = ((TableDistributionInfo*)func_ctx->user_fctx)->slot;
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
 
         if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-            FreeParallelFunctionState(((TableDistributionInfo*)func_ctx->user_fctx)->state);
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
         for (i = 0; i < PAGEWRITER_VIEW_COL_NUM; i++) {
-            values[i] = slot_getattr(slot, (i + 1), &nulls[i]);
+            values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
         }
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
 
@@ -12026,7 +12549,7 @@ Datum remote_ckpt_stat(PG_FUNCTION_ARGS)
 
     SRF_RETURN_DONE(funcctx);
 #else
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     HeapTuple tuple = NULL;
     Datum values[INCRE_CKPT_VIEW_COL_NUM];
     bool nulls[INCRE_CKPT_VIEW_COL_NUM] = {false};
@@ -12039,33 +12562,35 @@ Datum remote_ckpt_stat(PG_FUNCTION_ARGS)
     securec_check(rc, "\0", "\0");
 
     if (SRF_IS_FIRSTCALL()) {
-        func_ctx = SRF_FIRSTCALL_INIT();
-        xc_stat_view(func_ctx, INCRE_CKPT_VIEW_COL_NUM, INCRE_CKPT_FUNC);
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
+        funcctx = SRF_FIRSTCALL_INIT();
+        xc_stat_view(funcctx, INCRE_CKPT_VIEW_COL_NUM, INCRE_CKPT_FUNC);
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
         }
     }
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate* tupstore = ((TableDistributionInfo*)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot* slot = ((TableDistributionInfo*)func_ctx->user_fctx)->slot;
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
+
         if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-            FreeParallelFunctionState(((TableDistributionInfo*)func_ctx->user_fctx)->state);
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
         for (i = 0; i < INCRE_CKPT_VIEW_COL_NUM; i++) {
-            values[i] = slot_getattr(slot, (i + 1), &nulls[i]);
+            values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
         }
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
 
@@ -12113,7 +12638,7 @@ Datum remote_bgwriter_stat(PG_FUNCTION_ARGS)
             SRF_RETURN_DONE(funcctx);
         }
         for (i = 0; i < INCRE_CKPT_BGWRITER_VIEW_COL_NUM; i++) {
-            values[i] = slot_getattr(slot, (i + 1), &nulls[i]);
+            values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
         }
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         (void)ExecClearTuple(slot);
@@ -12125,165 +12650,221 @@ Datum remote_bgwriter_stat(PG_FUNCTION_ARGS)
 #endif
 }
 
-Datum local_double_write_stat(PG_FUNCTION_ARGS)
+Datum local_single_flush_dw_stat(PG_FUNCTION_ARGS)
 {
-    TupleDesc tup_desc = NULL;
-    HeapTuple tuple = NULL;
-    Datum values[DW_VIEW_COL_NUM];
-    bool nulls[DW_VIEW_COL_NUM] = {false};
-    uint32 i;
+    HeapTuple tuple = form_function_tuple(DW_SINGLE_VIEW_COL_NUM, DW_SINGLE_FUNC);
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
 
-    tup_desc = CreateTemplateTupleDesc(DW_VIEW_COL_NUM, false);
-    for (i = 0; i < DW_VIEW_COL_NUM; i++) {
-        TupleDescInitEntry(
-            tup_desc, (AttrNumber)(i + 1), g_dw_view_col_arr[i].name, g_dw_view_col_arr[i].data_type, -1, 0);
-        values[i] = g_dw_view_col_arr[i].get_data();
-        nulls[i] = false;
+Datum remote_single_flush_dw_stat(PG_FUNCTION_ARGS)
+{
+    FuncCallContext* funcctx = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported view in single node mode.")));
+
+    SRF_RETURN_DONE(funcctx);
+#else
+    Datum values[DW_SINGLE_VIEW_COL_NUM];
+    bool nulls[DW_SINGLE_VIEW_COL_NUM] = {false};
+
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        /* build tupdesc for result tuples. */
+        TupleDesc tupdesc = CreateTemplateTupleDesc(DW_SINGLE_VIEW_COL_NUM, false, TAM_HEAP);
+        for (uint32 i = 0; i < DW_SINGLE_VIEW_COL_NUM; i++) {
+            TupleDescInitEntry(
+                tupdesc, (AttrNumber)(i + 1), g_dw_single_view[i].name, g_dw_single_view[i].data_type, -1, 0);
+            nulls[i] = false;
+        }
+
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
+
+        funcctx->user_fctx = get_remote_single_flush_dw_stat(funcctx->tuple_desc);
+        MemoryContextSwitchTo(oldcontext);
+
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
+        }
     }
 
-    tup_desc = BlessTupleDesc(tup_desc);
-    tuple = heap_form_tuple(tup_desc, values, nulls);
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
+
+        if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
+            ExecDropSingleTupleTableSlot(slot);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
+        }
+        for (uint32 i = 0; i < DW_SINGLE_VIEW_COL_NUM; i++) {
+            values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
+        }
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+
+    SRF_RETURN_DONE(funcctx);
+#endif
+}
+
+Datum local_double_write_stat(PG_FUNCTION_ARGS)
+{
+    HeapTuple tuple = form_function_tuple(DW_VIEW_COL_NUM, DW_BATCH_FUNC);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
 Datum remote_double_write_stat(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
     Datum values[DW_VIEW_COL_NUM];
     bool nulls[DW_VIEW_COL_NUM] = {false};
 
     if (SRF_IS_FIRSTCALL()) {
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        MemoryContext oldcontext = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* build tupdesc for result tuples. */
-        TupleDesc tupdesc = CreateTemplateTupleDesc(DW_VIEW_COL_NUM, false);
+        TupleDesc tupdesc = CreateTemplateTupleDesc(DW_VIEW_COL_NUM, false, TAM_HEAP);
         for (uint32 i = 0; i < DW_VIEW_COL_NUM; i++) {
             TupleDescInitEntry(
                 tupdesc, (AttrNumber)(i + 1), g_dw_view_col_arr[i].name, g_dw_view_col_arr[i].data_type, -1, 0);
             nulls[i] = false;
         }
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
 
-        func_ctx->user_fctx = get_remote_stat_double_write(func_ctx->tuple_desc);
+        funcctx->user_fctx = get_remote_stat_double_write(funcctx->tuple_desc);
         MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
         }
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate* tupstore = ((TableDistributionInfo*)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot* slot = ((TableDistributionInfo*)func_ctx->user_fctx)->slot;
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
 
         if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-            FreeParallelFunctionState(((TableDistributionInfo*)func_ctx->user_fctx)->state);
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
         for (uint32 i = 0; i < DW_VIEW_COL_NUM; i++) {
-            values[i] = slot_getattr(slot, (i + 1), &nulls[i]);
+            values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
         }
-        HeapTuple tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
 
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
 
 Datum local_redo_stat(PG_FUNCTION_ARGS)
 {
-    TupleDesc tup_desc = NULL;
+    TupleDesc tupdesc = NULL;
     HeapTuple tuple = NULL;
     Datum values[REDO_VIEW_COL_SIZE];
     bool nulls[REDO_VIEW_COL_SIZE] = {false};
     uint32 i;
 
     redo_fill_redo_event();
-    tup_desc = CreateTemplateTupleDesc(REDO_VIEW_COL_SIZE, false);
+    tupdesc = CreateTemplateTupleDesc(REDO_VIEW_COL_SIZE, false, TAM_HEAP);
     for (i = 0; i < REDO_VIEW_COL_SIZE; i++) {
-        TupleDescInitEntry(tup_desc, (AttrNumber)(i + 1), g_redoViewArr[i].name, g_redoViewArr[i].data_type, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)(i + 1), g_redoViewArr[i].name, g_redoViewArr[i].data_type, -1, 0);
         values[i] = g_redoViewArr[i].get_data();
         nulls[i] = false;
     }
 
-    tup_desc = BlessTupleDesc(tup_desc);
-    tuple = heap_form_tuple(tup_desc, values, nulls);
+    tupdesc = BlessTupleDesc(tupdesc);
+    tuple = heap_form_tuple(tupdesc, values, nulls);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
 Datum remote_redo_stat(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
     Datum values[REDO_VIEW_COL_SIZE];
     bool nulls[REDO_VIEW_COL_SIZE] = {false};
 
     if (SRF_IS_FIRSTCALL()) {
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        MemoryContext oldcontext = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* build tupdesc for result tuples. */
-        TupleDesc tupdesc = CreateTemplateTupleDesc(REDO_VIEW_COL_SIZE, false);
+        TupleDesc tupdesc = CreateTemplateTupleDesc(REDO_VIEW_COL_SIZE, false, TAM_HEAP);
         for (uint32 i = 0; i < REDO_VIEW_COL_SIZE; i++) {
             TupleDescInitEntry(tupdesc, (AttrNumber)(i + 1), g_redoViewArr[i].name, g_redoViewArr[i].data_type, -1, 0);
             nulls[i] = false;
         }
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
 
         /* the main call for get local_redo_stat */
-        func_ctx->user_fctx = get_remote_stat_redo(func_ctx->tuple_desc);
+        funcctx->user_fctx = get_remote_stat_redo(funcctx->tuple_desc);
         MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
         }
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate* tupstore = ((TableDistributionInfo*)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot* slot = ((TableDistributionInfo*)func_ctx->user_fctx)->slot;
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
+
         if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-            FreeParallelFunctionState(((TableDistributionInfo*)func_ctx->user_fctx)->state);
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
         for (uint32 i = 0; i < REDO_VIEW_COL_SIZE; i++) {
-            values[i] = slot_getattr(slot, (i + 1), &nulls[i]);
+            values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
         }
-        HeapTuple tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
 
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
 
@@ -12295,53 +12876,54 @@ Datum remote_redo_stat(PG_FUNCTION_ARGS)
  */
 Datum gs_threadpool_status(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
     ThreadPoolStat* entry = NULL;
-    MemoryContext old_context = NULL;
+    MemoryContext oldcontext = NULL;
 
     /* stuff done only on the first call of the function */
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc = NULL;
+        TupleDesc tupdesc = NULL;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * switch to memory context appropriate for multiple function
          * calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* need a tuple descriptor representing 10 columns */
-        tup_desc = CreateTemplateTupleDesc(NUM_THREADPOOL_STATUS_ELEM, false);
+        tupdesc = CreateTemplateTupleDesc(NUM_THREADPOOL_STATUS_ELEM, false, TAM_HEAP);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "nodename", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "groupid", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "bindnumanum", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "bindcpunum", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "listenernum", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)6, "workerinfo", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)7, "sessioninfo", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "nodename", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "groupid", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "bindnumanum", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "bindcpunum", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "listenernum", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)6, "workerinfo", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)7, "sessioninfo", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)8, "streaminfo", TEXTOID, -1, 0);
 
         /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         /* total number of tuples to be returned */
         if (ENABLE_THREAD_POOL) {
-            func_ctx->user_fctx = (void*)g_threadPoolControler->GetThreadPoolStat(&(func_ctx->max_calls));
+            funcctx->user_fctx = (void*)g_threadPoolControler->GetThreadPoolStat(&(funcctx->max_calls));
         } else {
-            func_ctx->max_calls = 0;
+            funcctx->max_calls = 0;
         }
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    entry = (ThreadPoolStat*)func_ctx->user_fctx;
+    funcctx = SRF_PERCALL_SETUP();
+    entry = (ThreadPoolStat*)funcctx->user_fctx;
 
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* do when there is more left to send */
+    if (funcctx->call_cntr < funcctx->max_calls) /* do when there is more left to send */
+    {
         Datum values[NUM_THREADPOOL_STATUS_ELEM];
         bool nulls[NUM_THREADPOOL_STATUS_ELEM] = {false};
         HeapTuple tuple = NULL;
@@ -12352,7 +12934,7 @@ Datum gs_threadpool_status(PG_FUNCTION_ARGS)
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
-        entry += func_ctx->call_cntr;
+        entry += funcctx->call_cntr;
 
         values[0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
         values[1] = Int32GetDatum(entry->groupId);
@@ -12361,80 +12943,81 @@ Datum gs_threadpool_status(PG_FUNCTION_ARGS)
         values[4] = Int32GetDatum(entry->listenerNum);
         values[5] = CStringGetTextDatum(entry->workerInfo);
         values[6] = CStringGetTextDatum(entry->sessionInfo);
+        values[7] = CStringGetTextDatum(entry->streamInfo);
 
         if (entry->numaId == -1) {
             nulls[2] = true;
         }
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     } else {
         /* do when there is no more left */
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
-Datum gs_globalplancache_status(PG_FUNCTION_ARGS)
+Datum
+gs_globalplancache_status(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
-
-    FuncCallContext *func_ctx = NULL;
-    MemoryContext old_context;
+    FuncCallContext *funcctx = NULL;
+    MemoryContext oldcontext;
 
     /* stuff done only on the first call of the function */
-    if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
+    if (SRF_IS_FIRSTCALL())
+    {
+        TupleDesc tupdesc;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
         * switch to memory context appropriate for multiple function
         * calls
         */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-#define GPC_TUPLES_ATTR_NUM 7
+#define GPC_TUPLES_ATTR_NUM 8
 
         /* need a tuple descriptor representing 12 columns */
-        tup_desc = CreateTemplateTupleDesc(GPC_TUPLES_ATTR_NUM, false);
+        tupdesc = CreateTemplateTupleDesc(GPC_TUPLES_ATTR_NUM, false, TAM_HEAP);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber) 1, "nodename",
+        TupleDescInitEntry(tupdesc, (AttrNumber) 1, "nodename",
                            TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) 2, "query",
+        TupleDescInitEntry(tupdesc, (AttrNumber) 2, "query",
                            TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) 3, "refcount",
+        TupleDescInitEntry(tupdesc, (AttrNumber) 3, "refcount",
                            INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) 4, "valid",
+        TupleDescInitEntry(tupdesc, (AttrNumber) 4, "valid",
                            BOOLOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) 5, "databaseid",
+        TupleDescInitEntry(tupdesc, (AttrNumber) 5, "databaseid",
                            OIDOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) 6, "schema_name",
+        TupleDescInitEntry(tupdesc, (AttrNumber) 6, "schema_name",
                            TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) 7, "params_num",
+        TupleDescInitEntry(tupdesc, (AttrNumber) 7, "params_num",
                            INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 8, "func_id",
+                           OIDOID, -1, 0);
 
         /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         /* total number of tuples to be returned */
-        if (ENABLE_THREAD_POOL && ENABLE_DN_GPC) {
-            func_ctx->user_fctx = (void *)GPC->GetStatus(&(func_ctx->max_calls));
+        if (ENABLE_THREAD_POOL && ENABLE_GPC) {
+            funcctx->user_fctx = (void *)g_instance.plan_cache->GetStatus(&(funcctx->max_calls));
         } else {
-            func_ctx->max_calls = 0;
+            funcctx->max_calls = 0;
         }
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    GPCStatus *entry = (GPCStatus *)func_ctx->user_fctx;
+    funcctx = SRF_PERCALL_SETUP();
+    GPCViewStatus *entry = (GPCViewStatus *)funcctx->user_fctx;
 
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* do when there is more left to send */
+    if (funcctx->call_cntr < funcctx->max_calls)	/* do when there is more left to send */
+    {
         Datum values[GPC_TUPLES_ATTR_NUM];
         bool nulls[GPC_TUPLES_ATTR_NUM];
         HeapTuple tuple;
@@ -12445,7 +13028,7 @@ Datum gs_globalplancache_status(PG_FUNCTION_ARGS)
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
-        entry += func_ctx->call_cntr;
+        entry += funcctx->call_cntr;
 
         values[0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
         values[1] = CStringGetTextDatum(entry->query);
@@ -12454,67 +13037,86 @@ Datum gs_globalplancache_status(PG_FUNCTION_ARGS)
         values[4] = DatumGetObjectId(entry->DatabaseID);
         values[5] = CStringGetTextDatum(entry->schema_name);
         values[6] = Int32GetDatum(entry->params_num);
+        values[7] = DatumGetObjectId(entry->func_id);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else {
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    else
+    {
         /* do when there is no more left */
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
-Datum gs_globalplancache_prepare_status(PG_FUNCTION_ARGS)
+Datum
+gs_globalplancache_prepare_status(PG_FUNCTION_ARGS)
 {
+    /* can only called in distribute cluster */
 #ifndef ENABLE_MULTIPLE_NODES
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
 #endif
 
-    FuncCallContext *func_ctx = NULL;
-    MemoryContext old_context;
+    FuncCallContext *funcctx = NULL;
+    MemoryContext oldcontext;
 
     /* stuff done only on the first call of the function */
-    if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc;
+    if (SRF_IS_FIRSTCALL())
+    {
+        TupleDesc tupdesc;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
-         * switch to memory context appropriate for multiple function
-         * calls
-         */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        * switch to memory context appropriate for multiple function
+        * calls
+        */
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-#define GPC_PREPARE_TUPLES_ATTR_NUM 5
+#define GPC_PREPARE_TUPLES_ATTR_NUM 8
 
         /* need a tuple descriptor representing 12 columns */
-        tup_desc = CreateTemplateTupleDesc(GPC_PREPARE_TUPLES_ATTR_NUM, false);
+        tupdesc = CreateTemplateTupleDesc(GPC_PREPARE_TUPLES_ATTR_NUM, false);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber) 1, "nodename", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) 2, "global_sess_id", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) 3, "statement_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) 4, "refcount", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber) 5, "is_shared", BOOLOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 1, "nodename",
+                           TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 2, "cn_sess_id",
+                           INT8OID, -1, 0);
+
+        TupleDescInitEntry(tupdesc, (AttrNumber) 3, "cn_node_id",
+                           INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 4, "cn_time_line",
+                           INT4OID, -1, 0);
+
+        TupleDescInitEntry(tupdesc, (AttrNumber) 5, "statement_name",
+                           TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 6, "refcount",
+                           INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 7, "is_shared",
+                           BOOLOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 8, "query",
+                           TEXTOID, -1, 0);
 
         /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         /* total number of tuples to be returned */
         if (ENABLE_THREAD_POOL && ENABLE_DN_GPC) {
-            func_ctx->user_fctx = (void *)GPC->GetPrepareStatus(&(func_ctx->max_calls));
+            funcctx->user_fctx = (void *)g_instance.prepare_cache->GetStatus(&(funcctx->max_calls));
         } else {
-            func_ctx->max_calls = 0;
+            funcctx->max_calls = 0;
         }
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    GPCPrepareStatus *entry = (GPCPrepareStatus *)func_ctx->user_fctx;
+    funcctx = SRF_PERCALL_SETUP();
+    GPCPrepareStatus *entry = (GPCPrepareStatus *)funcctx->user_fctx;
 
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* do when there is more left to send */
+    if (funcctx->call_cntr < funcctx->max_calls)	/* do when there is more left to send */
+    {
         Datum values[GPC_PREPARE_TUPLES_ATTR_NUM];
         bool nulls[GPC_PREPARE_TUPLES_ATTR_NUM];
         HeapTuple tuple;
@@ -12525,148 +13127,155 @@ Datum gs_globalplancache_prepare_status(PG_FUNCTION_ARGS)
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
-        entry += func_ctx->call_cntr;
+        entry += funcctx->call_cntr;
 
         values[0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
-        values[1] = Int32GetDatum(entry->global_session_id);
-        values[2] = CStringGetTextDatum(entry->statement_name);
-        values[3] = Int32GetDatum(entry->refcount);
-        values[4] = BoolGetDatum(entry->is_shared);
+        values[1] = Int64GetDatum(entry->cn_sessid);
+        values[2] = Int32GetDatum(entry->cn_node_id);
+        values[3] = Int32GetDatum(entry->cn_time_line);
+        values[4] = CStringGetTextDatum(entry->statement_name);
+        values[5] = Int32GetDatum(entry->refcount);
+        values[6] = BoolGetDatum(entry->is_shared);
+        values[7] = CStringGetTextDatum(entry->query);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
-    } else {
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    else
+    {
         /* do when there is no more left */
-        SRF_RETURN_DONE(func_ctx);
+        SRF_RETURN_DONE(funcctx);
     }
 }
 
 Datum local_rto_stat(PG_FUNCTION_ARGS)
 {
-    TupleDesc tup_desc = NULL;
+    TupleDesc tupdesc = NULL;
     HeapTuple tuple = NULL;
     Datum values[RTO_VIEW_COL_SIZE];
     bool nulls[RTO_VIEW_COL_SIZE] = {false};
     uint32 i;
 
-    tup_desc = CreateTemplateTupleDesc(RTO_VIEW_COL_SIZE, false);
+    tupdesc = CreateTemplateTupleDesc(RTO_VIEW_COL_SIZE, false, TAM_HEAP);
     for (i = 0; i < RTO_VIEW_COL_SIZE; i++) {
-        TupleDescInitEntry(tup_desc, (AttrNumber)(i + 1), g_rtoViewArr[i].name, g_rtoViewArr[i].data_type, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)(i + 1), g_rtoViewArr[i].name, g_rtoViewArr[i].data_type, -1, 0);
         values[i] = g_rtoViewArr[i].get_data();
         nulls[i] = false;
     }
 
-    tup_desc = BlessTupleDesc(tup_desc);
-    tuple = heap_form_tuple(tup_desc, values, nulls);
+    tupdesc = BlessTupleDesc(tupdesc);
+    tuple = heap_form_tuple(tupdesc, values, nulls);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
 Datum remote_rto_stat(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
     Datum values[RTO_VIEW_COL_SIZE];
     bool nulls[RTO_VIEW_COL_SIZE] = {false};
     uint32 i;
 
     if (SRF_IS_FIRSTCALL()) {
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        MemoryContext oldcontext = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* build tupdesc for result tuples. */
-        TupleDesc tupdesc = CreateTemplateTupleDesc(RTO_VIEW_COL_SIZE, false);
+        TupleDesc tupdesc = CreateTemplateTupleDesc(RTO_VIEW_COL_SIZE, false, TAM_HEAP);
         for (i = 0; i < RTO_VIEW_COL_SIZE; i++) {
             TupleDescInitEntry(tupdesc, (AttrNumber)(i + 1), g_rtoViewArr[i].name, g_rtoViewArr[i].data_type, -1, 0);
             nulls[i] = false;
         }
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
 
         /* the main call for get get_rto_stat */
-        func_ctx->user_fctx = get_rto_stat(func_ctx->tuple_desc);
+        funcctx->user_fctx = get_rto_stat(funcctx->tuple_desc);
         MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
         }
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate* tupstore = ((TableDistributionInfo*)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot* slot = ((TableDistributionInfo*)func_ctx->user_fctx)->slot;
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
+
         if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-            FreeParallelFunctionState(((TableDistributionInfo*)func_ctx->user_fctx)->state);
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
         for (i = 0; i < RTO_VIEW_COL_SIZE; i++) {
-            values[i] = slot_getattr(slot, (i + 1), &nulls[i]);
+            values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
         }
-        HeapTuple tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
 
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
 
 Datum local_recovery_status(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
-    MemoryContext old_context = NULL;
+    FuncCallContext* funcctx = NULL;
+    MemoryContext oldcontext = NULL;
     RTOStandbyData* entry = NULL;
 
     /* stuff done only on the first call of the function */
     if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tup_desc = NULL;
+        TupleDesc tupdesc = NULL;
 
         /* create a function context for cross-call persistence */
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
         /*
          * switch to memory context appropriate for multiple function
          * calls
          */
-        old_context = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* need a tuple descriptor representing 6 columns */
-        tup_desc = CreateTemplateTupleDesc(RECOVERY_RTO_VIEW_COL, false);
+        tupdesc = CreateTemplateTupleDesc(RECOVERY_RTO_VIEW_COL, false);
 
-        TupleDescInitEntry(tup_desc, (AttrNumber)1, "node_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)2, "standby_node_name", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)3, "source_ip", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)4, "source_port", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)5, "dest_ip", TEXTOID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)6, "dest_port", INT4OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)7, "current_rto", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)8, "target_rto", INT8OID, -1, 0);
-        TupleDescInitEntry(tup_desc, (AttrNumber)9, "current_sleep_time", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "node_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "standby_node_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "source_ip", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "source_port", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "dest_ip", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)6, "dest_port", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)7, "current_rto", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)8, "target_rto", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)9, "current_sleep_time", INT8OID, -1, 0);
 
         /* complete descriptor of the tupledesc */
-        func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
-        func_ctx->user_fctx = (void*)GetRTOStat(&(func_ctx->max_calls));
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = (void*)GetRTOStat(&(funcctx->max_calls));
 
-        (void)MemoryContextSwitchTo(old_context);
+        (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
+    funcctx = SRF_PERCALL_SETUP();
 
-    entry = (RTOStandbyData*)func_ctx->user_fctx;
+    entry = (RTOStandbyData*)funcctx->user_fctx;
 
-    if (func_ctx->call_cntr < func_ctx->max_calls) {
-        /* do when there is more left to send */
+    if (funcctx->call_cntr < funcctx->max_calls) /* do when there is more left to send */
+    {
         Datum values[RECOVERY_RTO_VIEW_COL];
         bool nulls[RECOVERY_RTO_VIEW_COL] = {false};
         HeapTuple tuple = NULL;
@@ -12677,7 +13286,7 @@ Datum local_recovery_status(PG_FUNCTION_ARGS)
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
-        entry += func_ctx->call_cntr;
+        entry += funcctx->call_cntr;
 
         values[0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
         values[1] = CStringGetTextDatum(entry->id);
@@ -12689,32 +13298,32 @@ Datum local_recovery_status(PG_FUNCTION_ARGS)
         values[7] = Int64GetDatum(entry->target_rto);
         values[8] = Int64GetDatum(entry->current_sleep_time);
 
-        tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
 
     /* do when there is no more left */
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 }
 
 Datum remote_recovery_status(PG_FUNCTION_ARGS)
 {
-    FuncCallContext* func_ctx = NULL;
+    FuncCallContext* funcctx = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported view in single node mode.")));
 
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #else
     Datum values[RECOVERY_RTO_VIEW_COL];
     bool nulls[RECOVERY_RTO_VIEW_COL] = {false};
 
     if (SRF_IS_FIRSTCALL()) {
-        func_ctx = SRF_FIRSTCALL_INIT();
+        funcctx = SRF_FIRSTCALL_INIT();
 
-        MemoryContext oldcontext = MemoryContextSwitchTo(func_ctx->multi_call_memory_ctx);
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* build tupdesc for result tuples. */
-        TupleDesc tupdesc = CreateTemplateTupleDesc(RECOVERY_RTO_VIEW_COL, false);
+        TupleDesc tupdesc = CreateTemplateTupleDesc(RECOVERY_RTO_VIEW_COL, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "node_name", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "standby_node_name", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "source_ip", TEXTOID, -1, 0);
@@ -12725,38 +13334,103 @@ Datum remote_recovery_status(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)8, "target_rto", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)9, "current_sleep_time", INT8OID, -1, 0);
 
-        func_ctx->tuple_desc = BlessTupleDesc(tupdesc);
-        func_ctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
 
         /* the main call for get get_rto_stat */
-        func_ctx->user_fctx = get_recovery_stat(func_ctx->tuple_desc);
+        funcctx->user_fctx = get_recovery_stat(funcctx->tuple_desc);
         MemoryContextSwitchTo(oldcontext);
 
-        if (func_ctx->user_fctx == NULL) {
-            SRF_RETURN_DONE(func_ctx);
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
         }
     }
 
     /* stuff done on every call of the function */
-    func_ctx = SRF_PERCALL_SETUP();
-    if (func_ctx->user_fctx) {
-        Tuplestorestate* tupstore = ((TableDistributionInfo*)func_ctx->user_fctx)->state->tupstore;
-        TupleTableSlot* slot = ((TableDistributionInfo*)func_ctx->user_fctx)->slot;
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
 
         if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
-            FreeParallelFunctionState(((TableDistributionInfo*)func_ctx->user_fctx)->state);
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
             ExecDropSingleTupleTableSlot(slot);
-            pfree_ext(func_ctx->user_fctx);
-            func_ctx->user_fctx = NULL;
-            SRF_RETURN_DONE(func_ctx);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
         }
         for (uint32 i = 0; i < RECOVERY_RTO_VIEW_COL; i++) {
-            values[i] = slot_getattr(slot, (i + 1), &nulls[i]);
+            values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
         }
-        HeapTuple tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
-        (void)ExecClearTuple(slot);
-        SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
-    SRF_RETURN_DONE(func_ctx);
+    SRF_RETURN_DONE(funcctx);
 #endif
+}
+
+Datum track_memory_context_detail(PG_FUNCTION_ARGS)
+{
+#define TRACK_MEMORY_DETAIL_ELEMENT_NUMBER 4
+    FuncCallContext* funcctx = NULL;
+    Datum result;
+    MemoryContext oldcontext;
+    TupleDesc tupledesc;
+    HeapTuple tuple;
+    int i = 1;
+
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC,
+            "track_memory_context_detail");
+    }
+
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        /* Switch context when allocating stuff to be used in later calls */
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        /* Construct a tuple descriptor for the result rows. */
+        tupledesc = CreateTemplateTupleDesc(TRACK_MEMORY_DETAIL_ELEMENT_NUMBER, false);
+        TupleDescInitEntry(tupledesc, (AttrNumber)i++, "context_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)i++, "file", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)i++, "line", INT4OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)i, "size", INT8OID, -1, 0);
+
+        funcctx->tuple_desc = BlessTupleDesc(tupledesc);
+
+        funcctx->user_fctx = GetMemoryTrackInfo();
+
+        /* Return to original context when allocating transient memory */
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+
+    /* Get the saved state */
+    MemoryAllocDetailList* node = (MemoryAllocDetailList*)funcctx->user_fctx;
+    if (node != NULL) {
+        Datum values[TRACK_MEMORY_DETAIL_ELEMENT_NUMBER];
+        bool nulls[TRACK_MEMORY_DETAIL_ELEMENT_NUMBER] = {false};
+        MemoryAllocDetail* entry = node->entry;
+
+        i = 0;
+        values[i++] = CStringGetTextDatum(entry->detail_key.name);
+        values[i++] = CStringGetTextDatum(entry->detail_key.file);
+        values[i++] = Int32GetDatum(entry->detail_key.line);
+        values[i] = Int64GetDatum(entry->size);
+
+        /* Build and return the tuple. */
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        result = HeapTupleGetDatum(tuple);
+
+        funcctx->user_fctx = (void*)node->next;
+
+        SRF_RETURN_NEXT(funcctx, result);
+    } else {
+        SRF_RETURN_DONE(funcctx);
+    }
 }

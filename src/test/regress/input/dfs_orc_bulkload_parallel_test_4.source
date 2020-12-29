@@ -1,0 +1,83 @@
+set enable_global_stats = true;
+--
+-- BULK LOAD PARALLEL TEST 4
+--
+----
+--19. Format in FIXED correct
+----
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer position(0,2),
+n_name character(25) position(2,25),
+n_regionkey integer position(28, 2),
+n_comment character varying(152) position(30, 152)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation.fixed', FORMAT 'fixed');
+
+CREATE TABLE tmp_nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25),
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)with (orientation = orc) tablespace hdfs_ts
+DISTRIBUTE BY HASH (n_nationkey);
+
+INSERT INTO tmp_nation SELECT * FROM EXT_NATION;
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+
+DROP FOREIGN TABLE EXT_NATION;
+
+DROP TABLE tmp_nation;
+CREATE TABLE tmp_nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25),
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)with (orientation = orc) tablespace hdfs_ts
+DISTRIBUTE BY HASH (n_nationkey);
+
+----
+--22. Format in FIXED and missing POSITION specification for column "n_name"
+----
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer position(0,2),
+n_name character(25),
+n_regionkey integer position(28, 2),
+n_comment character varying(152) position(30, 152)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation.fixed', FORMAT 'fixed');
+
+INSERT INTO tmp_nation SELECT * FROM EXT_NATION;
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+
+DROP FOREIGN TABLE EXT_NATION;
+
+DROP TABLE tmp_nation;
+CREATE TABLE tmp_nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25),
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)with (orientation = orc) tablespace hdfs_ts
+DISTRIBUTE BY HASH (n_nationkey);
+
+----
+--23. Format in FIXED and specify FIX
+----
+CREATE FOREIGN TABLE EXT_NATION
+(
+n_nationkey integer position(0,2),
+n_name character(25),
+n_regionkey integer position(28, 2),
+n_comment character varying(152) position(30, 152)
+)
+SERVER GSMPP_SERVER
+OPTIONS(LOCATION 'gsfs://127.0.0.1:8900/nation_eol.fixed', FORMAT 'fixed', FIX '182');
+INSERT INTO tmp_nation SELECT * FROM EXT_NATION;
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+\d+ EXT_NATION
+DROP FOREIGN TABLE EXT_NATION;
+DROP TABLE TMP_NATION;

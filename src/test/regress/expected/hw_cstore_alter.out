@@ -395,8 +395,7 @@ DROP INDEX idx1_hw_cstore_alter_t7;
 DROP TABLE hw_cstore_alter_t7;
 -- 4.3.3 row table
 CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (compression = 'high'); -- failed
-ERROR:  Value "high" of option "compression" is invalid for row table
-DETAIL:  Valid values are "yes" and "no"
+ERROR:  row-oriented table does not support compression
 CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (max_batchrow = 60000); -- failed
 ERROR:  Un-support feature
 DETAIL:  Forbid to set option "max_batchrow" for row relation
@@ -409,7 +408,7 @@ DETAIL:  Forbid to set option "partial_cluster_rows" for row relation
 CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (internal_mask = 1024); -- failed
 ERROR:  Un-support feature
 DETAIL:  Forbid to set or change inner option "internal_mask"
-CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (compression = 'yes', fillfactor=70); -- ok
+CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (compression = 'no', fillfactor=70); -- ok
 ALTER TABLE hw_cstore_alter_t8 SET (compression = 'yes'); -- ok
 ALTER TABLE hw_cstore_alter_t8 SET (compression = 'no'); -- ok
 ALTER TABLE hw_cstore_alter_t8 SET (compression = 'low'); -- failed

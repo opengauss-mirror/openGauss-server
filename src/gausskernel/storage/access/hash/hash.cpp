@@ -20,23 +20,24 @@
 #include "knl/knl_variable.h"
 
 #include "access/hash.h"
+#include "access/tableam.h"
 #include "access/relscan.h"
 #include "catalog/index.h"
 #include "commands/vacuum.h"
 #include "optimizer/cost.h"
 #include "optimizer/plancat.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 
 /* Working state for hashbuild and its callback */
 typedef struct {
-    HSpool* spool;    /* NULL if not using spooling */
+    HSpool *spool;    /* NULL if not using spooling */
     double indtuples; /* # tuples accepted into index */
 } HashBuildState;
 
-static void hashbuildCallback(
-    Relation index, HeapTuple htup, Datum* values, const bool* isnull, bool tupleIsAlive, void* state);
+static void hashbuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
+                              void *state);
 
 /*
  *	hashbuild() -- build a new hash index.
@@ -45,8 +46,8 @@ Datum hashbuild(PG_FUNCTION_ARGS)
 {
     Relation heap = (Relation)PG_GETARG_POINTER(0);
     Relation index = (Relation)PG_GETARG_POINTER(1);
-    IndexInfo* indexInfo = (IndexInfo*)PG_GETARG_POINTER(2);
-    IndexBuildResult* result = NULL;
+    IndexInfo *indexInfo = (IndexInfo *)PG_GETARG_POINTER(2);
+    IndexBuildResult *result = NULL;
     RelPageType relpages;
     double reltuples;
     double allvisfrac;
@@ -58,9 +59,8 @@ Datum hashbuild(PG_FUNCTION_ARGS)
      * not the case, big trouble's what we have.
      */
     if (RelationGetNumberOfBlocks(index) != 0)
-        ereport(ERROR,
-            (errcode(ERRCODE_DATA_EXCEPTION),
-                (errmsg("index \"%s\" already contains data.", RelationGetRelationName(index)))));
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                        (errmsg("index \"%s\" already contains data.", RelationGetRelationName(index)))));
 
     /* Estimate the number of rows currently present in the table */
     estimate_rel_size(heap, NULL, &relpages, &reltuples, &allvisfrac, NULL);
@@ -88,7 +88,7 @@ Datum hashbuild(PG_FUNCTION_ARGS)
     buildstate.indtuples = 0;
 
     /* do the heap scan */
-    reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, hashbuildCallback, (void*)&buildstate, NULL);
+    reltuples = tableam_index_build_scan(heap, index, indexInfo, true, hashbuildCallback, (void*)&buildstate);
 
     if (buildstate.spool != NULL) {
         /* sort the tuples and insert them into the index */
@@ -99,7 +99,7 @@ Datum hashbuild(PG_FUNCTION_ARGS)
     /*
      * Return statistics
      */
-    result = (IndexBuildResult*)palloc(sizeof(IndexBuildResult));
+    result = (IndexBuildResult *)palloc(sizeof(IndexBuildResult));
 
     result->heap_tuples = reltuples;
     result->index_tuples = buildstate.indtuples;
@@ -122,10 +122,10 @@ Datum hashbuildempty(PG_FUNCTION_ARGS)
 /*
  * Per-tuple callback from IndexBuildHeapScan
  */
-static void hashbuildCallback(
-    Relation index, HeapTuple htup, Datum* values, const bool* isnull, bool tupleIsAlive, void* state)
+static void hashbuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
+                              void *state)
 {
-    HashBuildState* buildstate = (HashBuildState*)state;
+    HashBuildState *buildstate = (HashBuildState *)state;
     IndexTuple itup;
 
     /* Hash indexes don't index nulls, see notes in hashinsert */
@@ -156,8 +156,8 @@ static void hashbuildCallback(
 Datum hashinsert(PG_FUNCTION_ARGS)
 {
     Relation rel = (Relation)PG_GETARG_POINTER(0);
-    Datum* values = (Datum*)PG_GETARG_POINTER(1);
-    bool* isnull = (bool*)PG_GETARG_POINTER(2);
+    Datum *values = (Datum *)PG_GETARG_POINTER(1);
+    bool *isnull = (bool *)PG_GETARG_POINTER(2);
     ItemPointer ht_ctid = (ItemPointer)PG_GETARG_POINTER(3);
 
 #ifdef NOT_USED
@@ -244,8 +244,8 @@ Datum hashgettuple(PG_FUNCTION_ARGS)
         }
         if (offnum > maxoffnum)
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_CURSOR_STATE),
-                    (errmsg("failed to re-find scan position within index \"%s\"", RelationGetRelationName(rel)))));
+                    (errcode(ERRCODE_INVALID_CURSOR_STATE),
+                     (errmsg("failed to re-find scan position within index \"%s\"", RelationGetRelationName(rel)))));
         ItemPointerSetOffsetNumber(current, offnum);
 
         /*
@@ -299,7 +299,7 @@ Datum hashgettuple(PG_FUNCTION_ARGS)
 Datum hashgetbitmap(PG_FUNCTION_ARGS)
 {
     IndexScanDesc scan = (IndexScanDesc)PG_GETARG_POINTER(0);
-    TIDBitmap* tbm = (TIDBitmap*)PG_GETARG_POINTER(1);
+    TIDBitmap *tbm = (TIDBitmap *)PG_GETARG_POINTER(1);
     HashScanOpaque so = (HashScanOpaque)scan->opaque;
     bool res = false;
     int64 ntids = 0;
@@ -397,8 +397,8 @@ Datum hashrescan(PG_FUNCTION_ARGS)
     /* Update scan key, if a new one is given */
     if (scankey && scan->numberOfKeys > 0) {
         errno_t rc;
-        rc = memmove_s(scan->keyData, (unsigned)scan->numberOfKeys * sizeof(ScanKeyData),
-            scankey, (unsigned)scan->numberOfKeys * sizeof(ScanKeyData));
+        rc = memmove_s(scan->keyData, (unsigned)scan->numberOfKeys * sizeof(ScanKeyData), scankey,
+                       (unsigned)scan->numberOfKeys * sizeof(ScanKeyData));
         securec_check(rc, "", "");
 
         so->hashso_bucket_valid = false;
@@ -462,10 +462,10 @@ Datum hashrestrpos(PG_FUNCTION_ARGS)
  */
 Datum hashbulkdelete(PG_FUNCTION_ARGS)
 {
-    IndexVacuumInfo* info = (IndexVacuumInfo*)PG_GETARG_POINTER(0);
-    IndexBulkDeleteResult* stats = (IndexBulkDeleteResult*)PG_GETARG_POINTER(1);
+    IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
+    IndexBulkDeleteResult *stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     IndexBulkDeleteCallback callback = (IndexBulkDeleteCallback)PG_GETARG_POINTER(2);
-    void* callback_state = (void*)PG_GETARG_POINTER(3);
+    void *callback_state = (void *)PG_GETARG_POINTER(3);
     Relation rel = info->index;
     double tuples_removed;
     double num_index_tuples;
@@ -515,8 +515,8 @@ loop_top:
 
         /* Shouldn't have any active scans locally, either */
         if (_hash_has_active_scan(rel, cur_bucket))
-            ereport(
-                ERROR, (errcode(ERRCODE_SQL_ROUTINE_EXCEPTION), (errmsg("hash index has active scan during VACUUM."))));
+            ereport(ERROR,
+                    (errcode(ERRCODE_SQL_ROUTINE_EXCEPTION), (errmsg("hash index has active scan during VACUUM."))));
 
         /* Scan each page in bucket */
         blkno = bucket_blkno;
@@ -589,7 +589,7 @@ loop_top:
     }
 
     /* Okay, we're really done.  Update tuple count in metapage. */
-    if ((orig_maxbucket - metap->hashm_maxbucket == 0) && (orig_ntuples - metap->hashm_ntuples == 0)) {
+    if (orig_maxbucket == metap->hashm_maxbucket && orig_ntuples == metap->hashm_ntuples) {
         /*
          * No one has split or inserted anything since start of scan, so
          * believe our count as gospel.
@@ -613,7 +613,7 @@ loop_top:
 
     /* return statistics */
     if (stats == NULL)
-        stats = (IndexBulkDeleteResult*)palloc0(sizeof(IndexBulkDeleteResult));
+        stats = (IndexBulkDeleteResult *)palloc0(sizeof(IndexBulkDeleteResult));
     stats->estimated_count = false;
     stats->num_index_tuples = num_index_tuples;
     stats->tuples_removed += tuples_removed;
@@ -628,8 +628,8 @@ loop_top:
  */
 Datum hashvacuumcleanup(PG_FUNCTION_ARGS)
 {
-    IndexVacuumInfo* info = (IndexVacuumInfo*)PG_GETARG_POINTER(0);
-    IndexBulkDeleteResult* stats = (IndexBulkDeleteResult*)PG_GETARG_POINTER(1);
+    IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
+    IndexBulkDeleteResult *stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
     Relation rel = info->index;
     BlockNumber num_pages;
 
@@ -645,14 +645,14 @@ Datum hashvacuumcleanup(PG_FUNCTION_ARGS)
     PG_RETURN_POINTER(stats);
 }
 
-void hash_redo(XLogReaderState* record)
+void hash_redo(XLogReaderState *record)
 {
     ereport(PANIC, (errmsg("hash_redo: unimplemented")));
 }
 
 Datum hashmerge(PG_FUNCTION_ARGS)
 {
-    IndexBuildResult* result = NULL;
+    IndexBuildResult *result = NULL;
 
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), (errmsg("hashmerge: unimplemented."))));
     PG_RETURN_POINTER(result);

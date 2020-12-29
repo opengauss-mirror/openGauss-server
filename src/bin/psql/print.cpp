@@ -112,6 +112,7 @@ static void IsPagerNeeded(
     const printTableContent* cont, const int extra_lines, bool expanded, FILE** fout, bool* is_pager);
 
 static void print_aligned_vertical(const printTableContent* cont, FILE* fout);
+static char* GetEnvStr(const char* env);
 
 static void* pg_local_malloc(size_t size)
 {
@@ -586,6 +587,11 @@ static void print_aligned_text(const printTableContent* cont, FILE* fout)
     /* If we have rows, compute average */
     if (col_count != 0 && cell_count != 0) {
         int rows = cell_count / col_count;
+
+        if (rows == 0) {
+            fprintf(stderr, _("Integer cannot be zero: rows"));
+            exit(EXIT_FAILURE);
+        }
 
         for (i = 0; i < col_count; i++)
             width_average[i] /= rows;
@@ -1947,13 +1953,11 @@ void printTableInit(
 
     content->headers = (const char**)pg_local_calloc(ncolumns + 1, sizeof(*content->headers));
 
-    int64 res = (int64)ncolumns * (int64)nrows + 1;
-    /* res < 0 doesn't mean overflow but it's a invalid value too. */
-    if (res > PG_INT32_MAX || res < 0) {
-        fprintf(stderr, _("Invalid column nums:%d and row nums:%d"), ncolumns, nrows);
+    if (ncolumns * nrows + 1 <= 0) {
+        fprintf(stderr, _("Integer Overflow:ncolumns * nrows + 1"));
         exit(EXIT_FAILURE);
     }
-    content->cells = (const char**)pg_local_calloc((int)res, sizeof(*content->cells));
+    content->cells = (const char**)pg_local_calloc(ncolumns * nrows + 1, sizeof(*content->cells));
 
     content->cellmustfree = NULL;
     content->footers = NULL;
@@ -2040,8 +2044,8 @@ void printTableAddCell(printTableContent* const content, char* cell, const bool 
     if (mustfree) {
         if (content->cellmustfree == NULL) {
             int64 res = (int64)content->ncolumns * (int64)content->nrows;
-            if (res >= PG_INT32_MAX || res < 0) {
-                fprintf(stderr, _("Integer Overflow:content->ncolumns * content->nrows\n"));
+            if ((res + 1) >= (int64)PG_INT32_MAX) {
+                fprintf(stderr, _("Integer Overflow:content->ncolumns * content->nrows + 1\n"));
                 exit(EXIT_FAILURE);
             }
             content->cellmustfree = (bool*)pg_local_calloc(res + 1, sizeof(bool));
@@ -2424,3 +2428,27 @@ void check_env_value(const char* input_env_value)
     }
 }
 
+/*
+ * GetEnvStr
+ *
+ * Note: malloc space for get the return of getenv() function, then return the malloc space.
+ *         so, this space need be free.
+ */
+static char* GetEnvStr(const char* env)
+{
+    char* tmpvar = NULL;
+    const char* temp = getenv(env);
+    errno_t rc = 0;
+    if (temp != NULL) {
+        size_t len = strlen(temp);
+        if (0 == len)
+            return NULL;
+        tmpvar = (char*)malloc(len + 1);
+        if (tmpvar != NULL) {
+            rc = strcpy_s(tmpvar, len + 1, temp);
+            securec_check_c(rc, "\0", "\0");
+            return tmpvar;
+        }
+    }
+    return NULL;
+}

@@ -25,7 +25,6 @@
  *
  * -------------------------------------------------------------------------
  */
-#include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/stat.h>
@@ -756,8 +755,8 @@ bool is_feature_disabled(feature_name feature)
     if (versionControl.featureInfo[feature].disabled_features_flag)
         return true;
 
-    /* The liccense control does not support the DBHTAP product. */
-    if (versionControl.licenseVersion == PRODUCT_VERSION_DBHTAP) {
+    /* The liccense control does not support the GaussDB 300 product. */
+    if (versionControl.licenseVersion == PRODUCT_VERSION_GAUSSDB300) {
         return false;
     }
 
@@ -815,7 +814,7 @@ int loadConrtolData(LicenseControl* control)
             /* Set the license control */
             control->isLoaded = control->isLoaded ? true : false;
 
-            ereport(INFO, (errmsg("failed to parse feature control file: %s.", control->productFileName)));
+            ereport(WARNING, (errmsg("failed to parse feature control file: %s.", control->productFileName)));
             break;
         }
 
@@ -897,7 +896,7 @@ int parse_gaussdb_version_file(gaussdb_version* version_info, const char* filena
 
     fd = open(filepath, O_RDONLY);
     if (fd < 0) {
-        ereport(INFO,
+        ereport(WARNING,
             (errmsg("failed to open feature control file, please check whether it exists: FileName=%s,"
                     " Errno=%d, Errmessage=%s.",
                 filename,
@@ -912,6 +911,9 @@ int parse_gaussdb_version_file(gaussdb_version* version_info, const char* filena
 
     /* get the content of configuration file */
     file_size = file_info.st_size;
+    if (file_size <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("file_size is invalid:[%ld]", file_size)));
+    }
     file_content = (unsigned char*)palloc(file_size);
     if (file_content == NULL) {
         ereport(WARNING, (errmsg("can not palloc memory.")));
@@ -939,7 +941,7 @@ int parse_gaussdb_version_file(gaussdb_version* version_info, const char* filena
         }
     }
 
-    /*
+    /**
      * this gaussdb.version file exists, but sha256 digests are not consistent,
      * we will give a fatal report to user.
      */
@@ -1017,8 +1019,8 @@ error:
  */
 void signalReloadLicenseHandler(int sig)
 {
-    /* Only DBAP support the license resume operation. */
-    if (get_product_version() != PRODUCT_VERSION_DBAP) {
+    /* Only GaussDB200 support the license resume operation. */
+    if (get_product_version() != PRODUCT_VERSION_GAUSSDB200) {
         return;
     }
 
@@ -1049,18 +1051,19 @@ void signalReloadLicenseHandler(int sig)
  */
 void initialize_feature_flags()
 {
+    MemoryContext oldcontext = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
     /* Initialize the alarm module. */
     AlarmEnvInitialize();
 
     /* Load the product version control file. */
     if (loadConrtolData(&versionControl) != 0) {
-        ereport(INFO,
+        ereport(WARNING,
             (errmsg("Failed to load the product control file, so gaussdb cannot distinguish product version.")));
         return;
     }
 
-    /* Only DBAP support the license operation. */
-    if (get_product_version() != PRODUCT_VERSION_DBAP) {
+    /* Only GaussDB200 support the license operation. */
+    if (get_product_version() != PRODUCT_VERSION_GAUSSDB200) {
         return;
     }
 
@@ -1079,5 +1082,6 @@ void initialize_feature_flags()
 
     /* Set the intialized flag. */
     isInitialized = true;
+    (void)MemoryContextSwitchTo(oldcontext);
 }
 // end of file

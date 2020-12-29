@@ -26,7 +26,10 @@ all: mot_target
 
 subdir=src/gausskernel/storage/mot/core/src
 top_builddir ?= ../../../../../../
-MASSTREE_DIR=$(top_builddir)/third_party/dependency/masstree
+
+include $(top_builddir)/src/Makefile.global
+
+MASSTREE_DIR=$(MASSTREE_HOME)
 MASSTREE_PACKAGE=masstree-beta-0.9.0
 MOT_MASSTREE_PATCH=masstree-beta-0.9.0_patch
 MASSTREE_MEGRED_SOURCES_DIR=$(MASSTREE_DIR)/code

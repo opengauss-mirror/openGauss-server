@@ -53,4 +53,3 @@ struct FixFormatter : public Formatter {
 };
 
 #endif /* FORMATTER_H_ */
-

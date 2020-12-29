@@ -295,8 +295,8 @@ static void free_fetch(PLpgSQL_stmt_fetch* stmt);
 static void free_close(PLpgSQL_stmt_close* stmt);
 static void free_null(PLpgSQL_stmt* stmt);
 static void free_perform(PLpgSQL_stmt_perform* stmt);
-static void free_commit(PLpgSQL_stmt_commit* stmt);
-static void free_rollback(PLpgSQL_stmt_rollback* stmt);
+static void free_commit(PLpgSQL_stmt_commit *stmt);
+static void free_rollback(PLpgSQL_stmt_rollback *stmt);
 
 static void free_stmt(PLpgSQL_stmt* stmt)
 {
@@ -373,14 +373,14 @@ static void free_stmt(PLpgSQL_stmt* stmt)
         case PLPGSQL_STMT_PERFORM:
             free_perform((PLpgSQL_stmt_perform*)stmt);
             break;
-        case PLPGSQL_STMT_NULL:
-            free_null((PLpgSQL_stmt*)stmt);
-            break;
         case PLPGSQL_STMT_COMMIT:
-            free_commit((PLpgSQL_stmt_commit*)stmt);
+            free_commit((PLpgSQL_stmt_commit *) stmt);
             break;
         case PLPGSQL_STMT_ROLLBACK:
-            free_rollback((PLpgSQL_stmt_rollback*)stmt);
+            free_rollback((PLpgSQL_stmt_rollback *) stmt);
+            break;
+        case PLPGSQL_STMT_NULL:
+            free_null((PLpgSQL_stmt*)stmt);
             break;
         default:
             ereport(ERROR,
@@ -521,13 +521,14 @@ static void free_perform(PLpgSQL_stmt_perform* stmt)
     free_expr(stmt->expr);
 }
 
-static void free_commit(PLpgSQL_stmt_commit* stmt)
+static void free_commit(PLpgSQL_stmt_commit *stmt)
 {
 }
 
-static void free_rollback(PLpgSQL_stmt_rollback* stmt)
+static void free_rollback(PLpgSQL_stmt_rollback *stmt)
 {
 }
+
 static void free_exit(PLpgSQL_stmt_exit* stmt)
 {
     free_expr(stmt->cond);
@@ -658,7 +659,7 @@ void plpgsql_free_function_memory(PLpgSQL_function* func)
 
     // Release searchpath
     if (func->fn_searchpath != NULL) {
-        if (func->fn_searchpath->schemas->length > 0) {
+        if (func->fn_searchpath->schemas && func->fn_searchpath->schemas->length > 0) {
             list_free_ext(func->fn_searchpath->schemas);
         }
         pfree_ext(func->fn_searchpath);
@@ -669,6 +670,8 @@ void plpgsql_free_function_memory(PLpgSQL_function* func)
      * itself (which has to be kept around because there may be multiple
      * fn_extra pointers to it).
      */
+    if (func->fn_cxt == u_sess->plsql_cxt.plpgsql_func_cxt)
+        u_sess->plsql_cxt.plpgsql_func_cxt = NULL;
     if (func->fn_cxt) {
         MemoryContextDelete(func->fn_cxt);
     }
@@ -678,6 +681,7 @@ void plpgsql_free_function_memory(PLpgSQL_function* func)
 /**********************************************************************
  * Debug functions for analyzing the compiled code
  **********************************************************************/
+
 static void dump_ind(void);
 static void dump_stmt(PLpgSQL_stmt* stmt);
 static void dump_block(PLpgSQL_stmt_block* block);
@@ -705,9 +709,9 @@ static void dump_fetch(PLpgSQL_stmt_fetch* stmt);
 static void dump_cursor_direction(PLpgSQL_stmt_fetch* stmt);
 static void dump_close(PLpgSQL_stmt_close* stmt);
 static void dump_perform(PLpgSQL_stmt_perform* stmt);
+static void dump_commit(PLpgSQL_stmt_commit *stmt);
+static void dump_rollback(PLpgSQL_stmt_rollback *stmt);
 static void dump_null(PLpgSQL_stmt* stmt);
-static void dump_commit(PLpgSQL_stmt_commit* stmt);
-static void dump_rollback(PLpgSQL_stmt_rollback* stmt);
 static void dump_expr(PLpgSQL_expr* expr);
 
 static void dump_ind(void)
@@ -795,14 +799,14 @@ static void dump_stmt(PLpgSQL_stmt* stmt)
         case PLPGSQL_STMT_PERFORM:
             dump_perform((PLpgSQL_stmt_perform*)stmt);
             break;
-        case PLPGSQL_STMT_NULL:
-            dump_null((PLpgSQL_stmt*)stmt);
-            break;
         case PLPGSQL_STMT_COMMIT:
-            dump_commit((PLpgSQL_stmt_commit*)stmt);
+            dump_commit((PLpgSQL_stmt_commit *) stmt);
             break;
         case PLPGSQL_STMT_ROLLBACK:
-            dump_rollback((PLpgSQL_stmt_rollback*)stmt);
+            dump_rollback((PLpgSQL_stmt_rollback *) stmt);
+            break;
+        case PLPGSQL_STMT_NULL:
+            dump_null((PLpgSQL_stmt*)stmt);
             break;
         default:
             ereport(ERROR,
@@ -1158,22 +1162,23 @@ static void dump_perform(PLpgSQL_stmt_perform* stmt)
     printf("\n");
 }
 
+static void dump_commit(PLpgSQL_stmt_commit *stmt)
+{
+    dump_ind();
+    printf("COMMIT\n");
+    return;
+}
+
+static void dump_rollback(PLpgSQL_stmt_rollback *stmt)
+{
+    dump_ind();
+    printf("ROLLBACK\n");
+}
+
 static void dump_null(PLpgSQL_stmt* stmt)
 {
     dump_ind();
     printf("NULL\n");
-}
-
-static void dump_commit(PLpgSQL_stmt_commit* stmt)
-{
-    dump_ind();
-    printf("COMMIT\n");
-}
-
-static void dump_rollback(PLpgSQL_stmt_rollback* stmt)
-{
-    dump_ind();
-    printf("ROLLBACK\n");
 }
 
 static void dump_exit(PLpgSQL_stmt_exit* stmt)

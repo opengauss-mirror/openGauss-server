@@ -125,8 +125,7 @@ Node* MultiExecBitmapOr(BitmapOrState* node)
             /* first subplan */
             if (result == NULL) {
                 /* XXX should we use less than u_sess->attr.attr_memory.work_mem for this? */
-                result = tbm_create(u_sess->attr.attr_memory.work_mem * 1024L,
-                    ((BitmapOr *) node->ps.plan)->isshared ? t_thrd.bgworker_cxt.memCxt : NULL);
+                result = tbm_create(u_sess->attr.attr_memory.work_mem * 1024L);
                 /* If bitmapscan uses global partition index, set tbm to global */
                 if (RelationIsGlobalIndex(((BitmapIndexScanState*)subnode)->biss_RelationDesc)) {
                     tbm_set_global(result, true);

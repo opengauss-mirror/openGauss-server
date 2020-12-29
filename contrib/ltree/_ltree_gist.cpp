@@ -706,7 +706,6 @@ Datum _ltree_consistent(PG_FUNCTION_ARGS)
     char* query = (char*)DatumGetPointer(PG_DETOAST_DATUM(PG_GETARG_DATUM(1)));
     StrategyNumber strategy = (StrategyNumber)PG_GETARG_UINT16(2);
 
-    /* Oid		subtype = PG_GETARG_OID(3); */
     bool* recheck = (bool*)PG_GETARG_POINTER(4);
     ltree_gist* key = (ltree_gist*)DatumGetPointer(entry->key);
     bool res = false;

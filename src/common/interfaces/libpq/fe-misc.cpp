@@ -141,27 +141,23 @@ static int pqGets_internal(PQExpBuffer buf, PGconn* conn, bool resetbuffer)
     int inEnd = conn->inEnd;
     int slen;
 
-    while (inCursor < inEnd && inBuffer[inCursor]) {
+    while (inCursor < inEnd && inBuffer[inCursor])
         inCursor++;
-    }
 
-    if (inCursor >= inEnd) {
+    if (inCursor >= inEnd)
         return EOF;
-    }
 
     slen = inCursor - conn->inCursor;
 
-    if (resetbuffer) {
+    if (resetbuffer)
         resetPQExpBuffer(buf);
-    }
 
     appendBinaryPQExpBuffer(buf, inBuffer + conn->inCursor, slen);
 
     conn->inCursor = ++inCursor;
 
-    if (conn->Pfdebug != NULL) {
+    if (conn->Pfdebug != NULL)
         fprintf(conn->Pfdebug, "From backend> \"%s\"\n", buf->data);
-    }
 
     return 0;
 }
@@ -199,6 +195,7 @@ int pqGetnchar(char* s, size_t len, PGconn* conn)
     if (len > (size_t)(conn->inEnd - conn->inCursor))
         return EOF;
 
+    // len is size_t > SECUREC_MEM_MAX_LEN
     memcpy(s, conn->inBuffer + conn->inCursor, len);
     /* no terminating null */
 
@@ -362,8 +359,9 @@ int pqCheckOutBufferSpace(size_t bytes_needed, PGconn* conn)
     int newsize = conn->outBufSize;
     char* newbuf = NULL;
 
-    if (bytes_needed <= (size_t)newsize)
+    if (bytes_needed <= (size_t)newsize) {
         return 0;
+    }
 
     /*
      * If we need to enlarge the buffer, we first try to double it in size; if
@@ -402,7 +400,11 @@ int pqCheckOutBufferSpace(size_t bytes_needed, PGconn* conn)
     }
 
     /* malloc failed. Probably out of memory */
-    printfPQExpBuffer(&conn->errorMessage, "cannot allocate memory for output buffer\n");
+    if (newsize < 0) {
+        printfPQExpBuffer(&conn->errorMessage, "size of allocated memory for input buffer is negative\n");
+    } else {
+        printfPQExpBuffer(&conn->errorMessage, "cannot allocate memory for input buffer\n");
+    }
     return EOF;
 }
 
@@ -417,8 +419,9 @@ int pqCheckInBufferSpace(size_t bytes_needed, PGconn* conn)
     int newsize = conn->inBufSize;
     char* newbuf = NULL;
 
-    if (bytes_needed <= (size_t)newsize)
+    if (bytes_needed <= (size_t)newsize) {
         return 0;
+    }
 
     /*
      * If we need to enlarge the buffer, we first try to double it in size; if
@@ -466,11 +469,7 @@ int pqCheckInBufferSpace(size_t bytes_needed, PGconn* conn)
     }
 
     /* malloc failed. Probably out of memory */
-    if (newsize < 0) {
-        printfPQExpBuffer(&conn->errorMessage, "size of allocated memory for input buffer is negative\n");
-    } else {
-        printfPQExpBuffer(&conn->errorMessage, "cannot allocate memory for input buffer\n");
-    }
+    printfPQExpBuffer(&conn->errorMessage, "cannot allocate memory for input buffer\n");
     return EOF;
 }
 
@@ -527,9 +526,8 @@ int pqPutMsgStart(char msg_type, bool force_len, PGconn* conn)
     conn->outMsgEnd = endPos;
     /* length word, if needed, will be filled in by pqPutMsgEnd */
 
-    if (conn->Pfdebug != NULL) {
+    if (conn->Pfdebug != NULL)
         fprintf(conn->Pfdebug, "To backend> Msg %c\n", msg_type ? msg_type : ' ');
-    }
 
     return 0;
 }
@@ -541,16 +539,22 @@ int pqPutMsgStart(char msg_type, bool force_len, PGconn* conn)
  */
 static int pqPutMsgBytes(const void* buf, size_t len, PGconn* conn)
 {
+#ifndef WIN32
     if (unlikely(len > SIZE_MAX - conn->outMsgEnd)) {
         return EOF;
     }
+#else
+    if (len > SIZE_MAX - conn->outMsgEnd) {
+        return EOF;
+    }
+#endif
     /* make sure there is room for it */
     if (pqCheckOutBufferSpace(conn->outMsgEnd + len, conn))
         return EOF;
     /* okay, save the data
      * len is size_t > SECUREC_MEM_MAX_LEN
      */
-    memcpy(conn->outBuffer + conn->outMsgEnd, buf, len);
+    memcpy(conn->outBuffer + conn->outMsgEnd, (char*)buf, len);
     conn->outMsgEnd += len;
     /* no Pfdebug call here, caller should do it */
     return 0;
@@ -693,9 +697,8 @@ retry3:
         return 1;
     }
 
-    if (someread) {
-        return 1;
-    } /* got a zero read after successful tries */
+    if (someread)
+        return 1; /* got a zero read after successful tries */
 
         /*
          * A return value of 0 could mean just that no data is now available, or
@@ -939,8 +942,7 @@ int pqWait(int forRead, int forWrite, PGconn* conn)
 
     /* Set up a time limit, if rw_timeout isn't zero and not NULL */
     if (conn->rw_timeout != NULL) {
-        char* res = NULL;
-        timeout = strtol(conn->rw_timeout, &res, 10); /* max length of int */
+        timeout = atoi(conn->rw_timeout);
     }
 
     if (timeout <= 0) {
@@ -986,8 +988,8 @@ int pqWaitTimed(int forRead, int forWrite, PGconn* conn, time_t finish_time)
 
     if (result == 0) {
         printfPQExpBuffer(&conn->errorMessage,
-                libpq_gettext("wait %s:%s timeout expired, errno: %s\n"),
-                conn->pghost, conn->pgport, strerror(errno));
+            libpq_gettext("wait %s:%s timeout expired\n"),
+            conn->pghost, conn->pgport);
         return EOF;
     }
 
@@ -1047,9 +1049,8 @@ static int pqSocketCheck(PGconn* conn, int forRead, int forWrite, time_t end_tim
     if (result < 0) {
         char sebuf[256];
         printfPQExpBuffer(&conn->errorMessage,
-                libpq_gettext("select() failed: %s, remote datanode %s, errno: %s\n"),
-                SOCK_STRERROR(SOCK_ERRNO, sebuf, sizeof(sebuf)),
-                conn->remote_nodename, strerror(errno));
+            libpq_gettext("select() failed: %s, remote datanode %s, errno: %s\n"),
+            SOCK_STRERROR(SOCK_ERRNO, sebuf, sizeof(sebuf)), conn->remote_nodename, strerror(errno));
     }
 
     return result;
@@ -1082,6 +1083,7 @@ static int pqSocketPoll(int sock, int forRead, int forWrite, time_t end_time)
         input_fd.events |= POLLIN;
     if (forWrite)
         input_fd.events |= POLLOUT;
+
     /* Compute appropriate timeout interval */
     if (end_time == ((time_t)-1))
         timeout_ms = -1;
@@ -1110,23 +1112,26 @@ static int pqSocketPoll(int sock, int forRead, int forWrite, time_t end_time)
     FD_ZERO(&input_mask);
     FD_ZERO(&output_mask);
     FD_ZERO(&except_mask);
-    if (forRead)
+    if (forRead) {
         FD_SET(sock, &input_mask);
+    }
 
-    if (forWrite)
+    if (forWrite) {
         FD_SET(sock, &output_mask);
+    }
     FD_SET(sock, &except_mask);
 
     /* Compute appropriate timeout interval */
-    if (end_time == ((time_t)-1))
+    if (end_time == ((time_t)-1)) {
         ptr_timeout = NULL;
-    else {
+    } else {
         time_t now = time(NULL);
 
-        if (end_time > now)
+        if (end_time > now) {
             timeout.tv_sec = end_time - now;
-        else
+        } else {
             timeout.tv_sec = 0;
+        }
         timeout.tv_usec = 0;
         ptr_timeout = &timeout;
     }
@@ -1168,8 +1173,9 @@ int PQenv2encoding(void)
     int encoding = PG_SQL_ASCII;
 
     tmp = gs_getenv_r("PGCLIENTENCODING");
-    if (check_client_env(tmp) == NULL)
+    if (check_client_env(tmp) == NULL) {
         return encoding;
+    }
 
     str = strdup(tmp);
     if (str != NULL && *str != '\0') {
@@ -1200,8 +1206,15 @@ char* libpq_gettext(const char* msgid)
         already_bound = true;
         /* No relocatable lookup here because the binary could be anywhere */
         ldir = gs_getenv_r("PGLOCALEDIR");
-        if (check_client_env(ldir) == NULL)
+        char real_ldir[PATH_MAX + 1] = {'\0'};
+        if (ldir == NULL || realpath(ldir, real_ldir) == NULL) {
             ldir = LOCALEDIR;
+        } else {
+            ldir = real_ldir;
+            if (check_client_env(ldir) == NULL) {
+                ldir = LOCALEDIR;
+            }
+        }
         bindtextdomain(PG_TEXTDOMAIN("libpq"), ldir);
 #ifdef WIN32
         SetLastError(save_errno);

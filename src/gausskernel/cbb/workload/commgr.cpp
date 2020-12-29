@@ -36,9 +36,11 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/memprot.h"
-
+#include "pgstat.h"
 #include "workload/commgr.h"
 #include "workload/workload.h"
+#include "workload/statctl.h"
+#include "optimizer/nodegroups.h"
 
 extern void WLMGetForeignResPoolMemory(ResourcePool* foreign_respool, int* memsize, int* estmsize);
 
@@ -156,7 +158,11 @@ void UnLockInstanceRealTHashPartition(uint32 hashCode)
  */
 void WLMReplyCollectInfo(char* keystr, WLMCollectTag tag)
 {
-    AssertEreport(StringIsValid(keystr), MOD_OPT, "");
+    if (keystr == NULL || *keystr == '\0') {
+        ereport(ERROR, (errmodule(MOD_WLM_CP),
+               errcode(ERRCODE_SYNTAX_ERROR),
+               errmsg("The key string of 'R' request could not be NULL")));
+    }
 
     StringInfoData retbuf;
 
@@ -183,19 +189,19 @@ void WLMReplyCollectInfo(char* keystr, WLMCollectTag tag)
             int curr_iops = 0;
 
             if (!IsQidInvalid(&qid)) {
-                WLMAutoLWLock io_lock(WorkloadIoStatHashLock, LW_SHARED);
-                io_lock.AutoLWLockAcquire();
+                uint32 bucketId = GetIoStatBucket(&qid);
+                int lockId = GetIoStatLockId(bucketId);
+                HTAB* hashTbl = g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl[bucketId].hashTable;
+                (void)LWLockAcquire(GetMainLWLockByIndex(lockId), LW_SHARED);
 
                 /* get history peak read/write Bps/iops and current total bytes/times of read/write from hash table */
-                WLMDNodeIOInfo* ioinfo = (WLMDNodeIOInfo*)hash_search(
-                    g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl, &qid, HASH_FIND, NULL);
+                WLMDNodeIOInfo* ioinfo = (WLMDNodeIOInfo*)hash_search(hashTbl, &qid, HASH_FIND, NULL);
 
                 if (ioinfo != NULL) {
                     peak_iops = ioinfo->io_geninfo.peak_iops;
                     curr_iops = ioinfo->io_geninfo.curr_iops;
                 }
-
-                io_lock.AutoLWLockRelease();
+                LWLockRelease(GetMainLWLockByIndex(lockId));
             }
 
             uint32 hashCode = WLMHashCode(&qid, sizeof(Qid));
@@ -221,7 +227,7 @@ void WLMReplyCollectInfo(char* keystr, WLMCollectTag tag)
                 SessionLevelMemory* sessionMemory = (SessionLevelMemory*)pDNodeInfo->mementry;
 
                 totalCpuTime = pDNodeInfo->geninfo.totalCpuTime;
-                endTime = sessionMemory->dnEndTime > 0 ? sessionMemory->dnEndTime : GetCurrentTimestamp();
+                endTime = (sessionMemory->dnEndTime > 0) ? sessionMemory->dnEndTime : GetCurrentTimestamp();
                 dnTime = WLMGetTimestampDuration(sessionMemory->dnStartTime, endTime);
                 queryMemInChunks = sessionMemory->queryMemInChunks << (chunkSizeInBits - BITS_IN_MB);
                 peakChunksQuery = sessionMemory->peakChunksQuery << (chunkSizeInBits - BITS_IN_MB);
@@ -274,18 +280,19 @@ void WLMReplyCollectInfo(char* keystr, WLMCollectTag tag)
             errno_t ssval = sscanf_s(keystr, "%u,%lu,%ld", &qid.procId, &qid.queryId, &qid.stamp);
             securec_check_ssval(ssval, , LOG);
 
-            WLMAutoLWLock io_lock(WorkloadIoStatHashLock, LW_SHARED);
-            io_lock.AutoLWLockAcquire();
+            uint32 bucketId = GetIoStatBucket(&qid);
+            int lockId = GetIoStatLockId(bucketId);
+            (void)LWLockAcquire(GetMainLWLockByIndex(lockId), LW_SHARED);
 
             /* get history peak read/write Bps/iops and current total bytes/times of read/write from hash table */
             WLMDNodeIOInfo* pDNodeIoInfo = (WLMDNodeIOInfo*)hash_search(
-                g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl, &qid, HASH_FIND, NULL);
+                g_instance.wlm_cxt->stat_manager.iostat_info_hashtbl[bucketId].hashTable, &qid, HASH_FIND, NULL);
             if (pDNodeIoInfo != NULL) {
                 WLMIoGeninfo* ioinfo = &pDNodeIoInfo->io_geninfo;
                 curr_iops = ioinfo->curr_iops;
                 peak_iops = ioinfo->peak_iops;
             }
-            io_lock.AutoLWLockRelease();
+            LWLockRelease(GetMainLWLockByIndex(lockId));
 
             if (curr_iops != 0) {
                 pq_beginmessage(&retbuf, 'c');
@@ -318,7 +325,7 @@ void WLMReplyCollectInfo(char* keystr, WLMCollectTag tag)
                 if (flag) {
                     flag += 1;
                     errno_t ssval = sscanf_s(flag,
-                        "%lld %lld %lld",
+                        "%ld %ld %ld",
                         &globalTotalSpace,
                         &globalTmpSpace,
                         &globalSpillSpace);
@@ -350,9 +357,9 @@ void WLMReplyCollectInfo(char* keystr, WLMCollectTag tag)
             uint64 writeBytes = 0;
             uint64 readCounts = 0;
             uint64 writeCounts = 0;
-            uint64 totalspace = 0;
-            uint64 tmpSpace = 0;
-            uint64 spillSpace = 0;
+            int64 totalspace = 0;
+            int64 tmpSpace = 0;
+            int64 spillSpace = 0;
             bool userdata_valid = false;
             /* get user info from user hash cache */
             if (userdata != NULL) {
@@ -598,6 +605,8 @@ void WLMReplyCollectInfo(char* keystr, WLMCollectTag tag)
              */
             Qid qid;
             int removed;
+            int tableCounterSize = 0;
+            int timeInfoSize = 0;
 
             errno_t ssval = sscanf_s(keystr, "%u,%lu,%ld,%d", &qid.procId, &qid.queryId, &qid.stamp, &removed);
             securec_check_ssval(ssval, , LOG);
@@ -619,6 +628,41 @@ void WLMReplyCollectInfo(char* keystr, WLMCollectTag tag)
                     if (pDetail != NULL) {
                         errno_t rc = memcpy_s(pDetail, sizeof(WLMStmtDetail), pDetail_hash, sizeof(WLMStmtDetail));
                         securec_check(rc, "\0", "\0");
+                        if (pDetail_hash->plan_size > 0 && pDetail_hash->query_plan != NULL) {
+                            pDetail->query_plan = (char*)palloc0(pDetail_hash->plan_size);
+                            rc = memcpy_s(pDetail->query_plan, pDetail_hash->plan_size, pDetail_hash->query_plan, pDetail_hash->plan_size);
+                            pDetail->plan_size = pDetail_hash->plan_size;
+                            securec_check(rc, "\0", "\0");
+                        } else {
+                            StringInfoData plan_string;
+                            initStringInfo(&plan_string);
+                            appendStringInfo(&plan_string, "Datanode Name: %s\nNoPlan\n\n", g_instance.attr.attr_common.PGXCNodeName);
+                            pDetail->plan_size = plan_string.len + 1;
+                            pDetail->query_plan = (char*)palloc0(pDetail->plan_size);
+                            rc = strncpy_s(pDetail->query_plan, pDetail->plan_size, plan_string.data, pDetail->plan_size - 1);
+                            securec_check(rc, "\0", "\0");
+                            pfree_ext(plan_string.data);
+                        }
+
+                        tableCounterSize = sizeof(PgStat_TableCounts);
+                        pDetail->slowQueryInfo.current_table_counter = (PgStat_TableCounts*)palloc0(tableCounterSize);
+                        if (pDetail_hash->slowQueryInfo.current_table_counter != NULL) {
+                            rc = memcpy_s(pDetail->slowQueryInfo.current_table_counter, tableCounterSize,
+                                      pDetail_hash->slowQueryInfo.current_table_counter, tableCounterSize);
+                            securec_check(rc, "\0", "\0");
+                        }
+
+                        timeInfoSize = sizeof(int64) * TOTAL_TIME_INFO_TYPES;
+                        pDetail->slowQueryInfo.localTimeInfoArray = (int64*)palloc0(timeInfoSize);
+                        if (pDetail_hash->slowQueryInfo.localTimeInfoArray != NULL) {
+                            rc = memcpy_s(pDetail->slowQueryInfo.localTimeInfoArray, timeInfoSize,
+                                      pDetail_hash->slowQueryInfo.localTimeInfoArray, timeInfoSize);
+                            securec_check(rc, "\0", "\0");
+                        }
+
+                        pfree_ext(pDetail_hash->slowQueryInfo.current_table_counter);
+                        pfree_ext(pDetail_hash->slowQueryInfo.localTimeInfoArray);
+                        pfree_ext(pDetail_hash->query_plan);
                     }
                 }
                 /* remove it from the hash table */
@@ -635,6 +679,37 @@ void WLMReplyCollectInfo(char* keystr, WLMCollectTag tag)
                     if (pDetail != NULL) {
                         errno_t rc = memcpy_s(pDetail, sizeof(WLMStmtDetail), pDetail_hash, sizeof(WLMStmtDetail));
                         securec_check(rc, "\0", "\0");
+                        if (pDetail_hash->plan_size > 0 && pDetail_hash->query_plan != NULL) {
+                            pDetail->query_plan = (char*)palloc0(pDetail_hash->plan_size);
+                            rc = memcpy_s(pDetail->query_plan, pDetail_hash->plan_size, pDetail_hash->query_plan, pDetail_hash->plan_size);
+                            securec_check(rc, "\0", "\0");
+                            pDetail->plan_size = pDetail_hash->plan_size;
+                        } else {
+                            StringInfoData plan_string;
+                            initStringInfo(&plan_string);
+                            appendStringInfo(&plan_string, "Datanode Name: %s\nNoPlan\n\n", g_instance.attr.attr_common.PGXCNodeName);
+                            pDetail->plan_size = plan_string.len + 1;
+                            pDetail->query_plan = (char*)palloc0(pDetail->plan_size);
+                            rc = strncpy_s(pDetail->query_plan, pDetail->plan_size, plan_string.data, pDetail->plan_size - 1);
+                            securec_check(rc, "\0", "\0");
+                            pfree_ext(plan_string.data);
+                        }
+
+                        tableCounterSize = sizeof(PgStat_TableCounts);
+                        pDetail->slowQueryInfo.current_table_counter = (PgStat_TableCounts*)palloc0(tableCounterSize);
+                        if (pDetail_hash->slowQueryInfo.current_table_counter != NULL) {
+                            rc = memcpy_s(pDetail->slowQueryInfo.current_table_counter, tableCounterSize,
+                                      pDetail_hash->slowQueryInfo.current_table_counter, tableCounterSize);
+                            securec_check(rc, "\0", "\0");
+                        }
+
+                        timeInfoSize = sizeof(int64) * TOTAL_TIME_INFO_TYPES;
+                        pDetail->slowQueryInfo.localTimeInfoArray = (int64*)palloc0(timeInfoSize);
+                        if (pDetail_hash->slowQueryInfo.localTimeInfoArray != NULL) {
+                            rc = memcpy_s(pDetail->slowQueryInfo.localTimeInfoArray, timeInfoSize,
+                                      pDetail_hash->slowQueryInfo.localTimeInfoArray, timeInfoSize);
+                            securec_check(rc, "\0", "\0");
+                        }
                     }
                 }
                 (void)UnLockSessHistHashPartition(hashCode);
@@ -656,9 +731,33 @@ void WLMReplyCollectInfo(char* keystr, WLMCollectTag tag)
                     pq_sendint(&retbuf, pDetail->ioinfo.peak_iops, sizeof(int));
                     pq_sendint(&retbuf, pDetail->ioinfo.curr_iops, sizeof(int));
                     pq_sendstring(&retbuf, g_instance.attr.attr_common.PGXCNodeName);
-                    pq_endmessage(&retbuf);
 
+                    if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION) {
+                        /* tuple info & cache IO */
+                        pq_sendint64(&retbuf, pDetail->slowQueryInfo.current_table_counter->t_tuples_returned);
+                        pq_sendint64(&retbuf, pDetail->slowQueryInfo.current_table_counter->t_tuples_fetched);
+                        pq_sendint64(&retbuf, pDetail->slowQueryInfo.current_table_counter->t_tuples_inserted);
+                        pq_sendint64(&retbuf, pDetail->slowQueryInfo.current_table_counter->t_tuples_updated);
+                        pq_sendint64(&retbuf, pDetail->slowQueryInfo.current_table_counter->t_tuples_deleted);
+                        pq_sendint64(&retbuf, pDetail->slowQueryInfo.current_table_counter->t_blocks_fetched);
+                        pq_sendint64(&retbuf, pDetail->slowQueryInfo.current_table_counter->t_blocks_hit);
+
+                        /* time Info */
+                        for (uint32 idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
+                            pq_sendint64(&retbuf, pDetail->slowQueryInfo.localTimeInfoArray[idx]);
+                        }
+
+                        /* plan info */
+                        pq_sendint64(&retbuf, pDetail->plan_size);
+                        pq_sendstring(&retbuf, pDetail->query_plan);
+                    }
+
+                    pq_endmessage(&retbuf);
+                    ereport(DEBUG1, (errcode(ERRCODE_SLOW_QUERY), errmsg("%u, %lu, %ld\nplan %s", qid.procId, qid.queryId, qid.stamp, pDetail->query_plan), errhidestmt(true), errhideprefix(true)));
                     retcode = 1;
+                    pfree_ext(pDetail->slowQueryInfo.current_table_counter);
+                    pfree_ext(pDetail->slowQueryInfo.localTimeInfoArray);
+                    pfree_ext(pDetail->query_plan);
                     pfree_ext(pDetail);
                 }
             }
@@ -851,12 +950,9 @@ void WLMReleaseFailCountAgent(int datanode_count, PoolAgent* agent, PGXCNodeAllH
     }
 
     for (int i = 0; i < datanode_count; ++i) {
-        LWLockAcquire(PoolerLock, LW_SHARED);
         if (agent->dn_connections[i]) {
-            release_connection(agent->pool, agent->dn_connections[i], agent->dn_conn_oids[i], true);
-            agent->dn_connections[i] = NULL;
+            release_connection(agent, &(agent->dn_connections[i]), agent->dn_conn_oids[i], true);
         }
-        LWLockRelease(PoolerLock);
 
         if (pgxc_handles->datanode_handles[i]) {
             pgxc_node_free(pgxc_handles->datanode_handles[i]);
@@ -928,6 +1024,10 @@ int WLMRemoteInfoSenderByNG(const char* group_name, const char* keystr, WLMColle
         }
 
         ereport(DEBUG3, (errmsg("SEND data to DN %s in NG.", dn_handle->remoteNodeName)));
+
+        if (dn_handle->state == DN_CONNECTION_STATE_QUERY) {
+            BufferConnection(dn_handle);
+        }
 
         dn_handle->state = DN_CONNECTION_STATE_IDLE;
 
@@ -1021,7 +1121,12 @@ void WLMRemoteInfoWork(PGXCNodeAllHandles* pgxcHandles, void* sumInfo, int size,
         bool isFinished = false;
 
         /* receive workload records from each node */
-        while (!pgxc_node_receive(1, &dnHandle, &timeout)) {
+        for (;;) {
+            if (pgxc_node_receive(1, &dnHandle, &timeout)) {
+                ereport(LOG,
+                    (errmsg("%s:%d recv fail", __FUNCTION__, __LINE__)));
+                break;
+            }
             int len;
             char* msg = NULL;
             char msg_type = get_message(dnHandle, &len, &msg);
@@ -1291,7 +1396,13 @@ List* WLMRemoteJobInfoCollector(const char* keystr, void* suminfo, WLMCollectTag
         bool isFinish = false;
 
         /* receive workload jobs from each node */
-        while (!pgxc_node_receive(1, &dn_handle, &timeout)) {
+        for (;;) {
+            if (pgxc_node_receive(1, &dn_handle, &timeout)) {
+                ereport(LOG,
+                    (errmsg("%s:%d recv fail", __FUNCTION__, __LINE__)));
+                break;
+            }
+
             char* msg = NULL;
             int len;
 
@@ -1404,6 +1515,31 @@ List* WLMRemoteJobInfoCollector(const char* keystr, void* suminfo, WLMCollectTag
     return jobs_list;
 }
 
+PGXCNodeAllHandles* WLMRemoteNodeAcquireConn(List* node_list, PoolNodeType type)
+{
+    PGXCNodeAllHandles* pgxc_handles = NULL;
+
+    PG_TRY();
+    {
+        if (type == POOL_NODE_CN) {
+            pgxc_handles = get_handles(NULL, node_list, true);
+        } else {
+            pgxc_handles = get_handles(node_list, NULL, false);
+        }
+    }
+    PG_CATCH();
+    {
+        release_pgxc_handles(pgxc_handles);
+        pgxc_handles = NULL;
+        list_free(node_list);
+
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    return pgxc_handles;
+}
+
 /*
  * @Description: collect info from remote nodes
  * @IN keystr: key string
@@ -1417,7 +1553,6 @@ List* WLMRemoteJobInfoCollector(const char* keystr, void* suminfo, WLMCollectTag
 void WLMRemoteInfoCollector(const char* keystr, void* suminfo, WLMCollectTag tag, int size, WLMParseMessage parse_func)
 {
     List* dnlist = NULL;
-    PGXCNodeAllHandles* pgxc_handles = NULL;
 
     DynamicNodeData* nodedata = (DynamicNodeData*)suminfo;
 
@@ -1427,21 +1562,7 @@ void WLMRemoteInfoCollector(const char* keystr, void* suminfo, WLMCollectTag tag
 
     /* get data node list from dn_handles */
     dnlist = GetNodeGroupNodeList(nodedata->group_members, nodedata->group_count);
-
-    PG_TRY();
-    {
-        pgxc_handles = get_handles(dnlist, NULL, false);
-    }
-    PG_CATCH();
-    {
-        release_pgxc_handles(pgxc_handles);
-        pgxc_handles = NULL;
-        list_free_ext(dnlist);
-
-        PG_RE_THROW();
-    }
-    PG_END_TRY();
-
+    PGXCNodeAllHandles* pgxc_handles = WLMRemoteNodeAcquireConn(dnlist, POOL_NODE_DN);
     list_free_ext(dnlist);
 
     if (pgxc_handles == NULL) {
@@ -1580,10 +1701,6 @@ void WLMRemoteInfoCollector(const char* keystr, void* suminfo, WLMCollectTag tag
  */
 void WLMRemoteNodeExecuteSql(const char* sql, int nodeid)
 {
-    List* cnlist = NULL;
-
-    PGXCNodeAllHandles* pgxc_handles = NULL;
-
     TupleTableSlot* scanslot = NULL;
     int conn_count = 1;
 
@@ -1597,23 +1714,9 @@ void WLMRemoteNodeExecuteSql(const char* sql, int nodeid)
         return;
     }
 
-    /* get all data node index */
+    List* cnlist = NULL;
     cnlist = lappend_int(cnlist, nodeid - 1);
-
-    PG_TRY();
-    {
-        pgxc_handles = get_handles(NULL, cnlist, true);
-    }
-    PG_CATCH();
-    {
-        release_pgxc_handles(pgxc_handles);
-        pgxc_handles = NULL;
-        list_free(cnlist);
-
-        PG_RE_THROW();
-    }
-    PG_END_TRY();
-
+    PGXCNodeAllHandles* pgxc_handles = WLMRemoteNodeAcquireConn(cnlist, POOL_NODE_CN);
     list_free(cnlist);
 
     if (pgxc_handles == NULL) {
@@ -1632,6 +1735,7 @@ void WLMRemoteNodeExecuteSql(const char* sql, int nodeid)
         int j = 0;
 
         if (pgxc_node_receive(conn_count, pgxc_handles->coord_handles, NULL)) {
+            ereport(LOG, (errmsg("%s:%d recv fail", __FUNCTION__, __LINE__)));
             break;
         }
         while (j < conn_count) {

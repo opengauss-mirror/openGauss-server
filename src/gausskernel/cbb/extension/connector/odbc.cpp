@@ -489,6 +489,7 @@ public:
 private:
     bool connected_;
 };
+
 }  // namespace myodbc
 
 namespace myodbc {
@@ -620,13 +621,16 @@ private:
     bool open_;
     class connection conn_;
 };
+
 }  // namespace myodbc
 
 namespace myodbc {
+
 /*
  * Implementation of result class: result_impl
  */
 class result::result_impl {
+
 public:
     result_impl(const result_impl& impl) = delete;
     result_impl& operator=(const result_impl& impl) = delete;
@@ -1161,6 +1165,7 @@ inline void result::result_impl::get_ref_impl<bool>(short column, bool& result)
             type_incompatible_error(col.ctype_, col.column_);
     }
 }
+
 }  // namespace myodbc
 
 namespace myodbc {
@@ -1224,6 +1229,7 @@ void* connection::native_env_handle() const
 {
     return impl_->native_env_handle();
 }
+
 }  // namespace myodbc
 
 namespace myodbc {
@@ -1288,6 +1294,7 @@ short statement::columns()
 {
     return impl_->columns();
 }
+
 }  // namespace myodbc
 
 namespace myodbc {
@@ -1408,8 +1415,7 @@ RESULT_HANDLE odbc_lib_query(CONN_HANDLE conn, const char* query)
 
     return _result;
 }
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+
 /*
  * @Description: get one row of the result set from odbc driver.
  *
@@ -1616,4 +1622,3 @@ void odbc_lib_get_result(RESULT_HANDLE result, unsigned int* types, void** _buf,
         }
     }
 }
-#pragma GCC diagnostic pop

@@ -1,0 +1,322 @@
+create database test;
+create user test with sysadmin password 'Gauss@123';
+create user test2 password 'Gauss@123';
+\c test
+set role test password 'Gauss@123';
+
+create table t1(c1 int, c2 int, c3 int) with(orientation=column);
+create table t2(c1 int, c4 int, c2 int, c3 int);
+alter table t2 drop column c4;
+create table t3(c1 int, c2 int, c3 int);
+
+insert into t1 select v, v*10, v*100 from generate_series(1, 100) as v;
+insert into t2 select v, v*10, v*100 from generate_series(51, 150) as v;
+insert into t3 select v, v*10, v*100 from generate_series(51, 150) as v;
+
+analyze t1;
+analyze t2;
+set default_statistics_target = -2;
+analyze t1((c3, c2));
+
+
+create table hash_row(c1 int, c2 int, c3 int);
+create table hash_col(c1 int, c2 int, c3 int) with(orientation=column);
+create table rep_row(c1 int, c2 int, c3 int) distribute by replication;
+create table rep_col(c1 int, c2 int, c3 int) with(orientation=column) distribute by replication;
+
+insert into hash_row select v, v*10, v*100 from generate_series(1, 10) as v;
+insert into hash_col select v, v*10, v*100 from generate_series(3, 12) as v;
+insert into rep_row select v, v*10, v*100 from generate_series(6, 15) as v;
+insert into rep_col select v, v*10, v*100 from generate_series(8, 17) as v;
+
+create table t_char(c1 int, c2 char(10), c3 int);
+create table t_varchar(c1 int, c2 varchar(10), c3 int);
+create table t_numeric(c1 int, c2 numeric(2, 2), c3 int);
+
+create table aggtable1(
+  c1 int,
+  c2 tinyint,
+  c3 smallint,
+  c4 bigint,
+  c5 numeric,
+  c6 float4,
+  c7 float8,
+  c8 int
+);
+
+insert into aggtable1 values(1,2,3,4,5,6,7,100);
+insert into aggtable1 values(8,9,10,11,12,13,14,200);
+insert into aggtable1 values(1,2,3,4,5,6,7,100);
+insert into aggtable1 values(8,9,10,11,12,13,14,200);
+insert into aggtable1 values(29,30,31,32,33,34,35,100);
+insert into aggtable1 values(36,37,38,39,40,41,42,200);
+insert into aggtable1 values(NULL,NULL,NULL,NULL,NULL,NULL,NULL,100);
+insert into aggtable1 values(NULL,NULL,NULL,NULL,NULL,NULL,NULL,200);
+insert into aggtable1 select * from aggtable1;
+insert into aggtable1 select * from aggtable1;
+insert into aggtable1 select * from aggtable1;
+insert into aggtable1 select * from aggtable1;
+insert into aggtable1 select * from aggtable1;
+insert into aggtable1 select * from aggtable1;
+insert into aggtable1 select * from aggtable1;
+insert into aggtable1 select * from aggtable1;
+insert into aggtable1 select * from aggtable1;
+insert into aggtable1 select * from aggtable1;
+insert into aggtable1 select * from aggtable1;
+analyze aggtable1;
+
+create table implicit_cast(c1 int, c2 text);
+insert into  implicit_cast values (1, 'abc1d');
+analyze implicit_cast;
+
+CREATE TABLE lineitem (
+    l_orderkey bigint ,
+    l_partkey bigint,
+    l_suppkey bigint ,
+    l_linenumber bigint ,
+    l_quantity numeric(15,2) ,
+    l_extendedprice numeric(15,2) ,
+    l_discount numeric(15,2) ,
+    l_tax numeric(15,2) ,
+    l_returnflag character(1) ,
+    l_linestatus character(1) ,
+    l_shipdate timestamp(0) without time zone ,
+    l_commitdate timestamp(0) without time zone ,
+    l_receiptdate timestamp(0) without time zone ,
+    l_shipinstruct character(25) ,
+    l_shipmode character(10) ,
+    l_comment character varying(44)
+);
+
+create table household_demographics(hd_demo_sk int, hd_buy_potential char(15), hd_vehicle_count int);
+
+create table multdistr_02(
+ col_tinyint     tinyint,
+ col_smallint    smallint,
+ col_int         integer,
+ col_bigint      bigint ,
+ col_numeric     numeric ,
+ col_double      double precision,
+ col_decimal     numeric,
+ col_varchar     character varying,
+ col_char        character(30),
+ col_nvarchar2   nvarchar2,
+ col_text        text,
+ col_timestamptz  timestamp with time zone,
+ col_timestamp   timestamp without time zone,
+ col_interval    interval,
+ col_date        timestamp(0) without time zone
+);
+
+create table multdistr_05(
+ c_id           integer ,
+ c_d_id         integer ,
+ c_w_id         integer,
+ c_first        character varying(16),
+ c_middle       character(2),
+ c_last         character varying(16),
+ c_street_1     character varying(20),
+ c_street_2     character varying(20),
+ c_city         character varying(20),
+ c_state        character(2),
+ c_zip          character(9),
+ c_phone        character(16),
+ c_since        character varying(20),
+ c_credit       character(2),
+ c_credit_lim   numeric(12,2) ,
+ c_discount     numeric ,
+ c_balance      numeric(12,2),
+ c_ytd_payment  character varying(20),
+ c_payment_cnt  integer ,
+ c_delivery_cnt integer ,
+ c_data         character varying(500)
+);
+
+create table multdistr_07(
+ wd_tinyint      integer,
+ wd_smallint      smallint,
+ wd_int           integer,
+ wd_bigint        integer,
+ wd_numeric       numeric,
+ wd_real          real,
+ wd_double        double precision,
+ wd_decimal       numeric ,
+ wd_varchar       text  ,
+ wd_char          character(30) ,
+ wd_nvarchar2     nvarchar2,
+ wd_text          text,
+ wd_timestamptz   timestamp with time zone,
+ wd_timestamp     timestamp without time zone,
+ wd_date          timestamp(0) without time zone,
+ wd_time          time without time zone,
+ wd_timetz        time with time zone,
+ wd_interval      interval,
+ wd_smalldatetine smalldatetime,
+ wd_text1         text,
+ wd_int1          integer ,
+ wd_varchar1      character varying,
+ wd_num           numeric,
+ wd_num1          numeric,
+ wd_char1         character(20),
+ wd_char2         character(20),
+ wd_date4         timestamp(0) without time zone,
+ wd_date5         timestamp(0) without time zone
+);
+insert into multdistr_07 values (1,1,1,1,1,1,1,1,'abc','abc','abc','abc');
+analyze multdistr_07;
+
+\c regression
+create server server_remote foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+
+CREATE FOREIGN TABLE hash_row(c1 int, c2 int, c3 int) server server_remote;
+CREATE FOREIGN TABLE hash_col(c1 int, c2 int, c3 int) server server_remote;
+CREATE FOREIGN TABLE rep_row(c1 int, c2 int, c3 int) server server_remote;
+CREATE FOREIGN TABLE rep_col(c1 int, c2 int, c3 int) server server_remote;
+
+create server agg_server_remote foreign data wrapper gc_fdw
+options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
+
+drop foreign table if exists aggtable1;
+create foreign table aggtable1(
+  c1 int,
+  c2 tinyint,
+  c3 smallint,
+  c4 bigint,
+  c5 numeric,
+  c6 float4,
+  c7 float8,
+  c8 int
+)server agg_server_remote;
+
+analyze aggtable1;
+
+drop foreign table if exists implicit_cast;
+create foreign table implicit_cast(c1 int, c2 text) server agg_server_remote;
+
+\c test
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
+analyze lineitem;
+\c regression
+
+drop foreign table if exists lineitem;
+CREATE FOREIGN TABLE lineitem (
+    l_orderkey bigint ,
+    l_partkey bigint,
+    l_suppkey bigint ,
+    l_linenumber bigint ,
+    l_quantity numeric(15,2) ,
+    l_extendedprice numeric(15,2) ,
+    l_discount numeric(15,2) ,
+    l_tax numeric(15,2) ,
+    l_returnflag character(1) ,
+    l_linestatus character(1) ,
+    l_shipdate timestamp(0) without time zone ,
+    l_commitdate timestamp(0) without time zone ,
+    l_receiptdate timestamp(0) without time zone ,
+    l_shipinstruct character(25) ,
+    l_shipmode character(10) ,
+    l_comment character varying(44)
+) server agg_server_remote;
+analyze lineitem;
+
+drop foreign table if exists household_demographics;
+create foreign table household_demographics(hd_demo_sk int, hd_buy_potential char(15), hd_vehicle_count int)
+server agg_server_remote;
+
+create foreign table multdistr_02(
+ col_tinyint     tinyint,
+ col_smallint    smallint,
+ col_int         integer,
+ col_bigint      bigint ,
+ col_numeric     numeric ,
+ col_double      double precision,
+ col_decimal     numeric,
+ col_varchar     character varying,
+ col_char        character(30),
+ col_nvarchar2   nvarchar2,
+ col_text        text,
+ col_timestamptz  timestamp with time zone,
+ col_timestamp   timestamp without time zone,
+ col_interval    interval,
+ col_date        timestamp(0) without time zone
+)server agg_server_remote;
+
+create foreign table multdistr_05(
+ c_id           integer ,
+ c_d_id         integer ,
+ c_w_id         integer,
+ c_first        character varying(16),
+ c_middle       character(2),
+ c_last         character varying(16),
+ c_street_1     character varying(20),
+ c_street_2     character varying(20),
+ c_city         character varying(20),
+ c_state        character(2),
+ c_zip          character(9),
+ c_phone        character(16),
+ c_since        character varying(20),
+ c_credit       character(2),
+ c_credit_lim   numeric(12,2) ,
+ c_discount     numeric ,
+ c_balance      numeric(12,2),
+ c_ytd_payment  character varying(20),
+ c_payment_cnt  integer ,
+ c_delivery_cnt integer ,
+ c_data         character varying(500)
+) server agg_server_remote;
+
+create foreign table multdistr_07(
+ wd_tinyint      integer,
+ wd_smallint      smallint,
+ wd_int           integer,
+ wd_bigint        integer,
+ wd_numeric       numeric,
+ wd_real          real,
+ wd_double        double precision,
+ wd_decimal       numeric ,
+ wd_varchar       text  ,
+ wd_char          character(30) ,
+ wd_nvarchar2     nvarchar2,
+ wd_text          text,
+ wd_timestamptz   timestamp with time zone,
+ wd_timestamp     timestamp without time zone,
+ wd_date          timestamp(0) without time zone,
+ wd_time          time without time zone,
+ wd_timetz        time with time zone,
+ wd_interval      interval,
+ wd_smalldatetine smalldatetime,
+ wd_text1         text,
+ wd_int1          integer ,
+ wd_varchar1      character varying,
+ wd_num           numeric,
+ wd_num1          numeric,
+ wd_char1         character(20),
+ wd_char2         character(20),
+ wd_date4         timestamp(0) without time zone,
+ wd_date5         timestamp(0) without time zone
+)server agg_server_remote;
+analyze multdistr_07;
+
+create server gcserver2 foreign data wrapper gc_fdw options(address '127.0.0.1:61600', dbname 'test', username 'test', password 'encryptstr12345678901234567890123456789012345678901234');
+create server gcserver3 foreign data wrapper gc_fdw options(address '127.0.0.1:61600', dbname 'test', username 'test', password 'encryptstr123456789012345678901234567890123456789012345');
+create server gcserver4 foreign data wrapper gc_fdw options(address '127.0.0.1:61600', dbname 'test', username 'test', password 'encryptstr1234567890123456789012');
+create server gcserver4_1 foreign data wrapper gc_fdw options(address '127.0.0.1:61600', dbname 'test', username 'test', password 'encryptstr123456789012345678901234567890');
+
+create server gcserver5 foreign data wrapper gc_fdw options(address '127.0.0.1:61600', dbname 'test', username 'test', password 'ENCRYPTSTR12345678901234567890123456789012345678901234');
+create server gcserver6 foreign data wrapper gc_fdw options(address '127.0.0.1:61600', dbname 'test', username 'test', password 'ENCRYPTSTR123456789012345678901234567890123456789012345');
+create server gcserver7 foreign data wrapper gc_fdw options(address '127.0.0.1:61600', dbname 'test', username 'test', password 'ENCRYPTSTR1234567890123456789012345678901234567890123');
+
+alter server gcserver2 options (set password 'encryptstr12345678901234567890123456789012345678901234');
+alter server gcserver2 options (set password 'encryptstr123456789012345678901234567890123456789012345');
+alter server gcserver2 options (set password 'encryptstr1234567890123456789012');
+
+alter server gcserver2 options (set password 'ENCRYPTSTR12345678901234567890123456789012345678901234');
+alter server gcserver2 options (set password 'ENCRYPTSTR123456789012345678901234567890123456789012345');
+alter server gcserver2 options (set password 'ENCRYPTSTR1234567890123456789012345678901234567890123');
+
+drop server gcserver2;
+drop server gcserver3;
+drop server gcserver4;
+
+-- end of file

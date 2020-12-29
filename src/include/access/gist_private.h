@@ -18,8 +18,8 @@
 #include "access/itup.h"
 #include "access/xlogreader.h"
 #include "fmgr.h"
-#include "storage/bufmgr.h"
-#include "storage/buffile.h"
+#include "storage/buf/bufmgr.h"
+#include "storage/buf/buffile.h"
 #include "utils/rbtree.h"
 #include "utils/hsearch.h"
 

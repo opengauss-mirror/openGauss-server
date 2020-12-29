@@ -21,7 +21,6 @@
  * -------------------------------------------------------------------------
  */
 
-
 #ifndef PQRQUET_READER_H
 #define PQRQUET_READER_H
 
@@ -33,7 +32,6 @@
 
 namespace dfs {
 namespace reader {
-
 class ParquetReaderImpl;
 
 class ParquetReader : public DFSReader {
@@ -132,7 +130,6 @@ private:
 
     dfs::DFSConnector *m_conn;
 };
-
 }  // namespace reader
 }  // namespace dfs
 #endif

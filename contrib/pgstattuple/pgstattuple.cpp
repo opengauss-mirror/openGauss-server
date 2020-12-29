@@ -32,10 +32,9 @@
 #include "catalog/namespace.h"
 #include "funcapi.h"
 #include "miscadmin.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "utils/builtins.h"
-#include "utils/tqual.h"
 
 PG_MODULE_MAGIC;
 
@@ -194,7 +193,6 @@ static Datum pgstat_relation(Relation rel, FunctionCallInfo fcinfo)
 
     switch (rel->rd_rel->relkind) {
         case RELKIND_RELATION:
-        case RELKIND_MATVIEW:
         case RELKIND_TOASTVALUE:
         case RELKIND_UNCATALOGED:
         case RELKIND_SEQUENCE:
@@ -221,11 +219,17 @@ static Datum pgstat_relation(Relation rel, FunctionCallInfo fcinfo)
         case RELKIND_VIEW:
             err = "view";
             break;
+        case RELKIND_CONTQUERY:
+            err = "contview";
+            break;
         case RELKIND_COMPOSITE_TYPE:
             err = "composite type";
             break;
         case RELKIND_FOREIGN_TABLE:
             err = "foreign table";
+            break;
+        case RELKIND_STREAM:
+            err = "stream";
             break;
         default:
             err = "unknown";

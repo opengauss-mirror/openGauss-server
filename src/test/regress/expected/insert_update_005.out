@@ -1,0 +1,384 @@
+-- initial, rewrite from merge_2.sql
+DROP SCHEMA test_insert_update_005 CASCADE;
+ERROR:  schema "test_insert_update_005" does not exist
+CREATE SCHEMA test_insert_update_005;
+SET current_schema = test_insert_update_005;
+CREATE TABLE products_base
+(
+    product_id INTEGER DEFAULT 0,
+    product_name VARCHAR(60) DEFAULT 'null',
+    category VARCHAR(60) DEFAULT 'unknown',
+    total INTEGER DEFAULT '0'
+);
+INSERT INTO products_base VALUES (1501, 'vivitar 35mm', 'electrncs', 100);
+INSERT INTO products_base VALUES (1502, 'olympus is50', 'electrncs', 100);
+INSERT INTO products_base VALUES (1600, 'play gym', 'toys', 100);
+INSERT INTO products_base VALUES (1601, 'lamaze', 'toys', 100);
+INSERT INTO products_base VALUES (1666, 'harry potter', 'dvd', 100);
+CREATE TABLE newproducts_base
+(
+    product_id INTEGER DEFAULT 0,
+    product_name VARCHAR(60) DEFAULT 'null',
+    category VARCHAR(60) DEFAULT 'unknown',
+    total INTEGER DEFAULT '0'
+);
+INSERT INTO newproducts_base VALUES (1502, 'olympus camera', 'electrncs', 200);
+INSERT INTO newproducts_base VALUES (1601, 'lamaze2', 'toys2', 200);
+INSERT INTO newproducts_base VALUES (1666, 'harry potter2', 'toys', 200);
+INSERT INTO newproducts_base VALUES (1700, 'wait interface', 'books', 200);
+CREATE TABLE products_row
+(
+    product_id INTEGER DEFAULT 0,
+    product_name VARCHAR(60) DEFAULT 'null',
+    category VARCHAR(60) DEFAULT 'unknown',
+    total INTEGER DEFAULT '0',
+    PRIMARY KEY (product_id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "products_row_pkey" for table "products_row"
+CREATE TABLE newproducts_row
+(
+    product_id INTEGER DEFAULT 0,
+    product_name VARCHAR(60) DEFAULT 'null',
+    category VARCHAR(60) DEFAULT 'unknown',
+    total INTEGER DEFAULT '0',
+    PRIMARY KEY (product_id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "newproducts_row_pkey" for table "newproducts_row"
+INSERT INTO products_row SELECT * FROM products_base;
+INSERT INTO newproducts_row SELECT * FROM newproducts_base;
+--example 1
+CREATE VIEW v AS (SELECT * FROM newproducts_row WHERE total > 100);
+INSERT INTO products_row (product_id,product_name, category, total)
+SELECT product_id, product_name, category || 'DEF', total + 200 FROM V
+ON DUPLICATE KEY UPDATE products_row.product_name = products_row.product_name,
+products_row.category = products_row.category || 'ABC', products_row.total = products_row.total + 100;
+SELECT * FROM products_row ORDER BY 1;
+ product_id |  product_name  |   category   | total 
+------------+----------------+--------------+-------
+       1501 | vivitar 35mm   | electrncs    |   100
+       1502 | olympus is50   | electrncsABC |   200
+       1600 | play gym       | toys         |   100
+       1601 | lamaze         | toysABC      |   200
+       1666 | harry potter   | dvdABC       |   200
+       1700 | wait interface | booksDEF     |   400
+(6 rows)
+
+DROP VIEW v;
+--example 2
+TRUNCATE products_row;
+INSERT INTO products_row SELECT * FROM products_base;
+INSERT INTO products_row (product_id, product_name, category, total)
+SELECT product_id, product_name, category || 'DEF', total + 200 FROM products_row
+ON DUPLICATE KEY UPDATE products_row.product_name = products_row.product_name,
+products_row.category = products_row.category || 'ABC' ,products_row.total = products_row.total + 100;
+SELECT * FROM products_row ORDER BY 1;
+ product_id | product_name |   category   | total 
+------------+--------------+--------------+-------
+       1501 | vivitar 35mm | electrncsABC |   200
+       1502 | olympus is50 | electrncsABC |   200
+       1600 | play gym     | toysABC      |   200
+       1601 | lamaze       | toysABC      |   200
+       1666 | harry potter | dvdABC       |   200
+(5 rows)
+
+--example 3
+TRUNCATE products_row;
+INSERT INTO products_row SELECT * FROM products_base;
+INSERT INTO products_row (product_id,product_name, category, total)
+SELECT product_id, product_name, category, total FROM newproducts_row
+ON DUPLICATE KEY UPDATE products_row.product_name = DEFAULT,
+products_row.category = DEFAULT, products_row.total = DEFAULT;
+SELECT * FROM products_row ORDER BY 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | null           | unknown   |     0
+       1600 | play gym       | toys      |   100
+       1601 | null           | unknown   |     0
+       1666 | null           | unknown   |     0
+       1700 | wait interface | books     |   200
+(6 rows)
+
+--example 4
+TRUNCATE products_row;
+INSERT INTO products_row SELECT * FROM products_base;
+BEGIN;
+DO LANGUAGE plpgsql $$
+BEGIN
+INSERT INTO products_row (product_id, product_name, category, total)
+SELECT product_id, product_name, category, total FROM newproducts_row
+ON DUPLICATE KEY UPDATE product_name = __unnamed_subquery_source__.product_name,
+category = __unnamed_subquery_source__.category, total = __unnamed_subquery_source__.total;
+END;
+$$;
+SELECT * FROM products_row order by 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1600 | play gym       | toys      |   100
+       1601 | lamaze2        | toys2     |   200
+       1666 | harry potter2  | toys      |   200
+       1700 | wait interface | books     |   200
+(6 rows)
+
+ROLLBACK;
+--example 5
+TRUNCATE products_row;
+INSERT INTO products_row SELECT * FROM products_base;
+BEGIN;
+BEGIN
+INSERT INTO products_row (product_id,product_name, category, total)
+SELECT product_id, product_name, category, total FROM newproducts_row
+ON DUPLICATE KEY UPDATE product_name = __unnamed_subquery_source__.product_name,
+category = __unnamed_subquery_source__.category, total = __unnamed_subquery_source__.total;
+END;
+/
+SELECT * FROM products_row order by 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1600 | play gym       | toys      |   100
+       1601 | lamaze2        | toys2     |   200
+       1666 | harry potter2  | toys      |   200
+       1700 | wait interface | books     |   200
+(6 rows)
+
+ROLLBACK;
+--example 6
+TRUNCATE products_row;
+INSERT INTO products_row SELECT * FROM products_base;
+CREATE OR REPLACE PROCEDURE p1()
+AS
+BEGIN
+INSERT INTO products_row (product_id,product_name, category, total)
+SELECT product_id, product_name, category, total FROM newproducts_row
+ON DUPLICATE KEY UPDATE product_name = __unnamed_subquery_source__.product_name,
+category = __unnamed_subquery_source__.category, total =__unnamed_subquery_source__.total;
+END;
+/
+BEGIN;
+SELECT p1();
+ p1 
+----
+ 
+(1 row)
+
+SELECT * FROM products_row order by 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1600 | play gym       | toys      |   100
+       1601 | lamaze2        | toys2     |   200
+       1666 | harry potter2  | toys      |   200
+       1700 | wait interface | books     |   200
+(6 rows)
+
+ROLLBACK;
+CREATE OR REPLACE PROCEDURE p2 (param1 IN text)
+AS
+BEGIN
+INSERT INTO products_row (product_name, total) VALUES (param1, 20) 
+ON DUPLICATE KEY UPDATE category = param1;
+END;
+/
+BEGIN;
+SELECT p2('param1');
+ p2 
+----
+ 
+(1 row)
+
+SELECT * FROM products_row order by 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+          0 | param1       | unknown   |    20
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+(6 rows)
+
+SELECT p2('param1');
+ p2 
+----
+ 
+(1 row)
+
+SELECT * FROM products_row order by 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+          0 | param1       | param1    |    20
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+(6 rows)
+
+ROLLBACK;
+--example 7
+CREATE TABLE des(a BIGINT, b BIGINT, c VARCHAR(1000), PRIMARY KEY(a));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "des_pkey" for table "des"
+CREATE TABLE src(a BIGINT, b BIGINT, c VARCHAR(1000), PRIMARY KEY(a));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "src_pkey" for table "src"
+CREATE INDEX src_i ON src(b);
+CREATE INDEX des_i ON des(b);
+INSERT INTO des VALUES(generate_series(1, 10), generate_series(1, 10), 'des');
+INSERT INTO src VALUES(generate_series(1, 10), generate_series(1, 10), 'src');
+INSERT INTO src (SELECT a + 100, b + 100, c FROM src);
+INSERT INTO src (SELECT a + 1000, b + 1000, c FROM src);
+INSERT INTO src (SELECT a + 10000, b + 10000, c FROM src);
+INSERT INTO src (SELECT a + 100000, b + 100000, c FROM src);
+INSERT INTO src (SELECT a + 1000000, b + 1000000, c FROM src);
+INSERT INTO src (SELECT a + 10000000, b + 10000000, c FROM src);
+INSERT INTO src (SELECT a + 100000000, b + 100000000, c FROM src);
+INSERT INTO src (SELECT a + 1000000000, b + 100000000, c FROM src);
+INSERT INTO src (SELECT a + 10000000000, b + 100000000, c FROM src);
+INSERT INTO des (SELECT a + 100, b + 100, c FROM des);
+INSERT INTO des (SELECT a + 1000, b + 1000, c FROM des);
+INSERT INTO des (SELECT a + 10000, b + 10000, c FROM des);
+INSERT INTO des (SELECT a + 100000, b + 100000, c FROM des);
+INSERT INTO des (SELECT a + 1000000, b + 1000000, c FROM des);
+INSERT INTO des (SELECT a + 10000000, b + 10000000, c FROM des);
+INSERT INTO des (SELECT a + 100000000, b + 100000000, c FROM des);
+INSERT INTO des (SELECT a + 1000000000, b + 1000000000, c FROM des);
+INSERT INTO des (SELECT a + 10000000000, b + 1000000000, c FROM des);
+INSERT INTO des (a, b, c)
+SELECT a, b, c FROM src
+ON DUPLICATE KEY UPDATE b = __unnamed_subquery_source__.b + 10, c = __unnamed_subquery_source__.c;
+--rows shall be the same
+SELECT COUNT(*) FROM src;
+ count 
+-------
+  5120
+(1 row)
+
+SELECT COUNT(*) FROM des;
+ count 
+-------
+  5120
+(1 row)
+
+--column b of des is 10 bigger than src
+SELECT * FROM src WHERE a = 105;
+  a  |  b  |  c  
+-----+-----+-----
+ 105 | 105 | src
+(1 row)
+
+SELECT * FROM des WHERE b = 115;
+  a  |  b  |  c  
+-----+-----+-----
+ 105 | 115 | src
+(1 row)
+
+DROP TABLE des;
+DROP TABLE src;
+--example 8
+BEGIN;
+ALTER TABLE products_row DROP COLUMN category;
+INSERT INTO products_row (product_id, product_name, total)
+SELECT product_id, product_name, total  FROM newproducts_row
+ON DUPLICATE KEY UPDATE product_name = products_row.product_name ||' + '|| __unnamed_subquery_source__.product_name,
+total = products_row.total + __unnamed_subquery_source__.total;
+SELECT * FROM products_row ORDER BY 1;
+ product_id |         product_name          | total 
+------------+-------------------------------+-------
+       1501 | vivitar 35mm                  |   100
+       1502 | olympus is50 + olympus camera |   300
+       1600 | play gym                      |   100
+       1601 | lamaze + lamaze2              |   300
+       1666 | harry potter + harry potter2  |   300
+       1700 | wait interface                |   200
+(6 rows)
+
+TRUNCATE products_row;
+ALTER TABLE products_row ADD COLUMN category VARCHAR;
+INSERT INTO products_row SELECT product_id, product_name, total, category FROM products_base;
+INSERT into products_row (product_id, product_name, total)
+SELECT product_id, product_name, total FROM newproducts_row
+ON DUPLICATE KEY UPDATE product_name = products_row.product_name ||' + '|| __unnamed_subquery_source__.product_name,
+total = products_row.total + __unnamed_subquery_source__.total;
+SELECT * FROM products_row ORDER BY 1;
+ product_id |         product_name          | total | category  
+------------+-------------------------------+-------+-----------
+       1501 | vivitar 35mm                  |   100 | electrncs
+       1502 | olympus is50 + olympus camera |   300 | electrncs
+       1600 | play gym                      |   100 | toys
+       1601 | lamaze + lamaze2              |   300 | toys
+       1666 | harry potter + harry potter2  |   300 | dvd
+       1700 | wait interface                |   200 | 
+(6 rows)
+
+ROLLBACK;
+--example 9
+CREATE TABLE test_partition_source
+(c_smallint SMALLINT, c_numeric NUMERIC, PRIMARY KEY(c_smallint))
+    PARTITION by range (c_smallint)
+(
+    PARTITION TBL_1 VALUES LESS THAN (-1),
+    PARTITION TBL_2 VALUES LESS THAN (30),
+    PARTITION TBL_3 VALUES LESS THAN (60),
+    PARTITION TBL_4 VALUES LESS THAN (100)
+)disable ROW movement;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_partition_source_pkey" for table "test_partition_source"
+INSERT INTO test_partition_source VALUES(-1, 5);
+INSERT INTO test_partition_source VALUES(40, 5);
+INSERT INTO test_partition_source VALUES(66, 5);
+CREATE TABLE test_partition(a INT, b NUMERIC,PRIMARY KEY(a));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_partition_pkey" for table "test_partition"
+INSERT INTO test_partition VALUES(-1, 10);
+INSERT INTO test_partition VALUES(2, 10);
+SET behavior_compat_options='merge_update_multi';
+INSERT INTO test_partition_source (c_smallint, c_numeric)
+SELECT * FROM test_partition
+ON DUPLICATE KEY UPDATE c_numeric = __unnamed_subquery_source__.c_numeric;
+SELECT * FROM test_partition_source ORDER BY 1, 2;
+ c_smallint | c_numeric 
+------------+-----------
+         -1 |        10
+          2 |        10
+         40 |         5
+         66 |         5
+(4 rows)
+
+--- error: distribute key are not allowed to update
+INSERT INTO test_partition_source (c_smallint, c_numeric)
+SELECT * FROM test_partition
+ON DUPLICATE KEY UPDATE c_smallint = 1;
+ERROR:  Distributed key column can't be updated in current version
+reset behavior_compat_options;
+ALTER TABLE test_partition_source enable ROW movement;
+INSERT INTO test_partition_source (c_smallint, c_numeric)
+SELECT * FROM test_partition
+ON DUPLICATE KEY UPDATE c_numeric = __unnamed_subquery_source__.c_numeric;
+SELECT * FROM test_partition_source ORDER BY 1, 2;
+ c_smallint | c_numeric 
+------------+-----------
+         -1 |        10
+          2 |        10
+         40 |         5
+         66 |         5
+(4 rows)
+
+--- error: distribute key are not allowed to update
+INSERT INTO test_partition_source (c_smallint, c_numeric)
+SELECT * FROM test_partition
+ON DUPLICATE KEY UPDATE c_smallint = 1;
+ERROR:  Distributed key column can't be updated in current version
+reset behavior_compat_options;
+-- clean up
+DROP SCHEMA test_insert_update_005 CASCADE;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to table products_base
+drop cascades to table newproducts_base
+drop cascades to table products_row
+drop cascades to table newproducts_row
+drop cascades to function p1()
+drop cascades to function p2(text)
+drop cascades to table test_partition_source
+drop cascades to table test_partition

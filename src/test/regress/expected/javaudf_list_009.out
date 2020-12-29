@@ -1,0 +1,190 @@
+DROP SCHEMA bicoredata_009 CASCADE;
+ERROR:  schema "bicoredata_009" does not exist
+CREATE SCHEMA bicoredata_009;
+SET CURRENT_SCHEMA = bicoredata_009;
+--FUNC_129
+CREATE FUNCTION ServiceEntry(text, text)
+	RETURNS int4
+	AS 'com.huawei.udf.ServiceEntryUDF.evaluate'
+	LANGUAGE java;
+SELECT ServiceEntry ('','123');
+ serviceentry 
+--------------
+      4010000
+(1 row)
+
+SELECT ServiceEntry ('mw','');
+ serviceentry 
+--------------
+      4020000
+(1 row)
+
+SELECT ServiceEntry ('mw','4000000') ;
+ serviceentry 
+--------------
+      4020000
+(1 row)
+
+SELECT ServiceEntry ('mw','400000') ;
+ serviceentry 
+--------------
+           -2
+(1 row)
+
+CREATE FUNCTION ServiceEntry(text)
+	RETURNS text
+	AS 'com.huawei.udf.ServiceEntryUDF.evaluate'
+	LANGUAGE java;
+SELECT ServiceEntry ('mw123');
+ serviceentry 
+--------------
+ mobileweb
+(1 row)
+
+--!FUNC_130 GetSearchType returns ArrayList
+--FUNC_131
+CREATE FUNCTION RomListExplode(text)
+	RETURNS text
+	AS 'com.huawei.platform.bi.udf.service.hota.RomListExplodeUDF.evaluate'
+	LANGUAGE java;
+SELECT RomListExplode('[{\"romVersion\":\"android:1.0\",\"updateTime\":\"20161111\"},{\"romVersion\":\"android:2.0\",\"updateTime\":\"20161112\"},{\"romVersion\":\"android:3.0\",\"updateTime\":\"20161113\"}]') ;
+ romlistexplode 
+----------------
+ 
+(1 row)
+
+--FUNC_132 ItemID
+CREATE FUNCTION ItemID(text)
+	RETURNS text
+	AS 'com.huawei.udf.ItemIDUDF.evaluate'
+	LANGUAGE java;
+SELECT ItemID('abc') ;
+       itemid        
+---------------------
+ 9016225876650102295
+(1 row)
+
+CREATE FUNCTION ItemID(text, int4)
+	RETURNS text
+	AS 'com.huawei.udf.ItemIDUDF.evaluate(java.lang.String, java.lang.Integer)'
+	LANGUAGE java;
+SELECT ItemID('abc',1);
+       itemid        
+---------------------
+ 9016225876650102295
+(1 row)
+
+CREATE FUNCTION ItemID(text, text)
+	RETURNS text
+	AS 'com.huawei.udf.ItemIDUDF.evaluate'
+	LANGUAGE java;
+SELECT ItemID('9016225876650000000','abc');
+       itemid        
+---------------------
+ 9016225876650000000
+(1 row)
+
+CREATE FUNCTION ItemID(text, text, int4)
+	RETURNS text
+	AS 'com.huawei.udf.ItemIDUDF.evaluate(java.lang.String, java.lang.String, java.lang.Integer)'
+	LANGUAGE java;
+SELECT ItemID(null,'abc',1);
+       itemid        
+---------------------
+ 9016225876650102295
+(1 row)
+
+--FUNC_133
+CREATE FUNCTION GetTerminalOs(text, int4)
+	RETURNS text
+	AS 'com.huawei.udf.GetTerminalOsUDF.evaluate(java.lang.String, java.lang.Integer)'
+	LANGUAGE java;
+SELECT GetTerminalOs ('android1.5abc',1);
+ getterminalos 
+---------------
+ android 1.5
+(1 row)
+
+CREATE FUNCTION GetTerminalOs(text)
+	RETURNS text
+	AS 'com.huawei.udf.GetTerminalOsUDF.evaluate'
+	LANGUAGE java;
+SELECT GetTerminalOs ('2') ;
+ getterminalos 
+---------------
+ android 2.1
+(1 row)
+
+--FUNC_134
+CREATE FUNCTION HotaExtraInfo(text, text)
+	RETURNS text
+	AS 'com.huawei.platform.bi.udf.service.hota.HotaExtraInfoUDF.evaluate'
+	LANGUAGE java;
+SELECT HotaExtraInfo('VIE-L29','860864033123322');
+                          hotaextrainfo                           
+------------------------------------------------------------------
+ CEA4895F772B432E8A91874DB0D3391AA0581B905A00CC5C467AD1C56935CCB3
+(1 row)
+
+CREATE FUNCTION HotaExtraInfo(text, text, text)
+	RETURNS text
+	AS 'com.huawei.platform.bi.udf.service.hota.HotaExtraInfoUDF.evaluate'
+	LANGUAGE java;
+SELECT HotaExtraInfo('44:6E:E5:70:DB:44','VIE-L29','860864033123322');
+                                                          hotaextrainfo                                                           
+----------------------------------------------------------------------------------------------------------------------------------
+ C2D44FBCFEFDCB0EECF2DE92DF4C15D3338CBEB0FF9D7705752D05FA46C01E52CEA4895F772B432E8A91874DB0D3391AA0581B905A00CC5C467AD1C56935CCB3
+(1 row)
+
+--!FUNC_135 DivEmui_PsInterval return ArrayList
+--!FUNC_136 DiviDeInterval return ArrayList
+--FUNC_137
+CREATE FUNCTION GetCver(text, text)
+	RETURNS text
+	AS 'com.huawei.udf.GetCver.evaluate'
+	LANGUAGE java;
+SELECT GetCver('gf.232','233');
+ getcver 
+---------
+ 232
+(1 row)
+
+--FUNC_138
+CREATE FUNCTION GetForumId(text, text)
+	RETURNS int4
+	AS 'com.huawei.udf.GetForumId.evaluate'
+	LANGUAGE java;
+SELECT GetForumId ('fid', 'www.baidu.com&fid=123');
+ getforumid 
+------------
+        123
+(1 row)
+
+--!FUNC_139 HispaceVersionVauleSort dependent file
+--FUNC_140
+CREATE FUNCTION SearchWord(text)
+	RETURNS text
+	AS 'com.huawei.udf.SearchWordUDF.evaluate'
+	LANGUAGE java;
+SELECT searchWord('asd/sd2');
+ searchword 
+------------
+ asd
+(1 row)
+
+DROP SCHEMA bicoredata_009 CASCADE;
+NOTICE:  drop cascades to 14 other objects
+DETAIL:  drop cascades to function serviceentry(text,text)
+drop cascades to function serviceentry(text)
+drop cascades to function romlistexplode(text)
+drop cascades to function itemid(text)
+drop cascades to function itemid(text,integer)
+drop cascades to function itemid(text,text)
+drop cascades to function itemid(text,text,integer)
+drop cascades to function getterminalos(text,integer)
+drop cascades to function getterminalos(text)
+drop cascades to function hotaextrainfo(text,text)
+drop cascades to function hotaextrainfo(text,text,text)
+drop cascades to function getcver(text,text)
+drop cascades to function getforumid(text,text)
+drop cascades to function searchword(text)

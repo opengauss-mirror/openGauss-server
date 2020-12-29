@@ -1,0 +1,39 @@
+set enable_global_stats = true;
+--
+-- BULK LOAD START
+--
+---
+-- Check gds argments
+---
+\! @abs_bindir@/gds -h > /dev/null 2>&1
+\! @abs_bindir@/gds -d -2
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -t
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -t -1
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -t 100
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p :8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:9999999999999999999999999999999999999999999999999999999999999999999999999999999999999 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:12345 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -S 0
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -E aa
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/bbbbb/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:99999 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -s ./tmp_check/status -a
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/AAAA/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -E 100MB -t 2
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -H 0.0.0.0/0
+\! @abs_bindir@/gds -V >/dev/null
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8901 -H 0.0.0.999
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8901 -H 0.0.0.0/99
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8901 -H 127.0.0.1
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8901 -r -D -H 0.0.0.0/0,0.0.0.0/0 -l @abs_bindir@/gds1.log -s ./tmp_check/status1 -E 1GB
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8902 -r -D -H 0.0.0.0/0,0.0.0.0/0 -l @abs_bindir@/gds1.log -E 1GB
+\! cp @abs_bindir@/../share/postgresql/gds.conf @abs_bindir@/
+\! python @abs_bindir@/gds_ctl.py start
+\! python @abs_bindir@/gds_ctl.py status
+\! python @abs_bindir@/gds_ctl.py stop
+\! python @abs_bindir@/gds_ctl.py start
+\! python @abs_bindir@/gds_ctl.py stop 127.0.0.1:8098
+\! rm -f @abs_bindir@/gds.conf
+\! strings @abs_bindir@/gds  | grep '18\.244\.0\.188'
+SET ENABLE_STREAM_OPERATOR=ON;

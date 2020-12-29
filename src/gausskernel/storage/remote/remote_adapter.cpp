@@ -36,6 +36,7 @@
 #include "utils/memutils.h"
 
 extern GaussdbThreadEntry GetThreadEntry(knl_thread_role role);
+#define MAX_WAIT_TIMES 5
 
 typedef struct RemoteReadContext {
     CUStorage* custorage;
@@ -52,7 +53,6 @@ typedef struct RemoteReadContext {
 int XLogWaitForReplay(uint64 primary_insert_lsn)
 {
     int wait_times = 0;
-    const int max_wait_times = 5;
 
     /* local replayed lsn */
     XLogRecPtr standby_replay_lsn = GetXLogReplayRecPtr(NULL, NULL);
@@ -60,14 +60,14 @@ int XLogWaitForReplay(uint64 primary_insert_lsn)
     /* if primary_insert_lsn  >  standby_replay_lsn then need wait */
     while (!XLByteLE(primary_insert_lsn, standby_replay_lsn)) {
         /* if sleep to much times */
-        if (wait_times >= max_wait_times) {
+        if (wait_times >= MAX_WAIT_TIMES) {
             ereport(LOG,
-                (errmodule(MOD_REMOTE),
-                    errmsg("replay slow. requre lsn %X/%X, replayed lsn %X/%X",
-                        (uint32)(primary_insert_lsn >> 32),
-                        (uint32)primary_insert_lsn,
-                        (uint32)(standby_replay_lsn >> 32),
-                        (uint32)standby_replay_lsn)));
+                    (errmodule(MOD_REMOTE),
+                     errmsg("replay slow. requre lsn %X/%X, replayed lsn %X/%X",
+                            (uint32)(primary_insert_lsn >> 32),
+                            (uint32)primary_insert_lsn,
+                            (uint32)(standby_replay_lsn >> 32),
+                            (uint32)standby_replay_lsn)));
             return REMOTE_READ_NEED_WAIT;
         }
 
@@ -97,7 +97,7 @@ int XLogWaitForReplay(uint64 primary_insert_lsn)
  * @See also:
  */
 int StandbyReadCUforPrimary(uint32 spcnode, uint32 dbnode, uint32 relnode, int32 colid, uint64 offset, int32 size,
-    uint64 lsn, RemoteReadContext* context, char** cudata)
+                            uint64 lsn, RemoteReadContext* context, char** cudata)
 {
     Assert(cudata);
 
@@ -163,7 +163,7 @@ int StandbyReadCUforPrimary(uint32 spcnode, uint32 dbnode, uint32 relnode, int32
  * @See also:
  */
 int StandbyReadPageforPrimary(uint32 spcnode, uint32 dbnode, uint32 relnode, int16 bucketnode, int32 forknum,
-    uint32 blocknum, uint32 blocksize, uint64 lsn, RemoteReadContext* context, char** pagedata)
+                              uint32 blocknum, uint32 blocksize, uint64 lsn, RemoteReadContext* context, char** pagedata)
 {
     Assert(pagedata);
 
@@ -205,7 +205,7 @@ int StandbyReadPageforPrimary(uint32 spcnode, uint32 dbnode, uint32 relnode, int
 
         if (ret_code == REMOTE_READ_OK) {
             *pagedata = context->pagedata;
-            PageSetChecksumInplace((Page)*pagedata, blocknum);
+            PageSetChecksumInplace((Page) * pagedata, blocknum);
         }
 
         if (t_thrd.utils_cxt.CurrentResourceOwner != NULL)
@@ -259,10 +259,12 @@ void InitWorkEnv()
     if (!t_thrd.storage_cxt.work_env_init) {
         knl_thread_arg arg;
         arg.role = RPC_WORKER;
+        arg.t_thrd = &t_thrd;
         /* binding static TLS variables for current thread */
         EarlyBindingTLSVariables();
         if ((GetThreadEntry(RPC_WORKER))(&arg) == 0) {
-            t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "rpc worker thread");
+            t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "rpc worker thread",
+                MEMORY_CONTEXT_STORAGE);
             t_thrd.storage_cxt.work_env_init = true;
         }
     }
@@ -290,10 +292,10 @@ RemoteReadContext* InitRemoteReadContext()
 
     if (t_thrd.storage_cxt.remote_function_context == NULL) {
         t_thrd.storage_cxt.remote_function_context = AllocSetContextCreate((MemoryContext)NULL,
-            "remote function",
-            ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE);
+                                                                           "remote function",
+                                                                           ALLOCSET_DEFAULT_MINSIZE,
+                                                                           ALLOCSET_DEFAULT_INITSIZE,
+                                                                           ALLOCSET_DEFAULT_MAXSIZE);
     }
     (void)MemoryContextSwitchTo(t_thrd.storage_cxt.remote_function_context);
 
@@ -332,29 +334,31 @@ void ReleaseRemoteReadContext(RemoteReadContext* context)
  */
 bool GetCertEnv(const char* envName, char* outputEnvStr, size_t envValueLen)
 {
+    const char* tmpenv = NULL;
     char* envValue = NULL;
     const char* dangerCharacterList[] = {"|",
-        ";",
-        "&",
-        "$",
-        "<",
-        ">",
-        "`",
-        "\\",
-        "'",
-        "\"",
-        "{",
-        "}",
-        "(",
-        ")",
-        "[",
-        "]",
-        "~",
-        "*",
-        "?",
-        "!",
-        "\n",
-        NULL};
+                                         ";",
+                                         "&",
+                                         "$",
+                                         "<",
+                                         ">",
+                                         "`",
+                                         "\\",
+                                         "'",
+                                         "\"",
+                                         "{",
+                                         "}",
+                                         "(",
+                                         ")",
+                                         "[",
+                                         "]",
+                                         "~",
+                                         "*",
+                                         "?",
+                                         "!",
+                                         "\n",
+                                         NULL
+                                        };
     int index = 0;
     errno_t rc = EOK;
 
@@ -363,19 +367,36 @@ bool GetCertEnv(const char* envName, char* outputEnvStr, size_t envValueLen)
         return false;
     }
 
-    envValue = getenv(envName);
-    if (envValue == NULL) {
+    tmpenv = getenv(envName);
+    if (tmpenv == NULL) {
         ::OutputMsgforRPC(WARNING,
-            "Failed to get environment variable: \"%s\". Please check and make sure it is configured!",
-            envName);
+                          "Failed to get environment variable: \"%s\". Please check and make sure it is configured!",
+                          envName);
         return false;
     }
 
-    size_t len = strlen(envValue);
-    if ((envValue[0] == '\0') || len >= envValueLen) {
+    size_t len = strlen(tmpenv);
+    if (len >= envValueLen) {
+        ::OutputMsgforRPC(WARNING, "len(%lu) > envValueLen(%lu), "
+                          "Failed to get environment variable: \"%s\". Please check and make sure it is configured!",
+                          len, envValueLen, envName);
+        return false;
+    }
+
+    envValue = (char *)malloc(len + 1);
+    if (envValue == NULL) {
         ::OutputMsgforRPC(WARNING,
-            "Failed to get environment variable: \"%s\". Please check and make sure it is configured!",
-            envName);
+                          "Failed to malloc when get environment variable: \"%s\"!", envName);
+        return false;
+    }
+    rc = strcpy_s(envValue, len + 1, tmpenv);
+    securec_check_c(rc, "", "");
+
+    if (envValue[0] == '\0') {
+        ::OutputMsgforRPC(WARNING,
+                          "Failed to get environment variable: \"%s\". Please check and make sure it is configured!",
+                          envName);
+        free(envValue);
         return false;
     }
 
@@ -383,6 +404,7 @@ bool GetCertEnv(const char* envName, char* outputEnvStr, size_t envValueLen)
         if (strstr(envValue, dangerCharacterList[index]) != NULL) {
             ::OutputMsgforRPC(
                 WARNING, "Failed to check environment value: invalid token \"%s\".", dangerCharacterList[index]);
+            free(envValue);
             return false;
         }
     }
@@ -390,6 +412,7 @@ bool GetCertEnv(const char* envName, char* outputEnvStr, size_t envValueLen)
     rc = strcpy_s(outputEnvStr, len + 1, envValue);
     securec_check_c(rc, "", "");
 
+    free(envValue);
     return true;
 }
 

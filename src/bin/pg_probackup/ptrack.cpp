@@ -19,8 +19,8 @@
  * Macro needed to parse ptrack.
  * NOTE Keep those values synchronized with definitions in ptrack.h
  */
-#define PTRACK_BITS_PER_HEAPBLOCK 1
-#define HEAPBLOCKS_PER_BYTE (BITS_PER_BYTE / PTRACK_BITS_PER_HEAPBLOCK)
+/* is not used now #define PTRACK_BITS_PER_HEAPBLOCK 1   may be removed */
+/* is not used only keep same with kernel #define HEAPBLOCKS_PER_BYTE (BITS_PER_BYTE / PTRACK_BITS_PER_HEAPBLOCK) */
 
 /*
  * Get lsn of the moment when ptrack was enabled the last time.
@@ -64,11 +64,15 @@ pg_ptrack_get_pagemapset(PGconn *backup_conn, XLogRecPtr lsn)
 	BlockNumber	blknum	= 0;
 	datapagemap_t pagemap;
 
-	snprintf(start_lsn, sizeof(start_lsn), "%X/%X", (uint32) (lsn >> 32), (uint32) lsn);
+	errno_t rc = snprintf_s(start_lsn, sizeof(start_lsn), sizeof(start_lsn) - 1, "%X/%X",
+                            (uint32) (lsn >> 32), (uint32) lsn);
+    securec_check_ss_c(rc, "\0", "\0");
 	params[0] = gs_pstrdup(start_lsn);
 
-	res = pgut_execute(backup_conn, "CHECKPOINT;", 0, NULL);
-	PQclear(res);
+    if (!current.from_replica) {
+        res = pgut_execute(backup_conn, "CHECKPOINT;", 0, NULL);
+        PQclear(res);
+    }
 
 	res = pgut_execute(backup_conn, "SELECT pg_cbm_tracked_location()", 0, NULL);
 	if (PQnfields(res) != 1) {
@@ -92,14 +96,13 @@ pg_ptrack_get_pagemapset(PGconn *backup_conn, XLogRecPtr lsn)
 	pagemap.bitmapsize = 0;
 
 	/* Construct database map */
-	for (i = 0; i < PQntuples(res); i++)
-	{
+	for (i = 0; i < PQntuples(res); i++) {
 		page_map_entry *pm_entry = (page_map_entry *) pgut_malloc(sizeof(page_map_entry));
 
 		/* get path */
 		pm_entry->path = pgut_strdup(PQgetvalue(res, i, 0));
 
-		ret = sscanf_s(PQgetvalue(res, i, 1), "%u", &blkcnt);
+		ret = sscanf_s(PQgetvalue(res, i, 1), "%d", &blkcnt);
 		securec_check_for_sscanf_s(ret, 1, "\0", "\0");
 
 		if (blkcnt == 1) {

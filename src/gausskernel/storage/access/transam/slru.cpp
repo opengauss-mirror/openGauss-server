@@ -78,7 +78,7 @@ typedef struct SlruFlushData {
     int64 segno[MAX_FLUSH_BUFFERS]; /* their log seg#s */
 } SlruFlushData;
 
-typedef struct SlruFlushData* SlruFlush;
+typedef struct SlruFlushData *SlruFlush;
 
 /*
  * Macro to mark a buffer slot "most recently used".  Note multiple evaluation
@@ -141,12 +141,12 @@ Size SimpleLruShmemSize(int nslots, int nlsns)
 
     /* we assume nslots isn't so large as to risk overflow */
     sz = MAXALIGN(sizeof(SlruSharedData));
-    sz += MAXALIGN(nslots * sizeof(char*));          /* page_buffer[] */
+    sz += MAXALIGN(nslots * sizeof(char *));         /* page_buffer[] */
     sz += MAXALIGN(nslots * sizeof(SlruPageStatus)); /* page_status[] */
     sz += MAXALIGN(nslots * sizeof(bool));           /* page_dirty[] */
     sz += MAXALIGN(nslots * sizeof(int64));          /* page_number[] */
     sz += MAXALIGN(nslots * sizeof(int));            /* page_lru_count[] */
-    sz += MAXALIGN(nslots * sizeof(LWLock*));        /* buffer_locks[] */
+    sz += MAXALIGN(nslots * sizeof(LWLock *));       /* buffer_locks[] */
 
     if (nlsns > 0)
         sz += MAXALIGN(nslots * nlsns * sizeof(XLogRecPtr)); /* group_lsn[] */
@@ -154,8 +154,8 @@ Size SimpleLruShmemSize(int nslots, int nlsns)
     return BUFFERALIGN(sz) + BLCKSZ * nslots;
 }
 
-void SimpleLruInit(
-    SlruCtl ctl, const char* name, int trancheId, int nslots, int nlsns, LWLock* ctllock, const char* subdir, int index)
+void SimpleLruInit(SlruCtl ctl, const char *name, int trancheId, int nslots, int nlsns, LWLock *ctllock,
+                   const char *subdir, int index)
 {
     SlruShared shared;
     bool found = false;
@@ -165,7 +165,7 @@ void SimpleLruInit(
 
     if (!IsUnderPostmaster) {
         /* Initialize locks and shared memory area */
-        char* ptr = NULL;
+        char *ptr = NULL;
         Size offset;
         int slotno;
 
@@ -181,23 +181,23 @@ void SimpleLruInit(
         shared->force_check_first_xid = false;
 
         /* shared->latest_page_number will be set later */
-        ptr = (char*)shared;
+        ptr = (char *)shared;
         offset = MAXALIGN(sizeof(SlruSharedData));
-        shared->page_buffer = (char**)(ptr + offset);
-        offset += MAXALIGN(nslots * sizeof(char*));
-        shared->page_status = (SlruPageStatus*)(ptr + offset);
+        shared->page_buffer = (char **)(ptr + offset);
+        offset += MAXALIGN(nslots * sizeof(char *));
+        shared->page_status = (SlruPageStatus *)(ptr + offset);
         offset += MAXALIGN(nslots * sizeof(SlruPageStatus));
-        shared->page_dirty = (bool*)(ptr + offset);
+        shared->page_dirty = (bool *)(ptr + offset);
         offset += MAXALIGN(nslots * sizeof(bool));
-        shared->page_number = (int64*)(ptr + offset);
+        shared->page_number = (int64 *)(ptr + offset);
         offset += MAXALIGN(nslots * sizeof(int64));
-        shared->page_lru_count = (int*)(ptr + offset);
+        shared->page_lru_count = (int *)(ptr + offset);
         offset += MAXALIGN(nslots * sizeof(int));
-        shared->buffer_locks = (LWLock**)(ptr + offset);
-        offset += MAXALIGN(nslots * sizeof(LWLock*));
+        shared->buffer_locks = (LWLock **)(ptr + offset);
+        offset += MAXALIGN(nslots * sizeof(LWLock *));
 
         if (nlsns > 0) {
-            shared->group_lsn = (XLogRecPtr*)(ptr + offset);
+            shared->group_lsn = (XLogRecPtr *)(ptr + offset);
             offset += MAXALIGN(nslots * nlsns * sizeof(XLogRecPtr));
         }
 
@@ -232,7 +232,7 @@ void SimpleLruInit(
  *
  * Control lock must be held at entry, and will be held at exit.
  */
-int SimpleLruZeroPage(SlruCtl ctl, int64 pageno, bool* pBZeroPage)
+int SimpleLruZeroPage(SlruCtl ctl, int64 pageno, bool *pBZeroPage)
 {
     SlruShared shared = ctl->shared;
     errno_t rc = EOK;
@@ -267,18 +267,12 @@ int SimpleLruZeroPage(SlruCtl ctl, int64 pageno, bool* pBZeroPage)
          * case 3: an existing slot with the same pageno
          */
         if (!(shared->page_status[slotno] == SLRU_PAGE_EMPTY ||
-                (shared->page_status[slotno] == SLRU_PAGE_VALID && !shared->page_dirty[slotno])))
+              (shared->page_status[slotno] == SLRU_PAGE_VALID && !shared->page_dirty[slotno])))
             ereport(PANIC,
-                (errmodule(MOD_SLRU),
-                    errcode(ERRCODE_DATA_EXCEPTION),
-                    errmsg("slru zero page under %s", ctl->dir),
-                    errdetail("page(%ld) in slot(%d) status(%d) | number(%ld) | dirty(%d) is wrong.",
-                        pageno,
-                        slotno,
-                        shared->page_status[slotno],
-                        shared->page_number[slotno],
-                        shared->page_dirty[slotno]),
-                    errhint("Try it again.")));
+                    (errmodule(MOD_SLRU), errcode(ERRCODE_DATA_EXCEPTION), errmsg("slru zero page under %s", ctl->dir),
+                     errdetail("page(%ld) in slot(%d) status(%d) | number(%ld) | dirty(%d) is wrong.", pageno, slotno,
+                               shared->page_status[slotno], shared->page_number[slotno], shared->page_dirty[slotno]),
+                     errhint("Try it again.")));
 
         /* Mark the slot as containing this page */
         shared->page_number[slotno] = pageno;
@@ -317,9 +311,8 @@ static void SimpleLruZeroLSNs(SlruCtl ctl, int slotno)
 
     if (shared->lsn_groups_per_page > 0) {
         rc = memset_s(&shared->group_lsn[slotno * shared->lsn_groups_per_page],
-            shared->lsn_groups_per_page * sizeof(XLogRecPtr),
-            0,
-            shared->lsn_groups_per_page * sizeof(XLogRecPtr));
+                      shared->lsn_groups_per_page * sizeof(XLogRecPtr), 0,
+                      shared->lsn_groups_per_page * sizeof(XLogRecPtr));
         securec_check(rc, "\0", "\0");
     }
 }
@@ -413,17 +406,11 @@ int SimpleLruReadPage(SlruCtl ctl, int64 pageno, bool write_ok, TransactionId xi
 
         /* We found no match; assert we selected a freeable slot */
         if (!(shared->page_status[slotno] == SLRU_PAGE_EMPTY ||
-                (shared->page_status[slotno] == SLRU_PAGE_VALID && !shared->page_dirty[slotno])))
+              (shared->page_status[slotno] == SLRU_PAGE_VALID && !shared->page_dirty[slotno])))
             ereport(PANIC,
-                (errmodule(MOD_SLRU),
-                    errcode(ERRCODE_DATA_EXCEPTION),
-                    errmsg("slru read page under %s", ctl->dir),
-                    errdetail("page(%ld) in slot(%d) status(%d) | dirty(%d) is wrong, xid %lu",
-                        pageno,
-                        slotno,
-                        shared->page_status[slotno],
-                        shared->page_dirty[slotno],
-                        xid)));
+                    (errmodule(MOD_SLRU), errcode(ERRCODE_DATA_EXCEPTION), errmsg("slru read page under %s", ctl->dir),
+                     errdetail("page(%ld) in slot(%d) status(%d) | dirty(%d) is wrong, xid %lu", pageno, slotno,
+                               shared->page_status[slotno], shared->page_dirty[slotno], xid)));
 
         /* Mark the slot read-busy */
         shared->page_number[slotno] = pageno;
@@ -446,18 +433,12 @@ int SimpleLruReadPage(SlruCtl ctl, int64 pageno, bool write_ok, TransactionId xi
         (void)LWLockAcquire(shared->control_lock, LW_EXCLUSIVE);
 
         if (!(shared->page_number[slotno] == pageno && shared->page_status[slotno] == SLRU_PAGE_READ_IN_PROGRESS &&
-                !shared->page_dirty[slotno]))
+              !shared->page_dirty[slotno]))
             ereport(PANIC,
-                (errmodule(MOD_SLRU),
-                    errcode(ERRCODE_DATA_EXCEPTION),
-                    errmsg("slru read page under %s", ctl->dir),
-                    errdetail("page(%ld) in slot(%d) status(%d) | number(%ld) | dirty(%d) is wrong, xid %lu",
-                        pageno,
-                        slotno,
-                        shared->page_status[slotno],
-                        shared->page_number[slotno],
-                        shared->page_dirty[slotno],
-                        xid)));
+                    (errmodule(MOD_SLRU), errcode(ERRCODE_DATA_EXCEPTION), errmsg("slru read page under %s", ctl->dir),
+                     errdetail("page(%ld) in slot(%d) status(%d) | number(%ld) | dirty(%d) is wrong, xid %lu", pageno,
+                               slotno, shared->page_status[slotno], shared->page_number[slotno],
+                               shared->page_dirty[slotno], xid)));
 
         shared->page_status[slotno] = ok ? SLRU_PAGE_VALID : SLRU_PAGE_EMPTY;
 
@@ -568,15 +549,9 @@ static void SlruInternalWritePage(SlruCtl ctl, int slotno, SlruFlush fdata)
 
     if (!(shared->page_number[slotno] == pageno && shared->page_status[slotno] == SLRU_PAGE_WRITE_IN_PROGRESS))
         ereport(PANIC,
-            (errmodule(MOD_SLRU),
-                errcode(ERRCODE_DATA_EXCEPTION),
-                errmsg("slru write page under %s", ctl->dir),
-                errdetail("page(%ld) in slot(%d) status(%d) | number(%ld) | dirty(%d) is wrong",
-                    pageno,
-                    slotno,
-                    shared->page_status[slotno],
-                    shared->page_number[slotno],
-                    shared->page_dirty[slotno])));
+                (errmodule(MOD_SLRU), errcode(ERRCODE_DATA_EXCEPTION), errmsg("slru write page under %s", ctl->dir),
+                 errdetail("page(%ld) in slot(%d) status(%d) | number(%ld) | dirty(%d) is wrong", pageno, slotno,
+                           shared->page_status[slotno], shared->page_number[slotno], shared->page_dirty[slotno])));
 
     /* If we failed to write, mark the page dirty again */
     if (!ok)
@@ -622,13 +597,8 @@ static bool SlruPhysicalReadPage(SlruCtl ctl, int64 pageno, int slotno)
     int fd;
     int rc = 0;
 
-    rc = snprintf_s(path,
-        MAXPGPATH,
-        MAXPGPATH - 1,
-        "%s/%04X%08X",
-        (ctl)->dir,
-        (uint32)((uint64)(segno) >> 32),
-        (uint32)((segno) & (int64)0xFFFFFFFF));
+    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%04X%08X", (ctl)->dir, (uint32)((uint64)(segno) >> 32),
+                    (uint32)((segno) & (int64)0xFFFFFFFF));
     securec_check_ss(rc, "", "");
 
     /*
@@ -744,7 +714,7 @@ static bool SlruPhysicalWritePage(SlruCtl ctl, int64 pageno, int slotno, SlruFlu
              * section anyway, but let's make sure.
              */
             START_CRIT_SECTION();
-            XLogWaitFlush(max_lsn);
+            XLogFlush(max_lsn);
             END_CRIT_SECTION();
         }
     }
@@ -781,13 +751,8 @@ static bool SlruPhysicalWritePage(SlruCtl ctl, int64 pageno, int slotno, SlruFlu
          * code simultaneously for different pages of the same file. Hence,
          * don't use O_EXCL or O_TRUNC or anything like that.
          */
-        rc = snprintf_s(path,
-            MAXPGPATH,
-            MAXPGPATH - 1,
-            "%s/%04X%08X",
-            (ctl)->dir,
-            (uint32)((uint64)(segno) >> 32),
-            (uint32)((segno) & (int64)0xFFFFFFFF));
+        rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%04X%08X", (ctl)->dir, (uint32)((uint64)(segno) >> 32),
+                        (uint32)((segno) & (int64)0xFFFFFFFF));
         securec_check_ss(rc, "", "");
         fd = BasicOpenFile(path, O_RDWR | O_CREAT | PG_BINARY, S_IRUSR | S_IWUSR);
         if (fd < 0) {
@@ -871,70 +836,48 @@ static void SlruReportIOError(SlruCtl ctl, int64 pageno, TransactionId xid)
     char path[MAXPGPATH];
     int rc = 0;
 
-    rc = snprintf_s(path,
-        MAXPGPATH,
-        MAXPGPATH - 1,
-        "%s/%04X%08X",
-        (ctl)->dir,
-        (uint32)((uint64)(segno) >> 32),
-        (uint32)((segno) & (int64)0xFFFFFFFF));
+    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%04X%08X", (ctl)->dir, (uint32)((uint64)(segno) >> 32),
+                    (uint32)((segno) & (int64)0xFFFFFFFF));
     securec_check_ss(rc, "", "");
     errno = t_thrd.xact_cxt.slru_errno;
     switch (t_thrd.xact_cxt.slru_errcause) {
         case SLRU_OPEN_FAILED:
-            ereport(ERROR,
-                (errmodule(MOD_SLRU),
-                    errcode_for_file_access(),
-                    errmsg("could not access status of transaction %lu , nextXid is %lu ",
-                        xid,
-                        t_thrd.xact_cxt.ShmemVariableCache->nextXid),
-                    errdetail("Could not open file \"%s\": %m.", path)));
+            ereport(ERROR, (errmodule(MOD_SLRU), errcode_for_file_access(),
+                            errmsg("could not access status of transaction %lu , nextXid is %lu ", xid,
+                                   t_thrd.xact_cxt.ShmemVariableCache->nextXid),
+                            errdetail("Could not open file \"%s\": %m.", path)));
             break;
         case SLRU_SEEK_FAILED:
-            ereport(ERROR,
-                (errmodule(MOD_SLRU),
-                    errcode_for_file_access(),
-                    errmsg("could not access status of transaction %lu, nextXid is  %lu",
-                        xid,
-                        t_thrd.xact_cxt.ShmemVariableCache->nextXid),
-                    errdetail("Could not seek in file \"%s\" to offset %d: %m.", path, offset)));
+            ereport(ERROR, (errmodule(MOD_SLRU), errcode_for_file_access(),
+                            errmsg("could not access status of transaction %lu, nextXid is  %lu", xid,
+                                   t_thrd.xact_cxt.ShmemVariableCache->nextXid),
+                            errdetail("Could not seek in file \"%s\" to offset %d: %m.", path, offset)));
             break;
         case SLRU_READ_FAILED:
-            ereport(ERROR,
-                (errmodule(MOD_SLRU),
-                    errcode_for_file_access(),
-                    errmsg("could not access status of transaction  %lu, nextXid is %lu",
-                        xid,
-                        t_thrd.xact_cxt.ShmemVariableCache->nextXid),
-                    errdetail("Could not read from file \"%s\" at offset %d: %m.", path, offset)));
+            ereport(ERROR, (errmodule(MOD_SLRU), errcode_for_file_access(),
+                            errmsg("could not access status of transaction  %lu, nextXid is %lu", xid,
+                                   t_thrd.xact_cxt.ShmemVariableCache->nextXid),
+                            errdetail("Could not read from file \"%s\" at offset %d: %m.", path, offset)));
             break;
         case SLRU_WRITE_FAILED:
-            ereport(ERROR,
-                (errmodule(MOD_SLRU),
-                    errcode_for_file_access(),
-                    errmsg("could not access status of transaction  %lu", xid),
-                    errdetail("Could not write to file \"%s\" at offset %d: %m.", path, offset)));
+            ereport(ERROR, (errmodule(MOD_SLRU), errcode_for_file_access(),
+                            errmsg("could not access status of transaction  %lu", xid),
+                            errdetail("Could not write to file \"%s\" at offset %d: %m.", path, offset)));
             break;
         case SLRU_FSYNC_FAILED:
-            ereport(data_sync_elevel(ERROR),
-                (errmodule(MOD_SLRU),
-                    errcode_for_file_access(),
-                    errmsg("could not access status of transaction %lu", xid),
-                    errdetail("Could not fsync file \"%s\": %m.", path)));
+            ereport(data_sync_elevel(ERROR), (errmodule(MOD_SLRU), errcode_for_file_access(),
+                                              errmsg("could not access status of transaction %lu", xid),
+                                              errdetail("Could not fsync file \"%s\": %m.", path)));
             break;
         case SLRU_CLOSE_FAILED:
-            ereport(ERROR,
-                (errmodule(MOD_SLRU),
-                    errcode_for_file_access(),
-                    errmsg("could not access status of transaction %lu", xid),
-                    errdetail("Could not close file \"%s\": %m.", path)));
+            ereport(ERROR, (errmodule(MOD_SLRU), errcode_for_file_access(),
+                            errmsg("could not access status of transaction %lu", xid),
+                            errdetail("Could not close file \"%s\": %m.", path)));
             break;
         default:
             /* can't get here, we trust */
-            ereport(ERROR,
-                (errmodule(MOD_SLRU),
-                    errcode(ERRCODE_UNDEFINED_OBJECT),
-                    errmsg("unrecognized SimpleLru error cause: %d", (int)t_thrd.xact_cxt.slru_errcause)));
+            ereport(ERROR, (errmodule(MOD_SLRU), errcode(ERRCODE_UNDEFINED_OBJECT),
+                            errmsg("unrecognized SimpleLru error cause: %d", (int)t_thrd.xact_cxt.slru_errcause)));
             break;
     }
 }
@@ -1076,7 +1019,7 @@ static int SlruSelectLRUPage(SlruCtl ctl, int64 pageno)
 int SimpleLruFlush(SlruCtl ctl, bool checkpoint)
 {
     SlruShared shared = ctl->shared;
-    SlruFlushData fdata = {0, {0}, {0}};
+    SlruFlushData fdata = { 0, {0}, {0}};
     int slotno;
     int64 pageno = 0;
     int i;
@@ -1161,8 +1104,8 @@ restart:;
      */
     if (shared->latest_page_number < cutoffPage) {
         LWLockRelease(shared->control_lock);
-        ereport(
-            LOG, (errmodule(MOD_SLRU), errmsg("could not truncate directory \"%s\": apparent wraparound", ctl->dir)));
+        ereport(LOG,
+                (errmodule(MOD_SLRU), errmsg("could not truncate directory \"%s\": apparent wraparound", ctl->dir)));
         return;
     }
 
@@ -1207,9 +1150,9 @@ restart:;
  *		This callback reports true if there's any segment prior to the one
  *		containing the page passed as "data".
  */
-bool SlruScanDirCbReportPresence(SlruCtl ctl, const char* filename, int64 segpage, const void* data)
+bool SlruScanDirCbReportPresence(SlruCtl ctl, const char *filename, int64 segpage, const void *data)
 {
-    int64 cutoffPage = *(int64*)data;
+    int64 cutoffPage = *(int64 *)data;
 
     cutoffPage -= cutoffPage % SLRU_PAGES_PER_SEGMENT;
 
@@ -1223,10 +1166,10 @@ bool SlruScanDirCbReportPresence(SlruCtl ctl, const char* filename, int64 segpag
  * SlruScanDirectory callback.
  *		This callback deletes segments prior to the one passed in as "data".
  */
-bool SlruScanDirCbDeleteCutoff(SlruCtl ctl, const char* filename, int64 segpage, const void* data)
+bool SlruScanDirCbDeleteCutoff(SlruCtl ctl, const char *filename, int64 segpage, const void *data)
 {
     char path[MAXPGPATH];
-    int64 cutoffPage = *(int64*)data;
+    int64 cutoffPage = *(int64 *)data;
     int rc = 0;
 
     if (segpage < cutoffPage) {
@@ -1243,7 +1186,7 @@ bool SlruScanDirCbDeleteCutoff(SlruCtl ctl, const char* filename, int64 segpage,
  * SlruScanDirectory callback.
  *		This callback deletes all segments.
  */
-bool SlruScanDirCbDeleteAll(SlruCtl ctl, const char* filename, int64 segpage, const void* data)
+bool SlruScanDirCbDeleteAll(SlruCtl ctl, const char *filename, int64 segpage, const void *data)
 {
     char path[MAXPGPATH];
     int rc = 0;
@@ -1266,11 +1209,11 @@ bool SlruScanDirCbDeleteAll(SlruCtl ctl, const char* filename, int64 segpage, co
  *
  * Note that no locking is applied.
  */
-bool SlruScanDirectory(SlruCtl ctl, SlruScanCallback callback, const void* data)
+bool SlruScanDirectory(SlruCtl ctl, SlruScanCallback callback, const void *data)
 {
     bool retval = false;
-    DIR* cldir = NULL;
-    struct dirent* clde = NULL;
+    DIR *cldir = NULL;
+    struct dirent *clde = NULL;
     int64 segno;
     int64 segpage;
 
@@ -1280,8 +1223,8 @@ bool SlruScanDirectory(SlruCtl ctl, SlruScanCallback callback, const void* data)
             segno = (int64)pg_strtouint64(clde->d_name, NULL, 16);
             segpage = segno * SLRU_PAGES_PER_SEGMENT;
 
-            ereport(DEBUG2,
-                (errmodule(MOD_SLRU), errmsg("SlruScanDirectory invoking callback on %s/%s", ctl->dir, clde->d_name)));
+            ereport(DEBUG2, (errmodule(MOD_SLRU),
+                             errmsg("SlruScanDirectory invoking callback on %s/%s", ctl->dir, clde->d_name)));
             retval = callback(ctl, clde->d_name, segpage, data);
             if (retval)
                 break;

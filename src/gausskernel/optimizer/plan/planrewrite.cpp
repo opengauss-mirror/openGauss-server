@@ -36,7 +36,7 @@
 #include "parser/parse_relation.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #ifdef PGXC
 #include "optimizer/dataskew.h"
 #include "optimizer/streamplan.h"
@@ -116,10 +116,10 @@ static bool HasConvertableInlistCond(RelOptInfo* rel);
 static int ConvertableInlistMaxNum(const RelOptInfo* rel);
 static bool IsEqualOpr(Oid opno);
 static bool inline IsConvertableType(Oid typoid);
-static RelOptInfo* build_alternative_rel(const RelOptInfo* origin, RTEKind rtekind);
-static List* convert_constarray_to_simple(Const* combined_const, Oid* paramtype);
+static List* convert_constarray_to_simple(Const* combined_const, Var* listvar, Oid* paramtype);
 static char* get_attr_name(int attrnum);
 static void rebuild_subquery(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte, RangeTblEntry* new_rte);
+RelOptInfo* build_alternative_rel(const RelOptInfo* origin, RTEKind rtekind);
 
 /*****************************************************************************
  *
@@ -612,6 +612,10 @@ static void find_inlist2join_path_walker(Path* path, find_inlist2join_context* c
             find_inlist2join_path_walker(jp->outerjoinpath, context);
         } break;
 
+        case T_BaseResult: {
+            find_inlist2join_path_walker(((ResultPath*)path)->subpath, context);
+        } break;
+
         default:
             break;
     }
@@ -646,7 +650,7 @@ static bool IsConvertableBaseRel(const RangeTblEntry* rte)
     }
 
     /* Disallow HDFS table case and Foreign table case */
-    if (RelationIsDfsStore(rel) || RelationIsForeignTable(rel)) {
+    if (RelationIsDfsStore(rel) || RelationIsForeignTable(rel) || RelationIsStream(rel)) {
         convertable = false;
     }
 
@@ -1006,7 +1010,7 @@ static RangeTblEntry* make_rte_with_subquery(PlannerInfo* root, RelOptInfo* rel,
  *
  * Return: RelOptInfo. the new RelOptInfo with specific rtekind
  */
-static RelOptInfo* build_alternative_rel(const RelOptInfo* origin, RTEKind rtekind)
+RelOptInfo* build_alternative_rel(const RelOptInfo* origin, RTEKind rtekind)
 {
     RelOptInfo* rel = NULL;
     Assert(origin != NULL);
@@ -1049,13 +1053,16 @@ static RelOptInfo* build_alternative_rel(const RelOptInfo* origin, RTEKind rteki
     rel->partItrs_for_index_unusable = -1;
     rel->subplan = NULL;
     rel->subroot = NULL;
+    rel->subplan_params = NIL;
     rel->fdwroutine = NULL;
     rel->fdw_private = NULL;
     rel->baserestrictcost.startup = 0;
     rel->baserestrictcost.per_tuple = 0;
-    rel->joininfo = NIL;
+    rel->joininfo = (List*)copyObject(origin->joininfo);
+    rel->subplanrestrictinfo = (List*)copyObject(origin->subplanrestrictinfo);
     rel->has_eclass_joins = false;
     rel->varratio = NIL;
+    rel->lateral_relids = origin->lateral_relids;
 
     rel->alternatives = NIL;
     rel->base_rel = (RelOptInfo*)origin;
@@ -1118,7 +1125,7 @@ static char* get_attr_name(int attrnum)
  *
  * Return: List *. the converted simple const list
  */
-static List* convert_constarray_to_simple(Const* combined_const, Oid* paramtype)
+static List* convert_constarray_to_simple(Const* combined_const, Var* listvar, Oid* paramtype)
 {
     int i;
     int nitems;
@@ -1129,6 +1136,7 @@ static List* convert_constarray_to_simple(Const* combined_const, Oid* paramtype)
     char* s = NULL;
     bits8* bitmap = NULL;
     int bitmask;
+    bool elemNull = false;
     Node* simple_const = NULL;
     List* const_list = NIL;
 
@@ -1148,9 +1156,11 @@ static List* convert_constarray_to_simple(Const* combined_const, Oid* paramtype)
 
         /* Get array element, checking for NULL */
         if (bitmap && (*bitmap & bitmask) == 0) {
+            elemNull = true;
             simple_const = (Node*)makeConst(
                 *paramtype, combined_const->consttypmod, combined_const->constcollid, typlen, (Datum)0, true, typbyval);
         } else {
+            elemNull = false;
             elt = fetch_att(s, typbyval, typlen);
             s = att_addlength_pointer(s, typlen, s);
             s = (char*)att_align_nominal(s, typalign);
@@ -1323,7 +1333,7 @@ static void rebuild_subquery(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* 
             Oid paramtype = 0;
             Var* listvar = fix_subquery_vars_expr((Node*)scalar->args, rel->relid, (Index)SUBQUERY_VARNO);
             Const* combined_const = (Const*)list_nth(scalar->args, 1);
-            List* const_list = convert_constarray_to_simple(combined_const, &paramtype);
+            List* const_list = convert_constarray_to_simple(combined_const, listvar, &paramtype);
 
             args_in_opexpr = lappend(args_in_opexpr, linitial((List*)scalar->args));
 
@@ -1410,5 +1420,11 @@ static void rebuild_subquery(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* 
     /* Build FromExpr */
     Expr* andexpr = makeBoolExpr(AND_EXPR, args, -1);
     query->jointree = makeFromExpr(fromlist, (Node*)andexpr);
+
+#ifdef ENABLE_MULTIPLE_NODES
+    /* Set can_push flag of query. */
+    mark_query_canpush_flag((Node *) query);
+#endif
+
     new_rte->subquery = query;
 }

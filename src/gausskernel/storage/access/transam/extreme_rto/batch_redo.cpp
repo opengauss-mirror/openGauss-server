@@ -43,10 +43,10 @@
 #include "access/xlogproc.h"
 
 namespace extreme_rto {
-static inline void PRXLogRecGetBlockTag(
-    XLogRecParseState* recordblockstate, RelFileNode* rnode, BlockNumber* blknum, ForkNumber* forknum)
+static inline void PRXLogRecGetBlockTag(XLogRecParseState *recordBlockState, RelFileNode *rnode, BlockNumber *blknum,
+                                        ForkNumber *forknum)
 {
-    XLogBlockParse* blockparse = &(recordblockstate->blockparse);
+    XLogBlockParse *blockparse = &(recordBlockState->blockparse);
 
     if (rnode != NULL) {
         rnode->dbNode = blockparse->blockhead.dbNode;
@@ -62,17 +62,17 @@ static inline void PRXLogRecGetBlockTag(
     }
 }
 
-void PRInitRedoItemEntry(RedoItemHashEntry* redoItemHashEntry)
+void PRInitRedoItemEntry(RedoItemHashEntry *redoItemHashEntry)
 {
     redoItemHashEntry->redoItemNum = 0;
     redoItemHashEntry->head = NULL;
     redoItemHashEntry->tail = NULL;
 }
 
-HTAB* PRRedoItemHashInitialize(MemoryContext context)
+HTAB *PRRedoItemHashInitialize(MemoryContext context)
 {
     HASHCTL ctl;
-    HTAB* hTab = NULL;
+    HTAB *hTab = NULL;
 
     /*
      * create hashtable that indexes the redo items
@@ -83,15 +83,13 @@ HTAB* PRRedoItemHashInitialize(MemoryContext context)
     ctl.keysize = sizeof(RedoItemTag);
     ctl.entrysize = sizeof(RedoItemHashEntry);
     ctl.hash = tag_hash;
-    hTab = hash_create("Redo item hash by relfilenode and blocknum",
-        INITredoItemHashSIZE,
-        &ctl,
-        HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+    hTab = hash_create("Redo item hash by relfilenode and blocknum", INITredoItemHashSIZE, &ctl,
+                       HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
     return hTab;
 }
 
-void PRRegisterBlockInsertToList(RedoItemHashEntry* redoItemHashEntry, XLogRecParseState* record)
+void PRRegisterBlockInsertToList(RedoItemHashEntry *redoItemHashEntry, XLogRecParseState *record)
 {
     if (redoItemHashEntry->tail != NULL) {
         redoItemHashEntry->tail->nextrecord = record;
@@ -104,105 +102,131 @@ void PRRegisterBlockInsertToList(RedoItemHashEntry* redoItemHashEntry, XLogRecPa
     redoItemHashEntry->redoItemNum++;
 }
 
-void PRRegisterBlockChangeExtended(XLogRecParseState* recordblockstate, const RelFileNode rNode, ForkNumber forkNum,
-    BlockNumber blkNo, HTAB* redoItemHash)
+void PRRegisterBlockChangeExtended(XLogRecParseState *recordBlockState, const RelFileNode rNode, ForkNumber forkNum,
+                                   BlockNumber blkNo, HTAB *redoItemHash)
 {
     RedoItemTag redoItemTag;
-    RedoItemHashEntry* redoItemHashEntry = NULL;
+    RedoItemHashEntry *redoItemHashEntry = NULL;
     bool found = true;
 
     INIT_REDO_ITEM_TAG(redoItemTag, rNode, forkNum, blkNo);
 
-    redoItemHashEntry = (RedoItemHashEntry*)hash_search(redoItemHash, (void*)&redoItemTag, HASH_ENTER, &found);
+    redoItemHashEntry = (RedoItemHashEntry *)hash_search(redoItemHash, (void *)&redoItemTag, HASH_ENTER, &found);
     if (redoItemHashEntry == NULL) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FETCH_DATA_FAILED),
-                errmsg("could not find or create redo item entry: rel %u/%u/%u "
-                       "forknum %d blkno %u",
-                    rNode.spcNode,
-                    rNode.dbNode,
-                    rNode.relNode,
-                    forkNum,
-                    blkNo)));
+        ereport(ERROR, (errcode(ERRCODE_FETCH_DATA_FAILED),
+                        errmsg("could not find or create redo item entry: rel %u/%u/%u "
+                               "forknum %d blkno %u",
+                               rNode.spcNode, rNode.dbNode, rNode.relNode, forkNum, blkNo)));
     }
 
     if (!found) {
         PRInitRedoItemEntry(redoItemHashEntry);
     }
-    PRRegisterBlockInsertToList(redoItemHashEntry, recordblockstate);
+    PRRegisterBlockInsertToList(redoItemHashEntry, recordBlockState);
 }
 
-void PRTrackRemoveEntry(HTAB* hashMap, RedoItemHashEntry* entry)
+void PRTrackRemoveEntry(HTAB *hashMap, RedoItemHashEntry *entry)
 {
-    XLogRecParseState* recordblockstate = entry->head;
-    XLogBlockParseStateRelease(recordblockstate);
+    XLogRecParseState *recordBlockState = entry->head;
+#ifdef USE_ASSERT_CHECKING
+    XLogRecParseState *nextBlockState = entry->head;
+    while (nextBlockState != NULL) {
+        XLogRecParseState *prev = nextBlockState;
+        nextBlockState = (XLogRecParseState *)(nextBlockState->nextrecord);
+
+        if (prev->refrecord != NULL) {
+            DoRecordCheck(prev, InvalidXLogRecPtr, false);
+        }
+
+        ereport(LOG, (errmsg("PRTrackRemoveEntry:record(%X/%X) relation %u/%u/%u forknum %u blocknum %u dropped(%p)",
+                             (uint32)(prev->blockparse.blockhead.end_ptr >> 32),
+                             (uint32)(prev->blockparse.blockhead.end_ptr), prev->blockparse.blockhead.spcNode,
+                             prev->blockparse.blockhead.dbNode, prev->blockparse.blockhead.relNode,
+                             prev->blockparse.blockhead.forknum, prev->blockparse.blockhead.blkno, prev->refrecord)));
+    }
+
+#endif
+    XLogBlockParseStateRelease(recordBlockState);
 
     if (hash_search(hashMap, entry, HASH_REMOVE, NULL) == NULL) {
-        ereport(
-            ERROR, (errcode(ERRCODE_FILE_READ_FAILED), errmsg("PRTrackRemoveEntry:Redo item hash table corrupted")));
+        ereport(ERROR, (errmsg("PRTrackRemoveEntry:Redo item hash table corrupted")));
     }
 }
 
-void PRTrackRelTruncate(HTAB* hashMap, const RelFileNode rNode, ForkNumber forkNum, BlockNumber blkNo)
+void PRTrackRelTruncate(HTAB *hashMap, const RelFileNode rNode, ForkNumber forkNum, BlockNumber blkNo)
 {
     HASH_SEQ_STATUS status;
-    RedoItemHashEntry* redoItemEntry = NULL;
+    RedoItemHashEntry *redoItemEntry = NULL;
     hash_seq_init(&status, hashMap);
 
-    while ((redoItemEntry = (RedoItemHashEntry*)hash_seq_search(&status)) != NULL) {
-        if (redoItemEntry->redoItemTag.rNode.spcNode == rNode.spcNode &&
-            redoItemEntry->redoItemTag.rNode.dbNode == rNode.dbNode &&
-            redoItemEntry->redoItemTag.rNode.relNode == rNode.relNode &&
+    while ((redoItemEntry = (RedoItemHashEntry *)hash_seq_search(&status)) != NULL) {
+        if (RelFileNodeEquals(redoItemEntry->redoItemTag.rNode, rNode) &&
             redoItemEntry->redoItemTag.forkNum == forkNum && (redoItemEntry->redoItemTag.blockNum >= blkNo)) {
             PRTrackRemoveEntry(hashMap, redoItemEntry);
         }
     }
 }
 
-void PRTrackTableSpaceDrop(XLogRecParseState* recordblockstate, HTAB* hashMap)
+void PRTrackTableSpaceDrop(XLogRecParseState *recordBlockState, HTAB *hashMap)
 {
     HASH_SEQ_STATUS status;
-    RedoItemHashEntry* redoItemEntry = NULL;
+    RedoItemHashEntry *redoItemEntry = NULL;
     hash_seq_init(&status, hashMap);
 
     RelFileNode rNode;
-    PRXLogRecGetBlockTag(recordblockstate, &rNode, NULL, NULL);
+    PRXLogRecGetBlockTag(recordBlockState, &rNode, NULL, NULL);
+#ifdef USE_ASSERT_CHECKING
+    ereport(LOG, (errmsg("PRTrackRelTruncate:(%X/%X)clear table space %u record",
+                         (uint32)(recordBlockState->blockparse.blockhead.end_ptr >> 32),
+                         (uint32)(recordBlockState->blockparse.blockhead.end_ptr), rNode.spcNode)));
+#endif
 
-    while ((redoItemEntry = (RedoItemHashEntry*)hash_seq_search(&status)) != NULL) {
+    while ((redoItemEntry = (RedoItemHashEntry *)hash_seq_search(&status)) != NULL) {
         if (redoItemEntry->redoItemTag.rNode.spcNode == rNode.spcNode) {
             PRTrackRemoveEntry(hashMap, redoItemEntry);
         }
     }
-    XLogBlockParseStateRelease(recordblockstate);
+    XLogBlockParseStateRelease(recordBlockState);
 }
 
-void PRTrackDatabaseDrop(XLogRecParseState* recordblockstate, HTAB* hashMap)
+void PRTrackDatabaseDrop(XLogRecParseState *recordBlockState, HTAB *hashMap)
 {
     HASH_SEQ_STATUS status;
-    RedoItemHashEntry* redoItemEntry = NULL;
+    RedoItemHashEntry *redoItemEntry = NULL;
     hash_seq_init(&status, hashMap);
 
     RelFileNode rNode;
-    PRXLogRecGetBlockTag(recordblockstate, &rNode, NULL, NULL);
+    PRXLogRecGetBlockTag(recordBlockState, &rNode, NULL, NULL);
+#ifdef USE_ASSERT_CHECKING
+    ereport(LOG, (errmsg("PRTrackRelTruncate:(%X/%X)clear db %u/%u record",
+                         (uint32)(recordBlockState->blockparse.blockhead.end_ptr >> 32),
+                         (uint32)(recordBlockState->blockparse.blockhead.end_ptr), rNode.spcNode, rNode.dbNode)));
+#endif
 
-    while ((redoItemEntry = (RedoItemHashEntry*)hash_seq_search(&status)) != NULL) {
+    while ((redoItemEntry = (RedoItemHashEntry *)hash_seq_search(&status)) != NULL) {
         if (redoItemEntry->redoItemTag.rNode.spcNode == rNode.spcNode &&
             redoItemEntry->redoItemTag.rNode.dbNode == rNode.dbNode) {
             PRTrackRemoveEntry(hashMap, redoItemEntry);
         }
     }
-    XLogBlockParseStateRelease(recordblockstate);
+    XLogBlockParseStateRelease(recordBlockState);
 }
 
-void PRTrackRelStorageDrop(XLogRecParseState* recordblockstate, HTAB* redoItemHash)
+void PRTrackRelStorageDrop(XLogRecParseState *recordBlockState, HTAB *redoItemHash)
 {
-    XLogBlockParse* blockparse = &(recordblockstate->blockparse);
-    XLogBlockDdlParse* ddlParse = &(recordblockstate->blockparse.extra_rec.blockddlrec);
+    XLogBlockParse *blockparse = &(recordBlockState->blockparse);
+    XLogBlockDdlParse *ddlParse = &(recordBlockState->blockparse.extra_rec.blockddlrec);
     RelFileNode rNode;
     rNode.spcNode = blockparse->blockhead.spcNode;
     rNode.dbNode = blockparse->blockhead.dbNode;
     rNode.relNode = blockparse->blockhead.relNode;
     rNode.bucketNode = blockparse->blockhead.bucketNode;
+
+#ifdef USE_ASSERT_CHECKING
+    ereport(LOG, (errmsg("PRTrackRelTruncate:(%X/%X)clear relation %u/%u/%u forknum %u record",
+                         (uint32)(blockparse->blockhead.end_ptr >> 32), (uint32)(blockparse->blockhead.end_ptr),
+                         rNode.spcNode, rNode.dbNode, rNode.relNode, blockparse->blockhead.forknum)));
+#endif
 
     if (ddlParse->blockddltype == BLOCK_DDL_TRUNCATE_RELNODE) {
         PRTrackRelTruncate(redoItemHash, rNode, blockparse->blockhead.forknum, blockparse->blockhead.blkno);
@@ -212,40 +236,50 @@ void PRTrackRelStorageDrop(XLogRecParseState* recordblockstate, HTAB* redoItemHa
     } else {
         PRTrackRelTruncate(redoItemHash, rNode, blockparse->blockhead.forknum, 0);
     }
-    XLogBlockParseStateRelease(recordblockstate);
+    XLogBlockParseStateRelease(recordBlockState);
 }
 
 // Get relfile node fork num blockNum
-void PRTrackRelPageModification(XLogRecParseState* recordblockstate, HTAB* redoItemHash)
+void PRTrackRelPageModification(XLogRecParseState *recordBlockState, HTAB *redoItemHash)
 {
     RelFileNode relnode;
     ForkNumber forkNum;
     BlockNumber blkNo;
 
-    PRXLogRecGetBlockTag(recordblockstate, &relnode, &blkNo, &forkNum);
+    PRXLogRecGetBlockTag(recordBlockState, &relnode, &blkNo, &forkNum);
 
-    PRRegisterBlockChangeExtended(recordblockstate, relnode, forkNum, blkNo, redoItemHash);
+    PRRegisterBlockChangeExtended(recordBlockState, relnode, forkNum, blkNo, redoItemHash);
 }
 
 /**
-    for block state, put it in to hash,
-     others state, clear related block state(including release), do not release it
+    for block state, put it in to hash
 */
-void PRTrackChangeBlock(XLogRecParseState* recordblockstate, HTAB* redoItemHash)
+void PRTrackAddBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash)
 {
-    XLogBlockParse* blockparse = &(recordblockstate->blockparse);
-    if (blockparse->blockhead.block_valid < BLOCK_DATA_DDL_TYPE ||
-        blockparse->blockhead.block_valid == BLOCK_DATA_NEWCU_TYPE ||
-        blockparse->blockhead.block_valid == BLOCK_DATA_BCM_TYPE) {
-        PRTrackRelPageModification(recordblockstate, redoItemHash);
-    } else if (blockparse->blockhead.block_valid == BLOCK_DATA_DDL_TYPE) {
-        PRTrackRelStorageDrop(recordblockstate, redoItemHash);
+    Assert(recordBlockState->blockparse.blockhead.block_valid < BLOCK_DATA_DDL_TYPE);
+    PRTrackRelPageModification(recordBlockState, redoItemHash);
+}
+
+/**
+     others state, clear related block state(including release), release it
+*/
+void PRTrackClearBlock(XLogRecParseState *recordBlockState, HTAB *redoItemHash)
+{
+    XLogBlockParse *blockparse = &(recordBlockState->blockparse);
+    if (blockparse->blockhead.block_valid == BLOCK_DATA_DDL_TYPE) {
+        PRTrackRelStorageDrop(recordBlockState, redoItemHash);
     } else if (blockparse->blockhead.block_valid == BLOCK_DATA_DROP_DATABASE_TYPE) {
-        PRTrackDatabaseDrop(recordblockstate, redoItemHash);
+        PRTrackDatabaseDrop(recordBlockState, redoItemHash);
     } else if (blockparse->blockhead.block_valid == BLOCK_DATA_DROP_TBLSPC_TYPE) {
-        PRTrackTableSpaceDrop(recordblockstate, redoItemHash);
+        PRTrackTableSpaceDrop(recordBlockState, redoItemHash);
     } else {
-        XLogBlockParseStateRelease(recordblockstate);
+        const uint32 rightShiftSize = 32;
+        ereport(WARNING,
+                (errmsg("PRTrackClearBlock:(%X/%X) not identified %u/%u/%u forknum %d record",
+                        (uint32)(blockparse->blockhead.end_ptr >> rightShiftSize),
+                        (uint32)(blockparse->blockhead.end_ptr), blockparse->blockhead.spcNode,
+                        blockparse->blockhead.dbNode, blockparse->blockhead.relNode, blockparse->blockhead.forknum)));
+        XLogBlockParseStateRelease(recordBlockState);
     }
 }
 

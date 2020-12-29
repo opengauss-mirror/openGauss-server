@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_RESOURCE_LABEL">
+<refmeta>
+<refentrytitle>DROP RESOURCE LABEL</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP RESOURCE LABEL</refname>
+<refpurpose>remove a resource label</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP RESOURCE LABEL [ IF EXISTS ] policy_name[, ... ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

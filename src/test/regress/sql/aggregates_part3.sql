@@ -21,50 +21,50 @@ analyze t_agg1;
 analyze t_agg2;
 
 -- (3) windowagg
-explain (costs off, nodes off) select c, sum(x) from (select c, row_number() over (partition by c, d, e order by d, e) x from t_agg1) group by c;
+explain (costs off) select c, sum(x) from (select c, row_number() over (partition by c, d, e order by d, e) x from t_agg1) group by c;
 select c, sum(x) from (select c, row_number() over (partition by c, d, e order by d, e) x from t_agg1) group by c order by c limit 10;
-explain (costs off, nodes off) select x, sum(c+d+e) from (select c, d, e, row_number() over (partition by d order by c, e) x from t_agg1) group by x;
+explain (costs off) select x, sum(c+d+e) from (select c, d, e, row_number() over (partition by d order by c, e) x from t_agg1) group by x;
 select x, sum(c+d+e) from (select c, d, e, row_number() over (partition by d order by c, e) x from t_agg1) group by x order by x limit 10;
 
 -- join
-explain (costs off, nodes off) select sum(t_agg1.a) from t_agg1 join t_agg2 on t_agg1.c=t_agg2.b group by t_agg1.c;
+explain (costs off) select sum(t_agg1.a) from t_agg1 join t_agg2 on t_agg1.c=t_agg2.b group by t_agg1.c;
 select sum(t_agg1.a) from t_agg1 join t_agg2 on t_agg1.c=t_agg2.b group by t_agg1.c order by t_agg1.c limit 10;
-explain (costs off, nodes off) select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, t_agg2.b-t_agg2.a c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c) group by a, b; 
+explain (costs off) select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, t_agg2.b-t_agg2.a c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c) group by a, b; 
 select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, t_agg2.b-t_agg2.a c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c) group by a, b order by a, b limit 10;
-explain (costs off, nodes off) select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, sum(t_agg2.b-t_agg2.a) c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c group by t_agg1.d, t_agg1.c) group by a, b; 
+explain (costs off) select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, sum(t_agg2.b-t_agg2.a) c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c group by t_agg1.d, t_agg1.c) group by a, b; 
 select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, sum(t_agg2.b-t_agg2.a) c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c group by t_agg1.d, t_agg1.c) group by a, b order by a, b limit 10;
-explain (costs off, nodes off) select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, sum(t_agg2.b-t_agg2.a) c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c group by t_agg1.d, t_agg1.c having avg(t_agg2.a-t_agg2.b)>=0) group by a, b having count(c)=1; 
+explain (costs off) select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, sum(t_agg2.b-t_agg2.a) c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c group by t_agg1.d, t_agg1.c having avg(t_agg2.a-t_agg2.b)>=0) group by a, b having count(c)=1; 
 select a, b, count(c) from (select t_agg1.c a, t_agg1.d b, sum(t_agg2.b+t_agg2.a) c from t_agg1 join t_agg2 on t_agg1.b=t_agg2.c group by t_agg1.d, t_agg1.c having avg(t_agg2.a-t_agg2.b)>=0) group by a, b having count(c)=1 order by a, b limit 10;
 
 -- distinct pull down
-explain (costs off, nodes off) select distinct count(a) as result from t_agg1 group by a order by count(a) using < fetch next 15 rows only;
+explain (costs off) select distinct count(a) as result from t_agg1 group by a order by count(a) using < fetch next 15 rows only;
 select distinct count(a) as result from t_agg1 group by a order by count(a) using < fetch next 15 rows only;
-explain (costs off, nodes off) select distinct count(d) as result from t_agg1 group by c order by count(d) using < fetch next 15 rows only;
+explain (costs off) select distinct count(d) as result from t_agg1 group by c order by count(d) using < fetch next 15 rows only;
 select distinct count(d) as result from t_agg1 group by c order by count(d) using < fetch next 15 rows only;
 select * from (select distinct count(d) as result from t_agg1 group by c order by count(d) using < limit all) order by result using < nulls first fetch next 15 rows only;
-explain (costs off, nodes off) select * from (select distinct count(a) as result from t_agg1 group by a order by count(a) using < limit all) order by result using < nulls first fetch next 15 rows only;
+explain (costs off) select * from (select distinct count(a) as result from t_agg1 group by a order by count(a) using < limit all) order by result using < nulls first fetch next 15 rows only;
 select * from (select distinct count(a) as result from t_agg1 group by a order by count(a) using < limit all) order by result using < nulls first fetch next 15 rows only;
-explain (costs off, nodes off) select * from (select distinct count(d) as result from t_agg1 group by c order by count(d) using < limit all) order by result using < nulls first fetch next 15 rows only;
+explain (costs off) select * from (select distinct count(d) as result from t_agg1 group by c order by count(d) using < limit all) order by result using < nulls first fetch next 15 rows only;
 select * from (select distinct count(d) as result from t_agg1 group by c order by count(d) using < limit all) order by result using < nulls first fetch next 15 rows only;
 
 set enable_hashagg=off;
-explain (costs off, nodes off) select all * from (select distinct case when b%2=1 then 'id=1' when b%2=0 then 'id=0' else 'id=2' end as result from t_agg1 order by 1); 
+explain (costs off) select all * from (select distinct case when b%2=1 then 'id=1' when b%2=0 then 'id=0' else 'id=2' end as result from t_agg1 order by 1); 
 select all * from (select distinct case when b%2=1 then 'id=1' when b%2=0 then 'id=0' else 'id=2' end as result from t_agg1 order by 1) order by 1; 
-explain (costs off, nodes off) select all * from (select case when b%2=1 then 'id=1' when b%2=0 then 'id=0' else 'id=2' end as result from t_agg1 group by result order by 1); 
+explain (costs off) select all * from (select case when b%2=1 then 'id=1' when b%2=0 then 'id=0' else 'id=2' end as result from t_agg1 group by result order by 1); 
 select all * from (select case when b%2=1 then 'id=1' when b%2=0 then 'id=0' else 'id=2' end as result from t_agg1 group by 1 order by 1) order by 1; 
-explain (costs off, nodes off) select sum(x) from (select sum(a) x from t_agg1 group by b);
+explain (costs off) select sum(x) from (select sum(a) x from t_agg1 group by b);
 select sum(x) from (select sum(a) x from t_agg1 group by b);
 reset enable_hashagg;
 
-explain (costs off, nodes off) select x from (select d, sum(a) x from t_agg1 group by 1);
+explain (costs off) select x from (select d, sum(a) x from t_agg1 group by 1);
 select x from (select d, sum(a) x from t_agg1 group by 1) order by 1;
-explain (costs off, nodes off) select x from (select g, sum(a) x from t_agg1 group by 1);
+explain (costs off) select x from (select g, sum(a) x from t_agg1 group by 1);
 select x from (select g, sum(a) x from t_agg1 group by 1) order by 1;
 
 set plan_mode_seed=2;
-explain (costs off, nodes off) SELECT DISTINCT * FROM ( SELECT DISTINCT SUM(b) as result1 FROM t_agg1 where b <= 8 group by b having b < 10 order by result1 ASC OFFSET 1 ROW FETCH NEXT 30 ROW ONLY ) AS RESULT where result1 !=(3+3-1) group by result1 order by 1;
+explain (costs off) SELECT DISTINCT * FROM ( SELECT DISTINCT SUM(b) as result1 FROM t_agg1 where b <= 8 group by b having b < 10 order by result1 ASC OFFSET 1 ROW FETCH NEXT 30 ROW ONLY ) AS RESULT where result1 !=(3+3-1) group by result1 order by 1;
 SELECT DISTINCT * FROM ( SELECT DISTINCT SUM(b) as result1 FROM t_agg1 where b <= 8 group by b having b < 10 order by result1 ASC OFFSET 1 ROW FETCH NEXT 30 ROW ONLY ) AS RESULT where result1 !=(3+3-1) group by result1 order by 1;
-explain (costs off, nodes off) SELECT ALL * FROM (SELECT DISTINCT CASE WHEN d=1 THEN 'ID1' WHEN d=2 THEN 'ID2' ELSE 'ID0' END as result FROM t_agg1 where d is not null group by d order by 1 OFFSET 1 ROW FETCH NEXT 25 ROW ONLY ) ;
+explain (costs off) SELECT ALL * FROM (SELECT DISTINCT CASE WHEN d=1 THEN 'ID1' WHEN d=2 THEN 'ID2' ELSE 'ID0' END as result FROM t_agg1 where d is not null group by d order by 1 OFFSET 1 ROW FETCH NEXT 25 ROW ONLY ) ;
 SELECT ALL * FROM (SELECT DISTINCT CASE WHEN d=1 THEN 'ID1' WHEN d=2 THEN 'ID2' ELSE 'ID0' END as result FROM t_agg1 where d is not null group by d order by 1 OFFSET 1 ROW FETCH NEXT 25 ROW ONLY ) ;
 reset plan_mode_seed;
 
@@ -92,7 +92,7 @@ CREATE TABLE sales_transaction_line
     tran_line_sales_type_cd char(100) null
 )with (orientation=row);
 
-explain (costs off, nodes off)
+explain (costs off)
 SELECT
     CAST(TRAN_LINE_STATUS_CD AS char) c1,
     CAST(TRAN_LINE_STATUS_CD AS char) c2,
@@ -101,7 +101,7 @@ SELECT
 FROM sales_transaction_line 
 GROUP BY c1,c3 ;
 
-explain (costs off, nodes off)
+explain (costs off)
 SELECT
     CAST(TRAN_LINE_STATUS_CD AS char) c1,
     CAST(TRAN_LINE_STATUS_CD AS char) c2,

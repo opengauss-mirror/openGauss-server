@@ -1,0 +1,37 @@
+set explain_perf_mode=normal;
+select avg(c5), avg(c7) from aggtable1 where c8=100 or c8=200 group by c8 order by c8;
+         avg         |       avg        
+---------------------+------------------
+ 14.3333333333333333 | 16.3333333333333
+ 21.3333333333333333 | 23.3333333333333
+(2 rows)
+
+prepare p1(int) as select avg(c5), avg(c7) from aggtable1 where c8=$1 group by c8 order by c8;                                                                                                              execute p1(100);
+         avg         |       avg        
+---------------------+------------------
+ 14.3333333333333333 | 16.3333333333333
+(1 row)
+
+execute p1(200);
+         avg         |       avg        
+---------------------+------------------
+ 21.3333333333333333 | 23.3333333333333
+(1 row)
+
+explain (verbose on, costs off) execute p1(100);
+                                                                                  QUERY PLAN                                                                                   
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate
+   Output: pg_catalog.avg((avg(c5))), pg_catalog.avg((avg(c7))), c8
+   Group By Key: aggtable1.c8
+   ->  Streaming (type: GATHER)
+         Output: (avg(c5)), (avg(c7)), c8
+         Node/s: All datanodes
+         ->  Dummy HashAggregate
+               Output: avg(c5), avg(c7), c8
+               Group By Key: aggtable1.c8
+               ->  Foreign Scan on public.aggtable1
+                     Output: count((c5)), sum(((c5))::numeric), count((c7)), sum((c7)), sum(((c7))*((c7))), c8
+                     Remote SQL: SELECT count((c5)), sum(((c5))::numeric), count((c7)), sum((c7)), sum(((c7))*((c7))), c8 FROM public.aggtable1 WHERE ((c8 = 100)) GROUP BY c8
+(12 rows)
+

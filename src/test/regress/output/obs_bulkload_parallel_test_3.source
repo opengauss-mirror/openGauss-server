@@ -1,0 +1,18 @@
+--
+-- OBS BULK LOAD PARALLEL TEST 3
+--
+----
+--16. noescaping in TEXT format
+----
+create foreign table escaping(c1 int, c2 varchar, c3 int) server gsmpp_server options (location 'gsobs://@obshostname@/@obsbucket@/obscheck/load_escape.data', format 'text', noescaping 'true', delimiter '|',
+access_key '@ak@',
+secret_access_key '@sk@');
+select * from escaping;
+ c1  |    c2    | c3  
+-----+----------+-----
+ 321 | a apply\ | 123
+ 321 | a apply\ | 123
+ 321 | a apply\ | 123
+(3 rows)
+
+drop foreign table escaping;

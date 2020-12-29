@@ -34,9 +34,9 @@ typedef struct {
     bool initialized;
 } PosixSemaphore;
 
-void PosixSemaphoreInit(PosixSemaphore* sem, unsigned int initValue);
-void PosixSemaphoreDestroy(PosixSemaphore* sem);
-void PosixSemaphoreWait(PosixSemaphore* sem);
-void PosixSemaphorePost(PosixSemaphore* sem);
+void PosixSemaphoreInit(PosixSemaphore *sem, unsigned int initValue);
+void PosixSemaphoreDestroy(PosixSemaphore *sem);
+void PosixSemaphoreWait(PosixSemaphore *sem);
+void PosixSemaphorePost(PosixSemaphore *sem);
 }  // namespace extreme_rto
 #endif

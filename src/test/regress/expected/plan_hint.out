@@ -2234,8 +2234,8 @@ WARNING:  unused hint: No IndexScan(hint_vec hint_vec_index2)
 (3 rows)
 
 explain (costs off) select hint_t1.a from hint_t1
-join  (select /*+ hashjoin(t2 aa)*/ a from hint_t2 as t2
-      where t2.a in (select /*+ blockname(aa)*/ a from hint_t3 group by a))as bb
+join  (select /*+ hashjoin(t2 aa)*/ a from hint_t2 as t2 
+      where t2.a in (select /*+ blockname(aa)*/ a from hint_t3 group by a))as bb 
   on (hint_t1.a = bb.a);
                      QUERY PLAN                      
 -----------------------------------------------------

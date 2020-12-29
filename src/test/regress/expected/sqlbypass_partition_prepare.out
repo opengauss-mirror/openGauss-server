@@ -1,0 +1,3405 @@
+set enable_opfusion=on;
+set enable_partition_opfusion=on;
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+set opfusion_debug_mode = 'log';
+set log_min_messages=debug;
+set logging_module = 'on(OPFUSION)';
+--create table
+drop table if exists test_bypass_sql_partition;
+NOTICE:  table "test_bypass_sql_partition" does not exist, skipping
+create table test_bypass_sql_partition(col1 int, col2 int, col3 text)
+partition by range (col1)
+(
+	partition test_bypass_sql_partition_1 values less than(10),
+	partition test_bypass_sql_partition_2 values less than(20),
+	partition test_bypass_sql_partition_3 values less than(30),
+	partition test_bypass_sql_partition_4 values less than(40),
+	partition test_bypass_sql_partition_5 values less than(50),
+	partition test_bypass_sql_partition_6 values less than(60),
+	partition test_bypass_sql_partition_7 values less than(70),
+	partition test_bypass_sql_partition_8 values less than(80)
+);
+create index itest_bypass_sql_partition on test_bypass_sql_partition(col1,col2) local;
+insert into test_bypass_sql_partition select generate_series(0,79,1), generate_series(0,100,10), repeat('a',7);
+prepare p11 as insert into test_bypass_sql_partition values($1,$2,$3);
+prepare p12 as insert into test_bypass_sql_partition(col1,col2) values ($1,$2);
+
+
+
+explain execute p11(0,0,'test_insert');
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ [Bypass]
+ Insert on test_bypass_sql_partition  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+execute p11(10,10,'test_insert');
+execute p11(12,12,'test_insert');
+execute p11(-1,-1,'test_insert2');
+execute p11(23,23,'test_insert2');
+execute p11(33,33,'test_insert3');
+execute p11(0,0,'test_insert3');
+explain execute p12(1,1);
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ [Bypass]
+ Insert on test_bypass_sql_partition  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+execute p12(1,1);
+execute p12(22,22);
+execute p12(20,20);
+
+--nobypass
+execute p11(null,null,null);
+ERROR:  inserted partition key does not map to any table partition
+prepare p_insert1 as insert into test_bypass_sql_partition values(0,generate_series(1,100),'test');
+execute p_insert1;
+--bypass
+prepare p13 as select * from test_bypass_sql_partition where col1=$1 and col2=$2;
+explain execute p13(0,0);
+                                                          QUERY PLAN                                                           
+-------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Partition Iterator  (cost=0.00..8.27 rows=1 width=40)
+   Iterations: PART
+   ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..8.27 rows=1 width=40)
+         Index Cond: ((col1 = $1) AND (col2 = $2))
+         Selected Partitions:  PART
+(6 rows)
+
+execute p13(0,0);
+ col1 | col2 |     col3     
+------+------+--------------
+    0 |    0 | test_insert3
+    0 |    0 | aaaaaaa
+(2 rows)
+
+execute p13(10,0);
+ col1 | col2 |  col3   
+------+------+---------
+   10 |    0 | aaaaaaa
+(1 row)
+
+execute p13(20,0);
+ col1 | col2 |  col3   
+------+------+---------
+   20 |    0 | aaaaaaa
+(1 row)
+
+execute p13(30,0);
+ col1 | col2 |  col3   
+------+------+---------
+   30 |    0 | aaaaaaa
+(1 row)
+
+execute p13(40,0);
+ col1 | col2 |  col3   
+------+------+---------
+   40 |    0 | aaaaaaa
+(1 row)
+
+set enable_indexonlyscan=off;
+explain execute p13(0,0);
+                                                          QUERY PLAN                                                           
+-------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Partition Iterator  (cost=0.00..8.27 rows=1 width=40)
+   Iterations: PART
+   ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..8.27 rows=1 width=40)
+         Index Cond: ((col1 = $1) AND (col2 = $2))
+         Selected Partitions:  PART
+(6 rows)
+
+execute p13(0,0);
+ col1 | col2 |     col3     
+------+------+--------------
+    0 |    0 | test_insert3
+    0 |    0 | aaaaaaa
+(2 rows)
+
+reset enable_indexonlyscan;
+prepare p15 as update test_bypass_sql_partition set col2=col2+$4,col3=$3 where col1=$1 and col2=$2;
+explain execute p15 (0,0,'test_update',-1);
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Update on test_bypass_sql_partition  (cost=0.00..8.27 rows=1 width=18)
+   ->  Partition Iterator  (cost=0.00..8.27 rows=1 width=18)
+         Iterations: PART
+         ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..8.27 rows=1 width=18)
+               Index Cond: ((col1 = $1) AND (col2 = $2))
+               Selected Partitions:  PART
+(7 rows)
+
+execute p15 (0,0,'test_update',-1);
+prepare p16 as update test_bypass_sql_partition set col2=mod($1,$2)  where col1=$3 and col2=$4;
+explain execute p16(5,3,1,1);
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Update on test_bypass_sql_partition  (cost=0.00..8.28 rows=1 width=46)
+   ->  Partition Iterator  (cost=0.00..8.28 rows=1 width=46)
+         Iterations: PART
+         ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..8.27 rows=1 width=46)
+               Index Cond: ((col1 = $3) AND (col2 = $4))
+               Selected Partitions:  PART
+(7 rows)
+
+execute p16(5,3,1,1);
+
+
+prepare p101 as update test_bypass_sql_partition set col2=$1,col3=$2 where  col1=$3 ;
+execute p101 (111,'test_update2',-1);
+prepare p102 as select * from  test_bypass_sql_partition where col1=$1;
+execute p102 (1);
+ col1 | col2 |  col3   
+------+------+---------
+    1 |    0 | aaaaaaa
+    1 |    2 | 
+    1 |   10 | aaaaaaa
+    1 |   20 | aaaaaaa
+    1 |   30 | aaaaaaa
+    1 |   40 | aaaaaaa
+    1 |   50 | aaaaaaa
+    1 |   60 | aaaaaaa
+    1 |   70 | aaaaaaa
+    1 |   80 | aaaaaaa
+    1 |   90 | aaaaaaa
+    1 |  100 | aaaaaaa
+(12 rows)
+
+
+
+prepare p1011 as insert into test_bypass_sql_partition values(-3,-3,'test_pbe');
+prepare p1013 as update test_bypass_sql_partition set col2=10 where col1=-3;
+prepare p1012 as select * from test_bypass_sql_partition where col1=-3;
+prepare p1014 as select * from test_bypass_sql_partition where col1=-3 for update;
+prepare p1015 as delete from test_bypass_sql_partition where col1=-3;
+explain execute p1011;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ [Bypass]
+ Insert on test_bypass_sql_partition  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+execute p1011;
+explain execute p1012;
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Partition Iterator  (cost=0.00..24.36 rows=6 width=40)
+   Iterations: 1
+   ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=40)
+         Index Cond: (col1 = (-3))
+         Selected Partitions:  1
+(6 rows)
+
+execute p1012;
+ col1 | col2 |   col3   
+------+------+----------
+   -3 |   -3 | test_pbe
+(1 row)
+
+explain execute p1013;
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Update on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=46)
+   ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=46)
+         Iterations: 1
+         ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=46)
+               Index Cond: (col1 = (-3))
+               Selected Partitions:  1
+(7 rows)
+
+execute p1013;
+explain execute p1014;
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ LockRows  (cost=0.00..24.42 rows=6 width=50)
+   ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=50)
+         Iterations: 1
+         ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=50)
+               Index Cond: (col1 = (-3))
+               Selected Partitions:  1
+(7 rows)
+
+execute p1014;
+ col1 | col2 |   col3   
+------+------+----------
+   -3 |   10 | test_pbe
+(1 row)
+
+prepare p10141 as select col1,col2 from test_bypass_sql_partition where col1=-3 for update;
+explain execute p10141;
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ LockRows  (cost=0.00..24.42 rows=6 width=18)
+   ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=18)
+         Iterations: 1
+         ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=18)
+               Index Cond: (col1 = (-3))
+               Selected Partitions:  1
+(7 rows)
+
+execute p10141;
+ col1 | col2 
+------+------
+   -3 |   10
+(1 row)
+
+
+prepare p1021 as select * from  test_bypass_sql_partition where col1=$1 limit 1;
+explain execute p1021(1);
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit  (cost=0.00..4.06 rows=1 width=40)
+   ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=40)
+         Iterations: PART
+         ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=40)
+               Index Cond: (col1 = $1)
+               Selected Partitions:  PART
+(7 rows)
+
+execute p1021(1);
+ col1 | col2 |  col3   
+------+------+---------
+    1 |    0 | aaaaaaa
+(1 row)
+
+--bypass through index only scan
+
+prepare p10211 as select col1,col2 from  test_bypass_sql_partition where col1=$1 limit 1;
+explain execute p10211(1);
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit  (cost=0.00..4.06 rows=1 width=8)
+   ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=8)
+         Iterations: PART
+         ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=8)
+               Index Cond: (col1 = $1)
+               Selected Partitions:  PART
+(7 rows)
+
+execute p10211(1);
+ col1 | col2 
+------+------
+    1 |    0
+(1 row)
+
+prepare p10212 as select col1,col2 from  test_bypass_sql_partition where col1=$1 offset 1;
+explain execute p10212(1);
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit  (cost=4.06..24.36 rows=5 width=8)
+   ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=8)
+         Iterations: PART
+         ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=8)
+               Index Cond: (col1 = $1)
+               Selected Partitions:  PART
+(7 rows)
+
+execute p10212(1);
+ col1 | col2 
+------+------
+    1 |    2
+    1 |   10
+    1 |   20
+    1 |   30
+    1 |   40
+    1 |   50
+    1 |   60
+    1 |   70
+    1 |   80
+    1 |   90
+    1 |  100
+(11 rows)
+
+prepare p10213 as select col1,col2 from  test_bypass_sql_partition where col1=$1 limit 1 offset null;
+explain execute p10213(1);
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit  (cost=0.00..4.06 rows=1 width=8)
+   ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=8)
+         Iterations: PART
+         ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=8)
+               Index Cond: (col1 = $1)
+               Selected Partitions:  PART
+(7 rows)
+
+execute p10213(1);
+ col1 | col2 
+------+------
+    1 |    0
+(1 row)
+
+prepare p10214 as select col1,col2 from  test_bypass_sql_partition where col1=$1 limit null offset null;
+explain execute p10214(1);
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit  (cost=0.00..24.36 rows=6 width=8)
+   ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=8)
+         Iterations: PART
+         ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=8)
+               Index Cond: (col1 = $1)
+               Selected Partitions:  PART
+(7 rows)
+
+execute p10214(1);
+ col1 | col2 
+------+------
+    1 |    0
+    1 |    2
+    1 |   10
+    1 |   20
+    1 |   30
+    1 |   40
+    1 |   50
+    1 |   60
+    1 |   70
+    1 |   80
+    1 |   90
+    1 |  100
+(12 rows)
+
+
+
+
+prepare p1024 as select * from  test_bypass_sql_partition where col1=0 order by col1 for update limit 1;
+prepare p1025 as select * from  test_bypass_sql_partition where col1=$1 for update limit 1;
+execute p1024;
+ col1 | col2 |    col3     
+------+------+-------------
+    0 |   -1 | test_update
+(1 row)
+
+execute p1025(1);
+ col1 | col2 |  col3   
+------+------+---------
+    1 |    0 | aaaaaaa
+(1 row)
+
+prepare p104 as select * from test_bypass_sql_partition where col1=$1 order by col1;
+execute p104 (3);
+ col1 | col2 |  col3   
+------+------+---------
+    3 |    0 | aaaaaaa
+    3 |   10 | aaaaaaa
+    3 |   20 | aaaaaaa
+    3 |   30 | aaaaaaa
+    3 |   40 | aaaaaaa
+    3 |   50 | aaaaaaa
+    3 |   60 | aaaaaaa
+    3 |   70 | aaaaaaa
+    3 |   80 | aaaaaaa
+    3 |   90 | aaaaaaa
+    3 |  100 | aaaaaaa
+(11 rows)
+
+prepare p1052 as select col1,col2 from test_bypass_sql_partition where col1=$1 order by col1 for update limit 2;
+execute p1052(2);
+ col1 | col2 
+------+------
+    2 |    0
+    2 |   10
+(2 rows)
+
+prepare p10601 as select col1,col2 from test_bypass_sql_partition where col1>$1 and col1<$2 and col2>$3 order by col1;
+execute p10601 (0,10,1);
+ col1 | col2 
+------+------
+    1 |    2
+    1 |   10
+    1 |   20
+    1 |   30
+    1 |   40
+    1 |   50
+    1 |   60
+    1 |   70
+    1 |   80
+    1 |   90
+    1 |  100
+    2 |   10
+    2 |   20
+    2 |   30
+    2 |   40
+    2 |   50
+    2 |   60
+    2 |   70
+    2 |   80
+    2 |   90
+    2 |  100
+    3 |   10
+    3 |   20
+    3 |   30
+    3 |   40
+    3 |   50
+    3 |   60
+    3 |   70
+    3 |   80
+    3 |   90
+    3 |  100
+    4 |   10
+    4 |   20
+    4 |   30
+    4 |   40
+    4 |   50
+    4 |   60
+    4 |   70
+    4 |   80
+    4 |   90
+    4 |  100
+    5 |   10
+    5 |   20
+    5 |   30
+    5 |   40
+    5 |   50
+    5 |   60
+    5 |   70
+    5 |   80
+    5 |   90
+    5 |  100
+    6 |   10
+    6 |   20
+    6 |   30
+    6 |   40
+    6 |   50
+    6 |   60
+    6 |   70
+    6 |   80
+    6 |   90
+    6 |  100
+    7 |   10
+    7 |   20
+    7 |   30
+    7 |   40
+    7 |   50
+    7 |   60
+    7 |   70
+    7 |   80
+    7 |   90
+    7 |  100
+    8 |   10
+    8 |   20
+    8 |   30
+    8 |   40
+    8 |   50
+    8 |   60
+    8 |   70
+    8 |   80
+    8 |   90
+    8 |  100
+    9 |   10
+    9 |   20
+    9 |   30
+    9 |   40
+    9 |   50
+    9 |   60
+    9 |   70
+    9 |   80
+    9 |   90
+    9 |  100
+(91 rows)
+
+
+--nobypass
+prepare p1020 as  select * from  test_bypass_sql_partition where col1>0 order by col1 limit 1;
+execute p1020;
+ col1 | col2 |  col3   
+------+------+---------
+    1 |    0 | aaaaaaa
+(1 row)
+
+prepare p10200 as  select col1,col2 from  test_bypass_sql_partition where col1>0 order by col1 limit 1;
+explain execute p10200;
+                                                                 QUERY PLAN                                                                  
+---------------------------------------------------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not support query in multiple partitions.
+ Limit  (cost=0.00..0.35 rows=1 width=8)
+   ->  Partition Iterator  (cost=0.00..135.06 rows=389 width=8)
+         Iterations: 8
+         ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..135.06 rows=389 width=8)
+               Index Cond: (col1 > 0)
+               Selected Partitions:  1..8
+(7 rows)
+
+execute p10200;
+ col1 | col2 
+------+------
+    1 |    0
+(1 row)
+
+prepare p1022 as select * from  test_bypass_sql_partition where col1=$1 limit $2;
+explain execute p1022(0,3);
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used limit grammar with a non-constant value.
+ Limit  (cost=0.00..4.06 rows=1 width=40)
+   ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=40)
+         Iterations: PART
+         ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=40)
+               Index Cond: (col1 = $1)
+               Selected Partitions:  PART
+(7 rows)
+
+execute p1022(0,3);
+ col1 | col2 |    col3     
+------+------+-------------
+    0 |   -1 | test_update
+    0 |   -1 | test_update
+    0 |    1 | test
+(3 rows)
+
+explain execute p1022(0,null);
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used limit grammar with a non-constant value.
+ Limit  (cost=0.00..4.06 rows=1 width=40)
+   ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=40)
+         Iterations: PART
+         ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=40)
+               Index Cond: (col1 = $1)
+               Selected Partitions:  PART
+(7 rows)
+
+execute p1022(0,null);
+ col1 | col2 |    col3     
+------+------+-------------
+    0 |   -1 | test_update
+    0 |   -1 | test_update
+    0 |    1 | test
+    0 |    2 | test
+    0 |    3 | test
+    0 |    4 | test
+    0 |    5 | test
+    0 |    6 | test
+    0 |    7 | test
+    0 |    8 | test
+    0 |    9 | test
+    0 |   10 | test
+    0 |   10 | aaaaaaa
+    0 |   11 | test
+    0 |   12 | test
+    0 |   13 | test
+    0 |   14 | test
+    0 |   15 | test
+    0 |   16 | test
+    0 |   17 | test
+    0 |   18 | test
+    0 |   19 | test
+    0 |   20 | test
+    0 |   20 | aaaaaaa
+    0 |   21 | test
+    0 |   22 | test
+    0 |   23 | test
+    0 |   24 | test
+    0 |   25 | test
+    0 |   26 | test
+    0 |   27 | test
+    0 |   28 | test
+    0 |   29 | test
+    0 |   30 | test
+    0 |   30 | aaaaaaa
+    0 |   31 | test
+    0 |   32 | test
+    0 |   33 | test
+    0 |   34 | test
+    0 |   35 | test
+    0 |   36 | test
+    0 |   37 | test
+    0 |   38 | test
+    0 |   39 | test
+    0 |   40 | test
+    0 |   40 | aaaaaaa
+    0 |   41 | test
+    0 |   42 | test
+    0 |   43 | test
+    0 |   44 | test
+    0 |   45 | test
+    0 |   46 | test
+    0 |   47 | test
+    0 |   48 | test
+    0 |   49 | test
+    0 |   50 | test
+    0 |   50 | aaaaaaa
+    0 |   51 | test
+    0 |   52 | test
+    0 |   53 | test
+    0 |   54 | test
+    0 |   55 | test
+    0 |   56 | test
+    0 |   57 | test
+    0 |   58 | test
+    0 |   59 | test
+    0 |   60 | test
+    0 |   60 | aaaaaaa
+    0 |   61 | test
+    0 |   62 | test
+    0 |   63 | test
+    0 |   64 | test
+    0 |   65 | test
+    0 |   66 | test
+    0 |   67 | test
+    0 |   68 | test
+    0 |   69 | test
+    0 |   70 | test
+    0 |   70 | aaaaaaa
+    0 |   71 | test
+    0 |   72 | test
+    0 |   73 | test
+    0 |   74 | test
+    0 |   75 | test
+    0 |   76 | test
+    0 |   77 | test
+    0 |   78 | test
+    0 |   79 | test
+    0 |   80 | test
+    0 |   80 | aaaaaaa
+    0 |   81 | test
+    0 |   82 | test
+    0 |   83 | test
+    0 |   84 | test
+    0 |   85 | test
+    0 |   86 | test
+    0 |   87 | test
+    0 |   88 | test
+    0 |   89 | test
+    0 |   90 | test
+    0 |   90 | aaaaaaa
+    0 |   91 | test
+    0 |   92 | test
+    0 |   93 | test
+    0 |   94 | test
+    0 |   95 | test
+    0 |   96 | test
+    0 |   97 | test
+    0 |   98 | test
+    0 |   99 | test
+    0 |  100 | test
+    0 |  100 | aaaaaaa
+(112 rows)
+
+prepare p1023 as select * from  test_bypass_sql_partition where col1=$1 limit $2 offset $3;
+explain execute p1023(0,3,2);
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used limit grammar with a non-constant value.
+ Limit  (cost=4.06..8.12 rows=1 width=40)
+   ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=40)
+         Iterations: PART
+         ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=40)
+               Index Cond: (col1 = $1)
+               Selected Partitions:  PART
+(7 rows)
+
+execute p1023(0,3,2);
+ col1 | col2 | col3 
+------+------+------
+    0 |    1 | test
+    0 |    2 | test
+    0 |    3 | test
+(3 rows)
+
+prepare p1026 as select * from  test_bypass_sql_partition where col1=$1 for update limit $2;
+prepare p1027 as select * from  test_bypass_sql_partition where col1=$1 for update limit $2 offset $3;
+explain execute p1026(0,3);
+                                                                 QUERY PLAN                                                                 
+--------------------------------------------------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used limit grammar with a non-constant value.
+ Limit  (cost=0.00..4.07 rows=1 width=50)
+   ->  LockRows  (cost=0.00..24.42 rows=6 width=50)
+         ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=50)
+               Iterations: PART
+               ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=50)
+                     Index Cond: (col1 = $1)
+                     Selected Partitions:  PART
+(8 rows)
+
+execute p1026(0,3);
+ col1 | col2 |    col3     
+------+------+-------------
+    0 |   -1 | test_update
+    0 |   -1 | test_update
+    0 |    1 | test
+(3 rows)
+
+explain execute p1027(0,3,2);
+                                                                 QUERY PLAN                                                                 
+--------------------------------------------------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used limit grammar with a non-constant value.
+ Limit  (cost=4.07..8.14 rows=1 width=50)
+   ->  LockRows  (cost=0.00..24.42 rows=6 width=50)
+         ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=50)
+               Iterations: PART
+               ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=50)
+                     Index Cond: (col1 = $1)
+                     Selected Partitions:  PART
+(8 rows)
+
+execute p1027(0,3,2);
+ col1 | col2 | col3 
+------+------+------
+    0 |    1 | test
+    0 |    2 | test
+    0 |    3 | test
+(3 rows)
+
+prepare p103 as select col1,col2 from test_bypass_sql_partition where col2=$1 order by col1;
+execute p103 (2);
+ col1 | col2 
+------+------
+    0 |    2
+    1 |    2
+(2 rows)
+
+prepare p105 as select col1,col2 from test_bypass_sql_partition where col1<$1 order by col1 limit 2;
+execute p105 (5);
+ col1 | col2 
+------+------
+   -3 |   10
+   -1 |  111
+(2 rows)
+
+prepare p1051 as select col1,col2 from test_bypass_sql_partition where col1<$1 and col1>$2 order by col1 limit 3;
+execute p1051(5,3);
+ col1 | col2 
+------+------
+    4 |    0
+    4 |   10
+    4 |   20
+(3 rows)
+
+prepare p106 as select col1,col2 from test_bypass_sql_partition where col1>$1 and col2>$2 order by col1 limit 3;
+execute p106 (0,1);
+ col1 | col2 
+------+------
+    1 |    2
+    1 |   10
+    1 |   20
+(3 rows)
+
+
+--bypass
+prepare p17 as select * from test_bypass_sql_partition where col1=$1 and col2=$2 for update;
+execute p17 (3,3);
+ col1 | col2 | col3 
+------+------+------
+(0 rows)
+
+prepare p18 as update test_bypass_sql_partition set col2=$1*$2  where col1=$3 and col2=$4;
+explain execute p18(3,7,3,3);
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Update on test_bypass_sql_partition  (cost=0.00..8.28 rows=1 width=46)
+   ->  Partition Iterator  (cost=0.00..8.28 rows=1 width=46)
+         Iterations: PART
+         ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..8.27 rows=1 width=46)
+               Index Cond: ((col1 = $3) AND (col2 = $4))
+               Selected Partitions:  PART
+(7 rows)
+
+execute p18(3,7,3,3);
+prepare p111 as select col1,col2 from test_bypass_sql_partition where col1>10 and col1<20 order by col1 desc;
+execute p111;
+ col1 | col2 
+------+------
+   19 |  100
+   19 |   90
+   19 |   80
+   19 |   70
+   19 |   60
+   19 |   50
+   19 |   40
+   19 |   30
+   19 |   20
+   19 |   10
+   19 |    0
+   18 |  100
+   18 |   90
+   18 |   80
+   18 |   70
+   18 |   60
+   18 |   50
+   18 |   40
+   18 |   30
+   18 |   20
+   18 |   10
+   18 |    0
+   17 |  100
+   17 |   90
+   17 |   80
+   17 |   70
+   17 |   60
+   17 |   50
+   17 |   40
+   17 |   30
+   17 |   20
+   17 |   10
+   17 |    0
+   16 |  100
+   16 |   90
+   16 |   80
+   16 |   70
+   16 |   60
+   16 |   50
+   16 |   40
+   16 |   30
+   16 |   20
+   16 |   10
+   16 |    0
+   15 |  100
+   15 |   90
+   15 |   80
+   15 |   70
+   15 |   60
+   15 |   50
+   15 |   40
+   15 |   30
+   15 |   20
+   15 |   10
+   15 |    0
+   14 |  100
+   14 |   90
+   14 |   80
+   14 |   70
+   14 |   60
+   14 |   50
+   14 |   40
+   14 |   30
+   14 |   20
+   14 |   10
+   14 |    0
+   13 |  100
+   13 |   90
+   13 |   80
+   13 |   70
+   13 |   60
+   13 |   50
+   13 |   40
+   13 |   30
+   13 |   20
+   13 |   10
+   13 |    0
+   12 |  100
+   12 |   90
+   12 |   80
+   12 |   70
+   12 |   60
+   12 |   50
+   12 |   40
+   12 |   30
+   12 |   20
+   12 |   12
+   12 |   10
+   12 |    0
+   11 |  100
+   11 |   90
+   11 |   80
+   11 |   70
+   11 |   60
+   11 |   50
+   11 |   40
+   11 |   30
+   11 |   20
+   11 |   10
+   11 |    0
+(100 rows)
+
+prepare p112 as select col1,col2 from test_bypass_sql_partition where col1>10 and col1<20 order by col1 limit 10;
+execute p112;
+ col1 | col2 
+------+------
+   11 |    0
+   11 |   10
+   11 |   20
+   11 |   30
+   11 |   40
+   11 |   50
+   11 |   60
+   11 |   70
+   11 |   80
+   11 |   90
+(10 rows)
+
+--nobypass
+prepare p181 as update test_bypass_sql_partition set col2= $1 where col1 is null;
+explain execute p181(111);
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because the partition key is not in the parameters.
+ Update on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=46)
+   ->  Partition Iterator  (cost=0.00..24.36 rows=6 width=46)
+         Iterations: 0
+         ->  Partitioned Index Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=46)
+               Index Cond: (col1 IS NULL)
+               Selected Partitions:  NONE
+(7 rows)
+
+execute p181(111);
+
+prepare p191 as select * from test_bypass_sql_partition where col1 is null  and col2 is null;
+prepare p192 as delete from  test_bypass_sql_partition where col1 is null  and col2 is null;
+execute p191;
+ col1 | col2 | col3 
+------+------+------
+(0 rows)
+
+execute p192;
+
+--error
+execute p11(null,null,'test_null');
+ERROR:  inserted partition key does not map to any table partition
+--bypass through index only scan
+prepare p11301 as select col1,col2 from test_bypass_sql_partition where col1 = $1 order by col1,col2 desc;
+explain execute p11301 (2);
+                                                                 QUERY PLAN                                                                  
+---------------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Partition Iterator  (cost=0.00..24.36 rows=6 width=8)
+   Iterations: PART
+   ->  Partitioned Index Only Scan Backward using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=8)
+         Index Cond: (col1 = $1)
+         Selected Partitions:  PART
+(6 rows)
+
+execute p11301 (2);
+ col1 | col2 
+------+------
+    2 |  100
+    2 |   90
+    2 |   80
+    2 |   70
+    2 |   60
+    2 |   50
+    2 |   40
+    2 |   30
+    2 |   20
+    2 |   10
+    2 |    0
+(11 rows)
+
+prepare p11401 as select col1,col2 from test_bypass_sql_partition where col1 = $1 order by col1,col2;
+explain execute p11401 (2);
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Partition Iterator  (cost=0.00..24.36 rows=6 width=8)
+   Iterations: PART
+   ->  Partitioned Index Only Scan using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=8)
+         Index Cond: (col1 = $1)
+         Selected Partitions:  PART
+(6 rows)
+
+execute p11401 (2);
+ col1 | col2 
+------+------
+    2 |    0
+    2 |   10
+    2 |   20
+    2 |   30
+    2 |   40
+    2 |   50
+    2 |   60
+    2 |   70
+    2 |   80
+    2 |   90
+    2 |  100
+(11 rows)
+
+set enable_indexonlyscan=off;
+explain execute p11301 (2);
+                                                                 QUERY PLAN                                                                  
+---------------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Partition Iterator  (cost=0.00..24.36 rows=6 width=8)
+   Iterations: PART
+   ->  Partitioned Index Only Scan Backward using itest_bypass_sql_partition on test_bypass_sql_partition  (cost=0.00..24.36 rows=6 width=8)
+         Index Cond: (col1 = $1)
+         Selected Partitions:  PART
+(6 rows)
+
+execute p11401 (2);
+ col1 | col2 
+------+------
+    2 |    0
+    2 |   10
+    2 |   20
+    2 |   30
+    2 |   40
+    2 |   50
+    2 |   60
+    2 |   70
+    2 |   80
+    2 |   90
+    2 |  100
+(11 rows)
+
+reset enable_indexonlyscan;
+--nobypass
+prepare p120 as insert into test_bypass_sql_partition select * from test_bypass_sql_partition where col1>$1 and col1<$2;
+execute p120 (0, 9);
+--not bypass
+prepare p115 as select * from test_bypass_sql_partition order by col2 desc;
+explain execute p115;
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
+ Sort  (cost=1000000002226.45..1000000002229.37 rows=1167 width=40)
+   Sort Key: col2 DESC
+   ->  Partition Iterator  (cost=10000000000.00..1000000002167.00 rows=1167 width=40)
+         Iterations: 8
+         ->  Partitioned Seq Scan on test_bypass_sql_partition  (cost=10000000000.00..1000000002167.00 rows=1167 width=40)
+               Selected Partitions:  1..8
+(7 rows)
+
+execute p115;
+ col1 | col2 |     col3     
+------+------+--------------
+   -1 |  111 | test_update2
+   14 |  100 | aaaaaaa
+    2 |  100 | aaaaaaa
+   49 |  100 | aaaaaaa
+   51 |  100 | aaaaaaa
+   63 |  100 | aaaaaaa
+   56 |  100 | aaaaaaa
+    7 |  100 | aaaaaaa
+    9 |  100 | aaaaaaa
+   40 |  100 | aaaaaaa
+   59 |  100 | aaaaaaa
+   60 |  100 | aaaaaaa
+    4 |  100 | aaaaaaa
+   28 |  100 | aaaaaaa
+   30 |  100 | aaaaaaa
+    6 |  100 | aaaaaaa
+   48 |  100 | aaaaaaa
+   72 |  100 | aaaaaaa
+   46 |  100 | aaaaaaa
+   69 |  100 | aaaaaaa
+   75 |  100 | aaaaaaa
+   29 |  100 | aaaaaaa
+   12 |  100 | aaaaaaa
+   25 |  100 | aaaaaaa
+   33 |  100 | aaaaaaa
+   19 |  100 | aaaaaaa
+   78 |  100 | aaaaaaa
+    3 |  100 | aaaaaaa
+    5 |  100 | aaaaaaa
+   74 |  100 | aaaaaaa
+   65 |  100 | aaaaaaa
+   41 |  100 | aaaaaaa
+    7 |  100 | aaaaaaa
+   61 |  100 | aaaaaaa
+   22 |  100 | aaaaaaa
+    4 |  100 | aaaaaaa
+   36 |  100 | aaaaaaa
+   42 |  100 | aaaaaaa
+   70 |  100 | aaaaaaa
+   15 |  100 | aaaaaaa
+   57 |  100 | aaaaaaa
+   39 |  100 | aaaaaaa
+   54 |  100 | aaaaaaa
+    0 |  100 | aaaaaaa
+   47 |  100 | aaaaaaa
+   43 |  100 | aaaaaaa
+   58 |  100 | aaaaaaa
+    3 |  100 | aaaaaaa
+   77 |  100 | aaaaaaa
+   31 |  100 | aaaaaaa
+   67 |  100 | aaaaaaa
+   68 |  100 | aaaaaaa
+   11 |  100 | aaaaaaa
+   55 |  100 | aaaaaaa
+   34 |  100 | aaaaaaa
+   26 |  100 | aaaaaaa
+   45 |  100 | aaaaaaa
+    2 |  100 | aaaaaaa
+   18 |  100 | aaaaaaa
+   17 |  100 | aaaaaaa
+   37 |  100 | aaaaaaa
+    6 |  100 | aaaaaaa
+   71 |  100 | aaaaaaa
+   27 |  100 | aaaaaaa
+   53 |  100 | aaaaaaa
+    1 |  100 | aaaaaaa
+   35 |  100 | aaaaaaa
+   52 |  100 | aaaaaaa
+   32 |  100 | aaaaaaa
+   16 |  100 | aaaaaaa
+   66 |  100 | aaaaaaa
+   21 |  100 | aaaaaaa
+   76 |  100 | aaaaaaa
+   62 |  100 | aaaaaaa
+   64 |  100 | aaaaaaa
+   10 |  100 | aaaaaaa
+    8 |  100 | aaaaaaa
+   44 |  100 | aaaaaaa
+   13 |  100 | aaaaaaa
+    5 |  100 | aaaaaaa
+   20 |  100 | aaaaaaa
+   50 |  100 | aaaaaaa
+   38 |  100 | aaaaaaa
+   79 |  100 | aaaaaaa
+   73 |  100 | aaaaaaa
+   24 |  100 | aaaaaaa
+    8 |  100 | aaaaaaa
+    0 |  100 | test
+   23 |  100 | aaaaaaa
+    1 |  100 | aaaaaaa
+    0 |   99 | test
+    0 |   98 | test
+    0 |   97 | test
+    0 |   96 | test
+    0 |   95 | test
+    0 |   94 | test
+    0 |   93 | test
+    0 |   92 | test
+    0 |   91 | test
+   67 |   90 | aaaaaaa
+    5 |   90 | aaaaaaa
+   18 |   90 | aaaaaaa
+   58 |   90 | aaaaaaa
+   41 |   90 | aaaaaaa
+   60 |   90 | aaaaaaa
+   15 |   90 | aaaaaaa
+   49 |   90 | aaaaaaa
+   63 |   90 | aaaaaaa
+   46 |   90 | aaaaaaa
+   44 |   90 | aaaaaaa
+   10 |   90 | aaaaaaa
+   12 |   90 | aaaaaaa
+   43 |   90 | aaaaaaa
+   70 |   90 | aaaaaaa
+   40 |   90 | aaaaaaa
+   50 |   90 | aaaaaaa
+   47 |   90 | aaaaaaa
+   13 |   90 | aaaaaaa
+    0 |   90 | aaaaaaa
+   66 |   90 | aaaaaaa
+   53 |   90 | aaaaaaa
+   16 |   90 | aaaaaaa
+   20 |   90 | aaaaaaa
+   19 |   90 | aaaaaaa
+   69 |   90 | aaaaaaa
+   68 |   90 | aaaaaaa
+   48 |   90 | aaaaaaa
+   55 |   90 | aaaaaaa
+   28 |   90 | aaaaaaa
+   45 |   90 | aaaaaaa
+    2 |   90 | aaaaaaa
+   73 |   90 | aaaaaaa
+   11 |   90 | aaaaaaa
+    3 |   90 | aaaaaaa
+   52 |   90 | aaaaaaa
+   14 |   90 | aaaaaaa
+   25 |   90 | aaaaaaa
+   42 |   90 | aaaaaaa
+   65 |   90 | aaaaaaa
+   17 |   90 | aaaaaaa
+   76 |   90 | aaaaaaa
+    9 |   90 | aaaaaaa
+   34 |   90 | aaaaaaa
+   22 |   90 | aaaaaaa
+    7 |   90 | aaaaaaa
+   62 |   90 | aaaaaaa
+    8 |   90 | aaaaaaa
+    4 |   90 | aaaaaaa
+    1 |   90 | aaaaaaa
+   37 |   90 | aaaaaaa
+   79 |   90 | aaaaaaa
+   61 |   90 | aaaaaaa
+    7 |   90 | aaaaaaa
+   27 |   90 | aaaaaaa
+    8 |   90 | aaaaaaa
+    6 |   90 | aaaaaaa
+   71 |   90 | aaaaaaa
+   24 |   90 | aaaaaaa
+   74 |   90 | aaaaaaa
+   78 |   90 | aaaaaaa
+   32 |   90 | aaaaaaa
+   77 |   90 | aaaaaaa
+    5 |   90 | aaaaaaa
+   64 |   90 | aaaaaaa
+   21 |   90 | aaaaaaa
+   35 |   90 | aaaaaaa
+    4 |   90 | aaaaaaa
+   38 |   90 | aaaaaaa
+   56 |   90 | aaaaaaa
+    6 |   90 | aaaaaaa
+   57 |   90 | aaaaaaa
+    3 |   90 | aaaaaaa
+   30 |   90 | aaaaaaa
+   54 |   90 | aaaaaaa
+   33 |   90 | aaaaaaa
+   29 |   90 | aaaaaaa
+    2 |   90 | aaaaaaa
+   51 |   90 | aaaaaaa
+   36 |   90 | aaaaaaa
+   26 |   90 | aaaaaaa
+   39 |   90 | aaaaaaa
+    1 |   90 | aaaaaaa
+   31 |   90 | aaaaaaa
+   23 |   90 | aaaaaaa
+   75 |   90 | aaaaaaa
+   72 |   90 | aaaaaaa
+   59 |   90 | aaaaaaa
+    0 |   90 | test
+    0 |   89 | test
+    0 |   88 | test
+    0 |   87 | test
+    0 |   86 | test
+    0 |   85 | test
+    0 |   84 | test
+    0 |   83 | test
+    0 |   82 | test
+    0 |   81 | test
+    5 |   80 | aaaaaaa
+    0 |   80 | test
+   71 |   80 | aaaaaaa
+   58 |   80 | aaaaaaa
+   30 |   80 | aaaaaaa
+   22 |   80 | aaaaaaa
+    1 |   80 | aaaaaaa
+   38 |   80 | aaaaaaa
+   74 |   80 | aaaaaaa
+   35 |   80 | aaaaaaa
+   25 |   80 | aaaaaaa
+    2 |   80 | aaaaaaa
+   50 |   80 | aaaaaaa
+   32 |   80 | aaaaaaa
+   53 |   80 | aaaaaaa
+   28 |   80 | aaaaaaa
+   55 |   80 | aaaaaaa
+    3 |   80 | aaaaaaa
+   66 |   80 | aaaaaaa
+   37 |   80 | aaaaaaa
+    4 |   80 | aaaaaaa
+   34 |   80 | aaaaaaa
+   56 |   80 | aaaaaaa
+   79 |   80 | aaaaaaa
+   20 |   80 | aaaaaaa
+   63 |   80 | aaaaaaa
+   31 |   80 | aaaaaaa
+    5 |   80 | aaaaaaa
+   76 |   80 | aaaaaaa
+   69 |   80 | aaaaaaa
+   73 |   80 | aaaaaaa
+   70 |   80 | aaaaaaa
+   23 |   80 | aaaaaaa
+    6 |   80 | aaaaaaa
+   59 |   80 | aaaaaaa
+    7 |   80 | aaaaaaa
+   60 |   80 | aaaaaaa
+   77 |   80 | aaaaaaa
+   26 |   80 | aaaaaaa
+    7 |   80 | aaaaaaa
+   39 |   80 | aaaaaaa
+   36 |   80 | aaaaaaa
+   29 |   80 | aaaaaaa
+   78 |   80 | aaaaaaa
+    0 |   80 | aaaaaaa
+    8 |   80 | aaaaaaa
+    3 |   80 | aaaaaaa
+   33 |   80 | aaaaaaa
+   61 |   80 | aaaaaaa
+   75 |   80 | aaaaaaa
+    6 |   80 | aaaaaaa
+   21 |   80 | aaaaaaa
+   19 |   80 | aaaaaaa
+    2 |   80 | aaaaaaa
+   68 |   80 | aaaaaaa
+   16 |   80 | aaaaaaa
+    9 |   80 | aaaaaaa
+   41 |   80 | aaaaaaa
+    8 |   80 | aaaaaaa
+   13 |   80 | aaaaaaa
+   51 |   80 | aaaaaaa
+   64 |   80 | aaaaaaa
+   24 |   80 | aaaaaaa
+   10 |   80 | aaaaaaa
+   72 |   80 | aaaaaaa
+    1 |   80 | aaaaaaa
+   44 |   80 | aaaaaaa
+   27 |   80 | aaaaaaa
+   47 |   80 | aaaaaaa
+   67 |   80 | aaaaaaa
+   54 |   80 | aaaaaaa
+   18 |   80 | aaaaaaa
+   49 |   80 | aaaaaaa
+   65 |   80 | aaaaaaa
+   15 |   80 | aaaaaaa
+   52 |   80 | aaaaaaa
+   12 |   80 | aaaaaaa
+   46 |   80 | aaaaaaa
+   43 |   80 | aaaaaaa
+   42 |   80 | aaaaaaa
+   11 |   80 | aaaaaaa
+   62 |   80 | aaaaaaa
+   45 |   80 | aaaaaaa
+    4 |   80 | aaaaaaa
+   40 |   80 | aaaaaaa
+   48 |   80 | aaaaaaa
+   14 |   80 | aaaaaaa
+   57 |   80 | aaaaaaa
+   17 |   80 | aaaaaaa
+    0 |   79 | test
+    0 |   78 | test
+    0 |   77 | test
+    0 |   76 | test
+    0 |   75 | test
+    0 |   74 | test
+    0 |   73 | test
+    0 |   72 | test
+    0 |   71 | test
+   28 |   70 | aaaaaaa
+   69 |   70 | aaaaaaa
+   74 |   70 | aaaaaaa
+   79 |   70 | aaaaaaa
+    8 |   70 | aaaaaaa
+   66 |   70 | aaaaaaa
+   76 |   70 | aaaaaaa
+    0 |   70 | test
+   77 |   70 | aaaaaaa
+   25 |   70 | aaaaaaa
+    7 |   70 | aaaaaaa
+   19 |   70 | aaaaaaa
+   43 |   70 | aaaaaaa
+   35 |   70 | aaaaaaa
+   42 |   70 | aaaaaaa
+   26 |   70 | aaaaaaa
+   61 |   70 | aaaaaaa
+   23 |   70 | aaaaaaa
+   58 |   70 | aaaaaaa
+   38 |   70 | aaaaaaa
+   50 |   70 | aaaaaaa
+   51 |   70 | aaaaaaa
+    2 |   70 | aaaaaaa
+   70 |   70 | aaaaaaa
+   32 |   70 | aaaaaaa
+   57 |   70 | aaaaaaa
+   46 |   70 | aaaaaaa
+   29 |   70 | aaaaaaa
+   21 |   70 | aaaaaaa
+   54 |   70 | aaaaaaa
+    1 |   70 | aaaaaaa
+   60 |   70 | aaaaaaa
+   37 |   70 | aaaaaaa
+    1 |   70 | aaaaaaa
+   44 |   70 | aaaaaaa
+   73 |   70 | aaaaaaa
+   34 |   70 | aaaaaaa
+    4 |   70 | aaaaaaa
+   17 |   70 | aaaaaaa
+   47 |   70 | aaaaaaa
+   24 |   70 | aaaaaaa
+    2 |   70 | aaaaaaa
+   18 |   70 | aaaaaaa
+   48 |   70 | aaaaaaa
+   31 |   70 | aaaaaaa
+    9 |   70 | aaaaaaa
+    5 |   70 | aaaaaaa
+   64 |   70 | aaaaaaa
+   16 |   70 | aaaaaaa
+   20 |   70 | aaaaaaa
+   27 |   70 | aaaaaaa
+   67 |   70 | aaaaaaa
+    3 |   70 | aaaaaaa
+   56 |   70 | aaaaaaa
+   52 |   70 | aaaaaaa
+   39 |   70 | aaaaaaa
+    6 |   70 | aaaaaaa
+   15 |   70 | aaaaaaa
+   65 |   70 | aaaaaaa
+   36 |   70 | aaaaaaa
+    0 |   70 | aaaaaaa
+   33 |   70 | aaaaaaa
+   62 |   70 | aaaaaaa
+    4 |   70 | aaaaaaa
+   41 |   70 | aaaaaaa
+    8 |   70 | aaaaaaa
+   40 |   70 | aaaaaaa
+   78 |   70 | aaaaaaa
+   14 |   70 | aaaaaaa
+   59 |   70 | aaaaaaa
+   55 |   70 | aaaaaaa
+   12 |   70 | aaaaaaa
+   30 |   70 | aaaaaaa
+   10 |   70 | aaaaaaa
+    5 |   70 | aaaaaaa
+   71 |   70 | aaaaaaa
+   75 |   70 | aaaaaaa
+   49 |   70 | aaaaaaa
+   53 |   70 | aaaaaaa
+   68 |   70 | aaaaaaa
+   72 |   70 | aaaaaaa
+   63 |   70 | aaaaaaa
+    3 |   70 | aaaaaaa
+    7 |   70 | aaaaaaa
+   22 |   70 | aaaaaaa
+    6 |   70 | aaaaaaa
+   45 |   70 | aaaaaaa
+   11 |   70 | aaaaaaa
+   13 |   70 | aaaaaaa
+    0 |   69 | test
+    0 |   68 | test
+    0 |   67 | test
+    0 |   66 | test
+    0 |   65 | test
+    0 |   64 | test
+    0 |   63 | test
+    0 |   62 | test
+    0 |   61 | test
+   29 |   60 | aaaaaaa
+   42 |   60 | aaaaaaa
+   51 |   60 | aaaaaaa
+    3 |   60 | aaaaaaa
+    8 |   60 | aaaaaaa
+   30 |   60 | aaaaaaa
+   50 |   60 | aaaaaaa
+   26 |   60 | aaaaaaa
+   70 |   60 | aaaaaaa
+   41 |   60 | aaaaaaa
+   25 |   60 | aaaaaaa
+   23 |   60 | aaaaaaa
+    2 |   60 | aaaaaaa
+   19 |   60 | aaaaaaa
+   28 |   60 | aaaaaaa
+    5 |   60 | aaaaaaa
+   45 |   60 | aaaaaaa
+    2 |   60 | aaaaaaa
+   32 |   60 | aaaaaaa
+   35 |   60 | aaaaaaa
+   38 |   60 | aaaaaaa
+   58 |   60 | aaaaaaa
+   64 |   60 | aaaaaaa
+    4 |   60 | aaaaaaa
+   61 |   60 | aaaaaaa
+   40 |   60 | aaaaaaa
+   72 |   60 | aaaaaaa
+    1 |   60 | aaaaaaa
+   53 |   60 | aaaaaaa
+   20 |   60 | aaaaaaa
+   15 |   60 | aaaaaaa
+    3 |   60 | aaaaaaa
+   33 |   60 | aaaaaaa
+    7 |   60 | aaaaaaa
+    4 |   60 | aaaaaaa
+    1 |   60 | aaaaaaa
+   49 |   60 | aaaaaaa
+   56 |   60 | aaaaaaa
+    0 |   60 | test
+   52 |   60 | aaaaaaa
+   59 |   60 | aaaaaaa
+   36 |   60 | aaaaaaa
+    6 |   60 | aaaaaaa
+   22 |   60 | aaaaaaa
+   39 |   60 | aaaaaaa
+   12 |   60 | aaaaaaa
+   62 |   60 | aaaaaaa
+   11 |   60 | aaaaaaa
+   68 |   60 | aaaaaaa
+   14 |   60 | aaaaaaa
+   44 |   60 | aaaaaaa
+   66 |   60 | aaaaaaa
+   31 |   60 | aaaaaaa
+   17 |   60 | aaaaaaa
+   60 |   60 | aaaaaaa
+   73 |   60 | aaaaaaa
+   10 |   60 | aaaaaaa
+   34 |   60 | aaaaaaa
+   69 |   60 | aaaaaaa
+    8 |   60 | aaaaaaa
+    9 |   60 | aaaaaaa
+   46 |   60 | aaaaaaa
+   48 |   60 | aaaaaaa
+   43 |   60 | aaaaaaa
+   76 |   60 | aaaaaaa
+   37 |   60 | aaaaaaa
+   78 |   60 | aaaaaaa
+   57 |   60 | aaaaaaa
+   65 |   60 | aaaaaaa
+   27 |   60 | aaaaaaa
+    0 |   60 | aaaaaaa
+   79 |   60 | aaaaaaa
+   13 |   60 | aaaaaaa
+   18 |   60 | aaaaaaa
+   71 |   60 | aaaaaaa
+   47 |   60 | aaaaaaa
+   24 |   60 | aaaaaaa
+    7 |   60 | aaaaaaa
+   75 |   60 | aaaaaaa
+   74 |   60 | aaaaaaa
+   54 |   60 | aaaaaaa
+   63 |   60 | aaaaaaa
+   55 |   60 | aaaaaaa
+   21 |   60 | aaaaaaa
+    6 |   60 | aaaaaaa
+   16 |   60 | aaaaaaa
+   77 |   60 | aaaaaaa
+   67 |   60 | aaaaaaa
+    5 |   60 | aaaaaaa
+    0 |   59 | test
+    0 |   58 | test
+    0 |   57 | test
+    0 |   56 | test
+    0 |   55 | test
+    0 |   54 | test
+    0 |   53 | test
+    0 |   52 | test
+    0 |   51 | test
+   48 |   50 | aaaaaaa
+   14 |   50 | aaaaaaa
+   11 |   50 | aaaaaaa
+   17 |   50 | aaaaaaa
+   67 |   50 | aaaaaaa
+   74 |   50 | aaaaaaa
+   64 |   50 | aaaaaaa
+   19 |   50 | aaaaaaa
+   12 |   50 | aaaaaaa
+   62 |   50 | aaaaaaa
+   27 |   50 | aaaaaaa
+   15 |   50 | aaaaaaa
+   24 |   50 | aaaaaaa
+   18 |   50 | aaaaaaa
+   21 |   50 | aaaaaaa
+   61 |   50 | aaaaaaa
+   10 |   50 | aaaaaaa
+   13 |   50 | aaaaaaa
+   16 |   50 | aaaaaaa
+   65 |   50 | aaaaaaa
+   29 |   50 | aaaaaaa
+    8 |   50 | aaaaaaa
+   68 |   50 | aaaaaaa
+   26 |   50 | aaaaaaa
+   69 |   50 | aaaaaaa
+    5 |   50 | aaaaaaa
+   23 |   50 | aaaaaaa
+    7 |   50 | aaaaaaa
+   66 |   50 | aaaaaaa
+   20 |   50 | aaaaaaa
+    6 |   50 | aaaaaaa
+    5 |   50 | aaaaaaa
+   63 |   50 | aaaaaaa
+   60 |   50 | aaaaaaa
+    7 |   50 | aaaaaaa
+   28 |   50 | aaaaaaa
+    4 |   50 | aaaaaaa
+   25 |   50 | aaaaaaa
+    3 |   50 | aaaaaaa
+   71 |   50 | aaaaaaa
+   22 |   50 | aaaaaaa
+    2 |   50 | aaaaaaa
+    1 |   50 | aaaaaaa
+   52 |   50 | aaaaaaa
+   79 |   50 | aaaaaaa
+   77 |   50 | aaaaaaa
+   55 |   50 | aaaaaaa
+   38 |   50 | aaaaaaa
+   58 |   50 | aaaaaaa
+   35 |   50 | aaaaaaa
+   32 |   50 | aaaaaaa
+    0 |   50 | test
+    4 |   50 | aaaaaaa
+   50 |   50 | aaaaaaa
+   37 |   50 | aaaaaaa
+   34 |   50 | aaaaaaa
+   31 |   50 | aaaaaaa
+    2 |   50 | aaaaaaa
+   76 |   50 | aaaaaaa
+   73 |   50 | aaaaaaa
+   70 |   50 | aaaaaaa
+   53 |   50 | aaaaaaa
+   78 |   50 | aaaaaaa
+   39 |   50 | aaaaaaa
+   56 |   50 | aaaaaaa
+   75 |   50 | aaaaaaa
+   36 |   50 | aaaaaaa
+    8 |   50 | aaaaaaa
+   33 |   50 | aaaaaaa
+   72 |   50 | aaaaaaa
+   30 |   50 | aaaaaaa
+    0 |   50 | aaaaaaa
+    3 |   50 | aaaaaaa
+   59 |   50 | aaaaaaa
+    6 |   50 | aaaaaaa
+    9 |   50 | aaaaaaa
+    1 |   50 | aaaaaaa
+   49 |   50 | aaaaaaa
+   41 |   50 | aaaaaaa
+   46 |   50 | aaaaaaa
+   44 |   50 | aaaaaaa
+   47 |   50 | aaaaaaa
+   43 |   50 | aaaaaaa
+   40 |   50 | aaaaaaa
+   57 |   50 | aaaaaaa
+   51 |   50 | aaaaaaa
+   42 |   50 | aaaaaaa
+   45 |   50 | aaaaaaa
+   54 |   50 | aaaaaaa
+    0 |   49 | test
+    0 |   48 | test
+    0 |   47 | test
+    0 |   46 | test
+    0 |   45 | test
+    0 |   44 | test
+    0 |   43 | test
+    0 |   42 | test
+    0 |   41 | test
+   41 |   40 | aaaaaaa
+    6 |   40 | aaaaaaa
+   72 |   40 | aaaaaaa
+   65 |   40 | aaaaaaa
+   43 |   40 | aaaaaaa
+    7 |   40 | aaaaaaa
+   18 |   40 | aaaaaaa
+   22 |   40 | aaaaaaa
+    9 |   40 | aaaaaaa
+   52 |   40 | aaaaaaa
+   77 |   40 | aaaaaaa
+   42 |   40 | aaaaaaa
+   38 |   40 | aaaaaaa
+   47 |   40 | aaaaaaa
+   68 |   40 | aaaaaaa
+   74 |   40 | aaaaaaa
+   25 |   40 | aaaaaaa
+   63 |   40 | aaaaaaa
+   46 |   40 | aaaaaaa
+   35 |   40 | aaaaaaa
+   79 |   40 | aaaaaaa
+    8 |   40 | aaaaaaa
+   67 |   40 | aaaaaaa
+   28 |   40 | aaaaaaa
+   55 |   40 | aaaaaaa
+   59 |   40 | aaaaaaa
+   32 |   40 | aaaaaaa
+   49 |   40 | aaaaaaa
+   64 |   40 | aaaaaaa
+    7 |   40 | aaaaaaa
+    1 |   40 | aaaaaaa
+   71 |   40 | aaaaaaa
+   19 |   40 | aaaaaaa
+   15 |   40 | aaaaaaa
+   44 |   40 | aaaaaaa
+   12 |   40 | aaaaaaa
+   20 |   40 | aaaaaaa
+   66 |   40 | aaaaaaa
+   60 |   40 | aaaaaaa
+   56 |   40 | aaaaaaa
+   53 |   40 | aaaaaaa
+   58 |   40 | aaaaaaa
+    2 |   40 | aaaaaaa
+    0 |   40 | aaaaaaa
+   17 |   40 | aaaaaaa
+    4 |   40 | aaaaaaa
+    5 |   40 | aaaaaaa
+   23 |   40 | aaaaaaa
+   16 |   40 | aaaaaaa
+    8 |   40 | aaaaaaa
+   73 |   40 | aaaaaaa
+   13 |   40 | aaaaaaa
+   48 |   40 | aaaaaaa
+   57 |   40 | aaaaaaa
+   37 |   40 | aaaaaaa
+   34 |   40 | aaaaaaa
+   50 |   40 | aaaaaaa
+   76 |   40 | aaaaaaa
+   54 |   40 | aaaaaaa
+   29 |   40 | aaaaaaa
+   51 |   40 | aaaaaaa
+    3 |   40 | aaaaaaa
+   31 |   40 | aaaaaaa
+   14 |   40 | aaaaaaa
+   78 |   40 | aaaaaaa
+    1 |   40 | aaaaaaa
+   21 |   40 | aaaaaaa
+   70 |   40 | aaaaaaa
+    3 |   40 | aaaaaaa
+   69 |   40 | aaaaaaa
+   24 |   40 | aaaaaaa
+    2 |   40 | aaaaaaa
+   33 |   40 | aaaaaaa
+   45 |   40 | aaaaaaa
+    6 |   40 | aaaaaaa
+   30 |   40 | aaaaaaa
+   10 |   40 | aaaaaaa
+    5 |   40 | aaaaaaa
+   11 |   40 | aaaaaaa
+   75 |   40 | aaaaaaa
+   40 |   40 | aaaaaaa
+   39 |   40 | aaaaaaa
+    0 |   40 | test
+    4 |   40 | aaaaaaa
+   61 |   40 | aaaaaaa
+   27 |   40 | aaaaaaa
+   36 |   40 | aaaaaaa
+   26 |   40 | aaaaaaa
+   62 |   40 | aaaaaaa
+    0 |   39 | test
+    0 |   38 | test
+    0 |   37 | test
+    0 |   36 | test
+    0 |   35 | test
+    0 |   34 | test
+    0 |   33 | test
+   33 |   33 | test_insert3
+    0 |   32 | test
+    0 |   31 | test
+   51 |   30 | aaaaaaa
+    3 |   30 | aaaaaaa
+    0 |   30 | aaaaaaa
+    8 |   30 | aaaaaaa
+    5 |   30 | aaaaaaa
+    2 |   30 | aaaaaaa
+    7 |   30 | aaaaaaa
+    4 |   30 | aaaaaaa
+    1 |   30 | aaaaaaa
+    9 |   30 | aaaaaaa
+    6 |   30 | aaaaaaa
+    0 |   30 | test
+    1 |   30 | aaaaaaa
+    2 |   30 | aaaaaaa
+    3 |   30 | aaaaaaa
+    4 |   30 | aaaaaaa
+    5 |   30 | aaaaaaa
+    6 |   30 | aaaaaaa
+    7 |   30 | aaaaaaa
+    8 |   30 | aaaaaaa
+   14 |   30 | aaaaaaa
+   11 |   30 | aaaaaaa
+   19 |   30 | aaaaaaa
+   16 |   30 | aaaaaaa
+   13 |   30 | aaaaaaa
+   10 |   30 | aaaaaaa
+   18 |   30 | aaaaaaa
+   15 |   30 | aaaaaaa
+   12 |   30 | aaaaaaa
+   17 |   30 | aaaaaaa
+   25 |   30 | aaaaaaa
+   22 |   30 | aaaaaaa
+   27 |   30 | aaaaaaa
+   24 |   30 | aaaaaaa
+   21 |   30 | aaaaaaa
+   29 |   30 | aaaaaaa
+   26 |   30 | aaaaaaa
+   23 |   30 | aaaaaaa
+   20 |   30 | aaaaaaa
+   28 |   30 | aaaaaaa
+   36 |   30 | aaaaaaa
+   33 |   30 | aaaaaaa
+   30 |   30 | aaaaaaa
+   38 |   30 | aaaaaaa
+   35 |   30 | aaaaaaa
+   32 |   30 | aaaaaaa
+   37 |   30 | aaaaaaa
+   34 |   30 | aaaaaaa
+   31 |   30 | aaaaaaa
+   39 |   30 | aaaaaaa
+   47 |   30 | aaaaaaa
+   44 |   30 | aaaaaaa
+   41 |   30 | aaaaaaa
+   49 |   30 | aaaaaaa
+   46 |   30 | aaaaaaa
+   43 |   30 | aaaaaaa
+   40 |   30 | aaaaaaa
+   48 |   30 | aaaaaaa
+   45 |   30 | aaaaaaa
+   42 |   30 | aaaaaaa
+   58 |   30 | aaaaaaa
+   55 |   30 | aaaaaaa
+   52 |   30 | aaaaaaa
+   57 |   30 | aaaaaaa
+   54 |   30 | aaaaaaa
+   59 |   30 | aaaaaaa
+   56 |   30 | aaaaaaa
+   53 |   30 | aaaaaaa
+   50 |   30 | aaaaaaa
+   69 |   30 | aaaaaaa
+   66 |   30 | aaaaaaa
+   63 |   30 | aaaaaaa
+   60 |   30 | aaaaaaa
+   68 |   30 | aaaaaaa
+   65 |   30 | aaaaaaa
+   62 |   30 | aaaaaaa
+   67 |   30 | aaaaaaa
+   64 |   30 | aaaaaaa
+   61 |   30 | aaaaaaa
+   77 |   30 | aaaaaaa
+   74 |   30 | aaaaaaa
+   71 |   30 | aaaaaaa
+   79 |   30 | aaaaaaa
+   76 |   30 | aaaaaaa
+   73 |   30 | aaaaaaa
+   70 |   30 | aaaaaaa
+   78 |   30 | aaaaaaa
+   75 |   30 | aaaaaaa
+   72 |   30 | aaaaaaa
+    0 |   29 | test
+    0 |   28 | test
+    0 |   27 | test
+    0 |   26 | test
+    0 |   25 | test
+    0 |   24 | test
+   23 |   23 | test_insert2
+    0 |   23 | test
+   22 |   22 | 
+    0 |   22 | test
+    0 |   21 | test
+    0 |   20 | test
+   48 |   20 | aaaaaaa
+   40 |   20 | aaaaaaa
+   43 |   20 | aaaaaaa
+   59 |   20 | aaaaaaa
+   46 |   20 | aaaaaaa
+   38 |   20 | aaaaaaa
+   56 |   20 | aaaaaaa
+   53 |   20 | aaaaaaa
+   30 |   20 | aaaaaaa
+   33 |   20 | aaaaaaa
+   36 |   20 | aaaaaaa
+   50 |   20 | aaaaaaa
+   39 |   20 | aaaaaaa
+   31 |   20 | aaaaaaa
+   34 |   20 | aaaaaaa
+   37 |   20 | aaaaaaa
+   58 |   20 | aaaaaaa
+   32 |   20 | aaaaaaa
+   55 |   20 | aaaaaaa
+   77 |   20 | aaaaaaa
+   35 |   20 | aaaaaaa
+   52 |   20 | aaaaaaa
+   20 |   20 | 
+   27 |   20 | aaaaaaa
+    9 |   20 | aaaaaaa
+   22 |   20 | aaaaaaa
+   25 |   20 | aaaaaaa
+   28 |   20 | aaaaaaa
+   68 |   20 | aaaaaaa
+   20 |   20 | aaaaaaa
+   23 |   20 | aaaaaaa
+   65 |   20 | aaaaaaa
+   26 |   20 | aaaaaaa
+   62 |   20 | aaaaaaa
+   29 |   20 | aaaaaaa
+   21 |   20 | aaaaaaa
+   24 |   20 | aaaaaaa
+   16 |   20 | aaaaaaa
+   19 |   20 | aaaaaaa
+   67 |   20 | aaaaaaa
+   74 |   20 | aaaaaaa
+   11 |   20 | aaaaaaa
+   14 |   20 | aaaaaaa
+   64 |   20 | aaaaaaa
+   17 |   20 | aaaaaaa
+   61 |   20 | aaaaaaa
+    1 |   20 | aaaaaaa
+   12 |   20 | aaaaaaa
+   15 |   20 | aaaaaaa
+   18 |   20 | aaaaaaa
+   10 |   20 | aaaaaaa
+   69 |   20 | aaaaaaa
+   13 |   20 | aaaaaaa
+    8 |   20 | aaaaaaa
+   66 |   20 | aaaaaaa
+    7 |   20 | aaaaaaa
+   63 |   20 | aaaaaaa
+    4 |   20 | aaaaaaa
+    6 |   20 | aaaaaaa
+   60 |   20 | aaaaaaa
+    5 |   20 | aaaaaaa
+    4 |   20 | aaaaaaa
+    3 |   20 | aaaaaaa
+    2 |   20 | aaaaaaa
+    1 |   20 | aaaaaaa
+   79 |   20 | aaaaaaa
+   76 |   20 | aaaaaaa
+   73 |   20 | aaaaaaa
+   71 |   20 | aaaaaaa
+   70 |   20 | aaaaaaa
+    2 |   20 | aaaaaaa
+   78 |   20 | aaaaaaa
+   75 |   20 | aaaaaaa
+    7 |   20 | aaaaaaa
+   72 |   20 | aaaaaaa
+    5 |   20 | aaaaaaa
+    8 |   20 | aaaaaaa
+    0 |   20 | aaaaaaa
+    3 |   20 | aaaaaaa
+   49 |   20 | aaaaaaa
+   41 |   20 | aaaaaaa
+   44 |   20 | aaaaaaa
+   57 |   20 | aaaaaaa
+   47 |   20 | aaaaaaa
+   54 |   20 | aaaaaaa
+    6 |   20 | aaaaaaa
+   51 |   20 | aaaaaaa
+   42 |   20 | aaaaaaa
+   45 |   20 | aaaaaaa
+    0 |   19 | test
+    0 |   18 | test
+    0 |   17 | test
+    0 |   16 | test
+    0 |   15 | test
+    0 |   14 | test
+    0 |   13 | test
+    0 |   12 | test
+   12 |   12 | test_insert
+    0 |   11 | test
+   14 |   10 | aaaaaaa
+   52 |   10 | aaaaaaa
+    5 |   10 | aaaaaaa
+   17 |   10 | aaaaaaa
+   42 |   10 | aaaaaaa
+   69 |   10 | aaaaaaa
+   32 |   10 | aaaaaaa
+   15 |   10 | aaaaaaa
+   43 |   10 | aaaaaaa
+   28 |   10 | aaaaaaa
+    1 |   10 | aaaaaaa
+   35 |   10 | aaaaaaa
+   68 |   10 | aaaaaaa
+   38 |   10 | aaaaaaa
+   41 |   10 | aaaaaaa
+   47 |   10 | aaaaaaa
+   30 |   10 | aaaaaaa
+    7 |   10 | aaaaaaa
+   12 |   10 | aaaaaaa
+   33 |   10 | aaaaaaa
+   18 |   10 | aaaaaaa
+   36 |   10 | aaaaaaa
+   61 |   10 | aaaaaaa
+   25 |   10 | aaaaaaa
+   57 |   10 | aaaaaaa
+   76 |   10 | aaaaaaa
+   39 |   10 | aaaaaaa
+   65 |   10 | aaaaaaa
+   66 |   10 | aaaaaaa
+   54 |   10 | aaaaaaa
+    0 |   10 | aaaaaaa
+   31 |   10 | aaaaaaa
+    8 |   10 | aaaaaaa
+   73 |   10 | aaaaaaa
+   51 |   10 | aaaaaaa
+    9 |   10 | aaaaaaa
+   34 |   10 | aaaaaaa
+   46 |   10 | aaaaaaa
+   55 |   10 | aaaaaaa
+   71 |   10 | aaaaaaa
+   19 |   10 | aaaaaaa
+   72 |   10 | aaaaaaa
+   56 |   10 | aaaaaaa
+   44 |   10 | aaaaaaa
+   45 |   10 | aaaaaaa
+   58 |   10 | aaaaaaa
+   11 |   10 | aaaaaaa
+   10 |   10 | test_insert
+   37 |   10 | aaaaaaa
+    4 |   10 | aaaaaaa
+   16 |   10 | aaaaaaa
+   40 |   10 | aaaaaaa
+    1 |   10 | aaaaaaa
+   60 |   10 | aaaaaaa
+   78 |   10 | aaaaaaa
+   50 |   10 | aaaaaaa
+   -3 |   10 | test_pbe
+   75 |   10 | aaaaaaa
+   74 |   10 | aaaaaaa
+   70 |   10 | aaaaaaa
+   22 |   10 | aaaaaaa
+   26 |   10 | aaaaaaa
+   62 |   10 | aaaaaaa
+   29 |   10 | aaaaaaa
+   53 |   10 | aaaaaaa
+   10 |   10 | aaaaaaa
+   21 |   10 | aaaaaaa
+    7 |   10 | aaaaaaa
+    6 |   10 | aaaaaaa
+   59 |   10 | aaaaaaa
+   77 |   10 | aaaaaaa
+   24 |   10 | aaaaaaa
+   79 |   10 | aaaaaaa
+    6 |   10 | aaaaaaa
+   27 |   10 | aaaaaaa
+   20 |   10 | aaaaaaa
+    2 |   10 | aaaaaaa
+   67 |   10 | aaaaaaa
+    3 |   10 | aaaaaaa
+    8 |   10 | aaaaaaa
+   49 |   10 | aaaaaaa
+    0 |   10 | test
+    5 |   10 | aaaaaaa
+   64 |   10 | aaaaaaa
+   63 |   10 | aaaaaaa
+   48 |   10 | aaaaaaa
+    4 |   10 | aaaaaaa
+   13 |   10 | aaaaaaa
+    3 |   10 | aaaaaaa
+   23 |   10 | aaaaaaa
+    2 |   10 | aaaaaaa
+    0 |    9 | test
+    0 |    8 | test
+    0 |    7 | test
+    0 |    6 | test
+    0 |    5 | test
+    0 |    4 | test
+    0 |    3 | test
+    0 |    2 | test
+    1 |    2 | 
+    1 |    2 | 
+    0 |    1 | test
+   41 |    0 | aaaaaaa
+   60 |    0 | aaaaaaa
+   72 |    0 | aaaaaaa
+   24 |    0 | aaaaaaa
+   27 |    0 | aaaaaaa
+   52 |    0 | aaaaaaa
+   22 |    0 | aaaaaaa
+   68 |    0 | aaaaaaa
+   14 |    0 | aaaaaaa
+   17 |    0 | aaaaaaa
+   65 |    0 | aaaaaaa
+   70 |    0 | aaaaaaa
+   62 |    0 | aaaaaaa
+    8 |    0 | aaaaaaa
+   12 |    0 | aaaaaaa
+   15 |    0 | aaaaaaa
+   18 |    0 | aaaaaaa
+   10 |    0 | aaaaaaa
+   13 |    0 | aaaaaaa
+    5 |    0 | aaaaaaa
+   16 |    0 | aaaaaaa
+   19 |    0 | aaaaaaa
+    3 |    0 | aaaaaaa
+   67 |    0 | aaaaaaa
+   11 |    0 | aaaaaaa
+    6 |    0 | aaaaaaa
+   64 |    0 | aaaaaaa
+    9 |    0 | aaaaaaa
+    8 |    0 | aaaaaaa
+   61 |    0 | aaaaaaa
+   45 |    0 | aaaaaaa
+   78 |    0 | aaaaaaa
+    7 |    0 | aaaaaaa
+    6 |    0 | aaaaaaa
+    5 |    0 | aaaaaaa
+    4 |    0 | aaaaaaa
+   47 |    0 | aaaaaaa
+   69 |    0 | aaaaaaa
+    3 |    0 | aaaaaaa
+   48 |    0 | aaaaaaa
+    2 |    0 | aaaaaaa
+   77 |    0 | aaaaaaa
+    1 |    0 | aaaaaaa
+   74 |    0 | aaaaaaa
+   55 |    0 | aaaaaaa
+   44 |    0 | aaaaaaa
+   71 |    0 | aaaaaaa
+   40 |    0 | aaaaaaa
+   57 |    0 | aaaaaaa
+    4 |    0 | aaaaaaa
+   36 |    0 | aaaaaaa
+   39 |    0 | aaaaaaa
+   51 |    0 | aaaaaaa
+   73 |    0 | aaaaaaa
+   75 |    0 | aaaaaaa
+    1 |    0 | aaaaaaa
+   31 |    0 | aaaaaaa
+   49 |    0 | aaaaaaa
+   34 |    0 | aaaaaaa
+   46 |    0 | aaaaaaa
+   37 |    0 | aaaaaaa
+   59 |    0 | aaaaaaa
+   43 |    0 | aaaaaaa
+   32 |    0 | aaaaaaa
+   35 |    0 | aaaaaaa
+   56 |    0 | aaaaaaa
+   38 |    0 | aaaaaaa
+   53 |    0 | aaaaaaa
+   79 |    0 | aaaaaaa
+   30 |    0 | aaaaaaa
+   50 |    0 | aaaaaaa
+   33 |    0 | aaaaaaa
+   54 |    0 | aaaaaaa
+   25 |    0 | aaaaaaa
+   28 |    0 | aaaaaaa
+   76 |    0 | aaaaaaa
+   20 |    0 | aaaaaaa
+   58 |    0 | aaaaaaa
+   23 |    0 | aaaaaaa
+   42 |    0 | aaaaaaa
+   26 |    0 | aaaaaaa
+   66 |    0 | aaaaaaa
+    2 |    0 | aaaaaaa
+   29 |    0 | aaaaaaa
+   63 |    0 | aaaaaaa
+    7 |    0 | aaaaaaa
+   21 |    0 | aaaaaaa
+    0 |   -1 | test_update
+    0 |   -1 | test_update
+(1079 rows)
+
+prepare p116 as select * from test_bypass_sql_partition order by col2;
+explain execute p116;
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
+ Sort  (cost=1000000002226.45..1000000002229.37 rows=1167 width=40)
+   Sort Key: col2
+   ->  Partition Iterator  (cost=10000000000.00..1000000002167.00 rows=1167 width=40)
+         Iterations: 8
+         ->  Partitioned Seq Scan on test_bypass_sql_partition  (cost=10000000000.00..1000000002167.00 rows=1167 width=40)
+               Selected Partitions:  1..8
+(7 rows)
+
+execute p116;
+ col1 | col2 |     col3     
+------+------+--------------
+    0 |   -1 | test_update
+    0 |   -1 | test_update
+   11 |    0 | aaaaaaa
+    8 |    0 | aaaaaaa
+   14 |    0 | aaaaaaa
+   22 |    0 | aaaaaaa
+    7 |    0 | aaaaaaa
+   15 |    0 | aaaaaaa
+   27 |    0 | aaaaaaa
+   18 |    0 | aaaaaaa
+    8 |    0 | aaaaaaa
+    6 |    0 | aaaaaaa
+   73 |    0 | aaaaaaa
+   24 |    0 | aaaaaaa
+   10 |    0 | aaaaaaa
+   21 |    0 | aaaaaaa
+   70 |    0 | aaaaaaa
+   13 |    0 | aaaaaaa
+    5 |    0 | aaaaaaa
+   29 |    0 | aaaaaaa
+   19 |    0 | aaaaaaa
+   16 |    0 | aaaaaaa
+   26 |    0 | aaaaaaa
+   23 |    0 | aaaaaaa
+    5 |    0 | aaaaaaa
+    4 |    0 | aaaaaaa
+   20 |    0 | aaaaaaa
+   28 |    0 | aaaaaaa
+   76 |    0 | aaaaaaa
+   79 |    0 | aaaaaaa
+   25 |    0 | aaaaaaa
+    2 |    0 | aaaaaaa
+    3 |    0 | aaaaaaa
+   33 |    0 | aaaaaaa
+   78 |    0 | aaaaaaa
+    2 |    0 | aaaaaaa
+   30 |    0 | aaaaaaa
+   71 |    0 | aaaaaaa
+   38 |    0 | aaaaaaa
+   35 |    0 | aaaaaaa
+    1 |    0 | aaaaaaa
+   74 |    0 | aaaaaaa
+    6 |    0 | aaaaaaa
+   17 |    0 | aaaaaaa
+   63 |    0 | aaaaaaa
+    9 |    0 | aaaaaaa
+   66 |    0 | aaaaaaa
+   58 |    0 | aaaaaaa
+   53 |    0 | aaaaaaa
+    3 |    0 | aaaaaaa
+   50 |    0 | aaaaaaa
+   77 |    0 | aaaaaaa
+   69 |    0 | aaaaaaa
+   32 |    0 | aaaaaaa
+   37 |    0 | aaaaaaa
+   34 |    0 | aaaaaaa
+   61 |    0 | aaaaaaa
+   31 |    0 | aaaaaaa
+   39 |    0 | aaaaaaa
+   64 |    0 | aaaaaaa
+   36 |    0 | aaaaaaa
+    7 |    0 | aaaaaaa
+   44 |    0 | aaaaaaa
+   41 |    0 | aaaaaaa
+   49 |    0 | aaaaaaa
+   67 |    0 | aaaaaaa
+   46 |    0 | aaaaaaa
+   43 |    0 | aaaaaaa
+    4 |    0 | aaaaaaa
+   40 |    0 | aaaaaaa
+   48 |    0 | aaaaaaa
+   45 |    0 | aaaaaaa
+   42 |    0 | aaaaaaa
+   47 |    0 | aaaaaaa
+   62 |    0 | aaaaaaa
+    1 |    0 | aaaaaaa
+   55 |    0 | aaaaaaa
+   52 |    0 | aaaaaaa
+   72 |    0 | aaaaaaa
+   57 |    0 | aaaaaaa
+   54 |    0 | aaaaaaa
+   65 |    0 | aaaaaaa
+   51 |    0 | aaaaaaa
+   68 |    0 | aaaaaaa
+   59 |    0 | aaaaaaa
+   56 |    0 | aaaaaaa
+   75 |    0 | aaaaaaa
+   12 |    0 | aaaaaaa
+   60 |    0 | aaaaaaa
+    0 |    1 | test
+    1 |    2 | 
+    0 |    2 | test
+    1 |    2 | 
+    0 |    3 | test
+    0 |    4 | test
+    0 |    5 | test
+    0 |    6 | test
+    0 |    7 | test
+    0 |    8 | test
+    0 |    9 | test
+   51 |   10 | aaaaaaa
+    4 |   10 | aaaaaaa
+   76 |   10 | aaaaaaa
+   13 |   10 | aaaaaaa
+    7 |   10 | aaaaaaa
+   54 |   10 | aaaaaaa
+   57 |   10 | aaaaaaa
+   59 |   10 | aaaaaaa
+   67 |   10 | aaaaaaa
+   64 |   10 | aaaaaaa
+   61 |   10 | aaaaaaa
+    0 |   10 | test
+    1 |   10 | aaaaaaa
+   52 |   10 | aaaaaaa
+   69 |   10 | aaaaaaa
+   55 |   10 | aaaaaaa
+   66 |   10 | aaaaaaa
+   58 |   10 | aaaaaaa
+   50 |   10 | aaaaaaa
+   53 |   10 | aaaaaaa
+   56 |   10 | aaaaaaa
+    2 |   10 | aaaaaaa
+   48 |   10 | aaaaaaa
+   63 |   10 | aaaaaaa
+   40 |   10 | aaaaaaa
+   43 |   10 | aaaaaaa
+   46 |   10 | aaaaaaa
+   73 |   10 | aaaaaaa
+   49 |   10 | aaaaaaa
+   41 |   10 | aaaaaaa
+    5 |   10 | aaaaaaa
+   44 |   10 | aaaaaaa
+   60 |   10 | aaaaaaa
+   47 |   10 | aaaaaaa
+   68 |   10 | aaaaaaa
+   42 |   10 | aaaaaaa
+   45 |   10 | aaaaaaa
+    8 |   10 | aaaaaaa
+   37 |   10 | aaaaaaa
+   65 |   10 | aaaaaaa
+   32 |   10 | aaaaaaa
+   35 |   10 | aaaaaaa
+   62 |   10 | aaaaaaa
+   38 |   10 | aaaaaaa
+   30 |   10 | aaaaaaa
+   33 |   10 | aaaaaaa
+   78 |   10 | aaaaaaa
+   75 |   10 | aaaaaaa
+   -3 |   10 | test_pbe
+    1 |   10 | aaaaaaa
+   79 |   10 | aaaaaaa
+   36 |   10 | aaaaaaa
+    0 |   10 | aaaaaaa
+   39 |   10 | aaaaaaa
+   31 |   10 | aaaaaaa
+   72 |   10 | aaaaaaa
+    2 |   10 | aaaaaaa
+   70 |   10 | aaaaaaa
+   34 |   10 | aaaaaaa
+    3 |   10 | aaaaaaa
+    3 |   10 | aaaaaaa
+   26 |   10 | aaaaaaa
+   29 |   10 | aaaaaaa
+   21 |   10 | aaaaaaa
+    6 |   10 | aaaaaaa
+    4 |   10 | aaaaaaa
+   71 |   10 | aaaaaaa
+   24 |   10 | aaaaaaa
+   77 |   10 | aaaaaaa
+   27 |   10 | aaaaaaa
+   17 |   10 | aaaaaaa
+    5 |   10 | aaaaaaa
+   14 |   10 | aaaaaaa
+   22 |   10 | aaaaaaa
+   25 |   10 | aaaaaaa
+   11 |   10 | aaaaaaa
+    6 |   10 | aaaaaaa
+   28 |   10 | aaaaaaa
+   19 |   10 | aaaaaaa
+   20 |   10 | aaaaaaa
+   23 |   10 | aaaaaaa
+   16 |   10 | aaaaaaa
+    7 |   10 | aaaaaaa
+    9 |   10 | aaaaaaa
+   74 |   10 | aaaaaaa
+   10 |   10 | test_insert
+   15 |   10 | aaaaaaa
+   12 |   10 | aaaaaaa
+    8 |   10 | aaaaaaa
+   18 |   10 | aaaaaaa
+   10 |   10 | aaaaaaa
+    0 |   11 | test
+    0 |   12 | test
+   12 |   12 | test_insert
+    0 |   13 | test
+    0 |   14 | test
+    0 |   15 | test
+    0 |   16 | test
+    0 |   17 | test
+    0 |   18 | test
+    0 |   19 | test
+   39 |   20 | aaaaaaa
+   24 |   20 | aaaaaaa
+   63 |   20 | aaaaaaa
+   31 |   20 | aaaaaaa
+   28 |   20 | aaaaaaa
+   34 |   20 | aaaaaaa
+   19 |   20 | aaaaaaa
+   60 |   20 | aaaaaaa
+   78 |   20 | aaaaaaa
+   79 |   20 | aaaaaaa
+   11 |   20 | aaaaaaa
+   37 |   20 | aaaaaaa
+   18 |   20 | aaaaaaa
+   74 |   20 | aaaaaaa
+    1 |   20 | aaaaaaa
+    8 |   20 | aaaaaaa
+   52 |   20 | aaaaaaa
+   58 |   20 | aaaaaaa
+    1 |   20 | aaaaaaa
+    5 |   20 | aaaaaaa
+    7 |   20 | aaaaaaa
+   68 |   20 | aaaaaaa
+   20 |   20 | aaaaaaa
+   65 |   20 | aaaaaaa
+   23 |   20 | aaaaaaa
+    5 |   20 | aaaaaaa
+   55 |   20 | aaaaaaa
+    2 |   20 | aaaaaaa
+   76 |   20 | aaaaaaa
+    0 |   20 | test
+   38 |   20 | aaaaaaa
+   69 |   20 | aaaaaaa
+    4 |   20 | aaaaaaa
+   30 |   20 | aaaaaaa
+   33 |   20 | aaaaaaa
+   21 |   20 | aaaaaaa
+   66 |   20 | aaaaaaa
+   36 |   20 | aaaaaaa
+   25 |   20 | aaaaaaa
+   13 |   20 | aaaaaaa
+   71 |   20 | aaaaaaa
+   61 |   20 | aaaaaaa
+   22 |   20 | aaaaaaa
+   40 |   20 | aaaaaaa
+   43 |   20 | aaaaaaa
+   29 |   20 | aaaaaaa
+    9 |   20 | aaaaaaa
+   46 |   20 | aaaaaaa
+    7 |   20 | aaaaaaa
+   16 |   20 | aaaaaaa
+   17 |   20 | aaaaaaa
+   62 |   20 | aaaaaaa
+   77 |   20 | aaaaaaa
+    0 |   20 | aaaaaaa
+   32 |   20 | aaaaaaa
+   50 |   20 | aaaaaaa
+   53 |   20 | aaaaaaa
+    8 |   20 | aaaaaaa
+   15 |   20 | aaaaaaa
+   56 |   20 | aaaaaaa
+   73 |   20 | aaaaaaa
+   26 |   20 | aaaaaaa
+   59 |   20 | aaaaaaa
+    2 |   20 | aaaaaaa
+   67 |   20 | aaaaaaa
+   51 |   20 | aaaaaaa
+   75 |   20 | aaaaaaa
+   54 |   20 | aaaaaaa
+   35 |   20 | aaaaaaa
+    3 |   20 | aaaaaaa
+   57 |   20 | aaaaaaa
+    4 |   20 | aaaaaaa
+   49 |   20 | aaaaaaa
+   20 |   20 | 
+   41 |   20 | aaaaaaa
+   44 |   20 | aaaaaaa
+   27 |   20 | aaaaaaa
+   64 |   20 | aaaaaaa
+   47 |   20 | aaaaaaa
+   10 |   20 | aaaaaaa
+   14 |   20 | aaaaaaa
+    3 |   20 | aaaaaaa
+    6 |   20 | aaaaaaa
+   42 |   20 | aaaaaaa
+   72 |   20 | aaaaaaa
+    6 |   20 | aaaaaaa
+   45 |   20 | aaaaaaa
+   70 |   20 | aaaaaaa
+   12 |   20 | aaaaaaa
+   48 |   20 | aaaaaaa
+    0 |   21 | test
+    0 |   22 | test
+   22 |   22 | 
+   23 |   23 | test_insert2
+    0 |   23 | test
+    0 |   24 | test
+    0 |   25 | test
+    0 |   26 | test
+    0 |   27 | test
+    0 |   28 | test
+    0 |   29 | test
+   51 |   30 | aaaaaaa
+    3 |   30 | aaaaaaa
+    0 |   30 | aaaaaaa
+    8 |   30 | aaaaaaa
+    5 |   30 | aaaaaaa
+    2 |   30 | aaaaaaa
+    7 |   30 | aaaaaaa
+    4 |   30 | aaaaaaa
+    1 |   30 | aaaaaaa
+    9 |   30 | aaaaaaa
+    6 |   30 | aaaaaaa
+    0 |   30 | test
+    1 |   30 | aaaaaaa
+    2 |   30 | aaaaaaa
+    3 |   30 | aaaaaaa
+    4 |   30 | aaaaaaa
+    5 |   30 | aaaaaaa
+    6 |   30 | aaaaaaa
+    7 |   30 | aaaaaaa
+    8 |   30 | aaaaaaa
+   14 |   30 | aaaaaaa
+   11 |   30 | aaaaaaa
+   19 |   30 | aaaaaaa
+   16 |   30 | aaaaaaa
+   13 |   30 | aaaaaaa
+   10 |   30 | aaaaaaa
+   18 |   30 | aaaaaaa
+   15 |   30 | aaaaaaa
+   12 |   30 | aaaaaaa
+   17 |   30 | aaaaaaa
+   25 |   30 | aaaaaaa
+   22 |   30 | aaaaaaa
+   27 |   30 | aaaaaaa
+   24 |   30 | aaaaaaa
+   21 |   30 | aaaaaaa
+   29 |   30 | aaaaaaa
+   26 |   30 | aaaaaaa
+   23 |   30 | aaaaaaa
+   20 |   30 | aaaaaaa
+   28 |   30 | aaaaaaa
+   36 |   30 | aaaaaaa
+   33 |   30 | aaaaaaa
+   30 |   30 | aaaaaaa
+   38 |   30 | aaaaaaa
+   35 |   30 | aaaaaaa
+   32 |   30 | aaaaaaa
+   37 |   30 | aaaaaaa
+   34 |   30 | aaaaaaa
+   31 |   30 | aaaaaaa
+   39 |   30 | aaaaaaa
+   47 |   30 | aaaaaaa
+   44 |   30 | aaaaaaa
+   41 |   30 | aaaaaaa
+   49 |   30 | aaaaaaa
+   46 |   30 | aaaaaaa
+   43 |   30 | aaaaaaa
+   40 |   30 | aaaaaaa
+   48 |   30 | aaaaaaa
+   45 |   30 | aaaaaaa
+   42 |   30 | aaaaaaa
+   58 |   30 | aaaaaaa
+   55 |   30 | aaaaaaa
+   52 |   30 | aaaaaaa
+   57 |   30 | aaaaaaa
+   54 |   30 | aaaaaaa
+   59 |   30 | aaaaaaa
+   56 |   30 | aaaaaaa
+   53 |   30 | aaaaaaa
+   50 |   30 | aaaaaaa
+   69 |   30 | aaaaaaa
+   66 |   30 | aaaaaaa
+   63 |   30 | aaaaaaa
+   60 |   30 | aaaaaaa
+   68 |   30 | aaaaaaa
+   65 |   30 | aaaaaaa
+   62 |   30 | aaaaaaa
+   67 |   30 | aaaaaaa
+   64 |   30 | aaaaaaa
+   61 |   30 | aaaaaaa
+   77 |   30 | aaaaaaa
+   74 |   30 | aaaaaaa
+   71 |   30 | aaaaaaa
+   79 |   30 | aaaaaaa
+   76 |   30 | aaaaaaa
+   73 |   30 | aaaaaaa
+   70 |   30 | aaaaaaa
+   78 |   30 | aaaaaaa
+   75 |   30 | aaaaaaa
+   72 |   30 | aaaaaaa
+    0 |   31 | test
+    0 |   32 | test
+    0 |   33 | test
+   33 |   33 | test_insert3
+    0 |   34 | test
+    0 |   35 | test
+    0 |   36 | test
+    0 |   37 | test
+    0 |   38 | test
+    0 |   39 | test
+   19 |   40 | aaaaaaa
+   62 |   40 | aaaaaaa
+   36 |   40 | aaaaaaa
+   15 |   40 | aaaaaaa
+   39 |   40 | aaaaaaa
+   74 |   40 | aaaaaaa
+   65 |   40 | aaaaaaa
+    5 |   40 | aaaaaaa
+   43 |   40 | aaaaaaa
+    3 |   40 | aaaaaaa
+    0 |   40 | aaaaaaa
+   44 |   40 | aaaaaaa
+   29 |   40 | aaaaaaa
+    1 |   40 | aaaaaaa
+   48 |   40 | aaaaaaa
+   20 |   40 | aaaaaaa
+   68 |   40 | aaaaaaa
+   71 |   40 | aaaaaaa
+   69 |   40 | aaaaaaa
+    8 |   40 | aaaaaaa
+   55 |   40 | aaaaaaa
+    2 |   40 | aaaaaaa
+   47 |   40 | aaaaaaa
+   37 |   40 | aaaaaaa
+   40 |   40 | aaaaaaa
+   66 |   40 | aaaaaaa
+   60 |   40 | aaaaaaa
+   31 |   40 | aaaaaaa
+   56 |   40 | aaaaaaa
+   63 |   40 | aaaaaaa
+   34 |   40 | aaaaaaa
+   76 |   40 | aaaaaaa
+   18 |   40 | aaaaaaa
+   13 |   40 | aaaaaaa
+   59 |   40 | aaaaaaa
+    6 |   40 | aaaaaaa
+   73 |   40 | aaaaaaa
+   17 |   40 | aaaaaaa
+   52 |   40 | aaaaaaa
+   41 |   40 | aaaaaaa
+   45 |   40 | aaaaaaa
+    2 |   40 | aaaaaaa
+   16 |   40 | aaaaaaa
+   70 |   40 | aaaaaaa
+   64 |   40 | aaaaaaa
+   33 |   40 | aaaaaaa
+   21 |   40 | aaaaaaa
+   12 |   40 | aaaaaaa
+   61 |   40 | aaaaaaa
+    4 |   40 | aaaaaaa
+   77 |   40 | aaaaaaa
+   27 |   40 | aaaaaaa
+    9 |   40 | aaaaaaa
+   67 |   40 | aaaaaaa
+    7 |   40 | aaaaaaa
+   30 |   40 | aaaaaaa
+   46 |   40 | aaaaaaa
+   24 |   40 | aaaaaaa
+    1 |   40 | aaaaaaa
+   28 |   40 | aaaaaaa
+   53 |   40 | aaaaaaa
+   26 |   40 | aaaaaaa
+   23 |   40 | aaaaaaa
+    8 |   40 | aaaaaaa
+   25 |   40 | aaaaaaa
+   50 |   40 | aaaaaaa
+   32 |   40 | aaaaaaa
+    7 |   40 | aaaaaaa
+   72 |   40 | aaaaaaa
+    5 |   40 | aaaaaaa
+   57 |   40 | aaaaaaa
+   22 |   40 | aaaaaaa
+   11 |   40 | aaaaaaa
+   10 |   40 | aaaaaaa
+   35 |   40 | aaaaaaa
+   75 |   40 | aaaaaaa
+    4 |   40 | aaaaaaa
+   54 |   40 | aaaaaaa
+   79 |   40 | aaaaaaa
+    6 |   40 | aaaaaaa
+   14 |   40 | aaaaaaa
+   38 |   40 | aaaaaaa
+   49 |   40 | aaaaaaa
+   78 |   40 | aaaaaaa
+    0 |   40 | test
+   42 |   40 | aaaaaaa
+    3 |   40 | aaaaaaa
+   51 |   40 | aaaaaaa
+   58 |   40 | aaaaaaa
+    0 |   41 | test
+    0 |   42 | test
+    0 |   43 | test
+    0 |   44 | test
+    0 |   45 | test
+    0 |   46 | test
+    0 |   47 | test
+    0 |   48 | test
+    0 |   49 | test
+   45 |   50 | aaaaaaa
+   42 |   50 | aaaaaaa
+   14 |   50 | aaaaaaa
+   15 |   50 | aaaaaaa
+    0 |   50 | test
+   47 |   50 | aaaaaaa
+   44 |   50 | aaaaaaa
+   41 |   50 | aaaaaaa
+   21 |   50 | aaaaaaa
+   13 |   50 | aaaaaaa
+   18 |   50 | aaaaaaa
+    6 |   50 | aaaaaaa
+   10 |   50 | aaaaaaa
+   70 |   50 | aaaaaaa
+   29 |   50 | aaaaaaa
+   73 |   50 | aaaaaaa
+    8 |   50 | aaaaaaa
+    5 |   50 | aaaaaaa
+   26 |   50 | aaaaaaa
+   23 |   50 | aaaaaaa
+   76 |   50 | aaaaaaa
+   20 |   50 | aaaaaaa
+    7 |   50 | aaaaaaa
+   79 |   50 | aaaaaaa
+   17 |   50 | aaaaaaa
+   74 |   50 | aaaaaaa
+    5 |   50 | aaaaaaa
+    4 |   50 | aaaaaaa
+    4 |   50 | aaaaaaa
+   28 |   50 | aaaaaaa
+   71 |   50 | aaaaaaa
+   78 |   50 | aaaaaaa
+   25 |   50 | aaaaaaa
+   22 |   50 | aaaaaaa
+   63 |   50 | aaaaaaa
+   11 |   50 | aaaaaaa
+   66 |   50 | aaaaaaa
+    3 |   50 | aaaaaaa
+    1 |   50 | aaaaaaa
+   69 |   50 | aaaaaaa
+   16 |   50 | aaaaaaa
+   77 |   50 | aaaaaaa
+    2 |   50 | aaaaaaa
+   61 |   50 | aaaaaaa
+   38 |   50 | aaaaaaa
+   64 |   50 | aaaaaaa
+   35 |   50 | aaaaaaa
+   32 |   50 | aaaaaaa
+   19 |   50 | aaaaaaa
+   67 |   50 | aaaaaaa
+    7 |   50 | aaaaaaa
+    9 |   50 | aaaaaaa
+    1 |   50 | aaaaaaa
+    6 |   50 | aaaaaaa
+   62 |   50 | aaaaaaa
+   75 |   50 | aaaaaaa
+   37 |   50 | aaaaaaa
+   34 |   50 | aaaaaaa
+   65 |   50 | aaaaaaa
+   31 |   50 | aaaaaaa
+    3 |   50 | aaaaaaa
+   68 |   50 | aaaaaaa
+    0 |   50 | aaaaaaa
+   60 |   50 | aaaaaaa
+   52 |   50 | aaaaaaa
+   12 |   50 | aaaaaaa
+   39 |   50 | aaaaaaa
+   55 |   50 | aaaaaaa
+   36 |   50 | aaaaaaa
+   58 |   50 | aaaaaaa
+   33 |   50 | aaaaaaa
+    8 |   50 | aaaaaaa
+   30 |   50 | aaaaaaa
+   27 |   50 | aaaaaaa
+   50 |   50 | aaaaaaa
+   53 |   50 | aaaaaaa
+   56 |   50 | aaaaaaa
+    2 |   50 | aaaaaaa
+   49 |   50 | aaaaaaa
+   59 |   50 | aaaaaaa
+   72 |   50 | aaaaaaa
+   46 |   50 | aaaaaaa
+   43 |   50 | aaaaaaa
+   40 |   50 | aaaaaaa
+   51 |   50 | aaaaaaa
+   54 |   50 | aaaaaaa
+   24 |   50 | aaaaaaa
+   48 |   50 | aaaaaaa
+   57 |   50 | aaaaaaa
+    0 |   51 | test
+    0 |   52 | test
+    0 |   53 | test
+    0 |   54 | test
+    0 |   55 | test
+    0 |   56 | test
+    0 |   57 | test
+    0 |   58 | test
+    0 |   59 | test
+   61 |   60 | aaaaaaa
+   53 |   60 | aaaaaaa
+   41 |   60 | aaaaaaa
+    4 |   60 | aaaaaaa
+   16 |   60 | aaaaaaa
+    8 |   60 | aaaaaaa
+   18 |   60 | aaaaaaa
+   56 |   60 | aaaaaaa
+   52 |   60 | aaaaaaa
+   21 |   60 | aaaaaaa
+   59 |   60 | aaaaaaa
+   77 |   60 | aaaaaaa
+   37 |   60 | aaaaaaa
+   24 |   60 | aaaaaaa
+   50 |   60 | aaaaaaa
+    0 |   60 | aaaaaaa
+    8 |   60 | aaaaaaa
+   27 |   60 | aaaaaaa
+   55 |   60 | aaaaaaa
+   34 |   60 | aaaaaaa
+    5 |   60 | aaaaaaa
+   74 |   60 | aaaaaaa
+    9 |   60 | aaaaaaa
+   71 |   60 | aaaaaaa
+   31 |   60 | aaaaaaa
+   40 |   60 | aaaaaaa
+   51 |   60 | aaaaaaa
+   11 |   60 | aaaaaaa
+   54 |   60 | aaaaaaa
+   26 |   60 | aaaaaaa
+   32 |   60 | aaaaaaa
+    5 |   60 | aaaaaaa
+    4 |   60 | aaaaaaa
+   69 |   60 | aaaaaaa
+    0 |   60 | test
+   29 |   60 | aaaaaaa
+   13 |   60 | aaaaaaa
+    1 |   60 | aaaaaaa
+   66 |   60 | aaaaaaa
+   76 |   60 | aaaaaaa
+   79 |   60 | aaaaaaa
+   44 |   60 | aaaaaaa
+   35 |   60 | aaaaaaa
+   17 |   60 | aaaaaaa
+   15 |   60 | aaaaaaa
+   64 |   60 | aaaaaaa
+   72 |   60 | aaaaaaa
+   14 |   60 | aaaaaaa
+   28 |   60 | aaaaaaa
+    6 |   60 | aaaaaaa
+   12 |   60 | aaaaaaa
+   19 |   60 | aaaaaaa
+   22 |   60 | aaaaaaa
+   57 |   60 | aaaaaaa
+   46 |   60 | aaaaaaa
+   42 |   60 | aaaaaaa
+   45 |   60 | aaaaaaa
+   70 |   60 | aaaaaaa
+   58 |   60 | aaaaaaa
+   36 |   60 | aaaaaaa
+   68 |   60 | aaaaaaa
+   75 |   60 | aaaaaaa
+   65 |   60 | aaaaaaa
+   43 |   60 | aaaaaaa
+   33 |   60 | aaaaaaa
+   48 |   60 | aaaaaaa
+   25 |   60 | aaaaaaa
+   39 |   60 | aaaaaaa
+    2 |   60 | aaaaaaa
+    7 |   60 | aaaaaaa
+    1 |   60 | aaaaaaa
+   30 |   60 | aaaaaaa
+   47 |   60 | aaaaaaa
+    3 |   60 | aaaaaaa
+   62 |   60 | aaaaaaa
+    6 |   60 | aaaaaaa
+    2 |   60 | aaaaaaa
+   78 |   60 | aaaaaaa
+   20 |   60 | aaaaaaa
+    3 |   60 | aaaaaaa
+    7 |   60 | aaaaaaa
+   60 |   60 | aaaaaaa
+   63 |   60 | aaaaaaa
+   73 |   60 | aaaaaaa
+   67 |   60 | aaaaaaa
+   49 |   60 | aaaaaaa
+   38 |   60 | aaaaaaa
+   10 |   60 | aaaaaaa
+   23 |   60 | aaaaaaa
+    0 |   61 | test
+    0 |   62 | test
+    0 |   63 | test
+    0 |   64 | test
+    0 |   65 | test
+    0 |   66 | test
+    0 |   67 | test
+    0 |   68 | test
+    0 |   69 | test
+   52 |   70 | aaaaaaa
+   13 |   70 | aaaaaaa
+   10 |   70 | aaaaaaa
+    7 |   70 | aaaaaaa
+   29 |   70 | aaaaaaa
+    6 |   70 | aaaaaaa
+   26 |   70 | aaaaaaa
+   23 |   70 | aaaaaaa
+   20 |   70 | aaaaaaa
+    5 |   70 | aaaaaaa
+    1 |   70 | aaaaaaa
+   28 |   70 | aaaaaaa
+   25 |   70 | aaaaaaa
+   22 |   70 | aaaaaaa
+    4 |   70 | aaaaaaa
+   27 |   70 | aaaaaaa
+   24 |   70 | aaaaaaa
+    3 |   70 | aaaaaaa
+   21 |   70 | aaaaaaa
+    2 |   70 | aaaaaaa
+   37 |   70 | aaaaaaa
+   34 |   70 | aaaaaaa
+    1 |   70 | aaaaaaa
+   31 |   70 | aaaaaaa
+   39 |   70 | aaaaaaa
+   36 |   70 | aaaaaaa
+   33 |   70 | aaaaaaa
+   30 |   70 | aaaaaaa
+   77 |   70 | aaaaaaa
+   38 |   70 | aaaaaaa
+   35 |   70 | aaaaaaa
+   32 |   70 | aaaaaaa
+   76 |   70 | aaaaaaa
+   40 |   70 | aaaaaaa
+   48 |   70 | aaaaaaa
+   45 |   70 | aaaaaaa
+   42 |   70 | aaaaaaa
+   74 |   70 | aaaaaaa
+    0 |   70 | test
+   47 |   70 | aaaaaaa
+   44 |   70 | aaaaaaa
+   41 |   70 | aaaaaaa
+    4 |   70 | aaaaaaa
+   49 |   70 | aaaaaaa
+   46 |   70 | aaaaaaa
+   43 |   70 | aaaaaaa
+   51 |   70 | aaaaaaa
+   71 |   70 | aaaaaaa
+   59 |   70 | aaaaaaa
+   56 |   70 | aaaaaaa
+   53 |   70 | aaaaaaa
+   50 |   70 | aaaaaaa
+   58 |   70 | aaaaaaa
+   55 |   70 | aaaaaaa
+   57 |   70 | aaaaaaa
+   54 |   70 | aaaaaaa
+    2 |   70 | aaaaaaa
+   62 |   70 | aaaaaaa
+    5 |   70 | aaaaaaa
+   67 |   70 | aaaaaaa
+    7 |   70 | aaaaaaa
+   64 |   70 | aaaaaaa
+    8 |   70 | aaaaaaa
+   61 |   70 | aaaaaaa
+   69 |   70 | aaaaaaa
+   66 |   70 | aaaaaaa
+   63 |   70 | aaaaaaa
+    0 |   70 | aaaaaaa
+   60 |   70 | aaaaaaa
+    3 |   70 | aaaaaaa
+   68 |   70 | aaaaaaa
+   79 |   70 | aaaaaaa
+   65 |   70 | aaaaaaa
+   73 |   70 | aaaaaaa
+    6 |   70 | aaaaaaa
+   70 |   70 | aaaaaaa
+    9 |   70 | aaaaaaa
+   78 |   70 | aaaaaaa
+   75 |   70 | aaaaaaa
+   72 |   70 | aaaaaaa
+   12 |   70 | aaaaaaa
+   15 |   70 | aaaaaaa
+   17 |   70 | aaaaaaa
+   14 |   70 | aaaaaaa
+   18 |   70 | aaaaaaa
+   11 |   70 | aaaaaaa
+   19 |   70 | aaaaaaa
+    8 |   70 | aaaaaaa
+   16 |   70 | aaaaaaa
+    0 |   71 | test
+    0 |   72 | test
+    0 |   73 | test
+    0 |   74 | test
+    0 |   75 | test
+    0 |   76 | test
+    0 |   77 | test
+    0 |   78 | test
+    0 |   79 | test
+   62 |   80 | aaaaaaa
+   56 |   80 | aaaaaaa
+    3 |   80 | aaaaaaa
+   28 |   80 | aaaaaaa
+   51 |   80 | aaaaaaa
+   66 |   80 | aaaaaaa
+   25 |   80 | aaaaaaa
+   75 |   80 | aaaaaaa
+   48 |   80 | aaaaaaa
+   69 |   80 | aaaaaaa
+   22 |   80 | aaaaaaa
+   32 |   80 | aaaaaaa
+    2 |   80 | aaaaaaa
+   54 |   80 | aaaaaaa
+   33 |   80 | aaaaaaa
+   35 |   80 | aaaaaaa
+   57 |   80 | aaaaaaa
+   53 |   80 | aaaaaaa
+   30 |   80 | aaaaaaa
+   43 |   80 | aaaaaaa
+   38 |   80 | aaaaaaa
+    5 |   80 | aaaaaaa
+    1 |   80 | aaaaaaa
+   72 |   80 | aaaaaaa
+    4 |   80 | aaaaaaa
+   67 |   80 | aaaaaaa
+   61 |   80 | aaaaaaa
+    7 |   80 | aaaaaaa
+   45 |   80 | aaaaaaa
+    1 |   80 | aaaaaaa
+   70 |   80 | aaaaaaa
+   64 |   80 | aaaaaaa
+   46 |   80 | aaaaaaa
+   36 |   80 | aaaaaaa
+   50 |   80 | aaaaaaa
+   42 |   80 | aaaaaaa
+   18 |   80 | aaaaaaa
+   52 |   80 | aaaaaaa
+   49 |   80 | aaaaaaa
+   39 |   80 | aaaaaaa
+   78 |   80 | aaaaaaa
+    0 |   80 | aaaaaaa
+   27 |   80 | aaaaaaa
+   77 |   80 | aaaaaaa
+   47 |   80 | aaaaaaa
+   58 |   80 | aaaaaaa
+   20 |   80 | aaaaaaa
+    8 |   80 | aaaaaaa
+   65 |   80 | aaaaaaa
+    6 |   80 | aaaaaaa
+    7 |   80 | aaaaaaa
+    9 |   80 | aaaaaaa
+   14 |   80 | aaaaaaa
+   74 |   80 | aaaaaaa
+   12 |   80 | aaaaaaa
+   34 |   80 | aaaaaaa
+   26 |   80 | aaaaaaa
+    8 |   80 | aaaaaaa
+   41 |   80 | aaaaaaa
+   37 |   80 | aaaaaaa
+   23 |   80 | aaaaaaa
+   68 |   80 | aaaaaaa
+    4 |   80 | aaaaaaa
+   71 |   80 | aaaaaaa
+   44 |   80 | aaaaaaa
+   19 |   80 | aaaaaaa
+   24 |   80 | aaaaaaa
+   21 |   80 | aaaaaaa
+   55 |   80 | aaaaaaa
+   17 |   80 | aaaaaaa
+    3 |   80 | aaaaaaa
+   15 |   80 | aaaaaaa
+   16 |   80 | aaaaaaa
+    0 |   80 | test
+   63 |   80 | aaaaaaa
+   10 |   80 | aaaaaaa
+   31 |   80 | aaaaaaa
+   73 |   80 | aaaaaaa
+   13 |   80 | aaaaaaa
+   40 |   80 | aaaaaaa
+   60 |   80 | aaaaaaa
+   11 |   80 | aaaaaaa
+   59 |   80 | aaaaaaa
+    6 |   80 | aaaaaaa
+    5 |   80 | aaaaaaa
+   76 |   80 | aaaaaaa
+    2 |   80 | aaaaaaa
+   29 |   80 | aaaaaaa
+   79 |   80 | aaaaaaa
+    0 |   81 | test
+    0 |   82 | test
+    0 |   83 | test
+    0 |   84 | test
+    0 |   85 | test
+    0 |   86 | test
+    0 |   87 | test
+    0 |   88 | test
+    0 |   89 | test
+   55 |   90 | aaaaaaa
+   52 |   90 | aaaaaaa
+   47 |   90 | aaaaaaa
+   71 |   90 | aaaaaaa
+   42 |   90 | aaaaaaa
+    6 |   90 | aaaaaaa
+   57 |   90 | aaaaaaa
+   34 |   90 | aaaaaaa
+   18 |   90 | aaaaaaa
+   54 |   90 | aaaaaaa
+   37 |   90 | aaaaaaa
+   51 |   90 | aaaaaaa
+   79 |   90 | aaaaaaa
+    1 |   90 | aaaaaaa
+    9 |   90 | aaaaaaa
+    4 |   90 | aaaaaaa
+   59 |   90 | aaaaaaa
+    0 |   90 | test
+   56 |   90 | aaaaaaa
+   32 |   90 | aaaaaaa
+   16 |   90 | aaaaaaa
+   64 |   90 | aaaaaaa
+   70 |   90 | aaaaaaa
+   61 |   90 | aaaaaaa
+    7 |   90 | aaaaaaa
+   35 |   90 | aaaaaaa
+   38 |   90 | aaaaaaa
+   15 |   90 | aaaaaaa
+   69 |   90 | aaaaaaa
+   20 |   90 | aaaaaaa
+   66 |   90 | aaaaaaa
+   63 |   90 | aaaaaaa
+   30 |   90 | aaaaaaa
+   33 |   90 | aaaaaaa
+   60 |   90 | aaaaaaa
+   78 |   90 | aaaaaaa
+   36 |   90 | aaaaaaa
+   39 |   90 | aaaaaaa
+   13 |   90 | aaaaaaa
+    2 |   90 | aaaaaaa
+    1 |   90 | aaaaaaa
+   68 |   90 | aaaaaaa
+    6 |   90 | aaaaaaa
+   65 |   90 | aaaaaaa
+   62 |   90 | aaaaaaa
+    5 |   90 | aaaaaaa
+   31 |   90 | aaaaaaa
+    2 |   90 | aaaaaaa
+   23 |   90 | aaaaaaa
+    7 |   90 | aaaaaaa
+   10 |   90 | aaaaaaa
+   26 |   90 | aaaaaaa
+   29 |   90 | aaaaaaa
+   67 |   90 | aaaaaaa
+    8 |   90 | aaaaaaa
+    3 |   90 | aaaaaaa
+   75 |   90 | aaaaaaa
+    8 |   90 | aaaaaaa
+   72 |   90 | aaaaaaa
+   21 |   90 | aaaaaaa
+    3 |   90 | aaaaaaa
+    4 |   90 | aaaaaaa
+   24 |   90 | aaaaaaa
+   27 |   90 | aaaaaaa
+   12 |   90 | aaaaaaa
+   77 |   90 | aaaaaaa
+    0 |   90 | aaaaaaa
+    5 |   90 | aaaaaaa
+   14 |   90 | aaaaaaa
+   17 |   90 | aaaaaaa
+   11 |   90 | aaaaaaa
+   22 |   90 | aaaaaaa
+   74 |   90 | aaaaaaa
+   25 |   90 | aaaaaaa
+   48 |   90 | aaaaaaa
+   28 |   90 | aaaaaaa
+   45 |   90 | aaaaaaa
+   40 |   90 | aaaaaaa
+   53 |   90 | aaaaaaa
+   43 |   90 | aaaaaaa
+   46 |   90 | aaaaaaa
+   50 |   90 | aaaaaaa
+   49 |   90 | aaaaaaa
+   76 |   90 | aaaaaaa
+   41 |   90 | aaaaaaa
+   73 |   90 | aaaaaaa
+   58 |   90 | aaaaaaa
+   44 |   90 | aaaaaaa
+   19 |   90 | aaaaaaa
+    0 |   91 | test
+    0 |   92 | test
+    0 |   93 | test
+    0 |   94 | test
+    0 |   95 | test
+    0 |   96 | test
+    0 |   97 | test
+    0 |   98 | test
+    0 |   99 | test
+   25 |  100 | aaaaaaa
+   72 |  100 | aaaaaaa
+    4 |  100 | aaaaaaa
+   28 |  100 | aaaaaaa
+   74 |  100 | aaaaaaa
+   39 |  100 | aaaaaaa
+   13 |  100 | aaaaaaa
+   36 |  100 | aaaaaaa
+    1 |  100 | aaaaaaa
+   79 |  100 | aaaaaaa
+   20 |  100 | aaaaaaa
+   53 |  100 | aaaaaaa
+   71 |  100 | aaaaaaa
+   51 |  100 | aaaaaaa
+   78 |  100 | aaaaaaa
+   38 |  100 | aaaaaaa
+   17 |  100 | aaaaaaa
+   77 |  100 | aaaaaaa
+   62 |  100 | aaaaaaa
+    5 |  100 | aaaaaaa
+   19 |  100 | aaaaaaa
+    8 |  100 | aaaaaaa
+   56 |  100 | aaaaaaa
+   15 |  100 | aaaaaaa
+   23 |  100 | aaaaaaa
+   18 |  100 | aaaaaaa
+   55 |  100 | aaaaaaa
+   65 |  100 | aaaaaaa
+   35 |  100 | aaaaaaa
+   12 |  100 | aaaaaaa
+   33 |  100 | aaaaaaa
+   57 |  100 | aaaaaaa
+   59 |  100 | aaaaaaa
+   58 |  100 | aaaaaaa
+   16 |  100 | aaaaaaa
+   26 |  100 | aaaaaaa
+    7 |  100 | aaaaaaa
+   29 |  100 | aaaaaaa
+   66 |  100 | aaaaaaa
+   32 |  100 | aaaaaaa
+    1 |  100 | aaaaaaa
+    6 |  100 | aaaaaaa
+   10 |  100 | aaaaaaa
+   69 |  100 | aaaaaaa
+   75 |  100 | aaaaaaa
+   63 |  100 | aaaaaaa
+   49 |  100 | aaaaaaa
+   14 |  100 | aaaaaaa
+    4 |  100 | aaaaaaa
+   42 |  100 | aaaaaaa
+    3 |  100 | aaaaaaa
+   37 |  100 | aaaaaaa
+   60 |  100 | aaaaaaa
+   48 |  100 | aaaaaaa
+    7 |  100 | aaaaaaa
+    2 |  100 | aaaaaaa
+   24 |  100 | aaaaaaa
+   30 |  100 | aaaaaaa
+    0 |  100 | aaaaaaa
+   27 |  100 | aaaaaaa
+   45 |  100 | aaaaaaa
+   61 |  100 | aaaaaaa
+    9 |  100 | aaaaaaa
+   46 |  100 | aaaaaaa
+    6 |  100 | aaaaaaa
+   34 |  100 | aaaaaaa
+   41 |  100 | aaaaaaa
+   11 |  100 | aaaaaaa
+   43 |  100 | aaaaaaa
+   44 |  100 | aaaaaaa
+   31 |  100 | aaaaaaa
+   64 |  100 | aaaaaaa
+    5 |  100 | aaaaaaa
+    8 |  100 | aaaaaaa
+    0 |  100 | test
+    2 |  100 | aaaaaaa
+   76 |  100 | aaaaaaa
+   67 |  100 | aaaaaaa
+   40 |  100 | aaaaaaa
+    3 |  100 | aaaaaaa
+   68 |  100 | aaaaaaa
+   54 |  100 | aaaaaaa
+   73 |  100 | aaaaaaa
+   22 |  100 | aaaaaaa
+   50 |  100 | aaaaaaa
+   52 |  100 | aaaaaaa
+   21 |  100 | aaaaaaa
+   47 |  100 | aaaaaaa
+   70 |  100 | aaaaaaa
+   -1 |  111 | test_update2
+(1079 rows)
+
+prepare p117 as select col1, col2 from test_bypass_sql_partition where true order by col1 limit 10;
+prepare p118 as select col2, col1 from test_bypass_sql_partition order by col1 limit 10;
+prepare p119 as select col1, col2 from test_bypass_sql_partition order by col1 desc limit 10;
+execute p117;
+ col1 | col2 
+------+------
+   -3 |   10
+   -1 |  111
+    0 |   -1
+    0 |   -1
+    0 |    1
+    0 |    2
+    0 |    3
+    0 |    4
+    0 |    5
+    0 |    6
+(10 rows)
+
+execute p118;
+ col2 | col1 
+------+------
+   10 |   -3
+  111 |   -1
+   -1 |    0
+   -1 |    0
+    1 |    0
+    2 |    0
+    3 |    0
+    4 |    0
+    5 |    0
+    6 |    0
+(10 rows)
+
+execute p119;
+ col1 | col2 
+------+------
+   79 |  100
+   79 |   90
+   79 |   80
+   79 |   70
+   79 |   60
+   79 |   50
+   79 |   40
+   79 |   30
+   79 |   20
+   79 |   10
+(10 rows)
+
+
+
+--bypass
+prepare p_select1 as select * from test_bypass_sql_partition where col1 = $1 limit 10;
+execute p_select1(0);
+ col1 | col2 |    col3     
+------+------+-------------
+    0 |   -1 | test_update
+    0 |   -1 | test_update
+    0 |    1 | test
+    0 |    2 | test
+    0 |    3 | test
+    0 |    4 | test
+    0 |    5 | test
+    0 |    6 | test
+    0 |    7 | test
+    0 |    8 | test
+(10 rows)
+
+prepare p_select2 as select * from test_bypass_sql_partition where col1 = $1 limit 10 for update;
+execute p_select2(0);
+ col1 | col2 |    col3     
+------+------+-------------
+    0 |   -1 | test_update
+    0 |   -1 | test_update
+    0 |    1 | test
+    0 |    2 | test
+    0 |    3 | test
+    0 |    4 | test
+    0 |    5 | test
+    0 |    6 | test
+    0 |    7 | test
+    0 |    8 | test
+(10 rows)
+
+
+--nobypass
+
+
+prepare p_select3 as select col1, col2 from test_bypass_sql_partition limit 10;
+execute p_select3;
+ col1 | col2 
+------+------
+   -3 |   10
+   -1 |  111
+    0 |   -1
+    0 |   -1
+    0 |    1
+    0 |    2
+    0 |    3
+    0 |    4
+    0 |    5
+    0 |    6
+(10 rows)
+
+
+prepare p_select4 as select col1, col2 from test_bypass_sql_partition where col1 < $1 and col1 > $2 limit 10;
+execute p_select4(20,10);
+ col1 | col2 
+------+------
+   11 |    0
+   11 |   10
+   11 |   20
+   11 |   30
+   11 |   40
+   11 |   50
+   11 |   60
+   11 |   70
+   11 |   80
+   11 |   90
+(10 rows)
+
+prepare p_select5 as select col1, col2 from test_bypass_sql_partition where col1 <= $1 and col1 >=$2 limit 10;
+execute p_select5(11,15);
+ col1 | col2 
+------+------
+(0 rows)
+
+--bypass
+prepare p_update1 as update test_bypass_sql_partition set col3=$1 where col1=$2;
+execute p_update1(1, 10);
+prepare p_update2 as update test_bypass_sql_partition set col3=$1,col2=col1-$2 where col1=$3;
+execute p_update2('test_null',1,1);
+--nobypass
+update test_bypass_sql_partition set col3='test_null' where col1 < 70;
+update test_bypass_sql_partition set col3='test_null' where true;
+update test_bypass_sql_partition set col1 = 1 where col1 > 1 and col1 < 10;
+prepare p_update3 as update test_bypass_sql_partition set col1 = $1 where col1 > $2 and col1 < $3;
+execute p_update3(1,1,10);
+
+prepare p_update4 as update test_bypass_sql_partition set col3=$1,col2=mod(5,3) where col1 > $2 and col1 < $3;
+execute p_update4('test_null',11,15);
+prepare p_update5 as update test_bypass_sql_partition set col3=$1,col2=col1-1 where col1 >= $2 and col1 <= $3;
+execute p_update5('test_null',1,10);
+
+--bypass
+prepare p_delete1 as delete from test_bypass_sql_partition where col1=$1;
+execute p_delete1 (1);
+
+--nobypass
+prepare p_delete3 as delete from test_bypass_sql_partition where col1 > $1 and col1 < $2;
+execute p_delete3(1,10);
+prepare p_delete4 as delete from test_bypass_sql_partition where col1 <= $1 and col1 >= $2;
+execute p_delete4(1,10);
+prepare p_delete2 as delete from test_bypass_sql_partition where true;
+execute p_delete2;
+reset enable_partition_opfusion;
+drop table test_bypass_sql_partition;
+

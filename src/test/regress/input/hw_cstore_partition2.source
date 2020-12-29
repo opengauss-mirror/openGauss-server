@@ -1,0 +1,38 @@
+--add partition
+create table test(id int) with(orientation = column)
+partition by range (id)
+(
+     partition CstorePartition_21 values less than (3),
+     partition CstorePartition_22 values less than (5)
+);
+alter table test add partition CstorePartition_23 values less than (8);
+copy test from '@abs_srcdir@/data/add&drop_partition.data' delimiter '|';
+set enable_vector_engine=on; 
+select * from test order by id;
+select * from test partition (CstorePartition_23) order by id;
+drop table test;
+
+--drop partition
+create table test(id int) with(orientation = column)
+partition by range (id)
+(
+     partition CstorePartition_21 values less than (3),
+     partition CstorePartition_22 values less than (5)
+);
+alter table test add partition CstorePartition_23 values less than (8);
+copy test from '@abs_srcdir@/data/add&drop_partition.data' delimiter '|';
+set enable_vector_engine=on; 
+select * from test order by id;
+select * from test partition (CstorePartition_23) order by id;
+alter table test drop partition CstorePartition_23 ;
+select * from test order by id;
+select * from test partition (CstorePartition_23) order by id;
+drop table test;
+--test for analyze table with index
+create table analyze_table(id int) with (orientation = column);
+create index analyze_tableIDX on analyze_table(id);
+analyze analyze_table;
+drop table analyze_table;
+reset enable_vector_engine;
+
+

@@ -51,7 +51,7 @@ public:
      * the algo and cekname come form user.
      */
     bool init_Key(const char* algo, const char* cekname);
-    /* use default value init key environment. */
+    /* use default value init key environment.*/
     bool init_Key();
 
     /* Checking whether DEK is correct will be judged by the saved encrypted_sample_string. */

@@ -22,8 +22,10 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_proc_fn.h"
 #include "catalog/pg_type.h"
+#include "executor/spi.h"
 #include "funcapi.h"
 #include "nodes/makefuncs.h"
+#include "nodes/nodeFuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/pg_list.h"
 #include "optimizer/clauses.h"
@@ -32,6 +34,7 @@
 #include "pgxc/locator.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
+#include "utils/globalplancore.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -42,12 +45,6 @@
 
 /* functions reference other modules */
 extern THR_LOCAL List* baseSearchPath;
-
-typedef struct plpgsql_hashent {
-    PLpgSQL_func_hashkey key;
-    PLpgSQL_function* function;
-    DListCell* cell; /* Dlist cell for delete function compile results. */
-} plpgsql_HashEnt;
 
 #define FUNCS_PER_USER 128 /* initial table size */
 
@@ -76,36 +73,35 @@ static void add_dummy_return(PLpgSQL_function* func);
 static Node* plpgsql_pre_column_ref(ParseState* pstate, ColumnRef* cref);
 static Node* plpgsql_post_column_ref(ParseState* pstate, ColumnRef* cref, Node* var);
 static Node* plpgsql_param_ref(ParseState* pstate, ParamRef* pref);
-static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, const ColumnRef* cref, bool error_if_no_field);
+static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRef* cref, bool error_if_no_field);
 static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location);
 static PLpgSQL_row* build_row_from_class(Oid class_oid);
 static PLpgSQL_row* build_row_from_vars(PLpgSQL_variable** vars, int numvars);
 static PLpgSQL_type* build_datatype(HeapTuple type_tup, int32 typmod, Oid collation);
 static void compute_function_hashkey(
-    FunctionCallInfo fcinfo, const Form_pg_proc proc_struct, PLpgSQL_func_hashkey* hashkey, bool for_validator);
+    FunctionCallInfo fcinfo, Form_pg_proc proc_struct, PLpgSQL_func_hashkey* hashkey, bool for_validator);
 static void plpgsql_resolve_polymorphic_argtypes(
-    int numargs, Oid* arg_types, const char* arg_modes, Node* call_expr, bool for_validator, const char* pro_name);
-static PLpgSQL_function* plpgsql_HashTableLookup(const PLpgSQL_func_hashkey* func_key);
-static void plpgsql_HashTableInsert(PLpgSQL_function* func, const PLpgSQL_func_hashkey* func_key);
-static void plpgsql_HashTableDelete(PLpgSQL_function* func);
+    int numargs, Oid* argtypes, const char* argmodes, Node* call_expr, bool for_validator, const char* proname);
+static PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key);
+static void plpgsql_HashTableInsert(PLpgSQL_function* func, PLpgSQL_func_hashkey* func_key);
 static void delete_function(PLpgSQL_function* func);
 static void plpgsql_append_dlcell(plpgsql_HashEnt* entity);
 
 static int plpgsql_getCustomErrorCode(void);
 extern bool is_func_need_cache(Oid funcid, const char* func_name);
 
-static bool plpgsql_check_search_path(const PLpgSQL_function* func, HeapTuple proc_tup);
+static bool plpgsql_check_search_path(PLpgSQL_function* func, HeapTuple procTup);
 static bool plpgsql_check_insert_colocate(
-    const Query* query, const List* qry_part_attr_num, const List* trig_part_attr_num, PLpgSQL_function* func);
+    Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func);
 static bool plpgsql_check_updel_colocate(
     Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func);
 static bool plpgsql_check_opexpr_colocate(
-    const Query* query, const List* qry_part_attr_num, const List* trig_part_attr_num, PLpgSQL_function* func, const List* opexpr_list);
+    Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func, List* opexpr_list);
 
 /* ----------
  * plpgsql_compile		Make an execution tree for a PL/pgSQL function.
  *
- * If for_validator is true, we're only compiling for validation purposes,
+ * If forValidator is true, we're only compiling for validation purposes,
  * and so some checks are skipped.
  *
  * Note: it's important for this to fall through quickly if the function
@@ -127,9 +123,7 @@ PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool for_validator)
      */
     proc_tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
     if (!HeapTupleIsValid(proc_tup)) {
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL),
-                errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+        ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for function %u, while compile function", func_oid)));
     }
     proc_struct = (Form_pg_proc)GETSTRUCT(proc_tup);
@@ -200,6 +194,8 @@ recheck:
          * Do the hard part.
          */
         func = do_compile(fcinfo, proc_tup, func, &hashkey, for_validator);
+        if (ENABLE_CN_GPC)
+            set_func_expr_unique_id(func);
     }
 
     ReleaseSysCache(proc_tup);
@@ -225,6 +221,7 @@ PLpgSQL_function* plpgsql_compile_nohashkey(FunctionCallInfo fcinfo)
 {
     Oid func_oid = fcinfo->flinfo->fn_oid;
     HeapTuple proc_tup = NULL;
+    Form_pg_proc proc_struct = NULL;
     PLpgSQL_function* func = NULL;
 
     /* Lookup the pg_proc tuple by Oid, as we'll need it in any case */
@@ -233,6 +230,7 @@ PLpgSQL_function* plpgsql_compile_nohashkey(FunctionCallInfo fcinfo)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("cache lookup failed for function %u", func_oid)));
     }
     
+	proc_struct = (Form_pg_proc)GETSTRUCT(proc_tup);
     /*
      * See if there's already a cache entry for the current FmgrInfo. If not,
      * try to find one in the hash table.
@@ -261,7 +259,7 @@ PLpgSQL_function* plpgsql_compile_nohashkey(FunctionCallInfo fcinfo)
  * @in num_out_args -out args number
  * @out - bool return true if id is need to add a dummy return
  */
-static bool whether_add_return(const PLpgSQL_function* func, int num_out_args)
+static bool whether_add_return(PLpgSQL_function* func, int num_out_args)
 {
     if (num_out_args == 1 || (num_out_args == 0 && func->fn_rettype == VOIDOID ) || func->fn_retset ||
         func->fn_rettype == RECORDOID) {
@@ -334,9 +332,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
      */
     prosrcdatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_prosrc, &isnull);
     if (isnull) {
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL),
-                errcode(ERRCODE_UNDEFINED_OBJECT),
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("The definition of the function is null"),
                 errhint("Check whether the definition of the function is complete in the pg_proc system table.")));
     }
@@ -366,7 +362,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
      * structs are never thrown away, so keep them in session memory context.
      */
     if (func == NULL) {
-        func = (PLpgSQL_function*)MemoryContextAllocZero(u_sess->top_mem_cxt, sizeof(PLpgSQL_function));
+        func = (PLpgSQL_function*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(PLpgSQL_function));
     } else {
         /* re-using a previously existing struct, so clear it out */
         rc = memset_s(func, sizeof(PLpgSQL_function), 0, sizeof(PLpgSQL_function));
@@ -416,17 +413,13 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     if (proc_struct->pronamespace == PG_CATALOG_NAMESPACE) {
         current_searchpath = fetch_search_path(false);
         if (current_searchpath == NIL) {
-            ereport(ERROR,
-                (errmodule(MOD_PLSQL),
-                    errcode(ERRCODE_UNDEFINED_SCHEMA),
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_SCHEMA),
                     errmsg("the search_path is empty while the porc belongs to pg_catalog ")));
         }
         namespace_name = get_namespace_name(linitial_oid(current_searchpath));
         if (namespace_name == NULL) {
             list_free_ext(current_searchpath);
-            ereport(ERROR,
-                (errmodule(MOD_PLSQL),
-                    errcode(ERRCODE_UNDEFINED_SCHEMA),
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_SCHEMA),
                     errmsg("cannot find the namespace according to search_path")));
         }
         func->fn_searchpath->schemas = current_searchpath;
@@ -444,7 +437,26 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
              * Otherwise, we only find objects in the namespace
              * of current function.
              */
+
             ListCell* l = NULL;
+
+            /* If u_sess->catalog_cxt.namespaceUser and roleid are not equeal,
+             * then u_sess->catalog_cxt.baseSearchPath doesn't
+             * contain currentUser schema.currenUser schema will be added in
+             * PushOverrideSearchPath.
+             * 
+             * It can happen executing following statements.
+             * 
+             * create temp table t1(a int);
+             * \d t1                     --(get schema pg_temp_xxx)
+             * drop table t1;
+             * drop schema pg_temp_xxx cascade;
+             * call proc1()              --(proc1 contains create temp table statement)
+             */
+            Oid roleid = GetUserId();
+            if (u_sess->catalog_cxt.namespaceUser != roleid) {
+                func->fn_searchpath->addUser = true;
+            }
             /* Use baseSearchPath not activeSearchPath. */
             foreach (l, u_sess->catalog_cxt.baseSearchPath) {
                 Oid namespaceId = lfirst_oid(l);
@@ -489,12 +501,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
 
             numargs = get_func_arg_info(proc_tup, &arg_types, &argnames, &arg_modes);
 
-            plpgsql_resolve_polymorphic_argtypes(numargs,
-                arg_types,
-                arg_modes,
-                fcinfo->flinfo->fn_expr,
-                for_validator,
-                u_sess->plsql_cxt.plpgsql_error_funcname);
+            plpgsql_resolve_polymorphic_argtypes(numargs, arg_types, arg_modes,
+                fcinfo->flinfo->fn_expr, for_validator, u_sess->plsql_cxt.plpgsql_error_funcname);
 
             in_arg_varnos = (int*)palloc0(numargs * sizeof(int));
             out_arg_variables = (PLpgSQL_variable**)palloc0(numargs * sizeof(PLpgSQL_variable*));
@@ -525,9 +533,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                 /* (note we already replaced polymorphic types) */
                 /* (build_variable would do this, but wrong message) */
                 if (argdtype->ttype != PLPGSQL_TTYPE_SCALAR && argdtype->ttype != PLPGSQL_TTYPE_ROW) {
-                    ereport(ERROR,
-                        (errmodule(MOD_PLSQL),
-                            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("PL/pgSQL functions cannot accept type %s", format_type_be(arg_type_id))));
                 }
                 /* Build variable and add to datum list */
@@ -602,9 +608,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                 } else {
                     rettypeid = get_fn_expr_rettype(fcinfo->flinfo);
                     if (!OidIsValid(rettypeid)) {
-                        ereport(ERROR,
-                            (errmodule(MOD_PLSQL),
-                                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        ereport(ERROR, (errmodule(MOD_PLSQL),  errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmsg("could not determine actual return type for polymorphic function \"%s\"",
                                     u_sess->plsql_cxt.plpgsql_error_funcname)));
                     }
@@ -622,9 +626,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
              */
             type_tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(rettypeid));
             if (!HeapTupleIsValid(type_tup)) {
-                ereport(ERROR,
-                    (errmodule(MOD_PLSQL),
-                        errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for type %u while compile function.", rettypeid)));
             }
             type_struct = (Form_pg_type)GETSTRUCT(type_tup);
@@ -635,14 +637,10 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                 if (rettypeid == VOIDOID || rettypeid == RECORDOID) {
                     /* okay */;
                 } else if (rettypeid == TRIGGEROID) {
-                    ereport(ERROR,
-                        (errmodule(MOD_PLSQL),
-                            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("trigger functions can only be called as triggers")));
                 } else {
-                    ereport(ERROR,
-                        (errmodule(MOD_PLSQL),
-                            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("PL/pgSQL functions cannot return type %s", format_type_be(rettypeid))));
                 }
             }
@@ -677,9 +675,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
 
             /* shouldn't be any declared arguments */
             if (proc_struct->pronargs != 0) {
-                ereport(ERROR,
-                    (errmodule(MOD_PLSQL),
-                        errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                         errmsg("trigger functions cannot have declared arguments"),
                         errhint("The arguments of the trigger can be accessed through TG_NARGS and TG_ARGV instead.")));
             }
@@ -738,9 +734,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
             break;
 
         default:
-            ereport(ERROR,
-                (errmodule(MOD_PLSQL),
-                    errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                     errmsg("unrecognized function typecode: %d", (int)is_trigger),
                     errhint("This node type is expected to be a function or trigger.")));
             break;
@@ -836,6 +830,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
      */
     if (hashkey && is_func_need_cache(func->fn_oid, NameStr(proc_struct->proname))) {
         plpgsql_HashTableInsert(func, hashkey);
+        uint32 key = SPICacheHashFunc(func->fn_hashkey, sizeof(PLpgSQL_func_hashkey));
+        SPICacheTableInsert(key, func->fn_oid);
     }
 
     /*
@@ -971,9 +967,7 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
      */
     parse_rc = plpgsql_yyparse();
     if (parse_rc != 0) {
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL),
-                errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("Syntax parsing error, plpgsql parser returned %d", parse_rc)));
     }
     func->action = u_sess->plsql_cxt.plpgsql_parse_result;
@@ -1033,8 +1027,7 @@ static void plpgsql_compile_error_callback(void* arg)
 
     if (u_sess->plsql_cxt.plpgsql_error_funcname) {
         errcontext("compilation of PL/pgSQL function \"%s\" near line %d",
-            u_sess->plsql_cxt.plpgsql_error_funcname,
-            plpgsql_latest_lineno());
+            u_sess->plsql_cxt.plpgsql_error_funcname, plpgsql_latest_lineno());
     }
 }
 
@@ -1051,9 +1044,7 @@ static void add_parameter_name(int item_type, int item_no, const char* name)
      * disambiguate.
      */
     if (plpgsql_ns_lookup(plpgsql_ns_top(), true, name, NULL, NULL, NULL) != NULL) {
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL),
-                errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("parameter name \"%s\" used more than once", name)));
     }
     /* OK, add the name */
@@ -1149,14 +1140,13 @@ static Node* plpgsql_post_column_ref(ParseState* pstate, ColumnRef* cref, Node* 
      * helpful error message possible.)
      */
     myvar = resolve_column_ref(pstate, expr, cref, (var == NULL));
+
     if (myvar != NULL && var != NULL) {
         /*
          * We could leave it to the core parser to throw this error, but we
          * can add a more useful detail message than the core could.
          */
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL),
-                errcode(ERRCODE_AMBIGUOUS_COLUMN),
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_AMBIGUOUS_COLUMN),
                 errmsg("column reference \"%s\" is ambiguous", NameListToString(cref->fields)),
                 errdetail("It could refer to either a PL/pgSQL variable or a table column."),
                 parser_errposition(pstate, cref->location)));
@@ -1178,7 +1168,9 @@ static Node* plpgsql_param_ref(ParseState* pstate, ParamRef* pref)
 
     rc = snprintf_s(pname, sizeof(pname), sizeof(pname) - 1, "$%d", pref->number);
     securec_check_ss(rc, "\0", "\0");
+
     nse = plpgsql_ns_lookup(expr->ns, false, pname, NULL, NULL, NULL);
+
     if (nse == NULL) {
         return NULL; /* name not known to plpgsql */
     }
@@ -1193,7 +1185,7 @@ static Node* plpgsql_param_ref(ParseState* pstate, ParamRef* pref)
  * error_if_no_field tells whether to throw error or quietly return NULL if
  * we are able to match a record/row name but don't find a field name match.
  */
-static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, const ColumnRef* cref, bool error_if_no_field)
+static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRef* cref, bool error_if_no_field)
 {
     PLpgSQL_execstate* estate = NULL;
     PLpgSQL_nsitem* nse = NULL;
@@ -1336,9 +1328,7 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, const Co
                  * it like field-not-found: throw error or return NULL.
                  */
                 if (error_if_no_field) {
-                    ereport(ERROR,
-                        (errmodule(MOD_PLSQL),
-                            errcode(ERRCODE_UNDEFINED_COLUMN),
+                    ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_COLUMN),
                             errmsg("record \"%s\" has no field \"%s\"", (nnames_field == 1) ? name1 : name2, colname),
                             parser_errposition(pstate, cref->location)));
                 }
@@ -1365,17 +1355,13 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, const Co
                 }
                 /* Not found, so throw error or return NULL */
                 if (error_if_no_field)
-                    ereport(ERROR,
-                        (errmodule(MOD_PLSQL),
-                            errcode(ERRCODE_UNDEFINED_COLUMN),
+                    ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_COLUMN),
                             errmsg("record \"%s\" has no field \"%s\"", (nnames_field == 1) ? name1 : name2, colname),
                             parser_errposition(pstate, cref->location)));
             }
             break;
         default:
-            ereport(ERROR,
-                (errmodule(MOD_PLSQL),
-                    errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                     errmsg("unrecognized plpgsql itemtype: %d, when resolve column reference", nse->itemtype)));
             break;
     }
@@ -1554,7 +1540,7 @@ bool plpgsql_parse_dblword(char* word1, char* word2, PLwdatum* wdatum, PLcword* 
 
     /*
      * String to compare with B in A.B,
-     * compatible with a's varray accesss method
+     * compatible with A db's varray accesss method
      */
     const char* varray_first = "first";
     const char* varray_last = "last";
@@ -1810,6 +1796,8 @@ PLpgSQL_type* plpgsql_parse_wordtype(char* ident)
             case PLPGSQL_NSTYPE_VAR:
                 return ((PLpgSQL_var*)(u_sess->plsql_cxt.plpgsql_Datums[nse->itemno]))->datatype;
 
+                /* XXX perhaps allow REC/ROW here? */
+
             default:
                 return NULL;
         }
@@ -1857,6 +1845,7 @@ PLpgSQL_type* plpgsql_parse_cwordtype(List* idents)
     Form_pg_class class_struct = NULL;
     Form_pg_attribute attr_struct = NULL;
     MemoryContext old_cxt = NULL;
+    bool flag = false;
 
     /* Avoid memory leaks in the long-term function context */
     old_cxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
@@ -1902,11 +1891,13 @@ PLpgSQL_type* plpgsql_parse_cwordtype(List* idents)
     class_struct = (Form_pg_class)GETSTRUCT(classtup);
 
     /*
-     * It must be a relation, sequence, view, materialized view, composite type, or foreign table
+     * It must be a relation, sequence, view, composite type, materialized view, or foreign table
      */
-    if (class_struct->relkind != RELKIND_RELATION && class_struct->relkind != RELKIND_SEQUENCE &&
+    flag = class_struct->relkind != RELKIND_RELATION && class_struct->relkind != RELKIND_SEQUENCE &&
         class_struct->relkind != RELKIND_VIEW && class_struct->relkind != RELKIND_COMPOSITE_TYPE &&
-        class_struct->relkind != RELKIND_FOREIGN_TABLE && class_struct->relkind != RELKIND_MATVIEW) {
+        class_struct->relkind != RELKIND_FOREIGN_TABLE && class_struct->relkind != RELKIND_MATVIEW &&
+        class_struct->relkind != RELKIND_STREAM && class_struct->relkind != RELKIND_CONTQUERY;
+    if (flag) {
         goto done;
     }
     /*
@@ -2066,6 +2057,7 @@ PLpgSQL_variable* plpgsql_build_variable(
             var->lineno = lineno;
             var->datatype = dtype;
             /* other fields might be filled by caller */
+
             /* preset to NULL */
             var->value = 0;
             var->isnull = true;
@@ -2135,9 +2127,7 @@ PLpgSQL_variable* plpgsql_build_variable(
             break;
         }
         default:
-            ereport(ERROR,
-                (errmodule(MOD_PLSQL),
-                    errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                     errmsg("unrecognized ttype: %d, when build variable in PLSQL, this situation should not occur.",
                         dtype->ttype)));
             result = NULL; /* keep compiler quiet */
@@ -2159,6 +2149,7 @@ PLpgSQL_variable* plpgsql_build_varrayType(const char* refname, int lineno, PLpg
     var->lineno = lineno;
     var->datatype = dtype;
     /* other fields might be filled by caller */
+
     /* preset to NULL */
     var->value = 0;
     var->isnull = true;
@@ -2259,13 +2250,12 @@ static PLpgSQL_row* build_row_from_class(Oid class_oid)
     class_struct = RelationGetForm(rel);
     relname = RelationGetRelationName(rel);
 
-    /* accept relation, sequence, view, composite type, materialized view or foreign table */
+    /* accept relation, sequence, view, composite type, materialized view, or foreign table */
     if (class_struct->relkind != RELKIND_RELATION && class_struct->relkind != RELKIND_SEQUENCE &&
         class_struct->relkind != RELKIND_VIEW && class_struct->relkind != RELKIND_COMPOSITE_TYPE &&
-        class_struct->relkind != RELKIND_FOREIGN_TABLE && class_struct->relkind != RELKIND_MATVIEW) {
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL),
-                errcode(ERRCODE_WRONG_OBJECT_TYPE),
+        class_struct->relkind != RELKIND_FOREIGN_TABLE && class_struct->relkind != RELKIND_MATVIEW &&
+        class_struct->relkind != RELKIND_STREAM && class_struct->relkind != RELKIND_CONTQUERY) {
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("relation \"%s\" is not a table, when build a row variable from relation in PLSQL.", relname)));
     }
     /*
@@ -2308,10 +2298,8 @@ static PLpgSQL_row* build_row_from_class(Oid class_oid)
              * the variables due to entering a block at execution time. Thus
              * we ignore this information for now.
              */
-            var = plpgsql_build_variable(refname,
-                0,
-                plpgsql_build_datatype(attr_struct->atttypid, attr_struct->atttypmod, attr_struct->attcollation),
-                false);
+            var = plpgsql_build_variable(refname, 0, plpgsql_build_datatype(attr_struct->atttypid, 
+                                        attr_struct->atttypmod, attr_struct->attcollation), false);
 
             /* Add the variable to the row */
             row->fieldnames[i] = attname;
@@ -2475,9 +2463,7 @@ static PLpgSQL_type* build_datatype(HeapTuple type_tup, int32 typmod, Oid collat
     PLpgSQL_type* typ = NULL;
 
     if (!type_struct->typisdefined) {
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL),
-                errcode(ERRCODE_UNDEFINED_OBJECT),
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("type \"%s\" is only a shell when build data type in PLSQL.", NameStr(type_struct->typname))));
     }
     typ = (PLpgSQL_type*)palloc(sizeof(PLpgSQL_type));
@@ -2568,6 +2554,9 @@ PLpgSQL_condition* plpgsql_parse_err_condition(char* condname)
     /*
      * XXX Eventually we will want to look for user-defined exception names
      * here.
+     */
+
+    /*
      * OTHERS is represented as code 0 (which would map to '00000', but we
      * have no need to represent that as an exception condition).
      */
@@ -2655,8 +2644,8 @@ int plpgsql_add_initdatums(int** varnos)
                 switch (u_sess->plsql_cxt.plpgsql_Datums[i]->dtype) {
                     case PLPGSQL_DTYPE_VAR:
                         (*varnos)[n++] = u_sess->plsql_cxt.plpgsql_Datums[i]->dno;
-                        break;
-
+                    /* fall through */
+                    
                     default:
                         break;
                 }
@@ -2676,7 +2665,7 @@ int plpgsql_add_initdatums(int** varnos)
  * The hashkey is returned into the caller-provided storage at *hashkey.
  */
 static void compute_function_hashkey(
-    FunctionCallInfo fcinfo, const Form_pg_proc proc_struct, PLpgSQL_func_hashkey* hashkey, bool for_validator)
+    FunctionCallInfo fcinfo, Form_pg_proc proc_struct, PLpgSQL_func_hashkey* hashkey, bool for_validator)
 {
     /* Make sure any unused bytes of the struct are zero */
     errno_t rc = memset_s(hashkey, sizeof(PLpgSQL_func_hashkey), 0, sizeof(PLpgSQL_func_hashkey));
@@ -2777,13 +2766,18 @@ static void plpgsql_resolve_polymorphic_argtypes(
  */
 static void delete_function(PLpgSQL_function* func)
 {
+    u_sess->plsql_cxt.is_delete_function = true;
+
+    SPIPlanCacheTableDelete(SPICacheHashFunc(func->fn_hashkey, sizeof(PLpgSQL_func_hashkey)));
+
     /* remove function from hash table (might be done already) */
     plpgsql_HashTableDelete(func);
-
     /* release the function's storage if safe and not done already */
     if (func->use_count == 0) {
         plpgsql_free_function_memory(func);
     }
+
+    u_sess->plsql_cxt.is_delete_function = false;
 }
 
 /* exported so we can call it from plpgsql_init() */
@@ -2805,7 +2799,7 @@ void plpgsql_HashTableInit(void)
         hash_create("PLpgSQL function cache", FUNCS_PER_USER, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
 
-static PLpgSQL_function* plpgsql_HashTableLookup(const PLpgSQL_func_hashkey* func_key)
+static PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key)
 {
     plpgsql_HashEnt* hentry = NULL;
 
@@ -2820,7 +2814,7 @@ static PLpgSQL_function* plpgsql_HashTableLookup(const PLpgSQL_func_hashkey* fun
     }
 }
 
-static void plpgsql_HashTableInsert(PLpgSQL_function* func, const PLpgSQL_func_hashkey* func_key)
+static void plpgsql_HashTableInsert(PLpgSQL_function* func, PLpgSQL_func_hashkey* func_key)
 {
     plpgsql_HashEnt* hentry = NULL;
     bool found = false;
@@ -2840,7 +2834,7 @@ static void plpgsql_HashTableInsert(PLpgSQL_function* func, const PLpgSQL_func_h
     func->fn_hashkey = &hentry->key;
 }
 
-static void plpgsql_HashTableDelete(PLpgSQL_function* func)
+void plpgsql_HashTableDelete(PLpgSQL_function* func)
 {
     plpgsql_HashEnt* hentry = NULL;
 
@@ -2873,9 +2867,7 @@ static int plpgsql_getCustomErrorCode(void)
     int third = 0;
 
     if (u_sess->plsql_cxt.plpgsql_IndexErrorVariable >= u_sess->attr.attr_common.max_user_defined_exception) {
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL),
-                errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                 errmsg("exception variable count %d exceed max value, max exception variable count is %d",
                     u_sess->plsql_cxt.plpgsql_IndexErrorVariable,
                     u_sess->attr.attr_common.max_user_defined_exception)));
@@ -2900,7 +2892,7 @@ static void plpgsql_append_dlcell(plpgsql_HashEnt* entity)
 {
     MemoryContext oldctx;
     PLpgSQL_function* func = NULL;
-    oldctx = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+    oldctx = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     u_sess->plsql_cxt.plpgsql_dlist_functions = dlappend(u_sess->plsql_cxt.plpgsql_dlist_functions, entity);
     (void)MemoryContextSwitchTo(oldctx);
 
@@ -2925,7 +2917,7 @@ static void plpgsql_append_dlcell(plpgsql_HashEnt* entity)
 /*
  * Check whether function's search path is same as system search_path.
  */
-static bool plpgsql_check_search_path(const PLpgSQL_function* func, HeapTuple proc_tup)
+static bool plpgsql_check_search_path(PLpgSQL_function* func, HeapTuple proc_tup)
 {
     /* If SUPPORT_BIND_SEARCHPATH is false, always return true. */
     if (!SUPPORT_BIND_SEARCHPATH) {
@@ -2988,6 +2980,8 @@ bool plpgsql_check_colocate(Query* query, RangeTblEntry* rte, void* plpgsql_func
     Relation tg_relation = NULL;
     RelationLocInfo* qe_rel_loc_info = NULL; /* triggering query's rel loc info */
     RelationLocInfo* tg_rel_loc_info = NULL; /* trigger body's rel loc info */
+    int qe_rel_nodelist_len = 0;
+    int tg_rel_nodelist_len = 0;
 
     Assert(query->commandType == CMD_INSERT || query->commandType == CMD_DELETE || query->commandType == CMD_UPDATE);
 
@@ -3003,6 +2997,9 @@ bool plpgsql_check_colocate(Query* query, RangeTblEntry* rte, void* plpgsql_func
     /* Check if trigger query table and trigger body table are on the same node list. */
     qe_rel_loc_info = qe_relation->rd_locator_info;
     tg_rel_loc_info = tg_relation->rd_locator_info;
+
+    qe_rel_nodelist_len = list_length(qe_rel_loc_info->nodeList);
+    tg_rel_nodelist_len = list_length(tg_rel_loc_info->nodeList);
 
     /* Cannot ship whenever target table is not row type. */
     if (!RelationIsRowFormat(tg_relation)) {
@@ -3078,6 +3075,7 @@ static bool plpgsql_check_updel_colocate(
     }
     /* Flatten AND/OR expression for checking or expr. */
     whereClause = eval_const_expressions(NULL, (Node*)query->jointree->quals);
+
     /* If it is or clause, we break the clause to check colocation of each expr */
     if (or_clause(whereClause)) {
         List* temp_list = NIL;
@@ -3094,17 +3092,21 @@ static bool plpgsql_check_updel_colocate(
 
             if (!is_colocate) {
                 break;
-            }
-        }
-
-        list_free_ext(opexpr_list);
+        	}
+		}
+		
+        if (opexpr_list != NIL) {
+            list_free_ext(opexpr_list);
+		}
         return is_colocate;
     } else {
         /* For and with no or condition, we can ship when any opexpr is colocated. */
         is_colocate = plpgsql_check_opexpr_colocate(query, qry_part_attr_num, trig_part_attr_num, func, opexpr_list);
     }
 
-    list_free_ext(opexpr_list);
+    if (opexpr_list != NIL) {
+        list_free_ext(opexpr_list);
+	}
     return is_colocate;
 }
 
@@ -3119,7 +3121,7 @@ static bool plpgsql_check_updel_colocate(
  * @return : when co-location return true.
  */
 static bool plpgsql_check_opexpr_colocate(
-    const Query* query, const List* qry_part_attr_num, const List* trig_part_attr_num, PLpgSQL_function* func, const List* opexpr_list)
+    Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func, List* opexpr_list)
 {
     ListCell* lc1 = NULL;
     ListCell* lc2 = NULL;
@@ -3219,7 +3221,7 @@ static bool plpgsql_check_opexpr_colocate(
  * @in trig_part_attr_num : list of attr no of the dist keys of query in trigger
  */
 static bool plpgsql_check_insert_colocate(
-    const Query* query, const List* qry_part_attr_num, const List* trig_part_attr_num, PLpgSQL_function* func)
+    Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func)
 {
     ListCell* lc1 = NULL;
     ListCell* lc2 = NULL;

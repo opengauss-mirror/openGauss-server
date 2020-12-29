@@ -26,6 +26,8 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_attribute.h"
+#include "catalog/heap.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "parser/parse_relation.h"
@@ -51,7 +53,7 @@
 #include "utils/relcache.h"
 #include "utils/resowner.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 /*
  * Given a hash value and the size of the hash table, find the bucket
@@ -85,24 +87,24 @@ extern Datum pv_builtin_functions(PG_FUNCTION_ARGS);
 static inline HeapTuple SearchCatCacheInternal(
     CatCache* cache, int nkeys, Datum v1, Datum v2, Datum v3, Datum v4, int level = DEBUG2);
 
-static HeapTuple search_cat_cache_miss(
+static HeapTuple SearchCatCacheMiss(
     CatCache* cache, int nkeys, uint32 hashValue, Index hashIndex, Datum v1, Datum v2, Datum v3, Datum v4, int level);
 
-static uint32 catalog_cache_compute_hash_value(CatCache* cache, int nkeys, Datum v1, Datum v2, Datum v3, Datum v4);
-static uint32 catalog_cache_compute_tuple_hash_value(CatCache* cache, int nkeys, HeapTuple tuple);
-static inline bool catalog_cache_compare_tuple(
+static uint32 CatalogCacheComputeHashValue(CatCache* cache, int nkeys, Datum v1, Datum v2, Datum v3, Datum v4);
+static uint32 CatalogCacheComputeTupleHashValue(CatCache* cache, int nkeys, HeapTuple tuple);
+static inline bool CatalogCacheCompareTuple(
     const CatCache* cache, int nkeys, const Datum* cachekeys, const Datum* searchkeys);
 
 #ifdef CATCACHE_STATS
-static void cat_cache_print_stats(int code, Datum arg);
+static void CatCachePrintStats(int code, Datum arg);
 #endif
-static void cat_cache_remove_ctup(CatCache* cache, CatCTup* ct);
-static void cat_cache_remove_clist(CatCache* cache, CatCList* cl);
-static void catalog_cache_initialize_cache(CatCache* cache);
-static CatCTup* catalog_cache_create_entry(CatCache* cache, HeapTuple ntp, Datum* arguments, uint32 hashValue,
+static void CatCacheRemoveCTup(CatCache* cache, CatCTup* ct);
+static void CatCacheRemoveCList(CatCache* cache, CatCList* cl);
+static void CatalogCacheInitializeCache(CatCache* cache);
+static CatCTup* CatalogCacheCreateEntry(CatCache* cache, HeapTuple ntp, Datum* arguments, uint32 hashValue,
     Index hashIndex, bool negative, bool isnailed = false);
-static void cat_cache_free_keys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* keys);
-static void cat_cache_copy_keys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* srckeys, Datum* dstkeys);
+static void CatCacheFreeKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* keys);
+static void CatCacheCopyKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* srckeys, Datum* dstkeys);
 
 /*
  *					internal support functions
@@ -236,7 +238,7 @@ static uint32 uuidhashfast(Datum datum)
 }
 
 /* Lookup support functions for a type. */
-static void get_cc_hash_eq_funcs(Oid keytype, CCHashFN* hashfunc, RegProcedure* eqfunc, CCFastEqualFN* fasteqfunc)
+static void GetCCHashEqFuncs(Oid keytype, CCHashFN* hashfunc, RegProcedure* eqfunc, CCFastEqualFN* fasteqfunc)
 {
     switch (keytype) {
         case BOOLOID:
@@ -317,58 +319,53 @@ static void get_cc_hash_eq_funcs(Oid keytype, CCHashFN* hashfunc, RegProcedure* 
 }
 
 /*
- *		catalog_cache_compute_hash_value
+ *		CatalogCacheComputeHashValue
  *
  * Compute the hash value associated with a given set of lookup keys
  */
-static uint32 catalog_cache_compute_hash_value(CatCache* cache, int nkeys, Datum v1, Datum v2, Datum v3, Datum v4)
+static uint32 CatalogCacheComputeHashValue(CatCache* cache, int nkeys, Datum v1, Datum v2, Datum v3, Datum v4)
 {
-    uint32 hash_value = 0;
-    uint32 one_hash;
+    uint32 hashValue = 0;
+    uint32 oneHash;
     CCHashFN* cc_hashfunc = cache->cc_hashfunc;
-
-    CACHE3_elog(DEBUG2, "catalog_cache_compute_hash_value %s %d", cache->cc_relname, nkeys);
 
     switch (nkeys) {
         case 4:
-            one_hash = (cc_hashfunc[3])(v4);
-            hash_value ^= one_hash << 24;
-            hash_value ^= one_hash >> 8;
+            oneHash = (cc_hashfunc[3])(v4);
+            hashValue ^= oneHash << 24;
+            hashValue ^= oneHash >> 8;
             /* FALLTHROUGH */
         case 3:
-            one_hash = (cc_hashfunc[2])(v3);
-            hash_value ^= one_hash << 16;
-            hash_value ^= one_hash >> 16;
+            oneHash = (cc_hashfunc[2])(v3);
+            hashValue ^= oneHash << 16;
+            hashValue ^= oneHash >> 16;
             /* FALLTHROUGH */
         case 2:
-            one_hash = (cc_hashfunc[1])(v2);
-            hash_value ^= one_hash << 8;
-            hash_value ^= one_hash >> 24;
+            oneHash = (cc_hashfunc[1])(v2);
+            hashValue ^= oneHash << 8;
+            hashValue ^= oneHash >> 24;
             /* FALLTHROUGH */
         case 1:
-            one_hash = (cc_hashfunc[0])(v1);
-            hash_value ^= one_hash;
+            oneHash = (cc_hashfunc[0])(v1);
+            hashValue ^= oneHash;
             break;
         default:
             ereport(FATAL, (errmsg("wrong number of hash keys: %d", nkeys)));
             break;
     }
 
-    return hash_value;
+    return hashValue;
 }
 
 /*
- *		catalog_cache_compute_tuple_hash_value
+ *		CatalogCacheComputeTupleHashValue
  *
  * Compute the hash value associated with a given tuple to be cached
  */
-static uint32 catalog_cache_compute_tuple_hash_value(CatCache* cache, int nkeys, HeapTuple tuple)
+static uint32 CatalogCacheComputeTupleHashValue(CatCache* cache, int nkeys, HeapTuple tuple)
 {
-    Datum v1 = 0;
-    Datum v2 = 0;
-    Datum v3 = 0;
-    Datum v4 = 0;
-    bool is_null = false;
+    Datum v1 = 0, v2 = 0, v3 = 0, v4 = 0;
+    bool isNull = false;
 
     int* cc_keyno = cache->cc_keyno;
     TupleDesc cc_tupdesc = cache->cc_tupdesc;
@@ -377,54 +374,53 @@ static uint32 catalog_cache_compute_tuple_hash_value(CatCache* cache, int nkeys,
     switch (nkeys) {
         case 4:
             v4 = (cc_keyno[3] == ObjectIdAttributeNumber) ? ObjectIdGetDatum(HeapTupleGetOid(tuple))
-                : fastgetattr(tuple, cc_keyno[3], cc_tupdesc, &is_null);
-            Assert(!is_null);
+                                                          : fastgetattr(tuple, cc_keyno[3], cc_tupdesc, &isNull);
+            Assert(!isNull);
             /* FALLTHROUGH */
         case 3:
             v3 = (cc_keyno[2] == ObjectIdAttributeNumber) ? ObjectIdGetDatum(HeapTupleGetOid(tuple))
-                : fastgetattr(tuple, cc_keyno[2], cc_tupdesc, &is_null);
-            Assert(!is_null);
+                                                          : fastgetattr(tuple, cc_keyno[2], cc_tupdesc, &isNull);
+            Assert(!isNull);
             /* FALLTHROUGH */
         case 2:
             v2 = (cc_keyno[1] == ObjectIdAttributeNumber) ? ObjectIdGetDatum(HeapTupleGetOid(tuple))
-                : fastgetattr(tuple, cc_keyno[1], cc_tupdesc, &is_null);
-            Assert(!is_null);
+                                                          : fastgetattr(tuple, cc_keyno[1], cc_tupdesc, &isNull);
+            Assert(!isNull);
             /* FALLTHROUGH */
         case 1:
             v1 = (cc_keyno[0] == ObjectIdAttributeNumber) ? ObjectIdGetDatum(HeapTupleGetOid(tuple))
-                : fastgetattr(tuple, cc_keyno[0], cc_tupdesc, &is_null);
-            Assert(!is_null);
+                                                          : fastgetattr(tuple, cc_keyno[0], cc_tupdesc, &isNull);
+            Assert(!isNull);
             break;
         default:
             ereport(FATAL, (errmsg("wrong number of hash keys: %d", nkeys)));
             break;
     }
 
-    return catalog_cache_compute_hash_value(cache, nkeys, v1, v2, v3, v4);
+    return CatalogCacheComputeHashValue(cache, nkeys, v1, v2, v3, v4);
 }
 
 /*
- *		catalog_cache_compare_tuple
+ *		CatalogCacheCompareTuple
  *
  * Compare a tuple to the passed arguments.
  */
-static inline bool catalog_cache_compare_tuple(
+static inline bool CatalogCacheCompareTuple(
     const CatCache* cache, int nkeys, const Datum* cachekeys, const Datum* searchkeys)
 {
     const CCFastEqualFN* cc_fastequal = cache->cc_fastequal;
     int i;
 
     for (i = 0; i < nkeys; i++) {
-        if (!(cc_fastequal[i])(cachekeys[i], searchkeys[i])) {
+        if (!(cc_fastequal[i])(cachekeys[i], searchkeys[i]))
             return false;
-        }
     }
     return true;
 }
 
 #ifdef CATCACHE_STATS
 
-static void cat_cache_print_stats(int code, Datum arg)
+static void CatCachePrintStats(int code, Datum arg)
 {
     CatCache* cache = NULL;
     long cc_searches = 0;
@@ -436,9 +432,8 @@ static void cat_cache_print_stats(int code, Datum arg)
     long cc_lhits = 0;
 
     for (cache = u_sess->cache_cxt.cache_header->ch_caches; cache; cache = cache->cc_next) {
-        if (cache->cc_ntup == 0 && cache->cc_searches == 0) {
+        if (cache->cc_ntup == 0 && cache->cc_searches == 0)
             continue; /* don't print unused caches */
-        }
         ereport(DEBUG2,
             (errmsg("catcache %s/%u: %d tup, %ld srch, %ld+%ld=%ld hits, %ld+%ld=%ld loads, %ld invals, %ld lsrch, %ld "
                     "lhits",
@@ -481,14 +476,14 @@ static void cat_cache_print_stats(int code, Datum arg)
 #endif /* CATCACHE_STATS */
 
 /*
- *		cat_cache_remove_ctup
+ *		CatCacheRemoveCTup
  *
  * Unlink and delete the given cache entry
  *
  * NB: if it is a member of a CatCList, the CatCList is deleted too.
  * Both the cache entry and the list had better have zero refcount.
  */
-static void cat_cache_remove_ctup(CatCache* cache, CatCTup* ct)
+static void CatCacheRemoveCTup(CatCache* cache, CatCTup* ct)
 {
     Assert(ct->refcount == 0);
     Assert(ct->my_cache == cache);
@@ -496,12 +491,12 @@ static void cat_cache_remove_ctup(CatCache* cache, CatCTup* ct)
 
     if (ct->c_list) {
         /*
-         * The cleanest way to handle this is to call cat_cache_remove_clist,
+         * The cleanest way to handle this is to call CatCacheRemoveCList,
          * which will recurse back to me, and the recursive call will do the
          * work.  Set the "dead" flag to make sure it does recurse.
          */
         ct->dead = true;
-        cat_cache_remove_clist(cache, ct->c_list);
+        CatCacheRemoveCList(cache, ct->c_list);
         return; /* nothing left to do */
     }
 
@@ -512,9 +507,8 @@ static void cat_cache_remove_ctup(CatCache* cache, CatCTup* ct)
      * Free keys when we're dealing with a negative entry, normal entries just
      * point into tuple, allocated together with the CatCTup.
      */
-    if (ct->negative) {
-        cat_cache_free_keys(cache->cc_tupdesc, cache->cc_nkeys, cache->cc_keyno, ct->keys);
-    }
+    if (ct->negative)
+        CatCacheFreeKeys(cache->cc_tupdesc, cache->cc_nkeys, cache->cc_keyno, ct->keys);
     pfree_ext(ct);
 
     --cache->cc_ntup;
@@ -522,13 +516,13 @@ static void cat_cache_remove_ctup(CatCache* cache, CatCTup* ct)
 }
 
 /*
- *		cat_cache_remove_clist
+ *		CatCacheRemoveCList
  *
  * Unlink and delete the given cache list entry
  *
  * NB: any dead member entries that become unreferenced are deleted too.
  */
-static void cat_cache_remove_clist(CatCache* cache, CatCList* cl)
+static void CatCacheRemoveCList(CatCache* cache, CatCList* cl)
 {
     int i;
 
@@ -547,16 +541,15 @@ static void cat_cache_remove_clist(CatCache* cache, CatCList* cl)
 #ifndef CATCACHE_FORCE_RELEASE
             ct->dead &&
 #endif
-            ct->refcount == 0) {
-            cat_cache_remove_ctup(cache, ct);
-        }
+            ct->refcount == 0)
+            CatCacheRemoveCTup(cache, ct);
     }
 
     /* delink from linked list */
     DLRemove(&cl->cache_elem);
 
     /* free associated column data */
-    cat_cache_free_keys(cache->cc_tupdesc, cl->nkeys, cache->cc_keyno, cl->keys);
+    CatCacheFreeKeys(cache->cc_tupdesc, cl->nkeys, cache->cc_keyno, cl->keys);
     pfree_ext(cl);
 }
 
@@ -578,23 +571,22 @@ static void cat_cache_remove_clist(CatCache* cache, CatCList* cl)
  *
  *	This routine is only quasi-public: it should only be used by inval.c.
  */
-void CatalogCacheIdInvalidate(int cacheId, uint32 hash_value)
+void CatalogCacheIdInvalidate(int cacheId, uint32 hashValue)
 {
     CatCache* ccp = NULL;
 
-    CACHE3_elog(DEBUG2, "CatalogCacheIdInvalidate: called, cacheId %d, hash_value: %d", cacheId, hash_value);
+    CACHE3_elog(DEBUG2, "CatalogCacheIdInvalidate: called, cacheId %d, hashValue: %d", cacheId, hashValue);
 
     /*
      * inspect caches to find the proper cache
      */
     for (ccp = u_sess->cache_cxt.cache_header->ch_caches; ccp; ccp = ccp->cc_next) {
-        Index hash_index;
+        Index hashIndex;
         Dlelem* elt = NULL;
         Dlelem* nextelt = NULL;
 
-        if (cacheId != ccp->id) {
+        if (cacheId != ccp->id)
             continue;
-        }
 
         /*
          * We don't bother to check whether the cache has finished
@@ -608,27 +600,29 @@ void CatalogCacheIdInvalidate(int cacheId, uint32 hash_value)
          */
         for (elt = DLGetHead(&ccp->cc_lists); elt; elt = nextelt) {
             CatCList* cl = (CatCList*)DLE_VAL(elt);
+
             nextelt = DLGetSucc(elt);
 
-            if (cl->isnailed) {
+            if (cl->isnailed)
                 continue;
-            }
 
-            if (cl->refcount > 0) {
+            if (cl->refcount > 0)
                 cl->dead = true;
-            } else {
-                cat_cache_remove_clist(ccp, cl);
-            }
+            else
+                CatCacheRemoveCList(ccp, cl);
         }
 
         /*
          * inspect the proper hash bucket for tuple matches
          */
-        hash_index = HASH_INDEX(hash_value, ccp->cc_nbuckets);
-        for (elt = DLGetHead(&ccp->cc_bucket[hash_index]); elt; elt = nextelt) {
+        hashIndex = HASH_INDEX(hashValue, ccp->cc_nbuckets);
+
+        for (elt = DLGetHead(&ccp->cc_bucket[hashIndex]); elt; elt = nextelt) {
             CatCTup* ct = (CatCTup*)DLE_VAL(elt);
+
             nextelt = DLGetSucc(elt);
-            if (hash_value == ct->hash_value) {
+
+            if (hashValue == ct->hash_value) {
                 if (ct->isnailed) {
                     continue;
                 }
@@ -637,9 +631,9 @@ void CatalogCacheIdInvalidate(int cacheId, uint32 hash_value)
                     /* list, if any, was marked dead above */
                     Assert(ct->c_list == NULL || ct->c_list->dead);
                 } else
-                    cat_cache_remove_ctup(ccp, ct);
+                    CatCacheRemoveCTup(ccp, ct);
                 CACHE3_elog(
-                    DEBUG2, "CatalogCacheIdInvalidate: cacheId: %d hash_value %d invalidated", cacheId, hash_value);
+                    DEBUG2, "CatalogCacheIdInvalidate: cacheId: %d hashValue %d invalidated", cacheId, hashValue);
 #ifdef CATCACHE_STATS
                 ccp->cc_invals++;
 #endif
@@ -650,6 +644,11 @@ void CatalogCacheIdInvalidate(int cacheId, uint32 hash_value)
     }
 }
 
+/* ----------------------------------------------------------------
+ *					   public functions
+ * ----------------------------------------------------------------
+ */
+
 /*
  *		AtEOXact_CatCache
  *
@@ -659,7 +658,7 @@ void CatalogCacheIdInvalidate(int cacheId, uint32 hash_value)
  * ResourceOwner mechanism.  This routine is just a debugging
  * cross-check that no pins remain.
  */
-void AtEOXact_CatCache(bool is_commit)
+void AtEOXact_CatCache(bool isCommit)
 {
 #ifdef USE_ASSERT_CHECKING
     if (assert_enabled) {
@@ -683,9 +682,8 @@ void AtEOXact_CatCache(bool is_commit)
                 for (elt = DLGetHead(&ccp->cc_bucket[i]); elt; elt = DLGetSucc(elt)) {
                     CatCTup* ct = (CatCTup*)DLE_VAL(elt);
 
-                    if (ct == NULL) {
+                    if (ct == NULL)
                         continue;
-                    }
 
                     Assert(ct->ct_magic == CT_MAGIC);
                     Assert(ct->refcount == 0);
@@ -698,33 +696,14 @@ void AtEOXact_CatCache(bool is_commit)
 }
 
 /*
- * Standard routine for creating cache context if it doesn't exist yet
- *
- * There are a lot of places (probably far more than necessary) that check
- * whether CacheMemoryContext exists yet and want to create it if not.
- * We centralize knowledge of exactly how to create it here.
- */
-void CreateCacheMemoryContext(void)
-{
-    /*  
-     * Purely for paranoia, check that context doesn't exist; caller probably
-     * did so already.
-     */  
-    if (!CacheMemoryContext)
-        CacheMemoryContext = AllocSetContextCreate(TopMemoryContext,
-                                                   "CacheMemoryContext",                           
-                                                   ALLOCSET_DEFAULT_SIZES);                        
-}
-
-/*
- *		reset_catalog_cache
+ *		ResetCatalogCache
  *
  * Reset one catalog cache to empty.
  *
  * This is not very efficient if the target cache is nearly empty.
  * However, it shouldn't need to be efficient; we don't invoke it often.
  */
-static void reset_catalog_cache(CatCache* cache)
+static void ResetCatalogCache(CatCache* cache)
 {
     Dlelem* elt = NULL;
     Dlelem* nextelt = NULL;
@@ -733,36 +712,34 @@ static void reset_catalog_cache(CatCache* cache)
     /* Remove each list in this cache, or at least mark it dead */
     for (elt = DLGetHead(&cache->cc_lists); elt; elt = nextelt) {
         CatCList* cl = (CatCList*)DLE_VAL(elt);
+
         nextelt = DLGetSucc(elt);
 
-        if (cl->isnailed) {
+        if (cl->isnailed)
             continue;
-        }
 
-        if (cl->refcount > 0) {
+        if (cl->refcount > 0)
             cl->dead = true;
-        } else {
-            cat_cache_remove_clist(cache, cl);
-        }
+        else
+            CatCacheRemoveCList(cache, cl);
     }
 
     /* Remove each tuple in this cache, or at least mark it dead */
     for (i = 0; i < cache->cc_nbuckets; i++) {
         for (elt = DLGetHead(&cache->cc_bucket[i]); elt; elt = nextelt) {
             CatCTup* ct = (CatCTup*)DLE_VAL(elt);
+
             nextelt = DLGetSucc(elt);
 
-            if (ct->isnailed) {
+            if (ct->isnailed)
                 continue;
-            }
 
             if (ct->refcount > 0 || (ct->c_list && ct->c_list->refcount > 0)) {
                 ct->dead = true;
                 /* list, if any, was marked dead above */
                 Assert(ct->c_list == NULL || ct->c_list->dead);
-            } else {
-                cat_cache_remove_ctup(cache, ct);
-            }
+            } else
+                CatCacheRemoveCTup(cache, ct);
 #ifdef CATCACHE_STATS
             cache->cc_invals++;
 #endif
@@ -783,7 +760,7 @@ void ResetCatalogCaches(void)
         CACHE1_elog(DEBUG2, "ResetCatalogCaches called");
     }
     for (cache = u_sess->cache_cxt.cache_header->ch_caches; cache; cache = cache->cc_next)
-        reset_catalog_cache(cache);
+        ResetCatalogCache(cache);
 
     if (!RecoveryInProgress()) {
         CACHE1_elog(DEBUG2, "end of ResetCatalogCaches call");
@@ -796,24 +773,24 @@ void ResetCatalogCaches(void)
  *	Flush all catcache entries that came from the specified system catalog.
  *	This is needed after VACUUM FULL/CLUSTER on the catalog, since the
  *	tuples very likely now have different TIDs than before.  (At one point
- *	we also tried to force re-execution of catalog_cache_initialize_cache for
+ *	we also tried to force re-execution of CatalogCacheInitializeCache for
  *	the cache(s) on that catalog.  This is a bad idea since it leads to all
  *	kinds of trouble if a cache flush occurs while loading cache entries.
  *	We now avoid the need to do it by copying cc_tupdesc out of the relcache,
  *	rather than relying on the relcache to keep a tupdesc for us.  Of course
  *	this assumes the tupdesc of a cachable system table will not change...)
  */
-void CatalogCacheFlushCatalog(Oid cat_id)
+void CatalogCacheFlushCatalog(Oid catId)
 {
     CatCache* cache = NULL;
 
-    CACHE2_elog(DEBUG2, "CatalogCacheFlushCatalog called for %u", cat_id);
+    CACHE2_elog(DEBUG2, "CatalogCacheFlushCatalog called for %u", catId);
 
     for (cache = u_sess->cache_cxt.cache_header->ch_caches; cache; cache = cache->cc_next) {
         /* Does this cache store tuples of the target catalog? */
-        if (cache->cc_reloid == cat_id) {
+        if (cache->cc_reloid == catId) {
             /* Yes, so flush all its contents */
-            reset_catalog_cache(cache);
+            ResetCatalogCache(cache);
 
             /* Tell inval.c to call syscache callbacks for this cache */
             CallSyscacheCallbacks(cache->id, 0);
@@ -832,15 +809,15 @@ void CatalogCacheFlushCatalog(Oid cat_id)
  *	structure initialized on the first access.
  */
 #ifdef CACHEDEBUG
-#define InitCatCache_DEBUG2 \
-    do { \
-        ereport(DEBUG2, \
+#define InitCatCache_DEBUG2                                               \
+    do {                                                                  \
+        ereport(DEBUG2,                                                   \
             (errmsg("InitCatCache: rel=%u ind=%u id=%d nkeys=%d size=%d", \
-                cp->cc_reloid, \
-                cp->cc_indexoid, \
-                cp->id, \
-                cp->cc_nkeys, \
-                cp->cc_nbuckets))); \
+                cp->cc_reloid,                                            \
+                cp->cc_indexoid,                                          \
+                cp->id,                                                   \
+                cp->cc_nkeys,                                             \
+                cp->cc_nbuckets)));                                       \
     } while (0)
 #else
 #define InitCatCache_DEBUG2
@@ -882,7 +859,7 @@ CatCache* InitCatCache(int id, Oid reloid, Oid indexoid, int nkeys, const int* k
         u_sess->cache_cxt.cache_header->ch_ntup = 0;
 #ifdef CATCACHE_STATS
         /* set up to dump stats at backend exit */
-        on_proc_exit(cat_cache_print_stats, 0);
+        on_proc_exit(CatCachePrintStats, 0);
 #endif
     }
 
@@ -908,9 +885,8 @@ CatCache* InitCatCache(int id, Oid reloid, Oid indexoid, int nkeys, const int* k
     cp->cc_ntup = 0;
     cp->cc_nbuckets = nbuckets;
     cp->cc_nkeys = nkeys;
-    for (i = 0; i < nkeys; ++i) {
+    for (i = 0; i < nkeys; ++i)
         cp->cc_keyno[i] = key[i];
-    }
 
     /*
      * new cache is initialized as far as we can go for now. print some
@@ -928,11 +904,12 @@ CatCache* InitCatCache(int id, Oid reloid, Oid indexoid, int nkeys, const int* k
      * back to the old context before we return...
      */
     MemoryContextSwitchTo(oldcxt);
+
     return cp;
 }
 
 /*
- *		catalog_cache_initialize_cache
+ *		CatalogCacheInitializeCache
  *
  * This function does final initialization of a catcache: obtain the tuple
  * descriptor and set up the hash and equality function links.	We assume
@@ -940,33 +917,34 @@ CatCache* InitCatCache(int id, Oid reloid, Oid indexoid, int nkeys, const int* k
  */
 #ifdef CACHEDEBUG
 #define CatalogCacheInitializeCache_DEBUG1 \
-    ereport(DEBUG2, (errmsg("catalog_cache_initialize_cache: cache rel=%u", cache->cc_reloid)))
+    ereport(DEBUG2, (errmsg("CatalogCacheInitializeCache: cache @%p rel=%u", cache, cache->cc_reloid)))
 
-#define CatalogCacheInitializeCache_DEBUG2 \
-    do { \
-        if (cache->cc_keyno[i] > 0) { \
-            ereport(DEBUG2, \
-                (errmsg("catalog_cache_initialize_cache: load %d/%d w/%d, %u", \
-                    i + 1, \
-                    cache->cc_nkeys, \
-                    cache->cc_keyno[i], \
-                    tupdesc->attrs[cache->cc_keyno[i] - 1]->atttypid))); \
-        } else { \
-            ereport(DEBUG2, \
-                (errmsg("catalog_cache_initialize_cache: load %d/%d w/%d", i + 1, cache->cc_nkeys, cache->cc_keyno[i]))); \
-        } \
+#define CatalogCacheInitializeCache_DEBUG2                                                                             \
+    do {                                                                                                               \
+        if (cache->cc_keyno[i] > 0) {                                                                                  \
+            ereport(DEBUG2,                                                                                            \
+                (errmsg("CatalogCacheInitializeCache: load %d/%d w/%d, %u",                                            \
+                    i + 1,                                                                                             \
+                    cache->cc_nkeys,                                                                                   \
+                    cache->cc_keyno[i],                                                                                \
+                    tupdesc->attrs[cache->cc_keyno[i] - 1]->atttypid)));                                               \
+        } else {                                                                                                       \
+            ereport(DEBUG2,                                                                                            \
+                (errmsg("CatalogCacheInitializeCache: load %d/%d w/%d", i + 1, cache->cc_nkeys, cache->cc_keyno[i]))); \
+        }                                                                                                              \
     } while (0)
 #else
 #define CatalogCacheInitializeCache_DEBUG1
 #define CatalogCacheInitializeCache_DEBUG2
 #endif
 
-static void catalog_cache_initialize_cache(CatCache* cache)
+static void CatalogCacheInitializeCache(CatCache* cache)
 {
     Relation relation;
     MemoryContext oldcxt;
     TupleDesc tupdesc;
     int i;
+
     CatalogCacheInitializeCache_DEBUG1;
 
     /*
@@ -974,7 +952,9 @@ static void catalog_cache_initialize_cache(CatCache* cache)
      * for which we can not throw an ERROR.
      */
     LockRelationOid(cache->cc_reloid, AccessShareLock);
+
     relation = RelationIdGetRelation(cache->cc_reloid);
+
     if (!RelationIsValid(relation)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -982,11 +962,13 @@ static void catalog_cache_initialize_cache(CatCache* cache)
     }
 
     pgstat_initstats(relation);
+
     /*
      * switch to the cache context so our allocations do not vanish at the end
      * of a transaction
      */
     Assert(u_sess->cache_mem_cxt != NULL);
+
     oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
 
     /*
@@ -1005,8 +987,10 @@ static void catalog_cache_initialize_cache(CatCache* cache)
      * return to the caller's memory context and close the rel
      */
     MemoryContextSwitchTo(oldcxt);
+
     heap_close(relation, AccessShareLock);
-    CACHE3_elog(DEBUG2, "catalog_cache_initialize_cache: %s, %d keys", cache->cc_relname, cache->cc_nkeys);
+
+    CACHE3_elog(DEBUG2, "CatalogCacheInitializeCache: %s, %d keys", cache->cc_relname, cache->cc_nkeys);
 
     /*
      * initialize cache's key information
@@ -1014,18 +998,19 @@ static void catalog_cache_initialize_cache(CatCache* cache)
     for (i = 0; i < cache->cc_nkeys; ++i) {
         Oid keytype;
         RegProcedure eqfunc;
+
         CatalogCacheInitializeCache_DEBUG2;
 
-        if (cache->cc_keyno[i] > 0) {
+        if (cache->cc_keyno[i] > 0)
             keytype = tupdesc->attrs[cache->cc_keyno[i] - 1]->atttypid;
-        } else {
-            if (cache->cc_keyno[i] != ObjectIdAttributeNumber) {
+        else {
+            if (cache->cc_keyno[i] != ObjectIdAttributeNumber)
                 ereport(FATAL, (errmsg("only sys attr supported in caches is OID")));
-            }
             keytype = OIDOID;
         }
 
-        get_cc_hash_eq_funcs(keytype, &cache->cc_hashfunc[i], &eqfunc, &cache->cc_fastequal[i]);
+        GetCCHashEqFuncs(keytype, &cache->cc_hashfunc[i], &eqfunc, &cache->cc_fastequal[i]);
+
         /*
          * Do equality-function lookup (we assume this won't need a catalog
          * lookup for any supported type)
@@ -1040,8 +1025,6 @@ static void catalog_cache_initialize_cache(CatCache* cache)
         cache->cc_skey[i].sk_subtype = InvalidOid;
         /* Currently, there are no catcaches on collation-aware data types */
         cache->cc_skey[i].sk_collation = InvalidOid;
-
-        CACHE3_elog(DEBUG2, "catalog_cache_initialize_cache %s %d", cache->cc_relname, i);
     }
 
     /*
@@ -1051,19 +1034,18 @@ static void catalog_cache_initialize_cache(CatCache* cache)
 }
 
 /*
- * InitCatCachePhase2 -- external interface for catalog_cache_initialize_cache
+ * InitCatCachePhase2 -- external interface for CatalogCacheInitializeCache
  *
  * One reason to call this routine is to ensure that the relcache has
  * created entries for all the catalogs and indexes referenced by catcaches.
  * Therefore, provide an option to open the index as well as fixing the
  * cache itself.  An exception is the indexes on pg_am, which we don't use
- * (cf. index_scan_ok).
+ * (cf. IndexScanOK).
  */
 void InitCatCachePhase2(CatCache* cache, bool touch_index)
 {
-    if (cache->cc_tupdesc == NULL) {
-        catalog_cache_initialize_cache(cache);
-    }
+    if (cache->cc_tupdesc == NULL)
+        CatalogCacheInitializeCache(cache);
 
     /*
      * If the relcache of the underneath catalog has not been built,
@@ -1094,10 +1076,10 @@ void InitCatCachePhase2(CatCache* cache, bool touch_index)
 }
 
 /*
- *		index_scan_ok
+ *		IndexScanOK
  *
  *		This function checks for tuples that will be fetched by
- *		index_support_initialize() during relcache initialization for
+ *		IndexSupportInitialize() during relcache initialization for
  *		certain system indexes that support critical syscaches.
  *		We can't use an indexscan to fetch these, else we'll get into
  *		infinite recursion.  A plain heap scan will work, however.
@@ -1108,23 +1090,24 @@ void InitCatCachePhase2(CatCache* cache, bool touch_index)
  *		pg_authid and pg_auth_members syscaches for authentication even if
  *		we don't yet have relcache entries for those catalogs' indexes.
  */
-static bool index_scan_ok(CatCache* cache, ScanKey cur_skey)
+static bool IndexScanOK(CatCache* cache, ScanKey cur_skey)
 {
     switch (cache->id) {
         case INDEXRELID:
+
             /*
              * Rather than tracking exactly which indexes have to be loaded
              * before we can use indexscans (which changes from time to time),
              * just force all pg_index searches to be heap scans until we've
              * built the critical relcaches.
              */
-            if (!u_sess->relcache_cxt.criticalRelcachesBuilt) {
+            if (!u_sess->relcache_cxt.criticalRelcachesBuilt)
                 return false;
-            }
             break;
 
         case AMOID:
         case AMNAME:
+
             /*
              * Always do heap scans in pg_am, because it's so small there's
              * not much point in an indexscan anyway.  We *must* do this when
@@ -1137,13 +1120,13 @@ static bool index_scan_ok(CatCache* cache, ScanKey cur_skey)
         case AUTHOID:
         case AUTHMEMMEMROLE:
         case USERSTATUSROLEID:
+
             /*
              * Protect authentication lookups occurring before relcache has
              * collected entries for shared indexes.
              */
-            if (!u_sess->relcache_cxt.criticalSharedRelcachesBuilt) {
+            if (!u_sess->relcache_cxt.criticalSharedRelcachesBuilt)
                 return false;
-            }
             break;
 
         default:
@@ -1170,6 +1153,7 @@ static bool index_scan_ok(CatCache* cache, ScanKey cur_skey)
  * the caller need not go to the trouble of converting it to a fully
  * null-padded NAME.
  */
+
 HeapTuple SearchCatCache(CatCache* cache, Datum v1, Datum v2, Datum v3, Datum v4, int level)
 {
     return SearchCatCacheInternal(cache, cache->cc_nkeys, v1, v2, v3, v4, level);
@@ -1200,24 +1184,38 @@ HeapTuple SearchCatCache4(CatCache* cache, Datum v1, Datum v2, Datum v3, Datum v
     return SearchCatCacheInternal(cache, 4, v1, v2, v3, v4);
 }
 
+void SearchCatCacheCheck(){
+    if (IsAbortedTransactionBlockState()) {
+        force_backtrace_messages = true;
+        ereport(ERROR,
+            (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
+                errmsg("SearchCatCacheCheck:current transaction is aborted, "
+                    "commands ignored until end of transaction block, firstChar[%c]",
+                    u_sess->proc_cxt.firstChar)));
+    }
+    return;
+}
+
 /*
  * Work-horse for SearchCatCache/SearchCatCacheN.
  */
 HeapTuple SearchCatCacheInternal(CatCache* cache, int nkeys, Datum v1, Datum v2, Datum v3, Datum v4, int level)
 {
     Datum arguments[CATCACHE_MAXKEYS];
-    uint32 hash_value;
-    Index hash_index;
+    uint32 hashValue;
+    Index hashIndex;
     Dlelem* elt = NULL;
     CatCTup* ct = NULL;
 
     Assert(cache->cc_nkeys == nkeys);
+
+    SearchCatCacheCheck();
+
     /*
      * one-time startup overhead for each cache
      */
-    if (unlikely(cache->cc_tupdesc == NULL)) {
-        catalog_cache_initialize_cache(cache);
-    }
+    if (unlikely(cache->cc_tupdesc == NULL))
+        CatalogCacheInitializeCache(cache);
 
 #ifdef CATCACHE_STATS
     cache->cc_searches++;
@@ -1232,25 +1230,24 @@ HeapTuple SearchCatCacheInternal(CatCache* cache, int nkeys, Datum v1, Datum v2,
     /*
      * find the hash bucket in which to look for the tuple
      */
-    hash_value = catalog_cache_compute_hash_value(cache, nkeys, v1, v2, v3, v4);
-    hash_index = HASH_INDEX(hash_value, (uint32)cache->cc_nbuckets);
+    hashValue = CatalogCacheComputeHashValue(cache, nkeys, v1, v2, v3, v4);
+    hashIndex = HASH_INDEX(hashValue, (uint32)cache->cc_nbuckets);
 
     /*
      * scan the hash bucket until we find a match or exhaust our tuples
      */
-    for (elt = DLGetHead(&cache->cc_bucket[hash_index]); elt; elt = DLGetSucc(elt)) {
+    for (elt = DLGetHead(&cache->cc_bucket[hashIndex]); elt; elt = DLGetSucc(elt)) {
+
         ct = (CatCTup*)DLE_VAL(elt);
-        if (ct->dead) {
+
+        if (ct->dead)
             continue; /* ignore dead entries */
-        }
 
-        if (ct->hash_value != hash_value) {
+        if (ct->hash_value != hashValue)
             continue; /* quickly skip entry if wrong hash val */
-        }
 
-        if (!catalog_cache_compare_tuple(cache, nkeys, ct->keys, arguments)) {
+        if (!CatalogCacheCompareTuple(cache, nkeys, ct->keys, arguments))
             continue;
-        }
 
         /*
          * We found a match in the cache.  Move it to the front of the list
@@ -1264,12 +1261,12 @@ HeapTuple SearchCatCacheInternal(CatCache* cache, int nkeys, Datum v1, Datum v2,
          * If it's a positive entry, bump its refcount and return it. If it's
          * negative, we can report failure to the caller.
          */
-        if (!ct->negative) {
+        if (!ct->negative && t_thrd.utils_cxt.CurrentResourceOwner != NULL) {
             ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
             ct->refcount++;
             ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
 
-            CACHE3_elog(DEBUG2, "SearchCatCache(%s): found in bucket %d", cache->cc_relname, hash_index);
+            CACHE3_elog(DEBUG2, "SearchCatCache(%s): found in bucket %d", cache->cc_relname, hashIndex);
 
 #ifdef CATCACHE_STATS
             cache->cc_hits++;
@@ -1277,7 +1274,7 @@ HeapTuple SearchCatCacheInternal(CatCache* cache, int nkeys, Datum v1, Datum v2,
 
             return &ct->tuple;
         } else {
-            CACHE3_elog(DEBUG2, "SearchCatCache(%s): found neg entry in bucket %d", cache->cc_relname, hash_index);
+            CACHE3_elog(DEBUG2, "SearchCatCache(%s): found neg entry in bucket %d", cache->cc_relname, hashIndex);
 
 #ifdef CATCACHE_STATS
             cache->cc_neg_hits++;
@@ -1286,28 +1283,30 @@ HeapTuple SearchCatCacheInternal(CatCache* cache, int nkeys, Datum v1, Datum v2,
             return NULL;
         }
     }
-    return search_cat_cache_miss(cache, nkeys, hash_value, hash_index, v1, v2, v3, v4, level);
+    return SearchCatCacheMiss(cache, nkeys, hashValue, hashIndex, v1, v2, v3, v4, level);
 }
 
 HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc);
 
 /*
- * search_builtin_proc_by_name_arg_nsp
+ * SearchBuiltinProcByNameArgNsp
  *
  *  This function is used to find the identified funtion by namespace, argument type and function name.
  *  Because these three arguments below is the unique index for builtin functions, so we can find only
  *  one buitin function if it exists. Then we create the heap tuple by the infomation we get from builtin
  *  function arrarys,and return it.
  */
-static HeapTuple search_builtin_proc_by_name_arg_nsp(CatCache* cache, int nkeys, Datum* arguments)
+static HeapTuple SearchBuiltinProcByNameArgNsp(CatCache* cache, int nkeys, Datum* arguments)
 {
     char* funcname = NULL;
     oidvector* argtypes = NULL;
     const FuncGroup* gfuncs = NULL;
 
     Assert(nkeys == 3);
+
     funcname = NameStr(*(DatumGetName(arguments[0])));
     gfuncs = SearchBuiltinFuncByName(funcname);
+
     if (gfuncs == NULL) {
         CACHE3_elog(DEBUG2, "%s: the function \"%s\" does not in built-in list", __FUNCTION__, funcname);
         return NULL;
@@ -1354,15 +1353,16 @@ static HeapTuple search_builtin_proc_by_name_arg_nsp(CatCache* cache, int nkeys,
 }
 
 /*
- * search_builtin_proc_by_oid
+ * SearchBuiltinProcByOid
  *
  *  This function is used to find the identified funtion by builtin function's oid. Because function
  *  oid is the unique index for builtin functions, so we can find only one buitin function if it exists.
  *  Then we create the heap tuple by the infomation we get from builtin function arrarys,and return it.
  */
-static HeapTuple search_builtin_proc_by_oid(CatCache* cache, int nkeys, Datum* arguments)
+static HeapTuple SearchBuiltinProcByOid(CatCache* cache, int nkeys, Datum* arguments)
 {
     const Builtin_func* bfunc = NULL;
+
     Assert(nkeys == 1);
 
     Oid funcoid = DatumGetObjectId(arguments[0]);
@@ -1378,7 +1378,7 @@ static HeapTuple search_builtin_proc_by_oid(CatCache* cache, int nkeys, Datum* a
 }
 
 /*
- * search_builtin_proc_cache_miss
+ * SearchBuiltinProcCacheMiss
  *
  *  This function is the entry of finding the builtin function by some specific arguments.
  *  Now we have two methods to get the unique builtin function. One is finding by name,
@@ -1386,15 +1386,108 @@ static HeapTuple search_builtin_proc_by_oid(CatCache* cache, int nkeys, Datum* a
  *  index for builtin functions. We can get the search mode infomation from cache to determine which
  *  function will be called for processing
  */
-static HeapTuple search_builtin_proc_cache_miss(CatCache* cache, int nkeys, Datum* arguments)
+static HeapTuple SearchBuiltinProcCacheMiss(CatCache* cache, int nkeys, Datum* arguments)
 {
     if (CacheIsProcNameArgNsp(cache)) {
-        return search_builtin_proc_by_name_arg_nsp(cache, nkeys, arguments);
+        return SearchBuiltinProcByNameArgNsp(cache, nkeys, arguments);
     } else if (CacheIsProcOid(cache)) {
-        return search_builtin_proc_by_oid(cache, nkeys, arguments);
+        return SearchBuiltinProcByOid(cache, nkeys, arguments);
     } else {
         return NULL;
     }
+}
+
+static HeapTuple GetPgAttributeAttrTuple(TupleDesc tupleDesc, const Form_pg_attribute attr)
+{
+    Datum values[Natts_pg_attribute];
+    bool isnull[Natts_pg_attribute];
+
+    errno_t rc;
+    rc = memset_s(isnull, sizeof(isnull), 0, sizeof(isnull));
+    securec_check(rc, "", "");
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "", "");
+
+    values[Anum_pg_attribute_attrelid - 1] = ObjectIdGetDatum(attr->attrelid);
+    values[Anum_pg_attribute_attname - 1] = NameGetDatum(&(attr->attname));
+    values[Anum_pg_attribute_atttypid - 1] = ObjectIdGetDatum(attr->atttypid);
+    values[Anum_pg_attribute_attstattarget - 1] = Int32GetDatum(attr->attstattarget);
+    values[Anum_pg_attribute_attlen - 1] = Int16GetDatum(attr->attlen);
+    values[Anum_pg_attribute_attnum - 1] = Int16GetDatum(attr->attnum);
+    values[Anum_pg_attribute_attndims - 1] = Int32GetDatum(attr->attndims);
+    values[Anum_pg_attribute_attcacheoff - 1] = Int32GetDatum(attr->attcacheoff);
+    values[Anum_pg_attribute_atttypmod - 1] = Int32GetDatum(attr->atttypmod);
+    values[Anum_pg_attribute_attbyval - 1] = BoolGetDatum(attr->attbyval);
+    values[Anum_pg_attribute_attstorage - 1] = CharGetDatum(attr->attstorage);
+    values[Anum_pg_attribute_attalign - 1] = CharGetDatum(attr->attalign);
+    values[Anum_pg_attribute_attnotnull - 1] = BoolGetDatum(attr->attnotnull);
+    values[Anum_pg_attribute_atthasdef - 1] = BoolGetDatum(attr->atthasdef);
+    values[Anum_pg_attribute_attisdropped - 1] = BoolGetDatum(attr->attisdropped);
+    values[Anum_pg_attribute_attislocal - 1] = BoolGetDatum(attr->attislocal);
+    values[Anum_pg_attribute_attcmprmode - 1] = Int8GetDatum(attr->attcmprmode);
+    values[Anum_pg_attribute_attinhcount - 1] = Int32GetDatum(attr->attinhcount);
+    values[Anum_pg_attribute_attcollation - 1] = ObjectIdGetDatum(attr->attcollation);
+    values[Anum_pg_attribute_attkvtype - 1] = Int8GetDatum(attr->attkvtype);
+
+    /* start out with empty permissions and empty options */
+    isnull[Anum_pg_attribute_attacl - 1] = true;
+    isnull[Anum_pg_attribute_attoptions - 1] = true;
+    isnull[Anum_pg_attribute_attfdwoptions - 1] = true;
+
+    /* at default, new fileld attinitdefval of pg_attribute is null. */
+    isnull[Anum_pg_attribute_attinitdefval - 1] = true;
+
+    return heap_form_tuple(tupleDesc, values, isnull);
+}
+
+static HeapTuple SearchPgAttributeCacheMiss(CatCache* cache, int nkeys, const Datum* arguments)
+{
+    Assert(nkeys == 2);
+    Oid relOid = DatumGetObjectId(arguments[0]);
+    CatalogRelationBuildParam catalogDesc = GetCatalogParam(relOid);
+    if (catalogDesc.oid == InvalidOid) {
+        return NULL;
+    }
+    const FormData_pg_attribute* catlogAttrs = catalogDesc.attrs;
+    FormData_pg_attribute tempAttr;
+    if (cache->id == ATTNUM) {
+        int16 attNum = DatumGetInt16(arguments[1]);
+        Form_pg_attribute attr;
+        if (attNum < 0) {
+            /* The system table does not have the bucket column, so incoming false */
+            if ((attNum == ObjectIdAttributeNumber && !catalogDesc.hasoids) || attNum == BucketIdAttributeNumber) {
+                return NULL;
+            }
+            attr = SystemAttributeDefinition(attNum, catalogDesc.hasoids, false);
+            attr->attrelid = relOid;
+        } else if (attNum <= catalogDesc.natts && attNum > 0) {
+            tempAttr = catlogAttrs[attNum - 1];
+            attr = &tempAttr;
+        } else {
+            return NULL;
+        }
+        return GetPgAttributeAttrTuple(cache->cc_tupdesc, attr);
+    } else if (cache->id == ATTNAME) {
+        Form_pg_attribute attr;
+        for (int16 attnum = 0; attnum < catalogDesc.natts; attnum++) {
+            tempAttr = catlogAttrs[attnum];
+            attr = &tempAttr;
+            if (strcmp(NameStr(*DatumGetName(arguments[1])), NameStr(attr->attname)) == 0) {
+                return GetPgAttributeAttrTuple(cache->cc_tupdesc, attr);
+            }
+        }
+        attr = SystemAttributeByName(NameStr(*DatumGetName(arguments[1])), catalogDesc.hasoids);
+        if (attr == NULL) {
+            return NULL;
+        }
+        attr->attrelid = relOid;
+        return GetPgAttributeAttrTuple(cache->cc_tupdesc, attr);
+    } else {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                         errmsg("pg_attribute does not have syscache with id %d", cache->id)));
+    }
+    return NULL;
 }
 
 /*
@@ -1404,8 +1497,8 @@ static HeapTuple search_builtin_proc_cache_miss(CatCache* cache, int nkeys, Datu
  * as small as possible.  To avoid that effort being undone by a helpful
  * compiler, try to explicitly forbid inlining.
  */
-static HeapTuple search_cat_cache_miss(
-    CatCache* cache, int nkeys, uint32 hash_value, Index hash_index, Datum v1, Datum v2, Datum v3, Datum v4, int level)
+static HeapTuple SearchCatCacheMiss(
+    CatCache* cache, int nkeys, uint32 hashValue, Index hashIndex, Datum v1, Datum v2, Datum v3, Datum v4, int level)
 {
     ScanKeyData cur_skey[CATCACHE_MAXKEYS];
     Relation relation;
@@ -1434,14 +1527,27 @@ static HeapTuple search_cat_cache_miss(
 
     /* For search a function, we firstly try to search it in built-in function list */
     if (IsProcCache(cache) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
-        CACHE2_elog(DEBUG2, "search_cat_cache_miss(%d): function not found in pg_proc", cache->id);
+        CACHE2_elog(DEBUG2, "SearchCatCacheMiss(%d): function not found in pg_proc", cache->id);
 
-        ntp = search_builtin_proc_cache_miss(cache, nkeys, arguments);
+        ntp = SearchBuiltinProcCacheMiss(cache, nkeys, arguments);
         if (HeapTupleIsValid(ntp)) {
-            CACHE2_elog(DEBUG2, "search_cat_cache_miss(%d): match a built-in function", cache->id);
-            ct = catalog_cache_create_entry(cache, ntp, arguments, hash_value, hash_index, false);
+            CACHE2_elog(DEBUG2, "SearchCatCacheMiss(%d): match a built-in function", cache->id);
+            ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
             heap_freetuple(ntp);
             /* immediately set the refcount to 1 */
+            ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+            ct->refcount++;
+            ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
+        }
+    }
+
+    /* Insert hardcoded system catalogs' attributes into pg_attribute's syscache. */
+    if (IsAttributeCache(cache) && IsSystemObjOid(DatumGetObjectId(arguments[0]))) {
+        CACHE2_elog(DEBUG2, "SearchCatCacheMiss: cat tuple not in cat cache %d", cache->id);
+        ntp = SearchPgAttributeCacheMiss(cache, nkeys, arguments);
+        if (HeapTupleIsValid(ntp)) {
+            ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
+            heap_freetuple(ntp);
             ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
             ct->refcount++;
             ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
@@ -1466,13 +1572,13 @@ static HeapTuple search_cat_cache_miss(
     if (ct == NULL) {
         relation = heap_open(cache->cc_reloid, AccessShareLock);
 
-        ereport(DEBUG1, (errmsg("cache->cc_reloid - %u", cache->cc_reloid)));
+        ereport(DEBUG1, (errmsg("cache->cc_reloid - %d", cache->cc_reloid)));
 
         scandesc = systable_beginscan(
-            relation, cache->cc_indexoid, index_scan_ok(cache, cur_skey), SnapshotNow, nkeys, cur_skey);
+            relation, cache->cc_indexoid, IndexScanOK(cache, cur_skey), SnapshotNow, nkeys, cur_skey);
 
         while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
-            ct = catalog_cache_create_entry(cache, ntp, arguments, hash_value, hash_index, false);
+            ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
             /* immediately set the refcount to 1 */
             ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
             ct->refcount++;
@@ -1496,17 +1602,17 @@ static HeapTuple search_cat_cache_miss(
      * cache inval for that.)
      */
     if (ct == NULL) {
-        if (IsBootstrapProcessingMode()) {
+        if (IsBootstrapProcessingMode())
             return NULL;
-        }
 
-        ct = catalog_cache_create_entry(cache, NULL, arguments, hash_value, hash_index, true);
+        ct = CatalogCacheCreateEntry(cache, NULL, arguments, hashValue, hashIndex, true);
+
         CACHE4_elog(DEBUG2,
             "SearchCatCache(%s): Contains %d/%d tuples",
             cache->cc_relname,
             cache->cc_ntup,
             u_sess->cache_cxt.cache_header->ch_ntup);
-        ereport(level, (errmsg("SearchCatCache(%s): put neg entry in bucket %u", cache->cc_relname, hash_index)));
+        ereport(level, (errmsg("SearchCatCache(%s): put neg entry in bucket %u", cache->cc_relname, hashIndex)));
 
         /*
          * We are not returning the negative entry to the caller, so leave its
@@ -1521,7 +1627,7 @@ static HeapTuple search_cat_cache_miss(
         cache->cc_relname,
         cache->cc_ntup,
         u_sess->cache_cxt.cache_header->ch_ntup);
-    CACHE3_elog(DEBUG2, "SearchCatCache(%s): put in bucket %d", cache->cc_relname, hash_index);
+    CACHE3_elog(DEBUG2, "SearchCatCache(%s): put in bucket %d", cache->cc_relname, hashIndex);
 
 #ifdef CATCACHE_STATS
     cache->cc_newloads++;
@@ -1556,9 +1662,8 @@ void ReleaseCatCache(HeapTuple tuple)
 #ifndef CATCACHE_FORCE_RELEASE
         ct->dead &&
 #endif
-        ct->refcount == 0 && (ct->c_list == NULL || ct->c_list->refcount == 0)) {
-        cat_cache_remove_ctup(ct->my_cache, ct);
-    }
+        ct->refcount == 0 && (ct->c_list == NULL || ct->c_list->refcount == 0))
+        CatCacheRemoveCTup(ct->my_cache, ct);
 }
 
 /*
@@ -1575,14 +1680,13 @@ uint32 GetCatCacheHashValue(CatCache* cache, Datum v1, Datum v2, Datum v3, Datum
     /*
      * one-time startup overhead for each cache
      */
-    if (cache->cc_tupdesc == NULL) {
-        catalog_cache_initialize_cache(cache);
-    }
+    if (cache->cc_tupdesc == NULL)
+        CatalogCacheInitializeCache(cache);
 
     /*
      * calculate the hash value
      */
-    return catalog_cache_compute_hash_value(cache, cache->cc_nkeys, v1, v2, v3, v4);
+    return CatalogCacheComputeHashValue(cache, cache->cc_nkeys, v1, v2, v3, v4);
 }
 
 /*
@@ -1627,7 +1731,7 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
     bool replaces[attrCount];
     Datum values[attrCount];
 
-    /* sanity checks */
+    /* sanity checks*/
     Assert(PointerIsValid(func->prosrc));
 
     parameterCount = func->proargtypes.count;
@@ -1784,6 +1888,7 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
     /* construct the spcified struct  */
     parameterTypes = buildoidvector(func->proargtypes.values, func->proargtypes.count);
     defargpos = buildint2vector(func->prodefaultargpos->values, func->prodefaultargpos->count);
+
     if (func->proallargtypes != NULL) {
         allTypes = (Datum*)palloc((func->proallargtypes->count) * sizeof(Datum));
         Oid* argvalues = func->proallargtypes->values;
@@ -1796,6 +1901,7 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
     }
 
     allParameterTypes = PointerGetDatum(arrallParameterTypes);
+
     if (func->proargmodes != NULL) {
         dtmParamModes = (Datum*)palloc((func->proargmodes->count) * sizeof(Datum));
         char* mds = func->proargmodes->values;
@@ -1808,6 +1914,7 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
     }
 
     parameterModes = PointerGetDatum(arrparameterModes);
+
     if (func->proargnames != NULL) {
         dtmParamNames = (Datum*)palloc((func->proargnames->count) * sizeof(Datum));
         char** nms = func->proargnames->values;
@@ -1835,7 +1942,7 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
     }
 
     // proconfig have not handled???handle it later!!!!
-    (void)namestrcpy(&procname, func->funcName);
+    namestrcpy(&procname, func->funcName);
     values[Anum_pg_proc_proname - 1] = NameGetDatum(&procname);
     values[Anum_pg_proc_pronamespace - 1] = ObjectIdGetDatum(func->pronamespace);
     values[Anum_pg_proc_proowner - 1] = ObjectIdGetDatum(func->proowner);
@@ -1844,7 +1951,8 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
     values[Anum_pg_proc_prorows - 1] = Float4GetDatum(func->prorows);
     values[Anum_pg_proc_provariadic - 1] = ObjectIdGetDatum(variadicType);
     values[Anum_pg_proc_protransform - 1] = ObjectIdGetDatum(func->protransform);
-    values[Anum_pg_proc_prokind - 1] = CharGetDatum(func->prokind);
+    values[Anum_pg_proc_proisagg - 1] = BoolGetDatum(func->proisagg);
+    values[Anum_pg_proc_proiswindow - 1] = BoolGetDatum(func->proiswindow);
     values[Anum_pg_proc_prosecdef - 1] = BoolGetDatum(func->prosecdef);
     values[Anum_pg_proc_proleakproof - 1] = BoolGetDatum(func->proleakproof);
     values[Anum_pg_proc_proisstrict - 1] = BoolGetDatum(func->strict);
@@ -1854,6 +1962,8 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
     values[Anum_pg_proc_pronargdefaults - 1] = UInt16GetDatum(func->pronargdefaults);
     values[Anum_pg_proc_prorettype - 1] = ObjectIdGetDatum(func->rettype);
     values[Anum_pg_proc_proargtypes - 1] = PointerGetDatum(parameterTypes);
+    values[Anum_pg_proc_prokind - 1] = CharGetDatum(func->prokind);
+
     if (allParameterTypes != PointerGetDatum(NULL)) {
         values[Anum_pg_proc_proallargtypes - 1] = allParameterTypes;
     } else {
@@ -1931,6 +2041,7 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
 
     HeapTupleHeaderSetXminFrozen(tup->t_data);
     tup->t_data->t_infomask |= HEAP_XMAX_INVALID;
+
     if (desc == NULL) {
         // add buildin function's oid into HeapTuple if necessary
         HeapTupleSetOid(tup, func->foid);
@@ -1947,8 +2058,9 @@ CatCTup* CreateCatCTup(CatCache* cache, Datum* arguments, HeapTuple ntp)
     Index hashIndex;
     Dlelem* elt = NULL;
 
-    hashValue = catalog_cache_compute_tuple_hash_value(cache, cache->cc_nkeys, ntp);
+    hashValue = CatalogCacheComputeTupleHashValue(cache, cache->cc_nkeys, ntp);
     hashIndex = HASH_INDEX(hashValue, (uint32)cache->cc_nbuckets);
+
     for (elt = DLGetHead(&cache->cc_bucket[hashIndex]); elt; elt = DLGetSucc(elt)) {
         ct = (CatCTup*)DLE_VAL(elt);
         if (ct->dead || ct->negative) {
@@ -1968,9 +2080,94 @@ CatCTup* CreateCatCTup(CatCache* cache, Datum* arguments, HeapTuple ntp)
     }
     if (elt == NULL) {
         /* We didn't find a usable entry, so make a new one */
-        ct = catalog_cache_create_entry(cache, ntp, arguments, hashValue, hashIndex, false);
+        ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
     }
     return ct;
+}
+
+List* SearchPgAttributeCacheList(CatCache* cache, int nkey, Datum* arguments, List* list)
+{
+    HeapTuple heapTuple;
+    CatCTup* cTup = NULL;
+    const FormData_pg_attribute* catlogAttrs = NULL;
+    Dlelem* dlelem = NULL;
+
+    Assert(nkey == 1);
+    Oid relOid = ObjectIdGetDatum(arguments[0]);
+    CatalogRelationBuildParam catalogDesc = GetCatalogParam(relOid);
+    catlogAttrs = catalogDesc.attrs;
+
+    if (catalogDesc.oid == InvalidOid) {
+        return list;
+    }
+    PG_TRY();
+    {
+        bool hasBucketAttr = false;
+        for (int16 attnum = 0; attnum < catalogDesc.natts + GetSysAttLength(hasBucketAttr); attnum++) {
+            uint32 hashValue;
+            Index hashIndex;
+            Form_pg_attribute attr;
+            FormData_pg_attribute tempAttr;
+            if (attnum < catalogDesc.natts) {
+                tempAttr = catlogAttrs[attnum];
+                attr = &tempAttr;
+            } else {
+                int16 index = attnum - catalogDesc.natts;
+                if (!catalogDesc.hasoids && index == 1) {
+                    continue;
+                }
+                /* The system table does not have the bucket column, so incoming false */
+                attr = SystemAttributeDefinition(-(index + 1), catalogDesc.hasoids, false);
+                attr->attrelid = relOid;
+            }
+            heapTuple = GetPgAttributeAttrTuple(cache->cc_tupdesc, attr);
+            cTup = NULL;
+            hashValue = CatalogCacheComputeTupleHashValue(cache, cache->cc_nkeys, heapTuple);
+            hashIndex = HASH_INDEX(hashValue, static_cast<uint32>(cache->cc_nbuckets));
+
+            for (dlelem = DLGetHead(&cache->cc_bucket[hashIndex]); dlelem; dlelem = DLGetSucc(dlelem)) {
+                cTup = (CatCTup *) DLE_VAL(dlelem);
+                if (cTup->dead || cTup->negative)
+                    continue; /* ignore dead and negative*/
+                bool attnumIsNull = false;
+                int curAttnum = DatumGetInt16(SysCacheGetAttr(cache->id, &cTup->tuple,
+                                                                 Anum_pg_attribute_attnum, &attnumIsNull));
+                /* quickly skip entry if wrong tuple*/
+                if ((attnum < catalogDesc.natts && curAttnum != attnum) ||
+                    (attnum >= catalogDesc.natts && curAttnum != -(attnum - catalogDesc.natts + 1))) {
+                    continue;
+                }
+
+                /* Found a match, but can't use it if it belongs to another list already */
+                if (cTup->c_list)
+                    continue;
+                break;
+            }
+            if (dlelem == NULL) {
+                /* We didn't find a usable entry, so make a new one */
+                cTup = CatalogCacheCreateEntry(cache, heapTuple, arguments, hashValue, hashIndex, false);
+            }
+            heap_freetuple(heapTuple);
+            /*
+             * Careful here: enlarge resource owner catref array, add entry to ctlist, then bump its refcount.
+             * This way leaves state correct if enlarge or lappend runs out of memory_context_list
+             * We use resource owner to track referenced cachetups for safety reasons. Because ctlist is now
+             * built from different sources, i.e. built-in catalogs and physical relation tuples. If failure in later
+             * sources is not caught, resource owner will clean up ref count for cachetups got from previous sources.
+             */
+            ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+            list = lappend(list, cTup);
+            cTup->refcount++;
+            ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &cTup->tuple);
+        }
+    }
+    PG_CATCH();
+    {
+        ReleaseTempCatList(list, cache);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    return list;
 }
 
 List* SearchBuiltinProcCacheList(CatCache* cache, int nkey, Datum* arguments, List* list)
@@ -1979,10 +2176,12 @@ List* SearchBuiltinProcCacheList(CatCache* cache, int nkey, Datum* arguments, Li
     HeapTuple tup;
     CatCTup* ct = NULL;
     const FuncGroup* gfuncs = NULL;
-    ListCell* ctlist_item = NULL;
+
     Assert(nkey == 1);
+
     char* funcname = NameStr(*(DatumGetName(arguments[0])));
     gfuncs = SearchBuiltinFuncByName(funcname);
+
     if (gfuncs == NULL) {
         CACHE3_elog(DEBUG2, "%s: the function \"%s\" does not in built-in list", __FUNCTION__, funcname);
         return list;
@@ -1995,29 +2194,22 @@ List* SearchBuiltinProcCacheList(CatCache* cache, int nkey, Datum* arguments, Li
             tup = CreateHeapTuple4BuiltinFunc(bfunc, NULL);
             ct = CreateCatCTup(cache, arguments, tup);
             heap_freetuple(tup);
-            list = lappend(list, ct);
+            /*
+             * Careful here: enlarge resource owner catref array, add entry to ctlist, then bump its refcount.
+             * This way leaves state correct if enlarge or lappend runs out of memory_context_list
+             * We use resource owner to track referenced cachetups for safety reasons. Because ctlist is now
+             * built from different sources, i.e. built-in catalogs and physical relation tuples. If failure in later
+             * sources is not caught, resource owner will clean up ref count for cachetups got from previous sources.
+             */
             ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+            list = lappend(list, ct);
             ct->refcount++;
             ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
         }
     }
     PG_CATCH();
     {
-        foreach (ctlist_item, list) {
-            ct = (CatCTup*)lfirst(ctlist_item);
-            Assert(ct->c_list == NULL);
-            Assert(ct->refcount > 0);
-            ct->refcount--;
-            ResourceOwnerForgetCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
-
-            if (
-#ifndef CATCACHE_FORCE_RELEASE
-                ct->dead &&
-#endif
-                ct->refcount == 0 && (ct->c_list == NULL || ct->c_list->refcount == 0)) {
-                cat_cache_remove_ctup(cache, ct);
-            }
-        }
+        ReleaseTempCatList(list, cache);
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -2027,7 +2219,7 @@ List* SearchBuiltinProcCacheList(CatCache* cache, int nkey, Datum* arguments, Li
 
 TupleDesc CreateTupDesc4BuiltinFuncWithOid()
 {
-    TupleDesc tupdesc = CreateTemplateTupleDesc(31, false);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(33, false, TAM_HEAP);
 
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "proname", NAMEOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "pronamespace", OIDOID, -1, 0);
@@ -2037,29 +2229,31 @@ TupleDesc CreateTupDesc4BuiltinFuncWithOid()
     TupleDescInitEntry(tupdesc, (AttrNumber)6, "prorows", FLOAT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)7, "provariadic", OIDOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)8, "protransform", REGPROCOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)9, "prokind", CHAROID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)10, "prosecdef", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)11, "proleakproof", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)12, "proisstrict", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)13, "proretset", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)14, "provolatile", CHAROID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)15, "pronargs", INT2OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)16, "pronargdefaults", INT2OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)17, "prorettype", OIDOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)18, "proargtypes", OIDVECTOROID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)19, "proallargtypes", INT4ARRAYOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)20, "proargmodes", CHARARRAYOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)21, "proargnames", TEXTARRAYOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)22, "proargdefaults", PGNODETREEOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)23, "prosrc", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)24, "probin", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)25, "proconfig", TEXTARRAYOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)26, "proacl", ACLITEMARRAYOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)27, "prodefaultargpos", INT2VECTOROID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)28, "fencedmode", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)29, "proshippable", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)30, "propackage", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)31, "oid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)9, "proisagg", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)10, "proiswindow", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)11, "prosecdef", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)12, "proleakproof", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)13, "proisstrict", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)14, "proretset", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)15, "provolatile", CHAROID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)16, "pronargs", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)17, "pronargdefaults", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)18, "prorettype", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)19, "proargtypes", OIDVECTOROID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)20, "proallargtypes", INT4ARRAYOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)21, "proargmodes", CHARARRAYOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)22, "proargnames", TEXTARRAYOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)23, "proargdefaults", PGNODETREEOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)24, "prosrc", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)25, "probin", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)26, "proconfig", TEXTARRAYOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)27, "proacl", ACLITEMARRAYOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)28, "prodefaultargpos", INT2VECTOROID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)29, "fencedmode", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)30, "proshippable", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)31, "propackage", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)32, "prokind", CHAROID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)33, "oid", OIDOID, -1, 0);
 
     return tupdesc;
 }
@@ -2108,7 +2302,7 @@ void InsertBuiltinFuncInBootstrap()
         for (int j = 0; j < fg->fnums; j++) {
             func = &fg->funcs[j];
             tup = CreateHeapTuple4BuiltinFunc(func, NULL);
-            (void)simple_heap_insert(t_thrd.bootstrap_cxt.boot_reldesc, tup);
+            simple_heap_insert(t_thrd.bootstrap_cxt.boot_reldesc, tup);
             heap_freetuple(tup);
         }
     }
@@ -2138,12 +2332,13 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
     MemoryContext oldcxt;
     int i;
 
+    SearchCatCacheCheck();
+
     /*
      * one-time startup overhead for each cache
      */
-    if (cache->cc_tupdesc == NULL) {
-        catalog_cache_initialize_cache(cache);
-    }
+    if (cache->cc_tupdesc == NULL)
+        CatalogCacheInitializeCache(cache);
 
     Assert(nkeys > 0 && nkeys < cache->cc_nkeys);
 
@@ -2163,31 +2358,28 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
      * presently divide the CatCList items into buckets, but this still lets
      * us skip non-matching items quickly most of the time.
      */
-    lHashValue = catalog_cache_compute_hash_value(cache, nkeys, v1, v2, v3, v4);
+    lHashValue = CatalogCacheComputeHashValue(cache, nkeys, v1, v2, v3, v4);
 
     /*
      * scan the items until we find a match or exhaust our list
      */
     for (elt = DLGetHead(&cache->cc_lists); elt; elt = DLGetSucc(elt)) {
         cl = (CatCList*)DLE_VAL(elt);
-        if (cl->dead) {
-            continue; /* ignore dead entries */
-        }
 
-        if (cl->hash_value != lHashValue) {
+        if (cl->dead)
+            continue; /* ignore dead entries */
+
+        if (cl->hash_value != lHashValue)
             continue; /* quickly skip entry if wrong hash val */
-        }
 
         /*
          * see if the cached list matches our key.
          */
-        if (cl->nkeys != nkeys) {
+        if (cl->nkeys != nkeys)
             continue;
-        }
 
-        if (!catalog_cache_compare_tuple(cache, nkeys, cl->keys, arguments)) {
+        if (!CatalogCacheCompareTuple(cache, nkeys, cl->keys, arguments))
             continue;
-        }
 
         /*
          * We found a matching list.  Move the list to the front of the
@@ -2202,11 +2394,13 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
         ResourceOwnerEnlargeCatCacheListRefs(t_thrd.utils_cxt.CurrentResourceOwner);
         cl->refcount++;
         ResourceOwnerRememberCatCacheListRef(t_thrd.utils_cxt.CurrentResourceOwner, cl);
+
         CACHE2_elog(DEBUG2, "SearchCatCacheList(%s): found list", cache->cc_relname);
 
 #ifdef CATCACHE_STATS
         cache->cc_lhits++;
 #endif
+
         return cl;
     }
 
@@ -2221,6 +2415,7 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
      * we finish constructing the CatCList.
      */
     ResourceOwnerEnlargeCatCacheListRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+
     ctlist = NIL;
 
     /* Firstly, check the builtin functions. if there are functions
@@ -2230,6 +2425,11 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
     if (IsProcCache(cache) && CacheIsProcNameArgNsp(cache) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         ctlist = SearchBuiltinProcCacheList(cache, nkeys, arguments, ctlist);
     }
+
+    if (IsAttributeCache(cache) && IsSystemObjOid(DatumGetObjectId(arguments[0]))) {
+        ctlist = SearchPgAttributeCacheList(cache, nkeys, arguments, ctlist);
+    }
+
     PG_TRY();
     {
         ScanKeyData cur_skey[CATCACHE_MAXKEYS];
@@ -2250,8 +2450,9 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
         cur_skey[3].sk_argument = v4;
 
         relation = heap_open(cache->cc_reloid, AccessShareLock);
+
         scandesc = systable_beginscan(
-            relation, cache->cc_indexoid, index_scan_ok(cache, cur_skey), SnapshotNow, nkeys, cur_skey);
+            relation, cache->cc_indexoid, IndexScanOK(cache, cur_skey), SnapshotNow, nkeys, cur_skey);
 
         /* The list will be ordered iff we are doing an index scan */
         ordered = (scandesc->irel != NULL);
@@ -2260,66 +2461,85 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
             uint32 hashValue;
             Index hashIndex;
 
-            if (IsProcCache(cache) && IsBuiltinFuncOid(HeapTupleGetOid(ntp)) &&
+            if (IsProcCache(cache) && IsSystemObjOid(HeapTupleGetOid(ntp)) &&
                 u_sess->attr.attr_common.IsInplaceUpgrade == false) {
                 continue;
+            }
+            if (IsAttributeCache(cache)) {
+                bool attIsNull = false;
+                Oid attrelid = DatumGetObjectId(SysCacheGetAttr(cache->id, ntp,
+                                                Anum_pg_attribute_attrelid, &attIsNull));
+                if (IsSystemObjOid(attrelid) && IsValidCatalogParam(GetCatalogParam(attrelid))) {
+                    continue;
+                }
             }
 
             /*
              * See if there's an entry for this tuple already.
              */
             ct = NULL;
-            hashValue = catalog_cache_compute_tuple_hash_value(cache, cache->cc_nkeys, ntp);
+            hashValue = CatalogCacheComputeTupleHashValue(cache, cache->cc_nkeys, ntp);
             hashIndex = HASH_INDEX(hashValue, static_cast<uint32>(cache->cc_nbuckets));
+
             for (elt = DLGetHead(&cache->cc_bucket[hashIndex]); elt; elt = DLGetSucc(elt)) {
                 ct = (CatCTup*)DLE_VAL(elt);
-                if (ct->dead || ct->negative) {
-                    continue; /* ignore dead and negative entries */
-                }
 
-                if (ct->hash_value != hashValue) {
+                if (ct->dead || ct->negative)
+                    continue; /* ignore dead and negative entries */
+
+                if (ct->hash_value != hashValue)
                     continue; /* quickly skip entry if wrong hash val */
-                }
 
                 /* A built-in function is all in pg_proc, in upgrade senario, we skip searching
                  * the builtin functions from builtin function array. In non-upgrade mode, the function
                  * found from heap must exist in builtin array.
                  */
-                if (IsProcCache(cache) && IsBuiltinFuncOid(HeapTupleGetOid(&(ct->tuple))) &&
+                if (IsProcCache(cache) && IsSystemObjOid(HeapTupleGetOid(&(ct->tuple))) &&
                     u_sess->attr.attr_common.IsInplaceUpgrade == false) {
                     continue;
                 }
-
-                if (!ItemPointerEquals(&(ct->tuple.t_self), &(ntp->t_self))) {
-                    continue; /* not same tuple */
+                if (IsAttributeCache(cache)) {
+                    bool attIsNull = false;
+                    Oid attrelid = DatumGetObjectId(SysCacheGetAttr(cache->id, &(ct->tuple),
+                                   Anum_pg_attribute_attrelid, &attIsNull));
+                    if (IsSystemObjOid(attrelid) && IsValidCatalogParam(GetCatalogParam(attrelid))) {
+                        continue;
+                    }
                 }
+
+                if (!ItemPointerEquals(&(ct->tuple.t_self), &(ntp->t_self)))
+                    continue; /* not same tuple */
 
                 /*
                  * Found a match, but can't use it if it belongs to another
                  * list already
                  */
-                if (ct->c_list) {
+                if (ct->c_list)
                     continue;
-                }
 
                 break; /* A-OK */
             }
 
             if (elt == NULL) {
                 /* We didn't find a usable entry, so make a new one */
-                ct = catalog_cache_create_entry(cache, ntp, arguments, hashValue, hashIndex, false);
+                ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
             }
 
-            /* Careful here: add entry to ctlist, then bump its refcount */
-            /* This way leaves state correct if lappend runs out of memory */
-            ctlist = lappend(ctlist, ct);
-
+            /*
+             * Careful here: enlarge resource owner catref array, add entry to ctlist, then bump its refcount.
+             * This way leaves state correct if enlarge or lappend runs out of memory_context_list
+             * We use resource owner to track referenced cachetups for safety reasons. Because ctlist is now
+             * built from different sources, i.e. built-in catalogs and physical relation tuples. If failure in later
+             * sources is not caught, resource owner will clean up ref count for cachetups got from previous sources.
+             */
             ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+            ctlist = lappend(ctlist, ct);
             ct->refcount++;
             ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
         }
 
         systable_endscan(scandesc);
+
         heap_close(relation, AccessShareLock);
 
         /*
@@ -2330,7 +2550,7 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
         cl = (CatCList*)palloc(offsetof(CatCList, members) + (nmembers + 1) * sizeof(CatCTup*));
 
         /* Extract key values */
-        cat_cache_copy_keys(cache->cc_tupdesc, nkeys, cache->cc_keyno, arguments, cl->keys);
+        CatCacheCopyKeys(cache->cc_tupdesc, nkeys, cache->cc_keyno, arguments, cl->keys);
         MemoryContextSwitchTo(oldcxt);
 
         /*
@@ -2343,22 +2563,7 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
     }
     PG_CATCH();
     {
-        foreach (ctlist_item, ctlist) {
-            ct = (CatCTup*)lfirst(ctlist_item);
-            Assert(ct->c_list == NULL);
-            Assert(ct->refcount > 0);
-            ct->refcount--;
-            ResourceOwnerForgetCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
-
-            if (
-#ifndef CATCACHE_FORCE_RELEASE
-                ct->dead &&
-#endif
-                ct->refcount == 0 && (ct->c_list == NULL || ct->c_list->refcount == 0)) {
-                cat_cache_remove_ctup(cache, ct);
-            }
-        }
-
+        ReleaseTempCatList(ctlist, cache);
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -2384,9 +2589,8 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
         ct->refcount--;
         ResourceOwnerForgetCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
         /* mark list dead if any members already dead */
-        if (ct->dead) {
+        if (ct->dead)
             cl->dead = true;
-        }
     }
     Assert(i == nmembers);
 
@@ -2395,8 +2599,30 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
     /* Finally, bump the list's refcount and return it */
     cl->refcount++;
     ResourceOwnerRememberCatCacheListRef(t_thrd.utils_cxt.CurrentResourceOwner, cl);
+
     CACHE3_elog(DEBUG2, "SearchCatCacheList(%s): made list of %d members", cache->cc_relname, nmembers);
+
     return cl;
+}
+
+void ReleaseTempCatList(const List* volatile ctlist, CatCache* cache)
+{
+    ListCell* ctlist_item = NULL;
+    CatCTup* ct = NULL;
+    foreach (ctlist_item, ctlist) {
+        ct = (CatCTup*)lfirst(ctlist_item);
+        Assert(ct->c_list == NULL);
+        Assert(ct->refcount > 0);
+        ct->refcount--;
+        ResourceOwnerForgetCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
+
+        if (
+#ifndef CATCACHE_FORCE_RELEASE
+ct->dead &&
+#endif
+ct->refcount == 0 && (ct->c_list == NULL || ct->c_list->refcount == 0))
+            CatCacheRemoveCTup(cache, ct);
+    }
 }
 
 /*
@@ -2416,17 +2642,16 @@ void ReleaseCatCacheList(CatCList* list)
 #ifndef CATCACHE_FORCE_RELEASE
         list->dead &&
 #endif
-        list->refcount == 0) {
-        cat_cache_remove_clist(list->my_cache, list);
-    }
+        list->refcount == 0)
+        CatCacheRemoveCList(list->my_cache, list);
 }
 
 /*
- * catalog_cache_create_entry
+ * CatalogCacheCreateEntry
  *		Create a new CatCTup entry, copying the given HeapTuple and other
  *		supplied data into it.	The new entry initially has refcount 0.
  */
-static CatCTup* catalog_cache_create_entry(
+static CatCTup* CatalogCacheCreateEntry(
     CatCache* cache, HeapTuple ntp, Datum* arguments, uint32 hashValue, Index hashIndex, bool negative, bool isnailed)
 {
     CatCTup* ct = NULL;
@@ -2437,6 +2662,7 @@ static CatCTup* catalog_cache_create_entry(
     if (ntp) {
         int i;
         errno_t rc;
+
         Assert(!negative);
 
         /*
@@ -2446,16 +2672,16 @@ static CatCTup* catalog_cache_create_entry(
          * tuples being freed before we attempt to fetch them, in case of
          * something using a slightly stale catcache entry.
          */
-        if (HeapTupleHasExternal(ntp)) {
+        if (HeapTupleHasExternal(ntp))
             dtp = toast_flatten_tuple(ntp, cache->cc_tupdesc);
-        } else {
+        else
             dtp = ntp;
-        }
 
         /* Allocate memory for CatCTup and the cached tuple in one go */
         oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
 
         ct = (CatCTup*)palloc(sizeof(CatCTup) + MAXIMUM_ALIGNOF + dtp->t_len);
+        ct->tuple.tupTableType = HEAP_TUPLE;
         ct->tuple.t_len = dtp->t_len;
         ct->tuple.t_self = dtp->t_self;
         ct->tuple.t_tableOid = dtp->t_tableOid;
@@ -2471,9 +2697,8 @@ static CatCTup* catalog_cache_create_entry(
         securec_check(rc, "", "");
         MemoryContextSwitchTo(oldcxt);
 
-        if (dtp != ntp) {
+        if (dtp != ntp)
             heap_freetuple_ext(dtp);
-        }
 
         /* extract keys - they'll point into the tuple if not by-value */
         for (i = 0; i < cache->cc_nkeys; i++) {
@@ -2493,7 +2718,7 @@ static CatCTup* catalog_cache_create_entry(
          * Store keys - they'll point into separately allocated memory if not
          * by-value.
          */
-        cat_cache_copy_keys(cache->cc_tupdesc, cache->cc_nkeys, cache->cc_keyno, arguments, ct->keys);
+        CatCacheCopyKeys(cache->cc_tupdesc, cache->cc_nkeys, cache->cc_keyno, arguments, ct->keys);
         MemoryContextSwitchTo(oldcxt);
     }
 
@@ -2522,7 +2747,7 @@ static CatCTup* catalog_cache_create_entry(
 /*
  * Helper routine that frees keys stored in the keys array.
  */
-static void cat_cache_free_keys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* keys)
+static void CatCacheFreeKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* keys)
 {
     int i;
 
@@ -2530,9 +2755,8 @@ static void cat_cache_free_keys(TupleDesc tupdesc, int nkeys, const int* attnos,
         int attnum = attnos[i];
 
         /* only valid system attribute is the oid, which is by value */
-        if (attnum == ObjectIdAttributeNumber) {
+        if (attnum == ObjectIdAttributeNumber)
             continue;
-        }
         Assert(attnum > 0);
 
         if (!tupdesc->attrs[attnum - 1]->attbyval) {
@@ -2547,7 +2771,7 @@ static void cat_cache_free_keys(TupleDesc tupdesc, int nkeys, const int* attnos,
  * one, guaranteeing that the datums are fully allocated in the current memory
  * context.
  */
-static void cat_cache_copy_keys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* srckeys, Datum* dstkeys)
+static void CatCacheCopyKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* srckeys, Datum* dstkeys)
 {
     int i;
 
@@ -2573,7 +2797,7 @@ static void cat_cache_copy_keys(TupleDesc tupdesc, int nkeys, const int* attnos,
              * fall off the end of memory.
              */
             if (att->atttypid == NAMEOID) {
-                (void)namestrcpy(&srcname, DatumGetCString(src));
+                namestrcpy(&srcname, DatumGetCString(src));
                 src = NameGetDatum(&srcname);
             }
 
@@ -2583,38 +2807,38 @@ static void cat_cache_copy_keys(TupleDesc tupdesc, int nkeys, const int* attnos,
 }
 
 /*
- * PrepareToInvalidateCacheTuple()
+ *	PrepareToInvalidateCacheTuple()
  *
- * This is part of a rather subtle chain of events, so pay attention:
+ *	This is part of a rather subtle chain of events, so pay attention:
  *
- * When a tuple is inserted or deleted, it cannot be flushed from the
- * catcaches immediately, for reasons explained at the top of cache/inval.c.
- * Instead we have to add entry(s) for the tuple to a list of pending tuple
- * invalidations that will be done at the end of the command or transaction.
+ *	When a tuple is inserted or deleted, it cannot be flushed from the
+ *	catcaches immediately, for reasons explained at the top of cache/inval.c.
+ *	Instead we have to add entry(s) for the tuple to a list of pending tuple
+ *	invalidations that will be done at the end of the command or transaction.
  *
- * The lists of tuples that need to be flushed are kept by inval.c. This
- * routine is a helper routine for inval.c.  Given a tuple belonging to
- * the specified relation, find all catcaches it could be in, compute the
- * correct hash value for each such catcache, and call the specified
- * function to record the cache id and hash value in inval.c's lists.
- * CatalogCacheIdInvalidate will be called later, if appropriate,
- * using the recorded information.
+ *	The lists of tuples that need to be flushed are kept by inval.c.  This
+ *	routine is a helper routine for inval.c.  Given a tuple belonging to
+ *	the specified relation, find all catcaches it could be in, compute the
+ *	correct hash value for each such catcache, and call the specified
+ *	function to record the cache id and hash value in inval.c's lists.
+ *	CatalogCacheIdInvalidate will be called later, if appropriate,
+ *	using the recorded information.
  *
- * For an insert or delete, tuple is the target tuple and newtuple is NULL.
- * For an update, we are called just once, with tuple being the old tuple
- * version and newtuple the new version.  We should make two list entries
- * if the tuple's hash value changed, but only one if it didn't.
+ *	For an insert or delete, tuple is the target tuple and newtuple is NULL.
+ *	For an update, we are called just once, with tuple being the old tuple
+ *	version and newtuple the new version.  We should make two list entries
+ *	if the tuple's hash value changed, but only one if it didn't.
  *
- * Note that it is irrelevant whether the given tuple is actually loaded
- * into the catcache at the moment.  Even if it's not there now, it might
- * be by the end of the command, or there might be a matching negative entry
- * to flush --- or other backends' caches might have such entries --- so
- * we have to make list entries to flush it later.
+ *	Note that it is irrelevant whether the given tuple is actually loaded
+ *	into the catcache at the moment.  Even if it's not there now, it might
+ *	be by the end of the command, or there might be a matching negative entry
+ *	to flush --- or other backends' caches might have such entries --- so
+ *	we have to make list entries to flush it later.
  *
- * Also note that it's not an error if there are no catcaches for the
- * specified relation.  inval.c doesn't know exactly which rels have
- * catcaches --- it will call this routine for any tuple that's in a
- * system relation.
+ *	Also note that it's not an error if there are no catcaches for the
+ *	specified relation.  inval.c doesn't know exactly which rels have
+ *	catcaches --- it will call this routine for any tuple that's in a
+ *	system relation.
  */
 void PrepareToInvalidateCacheTuple(
     Relation relation, HeapTuple tuple, HeapTuple newtuple, void (*function)(int, uint32, Oid))
@@ -2641,29 +2865,30 @@ void PrepareToInvalidateCacheTuple(
      *		   and call the passed function to register the information.
      * ----------------
      */
+
     for (ccp = u_sess->cache_cxt.cache_header->ch_caches; ccp; ccp = ccp->cc_next) {
         uint32 hashvalue;
         Oid dbid;
 
-        if (ccp->cc_reloid != reloid) {
+        if (ccp->cc_reloid != reloid)
             continue;
-        }
 
         /* Just in case cache hasn't finished initialization yet... */
-        if (ccp->cc_tupdesc == NULL) {
-            catalog_cache_initialize_cache(ccp);
-        }
+        if (ccp->cc_tupdesc == NULL)
+            CatalogCacheInitializeCache(ccp);
 
-        hashvalue = catalog_cache_compute_tuple_hash_value(ccp, ccp->cc_nkeys, tuple);
+        hashvalue = CatalogCacheComputeTupleHashValue(ccp, ccp->cc_nkeys, tuple);
         dbid = ccp->cc_relisshared ? (Oid)0 : u_sess->proc_cxt.MyDatabaseId;
 
         (*function)(ccp->id, hashvalue, dbid);
+
         if (newtuple) {
             uint32 newhashvalue;
-            newhashvalue = catalog_cache_compute_tuple_hash_value(ccp, ccp->cc_nkeys, newtuple);
-            if (newhashvalue != hashvalue) {
+
+            newhashvalue = CatalogCacheComputeTupleHashValue(ccp, ccp->cc_nkeys, newtuple);
+
+            if (newhashvalue != hashvalue)
                 (*function)(ccp->id, newhashvalue, dbid);
-            }
         }
     }
 }
@@ -2688,132 +2913,11 @@ void PrintCatCacheLeakWarning(HeapTuple tuple)
             ct->refcount)));
 }
 
-void PrintCatCacheListLeakWarning(const CatCList* list)
+void PrintCatCacheListLeakWarning(CatCList* list)
 {
     ereport(WARNING,
         (errmsg("cache reference leak: cache %s (%d), list has count %d",
             list->my_cache->cc_relname,
             list->my_cache->id,
             list->refcount)));
-}
-
-void InsertHardCodeCatalogTupleIntoSyscache(CatCache* cache, Relation relation, Relation pg_attribute_relation)
-{
-    List* volatile ctlist = NIL;
-    ListCell* ctlist_item = NULL;
-    MemoryContext oldcxt;
-    CatCList* cl = NULL;
-    CatCTup* ct = NULL;
-    int nmembers = 0;
-    int nkeys = 1; /* because num of keys for pg_attribute SearchSysCacheList is 1 */
-    uint32 lHashValue;
-    Datum larguments[CATCACHE_MAXKEYS];
-    Form_pg_attribute* attrs = relation->rd_att->attrs;
-
-    if (cache->cc_tupdesc == NULL) {
-        catalog_cache_initialize_cache(cache);
-    }
-
-    for (int16 attnum = 1; attnum <= relation->rd_att->natts; attnum++) {
-        Form_pg_attribute attr = attrs[attnum - 1];
-        Datum arguments[CATCACHE_MAXKEYS];
-        uint32 hashValue;
-        Index hashIndex;
-        HeapTuple ntp;
-        Datum values[Natts_pg_attribute];
-        bool isnull[Natts_pg_attribute];
-
-        errno_t rc;
-        rc = memset_s(isnull, sizeof(isnull), 0, sizeof(isnull));
-        securec_check(rc, "", "");
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "", "");
-
-        if (cache->id == ATTNUM) {
-            arguments[0] = ObjectIdGetDatum(relation->rd_id);
-            arguments[1] = Int16GetDatum(attnum);
-        } else if (cache->id == ATTNAME) {
-            arguments[0] = ObjectIdGetDatum(relation->rd_id);
-            arguments[1] = CStringGetDatum(&(attr->attname));
-        } else {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("could not recognize syscache identifier %d", cache->id)));
-        }
-        arguments[2] = 0;
-        arguments[3] = 0;
-        hashValue = catalog_cache_compute_hash_value(
-            cache, cache->cc_nkeys, arguments[0], arguments[1], arguments[2], arguments[3]);
-        hashIndex = HASH_INDEX(hashValue, (uint32)cache->cc_nbuckets);
-
-        values[Anum_pg_attribute_attrelid - 1] = ObjectIdGetDatum(attr->attrelid);
-        values[Anum_pg_attribute_attname - 1] = NameGetDatum(&(attr->attname));
-        values[Anum_pg_attribute_atttypid - 1] = ObjectIdGetDatum(attr->atttypid);
-        values[Anum_pg_attribute_attstattarget - 1] = Int32GetDatum(attr->attstattarget);
-        values[Anum_pg_attribute_attlen - 1] = Int16GetDatum(attr->attlen);
-        values[Anum_pg_attribute_attnum - 1] = Int16GetDatum(attr->attnum);
-        values[Anum_pg_attribute_attndims - 1] = Int32GetDatum(attr->attndims);
-        values[Anum_pg_attribute_attcacheoff - 1] = Int32GetDatum(attr->attcacheoff);
-        values[Anum_pg_attribute_atttypmod - 1] = Int32GetDatum(attr->atttypmod);
-        values[Anum_pg_attribute_attbyval - 1] = BoolGetDatum(attr->attbyval);
-        values[Anum_pg_attribute_attstorage - 1] = CharGetDatum(attr->attstorage);
-        values[Anum_pg_attribute_attalign - 1] = CharGetDatum(attr->attalign);
-        values[Anum_pg_attribute_attnotnull - 1] = BoolGetDatum(attr->attnotnull);
-        values[Anum_pg_attribute_atthasdef - 1] = BoolGetDatum(attr->atthasdef);
-        values[Anum_pg_attribute_attisdropped - 1] = BoolGetDatum(attr->attisdropped);
-        values[Anum_pg_attribute_attislocal - 1] = BoolGetDatum(attr->attislocal);
-        values[Anum_pg_attribute_attcmprmode - 1] = Int8GetDatum(attr->attcmprmode);
-        values[Anum_pg_attribute_attinhcount - 1] = Int32GetDatum(attr->attinhcount);
-        values[Anum_pg_attribute_attcollation - 1] = ObjectIdGetDatum(attr->attcollation);
-        values[Anum_pg_attribute_attkvtype - 1] = Int8GetDatum(attr->attkvtype);
-
-        /* start out with empty permissions and empty options */
-        isnull[Anum_pg_attribute_attacl - 1] = true;
-        isnull[Anum_pg_attribute_attoptions - 1] = true;
-        isnull[Anum_pg_attribute_attfdwoptions - 1] = true;
-
-        /* at default, new fileld attinitdefval of pg_attribute is null. */
-        isnull[Anum_pg_attribute_attinitdefval - 1] = true;
-        ntp = heap_form_tuple(pg_attribute_relation->rd_att, values, isnull);
-        ct = catalog_cache_create_entry(cache, ntp, arguments, hashValue, hashIndex, false, true);
-        ctlist = lappend(ctlist, ct);
-        ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
-        ct->refcount++;
-        ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
-    }
-
-    larguments[0] = ObjectIdGetDatum(relation->rd_id);
-    larguments[1] = 0;
-    larguments[2] = 0;
-    larguments[3] = 0;
-
-    lHashValue = catalog_cache_compute_hash_value(cache, nkeys, larguments[0], larguments[1], larguments[2], larguments[3]);
-
-    oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
-    nmembers = list_length(ctlist);
-    cl = (CatCList*)palloc(offsetof(CatCList, members) + (nmembers + 1) * sizeof(CatCTup*));
-    cat_cache_copy_keys(cache->cc_tupdesc, nkeys, cache->cc_keyno, larguments, cl->keys);
-    MemoryContextSwitchTo(oldcxt);
-    cl->cl_magic = CL_MAGIC;
-    cl->my_cache = cache;
-    DLInitElem(&cl->cache_elem, cl);
-    cl->refcount = 0; /* for the moment */
-    cl->dead = false;
-    cl->isnailed = true;
-    cl->ordered = false;
-    cl->nkeys = nkeys;
-    cl->hash_value = lHashValue;
-    cl->n_members = nmembers;
-    int i = 0;
-    foreach (ctlist_item, ctlist) {
-        cl->members[i++] = ct = (CatCTup*)lfirst(ctlist_item);
-        Assert(ct->c_list == NULL);
-        ct->c_list = cl;
-        /* release the temporary refcount on the member */
-        Assert(ct->refcount > 0);
-        ct->refcount--;
-        ResourceOwnerForgetCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
-    }
-    Assert(i == nmembers);
-    DLAddHead(&cache->cc_lists, &cl->cache_elem);
 }

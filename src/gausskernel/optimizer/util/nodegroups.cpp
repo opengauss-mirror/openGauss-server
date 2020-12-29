@@ -43,8 +43,10 @@
 #include "pgxc/pgxcnode.h"
 #include "utils/acl.h"
 #include "utils/lsyscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "workload/memctl.h"
+#include "access/hash.h"
+#include "utils/dynahash.h"
 
 /* ------------------------------------------------------------------------- */
 /*  Data structure                                                         */
@@ -205,7 +207,7 @@ static Bitmapset* ng_node_oid_array_to_id_bms_skip_null(Oid* members, int nmembe
  *     (2) u_sess->opt_cxt.compute_permission_group_distribution
  *     (3) u_sess->opt_cxt.query_union_set_group_distribution
  *     (4) u_sess->opt_cxt.is_multiple_nodegroup_scenario
- *     (5) u_sess->opt_cxt.is_all_in_installation_nodegroup_scenario
+ *     (5) u_sess->opt_cxt.different_nodegroup_count
  *     if it's a multiple node group scenario, we should shut down SMP here
  *
  * @param (in) query:
@@ -251,7 +253,7 @@ void ng_init_nodegroup_optimizer(Query* query)
 
     /* Check wheather it is a multiple node group scenario */
     u_sess->opt_cxt.is_multiple_nodegroup_scenario = true;
-    u_sess->opt_cxt.is_all_in_installation_nodegroup_scenario = false;
+    u_sess->opt_cxt.different_nodegroup_count = 2;
     if (baserels_in_same_group) {
         Distribution* default_computing_group_distribution = ng_get_default_computing_group_distribution();
         if (ng_is_same_group(
@@ -259,11 +261,24 @@ void ng_init_nodegroup_optimizer(Query* query)
             u_sess->opt_cxt.is_multiple_nodegroup_scenario = false;
 
             if (ng_is_same_group(u_sess->opt_cxt.query_union_set_group_distribution, installation_group_distribution)) {
-                u_sess->opt_cxt.is_all_in_installation_nodegroup_scenario = true;
+                u_sess->opt_cxt.different_nodegroup_count--;
             }
         }
     }
-    u_sess->opt_cxt.enable_nodegroup_explain = !u_sess->opt_cxt.is_all_in_installation_nodegroup_scenario;
+
+    u_sess->opt_cxt.single_node_distribution = NULL;
+    /* Init dn gather's single node distribution */
+    if (IS_PGXC_COORDINATOR && u_sess->attr.attr_sql.enable_dngather 
+        && bms_num_members(u_sess->opt_cxt.query_union_set_group_distribution->bms_data_nodeids) >= 1
+        && u_sess->opt_cxt.query_dop <= 1) {
+        u_sess->opt_cxt.single_node_distribution = ng_get_random_single_dn_distribution(u_sess->opt_cxt.query_union_set_group_distribution);
+        if (!ng_is_same_group(u_sess->opt_cxt.query_union_set_group_distribution, u_sess->opt_cxt.single_node_distribution)) {
+            u_sess->opt_cxt.is_multiple_nodegroup_scenario = true;
+            u_sess->opt_cxt.different_nodegroup_count++;
+        }
+    }
+
+    u_sess->opt_cxt.enable_nodegroup_explain = u_sess->opt_cxt.different_nodegroup_count > 1;
 }
 
 /*
@@ -276,14 +291,16 @@ void ng_init_nodegroup_optimizer(Query* query)
  *     the params to backup options
  */
 void ng_backup_nodegroup_options(bool* p_is_multiple_nodegroup_scenario,
-    bool* p_is_all_in_installation_nodegroup_scenario, Distribution** p_in_redistribution_group_distribution,
-    Distribution** p_compute_permission_group_distribution, Distribution** p_query_union_set_group_distribution)
+    int* p_different_nodegroup_count, Distribution** p_in_redistribution_group_distribution,
+    Distribution** p_compute_permission_group_distribution, Distribution** p_query_union_set_group_distribution,
+    Distribution** p_single_node_distribution)
 {
     *p_is_multiple_nodegroup_scenario = u_sess->opt_cxt.is_multiple_nodegroup_scenario;
-    *p_is_all_in_installation_nodegroup_scenario = u_sess->opt_cxt.is_all_in_installation_nodegroup_scenario;
+    *p_different_nodegroup_count = u_sess->opt_cxt.different_nodegroup_count;
     *p_in_redistribution_group_distribution = u_sess->opt_cxt.in_redistribution_group_distribution;
     *p_compute_permission_group_distribution = u_sess->opt_cxt.compute_permission_group_distribution;
     *p_query_union_set_group_distribution = u_sess->opt_cxt.query_union_set_group_distribution;
+    *p_single_node_distribution = u_sess->opt_cxt.single_node_distribution;
 }
 
 /*
@@ -297,18 +314,20 @@ void ng_backup_nodegroup_options(bool* p_is_multiple_nodegroup_scenario,
  *     the params holds the original options
  */
 void ng_restore_nodegroup_options(bool p_is_multiple_nodegroup_scenario,
-    bool p_is_all_in_installation_nodegroup_scenario, Distribution* p_in_redistribution_group_distribution,
-    Distribution* p_compute_permission_group_distribution, Distribution* p_query_union_set_group_distribution)
+    int p_different_nodegroup_count, Distribution* p_in_redistribution_group_distribution,
+    Distribution* p_compute_permission_group_distribution, Distribution* p_query_union_set_group_distribution,
+    Distribution* p_single_node_distribution)
 {
     /* for further explain */
-    u_sess->opt_cxt.enable_nodegroup_explain = !u_sess->opt_cxt.is_all_in_installation_nodegroup_scenario;
+    u_sess->opt_cxt.enable_nodegroup_explain = u_sess->opt_cxt.different_nodegroup_count > 1;
 
     /* restore nodegroup optimizer options */
     u_sess->opt_cxt.is_multiple_nodegroup_scenario = p_is_multiple_nodegroup_scenario;
-    u_sess->opt_cxt.is_all_in_installation_nodegroup_scenario = p_is_all_in_installation_nodegroup_scenario;
+    u_sess->opt_cxt.different_nodegroup_count = p_different_nodegroup_count;
     u_sess->opt_cxt.in_redistribution_group_distribution = p_in_redistribution_group_distribution;
     u_sess->opt_cxt.compute_permission_group_distribution = p_compute_permission_group_distribution;
     u_sess->opt_cxt.query_union_set_group_distribution = p_query_union_set_group_distribution;
+    u_sess->opt_cxt.single_node_distribution = p_single_node_distribution;
 }
 
 /*
@@ -427,13 +446,13 @@ Distribution* ng_get_compute_permission_group_distribution()
     /* Just for initialize of computing permission group */
     if (u_sess->opt_cxt.compute_permission_group_distribution == NULL) {
         Oid user_oid = GetUserId();
-        List* group_oid_list = Get_nodegroup_oid_compute(user_oid);
+        List* group_oid_list = GetNodeGroupOidCompute(user_oid);
         Distribution* distribution = NULL;
         ListCell* lc = NULL;
         foreach (lc, group_oid_list) {
             Oid group_oid = (Oid)lfirst_oid(lc);
             Distribution* d = ng_get_group_distribution(group_oid);
-            distribution = ng_get_union_distribution(distribution, d);
+            distribution = ng_get_union_distribution_recycle(distribution, d);
         }
 
         if (distribution == NULL || bms_is_empty(distribution->bms_data_nodeids)) {
@@ -479,7 +498,7 @@ Distribution* ng_get_query_union_set_group_distribution(List* baserel_rte_list, 
         AssertEreport(rte->rtekind == RTE_RELATION, MOD_OPT, "");
 
         /* Only check plain relaion */
-        if (RELKIND_VIEW == rte->relkind) {
+        if (RELKIND_VIEW == rte->relkind || RELKIND_CONTQUERY == rte->relkind) {
             continue;
         }
 
@@ -490,7 +509,7 @@ Distribution* ng_get_query_union_set_group_distribution(List* baserel_rte_list, 
         } else {
             if (!ng_is_same_group(union_distribution, rel_distribution)) {
                 *baserels_in_same_group = false;
-                union_distribution = ng_get_union_distribution(union_distribution, rel_distribution);
+                union_distribution = ng_get_union_distribution_recycle(union_distribution, rel_distribution);
             }
         }
     }
@@ -551,7 +570,7 @@ Distribution* ng_get_expected_computing_group_distribution()
     if (InvalidOid == distribution->group_oid) {
         ereport(DEBUG1, (errmodule(MOD_OPT), errmsg("Expected computing node group does not exist.")));
 
-        distribution = ng_get_query_union_set_group_distribution();
+        distribution = ng_copy_distribution(ng_get_query_union_set_group_distribution());
     }
 
     return distribution;
@@ -651,6 +670,10 @@ Distribution* ng_get_default_computing_group_distribution()
     return NULL;
 }
 
+Distribution* ng_get_single_node_distribution() {
+    return u_sess->opt_cxt.single_node_distribution;
+}
+
 /*
  * ng_get_correlated_subplan_group_distribution
  *     Get Distribution information for a correlated sub-plan.
@@ -674,9 +697,9 @@ Distribution* ng_get_correlated_subplan_group_distribution()
         }
         case CNG_MODE_COSTBASED_EXPECT:
         case CNG_MODE_FORCE: {
-            Distribution* distribution_1 = ng_get_query_union_set_group_distribution();
+            Distribution* distribution_1 = ng_copy_distribution(ng_get_query_union_set_group_distribution());
             Distribution* distribution_2 = ng_get_expected_computing_group_distribution();
-            return ng_get_union_distribution(distribution_1, distribution_2);
+            return ng_get_union_distribution_recycle(distribution_1, distribution_2);
         }
         default:
             break;
@@ -741,6 +764,34 @@ char* ng_get_group_group_name(Oid group_oid)
 }
 
 /*
+ * ng_get_dist_group_name
+ *     get group name from distribution
+
+ */
+char* ng_get_dist_group_name(Distribution *distribution) 
+{
+    if (IS_PGXC_COORDINATOR && u_sess->attr.attr_sql.enable_dngather 
+        && u_sess->opt_cxt.is_dngather_support && distribution->group_oid == InvalidOid) {
+        char *sep = "";
+        StringInfo node_names = makeStringInfo();
+        NameData nodename = {{0}};
+        int node_no = -1;
+        while ((node_no = bms_next_member(distribution->bms_data_nodeids, node_no)) >= 0) { 
+            appendStringInfo(node_names,
+                "%s%s",
+                sep, 
+                get_pgxc_nodename(PGXCNodeGetNodeOid(node_no, PGXC_NODE_DATANODE), &nodename));
+                sep = ", ";
+        }    
+
+        return node_names->data;
+    }
+
+    return ng_get_group_group_name(distribution->group_oid);
+}
+
+
+/*
  * ng_get_group_nodeids
  *     Get node index bitmap set from group oid
  *     If the group oid is invalid, return all nodes
@@ -760,29 +811,34 @@ Bitmapset* ng_get_group_nodeids(const Oid groupoid)
         return ng_convert_to_nodeids(nodeid_list);
     }
 
-    /* First check if we already have default nodegroup set */
-    Oid* members = NULL;
-    int nmembers = get_pgxc_groupmembers(groupoid, &members);
+    bms_nodeids = ngroup_info_hash_search(groupoid);
+    if (!bms_nodeids) {
+        /* First check if we already have default nodegroup set */
+        Oid* members = NULL;
+        int nmembers = get_pgxc_groupmembers(groupoid, &members);
 
-    /* in logic cluster case, elastic_nodegroup can contain no members */
-    if (nmembers == 0 && in_logic_cluster() && groupoid == ng_get_group_groupoid(VNG_OPTION_ELASTIC_GROUP))
-        return NULL;
+        /* in logic cluster case, elastic_nodegroup can contain no members */
+        if (nmembers == 0 && in_logic_cluster() && groupoid == ng_get_group_groupoid(VNG_OPTION_ELASTIC_GROUP))
+            return NULL;
 
-    Assert(nmembers > 0);
+        Assert(nmembers > 0);
 
-    /*
-     * Creating a bitmap from array.
-     * Notice : installation group's group_members in pgxc_group may be not match with u_sess->pgxc_cxt.dn_handles
-     * when node changed in online expansion, so we skip it here and this currently looks ok.
-     *
-     * Note: we only have to do the special processing for installation node group, because in
-     * cluster expansion stage(adding node), only installation group's node will change.
-     */
-    if (groupoid == ng_get_installation_group_oid())
-        bms_nodeids = ng_node_oid_array_to_id_bms_skip_null(members, nmembers, PGXC_NODE_DATANODE);
-    else
-        bms_nodeids = ng_node_oid_array_to_id_bms(members, nmembers, PGXC_NODE_DATANODE);
-    pfree_ext(members);
+        /*
+         * Creating a bitmap from array.
+         * Notice : installation group's group_members in pgxc_group may be not match with u_sess->pgxc_cxt.dn_handles
+         * when node changed in online expansion, so we skip it here and this currently looks ok.
+         *
+         * Note: we only have to do the special processing for installation node group, because in
+         * cluster expansion stage(adding node), only installation group's node will change.
+         */
+        if (groupoid == ng_get_installation_group_oid())
+            bms_nodeids = ng_node_oid_array_to_id_bms_skip_null(members, nmembers, PGXC_NODE_DATANODE);
+        else
+            bms_nodeids = ng_node_oid_array_to_id_bms(members, nmembers, PGXC_NODE_DATANODE);
+        pfree_ext(members);
+
+        ngroup_info_hash_insert(groupoid, bms_nodeids);
+    }
 
     return bms_nodeids;
 }
@@ -852,13 +908,13 @@ static bool need_get_installation_group(Oid tableoid, char relkind)
         return true;
 
     /* Normal tables  will not use installation group */
-    if (relkind == RELKIND_RELATION || relkind == RELKIND_INDEX) {
+    if (relkind == RELKIND_RELATION || relkind == RELKIND_INDEX || relkind == RELKIND_MATVIEW) {
         return false;
     }
 
     if (in_logic_cluster()) {
-        /* Distributed foreign tables(in pgxc_class)  will not use installation group in logic cluster. */
-        if (relkind == RELKIND_FOREIGN_TABLE && is_pgxc_class_table(tableoid))
+        /* Distributed foreign tables(in pgxc_class)  will not use installation group in logic cluster.*/
+        if ((RELKIND_FOREIGN_TABLE == relkind || RELKIND_STREAM == relkind) && is_pgxc_class_table(tableoid))
             return false;
     }
 
@@ -1124,6 +1180,10 @@ unsigned int ng_get_dest_num_data_nodes(Path* path)
 {
     AssertEreport(path != NULL, MOD_OPT, "");
 
+#ifndef ENABLE_MULTIPLE_NODES
+    return 1;
+#endif
+
     if (!IS_STREAM_PLAN) {
         return 1;
     }
@@ -1131,7 +1191,9 @@ unsigned int ng_get_dest_num_data_nodes(Path* path)
     if (ng_is_all_in_installation_nodegroup_scenario()) {
         switch (path->pathtype) {
             case T_CStoreScan:
+#ifdef ENABLE_MULTIPLE_NODES
             case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
                 return u_sess->pgxc_cxt.NumDataNodes;
             default:
                 break;
@@ -1161,6 +1223,10 @@ unsigned int ng_get_dest_num_data_nodes(Plan* plan)
 {
     AssertEreport(plan != NULL, MOD_OPT, "");
 
+#ifndef ENABLE_MULTIPLE_NODES
+    return 1;
+#endif
+
     if (!IS_STREAM_PLAN) {
         return 1;
     }
@@ -1169,7 +1235,9 @@ unsigned int ng_get_dest_num_data_nodes(Plan* plan)
         switch (plan->type) {
             case T_SeqScan:
             case T_CStoreScan:
+#ifdef ENABLE_MULTIPLE_NODES
             case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
             case T_IndexScan:
             case T_IndexOnlyScan:
             case T_CStoreIndexScan:
@@ -1215,6 +1283,10 @@ unsigned int ng_get_dest_num_data_nodes(RelOptInfo* rel)
 {
     AssertEreport(rel != NULL, MOD_OPT, "");
 
+#ifndef ENABLE_MULTIPLE_NODES
+    return 1;
+#endif
+
     if (!IS_STREAM_PLAN) {
         return 1;
     }
@@ -1251,7 +1323,16 @@ unsigned int ng_get_dest_num_data_nodes(PlannerInfo* root, RelOptInfo* rel)
 {
     AssertEreport(rel != NULL, MOD_OPT, "");
 
+#ifndef ENABLE_MULTIPLE_NODES
+    return 1;
+#endif
+
+    if (rel->num_data_nodes != 0) {
+        return rel->num_data_nodes;
+    }
+
     if (!IS_STREAM_PLAN) {
+        rel->num_data_nodes = 1;
         return 1;
     }
 
@@ -1295,6 +1376,8 @@ unsigned int ng_get_dest_num_data_nodes(PlannerInfo* root, RelOptInfo* rel)
         elog(DEBUG1, "[ng_get_dest_num_data_nodes] num of data nodes is 0");
         num_data_nodes = 1;
     }
+
+    rel->num_data_nodes = num_data_nodes;
     return num_data_nodes;
 }
 
@@ -1377,6 +1460,9 @@ Distribution* ng_copy_distribution(Distribution* src_distribution)
 void ng_copy_distribution(Distribution* dest_distribution, const Distribution* src_distribution)
 {
     dest_distribution->group_oid = src_distribution->group_oid;
+    /* bms_copy will palloc a new bms */
+    if (dest_distribution->bms_data_nodeids != NULL)
+        bms_free(dest_distribution->bms_data_nodeids);
     dest_distribution->bms_data_nodeids = bms_copy(src_distribution->bms_data_nodeids);
 }
 
@@ -1444,7 +1530,7 @@ Distribution* ng_get_overlap_distribution(Distribution* distribution_1, Distribu
  *     second Distribution(s) to union
  *
  * @return:
- *     the union Distribution
+ *     the copied union Distribution and leaving their inputs untouched
  */
 Distribution* ng_get_union_distribution(Distribution* distribution_1, Distribution* distribution_2)
 {
@@ -1468,6 +1554,27 @@ Distribution* ng_get_union_distribution(Distribution* distribution_1, Distributi
     }
 }
 
+/*
+ * ng_get_union_distribution_recycle
+ *     get union of two Distribution(s)
+ *
+ * @param (in) distribution_1:
+ *     first Distribution(s) to union, it could be NULL
+ *     if this parameter is NULL, reture the second Distribution as union
+ * @param (in) distribution_2:
+ *     second Distribution(s) to union
+ *
+ * @return:
+ *     the copied union Distribution and recycle their inputs
+ */
+Distribution* ng_get_union_distribution_recycle(Distribution* distribution_1, Distribution* distribution_2)
+{
+    Distribution* result = ng_get_union_distribution(distribution_1, distribution_2);
+    DestroyDistribution(distribution_1);
+    DestroyDistribution(distribution_2);
+    return result;
+}
+
 Distribution* ng_get_random_single_dn_distribution(Distribution* distribution)
 {
     Distribution* result_distribution = NewDistribution();
@@ -1478,6 +1585,7 @@ Distribution* ng_get_random_single_dn_distribution(Distribution* distribution)
     }
     AssertEreport(dn_oid >= 0, MOD_OPT, "");
     result_distribution->bms_data_nodeids = bms_add_member(result_distribution->bms_data_nodeids, dn_oid);
+    result_distribution->group_oid = InvalidOid;
     return result_distribution;
 }
 
@@ -1617,10 +1725,28 @@ ExecNodes* ng_convert_to_exec_nodes(Distribution* distribution, char locator_typ
 }
 
 /*
+ * Check whether the distribution exists in the distributions. 
+ */
+bool is_distribution_exists(List* distributions, Distribution* distribution) 
+{
+    bool find = false;
+    ListCell* lc = NULL;
+    foreach(lc, distributions) {
+        Distribution* tmp_distribution = (Distribution*)lfirst(lc);
+        if (tmp_distribution != NULL && ng_is_same_group(tmp_distribution, distribution)) {
+            find = true;
+            break;
+        }
+    }
+    
+    return find;
+}
+
+/*
  * Heuristic methods
  */
 /*
- * ng_get_candidate_distribution_list
+ * ng_get_join_candidate_distribution_list
  *     Get candidate Distribution list of a Join
  *     Three candidates will be taken:
  *     (1) the node group of outer path
@@ -1636,35 +1762,45 @@ ExecNodes* ng_convert_to_exec_nodes(Distribution* distribution, char locator_typ
  * @return:
  *     the candidates list
  */
-List* ng_get_candidate_distribution_list(Path* outer_path, Path* inner_path)
+List* ng_get_join_candidate_distribution_list(Path* outer_path, Path* inner_path, DistrbutionPreferenceType type) 
 {
     List* candidate_list = NIL;
+    Distribution* distribution = NULL;
 
-    Distribution* distribution = ng_get_default_computing_group_distribution();
-    candidate_list = lappend(candidate_list, distribution);
+    /* Default compute distribution. */
+    if (type == DPT_ALL || type == DPT_SHUFFLE) {
+        distribution = ng_get_default_computing_group_distribution();
+        candidate_list = lappend(candidate_list, distribution);
+        ComputingNodeGroupMode cng_mode = ng_get_computing_nodegroup_mode();
+        if (CNG_MODE_FORCE == cng_mode) {
+            return candidate_list;
+        }
+    } 
 
-    ComputingNodeGroupMode cng_mode = ng_get_computing_nodegroup_mode();
-    if (CNG_MODE_FORCE == cng_mode) {
-        return candidate_list;
+    /* Single node distribution. */
+    if (type == DPT_ALL || type == DPT_SINGLE) {
+        distribution = ng_get_single_node_distribution();
+        if (distribution != NULL && !is_distribution_exists(candidate_list, distribution)) {
+            candidate_list = lappend(candidate_list, distribution);
+        }
     }
 
-    Distribution* outer_distribution = ng_get_dest_distribution(outer_path);
-    Distribution* inner_distribution = ng_get_dest_distribution(inner_path);
-
-    if (!ng_is_same_group(distribution, outer_distribution)) {
-        candidate_list = lappend(candidate_list, outer_distribution);
+    /* Join outer's distribution. */
+    distribution = ng_get_dest_distribution(outer_path);
+    if (!is_distribution_exists(candidate_list, distribution)) {
+        candidate_list = lappend(candidate_list, distribution);
     }
 
-    if (!ng_is_same_group(distribution, inner_distribution) &&
-        (!ng_is_same_group(outer_distribution, inner_distribution))) {
-        candidate_list = lappend(candidate_list, inner_distribution);
+    /* Join inner's distribution. */
+    distribution = ng_get_dest_distribution(inner_path);
+    if (!is_distribution_exists(candidate_list, distribution)) {
+        candidate_list = lappend(candidate_list, distribution);
     }
-
     return candidate_list;
 }
 
 /*
- * ng_get_candidate_distribution_list
+ * ng_get_join_candidate_distribution_list
  *     Get candidate Distribution list of a Join
  *     It will be different for correlated query block and un-correlated query block
  *     (1) for correlated query block, it's join should be in a special node group for correlated sub-plan
@@ -1678,19 +1814,19 @@ List* ng_get_candidate_distribution_list(Path* outer_path, Path* inner_path)
  * @return:
  *     the candidates list
  */
-List* ng_get_candidate_distribution_list(Path* outer_path, Path* inner_path, bool is_correlated)
+List* ng_get_join_candidate_distribution_list(Path* outer_path, Path* inner_path, bool is_correlated, DistrbutionPreferenceType type)
 {
     if (is_correlated) {
         Distribution* installation_distribution = ng_get_correlated_subplan_group_distribution();
         List* candidate_list = list_make1(installation_distribution);
         return candidate_list;
     } else {
-        return ng_get_candidate_distribution_list(outer_path, inner_path);
+        return ng_get_join_candidate_distribution_list(outer_path, inner_path, type);
     }
 }
 
 /*
- * ng_get_candidate_distribution_list
+ * ng_get_agg_candidate_distribution_list
  *     Get candidate Distribution list of an Agg
  *     Two candidates will be taken:
  *     (1) the default computing group of current computing mode
@@ -1702,7 +1838,7 @@ List* ng_get_candidate_distribution_list(Path* outer_path, Path* inner_path, boo
  * @return:
  *     the candidate Distribution list
  */
-List* ng_get_candidate_distribution_list(Plan* plan, bool is_correlated)
+List* ng_get_agg_candidate_distribution_list(Plan* plan, bool is_correlated, DistrbutionPreferenceType type) 
 {
     if (is_correlated) {
         Distribution* installation_distribution = ng_get_correlated_subplan_group_distribution();
@@ -1711,26 +1847,36 @@ List* ng_get_candidate_distribution_list(Plan* plan, bool is_correlated)
     }
 
     List* candidate_list = NIL;
+    Distribution* distribution = NULL;
 
-    Distribution* distribution = ng_get_default_computing_group_distribution();
-    candidate_list = lappend(candidate_list, distribution);
-
-    ComputingNodeGroupMode cng_mode = ng_get_computing_nodegroup_mode();
-    if (CNG_MODE_FORCE == cng_mode) {
-        return candidate_list;
+    /* Default compute distribution. */
+    if (type == DPT_ALL || type == DPT_SHUFFLE) {
+        distribution = ng_get_default_computing_group_distribution();
+        candidate_list = lappend(candidate_list, distribution);
+        ComputingNodeGroupMode cng_mode = ng_get_computing_nodegroup_mode();
+        if (CNG_MODE_FORCE == cng_mode) {
+            return candidate_list;
+        }
     }
 
-    Distribution* plan_distribution = ng_get_dest_distribution(plan);
-
-    if (!ng_is_same_group(distribution, plan_distribution)) {
-        candidate_list = lappend(candidate_list, plan_distribution);
+    /* Single node distribution. */
+    if (type == DPT_ALL || type == DPT_SINGLE) {
+        distribution = ng_get_single_node_distribution();
+        if (distribution != NULL && !is_distribution_exists(candidate_list, distribution)) {
+            candidate_list = lappend(candidate_list, distribution);
+        }
     }
 
+    /* Agg's dest distribution. */
+    distribution = ng_get_dest_distribution(plan);
+    if (!is_distribution_exists(candidate_list, distribution)) {
+        candidate_list = lappend(candidate_list, distribution);
+    } 
     return candidate_list;
 }
 
 /*
- * ng_get_candidate_distribution_list
+ * ng_get_setop_candidate_distribution_list
  *     Get candidate Distribution list of an setop
  *     Groups of all branchs will be taken.
  *
@@ -1740,7 +1886,7 @@ List* ng_get_candidate_distribution_list(Plan* plan, bool is_correlated)
  * @return:
  *     the candidate Distribution list
  */
-List* ng_get_candidate_distribution_list(List* subPlans, bool is_correlated)
+List* ng_get_setop_candidate_distribution_list(List* subPlans, bool is_correlated)
 {
     if (is_correlated) {
         Distribution* installation_distribution = ng_get_correlated_subplan_group_distribution();
@@ -1753,19 +1899,9 @@ List* ng_get_candidate_distribution_list(List* subPlans, bool is_correlated)
     ListCell* lc = NULL;
     foreach (lc, subPlans) {
         Plan* subPlan = (Plan*)lfirst(lc);
-        AssertEreport(subPlan->exec_nodes->nodeList != NIL, MOD_OPT, "");
+        Assert(subPlan->exec_nodes->nodeList != NIL);
         Distribution* distribution = ng_get_dest_distribution(subPlan);
-        bool found = false;
-        ListCell* lc2 = NULL;
-
-        foreach (lc2, candidate_distribution_list) {
-            Distribution* prev_distribution = (Distribution*)lfirst(lc2);
-            if (ng_is_same_group(prev_distribution, distribution)) {
-                found = true;
-            }
-        }
-
-        if (!found) {
+        if (!is_distribution_exists(candidate_distribution_list,  distribution)) {
             candidate_distribution_list = lappend(candidate_distribution_list, distribution);
         }
     }
@@ -1832,13 +1968,11 @@ Cost ng_calculate_setop_branch_stream_cost(
     Plan* subPlan, unsigned int producer_num_datanodes, unsigned int consumer_num_datanodes)
 {
     Cost cost = 0;
-	const int AVERAGE_ROW_WIDTH = 8;
 
-    if (is_replicated_plan(subPlan)) { 
-		/* 8 is average row width */
-        cost = (PLAN_LOCAL_ROWS(subPlan) / ((double)(consumer_num_datanodes))) * Max(subPlan->plan_width, AVERAGE_ROW_WIDTH);
+    if (is_replicated_plan(subPlan)) {
+        cost = (PLAN_LOCAL_ROWS(subPlan) / ((double)(consumer_num_datanodes))) * Max(subPlan->plan_width, 8);
     } else {
-        cost = PLAN_LOCAL_ROWS(subPlan) * Max(subPlan->plan_width, AVERAGE_ROW_WIDTH);
+        cost = PLAN_LOCAL_ROWS(subPlan) * Max(subPlan->plan_width, 8);
     }
 
     return cost;
@@ -1979,7 +2113,7 @@ Distribution* ng_get_best_setop_distribution(List* subPlans, bool isUnionAll, bo
         return union_all_with_no_replicate;
     }
 
-    List* candidate_distribution_list = ng_get_candidate_distribution_list(subPlans, is_correlated);
+    List* candidate_distribution_list = ng_get_setop_candidate_distribution_list(subPlans, is_correlated);
 
     Cost min_total_cost = -1.0;
     Distribution* best_distribution = NULL;
@@ -2045,6 +2179,7 @@ void ng_stream_side_paths_for_replicate(PlannerInfo* root, Path** outer_path, Pa
 
     bool is_outer_replicated = is_replicated_path(*outer_path);
     bool is_inner_replicated = is_replicated_path(*inner_path);
+
     if (!is_outer_replicated && !is_inner_replicated) {
         ereport(ERROR,
             (errmodule(MOD_OPT),
@@ -2256,12 +2391,12 @@ bool ng_is_multiple_nodegroup_scenario()
 }
 
 /*
- * ng_u_sess->opt_cxt.is_all_in_installation_nodegroup_scenario
+ * ng_u_sess->opt_cxt.different_nodegroup_count
  *     get wheather it's a everything in installation node group scenario
  */
 bool ng_is_all_in_installation_nodegroup_scenario()
 {
-    return u_sess->opt_cxt.is_all_in_installation_nodegroup_scenario;
+    return u_sess->opt_cxt.different_nodegroup_count == 1;
 }
 
 /*
@@ -2528,3 +2663,149 @@ ExecNodes* ng_get_single_node_group_exec_node()
 
     return exec_nodes;
 }
+
+char* dist_to_str(Distribution* distribution)
+{
+    StringInfo str = makeStringInfo();
+
+    appendStringInfo(str, "groupid(%u) nodeids(", distribution->group_oid);
+    
+    _outBitmapset(str, distribution->bms_data_nodeids);
+
+    appendStringInfo(str, ")");
+
+    return str->data;
+}
+
+bool ng_is_single_node_group_distribution(Distribution* distribution) 
+{
+    Distribution* single_node_distribution = u_sess->opt_cxt.single_node_distribution;
+    if (single_node_distribution == NULL || distribution == NULL) {
+        return false;
+    }
+	
+    if (single_node_distribution == distribution) {
+        return true;
+    }
+
+    return ng_is_same_group(single_node_distribution, distribution);
+}
+
+int ng_get_different_nodegroup_count() 
+{
+    return u_sess->opt_cxt.different_nodegroup_count; 
+}
+
+static int ngroup_hash_partition_id(int id)
+{
+    return id % NUM_NGROUP_INFO_PARTITIONS;
+}
+
+static LWLock *ngroup_mapping_partitionlock(int hashcode)
+{
+    int id = FirstNGroupMappingLock + ngroup_hash_partition_id(hashcode);
+    return &t_thrd.shemem_ptr_cxt.mainLWLockArray[id].lock;
+}
+
+void ngroup_info_hash_create()
+{
+    const int num_hash_elems = 1024;
+    HASHCTL hash_ctl;
+
+    errno_t rc = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
+    securec_check(rc, "", "");
+    hash_ctl.keysize = sizeof(Oid);
+    hash_ctl.entrysize = sizeof(NGroupInfo);
+    hash_ctl.hash = oid_hash;
+    hash_ctl.hcxt = g_instance.cache_cxt.global_cache_mem;
+    hash_ctl.num_partitions = NUM_NGROUP_INFO_PARTITIONS;
+
+    int flags =  HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_EXTERN_CONTEXT | HASH_NOEXCEPT | HASH_PARTITION;
+    g_instance.ngroup_hash_table = hash_create("ngroup cache hash", num_hash_elems, &hash_ctl, flags);
+
+    if (g_instance.ngroup_hash_table == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY),
+                errmsg("nodegroup hash create failed")));
+    }
+}
+
+Bitmapset *ngroup_info_hash_search(Oid ngroup_oid)
+{
+    Bitmapset *bms_nodeids = NULL;
+    bool found = false;
+
+    if (InvalidOid == ngroup_oid) {
+        List *nodeid_list = GetAllDataNodes();
+        bms_nodeids = ng_convert_to_nodeids(nodeid_list);
+        list_free(nodeid_list);
+        return bms_nodeids;
+    }
+
+    uint32 hashcode = oid_hash((const void *)&ngroup_oid, sizeof(ngroup_oid));
+    LWLock *new_partition_lock = ngroup_mapping_partitionlock(hashcode);
+
+    (void)LWLockAcquire(new_partition_lock, LW_SHARED);
+    NGroupInfo *ngroup_info = (NGroupInfo *)hash_search(g_instance.ngroup_hash_table, &ngroup_oid, HASH_FIND, &found);
+
+    if (found) {
+        /* the memory is release by caller */
+        bms_nodeids = bms_copy(ngroup_info->bms_nodeids);
+    }
+    LWLockRelease(new_partition_lock);
+
+    return bms_nodeids;
+}
+
+void  ngroup_info_hash_insert(Oid ngroup_oid, Bitmapset *bms_node_ids)
+{
+    bool found = false;
+    uint32 hashcode = oid_hash((const void *)&ngroup_oid, sizeof(ngroup_oid));
+    LWLock *new_partition_lock = ngroup_mapping_partitionlock(hashcode);
+    Bitmapset *bms_node_ids_copy = NULL;
+
+    MemoryContext old_mem_context = MemoryContextSwitchTo(g_instance.ngroup_hash_table->hcxt);
+    bms_node_ids_copy = bms_copy(bms_node_ids);
+    MemoryContextSwitchTo(old_mem_context);
+    
+    (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
+    NGroupInfo *ngroup_info = (NGroupInfo *)hash_search(g_instance.ngroup_hash_table, &ngroup_oid, HASH_ENTER, &found);
+    
+    if (ngroup_info) {
+        ngroup_info->oid = ngroup_oid;
+        ngroup_info->bms_nodeids = bms_node_ids_copy;
+    } else {
+        LWLockRelease(new_partition_lock);
+        pfree(bms_node_ids_copy);
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY),
+                errmsg("failed to insert node group hash table")));
+    }
+    LWLockRelease(new_partition_lock);
+}
+
+void ngroup_info_hash_delete(Oid ngroup_oid)
+{
+    if (InvalidOid == ngroup_oid) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
+                errmsg("NodeGroup Oid is invalid, invalid Oid is %u.", ngroup_oid)));
+    }
+    bool found = false;
+    Bitmapset *bms_ptr = NULL;
+    uint32 hashcode = oid_hash((const void *)&ngroup_oid, sizeof(ngroup_oid));
+    LWLock *new_partition_lock = ngroup_mapping_partitionlock(hashcode);
+    
+    (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);    
+    NGroupInfo *ngroup_info = (NGroupInfo *)hash_search(g_instance.ngroup_hash_table, &ngroup_oid, HASH_FIND, &found);
+
+    if (ngroup_info)
+        bms_ptr = ngroup_info->bms_nodeids;
+        
+    hash_search(g_instance.ngroup_hash_table, &ngroup_oid, HASH_REMOVE, &found);
+    LWLockRelease(new_partition_lock);
+    if (!found && ngroup_info) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
+                errmsg("delete failed from nodegroup hash table, Oid is %u.", ngroup_oid)));
+    }
+    if (bms_ptr)
+        pfree(bms_ptr);
+}
+

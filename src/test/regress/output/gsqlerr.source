@@ -10,7 +10,7 @@ call resolved_path:src/ get resolved_name error.
 call resolved_path:src/errcodes.txt get resolved_name error.
 \! @abs_srcdir@/../../../src/bin/gsqlerr/scanEreport @abs_srcdir@/../../../src/common/backend/ @abs_srcdir@/../../../src/gausskernel/ @abs_srcdir@/../../../src/common/backend/utils/errcodes.txt
 --test gsqlerr error
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr
+\! @abs_bindir@/gsqlerr
 Invalid option, please use 'gsqlerr -h' for more information.
 Display errorcode description
 
@@ -22,7 +22,7 @@ Options:
   [errorcode]      print errorcode description
 --?.*
 
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr -a 11
+\! @abs_bindir@/gsqlerr -a 11
 Invalid option, please use 'gsqlerr -h' for more information.
 Display errorcode description
 
@@ -35,7 +35,7 @@ Options:
 --?.*
 
 --test gsqlerr outer help
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr -h
+\! @abs_bindir@/gsqlerr -h
 Display errorcode description
 
 gsqlerror [options...]
@@ -47,11 +47,11 @@ Options:
 --?.*
 
 --test gsql outer -v
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr -v
+\! @abs_bindir@/gsqlerr -v
 
 V1.0 for gsqlerror. 
 --test gsql outer -errcode
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr 0
+\! @abs_bindir@/gsqlerr 0
 Invalid option, please use 'gsqlerr -h' for more information.
 Display errorcode description
 
@@ -63,7 +63,7 @@ Options:
   [errorcode]      print errorcode description
 --?.*
 
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr 1
+\! @abs_bindir@/gsqlerr 1
 
 [Description]
 --?.*
@@ -74,7 +74,7 @@ Options:
 [Action]
 --?.*
 
-\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr 9999
+\! @abs_bindir@/gsqlerr 9999
 
 Error code 9999 does not exist.
 --?.*

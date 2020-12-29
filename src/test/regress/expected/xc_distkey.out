@@ -38,14 +38,14 @@ select * from nu_tab where 789.412 = a;
  789.41200
 (1 row)
 
-explain (costs false, num_nodes true, nodes false) select * from nu_tab where a = 123.456;
+explain (costs false) select * from nu_tab where a = 123.456;
        QUERY PLAN        
 -------------------------
  Seq Scan on nu_tab
    Filter: (a = 123.456)
 (2 rows)
 
-explain (costs false, num_nodes true, nodes false) select * from nu_tab where 789.412 = a;
+explain (costs false) select * from nu_tab where 789.412 = a;
        QUERY PLAN        
 -------------------------
  Seq Scan on nu_tab
@@ -86,14 +86,14 @@ select * from tx_tab where 'Did the quick brown fox jump over the lazy dog?' = a
  Did the quick brown fox jump over the lazy dog?
 (1 row)
 
-explain (costs false, num_nodes true, nodes false) select * from tx_tab where a = 'hello world';
+explain (costs false) select * from tx_tab where a = 'hello world';
              QUERY PLAN              
 -------------------------------------
  Seq Scan on tx_tab
    Filter: (a = 'hello world'::text)
 (2 rows)
 
-explain (costs false, num_nodes true, nodes false) select * from tx_tab where a = 'Did the quick brown fox jump over the lazy dog?';
+explain (costs false) select * from tx_tab where a = 'Did the quick brown fox jump over the lazy dog?';
                                QUERY PLAN                                
 -------------------------------------------------------------------------
  Seq Scan on tx_tab
@@ -131,14 +131,14 @@ select * from vc_tab where 'A quick brown fox' = a;
  A quick brown fox
 (1 row)
 
-explain (costs false, num_nodes true, nodes false) select * from vc_tab where a = 'abcdefghijklmnopqrstuvwxyz';
+explain (costs false) select * from vc_tab where a = 'abcdefghijklmnopqrstuvwxyz';
                          QUERY PLAN                         
 ------------------------------------------------------------
  Seq Scan on vc_tab
    Filter: ((a)::text = 'abcdefghijklmnopqrstuvwxyz'::text)
 (2 rows)
 
-explain (costs false, num_nodes true, nodes false) select * from vc_tab where a = 'A quick brown fox';
+explain (costs false) select * from vc_tab where a = 'A quick brown fox';
                     QUERY PLAN                     
 ---------------------------------------------------
  Seq Scan on vc_tab
@@ -146,7 +146,7 @@ explain (costs false, num_nodes true, nodes false) select * from vc_tab where a 
 (2 rows)
 
 -- This test a bug in examine_conditions_walker where a = constant is optimized but constant = a was not
-explain (costs false, num_nodes true, nodes false) select * from vc_tab where 'A quick brown fox' = a;
+explain (costs false) select * from vc_tab where 'A quick brown fox' = a;
                     QUERY PLAN                     
 ---------------------------------------------------
  Seq Scan on vc_tab
@@ -335,14 +335,14 @@ select * from i4_tab where 2147483647 = a;
  2147483647
 (1 row)
 
-explain (costs false, num_nodes true, nodes false) select * from i4_tab where 65530 = a;
+explain (costs false) select * from i4_tab where 65530 = a;
       QUERY PLAN       
 -----------------------
  Seq Scan on i4_tab
    Filter: (65530 = a)
 (2 rows)
 
-explain (costs false, num_nodes true, nodes false) select * from i4_tab where a = 2147483647;
+explain (costs false) select * from i4_tab where a = 2147483647;
          QUERY PLAN         
 ----------------------------
  Seq Scan on i4_tab

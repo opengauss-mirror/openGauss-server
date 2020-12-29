@@ -32,5 +32,5 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = compress_kits.o cstore_compress.o time_series_compress.o
+OBJS = compress_kits.o cstore_compress.o cstore_compress_copy.o time_series_compress.o
 include $(top_srcdir)/src/gausskernel/common.mk

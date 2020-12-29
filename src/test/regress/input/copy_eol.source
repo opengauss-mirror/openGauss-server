@@ -4,135 +4,135 @@ insert into test_ud_eol values (1, 'zhangsan');
 insert into test_ud_eol values (2, 'lisi');
 insert into test_ud_eol values (3, 'wangwu');
 select * from test_ud_eol order by id;
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt';
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
 select * from test_ud_eol order by id;
 
 --1 test 0x0d0a
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d0a';
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d0a';
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0a';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0a';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d0a';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d0a';
 select * from test_ud_eol order by id;
 
 --2 test 0x0d
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d';
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d';
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0a';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0a';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d0a';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d0a';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d';
 select * from test_ud_eol order by id;
 
 --3 test 0x0a
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0a';
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0a';
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d0a';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d0a';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0d';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0d';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '0x0a';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '0x0a';
 select * from test_ud_eol order by id;
 
 --4 test \r\n
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\r\n';
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt' eol '\r\n';
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\r';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '\r';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\n';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '\n';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\r\n';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '\r\n';
 select * from test_ud_eol order by id;
 
 --5 test \r
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\r';
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt' eol '\r';
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\n';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '\n';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\r\n';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '\r\n';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\r';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '\r';
 select * from test_ud_eol order by id;
 
 --6 test \n
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\n';
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt' eol '\n';
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\r\n';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '\r\n';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\r';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '\r';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '\n';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '\n';
 select * from test_ud_eol order by id;
 
 --7 test $
-copy test_ud_eol to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '$';
+copy test_ud_eol to '@abs_srcdir@/data/test_ud_eol.txt' eol '$';
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt';
 select * from test_ud_eol order by id;
 
 truncate table test_ud_eol;
-copy test_ud_eol from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ud_eol.txt' eol '$';
+copy test_ud_eol from '@abs_srcdir@/data/test_ud_eol.txt' eol '$';
 select * from test_ud_eol order by id;
 
 drop table test_ud_eol;

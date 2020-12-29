@@ -26,7 +26,7 @@
 
 Datum spg_kd_config(PG_FUNCTION_ARGS)
 {
-    spgConfigOut* cfg = (spgConfigOut*)PG_GETARG_POINTER(1);
+    spgConfigOut *cfg = (spgConfigOut *)PG_GETARG_POINTER(1);
 
     cfg->prefixType = FLOAT8OID;
     cfg->labelType = VOIDOID; /* we don't need node labels */
@@ -35,7 +35,7 @@ Datum spg_kd_config(PG_FUNCTION_ARGS)
     PG_RETURN_VOID();
 }
 
-static int getSide(double coord, bool isX, Point* tst)
+static int getSide(double coord, bool isX, Point *tst)
 {
     double tstcoord = (isX) ? tst->x : tst->y;
 
@@ -50,15 +50,14 @@ static int getSide(double coord, bool isX, Point* tst)
 
 Datum spg_kd_choose(PG_FUNCTION_ARGS)
 {
-    spgChooseIn* in = (spgChooseIn*)PG_GETARG_POINTER(0);
-    spgChooseOut* out = (spgChooseOut*)PG_GETARG_POINTER(1);
-    Point* inPoint = DatumGetPointP(in->datum);
+    spgChooseIn *in = (spgChooseIn *)PG_GETARG_POINTER(0);
+    spgChooseOut *out = (spgChooseOut *)PG_GETARG_POINTER(1);
+    Point *inPoint = DatumGetPointP(in->datum);
     double coord;
 
     if (in->allTheSame) {
-        ereport(ERROR,
-            (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
-                errmsg("allTheSame should not occur for k-d trees")));
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
+                        errmsg("allTheSame should not occur for k-d trees")));
     }
 
     Assert(in->hasPrefix);
@@ -75,14 +74,14 @@ Datum spg_kd_choose(PG_FUNCTION_ARGS)
 }
 
 typedef struct SortedPoint {
-    Point* p;
+    Point *p;
     int i;
 } SortedPoint;
 
-static int x_cmp(const void* a, const void* b)
+static int x_cmp(const void *a, const void *b)
 {
-    SortedPoint* pa = (SortedPoint*)a;
-    SortedPoint* pb = (SortedPoint*)b;
+    SortedPoint *pa = (SortedPoint *)a;
+    SortedPoint *pb = (SortedPoint *)b;
 
     if (pa->p->x == pb->p->x) {
         return 0;
@@ -90,10 +89,10 @@ static int x_cmp(const void* a, const void* b)
     return (pa->p->x > pb->p->x) ? 1 : -1;
 }
 
-static int y_cmp(const void* a, const void* b)
+static int y_cmp(const void *a, const void *b)
 {
-    SortedPoint* pa = (SortedPoint*)a;
-    SortedPoint* pb = (SortedPoint*)b;
+    SortedPoint *pa = (SortedPoint *)a;
+    SortedPoint *pb = (SortedPoint *)b;
 
     if (pa->p->y == pb->p->y) {
         return 0;
@@ -103,14 +102,14 @@ static int y_cmp(const void* a, const void* b)
 
 Datum spg_kd_picksplit(PG_FUNCTION_ARGS)
 {
-    spgPickSplitIn* in = (spgPickSplitIn*)PG_GETARG_POINTER(0);
-    spgPickSplitOut* out = (spgPickSplitOut*)PG_GETARG_POINTER(1);
+    spgPickSplitIn *in = (spgPickSplitIn *)PG_GETARG_POINTER(0);
+    spgPickSplitOut *out = (spgPickSplitOut *)PG_GETARG_POINTER(1);
     int i;
     int middle;
-    SortedPoint* sorted = NULL;
+    SortedPoint *sorted = NULL;
     double coord;
 
-    sorted = (SortedPoint*)palloc(sizeof(*sorted) * in->nTuples);
+    sorted = (SortedPoint *)palloc(sizeof(*sorted) * in->nTuples);
     for (i = 0; i < in->nTuples; i++) {
         sorted[i].p = DatumGetPointP(in->datums[i]);
         sorted[i].i = i;
@@ -126,8 +125,8 @@ Datum spg_kd_picksplit(PG_FUNCTION_ARGS)
     out->nNodes = 2;
     out->nodeLabels = NULL; /* we don't need node labels */
 
-    out->mapTuplesToNodes = (int*)palloc(sizeof(int) * in->nTuples);
-    out->leafTupleDatums = (Datum*)palloc(sizeof(Datum) * in->nTuples);
+    out->mapTuplesToNodes = (int *)palloc(sizeof(int) * in->nTuples);
+    out->leafTupleDatums = (Datum *)palloc(sizeof(Datum) * in->nTuples);
 
     /*
      * Note: points that have coordinates exactly equal to coord may get
@@ -139,7 +138,7 @@ Datum spg_kd_picksplit(PG_FUNCTION_ARGS)
      * So we should never trigger the allTheSame logic.
      */
     for (i = 0; i < in->nTuples; i++) {
-        Point* p = sorted[i].p;
+        Point *p = sorted[i].p;
         int n = sorted[i].i;
 
         out->mapTuplesToNodes[n] = (i < middle) ? 0 : 1;
@@ -151,8 +150,8 @@ Datum spg_kd_picksplit(PG_FUNCTION_ARGS)
 
 Datum spg_kd_inner_consistent(PG_FUNCTION_ARGS)
 {
-    spgInnerConsistentIn* in = (spgInnerConsistentIn*)PG_GETARG_POINTER(0);
-    spgInnerConsistentOut* out = (spgInnerConsistentOut*)PG_GETARG_POINTER(1);
+    spgInnerConsistentIn *in = (spgInnerConsistentIn *)PG_GETARG_POINTER(0);
+    spgInnerConsistentOut *out = (spgInnerConsistentOut *)PG_GETARG_POINTER(1);
     double coord;
     uint32 which;
     int i;
@@ -161,9 +160,8 @@ Datum spg_kd_inner_consistent(PG_FUNCTION_ARGS)
     coord = DatumGetFloat8(in->prefixDatum);
 
     if (in->allTheSame) {
-        ereport(ERROR,
-            (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
-                errmsg("allTheSame should not occur for k-d trees")));
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
+                        errmsg("allTheSame should not occur for k-d trees")));
     }
 
     Assert(in->nNodes == 2);
@@ -172,8 +170,8 @@ Datum spg_kd_inner_consistent(PG_FUNCTION_ARGS)
     which = (1 << 1) | (1 << 2);
 
     for (i = 0; i < in->nkeys; i++) {
-        Point* query = DatumGetPointP(in->scankeys[i].sk_argument);
-        BOX* boxQuery = NULL;
+        Point *query = DatumGetPointP(in->scankeys[i].sk_argument);
+        BOX *boxQuery = NULL;
 
         switch (in->scankeys[i].sk_strategy) {
             case RTLeftStrategyNumber:
@@ -235,9 +233,8 @@ Datum spg_kd_inner_consistent(PG_FUNCTION_ARGS)
                 }
                 break;
             default:
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("unrecognized strategy number: %d", in->scankeys[i].sk_strategy)));
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                errmsg("unrecognized strategy number: %d", in->scankeys[i].sk_strategy)));
                 break;
         }
 
@@ -247,7 +244,7 @@ Datum spg_kd_inner_consistent(PG_FUNCTION_ARGS)
     }
 
     /* We must descend into the children identified by which */
-    out->nodeNumbers = (int*)palloc(sizeof(int) * 2);
+    out->nodeNumbers = (int *)palloc(sizeof(int) * 2);
     out->nNodes = 0;
     for (i = 1; i <= 2; i++) {
         if (which & (1U << (uint32)i)) {
@@ -256,10 +253,9 @@ Datum spg_kd_inner_consistent(PG_FUNCTION_ARGS)
     }
 
     /* Set up level increments, too */
-    out->levelAdds = (int*)palloc(sizeof(int) * 2);
+    out->levelAdds = (int *)palloc(sizeof(int) * 2);
     out->levelAdds[0] = 1;
     out->levelAdds[1] = 1;
 
     PG_RETURN_VOID();
 }
-

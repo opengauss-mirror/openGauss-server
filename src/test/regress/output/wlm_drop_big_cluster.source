@@ -1,0 +1,67 @@
+CREATE DATABASE testdb;
+\c testdb
+set resource_track_duration=0;
+set query_band='testdb_test';
+DECLARE
+sql_stmt VARCHAR2(500);
+my_cursor REFCURSOR;
+username text;
+schemaname  text;
+tablename text;
+relkind  CHAR;
+BEGIN
+sql_stmt := 'select rolname from  pg_authid where rolsuper != ''t'' and rolsystemadmin !=''t'' ';
+OPEN my_cursor FOR EXECUTE sql_stmt;
+FETCH FROM my_cursor INTO username;
+WHILE my_cursor % FOUND LOOP
+EXECUTE IMMEDIATE 'DROP OWNED BY '||username||' CASCADE';
+FETCH FROM my_cursor INTO username;
+END LOOP;
+CLOSE my_cursor;
+
+sql_stmt := 'SELECT n.nspname AS schemaname, c.relname AS tablename, c.relkind AS relkind FROM pg_class c LEFT JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pgxc_class x ON x.pcrelid = c.oid';
+OPEN my_cursor FOR EXECUTE sql_stmt;
+FETCH FROM my_cursor INTO schemaname, tablename, relkind;
+WHILE my_cursor % FOUND LOOP
+IF relkind = 'f' THEN
+EXECUTE IMMEDIATE 'DROP FOREIGN TABLE IF EXISTS '||schemaname||'.'||tablename||' CASCADE';
+ELSE
+EXECUTE IMMEDIATE 'DROP TABLE IF EXISTS '||schemaname||'.'||tablename||' CASCADE';
+END IF;
+FETCH FROM my_cursor INTO schemaname, tablename, relkind;
+END LOOP;
+CLOSE my_cursor;
+END;
+/
+DECLARE
+sql_stmt VARCHAR2(500);
+my_cursor REFCURSOR;
+username text;
+BEGIN
+sql_stmt := 'select rolname from  pg_authid  where rolsuper != ''t'' and rolsystemadmin !=''t''  ';
+OPEN my_cursor FOR EXECUTE sql_stmt;
+FETCH FROM my_cursor INTO username;
+WHILE my_cursor % FOUND LOOP
+EXECUTE IMMEDIATE 'DROP USER '||username||' CASCADE';
+FETCH FROM my_cursor INTO username;
+END LOOP;
+CLOSE my_cursor;
+END;
+/
+\! @abs_bindir@/gsql -r -p @portstring@ -d testdb -c "SELECT * from mpp_tables;"
+ schemaname | tablename | tableowner | tablespace | pgroup | nodeoids 
+------------+-----------+------------+------------+--------+----------
+(0 rows)
+
+--output
+\! @abs_bindir@/gsql -r -p @portstring@ -d testdb -c "SELECT count(*) from pgxc_group;"
+ count 
+-------
+     1
+(1 row)
+
+--output
+\c postgres
+drop database testdb;
+\c regression
+--end of file

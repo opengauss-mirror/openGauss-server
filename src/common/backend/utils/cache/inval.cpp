@@ -98,19 +98,21 @@
 
 #include "access/xact.h"
 #include "catalog/catalog.h"
+#include "catalog/pg_proc.h"
 #include "commands/prepare.h"
 #include "miscadmin.h"
 #include "storage/sinval.h"
 #include "storage/smgr.h"
-#include "utils/globalplancache.h"
 #include "utils/inval.h"
+#include "utils/globalplancache.h"
 #include "utils/memutils.h"
 #include "utils/plancache.h"
+#include "utils/plpgsql.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/relmapper.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "catalog/pgxc_class.h"
 
 /*
@@ -147,6 +149,7 @@ typedef struct InvalidationListHeader {
  * since we only act on it at transaction commit; we don't care which
  * command of the transaction set it.
  */
+
 typedef struct TransInvalidationInfo {
     /* Back link to parent transaction's info */
     struct TransInvalidationInfo* parent;
@@ -164,9 +167,17 @@ typedef struct TransInvalidationInfo {
     bool RelcacheInitFileInval;
 } TransInvalidationInfo;
 
+/* ----------------------------------------------------------------
+ *				Invalidation list support functions
+ *
+ * These three routines encapsulate processing of the "chunked"
+ * representation of what is logically just a list of messages.
+ * ----------------------------------------------------------------
+ */
+
 /*
  * AddInvalidationMessage
- * Add an invalidation message to a list (of chunks).
+ *		Add an invalidation message to a list (of chunks).
  *
  * Note that we do not pay any great attention to maintaining the original
  * ordering of the messages.
@@ -257,6 +268,14 @@ static void AppendInvalidationMessageList(InvalidationChunk** destHdr, Invalidat
         }                                                                 \
     } while (0)
 
+/* ----------------------------------------------------------------
+ *				Invalidation set support functions
+ *
+ * These routines understand about the division of a logical invalidation
+ * list into separate physical lists for catcache and relcache entries.
+ * ----------------------------------------------------------------
+ */
+
 /*
  * Add a catcache inval entry
  */
@@ -293,7 +312,7 @@ static void AddRelcacheInvalidationMessage(InvalidationListHeader* hdr, Oid dbId
 
     /* Don't add a duplicate item */
     /* We assume dbId need not be checked because it will never change */
-    ProcessMessageList(hdr->rclist, if (msg->rc.id == SHAREDINVALRELCACHE_ID && msg->rc.relId == relId) return);
+    ProcessMessageList(hdr->rclist, if (msg->rc.id == SHAREDINVALRELCACHE_ID && msg->rc.relId == relId) return );
 
     /* OK, add the item */
     msg.rc.id = SHAREDINVALRELCACHE_ID;
@@ -307,13 +326,30 @@ static void AddPartcacheInvalidationMessage(InvalidationListHeader* hdr, Oid dbI
 
     /* Don't add a duplicate item */
     /* We assume dbId need not be checked because it will never change */
-    ProcessMessageList(hdr->pclist, if (msg->pc.id == SHAREDINVALPARTCACHE_ID && msg->pc.partId == partId) return);
+    ProcessMessageList(hdr->pclist, if (msg->pc.id == SHAREDINVALPARTCACHE_ID && msg->pc.partId == partId) return );
 
     /* OK, add the item */
     msg.pc.id = SHAREDINVALPARTCACHE_ID;
     msg.pc.dbId = dbId;
     msg.pc.partId = partId;
     AddInvalidationMessage(&hdr->pclist, &msg);
+}
+
+/* function invalid and it's plan cache is invalid, need be removed */
+static void AddFunctionCacheInvalidationMessage(InvalidationListHeader* hdr, Oid dbId, Oid funcOid)
+{
+    SharedInvalidationMessage msg;
+
+    /* Don't add a duplicate item */
+    /* We assume dbId need not be checked because it will never change */
+    ProcessMessageList(hdr->rclist,
+        if (msg->fm.id == SHAREDINVALFUNC_ID && msg->fm.funcOid == funcOid) return );
+
+    /* OK, add the item */
+    msg.fm.id = SHAREDINVALFUNC_ID;
+    msg.fm.dbId = dbId;
+    msg.fm.funcOid = funcOid;
+    AddInvalidationMessage(&hdr->rclist, &msg);
 }
 
 /*
@@ -351,6 +387,11 @@ static void ProcessInvalidationMessagesMulti(
     ProcessMessageListMulti(hdr->rclist, func(msgs, n));
     ProcessMessageListMulti(hdr->pclist, func(msgs, n));
 }
+
+/* ----------------------------------------------------------------
+ *					  private support functions
+ * ----------------------------------------------------------------
+ */
 
 /*
  * RegisterCatcacheInvalidation
@@ -510,12 +551,16 @@ void LocalExecuteInvalidationMessage(SharedInvalidationMessage* msg)
                 (*ccitem->function)(ccitem->arg, msg->pc.partId);
             }
         }
+    } else if (msg->id == SHAREDINVALFUNC_ID) {
+        if (msg->fm.dbId == u_sess->proc_cxt.MyDatabaseId || msg->fm.dbId == InvalidOid) {
+            plpgsql_HashTableDeleteFunc(msg->fm.funcOid);
+        }
     } else {
         ereport(FATAL, (errmsg("unrecognized SI message ID: %d", msg->id)));
     }
 
-    if (ENABLE_DN_GPC) {
-        bool check = GPC->MsgCheck(msg);
+    if (ENABLE_GPC) {
+        bool check = GlobalPlanCache::MsgCheck(msg);
         if (check == true && u_sess->pcache_cxt.gpc_remote_msg == false) {
             u_sess->pcache_cxt.gpc_in_ddl = true;
         }
@@ -989,6 +1034,7 @@ void CacheInvalidateHeapTuple(Relation relation, HeapTuple tuple, HeapTuple newt
      * from being part of one relcache entry to being part of another.
      */
     tupleRelId = RelationGetRelid(relation);
+
     if (tupleRelId == RelationRelationId) {
         Form_pg_class classtup = (Form_pg_class)GETSTRUCT(tuple);
 
@@ -1049,6 +1095,11 @@ void CacheInvalidateHeapTuple(Relation relation, HeapTuple tuple, HeapTuple newt
     RegisterRelcacheInvalidation(databaseId, relationId);
 }
 
+void CacheInvalidateFunction(Oid funcId)
+{
+    AddFunctionCacheInvalidationMessage(&u_sess->inval_cxt.transInvalInfo->CurrentCmdInvalidMsgs,
+                                        u_sess->proc_cxt.MyDatabaseId, funcId);
+}
 /*
  * CacheInvalidateCatalog
  *		Register invalidation of the whole content of a system catalog.

@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_AUDIT_POLICY">
+<refmeta>
+<refentrytitle>DROP AUDIT POLICY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP AUDIT POLICY</refname>
+<refpurpose>remove a audit policy</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP AUDIT POLICY [IF EXISTS] policy_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

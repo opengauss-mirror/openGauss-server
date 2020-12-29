@@ -16,7 +16,7 @@
  *  dfs_update.cpp
  *
  * IDENTIFICATION
- *        src/gausskernel/storage/access/dfs/dfs_update.cpp
+ *    src/gausskernel/storage/access/dfs/dfs_update.cpp
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -147,7 +147,6 @@ void DfsUpdate::InitUpdateMemArg(Plan *plan)
                        "parititions totalnum is(%d)can spread maxMem is %dKB.",
                        m_dfsUpInsMemInfo->MemInsert, m_dfsUpInsMemInfo->MemSort, m_dfsUpInsMemInfo->partitionNum,
                        m_dfsUpInsMemInfo->canSpreadmaxMem);
-
         } else {
             // for usual table update. insert mem = 128MB(128MB-16MB), the other is used to sort . and sort Mem >16MB.
             m_dfsUpInsMemInfo->canSpreadmaxMem = plan->operatorMaxMem;

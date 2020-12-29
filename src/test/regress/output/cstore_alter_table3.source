@@ -124,12 +124,6 @@ ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE box;
 ERROR:  type "box" is not supported in column store
 ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE polygon;
 ERROR:  type "polygon" is not supported in column store
-ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE float8[];
-ERROR:  type "double precision[]" is not supported in column store
-ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE float4[];
-ERROR:  type "real[]" is not supported in column store
-ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE int2[];
-ERROR:  type "smallint[]" is not supported in column store
 -- test: cannot change data type of DISTRIBUTE column.
 ALTER TABLE alter_addcols_58 ALTER COLUMN a SET DATA TYPE varchar(100);
 DROP TABLE alter_addcols_58;

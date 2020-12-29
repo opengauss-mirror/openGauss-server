@@ -1670,7 +1670,7 @@ drop table date_t1_row;
 create table t1 (a timestamp with time zone);
 create table t2 (a date);
 create table t3 (a date);
-explain (verbose on, costs off, nodes off) insert into t1 select * from t2;
+explain (verbose on, costs off) insert into t1 select * from t2;
          QUERY PLAN          
 -----------------------------
  Insert on public.t1
@@ -1678,7 +1678,7 @@ explain (verbose on, costs off, nodes off) insert into t1 select * from t2;
          Output: t2.a
 (3 rows)
 
-explain (verbose on, costs off, nodes off) insert into t2 select * from t3;
+explain (verbose on, costs off) insert into t2 select * from t3;
          QUERY PLAN          
 -----------------------------
  Insert on public.t2

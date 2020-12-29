@@ -34,13 +34,10 @@
  * @param conn The connection to use in order to fetch.
  * @param progname The caller program name (for logging).
  * @param verbose Controls verbose output.
- * @param format Plain text format ('p') or tar format ('t').
- * @param compresslevel Compression level.
  * @return Boolean value denoting success or failure.
  */
-void FetchMotCheckpoint(const char* basedir, PGconn* conn, const char* progname, bool verbose,
-    const char format = 'p', const int compresslevel = 0);
-
+extern void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* progname, bool verbose,
+                               const char format = 'p', const int compresslevel = 0);
 /**
  * @brief Gets the checkpoint_dir config value from the mot.conf file.
  * @param dataDir pg_data directory.

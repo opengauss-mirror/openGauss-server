@@ -1,0 +1,273 @@
+--test create
+create table CstoreTestTable(id int) with (orientation = column)
+partition by range (id)
+(
+     partition CstorePartition1 values less than (5),
+     partition CstorePartition2 values less than (10)
+);
+
+select reloptions from pg_class where relname = 'cstoretesttable';
+
+select boundaries from pg_partition where relname = 'cstorepartition1';
+
+select boundaries from pg_partition where relname = 'cstorepartition2';
+
+--test truncate
+create table CstorePartition1Col(col int);
+create table CstorePartition2Col(col int);
+create table CstorePartition1CuDescCol(col int);
+create table CstorePartition2CUDescCol(col int);
+create table CstorePartition1CuDescIdxCol(col int);
+create table CstorePartition2CuDescIdxCol(col int);
+create table CstorePartition1DeltaCol(col int);
+create table CstorePartition2DeltaCol(col int);
+
+insert into CstorePartition1Col(col) select relfilenode from pg_partition where RELNAME='cstorepartition1';
+
+insert into CstorePartition2Col(col) select relfilenode from pg_partition where RELNAME='cstorepartition2';
+
+insert into CstorePartition1CuDescCol(col) select relfilenode from pg_class where oid = (select relcudescrelid from pg_partition where relname = 'cstorepartition1');
+
+insert into CstorePartition2CuDescCol(col) select relfilenode from pg_class where oid = (select relcudescrelid from pg_partition where relname = 'cstorepartition2');
+
+insert into CstorePartition1CuDescIdxCol(col) select relfilenode from pg_class where oid = (select relcudescidx from pg_partition where relname = 'cstorepartition1');
+
+insert into CstorePartition2CuDescIdxCol(col) select relfilenode from pg_class where oid = (select relcudescidx from pg_partition where relname = 'cstorepartition2');
+
+insert into CstorePartition1DeltaCol(col) select relfilenode from pg_class where oid = (select reldeltarelid from pg_partition where relname = 'cstorepartition1');
+
+insert into CstorePartition2DeltaCol(col) select relfilenode from pg_class where oid = (select reldeltarelid from pg_partition where relname = 'cstorepartition2');
+
+truncate CstoreTestTable;
+
+insert into CstorePartition1Col(col) select relfilenode from pg_partition where RELNAME='cstorepartition1';
+
+insert into CstorePartition2Col(col) select relfilenode from pg_partition where RELNAME='cstorepartition2';
+
+insert into CstorePartition1CuDescCol(col) select relfilenode from pg_class where oid = (select relcudescrelid from pg_partition where relname = 'cstorepartition1');
+
+insert into CstorePartition2CuDescCol(col) select relfilenode from pg_class where oid = (select relcudescrelid from pg_partition where relname = 'cstorepartition2');
+
+insert into CstorePartition1CuDescIdxCol(col) select relfilenode from pg_class where oid = (select relcudescidx from pg_partition where relname = 'cstorepartition1');
+
+insert into CstorePartition2CuDescIdxCol(col) select relfilenode from pg_class where oid = (select relcudescidx from pg_partition where relname = 'cstorepartition2');
+
+insert into CstorePartition1DeltaCol(col) select relfilenode from pg_class where oid = (select reldeltarelid from pg_partition where relname = 'cstorepartition1');
+
+insert into CstorePartition2DeltaCol(col) select relfilenode from pg_class where oid = (select reldeltarelid from pg_partition where relname = 'cstorepartition2');
+
+
+select count(distinct(col)) from CstorePartition1Col;
+
+select count(distinct(col)) from CstorePartition2Col;
+
+select count(distinct(col)) from CstorePartition1CuDescCol;
+
+select count(distinct(col)) from CstorePartition2CuDescCol;
+
+select count(distinct(col)) from CstorePartition1CuDescIdxCol;
+
+select count(distinct(col)) from CstorePartition2CuDescIdxCol;
+
+select count(distinct(col)) from CstorePartition1DeltaCol;
+
+select count(distinct(col)) from CstorePartition2DeltaCol;
+
+drop table CstoreTestTable;
+
+drop table CstorePartition1Col;
+drop table CstorePartition2Col;
+drop table CstorePartition1CuDescCol;
+drop table CstorePartition2CUDescCol;
+drop table CstorePartition1CuDescIdxCol;
+drop table CstorePartition2CuDescIdxCol;
+drop table CstorePartition1DeltaCol;
+drop table CstorePartition2DeltaCol;
+
+select * from pg_class where relname = 'cstoretesttable';
+
+select * from pg_partition where relname = 'cstorepartition1';
+
+select * from pg_partition where relname = 'cstorepartition2';
+
+--copy from check
+---
+--case 1:
+---
+drop table if exists lineitem;
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+with (orientation = column)
+distribute by hash(L_ORDERKEY)
+partition by range (L_ORDERKEY)
+(
+     partition CstorePartition1 values less than (100000),
+     partition CstorePartition2 values less than (200000),
+	 partition CstorePartition3 values less than (300000),
+	 partition CstorePartition4 values less than (400000),
+	 partition CstorePartition5 values less than (500000),
+	 partition CstorePartition6 values less than (600000),
+	 partition CstorePartition7 values less than (100000000)
+);
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
+drop table lineitem;
+
+--add partition
+create table test(id int) with(orientation = column)
+partition by range (id)
+(
+     partition CstorePartition1 values less than (3),
+     partition CstorePartition2 values less than (5)
+);
+alter table test add partition CstorePartition3 values less than (8);
+copy test from '@abs_srcdir@/data/add&drop_partition.data' delimiter '|';
+set enable_vector_engine=on; 
+select * from test order by id;
+select * from test partition (CstorePartition3) order by id;
+drop table test;
+
+--drop partition
+create table test(id int) with(orientation = column)
+partition by range (id)
+(
+     partition CstorePartition1 values less than (3),
+     partition CstorePartition2 values less than (5)
+);
+alter table test add partition CstorePartition3 values less than (8);
+copy test from '@abs_srcdir@/data/add&drop_partition.data' delimiter '|';
+set enable_vector_engine=on; 
+select * from test order by id;
+select * from test partition (CstorePartition3) order by id;
+alter table test drop partition CstorePartition3 ;
+select * from test order by id;
+select * from test partition (CstorePartition3) order by id;
+drop table test;
+
+--test for copyfrom partition table 
+
+create schema vector_engine;
+CREATE TABLE vector_engine.tbl_partition_operator_batch_001(
+    C_CHAR_1 CHAR(1),
+    C_CHAR_2 CHAR(10),
+    C_CHAR_3 CHAR(100),
+    C_VARCHAR_1 VARCHAR(1),
+    C_VARCHAR_2 VARCHAR(10),
+    C_VARCHAR_3 VARCHAR(1024),
+    C_INT INTEGER,
+    C_BIGINT BIGINT,
+    C_SMALLINT SMALLINT,
+    C_FLOAT FLOAT,
+    C_NUMERIC numeric(10,5),
+    C_DP double precision,
+    C_DATE DATE,
+    C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+    C_TS_WITH TIMESTAMP WITH TIME ZONE, PARTIAL CLUSTER KEY(C_TS_WITH))WITH (ORIENTATION=COLUMN)
+    partition by range (C_INT)
+(
+     partition tbl_partition_operator_batch_001_1 values less than (50),
+     partition tbl_partition_operator_batch_001_2 values less than (100),
+     partition tbl_partition_operator_batch_001_3 values less than (200),
+     partition tbl_partition_operator_batch_001_4 values less than (500),
+     partition tbl_partition_operator_batch_001_5 values less than (1000)
+);
+
+create schema row_engine;
+CREATE TABLE row_engine.tbl_partition_operator_batch_001(
+    C_CHAR_1 CHAR(1),
+    C_CHAR_2 CHAR(10),
+    C_CHAR_3 CHAR(100),
+    C_VARCHAR_1 VARCHAR(1),
+    C_VARCHAR_2 VARCHAR(10),
+    C_VARCHAR_3 VARCHAR(1024),
+    C_INT INTEGER,
+    C_BIGINT BIGINT,
+    C_SMALLINT SMALLINT,
+    C_FLOAT FLOAT,
+    C_NUMERIC numeric(10,5),
+    C_DP double precision,
+    C_DATE DATE,
+    C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+    C_TS_WITH TIMESTAMP WITH TIME ZONE ) 
+    partition by range (C_INT)
+( 
+     partition tbl_partition_operator_batch_001_1 values less than (50),
+     partition tbl_partition_operator_batch_001_2 values less than (100),
+     partition tbl_partition_operator_batch_001_3 values less than (200),
+     partition tbl_partition_operator_batch_001_4 values less than (500),
+     partition tbl_partition_operator_batch_001_5 values less than (1000)
+);
+
+CREATE OR REPLACE PROCEDURE PROC_tbl_partition_operator_batch_001_1()
+AS
+BEGIN
+       FOR I IN 1..49 LOOP
+         INSERT INTO row_engine.tbl_partition_operator_batch_001 VALUES('b','parti_001','parti_001GGAHWGS','b','xxxxx','parti_001FADFADFDAFAFEFAGEAFEAFEAGEAGEAGEE_'||i,i,i+111111,11,i+1.1,1.11,1.111,'2000-01-01','2000-01-01 01:01:01','2000-01-01 01:01:01+01');
+       END LOOP;
+END;
+/
+
+CALL PROC_tbl_partition_operator_batch_001_1();
+CALL PROC_tbl_partition_operator_batch_001_1();
+CALL PROC_tbl_partition_operator_batch_001_1();
+CALL PROC_tbl_partition_operator_batch_001_1();
+
+insert into vector_engine.tbl_partition_operator_batch_001 select * from row_engine.tbl_partition_operator_batch_001;
+analyze vector_engine.tbl_partition_operator_batch_001;
+select count(*) from vector_engine.tbl_partition_operator_batch_001;
+drop table vector_engine.tbl_partition_operator_batch_001;
+drop table row_engine.tbl_partition_operator_batch_001;
+drop schema vector_engine;
+drop schema row_engine;
+
+--test for analyze table with index
+create table analyze_table(id int) with (orientation = column);
+create index analyze_tableIDX on analyze_table(id);
+analyze analyze_table;
+drop table analyze_table;
+set enable_vector_engine=off; 
+
+--partition exchange
+create table test_exchange_partition(id int, value int) with (orientation = column)
+partition by range(value) (
+partition p1 values less than (10),
+partition p2 values less than (20),
+partition p3 values less than (maxvalue)
+);
+create table test_exchange_col(id int, value int) with (orientation = column);
+create table test_exchange_row(id int, value int);
+
+insert into test_exchange_row values(1, generate_series(10, 19));
+insert into test_exchange_col select * from test_exchange_row;
+alter table test_exchange_partition exchange partition (p2) with table test_exchange_col;
+select count(1) from test_exchange_partition;
+
+truncate test_exchange_partition;
+truncate test_exchange_col;
+truncate test_exchange_row;
+
+insert into test_exchange_row values(1, generate_series(0, 30));
+insert into test_exchange_col select * from test_exchange_row;
+alter table test_exchange_partition exchange partition (p2) with table test_exchange_col with validation;
+alter table test_exchange_partition exchange partition (p2) with table test_exchange_col with validation verbose;
+select count(1) from test_exchange_partition;
+
+drop table test_exchange_partition;
+drop table test_exchange_col;
+drop table test_exchange_row;

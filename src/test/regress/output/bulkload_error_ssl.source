@@ -1,0 +1,158 @@
+--
+-- BULK LOAD ERROR SSLTEST
+----
+-- prepare the ssl certificate files
+\! @abs_bindir@/gs_guc encrypt -M client -K Gauss@123 -D @abs_srcdir@/sslcert_withpwd > /dev/null 2>&1
+gs_guc encrypt -M client -K *** 
+\! @abs_bindir@/gs_guc encrypt -M server -K Gauss@123 -D @abs_srcdir@/sslcert_withpwd > /dev/null 2>&1
+gs_guc encrypt -M server -K *** 
+\! chmod 600 @abs_srcdir@/sslcert_withpwd/*
+\! mkdir -p $GAUSSHOME/share/sslcert/gds
+\! mkdir -p $OLDGAUSSHOME/share/sslcert/gds
+\! cp @abs_srcdir@/sslcert_withpwd/* $OLDGAUSSHOME/share/sslcert/gds
+\! cp @abs_srcdir@/sslcert_withpwd/* $GAUSSHOME/share/sslcert/gds
+--the SSL cert file is not in the right path
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1
+--cacert.pem
+\! mv @abs_srcdir@/sslcert_withpwd/cacert.pem @abs_srcdir@/
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8902 -H 0.0.0.0/0 --enable-ssl --ssl-dir @abs_srcdir@/sslcert_withpwd/
+failed to stat "@abs_srcdir@/sslcert_withpwd/cacert.pem", errno 2.
+failed to check and set the SSL directory.
+Failed to initialize server.
+\! mv @abs_srcdir@/cacert.pem @abs_srcdir@/sslcert_withpwd/
+--client.crt
+\! mv @abs_srcdir@/sslcert_withpwd/client.crt @abs_srcdir@/
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8902 -H 0.0.0.0/0 -D -l @abs_srcdir@/data/datanode1/gds.log --enable-ssl --ssl-dir @abs_srcdir@/sslcert_withpwd
+failed to stat "@abs_srcdir@/sslcert_withpwd/client.crt", errno 2.
+failed to check and set the SSL directory.
+Failed to initialize server.
+\! mv @abs_srcdir@/client.crt @abs_srcdir@/sslcert_withpwd/
+--client.key
+\! mv @abs_srcdir@/sslcert_withpwd/client.key @abs_srcdir@/
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8902 -H 0.0.0.0/0 -D -l @abs_srcdir@/data/datanode1/gds.log --enable-ssl --ssl-dir @abs_srcdir@/sslcert_withpwd
+failed to stat "@abs_srcdir@/sslcert_withpwd/client.key", errno 2.
+failed to check and set the SSL directory.
+Failed to initialize server.
+\! mv @abs_srcdir@/client.key @abs_srcdir@/sslcert_withpwd/
+--client.key.rand
+\! mv @abs_srcdir@/sslcert_withpwd/client.key.rand @abs_srcdir@/
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8902 -H 0.0.0.0/0 -D -l @abs_srcdir@/data/datanode1/gds.log --enable-ssl --ssl-dir @abs_srcdir@/sslcert_withpwd
+[SSL] file doesn't exist. details:no error found from OpenSSL
+failed to initialize the SSL context.
+Failed to initialize server.
+\! mv @abs_srcdir@/client.key.rand @abs_srcdir@/sslcert_withpwd/
+--client.key.cipher
+\! mv @abs_srcdir@/sslcert_withpwd/client.key.cipher @abs_srcdir@/
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8902 -H 0.0.0.0/0 -D -l @abs_srcdir@/data/datanode1/gds.log --enable-ssl --ssl-dir @abs_srcdir@/sslcert_withpwd
+[SSL] file doesn't exist. details:no error found from OpenSSL
+failed to initialize the SSL context.
+Failed to initialize server.
+\! mv @abs_srcdir@/client.key.cipher @abs_srcdir@/sslcert_withpwd/
+-- gds is running in SSL mode, but foreign table is in normal mode.
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8902 -H 0.0.0.0/0 -D -l @abs_srcdir@/data/datanode1/gds.log --enable-ssl --ssl-dir @abs_srcdir@/sslcert_withpwd/
+[SSL] SSL system is inited successfully.
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+distribute by hash(L_ORDERKEY);
+drop FOREIGN table if exists EXT_LINEITEM;
+NOTICE:  foreign table "ext_lineitem" does not exist, skipping
+CREATE FOREIGN TABLE EXT_LINEITEM (
+	L_ORDERKEY    BIGINT NOT NULL,        
+	L_PARTKEY     BIGINT NOT NULL,        
+	L_SUPPKEY     BIGINT NOT NULL,        
+	L_LINENUMBER  BIGINT NOT NULL,        
+	L_QUANTITY    DECIMAL(15,2) NOT NULL,        
+	L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,        
+	L_DISCOUNT    DECIMAL(15,2) NOT NULL,        
+	L_TAX     DECIMAL(15,2) NOT NULL,        
+	L_RETURNFLAG  CHAR(1) NOT NULL,        
+	L_LINESTATUS  CHAR(1) NOT NULL,        
+	L_SHIPDATE    DATE NOT NULL,        
+	L_COMMITDATE  DATE NOT NULL,        
+	L_RECEIPTDATE DATE NOT NULL,        
+	L_SHIPINSTRUCT CHAR(25) NOT NULL,        
+	L_SHIPMODE     CHAR(10) NOT NULL,        
+	L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'csv', location 'gsfs://127.0.0.1:8902/lineitem_10.data', delimiter '|', mode 'normal');
+insert into LINEITEM select * from EXT_LINEITEM;
+ERROR:  Unexpected EOF on GDS connection "gsfs://127.0.0.1:8902/lineitem_10.data": Connection reset by peer
+--gds is running in normal mode, but foreign table is in safe mode.
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8902 -H 0.0.0.0/0 -D -l @abs_srcdir@/data/datanode1/gds.log
+drop FOREIGN table if exists EXT_LINEITEMSSL;
+NOTICE:  foreign table "ext_lineitemssl" does not exist, skipping
+CREATE FOREIGN TABLE EXT_LINEITEMSSL (
+	L_ORDERKEY    BIGINT NOT NULL,        
+	L_PARTKEY     BIGINT NOT NULL,        
+	L_SUPPKEY     BIGINT NOT NULL,        
+	L_LINENUMBER  BIGINT NOT NULL,        
+	L_QUANTITY    DECIMAL(15,2) NOT NULL,        
+	L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,        
+	L_DISCOUNT    DECIMAL(15,2) NOT NULL,        
+	L_TAX     DECIMAL(15,2) NOT NULL,        
+	L_RETURNFLAG  CHAR(1) NOT NULL,        
+	L_LINESTATUS  CHAR(1) NOT NULL,        
+	L_SHIPDATE    DATE NOT NULL,        
+	L_COMMITDATE  DATE NOT NULL,        
+	L_RECEIPTDATE DATE NOT NULL,        
+	L_SHIPINSTRUCT CHAR(25) NOT NULL,        
+	L_SHIPMODE     CHAR(10) NOT NULL,        
+	L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'csv', location 'gsfss://127.0.0.1:8902/lineitem_10.data', delimiter '|', mode 'normal');
+insert into LINEITEM select * from EXT_LINEITEMSSL;
+ERROR:  SSL connect failed, code 1
+--SSL cert file of gds is not in the right path 
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8902 -H 0.0.0.0/0 -D -l @abs_srcdir@/data/datanode1/gds.log --enable-ssl --ssl-dir @abs_srcdir@/sslcert_withpwd/
+[SSL] SSL system is inited successfully.
+--cacert.pem
+\! mv $OLDGAUSSHOME/share/sslcert/gds/cacert.pem $OLDGAUSSHOME/share/sslcert/
+insert into LINEITEM select * from EXT_LINEITEMSSL;
+ERROR:  failed to load the root CA Certificate cacert.pem(@abs_gausshome@/share/sslcert/gds//cacert.pem)
+DETAIL:  No such file or directory
+\! mv $OLDGAUSSHOME/share/sslcert/cacert.pem $OLDGAUSSHOME/share/sslcert/gds/
+--server.key.cipher
+\! mv $OLDGAUSSHOME/share/sslcert/gds/server.key.cipher $OLDGAUSSHOME/share/sslcert/
+insert into LINEITEM select * from EXT_LINEITEMSSL;
+ERROR:  stat cipher file "@abs_gausshome@/share/sslcert/gds//server.key.cipher" failed, detail: No such file or directory
+\! mv $OLDGAUSSHOME/share/sslcert/server.key.cipher $OLDGAUSSHOME/share/sslcert/gds/
+--server.key.rand
+\! mv $OLDGAUSSHOME/share/sslcert/gds/server.key.rand $OLDGAUSSHOME/share/sslcert/
+insert into LINEITEM select * from EXT_LINEITEMSSL;
+ERROR:  stat rand file "@abs_gausshome@/share/sslcert/gds//server.key.rand" failed, detail: No such file or directory
+\! mv $OLDGAUSSHOME/share/sslcert/server.key.rand $OLDGAUSSHOME/share/sslcert/gds/
+--server.key.rand
+\! mv $OLDGAUSSHOME/share/sslcert/gds/server.key $OLDGAUSSHOME/share/sslcert/
+insert into LINEITEM select * from EXT_LINEITEMSSL;
+ERROR:  Failed to certificate file "@abs_gausshome@/share/sslcert/gds//server.key" in SSL object
+DETAIL:  No such file or directory
+\! mv $OLDGAUSSHOME/share/sslcert/server.key $OLDGAUSSHOME/share/sslcert/gds/
+--server.crt
+\! mv $OLDGAUSSHOME/share/sslcert/gds/server.crt $OLDGAUSSHOME/share/sslcert/
+insert into LINEITEM select * from EXT_LINEITEMSSL;
+ERROR:  failed to certificate the server.crt(@abs_gausshome@/share/sslcert/gds//server.crt) file in SSL context
+\! mv $OLDGAUSSHOME/share/sslcert/server.crt $OLDGAUSSHOME/share/sslcert/gds/
+--password is not correct
+drop table LINEITEM;
+drop foreign table EXT_LINEITEMSSL;
+drop foreign table EXT_LINEITEM;
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1
+\! rm -rf $GAUSSHOME/share/sslcert/gds

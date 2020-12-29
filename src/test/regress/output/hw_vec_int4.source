@@ -1,7 +1,7 @@
 --INT4
 \set VERBOSITY terse
 CREATE TABLE vint4_test(a INT4, b INT4, c INT4) with (orientation = column) ;
-copy vint4_test from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vint4_normal.data' delimiter '|' NULL '';
+copy vint4_test from '@abs_srcdir@/data/vint4_normal.data' delimiter '|' NULL '';
 select * from vint4_test order by a;
  a  |  b   |      c      
 ----+------+-------------

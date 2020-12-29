@@ -214,12 +214,13 @@ static int comparePairs(const void* a, const void* b)
             return res;
 
         /* guarantee that needfree will be later */
-        if (pb->needfree == pa->needfree)
+        if (pb->needfree == pa->needfree) {
             return 0;
-        else if (pa->needfree)
+        } else if (pa->needfree) {
             return 1;
-        else
+        } else {
             return -1;
+        }
     }
     return (pa->keylen > pb->keylen) ? 1 : -1;
 }
@@ -664,7 +665,9 @@ Datum hstore_from_record(PG_FUNCTION_ARGS)
     }
 
     if (my_extra->record_type != tupType || my_extra->record_typmod != tupTypmod) {
-        MemSet(my_extra, 0, sizeof(RecordIOData) - sizeof(ColumnIOData) + ncolumns * sizeof(ColumnIOData));
+        int rc = memset_s(my_extra, sizeof(RecordIOData) - sizeof(ColumnIOData) + ncolumns * sizeof(ColumnIOData),
+                          0, sizeof(RecordIOData) - sizeof(ColumnIOData) + ncolumns * sizeof(ColumnIOData));
+        securec_check(rc, "", "");
         my_extra->record_type = tupType;
         my_extra->record_typmod = tupTypmod;
         my_extra->ncolumns = ncolumns;
@@ -793,6 +796,7 @@ Datum hstore_populate_record(PG_FUNCTION_ARGS)
     }
 
     hs = PG_GETARG_HS(1);
+    NOT_NULL_HS(hs);
     entries = ARRPTR(hs);
     ptr = STRPTR(hs);
 
@@ -835,7 +839,9 @@ Datum hstore_populate_record(PG_FUNCTION_ARGS)
     }
 
     if (my_extra->record_type != tupType || my_extra->record_typmod != tupTypmod) {
-        MemSet(my_extra, 0, sizeof(RecordIOData) - sizeof(ColumnIOData) + ncolumns * sizeof(ColumnIOData));
+        int rc = memset_s(my_extra, sizeof(RecordIOData) - sizeof(ColumnIOData) + ncolumns * sizeof(ColumnIOData),
+                          0, sizeof(RecordIOData) - sizeof(ColumnIOData) + ncolumns * sizeof(ColumnIOData));
+        securec_check(rc, "", "");
         my_extra->record_type = tupType;
         my_extra->record_typmod = tupTypmod;
         my_extra->ncolumns = ncolumns;
@@ -934,6 +940,7 @@ extern "C" Datum hstore_out(PG_FUNCTION_ARGS);
 Datum hstore_out(PG_FUNCTION_ARGS)
 {
     HStore* in = PG_GETARG_HS(0);
+    NOT_NULL_HS(in);
     int buflen, i;
     int count = HS_COUNT(in);
     char *out = NULL, *ptr = NULL;
@@ -960,7 +967,7 @@ Datum hstore_out(PG_FUNCTION_ARGS)
         /* include "" and => and comma-space */
         buflen += 6 + 2 * HS_KEYLEN(entries, i);
         /* include "" only if nonnull */
-        buflen += 2 + (HS_VALISNULL(entries, i) ? 2 : 2 * HS_VALLEN(entries, i));
+        buflen += 2 + (HS_VALISNULL(entries, i) ? 2 : (2 * HS_VALLEN(entries, i)));
     }
 
     out = ptr = (char*)palloc(buflen);
@@ -997,6 +1004,7 @@ extern "C" Datum hstore_send(PG_FUNCTION_ARGS);
 Datum hstore_send(PG_FUNCTION_ARGS)
 {
     HStore* in = PG_GETARG_HS(0);
+    NOT_NULL_HS(in);
     int i;
     int count = HS_COUNT(in);
     char* base = STRPTR(in);

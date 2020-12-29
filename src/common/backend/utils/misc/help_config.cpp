@@ -19,7 +19,6 @@
 
 #include <float.h>
 #include <limits.h>
-#include <unistd.h>
 
 #include "utils/guc_tables.h"
 #include "utils/help_config.h"
@@ -81,7 +80,7 @@ static bool displayStruct(mixedStruct* structToDisplay)
  */
 static void printMixedStruct(mixedStruct* structToPrint)
 {
-    (void)printf("%s\t%s\t%s\t",
+    printf("%s\t%s\t%s\t",
         structToPrint->generic.name,
         GucContext_Names[structToPrint->generic.context],
         _(config_group_names[structToPrint->generic.group]));
@@ -89,27 +88,27 @@ static void printMixedStruct(mixedStruct* structToPrint)
     switch (structToPrint->generic.vartype) {
 
         case PGC_BOOL:
-            (void)printf("BOOLEAN\t%s\t\t\t", (structToPrint->cbool.reset_val == 0) ? "FALSE" : "TRUE");
+            printf("BOOLEAN\t%s\t\t\t", (structToPrint->cbool.reset_val == 0) ? "FALSE" : "TRUE");
             break;
 
         case PGC_INT:
-            (void)printf("INTEGER\t%d\t%d\t%d\t",
+            printf("INTEGER\t%d\t%d\t%d\t",
                 structToPrint->integer.reset_val,
                 structToPrint->integer.min,
                 structToPrint->integer.max);
             break;
 
         case PGC_REAL:
-            (void)printf(
+            printf(
                 "REAL\t%g\t%g\t%g\t", structToPrint->real.reset_val, structToPrint->real.min, structToPrint->real.max);
             break;
 
         case PGC_STRING:
-            (void)printf("STRING\t%s\t\t\t", structToPrint->string.boot_val ? structToPrint->string.boot_val : "");
+            printf("STRING\t%s\t\t\t", structToPrint->string.boot_val ? structToPrint->string.boot_val : "");
             break;
 
         case PGC_ENUM:
-            (void)printf("ENUM\t%s\t\t\t", config_enum_lookup_by_value(&structToPrint->_enum, structToPrint->_enum.boot_val));
+            printf("ENUM\t%s\t\t\t", config_enum_lookup_by_value(&structToPrint->_enum, structToPrint->_enum.boot_val));
             break;
 
         default:
@@ -117,7 +116,7 @@ static void printMixedStruct(mixedStruct* structToPrint)
             break;
     }
 
-    (void)printf("%s\t%s\n",
+    printf("%s\t%s\n",
         (structToPrint->generic.short_desc == NULL) ? "" : _(structToPrint->generic.short_desc),
         (structToPrint->generic.long_desc == NULL) ? "" : _(structToPrint->generic.long_desc));
 }

@@ -1,0 +1,241 @@
+--
+-- Test orc foreign data wrapper.
+--
+
+-- Settings to make the result deterministic
+SET datestyle = "ISO, YMD";
+drop server hdfs_server cascade;
+
+-- validator tests
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+CREATE FOREIGN TABLE test_validator_filename_missing (a int) 
+	SERVER hdfs_server distribute by roundrobin; -- ERROR
+
+CREATE FOREIGN TABLE test_validator_invalid_option (a int) 
+	SERVER hdfs_server 
+	OPTIONS(format 'orc', filenames 'bigrow.orc', bad_option_name '1') distribute by roundrobin; -- ERROR
+
+CREATE FOREIGN TABLE test_validator_tooMany_option (a int) 
+	SERVER hdfs_server 
+	OPTIONS(format 'orc', filenames 'bigrow.orc', foldername '/user/hdfs') distribute by roundrobin; -- ERROR
+
+drop foreign table test_validator_filename_missing;
+drop foreign table test_validator_invalid_option;
+drop foreign table test_validator_tooMany_option;
+--basic distributed foreign table test
+-- error scenarios
+DROP FOREIGN TABLE IF EXISTS test_missing_file;
+CREATE FOREIGN TABLE test_missing_file (a int) SERVER hdfs_server 
+	OPTIONS (format 'orc', filenames '/user/hive/warehouse/mppdb.db/missing_file.orc') distribute by roundrobin;
+
+SELECT * FROM test_missing_file limit 10; -- ERROR
+drop foreign table test_missing_file;
+
+DROP FOREIGN TABLE IF EXISTS test_table_definition_mismatch;
+CREATE FOREIGN TABLE test_table_definition_mismatch (type CHAR(6)) SERVER hdfs_server
+	OPTIONS (format 'orc', filenames '/user/hive/warehouse/mppdb.db/bigrow.orc') distribute by roundrobin;
+
+SELECT * FROM test_table_definition_mismatch limit 10; -- ERROR
+drop foreign table test_table_definition_mismatch;
+
+DROP FOREIGN TABLE IF EXISTS lineitem_twoStripes;
+Create foreign table lineitem_twoStripes (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', filenames '/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000000_0,/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/000001_0') distribute by roundrobin;
+
+explain (verbose, costs off, nodes off) SELECT L_SHIPDATE FROM lineitem_twoStripes WHERE L_orderkey BETWEEN 509050 AND 509070 order by l_shipdate;
+
+explain (verbose, costs off, nodes off) select L_TAX from lineitem_twoStripes where L_LINESTATUS = 'V';
+
+explain (verbose, costs off, nodes off) select L_LINESTATUS from lineitem_twoStripes where L_RETURNFLAG = 'N' order by 1 desc offset 1000 limit 20;
+
+explain (verbose, costs off, nodes off) SELECT count(L_SHIPDATE) FROM lineitem_twoStripes WHERE L_orderkey BETWEEN 509050 AND 509070;
+
+drop foreign table lineitem_twoStripes;
+
+DROP FOREIGN TABLE IF EXISTS lineitem;
+Create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS customer;
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/customer_orc11_64stripe')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS orders;
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/orders_orc11_64stripe')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS part;
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT, 
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/part_orc11_64stripe')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS supplier;
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/supplier_orc11_64stripe')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS partsupp;
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/partsupp_orc11_64stripe')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS nation;
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/nation_orc11_64stripe')
+distribute by roundrobin;
+
+DROP FOREIGN TABLE IF EXISTS region;
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe')
+distribute by roundrobin;
+
+-- there are bugs for the following three queries. cause EOF error from datanode
+explain (verbose, costs off, nodes off) SELECT L_shipdate FROM lineitem WHERE L_orderkey between 2125190 and 2125200 order by l_shipdate;
+explain (verbose, costs off, nodes off) SELECT count(L_shipdate) FROM lineitem WHERE L_orderkey between 2125190 and 2125200;
+explain (verbose, costs off, nodes off) SELECT *  from lineitem WHERE L_orderkey between 2125190 and 2125200 order by l_orderkey, l_partkey;
+
+create schema FVT_DATA_QUERY;
+
+create foreign table FVT_DATA_QUERY.TABLE_EXP_FROM_SUBQUERY_T1(
+D_ID int, D_W_ID int,
+D_NAME varchar(10),
+D_STREET_1 varchar(20))SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/subquery.db/table_exp_from_subquery_orc_t1')
+distribute by roundrobin;
+
+CREATE VIEW FVT_DATA_QUERY.TABLE_EXP_FROM_SUBQUERY_V1 as select * from FVT_DATA_QUERY.TABLE_EXP_FROM_SUBQUERY_T1;
+
+
+explain (verbose, costs off, nodes off) SELECT DISTINCT SUM(D_ID) as result1 FROM FVT_DATA_QUERY.TABLE_EXP_FROM_SUBQUERY_V1 group by D_ID order by 1;
+
+drop schema FVT_DATA_QUERY cascade;
+
+create foreign table tenk1(unique1 int,unique2 int,two int,four int,ten int,twenty int,hundred int,thousand int,twothousand int,
+fivethous int,tenthous int,odd int,even int,stringu1 varchar,stringu2 varchar,string4 varchar)SERVER hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/tenk1_orc')
+distribute by roundrobin;
+
+explain (verbose, costs off, nodes off) select count(distinct ss.ten) from (select ten from tenk1 a where unique1 IN (select hundred from tenk1 b)) ss;
+
+explain (verbose, costs off, nodes off) select r_name from region left join nation on n_nationkey < 5;
+drop foreign table tenk1;
+
+create table region001 as select R_REGIONKEY+1 id, R_REGIONKEY from region;
+explain (verbose, costs off, nodes off) select * from region001 order by 1;
+update region001 a set a.R_REGIONKEY=34 from customer where a.R_REGIONKEY = customer.c_custkey;
+explain (verbose, costs off, nodes off) select * from region001 order by 1;
+drop table region001;
+
+create foreign table  customer_demographics ( 
+        cd_demo_sk                int  ,
+        cd_gender                 char(1)  ,
+        cd_marital_status         char(1)  ,
+        cd_education_status       char(20) ,
+        cd_purchase_estimate      int  ,
+        cd_credit_rating          char(10) ,
+        cd_dep_count              int  ,
+        cd_dep_employed_count     int  ,
+        cd_dep_college_count      int   ) 
+server hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/customer_demographics')
+distribute by roundrobin;
+explain (verbose, costs off, nodes off) select count(1) from customer_demographics where cd_education_status = 'College';
+explain (verbose, costs off, nodes off) select count(1) from customer_demographics where cd_education_status = 'College ';
+drop foreign table customer_demographics;
+
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+DROP SERVER hdfs_server CASCADE;

@@ -1,0 +1,123 @@
+--
+---- test reange partitioned global index
+--
+--drop table and index
+drop index if exists local_gpi_range_table_index1;
+NOTICE:  index "local_gpi_range_table_index1" does not exist, skipping
+drop index if exists global_gpi_range_table_index1;
+NOTICE:  index "global_gpi_range_table_index1" does not exist, skipping
+drop index if exists global_gpi_range_table_index2;
+NOTICE:  index "global_gpi_range_table_index2" does not exist, skipping
+drop table if exists gpi_range_table;
+NOTICE:  table "gpi_range_table" does not exist, skipping
+drop table if exists gpi_range_like_table;
+NOTICE:  table "gpi_range_like_table" does not exist, skipping
+create table gpi_range_table
+(
+    INV_DATE_SK               integer               not null,
+    INV_ITEM_SK               integer               not null,
+    INV_WAREHOUSE_SK          integer               not null,
+    INV_QUANTITY_ON_HAND      integer
+)
+partition by range(inv_date_sk)
+(
+    partition p0 values less than(5000),
+    partition p1 values less than(10000),
+    partition p2 values less than(20000)
+);
+--succeed
+insert into gpi_range_table values (generate_series(1,10000), generate_series(1,10000), generate_series(1,10000));
+--succeed
+create index local_gpi_range_table_index1 on gpi_range_table(INV_DATE_SK) local;
+create index global_gpi_range_table_index1 on gpi_range_table(INV_ITEM_SK) global;
+create index global_gpi_range_table_index2 on gpi_range_table(INV_WAREHOUSE_SK) global;
+create table gpi_range_like_table(like tb1 INCLUDING INDEXES);
+ERROR:  Table (null).tb1 does not exist in current datanode.
+LINE 1: create table gpi_range_like_table(like tb1 INCLUDING INDEXES...
+                                               ^
+--error
+create table gpi_range_like_table(like tb1 INCLUDING ALL);
+ERROR:  Table (null).tb1 does not exist in current datanode.
+LINE 1: create table gpi_range_like_table(like tb1 INCLUDING ALL);
+                                               ^
+--succeed
+\dS+ gpi_range_like_table;
+--to select all index object
+select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible, part.reltoastrelid, part.partkey, part.interval, part.boundaries
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'gpi_range_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10;
+     relname     | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries 
+-----------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------
+ gpi_range_table | r        |        0 |           0 | r            |             0 |             0 | 1       |          | 
+ gpi_range_table | r        |        0 |           0 | r            |             0 |             0 | 1       |          | 
+ gpi_range_table | r        |        0 |           0 | r            |             0 |             0 | 1       |          | 
+ p0              | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}
+ p0              | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}
+ p0              | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}
+ p1              | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}
+ p1              | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}
+ p1              | p        |        0 |           0 | r            |             0 |             0 |         |          | {10000}
+ p2              | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}
+ p2              | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}
+ p2              | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}
+(12 rows)
+
+explain (costs off) select count(*) from gpi_range_table where INV_DATE_SK < 10000;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on gpi_range_table
+               Recheck Cond: (inv_date_sk < 10000)
+               Selected Partitions:  1..2
+               ->  Partitioned Bitmap Index Scan on local_gpi_range_table_index1
+                     Index Cond: (inv_date_sk < 10000)
+                     Selected Partitions:  1..2
+(9 rows)
+
+select count(*) from gpi_range_table where INV_DATE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from gpi_range_table where INV_ITEM_SK < 10000;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on gpi_range_table
+         Recheck Cond: (inv_item_sk < 10000)
+         ->  Bitmap Index Scan on global_gpi_range_table_index1
+               Index Cond: (inv_item_sk < 10000)
+(5 rows)
+
+select count(*) from gpi_range_table where INV_ITEM_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+explain (costs off) select count(*) from gpi_range_table where INV_WAREHOUSE_SK < 10000;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on gpi_range_table
+         Recheck Cond: (inv_warehouse_sk < 10000)
+         ->  Bitmap Index Scan on global_gpi_range_table_index2
+               Index Cond: (inv_warehouse_sk < 10000)
+(5 rows)
+
+select count(*) from gpi_range_table where INV_WAREHOUSE_SK < 10000;
+ count 
+-------
+  9999
+(1 row)
+
+--clean
+drop index if exists local_gpi_range_table_index1;
+drop index if exists global_gpi_range_table_index1;
+drop index if exists global_gpi_range_table_index2;
+drop table if exists gpi_range_table;
+drop table if exists gpi_range_like_table;
+NOTICE:  table "gpi_range_like_table" does not exist, skipping

@@ -15,20 +15,131 @@
 #define SNAPSHOT_H
 
 #include "access/htup.h"
-#include "storage/buf.h"
+#include "storage/buf/buf.h"
 #include "gtm/gtm_c.h"
+
+/*
+ * The different snapshot types.  We use SnapshotData structures to represent
+ * both "regular" (MVCC) snapshots and "special" snapshots that have non-MVCC
+ * semantics.  The specific semantics of a snapshot are encoded by its type.
+ *
+ * The behaviour of each type of snapshot should be documented alongside its
+ * enum value, best in terms that are not specific to an individual table AM.
+ *
+ * The reason the snapshot type rather than a callback as it used to be is
+ * that that allows to use the same snapshot for different table AMs without
+ * having one callback per AM.
+ */
+typedef enum SnapshotSatisfiesMethod
+{
+    /*-------------------------------------------------------------------------
+     * A tuple is visible iff the tuple is valid for the given MVCC snapshot.
+     *
+     * Here, we consider the effects of:
+     * - all transactions committed as of the time of the given snapshot
+     * - previous commands of this transaction
+     *
+     * Does _not_ include:
+     * - transactions shown as in-progress by the snapshot
+     * - transactions started after the snapshot was taken
+     * - changes made by the current command
+     * -------------------------------------------------------------------------
+     */
+    SNAPSHOT_MVCC = 0,
+
+    /* -------------------------------------------------------------------------
+     * A tuple is visible iff the tuple is valid for the given local MVCC snapshot.
+     *
+     * Here, we consider the effects of:
+     * - all transactions local committed as of the time of the given snapshot
+     * - previous commands of this transaction
+     *
+     * Does _not_ include:
+     * - transactions committed in gtm but not committed locally
+     * - transactions shown as in-progress by the snapshot
+     * - transactions started after the snapshot was taken
+     * - changes made by the current command
+     * -------------------------------------------------------------------------
+     */
+    SNAPSHOT_LOCAL_MVCC,
+
+    /* -------------------------------------------------------------------------
+     * A tuple is visible iff heap tuple is valid "now".
+     *
+     * Here, we consider the effects of:
+     * - all committed transactions (as of the current instant)
+     * - previous commands of this transaction
+     *
+     * Does _not_ include:
+     * - changes made by the current command.
+     * -------------------------------------------------------------------------
+     */
+    SNAPSHOT_NOW,
+
+    /*-------------------------------------------------------------------------
+     * A tuple is visible iff the tuple is valid "for itself".
+     *
+     * Here, we consider the effects of:
+     * - all committed transactions (as of the current instant)
+     * - previous commands of this transaction
+     * - changes made by the current command
+     *
+     * Does _not_ include:
+     * - in-progress transactions (as of the current instant)
+     * -------------------------------------------------------------------------
+     */
+    SNAPSHOT_SELF,
+
+    /*
+     * Any tuple is visible.
+     */
+    SNAPSHOT_ANY,
+
+    /*
+     * A tuple is visible iff the tuple is valid as a TOAST row.
+     */
+    SNAPSHOT_TOAST,
+
+    /*-------------------------------------------------------------------------
+     * A tuple is visible iff the tuple is valid including effects of open
+     * transactions.
+     *
+     * Here, we consider the effects of:
+     * - all committed and in-progress transactions (as of the current instant)
+     * - previous commands of this transaction
+     * - changes made by the current command
+     *
+     * This is essentially like SNAPSHOT_SELF as far as effects of the current
+     * transaction and committed/aborted xacts are concerned.  However, it
+     * also includes the effects of other xacts still in progress.
+     *
+     * A special hack is that when a snapshot of this type is used to
+     * determine tuple visibility, the passed-in snapshot struct is used as an
+     * output argument to return the xids of concurrent xacts that affected
+     * the tuple.  snapshot->xmin is set to the tuple's xmin if that is
+     * another transaction that's still in progress; or to
+     * InvalidTransactionId if the tuple's xmin is committed good, committed
+     * dead, or my own xact.  Similarly for snapshot->xmax and the tuple's
+     * xmax.  If the tuple was inserted speculatively, meaning that the
+     * inserter might still back down on the insertion without aborting the
+     * whole transaction, the associated token is also returned in
+     * snapshot->speculativeToken.  See also InitDirtySnapshot().
+     * -------------------------------------------------------------------------
+     */
+    SNAPSHOT_DIRTY,
+
+    /*
+     * A tuple is visible iff it follows the rules of SNAPSHOT_MVCC, but
+     * supports being called in timetravel context (for decoding catalog
+     * contents in the context of logical decoding).
+     */
+    SNAPSHOT_HISTORIC_MVCC,
+} SnapshotSatisfiesMethod;
 
 typedef struct SnapshotData* Snapshot;
 
 #define InvalidSnapshot ((Snapshot)NULL)
 
-/*
- * We use SnapshotData structures to represent both "regular" (MVCC)
- * snapshots and "special" snapshots that have non-MVCC semantics.
- * The specific semantics of a snapshot are encoded by the "satisfies"
- * function.
- */
-typedef bool (*SnapshotSatisfiesFunc)(HeapTuple htup, Snapshot snapshot, Buffer buffer);
 /*
  * Struct representing all kind of possible snapshots.
  *
@@ -47,7 +158,7 @@ typedef bool (*SnapshotSatisfiesFunc)(HeapTuple htup, Snapshot snapshot, Buffer 
  */
 
 typedef struct SnapshotData {
-    SnapshotSatisfiesFunc satisfies; /* tuple test function */
+    SnapshotSatisfiesMethod satisfies; /* satisfies type. */
 
     /*
      * The remaining fields are used only for MVCC snapshots, and are normally
@@ -108,20 +219,42 @@ typedef struct SnapshotData {
     uint32 active_count; /* refcount on ActiveSnapshot stack */
     uint32 regd_count;   /* refcount on RegisteredSnapshotList */
     void* user_data;     /* for local multiversion snapshot */
-    SnapshotType snapshot_type;
+    GTM_SnapshotType gtm_snapshot_type;
 } SnapshotData;
 
 /*
- * Result codes for HeapTupleSatisfiesUpdate.  This should really be in
- * tqual.h, but we want to avoid including that file elsewhere.
+ * Result codes for AM API tuple_{update,delete,lock}, and for visibility.
  */
-typedef enum {
-    HeapTupleMayBeUpdated,
-    HeapTupleInvisible,
-    HeapTupleSelfUpdated,
-    HeapTupleUpdated,
-    HeapTupleBeingUpdated,
-    HeapTupleSelfCreated
-} HTSU_Result;
+typedef enum TM_Result
+{
+    /*
+     * Signals that the action succeeded (i.e. update/delete performed, lock
+     * was acquired)
+     */
+    TM_Ok,
+
+    /* The affected tuple wasn't visible to the relevant snapshot */
+    TM_Invisible,
+
+    /* The affected tuple was already modified by the calling backend */
+    TM_SelfModified,
+
+    /*
+     * The affected tuple was updated by another transaction. 
+     */
+    TM_Updated,
+
+    /* The affected tuple was deleted by another transaction */
+    TM_Deleted,
+
+    /*
+     * The affected tuple is currently being modified by another session. This
+     * will only be returned if (update/delete/lock)_tuple are instructed not
+     * to wait.
+     */
+    TM_BeingModified,
+	TM_SelfCreated,
+	TM_SelfUpdated
+} TM_Result;
 
 #endif /* SNAPSHOT_H */

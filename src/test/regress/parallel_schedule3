@@ -1,3 +1,11 @@
+# ----------
+#query self tuning
+test: partiton_pathkey_col_plan partiton_pathkey_col_randomexec partiton_pathkey_row_plan partiton_pathkey_row_randomexec
+
+# # test dbms_job
+# test: hw_dbms_job
+# #test: query_self_tuning_3
+# test: hw_dfx_thread_status
 
 test: hw_dfx_thread_status
 
@@ -6,18 +14,47 @@ test: stable_function_shippable
 # data partition
 # ----------
 test: physical_slot
+#test: hw_cstore_partition hw_cstore_partition1 hw_cstore_partition2 hw_cstore_partition_size hw_cstore_analyze
+#test: hw_partition_sysview
+#test: hw_partition_syntax hw_partition_datatype hw_partition_tablespace
+#test: hw_partition_select0 hw_partition_select1 hw_partition_inequality hw_partition_pruning hw_partition_pruning_2 hw_partition_pruning_multikey hw_partition_pruning_multikey_2 hw_partition_pwj
+#test: hw_partition_scan_02 hw_partition_scan_03 hw_partition_scan_05
+#test: hw_partition_scan_01 hw_partition_scan_04 hw_partition_scan_06
+#test: hw_partition_table_like hw_partition_exchange hw_partition_set_tablespace hw_partition_cluster hw_partition_alter_table hw_partition_truncate hw_partition_rename hw_partition_merge hw_partition_split
+#test: hw_partition_table_like hw_partition_exchange1 hw_partition_exchange2 hw_partition_alter_table hw_partition_truncate0  hw_partition_merge1 
+#test: hw_partition_exchange3 hw_partition_truncate1 hw_partition_merge2 hw_partition_rename hw_partition_split hw_partition_set_tablespace
+#test: hw_partition_start_end
+#test: hw_partition_index hw_partition_reindex hw_partition_unusable_index
+#test: hw_partition_start_end
+#test: hw_partition_index hw_partition_reindex hw_partition_unusable_index_1 hw_partition_unusable_index_2
+#test: hw_partition_insert hw_partition_update hw_partition_dml  
+#test: hw_partition_grant hw_partition_of_type hw_partition_sql_adapt
+#test: hw_partition_nodes hw_partition_size hw_partition_compare hw_partition_storage_parameters hw_partition_storage_parameters_index hw_partition_toast hw_partition_cross hw_partition_maxvalue  
+# FIXME: move me back to the parallel test when the refcnt issue is fixed
+# Below two teste are unstable, temporarily ignoring. This is same to distribute_dattistic, relallvisible, Dongwang will solve the problem.
+#test: hw_partition_vacuum_full 
+#test: hw_partition_vacuum 
+#test: hw_expression_alias
+#test: hw_partition_lock
+#test: hw_partition_llt
+#test: hw_analyze_percent
 
+#test: hw_sql_llt_case
+#test: hw_sql_llt sqlLLT
+
+
+# test hw_smp
 test: hw_smp
 
 # test MERGE INTO
+#test: xc_merge xc_merge_col merge_restriction merge_compatible merge_explain merge_explain_pretty merge_misc merge_privilege 
+#test: merge_ng
+#test: xc_merge_ng
+#test: merge_1 merge_2
+#test: merge_col_1 merge_col_2
 
 # test INSERT UPDATE
 test: insert_update_001 insert_update_002 insert_update_003 insert_update_008 insert_update_009 insert_update_010
-test: delete update namespace case select_having select_implicit
-test: hw_test_operate_user
-test: hw_createtbl_llt gsqlerr
-test: hw_sql_llt sqlLLT
-
 # test UPSERT
 test: upsert_prepare
 test: upsert_001 upsert_002 upsert_003 upsert_008 upsert_009 upsert_010
@@ -25,8 +62,3 @@ test: upsert_grammer_test_01 upsert_unlog_test upsert_tmp_test
 test: upsert_grammer_test_02 upsert_restriction upsert_composite
 test: upsert_trigger_test upsert_explain
 test: upsert_clean
-
-# test parallel query, don't put more than 2 parallel query testcases into one test group
-test: parallel_query parallel_nested_loop
-test: parallel_hashjoin parallel_append
-test: parallel_create_index

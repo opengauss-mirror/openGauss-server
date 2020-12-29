@@ -1,0 +1,358 @@
+/*
+################################################################################
+# TESTCASE NAME : skew_statistic_single_col.py 
+# COMPONENT(S)  : 测试单列分布键的倾斜场景
+# PREREQUISITE  : skew_hint_setup.py
+# PLATFORM      : all
+# DESCRIPTION   : single col's skew
+# TAG           : single col
+# TC LEVEL      : Level 1
+################################################################################
+*/
+--I1.设置guc参数
+set current_schema to skew_join;
+--S1.skew_option=normal
+set skew_option=normal;
+--S2.设置计划格式
+set explain_perf_mode=normal;
+--S3.设置计划生成参数
+set enable_broadcast = off;
+--S4.设置计划生成参数
+set enable_mergejoin = off;
+--S5.设置计划生成参数
+set enable_nestloop = off;
+set query_dop = 1002;
+--I2.单列重分布，单值倾斜
+--S1.执行计划
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+(12 rows)
+
+--S2.执行查询
+select count(*) from skew_scol s, test_scol t where s.b = t.b;
+ count 
+-------
+   300
+(1 row)
+
+--I3.单列重分布，基表有NULL值
+--S1.执行计划
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.c = t.c;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.c = t.c)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                           ->  Hash
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+(12 rows)
+
+--S2.执行查询
+select count(*) from skew_scol s, test_scol t where s.c = t.c;
+ count 
+-------
+   100
+(1 row)
+
+--I4.单列重分布，倾斜列带有过滤条件
+--S1.执行计划，简单表达式，倾斜值被过滤
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.b > 1;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: (b > 1)
+                           ->  Hash
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+                                             Filter: (b > 1)
+(13 rows)
+
+--S2.执行计划，简单表达式，倾斜值被过滤
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.b != 1;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: (b <> 1)
+                           ->  Hash
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+                                             Filter: (b <> 1)
+(13 rows)
+
+--S3.执行计划，简单表达式，倾斜值不被过滤
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.b < 100;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: (b < 100)
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+                                             Filter: (b < 100)
+(14 rows)
+
+--S4.执行计划，简单表达式，倾斜值不被过滤
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.b + 50 > 10;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: ((b + 50) > 10)
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+                                             Filter: ((b + 50) > 10)
+(14 rows)
+
+--S5.执行计划，复杂表达式，倾斜值被过滤
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and sqrt(s.b) > 1;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: (sqrt((b)::double precision) > 1::double precision)
+                           ->  Hash
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+                                             Filter: (sqrt((b)::double precision) > 1::double precision)
+(13 rows)
+
+--S6.执行计划，复杂表达式，倾斜值不被过滤
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and sqrt(s.b) < 10;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: (sqrt((b)::double precision) < 10::double precision)
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+                                             Filter: (sqrt((b)::double precision) < 10::double precision)
+(14 rows)
+
+--S7.执行计划，多列表达式，倾斜值不一定被过滤
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and  s.a + s.b > 1;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: ((a + b) > 1)
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+(13 rows)
+
+--I5.单列重分布，其他列带有过滤条件
+--S1.设置保守策略，其他列带有简单表达式
+set skew_option = lazy;
+--S2.执行计划
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c > 1;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: (c > 1)
+                           ->  Hash
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+(12 rows)
+
+--S3.设置激进策略，其他列带有简单表达式
+set skew_option = normal;
+--S4.执行计划
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and s.c > 1;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: (c > 1)
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+(13 rows)
+
+--S5.设置保守策略，其他列带有复杂表达式
+set skew_option = lazy;
+--S6.执行计划
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and sqrt(s.c) < 10;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: (sqrt((c)::double precision) < 10::double precision)
+                           ->  Hash
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+(12 rows)
+
+--S7.设置激进策略，其他列带有简单表达式
+set skew_option = normal;
+--S8.执行计划
+explain (costs off) select count(*) from skew_scol s, test_scol t where s.b = t.b and sqrt(s.c) < 10;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = t.b)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                                       Filter: (sqrt((c)::double precision) < 10::double precision)
+                           ->  Hash
+                                 ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2)
+                                       ->  Seq Scan on test_scol t
+(13 rows)
+
+--I6.单列重分布，双侧倾斜
+--S1.双侧倾斜值不同。执行计划
+explain (costs off) select count(*) from skew_scol s, skew_scol1 s1 where s.b = s1.c;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = s1.c)
+                           Skew Join Optimized by Statistic
+                           ->  Streaming(type: HYBRID dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                           ->  Hash
+                                 ->  Streaming(type: HYBRID dop: 2/2)
+                                       ->  Seq Scan on skew_scol1 s1
+(12 rows)
+
+--S2.双侧倾斜值不同，执行查询
+select count(*) from skew_scol s, skew_scol1 s1 where s.b = s1.c;
+ count 
+-------
+   300
+(1 row)
+
+--S1.双侧倾斜值相同。执行计划
+explain (costs off) select count(*) from skew_scol s, skew_scol1 s1 where s.b = s1.b;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Aggregate
+                     ->  Hash Join
+                           Hash Cond: (s.b = s1.b)
+                           ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                 ->  Seq Scan on skew_scol s
+                           ->  Hash
+                                 ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)
+                                       ->  Seq Scan on skew_scol1 s1
+(11 rows)
+
+--S2.双侧倾斜值相同，执行查询
+select count(*) from skew_scol s, skew_scol1 s1 where s.b = s1.b;
+ count 
+-------
+ 20400
+(1 row)
+
+--I7.删除表数据
+drop schema skew_join cascade;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to table skew_type
+drop cascades to table unskew_type
+drop cascades to table skew_scol
+drop cascades to table skew_scol1
+drop cascades to table test_scol
+drop cascades to table r
+drop cascades to table s
+drop cascades to table t
+set query_dop = 2002;

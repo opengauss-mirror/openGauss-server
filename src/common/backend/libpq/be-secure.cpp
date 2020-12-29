@@ -101,6 +101,7 @@ static const char* SSLerrmessage(void);
 static void set_user_config_ssl_ciphers(const char* sslciphers);
 static void set_default_ssl_ciphers();
 static void initialize_SSL(void);
+static void secure_initialize(void);
 static int open_server_SSL(Port*);
 static void close_SSL(Port*);
 static const char* SSLerrmessage(void);
@@ -164,13 +165,13 @@ const char* ssl_rand_file = "server.key.rand";
 /*
  *  Initialize global context
  */
-int secure_initialize(void)
+static void secure_initialize(void)
 {
 #ifdef USE_SSL
     initialize_SSL();
 #endif
 
-    return 0;
+    return ;
 }
 
 /*
@@ -193,6 +194,7 @@ int secure_open_server(Port* port)
     int r = 0;
 
 #ifdef USE_SSL
+    secure_initialize();
     r = open_server_SSL(port);
 #endif
 
@@ -243,7 +245,7 @@ ssize_t secure_read(Port* port, void* ptr, size_t len)
                 }
 #ifdef WIN32
                 pgwin32_waitforsinglesocket(SSL_get_fd(port->ssl),
-                    (err == SSL_ERROR_WANT_READ) ? FD_READ | FD_CLOSE : FD_WRITE | FD_CLOSE,
+                    (err == SSL_ERROR_WANT_READ) ? (FD_READ | FD_CLOSE) : (FD_WRITE | FD_CLOSE),
                     INFINITE);
 #endif
                 goto rloop;
@@ -300,7 +302,10 @@ ssize_t secure_read(Port* port, void* ptr, size_t len)
             logic_conn_read_check_ended();
         } else {
             prepare_for_client_read();
+            PGSTAT_INIT_TIME_RECORD();
+            PGSTAT_START_TIME_RECORD();
             n = recv(port->sock, ptr, len, 0);
+            END_NET_RECV_INFO(n);
             client_read_ended();
         }
     }
@@ -334,7 +339,7 @@ ssize_t secure_write(Port* port, void* ptr, size_t len)
             case SSL_ERROR_WANT_WRITE:
 #ifdef WIN32
                 pgwin32_waitforsinglesocket(SSL_get_fd(port->ssl),
-                    (err == SSL_ERROR_WANT_READ) ? FD_READ | FD_CLOSE : FD_WRITE | FD_CLOSE,
+                    (err == SSL_ERROR_WANT_READ) ? (FD_READ | FD_CLOSE) : (FD_WRITE | FD_CLOSE),
                     INFINITE);
 #endif
                 goto wloop;
@@ -396,6 +401,7 @@ ssize_t secure_write(Port* port, void* ptr, size_t len)
         PGSTAT_START_TIME_RECORD();
         n = send(port->sock, ptr, len, 0);
         PGSTAT_END_TIME_RECORD(NET_SEND_TIME);
+        END_NET_SEND_INFO(n);
         
         /* for log printing, send message */
         IPC_PERFORMANCE_LOG_COLLECT(port->msgLog, ptr, n, port->remote_hostname, NULL, SECURE_WRITE);
@@ -605,6 +611,11 @@ static void set_user_config_ssl_ciphers(const char* sslciphers)
  */
 static void initialize_SSL(void)
 {
+    /* Already initialized SSL, return here */
+    if (u_sess->libpq_cxt.ssl_initialized) {
+        return;
+    }
+
 #define MAX_CERTIFICATE_DEPTH_SUPPORTED 20 /* The max certificate depth supported. */
 
     struct stat buf;
@@ -642,7 +653,7 @@ static void initialize_SSL(void)
         /* check certificate file permission */
 #if !defined(WIN32) && !defined(__CYGWIN__)
         if (stat(g_instance.attr.attr_security.ssl_cert_file, &buf) == 0){
-            if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO))) {
+            if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
                 ereport(FATAL,
                     (errcode(ERRCODE_CONFIG_FILE_ERROR),
                         errmsg("certificate file \"%s\" has group or world access",
@@ -668,7 +679,7 @@ static void initialize_SSL(void)
          * directory permission check in postmaster.c)
          */
 #if !defined(WIN32) && !defined(__CYGWIN__)
-        if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO))) {
+        if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
             ereport(FATAL,
                 (errcode(ERRCODE_CONFIG_FILE_ERROR),
                     errmsg("private key file \"%s\" has group or world access",
@@ -692,29 +703,28 @@ static void initialize_SSL(void)
                     g_instance.attr.attr_security.ssl_key_file,
                     SSLerrmessage())));
         }
-        /* check ca certificate file permission */
-#if !defined(WIN32) && !defined(__CYGWIN__)
-        if (stat(g_instance.attr.attr_security.ssl_ca_file, &buf) == 0){
-            if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO))) {
-                ereport(FATAL,
-                    (errcode(ERRCODE_CONFIG_FILE_ERROR),
-                        errmsg("ca certificate file \"%s\" has group or world access",
-                            g_instance.attr.attr_security.ssl_ca_file),
-                        errdetail("Permissions should be u=rw (0600) or less.")));
-            }
-        }
-#endif
     }
-
+    /* check ca certificate file permission */
+#if !defined(WIN32) && !defined(__CYGWIN__)
+    if (stat(g_instance.attr.attr_security.ssl_ca_file, &buf) == 0){
+        if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
+            ereport(FATAL,
+                (errcode(ERRCODE_CONFIG_FILE_ERROR),
+                    errmsg("ca certificate file \"%s\" has group or world access",
+                        g_instance.attr.attr_security.ssl_ca_file),
+                    errdetail("Permissions should be u=rw (0600) or less.")));
+        }
+    }
+#endif
     /* Check the signature algorithm.*/
     if (check_certificate_signature_algrithm(u_sess->libpq_cxt.SSL_server_context)) {
         ereport(WARNING, (errmsg("The server certificate contain a Low-intensity signature algorithm")));
     }
-
     /* Check the certificate expires time.*/
-    long leftspan = check_certificate_time(u_sess->libpq_cxt.SSL_server_context);
+    long leftspan = check_certificate_time(u_sess->libpq_cxt.SSL_server_context, 
+        u_sess->attr.attr_security.ssl_cert_notify_time);
     if (leftspan > 0) {
-        int leftdays = leftspan / 86400 > 0 ? leftspan / 86400 : 1;
+        int leftdays = (leftspan / 86400 > 0) ? (leftspan / 86400) : 1;
         if (leftdays > 1) {
             ereport(WARNING, (errmsg("The server certificate will expire in %d days", leftdays)));
         } else {
@@ -725,9 +735,9 @@ static void initialize_SSL(void)
     /* set up ephemeral DH keys, and disallow SSL v2 while at it
      * free the dh directly safe as there is reference counts in DH
      */
-    DH* dhkey = genDHKeyPair(DHKey2048);
+    DH* dhkey = genDHKeyPair(DHKey3072);
     if (dhkey == NULL) {
-        ereport(ERROR, (errmsg("DH: generating parameters (2048 bits) failed")));
+        ereport(ERROR, (errmsg("DH: generating parameters (3072 bits) failed")));
     }
     SSL_CTX_set_tmp_dh(u_sess->libpq_cxt.SSL_server_context, dhkey);
     DH_free(dhkey);
@@ -737,7 +747,7 @@ static void initialize_SSL(void)
         SSL_OP_SINGLE_DH_USE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1);
 
     /* set up the allowed cipher list */
-    if (strncmp(g_instance.attr.attr_security.SSLCipherSuites, "ALL", 3) == 0) {
+    if (strcasecmp(g_instance.attr.attr_security.SSLCipherSuites, "ALL") == 0) {
         set_default_ssl_ciphers();
     } else {
         set_user_config_ssl_ciphers(g_instance.attr.attr_security.SSLCipherSuites);
@@ -799,6 +809,8 @@ static void initialize_SSL(void)
     /*clear the sensitive info in server_key*/
     errorno = memset_s(u_sess->libpq_cxt.server_key, CIPHER_LEN + 1, 0, CIPHER_LEN + 1);
     securec_check(errorno, "\0", "\0");
+
+    u_sess->libpq_cxt.ssl_initialized = true;
 }
 
 /*
@@ -837,7 +849,7 @@ aloop:
             case SSL_ERROR_WANT_WRITE:
 #ifdef WIN32
                 pgwin32_waitforsinglesocket(SSL_get_fd(port->ssl),
-                    (err == SSL_ERROR_WANT_READ) ? FD_READ | FD_CLOSE | FD_ACCEPT : FD_WRITE | FD_CLOSE,
+                    (err == SSL_ERROR_WANT_READ) ? (FD_READ | FD_CLOSE | FD_ACCEPT) : (FD_WRITE | FD_CLOSE),
                     INFINITE);
 #endif
                 goto aloop;
@@ -894,7 +906,7 @@ aloop:
              * Reject embedded NULLs in certificate common name to prevent
              * attacks like CVE-2009-4034.
              */
-            if ((size_t)len != strlen(peer_cn)) {
+            if ((size_t)(unsigned)len != strlen(peer_cn)) {
                 ereport(COMMERROR,
                     (errcode(ERRCODE_PROTOCOL_VIOLATION),
                         errmsg("SSL certificate's common name contains embedded null")));
@@ -971,12 +983,12 @@ static void check_permission_cipher_file(const char* parent_dir)
     if (lstat(cipher_file, &cipherbuf) != 0 || lstat(rand_file, &randbuf) != 0)
         return;
 #if !defined(WIN32) && !defined(__CYGWIN__)
-    if (!S_ISREG(cipherbuf.st_mode) || (cipherbuf.st_mode & (S_IRWXG | S_IRWXO)))
+    if (!S_ISREG(cipherbuf.st_mode) || (cipherbuf.st_mode & (S_IRWXG | S_IRWXO)) || ((cipherbuf.st_mode & S_IRWXU) == S_IRWXU))
         ereport(FATAL,
             (errcode(ERRCODE_CONFIG_FILE_ERROR),
                 errmsg("cipher file \"%s\" has group or world access", cipher_file),
                 errdetail("Permissions should be u=rw (0600) or less.")));
-    if (!S_ISREG(randbuf.st_mode) || (randbuf.st_mode & (S_IRWXG | S_IRWXO)))
+    if (!S_ISREG(randbuf.st_mode) || (randbuf.st_mode & (S_IRWXG | S_IRWXO)) || ((randbuf.st_mode & S_IRWXU) == S_IRWXU))
         ereport(FATAL,
             (errcode(ERRCODE_CONFIG_FILE_ERROR),
                 errmsg("rand file \"%s\" has group or world access", rand_file),
@@ -1008,7 +1020,10 @@ ssize_t secure_raw_read(Port* port, void* ptr, size_t len)
 #ifdef WIN32
     pgwin32_noblock = true;
 #endif
+    PGSTAT_INIT_TIME_RECORD();
+    PGSTAT_START_TIME_RECORD();
     n = recv(port->sock, ptr, len, 0);
+    END_NET_RECV_INFO(n);
 #ifdef WIN32
     pgwin32_noblock = false;
 #endif
@@ -1023,7 +1038,10 @@ ssize_t secure_raw_write(Port* port, const void* ptr, size_t len)
 #ifdef WIN32
     pgwin32_noblock = true;
 #endif
+    PGSTAT_INIT_TIME_RECORD();
+    PGSTAT_START_TIME_RECORD();
     n = send(port->sock, ptr, len, 0);
+    END_NET_SEND_INFO(n);
 #ifdef WIN32
     pgwin32_noblock = false;
 #endif
@@ -1186,7 +1204,6 @@ static int SSL_CTX_set_cipher_list_ex(SSL_CTX* ctx, const char* ciphers[], const
     OPENSSL_free(cipher_buf);
     return ret;
 }
-
 
 /*
  * Brief            : DH* genDHKeyPair(DHKeyLength dhType)

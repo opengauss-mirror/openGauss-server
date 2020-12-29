@@ -29,6 +29,7 @@
  * native version of getrusage().  So, if configure decides to compile
  * this file at all, we just use this version unconditionally.
  */
+
 int getrusage(int who, struct rusage* rusage)
 {
 #ifdef WIN32

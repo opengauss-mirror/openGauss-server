@@ -14,7 +14,6 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include <dlfcn.h>
 #include <sys/stat.h>
 
 #ifndef WIN32_ONLY_COMPILER
@@ -61,6 +60,25 @@ static char* find_in_dynamic_libpath(const char* basename);
 
 /* Magic structure that module needs to match to be accepted */
 static const Pg_magic_struct magic_data = PG_MODULE_MAGIC_DATA;
+
+void check_external_function(const char* filepath, const char* filename, const char* funcname)
+{
+    if (!file_exists(filepath))
+        return;
+
+    check_backend_env(filepath);
+
+    /* Load the shared library, unless we already did */
+    void* lib_handle = internal_load_library(filepath);
+
+    /* Look up the function within the library */
+    PGFunction retval = (PGFunction)pg_dlsym(lib_handle, funcname);
+
+    if (retval == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                errmsg("could not find function \"%s\" in file \"%s\"", funcname, filename)));
+    }
+}
 
 /*
  * Load the specified dynamic-link library file, and look for a function
@@ -121,9 +139,8 @@ void load_file(const char* filename, bool restricted)
     char* fullname = NULL;
 
     /* Apply security restriction if requested */
-    if (restricted) {
+    if (restricted)
         check_restricted_library_name(filename);
-    }
 
     /* Expand the possibly-abbreviated filename to an exact path name */
     fullname = expand_dynamic_library_name(filename);
@@ -164,25 +181,27 @@ void* internal_load_library(const char* libname)
     PGModuleMagicFunction magic_func;
     struct stat stat_buf;
     PG_init_t PG_init = NULL;
+    char* file = last_dir_separator(libname);
+    file = (file == NULL) ? ((char*)libname) : (file + 1);
 
     /*
      * Scan the list of loaded FILES to see if the file has been loaded.
      */
     for (file_scanner = file_list; file_scanner != NULL && strcmp(libname, file_scanner->filename) != 0;
-         file_scanner = file_scanner->next) {
-    };
+         file_scanner = file_scanner->next)
+        ;
 
     if (file_scanner == NULL) {
         /*
          * Check for same files - different paths (ie, symlink or link)
          */
         if (stat(libname, &stat_buf) == -1) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not access file \"%s\": %m", libname)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not access file \"%s\": %m", file)));
         }
 
         for (file_scanner = file_list; file_scanner != NULL && !SAME_INODE(stat_buf, *file_scanner);
-             file_scanner = file_scanner->next) {
-        };
+             file_scanner = file_scanner->next)
+            ;
     }
 
     if (file_scanner == NULL) {
@@ -194,7 +213,8 @@ void* internal_load_library(const char* libname)
          */
         tmplen = offsetof(DynamicFileList, filename) + strlen(libname) + 1;
 
-        file_scanner = (DynamicFileList*)MemoryContextAlloc(g_instance.instance_context, tmplen);
+        file_scanner = (DynamicFileList*)MemoryContextAlloc(
+            INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), tmplen);
 
         if (file_scanner == NULL) {
             ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
@@ -250,14 +270,14 @@ void* internal_load_library(const char* libname)
                 file_scanner = NULL;
                 ereport(ERROR,
                     (errcode_for_file_access(),
-                        errmsg("could not load library \"%s\", get error report failed", libname)));
+                        errmsg("could not load library \"%s\", get error report failed", file)));
             }
             rc = strncpy_s(error, DLERROR_MSG_MAX_LEN + 1, load_error, strlen(load_error));
             securec_check(rc, "\0", "\0");
             pfree((char*)file_scanner);
             file_scanner = NULL;
             /* errcode_for_file_access might not be appropriate here? */
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not load library \"%s\": %s", libname, error)));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not load library \"%s\": %s", file, error)));
         }
 
         /* Check the magic function to determine compatibility */
@@ -287,7 +307,7 @@ void* internal_load_library(const char* libname)
             /* complain */
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OPERATION),
-                    errmsg("incompatible library \"%s\": missing magic block", libname),
+                    errmsg("incompatible library \"%s\": missing magic block", file),
                     errhint("Extension libraries are required to use the PG_MODULE_MAGIC macro.")));
         }
 
@@ -305,11 +325,13 @@ void* internal_load_library(const char* libname)
      */
     for (file_init_scanner = u_sess->fmgr_cxt.file_list_init;
          file_init_scanner != NULL && file_init_scanner->file_list != file_scanner;
-         file_init_scanner = file_init_scanner->next) { }
+         file_init_scanner = file_init_scanner->next) {
+    }
 
     /* If file_scanner doesn't exist, register it and call __PG_init() */
     if (file_init_scanner == NULL) {
-        file_init_scanner = (FileListInit*)MemoryContextAllocZero(u_sess->top_mem_cxt, sizeof(FileListInit));
+        file_init_scanner = (FileListInit*)MemoryContextAllocZero(
+            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), sizeof(FileListInit));
         file_init_scanner->file_list = file_scanner;
         file_init_scanner->next = NULL;
 
@@ -433,9 +455,7 @@ static void incompatible_module_error(const char* libname, const Pg_magic_struct
 static void internal_unload_library(const char* libname)
 {
 #ifdef NOT_USED
-    DynamicFileList* file_scanner = NULL;
-    DynamicFileList* prv = NULL;
-    DynamicFileList* nxt = NULL;
+    DynamicFileList *file_scanner = NULL, *prv = NULL, *nxt = NULL;
     struct stat stat_buf;
     PG_fini_t PG_fini = NULL;
 
@@ -496,10 +516,11 @@ bool file_exists(const char* name)
 
     AssertArg(name != NULL);
 
-    if (stat(name, &st) == 0)
+    if (stat(name, &st) == 0) {
         return S_ISDIR(st.st_mode) ? false : true;
-    else if (!(errno == ENOENT || errno == ENOTDIR || errno == EACCES))
+    } else if (!(errno == ENOENT || errno == ENOTDIR || errno == EACCES)) {
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not access file \"%s\": %m", name)));
+    }
 
     return false;
 }
@@ -596,6 +617,7 @@ static char* substitute_libpath_macro(const char* name)
     char* ret = NULL;
     errno_t rc = EOK;
 
+    AssertArg(name != NULL);
 
     /* Currently, we only recognize $libdir at the start of the string */
     if (name[0] != '$')
@@ -628,6 +650,7 @@ static char* find_in_dynamic_libpath(const char* basename)
     const char* p = NULL;
     size_t baselen;
 
+    AssertArg(basename != NULL);
     AssertArg(first_dir_separator(basename) == NULL);
     AssertState(u_sess->attr.attr_common.Dynamic_library_path != NULL);
 
@@ -721,7 +744,7 @@ void** find_rendezvous_variable(const char* varName)
         securec_check(ret, "\0", "\0");
         ctl.keysize = NAMEDATALEN;
         ctl.entrysize = sizeof(rendezvousHashEntry);
-        ctl.hcxt = u_sess->top_mem_cxt;
+        ctl.hcxt = SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR);
         u_sess->plsql_cxt.rendezvousHash = hash_create("Rendezvous variable hash", 16, &ctl, HASH_ELEM | HASH_CONTEXT);
     }
 

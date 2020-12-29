@@ -24,17 +24,38 @@
 #include "optimizer/paths.h"
 #include "optimizer/streamplan.h"
 #include "optimizer/tlist.h"
+#include "parser/parse_hint.h"
 #include "pgxc/pgxc.h"
+#include "utils/guc.h"
 #include "utils/lsyscache.h"
 
+static PathKey* makePathKey(EquivalenceClass* eclass, Oid opfamily, int strategy, bool nulls_first);
 static PathKey* make_canonical_pathkey(
     PlannerInfo* root, EquivalenceClass* eclass, Oid opfamily, int strategy, bool nulls_first);
-static bool pathkey_is_redundant(PathKey* new_pathkey, List* pathkeys);
+static bool pathkey_is_redundant(PathKey* new_pathkey, List* pathkeys, bool predpush = false);
 static bool right_merge_direction(PlannerInfo* root, PathKey* pathkey);
 
 /****************************************************************************
  *		PATHKEY CONSTRUCTION AND REDUNDANCY TESTING
  ****************************************************************************/
+/*
+ * makePathKey
+ *		create a PathKey node
+ *
+ * This does not promise to create a canonical PathKey, it's merely a
+ * convenience routine to build the specified node.
+ */
+static PathKey* makePathKey(EquivalenceClass* eclass, Oid opfamily, int strategy, bool nulls_first)
+{
+    PathKey* pk = makeNode(PathKey);
+
+    pk->pk_eclass = eclass;
+    pk->pk_opfamily = opfamily;
+    pk->pk_strategy = strategy;
+    pk->pk_nulls_first = nulls_first;
+
+    return pk;
+}
 
 /*
  * make_canonical_pathkey
@@ -70,12 +91,7 @@ static PathKey* make_canonical_pathkey(
      */
     oldcontext = MemoryContextSwitchTo(root->planner_cxt);
 
-    pk = makeNode(PathKey);
-    pk->pk_eclass = eclass;
-    pk->pk_opfamily = opfamily;
-    pk->pk_strategy = strategy;
-    pk->pk_nulls_first = nulls_first;
-
+    pk = makePathKey(eclass, opfamily, strategy, nulls_first);
     root->canon_pathkeys = lappend(root->canon_pathkeys, pk);
 
     (void)MemoryContextSwitchTo(oldcontext);
@@ -113,18 +129,44 @@ static PathKey* make_canonical_pathkey(
  * Because the equivclass.c machinery forms only one copy of any EC per query,
  * pointer comparison is enough to decide whether canonical ECs are the same.
  */
-static bool pathkey_is_redundant(PathKey* new_pathkey, List* pathkeys)
+static bool pathkey_is_redundant(PathKey* new_pathkey, List* pathkeys, bool predpush)
 {
     EquivalenceClass* new_ec = new_pathkey->pk_eclass;
     ListCell* lc = NULL;
 
+    /* Assert we've been given canonical pathkeys */
+    Assert(!new_ec->ec_merged);
+
     /* Check for EC containing a constant --- unconditionally redundant */
-    if (EC_MUST_BE_REDUNDANT(new_ec) && !new_ec->ec_group_set)
-        return true;
+    if (predpush) {
+        /* skip the Param */
+        bool have_const = false;
+        if (EC_MUST_BE_REDUNDANT(new_ec))
+        {
+            lc = NULL;
+            foreach (lc, new_ec->ec_members) {
+                EquivalenceMember *mem = (EquivalenceMember *)lfirst(lc);
+                if (mem->em_is_const && !check_param_clause((Node *)mem->em_expr)) {
+                    have_const = true;
+                    break;
+                }
+            }
+        }
+
+        if ((have_const && !new_ec->ec_below_outer_join) && !new_ec->ec_group_set)
+            return true;
+
+    } else {
+        if (EC_MUST_BE_REDUNDANT(new_ec) && !new_ec->ec_group_set)
+          return true;
+    }
 
     /* If same EC already used in list, then redundant */
     foreach (lc, pathkeys) {
         PathKey* old_pathkey = (PathKey*)lfirst(lc);
+
+        /* Assert we've been given canonical pathkeys */
+        Assert(!old_pathkey->pk_eclass->ec_merged);
 
         if (new_ec == old_pathkey->pk_eclass)
             return true;
@@ -146,7 +188,36 @@ static bool pathkey_is_redundant(PathKey* new_pathkey, List* pathkeys)
  */
 List* canonicalize_pathkeys(PlannerInfo* root, List* pathkeys)
 {
-    return list_copy(pathkeys);
+    List* new_pathkeys = NIL;
+    ListCell* l = NULL;
+
+    foreach (l, pathkeys) {
+        PathKey* pathkey = (PathKey*)lfirst(l);
+        EquivalenceClass* eclass = NULL;
+        PathKey* cpathkey = NULL;
+
+        /* Find the canonical (merged) EquivalenceClass */
+        eclass = pathkey->pk_eclass;
+        while (eclass->ec_merged)
+            eclass = eclass->ec_merged;
+
+        /*
+         * If we can tell it's redundant just from the EC, skip.
+         * pathkey_is_redundant would notice that, but we needn't even bother
+         * constructing the node...
+         */
+        if (EC_MUST_BE_REDUNDANT(eclass) && !eclass->ec_group_set)
+            continue;
+
+        /* OK, build a canonicalized PathKey struct */
+        cpathkey =
+            make_canonical_pathkey(root, eclass, pathkey->pk_opfamily, pathkey->pk_strategy, pathkey->pk_nulls_first);
+
+        /* Add to list unless redundant */
+        if (!pathkey_is_redundant(cpathkey, new_pathkeys))
+            new_pathkeys = lappend(new_pathkeys, cpathkey);
+    }
+    return new_pathkeys;
 }
 
 /*
@@ -178,8 +249,6 @@ static PathKey* make_pathkey_from_sortinfo(PlannerInfo* root, Expr* expr, Oid op
     List* opfamilies = NIL;
     EquivalenceClass* eclass = NULL;
 
-    Assert(canonicalize);
-
     strategy = reverse_sort ? BTGreaterStrategyNumber : BTLessStrategyNumber;
 
     /*
@@ -210,7 +279,10 @@ static PathKey* make_pathkey_from_sortinfo(PlannerInfo* root, Expr* expr, Oid op
         return NULL;
 
     /* And finally we can find or create a PathKey node */
-    return make_canonical_pathkey(root, eclass, opfamily, strategy, nulls_first);
+    if (canonicalize)
+        return make_canonical_pathkey(root, eclass, opfamily, strategy, nulls_first);
+    else
+        return makePathKey(eclass, opfamily, strategy, nulls_first);
 }
 
 /*
@@ -280,6 +352,16 @@ PathKeysComparison compare_pathkeys(List* keys1, List* keys2)
         PathKey* pathkey1 = (PathKey*)lfirst(key1);
         PathKey* pathkey2 = (PathKey*)lfirst(key2);
 
+        /*
+         * XXX would like to check that we've been given canonicalized input,
+         * but PlannerInfo not accessible here...
+         */
+#ifdef NOT_USED
+        AssertEreport(list_member_ptr(root->canon_pathkeys, pathkey1), MOD_OPT, "pathky1 is not a member in pathkeys");
+
+        AssertEreport(list_member_ptr(root->canon_pathkeys, pathkey2), MOD_OPT, "pathky2 is not a member in pathkeys");
+#endif
+
         if (pathkey1 != pathkey2)
             return PATHKEYS_DIFFERENT; /* no need to keep looking */
     }
@@ -322,10 +404,8 @@ bool pathkeys_contained_in(List* keys1, List* keys2)
  * 'pathkeys' represents a required ordering (already canonicalized!)
  * 'required_outer' denotes allowable outer relations for parameterized paths
  * 'cost_criterion' is STARTUP_COST or TOTAL_COST
- * 'require_parallel_safe' causes us to consider only parallel-safe paths
  */
-Path* get_cheapest_path_for_pathkeys(List* paths, List* pathkeys, Relids required_outer,
-    CostSelector cost_criterion, bool require_parallel_safe)
+Path* get_cheapest_path_for_pathkeys(List* paths, List* pathkeys, Relids required_outer, CostSelector cost_criterion)
 {
     Path* matched_path = NULL;
     ListCell* l = NULL;
@@ -339,10 +419,6 @@ Path* get_cheapest_path_for_pathkeys(List* paths, List* pathkeys, Relids require
          */
         if (matched_path != NULL && compare_path_costs(matched_path, path, cost_criterion) <= 0)
             continue;
-
-        if (require_parallel_safe && !path->parallel_safe) {
-            continue;
-        }
 
         if (pathkeys_contained_in(pathkeys, path->pathkeys) && bms_is_subset(PATH_REQ_OUTER(path), required_outer))
             matched_path = path;
@@ -383,23 +459,6 @@ Path* get_cheapest_fractional_path_for_pathkeys(List* paths, List* pathkeys, Rel
             matched_path = path;
     }
     return matched_path;
-}
-
-/*
- * get_cheapest_parallel_safe_total_inner
- * Find the unparameterized parallel-safe path with the least total cost.
- */
-Path* get_cheapest_parallel_safe_total_inner(List *paths)
-{
-    ListCell *l = NULL;
-
-    foreach(l, paths) {
-        Path *innerpath = (Path*)lfirst(l);
-        if (innerpath->parallel_safe && bms_is_empty(PATH_REQ_OUTER(innerpath)))
-            return innerpath;
-    }
-
-    return NULL;
 }
 
 /****************************************************************************
@@ -759,8 +818,6 @@ List* make_pathkeys_for_sortclauses(PlannerInfo* root, List* sortclauses, List* 
     List* pathkeys = NIL;
     ListCell* l = NULL;
 
-    Assert(canonicalize);
-
     foreach (l, sortclauses) {
         SortGroupClause* sortcl = (SortGroupClause*)lfirst(l);
         Expr* sortkey = NULL;
@@ -775,10 +832,13 @@ List* make_pathkeys_for_sortclauses(PlannerInfo* root, List* sortclauses, List* 
             sortcl->tleSortGroupRef,
             sortcl->groupSet,
             true,
-            true);
+            canonicalize);
 
         /* Canonical form eliminates redundant ordering keys */
-        if (!pathkey_is_redundant(pathkey, pathkeys))
+        if (canonicalize) {
+            if (!pathkey_is_redundant(pathkey, pathkeys, ENABLE_PRED_PUSH_ALL(root)))
+                pathkeys = lappend(pathkeys, pathkey);
+        } else
             pathkeys = lappend(pathkeys, pathkey);
     }
     return pathkeys;
@@ -966,6 +1026,16 @@ List* find_mergeclauses_for_outer_pathkeys(PlannerInfo* root, List* pathkeys, Li
     return mergeclauses;
 }
 
+inline int get_pathkey_index(EquivalenceClass** ecs, int necs, EquivalenceClass* key)
+{
+    int idx;
+    for (idx = 0; idx < necs; idx++) {
+        if (ecs[idx] == key)
+            break; /* found match */
+    }
+    return idx;
+}
+
 /*
  * select_outer_pathkeys_for_merge
  *	  Builds a pathkey list representing a possible sort ordering
@@ -1021,16 +1091,10 @@ List* select_outer_pathkeys_for_merge(PlannerInfo* root, List* mergeclauses, Rel
         /* get the outer eclass */
         update_mergeclause_eclasses(root, rinfo);
 
-        if (rinfo->outer_is_left)
-            oeclass = rinfo->left_ec;
-        else
-            oeclass = rinfo->right_ec;
+        oeclass = (rinfo->outer_is_left) ? rinfo->left_ec : rinfo->right_ec;
 
         /* reject duplicates */
-        for (j = 0; j < necs; j++) {
-            if (ecs[j] == oeclass)
-                break;
-        }
+        j = get_pathkey_index(ecs, necs, oeclass);
         if (j < necs)
             continue;
 
@@ -1059,10 +1123,7 @@ List* select_outer_pathkeys_for_merge(PlannerInfo* root, List* mergeclauses, Rel
             PathKey* query_pathkey = (PathKey*)lfirst(lc);
             EquivalenceClass* query_ec = query_pathkey->pk_eclass;
 
-            for (j = 0; j < necs; j++) {
-                if (ecs[j] == query_ec)
-                    break; /* found match */
-            }
+            j = get_pathkey_index(ecs, necs, query_ec);
             if (j >= necs)
                 break; /* didn't find match */
         }
@@ -1075,11 +1136,9 @@ List* select_outer_pathkeys_for_merge(PlannerInfo* root, List* mergeclauses, Rel
                 PathKey* query_pathkey = (PathKey*)lfirst(lc);
                 EquivalenceClass* query_ec = query_pathkey->pk_eclass;
 
-                for (j = 0; j < necs; j++) {
-                    if (ecs[j] == query_ec) {
-                        scores[j] = -1;
-                        break;
-                    }
+                j = get_pathkey_index(ecs, necs, query_ec);
+                if (j < necs) {
+                    scores[j] = -1;
                 }
             }
         }

@@ -8,7 +8,7 @@ select * from pg_get_functiondef((select oid from pg_proc where proname='pg_tabl
              |  RETURNS bigint                                              +
              |  LANGUAGE internal                                           +
              |  STRICT NOT FENCED NOT SHIPPABLE                             +
-             | AS $function$pg_table_size$function$                         +
+             | AS $function$pg_table_size$function$;                        +
              | 
 (1 row)
 

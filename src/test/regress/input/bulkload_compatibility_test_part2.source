@@ -1,0 +1,286 @@
+--- (2.1)for sql_compatibility = A_FORMAT
+--- (2.1.1)no bulkload datetime format specified
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server gsmpp_server options
+(location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid_format_1.data', format 'text', delimiter '|', mode 'normal')WITH err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_1.data' (format 'text', delimiter '|');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+--- (2.1.2)bulkload datetime format 1 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'YYYY-MM-DD', time_format 'HH24:MI:SS', ignore_extra_data 'true', timestamp_format 'YYYY-MM-DD HH24:MI:SS', noescaping 'true', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS', compatible_illegal_chars 'false');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_1.data' (format 'text', delimiter '|', date_format 'YYYY-MM-DD', time_format 'HH24:MI:SS', ignore_extra_data 'true', timestamp_format 'YYYY-MM-DD HH24:MI:SS', noescaping 'true', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS', compatible_illegal_chars 'false');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+--- (2.1.3)bulkload datetime format 2 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid_format_2.data');
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET date_format 'YYYYMMDD', SET time_format 'HHMISS', SET timestamp_format 'YYYYMMDDHHMISS', SET smalldatetime_format 'YYYYMMDDHH24MISS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(DROP date_format, DROP time_format, DROP timestamp_format, DROP smalldatetime_format);
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_2.data' (format 'text', delimiter '|', date_format 'YYYYMMDD', time_format 'HHMISS', ignore_extra_data 'true', timestamp_format 'YYYYMMDDHHMISS', noescaping 'true', smalldatetime_format 'YYYYMMDDHH24MISS', compatible_illegal_chars 'false');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_2.data' (format 'text', delimiter '|');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+--- (2.1.4)bulkload datetime format mixed with TO_DATE()/TO_TIMESTAMP() test
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT TO_DATE(COL_DATE, 'YYYYMMDD'), COL_TIME, TO_TIMESTAMP(COL_TIMESTAMP, 'YYYYMMDDHHMISS'), COL_SMALLDATETIME FROM FT_DATETIME_TEST;
+--- (2.1.5)bulkload datetime format 3 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid_format_3.data');
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'DD/MM/YYYY', time_format 'HHMISS', timestamp_format 'DD/MM/YYYYHHMISS', smalldatetime_format 'DD/MM/YYYYHHMISS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(DROP date_format, DROP time_format, DROP timestamp_format, DROP smalldatetime_format);
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_3.data' (format 'text', delimiter '|', date_format 'DD/MM/YYYY', time_format 'HHMISS', ignore_extra_data 'true', timestamp_format 'DD/MM/YYYYHHMISS', noescaping 'true', smalldatetime_format 'DD/MM/YYYYHH24MISS', compatible_illegal_chars 'false');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_3.data' (format 'text', delimiter '|');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+--- (2.1.6)bulkload datetime format 4 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid_format_4.data');
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'MONTH DD, YYYY AD', time_format 'HHMISS', timestamp_format 'MONTH DD, YYYY ADHHMISS', smalldatetime_format 'MONTH DD, YYYY ADHHMISS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(DROP date_format, DROP time_format, DROP timestamp_format, DROP smalldatetime_format);
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+DROP FOREIGN TABLE FT_DATETIME_TEST;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_4.data' (format 'text', delimiter '|', date_format 'FXMONTH DD, YYYY AD', time_format 'HHMISS', ignore_extra_data 'true', timestamp_format 'FXMONTH DD, YYYY ADHHMISS', noescaping 'true', smalldatetime_format 'FXMONTH DD, YYYY ADHH24MISS', compatible_illegal_chars 'false');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_4.data' (format 'text', delimiter '|');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+DROP TABLE DATETIME_TEST;
+--- (2.2)for sql_compatibility = C_FORMAT
+--- (2.2.1)no bulkload datetime format specified
+\c TD_FORMAT_DB;
+CREATE TABLE DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+);
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server gsmpp_server options
+(location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid_format_1.data', format 'text', delimiter '|', mode 'normal')WITH err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_1.data' (format 'text', delimiter '|');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+--- (2.2.2)bulkload datetime format 1 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'YYYY-MM-DD', time_format 'HH24:MI:SS', timestamp_format 'YYYY-MM-DD HH24:MI:SS', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_1.data' (format 'text', delimiter '|', date_format 'YYYY-MM-DD', time_format 'HH24:MI:SS', ignore_extra_data 'true', timestamp_format 'YYYY-MM-DD HH24:MI:SS', noescaping 'true', smalldatetime_format 'YYYY-MM-DD HH24:MI:SS', compatible_illegal_chars 'false');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+--- (2.2.3)bulkload datetime format 2 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid_format_2.data');
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET date_format 'YYYYMMDD', SET time_format 'HHMISS', SET timestamp_format 'YYYYMMDDHHMISS', SET smalldatetime_format 'YYYYMMDDHH24MISS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(DROP date_format, DROP time_format, DROP timestamp_format, DROP smalldatetime_format);
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_2.data' (format 'text', delimiter '|', date_format 'YYYYMMDD', time_format 'HHMISS', ignore_extra_data 'true', timestamp_format 'YYYYMMDDHHMISS', noescaping 'true', smalldatetime_format 'YYYYMMDDHH24MISS', compatible_illegal_chars 'false');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_2.data' (format 'text', delimiter '|');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+--- (2.2.4)bulkload datetime format mixed with TO_DATE()/TO_TIMESTAMP() test
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT TO_DATE(COL_DATE, 'YYYYMMDD'), COL_TIME, TO_TIMESTAMP(COL_TIMESTAMP, 'YYYYMMDDHHMISS'), COL_SMALLDATETIME FROM FT_DATETIME_TEST;
+--- (2.2.5)bulkload datetime format 3 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid_format_3.data');
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'DD/MM/YYYY', time_format 'HHMISS', timestamp_format 'DD/MM/YYYYHHMISS', smalldatetime_format 'DD/MM/YYYYHH24MISS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(DROP date_format, DROP time_format, DROP timestamp_format, DROP smalldatetime_format);
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_3.data' (format 'text', delimiter '|', date_format 'DD/MM/YYYY', time_format 'HHMISS', ignore_extra_data 'true', timestamp_format 'DD/MM/YYYYHHMISS', noescaping 'true', smalldatetime_format 'DD/MM/YYYYHH24MISS', compatible_illegal_chars 'false');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_3.data' (format 'text', delimiter '|');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+--- (2.2.6)bulkload datetime format 4 test
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(SET location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid_format_4.data');
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'FXMONTH DD, YYYY AD', time_format 'HHMISS', timestamp_format 'FXMONTH DD, YYYY ADHHMISS', smalldatetime_format 'FXMONTH DD, YYYY ADHH24MISS');
+TRUNCATE DATETIME_TEST;
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(DROP date_format, DROP time_format, DROP timestamp_format, DROP smalldatetime_format);
+INSERT INTO DATETIME_TEST SELECT * FROM FT_DATETIME_TEST;
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+SELECT COUNT(*) FROM err_dt_format_table;
+TRUNCATE DATETIME_TEST;
+TRUNCATE err_dt_format_table;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_4.data' (format 'text', delimiter '|', date_format 'MONTH DD, YYYY AD', time_format 'HHMISS', ignore_extra_data 'true', timestamp_format 'MONTH DD, YYYY ADHHMISS', noescaping 'true', smalldatetime_format 'MONTH DD, YYYY ADHH24MISS', compatible_illegal_chars 'false');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_4.data' (format 'text', delimiter '|');
+SELECT * FROM DATETIME_TEST ORDER BY COL_DATE;
+TRUNCATE DATETIME_TEST;
+DROP TABLE DATETIME_TEST;
+DROP FOREIGN TABLE FT_DATETIME_TEST;
+\c regression;
+---
+--	bulkload compatible illegal chars test
+---
+--- create foreign table
+CREATE FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/lineitem.data', delimiter '|', mode 'normal', compatible_illegal_chars 'false', compatible_illegal_chars 'true');
+CREATE FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/lineitem.data', delimiter '|', mode 'normal', compatible_illegal_chars 'true');
+SELECT ftoptions FROM pg_foreign_table WHERE ftrelid = (select oid from pg_class where relname = 'ext_lineitem_compatible_illegal_chars_normal');
+--- alter foreign table
+ALTER FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL OPTIONS(DROP compatible_illegal_chars);
+SELECT ftoptions FROM pg_foreign_table WHERE ftrelid = (select oid from pg_class where relname = 'ext_lineitem_compatible_illegal_chars_normal');
+ALTER FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL OPTIONS(ADD compatible_illegal_chars 'false', compatible_illegal_chars 'true');
+ALTER FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL OPTIONS(ADD compatible_illegal_chars 'false');
+SELECT ftoptions FROM pg_foreign_table WHERE ftrelid = (select oid from pg_class where relname = 'ext_lineitem_compatible_illegal_chars_normal');
+ALTER FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL OPTIONS(SET compatible_illegal_chars 'true');
+SELECT ftoptions FROM pg_foreign_table WHERE ftrelid = (select oid from pg_class where relname = 'ext_lineitem_compatible_illegal_chars_normal');
+--- drop foreign tables
+DROP FOREIGN TABLE EXT_LINEITEM_COMPATIBLE_ILLEGAL_CHARS_NORMAL;
+--- foreign table options conflict
+CREATE FOREIGN TABLE EXT_TABLE_CONFLICT (
+        A INT
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/conflict.data', null ' ', mode 'normal', compatible_illegal_chars 'true');
+CREATE FOREIGN TABLE EXT_TABLE_CONFLICT (
+        A INT
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/conflict.data', null '?', mode 'normal', compatible_illegal_chars 'true');
+CREATE FOREIGN TABLE EXT_TABLE_CONFLICT (
+        A INT
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/conflict.data', delimiter ' ', mode 'normal', compatible_illegal_chars 'true');
+CREATE FOREIGN TABLE EXT_TABLE_CONFLICT (
+        A INT
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/conflict.data', delimiter '?', mode 'normal', compatible_illegal_chars 'true');
+CREATE FOREIGN TABLE EXT_TABLE_CONFLICT (
+        A INT
+)SERVER gsmpp_server OPTIONS(format 'csv', location 'gsfs://127.0.0.1:8900/conflict.data', quote ' ', mode 'normal', compatible_illegal_chars 'true');
+CREATE FOREIGN TABLE EXT_TABLE_CONFLICT (
+        A INT
+)SERVER gsmpp_server OPTIONS(format 'csv', location 'gsfs://127.0.0.1:8900/conflict.data', quote '?', mode 'normal', compatible_illegal_chars 'true');
+CREATE FOREIGN TABLE EXT_TABLE_CONFLICT (
+        A INT
+)SERVER gsmpp_server OPTIONS(format 'csv', location 'gsfs://127.0.0.1:8900/conflict.data', escape ' ', mode 'normal', compatible_illegal_chars 'true');
+CREATE FOREIGN TABLE EXT_TABLE_CONFLICT (
+        A INT
+)SERVER gsmpp_server OPTIONS(format 'csv', location 'gsfs://127.0.0.1:8900/conflict.data', escape '?', mode 'normal', compatible_illegal_chars 'true');
+---
+--- bulkload compatibility options incompatible in binary mode
+---
+CREATE TABLE DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+);
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_3.data' (format 'binary', compatible_illegal_chars 'true');
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_3.data' (format 'binary', date_format 'DD/MM/YYYY');
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_3.data' (format 'binary', time_format 'HHMISS');
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_3.data' (format 'binary', timestamp_format 'DD/MM/YYYYHHMISS');
+COPY DATETIME_TEST FROM '@abs_srcdir@/data/datanode1/bulkload_datetime_format_test_data/datetime_valid_format_3.data' (format 'binary', smalldatetime_format 'DD/MM/YYYYHH24MISS');

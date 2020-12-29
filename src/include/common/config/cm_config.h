@@ -35,6 +35,7 @@
 #define LOGIC_CLUSTER_NUMBER (32 + 1)  // max 32 logic + 1 elastic group
 #define MAX_PATH_LEN 1024
 #define CM_IP_NUM 3
+#define GTM_IP_PORT 64
 #define CM_IP_LENGTH 128
 #define CM_IP_ALL_NUM_LENGTH (CM_IP_NUM * CM_IP_LENGTH)
 #define CM_PATH_LENGTH 1024
@@ -56,13 +57,15 @@
 #define CM_PRIMARY_STANDBY_NUM (8)  // supprot one primary and multi standby
 #define CM_MAX_CMSERVER_STANDBY_NUM (7)
 
-#ifndef ENABLE_MULTIPLE_NODES
-#define CM_MAX_DATANODE_STANDBY_NUM 8
-#else
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
 #define CM_MAX_DATANODE_STANDBY_NUM 7
+#else
+#define CM_MAX_DATANODE_STANDBY_NUM 8
 #endif
 
 #define CM_MAX_GTM_STANDBY_NUM (7)
+#define MAX_CN_NUM 256
+#define CM_MAX_SQL_COMMAND_LEN 2048
 
 #define HAVE_GTM 1
 #define NONE_GTM 0
@@ -99,12 +102,18 @@
 #define CLUSTER_PARALLEL_REDO_REPLAY_DETAIL_STATUS_QUERY 7
 #define CLUSTER_ABNORMAL_COUPLE_DETAIL_STATUS_QUERY 8
 #define CLUSTER_ABNORMAL_BALANCE_COUPLE_DETAIL_STATUS_QUERY 9
+#define CLUSTER_START_STATUS_QUERY 10
 
 #define DYNAMC_CONFIG_FILE "cluster_dynamic_config"
 
+#define PROCESS_UNKNOWN -1
 #define PROCESS_NOT_EXIST 0
 #define PROCESS_CORPSE 1
 #define PROCESS_RUNNING 2
+#define PROCESS_PHONY_DEAD_T 3
+#define PROCESS_PHONY_DEAD_D 4
+#define PROCESS_PHONY_DEAD_Z 5
+/***/
 #define PROCESS_WAIT_STOP 3
 #define PROCESS_WAIT_START 4
 
@@ -116,6 +125,12 @@
 #define QUERY_STATUS_CMAGENT_STEP 2
 #define QUERY_STATUS_CMAGENT_STEP_ACK 3
 
+#define AZ_START_STOP_INTERVEL 2
+#define AZ_STOP_DELAY 2
+
+#define ETCD_KEY_LENGTH 1024
+#define ETCD_VLAUE_LENGTH 1024
+
 /* az_Priorities, only init the values when load config file */
 const uint32 g_az_invalid = 0;
 extern uint32 g_az_master;
@@ -123,6 +138,11 @@ extern uint32 g_az_slave;
 extern uint32 g_az_arbiter;
 
 typedef enum AZRole { AZMaster, AZSlave, AZArbiter } AZRole;
+
+typedef struct az_role_string {
+    const char* role_string;
+    uint32 role_val;
+} az_role_string;
 
 typedef enum cmServerLevel {
     CM_SERVER_NONE = 0,  // no cm_server
@@ -207,6 +227,7 @@ typedef struct staticNodeConfig {
     uint32 backIpCount;
     char backIps[CM_IP_NUM][CM_IP_LENGTH];
 
+    /**/
     uint32 cmServerId;
     uint32 cmServerMirrorId;
     char cmDataPath[CM_PATH_LENGTH];
@@ -216,22 +237,26 @@ typedef struct staticNodeConfig {
     uint32 cmServerListenCount;
     char cmServer[CM_IP_NUM][CM_IP_LENGTH];
     uint32 port;
+    /**/
     uint32 cmServerLocalHAListenCount;
     char cmServerLocalHAIP[CM_IP_NUM][CM_IP_LENGTH];
     uint32 cmServerLocalHAPort;
 
     int32 cmServerRole;
+    /**/
     uint32 cmServerPeerHAListenCount;
     char cmServerPeerHAIP[CM_IP_NUM][CM_IP_LENGTH];
     uint32 cmServerPeerHAPort;
 
     peerCmServerInfo peerCmServers[CM_MAX_CMSERVER_STANDBY_NUM];
 
+    /**/
     uint32 gtmAgentId;
     uint32 cmAgentMirrorId;
     uint32 cmAgentListenCount;
     char cmAgentIP[CM_IP_NUM][CM_IP_LENGTH];
 
+    /**/
     uint32 gtmId;
     uint32 gtmMirrorId;
     uint32 gtm;
@@ -253,6 +278,7 @@ typedef struct staticNodeConfig {
 
     peerGtmInfo peerGtms[CM_MAX_CMSERVER_STANDBY_NUM];
 
+    /*****/
     uint32 gtmProxyId;
     uint32 gtmProxyMirrorId;
     uint32 gtmProxy;
@@ -260,6 +286,7 @@ typedef struct staticNodeConfig {
     char gtmProxyListenIP[CM_IP_NUM][CM_IP_LENGTH];
     uint32 gtmProxyPort;
 
+    /*****/
     uint32 coordinateId;
     uint32 coordinateMirrorId;
     uint32 coordinate;
@@ -270,6 +297,7 @@ typedef struct staticNodeConfig {
     uint32 coordinatePort;
     uint32 coordinateHAPort;
 
+    /*****/
     uint32 datanodeCount;
     dataNodeInfo datanode[CM_MAX_DATANODE_PER_NODE];
 
@@ -287,6 +315,7 @@ typedef struct staticNodeConfig {
 
     uint32 sctpBeginPort;
     uint32 sctpEndPort;
+
 } staticNodeConfig;
 
 typedef struct dynamicConfigHeader {
@@ -294,8 +323,9 @@ typedef struct dynamicConfigHeader {
     uint32 len;
     uint32 version;
     int64 time;
-    uint32 nodeCount;  // physicalNodeNum,same as staic config file head.
+    uint32 nodeCount;  /* physicalNodeNum,same as staic config file head. */
     uint32 relationCount;
+    uint32 term;
 } dynamicConfigHeader;
 
 typedef struct dynamic_cms_timeline {
@@ -310,6 +340,7 @@ typedef struct dynamicRelationConfig {
 } dynamicRelationConfig;
 
 typedef struct staticLogicNodeConfig {
+
     uint32 crc;
     uint32 node;
     char nodeName[CM_NODE_NAME];
@@ -351,8 +382,10 @@ extern staticNodeConfig* g_node;
 extern staticNodeConfig* g_currentNode;
 extern bool g_single_node_cluster;
 extern bool g_multi_az_cluster;
+extern bool g_one_master_multi_slave;
 extern bool g_only_dn_cluster;
 extern uint32 g_node_num;
+extern uint32 g_cluster_total_instance_group_num;
 extern uint32 g_etcd_num;
 extern uint32 g_cm_server_num;
 extern uint32 g_dn_replication_num;
@@ -387,4 +420,3 @@ extern char* getAZNamebyPriority(uint32 azPriority);
 extern int cmconfig_getenv(const char* env_var, char* output_env_value, uint32 env_value_len);
 
 #endif
-

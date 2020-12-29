@@ -413,7 +413,7 @@ SELECT * FROM clustertest ORDER BY 1;
 CLUSTER clustertest_pkey ON clustertest;
 ERROR:  CLUSTER cannot run inside a transaction block
 SELECT * FROM clustertest ORDER BY 1;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+--?ERROR:  current transaction is aborted, commands ignored until end of transaction block.*
 COMMIT;
 SELECT * FROM clustertest ORDER BY 1;
  key 

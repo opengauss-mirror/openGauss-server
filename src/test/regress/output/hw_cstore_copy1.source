@@ -25,9 +25,9 @@ CREATE TABLE LINEITEM
 )
 with (orientation = column)
 ;
-COPY LINEITEM FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem.data' DELIMITER '|';
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
 DELETE FROM LINEITEM;
-COPY LINEITEM FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem.data' DELIMITER '|';
+COPY LINEITEM FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
 drop table lineitem;
 -------
 --case 6:
@@ -42,9 +42,9 @@ CREATE TABLE OOrder (
                         o_ol_cnt int NOT NULL, 
                         o_all_local int NOT NULL)  with (orientation=column)
                         ;   
-copy oorder  from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/oorder.data' with csv null ''; 
-copy oorder  from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/oorder1_0' with csv null ''; 
-copy oorder  from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/oorder2_0' with csv null ''; 
+copy oorder  from '@abs_srcdir@/data/oorder.data' with csv null ''; 
+copy oorder  from '@abs_srcdir@/data/oorder1_0' with csv null ''; 
+copy oorder  from '@abs_srcdir@/data/oorder2_0' with csv null ''; 
 select * from oorder where o_d_id=1 and o_c_id=1 order by 1,2,3;
  o_id | o_d_id | o_w_id | o_c_id |        o_entry_d         | o_carrier_id | o_ol_cnt | o_all_local 
 ------+--------+--------+--------+--------------------------+--------------+----------+-------------
@@ -69,7 +69,7 @@ select count('ABC') from oorder;
 -----
 --case 6
 ---
-copy oorder to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/oorder.data' with csv null '';
+copy oorder to '@abs_srcdir@/results/oorder.data' with csv null '';
 --
 -- fix bug
 --
@@ -108,23 +108,23 @@ SELECT COUNT(*) FROM hw_cstore_copy_batchrows;
 ----
 --COPY FROM/TO DATA WITH MULTIPLE BYTES DELIMITER
 ----
-COPY tmp_nation TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/nation.mult' delimiter ',,,,,]]]]]]';
+COPY tmp_nation TO '@abs_srcdir@/results/nation.mult' delimiter ',,,,,]]]]]]';
 ERROR:  relation "tmp_nation" does not exist
-COPY tmp_nation TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/nation.mult' delimiter ',,,[]';
+COPY tmp_nation TO '@abs_srcdir@/results/nation.mult' delimiter ',,,[]';
 ERROR:  relation "tmp_nation" does not exist
 truncate tmp_nation;
 ERROR:  relation "tmp_nation" does not exist
-COPY tmp_nation FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/nation.mult' delimiter ',,,[]';
+COPY tmp_nation FROM '@abs_srcdir@/results/nation.mult' delimiter ',,,[]';
 ERROR:  relation "tmp_nation" does not exist
 SELECT * FROM tmp_nation ORDER BY n_nationkey;
 ERROR:  relation "tmp_nation" does not exist on datanode1
 LINE 1: SELECT * FROM tmp_nation ORDER BY n_nationkey;
                       ^
-COPY tmp_nation TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/nation.mult' delimiter '(),,,' csv;
+COPY tmp_nation TO '@abs_srcdir@/results/nation.mult' delimiter '(),,,' csv;
 ERROR:  relation "tmp_nation" does not exist
 truncate tmp_nation;
 ERROR:  relation "tmp_nation" does not exist
-COPY tmp_nation FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/nation.mult' delimiter '(),,,' csv;
+COPY tmp_nation FROM '@abs_srcdir@/results/nation.mult' delimiter '(),,,' csv;
 ERROR:  relation "tmp_nation" does not exist
 SELECT * FROM tmp_nation ORDER BY n_nationkey;
 ERROR:  relation "tmp_nation" does not exist on datanode1
@@ -145,11 +145,11 @@ select * from tmp_mult_delim order by c1;
   3 | fstes\\fwt
 (3 rows)
 
-COPY tmp_mult_delim TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/mult_delim.mult' delimiter 'few^fw"' csv;
+COPY tmp_mult_delim TO '@abs_srcdir@/results/mult_delim.mult' delimiter 'few^fw"' csv;
 ERROR:  delimiter cannot contain quote character
-COPY tmp_mult_delim TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/mult_delim.mult' delimiter 'few^fw/' csv;
+COPY tmp_mult_delim TO '@abs_srcdir@/results/mult_delim.mult' delimiter 'few^fw/' csv;
 truncate tmp_mult_delim;
-COPY tmp_mult_delim FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/mult_delim.mult' delimiter 'few^fw/' csv;
+COPY tmp_mult_delim FROM '@abs_srcdir@/results/mult_delim.mult' delimiter 'few^fw/' csv;
 select * from tmp_mult_delim order by c1;
  c1 |     c2     
 ----+------------

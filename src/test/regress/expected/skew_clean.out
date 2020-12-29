@@ -1,0 +1,38 @@
+drop schema skew_hint cascade;
+NOTICE:  drop cascades to 30 other objects
+DETAIL:  drop cascades to table skew_hint.src
+drop cascades to table skew_hint.t1
+drop cascades to table skew_hint.skew_t1
+drop cascades to table skew_hint.skew_t2
+drop cascades to table skew_hint.skew_t3
+drop cascades to table skew_hint.skew_t4
+drop cascades to table skew_hint.skew_t5
+drop cascades to table skew_hint.typetest
+drop cascades to table skew_hint.char_t
+drop cascades to table skew_hint.bpchar_t
+drop cascades to table skew_hint.varchar_t
+drop cascades to table skew_hint.nvarchar2_t
+drop cascades to table skew_hint.date_t
+drop cascades to table skew_hint.time_t
+drop cascades to table skew_hint.timestamp_t
+drop cascades to table skew_hint.timestampz_t
+drop cascades to table skew_hint.interval_t
+drop cascades to table skew_hint.timez_t
+drop cascades to table skew_hint.smalldatetime_t
+drop cascades to table skew_hint.text_t
+drop cascades to table skew_hint.null_t
+drop cascades to table skew_hint.agg_null_skew
+drop cascades to table skew_hint.hex_t
+drop cascades to table skew_hint.bool_t
+drop cascades to table skew_hint.bit_t
+drop cascades to table skew_hint.c_t
+drop cascades to table skew_hint.warehouse
+drop cascades to table skew_hint.store_returns
+drop cascades to table skew_hint."слон"
+drop cascades to table skew_hint.agg_qual
+drop schema hint cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table hint.src
+drop cascades to table hint.hint_t1
+drop cascades to table hint.hint_t2
+drop cascades to table hint.skew_t1

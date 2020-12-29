@@ -1,0 +1,376 @@
+set enable_global_stats = true;
+--
+-- HDFS and Partitioned HDFS table's simple Query&&Aggregate Testing
+--
+create schema simple_query_aggregate;
+set search_path=simple_query_aggregate;
+
+-- Create base line table
+create table t_base (
+        -- >>>>>>>>
+        -- these attributes are distributable/value-partitionable
+        c_distkey       int,
+
+        -- to be tested datatype
+        c_tinyint         tinyint,
+        c_smallint        smallint,
+        c_int             integer,
+        c_bigint          bigint,
+        c_time            time without time zone,
+        c_timetz          time with time zone,
+        c_varchar         varchar,
+        c_varchar2        varchar2,
+        c_char            char(30),
+        c_text            text,
+        c_nvarchar2       nvarchar2,
+        c_numeric         numeric,
+        c_decimal         decimal,
+        c_timestamp       timestamp with time zone,
+        c_timestamptz     timestamp without time zone,
+        c_date            date,
+        c_interval        interval,
+        c_tinterval       tinterval,
+        c_smalldatetime   smalldatetime,
+        -- <<<<<<<<<<<<<<<<<<<
+        c_boolean         boolean,
+        c_money           money,
+        c_real            real,
+        c_double          double precision,
+        c_bit             clob,
+        c_oid             oid
+) distribute by hash(c_distkey);
+
+-- First test CREATE TABLE LIKE clause
+-- 1. LIKE from a normal table
+-- 2. LIKE from a HDFS table
+create table t1 (like t_base) tablespace hdfs_ts;
+
+-- create t1p like t_base, we should define both tablespace and partition
+-- 1.1. LIKE from normal table. RESULTS: should fail in same symptom with normal partition table
+create table t1p (like t_base including all) tablespace hdfs_ts partition by values (c_tinyint, c_smallint, c_int, c_bigint);
+
+-- 1.2 LIKE from normal table. RESULTS: should fail because INCLUDING-DEFAULTS doesn't bring reloptions to value partitioned table
+create table t1p (like t_base including defaults ) partition by values (c_tinyint, c_smallint, c_int, c_bigint);
+
+-- 1.3 LIKE from normal table. RESULTS: should pass because tablespace hdfs_ts indicates that we are in HDFS table
+create table t1p (like t_base including defaults ) tablespace hdfs_ts partition by values (c_tinyint, c_smallint, c_int, c_bigint);
+select relname, parttype, reloptions from pg_class where relname in ('t1', 't1p') order by 1;
+select relname, parttype, partstrategy, partkey from pg_partition where relname in ('t1', 't1p') order by 1;
+drop table t1p;
+
+-- 2.1 LIKE from a HDFS table. Because tablesapce is not inheritable from a like-from table, so the
+-- behavior should be same as like from a none-HDFS table
+create table t1p (like t1 including all ) partition by values (c_tinyint, c_smallint, c_int, c_bigint);
+create table t1p (like t1 including defaults ) partition by values (c_tinyint, c_smallint, c_int, c_bigint);
+create table t1p (like t1 including defaults ) tablespace hdfs_ts partition by values (c_tinyint, c_smallint, c_int, c_bigint);
+select relname, parttype, reloptions from pg_class where relname in ('t1', 't1p') order by 1;
+select relname, parttype, partstrategy, partkey from pg_partition where relname in ('t1', 't1p') order by 1;
+drop table t1p;
+
+
+-- Test basic query
+insert into t_base values(0, 0,0,0,0, time'00:00:00', time'00:00:00', varchar'00000000', varchar2'00000000', char '0', text'00000000', nvarchar2'00000000', 0.1111, 0.11111, timestamp'2015-01-01 00:00:00', timestamp'2015-01-01 00:00:00', date'2015-01-01', interval'1 days 0 hours', tinterval'["2015-01-01 00:00:00" "2015-02-01 00:00:00"]', smalldatetime'2015-01-01:00:00:00', true, money'$0', 0.11111, 0.11111, CLOB'00000000', 00);
+insert into t_base values(1, 1,1,1,1, time'01:01:01', time'01:01:01', varchar'11111111', varchar2'11111111', char '1', text'11111111', nvarchar2'11111111', 1.1111, 1.11111, timestamp'2015-01-01 00:01:01', timestamp'2015-01-01 00:01:01', date'2015-01-01', interval'1 days 1 hours', tinterval'["2015-01-01 00:00:00" "2015-02-01 00:00:00"]', smalldatetime'2015-01-01:00:00:00', true, money'$1', 1.11111, 1.11111, CLOB'11111111', 11);
+insert into t_base values(2, 2,2,2,2, time'02:02:02', time'02:02:02', varchar'22222222', varchar2'22222222', char '2', text'22222222', nvarchar2'22222222', 2.1111, 2.11111, timestamp'2015-01-02 00:02:02', timestamp'2015-01-02 00:02:02', date'2015-02-02', interval'1 days 2 hours', tinterval'["2015-02-01 00:00:00" "2015-02-02 00:00:00"]', smalldatetime'2015-01-02:00:00:00', true, money'$2', 2.11111, 2.11111, CLOB'22222222', 22);
+insert into t_base values(3, 3,3,3,3, time'03:03:03', time'03:03:03', varchar'33333333', varchar2'33333333', char '3', text'33333333', nvarchar2'33333333', 3.1111, 3.11111, timestamp'2015-01-03 00:03:03', timestamp'2015-01-03 00:03:03', date'2015-03-03', interval'1 days 3 hours', tinterval'["2015-03-01 00:00:00" "2015-02-03 00:00:00"]', smalldatetime'2015-01-03:00:00:00', true, money'$3', 3.11111, 3.11111, CLOB'33333333', 33);
+insert into t_base values(4, 4,4,4,4, time'04:04:04', time'04:04:04', varchar'44444444', varchar2'44444444', char '4', text'44444444', nvarchar2'44444444', 4.1111, 4.11111, timestamp'2015-01-04 00:04:04', timestamp'2015-01-04 00:04:04', date'2015-04-04', interval'1 days 4 hours', tinterval'["2015-04-01 00:00:00" "2015-02-04 00:00:00"]', smalldatetime'2015-01-04:00:00:00', true, money'$4', 4.11111, 4.11111, CLOB'44444444', 44);
+insert into t_base values(5, 5,5,5,5, time'05:05:05', time'05:05:05', varchar'55555555', varchar2'55555555', char '5', text'55555555', nvarchar2'55555555', 5.1111, 5.11111, timestamp'2015-01-05 00:05:05', timestamp'2015-01-05 00:05:05', date'2015-05-05', interval'1 days 5 hours', tinterval'["2015-05-01 00:00:00" "2015-02-05 00:00:00"]', smalldatetime'2015-01-05:00:00:00', true, money'$5', 5.11111, 5.11111, CLOB'55555555', 55);
+insert into t_base values(6, 6,6,6,6, time'06:06:06', time'06:06:06', varchar'66666666', varchar2'66666666', char '6', text'66666666', nvarchar2'66666666', 6.1111, 6.11111, timestamp'2015-01-06 00:06:06', timestamp'2015-01-06 00:06:06', date'2015-06-06', interval'1 days 6 hours', tinterval'["2015-06-01 00:00:00" "2015-02-06 00:00:00"]', smalldatetime'2015-01-06:00:00:00', true, money'$6', 6.11111, 6.11111, CLOB'66666666', 66);
+insert into t_base values(7, 7,7,7,7, time'07:07:07', time'07:07:07', varchar'77777777', varchar2'77777777', char '7', text'77777777', nvarchar2'77777777', 7.1111, 7.11111, timestamp'2015-01-07 00:07:07', timestamp'2015-01-07 00:07:07', date'2015-07-07', interval'1 days 7 hours', tinterval'["2015-07-01 00:00:00" "2015-02-07 00:00:00"]', smalldatetime'2015-01-07:00:00:00', true, money'$7', 7.11111, 7.11111, CLOB'77777777', 77);
+insert into t_base values(8, 8,8,8,8, time'08:08:08', time'08:08:08', varchar'88888888', varchar2'88888888', char '8', text'88888888', nvarchar2'88888888', 8.1111, 8.11111, timestamp'2015-01-08 00:08:08', timestamp'2015-01-08 00:08:08', date'2015-08-08', interval'1 days 8 hours', tinterval'["2015-08-01 00:00:00" "2015-02-08 00:00:00"]', smalldatetime'2015-01-08:00:00:00', true, money'$8', 8.11111, 8.11111, CLOB'88888888', 88);
+insert into t_base values(9, 9,9,9,9, time'09:09:09', time'09:09:09', varchar'99999999', varchar2'99999999', char '9', text'99999999', nvarchar2'99999999', 9.1111, 9.11111, timestamp'2015-01-09 00:09:09', timestamp'2015-01-09 00:09:09', date'2015-09-09', interval'1 days 9 hours', tinterval'["2015-09-01 00:00:00" "2015-02-09 00:00:00"]', smalldatetime'2015-01-09:00:00:00', true, money'$9', 9.11111, 9.11111, CLOB'99999999', 99);
+
+-- populate rows to test table
+CREATE OR REPLACE FUNCTION populate_tbase(scaler INTEGER) RETURNS VOID AS
+$$
+DECLARE
+    i INTEGER;
+BEGIN
+    FOR i IN 0..scaler LOOP
+         insert into t_base
+        select
+        c_distkey +   (select max(c_distkey) from t_base),
+        (c_tinyint +  (select max(c_tinyint) from t_base)) % 40,
+        (c_smallint + (select max(c_smallint) from t_base)) % 40,
+        (c_int +      (select max(c_int) from t_base)) % 40,
+        (c_bigint +   (select max(c_bigint) from t_base)) % 40,
+        c_time              ,
+        c_timetz            ,
+        c_varchar           ,
+        c_varchar2          ,
+        c_char              ,
+        c_text              ,
+        c_nvarchar2         ,
+        c_numeric + (select max(c_distkey) from t_base) % 12,
+        c_decimal + (select max(c_distkey) from t_base) % 12,
+        c_timestamp         ,
+        c_timestamptz       ,
+        c_date              ,
+        c_interval          ,
+        c_tinterval         ,
+        c_smalldatetime     ,
+
+        c_boolean           ,
+        c_money             ,
+        (c_real + (select max(c_real) from t_base)) % 100,
+        (c_double + (select max(c_double) from t_base)) % 100,
+        c_bit               ,
+        c_oid
+        from t_base;
+    END LOOP;
+END $$ LANGUAGE plpgsql;
+
+-- extend table size to 20k rows
+select populate_tbase(11);
+select count(*)from t_base;
+
+DROP FUNCTION populate_tbase(INTEGER);
+
+--> Create test functions
+CREATE OR REPLACE FUNCTION SELECT_STAR_TEST(
+    TestName  VARCHAR,
+    param_t1  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+        select count(*)
+        from
+        (
+        select c_distkey, c_tinyint, c_smallint, c_int, c_bigint,c_time,c_timetz,c_varchar,c_varchar2,
+               c_char,c_text,c_nvarchar2,c_numeric,c_decimal,c_timestamp,c_timestamptz,c_date,c_interval,
+               c_tinterval,c_smalldatetime,c_boolean,c_money,c_oid
+        from t_base
+        minus all
+        select c_distkey, c_tinyint, c_smallint, c_int, c_bigint,c_time,c_timetz,c_varchar,c_varchar2,
+               c_char,c_text,c_nvarchar2,c_numeric,c_decimal,c_timestamp,c_timestamptz,c_date,c_interval,
+               c_tinterval,c_smalldatetime,c_boolean,c_money,c_oid
+        from '|| param_t1 ||'
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION SELECT_AGG_MAX(
+    TestName  VARCHAR,
+    param_t1  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+        select count(*)
+        from
+        (
+        select  max(c_distkey),max(c_tinyint),max(c_smallint),max(c_int),max(c_bigint),max(c_time),max(c_timetz),max(c_varchar),max(c_varchar2),
+                max(c_char),max(c_text),max(c_nvarchar2),max(c_numeric),max(c_decimal),max(c_timestamp),max(c_timestamptz),max(c_date),max(c_interval),
+                /* max(c_tinterval), */max(c_smalldatetime),max(c_boolean),max(c_money),max(c_bit),max(c_oid)
+        from t_base
+        minus all
+        select  max(c_distkey),max(c_tinyint),max(c_smallint),max(c_int),max(c_bigint),max(c_time),max(c_timetz),max(c_varchar),max(c_varchar2),
+                max(c_char),max(c_text),max(c_nvarchar2),max(c_numeric),max(c_decimal),max(c_timestamp),max(c_timestamptz),max(c_date),max(c_interval),
+                /* max(c_tinterval), */max(c_smalldatetime),max(c_boolean),max(c_money),max(c_bit),max(c_oid)
+        from '|| param_t1 ||'
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION SELECT_AGG_MIN(
+    TestName  VARCHAR,
+    param_t1  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+        select count(*)
+        from
+        (
+        select  min(c_distkey),min(c_tinyint),min(c_smallint),min(c_int),min(c_bigint),min(c_time),min(c_timetz),min(c_varchar),min(c_varchar2),
+                min(c_char),min(c_text),min(c_nvarchar2),min(c_numeric),min(c_decimal),min(c_timestamp),min(c_timestamptz),min(c_date),min(c_interval),
+                /* min(c_tinterval), */min(c_smalldatetime),min(c_boolean),min(c_money),min(c_bit),min(c_oid)
+        from t_base
+        minus all
+        select  min(c_distkey),min(c_tinyint),min(c_smallint),min(c_int),min(c_bigint),min(c_time),min(c_timetz),min(c_varchar),min(c_varchar2),
+                min(c_char),min(c_text),min(c_nvarchar2),min(c_numeric),min(c_decimal),min(c_timestamp),min(c_timestamptz),min(c_date),min(c_interval),
+                /* min(c_tinterval), */min(c_smalldatetime),min(c_boolean),min(c_money),min(c_bit),min(c_oid)
+        from '|| param_t1 ||'
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION SELECT_AGG_AVG(
+    TestName  VARCHAR,
+    param_t1  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+        select count(*)
+        from
+        (
+        select  avg(c_distkey),avg(c_tinyint),avg(c_smallint),avg(c_int),avg(c_bigint),avg(c_varchar),avg(c_varchar2),
+                avg(c_char),avg(c_text),avg(c_nvarchar2),avg(c_numeric),avg(c_decimal)
+        from t_base
+        minus all
+        select  avg(c_distkey),avg(c_tinyint),avg(c_smallint),avg(c_int),avg(c_bigint),avg(c_varchar),avg(c_varchar2),
+                avg(c_char),avg(c_text),avg(c_nvarchar2),avg(c_numeric),avg(c_decimal)
+        from '|| param_t1 ||'
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION SELECT_AGG_SUM(
+    TestName  VARCHAR,
+    param_t1  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+        select count(*)
+        from
+        (
+        select  sum(c_distkey),sum(c_tinyint),sum(c_smallint),sum(c_int),sum(c_bigint),sum(c_varchar),sum(c_varchar2),
+                sum(c_char),sum(c_text),sum(c_nvarchar2),sum(c_numeric),sum(c_decimal)
+        from t_base
+        minus all
+        select  sum(c_distkey),sum(c_tinyint),sum(c_smallint),sum(c_int),sum(c_bigint),sum(c_varchar),sum(c_varchar2),
+                sum(c_char),sum(c_text),sum(c_nvarchar2),sum(c_numeric),sum(c_decimal)
+        from '|| param_t1 ||'
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION SELECT_AGG_COUNT(
+    TestName  VARCHAR,
+    param_t1  VARCHAR
+) RETURNS TEXT 
+AS $$
+DECLARE
+    count_result INTEGER;
+BEGIN
+    EXECUTE
+    '
+        select count(*)
+        from
+        (
+        select  count( c_distkey),count( c_tinyint),count( c_smallint),count( c_int),count( c_bigint),count( c_varchar),count( c_varchar2),
+                count( c_char),count( c_text),count( c_nvarchar2),count( c_numeric),count( c_decimal)
+        from t_base
+        minus all
+        select  count( c_distkey),count( c_tinyint),count( c_smallint),count( c_int),count( c_bigint),count( c_varchar),count( c_varchar2),
+                count( c_char),count( c_text),count( c_nvarchar2),count( c_numeric),count( c_decimal)
+        from '|| param_t1 ||'
+    )
+    '
+    INTO count_result;
+      
+    return TestName || ' return code:' || count_result;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Test start
+create table t1 (like t_base including all ) tablespace hdfs_ts;
+create table t1p1 (like t1 including defaults ) tablespace hdfs_ts partition by values (c_tinyint, c_smallint, c_int, c_bigint);
+create table t1p2 (like t1 including defaults ) tablespace hdfs_ts partition by values (c_time, c_timetz, c_varchar, c_varchar2);
+create table t1p3 (like t1 including defaults ) tablespace hdfs_ts partition by values (c_decimal, c_timestamp, c_timestamptz, c_date);
+create table t1p4 (like t1 including defaults ) tablespace hdfs_ts partition by values (c_interval, c_smalldatetime);
+select relname, parttype, reloptions from pg_class where relname in ('t1','t1p1','t1p2','t1p3','t1p4') order by 1;
+select relname, parttype, partstrategy, partkey from pg_partition where relname in ('t1','t1p1','t1p2','t1p3','t1p4') order by 1;
+
+select SELECT_STAR_TEST('dummy test', 't1');
+select SELECT_AGG_MAX('dummy test', 't1');
+select SELECT_AGG_MIN('dummy test', 't1');
+select SELECT_AGG_SUM('dummy test', 't1');
+select SELECT_AGG_AVG('dummy test', 't1');
+select SELECT_AGG_COUNT('dummy test', 't1');
+
+set cstore_insert_mode = delta;
+insert into t1 select * from t_base where c_distkey   > 30000;
+insert into t1p1 select * from t_base where c_distkey > 30000;
+insert into t1p2 select * from t_base where c_distkey > 30000;
+insert into t1p3 select * from t_base where c_distkey > 30000;
+insert into t1p4 select * from t_base where c_distkey > 30000;
+
+set cstore_insert_mode = main;
+insert into t1 select * from t_base where c_distkey   <= 30000;
+insert into t1p1 select * from t_base where c_distkey <= 30000;
+insert into t1p2 select * from t_base where c_distkey <= 30000;
+insert into t1p3 select * from t_base where c_distkey <= 30000;
+insert into t1p4 select * from t_base where c_distkey <= 30000;
+
+
+select SELECT_STAR_TEST('select * test for t1, return code:', 't1');
+select SELECT_STAR_TEST('select * test for t1p1, return code:', 't1p1');
+select SELECT_STAR_TEST('select * test for t1p2, return code:', 't1p2');
+select SELECT_STAR_TEST('select * test for t1p3, return code:', 't1p3');
+select SELECT_STAR_TEST('select * test for t1p4, return code:', 't1p4');
+
+select SELECT_AGG_MAX('select max test for t1, return code:', 't1');
+select SELECT_AGG_MAX('select max test for t1p1, return code:', 't1p1');
+select SELECT_AGG_MAX('select max test for t1p2, return code:', 't1p2');
+select SELECT_AGG_MAX('select max test for t1p3, return code:', 't1p3');
+select SELECT_AGG_MAX('select max test for t1p4, return code:', 't1p4');
+
+select SELECT_AGG_MIN('select min test for t1, return code:', 't1');
+select SELECT_AGG_MIN('select min test for t1p1, return code:', 't1p1');
+select SELECT_AGG_MIN('select min test for t1p2, return code:', 't1p2');
+select SELECT_AGG_MIN('select min test for t1p3, return code:', 't1p3');
+select SELECT_AGG_MIN('select min test for t1p4, return code:', 't1p4');
+
+select SELECT_AGG_AVG('select avg test for t1, return code:', 't1');
+select SELECT_AGG_AVG('select avg test for t1p1, return code:', 't1p1');
+select SELECT_AGG_AVG('select avg test for t1p2, return code:', 't1p2');
+select SELECT_AGG_AVG('select avg test for t1p3, return code:', 't1p3');
+select SELECT_AGG_AVG('select avg test for t1p4, return code:', 't1p4');
+
+select SELECT_AGG_SUM('select sum test for t1, return code:', 't1');
+select SELECT_AGG_SUM('select sum test for t1p1, return code:', 't1p1');
+select SELECT_AGG_SUM('select sum test for t1p2, return code:', 't1p2');
+select SELECT_AGG_SUM('select sum test for t1p3, return code:', 't1p3');
+select SELECT_AGG_SUM('select sum test for t1p4, return code:', 't1p4');
+
+select SELECT_AGG_COUNT('select count test for t1, return code:', 't1');
+select SELECT_AGG_COUNT('select count test for t1p1, return code:', 't1p1');
+select SELECT_AGG_COUNT('select count test for t1p2, return code:', 't1p2');
+select SELECT_AGG_COUNT('select count test for t1p3, return code:', 't1p3');
+select SELECT_AGG_COUNT('select count test for t1p4, return code:', 't1p4');
+
+-- Start Test
+
+-- Test end
+drop table t_base;
+drop table t1;
+drop schema simple_query_aggregate cascade;

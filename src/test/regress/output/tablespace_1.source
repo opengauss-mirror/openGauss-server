@@ -25,7 +25,7 @@ CREATE TABLESPACE test_spc5 LOCATION '@abs_srcdir@/tmp_check/coordina';
 create user drop_space_user password "huawei@123";
 set role drop_space_user password "huawei@123";
 DROP TABLESPACE testspace;
-ERROR:  must be owner of tablespace testspace
+ERROR:  permission denied for tablespace testspace
 reset role;
 drop user drop_space_user;
 DROP TABLESPACE test_spc_base;

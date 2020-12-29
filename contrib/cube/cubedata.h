@@ -1,4 +1,6 @@
 /* contrib/cube/cubedata.h */
+#ifndef CUBEDATA_H
+#define CUBEDATA_H
 
 #define CUBE_MAX_DIM (100)
 
@@ -11,3 +13,5 @@ typedef struct NDBOX {
 #define DatumGetNDBOX(x) ((NDBOX*)DatumGetPointer(x))
 #define PG_GETARG_NDBOX(x) DatumGetNDBOX(PG_DETOAST_DATUM(PG_GETARG_DATUM(x)))
 #define PG_RETURN_NDBOX(x) PG_RETURN_POINTER(x)
+
+#endif

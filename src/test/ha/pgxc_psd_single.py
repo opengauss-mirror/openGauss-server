@@ -282,16 +282,16 @@ class Pterodb():
 	def __stop_server(self):
 		#stop data node
 		for i in range(1,self.data_node_num+1):
-			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i)
+			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + " -Z single_node"
 			print datanode_cmd
 			os.system(datanode_cmd)
 		#stop data node standby
 		for i in range(1,self.data_node_num+1):
-			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + "_standby"
+			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + "_standby" + " -Z single_node"
 			print datanode_cmd
 			os.system(datanode_cmd)
 			
-			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + "_dummystandby"
+			datanode_cmd = install_path + "/bin/gs_ctl stop -D " + self.data_dir + "/" + self.dname_prefix  + str(i) + "_dummystandby" + " -Z single_node"
 			print datanode_cmd
 			os.system(datanode_cmd)
 

@@ -21,7 +21,7 @@
 #include "utils/anls_opt.h"
 #include <signal.h>
 #include "datatype/timestamp.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 
 class ThreadInstrumentation;
 class StreamInstrumentation;
@@ -267,6 +267,7 @@ typedef struct Instrumentation {
     uint64 minmaxFilterRows;
     double init_time; /*	executor start time	*/
     double end_time;  /*	executor end time	*/
+    double run_time;  /*	executor run time	*/
     /* Count up the number of hdfs local block read. */
     double localBlock;
     /* Count up the number of hdfs remote blocks read. */
@@ -320,11 +321,6 @@ typedef struct Instrumentation {
     RecursiveInfo recursiveInfo;
 } Instrumentation;
 
-typedef struct WorkerInstrumentation {
-    int num_workers; /* # of structures that follow */
-    Instrumentation instrument[FLEXIBLE_ARRAY_MEMBER];
-} WorkerInstrumentation;
-
 /* instrumentation data */
 typedef struct InstrStreamPlanData {
     /* whether the plannode is valid */
@@ -369,6 +365,12 @@ enum ThreadTrack {
     CSTORE_PROJECT,
     LLVM_COMPILE_TIME,
     CNNET_INIT,
+    CN_CHECK_AND_UPDATE_NODEDEF,
+    CN_SERIALIZE_PLAN,
+    CN_SEND_QUERYID_WITH_SYNC,
+    CN_SEND_BEGIN_COMMAND,
+    CN_START_COMMAND,
+    DN_STREAM_THREAD_INIT,
     FILL_LATER_BATCH,
     GET_CU_DATA_LATER_READ,
     GET_CU_SIZE,
@@ -380,6 +382,9 @@ enum ThreadTrack {
     GET_COMPUTE_POOL_CONNECTION,
     GET_PG_LOG_TUPLES,
     GET_GS_PROFILE_TUPLES,
+    TSSTORE_PROJECT,
+    TSSTORE_SEARCH,
+    TSSTORE_SEARCH_TAGID,
 
     TRACK_NUM
 };
@@ -431,6 +436,8 @@ typedef struct ThreadInstrInfo {
     int offset;
 
 } ThreadInstrInfo;
+
+struct Plan;
 
 /*
  * thread instrumentation
@@ -685,11 +692,10 @@ public:
     /* get threadinstrArray in idx(DN) and planNodeId */
     ThreadInstrumentation* getThreadInstrumentationCN(int idx, int planNodeId, int smp)
     {
-        int offset =
-            m_planIdOffsetArray[planNodeId - 1] == 0 ? -1 : (m_planIdOffsetArray[planNodeId - 1] - 1) * m_query_dop;
-        int dn_num_streams = DN_NUM_STREAMS_IN_CN(m_num_streams, m_gather_count, m_query_dop);
-
         Assert(planNodeId >= 1 && planNodeId <= m_plannodes_num);
+        int offset =
+            (m_planIdOffsetArray[planNodeId - 1] == 0) ? -1 : (m_planIdOffsetArray[planNodeId - 1] - 1) * m_query_dop;
+        int dn_num_streams = DN_NUM_STREAMS_IN_CN(m_num_streams, m_gather_count, m_query_dop);
 
         if (offset == -1)
             return m_threadInstrArray[0];
@@ -698,9 +704,11 @@ public:
     }
 
     /* get ThreadInstrumentation in DN */
-    ThreadInstrumentation* getThreadInstrumentationDN(int planNodeId)
+    ThreadInstrumentation* getThreadInstrumentationDN(int planNodeId, int smpId)
     {
-        return m_threadInstrArray[m_planIdOffsetArray[planNodeId - 1] * m_query_dop];
+        Assert(planNodeId >= 1 && planNodeId <= m_plannodes_num);
+        int offset = m_planIdOffsetArray[planNodeId - 1] * m_query_dop;
+        return m_threadInstrArray[offset + smpId];
     }
 
     /* get threadinstrumentation of current CN */
@@ -891,10 +899,10 @@ typedef struct OperatorInfo {
     int64 peak_memory;
     int64 spill_size;
     TimestampTz enter_time;
-    int64 execute_time;
     int64 startup_time;
-    int status;
-    int warning;
+    int64 execute_time;
+    uint status;
+    uint warning;
 
     int ec_operator;
     int ec_status;
@@ -987,8 +995,8 @@ typedef struct size_info {
     double startup_time;
     double duration_time; /* max execute time */
     char* plan_node_name;
-    int warn_prof_info;
-    int status;
+    uint warn_prof_info;
+    uint status;
     bool has_data;
     int dn_count;
 
@@ -1005,14 +1013,9 @@ typedef struct size_info {
 extern OperatorProfileTable g_operator_table;
 
 extern Instrumentation* InstrAlloc(int n, int instrument_options);
-extern void InstrInit(Instrumentation *instr, int instrument_options);
 extern void InstrStartNode(Instrumentation* instr);
 extern void InstrStopNode(Instrumentation* instr, double nTuples);
 extern void InstrEndLoop(Instrumentation* instr);
-extern void InstrAggNode(Instrumentation *dst, Instrumentation *add);
-extern void InstrStartParallelQuery(void);
-extern void InstrEndParallelQuery(BufferUsage *result);
-extern void InstrAccumParallelQuery(BufferUsage *result);
 extern void StreamEndLoop(StreamTime* instr);
 extern void AddControlMemoryContext(Instrumentation* instr, MemoryContext context);
 extern void CalculateContextSize(MemoryContext ctx, int64* memorySize);
@@ -1044,8 +1047,8 @@ extern void ExplainCreateDNodeInfoOnDN(
 extern uint32 GetHashPlanCode(const void* key1, Size keysize);
 extern void InitOperStatProfile(void);
 extern void* ExplainGetSessionStatistics(int* num);
-extern void ExplainSetSessionInfo(int plan_node_id, Instrumentation* instr, bool on_datanode, 
-    const char* plan_name, int dop, int64 estimated_rows, TimestampTz current_time, OperatorPlanInfo* opt_plan_info);
+extern void ExplainSetSessionInfo(int plan_node_id, Instrumentation* instr, bool on_datanode, const char* plan_name,
+    int dop, int64 estimated_rows, TimestampTz current_time, OperatorPlanInfo* opt_plan_info);
 extern void* ExplainGetSessionInfo(const Qpid* qid, int removed, int* num);
 extern void releaseExplainTable();
 extern bool IsQpidInvalid(const Qpid* qid);
@@ -1053,8 +1056,8 @@ extern void sendExplainInfo(OperatorInfo* sessionMemory);
 extern void ExplainStartToGetStatistics(void);
 extern void removeExplainInfo(int plan_node_id);
 extern void OperatorStrategyFunc4SessionInfo(StringInfo msg, void* suminfo, int size);
-extern void setOperatorInfo(
-    OperatorInfo *operatorMemory, Instrumentation *InstrMemory, OperatorPlanInfo* opt_plan_info = NULL);
+extern void setOperatorInfo(OperatorInfo* operatorMemory, Instrumentation* InstrMemory,
+    OperatorPlanInfo* opt_plan_info = NULL);
 extern int64 e_rows_convert_to_int64(double plan_rows);
 extern void releaseOperatorInfoEC(OperatorInfo* sessionMemory);
 #endif /* INSTRUMENT_H */

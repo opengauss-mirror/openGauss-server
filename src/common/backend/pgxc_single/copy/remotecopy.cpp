@@ -78,7 +78,7 @@ void RemoteCopy_GetRelationLoc(RemoteCopyData* state, Relation rel, List* attnum
          * locator information.
          */
         if (attnums != NIL) {
-            ListCell* cur;
+            ListCell* cur = NULL;
             foreach (cur, attnums) {
                 int attnum = lfirst_int(cur);
                 if (state->rel_loc->partAttrNum == attnum) {

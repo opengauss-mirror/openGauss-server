@@ -23,10 +23,14 @@
 #include "knl/knl_variable.h"
 
 #include "access/sysattr.h"
-#include "catalog/gs_opt_model.h"
 #include "catalog/gs_obsscaninfo.h"
+#include "catalog/gs_opt_model.h"
+#include "catalog/gs_policy_label.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_aggregate.h"
+#include "catalog/gs_client_global_keys.h"
+#include "catalog/gs_column_keys.h"
+#include "catalog/gs_encrypted_columns.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
 #include "catalog/pg_auth_members.h"
@@ -76,6 +80,9 @@
 #include "catalog/pg_type.h"
 #include "catalog/pg_user_mapping.h"
 #include "catalog/pg_extension_data_source.h"
+#include "catalog/pg_streaming_stream.h"
+#include "catalog/pg_streaming_cont_query.h"
+#include "catalog/pg_streaming_reaper_status.h"
 #ifdef PGXC
 #include "catalog/pgxc_class.h"
 #include "catalog/pgxc_node.h"
@@ -83,6 +90,7 @@
 #include "catalog/pg_resource_pool.h"
 #include "catalog/pg_workload_group.h"
 #include "catalog/pg_app_workloadgroup_mapping.h"
+#include "catalog/pgxc_slice.h"
 #endif
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -132,12 +140,11 @@ struct cachedesc {
     int nbuckets; /* number of hash buckets for this cache */
 };
 
-static const struct cachedesc cacheinfo[] = {
-    {AggregateRelationId, /* AGGFNOID */
-        AggregateFnoidIndexId,
-        1,
-        {Anum_pg_aggregate_aggfnoid, 0, 0, 0},
-        32},
+static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID */
+                                                 AggregateFnoidIndexId,
+                                                 1,
+                                                 {Anum_pg_aggregate_aggfnoid, 0, 0, 0},
+                                                 32},
     {AccessMethodRelationId, /* AMNAME */
         AmNameIndexId,
         1,
@@ -196,11 +203,26 @@ static const struct cachedesc cacheinfo[] = {
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         128},
+    {HashBucketRelationId, /* BUCKETRELID */
+        HashBucketOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        256},
     {CastRelationId, /* CASTSOURCETARGET */
         CastSourceTargetIndexId,
         2,
         {Anum_pg_cast_castsource, Anum_pg_cast_casttarget, 0, 0},
         256},
+    {ClientLogicCachedColumnsId, /* CEOID */
+        GsSecEncryptedColumnsOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        128},
+    {ClientLogicCachedColumnsId, /* CERELIDCOUMNNAME */
+        GsSecEncryptedColumnsRelidColumnnameIndexId,
+        2,
+        {Anum_gs_encrypted_columns_rel_id, Anum_gs_encrypted_columns_column_name, 0, 0},
+        128},
     {OperatorClassRelationId, /* CLAAMNAMENSP */
         OpclassAmNameNspIndexId,
         3,
@@ -221,6 +243,22 @@ static const struct cachedesc cacheinfo[] = {
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         64},
+    {ClientLogicColumnSettingsId, /* COLUMNSETTINGDISTID */
+        ClientLogicColumnSettingDistributedIdIndexId,
+        1,
+        {Anum_gs_column_keys_column_key_distributed_id, 0, 0, 0},
+        128
+    },
+    {ClientLogicColumnSettingsId, /* COLUMNSETTINGNAME */
+        ClientLogicColumnSettingsNameIndexId,
+        2,
+        {Anum_gs_column_keys_column_key_name, Anum_gs_column_keys_key_namespace, 0, 0},
+        128},
+    {ClientLogicColumnSettingsId, /* COLUMNSETTINGOID */
+        ClientLogicColumnSettingsOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        128},
     {ConversionRelationId, /* CONDEFAULT */
         ConversionDefaultIndexId,
         4,
@@ -266,6 +304,16 @@ static const struct cachedesc cacheinfo[] = {
         3,
         {Anum_pg_default_acl_defaclrole, Anum_pg_default_acl_defaclnamespace, Anum_pg_default_acl_defaclobjtype, 0},
         256},
+    {PgDirectoryRelationId, /* DIRECTORYNAME */
+        PgDirectoryDirectoriesNameIndexId,
+        1,
+        {Anum_pg_directory_directory_name, 0, 0, 0},
+        64},
+    {PgDirectoryRelationId, /* DIRECTORYOID */
+        PgDirectoryOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        64},
     {EnumRelationId, /* ENUMOID */
         EnumOidIndexId,
         1,
@@ -300,6 +348,16 @@ static const struct cachedesc cacheinfo[] = {
         ForeignTableRelidIndexId,
         1,
         {Anum_pg_foreign_table_ftrelid, 0, 0, 0},
+        128},
+    {ClientLogicGlobalSettingsId, /* GLOBAL_KEY_NAME */
+        ClientLogicGlobalSettingsNameIndexId,
+        2,
+        {Anum_gs_client_global_keys_global_key_name, Anum_gs_client_global_keys_key_namespace, 0, 0},
+        128},
+    {ClientLogicGlobalSettingsId, /* GLOBAL_KEY_ID */
+        ClientLogicGlobalSettingsOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
         128},
     {IndexRelationId, /* INDEXRELID */
         IndexRelidIndexId,
@@ -363,6 +421,21 @@ static const struct cachedesc cacheinfo[] = {
         3,
         {Anum_pg_partition_relname, Anum_pg_partition_parttype, Anum_pg_partition_parentid, 0},
         1024},
+    {PgJobRelationId, /* PGJOBID */
+        PgJobIdIndexId,
+        1,
+        {Anum_pg_job_job_id, 0, 0, 0},
+        2048},
+    {PgJobProcRelationId, /* PGJOBPROCID */
+        PgJobProcIdIndexId,
+        1,
+        {Anum_pg_job_proc_job_id, 0, 0, 0},
+        128},
+    {PgObjectRelationId, /* PGOBJECTID */
+        PgObjectIndex,
+        2,
+        {Anum_pg_object_oid, Anum_pg_object_type, 0, 0},
+        2048},
 
 #ifdef PGXC
     {PgxcClassRelationId, /* PGXCCLASSRELID */
@@ -425,7 +498,22 @@ static const struct cachedesc cacheinfo[] = {
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         256},
+    {PgxcSliceRelationId, /* PGXCSLICERELID */
+        PgxcSliceIndexId,
+        4,
+        {Anum_pgxc_slice_relid, Anum_pgxc_slice_type, Anum_pgxc_slice_relname, Anum_pgxc_slice_sindex},
+        1024},
 #endif
+    {GsPolicyLabelRelationId, /* POLICYLABELNAME */
+        GsPolicyLabelNameIndexId,
+        3,
+        {Anum_gs_policy_label_labelname, Anum_gs_policy_label_fqdnnamespace, Anum_gs_policy_label_fqdnid, 0},
+        256},
+    {GsPolicyLabelRelationId, /* POLICYLABELOID */
+        GsPolicyLabelOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        256},
     {ProcedureRelationId, /* PROCNAMEARGSNSP */
         ProcedureNameArgsNspIndexId,
         3,
@@ -472,14 +560,79 @@ static const struct cachedesc cacheinfo[] = {
             Anum_pg_statistic_ext_stainherit,
             Anum_pg_statistic_ext_stakey},
         1024},
+    {StreamingContQueryRelationId, /* STREAMCQDEFRELID */
+        StreamingContQueryDefrelidIndexId,
+        1,
+        {Anum_streaming_cont_query_defrelid, 0, 0, 0},
+        2048},
+    {StreamingContQueryRelationId, /* STREAMCQID */
+        StreamingContQueryIdIndexId,
+        1,
+        {Anum_streaming_cont_query_id, 0, 0, 0},
+        2048},
+    {StreamingContQueryRelationId, /* STREAMCQLOOKUPID */
+        StreamingContQueryLookupidxidIndexId,
+        1,
+        {Anum_streaming_cont_query_lookupidxid, 0, 0, 0},
+        2048},
+    {StreamingContQueryRelationId, /* STREAMCQMATRELID */
+        StreamingContQueryMatrelidIndexId,
+        1,
+        {Anum_streaming_cont_query_matrelid, 0, 0, 0},
+        2048},
+    {StreamingContQueryRelationId, /* STREAMCQOID */
+        StreamingContQueryOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        2048},
+    {StreamingContQueryRelationId, /* STREAMCQRELID */
+        StreamingContQueryRelidIndexId,
+        1,
+        {Anum_streaming_cont_query_relid, 0, 0, 0},
+        2048},
+    {StreamingContQueryRelationId, /* STREAMCQSCHEMACHANGE */
+        StreamingContQuerySchemaChangeIndexId,
+        2,
+        {Anum_streaming_cont_query_matrelid, Anum_streaming_cont_query_active, 0, 0},
+        2048},
+    {StreamingStreamRelationId, /* STREAMOID */
+        StreamingStreamOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        2048},
+    {StreamingStreamRelationId, /* STREAMRELID */
+        StreamingStreamRelidIndexId,
+        1,
+        {Anum_streaming_stream_relid, 0, 0, 0},
+        2048},
+    {StreamingReaperStatusRelationId, /* REAPERCQOID */
+        StreamingReaperStatusOidIndexId,
+        1,
+        {Anum_streaming_reaper_status_id, 0, 0, 0},
+        2048},
+    {StreamingReaperStatusRelationId, /* REAPERSTATUSOID */
+        StreamingCQReaperStatusOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        2048},
+    {PgSynonymRelationId, /* SYNOID */
+        SynonymOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        64},
+    {PgSynonymRelationId, /* SYNONYMNAMENSP */
+        SynonymNameNspIndexId,
+        2,
+        {Anum_pg_synonym_synname, Anum_pg_synonym_synnamespace, 0, 0},
+        64},
     {TableSpaceRelationId, /* TABLESPACEOID */
         TablespaceOidIndexId,
         1,
         {
-            ObjectIdAttributeNumber,
-            0,
-            0,
-            0,
+        ObjectIdAttributeNumber,
+        0,
+        0,
+        0,
         },
         16},
     {TSConfigMapRelationId, /* TSCONFIGMAP */
@@ -547,56 +700,23 @@ static const struct cachedesc cacheinfo[] = {
         2,
         {Anum_pg_user_mapping_umuser, Anum_pg_user_mapping_umserver, 0, 0},
         128},
-    {UserStatusRelationId, /* USERSTATUSROLEID */
-        UserStatusRoleidIndexId,
-        1,
-        {Anum_pg_user_status_roloid, 0, 0, 0},
-        128},
     {UserStatusRelationId, /* USERSTATUSOID */
         UserStatusOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         128},
-    {PgJobRelationId, /* PGJOBID */
-        PgJobIdIndexId,
+    {UserStatusRelationId, /* USERSTATUSROLEID */
+        UserStatusRoleidIndexId,
         1,
-        {Anum_pg_job_job_id, 0, 0, 0},
-        2048},
-    {PgJobProcRelationId, /* PGJOBPROCID */
-        PgJobProcIdIndexId,
-        1,
-        {Anum_pg_job_proc_job_id, 0, 0, 0},
+        {Anum_pg_user_status_roloid, 0, 0, 0},
         128},
-    {PgDirectoryRelationId, /* DIRECTORYOID */
-        PgDirectoryOidIndexId,
-        1,
-        {ObjectIdAttributeNumber, 0, 0, 0},
-        64},
-    {PgDirectoryRelationId, /* DIRECTORYNAME */
-        PgDirectoryDirectoriesNameIndexId,
-        1,
-        {Anum_pg_directory_directory_name, 0, 0, 0},
-        64},
-    {PgObjectRelationId, /* PGOBJECT */
-        PgObjectIndex,
-        2,
-        {Anum_pg_object_oid, Anum_pg_object_type, 0, 0},
-        2048},
-    {PgSynonymRelationId, /* SYNONYMNAMENSP */
-        SynonymNameNspIndexId,
-        2,
-        {Anum_pg_synonym_synname, Anum_pg_synonym_synnamespace, 0, 0},
-        64},
-    {PgSynonymRelationId, /* SYNOID */
-        SynonymOidIndexId,
-        1,
-        {ObjectIdAttributeNumber, 0, 0, 0},
-        64},
-    {HashBucketRelationId, /* BUCKETRELID */
-        HashBucketOidIndexId,
-        1,
-        {ObjectIdAttributeNumber, 0, 0, 0},
-        256}};
+    {AggregateRelationId, /* STREAMINGGATHERAGGOID */
+        StreamingGatherAggIndexId,
+        3,
+        {Anum_pg_aggregate_aggtransfn, Anum_pg_aggregate_aggcollectfn, 
+         Anum_pg_aggregate_aggfinalfn, 0},
+        128}
+};
 
 int SysCacheSize = lengthof(cacheinfo);
 
@@ -623,11 +743,10 @@ void InitCatalogCache(void)
             cacheinfo[cacheId].nkeys,
             cacheinfo[cacheId].key,
             cacheinfo[cacheId].nbuckets);
-        if (!PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId])) {
+        if (!PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId]))
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("could not initialize cache %u (%d)", cacheinfo[cacheId].reloid, cacheId)));
-        }
     }
     u_sess->syscache_cxt.CacheInitialized = true;
 }

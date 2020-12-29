@@ -1,0 +1,156 @@
+--create normal tablespace
+\! rm -rf @abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts
+drop tablespace if exists hdfs_ts;
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/temp_dir/hdfs_ts');
+create schema hdfs_tablespc;
+set search_path = hdfs_tablespc;
+-- create dfs table 
+drop table if exists hdfs_table; 
+create table hdfs_table (a int) tablespace hdfs_ts;
+select relname, reloptions from pg_class where oid = 'hdfs_table'::regclass;
+
+drop table if exists hdfs_table; 
+create table hdfs_table (a int)with(orientation=orc) tablespace hdfs_ts;
+select relname, reloptions from pg_class where oid = 'hdfs_table'::regclass;
+
+drop table if exists hdfs_table; 
+create table hdfs_table (a int)with(orientation=column) tablespace hdfs_ts;
+select relname, reloptions from pg_class where oid = 'hdfs_table'::regclass;
+
+drop table if exists hdfs_table; 
+create table hdfs_table (a int)with(version=0.12) tablespace hdfs_ts;
+select relname, reloptions from pg_class where oid = 'hdfs_table'::regclass;
+
+--clean enviroment
+drop table if exists hdfs_table; 
+drop tablespace if exists hdfs_ts;
+\! rm -rf @abs_srcdir@/tmp_check/temp_hdfs_dir
+
+-- SQLONHADOOP-9
+-- if the filesystem is GENERAL, do not allow to assign address, cfgpath, storepath
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='general', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/temp_dir/hdfs_ts');
+
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='general', cfgpath='@hdfscfgpath@');
+
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(cfgpath='@hdfscfgpath@');
+
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='general', storepath='/@hdfsstoreplus@/temp_dir/hdfs_ts');
+
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='', storepath='/@hdfsstoreplus@/temp_dir/hdfs_ts');
+
+--SQLONHADOOP-7
+--error address
+create tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts'with (filesystem = 'HDFS', address = '192.168.12725000,192.168.127.9:25000' , cfgpath = '@hdfscfgpath@', storepath='/@hdfsstoreplus@/tablespace/test1');
+
+--right address, create tablespace success
+create tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts'with (filesystem = 'HDFS', address = '@hdfshostname@:@hdfsport@' , cfgpath = '@hdfscfgpath@', storepath='/@hdfsstoreplus@/tablespace/test1');
+
+drop tablespace if exists hdfs_ts;
+
+--error cfgpath
+create tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts'with (filesystem = 'HDFS', address = '@hdfshostname@:@hdfsport@' , cfgpath = '/home/hanfeng/FI_client/hadoop_client/HDFS/hadoop/etc/', storepath='/@hdfsstoreplus@/tablespace/test1');
+
+--right cfgpath, create tablespace success
+create tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts'with (filesystem = 'HDFS', address = '@hdfshostname@:@hdfsport@' , cfgpath = '@hdfscfgpath@', storepath='/@hdfsstoreplus@/tablespace/test1');
+
+drop tablespace if exists hdfs_ts;
+
+--SQLONHADOOP-5
+create tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts'with (filesystem = 'HDFS', address = '@hdfshostname@:@hdfsport@' , cfgpath = '@hdfscfgpath@', storepath = 'NULL');
+
+--SQLONHADOOP-4
+create tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts'with (filesystem = 'HDFS', address = '@hdfshostname@:@hdfsport@' , cfgpath = '@hdfscfgpath@', storepath='/@hdfsstoreplus@/tablespace/test1');
+
+create table temp_00(a int) tablespace hdfs_ts;
+drop tablespace if exists hdfs_ts;
+drop table temp_00;
+drop tablespace if exists hdfs_ts;
+
+
+create tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts'with (filesystem = '', address = '@hdfshostname@:@hdfsport@' , cfgpath = '@hdfscfgpath@', storepath='/@hdfsstoreplus@/tablespace/test1');
+create tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts'with (filesystem = 'HDFS', address = '' , cfgpath = '@hdfscfgpath@', storepath='/@hdfsstoreplus@/tablespace/test1');
+create tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts'with (filesystem = 'HDFS', address = '@hdfshostname@:@hdfsport@' , cfgpath = '', storepath='/@hdfsstoreplus@/tablespace/test1');
+create tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts'with (filesystem = 'HDFS', address = '@hdfshostname@:@hdfsport@' , cfgpath = '@hdfscfgpath@', storepath = '');
+
+--SQLONHADOOP-19
+\! rm -rf @abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts
+drop tablespace if exists hdfs_ts;
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/temp_dir/hdfs_ts');
+--create success
+create table ori10(a text)with(compression='no',orientation=orc,version=0.12)tablespace hdfs_ts;
+drop table ori10;
+--create fail
+create table ori11(a text)with(compression='no',orientation=column,version=0.11)tablespace hdfs_ts;
+drop table if exists ori11;
+--create fail
+create table gen1(a text)with(compression='no',orientation=orc,version=0.11);
+--create fail
+create table gen2(a text)with(compression='no',orientation=colum,version=0.11);
+--create fail
+create table gen3(a text)with(compression='no',orientation='column',version=0.11);
+--create success
+create table gen4(a text)with(compression='no',orientation=row);
+drop table gen4;
+
+--SQLONHADOOP-18 
+create table gen1(a text) with (compression='no',orientation=orc,version=0.11);
+
+--SQLONHADOOP-17
+create table ori4(a text) with (compression='no',orientation='column',version='');
+create table ori4(a text) with (compression='no',orientation='column');
+select reloptions from pg_class where relname='ori4';
+drop table ori4;
+
+--SQLONHADOOP-16
+create table ori1(a text)with (compression='no',orientation='cu',version=0.12) tablespace hdfs_ts;
+create table ori2(a text)with (compression='no',orientation='orc',version=000000) tablespace hdfs_ts;
+create table ori3(a text)with (compression='no',orientation='orc',version=0.13) tablespace hdfs_ts;
+
+--SQLONHADOOP-15 
+create table com1(a text) with (compression='zlib',orientation='orc',version=0.12) tablespace hdfs_ts;
+drop table com1;
+create table com1(a text) with (compression='snappy',orientation='orc',version=0.12) tablespace hdfs_ts;
+drop table com1;
+--error
+create table com3(a text) with (compression='no',orientation='orc',version=0.12)tablespace hdfs_ts;
+create table com3(a text) with (compression='yes',orientation='orc',version=0.12)tablespace hdfs_ts;
+create table com3(a text) with (compression='low',orientation='orc',version=0.12)tablespace hdfs_ts;
+create table com3(a text) with (compression='middle',orientation='orc',version=0.12)tablespace hdfs_ts;
+create table com3(a text) with (compression='high',orientation='orc',version=0.12)tablespace hdfs_ts;
+
+drop schema hdfs_tablespc cascade;
+create schema hdfs_tablespc;
+set search_path = hdfs_tablespc;
+--error filesystem
+drop tablespace if exists hdfs_ts;
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='errorfilesystem', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/temp_dir/hdfs_ts');
+
+--error address
+drop tablespace if exists hdfs_ts;
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='hdfs', address='10.67.528.30:25000,10.67.128.28:25000', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/temp_dir/hdfs_ts');
+
+--error cfgpath
+drop tablespace if exists hdfs_ts;
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='/home/hanfeng/FI_client/hadoop_client/HDF S/hadoop/etc/hadoop',storepath='/@hdfsstoreplus@/temp_dir/hdfs_ts');
+
+--error only exits filesystem
+drop tablespace if exists hdfs_ts;
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='hdfs');
+
+--error only exists filesystem and address
+\! rm -rf @abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts
+drop tablespace if exists hdfs_ts;
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@');
+
+--error only exists filesystem and storepath
+\! rm -rf @abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts
+drop tablespace if exists hdfs_ts;
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='hdfs', storepath='/@hdfsstoreplus@/temp_dir/hdfs_ts');
+
+--create normal tablespace
+\! rm -rf @abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts
+drop tablespace if exists hdfs_ts;
+create  tablespace hdfs_ts location '@abs_srcdir@/tmp_check/temp_hdfs_dir/hdfs_ts' with(filesystem='hdfs', address='@hdfshostname@:@hdfsport@', cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/temp_dir/hdfs_ts');
+
+drop tablespace if exists hdfs_ts;
+\! rm -rf @abs_srcdir@/tmp_check/temp_hdfs_dir

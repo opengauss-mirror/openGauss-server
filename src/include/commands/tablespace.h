@@ -102,7 +102,7 @@ extern void AlterTableSpaceOwner(const char* name, Oid newOwnerId);
 extern void AlterTableSpaceOptions(AlterTableSpaceOptionsStmt* stmt);
 extern bool IsSpecifiedTblspc(Oid spcOid, const char* specifedTblspc);
 
-extern void TablespaceCreateDbspace(Oid spcNode, Oid dbNode, bool isRedo);
+extern void TablespaceCreateDbspace(const RelFileNode rnode, bool isRedo);
 
 extern Oid GetDefaultTablespace(char relpersistence);
 extern DataSpaceType RelationUsesSpaceType(char relpersistence);
@@ -134,8 +134,7 @@ extern void tblspc_desc(StringInfo buf, XLogReaderState* record);
 extern uint64 pg_cal_tablespace_size_oid(Oid tblspcOid);
 extern Oid ConvertToPgclassRelTablespaceOid(Oid tblspc);
 extern Oid ConvertToRelfilenodeTblspcOid(Oid tblspc);
-extern void xlog_create_tblspc(Oid ts_id, char* ts_path, bool isRelativePath);
+extern void xlog_create_tblspc(Oid tsId, char* tsPath, bool isRelativePath);
 extern void xlog_drop_tblspc(Oid tsId);
 
 #endif /* TABLESPACE_H */
-

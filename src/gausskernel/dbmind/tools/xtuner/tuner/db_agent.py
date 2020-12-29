@@ -21,7 +21,7 @@ from tuner.exceptions import DBStatusError, SecurityError, ExecutionError, Optio
 from tuner.executor import ExecutorFactory
 from tuner.knob import RecommendedKnobs
 from tuner.utils import clip
-from tuner.utils import construct_header
+from tuner.utils import construct_dividing_line
 
 
 def check_special_character(phrase):
@@ -164,10 +164,10 @@ class DB_Agent:
         )
 
         stdout = self.exec_statement(sql)[4:]
-        result = [[stdout[4 * i], stdout[4 * i + 1], stdout[4 * i + 2], stdout[4 * i + 3]] for i in
+        tuples = [[stdout[4 * i], stdout[4 * i + 1], stdout[4 * i + 2], stdout[4 * i + 3]] for i in
                   range(len(stdout) // 4)]
 
-        for name, boot_val, min_val, max_val in result:
+        for name, boot_val, min_val, max_val in tuples:
             knob = self.knobs[name]
             knob.min = min_val if not knob.min else max(knob.min, min_val, key=lambda x: float(x))
             knob.max = max_val if not knob.max else min(knob.max, max_val, key=lambda x: float(x))
@@ -298,7 +298,7 @@ class DB_Agent:
         self.restart()
 
     def restart(self):
-        logging.info(construct_header("Restarting database.", padding="*"))
+        logging.info(construct_dividing_line("Restarting database.", padding="*"))
         self.exec_statement("checkpoint;")  # Prevent the database from being shut down for a long time.
         self.exec_command_on_host("gs_ctl stop -D {data_path}".format(data_path=self.data_path),
                                   ignore_status_code=True)
@@ -311,12 +311,13 @@ class DB_Agent:
             logging.fatal("The database restarted failed.")
             raise DBStatusError("The database restarted failed.")
 
-        logging.info(construct_header())
+        logging.info(construct_dividing_line())
 
     def drop_cache(self):
         try:
             # Check whether frequent input password is required.
-            if self.exec_command_on_host('sudo -n -l -U %s' % self.host_user).find('NOPASSWD') < 0:
+            user_desc = self.exec_command_on_host('sudo -n -l -U %s' % self.host_user, ignore_status_code=True)
+            if (not user_desc) or user_desc.find('NOPASSWD') < 0:
                 logging.warning("Hint: You must add this line '%s ALL=(ALL) NOPASSWD: ALL' to the file '/etc/sudoers' "
                                 "with administrator permission.", self.host_user)
                 return False

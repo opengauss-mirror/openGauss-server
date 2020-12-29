@@ -25,6 +25,7 @@
 #include "knl/knl_variable.h"
 #include <fcntl.h>
 #include <sys/file.h>
+#include "access/tableam.h"
 #include "access/tuptoaster.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
@@ -44,8 +45,8 @@
 #include "utils/numeric.h"
 #include "utils/numeric_gs.h"
 #include "storage/cucache_mgr.h"
-#include "storage/cstore_compress.h"
-#include "utils/tqual.h"
+#include "storage/cstore/cstore_compress.h"
+#include "access/heapam.h"
 #include "access/sysattr.h"
 #include "executor/instrument.h"
 #include "utils/date.h"
@@ -66,8 +67,8 @@
 #include "workload/workload.h"
 
 #ifdef PGXC
-#include "pgxc/pgxc.h"
-#include "pgxc/redistrib.h"
+    #include "pgxc/pgxc.h"
+    #include "pgxc/redistrib.h"
 #endif
 
 /* macro for tracing cstore scan */
@@ -132,7 +133,7 @@ CStore::CStore()
       m_needRCheck(false),
       m_onlyConstCol(false),
       m_timing_on(false),
-      m_isRangeScanInRedis(false),
+      m_rangeScanInRedis({false,0,0}),
       m_useBtreeIndex(false),
       m_firstColIdx(0),
       m_cuDescIdx(-1),
@@ -152,7 +153,6 @@ void CStore::BindingFp(CStoreScanState* state)
 {
     int i = 0;
     Relation rel = state->ss_currentRelation;
-    Form_pg_attribute* attrs = rel->rd_att->attrs;
     ProjectionInfo* proj = state->ps.ps_ProjInfo;
 
     if (proj->pi_maxOrmin) {
@@ -161,7 +161,7 @@ void CStore::BindingFp(CStoreScanState* state)
         m_fillMinMaxFunc = (fillMinMaxFuncPtr*)palloc0(sizeof(fillMinMaxFuncPtr) * m_colNum);
 
         for (i = 0; i < m_colNum; ++i) {
-            switch (attrs[m_colId[i]]->atttypid) {
+            switch (rel->rd_att->attrs[m_colId[i]]->atttypid) {
                 case CHAROID:
                 case INT2OID:
                 case INT4OID:
@@ -183,8 +183,10 @@ void CStore::BindingFp(CStoreScanState* state)
 
     for (i = 0; i < m_colNum; ++i) {
         m_CUDescInfo[i] = New(CurrentMemoryContext) LoadCUDescCtl(m_startCUID);
-
-        switch (attrs[m_colId[i]]->attlen) {
+        if (m_colId[i] > rel->rd_att->natts - 1 || m_colId[i] < 0) {
+            continue;
+        }
+        switch (rel->rd_att->attrs[m_colId[i]]->attlen) {
             case sizeof(char):
                 InitFillColFunction(i, (int)sizeof(char));
                 break;
@@ -211,11 +213,11 @@ void CStore::BindingFp(CStoreScanState* state)
                 break;
             default:
                 ereport(ERROR,
-                    (errcode(ERRCODE_DATATYPE_MISMATCH),
-                        (errmsg("unsupported data type length %d of column \"%s\" of relation \"%s\" ",
-                            (int)attrs[m_colId[i]]->attlen,
-                            NameStr(attrs[m_colId[i]]->attname),
-                            RelationGetRelationName(rel)))));
+                        (errcode(ERRCODE_DATATYPE_MISMATCH),
+                         (errmsg("unsupported data type length %d of column \"%s\" of relation \"%s\" ",
+                                 (int)rel->rd_att->attrs[m_colId[i]]->attlen,
+                                 NameStr(rel->rd_att->attrs[m_colId[i]]->attname),
+                                 RelationGetRelationName(rel)))));
                 break;
         }
     }
@@ -242,7 +244,18 @@ void CStore::InitFillVecEnv(CStoreScanState* state)
         foreach (cell, pColList) {
             // m_colIdx[] start from zero
             Assert(lfirst_int(cell) > 0);
-            m_colId[i] = lfirst_int(cell) - 1;
+            int colId = lfirst_int(cell) - 1;
+            if (colId >= m_relation->rd_att->natts) {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
+                    errmsg("column %d does not exist", colId)));
+            }
+            
+            if (m_relation->rd_att->attrs[colId]->attisdropped) {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
+                    errmsg("column %s does not exist",
+                    NameStr(m_relation->rd_att->attrs[colId]->attname))));
+            }
+            m_colId[i] = colId;
             m_lateRead[i] = false;
             i++;
         }
@@ -302,7 +315,6 @@ void CStore::InitRoughCheckEnv(CStoreScanState* state)
     // Initialize rough check function
     int nkeys = state->csss_NumScanKeys;
     if (nkeys > 0) {
-
         CStoreScanKey scanKey = state->csss_ScanKeys;
         Relation rel = state->ss_currentRelation;
         Form_pg_attribute* attrs = rel->rd_att->attrs;
@@ -321,15 +333,15 @@ void CStore::InitScan(CStoreScanState* state, Snapshot snapshot)
 
     // first of all, create the private memonry context
     m_scanMemContext = AllocSetContextCreate(CurrentMemoryContext,
-        "cstore scan memory context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+                                             "cstore scan memory context",
+                                             ALLOCSET_DEFAULT_MINSIZE,
+                                             ALLOCSET_DEFAULT_INITSIZE,
+                                             ALLOCSET_DEFAULT_MAXSIZE);
     m_perScanMemCnxt = AllocSetContextCreate(CurrentMemoryContext,
-        "cstore scan per scan memory context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+                                             "cstore scan per scan memory context",
+                                             ALLOCSET_DEFAULT_MINSIZE,
+                                             ALLOCSET_DEFAULT_INITSIZE,
+                                             ALLOCSET_DEFAULT_MAXSIZE);
 
     m_scanFunc = &CStore::CStoreScan;
 
@@ -354,9 +366,9 @@ void CStore::InitScan(CStoreScanState* state, Snapshot snapshot)
 
     m_CUDescIdx = (int*)palloc(sizeof(int) * u_sess->attr.attr_storage.max_loaded_cudesc);
     errno_t rc = memset_s((char*)m_CUDescIdx,
-        sizeof(int) * u_sess->attr.attr_storage.max_loaded_cudesc,
-        0xFF,
-        sizeof(int) * u_sess->attr.attr_storage.max_loaded_cudesc);
+                          sizeof(int) * u_sess->attr.attr_storage.max_loaded_cudesc,
+                          0xFF,
+                          sizeof(int) * u_sess->attr.attr_storage.max_loaded_cudesc);
     securec_check(rc, "\0", "\0");
     m_cursor = 0;
     m_colNum = 0;
@@ -366,7 +378,7 @@ void CStore::InitScan(CStoreScanState* state, Snapshot snapshot)
     m_prefetch_threshold =
         Min(CUCache->m_cstoreMaxSize / 4, u_sess->attr.attr_storage.cstore_prefetch_quantity * 1024LL);
     m_snapshot = snapshot;
-    m_isRangeScanInRedis = state->isRangeScanInRedis;
+    m_rangeScanInRedis = state->rangeScanInRedis;
 
     SetScanRange();
 
@@ -464,17 +476,16 @@ void CStore::CUPrefetch(CUDesc* cudesc, int col, AioDispatchCUDesc_t** dList, in
     uint64 load_offset = m_cuStorage[col]->GetAlignCUOffset(cudesc->cu_pointer);
     int head_padding_size = cudesc->cu_pointer - load_offset;
     int load_size = m_cuStorage[col]->GetAlignCUSize(head_padding_size + cudesc->cu_size);
-
     /* need check and add sitution cu store in many files,
         now if we found, jump the cu, we should think about more to deal with the CU in adio module */
     if (!m_cuStorage[col]->IsCUStoreInOneFile(load_offset, load_size)) {
         ereport(LOG,
-            (errmodule(MOD_ADIO),
-                errmsg("CUPrefetch: skip cloumn(%d), cuid(%u), offset(%lu), size(%d)  ",
-                    col,
-                    cudesc->cu_id,
-                    cudesc->cu_pointer,
-                    cudesc->cu_size)));
+                (errmodule(MOD_ADIO),
+                 errmsg("CUPrefetch: skip cloumn(%d), cuid(%u), offset(%lu), size(%d)  ",
+                        col,
+                        cudesc->cu_id,
+                        cudesc->cu_pointer,
+                        cudesc->cu_size)));
         return;
     }
 
@@ -486,11 +497,11 @@ void CStore::CUPrefetch(CUDesc* cudesc, int col, AioDispatchCUDesc_t** dList, in
     slotId = CUCache->FindDataBlock(&dataSlotTag, false);
     if (IsValidCacheSlotID(slotId)) {
         ereport(DEBUG1,
-            (errmodule(MOD_ADIO),
-                errmsg("prefetch find cu cache: relid(%u), column(%d), load cuid(%u)",
-                    m_relation->rd_node.relNode,
-                    col,
-                    cudesc->cu_id)));
+                (errmodule(MOD_ADIO),
+                 errmsg("prefetch find cu cache: relid(%u), column(%d), load cuid(%u)",
+                        m_relation->rd_node.relNode,
+                        col,
+                        cudesc->cu_id)));
         CUCache->UnPinDataBlock(slotId);
         return;
     }
@@ -540,10 +551,10 @@ void CStore::CUPrefetch(CUDesc* cudesc, int col, AioDispatchCUDesc_t** dList, in
 
     dList[count] = aioDescp;
     io_prep_pread((struct iocb*)dList[count],
-        aioDescp->cuDesc.fd,
-        aioDescp->cuDesc.buf,
-        aioDescp->cuDesc.size,
-        aioDescp->cuDesc.offset);
+                  aioDescp->cuDesc.fd,
+                  aioDescp->cuDesc.buf,
+                  aioDescp->cuDesc.size,
+                  aioDescp->cuDesc.offset);
     count++;
 
     CUCache->TerminateCU(false);  // already record in dList[count]
@@ -553,14 +564,14 @@ void CStore::CUPrefetch(CUDesc* cudesc, int col, AioDispatchCUDesc_t** dList, in
     CUCache->CULWLockDisown(slotId);
 
     ereport(DEBUG1,
-        (errmodule(MOD_ADIO),
-            errmsg("CUPrefetch: relid(%u), slotId(%d), col_id(%d), cu_id(%u), cu_size(%d), cu_point(%lu)",
-                m_relation->rd_node.relNode,
-                slotId,
-                col,
-                cudesc->cu_id,
-                cudesc->cu_size,
-                cudesc->cu_pointer)));
+            (errmodule(MOD_ADIO),
+             errmsg("CUPrefetch: relid(%u), slotId(%d), col_id(%d), cu_id(%u), cu_size(%d), cu_point(%lu)",
+                    m_relation->rd_node.relNode,
+                    slotId,
+                    col,
+                    cudesc->cu_id,
+                    cudesc->cu_size,
+                    cudesc->cu_pointer)));
 
     /* check need submint io */
     if (count >= MAX_CU_PREFETCH_REQSIZ) {
@@ -642,12 +653,12 @@ void CStore::CUListPrefetch()
     t_thrd.cstore_cxt.InProgressAioCUDispatchCount = 0;
 
     ereport(DEBUG1,
-        (errmodule(MOD_ADIO),
-            errmsg("CUListPrefetch: relation(%s), cloumns(%d), cuid from %u to %u ",
-                RelationGetRelationName(m_relation),
-                m_colNum,
-                m_CUDescInfo[0]->cuDescArray[m_CUDescIdx[m_lastNumCUDescIdx]].cu_id,
-                m_CUDescInfo[0]->cuDescArray[m_CUDescIdx[cuDescIdxTmp]].cu_id)));
+            (errmodule(MOD_ADIO),
+             errmsg("CUListPrefetch: relation(%s), cloumns(%d), cuid from %u to %u ",
+                    RelationGetRelationName(m_relation),
+                    m_colNum,
+                    m_CUDescInfo[0]->cuDescArray[m_CUDescIdx[m_lastNumCUDescIdx]].cu_id,
+                    m_CUDescInfo[0]->cuDescArray[m_CUDescIdx[cuDescIdxTmp]].cu_id)));
 
     m_lastNumCUDescIdx = m_NumCUDescIdx;
 }
@@ -755,10 +766,10 @@ void CStore::CStoreScanWithCU(_in_ CStoreScanState* state, __inout BatchCUData* 
         int colIdx = m_colId[i];
         if (attrs[colIdx]->attisdropped) {
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_OPERATION),
-                    (errmsg("Cannot load CUDesc and CU for a dropped column \"%s\" of table \"%s\"",
-                        NameStr(attrs[colIdx]->attname),
-                        RelationGetRelationName(m_relation)))));
+                    (errcode(ERRCODE_INVALID_OPERATION),
+                     (errmsg("Cannot load CUDesc and CU for a dropped column \"%s\" of table \"%s\"",
+                             NameStr(attrs[colIdx]->attname),
+                             RelationGetRelationName(m_relation)))));
         }
 
         CUDesc* cuDescPtr = &(m_CUDescInfo[i]->cuDescArray[cuDescIdx]);
@@ -768,10 +779,10 @@ void CStore::CStoreScanWithCU(_in_ CStoreScanState* state, __inout BatchCUData* 
         /* CStoreMemAlloc::Palloc is used in LoadCU. Need toCStoreMemAlloc::Pfree later */
         if (cuDescPtr->cu_size > 0) {
             m_cuStorage[colIdx]->LoadCU(cuDataPtr,
-                cuDescPtr->cu_pointer,
-                cuDescPtr->cu_size,
-                g_instance.attr.attr_storage.enable_adio_function,
-                false);
+                                        cuDescPtr->cu_pointer,
+                                        cuDescPtr->cu_size,
+                                        g_instance.attr.attr_storage.enable_adio_function,
+                                        false);
 
             if (cuDataPtr->IsVerified(cuDescPtr->magic) == false) {
                 addBadBlockStat(
@@ -779,27 +790,27 @@ void CStore::CStoreScanWithCU(_in_ CStoreScanState* state, __inout BatchCUData* 
 
                 if (RelationNeedsWAL(m_relation) && CanRemoteRead()) {
                     ereport(WARNING,
-                        (errcode(ERRCODE_DATA_CORRUPTED),
-                            (errmsg("invalid CU in cu_id %u of relation \"%s\" file %s offset %lu, try to remote read",
-                                cuDescPtr->cu_id,
-                                RelationGetRelationName(m_relation),
-                                relcolpath(m_cuStorage[colIdx]),
-                                cuDescPtr->cu_pointer)),
-                            handle_in_client(true)));
+                            (errcode(ERRCODE_DATA_CORRUPTED),
+                             (errmsg("invalid CU in cu_id %u of relation \"%s\" file %s offset %lu, try to remote read",
+                                     cuDescPtr->cu_id,
+                                     RelationGetRelationName(m_relation),
+                                     relcolpath(m_cuStorage[colIdx]),
+                                     cuDescPtr->cu_pointer)),
+                             handle_in_client(true)));
 
                     m_cuStorage[colIdx]->RemoteLoadCU(cuDataPtr,
-                        cuDescPtr->cu_pointer,
-                        cuDescPtr->cu_size,
-                        g_instance.attr.attr_storage.enable_adio_function,
-                        false);
+                                                      cuDescPtr->cu_pointer,
+                                                      cuDescPtr->cu_size,
+                                                      g_instance.attr.attr_storage.enable_adio_function,
+                                                      false);
 
                     if (cuDataPtr->IsVerified(cuDescPtr->magic)) {
                         m_cuStorage[colIdx]->OverwriteCU(
                             cuDataPtr->m_compressedBuf, cuDescPtr->cu_pointer, cuDescPtr->cu_size, false);
                     } else {
                         ereport(ERROR,
-                            (errcode(ERRCODE_DATA_CORRUPTED),
-                                (errmsg("fail to remote read CU, data corrupted in network"))));
+                                (errcode(ERRCODE_DATA_CORRUPTED),
+                                 (errmsg("fail to remote read CU, data corrupted in network"))));
                     }
                 } else {
                     int elevel = ERROR;
@@ -807,15 +818,15 @@ void CStore::CStoreScanWithCU(_in_ CStoreScanState* state, __inout BatchCUData* 
                         elevel = WARNING;
                     }
                     ereport(elevel,
-                        (errcode(ERRCODE_DATA_CORRUPTED),
-                            (errmsg("CU verification failed. The node is %s, invalid CU in cu_id %u of relation %s,"
-                                    "file %s offset %lu",
-                                g_instance.attr.attr_common.PGXCNodeName,
-                                cuDescPtr->cu_id,
-                                RelationGetRelationName(m_relation),
-                                relcolpath(m_cuStorage[colIdx]),
-                                cuDescPtr->cu_pointer)),
-                            handle_in_client(true)));
+                            (errcode(ERRCODE_DATA_CORRUPTED),
+                             (errmsg("CU verification failed. The node is %s, invalid CU in cu_id %u of relation %s,"
+                                     "file %s offset %lu",
+                                     g_instance.attr.attr_common.PGXCNodeName,
+                                     cuDescPtr->cu_id,
+                                     RelationGetRelationName(m_relation),
+                                     relcolpath(m_cuStorage[colIdx]),
+                                     cuDescPtr->cu_pointer)),
+                             handle_in_client(true)));
                 }
             }
         }
@@ -936,7 +947,7 @@ bool CStore::NeedLoadCUDesc(int32& cudesc_idx)
     {
         // check load condition, first not load finish, second not exceed prefetch count
         if (!m_load_finish && (m_cursor == m_NumCUDescIdx || LoadCudescMinus(m_cursor, m_NumCUDescIdx) <=
-                                                                 t_thrd.cstore_cxt.cstore_prefetch_count / 2)) {
+                               t_thrd.cstore_cxt.cstore_prefetch_count / 2)) {
             need_load = true;
             m_prefetch_quantity = 0;
             cudesc_idx = m_NumCUDescIdx;
@@ -1024,11 +1035,11 @@ void CStore::LoadCUDescIfNeed()
                 // give an min prefetch count here,because we need prefetch window to control whether need prefetch
                 t_thrd.cstore_cxt.cstore_prefetch_count = Max(m_NumLoadCUDesc, CSTORE_MIN_PREFETCH_COUNT);
                 ereport(DEBUG1,
-                    (errmodule(MOD_ADIO),
-                        errmsg("LoadCUDesc: columns(%d), count(%d), quantity(%d)",
-                            m_colNum,
-                            m_NumLoadCUDesc,
-                            m_prefetch_quantity)));
+                        (errmodule(MOD_ADIO),
+                         errmsg("LoadCUDesc: columns(%d), count(%d), quantity(%d)",
+                                m_colNum,
+                                m_NumLoadCUDesc,
+                                m_prefetch_quantity)));
             }
             break;
         }
@@ -1043,9 +1054,7 @@ void CStore::LoadCUDescIfNeed()
     if (m_colNum > 0 && m_sysColNum != 0) {
         // access normal columns and sys columns, use normal column's CUDesc
         m_virtualCUDescInfo = m_CUDescInfo[0];
-
     } else if (OnlySysOrConstCol()) {
-
         // only system columns or const columns, use the first column's CUDesc
         Assert(m_virtualCUDescInfo);
         LoadCUDesc(m_firstColIdx, m_virtualCUDescInfo, false, m_snapshot);
@@ -1105,7 +1114,7 @@ void CStore::SetScanRange()
     uint32 startCUID = FirstCUID + 1;
     uint32 endCUID = maxCuId;
 
-    if (m_isRangeScanInRedis) {
+    if (m_rangeScanInRedis.isRangeScanInRedis) {
         ItemPointerData start_ctid;
         ItemPointerData end_ctid;
 
@@ -1233,11 +1242,54 @@ void CStore::RoughCheckIfNeed(_in_ CStoreScanState* state)
         if (planstate->instrument) {
             RCInfo* rcPtr = &(planstate->instrument->rcInfo);
 
-            if (!hitCU)
-                rcPtr->IncNoneCUNum();
-            else
-                rcPtr->IncSomeCUNum();
+            if (!hitCU) {
+                int seq = scanKey[0].cs_attno;
+                CUDesc *cudesc = &(m_CUDescInfo[seq]->cuDescArray[i]);
+                planstate->instrument->nfiltered1 += cudesc->row_count;
 
+                Relation cuDescRel = heap_open(m_relation->rd_rel->relcudescrelid, AccessShareLock);
+                Relation idxRel = index_open(cuDescRel->rd_rel->relcudescidx, AccessShareLock);
+                ScanKeyData key[2];
+
+                ScanKeyInit(&key[0], (AttrNumber)CUDescColIDAttr, BTEqualStrategyNumber, 
+                            F_INT4EQ, Int32GetDatum(VitrualDelColID));
+                ScanKeyInit(&key[1], (AttrNumber)CUDescCUIDAttr, BTEqualStrategyNumber, 
+                            F_OIDEQ, UInt32GetDatum(cudesc->cu_id));
+                SysScanDesc cuDescScan = systable_beginscan_ordered(cuDescRel, idxRel, m_snapshot, 2, key);
+
+                HeapTuple tmpTup = NULL;
+
+                if ((tmpTup = systable_getnext_ordered(cuDescScan, ForwardScanDirection)) != NULL) {
+                    bool isNull = false;
+                    uint32 deadRowCount = 0;
+                    uint32 rowCount = DatumGetUInt32(fastgetattr(tmpTup, CUDescRowCountAttr, 
+                        cuDescRel->rd_att, &isNull));
+                    Datum v = fastgetattr(tmpTup, CUDescCUPointerAttr, cuDescRel->rd_att, &isNull);
+                    if (!isNull) {
+                        int8 *bitmap = (int8 *)PG_DETOAST_DATUM(DatumGetPointer(v));
+                        unsigned char delBitMap[MaxDelBitmapSize];
+                        uint32 nBytes = (rowCount + 7) / 8;
+                        errno_t rc = memcpy_s(delBitMap, MaxDelBitmapSize, 
+                                              VARDATA_ANY(bitmap), VARSIZE_ANY_EXHDR(bitmap));
+                        securec_check(rc, "", "");
+                        for (uint32 j = 0; j < nBytes; j++) {
+                            deadRowCount += NumberOfBit1Set[delBitMap[j]];
+                        }
+                        /* because new memory may be created, so we have to check and free in time. */
+                        if ((Pointer)bitmap != DatumGetPointer(v)) {
+                            pfree_ext(bitmap);
+                        }
+                    }
+                    planstate->instrument->nfiltered1 -= deadRowCount;
+                }
+                systable_endscan_ordered(cuDescScan);
+                index_close(idxRel, AccessShareLock);
+                heap_close(cuDescRel, AccessShareLock);
+
+                rcPtr->IncNoneCUNum();
+            } else {
+                rcPtr->IncSomeCUNum();
+            }
             planstate->instrument->needRCInfo = true;
         }
     }
@@ -1446,8 +1498,8 @@ void CStore::ScanByTids(_in_ CStoreIndexScanState* state, _in_ VectorBatch* idxO
             }
             default: {
                 ereport(ERROR,
-                    (errcode(ERRCODE_DATATYPE_MISMATCH),
-                        (errmsg("Cannot to fill unsupported system column %d for column store table", sysColIdx))));
+                        (errcode(ERRCODE_DATATYPE_MISMATCH),
+                         (errmsg("Cannot to fill unsupported system column %d for column store table", sysColIdx))));
                 break;
             }
         }
@@ -1528,7 +1580,7 @@ HeapTuple CStore::FormVCCUDescTup(
     nulls[CUDescSizeAttr - 1] = true;
     nulls[CUDescCUExtraAttr - 1] = true;
 
-    HeapTuple newTup = heap_form_tuple(cudesc, values, nulls);
+    HeapTuple newTup = (HeapTuple)tableam_tops_form_tuple(cudesc, values, nulls, HEAP_TUPLE);
 
     // ok, the temp data has been copied to newTup.
     // now we must free it before returning.
@@ -1544,7 +1596,7 @@ HeapTuple CStore::FormVCCUDescTup(
 // nulls[]:  used during forming tuple.
 // pColAttr: attribute data of one column, who matches pCudesc above, for column-store table.
 HeapTuple CStore::FormCudescTuple(_in_ CUDesc* pCudesc, _in_ TupleDesc pCudescTupDesc,
-    _in_ Datum pTupVals[CUDescMaxAttrNum], _in_ bool pTupNulls[CUDescMaxAttrNum], _in_ Form_pg_attribute pColAttr)
+                                  _in_ Datum pTupVals[CUDescMaxAttrNum], _in_ bool pTupNulls[CUDescMaxAttrNum], _in_ Form_pg_attribute pColAttr)
 {
     errno_t rc = memset_s(pTupNulls, CUDescMaxAttrNum, false, CUDescMaxAttrNum);
     securec_check(rc, "\0", "\0");
@@ -1592,7 +1644,7 @@ HeapTuple CStore::FormCudescTuple(_in_ CUDesc* pCudesc, _in_ TupleDesc pCudescTu
     // add attribute extra and set null flag.
     pTupNulls[CUDescCUExtraAttr - 1] = true;
 
-    return heap_form_tuple(pCudescTupDesc, pTupVals, pTupNulls);
+    return (HeapTuple)tableam_tops_form_tuple(pCudescTupDesc, pTupVals, pTupNulls, HEAP_TUPLE);
 }
 
 /* description: future plan-refact CStore::LoadCUDesc() with DeformCudescTuple(). */
@@ -1800,7 +1852,7 @@ Datum CStore::CudescTupGetMinMaxDatum(
 // set Cudesc Mode after min/max value have been computed.
 // return true if need to write cu file. otherwise return false.
 bool CStore::SetCudescModeForMinMaxVal(_in_ bool fullNulls, _in_ bool hasMinMaxFunc, _in_ bool hasNull,
-    _in_ int maxVarStrLen, _in_ int attlen, __inout CUDesc* cuDescPtr)
+                                       _in_ int maxVarStrLen, _in_ int attlen, __inout CUDesc* cuDescPtr)
 {
     if (!fullNulls) {
         // if hasNull is true, it's the NULL bitmap that stores the all null info.
@@ -1872,7 +1924,7 @@ bool CStore::SetCudescModeForTheSameVal(
 
 // We add a virtual column for marking deleted rows
 // The VC is divided into CUs. The cuDesc of VC includes colId, cuid,
-// row_count, del_mask, cu_mode, magric.
+// row_count, del_mask, cu_mode, magic.
 void CStore::SaveVCCUDesc(Oid cudescOid, uint32 cuId, int rowCount, uint32 magic, int options, const char* delBitmap)
 {
     Relation cudescHeapRel = heap_open(cudescOid, RowExclusiveLock);
@@ -1907,12 +1959,12 @@ void CStore::SaveVCCUDesc(Oid cudescOid, uint32 cuId, int rowCount, uint32 magic
         Assert(VARSIZE_ANY_EXHDR(PointerGetDatum(tmpCuPointData)) == (uint32)delMaskBytes);
     }
 
-    HeapTuple tup = heap_form_tuple(tupdesc, values, nulls);
+    HeapTuple tup = (HeapTuple)tableam_tops_form_tuple(tupdesc, values, nulls, HEAP_TUPLE);
 
     // We always generate xlog for cudesc tuple
-    options &= (~HEAP_INSERT_SKIP_WAL);
-    heap_insert(cudescHeapRel, tup, GetCurrentCommandId(true), options, NULL);
-    (void)index_insert(cudescIndexRel,
+    options &= (~TABLE_INSERT_SKIP_WAL);
+    (void)heap_insert(cudescHeapRel, tup, GetCurrentCommandId(true), options, NULL);
+    index_insert(cudescIndexRel,
         values,
         nulls,
         &(tup->t_self),
@@ -1960,7 +2012,6 @@ uint32 CStore::GetMaxCUID(Oid cudescHeap, TupleDesc cstoreRelTupDesc, Snapshot s
     ScanKeyInit(&key, (AttrNumber)CUDescColIDAttr, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(attrId));
 
     SysScanDesc cudesc_scan = systable_beginscan_ordered(heapRel, indexRel, snapshot, 1, &key);
-
     // Use BackwardScanDirection scan to Optimize for geting last CU description of column.
     if ((tup = systable_getnext_ordered(cudesc_scan, BackwardScanDirection)) != NULL) {
         maxCuId = DatumGetUInt32(fastgetattr(tup, CUDescCUIDAttr, heapTupDesc, &isnull));
@@ -1975,24 +2026,72 @@ uint32 CStore::GetMaxCUID(Oid cudescHeap, TupleDesc cstoreRelTupDesc, Snapshot s
     return maxCuId;
 }
 
-uint32 CStore::GetMaxIndexCUID(_in_ Relation heapRel, _in_ List* btreeIndex)
+static uint32 GetMaxCuIdFromCbtreeIndex(Relation heapRel, Relation idxRel)
 {
-    ListCell* lc = NULL;
-    uint32 maxCuID = 0;
+    uint32 maxCuID = FirstCUID;
+    ItemPointer tid;
+
+        IndexScanDesc indexScan = (IndexScanDesc)index_beginscan(heapRel, idxRel, GetActiveSnapshot(), 0, 0);
+    index_rescan(indexScan, NULL, 0, NULL, 0);
+    while ((tid = index_getnext_tid(indexScan, ForwardScanDirection)) != NULL) {
+        uint32 tmpCuID = ItemPointerGetBlockNumber(tid);
+        if (tmpCuID > maxCuID) {
+            maxCuID = tmpCuID;
+        }
+    }
+    index_endscan(indexScan);
+
+    return maxCuID;
+}
+
+/* get max CU id from cgin index relation */
+static uint32 GetMaxCuIdFromCginIndex(Relation heapRel, Relation idxRel)
+{
+    uint32 maxCuID = FirstCUID;
+
+    TupleDesc tidDesc = CreateTemplateTupleDesc(1, false);
+    TupleDescInitEntry(tidDesc, 1, "tid", TIDOID, -1, 0);
+    VectorBatch *tids = New(CurrentMemoryContext)VectorBatch(CurrentMemoryContext, tidDesc);
+
+    IndexScanDesc indexScan = index_beginscan_bitmap(idxRel, GetActiveSnapshot(), 0);
+    /* If sort is NULL, tids only contain 1 row to get the max cu ID */
+    int64 nTids = index_column_getbitmap(indexScan, NULL, tids);
+    if (nTids == 1) {
+        /* get the max cu ID */
+        ScalarVector *pVector = &tids->m_arr[0];
+        ItemPointer tid = (ItemPointer)(pVector->m_vals);
+        maxCuID = ItemPointerGetBlockNumber(tid);
+    }
+    index_endscan(indexScan);
+    FreeTupleDesc(tidDesc);
+
+    return maxCuID;
+}
+
+uint32 CStore::GetMaxIndexCUID(Relation heapRel, List *indexRel)
+{
+    ListCell *lc = NULL;
+    uint32 maxCuID = FirstCUID;
     uint32 tmpCuID = 0;
-    foreach (lc, btreeIndex) {
-        ItemPointer tid;
+    foreach (lc, indexRel) {
         Relation idxRel = (Relation)lfirst(lc);
-        IndexScanDesc indexScan = index_beginscan(heapRel, idxRel, GetActiveSnapshot(), 0, 0);
-        index_rescan(indexScan, NULL, 0, NULL, 0);
-        while ((tid = index_getnext_tid(indexScan, ForwardScanDirection)) != NULL) {
-            tmpCuID = ItemPointerGetBlockNumber(tid);
-            if (tmpCuID > maxCuID) {
-                maxCuID = tmpCuID;
+        switch (idxRel->rd_rel->relam) {
+            case CBTREE_AM_OID: {
+                tmpCuID = GetMaxCuIdFromCbtreeIndex(heapRel, idxRel);
+                break;
+            }
+            case CGIN_AM_OID: {
+                tmpCuID = GetMaxCuIdFromCginIndex(heapRel, idxRel);
+                break;
+            }
+            default: {
+                Assert(0);
+                break;
             }
         }
-
-        index_endscan(indexScan);
+        if (tmpCuID > maxCuID) {
+            maxCuID = tmpCuID;
+        }
     }
     return maxCuID;
 }
@@ -2057,7 +2156,8 @@ CUPointer CStore::GetMaxCUPointer(_in_ int attrno, _in_ Relation rel)
     maxPointerfromCufile = GetColDataFileSize(rel, attrno);
 
     // cu file may partital write when process is killed, so allign the maxPointerfromCufile to ALIGNOF_CUSIZE (8K)
-    maxPointerfromCufile = ALLIGN_CUSIZE(maxPointerfromCufile);
+    int align_size = RelationIsTsStore(rel) ? ALIGNOF_TIMESERIES_CUSIZE : ALIGNOF_CUSIZE;
+    maxPointerfromCufile = CUAlignUtils::AlignCuSize(maxPointerfromCufile, align_size);
 
     return Max(maxPointerfromCudesc, maxPointerfromCufile);
 }
@@ -2074,9 +2174,9 @@ void CStore::SaveCUDesc(_in_ Relation rel, _in_ CUDesc* cuDescPtr, _in_ int col,
 
     if (rel->rd_att->attrs[col]->attisdropped) {
         ereport(PANIC,
-            (errmsg("Cannot save CUDesc for a dropped column \"%s\" of table \"%s\"",
-                NameStr(rel->rd_att->attrs[col]->attname),
-                RelationGetRelationName(rel))));
+                (errmsg("Cannot save CUDesc for a dropped column \"%s\" of table \"%s\"",
+                        NameStr(rel->rd_att->attrs[col]->attname),
+                        RelationGetRelationName(rel))));
     }
 
     Relation cudesc_rel = heap_open(rel->rd_rel->relcudescrelid, RowExclusiveLock);
@@ -2087,15 +2187,15 @@ void CStore::SaveCUDesc(_in_ Relation rel, _in_ CUDesc* cuDescPtr, _in_ int col,
     HeapTuple tup = CStore::FormCudescTuple(cuDescPtr, cudesc_rel->rd_att, values, nulls, rel->rd_att->attrs[col]);
 
     // We always generate xlog for cudesc tuple
-    options &= (~HEAP_INSERT_SKIP_WAL);
+    options &= (~TABLE_INSERT_SKIP_WAL);
 
-    heap_insert(cudesc_rel, tup, GetCurrentCommandId(true), options, NULL);
-    (void)index_insert(idx_rel,
-        values,
-        nulls,
-        &(tup->t_self),
-        cudesc_rel,
-        idx_rel->rd_index->indisunique ? UNIQUE_CHECK_YES : UNIQUE_CHECK_NO);
+    (void)heap_insert(cudesc_rel, tup, GetCurrentCommandId(true), options, NULL);
+    index_insert(idx_rel,
+                       values,
+                       nulls,
+                       &(tup->t_self),
+                       cudesc_rel,
+                       idx_rel->rd_index->indisunique ? UNIQUE_CHECK_YES : UNIQUE_CHECK_NO);
 
     heap_freetuple(tup);
     pfree(DatumGetPointer(values[CUDescMinAttr - 1]));
@@ -2124,7 +2224,10 @@ bool CStore::LoadCUDesc(
 
     Assert(col >= 0);
     Assert(loadCUDescInfoPtr);
-
+    if (col >= m_relation->rd_att->natts) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("col index exceed col number, col:%d, number:%d", col, m_relation->rd_att->natts)));
+    }
     /*
      * we will reset m_perScanMemCnxt when switch to the next batch of cudesc data.
      * so the spaces only used for this batch should be managed by m_perScanMemCnxt.
@@ -2159,10 +2262,10 @@ bool CStore::LoadCUDesc(
     ScanKeyInit(&key[0], (AttrNumber)CUDescColIDAttr, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(attid));
 
     ScanKeyInit(&key[1],
-        (AttrNumber)CUDescCUIDAttr,
-        BTGreaterEqualStrategyNumber,
-        F_OIDGE,
-        UInt32GetDatum(loadCUDescInfoPtr->nextCUID));
+                (AttrNumber)CUDescCUIDAttr,
+                BTGreaterEqualStrategyNumber,
+                F_OIDGE,
+                UInt32GetDatum(loadCUDescInfoPtr->nextCUID));
 
     ScanKeyInit(&key[2], (AttrNumber)CUDescCUIDAttr, BTLessEqualStrategyNumber, F_OIDLE, UInt32GetDatum(m_endCUID));
 
@@ -2266,9 +2369,9 @@ bool CStore::LoadCUDesc(
         Assert(!isnull[CUDescCUPointerAttr - 1]);
         valPtr = DatumGetPointer(values[CUDescCUPointerAttr - 1]);
         rc = memcpy_s(&cuDescArray[loadCUDescInfoPtr->curLoadNum].cu_pointer,
-            sizeof(CUPointer),
-            VARDATA_ANY(valPtr),
-            sizeof(CUPointer));
+                      sizeof(CUPointer),
+                      VARDATA_ANY(valPtr),
+                      sizeof(CUPointer));
         securec_check(rc, "", "");
         Assert(VARSIZE_ANY_EXHDR(valPtr) == sizeof(CUPointer));
 
@@ -2321,9 +2424,9 @@ int CStore::FillVecBatch(_out_ VectorBatch* vecBatchOut)
 
         if (m_relation->rd_att->attrs[colIdx]->attisdropped) {
             ereport(PANIC,
-                (errmsg("Cannot fill VecBatch for a dropped column \"%s\" of table \"%s\"",
-                    NameStr(m_relation->rd_att->attrs[colIdx]->attname),
-                    RelationGetRelationName(m_relation))));
+                    (errmsg("Cannot fill VecBatch for a dropped column \"%s\" of table \"%s\"",
+                            NameStr(m_relation->rd_att->attrs[colIdx]->attname),
+                            RelationGetRelationName(m_relation))));
         }
         if (likely(colIdx >= 0)) {
             Assert(colIdx < vecBatchOut->m_cols);
@@ -2470,7 +2573,7 @@ int CStore::FillVector(_in_ int seq, _in_ CUDesc* cuDescPtr, _out_ ScalarVector*
 
     // step 5: CUToVector
     pos = cuPtr->ToVector<attlen, hasDeadRow>(
-        vec, leftRows, this->m_rowCursorInCU, this->m_scanPosInCU[seq], deadRows, this->m_cuDelMask);
+              vec, leftRows, this->m_rowCursorInCU, this->m_scanPosInCU[seq], deadRows, this->m_cuDelMask);
 
     if (IsValidCacheSlotID(slotId)) {
         // CU is pinned
@@ -2564,8 +2667,8 @@ void CStore::FillSysVecByTid(_in_ ScalarVector* tids, _out_ ScalarVector* destVe
                 }
                 default:
                     ereport(ERROR,
-                        (errcode(ERRCODE_DATATYPE_MISMATCH),
-                            (errmsg("Cannot to fill unsupported system column %d for column store table", sysColOid))));
+                            (errcode(ERRCODE_DATATYPE_MISMATCH),
+                             (errmsg("Cannot to fill unsupported system column %d for column store table", sysColOid))));
                     break;
             }
         }
@@ -2728,14 +2831,14 @@ void CStore::FillVectorByTids(_in_ int colIdx, _in_ ScalarVector* tids, _out_ Sc
                 } else {
                     Assert(false);
                     ereport(FATAL,
-                        (errmsg("compression unit descriptor not found, table(%s), column(%s), relfilenode(%u/%u/%u), "
-                                "cuid(%u)).",
-                            RelationGetRelationName(this->m_relation),
-                            NameStr(this->m_relation->rd_att->attrs[colIdx]->attname),
-                            this->m_relation->rd_node.spcNode,
-                            this->m_relation->rd_node.dbNode,
-                            this->m_relation->rd_node.relNode,
-                            curCUId)));
+                            (errmsg("compression unit descriptor not found, table(%s), column(%s), relfilenode(%u/%u/%u), "
+                                    "cuid(%u)).",
+                                    RelationGetRelationName(this->m_relation),
+                                    NameStr(this->m_relation->rd_att->attrs[colIdx]->attname),
+                                    this->m_relation->rd_node.spcNode,
+                                    this->m_relation->rd_node.dbNode,
+                                    this->m_relation->rd_node.relNode,
+                                    curCUId)));
                 }
             } else {
                 this->GetCUDeleteMaskIfNeed(curCUId, this->m_snapshot);
@@ -2873,9 +2976,9 @@ void CStore::FillVectorByTids(_in_ int colIdx, _in_ ScalarVector* tids, _out_ Sc
                     // because the source and the destination are both of 8 bytes
                     // length, so copy all data in one batch by memcpy().
                     rc = memcpy_s((char*)(vec->m_vals + pos),
-                        (size_t)(uint32)contiguous << 3,
-                        ((uint64*)cuPtr->m_srcData + firstOffset),
-                        (size_t)(uint32)contiguous << 3);
+                                  (size_t)(uint32)contiguous << 3,
+                                  ((uint64*)cuPtr->m_srcData + firstOffset),
+                                  (size_t)(uint32)contiguous << 3);
                     securec_check(rc, "\0", "\0");
                     pos += contiguous;
                     break;
@@ -2885,22 +2988,16 @@ void CStore::FillVectorByTids(_in_ int colIdx, _in_ ScalarVector* tids, _out_ Sc
                     // Total bytes to be copied is calculated from the offset table.
                     int32* offset = cuPtr->m_offset + firstOffset;
                     int32 obase = offset[0];
-
                     if (contiguous > cuDesc.row_count || contiguous >= (int)(cuPtr->m_offsetSize / sizeof(int32))) {
-                        ereport(WARNING,
-                            (errcode(ERRCODE_DATA_CORRUPTED),
-                                (errmsg("Tid and CUDdesc not matched, curCUId: %u, contiguous:%d, row_count:%d, "
-                                        "m_offsetSize:%d",
-                                    curCUId,
-                                    contiguous,
-                                    cuDesc.row_count,
-                                    cuPtr->m_offsetSize))));
-                        break;
+                        ereport(defence_errlevel(), (errcode(ERRCODE_DATA_CORRUPTED),
+                            errmsg("Tid and CUDesc, CUId: %u, colId: %d, contiguous: %d, row count: %d.",
+                                    curCUId, colIdx, contiguous, cuDesc.row_count),
+                            errdetail("please reindex the relation. relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
+                                    RelationGetRelationName(this->m_relation), RelationGetNamespace(this->m_relation), RelationGetRelid(this->m_relation),
+                                    this->m_relation->rd_node.spcNode, this->m_relation->rd_node.dbNode, this->m_relation->rd_node.relNode)));
                     }
-
                     int totalBytes = offset[contiguous] - obase;
                     char* src = cuPtr->m_srcData + obase;
-
                     // We can copy all elements in one batch together and fix the pointer
                     // by adding the memory base. It is manaully unrolled the loop to give
                     // a strong hint to compiler
@@ -3258,24 +3355,24 @@ void CStore::GetCUDeleteMaskIfNeed(_in_ uint32 cuid, _in_ Snapshot snapShot)
         Assert(snapShot->xmin > 0);
         if (TransactionIdPrecedes(snapShot->xmin, currGlobalXmin))
             ereport(ERROR,
-                (errcode(ERRCODE_SNAPSHOT_INVALID),
-                    (errmsg("Snapshot too old."),
-                        errdetail("Could not get the old version of CUDeleteBitmap, RecentGlobalXmin: %lu, "
-                                  "snapShot->xmin: %lu, snapShot->xmax: %lu",
-                            currGlobalXmin,
-                            snapShot->xmin,
-                            snapShot->xmax),
-                        errhint("This is a safe error report, will not impact data consistency, retry your query if "
-                                "needed."))));
+                    (errcode(ERRCODE_SNAPSHOT_INVALID),
+                     (errmsg("Snapshot too old."),
+                      errdetail("Could not get the old version of CUDeleteBitmap, RecentGlobalXmin: %lu, "
+                                "snapShot->xmin: %lu, snapShot->xmax: %lu",
+                                currGlobalXmin,
+                                snapShot->xmin,
+                                snapShot->xmax),
+                      errhint("This is a safe error report, will not impact data consistency, retry your query if "
+                              "needed."))));
         else {
             if (m_useBtreeIndex)
                 m_delMaskCUId = InValidCUID;
             else {
                 ereport(PANIC,
-                    (errmsg("CU Delete bitmap is missing."),
-                        errdetail("There might be some issue about cu %u delete bitmap, Please contact HW engineers "
-                                  "for support.",
-                            cuid)));
+                        (errmsg("CU Delete bitmap is missing."),
+                         errdetail("There might be some issue about cu %u delete bitmap, Please contact HW engineers "
+                                   "for support.",
+                                   cuid)));
             }
         }
     } else {
@@ -3304,42 +3401,42 @@ void CStore::CheckConsistenceOfCUData(CUDesc* cuDescPtr, CU* cu, AttrNumber col)
     /* check the src data ptr. */
     if (cu->m_srcData == NULL) {
         ereport(defence_errlevel(),
-            (errcode(ERRCODE_INTERNAL_ERROR),
-                errmsg("The m_srcData ptr of CU is NULL in CheckConsistenceOfCUData."),
-                errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
-                    RelationGetRelationName(m_relation), RelationGetNamespace(m_relation), RelationGetRelid(m_relation),
-                    m_relation->rd_node.spcNode, m_relation->rd_node.dbNode, m_relation->rd_node.relNode),
-                errdetail_internal("CU info: table column %d, id %u, offset %lu, size %d, row count %d",
-                    col,
-                    cuDescPtr->cu_id, cuDescPtr->cu_pointer, cuDescPtr->cu_size, cuDescPtr->row_count)));
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("The m_srcData ptr of CU is NULL in CheckConsistenceOfCUData."),
+                 errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
+                           RelationGetRelationName(m_relation), RelationGetNamespace(m_relation), RelationGetRelid(m_relation),
+                           m_relation->rd_node.spcNode, m_relation->rd_node.dbNode, m_relation->rd_node.relNode),
+                 errdetail_internal("CU info: table column %d, id %u, offset %lu, size %d, row count %d",
+                                    col,
+                                    cuDescPtr->cu_id, cuDescPtr->cu_pointer, cuDescPtr->cu_size, cuDescPtr->row_count)));
     }
 
     /* check the offset ptr. */
     if ((cu->m_eachValSize < 0 && cu->m_offset == NULL) || (cu->HasNullValue() && cu->m_offset == NULL)) {
         ereport(defence_errlevel(),
-            (errcode(ERRCODE_INTERNAL_ERROR),
-                errmsg("The m_offset ptr of CU is NULL in CheckConsistenceOfCUData."),
-                errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
-                    RelationGetRelationName(m_relation), RelationGetNamespace(m_relation), RelationGetRelid(m_relation),
-                    m_relation->rd_node.spcNode, m_relation->rd_node.dbNode, m_relation->rd_node.relNode),
-                errdetail_internal("CU info: table column %d, id %u, offset %lu, size %d, row count %d",
-                    col,
-                    cuDescPtr->cu_id, cuDescPtr->cu_pointer, cuDescPtr->cu_size, cuDescPtr->row_count)));
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("The m_offset ptr of CU is NULL in CheckConsistenceOfCUData."),
+                 errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
+                           RelationGetRelationName(m_relation), RelationGetNamespace(m_relation), RelationGetRelid(m_relation),
+                           m_relation->rd_node.spcNode, m_relation->rd_node.dbNode, m_relation->rd_node.relNode),
+                 errdetail_internal("CU info: table column %d, id %u, offset %lu, size %d, row count %d",
+                                    col,
+                                    cuDescPtr->cu_id, cuDescPtr->cu_pointer, cuDescPtr->cu_size, cuDescPtr->row_count)));
     }
 
     /* check the magic number */
     if (cu->m_magic != cuDescPtr->magic) {
         ereport(defence_errlevel(),
-            (errcode(ERRCODE_INTERNAL_ERROR),
-                errmsg("magic mismatch between cached CU data and CUDesc, CUDesc's magic %u, CU's magic %u",
-                    cuDescPtr->magic,
-                    cu->m_magic),
-                errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
-                    RelationGetRelationName(m_relation), RelationGetNamespace(m_relation), RelationGetRelid(m_relation),
-                    m_relation->rd_node.spcNode, m_relation->rd_node.dbNode, m_relation->rd_node.relNode),
-                errdetail_internal("CU info: table column %d, id %u, offset %lu, size %d, row count %d",
-                    col,
-                    cuDescPtr->cu_id, cuDescPtr->cu_pointer, cuDescPtr->cu_size, cuDescPtr->row_count)));
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("magic mismatch between cached CU data and CUDesc, CUDesc's magic %u, CU's magic %u",
+                        cuDescPtr->magic,
+                        cu->m_magic),
+                 errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
+                           RelationGetRelationName(m_relation), RelationGetNamespace(m_relation), RelationGetRelid(m_relation),
+                           m_relation->rd_node.spcNode, m_relation->rd_node.dbNode, m_relation->rd_node.relNode),
+                 errdetail_internal("CU info: table column %d, id %u, offset %lu, size %d, row count %d",
+                                    col,
+                                    cuDescPtr->cu_id, cuDescPtr->cu_pointer, cuDescPtr->cu_size, cuDescPtr->row_count)));
     }
 
     /* check the row number */
@@ -3347,47 +3444,47 @@ void CStore::CheckConsistenceOfCUData(CUDesc* cuDescPtr, CU* cu, AttrNumber col)
         /* see also CU::FormValuesOffset() */
         if ((cu->m_offsetSize / (int)sizeof(int32)) != (cuDescPtr->row_count + 1)) {
             ereport(defence_errlevel(),
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                    errmsg("row_count mismatch between cached CU data and CUDesc, CUDesc's row_count %d, CU's "
-                           "row_count %d",
-                        cuDescPtr->row_count,
-                        ((cu->m_offsetSize / (int)sizeof(int32)) - 1)),
-                    errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
-                        RelationGetRelationName(m_relation),
-                        RelationGetNamespace(m_relation),
-                        RelationGetRelid(m_relation),
-                        m_relation->rd_node.spcNode,
-                        m_relation->rd_node.dbNode,
-                        m_relation->rd_node.relNode),
-                    errdetail_internal("CU info: table column %d, id %u, offset %lu, size %d, magic %u",
-                        col,
-                        cuDescPtr->cu_id,
-                        cuDescPtr->cu_pointer,
-                        cuDescPtr->cu_size,
-                        cuDescPtr->magic)));
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("row_count mismatch between cached CU data and CUDesc, CUDesc's row_count %d, CU's "
+                            "row_count %d",
+                            cuDescPtr->row_count,
+                            ((cu->m_offsetSize / (int)sizeof(int32)) - 1)),
+                     errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
+                               RelationGetRelationName(m_relation),
+                               RelationGetNamespace(m_relation),
+                               RelationGetRelid(m_relation),
+                               m_relation->rd_node.spcNode,
+                               m_relation->rd_node.dbNode,
+                               m_relation->rd_node.relNode),
+                     errdetail_internal("CU info: table column %d, id %u, offset %lu, size %d, magic %u",
+                                        col,
+                                        cuDescPtr->cu_id,
+                                        cuDescPtr->cu_pointer,
+                                        cuDescPtr->cu_size,
+                                        cuDescPtr->magic)));
         }
     }
 
     /* check cu size */
     if (cu->m_cuSize != (uint32)cuDescPtr->cu_size) {
         ereport(defence_errlevel(),
-            (errcode(ERRCODE_INTERNAL_ERROR),
-                errmsg("cu_size mismatch between cached CU data and CUDesc, CUDesc's cu_size %u, CU's cu_size %u",
-                    (uint32)cuDescPtr->cu_size,
-                    cu->m_cuSize),
-                errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
-                    RelationGetRelationName(m_relation),
-                    RelationGetNamespace(m_relation),
-                    RelationGetRelid(m_relation),
-                    m_relation->rd_node.spcNode,
-                    m_relation->rd_node.dbNode,
-                    m_relation->rd_node.relNode),
-                errdetail_internal("CU info: table column %d, id %u, offset %lu, row count %d, magic %u",
-                    col,
-                    cuDescPtr->cu_id,
-                    cuDescPtr->cu_pointer,
-                    cuDescPtr->row_count,
-                    cuDescPtr->magic)));
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("cu_size mismatch between cached CU data and CUDesc, CUDesc's cu_size %u, CU's cu_size %u",
+                        (uint32)cuDescPtr->cu_size,
+                        cu->m_cuSize),
+                 errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
+                           RelationGetRelationName(m_relation),
+                           RelationGetNamespace(m_relation),
+                           RelationGetRelid(m_relation),
+                           m_relation->rd_node.spcNode,
+                           m_relation->rd_node.dbNode,
+                           m_relation->rd_node.relNode),
+                 errdetail_internal("CU info: table column %d, id %u, offset %lu, row count %d, magic %u",
+                                    col,
+                                    cuDescPtr->cu_id,
+                                    cuDescPtr->cu_pointer,
+                                    cuDescPtr->row_count,
+                                    cuDescPtr->magic)));
     }
 }
 
@@ -3411,17 +3508,17 @@ void CStore::CheckConsistenceOfCUData(CUDesc* cuDescPtr, CU* cu, AttrNumber col)
 //    the cache entry.
 CU* CStore::GetCUData(CUDesc* cuDescPtr, int colIdx, int valSize, int& slotId)
 {
-    /* 
+    /*
      * we will reset m_PerScanMemCnxt when switch to the next batch of cudesc data.
      * so the spaces only used for this batch should be managed by m_PerScanMemCnxt,
      * including the peices of space used in the decompression.
      */
     if (m_relation->rd_att->attrs[colIdx]->attisdropped) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OPERATION),
-                (errmsg("Cannot get CUData for a dropped column \"%s\" of table \"%s\"",
-                    NameStr(m_relation->rd_att->attrs[colIdx]->attname),
-                    RelationGetRelationName(m_relation)))));
+                (errcode(ERRCODE_INVALID_OPERATION),
+                 (errmsg("Cannot get CUData for a dropped column \"%s\" of table \"%s\"",
+                         NameStr(m_relation->rd_att->attrs[colIdx]->attname),
+                         RelationGetRelationName(m_relation)))));
     }
 
     AutoContextSwitch newMemCnxt(this->m_perScanMemCnxt);
@@ -3466,15 +3563,15 @@ RETRY_LOAD_CU:
         if (CUCache->DataBlockWaitIO(slotId)) {
             CUCache->UnPinDataBlock(slotId);
             ereport(LOG,
-                (errmodule(MOD_CACHE),
-                    errmsg("CU wait IO find an error, need to reload! table(%s), column(%s), relfilenode(%u/%u/%u), "
-                           "cuid(%u)",
-                        RelationGetRelationName(m_relation),
-                        NameStr(m_relation->rd_att->attrs[colIdx]->attname),
-                        m_relation->rd_node.spcNode,
-                        m_relation->rd_node.dbNode,
-                        m_relation->rd_node.relNode,
-                        cuDescPtr->cu_id)));
+                    (errmodule(MOD_CACHE),
+                     errmsg("CU wait IO find an error, need to reload! table(%s), column(%s), relfilenode(%u/%u/%u), "
+                            "cuid(%u)",
+                            RelationGetRelationName(m_relation),
+                            NameStr(m_relation->rd_att->attrs[colIdx]->attname),
+                            m_relation->rd_node.spcNode,
+                            m_relation->rd_node.dbNode,
+                            m_relation->rd_node.relNode,
+                            cuDescPtr->cu_id)));
             goto RETRY_LOAD_CU;
         }
 
@@ -3492,27 +3589,27 @@ RETRY_LOAD_CU:
             return cuPtr;
         }
         if (cuPtr->m_cache_compressed) {
-            retCode = CUCache->StartUncompressCU(cuDescPtr, slotId, this->m_plan_node_id, this->m_timing_on);
+            retCode = CUCache->StartUncompressCU(cuDescPtr, slotId, this->m_plan_node_id, this->m_timing_on, ALIGNOF_CUSIZE);
             if (retCode == CU_RELOADING) {
                 CUCache->UnPinDataBlock(slotId);
                 ereport(LOG, (errmodule(MOD_CACHE),
-                    errmsg("The CU is being reloaded by remote read thread. Retry to load CU! table(%s), "
-                           "column(%s), relfilenode(%u/%u/%u), cuid(%u)",
-                        RelationGetRelationName(m_relation), NameStr(m_relation->rd_att->attrs[colIdx]->attname),
-                        m_relation->rd_node.spcNode, m_relation->rd_node.dbNode, m_relation->rd_node.relNode,
-                        cuDescPtr->cu_id)));
+                              errmsg("The CU is being reloaded by remote read thread. Retry to load CU! table(%s), "
+                                     "column(%s), relfilenode(%u/%u/%u), cuid(%u)",
+                                     RelationGetRelationName(m_relation), NameStr(m_relation->rd_att->attrs[colIdx]->attname),
+                                     m_relation->rd_node.spcNode, m_relation->rd_node.dbNode, m_relation->rd_node.relNode,
+                                     cuDescPtr->cu_id)));
                 goto RETRY_LOAD_CU;
             } else if (retCode == CU_ERR_ADIO) {
                 ereport(ERROR,
-                    (errcode(ERRCODE_IO_ERROR),
-                        errmodule(MOD_ADIO),
-                        errmsg("Load CU failed in adio! table(%s), column(%s), relfilenode(%u/%u/%u), cuid(%u)",
-                            RelationGetRelationName(m_relation),
-                            NameStr(m_relation->rd_att->attrs[colIdx]->attname),
-                            m_relation->rd_node.spcNode,
-                            m_relation->rd_node.dbNode,
-                            m_relation->rd_node.relNode,
-                            cuDescPtr->cu_id)));
+                        (errcode(ERRCODE_IO_ERROR),
+                         errmodule(MOD_ADIO),
+                         errmsg("Load CU failed in adio! table(%s), column(%s), relfilenode(%u/%u/%u), cuid(%u)",
+                                RelationGetRelationName(m_relation),
+                                NameStr(m_relation->rd_att->attrs[colIdx]->attname),
+                                m_relation->rd_node.spcNode,
+                                m_relation->rd_node.dbNode,
+                                m_relation->rd_node.relNode,
+                                cuDescPtr->cu_id)));
             } else if (retCode == CU_ERR_CRC || retCode == CU_ERR_MAGIC) {
                 /* Prefech CU contains incorrect checksum */
                 addBadBlockStat(
@@ -3522,19 +3619,18 @@ RETRY_LOAD_CU:
                     /* clear CacheBlockInProgressIO and CacheBlockInProgressUncompress but not free cu buffer */
                     CUCache->TerminateCU(false);
                     ereport(WARNING,
-                        (errcode(ERRCODE_DATA_CORRUPTED),
-                            (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu, prefetch %s, try to "
-                                    "remote read",
-                                cuDescPtr->cu_id,
-                                RelationGetRelationName(m_relation),
-                                relcolpath(m_cuStorage[colIdx]),
-                                cuDescPtr->cu_pointer,
-                                GetUncompressErrMsg(retCode))),
-                            handle_in_client(true)));
+                            (errcode(ERRCODE_DATA_CORRUPTED),
+                             (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu, prefetch %s, try to "
+                                     "remote read",
+                                     cuDescPtr->cu_id,
+                                     RelationGetRelationName(m_relation),
+                                     relcolpath(m_cuStorage[colIdx]),
+                                     cuDescPtr->cu_pointer,
+                                     GetUncompressErrMsg(retCode))),
+                             handle_in_client(true)));
 
                     /* remote load cu */
                     retCode = GetCUDataFromRemote(cuDescPtr, cuPtr, colIdx, valSize, slotId);
-
                     if (retCode == CU_RELOADING) {
                         /* other thread in remote read */
                         CUCache->UnPinDataBlock(slotId);
@@ -3550,18 +3646,17 @@ RETRY_LOAD_CU:
                     // unlogged table can not remote read
                     CUCache->TerminateCU(true);
                     ereport(ERROR,
-                        (errcode(ERRCODE_DATA_CORRUPTED),
-                            (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu, prefetch %s",
-                                 cuDescPtr->cu_id,
-                                 RelationGetRelationName(m_relation),
-                                 relcolpath(m_cuStorage[colIdx]),
-                                 cuDescPtr->cu_pointer,
-                                 GetUncompressErrMsg(retCode)),
-                                errdetail("Can not remote read for unlogged/temp table. Should truncate table and "
-                                          "re-import data."),
-                                handle_in_client(true))));
+                            (errcode(ERRCODE_DATA_CORRUPTED),
+                             (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu, prefetch %s",
+                                     cuDescPtr->cu_id,
+                                     RelationGetRelationName(m_relation),
+                                     relcolpath(m_cuStorage[colIdx]),
+                                     cuDescPtr->cu_pointer,
+                                     GetUncompressErrMsg(retCode)),
+                              errdetail("Can not remote read for unlogged/temp table. Should truncate table and "
+                                        "re-import data."),
+                              handle_in_client(true))));
                 }
-
             } else {
                 Assert(retCode == CU_OK);
             }
@@ -3581,31 +3676,31 @@ RETRY_LOAD_CU:
     ADIO_RUN()
     {
         ereport(DEBUG1,
-            (errmodule(MOD_ADIO),
-                errmsg("GetCUData:relation(%s), colIdx(%d), load cuid(%u), slotId(%d)",
-                    RelationGetRelationName(m_relation),
-                    colIdx,
-                    cuDescPtr->cu_id,
-                    slotId)));
+                (errmodule(MOD_ADIO),
+                 errmsg("GetCUData:relation(%s), colIdx(%d), load cuid(%u), slotId(%d)",
+                        RelationGetRelationName(m_relation),
+                        colIdx,
+                        cuDescPtr->cu_id,
+                        slotId)));
     }
     ADIO_END();
 
     // Mark the CU as no longer io busy, and wake any waiters
     CUCache->DataBlockCompleteIO(slotId);
 
-    retCode = CUCache->StartUncompressCU(cuDescPtr, slotId, this->m_plan_node_id, this->m_timing_on);
+    retCode = CUCache->StartUncompressCU(cuDescPtr, slotId, this->m_plan_node_id, this->m_timing_on, ALIGNOF_CUSIZE);
     if (retCode == CU_RELOADING) {
         CUCache->UnPinDataBlock(slotId);
         ereport(LOG,
-            (errmodule(MOD_CACHE),
-                errmsg("The CU is being reloaded by remote read thread. Retry to load CU! table(%s), column(%s), "
-                       "relfilenode(%u/%u/%u), cuid(%u)",
-                    RelationGetRelationName(m_relation),
-                    NameStr(m_relation->rd_att->attrs[colIdx]->attname),
-                    m_relation->rd_node.spcNode,
-                    m_relation->rd_node.dbNode,
-                    m_relation->rd_node.relNode,
-                    cuDescPtr->cu_id)));
+                (errmodule(MOD_CACHE),
+                 errmsg("The CU is being reloaded by remote read thread. Retry to load CU! table(%s), column(%s), "
+                        "relfilenode(%u/%u/%u), cuid(%u)",
+                        RelationGetRelationName(m_relation),
+                        NameStr(m_relation->rd_att->attrs[colIdx]->attname),
+                        m_relation->rd_node.spcNode,
+                        m_relation->rd_node.dbNode,
+                        m_relation->rd_node.relNode,
+                        cuDescPtr->cu_id)));
         goto RETRY_LOAD_CU;
     } else if (retCode == CU_ERR_CRC || retCode == CU_ERR_MAGIC) {
         /* Sync load CU contains incorrect checksum */
@@ -3616,40 +3711,39 @@ RETRY_LOAD_CU:
             /* clear CacheBlockInProgressIO and CacheBlockInProgressUncompress but not free cu buffer */
             CUCache->TerminateCU(false);
             ereport(WARNING,
-                (errcode(ERRCODE_DATA_CORRUPTED),
-                    (errmsg(
-                         "invalid CU in cu_id %u of relation %s file %s offset %lu, sync load %s, try to remote read",
-                         cuDescPtr->cu_id,
-                         RelationGetRelationName(m_relation),
-                         relcolpath(m_cuStorage[colIdx]),
-                         cuDescPtr->cu_pointer,
-                         GetUncompressErrMsg(retCode)),
-                        handle_in_client(true))));
+                    (errcode(ERRCODE_DATA_CORRUPTED),
+                     (errmsg(
+                          "invalid CU in cu_id %u of relation %s file %s offset %lu, sync load %s, try to remote read",
+                          cuDescPtr->cu_id,
+                          RelationGetRelationName(m_relation),
+                          relcolpath(m_cuStorage[colIdx]),
+                          cuDescPtr->cu_pointer,
+                          GetUncompressErrMsg(retCode)),
+                      handle_in_client(true))));
 
             /* remote load cu */
             retCode = GetCUDataFromRemote(cuDescPtr, cuPtr, colIdx, valSize, slotId);
-
             if (retCode == CU_RELOADING) {
                 /* other thread in remote read */
                 CUCache->UnPinDataBlock(slotId);
                 ereport(LOG,
-                    (errmodule(MOD_CACHE),
-                        errmsg("The CU is being reloaded by remote read thread. Retry to load CU! table(%s), "
-                               "column(%s), relfilenode(%u/%u/%u), cuid(%u)",
-                            RelationGetRelationName(m_relation), NameStr(m_relation->rd_att->attrs[colIdx]->attname),
-                            m_relation->rd_node.spcNode, m_relation->rd_node.dbNode, m_relation->rd_node.relNode,
-                            cuDescPtr->cu_id)));
+                        (errmodule(MOD_CACHE),
+                         errmsg("The CU is being reloaded by remote read thread. Retry to load CU! table(%s), "
+                                "column(%s), relfilenode(%u/%u/%u), cuid(%u)",
+                                RelationGetRelationName(m_relation), NameStr(m_relation->rd_att->attrs[colIdx]->attname),
+                                m_relation->rd_node.spcNode, m_relation->rd_node.dbNode, m_relation->rd_node.relNode,
+                                cuDescPtr->cu_id)));
                 goto RETRY_LOAD_CU;
             }
         } else {
             // unlogged table can not remote read
             CUCache->TerminateCU(true);
             ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu, sync load %s", cuDescPtr->cu_id,
-                RelationGetRelationName(m_relation), relcolpath(m_cuStorage[colIdx]), cuDescPtr->cu_pointer,
-                GetUncompressErrMsg(retCode)),
-                errdetail("Can not remote read for unlogged/temp table. Should truncate table and re-import "
-                "data."))));
+                            (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu, sync load %s", cuDescPtr->cu_id,
+                                    RelationGetRelationName(m_relation), relcolpath(m_cuStorage[colIdx]), cuDescPtr->cu_pointer,
+                                    GetUncompressErrMsg(retCode)),
+                             errdetail("Can not remote read for unlogged/temp table. Should truncate table and re-import "
+                                       "data."))));
         }
     }
 
@@ -3694,10 +3788,10 @@ CUUncompressedRetCode CStore::GetCUDataFromRemote(
 
         if (cuPtr->m_cache_compressed) {
             m_cuStorage[colIdx]->RemoteLoadCU(cuPtr,
-                cuDescPtr->cu_pointer,
-                cuDescPtr->cu_size,
-                g_instance.attr.attr_storage.enable_adio_function,
-                true);
+                                              cuDescPtr->cu_pointer,
+                                              cuDescPtr->cu_size,
+                                              g_instance.attr.attr_storage.enable_adio_function,
+                                              true);
 
             if (cuPtr->IsVerified(cuDescPtr->magic))
                 m_cuStorage[colIdx]->OverwriteCU(
@@ -3710,31 +3804,31 @@ CUUncompressedRetCode CStore::GetCUDataFromRemote(
     } else {
         if (CUCache->DataBlockWaitIO(slotId)) {
             ereport(ERROR,
-                (errcode(ERRCODE_IO_ERROR),
-                    errmodule(MOD_CACHE),
-                    errmsg("There is an IO error when remote read CU in cu_id %u of relation %s file %s offset %lu. "
-                           "slotId %d, column \"%s\" ",
-                        cuDescPtr->cu_id,
-                        RelationGetRelationName(m_relation),
-                        relcolpath(m_cuStorage[colIdx]),
-                        cuDescPtr->cu_pointer,
-                        slotId,
-                        NameStr(m_relation->rd_att->attrs[colIdx]->attname))));
+                    (errcode(ERRCODE_IO_ERROR),
+                     errmodule(MOD_CACHE),
+                     errmsg("There is an IO error when remote read CU in cu_id %u of relation %s file %s offset %lu. "
+                            "slotId %d, column \"%s\" ",
+                            cuDescPtr->cu_id,
+                            RelationGetRelationName(m_relation),
+                            relcolpath(m_cuStorage[colIdx]),
+                            cuDescPtr->cu_pointer,
+                            slotId,
+                            NameStr(m_relation->rd_att->attrs[colIdx]->attname))));
         }
     }
 
-    retCode = CUCache->StartUncompressCU(cuDescPtr, slotId, this->m_plan_node_id, this->m_timing_on);
+    retCode = CUCache->StartUncompressCU(cuDescPtr, slotId, this->m_plan_node_id, this->m_timing_on, ALIGNOF_CUSIZE);
     if (retCode == CU_ERR_CRC || retCode == CU_ERR_MAGIC) {
         /* remote load crc error */
         CUCache->TerminateCU(true);
         ereport(ERROR,
-            (errcode(ERRCODE_DATA_CORRUPTED),
-                (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu, remote read %s",
-                    cuDescPtr->cu_id,
-                    RelationGetRelationName(m_relation),
-                    relcolpath(m_cuStorage[colIdx]),
-                    cuDescPtr->cu_pointer,
-                    GetUncompressErrMsg(retCode)))));
+                (errcode(ERRCODE_DATA_CORRUPTED),
+                 (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu, remote read %s",
+                         cuDescPtr->cu_id,
+                         RelationGetRelationName(m_relation),
+                         relcolpath(m_cuStorage[colIdx]),
+                         cuDescPtr->cu_pointer,
+                         GetUncompressErrMsg(retCode)))));
     }
 
     return retCode;
@@ -3773,10 +3867,10 @@ bool CStore::GetCURowCount(_in_ int col, __inout LoadCUDescCtl* loadCUDescInfoPt
 
     ScanKeyInit(&key[0], (AttrNumber)CUDescColIDAttr, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(attid));
     ScanKeyInit(&key[1],
-        (AttrNumber)CUDescCUIDAttr,
-        BTGreaterEqualStrategyNumber,
-        F_OIDGE,
-        UInt32GetDatum(loadCUDescInfoPtr->nextCUID));
+                (AttrNumber)CUDescCUIDAttr,
+                BTGreaterEqualStrategyNumber,
+                F_OIDGE,
+                UInt32GetDatum(loadCUDescInfoPtr->nextCUID));
     snapShot = (snapShot == NULL) ? GetActiveSnapshot() : snapShot;
 
     SysScanDesc cudesc_scan = systable_beginscan_ordered(cudesc_rel, idx_rel, snapShot, 2, key);
@@ -3915,8 +4009,8 @@ void CStore::UnlinkColDataFile(const RelFileNode& rnode, AttrNumber attrnum, boo
         CStoreUnlinkCuDataFiles(&cuStorage);
     } else {
         ereport(LOG,
-            (errmsg(
-                "delay unlinking column file %u/%u/%u att %d", rnode.spcNode, rnode.dbNode, rnode.relNode, attrnum)));
+                (errmsg(
+                     "delay unlinking column file %u/%u/%u att %d", rnode.spcNode, rnode.dbNode, rnode.relNode, attrnum)));
     }
 
     if (bcmIncluded) {
@@ -4150,14 +4244,13 @@ TransactionId CStore::GetCUXmin(uint32 cuid)
     // cu xmin  use the cudec record xmin which column 0
     CUDesc cudesc;
     bool found = this->GetCUDesc(colid, cuid, &cudesc, m_snapshot);
-
     if (!found) {
         Assert(false);
         ereport(FATAL,
-            (errmsg("compression unit descriptor(talbe \"%s\", column \"%s\", cuid %u) not found",
-                RelationGetRelationName(m_relation),
-                NameStr(m_relation->rd_att->attrs[colid]->attname),
-                cuid)));
+                (errmsg("compression unit descriptor(talbe \"%s\", column \"%s\", cuid %u) not found",
+                        RelationGetRelationName(m_relation),
+                        NameStr(m_relation->rd_att->attrs[colid]->attname),
+                        cuid)));
     }
 
     return cudesc.xmin;
@@ -4182,27 +4275,27 @@ void CStore::CheckConsistenceOfCUDesc(int cudescIdx) const
             continue;
         }
         ereport(defence_errlevel(),
-            (errcode(ERRCODE_INTERNAL_ERROR),
-                errmsg(
-                    "Inconsistent of CUDesc(table column, CUDesc index, CU id, number of rows) during batch loading, "
-                    "CUDesc[%d] (%d %d %u %d), CUDesc[%d] (%d %d %u %d)",
-                    0,
-                    (m_colId[0] + 1),
-                    cudescIdx,
-                    firstCUDesc->cu_id,
-                    firstCUDesc->row_count,
-                    col,
-                    (m_colId[col] + 1),
-                    cudescIdx,
-                    checkCUDesc->cu_id,
-                    checkCUDesc->row_count),
-                errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
-                    RelationGetRelationName(m_relation),
-                    RelationGetNamespace(m_relation),
-                    RelationGetRelid(m_relation),
-                    m_relation->rd_node.spcNode,
-                    m_relation->rd_node.dbNode,
-                    m_relation->rd_node.relNode)));
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg(
+                     "Inconsistent of CUDesc(table column, CUDesc index, CU id, number of rows) during batch loading, "
+                     "CUDesc[%d] (%d %d %u %d), CUDesc[%d] (%d %d %u %d)",
+                     0,
+                     (m_colId[0] + 1),
+                     cudescIdx,
+                     firstCUDesc->cu_id,
+                     firstCUDesc->row_count,
+                     col,
+                     (m_colId[col] + 1),
+                     cudescIdx,
+                     checkCUDesc->cu_id,
+                     checkCUDesc->row_count),
+                 errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
+                           RelationGetRelationName(m_relation),
+                           RelationGetNamespace(m_relation),
+                           RelationGetRelid(m_relation),
+                           m_relation->rd_node.spcNode,
+                           m_relation->rd_node.dbNode,
+                           m_relation->rd_node.relNode)));
     }
 }
 
@@ -4219,27 +4312,27 @@ void CStore::CheckConsistenceOfCUDescCtl(void)
             continue;
         }
         ereport(defence_errlevel(),
-            (errcode(ERRCODE_INTERNAL_ERROR),
-                errmsg("Inconsistent of CUDescCtl(table column, next CU ID, last load number, current load number) "
-                       "during batch loading, "
-                       "CUDescCtl[%d] is (%d %u %u %u), CUDescCtl[%d] is (%d %u %u %u)",
-                    0,
-                    (m_colId[0] + 1),
-                    firstCUDescCtl->nextCUID,
-                    firstCUDescCtl->lastLoadNum,
-                    firstCUDescCtl->curLoadNum,
-                    i,
-                    (m_colId[i] + 1),
-                    checkCUdescCtl->nextCUID,
-                    checkCUdescCtl->lastLoadNum,
-                    checkCUdescCtl->curLoadNum),
-                errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
-                    RelationGetRelationName(m_relation),
-                    RelationGetNamespace(m_relation),
-                    RelationGetRelid(m_relation),
-                    m_relation->rd_node.spcNode,
-                    m_relation->rd_node.dbNode,
-                    m_relation->rd_node.relNode)));
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("Inconsistent of CUDescCtl(table column, next CU ID, last load number, current load number) "
+                        "during batch loading, "
+                        "CUDescCtl[%d] is (%d %u %u %u), CUDescCtl[%d] is (%d %u %u %u)",
+                        0,
+                        (m_colId[0] + 1),
+                        firstCUDescCtl->nextCUID,
+                        firstCUDescCtl->lastLoadNum,
+                        firstCUDescCtl->curLoadNum,
+                        i,
+                        (m_colId[i] + 1),
+                        checkCUdescCtl->nextCUID,
+                        checkCUdescCtl->lastLoadNum,
+                        checkCUdescCtl->curLoadNum),
+                 errdetail("relation info: name \"%s\", namespace id %u, id %u, relfilenode %u/%u/%u",
+                           RelationGetRelationName(m_relation),
+                           RelationGetNamespace(m_relation),
+                           RelationGetRelid(m_relation),
+                           m_relation->rd_node.spcNode,
+                           m_relation->rd_node.dbNode,
+                           m_relation->rd_node.relNode)));
     }
 }
 
@@ -4259,14 +4352,14 @@ void CStore::IncLoadCuDescCursor()
 void InitScanDeltaRelation(CStoreScanState* node, Snapshot snapshot)
 {
     Relation deltaRelation;
-    HeapScanDesc deltaScanDesc;
+    TableScanDesc deltaScanDesc;
     Relation cstoreRel = node->ss_currentRelation;
 
     if (node->ss_currentRelation == NULL)
         return;
 
     deltaRelation = heap_open(cstoreRel->rd_rel->reldeltarelid, AccessShareLock);
-    deltaScanDesc = heap_beginscan(deltaRelation, snapshot, 0, NULL);
+    deltaScanDesc = tableam_scan_begin(deltaRelation, snapshot, 0, NULL);
 
     node->ss_currentDeltaRelation = deltaRelation;
     node->ss_currentDeltaScanDesc = deltaScanDesc;
@@ -4293,7 +4386,7 @@ static void FillDeltaSysColumn(int sysIdx, VectorBatch* outBatch, TupleTableSlot
         case SelfItemPointerAttributeNumber: {
             destValue[idx] = 0;
             ItemPointer destTid = (ItemPointer)(destValue + idx);
-            *destTid = slot->tts_tuple->t_self;
+            *destTid = ((HeapTuple) slot->tts_tuple)->t_self;
             break;
         }
         case XC_NodeIdAttributeNumber: {
@@ -4305,7 +4398,7 @@ static void FillDeltaSysColumn(int sysIdx, VectorBatch* outBatch, TupleTableSlot
             break;
         }
         case MinTransactionIdAttributeNumber: {
-            destValue[idx] = HeapTupleGetRawXmin(slot->tts_tuple);
+            destValue[idx] = HeapTupleGetRawXmin((HeapTuple)slot->tts_tuple);
             break;
         }
         default:
@@ -4361,19 +4454,18 @@ void ScanDeltaStore(CStoreScanState* node, VectorBatch* outBatch, List* indexqua
     bool hasIndexFilter = (list_length(indexqual) > 0);
     HeapTuple tuple = NULL;
     TupleTableSlot* slot = node->ss_ScanTupleSlot;
-    HeapScanDesc scandesc = node->ss_currentDeltaScanDesc;
+    TableScanDesc scandesc = (TableScanDesc)(node->ss_currentDeltaScanDesc);
     ExprContext* econtext = node->ps.ps_ExprContext;
     ResetExprContext(econtext);
 
     while (true) {
-        tuple = heap_getnext(scandesc, ForwardScanDirection);
+        tuple = (HeapTuple) tableam_scan_getnexttuple(scandesc, ForwardScanDirection);
 
         if (tuple != NULL) {
-
             (void)ExecStoreTuple(tuple, /* tuple to store */
-                slot,                   /* slot to store in */
-                scandesc->rs_cbuf,      /* buffer associated with this tuple */
-                false);                 /* pfree this pointer */
+                                 slot,                   /* slot to store in */
+                                 scandesc->rs_cbuf,      /* buffer associated with this tuple */
+                                 false);                 /* pfree this pointer */
 
             /* If there is index qual, use it to filter the delta rows before */
             if (hasIndexFilter) {
@@ -4409,7 +4501,7 @@ void ScanDeltaStore(CStoreScanState* node, VectorBatch* outBatch, List* indexqua
 void EndScanDeltaRelation(CStoreScanState* node)
 {
     if (node->ss_currentDeltaScanDesc) {
-        heap_endscan(node->ss_currentDeltaScanDesc);
+        tableam_scan_end((TableScanDesc)(node->ss_currentDeltaScanDesc));
         ExecCloseScanRelation(node->ss_currentDeltaRelation);
     }
 }
@@ -4468,10 +4560,10 @@ CStoreScanDesc CStoreBeginScan(Relation relation, int colNum, int16* colIdx, Sna
         scanstate->ss_ScanTupleSlot = MakeTupleTableSlot();
         ExprContext* econtext = makeNode(ExprContext);
         econtext->ecxt_per_tuple_memory = AllocSetContextCreate(CurrentMemoryContext,
-            "cstore delta scan",
-            ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE);
+                                                                "cstore delta scan",
+                                                                ALLOCSET_DEFAULT_MINSIZE,
+                                                                ALLOCSET_DEFAULT_INITSIZE,
+                                                                ALLOCSET_DEFAULT_MAXSIZE);
         scanstate->ps.ps_ExprContext = econtext;
         InitScanDeltaRelation(scanstate, (snapshot != NULL ? snapshot : GetActiveSnapshot()));
     } else {

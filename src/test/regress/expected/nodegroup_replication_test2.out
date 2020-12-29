@@ -1,0 +1,2319 @@
+/*---------------------------------------------------------------------------------------
+ *
+ *  Nodegroup replicated table test case
+ *
+ * Portions Copyright (c) 2017, Huawei
+ *
+ *
+ * IDENTIFICATION
+ *    src/test/regress/sql/nodegroup_replication_test.sql
+ *---------------------------------------------------------------------------------------
+ */
+create schema nodegroup_replication_test;
+set current_schema = nodegroup_replication_test;
+set enable_nodegroup_explain=true;
+ERROR:  unrecognized configuration parameter "enable_nodegroup_explain"
+set expected_computing_nodegroup='group1';
+create node group ng0 with (datanode1, datanode2, datanode3);
+create node group ng1 with (datanode4, datanode5, datanode6);
+create table t_row (c1 int, c2 int) distribute by hash(c1) to group ng1;
+create table t1 (c1 int, c2 int) with (orientation = column, compression=middle) distribute by hash(c1) to group ng0;
+create table t1_rep (c1 int, c2 int) with (orientation = column, compression=middle) distribute by replication to group ng0;
+create table t2 (c1 int, c2 int) with (orientation = column, compression=middle) distribute by hash(c1) to group ng1;
+create table t2_rep (c1 int, c2 int) with (orientation = column, compression=middle) distribute by replication to group ng1;
+-- no distribute keys available
+create table t2_rep_float (c1 float, c2 float) with (orientation = column, compression=middle) distribute by replication to group ng1;
+insert into t_row select v,v from generate_series(1,10) as v;
+insert into t1 select * from t_row;
+insert into t1_rep select * from t1;
+insert into t2 select * from t1;
+insert into t2_rep select * from t2;
+insert into t2_rep_float select * from t2;
+analyze t_row;
+analyze t1;
+analyze t1_rep;
+analyze t2;
+analyze t2_rep;
+analyze t2_rep_float;
+set enable_mergejoin=off;
+set enable_nestloop=off;
+set enable_hashjoin=on;
+-- replicate join replicate
+set expected_computing_nodegroup = 'ng0';
+explain (costs off) select * from t1_rep t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = t2.c1)
+               ->  CStore Scan on t1_rep t1
+               ->  CStore Scan on t1_rep t2
+(7 rows)
+
+select * from t1_rep t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t2_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = t2.c1)
+               ->  CStore Scan on t2_rep t1
+               ->  CStore Scan on t2_rep t2
+(7 rows)
+
+select * from t1_rep t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = t2.c1)
+               ->  Vector Streaming(type: BROADCAST)
+--?                     Spawn on:.*
+                     ->  CStore Scan on t2_rep t1
+               ->  CStore Scan on t1_rep t2
+(9 rows)
+
+select * from t2_rep t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = t2.c1)
+               ->  CStore Scan on t2_rep_float t1
+               ->  CStore Scan on t2_rep_float t2
+(7 rows)
+
+select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = (t2.c1)::double precision)
+               ->  CStore Scan on t2_rep_float t1
+               ->  CStore Scan on t2_rep t2
+(7 rows)
+
+select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = (t2.c1)::double precision)
+               ->  Vector Streaming(type: BROADCAST)
+--?                     Spawn on:.*
+                     ->  CStore Scan on t2_rep_float t1
+               ->  CStore Scan on t1_rep t2
+(9 rows)
+
+select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Limit
+               ->  Vector Sort
+                     Sort Key: t1.c1, t1.c2
+                     ->  Vector Hash Semi Join
+                           Hash Cond: (t1.c1 = t1_rep.c2)
+                           ->  Vector Streaming(type: BROADCAST)
+--?                                 Spawn on:.*
+                                 ->  CStore Scan on t2_rep t1
+                           ->  CStore Scan on t1_rep
+(12 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+set expected_computing_nodegroup = 'ng1';
+explain (costs off) select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = t2.c1)
+               ->  CStore Scan on t2_rep_float t1
+               ->  CStore Scan on t2_rep_float t2
+(7 rows)
+
+select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = (t2.c1)::double precision)
+               ->  CStore Scan on t2_rep_float t1
+               ->  CStore Scan on t2_rep t2
+(7 rows)
+
+select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = (t2.c1)::double precision)
+               ->  Vector Streaming(type: BROADCAST)
+--?                     Spawn on:.*
+                     ->  CStore Scan on t2_rep_float t1
+               ->  CStore Scan on t1_rep t2
+(9 rows)
+
+select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Limit
+               ->  Vector Sort
+                     Sort Key: t1.c1, t1.c2
+                     ->  Vector Hash Semi Join
+                           Hash Cond: (t1.c1 = t1_rep.c2)
+                           ->  Vector Streaming(type: BROADCAST)
+--?                                 Spawn on:.*
+                                 ->  CStore Scan on t2_rep t1
+                           ->  CStore Scan on t1_rep
+(12 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+reset expected_computing_nodegroup;
+explain (costs off) select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = t2.c1)
+               ->  CStore Scan on t2_rep_float t1
+               ->  CStore Scan on t2_rep_float t2
+(7 rows)
+
+select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = (t2.c1)::double precision)
+               ->  CStore Scan on t2_rep_float t1
+               ->  CStore Scan on t2_rep t2
+(7 rows)
+
+select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t1.c1 = (t2.c1)::double precision)
+               ->  Vector Streaming(type: BROADCAST)
+--?                     Spawn on:.*
+                     ->  CStore Scan on t2_rep_float t1
+               ->  CStore Scan on t1_rep t2
+(9 rows)
+
+select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Limit
+               ->  Vector Sort
+                     Sort Key: t1.c1, t1.c2
+                     ->  Vector Hash Semi Join
+                           Hash Cond: (t1.c1 = t1_rep.c2)
+                           ->  Vector Streaming(type: BROADCAST)
+--?                                 Spawn on:.*
+                                 ->  CStore Scan on t2_rep t1
+                           ->  CStore Scan on t1_rep
+(12 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+-- replicate join hash
+set expected_computing_nodegroup = 'ng0';
+explain (costs off) select * from t1_rep t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  CStore Scan on t1 t2
+               ->  CStore Scan on t1_rep t1
+                     Filter: (Hash By c1)
+(8 rows)
+
+select * from t1_rep t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+--?                     Spawn on:.*
+                     ->  CStore Scan on t1 t2
+               ->  CStore Scan on t2_rep t1
+(9 rows)
+
+select * from t2_rep t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: ((t2.c1)::double precision = t1.c1)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+--?                     Spawn on:.*
+                     ->  CStore Scan on t1 t2
+               ->  CStore Scan on t2_rep_float t1
+(9 rows)
+
+select * from t2_rep_float t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t1_rep t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+--?                     Spawn on:.*
+                     ->  CStore Scan on t2
+               ->  CStore Scan on t1_rep t1
+(9 rows)
+
+select * from t1_rep t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  CStore Scan on t2
+               ->  CStore Scan on t2_rep t1
+                     Filter: (Hash By c1)
+(8 rows)
+
+select * from t2_rep t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: ((t2.c1)::double precision = t1.c1)
+               ->  CStore Scan on t2
+               ->  CStore Scan on t2_rep_float t1
+(7 rows)
+
+select * from t2_rep_float t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Streaming (type: GATHER)
+--?               Node/s:.*
+               ->  Vector Limit
+                     ->  Vector Sort
+                           Sort Key: t1.c1, t1.c2
+                           ->  Vector Sonic Hash Join
+                                 Hash Cond: (t1.c1 = nodegroup_replication_test.t1.c2)
+                                 ->  CStore Scan on t2_rep t1
+                                       Filter: (Hash By c1)
+                                 ->  Vector Hash Aggregate
+                                       Group By Key: nodegroup_replication_test.t1.c2
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+--?                                             Spawn on:.*
+                                             ->  CStore Scan on t1
+(16 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+reset expected_computing_nodegroup;
+explain (costs off) select * from t1_rep t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  CStore Scan on t1 t2
+               ->  CStore Scan on t1_rep t1
+                     Filter: (Hash By c1)
+(8 rows)
+
+select * from t1_rep t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+--?                     Spawn on:.*
+                     ->  CStore Scan on t1 t2
+               ->  CStore Scan on t2_rep t1
+(9 rows)
+
+select * from t2_rep t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: ((t2.c1)::double precision = t1.c1)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+--?                     Spawn on:.*
+                     ->  CStore Scan on t1 t2
+               ->  CStore Scan on t2_rep_float t1
+(9 rows)
+
+select * from t2_rep_float t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t1_rep t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+--?                     Spawn on:.*
+                     ->  CStore Scan on t2
+               ->  CStore Scan on t1_rep t1
+(9 rows)
+
+select * from t1_rep t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: (t2.c1 = t1.c1)
+               ->  CStore Scan on t2
+               ->  CStore Scan on t2_rep t1
+                     Filter: (Hash By c1)
+(8 rows)
+
+select * from t2_rep t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Sonic Hash Join
+               Hash Cond: ((t2.c1)::double precision = t1.c1)
+               ->  CStore Scan on t2
+               ->  CStore Scan on t2_rep_float t1
+(7 rows)
+
+select * from t2_rep_float t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Streaming (type: GATHER)
+--?               Node/s:.*
+               ->  Vector Limit
+                     ->  Vector Sort
+                           Sort Key: t1.c1, t1.c2
+                           ->  Vector Hash Semi Join
+                                 Hash Cond: (t1.c1 = nodegroup_replication_test.t1.c2)
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+--?                                       Spawn on:.*
+                                       ->  CStore Scan on t2_rep t1
+                                             Filter: (Hash By c1)
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+--?                                       Spawn on:.*
+                                       ->  CStore Scan on t1
+(16 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+set enable_nestloop=off;
+set enable_hashjoin=off;
+set enable_mergejoin=on;
+-- replicate join replicate
+set expected_computing_nodegroup = 'ng0';
+explain (costs off) select * from t1_rep t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = t2.c1)
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t1_rep t1
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t1_rep t2
+(11 rows)
+
+select * from t1_rep t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t2_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = t2.c1)
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep t1
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t2_rep t2
+(11 rows)
+
+select * from t1_rep t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = t2.c1)
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  Vector Streaming(type: BROADCAST)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t2_rep t1
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t1_rep t2
+(13 rows)
+
+select * from t2_rep t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = t2.c1)
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep_float t1
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t2_rep_float t2
+(11 rows)
+
+select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = ((t2.c1)::double precision))
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep_float t1
+               ->  Vector Sort
+                     Sort Key: ((t2.c1)::double precision)
+                     ->  CStore Scan on t2_rep t2
+(11 rows)
+
+select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = ((t2.c1)::double precision))
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  Vector Streaming(type: BROADCAST)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t2_rep_float t1
+               ->  Vector Sort
+                     Sort Key: ((t2.c1)::double precision)
+                     ->  CStore Scan on t1_rep t2
+(13 rows)
+
+select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Limit
+               ->  Vector Sort
+                     Sort Key: t1.c1, t1.c2
+                     ->  Vector Merge Semi Join
+                           Merge Cond: (t1.c1 = t1_rep.c2)
+                           ->  Vector Sort
+                                 Sort Key: t1.c1
+                                 ->  Vector Streaming(type: BROADCAST)
+--?                                       Spawn on:.*
+                                       ->  CStore Scan on t2_rep t1
+                           ->  Vector Sort
+                                 Sort Key: t1_rep.c2
+                                 ->  CStore Scan on t1_rep
+(16 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+set expected_computing_nodegroup = 'ng1';
+explain (costs off) select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = t2.c1)
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep_float t1
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t2_rep_float t2
+(11 rows)
+
+select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = ((t2.c1)::double precision))
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep_float t1
+               ->  Vector Sort
+                     Sort Key: ((t2.c1)::double precision)
+                     ->  CStore Scan on t2_rep t2
+(11 rows)
+
+select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = ((t2.c1)::double precision))
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep_float t1
+               ->  Vector Sort
+                     Sort Key: ((t2.c1)::double precision)
+                     ->  Vector Result
+                           ->  Vector Streaming(type: BROADCAST)
+--?                                 Spawn on:.*
+                                 ->  CStore Scan on t1_rep t2
+(14 rows)
+
+select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Limit
+               ->  Vector Sort
+                     Sort Key: t1.c1, t1.c2
+                     ->  Vector Merge Semi Join
+                           Merge Cond: (t1.c1 = t1_rep.c2)
+                           ->  Vector Sort
+                                 Sort Key: t1.c1
+                                 ->  CStore Scan on t2_rep t1
+                           ->  Vector Sort
+                                 Sort Key: t1_rep.c2
+                                 ->  Vector Streaming(type: BROADCAST)
+--?                                       Spawn on:.*
+                                       ->  CStore Scan on t1_rep
+(16 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+reset expected_computing_nodegroup;
+explain (costs off) select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = t2.c1)
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep_float t1
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t2_rep_float t2
+(11 rows)
+
+select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = ((t2.c1)::double precision))
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep_float t1
+               ->  Vector Sort
+                     Sort Key: ((t2.c1)::double precision)
+                     ->  CStore Scan on t2_rep t2
+(11 rows)
+
+select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = ((t2.c1)::double precision))
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep_float t1
+               ->  Vector Sort
+                     Sort Key: ((t2.c1)::double precision)
+                     ->  Vector Result
+                           ->  Vector Streaming(type: BROADCAST)
+--?                                 Spawn on:.*
+                                 ->  CStore Scan on t1_rep t2
+(14 rows)
+
+select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Limit
+               ->  Vector Sort
+                     Sort Key: t1.c1, t1.c2
+                     ->  Vector Merge Semi Join
+                           Merge Cond: (t1.c1 = t1_rep.c2)
+                           ->  Vector Sort
+                                 Sort Key: t1.c1
+                                 ->  CStore Scan on t2_rep t1
+                           ->  Vector Sort
+                                 Sort Key: t1_rep.c2
+                                 ->  Vector Streaming(type: BROADCAST)
+--?                                       Spawn on:.*
+                                       ->  CStore Scan on t1_rep
+(16 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+-- replicate join hash
+set expected_computing_nodegroup = 'ng0';
+explain (costs off) select * from t1_rep t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t2.c1 = t1.c1)
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t1 t2
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t1_rep t1
+                           Filter: (Hash By c1)
+(12 rows)
+
+select * from t1_rep t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t2.c1 = t1.c1)
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t1 t2
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t2_rep t1
+                                 Filter: (Hash By c1)
+(14 rows)
+
+select * from t2_rep t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = ((t2.c1)::double precision))
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep_float t1
+               ->  Vector Sort
+                     Sort Key: ((t2.c1)::double precision)
+                     ->  Vector Result
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+--?                                 Spawn on:.*
+                                 ->  CStore Scan on t1 t2
+(14 rows)
+
+select * from t2_rep_float t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t1_rep t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t2.c1 = t1.c1)
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t2
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t1_rep t1
+                                 Filter: (Hash By c1)
+(14 rows)
+
+select * from t1_rep t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t2.c1 = t1.c1)
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t2
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep t1
+                           Filter: (Hash By c1)
+(12 rows)
+
+select * from t2_rep t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (((t2.c1)::double precision) = t1.c1)
+               ->  Vector Sort
+                     Sort Key: ((t2.c1)::double precision)
+                     ->  CStore Scan on t2
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep_float t1
+(11 rows)
+
+select * from t2_rep_float t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Streaming (type: GATHER)
+--?               Node/s:.*
+               ->  Vector Limit
+                     ->  Vector Sort
+                           Sort Key: t1.c1, t1.c2
+                           ->  Vector Merge Join
+                                 Merge Cond: (t1.c1 = nodegroup_replication_test.t1.c2)
+                                 ->  Vector Sort
+                                       Sort Key: t1.c1
+                                       ->  CStore Scan on t2_rep t1
+                                             Filter: (Hash By c1)
+                                 ->  Vector Sort
+                                       Sort Key: nodegroup_replication_test.t1.c2
+                                       ->  Vector Hash Aggregate
+                                             Group By Key: nodegroup_replication_test.t1.c2
+                                             ->  Vector Streaming(type: REDISTRIBUTE)
+--?                                                   Spawn on:.*
+                                                   ->  CStore Scan on t1
+(20 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+reset expected_computing_nodegroup;
+explain (costs off) select * from t1_rep t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t2.c1 = t1.c1)
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t1 t2
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t1_rep t1
+                           Filter: (Hash By c1)
+(12 rows)
+
+select * from t1_rep t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t2.c1 = t1.c1)
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t1 t2
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t2_rep t1
+                                 Filter: (Hash By c1)
+(14 rows)
+
+select * from t2_rep t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t1.c1 = ((t2.c1)::double precision))
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep_float t1
+               ->  Vector Sort
+                     Sort Key: ((t2.c1)::double precision)
+                     ->  Vector Result
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+--?                                 Spawn on:.*
+                                 ->  CStore Scan on t1 t2
+(14 rows)
+
+select * from t2_rep_float t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t1_rep t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t2.c1 = t1.c1)
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t2
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t1_rep t1
+                                 Filter: (Hash By c1)
+(14 rows)
+
+select * from t1_rep t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (t2.c1 = t1.c1)
+               ->  Vector Sort
+                     Sort Key: t2.c1
+                     ->  CStore Scan on t2
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep t1
+                           Filter: (Hash By c1)
+(12 rows)
+
+select * from t2_rep t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Merge Join
+               Merge Cond: (((t2.c1)::double precision) = t1.c1)
+               ->  Vector Sort
+                     Sort Key: ((t2.c1)::double precision)
+                     ->  CStore Scan on t2
+               ->  Vector Sort
+                     Sort Key: t1.c1
+                     ->  CStore Scan on t2_rep_float t1
+(11 rows)
+
+select * from t2_rep_float t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Streaming (type: GATHER)
+--?               Node/s:.*
+               ->  Vector Limit
+                     ->  Vector Sort
+                           Sort Key: t1.c1, t1.c2
+                           ->  Vector Merge Semi Join
+                                 Merge Cond: (t1.c1 = nodegroup_replication_test.t1.c2)
+                                 ->  Vector Sort
+                                       Sort Key: t1.c1
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+--?                                             Spawn on:.*
+                                             ->  CStore Scan on t2_rep t1
+                                                   Filter: (Hash By c1)
+                                 ->  Vector Sort
+                                       Sort Key: nodegroup_replication_test.t1.c2
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+--?                                             Spawn on:.*
+                                             ->  CStore Scan on t1
+(20 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+set enable_hashjoin=off;
+set enable_mergejoin=off;
+set enable_nestloop=on;
+-- replicate join replicate
+set expected_computing_nodegroup = 'ng0';
+explain (costs off) select * from t1_rep t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t1_rep t1
+               ->  Vector Materialize
+                     ->  CStore Scan on t1_rep t2
+(8 rows)
+
+select * from t1_rep t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t2_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t2_rep t1
+               ->  Vector Materialize
+                     ->  CStore Scan on t2_rep t2
+(8 rows)
+
+select * from t1_rep t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  Vector Streaming(type: BROADCAST)
+--?                     Spawn on:.*
+                     ->  CStore Scan on t2_rep t1
+               ->  Vector Materialize
+                     ->  CStore Scan on t1_rep t2
+(10 rows)
+
+select * from t2_rep t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t2_rep_float t1
+               ->  Vector Materialize
+                     ->  CStore Scan on t2_rep_float t2
+(8 rows)
+
+select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = (t2.c1)::double precision)
+               ->  CStore Scan on t2_rep_float t1
+               ->  Vector Materialize
+                     ->  CStore Scan on t2_rep t2
+(8 rows)
+
+select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = (t2.c1)::double precision)
+               ->  Vector Streaming(type: BROADCAST)
+--?                     Spawn on:.*
+                     ->  CStore Scan on t2_rep_float t1
+               ->  Vector Materialize
+                     ->  CStore Scan on t1_rep t2
+(10 rows)
+
+select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Limit
+               ->  Vector Sort
+                     Sort Key: t1.c1, t1.c2
+                     ->  Vector Nest Loop Semi Join
+                           Join Filter: (t1.c1 = t1_rep.c2)
+                           ->  Vector Streaming(type: BROADCAST)
+--?                                 Spawn on:.*
+                                 ->  CStore Scan on t2_rep t1
+                           ->  Vector Materialize
+                                 ->  CStore Scan on t1_rep
+(13 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+set expected_computing_nodegroup = 'ng1';
+explain (costs off) select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t2_rep_float t1
+               ->  Vector Materialize
+                     ->  CStore Scan on t2_rep_float t2
+(8 rows)
+
+select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = (t2.c1)::double precision)
+               ->  CStore Scan on t2_rep_float t1
+               ->  Vector Materialize
+                     ->  CStore Scan on t2_rep t2
+(8 rows)
+
+select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = (t2.c1)::double precision)
+               ->  CStore Scan on t2_rep_float t1
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t1_rep t2
+(10 rows)
+
+select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Limit
+               ->  Vector Sort
+                     Sort Key: t1.c1, t1.c2
+                     ->  Vector Nest Loop Semi Join
+                           Join Filter: (t1.c1 = t1_rep.c2)
+                           ->  CStore Scan on t2_rep t1
+                           ->  Vector Materialize
+                                 ->  Vector Streaming(type: BROADCAST)
+--?                                       Spawn on:.*
+                                       ->  CStore Scan on t1_rep
+(13 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+reset expected_computing_nodegroup;
+explain (costs off) select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t2_rep_float t1
+               ->  Vector Materialize
+                     ->  CStore Scan on t2_rep_float t2
+(8 rows)
+
+select * from t2_rep_float t1 join t2_rep_float t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = (t2.c1)::double precision)
+               ->  CStore Scan on t2_rep_float t1
+               ->  Vector Materialize
+                     ->  CStore Scan on t2_rep t2
+(8 rows)
+
+select * from t2_rep_float t1 join t2_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = (t2.c1)::double precision)
+               ->  CStore Scan on t2_rep_float t1
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t1_rep t2
+(10 rows)
+
+select * from t2_rep_float t1 join t1_rep t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Limit
+               ->  Vector Sort
+                     Sort Key: t1.c1, t1.c2
+                     ->  Vector Nest Loop Semi Join
+                           Join Filter: (t1.c1 = t1_rep.c2)
+                           ->  CStore Scan on t2_rep t1
+                           ->  Vector Materialize
+                                 ->  Vector Streaming(type: BROADCAST)
+--?                                       Spawn on:.*
+                                       ->  CStore Scan on t1_rep
+(13 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1_rep) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+-- replicate join hash
+set expected_computing_nodegroup = 'ng0';
+explain (costs off) select * from t1_rep t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t1 t2
+               ->  Vector Materialize
+                     ->  CStore Scan on t1_rep t1
+                           Filter: (Hash By c1)
+(9 rows)
+
+select * from t1_rep t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t1 t2
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t2_rep t1
+                                 Filter: (Hash By c1)
+(11 rows)
+
+select * from t2_rep t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = (t2.c1)::double precision)
+               ->  CStore Scan on t2_rep_float t1
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t1 t2
+(10 rows)
+
+select * from t2_rep_float t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t1_rep t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t2
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t1_rep t1
+                                 Filter: (Hash By c1)
+(11 rows)
+
+select * from t1_rep t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t2
+               ->  Vector Materialize
+                     ->  CStore Scan on t2_rep t1
+                           Filter: (Hash By c1)
+(9 rows)
+
+select * from t2_rep t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = (t2.c1)::double precision)
+               ->  CStore Scan on t2
+               ->  Vector Materialize
+                     ->  CStore Scan on t2_rep_float t1
+(8 rows)
+
+select * from t2_rep_float t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Streaming (type: GATHER)
+--?               Node/s:.*
+               ->  Vector Limit
+                     ->  Vector Sort
+                           Sort Key: t1.c1, t1.c2
+                           ->  Vector Nest Loop Semi Join
+                                 Join Filter: (t1.c1 = nodegroup_replication_test.t1.c2)
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+--?                                       Spawn on:.*
+                                       ->  CStore Scan on t2_rep t1
+                                             Filter: (Hash By c1)
+                                 ->  Vector Materialize
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+--?                                             Spawn on:.*
+                                             ->  CStore Scan on t1
+(17 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+reset expected_computing_nodegroup;
+explain (costs off) select * from t1_rep t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t1 t2
+               ->  Vector Materialize
+                     ->  CStore Scan on t1_rep t1
+                           Filter: (Hash By c1)
+(9 rows)
+
+select * from t1_rep t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t1 t2
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t2_rep t1
+                                 Filter: (Hash By c1)
+(11 rows)
+
+select * from t2_rep t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t1 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = (t2.c1)::double precision)
+               ->  CStore Scan on t2_rep_float t1
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t1 t2
+(10 rows)
+
+select * from t2_rep_float t1 join t1 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t1_rep t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t2
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+--?                           Spawn on:.*
+                           ->  CStore Scan on t1_rep t1
+                                 Filter: (Hash By c1)
+(11 rows)
+
+select * from t1_rep t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = t2.c1)
+               ->  CStore Scan on t2
+               ->  Vector Materialize
+                     ->  CStore Scan on t2_rep t1
+                           Filter: (Hash By c1)
+(9 rows)
+
+select * from t2_rep t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep_float t1 join t2 t2 on t1.c1=t2.c1;
+--?
+--?
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+--?         Node/s:.*
+         ->  Vector Nest Loop
+               Join Filter: (t1.c1 = (t2.c1)::double precision)
+               ->  CStore Scan on t2
+               ->  Vector Materialize
+                     ->  CStore Scan on t2_rep_float t1
+(8 rows)
+
+select * from t2_rep_float t1 join t2 t2 on t1.c1=t2.c1 order by 1,2,3,4 limit 5;
+ c1 | c2 | c1 | c2 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off) select * from t2_rep t1 where t1.c1 in (select c2 from t1) order by 1,2 limit 5;
+--?
+--?
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Streaming (type: GATHER)
+--?               Node/s:.*
+               ->  Vector Limit
+                     ->  Vector Sort
+                           Sort Key: t1.c1, t1.c2
+                           ->  Vector Nest Loop Semi Join
+                                 Join Filter: (t1.c1 = nodegroup_replication_test.t1.c2)
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+--?                                       Spawn on:.*
+                                       ->  CStore Scan on t2_rep t1
+                                             Filter: (Hash By c1)
+                                 ->  Vector Materialize
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+--?                                             Spawn on:.*
+                                             ->  CStore Scan on t1
+(17 rows)
+
+select * from t2_rep t1 where t1.c1 in (select c2 from t1) order by 1,2 limit 5;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+(5 rows)
+
+drop table t_row;
+drop table t1;
+drop table t2;
+drop table t1_rep;
+drop table t2_rep;
+drop table t2_rep_float;
+reset expected_computing_nodegroup;
+drop node group ng0;
+drop node group ng1;
+drop schema nodegroup_replication_test cascade;

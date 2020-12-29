@@ -18,6 +18,9 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+
+#include "access/tableam.h"
+#include "catalog/index.h"
 #include "catalog/indexing.h"
 #include "catalog/objectaddress.h"
 #include "catalog/pg_description.h"
@@ -26,11 +29,13 @@
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
 #include "miscadmin.h"
+#include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
+#include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 /*
  * @Description: check whether it's a share object.
@@ -45,6 +50,55 @@ static bool CheckShareObject(ObjectType objtype)
         return false;
 }
 
+static AclResult CheckObjectCommentPrivilege(const CommentStmt* stmt, Oid objectId, const Relation relation)
+{
+    AclResult aclresult = ACLCHECK_NO_PRIV;
+    switch (stmt->objtype) {
+        case OBJECT_SEQUENCE:
+        case OBJECT_TABLE:
+        case OBJECT_VIEW:
+        case OBJECT_MATVIEW:
+        case OBJECT_FOREIGN_TABLE:
+            aclresult = pg_class_aclcheck(objectId, GetUserId(), ACL_COMMENT);
+            break;
+        case OBJECT_INDEX:
+            aclresult = pg_class_aclcheck(IndexGetRelation(objectId, false), GetUserId(), ACL_INDEX);
+            break;
+        case OBJECT_COLUMN:
+            if (relation != NULL) {
+                Oid rel_id = RelationGetRelid(relation);
+                aclresult = pg_class_aclcheck(rel_id, GetUserId(), ACL_COMMENT);
+                if (aclresult != ACLCHECK_OK) {
+                    char* attname = strVal(lfirst(list_tail(stmt->objname)));
+                    AttrNumber attnum = get_attnum(rel_id, attname);
+                    aclresult = pg_attribute_aclcheck(rel_id, attnum, GetUserId(), ACL_COMMENT);
+                }
+            }
+            break;
+        case OBJECT_TYPE:
+            aclresult = pg_type_aclcheck(objectId, GetUserId(), ACL_COMMENT);
+            break;
+        case OBJECT_DATABASE:
+            aclresult = pg_database_aclcheck(objectId, GetUserId(), ACL_COMMENT);
+            break;
+        case OBJECT_FUNCTION:
+            aclresult = pg_proc_aclcheck(objectId, GetUserId(), ACL_COMMENT);
+            break;
+        case OBJECT_SCHEMA:
+            aclresult = pg_namespace_aclcheck(objectId, GetUserId(), ACL_COMMENT);
+            break;
+        case OBJECT_FOREIGN_SERVER:
+            aclresult = pg_foreign_server_aclcheck(objectId, GetUserId(), ACL_COMMENT);
+            break;
+        case OBJECT_TABLESPACE:
+            aclresult = pg_tablespace_aclcheck(objectId, GetUserId(), ACL_COMMENT);
+            break;
+        default:
+            aclresult = ACLCHECK_NO_PRIV;
+            break;
+    }
+    return aclresult;
+}
 /*
  * CommentObject --
  *
@@ -83,8 +137,11 @@ void CommentObject(CommentStmt* stmt)
     address =
         get_object_address(stmt->objtype, stmt->objname, stmt->objargs, &relation, ShareUpdateExclusiveLock, false);
 
-    /* Require ownership of the target object. */
-    check_object_ownership(GetUserId(), stmt->objtype, address, stmt->objname, stmt->objargs, relation);
+    /* Require ownership or comment privilege of the target object. */
+    AclResult aclresult = CheckObjectCommentPrivilege(stmt, address.objectId, relation);
+    if (aclresult != ACLCHECK_OK) {
+        check_object_ownership(GetUserId(), stmt->objtype, address, stmt->objname, stmt->objargs, relation);
+    }
 
     /* Perform other integrity checks as needed. */
     switch (stmt->objtype) {
@@ -100,14 +157,17 @@ void CommentObject(CommentStmt* stmt)
              * failures.
              */
             if (relation != NULL) {
-                if (relation->rd_rel->relkind != RELKIND_RELATION && relation->rd_rel->relkind != RELKIND_VIEW &&
+                if (relation->rd_rel->relkind != RELKIND_RELATION && 
+                    relation->rd_rel->relkind != RELKIND_VIEW &&
+                    relation->rd_rel->relkind != RELKIND_CONTQUERY &&
                     relation->rd_rel->relkind != RELKIND_MATVIEW &&
                     relation->rd_rel->relkind != RELKIND_COMPOSITE_TYPE &&
+                    relation->rd_rel->relkind != RELKIND_STREAM &&
                     relation->rd_rel->relkind != RELKIND_FOREIGN_TABLE)
                     ereport(ERROR,
-                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                            errmsg("\"%s\" is not a table, view, materialized view, composite type, or foreign table",
-                                RelationGetRelationName(relation))));
+                       (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("\"%s\" is not a table, view, composite type, or foreign table",
+                               RelationGetRelationName(relation))));
             }
             break;
         default:
@@ -187,7 +247,7 @@ void CreateComments(Oid oid, Oid classoid, int32 subid, const char* comment)
         if (comment == NULL) {
             simple_heap_delete(description, &oldtuple->t_self);
         } else {
-            newtuple = heap_modify_tuple(oldtuple, RelationGetDescr(description), values, nulls, replaces);
+            newtuple = (HeapTuple) tableam_tops_modify_tuple(oldtuple, RelationGetDescr(description), values, nulls, replaces);
             simple_heap_update(description, &oldtuple->t_self, newtuple);
         }
     } /* Assume there can be only one match */
@@ -203,7 +263,7 @@ void CreateComments(Oid oid, Oid classoid, int32 subid, const char* comment)
     /* Update indexes, if necessary */
     if (newtuple != NULL) {
         CatalogUpdateIndexes(description, newtuple);
-        heap_freetuple_ext(newtuple);
+        tableam_tops_free_tuple(newtuple);
     }
 
     /* Done */
@@ -258,7 +318,7 @@ void CreateSharedComments(Oid oid, Oid classoid, const char* comment)
         if (comment == NULL)
             simple_heap_delete(shdescription, &oldtuple->t_self);
         else {
-            newtuple = heap_modify_tuple(oldtuple, RelationGetDescr(shdescription), values, nulls, replaces);
+            newtuple = (HeapTuple) tableam_tops_modify_tuple(oldtuple, RelationGetDescr(shdescription), values, nulls, replaces);
             simple_heap_update(shdescription, &oldtuple->t_self, newtuple);
         }
     } /* Assume there can be only one match */
@@ -274,7 +334,7 @@ void CreateSharedComments(Oid oid, Oid classoid, const char* comment)
     /* Update indexes, if necessary */
     if (newtuple != NULL) {
         CatalogUpdateIndexes(shdescription, newtuple);
-        heap_freetuple_ext(newtuple);
+        tableam_tops_free_tuple(newtuple);
     }
 
     /* Done */
@@ -372,7 +432,7 @@ char* GetComment(Oid oid, Oid classoid, int32 subid)
         bool isnull = false;
 
         /* Found the tuple, get description field */
-        value = heap_getattr(tuple, Anum_pg_description_description, tupdesc, &isnull);
+        value = tableam_tops_tuple_getattr(tuple, Anum_pg_description_description, tupdesc, &isnull);
         if (!isnull)
             comment = TextDatumGetCString(value);
     } /* Assume there can be only one match */
@@ -384,4 +444,3 @@ char* GetComment(Oid oid, Oid classoid, int32 subid)
 
     return comment;
 }
-

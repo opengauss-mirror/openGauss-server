@@ -34,11 +34,11 @@ int main(int argc, char* argv[])
         {"maintenance-db", required_argument, NULL, 3},
         {NULL, 0, NULL, 0}};
 
-    const char* progname_tem = NULL;
+    const char* progname = NULL;
     int optindex;
     int c;
 
-    const char* dbname_tem = NULL;
+    const char* dbname = NULL;
     const char* maintenance_db = NULL;
     char* comment = NULL;
     char* host = NULL;
@@ -59,7 +59,7 @@ int main(int argc, char* argv[])
     PGconn* conn = NULL;
     PGresult* result = NULL;
 
-    progname_tem = get_progname(argv[0]);
+    progname = get_progname(argv[0]);
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pgscripts"));
 
     handle_help_version_opts(argc, argv, "createdb", help);
@@ -109,7 +109,7 @@ int main(int argc, char* argv[])
                 maintenance_db = optarg;
                 break;
             default:
-                fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname_tem);
+                fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
                 exit(1);
         }
     }
@@ -118,25 +118,25 @@ int main(int argc, char* argv[])
         case 0:
             break;
         case 1:
-            dbname_tem = argv[optind];
+            dbname = argv[optind];
             break;
         case 2:
-            dbname_tem = argv[optind];
+            dbname = argv[optind];
             comment = argv[optind + 1];
             break;
         default:
-            fprintf(stderr, _("%s: too many command-line arguments (first is \"%s\")\n"), progname_tem, argv[optind + 2]);
-            fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname_tem);
+            fprintf(stderr, _("%s: too many command-line arguments (first is \"%s\")\n"), progname, argv[optind + 2]);
+            fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
             exit(1);
     }
 
     if (locale != NULL) {
         if (lc_ctype != NULL) {
-            fprintf(stderr, _("%s: only one of --locale and --lc-ctype can be specified\n"), progname_tem);
+            fprintf(stderr, _("%s: only one of --locale and --lc-ctype can be specified\n"), progname);
             exit(1);
         }
         if (lc_collate != NULL) {
-            fprintf(stderr, _("%s: only one of --locale and --lc-collate can be specified\n"), progname_tem);
+            fprintf(stderr, _("%s: only one of --locale and --lc-collate can be specified\n"), progname);
             exit(1);
         }
         lc_ctype = locale;
@@ -145,23 +145,23 @@ int main(int argc, char* argv[])
 
     if (encoding != NULL) {
         if (pg_char_to_encoding(encoding) < 0) {
-            fprintf(stderr, _("%s: \"%s\" is not a valid encoding name\n"), progname_tem, encoding);
+            fprintf(stderr, _("%s: \"%s\" is not a valid encoding name\n"), progname, encoding);
             exit(1);
         }
     }
 
-    if (dbname_tem == NULL) {
+    if (dbname == NULL) {
         if (getenv("PGDATABASE") != NULL)
-            dbname_tem = getenv("PGDATABASE");
+            dbname = getenv("PGDATABASE");
         else if (getenv("PGUSER") != NULL)
-            dbname_tem = getenv("PGUSER");
+            dbname = getenv("PGUSER");
         else
-            dbname_tem = get_user_name(progname_tem);
+            dbname = get_user_name(progname);
     }
 
     initPQExpBuffer(&sql);
 
-    appendPQExpBuffer(&sql, "CREATE DATABASE %s", fmtId(dbname_tem));
+    appendPQExpBuffer(&sql, "CREATE DATABASE %s", fmtId(dbname));
 
     if (owner != NULL)
         appendPQExpBuffer(&sql, " OWNER %s", fmtId(owner));
@@ -179,16 +179,17 @@ int main(int argc, char* argv[])
     appendPQExpBuffer(&sql, ";\n");
 
     /* No point in trying to use postgres db when creating postgres db. */
-    if (maintenance_db == NULL && strcmp(dbname_tem, "postgres") == 0)
+    if (maintenance_db == NULL && strcmp(dbname, "postgres") == 0)
         maintenance_db = "template1";
 
-    conn = connectMaintenanceDatabase(maintenance_db, host, port, username, prompt_password, progname_tem);
+    conn = connectMaintenanceDatabase(maintenance_db, host, port, username, prompt_password, progname);
 
     if (echo)
         printf("%s", sql.data);
     result = PQexec(conn, sql.data);
+
     if (PQresultStatus(result) != PGRES_COMMAND_OK) {
-        fprintf(stderr, _("%s: database creation failed: %s"), progname_tem, PQerrorMessage(conn));
+        fprintf(stderr, _("%s: database creation failed: %s"), progname, PQerrorMessage(conn));
         PQfinish(conn);
         exit(1);
     }
@@ -196,16 +197,17 @@ int main(int argc, char* argv[])
     PQclear(result);
 
     if (comment != NULL) {
-        printfPQExpBuffer(&sql, "COMMENT ON DATABASE %s IS ", fmtId(dbname_tem));
+        printfPQExpBuffer(&sql, "COMMENT ON DATABASE %s IS ", fmtId(dbname));
         appendStringLiteralConn(&sql, comment, conn);
         appendPQExpBuffer(&sql, ";\n");
 
         if (echo)
             printf("%s", sql.data);
         result = PQexec(conn, sql.data);
+
         if (PQresultStatus(result) != PGRES_COMMAND_OK) {
             fprintf(
-                stderr, _("%s: comment creation failed (database was created): %s"), progname_tem, PQerrorMessage(conn));
+                stderr, _("%s: comment creation failed (database was created): %s"), progname, PQerrorMessage(conn));
             PQfinish(conn);
             exit(1);
         }
@@ -218,11 +220,11 @@ int main(int argc, char* argv[])
     exit(0);
 }
 
-static void help(const char* progname_tem)
+static void help(const char* progname)
 {
-    printf(_("%s creates a PostgreSQL database.\n\n"), progname_tem);
+    printf(_("%s creates a PostgreSQL database.\n\n"), progname);
     printf(_("Usage:\n"));
-    printf(_("  %s [OPTION]... [DBNAME] [DESCRIPTION]\n"), progname_tem);
+    printf(_("  %s [OPTION]... [DBNAME] [DESCRIPTION]\n"), progname);
     printf(_("\nOptions:\n"));
     printf(_("  -D, --tablespace=TABLESPACE  default tablespace for the database\n"));
     printf(_("  -e, --echo                   show the commands being sent to the server\n"));
@@ -244,4 +246,3 @@ static void help(const char* progname_tem)
     printf(_("\nBy default, a database with the same name as the current user is created.\n"));
     printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
 }
-

@@ -1792,7 +1792,7 @@ void MOTAdaptor::PackRow(TupleTableSlot* slot, MOT::Table* table, uint8_t* attrs
 {
     errno_t erc;
     EnsureSafeThreadAccessInline();
-    HeapTuple srcData = slot->tts_tuple;
+    HeapTuple srcData = (HeapTuple)slot->tts_tuple;
     TupleDesc tupdesc = slot->tts_tupleDescriptor;
     bool hasnulls = HeapTupleHasNulls(srcData);
     uint64_t i = 0;
@@ -1814,7 +1814,7 @@ void MOTAdaptor::PackRow(TupleTableSlot* slot, MOT::Table* table, uint8_t* attrs
     // we now copy the fields, for the time being the null ones will be copied as well
     for (; i < cols; i++, j++) {
         bool isnull = false;
-        Datum value = slot_getattr(slot, j, &isnull);
+        Datum value = heap_slot_getattr(slot, j, &isnull);
 
         if (!isnull) {
             DatumToMOT(table->GetField(j), value, tupdesc->attrs[i]->atttypid, destRow);
@@ -1837,7 +1837,7 @@ void MOTAdaptor::PackUpdateRow(TupleTableSlot* slot, MOT::Table* table, const ui
     for (; i < cols; i++, j++) {
         if (BITMAP_GET(attrs_used, i)) {
             bool isnull = false;
-            Datum value = slot_getattr(slot, j, &isnull);
+            Datum value = heap_slot_getattr(slot, j, &isnull);
 
             if (!isnull) {
                 DatumToMOT(table->GetField(j), value, tupdesc->attrs[i]->atttypid, destRow);

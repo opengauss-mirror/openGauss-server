@@ -71,6 +71,7 @@
 #include <sys/resource.h>
 #include <execinfo.h>
 #include "pgxc/pgxc.h"
+#include "port.h"
 
 typedef enum { UDF_INFO = 5, UDF_ARGS, UDF_RESULT, UDF_ERROR } UDFMsgType;
 
@@ -154,6 +155,37 @@ typedef struct {
         (bufPtr) += (size);                                   \
     } while (0)
 
+#define GetFixedMsgValSafe(bufPtr, addr, size, addr_size, srcRemainLen)           \
+    do {                                                                        \
+        if (unlikely(srcRemainLen < size)) {                                     \
+            ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_PROTOCOL_VIOLATION), \
+                errmsg("No data left in msg, left len:%u, desire len:%lu", srcRemainLen, (long unsigned int)size))); \
+        }                                                                          \
+        errno_t rc = memcpy_s((addr), (addr_size), (bufPtr), (size)); \
+        securec_check_c(rc, "\0", "\0");                      \
+        (bufPtr) += (size);                                   \
+        (srcRemainLen) -= (size);                             \
+    } while (0)                                               \
+
+#define GetVarMsgValSafe(bufPtr, addr, size, addr_size, srcRemainLen)           \
+        do {                                                      \
+            if (unlikely(srcRemainLen < 4)) {                                     \
+                ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_PROTOCOL_VIOLATION), \
+                    errmsg("No data left in msg, left len:%u", srcRemainLen))); \
+            }                                                                           \
+            (size) = *(int*)(bufPtr);                             \
+            (bufPtr) += 4;                                        \
+            (srcRemainLen) -= 4;                                  \
+            if (unlikely(srcRemainLen < size)) {                                     \
+                ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_PROTOCOL_VIOLATION), \
+                    errmsg("No data left in msg, left len:%u, desire len:%u", srcRemainLen, size))); \
+            }                                                                          \
+            errno_t rc = memcpy_s((addr), (addr_size), (bufPtr), (size)); \
+            securec_check_c(rc, "\0", "\0");                      \
+            (bufPtr) += (size);                                   \
+            (srcRemainLen) -= (size);                             \
+        } while (0)                                               \
+
 #define Reserve4BytesMsgHeader(bufPtr)                             \
     do {                                                           \
         int _reserveSize = 0;                                      \
@@ -198,18 +230,6 @@ void InitUDFInfo(UDFInfoType* udfInfo, int argN, int batchRows);
 /* Extern Enterface Declaration */
 extern void* internal_load_library(const char* libname);
 
-#define GET_FIXED_MSG_VAL_SAFE(bufPtr, addr, size, addrSize, srcRemainLen) \
-do { \
-    if (unlikely((srcRemainLen) <= 0 || (uint)(srcRemainLen) < (size))) { \
-        ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_PROTOCOL_VIOLATION), \
-            errmsg("No data left in msg, left len:%d, desire len:%lu", (srcRemainLen), (Size)(size)))); \
-    } \
-    errno_t rc = memcpy_s((addr), (addrSize), (bufPtr), (size)); \
-    securec_check_c(rc, "", ""); \
-    (bufPtr) += (size); \
-    (srcRemainLen) -= (size); \
-} while (0)
-
 /*
  * @Description: The main function of UDF RPC server.
  * It will initialize envrionment, create listen socket and startup
@@ -221,10 +241,7 @@ void FencedUDFMasterMain(int argc, char* argv[])
 {
     /* Just make set_ps_dispaly ok */
     IsUnderPostmaster = true;
-
     set_ps_display("gaussdb fenced UDF master process", true);
-
-    knl_thread_set_name("FencedUDFMaster");
 
     /* Step 1: Initialize envrionment: signal handle, display info */
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
@@ -274,7 +291,7 @@ void FencedUDFMasterMain(int argc, char* argv[])
         ereport(FATAL, (errmodule(MOD_UDF), errmsg("listen socket failed: %m")));
     }
 
-    ereport(LOG, (errmodule(MOD_UDF), errmsg("FencedUDFMaster process start OK.")));
+    ereport(LOG, (errmodule(MOD_UDF), errmsg("Fenced master process start OK.")));
 
     /* Step 3: ServerLoop for accept connection and start worker process */
     UDFMasterServerLoop();
@@ -420,7 +437,6 @@ pid_t StartUDFWorker(int socket)
         }
         case 0: {
             /* Child process */
-
             /* Just make set_ps_dispaly ok */
             IsUnderPostmaster = true;
 
@@ -480,18 +496,18 @@ static inline void RecvMsg(int socket, char* buffer, int len, bool isIdle = fals
             if (!IS_PGXC_COORDINATOR && !IS_PGXC_DATANODE && isIdle) {
                 exit(0);
             }
-            /* Both kernel and UDF master/worker can call this function.
-             * So, in kernel, myName should be PGXCNodeName. If this
+            /* Both GaussDB kernel and UDF master/worker can call this function.
+             * So, in GaussDB kernel, myName should be PGXCNodeName. If this
              * function is called from UDF master/worker, myName should be
              * "UDF Master/Worker".
              */
             char* myName = "UDF Master/Worker";
-            char* peerName = "Kernel(CN/DN)";
+            char* peerName = "GaussDB Kernel(CN/DN)";
             if (IS_PGXC_COORDINATOR || IS_PGXC_DATANODE) {
 #ifdef PGXC
                 myName = g_instance.attr.attr_common.PGXCNodeName;
 #else
-                myName = "Kernel(CN/DN)";
+                myName = "GaussDB Kernel(CN/DN)";
 #endif
                 peerName = "UDF Master/Worker";
             }
@@ -549,81 +565,66 @@ static char* GetBasicUDFInformation(FunctionCallInfoData* fcinfo)
     char fnVolatile;
     FmgrInfo* flinfo = fcinfo->flinfo;
     char* readPtr = fcinfo->udfInfo.udfMsgBuf->data;
-    int remainLen = fcinfo->udfInfo.udfMsgBuf->len;
+    uint remainLen = fcinfo->udfInfo.udfMsgBuf->len;
 
     /* Get Message type */
     short msgType;
-    GET_FIXED_MSG_VAL_SAFE(readPtr, (char*)&msgType, sizeof(msgType), sizeof(msgType), remainLen);
+    GetFixedMsgValSafe(readPtr, (char*)&msgType, sizeof(msgType), sizeof(msgType), remainLen);
 
     if (msgType == UDF_ARGS) {
         /* Get Function Oid */
-        GET_FIXED_MSG_VAL_SAFE(readPtr, (char*)&fnOid, sizeof(fnOid), sizeof(fnOid), remainLen);
+        GetFixedMsgValSafe(readPtr, (char*)&fnOid, sizeof(fnOid), sizeof(fnOid), remainLen);
         flinfo->fn_oid = fnOid;
     } else {
         /* Get memory limit size */
-        GET_FIXED_MSG_VAL_SAFE(readPtr,
-            (char*)&u_sess->attr.attr_sql.FencedUDFMemoryLimit,
+        GetFixedMsgValSafe(readPtr, (char*)&u_sess->attr.attr_sql.FencedUDFMemoryLimit,
             sizeof(u_sess->attr.attr_sql.FencedUDFMemoryLimit),
-            sizeof(u_sess->attr.attr_sql.FencedUDFMemoryLimit),
-            remainLen);
+            sizeof(u_sess->attr.attr_sql.FencedUDFMemoryLimit), remainLen);
 
         /* Get pljava_vmoptions */
-        GET_FIXED_MSG_VAL_SAFE(readPtr, (char*)&len, sizeof(len), sizeof(len), remainLen);
-        if (unlikely(len >= MaxAllocSize)) {
-            ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Invalid pljava vmoptions len:%u", len)));
-        }
+        GetFixedMsgValSafe(readPtr, (char*)&len, sizeof(len), sizeof(len), remainLen);
         u_sess->attr.attr_sql.pljava_vmoptions = (char*)palloc(len + 1);
-        GET_FIXED_MSG_VAL_SAFE(readPtr, u_sess->attr.attr_sql.pljava_vmoptions, len, len + 1, remainLen);
+        GetFixedMsgValSafe(readPtr, u_sess->attr.attr_sql.pljava_vmoptions, len, len + 1, remainLen);
         u_sess->attr.attr_sql.pljava_vmoptions[len] = 0;
 
         /* Get Function Oid */
-        GET_FIXED_MSG_VAL_SAFE(readPtr, (char*)&fnOid, sizeof(fnOid), sizeof(fnOid), remainLen);
+        GetFixedMsgValSafe(readPtr, (char*)&fnOid, sizeof(fnOid), sizeof(fnOid), remainLen);
         flinfo->fn_oid = fnOid;
 
         /* Get Language Oid */
-        GET_FIXED_MSG_VAL_SAFE(readPtr, (char*)&lagOid, sizeof(lagOid), sizeof(lagOid), remainLen);
+        GetFixedMsgValSafe(readPtr, (char*)&lagOid, sizeof(lagOid), sizeof(lagOid), remainLen);
         flinfo->fn_languageId = lagOid;
 
         /* Get func volatile propertie */
-        GET_FIXED_MSG_VAL_SAFE(readPtr, (char*)&fnVolatile, sizeof(fnVolatile), sizeof(fnVolatile), remainLen);
+        GetFixedMsgValSafe(readPtr, (char*)&fnVolatile, sizeof(fnVolatile), sizeof(fnVolatile), remainLen);
         flinfo->fn_volatile = fnVolatile;
 
         /* Get UDF name */
-        GET_FIXED_MSG_VAL_SAFE(readPtr, (char*)&len, sizeof(len), sizeof(len), remainLen);
-        if (unlikely(len >= NAMEDATALEN)) {
-            ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Invalid UDF name len:%u", len)));
-        }
-        GET_FIXED_MSG_VAL_SAFE(readPtr, flinfo->fnName, len, NAMEDATALEN, remainLen);
+        GetVarMsgValSafe(readPtr, flinfo->fnName, len, NAMEDATALEN, remainLen);
         flinfo->fnName[len] = 0;
 
         /* Get Library path */
-        GET_FIXED_MSG_VAL_SAFE(readPtr, (char*)&len, sizeof(len), sizeof(len), remainLen);
-        if (unlikely(len >= MaxAllocSize)) {
-            ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Invalid library path len:%u", len)));
-        }
+        GetFixedMsgValSafe(readPtr, (char*)&len, sizeof(len), sizeof(len), remainLen);
         flinfo->fnLibPath = (char*)palloc(len + 1);
-        GET_FIXED_MSG_VAL_SAFE(readPtr, flinfo->fnLibPath, len, len + 1, remainLen);
+        GetFixedMsgValSafe(readPtr, flinfo->fnLibPath, len, len + 1, remainLen);
         flinfo->fnLibPath[len] = 0;
 
         /* Get Argument number */
-        GET_FIXED_MSG_VAL_SAFE(readPtr, (char*)&flinfo->fn_nargs, sizeof(flinfo->fn_nargs),
-            sizeof(flinfo->fn_nargs), remainLen);
+        GetFixedMsgValSafe(readPtr, (char*)&flinfo->fn_nargs, sizeof(flinfo->fn_nargs), sizeof(flinfo->fn_nargs), 
+            remainLen);
 
         /* Macro is OK */
         InitFunctionCallInfoArgs(*fcinfo, flinfo->fn_nargs, BatchMaxSize);
 
         if (flinfo->fn_nargs > 0) {
             /* Get Argument type */
-            GET_FIXED_MSG_VAL_SAFE(readPtr, (char*)fcinfo->argTypes, sizeof(Oid) * flinfo->fn_nargs,
+            GetFixedMsgValSafe(readPtr, (char*)fcinfo->argTypes, sizeof(Oid) * flinfo->fn_nargs, 
                 sizeof(Oid) * flinfo->fn_nargs, remainLen);
         }
 
         /* Get Result Type */
-        GET_FIXED_MSG_VAL_SAFE(readPtr, (char*)&flinfo->fn_rettype, sizeof(flinfo->fn_rettype),
-            sizeof(flinfo->fn_rettype), remainLen);
+        GetFixedMsgValSafe(readPtr, (char*)&flinfo->fn_rettype, sizeof(flinfo->fn_rettype), sizeof(flinfo->fn_rettype), 
+            remainLen);
     }
     return readPtr;
 }
@@ -646,7 +647,7 @@ static void GetUDFArguments(FunctionCallInfoData* fcinfo)
 }
 static void RecvUDFInformation(int socket, FunctionCallInfoData* fcinfo)
 {
-    uint len = 0;
+    uint  len = 0;
     char* allocPtr = NULL;
     char buffer[UDF_MSG_BUFLEN];
     char* readPtr = buffer;
@@ -668,7 +669,7 @@ static void RecvUDFInformation(int socket, FunctionCallInfoData* fcinfo)
             errmsg("Invalid udf message len:%u", len)));
     }
     readPtr = buffer;
-    if (unlikely(len > UDF_MSG_BUFLEN)) {
+    if (unlikely(len >= UDF_MSG_BUFLEN)) {
         allocPtr = readPtr = (char*)palloc(len);
     }
     /* Get message body */
@@ -993,6 +994,12 @@ Datum UDFArgumentHandler(FunctionCallInfoData* fcinfo, int idx, Datum val)
                 if (isNull == 0) {
                     valLen = 0;
                     GetFixedMsgVal(readPtr, (char*)&valLen, sizeof(valLen), sizeof(valLen));
+                    if (valLen < 0) {
+                        ereport(ERROR,
+                            (errmodule(MOD_UDF), 
+                                errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
+                                errmsg("Variable length %d cannot be negative", valLen)));
+                    }
                     char* ptr = (char*)palloc0(valLen + 1);
                     GetFixedMsgVal(readPtr, (char*)ptr, valLen, valLen + 1);
                     result = PointerGetDatum(ptr);
@@ -1075,6 +1082,12 @@ Datum UDFArgumentHandler(FunctionCallInfoData* fcinfo, int idx, Datum val)
                 GetFixedMsgVal(readPtr, (char*)&isNull, sizeof(isNull), sizeof(isNull));
                 if (!isNull) {
                     GetFixedMsgVal(readPtr, (char*)&valLen, sizeof(valLen), sizeof(valLen));
+                    if (valLen < 0) {
+                        ereport(ERROR,
+                            (errmodule(MOD_UDF), 
+                                errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
+                                errmsg("Variable length %d cannot be negative", valLen)));
+                    }
                     char* buffer = (char*)palloc0(valLen + 1);
                     GetFixedMsgVal(readPtr, buffer, valLen, valLen + 1);
                     fcinfo->argnull[idx] = false;
@@ -1625,7 +1638,13 @@ Datum RPCFencedUDF(FunctionCallInfo fcinfo)
     /* Step 3: Get UDF result */
     int len = 0;
     resetStringInfo(fcinfo->udfInfo.udfMsgBuf);
-    RecvMsg(UDFRPCSocket, (char*)&len, sizeof(len));
+    RecvMsg(UDFRPCSocket, (char*)&len, sizeof(len));    
+    if (len < 0) {
+        ereport(ERROR,
+            (errmodule(MOD_UDF), 
+                errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
+                errmsg("Variable length %d cannot be negative", len)));
+    }
     char* ptr = (char*)palloc(len + 1);
     RecvMsg(UDFRPCSocket, ptr, len);
     AppendBufFixedMsgVal(fcinfo->udfInfo.udfMsgBuf, ptr, len);
@@ -1647,7 +1666,13 @@ Datum RPCFencedUDF(FunctionCallInfo fcinfo)
         }
     } else if (msgType == UDF_ERROR) {
         int valLen = 0;
-        GetFixedMsgVal(fcinfo->udfInfo.msgReadPtr, (char*)&valLen, sizeof(valLen), sizeof(valLen));
+        GetFixedMsgVal(fcinfo->udfInfo.msgReadPtr, (char*)&valLen, sizeof(valLen), sizeof(valLen));        
+        if (valLen < 0) {
+            ereport(ERROR,
+                (errmodule(MOD_UDF), 
+                    errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
+                    errmsg("Variable length %d cannot be negative", valLen)));
+        }
         char* errMsg = (char*)palloc0(valLen + 1);
         GetFixedMsgVal(fcinfo->udfInfo.msgReadPtr, (char*)errMsg, valLen, valLen + 1);
         ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_DATA_EXCEPTION), errmsg("UDF Error:%s", errMsg)));
@@ -1691,7 +1716,7 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
 
         fcinfo->udfInfo = entry->udfInfo;
     } else {
-        AutoContextSwitch contextSwitcher(t_thrd.top_mem_cxt);
+        AutoContextSwitch contextSwitcher(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
         entry = (UDFFuncHashTabEntry*)hash_search(UDFFuncHash, &oid, HASH_ENTER, NULL);
         if (NULL != entry) {
             FmgrInfo* flinfo = fcinfo->flinfo;
@@ -1818,7 +1843,6 @@ void InitFuncCallUDFInfo(FunctionCallInfoData* fcinfo, int argN, bool setFuncPtr
     }
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 Datum fenced_udf_process(PG_FUNCTION_ARGS)
 {
     int32 arg = PG_GETARG_INT32(0);
@@ -1870,7 +1894,6 @@ Datum fenced_udf_process(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 }
-#endif
 
 static char* parse_value(char* p_start)
 {
@@ -1888,7 +1911,6 @@ static char* parse_value(char* p_start)
     return value;
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 static void check_input_for_security_s(const char* input)
 {
     char* danger_token[] = {"|",
@@ -1918,12 +1940,11 @@ static void check_input_for_security_s(const char* input)
         if (strstr(input, danger_token[i])) {
             ereport(ERROR,
                 (errmodule(MOD_UDF),
-                    errcode(ERRCODE_ARRAY_ELEMENT_ERROR),
+                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("Contains invaid character: \"%s\"", danger_token[i])));
         }
     }
 }
-#endif
 
 static void check_extend_library_option(LibraryInfo* libInfo)
 {
@@ -1939,11 +1960,11 @@ static void check_extend_library_option(LibraryInfo* libInfo)
     }
 
     /* check option which should be ls, addjar or rmjar */
-    if ((len == 2) && (0 == strncmp(option, "ls", len))) {
+    if ((len == 2) && (strncmp(option, "ls", len) == 0)) {
         libInfo->optionType = OPTION_LS;
-    } else if ((len == 6) && (0 == strncmp(option, "addjar", len))) {
+    } else if ((len == 6) && (strncmp(option, "addjar", len) == 0)) {
         libInfo->optionType = OPTION_ADDJAR;
-    } else if ((len == 5) && (0 == strncmp(option, "rmjar", len))) {
+    } else if ((len == 5) && (strncmp(option, "rmjar", len) == 0)) {
         libInfo->optionType = OPTION_RMJAR;
     } else {
         ereport(ERROR,
@@ -2047,59 +2068,51 @@ static void parse_extend_library_operation(LibraryInfo* libInfo)
     }
     if (libInfo->destpath == NULL) {
         if (libInfo->optionType != OPTION_LS)
-            ereport(ERROR,
-                (errmodule(MOD_UDF),
-                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("Invalid argument: must set a \"libraryname\".")));
     } else {
-        if (strstr(libInfo->destpath, "/") != NULL)
-            ereport(ERROR,
-                (errmodule(MOD_UDF),
-                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("Invalid argument: should not contain \"/\" in \"libraryname\".")));
+        if ((strstr(libInfo->destpath, "/") != NULL) || libInfo->destpath[0] == '.')
+            ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("Invalid argument: \"libraryname\" should not contain \"/\" or starting with \".\".")));
     }
 
     if (libInfo->optionType != OPTION_ADDJAR) {
         return;
     }
 
-    if ((tmp = strstr(operation, "file://")) != NULL) {
+    if (strncmp(operation, "file://", strlen("file://")) == 0) {
         /* Check if there is "file://".
          * If it exists, it means the source path is local.
          */
         libInfo->isSourceLocal = true;
-        tmp += strlen("file://");
+        tmp = operation + strlen("file://");
         if ((libInfo->localpath = parse_value(tmp)) == NULL || libInfo->localpath[0] != '/') {
-            ereport(ERROR,
-                (errmodule(MOD_UDF),
-                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("Invalid argument: must set an absolute path followed by \"file:///\".")));
         }
         if (strlen(libInfo->localpath) < 4 ||
-            0 != (strncmp(libInfo->localpath + strlen(libInfo->localpath) - 4, ".jar", 4))) {
-            ereport(ERROR,
-                (errmodule(MOD_UDF),
-                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            (strncmp(libInfo->localpath + strlen(libInfo->localpath) - 4, ".jar", 4) != 0 )) {
+            ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("Invalid argument: the source file must be .jar file.")));
         }
-    } else if ((tmp = strstr(operation, "obs://")) != NULL) {
+    } else if (strncmp(operation, "obs://", strlen("obs://")) == 0) {
         /* Check if there is "obs://".
          * If it exists, it means the source path is from obs,
          * then we shoule parse bucket, obspath, accesskey, secretkey and region
          */
+        if (!isSecurityMode) {
+            ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Invalid argument: must set an absolute path followed by \"file:///\".")));
+        }
         libInfo->isSourceLocal = false;
-        tmp += strlen("obs://");
+        tmp = operation + strlen("obs://");
         if ((tmp = parse_value(tmp)) == NULL) {
-            ereport(ERROR,
-                (errmodule(MOD_UDF),
-                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("Invalid argument: must set bucket and filepath followed by \"obs://\".")));
         }
 
-        if (strlen(tmp) < 4 || 0 != (strncmp(tmp + strlen(tmp) - 4, ".jar", 4))) {
-            ereport(ERROR,
-                (errmodule(MOD_UDF),
-                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+        if (strlen(tmp) < 4 || (strncmp(tmp + strlen(tmp) - 4, ".jar", 4) != 0)) {
+            ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("Invalid argument: the source file must be .jar file.")));
         }
 
@@ -2107,9 +2120,7 @@ static void parse_extend_library_operation(LibraryInfo* libInfo)
         pfree_ext(tmp);
     } else {
         /* must set "file://" or "obs://" when OPTION_ADDJAR */
-        ereport(ERROR,
-            (errmodule(MOD_UDF),
-                errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+        ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("must set correct source file path.")));
     }
 
@@ -2117,10 +2128,8 @@ static void parse_extend_library_operation(LibraryInfo* libInfo)
     get_pkglib_path(my_exec_path, pathbuf);
     join_path_components(pathbuf, pathbuf, "java");
     join_path_components(pathbuf, pathbuf, libInfo->destpath);
-    if (0 == access(pathbuf, F_OK)) {
-        ereport(ERROR,
-            (errmodule(MOD_UDF),
-                errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+    if (access(pathbuf, F_OK) == 0) {
+        ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("Invalid argument: the library already existed, please remove it first using rmjar.")));
     }
 }
@@ -2138,6 +2147,7 @@ static void get_obsfile(OBSInfo* obsInfo, const char* tmp_path)
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return;
 #else
+
     StringInfoData cmd;
     initStringInfo(&cmd);
 
@@ -2154,11 +2164,9 @@ static void get_obsfile(OBSInfo* obsInfo, const char* tmp_path)
         tmp_path);
 
     /* reset key buffer to avoid private info leak */
-    GS_UINT32 access_key_len = strlen(obsInfo->accesskey);
-    errno_t ret = memset_s(obsInfo->accesskey, access_key_len + 1, 0, access_key_len + 1);
+    errno_t ret = memset_s(obsInfo->accesskey, strlen(obsInfo->accesskey) + 1, 0, strlen(obsInfo->accesskey) + 1);
     securec_check(ret, "\0", "\0");
-    GS_UINT32 secret_key_len = strlen(obsInfo->secretkey);
-    ret = memset_s(obsInfo->secretkey, secret_key_len + 1, 0, secret_key_len + 1);
+    ret = memset_s(obsInfo->secretkey, strlen(obsInfo->secretkey) + 1, 0, strlen(obsInfo->secretkey) + 1);
     securec_check(ret, "\0", "\0");
     ereport(DEBUG1,
         (errmodule(MOD_UDF),
@@ -2187,11 +2195,14 @@ static void get_obsfile(OBSInfo* obsInfo, const char* tmp_path)
         obsInfo->bucket,
         tmp_path);
 
-    if (-1 == rc || WIFEXITED(rc) == 0)
-        ereport(
-            ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("%d %d: System error. \"%s\"", rc, WIFEXITED(rc), cmd.data)));
+    if (rc == -1 || WIFEXITED(rc) == 0) {
+        ereport(LOG,
+            (errcode(ERRCODE_SYSTEM_ERROR), errmsg("[status]:%d %d System error. \"%s\"", rc, WIFEXITED(rc), cmd.data)));
+        ereport(ERROR,
+            (errcode(ERRCODE_SYSTEM_ERROR), errmsg("%d %d: System error.", rc, WIFEXITED(rc))));
+    }
 
-    ereport(DEBUG1, (errmodule(MOD_UDF), errmsg("[status]:%d %d %d", rc, WIFEXITED(rc), WEXITSTATUS(rc))));
+    ereport(LOG, (errmsg("[status]:%d %d %d [command]:\"%s\"", rc, WIFEXITED(rc), WEXITSTATUS(rc), cmd.data)));
 
     /* check download execution results, the rc should equal the 'os._exit(rc)' in udstools.py */
     rc = WEXITSTATUS(rc);
@@ -2203,46 +2214,45 @@ static void get_obsfile(OBSInfo* obsInfo, const char* tmp_path)
         case OBS_FAILED_IO_ERROR:
             ereport(ERROR,
                 ((errcode(ERRCODE_SQL_ROUTINE_EXCEPTION),
-                    errmsg("%d: Failed to access system files. \"%s\"", rc, cmd.data))));
+                    errmsg("%d: Failed to access system files.", rc))));
             break;
 
         case OBS_FAILED_INCORRECT_REGION:
             ereport(ERROR,
                 ((errcode(ERRCODE_SQL_ROUTINE_EXCEPTION),
-                    errmsg("%d: Invalid argument, must set correct region. \"%s\"", rc, cmd.data))));
+                    errmsg("%d: Invalid argument, must set correct region.", rc))));
             break;
 
         case OBS_FAILED_INVALID_ARGUMENT:
             ereport(ERROR,
-                ((errcode(ERRCODE_SQL_ROUTINE_EXCEPTION), errmsg("%d: Parameters error. \"%s\"", rc, cmd.data))));
+                ((errcode(ERRCODE_SQL_ROUTINE_EXCEPTION), errmsg("%d: Parameters error.", rc))));
             break;
 
         case OBS_FAILED_BASE_EXCEPTION:
             ereport(
-                ERROR, ((errcode(ERRCODE_SQL_ROUTINE_EXCEPTION), errmsg("%d: System error. \"%s\"", rc, cmd.data))));
+                ERROR, ((errcode(ERRCODE_SQL_ROUTINE_EXCEPTION), errmsg("%d: System error.", rc))));
             break;
 
         case OBS_FAILED_CONNECT_TO_UDS_SERVER:
             ereport(ERROR,
                 ((errcode(ERRCODE_CONNECTION_FAILURE),
-                    errmsg("%d: Failed to connect to obs server. \"%s\"", rc, cmd.data))));
+                    errmsg("%d: Failed to connect to obs server.", rc))));
             break;
 
         case OBS_FAILED_DOWNLOAD_FROM_UDS_SERVER:
             ereport(ERROR,
                 ((errcode(ERRCODE_SQL_ROUTINE_EXCEPTION),
-                    errmsg("%d: Failed to download from obs server. \"%s\"", rc, cmd.data))));
+                    errmsg("%d: Failed to download from obs server.", rc))));
             break;
 
         case OBS_FAILED_TRY_AGAIN:
             ereport(ERROR,
                 ((errcode(ERRCODE_CONNECTION_FAILURE),
-                    errmsg("%d: Obs server is busy. Try again later. \"%s\"", rc, cmd.data))));
+                    errmsg("%d: Obs server is busy. Try again later.", rc))));
             break;
 
         default:
-            ereport(
-                ERROR, ((errcode(ERRCODE_SQL_ROUTINE_EXCEPTION), errmsg("%d: Failed download \"%s\".", rc, cmd.data))));
+            ereport(ERROR, ((errcode(ERRCODE_SQL_ROUTINE_EXCEPTION), errmsg("%d: Download failed.", rc))));
             break;
     }
 
@@ -2250,7 +2260,6 @@ static void get_obsfile(OBSInfo* obsInfo, const char* tmp_path)
 #endif
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 static void execute_udstools_commnd(LibraryInfo* libInfo)
 {
     /* As gs_om addjar command can only distrubte local file,
@@ -2286,29 +2295,21 @@ static char* execute_gsom_javaudf_command(LibraryInfo* libInfo)
     if (libInfo->destpath != NULL) {
         appendStringInfo(&cmd, " -d %s", libInfo->destpath);
     }
-    /* we should catch both stderr and stdout so we append redirect tags to gs_om command */
-    appendStringInfo(&cmd, " 2>&1");
     ereport(DEBUG1, (errmodule(MOD_UDF), errmsg("[gs_om]: %s", cmd.data)));
 
     FILE* fp = NULL;
-    char results[MAXPGPATH];  // handle the gs_om command return message per line.
+    char results[MAXPGPATH]; /* handle the gs_om command return message per line. */
     StringInfoData ret;
     initStringInfo(&ret);
-    bool isFailed = false;  // check if the gs_om command execution is failed.
-    bool isError = false;   // check if the gs_om command reports failures in stderr.
-    
-    if (!is_absolute_path(cmd.data)) {
-        char Lrealpath[PATH_MAX + 1] = { 0 };
-        if (realpath(cmd.data, Lrealpath) == NULL) {
-            ereport(ERROR, (errmodule(MOD_UDF), errmsg("[gs_om]: %s realpath failed.", cmd.data)));
-        }
-        fp = fopen(Lrealpath, "r");
-    } else {
-        fp = popen(cmd.data, "r");
-    }
-    if (fp != NULL) {
-        int errorno;
-        errno_t rc;
+    bool isFailed = false; /* check if the gs_om command execution is failed. */
+    bool isError = false;  /* check if the gs_om command reports failures in stderr. */
+
+    check_input_for_security_s(cmd.data);
+    /* we should catch both stderr and stdout so we append redirect tags to gs_om command */
+    appendStringInfo(&cmd, " 2>&1");
+
+    if ((fp = popen(cmd.data, "r")) != NULL) {
+        error_t errorno;
         /* parse the gs_om command returns by line,
          * the returns contains either exepected results or error massages,
          * so we should parse the error massage and then elog() the massage,
@@ -2336,8 +2337,8 @@ static char* execute_gsom_javaudf_command(LibraryInfo* libInfo)
                 securec_check_ss(errorno, "\0", "\0");
                 char tails[MAXPGPATH];
                 while (fgets(tails, sizeof(tails), fp) != NULL) {
-                    rc = strncat_s(results, MAXPGPATH, tails, strlen(tails));
-                    securec_check_c(rc, "\0", "\0");
+                    errorno = strncat_s(results, MAXPGPATH, tails, strlen(tails));
+                    securec_check_c(errorno, "\0", "\0");
                 }
                 isError = true;
             } else if ((tmp = strstr(results, "Success: File consistent")) != NULL) {
@@ -2387,23 +2388,22 @@ static char* execute_gsom_javaudf_command(LibraryInfo* libInfo)
         resetStringInfo(&cmd);
         appendStringInfo(&cmd, "rm -rf %s", libInfo->localpath);
         ereport(DEBUG1, (errmodule(MOD_UDF), errmsg("[rm_tmp]: %s", cmd.data)));
-        check_input_for_security_s(cmd.data);
         int rc = system(cmd.data);
         if (rc != 0) {
-            elog(WARNING, "Remove obs tmp file \"%s\" failed.", libInfo->localpath);
+            ereport(LOG,
+                (errcode(ERRCODE_SYSTEM_ERROR),
+                errmsg("[WARNING] remove the tmp file downloaded from the OBS Server failed, [command] %s", cmd.data)));
         }
     }
 
     if (isFailed) {
-        ereport(ERROR,
-            (errmodule(MOD_UDF),
-                (errcode(ERRCODE_SQL_ROUTINE_EXCEPTION), errmsg("execute cmd \"%s\" fail", cmd.data))));
+        ereport(LOG, (errcode(ERRCODE_SQL_ROUTINE_EXCEPTION), errmsg("execute command failed, [command] %s", cmd.data)));
+        ereport(ERROR, (errmodule(MOD_UDF),
+                (errcode(ERRCODE_SQL_ROUTINE_EXCEPTION), errmsg("execute command failed"))));
     }
 
     if (isError) {
-        ereport(ERROR,
-            (errmodule(MOD_UDF),
-                errcode(ERRCODE_SQL_ROUTINE_EXCEPTION),
+        ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_SQL_ROUTINE_EXCEPTION),
                 errmsg("%s", (ret.len > 0) ? ret.data : "Cannot get detailed execution results.")));
     }
 
@@ -2414,7 +2414,6 @@ static char* execute_gsom_javaudf_command(LibraryInfo* libInfo)
 
     return ret.data;
 }
-#endif
 
 PG_FUNCTION_INFO_V1(gs_extend_library);
 /*
@@ -2428,12 +2427,11 @@ PG_FUNCTION_INFO_V1(gs_extend_library);
 Datum gs_extend_library(PG_FUNCTION_ARGS)
 {
     if (!superuser()) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 (errmsg("must be system admin to use the gs_extend_library function"))));
     }
 
-    LibraryInfo* libInfo = (LibraryInfo*)palloc(sizeof(LibraryInfo));
+    LibraryInfo* libInfo = (LibraryInfo*)palloc0(sizeof(LibraryInfo));
     libInfo->option = PG_GETARG_CSTRING(0);
     libInfo->operation = PG_GETARG_CSTRING(1);
     libInfo->destpath = NULL;
@@ -2441,7 +2439,6 @@ Datum gs_extend_library(PG_FUNCTION_ARGS)
     libInfo->isSourceLocal = true;
     libInfo->obsInfo = NULL;
 
-    ereport(DEBUG1, (errmodule(MOD_UDF), errmsg("[option] %s\n[operation]: %s", libInfo->option, libInfo->operation)));
     char* result = NULL;
     ExtendLibraryStatus status = EXTENDLIB_CHECK_OPTION;
     bool done = false;
@@ -2459,8 +2456,7 @@ Datum gs_extend_library(PG_FUNCTION_ARGS)
                         break;
                     }
 
-                    ereport(ERROR,
-                        (errmodule(MOD_UDF),
+                    ereport(ERROR, (errmodule(MOD_UDF),
                             errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                             errmsg("Invaid argument: must at least set libraryname")));
                 }
@@ -2473,7 +2469,6 @@ Datum gs_extend_library(PG_FUNCTION_ARGS)
                 }
                 break;
             }
-#ifdef ENABLE_MULTIPLE_NODES
             case EXTENDLIB_CALL_OBS_DOWNLOAD: {
                 execute_udstools_commnd(libInfo);
                 status = EXTENDLIB_CALL_OM;
@@ -2484,7 +2479,6 @@ Datum gs_extend_library(PG_FUNCTION_ARGS)
                 done = true;
                 break;
             }
-#endif
             default: {
                 ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_SYSTEM_ERROR), errmsg("System Error.")));
                 break;
@@ -2537,8 +2531,7 @@ char* get_obsfile_local(char* pathname, const char* basename, const char* extens
     /* add fullname to the end */
     tmp_path = parse_value(pathname);
     if (tmp_path == NULL)
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("Invalid argument: must set correct bucket and obs file path.")));
 
     appendStringInfo(&tmp, "%s", tmp_path);
@@ -2560,9 +2553,9 @@ char* get_obsfile_local(char* pathname, const char* basename, const char* extens
     InsertIntoPendingLibraryDelete(tmp.data, true);
     InsertIntoPendingLibraryDelete(tmp.data, false);
     /* check if there is a file of the same name */
-    if (file_exists(tmp.data))
-        ereport(WARNING, (errmodule(MOD_TS), errmsg("Dictionary file exists and will be replaced: \"%s\"", tmp.data)));
-
+    if (file_exists(tmp.data)) {
+        ereport(LOG, (errmodule(MOD_TS), errmsg("Dictionary file exists and will be replaced: \"%s\"", tmp.data)));
+    }
     /* ok, download the obs file to the tmp path */
     get_obsfile(obsinfo, tmp_path);
 

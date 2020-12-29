@@ -79,7 +79,6 @@ extern Oid get_func_variadictype(Oid funcid);
 extern bool get_func_retset(Oid funcid);
 extern bool func_strict(Oid funcid);
 extern char func_volatile(Oid funcid);
-extern char func_parallel(Oid funcid);
 extern bool get_func_proshippable(Oid funcid);
 extern bool get_func_leakproof(Oid funcid);
 extern float4 get_func_cost(Oid funcid);
@@ -136,8 +135,9 @@ extern char* get_exprtypename(Oid enumlabelid);
 extern char* get_typename_with_namespace(Oid typid);
 extern Oid get_typeoid_with_namespace(const char* typname);
 extern char* get_pgxc_nodename(Oid nodeoid, NameData* namedata = NULL);
-extern char* get_pgxc_nodename_noexcept(Oid nodeoid, char* nodename = NULL);
+extern char* get_pgxc_nodename_noexcept(Oid nodeoid, NameData *nodename = NULL);
 extern Oid get_pgxc_nodeoid(const char* nodename);
+extern Oid get_pgxc_datanodeoid(const char* nodename, bool missingOK);
 extern bool check_pgxc_node_name_is_exist(
     const char* nodename, const char* host, int port, int comm_sctp_port, int comm_control_port);
 extern Oid get_pgxc_primary_datanode_oid(Oid nodeoid);
@@ -191,7 +191,7 @@ extern bool get_attmultistatsslot(HeapTuple statstuple, Oid atttype, int32 attty
     Oid* actualop, Datum** values, int* nvalues, float4** numbers, int* nnumbers, bool** nulls = NULL);
 extern double get_attstadndistinct(HeapTuple statstuple);
 extern void free_attstatsslot(Oid atttype, Datum* values, int nvalues, float4* numbers, int nnumbers);
-extern char* get_namespace_name(Oid nspid, bool report_error = false);
+extern char* get_namespace_name(Oid nspid);
 extern Oid get_range_subtype(Oid rangeOid);
 extern char* get_cfgnamespace(Oid cfgid);
 extern char* get_typenamespace(Oid typid);

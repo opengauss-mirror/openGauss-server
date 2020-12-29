@@ -26,6 +26,7 @@
 
 #include <sys/mman.h> /* mmap */
 
+#include "access/tableam.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
@@ -49,7 +50,7 @@
 #include "utils/lsyscache.h"
 #include "utils/memprot.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "utils/inval.h"
 #include "optimizer/nodegroups.h"
 
@@ -60,7 +61,7 @@
 #define static
 #endif
 
-#define SESSION_TABNAME "gs_wlm_session_info"
+#define SESSION_TABNAME "gs_wlm_session_query_info_all"
 #define OPERATOR_TABNAME "gs_wlm_operator_info"
 #define SESSIONUSER_TABNAME "gs_wlm_user_session_info"
 #define USER_RESOURCE_HISTORY_TABNAME "gs_wlm_user_resource_history"
@@ -71,6 +72,7 @@
 #define CHAR_BUF_SIZE 512
 
 extern uint64 parseTableSpaceMaxSize(char* maxSize, bool* unlimited, char** newMaxSize);
+extern int gscgroup_get_cgroup_cpuinfo(struct cgroup* cg, int* setcnt, int64* usage);
 extern void WLMParseFunc4SessionInfo(StringInfo msg, void* suminfo, int size);
 extern void WLMInitMinValue4SessionInfo(WLMGeneralData* gendata);
 extern void WLMCheckMinValue4SessionInfo(WLMGeneralData* gendata);
@@ -1126,8 +1128,9 @@ void GetResourcePoolActPts(int memsize, RespoolData* rpdata, int* result)
     }
 
     if (memsize > rpdata->mem_size) {
-        result[0] = (rpdata->mem_size * 0.9) / KBYTES;
-        result[1] = rpdata->max_pts * 0.9 + 1;
+        /* use 90% to protect system */
+        result[0] = (int)((rpdata->mem_size * 0.9) / KBYTES);
+        result[1] = (int)(rpdata->max_pts * 0.9 + 1);
         return;
     }
 
@@ -1230,7 +1233,7 @@ void InitializeWorkloadManager(void)
 unsigned int GetRPMemorySize(int pct, Oid parentid)
 {
     /* get current max chunks per process, convert it to 'kB' */
-    unsigned int memsize = t_thrd.wlm_cxt.thread_srvmgr->freesize_update > 0 ? t_thrd.wlm_cxt.thread_srvmgr->totalsize
+    unsigned int memsize = (t_thrd.wlm_cxt.thread_srvmgr->freesize_update > 0) ? t_thrd.wlm_cxt.thread_srvmgr->totalsize
                                                                              : RESPOOL_MIN_MEMORY;
 
     /* compute parent memory size while parent is valid */
@@ -1341,8 +1344,9 @@ void WLMSetRespoolInfo(Oid rpoid, const char* cgroup_old)
          * If the control group is invalid, we will use
          * the default group and make a notice only once.
          */
-        if (g_instance.wlm_cxt->gscgroup_init_done && g_wlm_params->rpdata.cgchange &&
-            !CGroupIsValid(u_sess->wlm_cxt->group_keyname)) {
+        bool isCgroupValid = (g_instance.wlm_cxt->gscgroup_init_done && g_wlm_params->rpdata.cgchange &&
+            !CGroupIsValid(u_sess->wlm_cxt->group_keyname));
+        if (isCgroupValid) {
             ereport(NOTICE,
                 (errmsg("Cgroup \"%s\" in the resource pool is invalid, "
                         "Cgroup \"%s\" will be used.",
@@ -1392,8 +1396,9 @@ void WLMSetRespoolInfo(Oid rpoid, const char* cgroup_old)
          * If we do not set control group, and control group in
          * the resource pool is changed, we must use the new group
          */
-        if ((u_sess->wlm_cxt->cgroup_state == CG_USING || u_sess->wlm_cxt->cgroup_state == CG_RESPOOL) &&
-            g_wlm_params->rpdata.cgchange) {
+        bool isUseNewGroup = ((u_sess->wlm_cxt->cgroup_state == CG_USING ||
+            u_sess->wlm_cxt->cgroup_state == CG_RESPOOL) && g_wlm_params->rpdata.cgchange);
+        if (isUseNewGroup) {
             WLMSetControlGroup(g_wlm_params->rpdata.cgroup);
         }
 
@@ -1604,11 +1609,10 @@ bool WLMIsSpecialQuery(const char* sqltext)
 {
     Index i = 0;
 
-    char* whitelist[] = {"SELECT intervaltonum(gs_password_deadline())",
-        "SELECT gs_password_notifytime()",
+    char* whitelist[] = {"select name, setting from pg_settings where name in ('connection_info')",
         "SELECT VERSION()",
-        "SELECT name, setting from pg_settings",
-        "SELECT count(*) from pg_settings",
+        "SELECT intervaltonum(gs_password_deadline())",
+        "SELECT gs_password_notifytime()",
         "SET connection_info ="};
 
     if (IsConnFromGTMTool() || IsConnFromInternalTool() || u_sess->proc_cxt.IsWLMWhiteList) {
@@ -1627,11 +1631,14 @@ bool WLMIsSpecialQuery(const char* sqltext)
 
     // if the query is in the white list, it will be treated as a special query
     if (IsUnderPostmaster && IsConnFromApp()) {
-        for (i = 0; i < lengthof(whitelist); ++i) {
-            if ((strlen(whitelist[i]) <= strlen(sqltext)) &&
-                (strncasecmp(sqltext, whitelist[i], strlen(whitelist[i])) == 0)) {
+        for (i = 0; i < lengthof(whitelist) - 1; ++i) {
+            if ( (strcasecmp(sqltext, whitelist[i]) == 0)) {
                 return true;
             }
+        }
+        if ((strlen(whitelist[i]) <= strlen(sqltext)) && 
+            (strncasecmp(sqltext, whitelist[i], strlen(whitelist[i])) == 0)) {
+            return true;
         }
     }
 
@@ -1767,7 +1774,7 @@ bool WLMIsSimpleQuery(const QueryDesc* queryDesc, bool force_control, bool isQue
 
     g_wlm_params->use_planA = false;
 
-    if ((IS_PGXC_DATANODE && !IS_SINGLE_NODE) || (IS_PGXC_COORDINATOR && IsConnFromCoord()) ||
+    if (IS_PGXC_DATANODE || (IS_PGXC_COORDINATOR && IsConnFromCoord()) ||
         u_sess->attr.attr_resource.parctl_min_cost < 0) {
         return true;
     }
@@ -1830,7 +1837,7 @@ bool WLMIsSimpleQuery(const QueryDesc* queryDesc, bool force_control, bool isQue
                 return false;
             }
 
-            return WLMGetTotalCost(queryDesc, isQueryDesc) < (Cost)u_sess->attr.attr_resource.parctl_min_cost ? true
+            return (WLMGetTotalCost(queryDesc, isQueryDesc) < (Cost)u_sess->attr.attr_resource.parctl_min_cost) ? true
                                                                                                               : false;
         } else if (u_sess->attr.attr_resource.parctl_min_cost == 0) { /* no plan query, such as create table */
             return false;
@@ -2096,9 +2103,8 @@ char* GenerateResourcePoolStmt(CreateResourcePoolStmt* stmt, const char* origin_
             securec_check(rc, "\0", "\0");
             return query_string;
         } else {
-          pfree(query_string);
-          ereport(
-              ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("option \"%s\" not recognized", defel->defname)));  
+            pfree(query_string);
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("option \"%s\" not recognized", defel->defname)));
         }
         securec_check_ss(len, "\0", "\0");
 
@@ -2166,9 +2172,7 @@ void CreateResourcePool(CreateResourcePoolStmt* stmt)
     relation = heap_open(ResourcePoolRelationId, ShareUpdateExclusiveLock);
 
     CheckResourcePoolOptions(pool_name, stmt->options, true, values, nulls, repl, &parentid, &actpct, &mempct);
-
-    htup = heap_form_tuple(relation->rd_att, values, nulls);
-
+    htup = (HeapTuple)heap_form_tuple(relation->rd_att, values, nulls);
     /* Insert tuple in catalog */
     (void)simple_heap_insert(relation, htup);
 
@@ -2314,7 +2318,7 @@ void RemoveResourcePool(Relation relation, Oid pool_oid)
      * add childlist in t_thrd.top_mem_cxt to update
      * hash table when commit the transaction.
      */
-    oldcontext = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+    oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
     (void)CheckDependencyOnRespool(ResourcePoolRelationId, pool_oid, &childlist, true);
     (void)MemoryContextSwitchTo(oldcontext);
 
@@ -2353,7 +2357,7 @@ void RemoveResourcePool(Relation relation, Oid pool_oid)
     u_sess->wlm_cxt->respool_delete_list = childlist;
 
     /* add pool_oid in the deletion list */
-    oldcontext = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+    oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
     u_sess->wlm_cxt->respool_delete_list = lappend_oid(u_sess->wlm_cxt->respool_delete_list, pool_oid);
     (void)MemoryContextSwitchTo(oldcontext);
 
@@ -2502,9 +2506,7 @@ void CreateWorkloadGroup(CreateWorkloadGroupStmt* stmt)
     CheckWorkloadGroupOptions(group_name, pool_name, stmt->options, true, values, nulls, repl);
 
     relation = heap_open(WorkloadGroupRelationId, RowExclusiveLock);
-
-    htup = heap_form_tuple(relation->rd_att, values, nulls);
-
+    htup = (HeapTuple)heap_form_tuple(relation->rd_att, values, nulls);
     /* Insert tuple in catalog */
     (void)simple_heap_insert(relation, htup);
 
@@ -2715,7 +2717,7 @@ void CreateAppWorkloadGroupMapping(CreateAppWorkloadGroupMappingStmt* stmt)
 
     relation = heap_open(AppWorkloadGroupMappingRelationId, RowExclusiveLock);
 
-    htup = heap_form_tuple(relation->rd_att, values, nulls);
+    htup = (HeapTuple)heap_form_tuple(relation->rd_att, values, nulls);
 
     /* Insert tuple in catalog */
     (void)simple_heap_insert(relation, htup);
@@ -3002,11 +3004,10 @@ bool CheckWLMSessionInfoTableValid(const char* tablename)
      * tablename is session info table, but the
      * database is not postgres, it's not valid.
      */
-    const char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
     if ((strcmp(tablename, SESSION_TABNAME) == 0 || strcmp(tablename, SESSIONUSER_TABNAME) == 0 ||
             strcmp(tablename, OPERATOR_TABNAME) == 0 || strcmp(tablename, USER_RESOURCE_HISTORY_TABNAME) == 0 ||
             strcmp(tablename, INSTANCE_RESOURCE_HISTORY_TABNAME) == 0) &&
-        (!dbname || strcmp(dbname, g_instance.wlm_cxt->stat_manager.database) != 0)) {
+        strcmp(get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true), g_instance.wlm_cxt->stat_manager.database) != 0) {
         return false;
     }
 
@@ -3149,10 +3150,10 @@ bool BuildResourcePoolHash(LOCKMODE lockmode)
 {
     bool found = false;
     bool isnull = false;
+    errno_t errval = 0;
 
-    USE_AUTO_LWLOCK(ResourcePoolHashLock, LW_EXCLUSIVE);
-
-    AssignHTabInfoDirty<ResourcePool>(g_instance.wlm_cxt->resource_pool_hashtbl);
+    List *temp_respool_list = NULL;
+    TmpResourcePool *tmpResourcePool = NULL;
 
     HeapTuple tup;
 
@@ -3168,14 +3169,76 @@ bool BuildResourcePoolHash(LOCKMODE lockmode)
         int io_limits_value = 0;
         int io_priority_value = IOPRIORITY_NONE;
 
+        /* get the control group info */
+        Datum ControlGroupDatum = heap_getattr(tup, Anum_pg_resource_pool_control_group, pg_respool_dsc, &isnull);
+
+        /* get the parent oid */
+        Datum parentid = heap_getattr(tup, Anum_pg_resource_pool_parent, pg_respool_dsc, &isnull);
+
+        /* get the memory percent */
+        Datum mempct = heap_getattr(tup, Anum_pg_resource_pool_mem_percentage, pg_respool_dsc, &isnull);
+
+        tmpResourcePool = (TmpResourcePool *) palloc0_noexcept(sizeof(TmpResourcePool));
+        if (tmpResourcePool == NULL) {
+            return false;
+        }
+
+        /* set user id */
+        tmpResourcePool->rpoid = rpoid;
+        tmpResourcePool->parentoid = parentid;
+        tmpResourcePool->mempct = DatumGetInt32(mempct);
+
+        errval = strncpy_s(tmpResourcePool->cgroup, NAMEDATALEN, DatumGetCString(DirectFunctionCall1(nameout, ControlGroupDatum)), NAMEDATALEN - 1);
+        securec_check_errval(errval, , LOG);
+        /* get iops_limits for the pool */
+        Datum IOLimitsDatum = heap_getattr(tup, Anum_pg_resource_pool_iops_limits, pg_respool_dsc, &isnull);
+
+        if (!isnull) {
+            io_limits_value = DatumGetInt32(IOLimitsDatum);
+            tmpResourcePool->iops_limits = io_limits_value;
+        }
+
+        Datum IOPrioityDatum = heap_getattr(tup, Anum_pg_resource_pool_io_priority, pg_respool_dsc, &isnull);
+
+        if (!isnull) {
+            char* io_priority_datum_value = DatumGetCString(DirectFunctionCall1(nameout, IOPrioityDatum));
+            io_priority_value = GetIoPriority(io_priority_datum_value);
+            tmpResourcePool->io_priority = io_priority_value;
+        }
+
+        Datum NodeGroupDatum = heap_getattr(tup, Anum_pg_resource_pool_nodegroup, pg_respool_dsc, &isnull);
+
+        errval = strncpy_s(tmpResourcePool->ngroup, NAMEDATALEN,
+            DatumGetCString(DirectFunctionCall1(nameout, NodeGroupDatum)), NAMEDATALEN - 1);
+        securec_check_errval(errval, , LOG);
+
+        Datum ForeignUsersDatum = heap_getattr(tup, Anum_pg_resource_pool_is_foreign, pg_respool_dsc, &isnull);
+        tmpResourcePool->is_foreign = DatumGetBool(ForeignUsersDatum);
+
+        temp_respool_list = lappend(temp_respool_list, tmpResourcePool);
+    }
+    systable_endscan(scan);
+    heap_close(relation, lockmode);
+
+    /* start update respool hash */
+    USE_AUTO_LWLOCK(ResourcePoolHashLock, LW_EXCLUSIVE);
+    AssignHTabInfoDirty<ResourcePool>(g_instance.wlm_cxt->resource_pool_hashtbl);
+
+    ListCell *curr = list_head(temp_respool_list);
+    ListCell *next = NULL;
+
+    while (curr != NULL) {
+        next = lnext(curr);
+
+        tmpResourcePool = (TmpResourcePool *) lfirst(curr);
+
         /* create resource pool in hash table */
-        ResourcePool* rp =
-            (ResourcePool*)hash_search(g_instance.wlm_cxt->resource_pool_hashtbl, &rpoid, HASH_ENTER_NULL, &found);
+        ResourcePool *rp = (ResourcePool *) hash_search(g_instance.wlm_cxt->resource_pool_hashtbl,
+                                                        &tmpResourcePool->rpoid, HASH_ENTER_NULL, &found);
 
         if (rp == NULL) {
-            systable_endscan(scan);
-            heap_close(relation, lockmode);
             ereport(LOG, (errmsg("alloc memory failed. Build resource pool failed")));
+            list_free_ext(temp_respool_list);
             return false;
         }
 
@@ -3184,54 +3247,26 @@ bool BuildResourcePoolHash(LOCKMODE lockmode)
         if (!found) {
             /* init mutex for resource pool */
             pthread_mutex_init(&rp->mutex, NULL);
-            rp->rpoid = rpoid;
+            rp->rpoid = tmpResourcePool->rpoid;
         }
 
-        /* get the control group info */
-        Datum ControlGroupDatum = heap_getattr(tup, Anum_pg_resource_pool_control_group, pg_respool_dsc, &isnull);
-
-        errno_t errval = strncpy_s(
-            rp->cgroup, NAMEDATALEN, DatumGetCString(DirectFunctionCall1(nameout, ControlGroupDatum)), NAMEDATALEN - 1);
+        errval = strncpy_s(rp->cgroup, NAMEDATALEN, tmpResourcePool->cgroup, NAMEDATALEN - 1);
         securec_check_errval(errval, , LOG);
 
-        /* get the parent oid */
-        Datum parentid = heap_getattr(tup, Anum_pg_resource_pool_parent, pg_respool_dsc, &isnull);
-        rp->parentoid = DatumGetInt32(parentid);
-
-        /* get the memory percent */
-        Datum mempct = heap_getattr(tup, Anum_pg_resource_pool_mem_percentage, pg_respool_dsc, &isnull);
-        rp->mempct = DatumGetInt32(mempct);
-
-        /* get iops_limits for the pool */
-        Datum IOLimitsDatum = heap_getattr(tup, Anum_pg_resource_pool_iops_limits, pg_respool_dsc, &isnull);
-
-        if (!isnull) {
-            io_limits_value = DatumGetInt32(IOLimitsDatum);
-        }
-
-        Datum IOPrioityDatum = heap_getattr(tup, Anum_pg_resource_pool_io_priority, pg_respool_dsc, &isnull);
-
-        if (!isnull) {
-            char* io_priority_datum_value = DatumGetCString(DirectFunctionCall1(nameout, IOPrioityDatum));
-            io_priority_value = GetIoPriority(io_priority_datum_value);
-        }
-
-        rp->iops_limits = io_limits_value;
-        rp->io_priority = io_priority_value;
+        rp->parentoid = DatumGetInt32(tmpResourcePool->parentoid);
+        rp->mempct = DatumGetInt32(tmpResourcePool->mempct);
+        rp->iops_limits = tmpResourcePool->iops_limits;
+        rp->io_priority = tmpResourcePool->io_priority;
 
         errval = memset_s(rp->ngroup, NAMEDATALEN, 0, NAMEDATALEN);
         securec_check_errval(errval, , LOG);
 
         rp->is_foreign = false;
 
-        Datum NodeGroupDatum = heap_getattr(tup, Anum_pg_resource_pool_nodegroup, pg_respool_dsc, &isnull);
-
-        errval = strncpy_s(
-            rp->ngroup, NAMEDATALEN, DatumGetCString(DirectFunctionCall1(nameout, NodeGroupDatum)), NAMEDATALEN - 1);
+        errval = strncpy_s(rp->ngroup, NAMEDATALEN, tmpResourcePool->ngroup, NAMEDATALEN - 1);
         securec_check_errval(errval, , LOG);
 
-        Datum ForeignUsersDatum = heap_getattr(tup, Anum_pg_resource_pool_is_foreign, pg_respool_dsc, &isnull);
-        rp->is_foreign = DatumGetBool(ForeignUsersDatum);
+        rp->is_foreign = tmpResourcePool->is_foreign;
 
         /* set the foreign resource pool information in node group structure */
         if (rp->is_foreign && 0 != strcmp(rp->ngroup, DEFAULT_NODE_GROUP)) {
@@ -3241,15 +3276,14 @@ bool BuildResourcePoolHash(LOCKMODE lockmode)
             }
             rp->node_group = (void*)ng;
         }
+
+        curr = next;
     }
 
-    systable_endscan(scan);
-
-    heap_close(relation, lockmode);
+    list_free_ext(temp_respool_list);
 
     /* remove redundant resource pool info */
     CheckResourcePoolHash();
-
     return true;
 }
 /*
@@ -3318,7 +3352,7 @@ void CheckUserInfoHash(void)
     }
 }
 
-bool SearchUsedSpace(Oid userID, uint64* permSpace, uint64* tempSpace)
+bool SearchUsedSpace(Oid userID, int64* permSpace, int64* tempSpace)
 {
     HeapTuple tuple;
     bool isNull = false;
@@ -3330,11 +3364,11 @@ bool SearchUsedSpace(Oid userID, uint64* permSpace, uint64* tempSpace)
     tuple = SearchSysCache1(USERSTATUSROLEID, ObjectIdGetDatum(userID));
     if (HeapTupleIsValid(tuple)) {
         Datum spaceDatum = heap_getattr(tuple, Anum_pg_user_status_permspace, pgUsedSpaceDsc, &isNull);
-        *permSpace = UInt64GetDatum(spaceDatum);
+        *permSpace = DatumGetInt64(spaceDatum);
         Datum tmpSpaceDatum = heap_getattr(tuple, Anum_pg_user_status_tempspace, pgUsedSpaceDsc, &isNull);
         ereport(DEBUG2, (errmodule(MOD_WLM),
-            errmsg("[SearchUsedSpace] set temp space from %lu to %lu", *tempSpace, UInt64GetDatum(tmpSpaceDatum))));
-        *tempSpace = UInt64GetDatum(tmpSpaceDatum);
+            errmsg("[SearchUsedSpace] set temp space from %ld to %ld", *tempSpace, DatumGetInt64(tmpSpaceDatum))));
+        *tempSpace = DatumGetInt64(tmpSpaceDatum);
         isFind = true;
         ReleaseSysCache(tuple);
     }
@@ -3380,7 +3414,7 @@ bool heap_tuple_size_changed(Relation rel, HeapTuple tup)
     return false;
 }
 
-void UpdateUsedSpace(Oid userID, uint64 permSpace, uint64 tempSpace)
+void UpdateUsedSpace(Oid userID, int64 permSpace, int64 tempSpace)
 {
     HeapTuple tuple;
     HeapTuple newTuple;
@@ -3392,10 +3426,10 @@ void UpdateUsedSpace(Oid userID, uint64 permSpace, uint64 tempSpace)
     if (HeapTupleIsValid(tuple)) {
         TupleDesc pgUsedSpaceDsc = RelationGetDescr(relation);
 
-        newRecord[Anum_pg_user_status_permspace - 1] = UInt64GetDatum(permSpace);
+        newRecord[Anum_pg_user_status_permspace - 1] = Int64GetDatum(permSpace);
         newRecordRepl[Anum_pg_user_status_permspace - 1] = true;
 
-        newRecord[Anum_pg_user_status_tempspace - 1] = UInt64GetDatum(tempSpace);
+        newRecord[Anum_pg_user_status_tempspace - 1] = Int64GetDatum(tempSpace);
         newRecordRepl[Anum_pg_user_status_tempspace - 1] = true;
 
         newTuple = heap_modify_tuple(tuple, pgUsedSpaceDsc, newRecord, newRecordNulls, newRecordRepl);
@@ -3430,9 +3464,8 @@ bool BuildUserInfoHash(LOCKMODE lockmode)
     bool found = false;
     bool isNull = false;
 
-    USE_AUTO_LWLOCK(WorkloadUserInfoLock, LW_EXCLUSIVE);
-
-    AssignHTabInfoDirty<UserData>(g_instance.wlm_cxt->stat_manager.user_info_hashtbl);
+    List *temp_userdata_list = NULL;
+    TmpUserData *tempUserData = NULL;
 
     HeapTuple tup;
 
@@ -3446,9 +3479,9 @@ bool BuildUserInfoHash(LOCKMODE lockmode)
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
         bool unlimited = false;
         char* sizestr = NULL;
-        uint64 spacelimit = 0;
-        uint64 tmpSpaceLimit = 0;
-        uint64 spillSpaceLimit = 0;
+        int64 spacelimit = 0;
+        int64 tmpSpaceLimit = 0;
+        int64 spillSpaceLimit = 0;
         Oid puid = InvalidOid;
 
         Datum authidrespoolDatum = heap_getattr(tup, Anum_pg_authid_rolrespool, pg_authid_dsc, &isNull);
@@ -3471,7 +3504,7 @@ bool BuildUserInfoHash(LOCKMODE lockmode)
         if (!isNull) {
             char* maxSize = DatumGetCString(DirectFunctionCall1(textout, authidspaceDatum));
 
-            spacelimit = parseTableSpaceMaxSize(maxSize, &unlimited, &sizestr);
+            spacelimit = (int64)parseTableSpaceMaxSize(maxSize, &unlimited, &sizestr);
             ereport(DEBUG2, (errmsg("user %u spacelimit: %ldK", userid, spacelimit)));
         }
 
@@ -3480,8 +3513,9 @@ bool BuildUserInfoHash(LOCKMODE lockmode)
         if (!isNull) {
             char* maxSize = DatumGetCString(DirectFunctionCall1(textout, authidTempSpaceDatum));
 
-            tmpSpaceLimit = parseTableSpaceMaxSize(maxSize, &unlimited, &sizestr);
-            ereport(DEBUG2, (errmsg("user %u tmpSpaceLimit: %ldK", userid, (tmpSpaceLimit >> BITS_IN_KB))));
+            tmpSpaceLimit = (int64)parseTableSpaceMaxSize(maxSize, &unlimited, &sizestr);
+            ereport(DEBUG2, (errmsg("user %u tmpSpaceLimit: %ldK",
+                userid, (int64)((uint64)tmpSpaceLimit >> BITS_IN_KB))));
         }
 
         Datum authidSpillSpaceDatum = heap_getattr(tup, Anum_pg_authid_rolspillspace, pg_authid_dsc, &isNull);
@@ -3489,33 +3523,66 @@ bool BuildUserInfoHash(LOCKMODE lockmode)
         if (!isNull) {
             char* maxSize = DatumGetCString(DirectFunctionCall1(textout, authidSpillSpaceDatum));
 
-            spillSpaceLimit = parseTableSpaceMaxSize(maxSize, &unlimited, &sizestr);
-            ereport(DEBUG2, (errmsg("user %u tmpSpaceLimit: %ldK", userid, (spillSpaceLimit >> BITS_IN_KB))));
+            spillSpaceLimit = (int64)parseTableSpaceMaxSize(maxSize, &unlimited, &sizestr);
+            ereport(DEBUG2, (errmsg("user %u tmpSpaceLimit: %ldK",
+                userid, (int64)((uint64)spillSpaceLimit >> BITS_IN_KB))));
         }
 
         /* create user data in hash table */
+        tempUserData = (TmpUserData *)palloc0_noexcept(sizeof(TmpUserData));
+
+        /* set user id */
+        tempUserData->userid        = userid;
+        tempUserData->puid          = puid;
+        tempUserData->spacelimit    = spacelimit;
+        tempUserData->tmpSpaceLimit = tmpSpaceLimit;
+        tempUserData->spillSpaceLimit = spillSpaceLimit;
+        tempUserData->is_super      = is_super;
+        tempUserData->is_dirty      = false;
+        tempUserData->rpoid         = rpoid;
+        tempUserData->respool       = GetRespoolFromHTab(rpoid);
+
+        temp_userdata_list = lappend(temp_userdata_list, tempUserData);
+    }
+
+    systable_endscan(scan);
+    heap_close(relation, lockmode);
+    
+    /* start update userdata hash */
+    USE_AUTO_LWLOCK(WorkloadUserInfoLock, LW_EXCLUSIVE);
+    AssignHTabInfoDirty<UserData>(g_instance.wlm_cxt->stat_manager.user_info_hashtbl);
+
+    ListCell *curr = list_head(temp_userdata_list);
+    ListCell *next = NULL;
+
+    while (curr != NULL) {
+        next = lnext(curr);
+
+        tempUserData = (TmpUserData *) lfirst(curr);
+
+        Oid userid = tempUserData->userid;
+        Oid puid = tempUserData->puid;
         UserData* userdata = (UserData*)hash_search(
             g_instance.wlm_cxt->stat_manager.user_info_hashtbl, &userid, HASH_ENTER_NULL, &found);
 
         if (userdata == NULL) {
-            systable_endscan(scan);
-            heap_close(relation, lockmode);
             ereport(LOG, (errmsg("alloc memory failed.")));
+            list_free_ext(temp_userdata_list);
             return false;
         }
 
         /* set user id */
         userdata->userid = userid;
-        userdata->spacelimit = spacelimit;
-        userdata->tmpSpaceLimit = tmpSpaceLimit;
-        userdata->spillSpaceLimit = spillSpaceLimit;
-        userdata->is_super = is_super;
+        userdata->spacelimit = tempUserData->spacelimit;
+        userdata->tmpSpaceLimit = tempUserData->tmpSpaceLimit;
+        userdata->spillSpaceLimit = tempUserData->spillSpaceLimit;
+        userdata->is_super = tempUserData->is_super;
         userdata->is_dirty = false;
-        userdata->rpoid = rpoid;
-        userdata->respool = GetRespoolFromHTab(rpoid);
-        userdata->entry_list = NULL;
+        userdata->rpoid = tempUserData->rpoid;
+        userdata->respool = GetRespoolFromHTab(tempUserData->rpoid);
 
         if (!found) {
+            userdata->entry_list = NULL;
             pthread_mutex_init(&userdata->mutex, NULL);
         }
 
@@ -3526,6 +3593,8 @@ bool BuildUserInfoHash(LOCKMODE lockmode)
             userdata->spillSpace = 0;
             userdata->globalSpillSpace = 0;
             userdata->global_totalspace = 0;
+
+            curr = next;
             continue;
         }
 
@@ -3557,9 +3626,8 @@ bool BuildUserInfoHash(LOCKMODE lockmode)
                 g_instance.wlm_cxt->stat_manager.user_info_hashtbl, &puid, HASH_ENTER_NULL, NULL);
 
             if (parentdata == NULL) {
-                systable_endscan(scan);
-                heap_close(relation, lockmode);
                 ereport(LOG, (errmsg("Cannot allocate memory, build user hash table failed.")));
+                list_free_ext(temp_userdata_list);
                 return false;
             }
 
@@ -3569,8 +3637,8 @@ bool BuildUserInfoHash(LOCKMODE lockmode)
             ListCell* node = append_to_list<Oid, UserData, false>(&parentdata->childlist, &userid, userdata);
             if (node == NULL) {
                 REVERT_MEMORY_CONTEXT();
-                heap_close(relation, lockmode);
                 ereport(LOG, (errmsg("Cannot allocate memory, build user hash table failed.")));
+                list_free_ext(temp_userdata_list);
                 return false;
             }
 
@@ -3583,11 +3651,10 @@ bool BuildUserInfoHash(LOCKMODE lockmode)
 
             userdata->parent = NULL;
         }
+        curr = next;
     }
-    systable_endscan(scan);
 
-    heap_close(relation, lockmode);
-
+    list_free_ext(temp_userdata_list);
     /* remove redundant user info */
     CheckUserInfoHash();
 
@@ -3846,8 +3913,8 @@ bool GetUserChildlistFromCatalog(Oid userid, List** childlist, bool findall)
  * @Return: void
  * @See also:
  */
-void GetUserDataFromCatalog(Oid userid, Oid* rpoid, Oid* parentid, bool* issuper, uint64* spacelimit,
-    uint64* tmpspacelimit, uint64* spillspacelimit, char* ngroup, int lenNgroup)
+void GetUserDataFromCatalog(Oid userid, Oid* rpoid, Oid* parentid, bool* issuper, int64* spacelimit,
+    int64* tmpspacelimit, int64* spillspacelimit, char* ngroup, int lenNgroup)
 {
     bool isNull = false;
 
@@ -3890,8 +3957,9 @@ void GetUserDataFromCatalog(Oid userid, Oid* rpoid, Oid* parentid, bool* issuper
     /* we must make sure the space limit is not null to parse it */
     if (isNull == false && spacelimit != NULL) {
         maxSize = DatumGetCString(DirectFunctionCall1(textout, authidspaceDatum));
-        *spacelimit = parseTableSpaceMaxSize(maxSize, &unlimited, &sizestr);
-        ereport(DEBUG2, (errmsg("user %u spacelimit: %ldK", userid, (*spacelimit >> BITS_IN_KB))));
+        *spacelimit = (int64)parseTableSpaceMaxSize(maxSize, &unlimited, &sizestr);
+        ereport(DEBUG2, (errmsg("user %u spacelimit: %ldK", userid,
+            (*(uint64*)spacelimit >> BITS_IN_KB))));
     }
 
     Datum authidTmpSpaceDatum = heap_getattr(tup, Anum_pg_authid_roltempspace, pg_authid_dsc, &isNull);
@@ -3899,8 +3967,9 @@ void GetUserDataFromCatalog(Oid userid, Oid* rpoid, Oid* parentid, bool* issuper
     /* we must make sure the temp space limit is not null to parse it */
     if (isNull == false && tmpspacelimit != NULL) {
         maxSize = DatumGetCString(DirectFunctionCall1(textout, authidTmpSpaceDatum));
-        *tmpspacelimit = parseTableSpaceMaxSize(maxSize, &unlimited, &sizestr);
-        ereport(DEBUG2, (errmsg("user %u tmpSpaceLimit: %ldK", userid, (*tmpspacelimit >> BITS_IN_KB))));
+        *tmpspacelimit = (int64)parseTableSpaceMaxSize(maxSize, &unlimited, &sizestr);
+        ereport(DEBUG2, (errmsg("user %u tmpSpaceLimit: %ldK", userid,
+            (*(uint64*)tmpspacelimit >> BITS_IN_KB))));
     }
 
     Datum authidSpillSpaceDatum = heap_getattr(tup, Anum_pg_authid_rolspillspace, pg_authid_dsc, &isNull);
@@ -3908,8 +3977,9 @@ void GetUserDataFromCatalog(Oid userid, Oid* rpoid, Oid* parentid, bool* issuper
     /* we must make sure the spill space limit is not null to parse it */
     if (isNull == false && spillspacelimit != NULL) {
         maxSize = DatumGetCString(DirectFunctionCall1(textout, authidSpillSpaceDatum));
-        *spillspacelimit = parseTableSpaceMaxSize(maxSize, &unlimited, &sizestr);
-        ereport(DEBUG2, (errmsg("user %u spillSpaceLimit: %ldK", userid, (*spillspacelimit >> BITS_IN_KB))));
+        *spillspacelimit = (int64)parseTableSpaceMaxSize(maxSize, &unlimited, &sizestr);
+        ereport(DEBUG2, (errmsg("user %u spillSpaceLimit: %ldK", userid,
+            (*(uint64*)spillspacelimit >> BITS_IN_KB))));
     }
 
     Datum groupIdDatum = heap_getattr(tup, Anum_pg_authid_rolnodegroup, pg_authid_dsc, &isNull);
@@ -3939,7 +4009,7 @@ void GetUserDataFromCatalog(Oid userid, Oid* rpoid, Oid* parentid, bool* issuper
  * @Return: void
  * @See also:
  */
-void CheckUserPermSpace(Oid roleid, Oid parentid, uint64 spacelimit, uint64 tmpspacelimit, uint64 spillspacelimit)
+void CheckUserPermSpace(Oid roleid, Oid parentid, int64 spacelimit, int64 tmpspacelimit, int64 spillspacelimit)
 {
     if (!IS_PGXC_COORDINATOR) {
         return;
@@ -4015,13 +4085,13 @@ inline void ReportGroupSpaceLimit(char* type)
             errmsg("group user's %s space cannot be less than its child user's %s space limit.", type, type)));
 }
 
-inline bool CheckGroupSpaceLimit(uint64 child, uint64 parent)
+inline bool CheckGroupSpaceLimit(int64 child, int64 parent)
 {
     return (parent > 0 && child > parent);
 }
 
-inline void CheckGroupSpaceLimit(uint64 space, uint64 tmpspace, uint64 spillspace,
-     uint64 parent_space, uint64 parent_tmpspace, uint64 parent_spillspace)
+inline void CheckGroupSpaceLimit(int64 space, int64 tmpspace, int64 spillspace,
+     int64 parent_space, int64 parent_tmpspace, int64 parent_spillspace)
 {
     if (CheckGroupSpaceLimit(space, parent_space)) {
         ReportGroupSpaceLimit("perm");
@@ -4037,7 +4107,7 @@ inline void CheckGroupSpaceLimit(uint64 space, uint64 tmpspace, uint64 spillspac
 }
 
 inline void CheckChildSpaceLimit(Oid roleid, Oid parentid,
-     uint64 spacelimit, uint64 tmpspacelimit, uint64 spillspacelimit)
+     int64 spacelimit, int64 tmpspacelimit, int64 spillspacelimit)
 {
     List* childlist = NIL;
     (void)GetUserChildlistFromCatalog(roleid, &childlist, true);
@@ -4046,9 +4116,9 @@ inline void CheckChildSpaceLimit(Oid roleid, Oid parentid,
         ListCell* cell = NULL;
 
         foreach (cell, childlist) {
-            uint64 child_spacelimit = 0;
-            uint64 child_tmpspacelimit = 0;
-            uint64 child_spillspacelimit = 0;
+            int64 child_spacelimit = 0;
+            int64 child_tmpspacelimit = 0;
+            int64 child_spillspacelimit = 0;
             Oid childoid = lfirst_oid(cell);
 
             GetUserDataFromCatalog(
@@ -4078,16 +4148,16 @@ inline void CheckChildSpaceLimit(Oid roleid, Oid parentid,
  * @Return: void
  * @See also:
  */
-void CheckUserSpaceLimit(Oid roleid, Oid parentid, uint64 spacelimit, uint64 tmpspacelimit, uint64 spillspacelimit,
+void CheckUserSpaceLimit(Oid roleid, Oid parentid, int64 spacelimit, int64 tmpspacelimit, int64 spillspacelimit,
     bool is_default, bool changed, bool tmpchanged, bool spillchanged)
 {
     Oid user_parentid = InvalidOid;
-    uint64 user_spacelimit = 0;
-    uint64 user_tmpspacelimit = 0;
-    uint64 user_spillspacelimit = 0;
-    uint64 parent_spacelimit = 0;
-    uint64 parent_tmpspacelimit = 0;
-    uint64 parent_spillspacelimit = 0;
+    int64 user_spacelimit = 0;
+    int64 user_tmpspacelimit = 0;
+    int64 user_spillspacelimit = 0;
+    int64 parent_spacelimit = 0;
+    int64 parent_tmpspacelimit = 0;
+    int64 parent_spillspacelimit = 0;
 
     if (OidIsValid(roleid)) {
         GetUserDataFromCatalog(
@@ -4581,14 +4651,14 @@ UserResourceData* GetUserResourceData(const char* username)
     rsdata->read_speed = userdata->ioinfo.read_speed;
     rsdata->write_speed = userdata->ioinfo.write_speed;
 
-    rsdata->total_space = (userdata->spacelimit >> BITS_IN_KB);
-    rsdata->total_temp_space = (userdata->tmpSpaceLimit >> BITS_IN_KB);
-    rsdata->total_spill_space = (userdata->spillSpaceLimit >> BITS_IN_KB);
+    rsdata->total_space = (int64)((uint64)userdata->spacelimit >> BITS_IN_KB);
+    rsdata->total_temp_space = (int64)((uint64)userdata->tmpSpaceLimit >> BITS_IN_KB);
+    rsdata->total_spill_space = (int64)((uint64)userdata->spillSpaceLimit >> BITS_IN_KB);
 
     if (IS_PGXC_COORDINATOR) {
         // re-calculate global spill space here
         if (list_length(userdata->childlist) > 0) {
-            uint64 parentSpillSpace = 0;
+            int64 parentSpillSpace = 0;
             ListCell* cell = NULL;
 
             /* set parent total space */
@@ -4612,22 +4682,25 @@ UserResourceData* GetUserResourceData(const char* username)
         rsdata->total_spill_space = -1;
     }
 
-    rsdata->used_space = (userdata->totalspace >> BITS_IN_KB);
-    if (rsdata->used_space > rsdata->total_space) {
+    rsdata->used_space = (int64)((uint64)userdata->totalspace >> BITS_IN_KB);
+    if (rsdata->total_space != -1 &&
+        rsdata->used_space > rsdata->total_space) {
         rsdata->used_space = rsdata->total_space;
     }
 
-    rsdata->used_temp_space = (userdata->tmpSpace >> BITS_IN_KB);
-    if (rsdata->used_temp_space > rsdata->total_temp_space) {
+    rsdata->used_temp_space = (int64)((uint64)userdata->tmpSpace >> BITS_IN_KB);
+    if (rsdata->total_temp_space != -1 &&
+        rsdata->used_temp_space > rsdata->total_temp_space) {
         rsdata->used_temp_space = rsdata->total_temp_space;
     }
 
     if (IS_PGXC_COORDINATOR) {
-        rsdata->used_spill_space = (userdata->globalSpillSpace >> BITS_IN_KB);
+        rsdata->used_spill_space = (int64)((uint64)userdata->globalSpillSpace >> BITS_IN_KB);
     } else {
-        rsdata->used_spill_space = (userdata->spillSpace >> BITS_IN_KB);
+        rsdata->used_spill_space = (int64)((uint64)userdata->spillSpace >> BITS_IN_KB);
     }
-    if (rsdata->used_spill_space > rsdata->total_spill_space) {
+    if (rsdata->total_spill_space != -1 &&
+        rsdata->used_spill_space > rsdata->total_spill_space) {
         rsdata->used_spill_space = rsdata->total_spill_space;
     }
 

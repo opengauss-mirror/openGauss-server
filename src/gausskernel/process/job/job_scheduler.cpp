@@ -29,6 +29,7 @@
 #include "lib/dllist.h"
 #include "access/heapam.h"
 #include "access/reloptions.h"
+#include "access/tableam.h"
 #include "access/transam.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
@@ -45,7 +46,7 @@
 #include "postmaster/autovacuum.h"
 #include "postmaster/fork_process.h"
 #include "postmaster/postmaster.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/pmsignal.h"
@@ -63,7 +64,7 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "catalog/pg_job.h"
 #include "job/job_shmem.h"
 #include "job/job_scheduler.h"
@@ -122,14 +123,14 @@ NON_EXEC_STATIC void JobScheduleMain()
     /* reset t_thrd.proc_cxt.MyProcPid */
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
-    knl_thread_set_name("JobScheduler");
+    t_thrd.proc_cxt.MyProgName = "JobScheduler";
     u_sess->attr.attr_common.application_name = pstrdup("JobScheduler");
 
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     /* Identify myself via ps */
-    init_ps_display("JobScheduler process", "", "", "");
+    init_ps_display("job scheduler process", "", "", "");
 
     elog(LOG, "job scheduler started");
 
@@ -173,6 +174,14 @@ NON_EXEC_STATIC void JobScheduleMain()
     (void)gspqsignal(SIGFPE, FloatExceptionHandler);
     (void)gspqsignal(SIGCHLD, SIG_DFL);
 
+    if (IsUnderPostmaster) {
+        /* We allow SIGQUIT (quickdie) at all times */
+        (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
+    }
+
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
+
     /* Early initialization */
     BaseInit();
 
@@ -190,15 +199,16 @@ NON_EXEC_STATIC void JobScheduleMain()
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(dbname, InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitJobScheduler();
 
+#ifdef PGXC /* PGXC_COORD */
+    /*
+     * Initialize key pair to be used as object id while using advisory lock
+     * for backup
+     */
+    t_thrd.postmaster_cxt.xc_lockForBackupKey1 = Int32GetDatum(XC_LOCK_FOR_BACKUP_KEY_1);
+    t_thrd.postmaster_cxt.xc_lockForBackupKey2 = Int32GetDatum(XC_LOCK_FOR_BACKUP_KEY_2);
+#endif
+
     SetProcessingMode(NormalProcessing);
-
-    if (IsUnderPostmaster) {
-        /* We allow SIGQUIT (quickdie) at all times */
-        (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
-    }
-
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
-    (void)gs_signal_unblock_sigusr2();
 
     /*
      * Create the memory context we will use in the main loop.
@@ -303,7 +313,7 @@ NON_EXEC_STATIC void JobScheduleMain()
 
     if (t_thrd.job_cxt.got_SIGTERM) {
         /* Normal exit */
-        ereport(LOG, (errmsg("JobScheduler is shutting down")));
+        ereport(LOG, (errmsg("job scheduler is shutting down")));
 
         t_thrd.job_cxt.JobScheduleShmem->jsch_pid = 0;
 
@@ -314,7 +324,7 @@ NON_EXEC_STATIC void JobScheduleMain()
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Job Scheduler");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Job Scheduler", MEMORY_CONTEXT_EXECUTOR);
 
     /* Get classified list of node Oids for syschronise th job status info. */
     exec_init_poolhandles();
@@ -359,7 +369,7 @@ NON_EXEC_STATIC void JobScheduleMain()
          * necessity for manual cleanup of all postmaster children.
          */
         if ((unsigned int)ret & WL_POSTMASTER_DEATH) {
-            elog(LOG, "JobScheduler shutting down with exit code 1");
+            elog(LOG, "Job scheduler shutting down with exit code 1");
             proc_exit(1);
         }
 
@@ -463,7 +473,7 @@ NON_EXEC_STATIC void JobScheduleMain()
     }
 
     /* Normal exit */
-    ereport(LOG, (errmsg("JobScheduler is shutting down")));
+    ereport(LOG, (errmsg("job scheduler is shutting down")));
 
     t_thrd.job_cxt.JobScheduleShmem->jsch_pid = 0;
 
@@ -518,15 +528,8 @@ static void jobschd_sigusr2_handler(SIGNAL_ARGS)
  */
 static void jobschd_sigterm_handler(SIGNAL_ARGS)
 {
-    int save_errno = errno;
-
     t_thrd.job_cxt.got_SIGTERM = true;
-
-    if (t_thrd.proc) {
-        SetLatch(&t_thrd.proc->procLatch);
-    }
-
-    errno = save_errno;
+    die(postgres_signal_arg);
 }
 
 /*
@@ -627,6 +630,30 @@ static int GetJobStatus(int4 jobid)
     return JOB_WORKER_INACTIVE;
 }
 
+static inline bool IsExecuteOnCurrentNode(const char* executeNodeName)
+{
+    if (strcmp(executeNodeName, g_instance.attr.attr_common.PGXCNodeName) == 0)
+        return true;
+
+    if (strcmp(executeNodeName, PGJOB_TYPE_ALL) == 0)
+        return true;
+
+    if (IS_PGXC_COORDINATOR) {
+        if (strcmp(executeNodeName, PGJOB_TYPE_ALL_CN) == 0) {
+            return true;
+        } else if (strcmp(executeNodeName, PGJOB_TYPE_CCN) == 0) {
+            return is_pgxc_central_nodename(g_instance.attr.attr_common.PGXCNodeName);
+        } else {
+            return false;
+        }
+    }
+
+    if (IS_PGXC_DATANODE && strcmp(executeNodeName, PGJOB_TYPE_ALL_DN) == 0)
+        return true;
+
+    return false;
+}
+
 /*
  * Description: Find expire jobs and insert to job queue for execute.
  *
@@ -635,7 +662,7 @@ static int GetJobStatus(int4 jobid)
 static void ScanExpireJobs()
 {
     Relation pg_job_tbl = NULL;
-    HeapScanDesc scan = NULL;
+    TableScanDesc scan = NULL;
     HeapTuple tuple = NULL;
     MemoryContext oldCtx = NULL;
     int jobStatus = JOB_WORKER_INACTIVE;
@@ -644,13 +671,13 @@ static void ScanExpireJobs()
     StartTransactionCommand();
 
     pg_job_tbl = heap_open(PgJobRelationId, AccessShareLock);
-    scan = heap_beginscan(pg_job_tbl, SnapshotNow, 0, NULL);
+    scan = tableam_scan_begin(pg_job_tbl, SnapshotNow, 0, NULL);
 
     MemoryContextReset(t_thrd.job_cxt.ExpiredJobListCtx);
     oldCtx = MemoryContextSwitchTo(t_thrd.job_cxt.ExpiredJobListCtx);
     /* Build a new job list if it is null. */
     t_thrd.job_cxt.ExpiredJobList = DLNewList();
-    while (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection))) {
+    while (HeapTupleIsValid(tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
         Form_pg_job pg_job = (Form_pg_job)GETSTRUCT(tuple);
         Datum values[Natts_pg_job];
         bool nulls[Natts_pg_job];
@@ -659,8 +686,8 @@ static void ScanExpireJobs()
 
         get_job_values(jobID, tuple, pg_job_tbl, values, nulls);
 
-        if (strcmp(pg_job->node_name.data, g_instance.attr.attr_common.PGXCNodeName)) {
-            /* skip since current coordinator is not the right coordinator */
+        /* handle cases - ALL_NODE/ALL_CN/ALL_DN/CCN specific node */
+        if (!IsExecuteOnCurrentNode(pg_job->node_name.data)) {
             continue;
         }
 
@@ -700,10 +727,18 @@ static void ScanExpireJobs()
             }
         }
 
+        Oid dboid = get_database_oid(NameStr(pg_job->dbname), true);
+        if (!OidIsValid(dboid)) {
+            /* skip since the database of job does not exist */
+            ereport(LOG, (errcode(ERRCODE_UNDEFINED_DATABASE),
+                        errmsg("database \"%s\" of job %ld does not exist", NameStr(pg_job->dbname), jobID)));
+            continue;
+        }
+
         JobInfo jobInfo = (JobInfoData*)palloc0(sizeof(JobInfoData));
         jobInfo->job_id = jobID;
         jobInfo->job_oid = HeapTupleGetOid(tuple);
-        jobInfo->job_dboid = get_database_oid(NameStr(pg_job->dbname), false);
+        jobInfo->job_dboid = dboid;
         jobInfo->log_user = pg_job->log_user;
         jobInfo->node_name = pg_job->node_name;
         jobInfo->last_start_date =
@@ -712,7 +747,7 @@ static void ScanExpireJobs()
     }
 
     (void)MemoryContextSwitchTo(oldCtx);
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pg_job_tbl, AccessShareLock);
 
     CommitTransactionCommand();

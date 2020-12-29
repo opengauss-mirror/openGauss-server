@@ -1,0 +1,759 @@
+--
+--Dump && Restore
+--
+
+-- test range partition
+
+--
+---- check datatype for range partitionkey
+--
+--/* int2 */: sucess
+create table test_range_datatype_int2(a int2)
+partition by range(a)
+(
+	partition test_range_datatype_int2_p1 values less than (1),
+	partition test_range_datatype_int2_p2 values less than (2)
+);
+--/* int4 */: sucess
+create table test_range_datatype_int4(a int)
+partition by range(a)
+(
+	partition test_range_datatype_int4_p1 values less than (1),
+	partition test_range_datatype_int4_p2 values less than (2)
+);
+--/* int8 */: sucess
+create table test_range_datatype_int8(a int8)
+partition by range(a)
+(
+	partition test_range_datatype_int8_p1 values less than (1),
+	partition test_range_datatype_int8_p2 values less than (2)
+);
+--/* decimal */: sucess
+create table test_range_datatype_decimal(a decimal)
+partition by range(a)
+(
+	partition test_range_datatype_decimal_p1 values less than (7.1),
+	partition test_range_datatype_decimal_p2 values less than (8.4)
+);
+--/* numeric */: sucess
+create table test_range_datatype_numeric(a numeric(9,2))
+partition by range(a)
+(
+	partition test_range_datatype_numeric_p1 values less than (7.1),
+	partition test_range_datatype_numeric_p2 values less than (8.4)
+);
+--/* real */: sucess
+create table test_range_datatype_real(a REAL)
+partition by range(a)
+(
+	partition test_range_datatype_real_p1 values less than (7.1),
+	partition test_range_datatype_real_p2 values less than (8.4)
+);
+--/* double precision */: sucess
+create table test_range_datatype_doubleprecision(a double precision)
+partition by range(a)
+(
+	partition test_range_datatype_doubleprecision_p1 values less than (7.1),
+	partition test_range_datatype_doubleprecision_p2 values less than (8.4)
+);
+--/* char */: sucess
+create table test_range_datatype_char(a char)
+partition by range(a)
+(
+	partition test_range_datatype_char_p1 values less than ('A'),
+	partition test_range_datatype_char_p2 values less than ('B')
+);
+--/* varchar(n) */: sucess
+create table test_range_datatype_varcharn(a varchar(3))
+partition by range(a)
+(
+	partition test_range_datatype_varcharn_p1 values less than ('A'),
+	partition test_range_datatype_varcharn_p2 values less than ('B')
+);
+--/* varchar */: sucess
+create table test_range_datatype_varchar(a varchar)
+partition by range(a)
+(
+	partition test_range_datatype_varchar_p1 values less than ('A'),
+	partition test_range_datatype_varchar_p2 values less than ('B')
+);
+--/* char(n) */: sucess
+create table test_range_datatype_charn(a char(3))
+partition by range(a)
+(
+	partition test_range_datatype_charn_p1 values less than ('A'),
+	partition test_range_datatype_charn_p2 values less than ('B')
+);
+--/* character(n) */: sucess
+create table test_range_datatype_charactern(a character(3))
+partition by range(a)
+(
+	partition test_range_datatype_charactern_p1 values less than ('A'),
+	partition test_range_datatype_charactern_p2 values less than ('B')
+);
+--/* text */: sucess
+create table test_range_datatype_text(a text)
+partition by range(a)
+(
+	partition test_range_datatype_text_p1 values less than ('A'),
+	partition test_range_datatype_text_p2 values less than ('B')
+);
+/* nvarchar2 */: sucess
+create table test_range_datatype_nvarchar2(a nvarchar2)
+partition by range(a)
+(
+	partition test_range_datatype_nvarchar2_p1 values less than ('A'),
+	partition test_range_datatype_nvarchar2_p2 values less than ('B')
+);
+/* date */: sucess
+create table test_range_datatype_date(a date)
+partition by range(a)
+(
+	partition test_range_datatype_date_p1 values less than (to_date('2012-11-12','YYYY-MM-DD')),
+	partition test_range_datatype_date_p2 values less than (to_date('2012-11-13','YYYY-MM-DD'))
+);
+create table test_range_cast_date(a date)
+partition by range(a)
+(
+	partition test_range_cast_date_p1 values less than ('2012-12-26'),
+	partition test_range_cast_date_p2 values less than ('2013-12-26')
+);
+--/* timestamp */: sucess
+create table test_range_datatype_timestamp(a timestamp)
+partition by range(a)
+(
+	partition test_range_datatype_timestamp_p1 values less than (to_timestamp('2012-11-12','YYYY-MM-DD'))
+);
+create table test_range_cast_timestamp(a timestamp)
+partition by range(a)
+(
+	partition test_range_cast_timestamp_p1 values less than ('2012-12-26'),
+	partition test_range_cast_timestamp_p2 values less than ('2013-12-26')
+);
+--/* timestamptz */: sucess
+create table test_range_datatype_timestamptz(a timestamptz)
+partition by range(a)
+(
+	partition test_range_datatype_timestamptz_p1 values less than (current_timestamp)
+);
+create table test_range_cast_timestamptz(a timestamptz)
+partition by range(a)
+(
+	partition test_range_cast_timestamptz_p1 values less than ('2012-12-26'),
+	partition test_range_cast_timestamptz_p2 values less than ('2013-12-26')
+);
+--/* name */: sucess
+create table test_range_datatype_name(a name)
+partition by range(a)
+(
+	partition test_range_datatype_name_p1 values less than ('CBY'),
+	partition test_range_datatype_name_p2 values less than ('JYH')
+);
+--/* bpchar */: sucess 
+create table test_range_datatype_bpchar(a bpchar)
+partition by range(a)
+(
+	partition test_range_datatype_bpchar_p1 values less than ('C'),
+	partition test_range_datatype_bpchar_p2 values less than ('Z')
+);
+
+--dump
+\! sh @abs_srcdir@/tools/pg_dump.sh @abs_bindir@ "-d regression -Fd -f partition_datatype -j2"
+--clean up
+drop table test_range_datatype_bpchar;
+drop table test_range_datatype_char;
+drop table test_range_datatype_charactern;
+drop table test_range_datatype_charn;
+drop table test_range_datatype_doubleprecision;
+drop table test_range_datatype_int4;
+drop table test_range_datatype_int2;
+drop table test_range_datatype_int8;
+drop table test_range_datatype_name;
+drop table test_range_datatype_numeric;
+drop table test_range_datatype_nvarchar2;
+drop table test_range_datatype_real;
+drop table test_range_datatype_text;
+drop table test_range_datatype_timestamp;
+drop table test_range_cast_timestamp;
+drop table test_range_datatype_varchar;
+drop table test_range_datatype_varcharn;
+drop table test_range_datatype_date;
+drop table test_range_cast_date;
+drop table test_range_datatype_decimal;
+drop table test_range_datatype_timestamptz;
+drop table test_range_cast_timestamptz;
+--restore
+\! sh @abs_srcdir@/tools/pg_restore.sh @abs_bindir@ "-d regression partition_datatype"
+--clean up
+drop table test_range_datatype_bpchar;
+drop table test_range_datatype_char;
+drop table test_range_datatype_charactern;
+drop table test_range_datatype_charn;
+drop table test_range_datatype_doubleprecision;
+drop table test_range_datatype_int4;
+drop table test_range_datatype_int2;
+drop table test_range_datatype_int8;
+drop table test_range_datatype_name;
+drop table test_range_datatype_numeric;
+drop table test_range_datatype_nvarchar2;
+drop table test_range_datatype_real;
+drop table test_range_datatype_text;
+drop table test_range_datatype_timestamp;
+drop table test_range_cast_timestamp;
+drop table test_range_datatype_varchar;
+drop table test_range_datatype_varcharn;
+drop table test_range_datatype_date;
+drop table test_range_cast_date;
+drop table test_range_datatype_decimal;
+drop table test_range_datatype_timestamptz;
+drop table test_range_cast_timestamptz;
+\! rm -rf partition_datatype
+--
+---- check datatype for interval partitionkey
+--
+--/* int2 */: 
+--sucess 
+--create table test_interval_datatype_int2(a int2)
+---partition by range(a)
+---interval (1)
+---(
+---	partition p1 values less than (1),
+---	partition p2 values less than (2)
+---);
+-----/* int4 */: 
+-----sucess 
+---create table test_interval_datatype_int4(a int4)
+---partition by range(a)
+---interval (1)
+---(
+---	partition p1 values less than (1),
+---	partition p2 values less than (2)
+---);
+-----/* int8 */: 
+-----sucess 
+---create table test_interval_datatype_int8(a int8)
+---partition by range(a)
+---interval (1)
+---(
+---	partition p1 values less than (1),
+---	partition p2 values less than (2)
+---);
+-----/* date */: 
+-----sucess: 
+---create table test_interval_datatype_date_1(a date)
+---partition by range(a)
+---interval (interval '2 23:56:45' day to second)
+---(
+---	partition p1 values less than (to_date('2012-11-12','yyyy-mm-dd')),
+---	partition p2 values less than (to_date('2012-11-13','yyyy-mm-dd'))
+---);
+---create table test_interval_datatype_date_2(a date)
+---partition by range(a)
+---interval ('1 hour')
+---(
+---	partition p1 values less than (to_date('2012-11-12','yyyy-mm-dd')),
+---	partition p2 values less than (to_date('2012-11-13','yyyy-mm-dd'))
+---);
+-----/* timestamp */: 
+-----sucess 
+---create table test_interval_datatype_timestamp_1(a timestamp)
+---partition by range(a)
+---interval (interval '2 23:56:45' day to second)
+---(
+---	partition p1 values less than (to_timestamp('2012-11-12','yyyy-mm-dd')),
+---	partition p2 values less than (to_timestamp('2012-11-15','yyyy-mm-dd'))
+---);
+---create table test_interval_datatype_timestamp_2(a timestamp)
+---partition by range(a)
+---interval ('2 hour')
+---(
+---	partition p1 values less than (to_timestamp('2012-11-12','yyyy-mm-dd')),
+---	partition p2 values less than (to_timestamp('2012-11-15','yyyy-mm-dd'))
+---);
+-----/* timestamptz */: 
+-----sucess 
+---create table test_interval_timestamptz_1(a timestamptz)
+---partition by range(a)
+---interval (interval '2 23:56:45' day to second)
+---(
+---	partition p1 values less than (to_timestamp('2012-11-12','yyyy-mm-dd')),
+---	partition p2 values less than (to_timestamp('2012-11-15','yyyy-mm-dd'))
+---);
+---create table test_interval_timestamptz_2(a timestamptz)
+---partition by range(a)
+---interval ('2 hour')
+---(
+---	partition p1 values less than (to_timestamp('2012-11-12','yyyy-mm-dd')),
+---	partition p2 values less than (to_timestamp('2012-11-15','yyyy-mm-dd'))
+---);
+-----dump
+---\! sh @abs_srcdir@/tools/pg_dump.sh @abs_bindir@ "-d regression -Fd -f partition_datatype -j2 --inserts"
+-----clean up
+---drop table test_interval_datatype_int2;
+---drop table test_interval_datatype_int4;
+---drop table test_interval_datatype_int8;
+---drop table test_interval_datatype_date_1;
+---drop table test_interval_datatype_date_2;
+---drop table test_interval_datatype_timestamp_1;
+---drop table test_interval_datatype_timestamp_2;
+---drop table test_interval_timestamptz_1;
+---drop table test_interval_timestamptz_2;
+-----restore
+---\! sh @abs_srcdir@/tools/pg_restore.sh @abs_bindir@ "-d regression partition_datatype"
+-----clean up
+---drop table test_interval_datatype_int2;
+---drop table test_interval_datatype_int4;
+---drop table test_interval_datatype_int8;
+---drop table test_interval_datatype_date_1;
+---drop table test_interval_datatype_date_2;
+---drop table test_interval_datatype_timestamp_1;
+---drop table test_interval_datatype_timestamp_2;
+---drop table test_interval_timestamptz_1;
+---drop table test_interval_timestamptz_2;
+---\! rm -rf partition_datatype
+\! mkdir '@testtablespace@/testtablespace1';
+\! mkdir '@testtablespace@/testtablespace2';
+\! mkdir '@testtablespace@/testtablespace3';
+create tablespace hw_partition_dump_spc1 location '@testtablespace@/testtablespace1';
+create tablespace hw_partition_dump_spc2 location '@testtablespace@/testtablespace2';
+create tablespace hw_partition_dump_spc3 location '@testtablespace@/testtablespace3';
+---- test tablesapce for range partition
+--
+--sucess
+create table test_range_tsp_1(a int)
+partition by range(a)
+(
+	partition test_range_tsp_1_p1 values less than (1),
+	partition test_range_tsp_1_p2 values less than (2)
+);
+--sucess
+create table test_range_tsp_2(a int)
+tablespace hw_partition_dump_spc1
+partition by range(a)
+(
+	partition test_range_tsp_2_p1 values less than (1),
+	partition test_range_tsp_2_p2 values less than (2)
+);
+--sucess
+create table test_range_tsp_3(a int)
+partition by range(a)
+(
+	partition test_range_tsp_3_p1 values less than (1) tablespace hw_partition_dump_spc1,
+	partition test_range_tsp_3_p2 values less than (2)
+);
+--sucess
+create table test_range_tsp_4(a int)
+partition by range(a)
+(
+	partition test_range_tsp_4_p1 values less than (1) tablespace hw_partition_dump_spc1,
+	partition test_range_tsp_4_p2 values less than (2) tablespace hw_partition_dump_spc2
+);
+--dump
+\! sh @abs_srcdir@/tools/pg_dump.sh @abs_bindir@ "-d regression -Fd -f partition_datatype -j2 --inserts"
+--clean up
+drop table test_range_tsp_1;
+drop table test_range_tsp_2;
+drop table test_range_tsp_3;
+drop table test_range_tsp_4;
+--restore
+\! sh @abs_srcdir@/tools/pg_restore.sh @abs_bindir@ "-d regression partition_datatype"
+--clean up
+drop table test_range_tsp_1;
+drop table test_range_tsp_2;
+drop table test_range_tsp_3;
+drop table test_range_tsp_4;
+\! rm -rf partition_datatype
+
+/*
+--
+---- test tablesapce for interval partition
+--
+--sucess
+create table test_interval_tsp_1(a int)
+partition by range(a)
+interval (1) store in(hw_partition_dump_spc1)
+(
+	partition p1 values less than (1),
+	partition p2 values less than (2)
+);
+create table test_interval_tsp_2(a int)
+partition by range(a)
+interval (1) store in(hw_partition_dump_spc1,hw_partition_dump_spc2)
+(
+	partition p1 values less than (1),
+	partition p2 values less than (2)
+);
+
+--dump
+\! sh @abs_srcdir@/tools/pg_dump.sh @abs_bindir@ "-d regression -Fd -f partition_datatype -j2 --inserts"
+--clean up
+drop table test_interval_tsp_1;
+drop table test_interval_tsp_2;
+--restore
+\! sh @abs_srcdir@/tools/pg_restore.sh @abs_bindir@ "-d regression partition_datatype"
+--clean up
+drop table test_interval_tsp_1;
+drop table test_interval_tsp_2;
+\! rm -rf partition_datatype
+*/
+
+--clean up
+drop tablespace hw_partition_dump_spc1;
+drop tablespace hw_partition_dump_spc2;
+drop tablespace hw_partition_dump_spc3;
+\! rm -fr '@testtablespace@/testtablespace1'
+\! rm -fr '@testtablespace@/testtablespace2'
+\! rm -fr '@testtablespace@/testtablespace3'
+
+--
+---- test temporary table
+--
+--sucess
+create table test_syntax_temp_1(a int)
+partition by range(a)
+(
+	partition test_syntax_temp_1_p1 values less than (1),
+	partition test_syntax_temp_1_p2 values less than (2),
+	partition test_syntax_temp_1_p3 values less than (3)
+);
+--
+----test column constraint and collate
+--
+--sucess
+create table test_syntax_col_con_1(a int not null)
+partition by range(a)
+(
+	partition test_syntax_col_con_1_p1 values less than (1),
+	partition test_syntax_col_con_1_p2 values less than (2)
+);
+--sucess
+create table test_syntax_col_con_2(a int constraint con_2 not null)
+partition by range(a)
+(
+	partition test_syntax_col_con_2_p1 values less than (1),
+	partition test_syntax_col_con_2_p2 values less than (2)
+);
+--sucess
+create table test_syntax_col_con_3(a int null)
+partition by range(a)
+(
+	partition test_syntax_col_con_3_p1 values less than (1),
+	partition test_syntax_col_con_3_p2 values less than (2)
+);
+--sucess
+create table test_syntax_col_con_4(a int constraint con_4 null)
+partition by range(a)
+(
+	partition test_syntax_col_con_4_p1 values less than (1),
+	partition test_syntax_col_con_4_p2 values less than (2)
+);
+--sucess
+create table test_syntax_col_con_5(a int default 0)
+partition by range(a)
+(
+	partition test_syntax_col_con_5_p1 values less than (1),
+	partition test_syntax_col_con_5_p2 values less than (2)
+);
+--sucess
+create table test_syntax_col_con_6(a int constraint con_6 default 0)
+partition by range(a)
+(
+	partition test_syntax_col_con_6_p1 values less than (1),
+	partition test_syntax_col_con_6_p2 values less than (2)
+);
+--sucess
+create table test_syntax_col_con_7(a int check(a > 0))
+partition by range(a)
+(
+	partition test_syntax_col_con_7_p1 values less than (1),
+	partition test_syntax_col_con_7_p2 values less than (2)
+);
+--sucess
+create table test_syntax_col_con_8(a int constraint con_8 check(a > 0))
+partition by range(a)
+(
+	partition test_syntax_col_con_8_p1 values less than (1),
+	partition test_syntax_col_con_8_p2 values less than (2)
+);
+--sucess
+create table test_syntax_col_con_12(a int , b text collate "C")
+partition by range(a)
+(
+	partition test_syntax_col_con_12_p1 values less than (1),
+	partition test_syntax_col_con_12_p2 values less than (2)
+);
+--
+----test table constraint
+--
+--sucess
+create table test_syntax_tab_con_1(a int, check(a > 0))
+partition by range(a)
+(
+	partition test_syntax_tab_con_1_p1 values less than (1),
+	partition test_syntax_tab_con_1_p2 values less than (2)
+);
+
+--dump
+\! sh @abs_srcdir@/tools/pg_dump.sh @abs_bindir@ "-d regression -Fd -f partition_syntax -j2 --inserts"
+--clean up
+drop table test_syntax_temp_1;
+drop table test_syntax_col_con_1;
+drop table test_syntax_col_con_2;
+drop table test_syntax_col_con_3;
+drop table test_syntax_col_con_4;
+drop table test_syntax_col_con_5;
+drop table test_syntax_col_con_6;
+drop table test_syntax_col_con_7;
+drop table test_syntax_col_con_8;
+drop table test_syntax_col_con_12;
+drop table test_syntax_tab_con_1;
+--restore
+\! sh @abs_srcdir@/tools/pg_restore.sh @abs_bindir@ "-d regression partition_syntax"
+--clean up
+drop table test_syntax_temp_1;
+drop table test_syntax_col_con_1;
+drop table test_syntax_col_con_2;
+drop table test_syntax_col_con_3;
+drop table test_syntax_col_con_4;
+drop table test_syntax_col_con_5;
+drop table test_syntax_col_con_6;
+drop table test_syntax_col_con_7;
+drop table test_syntax_col_con_8;
+drop table test_syntax_col_con_12;
+drop table test_syntax_tab_con_1;
+\! rm -rf partition_syntax
+
+--a correct case
+--
+--sucess
+create table test_syntax_correct1(a int)
+partition by range(a)
+(
+	partition test_syntax_correct1_p1 values less than (1),
+	partition test_syntax_correct1_p2 values less than (2),
+	partition test_syntax_correct1_p3 values less than (3)
+);
+insert into test_syntax_correct1 values (1),(2);
+--sucess
+create table test_syntax_correct2(a int, b char(10))
+partition by range(a, b)
+(
+	partition test_syntax_correct2_p1 values less than (1, 'G'),
+	partition test_syntax_correct2_p2 values less than (2, 'M'),
+	partition test_syntax_correct2_p3 values less than (3, 'S')
+);
+insert into test_syntax_correct2 values (0, 'A');
+insert into test_syntax_correct2 values (2, 'J');
+--dump
+\! sh @abs_srcdir@/tools/pg_dump.sh @abs_bindir@ "-d regression -Fd -f partition_syntax -j2 --inserts"
+drop table test_syntax_correct1;
+drop table test_syntax_correct2;
+--restore
+\! sh @abs_srcdir@/tools/pg_restore.sh @abs_bindir@ "-d regression partition_syntax"
+select * from test_syntax_correct1;
+select * from test_syntax_correct2;
+drop table test_syntax_correct1;
+drop table test_syntax_correct2;
+\! rm -rf partition_syntax
+
+--
+---- check maxvalue for range partition
+--
+--/* int2 */: sucess
+create table test_maxvalue_datatype_int2(a int2)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_int2_p1 values less than (1),
+	partition test_maxvalue_datatype_int2_p2 values less than (maxvalue)
+);
+--/* int4 */: sucess
+create table test_maxvalue_datatype_int4(a int)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_int4_p1 values less than (1),
+	partition test_maxvalue_datatype_int4_p2 values less than (maxvalue)
+);
+--/* int8 */: sucess
+create table test_maxvalue_datatype_int8(a int8)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_int8_p1 values less than (1),
+	partition test_maxvalue_datatype_int8_p2 values less than (maxvalue)
+);
+--/* decimal */: sucess
+create table test_maxvalue_datatype_decimal(a decimal)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_decimal_p1 values less than (7.1),
+	partition test_maxvalue_datatype_decimal_p2 values less than (maxvalue)
+);
+--/* numeric */: sucess
+create table test_maxvalue_datatype_numeric(a numeric(9,2))
+partition by range(a)
+(
+	partition test_maxvalue_datatype_numeric_p1 values less than (7.1),
+	partition test_maxvalue_datatype_numeric_p2 values less than (maxvalue)
+);
+--/* real */: sucess
+create table test_maxvalue_datatype_real(a REAL)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_real_p1 values less than (7.1),
+	partition test_maxvalue_datatype_real_p2 values less than (maxvalue)
+);
+--/* double precision */: sucess
+create table test_maxvalue_datatype_doubleprecision(a double precision)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_doubleprecision_p1 values less than (7.1),
+	partition test_maxvalue_datatype_doubleprecision_p2 values less than (maxvalue)
+);
+--/* char */: sucess
+create table test_maxvalue_datatype_char(a char)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_char_p1 values less than ('A'),
+	partition test_maxvalue_datatype_char_p2 values less than (maxvalue)
+);
+--/* varchar(n) */: sucess
+create table test_maxvalue_datatype_varcharn(a varchar(3))
+partition by range(a)
+(
+	partition test_maxvalue_datatype_varcharn_p1 values less than ('A'),
+	partition test_maxvalue_datatype_varcharn_p2 values less than (maxvalue)
+);
+--/* varchar */: sucess
+create table test_maxvalue_datatype_varchar(a varchar)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_varchar_p1 values less than ('A'),
+	partition test_maxvalue_datatype_varchar_p2 values less than (maxvalue)
+);
+--/* char(n) */: sucess
+create table test_maxvalue_datatype_charn(a char(3))
+partition by range(a)
+(
+	partition test_maxvalue_datatype_charn_p1 values less than ('A'),
+	partition test_maxvalue_datatype_charn_p2 values less than (maxvalue)
+);
+--/* character(n) */: sucess
+create table test_maxvalue_datatype_charactern(a character(3))
+partition by range(a)
+(
+	partition test_maxvalue_datatype_charactern_p1 values less than ('A'),
+	partition test_maxvalue_datatype_charactern_p2 values less than (maxvalue)
+);
+--/* text */: sucess
+create table test_maxvalue_datatype_text(a text)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_text_p1 values less than ('A'),
+	partition test_maxvalue_datatype_text_p2 values less than (maxvalue)
+);
+/* nvarchar2 */: sucess
+create table test_maxvalue_datatype_nvarchar2(a nvarchar2)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_nvarchar2_p1 values less than ('A'),
+	partition test_maxvalue_datatype_nvarchar2_p2 values less than (maxvalue)
+);*/
+/* date */: sucess
+create table test_maxvalue_datatype_date(a date)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_date_p1 values less than (to_date('2012-11-12','YYYY-MM-DD')),
+	partition test_maxvalue_datatype_date_p2 values less than (maxvalue)
+);
+--/* timestamp */: sucess
+create table test_maxvalue_datatype_timestamp(a timestamp)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_timestamp_p1 values less than (to_timestamp('2012-11-12','yyyy-mm-dd')),
+	partition test_maxvalue_datatype_timestamp_p2 values less than (maxvalue)
+);
+--/* timestamptz */: sucess
+create table test_maxvalue_datatype_timestamptz(a timestamptz)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_timestamptz_p1 values less than (to_timestamp('2012-11-12','yyyy-mm-dd')),
+	partition test_maxvalue_datatype_timestamptz_p2 values less than (maxvalue)
+);
+--/* name */: sucess
+create table test_maxvalue_datatype_name(a name)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_name_p1 values less than ('CBY'),
+	partition test_maxvalue_datatype_name_p2 values less than (maxvalue)
+);
+--/* bpchar */: sucess 
+create table test_maxvalue_datatype_bpchar(a bpchar)
+partition by range(a)
+(
+	partition test_maxvalue_datatype_bpchar_p1 values less than ('C'),
+	partition test_maxvalue_datatype_bpchar_p2 values less than (maxvalue)
+);
+
+--dump
+\! sh @abs_srcdir@/tools/pg_dump.sh @abs_bindir@ "-d regression -Fd -f partition_maxvalue -j2 --inserts"
+--clean up
+drop table test_maxvalue_datatype_bpchar;
+drop table test_maxvalue_datatype_char;
+drop table test_maxvalue_datatype_charactern;
+drop table test_maxvalue_datatype_charn;
+drop table test_maxvalue_datatype_doubleprecision;
+drop table test_maxvalue_datatype_int4;
+drop table test_maxvalue_datatype_int2;
+drop table test_maxvalue_datatype_int8;
+drop table test_maxvalue_datatype_name;
+drop table test_maxvalue_datatype_numeric;
+drop table test_maxvalue_datatype_nvarchar2;
+drop table test_maxvalue_datatype_real;
+drop table test_maxvalue_datatype_text;
+drop table test_maxvalue_datatype_timestamp;
+drop table test_maxvalue_datatype_varchar;
+drop table test_maxvalue_datatype_varcharn;
+drop table test_maxvalue_datatype_date;
+drop table test_maxvalue_datatype_decimal;
+drop table test_maxvalue_datatype_timestamptz;
+--restore
+\! sh @abs_srcdir@/tools/pg_restore.sh @abs_bindir@ "-d regression partition_maxvalue"
+--clean up
+drop table test_maxvalue_datatype_bpchar;
+drop table test_maxvalue_datatype_char;
+drop table test_maxvalue_datatype_charactern;
+drop table test_maxvalue_datatype_charn;
+drop table test_maxvalue_datatype_doubleprecision;
+drop table test_maxvalue_datatype_int4;
+drop table test_maxvalue_datatype_int2;
+drop table test_maxvalue_datatype_int8;
+drop table test_maxvalue_datatype_name;
+drop table test_maxvalue_datatype_numeric;
+drop table test_maxvalue_datatype_nvarchar2;
+drop table test_maxvalue_datatype_real;
+drop table test_maxvalue_datatype_text;
+drop table test_maxvalue_datatype_timestamp;
+drop table test_maxvalue_datatype_varchar;
+drop table test_maxvalue_datatype_varcharn;
+drop table test_maxvalue_datatype_date;
+drop table test_maxvalue_datatype_decimal;
+drop table test_maxvalue_datatype_timestamptz;
+\! rm -rf partition_maxvalue
+
+--check syntax conflict with compress and bufferpool
+--create table test_syntax_conflicts(a int2)
+--bufferpool keep 
+--compress 
+--partition by range(a)
+--(
+--	partition p1 values less than (1),
+--	partition p2 values less than (2)
+--);
+----dump
+--\! sh @abs_srcdir@/tools/pg_dump.sh @abs_bindir@ "-d regression -Fp -f test_syntax_conflicts.sql"
+----clean up
+--drop table test_syntax_conflicts;
+--\! sh @abs_srcdir@/tools/psql.sh @abs_bindir@ "-d regression -f test_syntax_conflicts.sql"
+----clean up
+--drop table test_syntax_conflicts;
+--\! rm -fr test_syntax_conflicts.sql
+

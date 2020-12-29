@@ -21,7 +21,6 @@
  *
  * ---------------------------------------------------------------------------------------
  */
-#include <time.h>
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #ifdef PGXC
@@ -55,7 +54,7 @@
 #include "utils/combocid.h"
 #include "vecexecutor/vecstream.h"
 #include "access/hash.h"
-#include "distributelayer/streamTransportSctp.h"
+#include "distributelayer/streamTransportComm.h"
 #include "utils/numeric.h"
 #include "utils/numeric_gs.h"
 
@@ -94,7 +93,7 @@ void InitVecStreamMergeSort(VecStreamState* node)
 
     if (node->need_fresh_data) {
         if (datanode_receive_from_logic_conn(node->conn_count, node->connections, &node->netctl, -1)) {
-            int error_code = getSctpSocketError(gs_comm_strerror());
+            int error_code = getStreamSocketError(gs_comm_strerror());
             ereport(ERROR,
                 (errcode(error_code),
                     errmsg("Failed to read response from Datanodes. Detail: %s\n", gs_comm_strerror())));
@@ -333,8 +332,11 @@ VecStreamState* BuildVecStreamRuntime(Stream* node, EState* estate, int eflags)
     // Stream runtime only set up on datanode.
     if (IS_PGXC_DATANODE)
         SetupStreamRuntime(stream_state);
-
+#ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR) {
+#else
+    if (StreamTopConsumerAmI()) {
+#endif
         if (innerPlan(node))
             innerPlanState(stream_state) = ExecInitNode(innerPlan(node), estate, eflags);
 
@@ -343,14 +345,11 @@ VecStreamState* BuildVecStreamRuntime(Stream* node, EState* estate, int eflags)
     } else {
         // Right tree should be null
         Assert(innerPlan(node) == NULL);
-        /*
-         * We wrap the left tree in a backend thread. We only let main thread do this,
-         * since multiple smp threads share the same plan node
-         */
-        if (u_sess->stream_cxt.smp_id == 0) {
-            outerPlan(node) = NULL;
-        }
     }
+
+    /* Stream runtime only set up on datanode. */
+    if (IS_PGXC_DATANODE)
+        SetupStreamRuntime(stream_state);
 
     return stream_state;
 }

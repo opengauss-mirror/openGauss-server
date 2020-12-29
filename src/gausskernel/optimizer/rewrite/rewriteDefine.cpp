@@ -18,6 +18,7 @@
 
 #include "access/heapam.h"
 #include "access/multixact.h"
+#include "access/tableam.h"
 #include "access/transam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
@@ -29,6 +30,7 @@
 #include "catalog/pg_class.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/pgxc_class.h"
+#include "catalog/pgxc_slice.h"
 #include "catalog/storage.h"
 #include "commands/sec_rls_cmds.h"
 #include "commands/vacuum.h"
@@ -41,6 +43,9 @@
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rewriteSupport.h"
 #include "tcop/utility.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/utils/ts_redis.h"
+#endif
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/inval.h"
@@ -49,9 +54,9 @@
 #include "utils/rel_gs.h"
 #include "utils/sec_rls_utils.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
-static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isSelect, bool requireColumnNameMatch);
+static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isSelect);
 static bool setRuleCheckAsUser_walker(Node* node, Oid* context);
 static void setRuleCheckAsUser_Query(Query* qry, Oid userid);
 
@@ -100,7 +105,7 @@ static Oid InsertRule(char* rulname, int evtype, Oid eventrel_oid, AttrNumber ev
     /*
      * Check to see if we are replacing an existing tuple
      */
-    oldtup = SearchSysCache2((int)RULERELNAME, ObjectIdGetDatum(eventrel_oid), PointerGetDatum(rulname));
+    oldtup = SearchSysCache2(RULERELNAME, ObjectIdGetDatum(eventrel_oid), PointerGetDatum(rulname));
 
     if (HeapTupleIsValid(oldtup)) {
         if (!replace)
@@ -119,7 +124,7 @@ static Oid InsertRule(char* rulname, int evtype, Oid eventrel_oid, AttrNumber ev
         replaces[Anum_pg_rewrite_ev_qual - 1] = true;
         replaces[Anum_pg_rewrite_ev_action - 1] = true;
 
-        tup = heap_modify_tuple(oldtup, RelationGetDescr(pg_rewrite_desc), values, nulls, replaces);
+        tup = (HeapTuple) tableam_tops_modify_tuple(oldtup, RelationGetDescr(pg_rewrite_desc), values, nulls, replaces);
 
         simple_heap_update(pg_rewrite_desc, &tup->t_self, tup);
 
@@ -136,7 +141,7 @@ static Oid InsertRule(char* rulname, int evtype, Oid eventrel_oid, AttrNumber ev
     /* Need to update indexes in either case */
     CatalogUpdateIndexes(pg_rewrite_desc, tup);
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 
     /* If replacing, get rid of old dependencies and make new ones */
     if (is_update)
@@ -236,11 +241,11 @@ void DefineQueryRewrite(
 
     /*
      * Verify relation is of a type that rules can sensibly be applied to.
-     * Internal callers can target materialized views, but transformRuleStmt()
-     * blocks them for users.  Don't mention them in the error message.
      */
-    if (event_relation->rd_rel->relkind != RELKIND_RELATION && event_relation->rd_rel->relkind != RELKIND_MATVIEW &&
-        event_relation->rd_rel->relkind != RELKIND_VIEW)
+    if (event_relation->rd_rel->relkind != RELKIND_RELATION &&
+        event_relation->rd_rel->relkind != RELKIND_VIEW &&
+        event_relation->rd_rel->relkind != RELKIND_MATVIEW && 
+        event_relation->rd_rel->relkind != RELKIND_CONTQUERY)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("\"%s\" is not a table or view", RelationGetRelationName(event_relation))));
@@ -277,6 +282,21 @@ void DefineQueryRewrite(
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("rule actions on NEW are not implemented"),
                     errhint("Use triggers instead.")));
+    }
+
+    if (event_type == CMD_UTILITY) {
+        bool is_copy = false;
+        if (list_length(action) == 1) {
+            query = (Query*)linitial(action);
+#ifdef ENABLE_MULTIPLE_NODES
+            is_copy = is_copy_rule(query);
+#endif
+            if (is_copy && !is_instead) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Copy rule only support CREATE RULE rulename COPY to relname DO INSTEAD...")));
+            }
+        }
     }
 
     if (event_type == CMD_SELECT) {
@@ -327,8 +347,9 @@ void DefineQueryRewrite(
          * ... the targetlist of the SELECT action must exactly match the
          * event relation, ...
          */
-        checkRuleResultList(query->targetList, RelationGetDescr(event_relation), 
-            true, event_relation->rd_rel->relkind != RELKIND_MATVIEW);
+        checkRuleResultList(query->targetList,
+                            RelationGetDescr(event_relation),
+                            event_relation->rd_rel->relkind != RELKIND_MATVIEW);
 
         /*
          * ... there must not be another ON SELECT rule already ...
@@ -370,6 +391,8 @@ void DefineQueryRewrite(
             rulename = pstrdup(ViewSelectRuleName);
         }
 
+        event_relation->rd_rel->relkind = RELKIND_MATVIEW;
+
         /*
          * Are we converting a relation to a view?
          *
@@ -381,8 +404,9 @@ void DefineQueryRewrite(
          * business of converting relations to views is just a kluge to allow
          * loading ancient pg_dump files.)
          */
-        if (event_relation->rd_rel->relkind != RELKIND_VIEW && event_relation->rd_rel->relkind != RELKIND_MATVIEW) {
-            HeapScanDesc scanDesc;
+        if (event_relation->rd_rel->relkind != RELKIND_VIEW && event_relation->rd_rel->relkind != RELKIND_MATVIEW 
+            && event_relation->rd_rel->relkind != RELKIND_CONTQUERY) {
+            TableScanDesc scanDesc;
             if (RELATION_IS_PARTITIONED(event_relation)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -390,13 +414,13 @@ void DefineQueryRewrite(
                             RelationGetRelationName(event_relation)),
                         errdetail("can not convert partitioned table to view")));
             }
-            scanDesc = heap_beginscan(event_relation, SnapshotNow, 0, NULL);
-            if (heap_getnext(scanDesc, ForwardScanDirection) != NULL)
+            scanDesc = tableam_scan_begin(event_relation, SnapshotNow, 0, NULL);
+            if (tableam_scan_getnexttuple(scanDesc, ForwardScanDirection) != NULL)
                 ereport(ERROR,
                     (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                         errmsg("could not convert table \"%s\" to a view because it is not empty",
                             RelationGetRelationName(event_relation))));
-            heap_endscan(scanDesc);
+            tableam_scan_end(scanDesc);
 
             if (event_relation->rd_rel->relhastriggers)
                 ereport(ERROR,
@@ -459,7 +483,7 @@ void DefineQueryRewrite(
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("RETURNING lists are not supported in non-INSTEAD rules")));
-            checkRuleResultList(query->returningList, RelationGetDescr(event_relation), false, false);
+            checkRuleResultList(query->returningList, RelationGetDescr(event_relation), false);
         }
     }
 
@@ -470,7 +494,7 @@ void DefineQueryRewrite(
 
     /* discard rule if it's null action and not INSTEAD; it's a no-op */
     if (action != NIL || is_instead) {
-        (void)InsertRule(rulename, (int)event_type, event_relid, event_attno, is_instead, event_qual, action, replace);
+        (void)InsertRule(rulename, event_type, event_relid, event_attno, is_instead, event_qual, action, replace);
 
         /*
          * Set pg_class 'relhasrules' field TRUE for event relation. If
@@ -547,7 +571,7 @@ void DefineQueryRewrite(
          * the correct relkind and removal of reltoastrelid/reltoastidxid of
          * the toast table we potentially removed above.
          */
-        classTup = SearchSysCacheCopy1((int)RELOID, ObjectIdGetDatum(event_relid));
+        classTup = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(event_relid));
         if (!HeapTupleIsValid(classTup))
             ereport(ERROR,
                 (errmodule(MOD_OPT_REWRITE),
@@ -580,21 +604,22 @@ void DefineQueryRewrite(
         replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
         values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(InvalidTransactionId);
 
-        nctup = heap_modify_tuple(classTup, RelationGetDescr(relationRelation), values, nulls, replaces);
+        nctup = (HeapTuple) tableam_tops_modify_tuple(classTup, RelationGetDescr(relationRelation), values, nulls, replaces);
 
         simple_heap_update(relationRelation, &nctup->t_self, nctup);
         CatalogUpdateIndexes(relationRelation, nctup);
 
-        heap_freetuple_ext(nctup);
-        heap_freetuple_ext(classTup);
+        tableam_tops_free_tuple(nctup);
+        tableam_tops_free_tuple(classTup);
         heap_close(relationRelation, RowExclusiveLock);
 
-#ifdef ENABLE_MULTIPLE_NODES
+#ifdef PGXC
         RemovePgxcClass(event_relid);
-        (void)deleteDependencyRecordsFor(PgxcClassRelationId, event_relid, false);
+        RemovePgxcSlice(event_relid);
+        deleteDependencyRecordsFor(PgxcClassRelationId, event_relid, false);
         if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
             StringInfoData dropbuf;
-            char* nspname = get_namespace_name(nspid, true);
+            char* nspname = get_namespace_name(nspid);
             char* relname = get_rel_name(event_relid);
             const char* quoteNsp = quote_identifier(nspname);
             const char* quoteRel = quote_identifier(relname);
@@ -615,11 +640,10 @@ void DefineQueryRewrite(
  *		Verify that targetList produces output compatible with a tupledesc
  *
  * The targetList might be either a SELECT targetlist, or a RETURNING list;
- * isSelect tells which.  This is used for choosing error messages.
- * 
- * A SELECT targetlist may optionally require that column names match.
+ * isSelect tells which.  (This is mostly used for choosing error messages,
+ * but also we don't enforce column name matching for RETURNING.)
  */
-static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isSelect, bool requireColumnNameMatch)
+static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isSelect)
 {
     ListCell* tllist = NULL;
     int i;
@@ -657,7 +681,7 @@ static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isS
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("cannot convert relation containing dropped columns to view")));
 
-        if (requireColumnNameMatch && strcmp(tle->resname, attname) != 0)
+        if (isSelect && strcmp(tle->resname, attname) != 0)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                     errmsg("SELECT rule's target entry %d has different column name from \"%s\"", i, attname)));
@@ -759,7 +783,7 @@ void EnableDisableRule(Relation rel, const char* rulename, char fires_when)
      * Find the rule tuple to change.
      */
     pg_rewrite_desc = heap_open(RewriteRelationId, RowExclusiveLock);
-    ruletup = SearchSysCacheCopy2((int)RULERELNAME, ObjectIdGetDatum(owningRel), PointerGetDatum(rulename));
+    ruletup = SearchSysCacheCopy2(RULERELNAME, ObjectIdGetDatum(owningRel), PointerGetDatum(rulename));
     if (!HeapTupleIsValid(ruletup))
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -786,7 +810,7 @@ void EnableDisableRule(Relation rel, const char* rulename, char fires_when)
         changed = true;
     }
 
-    heap_freetuple_ext(ruletup);
+    tableam_tops_free_tuple(ruletup);
     heap_close(pg_rewrite_desc, RowExclusiveLock);
 
     /*
@@ -830,7 +854,7 @@ void RenameRewriteRule(Oid owningRel, const char* oldName, const char* newName)
     /* keep system catalog indexes current */
     CatalogUpdateIndexes(pg_rewrite_desc, ruletup);
 
-    heap_freetuple_ext(ruletup);
+    tableam_tops_free_tuple(ruletup);
     heap_close(pg_rewrite_desc, RowExclusiveLock);
 }
 

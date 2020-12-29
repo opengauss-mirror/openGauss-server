@@ -38,7 +38,7 @@ CREATE TABLE test_int_rep (
     pname text,
     "time" timestamp without time zone
 )
-WITH (orientation=column, compression=low)
+WITH (orientation=column, compression=no)
 ;
 
 explain (costs off, verbose ON)
@@ -275,7 +275,7 @@ CREATE TABLE test_int_rep (
     pname text,
     "time" timestamp without time zone
 )
-WITH (orientation=row, compression=low)
+WITH (orientation=row, compression=no)
 ;
 explain (costs off, verbose ON)
 WITH RECURSIVE tmp1 AS 

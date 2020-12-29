@@ -4,6 +4,7 @@
  *
  * Author: Magnus Hagander <magnus@hagander.net>
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
@@ -124,6 +125,18 @@ void ClearAndFreePasswd(void)
     }
 }
 
+static void CalculateArgCount(int *argcount)
+{
+    if (dbhost != NULL)
+        (*argcount)++;
+    if (dbuser != NULL)
+        (*argcount)++;
+    if (dbport != NULL)
+        (*argcount)++;
+
+    return;
+}
+
 /*
  * Connect to the server. Returns a valid PGconn pointer if connected,
  * or NULL on non-permanent error. On permanent error, the function will
@@ -133,18 +146,12 @@ void ClearAndFreePasswd(void)
 PGconn* GetConnection(void)
 {
     PGconn* tmpconn = NULL;
-    int argcount = 4; /* dbname, replication, fallback_app_name,
-                       * pwd */
+    int argcount = 6; /* dbname, fallback_app_name, connect_time, rw_timeout, pwd */
     const char** keywords;
     const char** values;
     const char* tmpparam = NULL;
 
-    if (dbhost != NULL)
-        argcount++;
-    if (dbuser != NULL)
-        argcount++;
-    if (dbport != NULL)
-        argcount++;
+    CalculateArgCount(&argcount);
 
     keywords = (const char**)xmalloc0((argcount + 1) * sizeof(*keywords));
     values = (const char**)xmalloc0((argcount + 1) * sizeof(*values));
@@ -155,7 +162,11 @@ PGconn* GetConnection(void)
     values[1] = dbname == NULL ? "true" : "database";
     keywords[2] = "fallback_application_name";
     values[2] = progname;
-    int i = 3;
+    keywords[3] = "connect_timeout";  /* param connect_time   */
+    values[3] = "120";                  /* default connect_time */
+    keywords[4] = "rw_timeout";       /* param rw_timeout     */
+    values[4] = "120";                 /* default rw_timeout   */
+    int i = 5;
     if (dbhost != NULL) {
         keywords[i] = "host";
         values[i] = dbhost;

@@ -22,6 +22,7 @@
  * TriggerData is the node type that is passed as fmgr "context" info
  * when a function is called by the trigger manager.
  */
+
 #define CALLED_AS_TRIGGER(fcinfo) ((fcinfo)->context != NULL && IsA((fcinfo)->context, TriggerData))
 
 typedef uint32 TriggerEvent;
@@ -59,6 +60,7 @@ typedef struct TriggerData {
 #define TRIGGER_EVENT_TIMINGMASK 0x00000018
 
 /* More TriggerEvent flags, used only within trigger.c */
+
 #define AFTER_TRIGGER_DEFERRABLE 0x00000020
 #define AFTER_TRIGGER_INITDEFERRED 0x00000040
 
@@ -116,18 +118,20 @@ extern void FreeTriggerDesc(TriggerDesc* trigdesc);
 extern void ExecBSInsertTriggers(EState* estate, ResultRelInfo* relinfo);
 extern void ExecASInsertTriggers(EState* estate, ResultRelInfo* relinfo);
 extern TupleTableSlot* ExecBRInsertTriggers(EState* estate, ResultRelInfo* relinfo, TupleTableSlot* slot);
-extern void ExecARInsertTriggers(EState* estate, ResultRelInfo* relinfo, Oid insertPartition, int2 bucketid, 
-    HeapTuple trigtuple, List* recheckIndexes);
+extern void ExecARInsertTriggers(
+    EState* estate, ResultRelInfo* relinfo, Oid insertPartition, int2 bucketid, HeapTuple trigtuple, List* recheckIndexes);
 extern TupleTableSlot* ExecIRInsertTriggers(EState* estate, ResultRelInfo* relinfo, TupleTableSlot* slot);
 extern void ExecBSDeleteTriggers(EState* estate, ResultRelInfo* relinfo);
 extern void ExecASDeleteTriggers(EState* estate, ResultRelInfo* relinfo);
 extern bool ExecBRDeleteTriggers(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid deletePartitionOid,
-    int2 bucketid,
+                                        int2 bucketid,
+
 #ifdef PGXC
     HeapTupleHeader datanode_tuphead,
 #endif
     ItemPointer tupleid);
 extern void ExecARDeleteTriggers(EState* estate, ResultRelInfo* relinfo, Oid deletePartitionOid, int2 bucketid,
+
 #ifdef PGXC
     HeapTupleHeader trigtuphead,
 #endif
@@ -141,8 +145,8 @@ extern TupleTableSlot* ExecBRUpdateTriggers(EState* estate, EPQState* epqstate, 
     HeapTupleHeader datanode_tuphead,
 #endif
     ItemPointer tupleid, TupleTableSlot* slot);
-extern void ExecARUpdateTriggers(EState* estate, ResultRelInfo* relinfo, Oid oldPartitionOid, int2 bucketid, 
-    Oid newPartitionOid,ItemPointer tupleid, HeapTuple newtuple,
+extern void ExecARUpdateTriggers(EState* estate, ResultRelInfo* relinfo, Oid oldPartitionOid, int2 bucketid, Oid newPartitionOid,
+    ItemPointer tupleid, HeapTuple newtuple,
 #ifdef PGXC
     HeapTupleHeader trigtuphead,
 #endif
@@ -156,6 +160,7 @@ extern void AfterTriggerBeginXact(void);
 extern void AfterTriggerBeginQuery(void);
 extern void AfterTriggerEndQuery(EState* estate);
 extern void AfterTriggerFireDeferred(void);
+extern bool IsAfterTriggerBegin(void);
 #ifdef PGXC
 extern bool IsAnyAfterTriggerDeferred(void);
 #endif
@@ -190,4 +195,3 @@ extern bool pgxc_has_trigger_for_event(int16 tg_event, TriggerDesc* trigdesc);
 #endif
 
 #endif /* TRIGGER_H */
-

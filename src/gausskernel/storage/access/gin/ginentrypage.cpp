@@ -9,7 +9,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *			src/gausskernel/storage/access/gin/ginentrypage.cpp
+ *    src/gausskernel/storage/access/gin/ginentrypage.cpp
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
@@ -21,8 +21,8 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 
-static void entrySplitPage(GinBtree btree, Buffer origbuf, GinBtreeStack* stack, GinBtreeEntryInsertData* insertData,
-    BlockNumber updateblkno, Page* newlpage, Page* newrpage);
+static void entrySplitPage(GinBtree btree, Buffer origbuf, GinBtreeStack *stack, GinBtreeEntryInsertData *insertData,
+                           BlockNumber updateblkno, Page *newlpage, Page *newrpage);
 
 /*
  * Form a tuple for entry tree.
@@ -39,8 +39,8 @@ static void entrySplitPage(GinBtree btree, Buffer origbuf, GinBtreeStack* stack,
  * filling in the posting list; the caller is responsible for filling it
  * afterwards if data = NULL and nipd > 0.
  */
-IndexTuple GinFormTuple(GinState* ginstate, OffsetNumber attnum, Datum key, GinNullCategory category, Pointer data,
-    Size dataSize, int nipd, bool errorTooBig)
+IndexTuple GinFormTuple(GinState *ginstate, OffsetNumber attnum, Datum key, GinNullCategory category, Pointer data,
+                        Size dataSize, int nipd, bool errorTooBig)
 {
     Datum datums[2];
     bool isnull[2];
@@ -95,12 +95,9 @@ IndexTuple GinFormTuple(GinState* ginstate, OffsetNumber attnum, Datum key, GinN
     newsize = MAXALIGN(newsize);
     if (newsize > GinMaxItemSize) {
         if (errorTooBig)
-            ereport(ERROR,
-                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                    errmsg("index row size %zu exceeds maximum %zu for index \"%s\"",
-                        (Size)newsize,
-                        (Size)GinMaxItemSize,
-                        RelationGetRelationName(ginstate->index))));
+            ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                            errmsg("index row size %zu exceeds maximum %zu for index \"%s\"", (Size)newsize,
+                                   (Size)GinMaxItemSize, RelationGetRelationName(ginstate->index))));
         pfree(itup);
         itup = NULL;
         return NULL;
@@ -116,8 +113,8 @@ IndexTuple GinFormTuple(GinState* ginstate, OffsetNumber attnum, Datum key, GinN
          * PostgreSQL 9.3 and earlier did not clear this new space, so we
          * might find uninitialized padding when reading tuples from disk.
          */
-        ret = memset_s(
-            (char*)itup + IndexTupleSize(itup), newsize - IndexTupleSize(itup), 0, newsize - IndexTupleSize(itup));
+        ret = memset_s((char *)itup + IndexTupleSize(itup), newsize - IndexTupleSize(itup), 0,
+                       newsize - IndexTupleSize(itup));
         securec_check(ret, "", "");
         /* set new size in tuple header */
         itup->t_info &= ~INDEX_SIZE_MASK;
@@ -128,7 +125,7 @@ IndexTuple GinFormTuple(GinState* ginstate, OffsetNumber attnum, Datum key, GinN
      * Copy in the posting list, if provided
      */
     if (data) {
-        char* ptr = GinGetPosting(itup);
+        char *ptr = GinGetPosting(itup);
 
         ret = memcpy_s(ptr, dataSize, data, dataSize);
         securec_check(ret, "", "");
@@ -148,7 +145,7 @@ IndexTuple GinFormTuple(GinState* ginstate, OffsetNumber attnum, Datum key, GinN
  * Read item pointers from leaf entry tuple.
  * Returns a palloc'd array of ItemPointers. The number of items is returned in nitems.
  */
-ItemPointer ginReadTuple(GinState* ginstate, OffsetNumber attnum, IndexTuple itup, int* nitems)
+ItemPointer ginReadTuple(GinState *ginstate, OffsetNumber attnum, IndexTuple itup, int *nitems)
 {
     Pointer ptr = GinGetPosting(itup);
     int nipd = GinGetNPosting(itup);
@@ -158,13 +155,11 @@ ItemPointer ginReadTuple(GinState* ginstate, OffsetNumber attnum, IndexTuple itu
 
     if (GinItupIsCompressed(itup)) {
         if (nipd > 0) {
-            ipd = ginPostingListDecode((GinPostingList*)ptr, &ndecoded);
+            ipd = ginPostingListDecode((GinPostingList *)ptr, &ndecoded);
             if (nipd != ndecoded)
-                ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("number of items mismatch in GIN entry tuple, %d in tuple header, %d decoded",
-                            nipd,
-                            ndecoded)));
+                ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                errmsg("number of items mismatch in GIN entry tuple, %d in tuple header, %d decoded",
+                                       nipd, ndecoded)));
         } else {
             ipd = (ItemPointer)palloc(0);
         }
@@ -235,8 +230,8 @@ static bool entryIsMoveRight(GinBtree btree, Page page)
     itup = getRightMostTuple(page);
     attnum = gintuple_get_attrnum(btree->ginstate, itup);
     key = gintuple_get_key(btree->ginstate, itup, &category);
-    if (ginCompareAttEntries(
-            btree->ginstate, btree->entryAttnum, btree->entryKey, btree->entryCategory, attnum, key, category) > 0)
+    if (ginCompareAttEntries(btree->ginstate, btree->entryAttnum, btree->entryKey, btree->entryCategory, attnum, key,
+                             category) > 0)
         return TRUE;
 
     return FALSE;
@@ -246,7 +241,7 @@ static bool entryIsMoveRight(GinBtree btree, Page page)
  * Find correct tuple in non-leaf page. It supposed that
  * page correctly chosen and searching value SHOULD be on page
  */
-static BlockNumber entryLocateEntry(GinBtree btree, GinBtreeStack* stack)
+static BlockNumber entryLocateEntry(GinBtree btree, GinBtreeStack *stack)
 {
     OffsetNumber low, high, maxoff;
     IndexTuple itup = NULL;
@@ -282,8 +277,8 @@ static BlockNumber entryLocateEntry(GinBtree btree, GinBtreeStack* stack)
             itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, mid));
             attnum = gintuple_get_attrnum(btree->ginstate, itup);
             key = gintuple_get_key(btree->ginstate, itup, &category);
-            result = ginCompareAttEntries(
-                btree->ginstate, btree->entryAttnum, btree->entryKey, btree->entryCategory, attnum, key, category);
+            result = ginCompareAttEntries(btree->ginstate, btree->entryAttnum, btree->entryKey, btree->entryCategory,
+                                          attnum, key, category);
         }
 
         if (result == 0) {
@@ -309,7 +304,7 @@ static BlockNumber entryLocateEntry(GinBtree btree, GinBtreeStack* stack)
  * Page should be correctly chosen.
  * Returns true if value found on page.
  */
-static bool entryLocateLeafEntry(GinBtree btree, GinBtreeStack* stack)
+static bool entryLocateLeafEntry(GinBtree btree, GinBtreeStack *stack)
 {
     Page page = BufferGetPage(stack->buffer);
     OffsetNumber low, high;
@@ -342,8 +337,8 @@ static bool entryLocateLeafEntry(GinBtree btree, GinBtreeStack* stack)
         itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, mid));
         attnum = gintuple_get_attrnum(btree->ginstate, itup);
         key = gintuple_get_key(btree->ginstate, itup, &category);
-        result = ginCompareAttEntries(
-            btree->ginstate, btree->entryAttnum, btree->entryKey, btree->entryCategory, attnum, key, category);
+        result = ginCompareAttEntries(btree->ginstate, btree->entryAttnum, btree->entryKey, btree->entryCategory,
+                                      attnum, key, category);
         if (result == 0) {
             stack->off = mid;
             return true;
@@ -406,7 +401,7 @@ static BlockNumber entryGetLeftMostPage(GinBtree btree, Page page)
     return GinGetDownlink(itup);
 }
 
-static bool entryIsEnoughSpace(GinBtree btree, Buffer buf, OffsetNumber off, GinBtreeEntryInsertData* insertData)
+static bool entryIsEnoughSpace(GinBtree btree, Buffer buf, OffsetNumber off, GinBtreeEntryInsertData *insertData)
 {
     Size releasedsz = 0;
     Size addedsz;
@@ -433,8 +428,8 @@ static bool entryIsEnoughSpace(GinBtree btree, Buffer buf, OffsetNumber off, Gin
  * should update it, update old child blkno to new right page
  * if child split occurred
  */
-static void entryPreparePage(
-    GinBtree btree, Page page, OffsetNumber off, GinBtreeEntryInsertData* insertData, BlockNumber updateblkno)
+static void entryPreparePage(GinBtree btree, Page page, OffsetNumber off, GinBtreeEntryInsertData *insertData,
+                             BlockNumber updateblkno)
 {
     Assert(insertData->entry);
     Assert(!GinPageIsData(page));
@@ -467,10 +462,11 @@ static void entryPreparePage(
  * item, the downlink of the existing item at stack->off will be updated to
  * point to updateblkno.
  */
-static GinPlaceToPageRC entryBeginPlaceToPage(GinBtree btree, Buffer buf, GinBtreeStack* stack, void* insertPayload,
-    BlockNumber updateblkno, void** ptp_workspace, Page* newlpage, Page* newrpage)
+static GinPlaceToPageRC entryBeginPlaceToPage(GinBtree btree, Buffer buf, GinBtreeStack *stack, void *insertPayload,
+                                              BlockNumber updateblkno, void **ptp_workspace, Page *newlpage,
+                                              Page *newrpage)
 {
-    GinBtreeEntryInsertData* insertData = (GinBtreeEntryInsertData*)insertPayload;
+    GinBtreeEntryInsertData *insertData = (GinBtreeEntryInsertData *)insertPayload;
     OffsetNumber off = stack->off;
 
     /* If it doesn't fit, deal with split case */
@@ -489,10 +485,10 @@ static GinPlaceToPageRC entryBeginPlaceToPage(GinBtree btree, Buffer buf, GinBtr
  * This is invoked within a critical section, and XLOG record creation (if
  * needed) is already started.	The target buffer is registered in slot 0.
  */
-static void entryExecPlaceToPage(
-    GinBtree btree, Buffer buf, GinBtreeStack* stack, void* insertPayload, BlockNumber updateblkno, void* ptp_workspace)
+static void entryExecPlaceToPage(GinBtree btree, Buffer buf, GinBtreeStack *stack, void *insertPayload,
+                                 BlockNumber updateblkno, void *ptp_workspace)
 {
-    GinBtreeEntryInsertData* insertData = (GinBtreeEntryInsertData*)insertPayload;
+    GinBtreeEntryInsertData *insertData = (GinBtreeEntryInsertData *)insertPayload;
     Page page = BufferGetPage(buf);
     OffsetNumber off = stack->off;
     OffsetNumber placed;
@@ -501,17 +497,16 @@ static void entryExecPlaceToPage(
 
     placed = PageAddItem(page, (Item)insertData->entry, IndexTupleSize(insertData->entry), off, false, false);
     if (placed != off) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("failed to add item to index page in \"%s\"", RelationGetRelationName(btree->index))));
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("failed to add item to index page in \"%s\"", RelationGetRelationName(btree->index))));
     }
 
     if (RelationNeedsWAL(btree->index)) {
         t_thrd.index_cxt.ptr_entry->isDelete = insertData->isDelete;
         t_thrd.index_cxt.ptr_entry->offset = off;
 
-        XLogRegisterBufData(0, (char*)t_thrd.index_cxt.ptr_entry, offsetof(ginxlogInsertEntry, tuple));
-        XLogRegisterBufData(0, (char*)insertData->entry, IndexTupleSize(insertData->entry));
+        XLogRegisterBufData(0, (char *)t_thrd.index_cxt.ptr_entry, offsetof(ginxlogInsertEntry, tuple));
+        XLogRegisterBufData(0, (char *)insertData->entry, IndexTupleSize(insertData->entry));
     }
 }
 
@@ -521,8 +516,8 @@ static void entryExecPlaceToPage(
  * Returns new temp pages to *newlpage and *newrpage.
  * The original buffer is left untouched.
  */
-static void entrySplitPage(GinBtree btree, Buffer origbuf, GinBtreeStack* stack, GinBtreeEntryInsertData* insertData,
-    BlockNumber updateblkno, Page* newlpage, Page* newrpage)
+static void entrySplitPage(GinBtree btree, Buffer origbuf, GinBtreeStack *stack, GinBtreeEntryInsertData *insertData,
+                           BlockNumber updateblkno, Page *newlpage, Page *newrpage)
 {
     OffsetNumber off = stack->off;
     OffsetNumber i = 0;
@@ -531,7 +526,7 @@ static void entrySplitPage(GinBtree btree, Buffer origbuf, GinBtreeStack* stack,
     Size totalsize = 0;
     Size lsize = 0;
     Size size = 0;
-    char* ptr = NULL;
+    char *ptr = NULL;
     IndexTuple itup;
     Page page;
     Page lpage = PageGetTempPageCopy(BufferGetPage(origbuf));
@@ -602,9 +597,8 @@ static void entrySplitPage(GinBtree btree, Buffer origbuf, GinBtreeStack* stack,
 
         if (PageAddItem(page, (Item)itup, IndexTupleSize(itup), InvalidOffsetNumber, false, false) ==
             InvalidOffsetNumber)
-            ereport(ERROR,
-                (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("failed to add item to index page in \"%s\"", RelationGetRelationName(btree->index))));
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("failed to add item to index page in \"%s\"",
+                                                                     RelationGetRelationName(btree->index))));
         ptr += MAXALIGN(IndexTupleSize(itup));
     }
 
@@ -616,16 +610,16 @@ static void entrySplitPage(GinBtree btree, Buffer origbuf, GinBtreeStack* stack,
 /*
  * Construct insertion payload for inserting the downlink for given buffer.
  */
-static void* entryPrepareDownlink(GinBtree btree, Buffer lbuf)
+static void *entryPrepareDownlink(GinBtree btree, Buffer lbuf)
 {
-    GinBtreeEntryInsertData* insertData = NULL;
+    GinBtreeEntryInsertData *insertData = NULL;
     Page lpage = BufferGetPage(lbuf);
     BlockNumber lblkno = BufferGetBlockNumber(lbuf);
     IndexTuple itup;
 
     itup = getRightMostTuple(lpage);
 
-    insertData = (GinBtreeEntryInsertData*)palloc(sizeof(GinBtreeEntryInsertData));
+    insertData = (GinBtreeEntryInsertData *)palloc(sizeof(GinBtreeEntryInsertData));
     insertData->entry = GinFormInteriorTuple(itup, lpage, lblkno);
     insertData->isDelete = false;
 
@@ -658,7 +652,7 @@ void ginEntryFillRoot(GinBtree btree, Page root, BlockNumber lblkno, Page lpage,
  * Note: during WAL recovery, there may be no valid data in ginstate
  * other than a faked-up Relation pointer; the key datum is bogus too.
  */
-void ginPrepareEntryScan(GinBtree btree, OffsetNumber attnum, Datum key, GinNullCategory category, GinState* ginstate)
+void ginPrepareEntryScan(GinBtree btree, OffsetNumber attnum, Datum key, GinNullCategory category, GinState *ginstate)
 {
     errno_t rc = EOK;
 

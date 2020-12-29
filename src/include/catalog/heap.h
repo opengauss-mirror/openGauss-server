@@ -4,6 +4,7 @@
  *	  prototypes for functions in backend/catalog/heap.c
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
@@ -18,6 +19,7 @@
 #include "parser/parse_node.h"
 #include "catalog/indexing.h"
 #include "utils/partcache.h"
+#include "utils/partitionmap.h"
 
 #define PSORT_RESERVE_COLUMN	"tid"
 #define CHCHK_PSORT_RESERVE_COLUMN(attname)		(strcmp(PSORT_RESERVE_COLUMN, (attname)) == 0)
@@ -39,27 +41,86 @@ typedef struct CookedConstraint {
 								 * inherited */
 } CookedConstraint;
 
+typedef struct CeHeapInfo {
+    int8 alg_type; /* int representation of encryption type RANDOMIZED/DETERMINISTIC */
+    Oid orig_typ;
+    int32 orig_mod; 
+    Oid cek_id;
+    NameData column_name;
+    int4 attnum;
+} CeHeapInfo;
+
 typedef struct HashBucketInfo {
 	oidvector  *bucketlist;
 	int2vector *bucketcol;
 	Oid          bucketOid;    
 } HashBucketInfo;
 
-extern Relation heap_create(const char *relname, Oid relnamespace, Oid reltablespace, Oid relid, Oid relfilenode,
-    Oid bucketOid, TupleDesc tupDesc, char relkind, char relpersistence, bool partitioned_relation, bool rowMovement,
-    bool shared_relation, bool mapped_relation, bool allow_system_table_mods, int8 row_compress, Oid ownerid,
-    bool skip_create_storage);
+typedef struct SliceConstInfo {
+    char* sliceName;
+    int sliceNum;
+    List* sliceBoundary;
+    Const* sliceBoundaryValue[RANGE_PARTKEYMAXNUM];
+} SliceConstInfo;
 
-extern Partition heapCreatePartition(const char* part_name, bool for_partitioned_table, Oid part_tablespace, Oid part_id,
-    Oid partFileNode, Oid bucketOid, Oid ownerid);
+extern Relation heap_create(const char *relname,
+			Oid relnamespace,
+			Oid reltablespace,
+			Oid relid,
+			Oid relfilenode,
+			Oid bucketOid,
+			TupleDesc tupDesc,
+			char relkind,
+			char relpersistence,
+			bool partitioned_relation,
+			bool rowMovement,
+			bool shared_relation,
+			bool mapped_relation,
+			bool allow_system_table_mods,
+			int8 row_compress,
+			Oid ownerid,
+			bool skip_create_storage,
+			TableAmType tam_type);
 
-extern Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltablespace, Oid relid, Oid reltypeid,
-    Oid reloftypeid, Oid ownerid, TupleDesc tupdesc, List *cooked_constraints, char relkind, char relpersistence,
-    bool shared_relation, bool mapped_relation, bool oidislocal, int oidinhcount, OnCommitAction oncommit, Datum reloptions,
-    bool use_user_acl, bool allow_system_table_mods, PartitionState *partTableState, int8 row_compress, List *filenodelist,
-    HashBucketInfo *bucketinfo, bool record_dependce = true);
+extern bool heap_is_matview_init_state(Relation rel);
+
+extern Partition
+heapCreatePartition(const char* part_name,
+						bool for_partitioned_table,
+						Oid part_tablespace,
+						Oid part_id,
+						Oid partFileNode,
+						Oid bucketOid,
+						Oid ownerid);
+
+extern Oid heap_create_with_catalog(const char *relname,
+						 Oid relnamespace,
+						 Oid reltablespace,
+						 Oid relid,
+						 Oid reltypeid,
+						 Oid reloftypeid,
+						 Oid ownerid,
+						 TupleDesc tupdesc,
+						 List *cooked_constraints,
+						 char relkind,
+						 char relpersistence,
+						 bool shared_relation,
+						 bool mapped_relation,
+						 bool oidislocal,
+						 int oidinhcount,
+						 OnCommitAction oncommit,
+						 Datum reloptions,
+						 bool use_user_acl,
+						 bool allow_system_table_mods,
+						 PartitionState *partTableState,
+						 int8 row_compress,
+						 List *filenodelist,						 
+						 HashBucketInfo *bucketinfo,
+						 bool record_dependce = true,
+						 List* ceLst = NULL);
 
 extern void heap_create_init_fork(Relation rel);
+
 extern void heap_drop_with_catalog(Oid relid);
 extern void heapDropPartition(Relation rel, Partition part);
 extern void dropToastTableOnPartition(Oid partId);
@@ -69,8 +130,18 @@ extern void dropDeltaTableOnPartition(Oid partId);
 
 extern void heapDropPartitionToastList(List* toastList);
 extern void heapDropPartitionList(Relation rel, List* partitionList);
-extern Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid,  Oid partrelfileOid,  Oid partTablespace, Oid bucketOid,
-    RangePartitionDefState *newPartDef, Oid ownerid, Datum reloptions, const bool* isTimestamptz);
+extern Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid,  Oid partrelfileOid,  Oid partTablespace,
+                                 Oid bucketOid, RangePartitionDefState *newPartDef, Oid ownerid, Datum reloptions,
+                                 const bool* isTimestamptz);
+
+extern Oid HeapAddListPartition(Relation pgPartRel, Oid partTableOid,  Oid partrelfileOid,  Oid partTablespace,
+                                Oid bucketOid, ListPartitionDefState *newPartDef, Oid ownerid, Datum reloptions,
+                                const bool* isTimestamptz);
+
+extern Oid HeapAddHashPartition(Relation pgPartRel, Oid partTableOid,  Oid partrelfileOid,  Oid partTablespace,
+                                Oid bucketOid, HashPartitionDefState *newPartDef, Oid ownerid, Datum reloptions,
+                                const bool* isTimestamptz);
+
 extern void heapDropPartitionIndex(Relation parentIndex, Oid partIndexId);
 extern void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc, int2vector* pkey, oidvector *intablespace,
     Datum interval, Datum maxValues,  Datum transitionPoint, Datum reloptions);
@@ -103,13 +174,16 @@ extern void RemoveStatistics(Oid relid, AttrNumber attnum);
 
 extern Form_pg_attribute SystemAttributeDefinition(AttrNumber attno, bool relhasoids, bool relhasbucket);
 extern Form_pg_attribute SystemAttributeByName(const char *attname, bool relhasoids);
+
+extern int GetSysAttLength(bool hasBucketAttr = true);
+
 extern void CheckAttributeNamesTypes(TupleDesc tupdesc, char relkind, bool allow_system_table_mods);
 extern void CheckAttributeType(const char *attname, Oid atttypid, Oid attcollation, List *containing_rowtypes, bool allow_system_table_mods);
 
 #ifdef PGXC
 /* Functions related to distribution data of relations */
-extern void AddRelationDistribution(Oid relid, DistributeBy *distributeby, PGXCSubCluster *subcluster, List *parentOids,
-    TupleDesc descriptor, bool isinstallationgroup);
+extern void AddRelationDistribution(const char *relname, Oid relid, DistributeBy *distributeby, 
+	PGXCSubCluster *subcluster, List *parentOids, TupleDesc descriptor, bool isinstallationgroup);
 extern void GetRelationDistributionItems(Oid relid, DistributeBy *distributeby, TupleDesc descriptor, char *locatortype,
     int *hashalgorithm, int *hashbuckets, AttrNumber *attnum);
 extern HashBucketInfo *GetRelationBucketInfo(DistributeBy *distributeby, TupleDesc tupledsc, 

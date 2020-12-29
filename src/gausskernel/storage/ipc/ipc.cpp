@@ -25,6 +25,9 @@
 #include <sys/stat.h>
 
 #include "miscadmin.h"
+#ifdef PROFILE_PID_DIR
+    #include "postmaster/autovacuum.h"
+#endif
 #include "storage/ipc.h"
 #include "tcop/tcopprot.h"
 #include "libpq/libpq-be.h"
@@ -38,18 +41,21 @@
 #include "postmaster/syslogger.h"
 #include "executor/execStream.h"
 #ifndef WIN32_ONLY_COMPILER
-#include "dynloader.h"
+    #include "dynloader.h"
 #else
-#include "port/dynloader/win32.h"
+    #include "port/dynloader/win32.h"
 #endif
 #include "utils/plog.h"
 #include "threadpool/threadpool.h"
 #include "instruments/instr_user.h"
+#include "utils/postinit.h"
+#ifdef ENABLE_MOT
 #include "storage/mot/mot_fdw.h"
+#endif
 
 #ifdef ENABLE_MEMORY_CHECK
 extern "C" {
-extern void __lsan_do_leak_check();
+    extern void __lsan_do_leak_check();
 }
 
 #endif
@@ -59,26 +65,29 @@ extern void __lsan_do_leak_check();
 
 volatile unsigned int alive_threads_waitted = NUMWAITTHREADS;
 
-extern void ShutdownPostgres(int code, Datum arg);
 extern void pq_close(int code, Datum arg);
 extern void AtProcExit_Files(int code, Datum arg);
 extern void audit_processlogout(int code, Datum arg);
 extern void CancelAutoAnalyze();
 
+#ifdef ENABLE_MOT
 static void MOTCleanupSession(int code, Datum arg)
 {
     MOTOnSessionClose();
 }
+#endif
 
 static const pg_on_exit_callback on_sess_exit_list[] = {
     ShutdownPostgres,
     PGXCNodeCleanAndRelease,
+#ifdef ENABLE_MOT
     /*
      * 1. Must come after ShutdownPostgres(), in case there is abort/rollback callback.
      * 2. Must come after PGXCNodeCleanAndRelease(), due to prepared statement cleanup
      *    (which cleans also all session JIT context objects).
      */
     MOTCleanupSession,
+#endif
     pq_close,
     AtProcExit_Files,
     audit_processlogout
@@ -89,8 +98,8 @@ static const int on_sess_exit_size = lengthof(on_sess_exit_list);
 extern void KillGraceThreads(void);
 extern void gs_set_hs_shm_data(HaShmemData* ha_shm_data);
 #ifndef ENABLE_LLT
-extern void clean_ec_conn();
-extern void delete_ec_ctrl();
+    extern void clean_ec_conn();
+    extern void delete_ec_ctrl();
 #endif
 extern void signal_sysloger_flush();
 
@@ -144,9 +153,23 @@ void proc_exit(int code)
 {
     DynamicFileList* file_scanner = NULL;
 
+    if (t_thrd.utils_cxt.backend_reserved) {
+        ereport(DEBUG2, (errmodule(MOD_MEM),
+            errmsg("[BackendReservedExit] current thread role is: %d, used memory is: %d MB\n",
+            t_thrd.role, t_thrd.utils_cxt.trackedMemChunks)));
+    }
+
+    audit_processlogout_unified();
+
     (void)pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);
 
     (void)gs_signal_block_sigusr2();
+
+    /* release gpc_reset_lock for fataled scheduler thread */
+    if (t_thrd.role == THREADPOOL_SCHEDULER && pmState == PM_RUN &&
+        ENABLE_DN_GPC && g_instance.gpc_reset_lock.__data.__owner != 0) {
+        pthread_mutex_unlock(&g_instance.gpc_reset_lock);
+    }
 
     if (t_thrd.proc_cxt.MyProcPid == PostmasterPid) {
         if (t_thrd.postmaster_cxt.redirection_done)
@@ -209,7 +232,7 @@ void proc_exit(int code)
     /* Reet to Local vfd if we have attach it to global vfdcache */
     ResetToLocalVfdCache();
 
-#ifdef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_LLT
     clean_ec_conn();
     delete_ec_ctrl();
 #endif
@@ -231,9 +254,46 @@ void proc_exit(int code)
      * Protect the node group incase the ShutPostgres Callback function
      * has not been registered
      */
-#ifdef ENABLE_MULTIPLE_NODES
     StreamNodeGroup::syncQuit(STREAM_ERROR);
     StreamNodeGroup::destroy(STREAM_ERROR);
+
+#ifdef PROFILE_PID_DIR
+    {
+        /*
+         * If we are profiling ourself then gprof's mcleanup() is about to
+         * write out a profile to ./gmon.out.  Since mcleanup() always uses a
+         * fixed file name, each backend will overwrite earlier profiles. To
+         * fix that, we create a separate subdirectory for each backend
+         * (./gprof/pid) and 'cd' to that subdirectory before we exit() - that
+         * forces mcleanup() to write each profile into its own directory.	We
+         * end up with something like: $PGDATA/gprof/8829/gmon.out
+         * $PGDATA/gprof/8845/gmon.out ...
+         *
+         * To avoid undesirable disk space bloat, autovacuum workers are
+         * discriminated against: all their gmon.out files go into the same
+         * subdirectory.  Without this, an installation that is "just sitting
+         * there" nonetheless eats megabytes of disk space every few seconds.
+         *
+         * Note that we do this here instead of in an on_proc_exit() callback
+         * because we want to ensure that this code executes last - we don't
+         * want to interfere with any other on_proc_exit() callback.  For the
+         * same reason, we do not include it in proc_exit_prepare ... so if
+         * you are exiting in the "wrong way" you won't drop your profile in a
+         * nice place.
+         */
+        char gprofDirName[32];
+        errno_t rc = EOK;
+        if (IsAutoVacuumWorkerProcess())
+            rc = snprintf_s(gprofDirName, sizeof(gprofDirName), sizeof(gprofDirName) - 1, "gprof/avworker");
+        else
+            rc =
+                snprintf_s(gprofDirName, sizeof(gprofDirName), sizeof(gprofDirName) - 1, "gprof/%lu", gs_thread_self());
+
+        securec_check_ss(rc, "\0", "\0");
+        (void)mkdir("gprof", S_IRWXU | S_IRWXG | S_IRWXO);
+        (void)mkdir(gprofDirName, S_IRWXU | S_IRWXG | S_IRWXO);
+        (void)chdir(gprofDirName);
+    }
 #endif
 
     /*
@@ -248,7 +308,13 @@ void proc_exit(int code)
             file_scanner = file_list;
             file_list = file_list->next;
 #ifndef ENABLE_MEMORY_CHECK
-            (void)pg_dlclose(file_scanner->handle);
+            /* 
+             * in the senario of ImmediateShutdown, it is not safe to close plugin 
+             * as PM thread will not wait for all children threads exist(will send SIGQUIT signal) referring to pmdie
+             */
+            if (g_instance.status != ImmediateShutdown) {
+                (void)pg_dlclose(file_scanner->handle);
+            }
 #endif
             pfree((char*)file_scanner);
             file_scanner = NULL;
@@ -259,7 +325,6 @@ void proc_exit(int code)
             gscgroup_free();
 
 #ifdef ENABLE_MEMORY_CHECK
-        DumpMemoryContext(SHARED_DUMP);
         ereport(LOG, (errmsg("Gaussdb memory_leak checking")));
         __lsan_do_leak_check();
 #endif
@@ -267,38 +332,6 @@ void proc_exit(int code)
         /* flush log before exit */
         signal_sysloger_flush();
 
-#ifdef PROFILE_PID_DIR
-        if (t_thrd.proc_cxt.MyProcPid == PostmasterPid) {
-            /*
-             * If we are profiling ourself then gprof's mcleanup() is about to
-             * write out a profile to ./gmon.out.  Since mcleanup() always uses a
-             * fixed file name, each backend will overwrite earlier profiles. To
-             * fix that, we create a separate subdirectory for each backend
-             * (./gprof/pid) and 'cd' to that subdirectory before we exit() - that
-             * forces mcleanup() to write each profile into its own directory.	We
-             * end up with something like: $PGDATA/gprof/8829/gmon.out
-             * $PGDATA/gprof/8845/gmon.out ...
-             *
-             * Note that we do this here instead of in an on_proc_exit() callback
-             * because we want to ensure that this code executes last - we don't
-             * want to interfere with any other on_proc_exit() callback.  For the
-             * same reason, we do not include it in proc_exit_prepare ... so if
-             * you are exiting in the "wrong way" you won't drop your profile in a
-             * nice place.
-             */
-        	char gprofDirName[32];
-            errno_t rc = EOK;
-            rc =
-                snprintf_s(gprofDirName, sizeof(gprofDirName), sizeof(gprofDirName) - 1, "gprof/%d", (int) getpid());
-
-            securec_check_ss(rc, "\0", "\0");
-            (void)mkdir("gprof", S_IRWXU | S_IRWXG | S_IRWXO);
-            (void)mkdir(gprofDirName, S_IRWXU | S_IRWXG | S_IRWXO);
-            (void)chdir(gprofDirName);
-            //before gaussdb exits, make sure write gmon.out to disk
-            exit(code);
-        }
-#endif
         // call _exit() safer than exit() in signal handler
         //
         _exit(code);
@@ -314,12 +347,19 @@ void proc_exit(int code)
     flush_plog();
 
     SysLoggerClose();
+    SQMCloseLogFile();
+    ASPCloseLogFile();
 
     if (IS_THREAD_POOL_WORKER) {
         CurrentMemoryContext = NULL;
         t_thrd.threadpool_cxt.worker->ShutDown();
+    } else if (IS_THREAD_POOL_LISTENER) {
+        t_thrd.threadpool_cxt.listener->ResetThreadId();
+    } else if (IS_THREAD_POOL_SCHEDULER) {
+        t_thrd.threadpool_cxt.scheduler->SetShutDown(true);
+    } else if (IS_THREAD_POOL_STREAM) {
+        t_thrd.threadpool_cxt.stream->ShutDown();
     }
-
     gs_thread_exit(code);
 }
 
@@ -402,10 +442,8 @@ void sess_exit(int code)
      * Protect the node group incase the ShutPostgres Callback function
      * has not been registered
      */
-#ifdef ENABLE_MULTIPLE_NODES
     StreamNodeGroup::syncQuit(STREAM_ERROR);
     StreamNodeGroup::destroy(STREAM_ERROR);
-#endif
     CloseClientSocket(u_sess, true);
 
     CancelAutoAnalyze();
@@ -431,18 +469,18 @@ void sess_exit_prepare(int code)
     t_thrd.proc_cxt.sess_exit_inprogress = true;
     old_sigset = gs_signal_block_sigusr2();
 
-    if (u_sess->gtt_ctx.gtt_cleaner_exit_registered) {
-        pg_on_exit_callback func = u_sess->gtt_ctx.gtt_sess_exit;
-        (*func)(code, UInt32GetDatum(NULL));
-    }
-
     /* FDW exit callback, used to free connections to other server, check FDW code for detail. */
     for (int i = 0; i < MAX_TYPE_FDW; i++) {
         if (u_sess->ext_fdw_ctx[i].fdwExitFunc != NULL) {
             (u_sess->ext_fdw_ctx[i].fdwExitFunc)(code, UInt32GetDatum(NULL));
         }
     }
-
+	
+    if (u_sess->gtt_ctx.gtt_cleaner_exit_registered) {
+        pg_on_exit_callback func = u_sess->gtt_ctx.gtt_sess_exit;
+        (*func)(code, UInt32GetDatum(NULL));
+    }
+	
     for (; u_sess->on_sess_exit_index < on_sess_exit_size; u_sess->on_sess_exit_index++)
         (*on_sess_exit_list[u_sess->on_sess_exit_index])(code, UInt32GetDatum(NULL));
 
@@ -466,11 +504,6 @@ void shmem_exit(int code)
     if (t_thrd.postmaster_cxt.redirection_done)
         ereport(DEBUG3, (errmsg("shmem_exit(%d): %d callbacks to make", code, t_thrd.storage_cxt.on_shmem_exit_index)));
 
-    if (g_instance.status == ImmediateShutdown) { // fast quit
-        t_thrd.storage_cxt.on_shmem_exit_index = 0;
-        return;
-    }
-
     /*
      * call all the registered callbacks.
      *
@@ -486,23 +519,6 @@ void shmem_exit(int code)
     }
 
     t_thrd.storage_cxt.on_shmem_exit_index = 0;
-}
-
-/* ----------------------------------------------------------------
- *        atexit_callback
- *
- *        Backstop to ensure that direct calls of exit() don't mess us up.
- *
- * Somebody who was being really uncooperative could call _exit(),
- * but for that case we have a "dead man switch" that will make the
- * postmaster treat it as a crash --- see pmsignal.c.
- * ----------------------------------------------------------------
- */
-static void atexit_callback(void)
-{
-    /* Clean up everything that must be cleaned up */
-    /* ... too bad we don't know the real exit code ... */
-    proc_exit_prepare(-1);
 }
 
 /* ----------------------------------------------------------------
@@ -525,32 +541,6 @@ void on_proc_exit(pg_on_exit_callback function, Datum arg)
     if (!t_thrd.storage_cxt.atexit_callback_setup) {
         t_thrd.storage_cxt.atexit_callback_setup = true;
     }
-}
-
-/* ----------------------------------------------------------------
- *        before_shmem_exit
- *
- *        Register early callback to perform user-level cleanup,
- *        e.g. transaction abort, before we begin shutting down
- *        low-level subsystems.
- * ----------------------------------------------------------------
- */
-void before_shmem_exit(pg_on_exit_callback function, Datum arg)
-{
-    if (t_thrd.storage_cxt.before_shmem_exit_index >= MAX_ON_EXITS)
-        ereport(FATAL,
-                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                 errmsg_internal("out of before_shmem_exit slots")));
-
-    t_thrd.storage_cxt.before_shmem_exit_list[t_thrd.storage_cxt.before_shmem_exit_index].function = function;
-    t_thrd.storage_cxt.before_shmem_exit_list[t_thrd.storage_cxt.before_shmem_exit_index].arg = arg;
-
-    ++t_thrd.storage_cxt.before_shmem_exit_index;
-
-    if (!t_thrd.storage_cxt.atexit_callback_setup) {
-        (void)atexit(atexit_callback);
-        t_thrd.storage_cxt.atexit_callback_setup = true; 
-    }   
 }
 
 /* ----------------------------------------------------------------
@@ -644,7 +634,10 @@ void CloseClientSocket(knl_session_context* sess, bool closesock)
     pgsocket tmpsock = -1;
     if (sess->proc_cxt.MyProcPort != NULL) {
         /* if gs_sock is NULL, just clean gs_poll hash table. */
+        MemoryContext oldcontext =
+            MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
         pfree_ext(sess->proc_cxt.MyProcPort->msgLog);
+        MemoryContextSwitchTo(oldcontext);
         gs_close_gsocket(&(sess->proc_cxt.MyProcPort->gs_sock));
     }
     if (t_thrd.postmaster_cxt.KeepSocketOpenForStream == false && (sess->proc_cxt.MyProcPort != NULL) &&
@@ -675,7 +668,7 @@ void PreventInterrupt()
     InterruptPending = false;
     t_thrd.int_cxt.ProcDiePending = false;
     t_thrd.int_cxt.QueryCancelPending = false;
-    /* And let's just make *sure* we're  not interrupted ... */
+    /* And le's just make *sure* we'tre  not interrupted ... */
     t_thrd.int_cxt.ImmediateInterruptOK = false;
     t_thrd.int_cxt.CritSectionCount = 0;
 }

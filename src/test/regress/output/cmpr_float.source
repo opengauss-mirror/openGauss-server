@@ -23,7 +23,7 @@ CREATE TABLE cmpr_float (
 	R17_ID float NOT NULL,
 	R18_ID float NOT NULL,
 	R19_ID float NOT NULL
-) COMPRESS;
+) ;
 CREATE TABLE cmpr_float_raw ( 
 	RR_ID int,
 	R0_ID float NOT NULL,
@@ -47,8 +47,8 @@ CREATE TABLE cmpr_float_raw (
 	R18_ID float NOT NULL,
 	R19_ID float NOT NULL
 );
-COPY cmpr_float FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_float.data';
-COPY cmpr_float_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_float.data';
+COPY cmpr_float FROM '@abs_srcdir@/data/cmpr_float.data';
+COPY cmpr_float_raw FROM '@abs_srcdir@/data/cmpr_float.data';
 SELECT (SELECT COUNT(*) FROM cmpr_float) - (SELECT COUNT(*) FROM cmpr_float_raw);
  ?column? 
 ----------

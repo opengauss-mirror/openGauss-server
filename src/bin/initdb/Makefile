@@ -17,7 +17,6 @@ top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
 override CPPFLAGS := -DFRONTEND -I$(libpq_srcdir) -I$(top_srcdir)/src/common/timezone -fPIE $(CPPFLAGS)
-LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
 
 # use system timezone data?
 ifneq (,$(with_system_tzdata))
@@ -34,17 +33,11 @@ endif
 OBJS=	initdb.o findtimezone.o localtime.o encnames.o pqsignal.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a
 all: gs_initdb
 
-ifeq ($(enable_profiling), no)
-  CAFLAGS = -fPIE -pie
-else
-  CAFLAGS = -fPIC
-endif
-
 gs_initdb: $(OBJS) | submake-libpgport
-	$(CC) $(CAFLAGS) $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
+	$(CC) -fPIE -pie $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
 utinitdb: $(OBJS) | submake-libpgport
 	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o libutinitdb.so
-	mv libutinitdb.so $(top_builddir)/src/test/ut/lib
+	mv libutinitdb.so $(top_builddir)/src/distribute/test/ut/lib
 
 # We used to pull in all of libpq to get encnames and pqsignal, but that
 # exposes us to risks of version skew if we link to a shared library.

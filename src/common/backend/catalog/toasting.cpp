@@ -97,21 +97,15 @@ void BootstrapToastTable(char* relName, Oid toastOid, Oid toastIndexOid)
 
     rel = heap_openrv(makeRangeVar(NULL, relName, -1), AccessExclusiveLock);
     if (rel->rd_rel->relkind != RELKIND_RELATION && rel->rd_rel->relkind != RELKIND_MATVIEW)
-        ereport(ERROR, 
-            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a table or materialized view", relName)));
+        ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("\"%s\" is not a table or materialized view", relName)));
 
     /* create_toast_table does all the work */
     if (!create_toast_table(rel, toastOid, toastIndexOid, (Datum)0, false, NULL))
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("\"%s\" does not require a toast table", relName)));
 
-    heap_close(rel, NoLock);
-}
-void NewRelationCreateToastTable(Oid relOid, Datum reloptions)
-{
-    Relation rel;
-    rel = heap_open(relOid, AccessExclusiveLock);
-    (void) create_toast_table(rel, InvalidOid, InvalidOid, reloptions, false, NULL);
     heap_close(rel, NoLock);
 }
 
@@ -293,7 +287,6 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
     indexInfo->ii_ReadyForInserts = true;
     indexInfo->ii_Concurrent = false;
     indexInfo->ii_BrokenHotChain = false;
-    indexInfo->ii_ParallelWorkers = 0;
     indexInfo->ii_PgClassAttrId = 0;
 
     collationObjectId[0] = InvalidOid;

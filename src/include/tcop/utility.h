@@ -19,6 +19,18 @@
 
 #define CHOOSE_EXEC_NODES(is_temp) ((is_temp) ? EXEC_ON_DATANODES : EXEC_ON_ALL_NODES)
 
+#define TRANSFER_DISABLE_DDL(namespaceOid) \
+    do { \
+        if (!IsInitdb && \
+            IS_PGXC_COORDINATOR && !IsConnFromCoord() && \
+            IsSchemaInDistribution(namespaceOid) && \
+            (u_sess->attr.attr_common.application_name == NULL || \
+                strncmp(u_sess->attr.attr_common.application_name, "gs_redis", strlen("gs_redis")) != 0)) { \
+                ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), \
+                    errmsg("Disallow DDL while schema transfering."))); \
+        } \
+    } while(0) \
+
 /* Hook for plugins to get control in ProcessUtility() */
 typedef void (*ProcessUtility_hook_type)(Node* parsetree, const char* queryString, ParamListInfo params,
     bool isTopLevel, DestReceiver* dest,
@@ -90,8 +102,10 @@ extern bool CheckExtensionInWhiteList(const char* extensionName, uint32 hashvalu
 bool IsHDFSTableAnalyze(Oid foreignTableId);
 /* @pgfdw judge if is a gc_fdw foreign table support analysis operation. */
 bool IsPGFDWTableAnalyze(Oid foreignTableId);
+#ifdef ENABLE_MOT
 /* @MOT IsMOTForeignTbale */
 bool IsMOTForeignTable(Oid foreignTableId);
+#endif
 /* @hdfs IsForeignTableAnalyze function is called by standard_ProcessUtility */
 bool IsHDFSForeignTableAnalyzable(VacuumStmt* stmt);
 void global_stats_set_samplerate(AnalyzeMode eAnalyzeMode, VacuumStmt* stmt, const double* NewSampleRate);
@@ -146,7 +160,7 @@ typedef struct ForeignTableDesc {
     Oid tableOid;
 } ForeignTableDesc;
 
-/* The struct for verify information */
+/* The struct for verify information*/
 typedef struct VerifyDesc {
     bool isCudesc;        /* judge cudesc relation and its toast\index relation */
     bool isCudescDamaged; /*judge the relation data corrupt*/
@@ -175,5 +189,8 @@ extern void AssembleHybridMessage(char** queryStringWithInfo, const char* queryS
 
 extern void ClearCreateSeqStmtUUID(CreateSeqStmt* stmt);
 extern void ClearCreateStmtUUIDS(CreateStmt* stmt);
+extern bool IsSchemaInDistribution(const Oid namespaceOid);
+extern Oid GetNamespaceIdbyRelId(const Oid relid);
+
 
 #endif /* UTILITY_H */

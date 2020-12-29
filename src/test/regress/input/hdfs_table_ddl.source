@@ -1,0 +1,354 @@
+set enable_global_stats = true;
+set max_query_retry_times = 0;
+--test hdfs table ddl
+\! rm -rf @abs_srcdir@/hdfs_ts_table_ddl
+drop tablespace if exists hdfs_ts_ddl;
+create tablespace hdfs_ts_ddl location '@abs_srcdir@/hdfs_ts_table_ddl' with(filesystem="hDfs", cfgpath='@hdfscfgpath@',storepath='/@hdfsstoreplus@/hdfs_table_object_ddl_ts_table_ddl');
+create schema hdfs_table_ddl_schema;
+set current_schema=hdfs_table_ddl_schema;
+
+--test delete hdfs replication table;
+create table hdfs_rep_tbl_000(a2 bigint, a3 int) tablespace hdfs_ts_ddl distribute by replication;
+insert into hdfs_rep_tbl_000 values(9223372036854775807,generate_series(1,1002));
+delete from hdfs_rep_tbl_000 where a3=1;
+delete hdfs_rep_tbl_000;
+\d+ hdfs_rep_tbl_000;
+drop table hdfs_rep_tbl_000;
+
+-- test node group for hdfs table
+create node group ng1 with(datanode1, datanode2);
+drop table if exists hdfs_tbl_000;
+create table hdfs_tbl_000(a int) with(orientation=orc) tablespace hdfs_ts_ddl to group ng1;
+set default_storage_nodegroup='ng1';
+create table hdfs_tbl_000(a int) with(orientation=orc) tablespace hdfs_ts_ddl;
+\d+ hdfs_tbl_000
+drop table hdfs_tbl_000;
+reset default_storage_nodegroup;
+drop node group ng1;
+
+-- only assign orientation
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int) with(orientation=orc) tablespace hdfs_ts_ddl;
+\d+ hdfs_tbl_001
+
+-- assign orientation, compression
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int) with(orientation=orc, compression=zlib) tablespace hdfs_ts_ddl;
+\d+ hdfs_tbl_001
+
+-- assign orientation, compression
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int) with(orientation=orc, compression=snappy) tablespace hdfs_ts_ddl;
+\d+ hdfs_tbl_001
+
+-- assign orientation, version
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int) with(orientation=orc, version=0.12) tablespace hdfs_ts_ddl;
+\d+ hdfs_tbl_001
+
+-- assign orientation, compression, version
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int) with(orientation=orc, compression= zlib, version=0.12) tablespace hdfs_ts_ddl;
+\d+ hdfs_tbl_001
+
+-- Orc, ZlIb
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int) with(orientation="Orc", compression= "ZlIb", version=0.12) tablespace hdfs_ts_ddl;
+\d+ hdfs_tbl_001
+set cstore_insert_mode=main;
+insert into hdfs_tbl_001 values (12);
+select * from hdfs_tbl_001;
+
+-- assign hdfs_ts_ddl tablespace
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int) tablespace hdfs_ts_ddl;
+\d+ hdfs_tbl_001
+
+--test data type
+drop table if exists hdfs_tbl_001;
+
+create table hdfs_tbl_001(a1 bool, a2 tinyint, a3 smallint, a4 int, a5 bigint, a6 numeric, a7 numeric(10,4), a8 decimal, a9 decimal(10,4), a10 real)tablespace hdfs_ts_ddl;
+set cstore_insert_mode=main;
+insert into hdfs_tbl_001 values(true, 2, 3, 4, 5, 6.66, 7.77, 8.88, 9.99999, 10.45 );
+select * from hdfs_tbl_001;
+
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, a1 float4, a2 float8, a4 binary_double) tablespace hdfs_ts_ddl;
+set cstore_insert_mode=main;
+insert into hdfs_tbl_001 values(0, 1.2, 2.2, 4.444);
+select * from hdfs_tbl_001;
+
+----------test char data type 
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a1 char, a2 char(4), a3 character(4), a4 nchar(3), a5 varchar(5), a6 character varying(5), a7 nvarchar2(4), a8 varchar2(5), a9 clob, a10 text) tablespace hdfs_ts_ddl;
+set cstore_insert_mode=main;
+--insert into hdfs_tbl_001 values('a', 'a2', '333', '444', '55555', '6666', '777', '888', '9999', '10101010');
+select * from hdfs_tbl_001;
+
+---------test time data type
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a1 date, a2 time, a3 time without time zone, a4 Timestamp, a5 Timestamp without time zone, a6 Timestamp with time zone, a7 Smalldatetime, a8 interval year (6))tablespace hdfs_ts_ddl;
+set cstore_insert_mode=main;
+insert into hdfs_tbl_001 values(date '12-10-2010', '21:21:21 pst', '21:21:21', '2010-12-12', '2010-12-12', '2013-12-11 pst', '2003-04-12 04:05:06', interval '2' year);
+select * from hdfs_tbl_001;
+
+---------test other data type
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a0 int, a1 oid, a2 money) tablespace hdfs_ts_ddl;
+set cstore_insert_mode=main;
+insert into hdfs_tbl_001 values(0, 234, '100'::money);
+select * from hdfs_tbl_001;
+
+----test constraint
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int, PARTIAL CLUSTER KEY (b) )tablespace hdfs_ts_ddl;
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int not null, c int null,  s int default 10)tablespace hdfs_ts_ddl;
+insert into hdfs_tbl_001 values (12, 13);
+select * from hdfs_tbl_001;
+----unsupport other constrint
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int, primary key(b) )tablespace hdfs_ts_ddl;
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int unique)tablespace hdfs_ts_ddl;
+ 
+-----test hdfs table struct
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int)tablespace hdfs_ts_ddl;
+\d+ hdfs_tbl_001
+select * from (select relname from pg_class where oid in (select reldeltarelid from pg_class where relname='hdfs_tbl_001'));
+
+------test distribution
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int)tablespace hdfs_ts_ddl distribute by hash(a);
+\d+ hdfs_tbl_001
+set cstore_insert_mode=main;
+insert into hdfs_tbl_001 values(12, 13);
+
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int)tablespace hdfs_ts_ddl distribute by hash(a, b);
+\d+ hdfs_tbl_001
+select relname, pclocatortype from pgxc_class a,  (select reldeltarelid from pg_class where relname='hdfs_tbl_001') b, 
+(select relname from pg_class where oid in (select reldeltarelid from pg_class where relname='hdfs_tbl_001')) c where b.reldeltarelid = a.pcrelid;
+set cstore_insert_mode=main;
+insert into hdfs_tbl_001 values(12, 13);
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int)tablespace hdfs_ts_ddl distribute by replication;
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int)tablespace hdfs_ts_ddl distribute by roundrobin;
+
+
+-----normal optoin
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int) with(orientation = row)tablespace hdfs_ts_ddl;
+
+----------------------------------------------------------------current, support cu on hdfs
+create table hdfs_tbl_001(a int, b int) with(orientation = column)tablespace hdfs_ts_ddl;
+
+------ error optoin
+
+
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int) with(orientation = row, version = 0.12);
+create table hdfs_tbl_001(a int, b int) with(orientation = column, version = 0.12);
+create table hdfs_tbl_001(a int, b int) with(orientation = orc);
+
+-------or, orcc, zli, zlibb, snap, snappyy
+create table hdfs_tbl_001(a int, b int) with(orientation = or, compression=zlib, version=0.12)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int) with(orientation = orcc, compression=zlib, version=0.12)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=zli, version=0.12)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=zlibb, version=0.12)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=snap, version=0.12)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=snappyy, version=0.12)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=n, version=0.12)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=non, version=0.12)tablespace hdfs_ts_ddl;
+
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=low, version=0.12)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=zlib, version=0.11)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=snappy, version=0.1)tablespace hdfs_ts_ddl;
+
+----------invalid version 
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=snappy, version=0.1)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=snappy, version=0.14)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=snappy, version=0.1)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=no, version=0.14)tablespace hdfs_ts_ddl;
+
+-----------other option
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=no, max_batchrow=5000)tablespace hdfs_ts_ddl;
+-----------other invalid option
+create table hdfs_tbl_001(a int, b int) with(orientation = orc, compression=no, max_batchrow=10)tablespace hdfs_ts_ddl;
+
+--test drop hdfs table
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int)tablespace hdfs_ts_ddl distribute by hash(a);
+drop table hdfs_tbl_001;
+drop table if exists hdfs_tbl_001;
+
+
+---- test default_tablespace
+set default_tablespace=hdfs_ts_ddl;
+create table hdfs_tbl_001(a int, b int);
+\d+ hdfs_tbl_001
+
+----- column, row, thorw error
+drop table if exists hdfs_tbl_001;
+-----------------------------------currently, support cu on hdfs
+create table hdfs_tbl_001(a int, b int) with(orientation = column);
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int) with(orientation = row);
+
+--throw error
+set default_tablespace='';
+create table hdfs_tbl_001(a int, b int) with(orientation = orc);
+
+-----test alter hdfs table
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int)tablespace hdfs_ts_ddl;
+alter table hdfs_tbl_001 add column c int;
+
+----unsupport rename
+alter table hdfs_tbl_001 rename to rename_hdfs_tbl_001;
+alter table hdfs_tbl_001 rename column b to c;
+
+---test create like .... include all
+create table hdfs_tbl_001_like( like hdfs_tbl_001 including all ) tablespace hdfs_ts_ddl;
+\d+ hdfs_tbl_001_like
+--test create table INHERITS, it is unsupport
+drop table if exists hdfs_tbl_001;
+drop table if exists hdfs_tbl_002;
+create table hdfs_tbl_002(a int, b int)tablespace hdfs_ts_ddl;
+create table hdfs_tbl_001(a int)inherits(hdfs_tbl_002) tablespace hdfs_ts_ddl;
+--test temp HDFS table
+create temp table hdfs_tbl_002_temp (a int, b int)tablespace hdfs_ts_ddl;
+drop table hdfs_tbl_002_temp;
+--create table as
+set cstore_insert_mode=main;
+insert into hdfs_tbl_002 values(12, 13);
+create table hdfs_tbl_001_as tablespace hdfs_ts_ddl as select * from hdfs_tbl_002;
+\d+ hdfs_tbl_001_as
+select * from hdfs_tbl_001_as;
+
+--test decimal
+create table dec2 (a int, b decimal(18,16), c decimal(18,17), d decimal(18,18)) tablespace hdfs_ts_ddl;
+insert into dec2 values(1, 0.123456789012345678, 0.123456789012345678, 0.123456789012345678);
+set cstore_insert_mode='main';
+insert into dec2 values(1, 0.123456789012345678, 0.123456789012345678, 0.123456789012345678);
+select * from dec2 where c > 0.1;
+select * from dec2 where b < 0.1;
+drop table dec2;
+
+-- create table IF NOT EXISTS
+drop table if exists hdfs_tbl_001;
+create table if not exists hdfs_tbl_001(a int, b int)tablespace hdfs_ts_ddl;
+create table if not exists hdfs_tbl_001(a int, b int)tablespace hdfs_ts_ddl;
+----test UNLOGGED table
+drop table if exists hdfs_tbl_001_unlogged;
+create UNLOGGED table if not exists hdfs_tbl_001_unlogged(a int, b int)tablespace hdfs_ts_ddl;
+drop table if exists hdfs_tbl_001_unlogged;
+create UNLOGGED table hdfs_tbl_001_unlogged tablespace hdfs_ts_ddl as select * from hdfs_tbl_002;
+drop table if exists hdfs_tbl_001_unlogged;
+----test create table schema.tablename
+create schema temp_schema;
+drop table if exists hdfs_tbl_001;
+create table temp_schema.hdfs_tbl_001(a int, b int)tablespace hdfs_ts_ddl;
+\d+ temp_schema.hdfs_tbl_001
+set cstore_insert_mode=main;
+insert into temp_schema.hdfs_tbl_001 values(12, 13);
+select * from temp_schema.hdfs_tbl_001;
+drop schema temp_schema;
+drop schema temp_schema cascade;
+
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int)tablespace hdfs_ts_ddl;
+set  cstore_insert_mode=delta;
+insert into hdfs_tbl_001 values(12, 13);
+insert into hdfs_tbl_001 values(12, 13);
+analyze;
+analyze hdfs_tbl_001;
+drop table if exists hdfs_tbl_001;
+
+----test: reindex internal table (hdfs table)
+----test1: hdfs table test
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int) with(orientation=orc,version=0.12) tablespace hdfs_ts_ddl;
+insert into hdfs_tbl_001 values(1, 13);
+insert into hdfs_tbl_001 values(2, 13);
+insert into hdfs_tbl_001 values(3, 13);
+
+create index a_idx_t1 on hdfs_tbl_001 using btree(a);
+reindex index a_idx_t1;
+reindex table hdfs_tbl_001;
+reindex internal table hdfs_tbl_001;
+
+drop index if exists a_idx_t1;
+drop table if exists hdfs_tbl_001;
+
+----test2: hdfs unlogged table test
+drop table if exists hdfs_tbl_002;
+create unlogged table hdfs_tbl_002(a int, b int) with(orientation=orc,version=0.12) tablespace hdfs_ts_ddl ;
+----test3: hdfs table test
+drop table if exists hdfs_tbl_003;
+create table hdfs_tbl_003(a int, b int) with(orientation=orc,version=0.12) tablespace hdfs_ts_ddl;
+insert into hdfs_tbl_003 values(1, 13);
+insert into hdfs_tbl_003 values(2, 13);
+insert into hdfs_tbl_003 values(3, 13);
+
+create index a_idx_t3 on hdfs_tbl_003 using btree(a);
+reindex index a_idx_t3;
+reindex table hdfs_tbl_003;
+reindex internal table hdfs_tbl_003;
+
+drop index if exists a_idx_t3;
+drop table if exists hdfs_tbl_003;
+
+
+
+drop table if exists row_tbl;
+create table row_tbl(a int, b int)with (orientation=row);
+drop table if exists column_tbl;
+create table column_tbl(a int, b int)with (orientation=column);
+drop table if exists hdfs_tbl_001;
+create table hdfs_tbl_001(a int, b int)tablespace hdfs_ts_ddl;
+alter table row_tbl set tablespace hdfs_ts_ddl;
+alter table column_tbl set tablespace hdfs_ts_ddl;
+alter table hdfs_tbl_001 set tablespace hdfs_ts_ddl;
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+set default_tablespace=hdfs_ts_ddl;
+create foreign table region010  (
+ R_REGIONKEY  INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER  hdfs_server 
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe')
+distribute by roundrobin;
+
+drop foreign table if exists region_tb_010;
+drop foreign table if exists region_tb_020;
+
+create foreign table region_tb_010  (
+ R_REGIONKEY  INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER  hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe')
+PER NODE REJECT LIMIT '10'
+distribute by roundrobin;
+
+create foreign table region_tb_020  (
+ R_REGIONKEY  INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER  hdfs_server
+OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/region_orc11_64stripe')
+REMOTE LOG 'logname1'
+distribute by roundrobin;
+
+drop foreign table region_tb_010;
+drop foreign table region_tb_020;
+
+set default_tablespace='';
+drop server hdfs_server cascade;
+drop schema hdfs_table_ddl_schema cascade;
+\d
+drop tablespace if exists hdfs_ts_ddl;
+\! rm -rf @abs_srcdir@/hdfs_ts_table_ddl

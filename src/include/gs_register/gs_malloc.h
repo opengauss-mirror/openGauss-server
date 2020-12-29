@@ -32,6 +32,13 @@
 #include "gssignal/gs_signal.h"
 #include "gs_threadlocal.h"
 
+#ifdef WIN32
+#define register_hash_len   1111
+#define register_local_info_len   64
+#define REGISTER_TRUE      1
+#define REGISTER_FALSE     0
+#endif
+
 /* these memory apply macro is used only for memory context */
 #define gs_free(local_register_ptr, local_register_size)             \
     do {                                                             \
@@ -108,6 +115,17 @@
             }                                                                                         \
         }                                                                                             \
     } while (0)
+
+#ifdef WIN32
+typedef struct tag_register_node {
+    unsigned long size_mem;
+    void *addr_mem;
+    struct tag_register_node *next;
+    struct tag_register_node *prior;
+    unsigned long no_ctl; /* pool no.*/
+    char register_local[register_local_info_len];
+} register_node;
+#endif
 
 #endif
 

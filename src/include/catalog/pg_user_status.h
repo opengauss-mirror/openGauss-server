@@ -45,6 +45,7 @@ CATALOG(pg_user_status,3460) BKI_SHARED_RELATION BKI_ROWTYPE_OID(3463) BKI_SCHEM
 	int2 rolstatus;         /* role status */
     int8 permspace;             /* perm space */
 	int8 tempspace;         /* temp space */
+    int2 passwordexpired;   /* password expired status */
 } FormData_pg_user_status;
 
 #undef timestamptz
@@ -60,13 +61,14 @@ typedef FormData_pg_user_status *Form_pg_user_status;
  *		compiler constants for pg_user_status
  * -------------------------------------------------------------------------
  */
-#define Natts_pg_user_status                    6
+#define Natts_pg_user_status                    7
 #define Anum_pg_user_status_roloid              1
 #define Anum_pg_user_status_failcount           2
 #define Anum_pg_user_status_locktime            3
 #define Anum_pg_user_status_rolstatus           4
 #define Anum_pg_user_status_permspace           5
 #define Anum_pg_user_status_tempspace           6
+#define Anum_pg_user_status_passwordexpired     7
 
 #endif   /* PG_USER_STATUS_H */
 

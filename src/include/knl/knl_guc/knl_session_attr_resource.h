@@ -48,6 +48,7 @@ typedef struct knl_session_attr_resource {
 #endif
     bool enable_cgroup_switch;
     bool enable_resource_track;
+    bool enable_hotkeys_collection;
     bool enable_verify_statements;
     bool enable_force_memory_control;
     bool enable_dywlm_adjust;
@@ -65,6 +66,7 @@ typedef struct knl_session_attr_resource {
     int resource_track_duration;
     int user_metric_retention_time;
     int topsql_retention_time;
+    int unique_sql_retention_time;
     int instance_metric_retention_time;
     int cpu_collect_timer;
     int iops_limits;
@@ -84,8 +86,10 @@ typedef struct knl_session_attr_resource {
     /* GUC variable for session history memory */
     int session_history_memory;
     bool bypass_workload_manager;
-
+    /* sql_use_spacelimit */
     int sqlUseSpaceLimit;
+    bool enable_auto_explain;
+    int  auto_explain_level;
 } knl_session_attr_resource;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_RESOURCE_H_ */

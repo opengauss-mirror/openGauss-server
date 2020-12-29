@@ -111,15 +111,16 @@ int hotpatch_check(const char* path, const char* command, bool* is_list)
     return -1;
 }
 
-static FILE* hotpatch_open_patch_info_file(const char* data_dir, int dir_length, void (*canonicalize_path)(char*))
+static FILE* hotpatch_open_patch_info_file(const char* data_dir, size_t dir_length, void (*canonicalize_path)(char*))
 {
     int ret;
     char info_file[g_max_length_path] = {0};
     FILE* fp = NULL;
 
-    if((int)strlen(data_dir) > dir_length) {
+    if (dir_length >= g_max_length_path) {
         return NULL;
     }
+
     ret = snprintf_s(info_file, g_max_length_path, g_max_length_path - 1, "%s/hotpatch/patch.info", data_dir);
     securec_check_ss_c(ret, "\0", "\0");
 
@@ -159,7 +160,6 @@ static int hotpatch_output_list_from_patch_info(FILE* fp, LogFunc log_func)
             return -1;
         }
         hotpatch_patch_state_to_string(patch_info.patch_state, patch_state_string, sizeof(patch_state_string));
-
         patch_info.patch_name[g_max_length_path - 1] = '\0';
         patch_name = strip_path_from_pathname(patch_info.patch_name);
         if (patch_name == NULL) {
@@ -172,7 +172,7 @@ static int hotpatch_output_list_from_patch_info(FILE* fp, LogFunc log_func)
     return 0;
 }
 
-void hotpatch_process_list(const char* return_string, int string_length, const char* data_dir, int dir_length,
+void hotpatch_process_list(const char* return_string, int string_length, const char* data_dir, size_t dir_length,
     void (*canonicalize_path)(char*), LogFunc log_func)
 {
     FILE* fp = NULL;

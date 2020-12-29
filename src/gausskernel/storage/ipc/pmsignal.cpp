@@ -175,8 +175,8 @@ int AssignPostmasterChildSlot(void)
     }
 
     /* Out of slots ... should never happen, else postmaster.c messed up */
-    ereport(PANIC, (errmsg("no free slots in PMChildFlags array")));
-    return 0; /* keep compiler quiet */
+    ereport(WARNING, (errmsg("no free slots in PMChildFlags array")));
+    return -1; /* keep compiler quiet */
 }
 
 /*
@@ -276,8 +276,7 @@ void MarkPostmasterChildActive(void)
 {
     int slot = t_thrd.proc_cxt.MyPMChildSlot;
 
-    Assert(slot > 0);
-    Assert(slot <= t_thrd.shemem_ptr_cxt.PMSignalState->num_child_flags);
+    Assert(slot > 0 && slot <= t_thrd.shemem_ptr_cxt.PMSignalState->num_child_flags);
     slot--;
     Assert(t_thrd.shemem_ptr_cxt.PMSignalState->PMChildFlags[slot] == PM_CHILD_ASSIGNED);
     t_thrd.shemem_ptr_cxt.PMSignalState->PMChildFlags[slot] = PM_CHILD_ACTIVE;

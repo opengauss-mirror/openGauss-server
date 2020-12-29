@@ -35,4 +35,3 @@ extern void dblinkCloseConn(void);
 extern void dblinkRequestCancel(void);
 
 #endif /* DBLINK_QUERY_H */
-

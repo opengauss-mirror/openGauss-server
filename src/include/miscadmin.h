@@ -23,12 +23,13 @@
 #ifndef MISCADMIN_H
 #define MISCADMIN_H
 
+#ifndef FRONTEND
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#endif
+#include "gs_thread.h"
 #include "pgtime.h" /* for pg_time_t */
 #include "libpq/libpq-be.h"
-
-#define InvalidPid ((ThreadId)(-1))
 
 #define PG_BACKEND_VERSIONSTR "gaussdb " DEF_GS_VERSION "\n"
 
@@ -37,6 +38,21 @@
  *****************************************************************************/
 
 extern const uint32 GRAND_VERSION_NUM;
+
+extern const uint32 MATVIEW_VERSION_NUM;
+extern const uint32 PARTIALPUSH_VERSION_NUM;
+extern const uint32 SUBLINKPULLUP_VERSION_NUM;
+extern const uint32 PREDPUSH_VERSION_NUM;
+extern const uint32 GTMLITE_VERSION_NUM;
+extern const uint32 EXECUTE_DIRECT_ON_MULTI_VERSION_NUM;
+extern const uint32 FIX_PBE_CUSTOME_PLAN_BUG_VERSION_NUM;
+extern const uint32 FUNCNAME_PUSHDOWN_VERSION_NUM;
+extern const uint32 STP_SUPPORT_COMMIT_ROLLBACK;
+extern const uint32 SUPPORT_GPI_VERSION_NUM;
+extern const uint32 PRIVS_VERSION_NUM;
+extern const uint32 ML_OPT_MODEL_VERSION_NUM;
+extern const uint32 RANGE_LIST_DISTRIBUTION_VERSION_NUM;
+extern const uint32 FIX_SQL_ADD_RELATION_REF_COUNT;
 
 #define INPLACE_UPGRADE_PRECOMMIT_VERSION 1
 
@@ -53,12 +69,6 @@ extern const uint32 GRAND_VERSION_NUM;
 #define OPT_CONVERT_TO_NUMERIC 1024
 #define OPT_MAX 11
 
-/* length of password */
-#define MAX_PASSWORD_LENGTH 999
-#define MIN_PASSWORD_LENGTH 6
-#define DEFAULT_PASSWORD_MIN_LENGTH 8
-#define DEFAULT_PASSWORD_MAX_LENGTH 32
-
 #define DISPLAY_LEADING_ZERO (u_sess->utils_cxt.behavior_compat_flags & OPT_DISPLAY_LEADING_ZERO)
 #define END_MONTH_CALCULATE (u_sess->utils_cxt.behavior_compat_flags & OPT_END_MONTH_CALCULATE)
 #define SUPPORT_PRETTY_ANALYZE (!(u_sess->utils_cxt.behavior_compat_flags & OPT_COMPAT_ANALYZE_SAMPLE))
@@ -67,19 +77,31 @@ extern const uint32 GRAND_VERSION_NUM;
 #define RETURN_NS (u_sess->utils_cxt.behavior_compat_flags & OPT_RETURN_NS_OR_NULL)
 #define CORRECT_TO_NUMBER (u_sess->utils_cxt.behavior_compat_flags & OPT_CORRECT_TO_NUMBER)
 #define SUPPORT_BIND_SEARCHPATH (u_sess->utils_cxt.behavior_compat_flags & OPT_BIND_SEARCHPATH)
-/*CONCAT_VARIADIC controls 1.the variadic type process, and 2. C DB mode null return process in concat. By default, the
- * option is blank and the behavior is new and compatible with current A DB and C DB mode, if the option is set, the
- * behavior is old and the same as previous DB kernel. */
+/*CONCAT_VARIADIC controls 1.the variadic type process, and 2. td mode null return process in concat. By default, the
+ * option is blank and the behavior is new and compatible with current A and C mode, if the option is set, the
+ * behavior is old and the same as previous GAUSSDB kernel. */
 #define CONCAT_VARIADIC (!(u_sess->utils_cxt.behavior_compat_flags & OPT_CONCAT_VARIADIC))
 #define MEGRE_UPDATE_MULTI (u_sess->utils_cxt.behavior_compat_flags & OPT_MEGRE_UPDATE_MULTI)
 #define CONVERT_STRING_DIGIT_TO_NUMERIC (u_sess->utils_cxt.behavior_compat_flags & OPT_CONVERT_TO_NUMERIC)
 
-#define DB_CMPT_OPT_A "A"
-#define DB_CMPT_OPT_B "B"
-#define DB_CMPT_OPT_C "C"
-#define DB_CMPT_OPT_PG "PG"
+/* define database compatibility Attribute */
+typedef struct {
+    int flag;
+    char name[256];
+} DB_CompatibilityAttr;
+#define DB_CMPT_A 0
+#define DB_CMPT_B 1
+#define DB_CMPT_C 2
+#define DB_CMPT_PG 3
 
-extern bool CheckCompArgs(const char *cmptFmt);
+extern bool checkCompArgs(const char *cmptFmt);
+
+typedef struct {
+    char name[32];
+} IntervalStylePack;
+
+extern DB_CompatibilityAttr g_dbCompatArray[];
+extern IntervalStylePack g_interStyleVal;
 
 /* in tcop/postgres.c */
 extern void ProcessInterrupts(void);
@@ -104,10 +126,14 @@ extern void ProcessInterrupts(void);
 
 #define HOLD_INTERRUPTS() (t_thrd.int_cxt.InterruptHoldoffCount++)
 
-#define RESUME_INTERRUPTS()                               \
-    do {                                                  \
-        Assert(t_thrd.int_cxt.InterruptHoldoffCount > 0); \
-        t_thrd.int_cxt.InterruptHoldoffCount--;           \
+#define RESUME_INTERRUPTS()                                                                      \
+    do {                                                                                         \
+        if (t_thrd.int_cxt.InterruptCountResetFlag && t_thrd.int_cxt.InterruptHoldoffCount== 0){ \
+            t_thrd.int_cxt.InterruptCountResetFlag = false;                                      \
+        } else {                                                                                 \
+            Assert(t_thrd.int_cxt.InterruptHoldoffCount > 0);                                    \
+            t_thrd.int_cxt.InterruptHoldoffCount--;                                              \
+        }                                                                                        \
     } while (0)
 
 #define START_CRIT_SECTION() (t_thrd.int_cxt.CritSectionCount++)
@@ -138,8 +164,12 @@ extern bool InplaceUpgradePrecommit;
 extern THR_LOCAL PGDLLIMPORT bool IsUnderPostmaster;
 extern THR_LOCAL PGDLLIMPORT char my_exec_path[];
 
+extern int8 ce_cache_refresh_type;
+
 #define MAX_QUERY_DOP (64)
 #define MIN_QUERY_DOP -(MAX_QUERY_DOP)
+
+extern const uint32 BACKUP_SLOT_VERSION_NUM;
 
 /* Debug mode.
  * 0 - Do not change any thing.
@@ -156,7 +186,7 @@ extern THR_LOCAL PGDLLIMPORT char my_exec_path[];
  * u_sess->time_cxt.DateStyle defines the output formatting choice for date/time types:
  *	USE_POSTGRES_DATES specifies traditional Postgres format
  *	USE_ISO_DATES specifies ISO-compliant format
- *	USE_SQL_DATES specifies A/Ingres-compliant format
+ *	USE_SQL_DATES specifies A db/Ingres-compliant format
  *	USE_GERMAN_DATES specifies German-style dd.mm/yyyy
  *
  */
@@ -213,7 +243,6 @@ extern bool stack_is_too_deep(void);
 
 /* in tcop/utility.c */
 extern void PreventCommandIfReadOnly(const char* cmdname);
-extern void PreventCommandIfParallelMode(const char *cmdname);
 extern void PreventCommandDuringRecovery(const char* cmdname);
 
 extern int trace_recovery(int trace_level);
@@ -229,6 +258,7 @@ extern int trace_recovery(int trace_level);
 
 /* now in utils/init/miscinit.c */
 extern char* GetUserNameFromId(Oid roleid);
+extern char* GetUserNameById(Oid roleid);
 extern Oid GetAuthenticatedUserId(void);
 extern Oid GetUserId(void);
 extern Oid getCurrentNamespace();
@@ -241,7 +271,7 @@ extern bool InLocalUserIdChange(void);
 extern bool InSecurityRestrictedOperation(void);
 extern void GetUserIdAndContext(Oid* userid, bool* sec_def_context);
 extern void SetUserIdAndContext(Oid userid, bool sec_def_context);
-extern void InitializeSessionUserId(const char* rolename, Oid role_id);
+extern void InitializeSessionUserId(const char* rolename);
 extern void InitializeSessionUserIdStandalone(void);
 extern void SetSessionAuthorization(Oid userid, bool is_superuser);
 extern Oid GetCurrentRoleId(void);
@@ -276,6 +306,9 @@ extern bool superuser_arg_no_seperation(Oid roleid);     /* given user is superu
 extern bool systemDBA_arg(Oid roleid);                   /* given user is systemdba */
 extern bool isSecurityadmin(Oid roleid);                 /* given user is security admin */
 extern bool isAuditadmin(Oid roleid);                    /* given user is audit admin */
+extern bool isMonitoradmin(Oid roleid);                 /* given user is monitor admin */
+extern bool isOperatoradmin(Oid roleid);                /* given user is operator admin */
+extern bool isPolicyadmin(Oid roleid);                  /* given user is policy admin */
 extern bool CheckExecDirectPrivilege(const char* query); /* check user have privilege to use execute direct */
 
 /*****************************************************************************
@@ -297,12 +330,10 @@ extern bool CheckExecDirectPrivilege(const char* query); /* check user have priv
         u_sess->misc_cxt.Mode = (mode);                                                                      \
     } while (0)
 
-/*
- * Auxiliary-process type identifiers.  These used to be in bootstrap.h
- * but it seems saner to have them here, with the ProcessingMode stuff.
- * The MyAuxProcType global is defined and set in bootstrap.c.
- */
 
+/*
+ * Auxiliary-process type identifiers.
+ */
 typedef enum {
     NotAnAuxProcess = -1,
     CheckerProcess = 0,
@@ -311,7 +342,6 @@ typedef enum {
     BgWriterProcess,
     CheckpointerProcess,
     WalWriterProcess,
-    WalWriterAuxiliaryProcess,
     WalReceiverProcess,
     WalRcvWriterProcess,
     DataReceiverProcess,
@@ -319,7 +349,7 @@ typedef enum {
     HeartbeatProcess,
 #ifdef PGXC
     TwoPhaseCleanerProcess,
-    WLMWorkerProcess, /* 11 */
+    WLMWorkerProcess,
     WLMMonitorWorkerProcess,
     WLMArbiterWorkerProcess,
     CPMonitorProcess,
@@ -327,20 +357,23 @@ typedef enum {
     CBMWriterProcess,
     RemoteServiceProcess,
 #endif
-    AsyncIOCompleterProcess, /* Must be the second last */
-    PageWriterProcess,
+    AsyncIOCompleterProcess,
+    TpoolSchdulerProcess,
+    TsCompactionProcess,
+    TsCompactionAuxiliaryProcess,
+    NUM_SINGLE_AUX_PROC, /* Sentry for auxiliary type with single thread. */
+
     /*
-     * BackendStatusArray
-     * allocates one PgBackendStatus per process. For auxiliary processes,
-     * each process uses its AuxProcType as the array index to access its
-     * PgBackendStatus.  For PageRedoProcesses, PageRedoProccess + id is
-     * used as the array index, where id is the 0-based worker id.  This
-     * trick works only if PageRedoProcess is the second to last entry.
+     * If anyone want add a new auxiliary thread type, and will create several
+     * threads for this type, then you must add it below NUM_SINGLE_AUX_PROC.
+     * Meanwhile, you must update NUM_MULTI_AUX_PROC and GetAuxProcEntryIndex().
      */
+    PageWriterProcess,
     MultiBgWriterProcess,
     PageRedoProcess,
     TpoolListenerProcess,
-    TpoolSchdulerProcess,
+    TsCompactionConsumerProcess,
+    CsnMinSyncProcess,
 
     NUM_AUXPROCTYPES /* Must be last! */
 } AuxProcType;
@@ -352,7 +385,6 @@ typedef enum {
 #define AmMulitBackgroundWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == MultiBgWriterProcess)
 #define AmCheckpointerProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == CheckpointerProcess)
 #define AmWalWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WalWriterProcess)
-#define AmWalWriterAuxiliaryProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WalWriterAuxiliaryProcess)
 #define AmWalReceiverProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WalReceiverProcess)
 #define AmWalReceiverWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WalRcvWriterProcess)
 #define AmDataReceiverProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == DataReceiverProcess)
@@ -365,6 +397,13 @@ typedef enum {
 #define AmRemoteServiceProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == RemoteServiceProcess)
 #define AmPageWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == PageWriterProcess)
 #define AmHeartbeatProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == HeartbeatProcess)
+#define AmTsCompactionProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == TsCompactionProcess)
+#define AmTsCompactionConsumerProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == TsCompactionConsumerProcess)
+#define AmTsCompactionAuxiliaryProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == TsCompactionAuxiliaryProcess)
+#define AmPageRedoWorker() (t_thrd.bootstrap_cxt.MyAuxProcType == PageRedoProcess)
+
+
+
 
 /*****************************************************************************
  *	  pinit.h --															 *
@@ -417,12 +456,6 @@ extern bool BackupInProgress(void);
 extern void CancelBackup(void);
 
 extern void EarlyBindingTLSVariables(void);
-extern bool StreamThreadAmI();
-extern void StreamTopConsumerReset();
-extern bool StreamTopConsumerAmI();
-extern bool ParallelWorkerAmI();
-extern bool ParallelLeaderAmI();
-
 
 /*
  * converts the 64 bits unsigned integer between host byte order and network byte order.
@@ -436,4 +469,5 @@ extern bool ParallelLeaderAmI();
 #define ntohl64(x) (x)
 #endif
 
+#define UPSERT_ROW_STORE_VERSION_NUM 92073 /* Version control for UPSERT */
 #endif /* MISCADMIN_H */

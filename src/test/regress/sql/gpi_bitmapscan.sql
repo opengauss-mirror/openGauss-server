@@ -4,7 +4,7 @@ DROP TABLE if exists gpi_bitmap_table2;
 
 SET enable_seqscan=off;
 SET enable_indexscan=off;
-
+SET force_bitmapand=on;
 CREATE TABLE gpi_bitmap_table1
 (
     c1 int,
@@ -79,6 +79,7 @@ DROP TABLE idx1_gpi_bitmap_table1;
 DROP TABLE idx1_gpi_bitmap_table2;
 SET enable_seqscan=on;
 SET enable_indexscan=on;
+SET force_bitmapand=off;
 
 drop table if exists test_part_bitmapand_ginst_btree;
 CREATE TABLE test_part_bitmapand_ginst_btree (a int, txtkeyword TEXT, txtsample TEXT) partition by range(a) (partition p1 values less than (1001), partition p2 values  less than (2001), partition p3 values less than (3001));

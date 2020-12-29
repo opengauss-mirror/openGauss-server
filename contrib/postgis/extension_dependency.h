@@ -81,18 +81,25 @@ typedef uint32 BlockNumber;
 #define STARELKIND_CLASS 'c'
 #define STARELKIND_PARTITION 'p'
 
+
 /* spi.h */
+#ifndef SPI_H
 #define SPI_OK_CONNECT 1
 #define SPI_OK_FINISH 2
 #define SPI_OK_FETCH 3
 #define SPI_OK_UTILITY 4
 #define SPI_OK_SELECT 5
+#define SPI_ERROR_NOOUTFUNC (-10)
+#define SPI_ERROR_NOATTRIBUTE (-9)
+
 extern THR_LOCAL PGDLLIMPORT uint32 SPI_processed;
+extern THR_LOCAL int SPI_result;
 
 typedef uint32 AclMode;
 typedef uint16 OffsetNumber;
 typedef struct GISTPageOpaqueData GISTPageOpaqueData;
 typedef GISTPageOpaqueData* GISTPageOpaque;
+typedef struct _SPI_plan* SPIPlanPtr;
 
 typedef struct SPITupleTable {
     MemoryContext tuptabcxt; /* memory context of result table */
@@ -102,13 +109,58 @@ typedef struct SPITupleTable {
     HeapTuple* vals;         /* tuples */
 } SPITupleTable;
 
+#endif
+
+/* pg_proc.h */
+typedef struct {
+    NameData    proname;         /* procedure name */
+    Oid         pronamespace;    /* OID of namespace containing this proc */
+    Oid         proowner;        /* procedure owner */
+    Oid         prolang;         /* OID of pg_language entry */
+    float4      procost;         /* estimated execution cost */
+    float4      prorows;         /* estimated # of rows out (if proretset) */
+    Oid         provariadic;     /* element type of variadic array, or 0 */
+    regproc     protransform;    /* transforms calls to it during planning */
+    bool        proisagg;        /* is it an aggregate? */
+    bool        proiswindow;     /* is it a window function? */
+    bool        prosecdef;       /* security definer */
+    bool        proleakproof;    /* is it a leak-proof function? */
+    bool        proisstrict;     /* strict with respect to NULLs? */
+    bool        proretset;       /* returns a set? */
+    char        provolatile;     /* see PROVOLATILE_ categories below */
+    int2        pronargs;        /* number of arguments */
+    int2        pronargdefaults; /* number of arguments with defaults */
+    Oid         prorettype;      /* OID of result type */
+
+    oidvector    proargtypes;    /* parameter types (excludes OUT params) */
+
+#ifdef CATALOG_VARLEN
+    Oid         proallargtypes[1];        /* all param types (NULL if IN only) */
+    char        proargmodes[1];           /* parameter modes (NULL if IN only) */
+    text        proargnames[1];           /* parameter names (NULL if no names) */
+    pg_node_tree proargdefaults;          /* list of expression trees for argument */
+    text        prosrc;                   /* procedure source text */
+    text        probin;                   /* secondary procedure info (can be NULL) */
+    text        proconfig[1];             /* procedure-local GUC settings */
+    aclitem     proacl[1];                /* access permissions */
+    int2vector  prodefaultargpos;
+    bool        fencedmode;
+    bool        proshippable;    /* if provolatile is not 'i', proshippable will determine if the func can be shipped */
+    bool        propackage;
+    char        prokind;         /* see PROKIND_ categories below */
+#endif
+} FormData_pg_proc;
+typedef FormData_pg_proc *Form_pg_proc;
+
 /* funcapi.h */
+#ifndef FUNCAPI_H
 typedef enum TypeFuncClass {
     TYPEFUNC_SCALAR,    /* scalar result type */
     TYPEFUNC_COMPOSITE, /* determinable rowtype result */
     TYPEFUNC_RECORD,    /* indeterminate rowtype result */
     TYPEFUNC_OTHER      /* bogus type, eg pseudotype */
 } TypeFuncClass;
+#endif
 
 /* nodes/execnodes.h */
 typedef struct ExprContext ExprContext;
@@ -116,6 +168,7 @@ typedef struct ExprContext ExprContext;
 typedef struct Tuplestorestate Tuplestorestate;
 
 /* nodes/execnodes.h */
+#ifndef EXECNODES_H
 typedef enum {
     ExprSingleResult,   /* expression does not return a set */
     ExprMultipleResult, /* this result is an element of a set */
@@ -144,10 +197,12 @@ typedef struct ReturnSetInfo {
     Tuplestorestate* setResult; /* holds the complete returned tuple set */
     TupleDesc setDesc;          /* actual descriptor for returned tuples */
 } ReturnSetInfo;
+#endif
 
 typedef PageHeaderData* PageHeader;
 
 /* funcapi.h */
+#ifndef FUNCAPI_H
 typedef struct AttInMetadata {
     /* full TupleDesc */
     TupleDesc tupdesc;
@@ -223,6 +278,7 @@ typedef struct FuncCallContext {
      */
     TupleDesc tuple_desc;
 } FuncCallContext;
+#endif
 
 /* windowapi.h */
 typedef struct WindowAggState WindowAggState;
@@ -274,12 +330,13 @@ typedef struct GIST_SPLITVEC {
     bool spl_rdatum_exists;  /* true, if spl_rdatum already exists. */
 } GIST_SPLITVEC;
 
+#ifndef RELATION_H
+/* nodes/relation.h */
 typedef struct ItstDisKey {
     List* superset_keys; /* list of superset keys list, several members possible */
     List* matching_keys; /* list of exact matching keys,  */
 } ItstDisKey;
 
-/* odes/relation.h */
 typedef struct PlannerGlobal PlannerGlobal;
 
 typedef struct PlannerInfo {
@@ -474,6 +531,7 @@ typedef struct PlannerInfo {
     bool is_under_recursive_tree;
     bool has_recursive_correlated_rte; /* true if any RTE correlated with recursive cte */
 } PlannerInfo;
+#endif
 
 /* commands/vacuum.h */
 typedef struct VacAttrStats VacAttrStats;
@@ -587,12 +645,25 @@ extern THR_LOCAL PGDLLIMPORT volatile bool InterruptPending;
 
 #define PageIsValid(page) PointerIsValid(page)
 #define PointerIsValid(pointer) ((const void*)(pointer) != NULL)
-
+typedef struct PortalData* Portal;
 extern int SPI_exec(const char* src, long tcount);
 extern int SPI_connect(CommandDest dest = DestSPI, void (*spiCallbackfn)(void*) = NULL, void* clientData = NULL);
 extern int SPI_finish(void);
 extern int SPI_execute(const char* src, bool read_only, long tcount);
 extern char* SPI_getvalue(HeapTuple tuple, TupleDesc tupdesc, int fnumber);
+extern int SPI_freeplan(SPIPlanPtr plan);
+extern void SPI_freetuptable(SPITupleTable *tuptable);
+extern void SPI_cursor_close(Portal portal);
+extern int SPI_execute_plan(SPIPlanPtr plan, Datum *Values, const char *Nulls, bool read_only, long tcount);
+extern SPIPlanPtr SPI_prepare(const char *src, int nargs, Oid *argtypes);
+extern Datum SPI_getbinval(HeapTuple tuple, TupleDesc tupdesc, int fnumber, bool *isnull);
+extern Portal SPI_cursor_open_with_args(const char* name, const char* src, int nargs, Oid* argtypes, Datum* Values,
+										const char* Nulls, bool read_only, int cursorOptions);
+extern void SPI_cursor_fetch(Portal portal, bool forward, long count);
+extern void* SPI_repalloc(void* pointer, Size size);
+
+extern char* text_to_cstring(const text* t);
+extern text* cstring_to_text(const char* s);
 
 extern HTAB* hash_create(const char* tabname, long nelem, HASHCTL* info, int flags);
 extern void hash_destroy(HTAB* hashp);
@@ -611,6 +682,10 @@ extern void get_share_path(const char* my_exec_path, char* ret_path);
 /* funcapi.h */
 #define HeapTupleGetDatum(_tuple) PointerGetDatum((_tuple)->t_data)
 #define TupleGetDatum(_slot, _tuple) PointerGetDatum((_tuple)->t_data)
+extern TypeFuncClass get_func_result_type(Oid functionId, Oid* resultTypeId, TupleDesc* resultTupleDesc);
+
+/* executor/executor.h */
+extern Datum GetAttributeByName(HeapTupleHeader tuple, const char* attname, bool* isNull);
 
 /* server/miscadmin.h */
 #define CHECK_FOR_INTERRUPTS()   \
@@ -771,5 +846,7 @@ extern void vacuum_delay_point(void);
 extern char* get_rel_name(Oid relid);
 
 extern THR_LOCAL PGDLLIMPORT int default_statistics_target;
+
+#define CStringGetTextDatum(s) PointerGetDatum(cstring_to_text(s))
 
 #endif /* EXTENSION_DEPENDENCY */

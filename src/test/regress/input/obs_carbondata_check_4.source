@@ -1,0 +1,41 @@
+\c carbondata
+SET DATESTYLE='ISO, MDY';
+--filter data by multi condition
+SELECT * FROM data_filter WHERE c_byte >= 105 AND c_short >= 32746 LIMIT 5;
+SELECT * FROM data_filter WHERE c_byte = -128 AND c_bool = 'f' LIMIT 5;
+
+SELECT * FROM data_filter WHERE c_short <= 32767 AND c_string2 = 'qw2122' LIMIT 5;
+SELECT * FROM data_filter WHERE c_short <= 32756 AND c_float <= 0 LIMIT 5;
+
+SELECT * FROM data_filter WHERE c_int >= 2147483436 AND c_long = 9223372036854775578 LIMIT 5;
+SELECT * FROM data_filter WHERE c_int <= 21 AND c_float = 12.8333 LIMIT 5;
+
+SELECT * FROM data_filter WHERE c_long <= 0 OR c_date = '2000-01-01' LIMIT 5;
+SELECT * FROM data_filter WHERE c_long <= 9223372036854775807 AND c_date <= '2019-08-02' LIMIT 5;
+
+SELECT * FROM data_filter WHERE c_float <= 0 AND c_decimal1 > 0 LIMIT 5;
+SELECT * FROM data_filter WHERE c_float = -0.000521 AND c_string1 <='这是中文' LIMIT 5;
+
+SELECT * FROM data_filter WHERE c_double = 19.25 AND c_varchar2 IS NULL LIMIT 5;
+SELECT * FROM data_filter WHERE c_double >= 0.000000001 OR c_varchar2 IS NULL LIMIT 5;
+
+SELECT * FROM data_filter WHERE c_decimal1 = 11.95146 AND c_date = '2000-01-01' LIMIT 5;
+SELECT * FROM data_filter WHERE c_decimal1 = 919.95146 OR c_string1 ='Tiger!Tiger!!' LIMIT 5;
+
+SELECT * FROM data_filter WHERE c_bool <= 'f' AND c_string2 <='CatPonyo' LIMIT 5;
+SELECT * FROM data_filter WHERE c_bool >= 't' OR c_string2 ='Lion!Lion!!' LIMIT 5;
+
+SELECT * FROM data_filter WHERE c_date = '2000-01-01' AND c_timestamp <= '2019-08-21 09:09:09' LIMIT 5;
+SELECT * FROM data_filter WHERE c_date <= '2019-08-02' AND c_varchar1 = '没有什么能够阻挡，我对自由的向往！'LIMIT 5;
+
+SELECT * FROM data_filter WHERE c_timestamp <= '2019-08-21 09:09:09' AND c_varchar3 = '星期一' LIMIT 5;
+SELECT * FROM data_filter WHERE c_timestamp >= '2019-08-21 09:09:09' OR c_varchar2 = 'a#HA#BTT#OP#ZBJ#SFYCG#asaa' LIMIT 5;
+
+--select count(*)
+SELECT COUNT(*) FROM big_data;
+
+\c carbondata_td
+SET DATESTYLE='ISO, MDY';
+--select data
+SELECT * FROM data_filter WHERE c_varchar3 IS NULL LIMIT 10;
+SELECT * FROM data_filter WHERE c_string1 IS NULL LIMIT 10;

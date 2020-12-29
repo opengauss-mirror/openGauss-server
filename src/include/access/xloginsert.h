@@ -3,6 +3,7 @@
  * xloginsert.h
  *        Functions for generating WAL records
  * 
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * 
@@ -16,8 +17,8 @@
 
 #include "access/rmgr.h"
 #include "access/xlogdefs.h"
-#include "storage/block.h"
-#include "storage/buf.h"
+#include "storage/buf/block.h"
+#include "storage/buf/buf.h"
 #include "storage/relfilenode.h"
 
 /*
@@ -46,7 +47,7 @@
 extern void XLogBeginInsert(void);
 extern XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, bool isupgrade = false, int bucket_id = InvalidBktId);
 extern void XLogEnsureRecordSpace(int nbuffers, int ndatas);
-extern void XLogRegisterData(char* data, uint32 len);
+extern void XLogRegisterData(char* data, int len);
 extern void XLogRegisterBuffer(uint8 block_id, Buffer buffer, uint8 flags);
 extern void XLogRegisterBlock(
     uint8 block_id, RelFileNode* rnode, ForkNumber forknum, BlockNumber blknum, char* page, uint8 flags);
@@ -57,4 +58,3 @@ extern void InitXLogInsert(void);
 extern void XLogIncludeOrigin(void);
 
 #endif /* XLOGINSERT_H */
-

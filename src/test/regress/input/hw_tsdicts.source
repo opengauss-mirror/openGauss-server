@@ -1,0 +1,219 @@
+--Test text search dictionariy
+create database hw_tsdicts;
+create user hw_tsdicts_user identified by "Gaussdba@Mpp";
+\c hw_tsdicts;
+
+--Case 1: Create text search dictionariy with FilePath
+CREATE TEXT SEARCH DICTIONARY hw_ispell (
+                        Template=ispell,
+                        DictFile=ispell_sample,
+                        AffFile=ispell_sample,
+						FilePath='file://@abs_bindir@/../share/postgresql/tsearch_data///'
+);
+SELECT ts_lexize('hw_ispell', 'skies');
+
+CREATE TEXT SEARCH DICTIONARY hw_synonym (
+						Template=synonym,
+						Synonyms=synonym_sample,
+						FilePath='file://@abs_bindir@/../share/postgresql/tsearch_data'
+);
+SELECT ts_lexize('hw_synonym', 'PoStGrEs');
+
+CREATE TEXT SEARCH DICTIONARY hw_thesaurus (
+                        Template=thesaurus,
+						DictFile=thesaurus_sample,
+						Dictionary=english_stem,
+						FilePath='file://@abs_bindir@/../share/postgresql/tsearch_data/   '
+);
+SELECT ts_lexize('hw_thesaurus', 'one');
+
+CREATE TEXT SEARCH DICTIONARY hw_simple (
+                        Template=simple,
+						StopWords=english,
+						FilePath='   file://@abs_bindir@/../share/postgresql/tsearch_data/'
+);
+SELECT ts_lexize('hw_simple', 'the');
+
+CREATE TEXT SEARCH DICTIONARY hw_snowball (
+                        Template=snowball,
+						StopWords=english,
+						Language=english,
+						FilePath='  file://@abs_bindir@/../share/postgresql/tsearch_data   '
+);
+SELECT ts_lexize('hw_snowball', 'the');
+
+--FilePath parameter error
+CREATE TEXT SEARCH DICTIONARY hw_simple1 (
+                        Template=simple,
+						StopWords=english,
+						FilePath='file://@abs_bindir@/../share/postgresql  /tsearch'
+);
+CREATE TEXT SEARCH DICTIONARY hw_simple1 (
+                        Template=simple,
+						StopWords=english,
+						FilePath='file://@abs_bindir@/../share/postgresql/tsearch'
+);
+CREATE TEXT SEARCH DICTIONARY hw_simple1 (
+                        Template=simple,
+						FilePath='file://@abs_bindir@/../share/postgresql/tsearch_data'
+);
+CREATE TEXT SEARCH DICTIONARY hw_snowball1 (
+                        Template=snowball,
+						Language=english,
+						FilePath='file://@abs_bindir@/../share/postgresql/tsearch_data'
+);
+
+--Check priviledge
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U hw_tsdicts_user -W Gaussdba@Mpp -c "CREATE TEXT SEARCH DICTIONARY hw_simple1 (Template=simple);"
+ALTER USER hw_tsdicts_user sysadmin;
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U hw_tsdicts_user -W Gaussdba@Mpp -c "CREATE TEXT SEARCH DICTIONARY hw_simple1 (Template=simple);"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U hw_tsdicts_user -W Gaussdba@Mpp -c "SELECT ts_lexize('hw_simple1', 'the');"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U hw_tsdicts_user -W Gaussdba@Mpp -c "CREATE TEXT SEARCH DICTIONARY hw_simple2 (Template=simple, StopWords=english);"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U hw_tsdicts_user -W Gaussdba@Mpp -c "SELECT ts_lexize('hw_simple2', 'the');"
+
+--Check
+select count(*) from pg_ts_dict where dictinitoption like '%filepath%';
+select dictname from pg_ts_dict where oid > 16384 order by 1;
+select count(*) from pg_shdepend where classid=3600 and objfile is not null;
+
+
+--Case 2: Alter text search dictionariy
+--Ispell
+select objfile is not null from pg_ts_dict a, pg_shdepend b where dictname='hw_ispell' and a.oid=b.objid;
+ALTER TEXT SEARCH DICTIONARY hw_ispell (
+                        AffFile=hunspell_sample,
+						FilePath='file://@abs_bindir@/../share/postgresql/tsearch_data///'
+);
+SELECT ts_lexize('hw_ispell', 'skies');
+SELECT ts_lexize('hw_ispell', 'ex-machina');
+
+ALTER TEXT SEARCH DICTIONARY hw_ispell (
+                        DictFile=hunspell_sample_long,
+                        AffFile=hunspell_sample_long,
+						StopWords=english
+);
+SELECT ts_lexize('hw_ispell', 'skies');
+SELECT ts_lexize('hw_ispell', 'ex-machina');
+
+ALTER TEXT SEARCH DICTIONARY hw_ispell (
+						StopWords
+);
+SELECT ts_lexize('hw_ispell', 'skies');
+SELECT ts_lexize('hw_ispell', 'ex-machina');
+
+ALTER TEXT SEARCH DICTIONARY hw_ispell (
+						StopWords=russian
+);
+SELECT ts_lexize('hw_ispell', 'skies');
+SELECT ts_lexize('hw_ispell', 'ex-machina');
+
+ALTER TEXT SEARCH DICTIONARY hw_ispell (
+                        DictFile=ispell_sample,
+                        AffFile=ispell_sample
+);
+SELECT ts_lexize('hw_ispell', 'skies');
+SELECT ts_lexize('hw_ispell', 'ex-machina');
+select objfile is not null from pg_ts_dict a, pg_shdepend b where dictname='hw_ispell' and a.oid=b.objid;
+
+--Simple
+select objfile is not null from pg_ts_dict a, pg_shdepend b where dictname='hw_simple' and a.oid=b.objid;
+ALTER TEXT SEARCH DICTIONARY hw_simple (
+                        Accept=false
+);
+SELECT ts_lexize('hw_simple', 'the');
+select objfile is not null from pg_ts_dict a, pg_shdepend b where dictname='hw_simple' and a.oid=b.objid;
+
+ALTER TEXT SEARCH DICTIONARY hw_simple (
+						Accept,
+                        StopWords
+);
+SELECT ts_lexize('hw_simple', 'the');
+select * from pg_ts_dict where dictname='hw_simple';
+select objfile is not null from pg_ts_dict a, pg_shdepend b where dictname='hw_simple' and a.oid=b.objid;
+ALTER TEXT SEARCH DICTIONARY hw_simple (
+                        StopWords=english
+);
+SELECT ts_lexize('hw_simple', 'the');
+select dictinitoption is not null from pg_ts_dict where dictname='hw_simple';
+select objfile is not null from pg_ts_dict a, pg_shdepend b where dictname='hw_simple' and a.oid=b.objid;
+
+--special case of useid 10 for it is pinned in pg_shdepend
+CREATE TEXT SEARCH DICTIONARY hw_simple1 (
+                        Template=simple
+);
+select * from pg_ts_dict where dictname='hw_simple1';
+select objfile is not null from pg_ts_dict a, pg_shdepend b where dictname='hw_simple1' and a.oid=b.objid;
+ALTER TEXT SEARCH DICTIONARY hw_simple1 (
+                        StopWords=english
+);
+select dictinitoption is not null from pg_ts_dict where dictname='hw_simple1';
+select objfile is not null from pg_ts_dict a, pg_shdepend b where dictname='hw_simple1' and a.oid=b.objid;
+ALTER TEXT SEARCH DICTIONARY hw_simple1 (
+                        StopWords
+);
+select * from pg_ts_dict where dictname='hw_simple1';
+select objfile is not null from pg_ts_dict a, pg_shdepend b where dictname='hw_simple1' and a.oid=b.objid;
+drop TEXT SEARCH DICTIONARY hw_simple1;
+select * from pg_ts_dict where dictname='hw_simple1';
+select objfile is not null from pg_ts_dict a, pg_shdepend b where dictname='hw_simple1' and a.oid=b.objid;
+
+--other user
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U hw_tsdicts_user -W Gaussdba@Mpp -c "ALTER TEXT SEARCH DICTIONARY hw_simple1 (StopWords=english);"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U hw_tsdicts_user -W Gaussdba@Mpp -c "SELECT ts_lexize('hw_simple1', 'the');"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U hw_tsdicts_user -W Gaussdba@Mpp -c "ALTER TEXT SEARCH DICTIONARY hw_simple2 (StopWords);"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U hw_tsdicts_user -W Gaussdba@Mpp -c "SELECT ts_lexize('hw_simple2', 'the');"
+select objfile is not null from pg_shdepend where classid=3600 order by 1;
+
+--parameter error
+ALTER TEXT SEARCH DICTIONARY hw_synonym (
+						Template=synonym,
+						Synonyms=synonym_sample,
+						FilePath='file://@abs_bindir@/../share/postgresql/tsearch_data'
+);
+ALTER TEXT SEARCH DICTIONARY hw_ispell (
+						FilePath='file://@abs_bindir@/../share/postgresql/tsearch_data///'
+);
+ALTER TEXT SEARCH DICTIONARY hw_simple (
+						FilePath='file://@abs_bindir@/../share/postgresql/tsearch_data/'
+);
+ALTER TEXT SEARCH DICTIONARY simple (
+                        Accept=false
+);
+
+
+--Case 3: Drop text search dictionariy
+\c regression
+select dictinitoption is null, objfile is null from pg_ts_dict a, pg_shdepend b where dictname='hw_simple1' and a.oid=b.objid;
+select dictinitoption is null, objfile is null from pg_ts_dict a, pg_shdepend b where dictname='hw_simple2' and a.oid=b.objid;
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U hw_tsdicts_user -W Gaussdba@Mpp -c "DROP TEXT SEARCH DICTIONARY hw_simple1;"
+select * from pg_ts_dict where dictname='hw_simple1';
+select dictinitoption, objfile from pg_ts_dict a, pg_shdepend b where dictname='hw_simple1' and a.oid=b.objid;
+
+--drop user
+select dictinitoption is null, objfile is null from pg_ts_dict a, pg_shdepend b where dictname='hw_simple2' and a.oid=b.objid;
+drop user hw_tsdicts_user cascade;
+select dictinitoption, objfile from pg_ts_dict a, pg_shdepend b where dictname='hw_simple2' and a.oid=b.objid;
+select count(*) from pg_ts_dict;
+
+--drop database
+select count(*) from pg_database a, pg_shdepend b where datname='hw_tsdicts' and a.oid=b.dbid and b.classid=3600;
+drop database hw_tsdicts;
+select count(*) from pg_database a, pg_shdepend b where datname='hw_tsdicts' and a.oid=b.dbid;
+select objfile from pg_shdepend where classid=3600;
+
+--error
+drop TEXT SEARCH DICTIONARY simple;
+drop TEXT SEARCH DICTIONARY english_stem;
+drop TEXT SEARCH DICTIONARY english_stem cascade;
+
+--pg_temp
+CREATE TEXT SEARCH DICTIONARY pg_temp.hw_simple (
+                        Template=simple,
+						StopWords=english
+);
+set current_schema=pg_temp;
+CREATE TEXT SEARCH DICTIONARY hw_simple (
+                        Template=simple,
+						StopWords=english
+);
+reset current_schema;

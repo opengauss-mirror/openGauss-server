@@ -34,6 +34,9 @@
  *
  * -------------------------------------------------------------------------
  */
+
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 #include <math.h>
 #include "postgres.h"
 #include "knl/knl_variable.h"
@@ -77,7 +80,7 @@
 #include "replication/walsender_private.h"
 #include "replication/datasender.h"
 #include "replication/dataqueue.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
@@ -97,11 +100,12 @@
 #include "postmaster/postmaster.h"
 #include "alarm/alarm.h"
 #include "utils/distribute_test.h"
+#include "gs_bbox.h"
 
 #define CRC_LEN 11
 
-extern void* internal_load_library(const char* libname);
-extern char* expand_dynamic_library_name(const char* name);
+extern void *internal_load_library(const char *libname);
+extern char *expand_dynamic_library_name(const char *name);
 extern bool PMstateIsRun(void);
 
 /* Are we there yet? */
@@ -119,9 +123,8 @@ long g_logical_slot_sleep_time = 0;
 static const int MICROSECONDS_PER_SECONDS = 1000000;
 static const int MILLISECONDS_PER_SECONDS = 1000;
 static const int MILLISECONDS_PER_MICROSECONDS = 1000;
-static const int INIT_CONTROL_REPLY = 1;
-static const int MAX_CONTROL_REPLY = 3000;
-static const int FAULT_TOLERANCE = 10;
+static const int INIT_CONTROL_REPLY = 3;
+static const int MAX_CONTROL_REPLY = 1000;
 static const int SLEEP_MORE = 200;
 static const int SLEEP_LESS = 200;
 static const int NODENAMELEN = 1024;
@@ -142,7 +145,8 @@ static void WalSndQuickDieHandler(SIGNAL_ARGS);
 static void WalSndXLogSendHandler(SIGNAL_ARGS);
 static void WalSndLastCycleHandler(SIGNAL_ARGS);
 
-static bool HandleWalReplicationCommand(const char* cmd_string);
+static void IdentifyCommand(Node* cmd_node, bool* replication_started, const char *cmd_string);
+static bool HandleWalReplicationCommand(const char *cmd_string);
 typedef void (*WalSndSendDataCallback)(void);
 static int WalSndLoop(WalSndSendDataCallback send_data);
 static void InitWalSnd(void);
@@ -152,42 +156,43 @@ static void XLogSendPhysical(void);
 static void XLogSendLogical(void);
 static void IdentifySystem(void);
 static void IdentifyVersion(void);
-static void IdentifyConsistence(IdentifyConsistenceCmd* cmd);
-static void IdentifyChannel(IdentifyChannelCmd* cmd);
-static void CreateReplicationSlot(const CreateReplicationSlotCmd* cmd);
-static void DropReplicationSlot(DropReplicationSlotCmd* cmd);
-static void StartReplication(StartReplicationCmd* cmd);
-static void StartLogicalReplication(StartReplicationCmd* cmd);
+static void IdentifyConsistence(IdentifyConsistenceCmd *cmd);
+static void IdentifyChannel(IdentifyChannelCmd *cmd);
+static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd);
+static void DropReplicationSlot(DropReplicationSlotCmd *cmd);
+static void StartReplication(StartReplicationCmd *cmd);
+static void StartLogicalReplication(StartReplicationCmd *cmd);
 static void ProcessStandbyMessage(void);
 static void ProcessStandbyReplyMessage(void);
 static void ProcessStandbyHSFeedbackMessage(void);
 static void ProcessStandbySwitchRequestMessage(void);
 static void ProcessRepliesIfAny(void);
 static bool LogicalSlotSleepFlag(void);
-static void do_actual_sleep(volatile WalSnd* walsnd);
+static void do_actual_sleep(volatile WalSnd *walsnd);
 static void LogCtrlCountSleepLimit(void);
 static void LogCtrlSleep(void);
-static void LogCtrlCalculateCurrentRTO(StandbyReplyMessage* reply);
+static void LogCtrlCalculateCurrentRTO(StandbyReplyMessage *reply);
+static void LogCtrlCalculateCurrentRPO(void);
 static void LogCtrlCalculateSleepTime(void);
 static void WalSndKeepalive(bool requestReply);
 static void WalSndRmXLog(bool requestReply);
 static void WalSndSyncDummyStandbyDone(bool requestReply);
 static void WalSndKeepaliveIfNecessary(TimestampTz now);
-static void WalSndResponseSwitchover(char* msgbuf);
+static void WalSndResponseSwitchover(char *msgbuf);
 static void SetHaWalSenderChannel(void);
 static void SetReplWalSender(void);
-static bool SendConfigFile(char* path);
+static bool SendConfigFile(char *path);
 static void ProcessStandbyFileTimeMessage(void);
 
 static long WalSndComputeSleeptime(TimestampTz now);
 static void WalSndCheckTimeOut(TimestampTz now);
 static void WalSndWriteLogicalAdvanceXLog(TimestampTz now);
 
-static void WalSndPrepareWrite(LogicalDecodingContext* ctx, XLogRecPtr lsn, TransactionId xid, bool last_write);
-static void WalSndWriteData(LogicalDecodingContext* ctx, XLogRecPtr lsn, TransactionId xid, bool last_write);
+static void WalSndPrepareWrite(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, bool last_write);
+static void WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, bool last_write);
 static XLogRecPtr WalSndWaitForWal(XLogRecPtr loc);
 
-static void XLogRead(char* buf, XLogRecPtr startptr, Size count);
+static void XLogRead(char *buf, XLogRecPtr startptr, Size count);
 
 static void SetWalSndPeerMode(ServerMode mode);
 static void SetWalSndPeerDbstate(DbState state);
@@ -195,15 +200,17 @@ static void SetWalSndPeerDbstate(DbState state);
 static void ChooseStartPointForDummyStandby(void);
 static bool WalSndCaughtup(void);
 static bool WalSndDummyLEStandby(void);
-static void StopAliveBuildSender(void);
 static void WalSndShutdown(void) __attribute__((noreturn));
 
 static bool UpdateHaWalSenderChannel(int ha_remote_listen_port);
 static bool IsWalSenderToBuild(void);
 static void WalSndSetPercentCountStartLsn(XLogRecPtr startLsn);
 static void WalSndRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecPtr currentDoneLsn);
+static void set_xlog_location(ServerMode local_role, XLogRecPtr* sndWrite, XLogRecPtr* sndFlush, XLogRecPtr* sndReplay);
+static void ProcessArchiveFeedbackMessage(void);
+static void WalSndArchiveXlog(XLogRecPtr targetLsn, int sub_term);
 
-char* DataDir = ".";
+char *DataDir = ".";
 
 /* Main entry point for walsender process */
 int WalSenderMain(void)
@@ -211,12 +218,12 @@ int WalSenderMain(void)
     MemoryContext walsnd_context;
     int nRet = 0;
 
-    knl_thread_set_name("WalSender");
+    t_thrd.proc_cxt.MyProgName = "WalSender";
     if (RecoveryInProgress()) {
         t_thrd.role = WAL_STANDBY_SENDER;
     }
 
-    if (g_threadPoolControler) {
+    if (g_threadPoolControler && !AM_WAL_DB_SENDER) {
         ereport(INFO, (errmsg("Try to bind walsender thread to available CPUs in threadpool.")));
         g_threadPoolControler->BindThreadToAllAvailCpu(t_thrd.proc_cxt.MyProcPid);
     }
@@ -224,7 +231,7 @@ int WalSenderMain(void)
     /* Create a per-walsender data structure in shared memory */
     InitWalSnd();
 
-    ereport(LOG, (errmsg("WalSender thread started")));
+    ereport(LOG, (errmsg("walsender thread started")));
     /*
      * Create a memory context that we will do all our work in.  We do this so
      * that we can reset the context during error recovery and thereby avoid
@@ -234,15 +241,13 @@ int WalSenderMain(void)
      * XXX: we don't actually attempt error recovery in walsender, we just
      * close the connection and exit.
      */
-    walsnd_context = AllocSetContextCreate(t_thrd.top_mem_cxt,
-        "Wal Sender",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    walsnd_context = AllocSetContextCreate(t_thrd.top_mem_cxt, "Wal Sender", ALLOCSET_DEFAULT_MINSIZE,
+                                           ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     (void)MemoryContextSwitchTo(walsnd_context);
 
     /* Set up resource owner */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "walsender top-level resource owner");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "walsender top-level resource owner",
+        MEMORY_CONTEXT_STORAGE);
 
     /*
      * Let postmaster know that we're streaming. Once we've declared us as a
@@ -283,7 +288,7 @@ int WalSenderMain(void)
     /* Initialize shared memory status */
     {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+        volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
         SpinLockAcquire(&walsnd->mutex);
         walsnd->pid = t_thrd.proc_cxt.MyProcPid;
@@ -315,20 +320,16 @@ int WalSenderMain(void)
     SyncRepInitConfig();
 
     if (t_thrd.proc_cxt.DataDir) {
-        nRet = snprintf_s(
-            t_thrd.walsender_cxt.gucconf_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", t_thrd.proc_cxt.DataDir);
+        nRet = snprintf_s(t_thrd.walsender_cxt.gucconf_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf",
+                          t_thrd.proc_cxt.DataDir);
         securec_check_ss(nRet, "\0", "\0");
 
-        nRet = snprintf_s(t_thrd.walsender_cxt.gucconf_lock_file,
-            MAXPGPATH,
-            MAXPGPATH - 1,
-            "%s/postgresql.conf.lock",
-            t_thrd.proc_cxt.DataDir);
+        nRet = snprintf_s(t_thrd.walsender_cxt.gucconf_lock_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf.lock",
+                          t_thrd.proc_cxt.DataDir);
         securec_check_ss(nRet, "\0", "\0");
     } else {
-        ereport(ERROR,
-            (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                errmsg_internal("cannot find GAUSSDATA: %s", t_thrd.walsender_cxt.gucconf_file)));
+        ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                        errmsg_internal("cannot find GAUSSDATA: %s", t_thrd.walsender_cxt.gucconf_file)));
     }
 
     /* init the dummy standby data num to write in wal streaming. */
@@ -349,9 +350,8 @@ int WalSenderMain(void)
 void CheckPMstateAndRecoveryInProgress(void)
 {
     if (!PMstateIsRun() || RecoveryInProgress()) {
-        ereport(ERROR,
-            (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                errmsg("can't decode in pmState is not run or recovery in progress.")));
+        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                        errmsg("can't decode in pmState is not run or recovery in progress.")));
     }
 }
 
@@ -364,13 +364,12 @@ static void WalSndHandshake(void)
     bool replication_started = false;
     int sleeptime = 0;
     int timeout = 0;
-    const int TIMEOUT_TIMES = 4;
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
     initStringInfo(&input_message);
 
     if (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY)
-        timeout = TIMEOUT_TIMES * u_sess->attr.attr_storage.wal_sender_timeout;
+        timeout = 4 * u_sess->attr.attr_storage.wal_sender_timeout;
     else
         timeout = u_sess->attr.attr_storage.wal_sender_timeout;
 
@@ -393,8 +392,8 @@ static void WalSndHandshake(void)
              * period
              */
             if (timeout > 0 && sleeptime >= timeout) {
-                ereport(COMMERROR,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("No message received from standby for maximum time")));
+                ereport(COMMERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                                    errmsg("No message received from standby for maximum time")));
                 proc_exit(0);
             }
             continue;
@@ -438,7 +437,7 @@ static void WalSndHandshake(void)
         switch (firstchar) {
             case 'Q': /* Query message */
             {
-                const char* query_string = NULL;
+                const char *query_string = NULL;
 
                 query_string = pq_getmsgstring(&input_message);
                 pq_getmsgend(&input_message);
@@ -458,14 +457,13 @@ static void WalSndHandshake(void)
                 break;
             case EOF:
                 /* standby disconnected unexpectedly */
-                ereport(
-                    COMMERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected EOF on standby connection")));
+                ereport(COMMERROR,
+                        (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected EOF on standby connection")));
                 proc_exit(0);
                 /* fall-through */
             default:
-                ereport(FATAL,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                        errmsg("invalid standby handshake message type %d", firstchar)));
+                ereport(FATAL, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                                errmsg("invalid standby handshake message type %d", firstchar)));
         }
     }
 }
@@ -481,7 +479,7 @@ static void IdentifySystem(void)
     char xpos[MAXFNAMELEN];
     XLogRecPtr logptr;
     int rc = 0;
-    char* dbname = NULL;
+    char *dbname = NULL;
 
     /*
      * Reply with a result set with one row, four columns. First col is system
@@ -509,8 +507,7 @@ static void IdentifySystem(void)
         dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
         if (dbname == NULL) {
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                        errmsg("database with OID %u does not exist",
-                            u_sess->proc_cxt.MyDatabaseId)));
+                            errmsg("database with OID %u does not exist", u_sess->proc_cxt.MyDatabaseId)));
         }
         CommitTransactionCommand();
         /* CommitTransactionCommand switches to t_thrd.top_mem_cxt */
@@ -562,15 +559,15 @@ static void IdentifySystem(void)
     pq_beginmessage(&buf, 'D');
     pq_sendint16(&buf, 4);             /* # of columns */
     pq_sendint32(&buf, strlen(sysid)); /* col1 len */
-    pq_sendbytes(&buf, (char*)sysid, strlen(sysid));
+    pq_sendbytes(&buf, (char *)sysid, strlen(sysid));
     pq_sendint32(&buf, strlen(tli)); /* col2 len */
-    pq_sendbytes(&buf, (char*)tli, strlen(tli));
+    pq_sendbytes(&buf, (char *)tli, strlen(tli));
     pq_sendint32(&buf, strlen(xpos)); /* col3 len */
-    pq_sendbytes(&buf, (char*)xpos, strlen(xpos));
+    pq_sendbytes(&buf, (char *)xpos, strlen(xpos));
     /* send NULL if not connected to a database */
     if (dbname != NULL) {
         pq_sendint32(&buf, strlen(dbname)); /* col4 len */
-        pq_sendbytes(&buf, (char*)dbname, strlen(dbname));
+        pq_sendbytes(&buf, (char *)dbname, strlen(dbname));
     } else {
         pq_sendint32(&buf, UINT32_MAX); /* col4 len, NULL */
     }
@@ -600,7 +597,9 @@ static void IdentifyVersion(void)
 
     rc = strncpy_s(pg_pversion, sizeof(pg_pversion), PG_PROTOCOL_VERSION, strlen(PG_PROTOCOL_VERSION));
     securec_check(rc, "\0", "\0");
-    nRet = snprintf_s(term, sizeof(term), sizeof(term) - 1, "%u", g_instance.comm_cxt.localinfo_cxt.term);
+    uint32 term_cur = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file,
+                          g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
+    nRet = snprintf_s(term, sizeof(term), sizeof(term) - 1, "%u", term_cur);
     securec_check_ss(nRet, "\0", "\0");
     pg_pversion[strlen(PG_PROTOCOL_VERSION)] = '\0';
 
@@ -640,11 +639,11 @@ static void IdentifyVersion(void)
     pq_beginmessage(&buf, 'D');
     pq_sendint16(&buf, 3);                   /* # of columns */
     pq_sendint32(&buf, strlen(pg_sversion)); /* col1 len */
-    pq_sendbytes(&buf, (char*)pg_sversion, strlen(pg_sversion));
+    pq_sendbytes(&buf, (char *)pg_sversion, strlen(pg_sversion));
     pq_sendint32(&buf, strlen(pg_pversion)); /* col2 len */
-    pq_sendbytes(&buf, (char*)pg_pversion, strlen(pg_pversion));
+    pq_sendbytes(&buf, (char *)pg_pversion, strlen(pg_pversion));
     pq_sendint32(&buf, strlen(term)); /* col2 len */
-    pq_sendbytes(&buf, (char*)term, strlen(term));
+    pq_sendbytes(&buf, (char *)term, strlen(term));
     pq_endmessage_noblock(&buf);
 
     /* Send CommandComplete and ReadyForQuery messages */
@@ -660,7 +659,7 @@ void IdentifyMode(void)
 {
     StringInfoData buf;
     char smode[11];
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     int nRet = 0;
     ServerMode current_mode = UNKNOWN_MODE;
 
@@ -692,7 +691,7 @@ void IdentifyMode(void)
     pq_beginmessage(&buf, 'D');
     pq_sendint16(&buf, 1);             /* # of columns */
     pq_sendint32(&buf, strlen(smode)); /* col1 len */
-    pq_sendbytes(&buf, (char*)smode, strlen(smode));
+    pq_sendbytes(&buf, (char *)smode, strlen(smode));
     pq_endmessage_noblock(&buf);
 
     /* Send CommandComplete and ReadyForQuery messages */
@@ -787,24 +786,25 @@ static void IdentifyMaxLsn(void)
  * IDENTIFY_CONSISTENCE
  * identify consistence of primary and standby
  */
-static void IdentifyConsistence(IdentifyConsistenceCmd* cmd)
+static void IdentifyConsistence(IdentifyConsistenceCmd *cmd)
 {
     StringInfoData buf;
-    char        crc[CRC_LEN] = {0};
-    char        maxLsnCrcStr[CRC_LEN] = {0};
-    pg_crc32    requestRecCrc = 0;
-    pg_crc32    localMaxLsnCrc = 0;
-    bool        crcValid = false;
-    XLogRecPtr  localMaxPtr = InvalidXLogRecPtr;;
-    char        strMaxPtr[MAXFNAMELEN] = {0};
-    int         nRet = 0;
-    char        msgBuf[XLOG_READER_MAX_MSGLENTH] = {0};
+    char crc[CRC_LEN] = {0};
+    char maxLsnCrcStr[CRC_LEN] = {0};
+    pg_crc32 requestRecCrc = 0;
+    pg_crc32 localMaxLsnCrc = 0;
+    bool crcValid = false;
+    XLogRecPtr localMaxPtr = InvalidXLogRecPtr;
+    ;
+    char strMaxPtr[MAXFNAMELEN] = {0};
+    int nRet = 0;
+    char msgBuf[XLOG_READER_MAX_MSGLENTH] = {0};
 
     requestRecCrc = GetXlogRecordCrc(cmd->recordptr, crcValid);
 
     /* To support grayupgrade, msg with 1 row of 2 or 3 colums is used
      * according to working version number. Will remove later.
-     */ 
+     */
     if (t_thrd.proc && t_thrd.proc->workingVersionNum >= 92060) {
         /* Don't care max xlog when check with building process */
         if (IsWalSenderToBuild() == false) {
@@ -815,16 +815,15 @@ static void IdentifyConsistence(IdentifyConsistenceCmd* cmd)
                     (void)GetXLogReplayRecPtr(NULL, &localMaxPtr);
                     localMaxLsnCrc = GetXlogRecordCrc(localMaxPtr, crcValid);
                 } else {
-                    localMaxPtr =
-                        FindMaxLSN(t_thrd.proc_cxt.DataDir, msgBuf, XLOG_READER_MAX_MSGLENTH, &localMaxLsnCrc);
+                    localMaxPtr = FindMaxLSN(t_thrd.proc_cxt.DataDir, msgBuf, XLOG_READER_MAX_MSGLENTH,
+                                             &localMaxLsnCrc);
                 }
             }
 
             ereport(LOG, (errmsg("remote request lsn/crc: [%X/%X, %u] "
-                "local max lsn/crc: [%X/%X, %u]",
-                (uint32)(cmd->recordptr >> 32), (uint32)cmd->recordptr,
-                (uint32)requestRecCrc, (uint32)(localMaxPtr >> 32),
-                (uint32)localMaxPtr, (uint32)localMaxLsnCrc)));
+                                 "local max lsn/crc: [%X/%X, %u]",
+                                 (uint32)(cmd->recordptr >> 32), (uint32)cmd->recordptr, (uint32)requestRecCrc,
+                                 (uint32)(localMaxPtr >> 32), (uint32)localMaxPtr, (uint32)localMaxLsnCrc)));
         }
 
         if (requestRecCrc == NONE_REC_CRC && WalSndCaughtup()) {
@@ -835,7 +834,7 @@ static void IdentifyConsistence(IdentifyConsistenceCmd* cmd)
         securec_check_ss(nRet, "\0", "\0");
 
         nRet = snprintf_s(strMaxPtr, sizeof(strMaxPtr), sizeof(strMaxPtr) - 1, "%X/%X", (uint32)(localMaxPtr >> 32),
-            (uint32)localMaxPtr);
+                          (uint32)localMaxPtr);
         securec_check_ss(nRet, "\0", "\0");
 
         nRet = snprintf_s(maxLsnCrcStr, sizeof(maxLsnCrcStr), sizeof(maxLsnCrcStr) - 1, "%X", localMaxLsnCrc);
@@ -847,42 +846,42 @@ static void IdentifyConsistence(IdentifyConsistenceCmd* cmd)
 
         /* first field */
         pq_sendstring(&buf, "requestRemoteCrc"); /* col name */
-        pq_sendint32(&buf, 0); /* table oid */
-        pq_sendint16(&buf, 0); /* attnum */
-        pq_sendint32(&buf, TEXTOID); /* type oid */
-        pq_sendint16(&buf, UINT16_MAX); /* typlen */
-        pq_sendint32(&buf, 0); /* typmod */
-        pq_sendint16(&buf, 0); /* format code */
+        pq_sendint32(&buf, 0);                   /* table oid */
+        pq_sendint16(&buf, 0);                   /* attnum */
+        pq_sendint32(&buf, TEXTOID);             /* type oid */
+        pq_sendint16(&buf, UINT16_MAX);          /* typlen */
+        pq_sendint32(&buf, 0);                   /* typmod */
+        pq_sendint16(&buf, 0);                   /* format code */
 
         /* second field */
         pq_sendstring(&buf, "localMaxLsn"); /* col name */
-        pq_sendint32(&buf, 0); /* table oid */
-        pq_sendint16(&buf, 1); /* attnum */
-        pq_sendint32(&buf, TEXTOID); /* type oid */
-        pq_sendint16(&buf, UINT16_MAX); /* typlen */
-        pq_sendint32(&buf, 0); /* typmod */
-        pq_sendint16(&buf, 0); /* format code */
+        pq_sendint32(&buf, 0);              /* table oid */
+        pq_sendint16(&buf, 1);              /* attnum */
+        pq_sendint32(&buf, TEXTOID);        /* type oid */
+        pq_sendint16(&buf, UINT16_MAX);     /* typlen */
+        pq_sendint32(&buf, 0);              /* typmod */
+        pq_sendint16(&buf, 0);              /* format code */
 
         /* third field */
         pq_sendstring(&buf, "localMaxLsnCrc"); /* col name */
-        pq_sendint32(&buf, 0); /* table oid */
-        pq_sendint16(&buf, 2); /* attnum */
-        pq_sendint32(&buf, TEXTOID); /* type oid */
-        pq_sendint16(&buf, UINT16_MAX); /* typlen */
-        pq_sendint32(&buf, 0); /* typmod */
-        pq_sendint16(&buf, 0); /* format code */
+        pq_sendint32(&buf, 0);                 /* table oid */
+        pq_sendint16(&buf, 2);                 /* attnum */
+        pq_sendint32(&buf, TEXTOID);           /* type oid */
+        pq_sendint16(&buf, UINT16_MAX);        /* typlen */
+        pq_sendint32(&buf, 0);                 /* typmod */
+        pq_sendint16(&buf, 0);                 /* format code */
 
         pq_endmessage_noblock(&buf);
 
         /* Send a DataRow message */
         pq_beginmessage(&buf, 'D');
-        pq_sendint16(&buf, 3); /* # of columns */
+        pq_sendint16(&buf, 3);           /* # of columns */
         pq_sendint32(&buf, strlen(crc)); /* col1 len */
-        pq_sendbytes(&buf, (char *) crc, strlen(crc));
+        pq_sendbytes(&buf, (char *)crc, strlen(crc));
         pq_sendint32(&buf, strlen(strMaxPtr)); /* col2 len */
-        pq_sendbytes(&buf, (char *) strMaxPtr, strlen(strMaxPtr));
+        pq_sendbytes(&buf, (char *)strMaxPtr, strlen(strMaxPtr));
         pq_sendint32(&buf, strlen(maxLsnCrcStr)); /* col3 len */
-        pq_sendbytes(&buf, (char *) maxLsnCrcStr, strlen(maxLsnCrcStr));
+        pq_sendbytes(&buf, (char *)maxLsnCrcStr, strlen(maxLsnCrcStr));
         pq_endmessage_noblock(&buf);
     } else {
         char havexlog[8] = {0};
@@ -897,47 +896,45 @@ static void IdentifyConsistence(IdentifyConsistenceCmd* cmd)
                     havexlog[0] = '1';
                 }
             }
-            ereport(LOG,
-                    (errmsg("standby rec: %x/%x, havexlog: %s, crc:%u",
-                            (uint32) (cmd->recordptr >> 32), (uint32) cmd->recordptr,
-                            havexlog, (uint32)requestRecCrc)));
+            ereport(LOG, (errmsg("standby rec: %x/%x, havexlog: %s, crc:%u", (uint32)(cmd->recordptr >> 32),
+                                 (uint32)cmd->recordptr, havexlog, (uint32)requestRecCrc)));
         } else {
-            havexlog[0] = '1';  /* have xlog be true if in primary mode */
+            havexlog[0] = '1'; /* have xlog be true if in primary mode */
         }
 
         nRet = snprintf_s(crc, sizeof(crc), sizeof(crc) - 1, "%X", requestRecCrc);
         securec_check_ss(nRet, "\0", "\0");
-        
+
         /* Send a RowDescription message */
         pq_beginmessage(&buf, 'T');
-        pq_sendint16(&buf, 2);      /* 1 fields */
-        
+        pq_sendint16(&buf, 2); /* 1 fields */
+
         /* first field */
         pq_sendstring(&buf, "reccrc");  /* col name */
-        pq_sendint32(&buf, 0);      /* table oid */
-        pq_sendint16(&buf, 0);      /* attnum */
-        pq_sendint32(&buf, TEXTOID);        /* type oid */
+        pq_sendint32(&buf, 0);          /* table oid */
+        pq_sendint16(&buf, 0);          /* attnum */
+        pq_sendint32(&buf, TEXTOID);    /* type oid */
         pq_sendint16(&buf, UINT16_MAX); /* typlen */
-        pq_sendint32(&buf, 0);      /* typmod */
-        pq_sendint16(&buf, 0);      /* format code */
-        
+        pq_sendint32(&buf, 0);          /* typmod */
+        pq_sendint16(&buf, 0);          /* format code */
+
         /* sencond field */
-        pq_sendstring(&buf, "havexlog");    /* col name */
-        pq_sendint32(&buf, 0);      /* table oid */
-        pq_sendint16(&buf, 0);      /* attnum */
-        pq_sendint32(&buf, INT4OID);        /* type oid */
-        pq_sendint16(&buf, 4);      /* typlen */
-        pq_sendint32(&buf, 0);      /* typmod */
-        pq_sendint16(&buf, 0);      /* format code */
+        pq_sendstring(&buf, "havexlog"); /* col name */
+        pq_sendint32(&buf, 0);           /* table oid */
+        pq_sendint16(&buf, 0);           /* attnum */
+        pq_sendint32(&buf, INT4OID);     /* type oid */
+        pq_sendint16(&buf, 4);           /* typlen */
+        pq_sendint32(&buf, 0);           /* typmod */
+        pq_sendint16(&buf, 0);           /* format code */
         pq_endmessage_noblock(&buf);
-        
+
         /* Send a DataRow message */
         pq_beginmessage(&buf, 'D');
-        pq_sendint16(&buf, 2);      /* # of columns */
-        pq_sendint32(&buf, strlen(crc));    /* col1 len */
-        pq_sendbytes(&buf, (char *) crc, strlen(crc));
-        pq_sendint32(&buf, strlen(havexlog));   /* col2 len */
-        pq_sendbytes(&buf, (char *) havexlog, strlen(havexlog));
+        pq_sendint16(&buf, 2);           /* # of columns */
+        pq_sendint32(&buf, strlen(crc)); /* col1 len */
+        pq_sendbytes(&buf, (char *)crc, strlen(crc));
+        pq_sendint32(&buf, strlen(havexlog)); /* col2 len */
+        pq_sendbytes(&buf, (char *)havexlog, strlen(havexlog));
         pq_endmessage_noblock(&buf);
     }
 
@@ -951,7 +948,7 @@ static void IdentifyConsistence(IdentifyConsistenceCmd* cmd)
  * IDENTIFY_CHANNEL
  * get channel identifier from standby
  */
-static void IdentifyChannel(IdentifyChannelCmd* cmd)
+static void IdentifyChannel(IdentifyChannelCmd *cmd)
 {
     StringInfoData buf;
 
@@ -990,7 +987,7 @@ static void IdentifyChannel(IdentifyChannelCmd* cmd)
 /*
  * START_REPLICATION
  */
-static void StartReplication(StartReplicationCmd* cmd)
+static void StartReplication(StartReplicationCmd *cmd)
 {
     StringInfoData buf;
 
@@ -1016,9 +1013,8 @@ static void StartReplication(StartReplicationCmd* cmd)
      * happen, so it's not worth writing some code to suppress them.
      */
     if (AM_WAL_STANDBY_SENDER && !RecoveryInProgress()) {
-        ereport(LOG,
-            (errmsg("terminating walsender process to force cascaded standby "
-                    "to update timeline and reconnect")));
+        ereport(LOG, (errmsg("terminating walsender process to force cascaded standby "
+                             "to update timeline and reconnect")));
         t_thrd.walsender_cxt.walsender_ready_to_stop = true;
     }
 
@@ -1033,9 +1029,8 @@ static void StartReplication(StartReplicationCmd* cmd)
     if (cmd->slotname) {
         ReplicationSlotAcquire(cmd->slotname, AmWalSenderToDummyStandby() ? true : false);
         if (t_thrd.slot_cxt.MyReplicationSlot->data.database != InvalidOid)
-            ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                    (errmsg("cannot use a logical replication slot for physical replication"))));
+            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                            (errmsg("cannot use a logical replication slot for physical replication"))));
     }
 
     /*
@@ -1074,8 +1069,8 @@ static void StartReplication(StartReplicationCmd* cmd)
  * which has to do a plain sleep/busy loop, because the walsender's latch gets
  * set everytime WAL is flushed.
  */
-static int logical_read_xlog_page(XLogReaderState* state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
-    char* cur_page, TimeLineID* pageTLI)
+static int logical_read_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
+                                  char *cur_page, TimeLineID *pageTLI)
 {
     XLogRecPtr flushptr;
     int count;
@@ -1100,12 +1095,12 @@ static int logical_read_xlog_page(XLogReaderState* state, XLogRecPtr targetPageP
 /*
  * Create a new replication slot.
  */
-static void CreateReplicationSlot(const CreateReplicationSlotCmd* cmd)
+static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 {
-    const char* slot_name = NULL;
+    const char *slot_name = NULL;
     StringInfoData buf;
     bool isDummyStandby = false;
-    const char* snapshot_name = NULL;
+    const char *snapshot_name = NULL;
     char xpos[MAXFNAMELEN];
     int rc = 0;
 
@@ -1122,8 +1117,8 @@ static void CreateReplicationSlot(const CreateReplicationSlotCmd* cmd)
          * handle errors during initialization because it'll get dropped if
          * this transaction fails. We'll make it persistent at the end.
          */
-        ReplicationSlotCreate(
-            cmd->slotname, RS_EPHEMERAL, isDummyStandby, u_sess->proc_cxt.MyDatabaseId, InvalidXLogRecPtr);
+        ReplicationSlotCreate(cmd->slotname, RS_EPHEMERAL, isDummyStandby, u_sess->proc_cxt.MyDatabaseId,
+                              InvalidXLogRecPtr);
     } else {
         /*
          * physical slot save init value if exist
@@ -1135,16 +1130,16 @@ static void CreateReplicationSlot(const CreateReplicationSlotCmd* cmd)
     if (cmd->kind == REPLICATION_KIND_LOGICAL) {
         ValidateName(cmd->slotname);
         ValidateName(cmd->plugin);
-        char* fullname = NULL;
+        char *fullname = NULL;
         fullname = expand_dynamic_library_name(cmd->plugin);
 
         /* Load the shared library, unless we already did */
         (void)internal_load_library(fullname);
 
-        LogicalDecodingContext* ctx = NULL;
+        LogicalDecodingContext *ctx = NULL;
 
-        ctx = CreateInitDecodingContext(
-            cmd->plugin, NIL, true, logical_read_xlog_page, WalSndPrepareWrite, WalSndWriteData);
+        ctx = CreateInitDecodingContext(cmd->plugin, NIL, true, logical_read_xlog_page, WalSndPrepareWrite,
+                                        WalSndWriteData);
 
         /* build initial snapshot, might take a while */
         DecodingContextFindStartpoint(ctx);
@@ -1164,12 +1159,9 @@ static void CreateReplicationSlot(const CreateReplicationSlotCmd* cmd)
         log_slot_create(&t_thrd.slot_cxt.MyReplicationSlot->data);
     }
 
-    rc = snprintf_s(xpos,
-        sizeof(xpos),
-        sizeof(xpos) - 1,
-        "%X/%X",
-        (uint32)(t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush >> 32),
-        (uint32)t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush);
+    rc = snprintf_s(xpos, sizeof(xpos), sizeof(xpos) - 1, "%X/%X",
+                    (uint32)(t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush >> 32),
+                    (uint32)t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush);
     securec_check_ss(rc, "\0", "\0");
 
     /*
@@ -1258,13 +1250,13 @@ static void CreateReplicationSlot(const CreateReplicationSlotCmd* cmd)
 }
 
 /* Determine if it is a logical slot */
-bool IsLogicalSlot(const char* name)
+bool IsLogicalSlot(const char *name)
 {
     bool ret = false;
 
     LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
     for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
-        ReplicationSlot* s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+        ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
 
         if (s->in_use && strcmp(name, NameStr(s->data.name)) == 0 && s->data.database != InvalidOid) {
             ret = true;
@@ -1279,7 +1271,7 @@ bool IsLogicalSlot(const char* name)
 /*
  * Get rid of a replication slot that is no longer wanted.
  */
-static void DropReplicationSlot(DropReplicationSlotCmd* cmd)
+static void DropReplicationSlot(DropReplicationSlotCmd *cmd)
 {
     if (IsLogicalSlot(cmd->slotname)) {
         CheckPMstateAndRecoveryInProgress();
@@ -1298,7 +1290,7 @@ static void DropReplicationSlot(DropReplicationSlotCmd* cmd)
  * Load previously initiated logical slot and prepare for sending data (via
  * WalSndLoop).
  */
-static void StartLogicalReplication(StartReplicationCmd* cmd)
+static void StartLogicalReplication(StartReplicationCmd *cmd)
 {
     StringInfoData buf;
 
@@ -1327,11 +1319,8 @@ static void StartLogicalReplication(StartReplicationCmd* cmd)
         struct stat st;
         int rc = 0;
 
-        rc = snprintf_s(snappath,
-            MAXPGPATH,
-            MAXPGPATH - 1,
-            "pg_replslot/%s/snap",
-            NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name));
+        rc = snprintf_s(snappath, MAXPGPATH, MAXPGPATH - 1, "pg_replslot/%s/snap",
+                        NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name));
         securec_check_ss(rc, "\0", "\0");
 
         if (stat(snappath, &st) == 0 && S_ISDIR(st.st_mode)) {
@@ -1355,8 +1344,9 @@ static void StartLogicalReplication(StartReplicationCmd* cmd)
      * Initialize position to the last ack'ed one, then the xlog records begin
      * to be shipped from that position.
      */
-    t_thrd.walsender_cxt.logical_decoding_ctx = CreateDecodingContext(
-        cmd->startpoint, cmd->options, false, logical_read_xlog_page, WalSndPrepareWrite, WalSndWriteData);
+    t_thrd.walsender_cxt.logical_decoding_ctx = CreateDecodingContext(cmd->startpoint, cmd->options, false,
+                                                                      logical_read_xlog_page, WalSndPrepareWrite,
+                                                                      WalSndWriteData);
 
     /* Start reading WAL from the oldest required WAL. */
     t_thrd.walsender_cxt.logical_startptr = t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn;
@@ -1370,7 +1360,7 @@ static void StartLogicalReplication(StartReplicationCmd* cmd)
     /* Also update the sent position status in shared memory */
     {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+        volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
         SpinLockAcquire(&walsnd->mutex);
         walsnd->sentPtr = t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn;
@@ -1404,7 +1394,7 @@ static void StartLogicalReplication(StartReplicationCmd* cmd)
  * Don't do anything lasting in here, it's quite possible that nothing will done
  * with the data.
  */
-static void WalSndPrepareWrite(LogicalDecodingContext* ctx, XLogRecPtr lsn, TransactionId xid, bool last_write)
+static void WalSndPrepareWrite(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, bool last_write)
 {
     /* can't have sync rep confused by sending the same LSN several times */
     if (!last_write)
@@ -1429,7 +1419,7 @@ static void WalSndPrepareWrite(LogicalDecodingContext* ctx, XLogRecPtr lsn, Tran
  * the network. Take as long as needed, but process replies from the other
  * side and check timeouts during that.
  */
-static void WalSndWriteData(LogicalDecodingContext* ctx, XLogRecPtr lsn, TransactionId xid, bool last_write)
+static void WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, bool last_write)
 {
     errno_t rc;
 
@@ -1443,10 +1433,8 @@ static void WalSndWriteData(LogicalDecodingContext* ctx, XLogRecPtr lsn, Transac
      */
     resetStringInfo(t_thrd.walsender_cxt.tmpbuf);
     pq_sendint64(t_thrd.walsender_cxt.tmpbuf, GetCurrentTimestamp());
-    rc = memcpy_s(&(ctx->out->data[1 + sizeof(int64) + sizeof(int64)]),
-        ctx->out->len,
-        t_thrd.walsender_cxt.tmpbuf->data,
-        sizeof(int64));
+    rc = memcpy_s(&(ctx->out->data[1 + sizeof(int64) + sizeof(int64)]), ctx->out->len,
+                  t_thrd.walsender_cxt.tmpbuf->data, sizeof(int64));
     securec_check(rc, "\0", "\0");
 
     /* fast path */
@@ -1499,8 +1487,8 @@ static void WalSndWriteData(LogicalDecodingContext* ctx, XLogRecPtr lsn, Transac
         /* Sleep until something happens or we time out */
         t_thrd.int_cxt.ImmediateInterruptOK = true;
         CHECK_FOR_INTERRUPTS();
-        WaitLatchOrSocket(
-            &t_thrd.walsender_cxt.MyWalSnd->latch, wakeEvents, u_sess->proc_cxt.MyProcPort->sock, sleeptime);
+        WaitLatchOrSocket(&t_thrd.walsender_cxt.MyWalSnd->latch, wakeEvents, u_sess->proc_cxt.MyProcPort->sock,
+                          sleeptime);
         t_thrd.int_cxt.ImmediateInterruptOK = false;
     }
 
@@ -1612,8 +1600,8 @@ static XLogRecPtr WalSndWaitForWal(XLogRecPtr loc)
         /* Sleep until something happens or we time out */
         t_thrd.int_cxt.ImmediateInterruptOK = true;
         CHECK_FOR_INTERRUPTS();
-        WaitLatchOrSocket(
-            &t_thrd.walsender_cxt.MyWalSnd->latch, wakeEvents, u_sess->proc_cxt.MyProcPort->sock, sleeptime);
+        WaitLatchOrSocket(&t_thrd.walsender_cxt.MyWalSnd->latch, wakeEvents, u_sess->proc_cxt.MyProcPort->sock,
+                          sleeptime);
         t_thrd.int_cxt.ImmediateInterruptOK = false;
     }
 
@@ -1625,7 +1613,7 @@ static XLogRecPtr WalSndWaitForWal(XLogRecPtr loc)
 /*
  * Check cmdString format.
  */
-bool cmdStringCheck(const char* cmd_string)
+bool cmdStringCheck(const char *cmd_string)
 {
     const int maxStack = 100;
     char charStack[maxStack];
@@ -1660,11 +1648,11 @@ bool cmdStringCheck(const char* cmd_string)
 }
 
 /*
- * Check cmdString length.
- */
+ *  * Check cmdString length.
+ *   */
 static bool cmdStringLengthCheck(const char* cmd_string)
 {
-    const size_t cmd_length_limit = 20000;
+    const size_t cmd_length_limit = 1024;
     const size_t slotname_limit = 64;
     char comd[cmd_length_limit] = {'\0'};
     char* sub_cmd = NULL;
@@ -1711,55 +1699,7 @@ static bool cmdStringLengthCheck(const char* cmd_string)
     return true;
 }
 
-/*
- * Execute an incoming replication command.
- */
-static bool HandleWalReplicationCommand(const char* cmd_string)
-{
-    bool replication_started = false;
-    int parse_rc;
-    Node* cmd_node = NULL;
-    MemoryContext cmd_context;
-    MemoryContext old_context;
-    replication_scanner_yyscan_t yyscanner = NULL;
-
-    /*
-     * CREATE_REPLICATION_SLOT ... LOGICAL exports a snapshot until the next
-     * command arrives. Clean up the old stuff if there's anything.
-     */
-    SnapBuildClearExportedSnapshot();
-
-    ereport(LOG, (errmsg("received wal replication command: %s", cmd_string)));
-
-    if (cmdStringCheck(cmd_string) == false) {
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), 
-            (errmsg_internal("replication command, syntax error."))));
-    }
-
-    if (cmdStringLengthCheck(cmd_string) == false) {
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
-            (errmsg_internal("replication slot name should be shorter than %d.", NAMEDATALEN))));
-    }
-
-    cmd_context = AllocSetContextCreate(CurrentMemoryContext,
-        "Replication command context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
-
-    yyscanner = replication_scanner_init(cmd_string);
-    parse_rc = replication_yyparse(yyscanner);
-    replication_scanner_finish(yyscanner);
-
-    if (parse_rc != 0) {
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), 
-            (errmsg_internal("replication command parser returned %d", parse_rc))));
-    }
-
-    old_context = MemoryContextSwitchTo(cmd_context);
-
-    cmd_node = t_thrd.replgram_cxt.replication_parse_result;
-
+static void IdentifyCommand(Node* cmd_node, bool* replication_started, const char *cmd_string){
     switch (cmd_node->type) {
         case T_IdentifySystemCmd:
             IdentifySystem();
@@ -1778,12 +1718,12 @@ static bool HandleWalReplicationCommand(const char* cmd_string)
             break;
 
         case T_IdentifyConsistenceCmd:
-            IdentifyConsistence((IdentifyConsistenceCmd*)cmd_node);
+            IdentifyConsistence((IdentifyConsistenceCmd *)cmd_node);
             SetReplWalSender();
             break;
 
         case T_IdentifyChannelCmd:
-            IdentifyChannel((IdentifyChannelCmd*)cmd_node);
+            IdentifyChannel((IdentifyChannelCmd *)cmd_node);
             break;
 
 #ifndef ENABLE_MULTIPLE_NODES
@@ -1798,7 +1738,7 @@ static bool HandleWalReplicationCommand(const char* cmd_string)
 
             if (!IS_PGXC_COORDINATOR && IS_DN_DUMMY_STANDYS_MODE())
                 StopAliveBuildSender();
-            SendBaseBackup((BaseBackupCmd*)cmd_node);
+            SendBaseBackup((BaseBackupCmd *)cmd_node);
 
             /* Send CommandComplete and ReadyForQuery messages */
             EndCommand_noblock("SELECT", DestRemote);
@@ -1809,19 +1749,19 @@ static bool HandleWalReplicationCommand(const char* cmd_string)
             break;
 
         case T_CreateReplicationSlotCmd:
-            CreateReplicationSlot((CreateReplicationSlotCmd*)cmd_node);
+            CreateReplicationSlot((CreateReplicationSlotCmd *)cmd_node);
             break;
 
         case T_DropReplicationSlotCmd:
-            DropReplicationSlot((DropReplicationSlotCmd*)cmd_node);
+            DropReplicationSlot((DropReplicationSlotCmd *)cmd_node);
             break;
 
         case T_StartReplicationCmd: {
-            StartReplicationCmd* cmd = (StartReplicationCmd*)cmd_node;
+            StartReplicationCmd *cmd = (StartReplicationCmd *)cmd_node;
             if (cmd->kind == REPLICATION_KIND_PHYSICAL) {
                 StartReplication(cmd);
                 /* break out of the loop */
-                replication_started = true;
+                *replication_started = true;
             } else {
                 CheckPMstateAndRecoveryInProgress();
                 StartLogicalReplication(cmd);
@@ -1829,17 +1769,68 @@ static bool HandleWalReplicationCommand(const char* cmd_string)
             break;
         }
 
+#ifdef ENABLE_MOT
         case T_FetchMotCheckpointCmd:
             PerformMotCheckpointFetch();
             /* Send CommandComplete and ReadyForQuery messages */
             EndCommand_noblock("SELECT", DestRemote);
-            ReadyForQuery_noblock(DestRemote, u_sess->attr.attr_storage.basebackup_timeout * MILLISECONDS_PER_SECONDS);
+            ReadyForQuery_noblock(DestRemote, u_sess->attr.attr_storage.wal_sender_timeout);
             break;
+#endif
 
         default:
-            ereport(
-                FATAL, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid standby query string: %s", cmd_string)));
+            ereport(FATAL,
+                    (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid standby query string: %s", cmd_string)));
     }
+
+}
+
+/*
+ * Execute an incoming replication command.
+ */
+static bool HandleWalReplicationCommand(const char *cmd_string)
+{
+    bool replication_started = false;
+    int parse_rc;
+    Node *cmd_node = NULL;
+    MemoryContext cmd_context;
+    MemoryContext old_context;
+    replication_scanner_yyscan_t yyscanner = NULL;
+
+    /*
+     * CREATE_REPLICATION_SLOT ... LOGICAL exports a snapshot until the next
+     * command arrives. Clean up the old stuff if there's anything.
+     */
+    SnapBuildClearExportedSnapshot();
+
+    ereport(LOG, (errmsg("received wal replication command: %s", cmd_string)));
+
+    if (cmdStringCheck(cmd_string) == false) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), (errmsg_internal("replication command, syntax error."))));
+    }
+
+    if (cmdStringLengthCheck(cmd_string) == false) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+            (errmsg_internal("replication slot name should be shorter than %d.", NAMEDATALEN))));
+    }
+
+    cmd_context = AllocSetContextCreate(CurrentMemoryContext, "Replication command context", ALLOCSET_DEFAULT_MINSIZE,
+                                        ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+
+    yyscanner = replication_scanner_init(cmd_string);
+    parse_rc = replication_yyparse(yyscanner);
+    replication_scanner_finish(yyscanner);
+
+    if (parse_rc != 0) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SYNTAX_ERROR), (errmsg_internal("replication command parser returned %d", parse_rc))));
+    }
+
+    old_context = MemoryContextSwitchTo(cmd_context);
+
+    cmd_node = t_thrd.replgram_cxt.replication_parse_result;
+
+    IdentifyCommand(cmd_node, &replication_started, cmd_string);
 
     /* done */
     (void)MemoryContextSwitchTo(old_context);
@@ -1887,8 +1878,8 @@ static void ProcessRepliesIfAny(void)
                 proc_exit(0);
                 /* fall-through */
             default:
-                ereport(FATAL,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid standby message type \"%c\"", firstchar)));
+                ereport(FATAL, (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                                errmsg("invalid standby message type \"%c\"", firstchar)));
         }
     }
 
@@ -1946,9 +1937,13 @@ static void ProcessStandbyMessage(void)
             ProcessStandbyFileTimeMessage();
             break;
 
+        case 'a':
+            ProcessArchiveFeedbackMessage();
+            break;
+
         default:
-            ereport(
-                COMMERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected message type \"%d\"", msgtype)));
+            ereport(COMMERROR,
+                    (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected message type \"%d\"", msgtype)));
             proc_exit(0);
     }
 }
@@ -1960,7 +1955,7 @@ static void PhysicalConfirmReceivedLocation(XLogRecPtr lsn)
 {
     bool changed = false;
     /* use volatile pointer to prevent code rearrangement */
-    volatile ReplicationSlot* slot = t_thrd.slot_cxt.MyReplicationSlot;
+    volatile ReplicationSlot *slot = t_thrd.slot_cxt.MyReplicationSlot;
 
     Assert(!XLByteEQ(lsn, InvalidXLogRecPtr));
     /* not update in boundary */
@@ -1995,13 +1990,12 @@ static void ProcessStandbyFileTimeMessage(void)
     ConfigModifyTimeMessage reply_modify_file_time;
     struct stat statbuf;
 
-    pq_copymsgbytes(
-        t_thrd.walsender_cxt.reply_message, (char*)&reply_modify_file_time, sizeof(ConfigModifyTimeMessage));
+    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char *)&reply_modify_file_time,
+                    sizeof(ConfigModifyTimeMessage));
     if (lstat(t_thrd.walsender_cxt.gucconf_file, &statbuf) != 0) {
         if (errno != ENOENT)
-            ereport(ERROR,
-                (errcode_for_file_access(),
-                    errmsg("could not stat file or directory \"%s\": %m", t_thrd.walsender_cxt.gucconf_file)));
+            ereport(ERROR, (errcode_for_file_access(),
+                            errmsg("could not stat file or directory \"%s\": %m", t_thrd.walsender_cxt.gucconf_file)));
     }
     if (reply_modify_file_time.config_modify_time != statbuf.st_mtime) {
         ereport(LOG, (errmsg("the config file has been modified, so send it to the standby")));
@@ -2010,7 +2004,7 @@ static void ProcessStandbyFileTimeMessage(void)
         ereport(LOG, (errmsg("the config file has no change")));
 }
 
-char* remote_role_to_string(int role)
+char *remote_role_to_string(int role)
 {
     switch (role) {
         case SNDROLE_PRIMARY_STANDBY:
@@ -2046,11 +2040,11 @@ static bool LogicalSlotSleepFlag(void)
     }
     XLogRecPtr min_restart_lsn = InvalidXLogRecPtr;
     for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
-        ReplicationSlot* s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+        ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
 
         if (s->in_use && s->data.database != InvalidOid) {
-            min_restart_lsn = min_restart_lsn == InvalidXLogRecPtr ? s->data.restart_lsn :
-                Min(min_restart_lsn, s->data.restart_lsn);
+            min_restart_lsn = min_restart_lsn == InvalidXLogRecPtr ? s->data.restart_lsn
+                                                                    : Min(min_restart_lsn, s->data.restart_lsn);
         }
     }
     if (min_restart_lsn == InvalidXLogRecPtr) {
@@ -2063,12 +2057,9 @@ static bool LogicalSlotSleepFlag(void)
             g_logical_slot_sleep_time = MICROSECONDS_PER_SECONDS;
         }
         ereport(LOG,
-            (errmsg("flush_lsn %X/%X exceed min_restart_lsn %X/%X by threshold %ld, sleep time increase by 0.1s.\n",
-                (uint32)(flush_lsn >> 32),
-                (uint32)flush_lsn,
-                (uint32)(min_restart_lsn >> 32),
-                (uint32)min_restart_lsn,
-                max_keep_log_seg)));
+                (errmsg("flush_lsn %X/%X exceed min_restart_lsn %X/%X by threshold %ld, sleep time increase by 0.1s.\n",
+                        (uint32)(flush_lsn >> 32), (uint32)flush_lsn, (uint32)(min_restart_lsn >> 32),
+                        (uint32)min_restart_lsn, max_keep_log_seg)));
         return true;
     } else {
         g_logical_slot_sleep_time = 0;
@@ -2076,17 +2067,19 @@ static bool LogicalSlotSleepFlag(void)
     return false;
 }
 
-static void do_actual_sleep(volatile WalSnd* walsnd)
+static void do_actual_sleep(volatile WalSnd *walsnd)
 {
     bool logical_slot_sleep_flag = LogicalSlotSleepFlag();
     /* try to control log sent rate so that standby can flush and apply log under RTO seconds */
     if (walsnd->state == WALSNDSTATE_STREAMING && IS_PGXC_DATANODE) {
-        if (u_sess->attr.attr_storage.target_rto > 0) {
+        if (u_sess->attr.attr_storage.target_rto > 0 || u_sess->attr.attr_storage.time_to_target_rpo > 0) {
             if (walsnd->log_ctrl.sleep_count % walsnd->log_ctrl.sleep_count_limit == 0) {
                 LogCtrlCalculateSleepTime();
                 LogCtrlCountSleepLimit();
             }
+            pgstat_report_waitevent(WAIT_EVENT_LOGCTRL_SLEEP);
             LogCtrlSleep();
+            pgstat_report_waitevent(WAIT_EVENT_END);
             if (logical_slot_sleep_flag &&
                 g_logical_slot_sleep_time > t_thrd.walsender_cxt.MyWalSnd->log_ctrl.sleep_time) {
                 pg_usleep(g_logical_slot_sleep_time - t_thrd.walsender_cxt.MyWalSnd->log_ctrl.sleep_time);
@@ -2108,31 +2101,23 @@ static void ProcessStandbyReplyMessage(void)
     StandbyReplyMessage reply;
     XLogRecPtr sndFlush = InvalidXLogRecPtr;
     int rc;
-    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(StandbyReplyMessage));
+    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char *)&reply, sizeof(StandbyReplyMessage));
 
-    ereport(DEBUG2,
-        (errmsg("receive %X/%X write %X/%X flush %X/%X apply %X/%X",
-            (uint32)(reply.receive >> 32),
-            (uint32)reply.receive,
-            (uint32)(reply.write >> 32),
-            (uint32)reply.write,
-            (uint32)(reply.flush >> 32),
-            (uint32)reply.flush,
-            (uint32)(reply.apply >> 32),
-            (uint32)reply.apply)));
+    ereport(DEBUG2, (errmsg("receive %X/%X write %X/%X flush %X/%X apply %X/%X", (uint32)(reply.receive >> 32),
+                            (uint32)reply.receive, (uint32)(reply.write >> 32), (uint32)reply.write,
+                            (uint32)(reply.flush >> 32), (uint32)reply.flush, (uint32)(reply.apply >> 32),
+                            (uint32)reply.apply)));
 
     /* send a reply if the standby requested one */
     if (reply.replyRequested) {
         WalSndKeepalive(false);
     }
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
     if (IS_PGXC_DATANODE) {
-        char* standby_name = (char*)(g_instance.rto_cxt.rto_standby_data[walsnd->index].id);
-        rc = strncpy_s(standby_name,
-            NODENAMELEN,
-            u_sess->attr.attr_common.application_name,
-            strlen(u_sess->attr.attr_common.application_name));
+        char *standby_name = (char *)(g_instance.rto_cxt.rto_standby_data[walsnd->index].id);
+        rc = strncpy_s(standby_name, NODENAMELEN, u_sess->attr.attr_common.application_name,
+                       strlen(u_sess->attr.attr_common.application_name));
         securec_check(rc, "\0", "\0");
         if (u_sess->attr.attr_storage.target_rto == 0) {
             g_instance.rto_cxt.rto_standby_data[walsnd->index].current_sleep_time = 0;
@@ -2140,12 +2125,11 @@ static void ProcessStandbyReplyMessage(void)
             g_instance.rto_cxt.rto_standby_data[walsnd->index].current_sleep_time = walsnd->log_ctrl.sleep_time;
         }
         if (g_instance.rto_cxt.rto_standby_data[walsnd->index].target_rto != u_sess->attr.attr_storage.target_rto) {
-            ereport(LOG,
-                (errmodule(MOD_RTO),
-                    errmsg("target_rto changes to %d, previous target_rto is %d, current the sleep time is %ld",
-                        u_sess->attr.attr_storage.target_rto,
-                        g_instance.rto_cxt.rto_standby_data[walsnd->index].target_rto,
-                        g_instance.rto_cxt.rto_standby_data[walsnd->index].current_sleep_time)));
+            ereport(LOG, (errmodule(MOD_RTO_RPO),
+                          errmsg("target_rto changes to %d, previous target_rto is %d, current the sleep time is %ld",
+                                 u_sess->attr.attr_storage.target_rto,
+                                 g_instance.rto_cxt.rto_standby_data[walsnd->index].target_rto,
+                                 g_instance.rto_cxt.rto_standby_data[walsnd->index].current_sleep_time)));
 
             g_instance.rto_cxt.rto_standby_data[walsnd->index].target_rto = u_sess->attr.attr_storage.target_rto;
         }
@@ -2172,6 +2156,7 @@ static void ProcessStandbyReplyMessage(void)
     if (!AM_WAL_DB_SENDER) {
         if (IS_PGXC_DATANODE && walsnd->log_ctrl.sleep_count % walsnd->log_ctrl.sleep_count_limit == 0) {
             LogCtrlCalculateCurrentRTO(&reply);
+            LogCtrlCalculateCurrentRPO();
             walsnd->log_ctrl.prev_reply_time = reply.sendTime;
             walsnd->log_ctrl.prev_flush = reply.flush;
             walsnd->log_ctrl.prev_apply = reply.apply;
@@ -2203,7 +2188,7 @@ static void ProcessStandbyReplyMessage(void)
 static void PhysicalReplicationSlotNewXmin(TransactionId feedbackXmin)
 {
     bool changed = false;
-    volatile ReplicationSlot* slot = t_thrd.slot_cxt.MyReplicationSlot;
+    volatile ReplicationSlot *slot = t_thrd.slot_cxt.MyReplicationSlot;
 
     SpinLockAcquire(&slot->mutex);
     t_thrd.pgxact->xmin = InvalidTransactionId;
@@ -2235,7 +2220,7 @@ static void ProcessStandbyHSFeedbackMessage(void)
     TransactionId nextXid;
 
     /* Decipher the reply message */
-    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(StandbyHSFeedbackMessage));
+    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char *)&reply, sizeof(StandbyHSFeedbackMessage));
 
     ereport(DEBUG2, (errmsg("hot standby feedback xmin " XID_FMT, reply.xmin)));
 
@@ -2295,11 +2280,11 @@ static void ProcessStandbySwitchRequestMessage(void)
     int i;
     StandbySwitchRequestMessage message;
 
-    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&message, sizeof(StandbySwitchRequestMessage));
+    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char *)&message, sizeof(StandbySwitchRequestMessage));
 
     if (message.demoteMode < SmartDemote || message.demoteMode > FastDemote) {
-        ereport(
-            WARNING, (errmsg("invalid switchover mode in standby switchover request message: %d", message.demoteMode)));
+        ereport(WARNING,
+                (errmsg("invalid switchover mode in standby switchover request message: %d", message.demoteMode)));
         return;
     }
 
@@ -2310,7 +2295,7 @@ static void ProcessStandbySwitchRequestMessage(void)
      * at once. There will be some risk of losting data when catchup can't send the data pages.
      */
     if (catchup_online) {
-        volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+        volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
         ClusterNodeState old_mode = walsnd->node_state;
 
         walsnd->node_state = NODESTATE_PRIMARY_DEMOTING_WAIT_CATCHUP;
@@ -2330,10 +2315,8 @@ static void ProcessStandbySwitchRequestMessage(void)
         return;
     } else if (message.demoteMode <= t_thrd.walsender_cxt.Demotion) {
         SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
-        ereport(NOTICE,
-            (errmsg("the standby already requested %s switchover, so ignore new %s switchover request.",
-                DemoteModeDesc(t_thrd.walsender_cxt.Demotion),
-                DemoteModeDesc(message.demoteMode))));
+        ereport(NOTICE, (errmsg("the standby already requested %s switchover, so ignore new %s switchover request.",
+                                DemoteModeDesc(t_thrd.walsender_cxt.Demotion), DemoteModeDesc(message.demoteMode))));
         return;
     }
 
@@ -2341,7 +2324,7 @@ static void ProcessStandbySwitchRequestMessage(void)
 
     /* update the demote state */
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
         if (walsnd->pid == 0) {
             continue;
@@ -2354,10 +2337,28 @@ static void ProcessStandbySwitchRequestMessage(void)
     SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
 
     t_thrd.walsender_cxt.Demotion = (DemoteMode)message.demoteMode;
-    ereport(
-        LOG, (errmsg("received %s switchover request from standby", DemoteModeDesc(t_thrd.walsender_cxt.Demotion))));
+    ereport(LOG,
+            (errmsg("received %s switchover request from standby", DemoteModeDesc(t_thrd.walsender_cxt.Demotion))));
 
     SendPostmasterSignal(PMSIGNAL_DEMOTE_PRIMARY);
+}
+
+/*
+ * Hot Standby feedback
+ */
+static void ProcessArchiveFeedbackMessage(void)
+{
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    ArchiveXlogResponseMeeeage reply;
+    /* Decipher the reply message */
+    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(ArchiveXlogResponseMeeeage));
+    ereport(LOG,
+        (errmsg("ProcessArchiveFeedbackMessage %d %X/%X", reply.pitr_result, 
+            (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
+    g_instance.archive_obs_cxt.pitr_finish_result = reply.pitr_result;
+    g_instance.archive_obs_cxt.archive_task.targetLsn = reply.targetLsn;
+    Assert(walsnd->arch_latch != NULL);
+    SetLatch(walsnd->arch_latch);
 }
 
 /*
@@ -2365,14 +2366,14 @@ static void ProcessStandbySwitchRequestMessage(void)
  */
 static void LogCtrlCountSleepLimit(void)
 {
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
     int64 sleep_count_limit_count;
     if (walsnd->log_ctrl.sleep_time == 0) {
         sleep_count_limit_count = MAX_CONTROL_REPLY;
     } else {
         sleep_count_limit_count = INIT_CONTROL_REPLY * MICROSECONDS_PER_SECONDS / walsnd->log_ctrl.sleep_time;
-        sleep_count_limit_count =
-            (sleep_count_limit_count > MAX_CONTROL_REPLY) ? MAX_CONTROL_REPLY : sleep_count_limit_count;
+        sleep_count_limit_count = (sleep_count_limit_count > MAX_CONTROL_REPLY) ? MAX_CONTROL_REPLY
+                                                                                : sleep_count_limit_count;
     }
     if (sleep_count_limit_count <= 0) {
         sleep_count_limit_count = INIT_CONTROL_REPLY;
@@ -2385,7 +2386,7 @@ static void LogCtrlCountSleepLimit(void)
  */
 static void LogCtrlSleep(void)
 {
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
     if (walsnd->log_ctrl.sleep_time > 0 && walsnd->log_ctrl.sleep_time <= MICROSECONDS_PER_SECONDS) {
         pg_usleep(walsnd->log_ctrl.sleep_time);
     } else if (walsnd->log_ctrl.sleep_time > MICROSECONDS_PER_SECONDS) {
@@ -2404,9 +2405,9 @@ static inline uint64 LogCtrlCountBigSpeed(uint64 originSpeed, uint64 curSpeed)
 /*
  * Estimate the time standby need to flush and apply log.
  */
-static void LogCtrlCalculateCurrentRTO(StandbyReplyMessage* reply)
+static void LogCtrlCalculateCurrentRTO(StandbyReplyMessage *reply)
 {
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
     long sec_to_time;
     int microsec_to_time;
     if (XLByteLT(reply->receive, reply->flush) || XLByteLT(reply->flush, reply->apply) ||
@@ -2424,7 +2425,7 @@ static void LogCtrlCalculateCurrentRTO(StandbyReplyMessage* reply)
 
     TimestampDifference(walsnd->log_ctrl.prev_reply_time, reply->sendTime, &sec_to_time, &microsec_to_time);
     long millisec_time_diff = sec_to_time * MILLISECONDS_PER_SECONDS + microsec_to_time / MILLISECONDS_PER_MICROSECONDS;
-    if (millisec_time_diff <= 0) {
+    if (millisec_time_diff <= 10) {
         return;
     }
 
@@ -2434,14 +2435,14 @@ static void LogCtrlCalculateCurrentRTO(StandbyReplyMessage* reply)
      * by multiply first then divide, which is (8 * previous_speed * 7/8 + speed_now) / 8.
      */
     if (walsnd->log_ctrl.pre_rate1 != 0) {
-        walsnd->log_ctrl.pre_rate1 =
-            LogCtrlCountBigSpeed(walsnd->log_ctrl.pre_rate1, (uint64)(part1_diff / millisec_time_diff));
+        walsnd->log_ctrl.pre_rate1 = LogCtrlCountBigSpeed(walsnd->log_ctrl.pre_rate1,
+                                                          (uint64)(part1_diff / millisec_time_diff));
     } else {
         walsnd->log_ctrl.pre_rate1 = ((part1_diff / (uint64)millisec_time_diff) << SHIFT_SPEED);
     }
     if (walsnd->log_ctrl.pre_rate2 != 0) {
-        walsnd->log_ctrl.pre_rate2 =
-            LogCtrlCountBigSpeed(walsnd->log_ctrl.pre_rate2, (uint64)(part2_diff / millisec_time_diff));
+        walsnd->log_ctrl.pre_rate2 = LogCtrlCountBigSpeed(walsnd->log_ctrl.pre_rate2,
+                                                          (uint64)(part2_diff / millisec_time_diff));
     } else {
         walsnd->log_ctrl.pre_rate2 = ((uint64)(part2_diff / millisec_time_diff) << SHIFT_SPEED);
     }
@@ -2458,54 +2459,100 @@ static void LogCtrlCalculateCurrentRTO(StandbyReplyMessage* reply)
     walsnd->log_ctrl.prev_RTO = walsnd->log_ctrl.current_RTO;
     walsnd->log_ctrl.current_RTO = sec_RTO;
     g_instance.rto_cxt.rto_standby_data[walsnd->index].current_rto = walsnd->log_ctrl.current_RTO;
-    ereport(DEBUG4,
-        (errmodule(MOD_RTO),
-            errmsg("The RTO estimated is = : %lu seconds. reply->reveive is %lu, reply->flush is %lu, "
-                   "reply->apply is %lu, pre_flush is %lu, pre_apply is %lu, TimestampDifference is %ld, "
-                   "consumeRatePart1 is %lu, consumeRatePart2 is %lu",
-                sec_RTO,
-                reply->receive,
-                reply->flush,
-                reply->apply,
-                walsnd->log_ctrl.prev_flush,
-                walsnd->log_ctrl.prev_apply,
-                millisec_time_diff,
-                consumeRatePart1,
-                consumeRatePart2)));
+    ereport(DEBUG4, (errmodule(MOD_RTO_RPO),
+                     errmsg("The RTO estimated is = : %lu seconds. reply->reveive is %lu, reply->flush is %lu, "
+                            "reply->apply is %lu, pre_flush is %lu, pre_apply is %lu, TimestampDifference is %ld, "
+                            "consumeRatePart1 is %lu, consumeRatePart2 is %lu",
+                            sec_RTO, reply->receive, reply->flush, reply->apply, walsnd->log_ctrl.prev_flush,
+                            walsnd->log_ctrl.prev_apply, millisec_time_diff, consumeRatePart1, consumeRatePart2)));
+}
+
+/* Calculate the RTO and RPO changes and control the changes as long as one changes. */
+static void LogCtrlCalculateIndicatorChange(int64 *gapDiff, int64 *gap)
+{
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+
+    int64 rtoPrevGap = 0;
+    int64 rtoGapDiff = 0;
+    int64 rtoGap = 0;    
+    int64 rpoPrevGap = 0;
+    int64 rpoGapDiff = 0;
+    int64 rpoGap = 0;
+
+    if (u_sess->attr.attr_storage.target_rto > 0) {
+
+        if (walsnd->log_ctrl.prev_RTO < 0) {
+            walsnd->log_ctrl.prev_RTO = walsnd->log_ctrl.current_RTO;
+        }
+
+        int targetRTO = u_sess->attr.attr_storage.target_rto;
+        int64 currentRTO = walsnd->log_ctrl.current_RTO;
+        rtoGap = currentRTO - targetRTO;
+        rtoPrevGap = walsnd->log_ctrl.prev_RTO - targetRTO;
+        rtoGapDiff = rtoGap - rtoPrevGap;
+    }
+
+    if (u_sess->attr.attr_storage.time_to_target_rpo > 0) {
+        if (walsnd->log_ctrl.prev_RPO < 0) {
+            walsnd->log_ctrl.prev_RPO = walsnd->log_ctrl.current_RPO;
+        }
+
+        int targetRPO = u_sess->attr.attr_storage.time_to_target_rpo;
+        int64 currentRPO = walsnd->log_ctrl.current_RPO;
+        rpoGap = currentRPO - targetRPO;
+        rpoPrevGap = walsnd->log_ctrl.prev_RPO - targetRPO;
+        rpoGapDiff = rpoGap - rpoPrevGap;
+    }
+
+    if (abs(rpoGapDiff) > abs(rtoGapDiff)) {
+        *gapDiff = rpoGapDiff;
+        *gap = rpoGap;
+    } else {
+        *gapDiff = rtoGapDiff;
+        *gap = rtoGap;
+    }
+
+    ereport(DEBUG4, (errmodule(MOD_RTO_RPO), errmsg("[LogCtrlCalculateIndicatorChange] rto_gap=%d, rto_gap_diff=%d," 
+            "rpo_gap=%d, rpo_gap_diff=%d, gap=%d, gap_diff=%d", 
+        (int)rtoGap, (int)rtoGapDiff, (int)rpoGap, (int)rpoGapDiff, (int)*gap, (int)*gapDiff)));   
 }
 
 /*
- * If current RTO is less than target_rto, primary need less sleep.
- * If current RTO is more than target_rto, primary need more sleep.
- * If current RTO equals to target_rto, primary will sleep according to balance_sleep to maintain rto.
+ * If current RTO/RPO is less than target_rto/time_to_target_rpo, primary need less sleep.
+ * If current RTO/RPO is more than target_rto/time_to_target_rpo, primary need more sleep.
+ * If current RTO/RPO equals to target_rto/time_to_target_rpo, primary will sleep 
+ * according to balance_sleep to maintain rto.
  */
 static void LogCtrlCalculateSleepTime(void)
 {
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    if (walsnd->log_ctrl.prev_RTO < 0) {
-        walsnd->log_ctrl.prev_RTO = walsnd->log_ctrl.current_RTO;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    int64 gapDiff;
+    int64 gap;
+
+    LogCtrlCalculateIndicatorChange(&gapDiff, &gap);
+    /* If gap_diff is 0, the gap of the RPO and RTO remains unchanged. */
+    if (gapDiff == 0) {
         return;
     }
 
-    int targetRTO = u_sess->attr.attr_storage.target_rto;
-    int64 currentRTO = walsnd->log_ctrl.current_RTO;
-    int64 gap = currentRTO - targetRTO;
-    int64 prev_gap = walsnd->log_ctrl.prev_RTO - targetRTO;
-    int64 gap_diff = gap - prev_gap;
     int64 sleepTime = walsnd->log_ctrl.sleep_time;
     /* use for rto log */
     int64 pre_time = walsnd->log_ctrl.sleep_time;
+    int balance_range = 1;
 
     /* mark balance sleep time */
-    if (abs(gap_diff) <= (targetRTO / FAULT_TOLERANCE)) {
-        walsnd->log_ctrl.balance_sleep_time = sleepTime;
-        ereport(DEBUG4,
-            (errmodule(MOD_RTO),
-                errmsg("The balance time for log control is : %ld microseconds", walsnd->log_ctrl.balance_sleep_time)));
+    if (abs(gapDiff) <= balance_range) {
+        if (walsnd->log_ctrl.balance_sleep_time == 0) {
+            walsnd->log_ctrl.balance_sleep_time = sleepTime;
+        } else {
+            walsnd->log_ctrl.balance_sleep_time = (walsnd->log_ctrl.balance_sleep_time + sleepTime) / 2;
+        }
+        ereport(DEBUG4, (errmodule(MOD_RTO_RPO), errmsg("The balance time for log control is : %ld microseconds",
+            walsnd->log_ctrl.balance_sleep_time)));
     }
 
     /* rto balance, currentRTO close to targetRTO */
-    if (abs(gap) <= (targetRTO / FAULT_TOLERANCE)) {
+    if (abs(gap) <= balance_range) {
         if (walsnd->log_ctrl.balance_sleep_time != 0) {
             walsnd->log_ctrl.sleep_time = walsnd->log_ctrl.balance_sleep_time;
         } else {
@@ -2517,39 +2564,65 @@ static void LogCtrlCalculateSleepTime(void)
     /* need more sleep, currentRTO larger than targetRTO
      *  get bigger, but no more than 1s
      */
-    if (gap > (targetRTO / FAULT_TOLERANCE)) {
+    if (gap > balance_range) {
         sleepTime += SLEEP_MORE;
         walsnd->log_ctrl.sleep_time = (sleepTime < 1 * MICROSECONDS_PER_SECONDS) ? sleepTime : MICROSECONDS_PER_SECONDS;
     }
 
     /* need less sleep, currentRTO less than targetRTO */
-    if (gap < -(targetRTO / FAULT_TOLERANCE)) {
+    if (gap < -balance_range) {
         sleepTime -= SLEEP_LESS;
         walsnd->log_ctrl.sleep_time = (sleepTime >= 0) ? sleepTime : 0;
     }
     /* log control take effect */
     if (pre_time == 0 && walsnd->log_ctrl.sleep_time != 0) {
         ereport(LOG,
-            (errmodule(MOD_RTO),
-                errmsg("Log control take effect, target_rto is %d, current_rto is %ld, current the sleep time is %ld "
-                       "microseconds",
-                    u_sess->attr.attr_storage.target_rto,
-                    walsnd->log_ctrl.current_RTO,
-                    walsnd->log_ctrl.sleep_time)));
+                (errmodule(MOD_RTO_RPO),
+                 errmsg("Log control take effect, target_rto is %d, current_rto is %ld, current the sleep time is %ld "
+                        "microseconds",
+                        u_sess->attr.attr_storage.target_rto, walsnd->log_ctrl.current_RTO,
+                        walsnd->log_ctrl.sleep_time)));
     }
     /* log control take does not effect */
     if (pre_time != 0 && walsnd->log_ctrl.sleep_time == 0) {
-        ereport(LOG,
-            (errmodule(MOD_RTO),
-                errmsg("Log control does not take effect, target_rto is %d, current_rto is %ld, current the sleep time "
-                       "is %ld microseconds",
-                    u_sess->attr.attr_storage.target_rto,
-                    walsnd->log_ctrl.current_RTO,
-                    walsnd->log_ctrl.sleep_time)));
+        ereport(
+            LOG,
+            (errmodule(MOD_RTO_RPO),
+             errmsg("Log control does not take effect, target_rto is %d, current_rto is %ld, current the sleep time "
+                    "is %ld microseconds",
+                    u_sess->attr.attr_storage.target_rto, walsnd->log_ctrl.current_RTO, walsnd->log_ctrl.sleep_time)));
     }
-    ereport(DEBUG4,
-        (errmodule(MOD_RTO),
-            errmsg("The sleep time for log control is : %ld microseconds", walsnd->log_ctrl.sleep_time)));
+    ereport(DEBUG4, (errmodule(MOD_RTO_RPO),
+                     errmsg("The sleep time for log control is : %ld microseconds", walsnd->log_ctrl.sleep_time)));
+}
+
+static void LogCtrlCalculateCurrentRPO(void)
+{
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    long barrierTime = 0;
+    uint64 barrierId;
+    int matchNum;
+    char barrier[MAX_BARRIER_ID_LENGTH] = {0};
+    struct timeval timeVal;
+    long timeToRPO = 0;
+    // Obtain the timestamp in the ID in the hadr file.
+    if (obs_replication_read_barrier(HADR_BARRIER_ID_FILE, (char *)barrier)) {
+        ereport(DEBUG4, (errmodule(MOD_RTO_RPO), 
+                      errmsg("[LogCtrlCalculateCurrentRPO] read barrier id from obs %s", barrier)));
+        matchNum = sscanf_s(barrier, "hadr_%020" PRIu64 "_%013ld", &barrierId, &barrierTime);
+        if (matchNum != 2) {
+            return;
+        }
+    }
+
+    gettimeofday(&timeVal, NULL);
+    timeToRPO = timeVal.tv_sec * MILLISECONDS_PER_SECONDS + 
+        timeVal.tv_usec / MILLISECONDS_PER_SECONDS - barrierTime; // ms
+    ereport(DEBUG4, (errmodule(MOD_RTO_RPO), 
+                  errmsg("[LogCtrlCalculateCurrentRPO] timeToRPO is %ld ms", timeToRPO)));
+
+    walsnd->log_ctrl.prev_RPO = walsnd->log_ctrl.current_RPO;
+    walsnd->log_ctrl.current_RPO = timeToRPO / MILLISECONDS_PER_SECONDS;
 }
 
 static void ChooseStartPointForDummyStandby(void)
@@ -2557,10 +2630,8 @@ static void ChooseStartPointForDummyStandby(void)
     XLogRecPtr initSentPtr;
 
     if (!XLByteEQ(t_thrd.walsender_cxt.sentPtr, InvalidXLogRecPtr)) {
-        ereport(DEBUG1,
-            (errmsg("use current sentPtr %X/%X as sync secondary startpoint",
-                (uint32)(t_thrd.walsender_cxt.sentPtr >> 32),
-                (uint32)t_thrd.walsender_cxt.sentPtr)));
+        ereport(DEBUG1, (errmsg("use current sentPtr %X/%X as sync secondary startpoint",
+                                (uint32)(t_thrd.walsender_cxt.sentPtr >> 32), (uint32)t_thrd.walsender_cxt.sentPtr)));
         return;
     }
 
@@ -2569,12 +2640,8 @@ static void ChooseStartPointForDummyStandby(void)
     initSentPtr = XLogGetReplicationSlotMaximumLSN();
 
     ReplicationSlotReportRestartLSN();
-    ereport(LOG,
-        (errmsg("init sentPtr at %X/%X, latestValidRecord is %X/%X",
-            (uint32)(initSentPtr >> 32),
-            (uint32)initSentPtr,
-            (uint32)(latestValidRecord >> 32),
-            (uint32)latestValidRecord)));
+    ereport(LOG, (errmsg("init sentPtr at %X/%X, latestValidRecord is %X/%X", (uint32)(initSentPtr >> 32),
+                         (uint32)initSentPtr, (uint32)(latestValidRecord >> 32), (uint32)latestValidRecord)));
 
     if (XLByteEQ(initSentPtr, InvalidXLogRecPtr))
         initSentPtr = latestValidRecord;
@@ -2598,20 +2665,18 @@ static void ChooseStartPointForDummyStandby(void)
 
     t_thrd.walsender_cxt.sentPtr = MAX_XLOG_RECORD(t_thrd.walsender_cxt.sentPtr, initSentPtr);
 
-    ereport(DEBUG2,
+    ereport(
+        DEBUG2,
         (errmsg(
             "In ChooseStartPointForDummyStandby(): initSentPtr is %X/%X, latestValidRecord is %X/%X, sentPtr is %X/%X.",
-            (uint32)(initSentPtr >> 32),
-            (uint32)initSentPtr,
-            (uint32)(latestValidRecord >> 32),
-            (uint32)latestValidRecord,
-            (uint32)(t_thrd.walsender_cxt.sentPtr >> 32),
+            (uint32)(initSentPtr >> 32), (uint32)initSentPtr, (uint32)(latestValidRecord >> 32),
+            (uint32)latestValidRecord, (uint32)(t_thrd.walsender_cxt.sentPtr >> 32),
             (uint32)t_thrd.walsender_cxt.sentPtr)));
 }
-static int WSXLogPageRead(XLogReaderState* xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
-    char* readBuf, TimeLineID* pageTLI)
+static int WSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
+                          char *readBuf, TimeLineID *pageTLI)
 {
-    WSXLogPageReadPrivate* ws_private = (WSXLogPageReadPrivate*)xlogreader->private_data;
+    WSXLogPageReadPrivate *ws_private = (WSXLogPageReadPrivate *)xlogreader->private_data;
     uint32 targetPageOff;
     int nRetCode = 0;
     char xlogfile[MAXFNAMELEN];
@@ -2650,17 +2715,14 @@ static int WSXLogPageRead(XLogReaderState* xlogreader, XLogRecPtr targetPagePtr,
     if (lseek(ws_private->xlogreadfd, (off_t)targetPageOff, SEEK_SET) < 0) {
         Assert(false);
         ereport(WARNING,
-            (errmsg("could not seek %u bytes in the file %s: %s.", targetPageOff, xlogfpath, gs_strerror(errno))));
+                (errmsg("could not seek %u bytes in the file %s: %s.", targetPageOff, xlogfpath, gs_strerror(errno))));
         return -1;
     }
 
     if (read(ws_private->xlogreadfd, readBuf, XLOG_BLCKSZ) != XLOG_BLCKSZ) {
         Assert(false);
-        ereport(WARNING,
-            (errmsg("could not read the request %d bytes in the xlog file %s: %s.",
-                reqLen,
-                xlogfpath,
-                gs_strerror(errno))));
+        ereport(WARNING, (errmsg("could not read the request %d bytes in the xlog file %s: %s.", reqLen, xlogfpath,
+                                 gs_strerror(errno))));
         return -1;
     }
 
@@ -2670,12 +2732,12 @@ static int WSXLogPageRead(XLogReaderState* xlogreader, XLogRecPtr targetPagePtr,
 
 static void InitWalSndXLogReader()
 {
-    WSXLogPageReadPrivate* ws_private = NULL;
+    WSXLogPageReadPrivate *ws_private = NULL;
     errno_t rc = 0;
 
     if (t_thrd.walsender_cxt.ws_xlog_reader) {
         if (t_thrd.walsender_cxt.ws_xlog_reader->private_data) {
-            pfree((WSXLogPageReadPrivate*)t_thrd.walsender_cxt.ws_xlog_reader->private_data);
+            pfree((WSXLogPageReadPrivate *)t_thrd.walsender_cxt.ws_xlog_reader->private_data);
             t_thrd.walsender_cxt.ws_xlog_reader->private_data = NULL;
         }
 
@@ -2686,7 +2748,7 @@ static void InitWalSndXLogReader()
     /*
      * Allocate the xlogreader used for xlog parsing.
      */
-    ws_private = (WSXLogPageReadPrivate*)palloc(sizeof(WSXLogPageReadPrivate));
+    ws_private = (WSXLogPageReadPrivate *)palloc(sizeof(WSXLogPageReadPrivate));
 
     /* Set up XLOG reader facility */
     rc = memset_s(ws_private, sizeof(WSXLogPageReadPrivate), 0, sizeof(WSXLogPageReadPrivate));
@@ -2711,23 +2773,32 @@ static void WSDataSendInit()
      * just once to reduce palloc overhead.  The buffer must be made large
      * enough for maximum-sized messages.
      */
-    if (!g_instance.attr.attr_storage.enable_mix_replication)
+    if (!g_instance.attr.attr_storage.enable_mix_replication) {
         t_thrd.walsender_cxt.output_xlog_message =
-            (char*)palloc(1 + sizeof(WalDataMessageHeader) + (int)WS_MAX_SEND_SIZE);
-    else {
-        t_thrd.walsender_cxt.output_xlog_msg_prefix_len =
-            1 + sizeof(WalDataMessageHeader) + sizeof(uint32) + 1 + sizeof(XLogRecPtr);
+            (char *)palloc(1 + sizeof(WalDataMessageHeader) + (int)WS_MAX_SEND_SIZE);
+        if (BBOX_BLACKLIST_XLOG_MESSAGE_SEND) {
+            bbox_blacklist_add(XLOG_MESSAGE_SEND, t_thrd.walsender_cxt.output_xlog_message,
+                               1 + sizeof(WalDataMessageHeader) + (int)WS_MAX_SEND_SIZE);
+        }
+    } else {
+        t_thrd.walsender_cxt.output_xlog_msg_prefix_len = 1 + sizeof(WalDataMessageHeader) + sizeof(uint32) + 1 +
+                                                          sizeof(XLogRecPtr);
         t_thrd.walsender_cxt.output_xlog_message =
-            (char*)palloc(t_thrd.walsender_cxt.output_xlog_msg_prefix_len + (int)WS_MAX_SEND_SIZE);
-        t_thrd.walsender_cxt.output_data_message = (char*)palloc(
+            (char *)palloc(t_thrd.walsender_cxt.output_xlog_msg_prefix_len + (int)WS_MAX_SEND_SIZE);
+        t_thrd.walsender_cxt.output_data_message = (char *)palloc(
             1 + sizeof(WalDataPageMessageHeader) + sizeof(uint32) + 1 + sizeof(XLogRecPtr) * 2 + (int)WS_MAX_SEND_SIZE);
         t_thrd.walsender_cxt.output_data_msg_cur_len = 0;
-        t_thrd.walsender_cxt.load_cu_buffer = (char*)palloc(t_thrd.walsender_cxt.load_cu_buffer_size);
+        t_thrd.walsender_cxt.load_cu_buffer = (char *)palloc(t_thrd.walsender_cxt.load_cu_buffer_size);
 
         InitWalSndXLogReader();
 
         t_thrd.walsender_cxt.wsXLogJustSendRegion->start_ptr = InvalidXLogRecPtr;
         t_thrd.walsender_cxt.wsXLogJustSendRegion->end_ptr = InvalidXLogRecPtr;
+
+        if (BBOX_BLACKLIST_XLOG_MESSAGE_SEND) {
+            bbox_blacklist_add(XLOG_MESSAGE_SEND, t_thrd.walsender_cxt.output_xlog_message,
+                               t_thrd.walsender_cxt.output_xlog_msg_prefix_len + (int)WS_MAX_SEND_SIZE);
+        }
     }
 
     return;
@@ -2765,9 +2836,8 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
 #ifdef ENABLE_DISTRIBUTE_TEST
         if (TEST_STUB(DN_WALSEND_MAINLOOP, stub_sleep_emit)) {
             ereport(get_distribute_test_param()->elevel,
-                (errmsg("sleep_emit happen during WalSndLoop  time:%ds, stub_name:%s",
-                    get_distribute_test_param()->sleep_time,
-                    get_distribute_test_param()->test_stub_name)));
+                    (errmsg("sleep_emit happen during WalSndLoop  time:%ds, stub_name:%s",
+                            get_distribute_test_param()->sleep_time, get_distribute_test_param()->test_stub_name)));
         }
 #endif
 
@@ -2786,6 +2856,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             marked_stream_replication = u_sess->attr.attr_storage.enable_stream_replication;
             ProcessConfigFile(PGC_SIGHUP);
             SyncRepInitConfig();
+#ifndef ENABLE_MULTIPLE_NODES
             if (g_instance.attr.attr_common.sync_config_strategy == ALL_NODE ||
                 (g_instance.attr.attr_common.sync_config_strategy == ONLY_SYNC_NODE &&
                 t_thrd.walsender_cxt.MyWalSnd->sync_standby_priority > 0)) {
@@ -2793,11 +2864,21 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             } else {
                 sync_config_needed = false;
             }
+#else
+            sync_config_needed = true;
+#endif
         }
+
+        volatile unsigned int *pitr_archive_flag = &t_thrd.walsender_cxt.MyWalSnd->archive_flag;
+        if (unlikely(pg_atomic_read_u32(pitr_archive_flag) == 1)) {
+            WalSndArchiveXlog(t_thrd.walsender_cxt.MyWalSnd->arch_task_lsn, 
+                t_thrd.walsender_cxt.MyWalSnd->archive_obs_subterm);
+            pg_atomic_write_u32(pitr_archive_flag, 0);
+        } 
 
         /* switchover is forbidden when catchup thread in progress */
         if (catchup_online && t_thrd.walsender_cxt.WalSndCtl->demotion > NoDemote) {
-            volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+            volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
             SpinLockAcquire(&t_thrd.walsender_cxt.WalSndCtl->mutex);
 
             walsnd->node_state = NODESTATE_PRIMARY_DEMOTING_WAIT_CATCHUP;
@@ -2811,12 +2892,12 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
 
             ereport(PANIC,
-                (errmsg("walsender stop switchover process for catchup is alive, the process need to be restart")));
+                    (errmsg("walsender stop switchover process for catchup is alive, the process need to be restart")));
         }
 
         /* Normal exit from the walsender is here */
         if ((t_thrd.walsender_cxt.walsender_shutdown_requested &&
-                !t_thrd.walsender_cxt.response_switchover_requested) ||
+             !t_thrd.walsender_cxt.response_switchover_requested) ||
             t_thrd.walsender_cxt.MyWalSnd->node_state == NODESTATE_STANDBY_REDIRECT) {
             /* Inform the standby that XLOG streaming is done */
             if (!sync_config_needed) {
@@ -2859,8 +2940,8 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
 
             ereport(LOG, (errmsg("The WAL sender in primary is ready to do the switchover.")));
 
-            ereport(
-                LOG, (errmsg("the latest WAL insert at %X/%X", (uint32)(WriteRqstPtr >> 32), (uint32)WriteRqstPtr)));
+            ereport(LOG,
+                    (errmsg("the latest WAL insert at %X/%X", (uint32)(WriteRqstPtr >> 32), (uint32)WriteRqstPtr)));
 
             /*
              * Check whether the write requestptr points to the end of new
@@ -2869,10 +2950,8 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
              */
             if (SizeOfXLogLongPHD == XLogPageOffSet || SizeOfXLogShortPHD == WriteRqstPtr % XLogSegSize) {
                 WriteRqstPtr -= XLogPageOffSet;
-                ereport(LOG,
-                    (errmsg("the latest WAL insert back off to %X/%X",
-                        (uint32)(WriteRqstPtr >> 32),
-                        (uint32)WriteRqstPtr)));
+                ereport(LOG, (errmsg("the latest WAL insert back off to %X/%X", (uint32)(WriteRqstPtr >> 32),
+                                     (uint32)WriteRqstPtr)));
             }
 
             /*
@@ -2880,9 +2959,9 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
              * work to do, continue to loop.
              */
             if (XLogNeedsFlush(WriteRqstPtr)) {
-                XLogWaitFlush(WriteRqstPtr);
+                XLogFlush(WriteRqstPtr);
                 ereport(LOG,
-                    (errmsg("the latest WAL flush to %X/%X.", (uint32)(WriteRqstPtr >> 32), (uint32)WriteRqstPtr)));
+                        (errmsg("the latest WAL flush to %X/%X.", (uint32)(WriteRqstPtr >> 32), (uint32)WriteRqstPtr)));
             } else {
                 XLogRecPtr SendRqstPtr;
                 SendRqstPtr = AM_WAL_STANDBY_SENDER ? GetStandbyFlushRecPtr(NULL) : GetFlushRecPtr();
@@ -2890,28 +2969,26 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
                 if (XLByteLE(SendRqstPtr, t_thrd.walsender_cxt.MyWalSnd->flush) &&
                     !t_thrd.walsender_cxt.wal_send_completed) {
                     t_thrd.walsender_cxt.wal_send_completed = true;
-                    ereport(LOG,
-                        (errmsg("the latest WAL complete at %X/%X", (uint32)(SendRqstPtr >> 32), (uint32)SendRqstPtr)));
+                    ereport(LOG, (errmsg("the latest WAL complete at %X/%X", (uint32)(SendRqstPtr >> 32),
+                                         (uint32)SendRqstPtr)));
                 } else
-                    ereport(LOG,
-                        (errmsg("the latest WAL flush at %X/%X the latest standby flush at %X/%X",
-                            (uint32)(SendRqstPtr >> 32),
-                            (uint32)SendRqstPtr,
-                            (uint32)(t_thrd.walsender_cxt.MyWalSnd->flush >> 32),
-                            (uint32)t_thrd.walsender_cxt.MyWalSnd->flush)));
+                    ereport(LOG, (errmsg("the latest WAL flush at %X/%X the latest standby flush at %X/%X",
+                                         (uint32)(SendRqstPtr >> 32), (uint32)SendRqstPtr,
+                                         (uint32)(t_thrd.walsender_cxt.MyWalSnd->flush >> 32),
+                                         (uint32)t_thrd.walsender_cxt.MyWalSnd->flush)));
 
                 if (!DataSndInProgress(SNDROLE_PRIMARY_STANDBY | SNDROLE_PRIMARY_DUMMYSTANDBY) &&
                     !WalSndInProgress(SNDROLE_PRIMARY_DUMMYSTANDBY | SNDROLE_PRIMARY_STANDBY) &&
                     t_thrd.walsender_cxt.wal_send_completed) {
                     t_thrd.walsender_cxt.response_switchover_requested = false;
                     WalSndResponseSwitchover(t_thrd.walsender_cxt.output_xlog_message);
-                    ereport(LOG,
+                    ereport(
+                        LOG,
                         (errmsg(
                             "The WAL sender in primary has done the switchover waiting for the standby's promotion.")));
                 }
             }
         }
-
         if (sync_config_needed) {
             if (t_thrd.walsender_cxt.walsender_shutdown_requested) {
                 if (!AM_WAL_DB_SENDER && !SendConfigFile(t_thrd.walsender_cxt.gucconf_file))
@@ -2953,9 +3030,8 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
                 }
 
                 if (u_sess->attr.attr_storage.HaModuleDebug) {
-                    ereport(LOG,
-                        (errmsg("standby is steaming, "
-                                "stop sync to walsender, recycle local data.")));
+                    ereport(LOG, (errmsg("standby is steaming, "
+                                         "stop sync to walsender, recycle local data.")));
                 }
 
                 /* Notify dummy to cleanup WAL. False means not need response. */
@@ -3000,10 +3076,9 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
                 if (!pq_is_send_pending()) {
                     WalSndSyncDummyStandbyDone(false);
                     (void)pq_flush();
-                    ereport(LOG,
-                        (errmsg("dummystandby wal data replication completed at %X/%X",
-                            (uint32)(t_thrd.walsender_cxt.sentPtr >> 32),
-                            (uint32)t_thrd.walsender_cxt.sentPtr)));
+                    ereport(LOG, (errmsg("dummystandby wal data replication completed at %X/%X",
+                                         (uint32)(t_thrd.walsender_cxt.sentPtr >> 32),
+                                         (uint32)t_thrd.walsender_cxt.sentPtr)));
                 }
             }
         }
@@ -3025,9 +3100,8 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
              * started to wait at that point might wait for some time.
              */
             if (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_CATCHUP) {
-                ereport(DEBUG1,
-                    (errmsg(
-                        "standby \"%s\" has now caught up with primary", u_sess->attr.attr_common.application_name)));
+                ereport(DEBUG1, (errmsg("standby \"%s\" has now caught up with primary",
+                                        u_sess->attr.attr_common.application_name)));
                 WalSndSetState(WALSNDSTATE_STREAMING);
                 /* Refresh new state to peer */
                 WalSndKeepalive(true);
@@ -3062,10 +3136,9 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
         } else {
             if (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_STREAMING &&
                 !XLByteLT(t_thrd.walsender_cxt.catchup_threshold,
-                    INT2UINT64(g_instance.attr.attr_storage.MaxSendSize) * 1024)) {
-                ereport(DEBUG1,
-                    (errmsg(
-                        "standby \"%s\" has now caught up with primary", u_sess->attr.attr_common.application_name)));
+                          INT2UINT64(g_instance.attr.attr_storage.MaxSendSize) * 1024)) {
+                ereport(DEBUG1, (errmsg("standby \"%s\" has now caught up with primary",
+                                        u_sess->attr.attr_common.application_name)));
                 WalSndSetState(WALSNDSTATE_CATCHUP);
                 t_thrd.walsender_cxt.catchup_threshold = 0;
             }
@@ -3114,8 +3187,8 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             if (sleeptime > u_sess->attr.attr_storage.wal_sender_timeout / 2)
                 sleeptime = u_sess->attr.attr_storage.wal_sender_timeout / 2;
 
-            WaitLatchOrSocket(
-                &t_thrd.walsender_cxt.MyWalSnd->latch, wakeEvents, u_sess->proc_cxt.MyProcPort->sock, sleeptime);
+            WaitLatchOrSocket(&t_thrd.walsender_cxt.MyWalSnd->latch, wakeEvents, u_sess->proc_cxt.MyProcPort->sock,
+                              sleeptime);
             t_thrd.int_cxt.ImmediateInterruptOK = false;
         }
 
@@ -3157,8 +3230,8 @@ static long WalSndComputeSleeptime(TimestampTz now)
          * At the latest stop sleeping once wal_sender_timeout has been
          * reached.
          */
-        wakeup_time = TimestampTzPlusMilliseconds(
-            t_thrd.walsender_cxt.last_reply_timestamp, u_sess->attr.attr_storage.wal_sender_timeout);
+        wakeup_time = TimestampTzPlusMilliseconds(t_thrd.walsender_cxt.last_reply_timestamp,
+                                                  u_sess->attr.attr_storage.wal_sender_timeout);
 
         /*
          * If no ping has been sent yet, wakeup when it's time to do so.
@@ -3166,8 +3239,8 @@ static long WalSndComputeSleeptime(TimestampTz now)
          * the timeout passed without a response.
          */
         if (!t_thrd.walsender_cxt.waiting_for_ping_response)
-            wakeup_time = TimestampTzPlusMilliseconds(
-                t_thrd.walsender_cxt.last_reply_timestamp, u_sess->attr.attr_storage.wal_sender_timeout / 2);
+            wakeup_time = TimestampTzPlusMilliseconds(t_thrd.walsender_cxt.last_reply_timestamp,
+                                                      u_sess->attr.attr_storage.wal_sender_timeout / 2);
 
         /* Compute relative time until wakeup. */
         TimestampDifference(now, wakeup_time, &sec_to_timeout, &microsec_to_timeout);
@@ -3188,8 +3261,8 @@ static void WalSndWriteLogicalAdvanceXLog(TimestampTz now)
     if (t_thrd.walsender_cxt.last_logical_xlog_advanced_timestamp <= 0)
         return;
 
-    timegap = TimestampTzPlusMilliseconds(
-        t_thrd.walsender_cxt.last_logical_xlog_advanced_timestamp, t_thrd.walsender_cxt.logical_xlog_advanced_timeout);
+    timegap = TimestampTzPlusMilliseconds(t_thrd.walsender_cxt.last_logical_xlog_advanced_timestamp,
+                                          t_thrd.walsender_cxt.logical_xlog_advanced_timeout);
     if (t_thrd.walsender_cxt.logical_xlog_advanced_timeout > 0 && now >= timegap) {
         ereport(LOG, (errmsg("write xlog of logical slot advanced")));
         log_slot_advance(&t_thrd.slot_cxt.MyReplicationSlot->data);
@@ -3200,7 +3273,7 @@ static void WalSndWriteLogicalAdvanceXLog(TimestampTz now)
 static TimestampTz GetHeartbeatLastReplyTimestamp()
 {
     int replindex;
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
     SpinLockAcquire(&walsnd->mutex);
     replindex = walsnd->channel_get_replc;
     SpinLockRelease(&walsnd->mutex);
@@ -3212,11 +3285,11 @@ static TimestampTz GetHeartbeatLastReplyTimestamp()
 static inline TimestampTz CalculateTimeout(TimestampTz last_reply_time)
 {
     const int MULTIPLE_TIME = 4;
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
     if (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY) {
-        return TimestampTzPlusMilliseconds(
-            last_reply_time, MULTIPLE_TIME * u_sess->attr.attr_storage.wal_sender_timeout);
+        return TimestampTzPlusMilliseconds(last_reply_time,
+                                           MULTIPLE_TIME * u_sess->attr.attr_storage.wal_sender_timeout);
     } else {
         return TimestampTzPlusMilliseconds(last_reply_time, u_sess->attr.attr_storage.wal_sender_timeout);
     }
@@ -3258,19 +3331,16 @@ static void WalSndCheckTimeOut(TimestampTz now)
         timeout = CalculateTimeout(last_reply_time);
     }
 
-    if (heartbeat != 0 && now >= timeout) {
+    if (now >= timeout) {
         /*
          * Since typically expiration of replication timeout means
          * communication problem, we don't send the error message to the
          * standby.
          */
-        ereport(ERROR,
-            (errmsg("terminating Walsender process due to replication timeout."
-                    "now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)",
-                timestamptz_to_str(now),
-                timestamptz_to_str(timeout),
-                timestamptz_to_str(last_reply_time),
-                timestamptz_to_str(heartbeat))));
+        ereport(ERROR, (errmsg("terminating Walsender process due to replication timeout."
+                               "now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)",
+                               timestamptz_to_str(now), timestamptz_to_str(timeout),
+                               timestamptz_to_str(last_reply_time), timestamptz_to_str(heartbeat))));
         WalSndShutdown();
     }
 }
@@ -3294,7 +3364,7 @@ static void InitWalSnd(void)
      */
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
         SpinLockAcquire(&walsnd->mutex);
 
@@ -3306,8 +3376,8 @@ static void InitWalSnd(void)
              * Found a free slot. Reserve it for us.
              */
             walsnd->pid = t_thrd.proc_cxt.MyProcPid;
-            rc = memset_s((XLogRecPtr* )&walsnd->sentPtr, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
-            securec_check(rc, "\0", "\0");
+            rc = memset_s((void *)&walsnd->sentPtr, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
+            securec_check(rc, "", "");
             walsnd->state = WALSNDSTATE_STARTUP;
             walsnd->node_state = NODESTATE_NORMAL;
             if (dummyStandbyMode) {
@@ -3325,18 +3395,18 @@ static void InitWalSnd(void)
             walsnd->peer_role = UNKNOWN_MODE;
             walsnd->peer_state = NORMAL_STATE;
             walsnd->channel_get_replc = 0;
-            rc = memset_s((XLogRecPtr*)&walsnd->receive, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
-            securec_check(rc, "\0", "\0");
-            rc = memset_s((XLogRecPtr*)&walsnd->write, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
-            securec_check(rc, "\0", "\0");
-            rc = memset_s((XLogRecPtr*)&walsnd->flush, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
-            securec_check(rc, "\0", "\0");
-            rc = memset_s((XLogRecPtr*)&walsnd->apply, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
-            securec_check(rc, "\0", "\0");
-            rc = memset_s((XLogRecPtr*)&walsnd->data_flush, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
-            securec_check(rc, "\0", "\0");
-            rc = memset_s((XLogRecPtr*)&walsnd->wal_sender_channel, sizeof(ReplConnInfo), 0, sizeof(ReplConnInfo));
-            securec_check(rc, "\0", "\0");
+            rc = memset_s((void *)&walsnd->receive, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
+            securec_check(rc, "", "");
+            rc = memset_s((void *)&walsnd->write, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
+            securec_check(rc, "", "");
+            rc = memset_s((void *)&walsnd->flush, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
+            securec_check(rc, "", "");
+            rc = memset_s((void *)&walsnd->apply, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
+            securec_check(rc, "", "");
+            rc = memset_s((void *)&walsnd->data_flush, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
+            securec_check(rc, "", "");
+            rc = memset_s((void *)&walsnd->wal_sender_channel, sizeof(ReplConnInfo), 0, sizeof(ReplConnInfo));
+            securec_check(rc, "", "");
             walsnd->sync_standby_priority = 0;
             walsnd->index = i;
             walsnd->log_ctrl.sleep_time = 0;
@@ -3350,20 +3420,20 @@ static void InitWalSnd(void)
             walsnd->log_ctrl.prev_reply_time = 0;
             walsnd->log_ctrl.pre_rate1 = 0;
             walsnd->log_ctrl.pre_rate2 = 0;
+            walsnd->log_ctrl.prev_RPO = -1;
+            walsnd->log_ctrl.current_RPO = -1;
             SpinLockRelease(&walsnd->mutex);
             /* don't need the lock anymore */
-            OwnLatch((Latch*)&walsnd->latch);
-            t_thrd.walsender_cxt.MyWalSnd = (WalSnd*)walsnd;
+            OwnLatch((Latch *)&walsnd->latch);
+            t_thrd.walsender_cxt.MyWalSnd = (WalSnd *)walsnd;
 
             break;
         }
     }
     if (t_thrd.walsender_cxt.MyWalSnd == NULL)
-        ereport(FATAL,
-            (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
-                errmsg("number of requested standby connections "
-                       "exceeds max_wal_senders (currently %d)",
-                    g_instance.attr.attr_storage.max_wal_senders)));
+        ereport(FATAL, (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("number of requested standby connections "
+                                                                      "exceeds max_wal_senders (currently %d)",
+                                                                      g_instance.attr.attr_storage.max_wal_senders)));
 
     /* Arrange to clean up at walsender exit */
     on_shmem_exit(WalSndKill, 0);
@@ -3372,7 +3442,7 @@ static void InitWalSnd(void)
 /* Mark WalSnd struct no longer in use. */
 static void WalSndReset(WalSnd *walsnd)
 {
-    errno_t	rc = 0;
+    errno_t rc = 0;
 
     SpinLockAcquire(&walsnd->mutex);
     walsnd->pid = 0;
@@ -3385,10 +3455,10 @@ static void WalSndReset(WalSnd *walsnd)
     walsnd->wal_sender_channel.remoteservice = 0;
     walsnd->channel_get_replc = 0;
     rc = memset_s(walsnd->wal_sender_channel.localhost, sizeof(walsnd->wal_sender_channel.localhost), 0,
-        sizeof(walsnd->wal_sender_channel.localhost));
+                  sizeof(walsnd->wal_sender_channel.localhost));
     securec_check_c(rc, "\0", "\0");
     rc = memset_s(walsnd->wal_sender_channel.remotehost, sizeof(walsnd->wal_sender_channel.remotehost), 0,
-        sizeof(walsnd->wal_sender_channel.remotehost));
+                  sizeof(walsnd->wal_sender_channel.remotehost));
     securec_check_c(rc, "\0", "\0");
     SpinLockRelease(&walsnd->mutex);
 }
@@ -3414,8 +3484,7 @@ static void WalSndKill(int code, Datum arg)
     }
 
     if (dummyStandbyMode) {
-        set_failover_host_conninfo_for_dummy(walsnd->wal_sender_channel.remotehost,
-            t_thrd.walsender_cxt.remotePort);
+        set_failover_host_conninfo_for_dummy(walsnd->wal_sender_channel.remotehost, t_thrd.walsender_cxt.remotePort);
         t_thrd.walsender_cxt.remotePort = 0;
     }
 
@@ -3446,6 +3515,10 @@ static void WalSndKill(int code, Datum arg)
     t_thrd.walsender_cxt.wsXLogJustSendRegion->start_ptr = InvalidXLogRecPtr;
     t_thrd.walsender_cxt.wsXLogJustSendRegion->end_ptr = InvalidXLogRecPtr;
 
+    if (BBOX_BLACKLIST_XLOG_MESSAGE_SEND) {
+        bbox_blacklist_remove(XLOG_MESSAGE_SEND, t_thrd.walsender_cxt.output_xlog_message);
+    }
+
     ereport(LOG, (errmsg("walsender thread shut down")));
 }
 
@@ -3469,14 +3542,14 @@ static void WalSndShutdown(void)
 /*
  * Read 'count' bytes from WAL into 'buf', starting at location 'startptr'.
  * XXX probably this should be improved to suck data directly from the
- * WAL buffers when possible. Will open, and keep open, one WAL segment 
+ * WAL buffers when possible. Will open, and keep open, one WAL segment
  * stored in the global file descriptor sendFile. This means if XLogRead is used
  * once, there will always be one descriptor left open until the process ends, but never
  * more than one.
  */
-static void XLogRead(char* buf, XLogRecPtr startptr, Size count)
+static void XLogRead(char *buf, XLogRecPtr startptr, Size count)
 {
-    char* p = NULL;
+    char *p = NULL;
     XLogRecPtr recptr;
     Size nbytes;
     XLogSegNo segno;
@@ -3515,15 +3588,14 @@ retry:
                     /* we suppose wal segments removed happend when we can't open the xlog file. */
                     WalSegmemtRemovedhappened = true;
                     ereport(ERROR,
-                        (errcode_for_file_access(),
-                            errmsg("requested WAL segment %s has already been removed",
-                                XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo))));
+                            (errcode_for_file_access(),
+                             errmsg("requested WAL segment %s has already been removed",
+                                    XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo))));
                 } else {
                     ereport(ERROR,
-                        (errcode_for_file_access(),
-                            errmsg("could not open file \"%s\" (log segment %s): %m",
-                                path,
-                                XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo))));
+                            (errcode_for_file_access(),
+                             errmsg("could not open file \"%s\" (log segment %s): %m", path,
+                                    XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo))));
                 }
             }
             t_thrd.walsender_cxt.sendOff = 0;
@@ -3534,11 +3606,10 @@ retry:
             if (lseek(t_thrd.walsender_cxt.sendFile, (off_t)startoff, SEEK_SET) < 0) {
                 (void)close(t_thrd.walsender_cxt.sendFile);
                 t_thrd.walsender_cxt.sendFile = -1;
-                ereport(ERROR,
-                    (errcode_for_file_access(),
-                        errmsg("could not seek in log segment %s to offset %u: %m",
-                            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo),
-                            startoff)));
+                ereport(ERROR, (errcode_for_file_access(),
+                                errmsg("could not seek in log segment %s to offset %u: %m",
+                                       XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo),
+                                       startoff)));
             }
             t_thrd.walsender_cxt.sendOff = startoff;
         }
@@ -3556,12 +3627,10 @@ retry:
         if (readbytes <= 0) {
             (void)close(t_thrd.walsender_cxt.sendFile);
             t_thrd.walsender_cxt.sendFile = -1;
-            ereport(ERROR,
-                (errcode_for_file_access(),
-                    errmsg("could not read from log segment %s, offset %u, length %lu: %m",
-                        XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo),
-                        t_thrd.walsender_cxt.sendOff,
-                        INT2ULONG(segbytes))));
+            ereport(ERROR, (errcode_for_file_access(),
+                            errmsg("could not read from log segment %s, offset %u, length %lu: %m",
+                                   XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.walsender_cxt.sendSegNo),
+                                   t_thrd.walsender_cxt.sendOff, INT2ULONG(segbytes))));
         }
 
         /* Update state for read */
@@ -3590,7 +3659,7 @@ retry:
      */
     if (AM_WAL_STANDBY_SENDER) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+        volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
         bool reload = false;
 
         SpinLockAcquire(&walsnd->mutex);
@@ -3616,8 +3685,8 @@ retry:
 static void XLogSendLogical(void)
 {
     CheckPMstateAndRecoveryInProgress();
-    XLogRecord* record = NULL;
-    char* errm = NULL;
+    XLogRecord *record = NULL;
+    char *errm = NULL;
 
     /*
      * Don't know whether we've caught up yet. We'll set it to true in
@@ -3627,22 +3696,20 @@ static void XLogSendLogical(void)
      */
     WalSndCaughtUp = false;
 
-    record =
-        XLogReadRecord(t_thrd.walsender_cxt.logical_decoding_ctx->reader, t_thrd.walsender_cxt.logical_startptr, &errm);
+    record = XLogReadRecord(t_thrd.walsender_cxt.logical_decoding_ctx->reader, t_thrd.walsender_cxt.logical_startptr,
+                            &errm);
     t_thrd.walsender_cxt.logical_startptr = InvalidXLogRecPtr;
 
     /* xlog record was invalid */
     if (errm != NULL)
-        ereport(ERROR,
-            (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",
-                    (uint32)(t_thrd.walsender_cxt.logical_decoding_ctx->reader->EndRecPtr >> 32),
-                    (uint32)t_thrd.walsender_cxt.logical_decoding_ctx->reader->EndRecPtr,
-                    errm)));
+        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                        errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",
+                               (uint32)(t_thrd.walsender_cxt.logical_decoding_ctx->reader->EndRecPtr >> 32),
+                               (uint32)t_thrd.walsender_cxt.logical_decoding_ctx->reader->EndRecPtr, errm)));
 
     if (record != NULL) {
-        LogicalDecodingProcessRecord(
-            t_thrd.walsender_cxt.logical_decoding_ctx, t_thrd.walsender_cxt.logical_decoding_ctx->reader);
+        LogicalDecodingProcessRecord(t_thrd.walsender_cxt.logical_decoding_ctx,
+                                     t_thrd.walsender_cxt.logical_decoding_ctx->reader);
 
         t_thrd.walsender_cxt.sentPtr = t_thrd.walsender_cxt.logical_decoding_ctx->reader->EndRecPtr;
     } else {
@@ -3657,7 +3724,7 @@ static void XLogSendLogical(void)
     /* Update shared memory status */
     {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+        volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
         SpinLockAcquire(&walsnd->mutex);
         walsnd->sentPtr = t_thrd.walsender_cxt.sentPtr;
@@ -3680,7 +3747,7 @@ static void XLogSendPhysical(void)
     Size nbytes = 0;
     WalDataMessageHeader msghdr;
     ServerMode local_role;
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     errno_t errorno = EOK;
 
     t_thrd.walsender_cxt.catchup_threshold = 0;
@@ -3706,9 +3773,8 @@ static void XLogSendPhysical(void)
          */
         if (currentTargetTLI != t_thrd.xlog_cxt.ThisTimeLineID) {
             if (!t_thrd.walsender_cxt.walsender_ready_to_stop)
-                ereport(LOG,
-                    (errmsg("terminating walsender process to force cascaded standby "
-                            "to update timeline and reconnect")));
+                ereport(LOG, (errmsg("terminating walsender process to force cascaded standby "
+                                     "to update timeline and reconnect")));
             t_thrd.walsender_cxt.walsender_ready_to_stop = true;
             WalSndCaughtUp = true;
             return;
@@ -3754,13 +3820,10 @@ static void XLogSendPhysical(void)
     Assert(nbytes <= (Size)g_instance.attr.attr_storage.MaxSendSize * 1024);
 
     if (nbytes == 0)
-        ereport(NOTICE,
-            (errmsg("streaming body is empty, "
-                    "request send: %X/%X, already sent: %X/%X",
-                (uint32)(SendRqstPtr >> 32),
-                (uint32)SendRqstPtr,
-                (uint32)(t_thrd.walsender_cxt.sentPtr >> 32),
-                (uint32)t_thrd.walsender_cxt.sentPtr)));
+        ereport(NOTICE, (errmsg("streaming body is empty, "
+                                "request send: %X/%X, already sent: %X/%X",
+                                (uint32)(SendRqstPtr >> 32), (uint32)SendRqstPtr,
+                                (uint32)(t_thrd.walsender_cxt.sentPtr >> 32), (uint32)t_thrd.walsender_cxt.sentPtr)));
 
     /*
      * OK to read and send the slice.
@@ -3772,15 +3835,10 @@ static void XLogSendPhysical(void)
      * calls.
      */
     XLogRead(t_thrd.walsender_cxt.output_xlog_message + 1 + sizeof(WalDataMessageHeader), startptr, nbytes);
-    ereport(DEBUG5,
-        (errmsg("conninfo:(%s,%d) start: %X/%X, end: %X/%X, %lu bytes",
-            t_thrd.walsender_cxt.MyWalSnd->wal_sender_channel.localhost,
-            t_thrd.walsender_cxt.MyWalSnd->wal_sender_channel.localport,
-            (uint32)(startptr >> 32),
-            (uint32)startptr,
-            (uint32)(endptr >> 32),
-            (uint32)endptr,
-            nbytes)));
+    ereport(DEBUG5, (errmsg("conninfo:(%s,%d) start: %X/%X, end: %X/%X, %lu bytes",
+                            t_thrd.walsender_cxt.MyWalSnd->wal_sender_channel.localhost,
+                            t_thrd.walsender_cxt.MyWalSnd->wal_sender_channel.localport, (uint32)(startptr >> 32),
+                            (uint32)startptr, (uint32)(endptr >> 32), (uint32)endptr, nbytes)));
 
     /*
      * We fill the message header last so that the send timestamp is taken as
@@ -3807,19 +3865,18 @@ static void XLogSendPhysical(void)
     }
 
     errorno = memcpy_s(t_thrd.walsender_cxt.output_xlog_message + 1,
-        sizeof(WalDataMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024,
-        &msghdr,
-        sizeof(WalDataMessageHeader));
+                       sizeof(WalDataMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024, &msghdr,
+                       sizeof(WalDataMessageHeader));
     securec_check(errorno, "\0", "\0");
-    (void)pq_putmessage_noblock(
-        'd', t_thrd.walsender_cxt.output_xlog_message, 1 + sizeof(WalDataMessageHeader) + nbytes);
+    (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message,
+                                1 + sizeof(WalDataMessageHeader) + nbytes);
 
     t_thrd.walsender_cxt.sentPtr = endptr;
 
     /* Update shared memory status */
     {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+        volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
         SpinLockAcquire(&walsnd->mutex);
         walsnd->sentPtr = t_thrd.walsender_cxt.sentPtr;
@@ -3831,12 +3888,8 @@ static void XLogSendPhysical(void)
         char activitymsg[50];
         int rc = 0;
 
-        rc = snprintf_s(activitymsg,
-            sizeof(activitymsg),
-            sizeof(activitymsg) - 1,
-            "streaming %X/%X",
-            (uint32)(t_thrd.walsender_cxt.sentPtr >> 32),
-            (uint32)t_thrd.walsender_cxt.sentPtr);
+        rc = snprintf_s(activitymsg, sizeof(activitymsg), sizeof(activitymsg) - 1, "streaming %X/%X",
+                        (uint32)(t_thrd.walsender_cxt.sentPtr >> 32), (uint32)t_thrd.walsender_cxt.sentPtr);
         securec_check_ss(rc, "\0", "\0");
 
         set_ps_display(activitymsg, false);
@@ -3854,7 +3907,7 @@ void WalSndRqstFileReload(void)
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
         if (walsnd->pid == 0)
             continue;
@@ -3949,7 +4002,7 @@ static void WalSndLastCycleHandler(SIGNAL_ARGS)
     if (IS_DN_DUMMY_STANDYS_MODE()) {
         if (t_thrd.walsender_cxt.MyWalSnd && !AmWalSenderToDummyStandby() &&
             (t_thrd.walsender_cxt.MyWalSnd->node_state == NODESTATE_PROMOTE_APPROVE ||
-                t_thrd.walsender_cxt.MyWalSnd->node_state == NODESTATE_STANDBY_REDIRECT))
+             t_thrd.walsender_cxt.MyWalSnd->node_state == NODESTATE_STANDBY_REDIRECT))
             t_thrd.walsender_cxt.response_switchover_requested = true;
     } else {
         if (t_thrd.walsender_cxt.MyWalSnd && t_thrd.walsender_cxt.MyWalSnd->node_state == NODESTATE_PROMOTE_APPROVE)
@@ -3998,7 +4051,7 @@ void WalSndShmemInit(void)
     errno_t rc = 0;
     int i;
 
-    t_thrd.walsender_cxt.WalSndCtl = (WalSndCtlData*)ShmemInitStruct("Wal Sender Ctl", WalSndShmemSize(), &found);
+    t_thrd.walsender_cxt.WalSndCtl = (WalSndCtlData *)ShmemInitStruct("Wal Sender Ctl", WalSndShmemSize(), &found);
 
     if (!found) {
         /* First time through, so initialize */
@@ -4009,7 +4062,7 @@ void WalSndShmemInit(void)
             SHMQueueInit(&(t_thrd.walsender_cxt.WalSndCtl->SyncRepQueue[i]));
 
         for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
-            WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+            WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
             walsnd->sendKeepalive = true;
             SpinLockInit(&walsnd->mutex);
@@ -4035,10 +4088,9 @@ void WalSndWakeup(void)
 static bool WalSndCaughtup(void)
 {
     int i;
-
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
         SpinLockAcquire(&walsnd->mutex);
 
@@ -4063,7 +4115,7 @@ static bool WalSndDummyLEStandby(void)
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
         SpinLockAcquire(&walsnd->mutex);
 
@@ -4089,7 +4141,7 @@ bool WalSndInProgress(int type)
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
         SpinLockAcquire(&walsnd->mutex);
 
@@ -4115,7 +4167,7 @@ bool WalSndQuorumInProgress(int type)
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
         SpinLockAcquire(&walsnd->mutex);
         if (walsnd->pid != 0 && walsnd->pid != t_thrd.proc_cxt.MyProcPid &&
             ((walsnd->sendRole & type) == walsnd->sendRole)) {
@@ -4135,14 +4187,20 @@ bool WalSndAllInProgress(int type)
 {
     int i;
     int num = 0;
-    int all_num = t_thrd.syncrep_cxt.SyncRepConfig->nmembers;
+    int all_num = 0;
+
+    for (i = 1; i < MAX_REPLNODE_NUM; i++) {
+        if (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL)
+            all_num++;
+    }
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
         SpinLockAcquire(&walsnd->mutex);
         if (walsnd->pid != 0 && walsnd->pid != t_thrd.proc_cxt.MyProcPid &&
-            ((walsnd->sendRole & type) == walsnd->sendRole)) {
+            ((walsnd->sendRole & type) == walsnd->sendRole) &&
+            walsnd->sentPtr > 0) {
             num++;
         }
         SpinLockRelease(&walsnd->mutex);
@@ -4167,17 +4225,16 @@ void StandbyOrSecondaryIsAlive(void)
      * connected will report an ERROR to rollback transaction.
      */
     if (!(t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
-            WalSndInProgress(SNDROLE_PRIMARY_STANDBY | SNDROLE_PRIMARY_DUMMYSTANDBY)))
-        ereport(LOG,
-            (errmsg("No standby or secondary is connected, a new dfs file "
-                    "can not be created")));
+          WalSndInProgress(SNDROLE_PRIMARY_STANDBY | SNDROLE_PRIMARY_DUMMYSTANDBY)))
+        ereport(LOG, (errmsg("No standby or secondary is connected, a new dfs file "
+                             "can not be created")));
 }
 
 /* Set state for current walsender (only called in walsender) */
 void WalSndSetState(WalSndState state)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
     Assert(AM_WAL_SENDER);
 
@@ -4197,7 +4254,7 @@ void WalSndSetState(WalSndState state)
  * Return a string constant representing the state. This is used
  * in system views, and should *not* be translated.
  */
-static const char* WalSndGetStateString(WalSndState state)
+static const char *WalSndGetStateString(WalSndState state)
 {
     switch (state) {
         case WALSNDSTATE_STARTUP:
@@ -4216,26 +4273,23 @@ static const char* WalSndGetStateString(WalSndState state)
  * Build tuple desc and store for the caller result
  * return the tuple store, the tupdesc would be return by pointer.
  */
-Tuplestorestate* BuildTupleResult(FunctionCallInfo fcinfo, TupleDesc* tupdesc)
+Tuplestorestate *BuildTupleResult(FunctionCallInfo fcinfo, TupleDesc *tupdesc)
 {
-    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
-    Tuplestorestate* tupstore = NULL;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+    Tuplestorestate *tupstore = NULL;
 
     MemoryContext per_query_ctx;
     MemoryContext oldcontext;
 
     /* check to see if caller supports returning a tuplestore */
     if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("set-valued function called in context that cannot accept a set")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("set-valued function called in context that cannot accept a set")));
     }
 
     if (!(rsinfo->allowedModes & SFRM_Materialize))
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("materialize mode required, but it is not "
-                       "allowed in this context")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("materialize mode required, but it is not "
+                                                                       "allowed in this context")));
 
     /* Build a tuple descriptor for our result type */
     if (get_call_result_type(fcinfo, NULL, tupdesc) != TYPEFUNC_COMPOSITE)
@@ -4254,6 +4308,19 @@ Tuplestorestate* BuildTupleResult(FunctionCallInfo fcinfo, TupleDesc* tupdesc)
     return tupstore;
 }
 
+
+static void set_xlog_location(ServerMode local_role, XLogRecPtr* sndWrite, XLogRecPtr* sndFlush, XLogRecPtr* sndReplay){
+    if (local_role == PRIMARY_MODE) {
+        *sndWrite = GetXLogWriteRecPtr();
+        *sndFlush = GetFlushRecPtr();
+        *sndReplay = *sndFlush;
+    } else {
+        *sndWrite = GetWalRcvWriteRecPtr(NULL);
+        *sndFlush = GetStandbyFlushRecPtr(NULL);
+        *sndReplay = GetXLogReplayRecPtr(NULL);
+    }
+}
+
 /*
  * Returns activity of walsenders, including pids and xlog locations sent to
  * standby servers.
@@ -4263,11 +4330,11 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 #define PG_STAT_GET_WAL_SENDERS_COLS 21
 
     TupleDesc tupdesc;
-    Tuplestorestate* tupstore = NULL;
-    int* sync_priority = NULL;
+    Tuplestorestate *tupstore = NULL;
+    int *sync_priority = NULL;
     int i = 0;
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
-    List* sync_standbys = NIL;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    List *sync_standbys = NIL;
 
     tupstore = BuildTupleResult(fcinfo, &tupdesc);
 
@@ -4277,10 +4344,10 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
          * acquisitions and to allow us to evaluate who is the current sync
          * standby. This code must match the code in SyncRepReleaseWaiters().
          */
-        sync_priority = (int*)palloc(sizeof(int) * g_instance.attr.attr_storage.max_wal_senders);
+        sync_priority = (int *)palloc(sizeof(int) * g_instance.attr.attr_storage.max_wal_senders);
         for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
             /* use volatile pointer to prevent code rearrangement */
-            volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+            volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
             if (walsnd->pid != 0) {
                 /*
@@ -4302,17 +4369,13 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
         char location[MAXFNAMELEN] = {0};
-        XLogRecPtr sentRecPtr;
-        XLogRecPtr local_write;
-        XLogRecPtr flush;
-        XLogRecPtr apply;
+        XLogRecPtr sentRecPtr, local_write;
+        XLogRecPtr flush, apply;
         WalSndState state;
-        XLogRecPtr sndWrite;
-        XLogRecPtr sndFlush;
-        XLogRecPtr sndReplay;
-        XLogRecPtr RcvReceived;
+        XLogRecPtr sndWrite, sndFlush;
+        XLogRecPtr sndReplay, RcvReceived;
         XLogRecPtr syncStart;
 
         int sync_percent = 0;
@@ -4334,7 +4397,7 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 
         SpinLockAcquire(&hashmdata->mutex);
         local_role = hashmdata->current_mode;
-        if (walsnd->pid == 0) {
+        if (walsnd->pid == 0 || walsnd->lwpId == 0) {
             SpinLockRelease(&hashmdata->mutex);
             continue;
         }
@@ -4343,9 +4406,9 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 
         localport = walsnd->wal_sender_channel.localport;
         remoteport = walsnd->wal_sender_channel.remoteport;
-        rc = strncpy_s(localip, IP_LEN, (char*)walsnd->wal_sender_channel.localhost, IP_LEN - 1);
+        rc = strncpy_s(localip, IP_LEN, (char *)walsnd->wal_sender_channel.localhost, IP_LEN - 1);
         securec_check(rc, "\0", "\0");
-        rc = strncpy_s(remoteip, IP_LEN, (char*)walsnd->wal_sender_channel.remotehost, IP_LEN - 1);
+        rc = strncpy_s(remoteip, IP_LEN, (char *)walsnd->wal_sender_channel.remotehost, IP_LEN - 1);
         securec_check(rc, "\0", "\0");
         localip[IP_LEN - 1] = '\0';
         remoteip[IP_LEN - 1] = '\0';
@@ -4366,15 +4429,7 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
             priority = walsnd->sync_standby_priority;
         SpinLockRelease(&walsnd->mutex);
 
-        if (local_role == PRIMARY_MODE) {
-            sndWrite = GetXLogWriteRecPtr();
-            sndFlush = GetFlushRecPtr();
-            sndReplay = sndFlush;
-        } else {
-            sndWrite = GetWalRcvWriteRecPtr(NULL);
-            sndFlush = GetStandbyFlushRecPtr(NULL);
-            sndReplay = GetXLogReplayRecPtr(NULL);
-        }
+        set_xlog_location(local_role, &sndWrite, &sndFlush, &sndReplay);
 
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
@@ -4382,13 +4437,14 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
         values[j++] = Int64GetDatum(walsnd->pid);
         values[j++] = Int32GetDatum(walsnd->lwpId);
 
-        if (!superuser()) {
+        if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode) &&
+            !isMonitoradmin(GetUserId())) {
             /*
              * Only superusers can see details. Other users only get the pid
              * value to know it's a walsender, but no details.
              */
             rc = memset_s(&nulls[j], PG_STAT_GET_WAL_SENDERS_COLS - j, true, PG_STAT_GET_WAL_SENDERS_COLS - j);
-            securec_check(rc, "\0", "\0");
+            securec_check(rc, "", "");
         } else {
             /* local_role */
             values[j++] = CStringGetTextDatum(wal_get_role_string(local_role));
@@ -4421,80 +4477,64 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
                 nulls[j++] = true;
 
             /* sender_sent_location */
-            ret = snprintf_s(location,
-                sizeof(location),
-                sizeof(location) - 1,
-                "%X/%X",
-                (uint32)(sentRecPtr >> 32),
-                (uint32)sentRecPtr);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(sentRecPtr >> 32),
+                             (uint32)sentRecPtr);
             securec_check_ss(ret, "\0", "\0");
             values[j++] = CStringGetTextDatum(location);
 
             /* sender_write_location */
             if (sndWrite == 0)
                 SETXLOGLOCATION(sndWrite, sentRecPtr)
-            ret = snprintf_s(
-                location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(sndWrite >> 32), (uint32)sndWrite);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(sndWrite >> 32),
+                             (uint32)sndWrite);
             securec_check_ss(ret, "\0", "\0");
             values[j++] = CStringGetTextDatum(location);
 
             /* sender_flush_location */
             if (sndFlush == 0)
                 SETXLOGLOCATION(sndFlush, sentRecPtr)
-            ret = snprintf_s(
-                location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(sndFlush >> 32), (uint32)sndFlush);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(sndFlush >> 32),
+                             (uint32)sndFlush);
             securec_check_ss(ret, "\0", "\0");
             values[j++] = CStringGetTextDatum(location);
 
             /* sender_replay_location */
             if (sndReplay == 0)
                 SETXLOGLOCATION(sndReplay, sentRecPtr)
-            ret = snprintf_s(location,
-                sizeof(location),
-                sizeof(location) - 1,
-                "%X/%X",
-                (uint32)(sndReplay >> 32),
-                (uint32)sndReplay);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(sndReplay >> 32),
+                             (uint32)sndReplay);
             securec_check_ss(ret, "\0", "\0");
             values[j++] = CStringGetTextDatum(location);
 
             /* receiver_received_location */
             if (RcvReceived == 0)
                 SETXLOGLOCATION(RcvReceived, sentRecPtr)
-            ret = snprintf_s(location,
-                sizeof(location),
-                sizeof(location) - 1,
-                "%X/%X",
-                (uint32)(RcvReceived >> 32),
-                (uint32)RcvReceived);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(RcvReceived >> 32),
+                             (uint32)RcvReceived);
             securec_check_ss(ret, "\0", "\0");
             values[j++] = CStringGetTextDatum(location);
 
             /* receiver_write_location */
             if (local_write == 0)
                 SETXLOGLOCATION(local_write, sentRecPtr)
-            ret = snprintf_s(location,
-                sizeof(location),
-                sizeof(location) - 1,
-                "%X/%X",
-                (uint32)(local_write >> 32),
-                (uint32)local_write);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(local_write >> 32),
+                             (uint32)local_write);
             securec_check_ss(ret, "\0", "\0");
             values[j++] = CStringGetTextDatum(location);
 
             /* receiver_flush_location */
             if (flush == 0)
                 SETXLOGLOCATION(flush, sentRecPtr)
-            ret = snprintf_s(
-                location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(flush >> 32), (uint32)flush);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(flush >> 32),
+                             (uint32)flush);
             securec_check_ss(ret, "\0", "\0");
             values[j++] = CStringGetTextDatum(location);
 
             /* receiver_replay_location */
             if (apply == 0)
                 SETXLOGLOCATION(apply, sentRecPtr)
-            ret = snprintf_s(
-                location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(apply >> 32), (uint32)apply);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%X/%X", (uint32)(apply >> 32),
+                             (uint32)apply);
             securec_check_ss(ret, "\0", "\0");
             values[j++] = CStringGetTextDatum(location);
 
@@ -4533,9 +4573,9 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
                 if (priority == 0)
                     values[j++] = CStringGetTextDatum("Async");
                 else if (list_member_int(sync_standbys, i)) {
-                    values[j++] = t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY ?
-                        CStringGetTextDatum("Sync") :
-                        CStringGetTextDatum("Quorum");
+                    values[j++] = t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY
+                                        ? CStringGetTextDatum("Sync")
+                                        : CStringGetTextDatum("Quorum");
                 } else
                     values[j++] = CStringGetTextDatum("Potential");
                 values[j++] = Int32GetDatum(priority);
@@ -4547,14 +4587,8 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
                 values[j++] = CStringGetTextDatum("Off");
 
             /* channel */
-            ret = snprintf_s(location,
-                sizeof(location),
-                sizeof(location) - 1,
-                "%s:%d-->%s:%d",
-                localip,
-                localport,
-                remoteip,
-                remoteport);
+            ret = snprintf_s(location, sizeof(location), sizeof(location) - 1, "%s:%d-->%s:%d", localip, localport,
+                             remoteip, remoteport);
             securec_check_ss(ret, "\0", "\0");
             values[j++] = CStringGetTextDatum(location);
         }
@@ -4581,7 +4615,7 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 static void WalSndKeepalive(bool requestReply)
 {
     PrimaryKeepaliveMessage keepalive_message;
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     errno_t errorno = EOK;
 
     /* Construct a new message */
@@ -4599,9 +4633,8 @@ static void WalSndKeepalive(bool requestReply)
     /* Prepend with the message type and send it. */
     t_thrd.walsender_cxt.output_xlog_message[0] = 'k';
     errorno = memcpy_s(t_thrd.walsender_cxt.output_xlog_message + 1,
-        sizeof(WalDataMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024,
-        &keepalive_message,
-        sizeof(PrimaryKeepaliveMessage));
+                       sizeof(WalDataMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024,
+                       &keepalive_message, sizeof(PrimaryKeepaliveMessage));
     securec_check(errorno, "\0", "\0");
     (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message, sizeof(PrimaryKeepaliveMessage) + 1);
 
@@ -4618,7 +4651,7 @@ static void WalSndKeepalive(bool requestReply)
 static void WalSndRmXLog(bool requestReply)
 {
     RmXLogMessage rmXLogMessage;
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     errno_t errorno = EOK;
 
     /* Construct a new message */
@@ -4633,10 +4666,8 @@ static void WalSndRmXLog(bool requestReply)
 
     /* Prepend with the message type and send it. */
     t_thrd.walsender_cxt.output_xlog_message[0] = 'x';
-    errorno = memcpy_s(t_thrd.walsender_cxt.output_xlog_message + 1,
-        sizeof(WalDataMessageHeader) + WS_MAX_SEND_SIZE,
-        &rmXLogMessage,
-        sizeof(RmXLogMessage));
+    errorno = memcpy_s(t_thrd.walsender_cxt.output_xlog_message + 1, sizeof(WalDataMessageHeader) + WS_MAX_SEND_SIZE,
+                       &rmXLogMessage, sizeof(RmXLogMessage));
     securec_check(errorno, "\0", "\0");
     (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message, sizeof(RmXLogMessage) + 1);
 }
@@ -4649,7 +4680,7 @@ static void WalSndRmXLog(bool requestReply)
 static void WalSndSyncDummyStandbyDone(bool requestReply)
 {
     EndXLogMessage endXLogMessage;
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     errno_t errorno = EOK;
 
     /* Construct a new message */
@@ -4665,9 +4696,8 @@ static void WalSndSyncDummyStandbyDone(bool requestReply)
     /* Prepend with the message type and send it. */
     t_thrd.walsender_cxt.output_xlog_message[0] = 'e';
     errorno = memcpy_s(t_thrd.walsender_cxt.output_xlog_message + 1,
-        sizeof(WalDataMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024,
-        &endXLogMessage,
-        sizeof(EndXLogMessage));
+                       sizeof(WalDataMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024, &endXLogMessage,
+                       sizeof(EndXLogMessage));
     securec_check(errorno, "\0", "\0");
     (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message, sizeof(EndXLogMessage) + 1);
 }
@@ -4691,8 +4721,8 @@ static void WalSndKeepaliveIfNecessary(TimestampTz now)
      * from the standby, send a keep-alive message to the standby requesting
      * an immediate reply.
      */
-    ping_time = TimestampTzPlusMilliseconds(
-        t_thrd.walsender_cxt.last_reply_timestamp, u_sess->attr.attr_storage.wal_sender_timeout / 2);
+    ping_time = TimestampTzPlusMilliseconds(t_thrd.walsender_cxt.last_reply_timestamp,
+                                            u_sess->attr.attr_storage.wal_sender_timeout / 2);
     if (now >= ping_time) {
         WalSndKeepalive(true);
         t_thrd.walsender_cxt.waiting_for_ping_response = true;
@@ -4702,10 +4732,10 @@ static void WalSndKeepaliveIfNecessary(TimestampTz now)
 /*
  * send switchover response message
  */
-static void WalSndResponseSwitchover(char* msgbuf)
+static void WalSndResponseSwitchover(char *msgbuf)
 {
     PrimarySwitchResponseMessage response_message;
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
     errno_t errorno = EOK;
 
     if (walsnd == NULL)
@@ -4717,7 +4747,7 @@ static void WalSndResponseSwitchover(char* msgbuf)
             /* clean view data. */
             int rc;
             rc = memset_s(&(g_instance.rto_cxt), sizeof(knl_g_rto_context), 0, sizeof(knl_g_rto_context));
-            securec_check(rc, "\0", "\0");
+            securec_check(rc, "", "");
             break;
         case NODESTATE_PRIMARY_DEMOTING_WAIT_CATCHUP:
             response_message.switchResponse = SWITCHOVER_DEMOTE_CATCHUP_EXIST;
@@ -4732,17 +4762,40 @@ static void WalSndResponseSwitchover(char* msgbuf)
     response_message.sendTime = GetCurrentTimestamp();
 
     ereport(LOG,
-        (errmsg("sending switchover response message%s",
-            walsnd->node_state == NODESTATE_PRIMARY_DEMOTING_WAIT_CATCHUP ? ", meeting alive catchup" : ".")));
+            (errmsg("sending switchover response message%s",
+                    walsnd->node_state == NODESTATE_PRIMARY_DEMOTING_WAIT_CATCHUP ? ", meeting alive catchup" : ".")));
 
     /* Prepend with the message type and send it. */
     msgbuf[0] = 'p';
-    errorno = memcpy_s(msgbuf + 1,
-        sizeof(WalDataMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024,
-        &response_message,
-        sizeof(PrimarySwitchResponseMessage));
+    errorno = memcpy_s(msgbuf + 1, sizeof(WalDataMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024,
+                       &response_message, sizeof(PrimarySwitchResponseMessage));
     securec_check(errorno, "\0", "\0");
     (void)pq_putmessage_noblock('d', msgbuf, sizeof(PrimarySwitchResponseMessage) + 1);
+}
+
+/*
+ * send archive xlog command
+ */
+static void WalSndArchiveXlog(XLogRecPtr targetLsn, int sub_term)
+{
+    ArchiveXlogMessage archive_message;
+    errno_t errorno = EOK;
+    ereport(LOG,
+        (errmsg("WalSndArchiveXlog %X/%X", (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
+
+    archive_message.targetLsn = targetLsn;
+    archive_message.term = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file, 
+        g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
+    archive_message.sub_term = sub_term;
+
+    /* Prepend with the message type and send it. */
+    t_thrd.walsender_cxt.output_xlog_message[0] = 'a';
+    errorno = memcpy_s(t_thrd.walsender_cxt.output_xlog_message + 1,
+        sizeof(ArchiveXlogMessage) + WS_MAX_SEND_SIZE,
+        &archive_message,
+        sizeof(ArchiveXlogMessage));
+    securec_check(errorno, "\0", "\0");
+    (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message, sizeof(ArchiveXlogMessage) + 1);
 }
 
 /*
@@ -4763,7 +4816,7 @@ XLogRecPtr GetOldestWALSendPointer(void)
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
         XLogRecPtr recptr;
 
         if (walsnd->pid == 0)
@@ -4790,78 +4843,69 @@ XLogRecPtr GetOldestWALSendPointer(void)
  */
 static void SetHaWalSenderChannel()
 {
-    struct sockaddr* laddr = (struct sockaddr*)&(u_sess->proc_cxt.MyProcPort->laddr.addr);
-    struct sockaddr* raddr = (struct sockaddr*)&(u_sess->proc_cxt.MyProcPort->raddr.addr);
+    struct sockaddr *laddr = (struct sockaddr *)&(u_sess->proc_cxt.MyProcPort->laddr.addr);
+    struct sockaddr *raddr = (struct sockaddr *)&(u_sess->proc_cxt.MyProcPort->raddr.addr);
     char local_ip[IP_LEN] = {0};
     char remote_ip[IP_LEN] = {0};
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    char* result = NULL;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    char *result = NULL;
     errno_t rc = 0;
 
     if (laddr->sa_family == AF_INET6) {
-        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in*)laddr)->sin_addr, 128, local_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in *)laddr)->sin_addr, 128, local_ip, IP_LEN);
         if (result == NULL) {
             ereport(WARNING, (errmsg("inet_net_ntop failed")));
         }
     } else if (laddr->sa_family == AF_INET) {
-        result = inet_net_ntop(AF_INET, &((struct sockaddr_in*)laddr)->sin_addr, 32, local_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET, &((struct sockaddr_in *)laddr)->sin_addr, 32, local_ip, IP_LEN);
         if (result == NULL) {
             ereport(WARNING, (errmsg("inet_net_ntop failed")));
         }
     }
 
     if (raddr->sa_family == AF_INET6) {
-        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in*)raddr)->sin_addr, 128, remote_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in *)raddr)->sin_addr, 128, remote_ip, IP_LEN);
         if (result == NULL) {
             ereport(WARNING, (errmsg("inet_net_ntop failed")));
         }
     } else if (raddr->sa_family == AF_INET) {
-        result = inet_net_ntop(AF_INET, &((struct sockaddr_in*)raddr)->sin_addr, 32, remote_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET, &((struct sockaddr_in *)raddr)->sin_addr, 32, remote_ip, IP_LEN);
         if (result == NULL) {
             ereport(WARNING, (errmsg("inet_net_ntop failed")));
         }
     }
 
     SpinLockAcquire(&walsnd->mutex);
-    rc = strncpy_s((char*)walsnd->wal_sender_channel.localhost, IP_LEN, local_ip, IP_LEN - 1);
+    rc = strncpy_s((char *)walsnd->wal_sender_channel.localhost, IP_LEN, local_ip, IP_LEN - 1);
     securec_check(rc, "\0", "\0");
     walsnd->wal_sender_channel.localhost[IP_LEN - 1] = '\0';
-    walsnd->wal_sender_channel.localport = ntohs(((struct sockaddr_in*)laddr)->sin_port);
-    rc = strncpy_s((char*)walsnd->wal_sender_channel.remotehost, IP_LEN, remote_ip, IP_LEN - 1);
+    walsnd->wal_sender_channel.localport = ntohs(((struct sockaddr_in *)laddr)->sin_port);
+    rc = strncpy_s((char *)walsnd->wal_sender_channel.remotehost, IP_LEN, remote_ip, IP_LEN - 1);
     securec_check(rc, "\0", "\0");
     walsnd->wal_sender_channel.remotehost[IP_LEN - 1] = '\0';
-    walsnd->wal_sender_channel.remoteport = ntohs(((struct sockaddr_in*)raddr)->sin_port);
+    walsnd->wal_sender_channel.remoteport = ntohs(((struct sockaddr_in *)raddr)->sin_port);
     SpinLockRelease(&walsnd->mutex);
 
-    /* for log control view. */
     if (IS_PGXC_DATANODE) {
-        g_instance.rto_cxt.rto_standby_data[walsnd->index].source_port = walsnd->wal_sender_channel.localport;
-        g_instance.rto_cxt.rto_standby_data[walsnd->index].dest_port = walsnd->wal_sender_channel.remoteport;
-
-        char* localip = (char*)(g_instance.rto_cxt.rto_standby_data[walsnd->index].source_ip);
-        rc = strncpy_s(localip, IP_LEN, local_ip, IP_LEN - 1);
+        char *standby_name = (char *)(g_instance.rto_cxt.rto_standby_data[walsnd->index].id);
+        rc = strncpy_s(standby_name, NODENAMELEN, u_sess->attr.attr_common.application_name,
+                       strlen(u_sess->attr.attr_common.application_name));
         securec_check(rc, "\0", "\0");
-        g_instance.rto_cxt.rto_standby_data[walsnd->index].source_ip[IP_LEN - 1] = '\0';
-
-        char* remoteip = (char*)(g_instance.rto_cxt.rto_standby_data[walsnd->index].dest_ip);
-        rc = strncpy_s(remoteip, IP_LEN, remote_ip, IP_LEN - 1);
-        securec_check(rc, "\0", "\0");
-        g_instance.rto_cxt.rto_standby_data[walsnd->index].dest_ip[IP_LEN - 1] = '\0';
     }
 }
 
 static bool UpdateHaWalSenderChannel(int ha_remote_listen_port)
 {
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
     bool is_found = false;
     int i = 0;
 
     for (i = 1; i < MAX_REPLNODE_NUM; i++) {
-        ReplConnInfo* replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+        ReplConnInfo *replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
         if (replconninfo == NULL)
             continue;
 
-        if (strncmp((char*)replconninfo->remotehost, (char*)walsnd->wal_sender_channel.remotehost, IP_LEN) == 0 &&
+        if (strncmp((char *)replconninfo->remotehost, (char *)walsnd->wal_sender_channel.remotehost, IP_LEN) == 0 &&
             replconninfo->remoteport == ha_remote_listen_port) {
             SpinLockAcquire(&walsnd->mutex);
             walsnd->channel_get_replc = i;
@@ -4881,7 +4925,7 @@ static bool UpdateHaWalSenderChannel(int ha_remote_listen_port)
 
 static void SetReplWalSender(void)
 {
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
     SpinLockAcquire(&walsnd->mutex);
     walsnd->replSender = true;
@@ -4891,7 +4935,7 @@ static void SetReplWalSender(void)
 /* Set walsnd peer_mode */
 static void SetWalSndPeerMode(ServerMode mode)
 {
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
     SpinLockAcquire(&walsnd->mutex);
     walsnd->peer_role = mode;
@@ -4901,7 +4945,7 @@ static void SetWalSndPeerMode(ServerMode mode)
 /* Set walsnd peer_state */
 static void SetWalSndPeerDbstate(DbState state)
 {
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
     SpinLockAcquire(&walsnd->mutex);
     walsnd->peer_state = state;
@@ -4909,16 +4953,18 @@ static void SetWalSndPeerDbstate(DbState state)
 }
 
 /* send config file to standby */
-static bool SendConfigFile(char* path)
+static bool SendConfigFile(char *path)
 {
-    FILE* fp = NULL;
-    char* buf = NULL;
-    int nread = 0;
+    char *buf = NULL;
+    char *temp_buf = nullptr;
+    char **opt_lines = nullptr;
     int len = 0;
+    int temp_buf_len = 0;
     struct stat statbuf;
-    ConfFileLock filelock = {NULL, 0};
+    ConfFileLock filelock = { NULL, 0 };
     ConfigModifyTimeMessage msgConfigTime;
     errno_t errorno = EOK;
+    bool read_guc_file_success = true;
 
     if (AmWalSenderToDummyStandby() || AmWalSenderOnDummyStandby())
         return true;
@@ -4931,63 +4977,73 @@ static bool SendConfigFile(char* path)
         ereport(LOG, (errmsg("get lock failed when send gaussdb config file to the peer.")));
         return false;
     }
-    if ((fp = fopen(path, "rb")) == NULL) {
+    PG_TRY();
+    {
+    opt_lines = read_guc_file(path);
+    }
+    PG_CATCH();
+    {
+        read_guc_file_success = false;
+        EmitErrorReport();
+        FlushErrorState();
+    }
+    PG_END_TRY();
+    if (!read_guc_file_success) {
+        /* if failed to read guc file, will log the error info in PG_CATCH(), no need to log again. */
         release_file_lock(&filelock);
-        ereport(LOG, (errmsg("could not open file or directory \"%s\": %m", path)));
         return false;
     }
-    len = 1 + sizeof(ConfigModifyTimeMessage) + statbuf.st_size;
-    buf = (char*)palloc0(len);
+    if (opt_lines == nullptr) {
+        release_file_lock(&filelock);
+        ereport(LOG, (errmsg("the config file has no data,please check it.")));
+        return false;
+    }
+    comment_guc_lines(opt_lines, g_reserve_param);
+    temp_buf_len = add_guc_optlines_to_buffer(opt_lines, &temp_buf);
+    release_opt_lines(opt_lines);
+    Assert(temp_buf_len != 0);
+    /* temp_buf_len including last byte '\0' */
+    len = 1 + sizeof(ConfigModifyTimeMessage) + temp_buf_len;
+    buf = (char *)palloc0(len);
     buf[0] = 'm';
     msgConfigTime.config_modify_time = statbuf.st_mtime;
-    errorno = memcpy_s(
-        buf + 1, sizeof(ConfigModifyTimeMessage) + statbuf.st_size, &msgConfigTime, sizeof(ConfigModifyTimeMessage));
+    errorno = memcpy_s(buf + 1, sizeof(ConfigModifyTimeMessage) + temp_buf_len,
+                        &msgConfigTime, sizeof(ConfigModifyTimeMessage));
     securec_check(errorno, "\0", "\0");
-    nread = (int)fread(buf + 1 + sizeof(ConfigModifyTimeMessage), 1, statbuf.st_size, fp);
-    if (nread != statbuf.st_size) {
-        release_file_lock(&filelock);
-        (void)fclose(fp);
-        pfree(buf);
-        buf = NULL;
-        ereport(LOG, (errcode_for_file_access(), errmsg("could not read gaussdb config file: %m")));
-        return false;
-    }
-    if (fclose(fp) != 0)
-        ereport(LOG, (errmsg("walsender close the file or directory error\"%s\": %m", path)));
+    errorno = memcpy_s(buf + 1 + sizeof(ConfigModifyTimeMessage), temp_buf_len,
+                        temp_buf, temp_buf_len);
+    securec_check(errorno, "\0", "\0");
+    pfree(temp_buf);
+    temp_buf = NULL;
     release_file_lock(&filelock);
     /* Send the chunk as a CopyData message */
-    (void)pq_putmessage_noblock('d', buf, 1 + sizeof(ConfigModifyTimeMessage) + nread);
+    (void)pq_putmessage_noblock('d', buf, len);
     pfree(buf);
     buf = NULL;
-    ereport(LOG, (errmsg("walsender send config file size :%d", (int)(1 + sizeof(ConfigModifyTimeMessage) + nread))));
+    ereport(LOG, (errmsg("walsender send config file size :%d", len)));
     return true;
 }
 
-AlarmCheckResult WalSegmentsRemovedChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
+AlarmCheckResult WalSegmentsRemovedChecker(Alarm *alarm, AlarmAdditionalParam *additionalParam)
 {
     if (WalSegmemtRemovedhappened == true) {
         // fill the alarm message
-        WriteAlarmAdditionalInfo(additionalParam,
-            g_instance.attr.attr_common.PGXCNodeName,
-            "",
-            "",
-            alarm,
-            ALM_AT_Fault,
-            g_instance.attr.attr_common.PGXCNodeName);
+        WriteAlarmAdditionalInfo(additionalParam, g_instance.attr.attr_common.PGXCNodeName, "", "", alarm, ALM_AT_Fault,
+                                 g_instance.attr.attr_common.PGXCNodeName);
         return ALM_ACR_Abnormal;
     } else {
         // fill the alarm message
-        WriteAlarmAdditionalInfo(
-            additionalParam, g_instance.attr.attr_common.PGXCNodeName, "", "", alarm, ALM_AT_Resume);
+        WriteAlarmAdditionalInfo(additionalParam, g_instance.attr.attr_common.PGXCNodeName, "", "", alarm,
+                                 ALM_AT_Resume);
         return ALM_ACR_Normal;
     }
 }
 
-static void StopAliveBuildSender(void)
+void StopAliveBuildSender(void)
 {
     for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
         SndRole sndrole;
 
         if (walsnd->pid == 0 || t_thrd.walsender_cxt.MyWalSnd == walsnd)
@@ -5003,8 +5059,25 @@ static void StopAliveBuildSender(void)
     }
 }
 
-void GetFastestReplayStandByServiceAddress(
-    char* fastest_remote_address, char* second_fastest_remote_address, size_t address_len)
+bool IsAllBuildSenderExit()
+{
+    for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
+        /* use volatile pointer to prevent code rearrangement */
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        SndRole sndrole;
+        SpinLockAcquire(&walsnd->mutex);
+        sndrole = walsnd->sendRole;
+        SpinLockRelease(&walsnd->mutex);
+        if (sndrole == SNDROLE_PRIMARY_BUILDSTANDBY && walsnd->pid != 0) {
+            return false;
+        }
+    }
+    ereport(LOG, (errmsg("all build walsenders exited")));
+    return true;
+}
+
+void GetFastestReplayStandByServiceAddress(char *fastest_remote_address, char *second_fastest_remote_address,
+                                           size_t address_len)
 {
     if (fastest_remote_address == NULL || second_fastest_remote_address == NULL || address_len == 0 ||
         t_thrd.walsender_cxt.WalSndCtl == NULL)
@@ -5019,7 +5092,7 @@ void GetFastestReplayStandByServiceAddress(
 
     for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
         if (walsnd->pid == 0 || !walsnd->replSender)
             continue;
@@ -5051,14 +5124,10 @@ void GetFastestReplayStandByServiceAddress(
 
     /* find fastest replay standby */
     if (!XLogRecPtrIsInvalid(fastest_replay)) {
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[fastest];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[fastest];
         SpinLockAcquire(&walsnd->mutex);
-        rc = snprintf_s(fastest_remote_address,
-            address_len,
-            (address_len - 1),
-            "%s:%d",
-            walsnd->wal_sender_channel.remotehost,
-            walsnd->wal_sender_channel.remoteservice);
+        rc = snprintf_s(fastest_remote_address, address_len, (address_len - 1), "%s:%d",
+                        walsnd->wal_sender_channel.remotehost, walsnd->wal_sender_channel.remoteservice);
         SpinLockRelease(&walsnd->mutex);
 
         securec_check_ss(rc, "", "");
@@ -5066,17 +5135,13 @@ void GetFastestReplayStandByServiceAddress(
 
     /* find second fastest replay standby */
     if (!XLogRecPtrIsInvalid(second_fastest_replay)) {
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[second_fastest];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[second_fastest];
         SpinLockAcquire(&walsnd->mutex);
-        rc = snprintf_s(second_fastest_remote_address,
-            address_len,
-            (address_len - 1),
-            "%s:%d",
-            walsnd->wal_sender_channel.remotehost,
-            walsnd->wal_sender_channel.remoteservice);
+        rc = snprintf_s(second_fastest_remote_address, address_len, (address_len - 1), "%s:%d",
+                        walsnd->wal_sender_channel.remotehost, walsnd->wal_sender_channel.remoteservice);
         SpinLockRelease(&walsnd->mutex);
 
-        securec_check_ss(rc, "\0", "\0");
+        securec_check_ss(rc, "", "");
     }
 }
 
@@ -5087,7 +5152,7 @@ bool IsPrimaryStandByReadyToRemoteRead(void)
 
     for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
         if (walsnd->pid == 0 || t_thrd.walsender_cxt.MyWalSnd == walsnd)
             continue;
@@ -5111,7 +5176,7 @@ bool IsPrimaryStandByReadyToRemoteRead(void)
 
 static bool IsWalSenderToBuild(void)
 {
-    WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
     bool isWalToBuild = false;
     if (walsnd == NULL) {
         return false;
@@ -5131,7 +5196,7 @@ static bool IsWalSenderToBuild(void)
 static void WalSndSetPercentCountStartLsn(XLogRecPtr startLsn)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
     SpinLockAcquire(&walsnd->mutex);
     walsnd->syncPercentCountStart = startLsn;
@@ -5142,7 +5207,7 @@ static void WalSndSetPercentCountStartLsn(XLogRecPtr startLsn)
 static void WalSndRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecPtr currentDoneLsn)
 {
     uint64 coundWindow = ((uint64)WalGetSyncCountWindow() * XLOG_SEG_SIZE);
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
     XLogRecPtr baseStartLsn = InvalidXLogRecPtr;
 
     if (!walsnd) {

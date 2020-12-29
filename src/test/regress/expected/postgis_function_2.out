@@ -1,0 +1,1205 @@
+/*
+###############################################################################
+# TESTCASE NAME : postgis_outputs.sql
+# COMPONENT(S)  : test function outputs
+# PREREQUISITE  : 
+# PLATFORM      : SUSE11.3
+# DESCRIPTION   : 验证postgis函数中几何的不同格式输出
+# TAG           : ST_AsBinary,ST_AsEWKB,ST_AsEWKT,ST_AsGeoJSON,ST_AsTexti,ST_GeoHash
+# TC LEVEL      : 
+################################################################################
+*/
+set current_schema=postgis;
+--S1.验证函数ST_AsBinary输出几何的二进制表示格式
+SELECT '579',ST_AsBinary(the_geom) from geom_polygon where name='AAAA';
+ ?column? |                                                                                         st_asbinary                                                                                          
+----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 579      | \x010300000001000000050000000000000000000000000000000000000000000000000000000000000000001440000000000000144000000000000014400000000000001440000000000000000000000000000000000000000000000000
+(1 row)
+
+--S2.验证函数ST_AsEWKB输出几何扩展二进制表示格式
+SELECT '581',ST_AsEWKB(the_geom) as st_asewkb from geom_line order by name, st_asewkb limit 10;
+ ?column? |                                          st_asewkb                                           
+----------+----------------------------------------------------------------------------------------------
+ 581      | \x0102000020e6100000020000000000000000000000000000000000000000000000000014400000000000001440
+ 581      | \x0102000020e6100000020000000000000000000000000000000000244000000000000014400000000000002e40
+ 581      | \x0102000020e610000002000000000000000000244000000000000000000000000000002e400000000000001440
+ 581      | \x0102000020e6100000020000000000000000000000000000000000344000000000000014400000000000003940
+ 581      | \x0102000020e610000002000000000000000000244000000000000024400000000000002e400000000000002e40
+ 581      | \x0102000020e6100000020000000000000000003440000000000000000000000000000039400000000000001440
+ 581      | \x0102000020e61000000200000000000000000000000000000000003e4000000000000014400000000000804140
+ 581      | \x0102000020e610000002000000000000000000244000000000000034400000000000002e400000000000003940
+ 581      | \x0102000020e6100000020000000000000000003440000000000000244000000000000039400000000000002e40
+ 581      | \x0102000020e6100000020000000000000000003e40000000000000000000000000008041400000000000001440
+(10 rows)
+
+--S3.验证函数ST_AsEWKT输出几何的扩展文本表示格式
+SELECT '583',ST_AsEWKT(the_geom) from geom_point order by citiID limit 10;
+ ?column? |  st_asewkt  
+----------+-------------
+ 583      | POINT(0 0)
+ 583      | POINT(0 10)
+ 583      | POINT(0 20)
+ 583      | POINT(0 30)
+ 583      | POINT(0 40)
+ 583      | POINT(0 50)
+ 583      | POINT(0 60)
+ 583      | POINT(0 70)
+ 583      | POINT(0 80)
+ 583      | POINT(0 90)
+(10 rows)
+
+--S4.验证函数ST_AsGeoJSON输出几何的json表示格式
+SELECT ST_AsGeoJSON(the_geom) from geom_multipoint order by id limit 1;
+                      st_asgeojson                       
+---------------------------------------------------------
+ {"type":"MultiPoint","coordinates":[[0,0],[0,0],[0,0]]}
+(1 row)
+
+--S5.验证函数ST_AsGML输出几何的GML表示格式
+SELECT ST_AsGML(ST_GeomFromText(ST_AsText(the_geom))) from geom_multipolygon where citiID<10 order by id;
+                                                                                                                                                                                                                       st_asgml                                                                                                                                                                                                                       
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,0 0,0 0,0 0,0 0,0</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,0 0,0 0,0 0,0</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,0 0,0 0,0 0,0 0,0</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,0 0,0 0,0 0,0</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,10 0,20 0,11 0,2 0,10</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,10 0,20 0,2 0,10</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,10 0,20 0,11 0,2 0,10</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,10 0,20 0,2 0,10</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,20 0,40 0,22 0,4 0,20</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,20 0,40 0,4 0,20</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,20 0,40 0,22 0,4 0,20</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,20 0,40 0,4 0,20</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,30 0,60 0,33 0,6 0,30</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,30 0,60 0,6 0,30</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,30 0,60 0,33 0,6 0,30</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,30 0,60 0,6 0,30</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,40 0,80 0,44 0,8 0,40</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,40 0,80 0,8 0,40</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,40 0,80 0,44 0,8 0,40</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,40 0,80 0,8 0,40</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,50 0,100 0,55 0,10 0,50</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,50 0,100 0,10 0,50</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,50 0,100 0,55 0,10 0,50</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,50 0,100 0,10 0,50</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,60 0,120 0,66 0,12 0,60</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,60 0,120 0,12 0,60</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,60 0,120 0,66 0,12 0,60</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,60 0,120 0,12 0,60</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,70 0,140 0,77 0,14 0,70</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,70 0,140 0,14 0,70</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,70 0,140 0,77 0,14 0,70</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,70 0,140 0,14 0,70</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,80 0,160 0,88 0,16 0,80</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,80 0,160 0,16 0,80</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,80 0,160 0,88 0,16 0,80</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,80 0,160 0,16 0,80</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,90 0,180 0,99 0,18 0,90</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,90 0,180 0,18 0,90</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+ <gml:MultiPolygon><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,90 0,180 0,99 0,18 0,90</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember><gml:polygonMember><gml:Polygon><gml:outerBoundaryIs><gml:LinearRing><gml:coordinates>0,90 0,180 0,18 0,90</gml:coordinates></gml:LinearRing></gml:outerBoundaryIs></gml:Polygon></gml:polygonMember></gml:MultiPolygon>
+(20 rows)
+
+--S6.验证函数ST_AsHEXEWKB输出几何HEXEWKB表示格式
+SELECT ST_AsHEXEWKB(ST_GeomFromText(ST_AsText(the_geom))) from geom_multilinestring where id=13;
+ st_ashexewkb 
+--------------
+(0 rows)
+
+--S7.验证函数ST_AsKML输出几何KML表示格式
+SELECT ST_AsKML(ST_GeomFromText(ST_AsText(the_geom))) from geom_multipolygon where id=5;
+ERROR:  Input geometry has unknown (0) SRID
+CONTEXT:  referenced column: _st_askml
+SQL function "st_askml" statement 1
+referenced column: st_askml
+--S8.验证函数ST_AsLatLonText输出几何度分秒表示
+SELECT (ST_AsLatLonText(ST_AsText(the_geom), 'D\textdegree{}M''S.SSS"C')) from geom_point where id<10 order by id; 
+                 st_aslatlontext                  
+--------------------------------------------------
+ 0\textdegree{}0'0.000"N 0\textdegree{}0'0.000"E
+ 10\textdegree{}0'0.000"N 0\textdegree{}0'0.000"E
+ 20\textdegree{}0'0.000"N 0\textdegree{}0'0.000"E
+ 30\textdegree{}0'0.000"N 0\textdegree{}0'0.000"E
+ 40\textdegree{}0'0.000"N 0\textdegree{}0'0.000"E
+ 50\textdegree{}0'0.000"N 0\textdegree{}0'0.000"E
+ 60\textdegree{}0'0.000"N 0\textdegree{}0'0.000"E
+ 70\textdegree{}0'0.000"N 0\textdegree{}0'0.000"E
+ 80\textdegree{}0'0.000"N 0\textdegree{}0'0.000"E
+ 90\textdegree{}0'0.000"N 0\textdegree{}0'0.000"E
+(10 rows)
+
+--S9.验证函数ST_AsSVG输出几何SVG表示格式
+SELECT ST_AsSVG(ST_GeomFromText(ST_AsText(the_geom),4326)) from geom_point order by id limit 10;
+    st_assvg     
+-----------------
+ cx="0" cy="0"
+ cx="0" cy="-10"
+ cx="0" cy="-20"
+ cx="0" cy="-30"
+ cx="0" cy="-40"
+ cx="0" cy="-50"
+ cx="0" cy="-60"
+ cx="0" cy="-70"
+ cx="0" cy="-80"
+ cx="0" cy="-90"
+(10 rows)
+
+--S10.验证函数ST_AsText输出几何文本表示格式
+SELECT ST_AsText(the_geom) from geom_multipolygon order by id limit 10;
+                            st_astext                             
+------------------------------------------------------------------
+ MULTIPOLYGON(((0 0,0 0,0 0,0 0,0 0)),((0 0,0 0,0 0,0 0)))
+ MULTIPOLYGON(((0 0,0 0,0 0,0 0,0 0)),((0 0,0 0,0 0,0 0)))
+ MULTIPOLYGON(((0 10,0 20,0 11,0 2,0 10)),((0 10,0 20,0 2,0 10)))
+ MULTIPOLYGON(((0 10,0 20,0 11,0 2,0 10)),((0 10,0 20,0 2,0 10)))
+ MULTIPOLYGON(((0 20,0 40,0 22,0 4,0 20)),((0 20,0 40,0 4,0 20)))
+ MULTIPOLYGON(((0 20,0 40,0 22,0 4,0 20)),((0 20,0 40,0 4,0 20)))
+ MULTIPOLYGON(((0 30,0 60,0 33,0 6,0 30)),((0 30,0 60,0 6,0 30)))
+ MULTIPOLYGON(((0 30,0 60,0 33,0 6,0 30)),((0 30,0 60,0 6,0 30)))
+ MULTIPOLYGON(((0 40,0 80,0 44,0 8,0 40)),((0 40,0 80,0 8,0 40)))
+ MULTIPOLYGON(((0 40,0 80,0 44,0 8,0 40)),((0 40,0 80,0 8,0 40)))
+(10 rows)
+
+--S11.验证函数ST_AsX3D输出几何3D表示格式
+SELECT '<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 3.0//EN" "http://www.web3d.org/specifications/x3d-3.0.dtd">
+<X3D>
+<Scene>
+<Transform>
+<Shape>
+<Appearance>
+<Material emissiveColor=''0 0 1''/>
+</Appearance> ' ||
+ST_AsX3D( ST_GeomFromEWKT('POLYHEDRALSURFACE( ((0 0 0, 0 0 1, 0 1 1, 0 1 0, 0 0 0)),
+((0 0 0, 0 1 0, 1 1 0, 1 0 0, 0 0 0)), ((0 0 0, 1 0 0, 1 0 1, 0 0 1, 0 0 0)),
+((1 1 0, 1 1 1, 1 0 1, 1 0 0, 1 1 0)),
+((0 1 0, 0 1 1, 1 1 1, 1 1 0, 0 1 0)), ((0 0 1, 1 0 1, 1 1 1, 0 1 1, 0 0 1)) )')) ||
+'</Shape>
+</Transform>
+</Scene>
+</X3D>' As x3ddoc;
+                                                                                                                                                                 x3ddoc                                                                                                                                                                  
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ <?xml version="1.0" encoding="UTF-8"?>                                                                                                                                                                                                                                                                                                 +
+ <!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 3.0//EN" "http://www.web3d.org/specifications/x3d-3.0.dtd">                                                                                                                                                                                                                                  +
+ <X3D>                                                                                                                                                                                                                                                                                                                                  +
+ <Scene>                                                                                                                                                                                                                                                                                                                                +
+ <Transform>                                                                                                                                                                                                                                                                                                                            +
+ <Shape>                                                                                                                                                                                                                                                                                                                                +
+ <Appearance>                                                                                                                                                                                                                                                                                                                           +
+ <Material emissiveColor='0 0 1'/>                                                                                                                                                                                                                                                                                                      +
+ </Appearance> <IndexedFaceSet convex='false'  coordIndex='0 1 2 3 -1 4 5 6 7 -1 8 9 10 11 -1 12 13 14 15 -1 16 17 18 19 -1 20 21 22 23'><Coordinate point='0 0 0 0 0 1 0 1 1 0 1 0 0 0 0 0 1 0 1 1 0 1 0 0 0 0 0 1 0 0 1 0 1 0 0 1 1 1 0 1 1 1 1 0 1 1 0 0 0 1 0 0 1 1 1 1 1 1 1 0 0 0 1 1 0 1 1 1 1 0 1 1' /></IndexedFaceSet></Shape>+
+ </Transform>                                                                                                                                                                                                                                                                                                                           +
+ </Scene>                                                                                                                                                                                                                                                                                                                               +
+ </X3D>
+(1 row)
+
+--S12.验证函数ST_GeoHash输出几何Hash表示格式
+SELECT ST_GeoHash(the_geom) from geom_multipoint where name='UUUU';
+ERROR:  Geohash requires inputs in decimal degrees, got (50 100, 150 200).
+CONTEXT:  referenced column: st_geohash
+/*
+###############################################################################
+# TESTCASE NAME : postgis_processing.sql
+# COMPONENT(S)  : test function processing
+# PREREQUISITE  : 
+# PLATFORM      : SUSE11.3
+# DESCRIPTION   : 验证postgis几何处理函数
+# TAG           : ST_Buffer,ST_BuildArea,ST_Collect
+################################################################################
+*/
+--I1.processing简单语句测试
+--S1.验证函数ST_Buffer返回几何体给定距离内所有点的集合
+SELECT ST_Buffer(ST_GeomFromText(the_geom),50, 'quad_segs=8') from geom_point where id=5;
+ERROR:  parse error - invalid geometry
+HINT:  "...000000000000000000000000000000004940" <-- parse error at position 43 within geometry
+CONTEXT:  referenced column: st_buffer
+SELECT ST_Buffer(ST_GeomFromText('LINESTRING(50 50,150 150,150 50)'), 10, 'endcap=round join=round');
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         st_buffer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?
+(1 row)
+
+SELECT ST_Buffer(ST_GeomFromText(ST_AsText(the_geom)),50, 'quad_segs=8') from geom_polygon where id<10 order by id;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         st_buffer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+--?
+(10 rows)
+
+--S2.验证函数ST_BuildArea创建给定几何体的组成线条形成的面状几何
+SELECT ST_BuildArea(ST_Collect(smallc,bigc))FROM (SELECT ST_Buffer(ST_GeomFromText(tb1.geom), 25) As smallc,ST_Buffer(ST_GeomFromText(tb2.geom), 50) as bigc from (select ST_Astext(the_geom) as geom from geom_line where id=6) tb1, (select ST_Astext(the_geom) as geom from geom_line where id=15) tb2);
+ st_buildarea 
+--------------
+(0 rows)
+
+--S3.验证函数ST_Collect从其他几何体的集合中返回指定的geometry值
+SELECT ST_AsText(ST_Collect(ST_GeomFromText(tb1.geom),ST_GeomFromText(tb2.geom))) from (select ST_AsText(the_geom) as geom from geom_point where id=7) tb1,(select ST_AsText(the_geom) as geom from geom_line where id=9) tb2;
+                       st_astext                       
+-------------------------------------------------------
+ GEOMETRYCOLLECTION(POINT(0 70),LINESTRING(0 90,5 95))
+(1 row)
+
+--S4.验证函数ST_ConcaveHull几何的凹形表示可能包含组内所有几何的凹形几何
+SELECT d.name,ST_ConcaveHull(ST_Collect(d.the_geom), 0.99) As geom FROM geom_polygon As d GROUP BY d.id,d.name order by d.name limit 10;
+ name |                                                                                                                                                                                                                                geom                                                                                                                                                                                                                                
+------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ AAAA | 0103000020E6100000010000000D00000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000104000000000000000000000000000001440000000000000004000000000000014400000000000001040000000000000144000000000000014400000000000001440000000000000144000000000000008400000000000001440000000000000F03F0000000000001440000000000000000000000000000008400000000000000000000000000000F03F000000000000000000000000000000000000000000000000
+ BBBB | 0103000020E6100000010000000D0000000000000000001440000000000000144050264166120FFE3F36DB37B31D3E20400000000000000000000000000000244000000000000000007AE7CFCC13D42C4000000000000000007AE7CFCC13D43240000000000000000037DB37B31D3E374000000000000000000000000000003940D86CDFCC76F8084065126426F1E0354000000000000014400000000000003440000000000000144086183033EC2B2F4000000000000014400C316066D857264000000000000014402593203389071B4000000000000014400000000000001440
+ BBBB | 0103000020E6100000010000000D00000000000000000014400000000000000000BBFDB7B8E4932140EDF6DFE2924FFE3F76FB6F71C9272940ECF6DFE2924F0E400000000000002E40000000000000144095FE72F36E3C334000000000000014402AFDE5E6DD7837400000000000001440000000000000394000000000000014402201A4A30D3635408A04908E36D80840440248471B6C31402512403ADA60F33F0000000000002E400000000000000000D6021A19228725400000000000000000580B6864881C1A40000000000000000000000000000014400000000000000000
+ CCCC | 0103000020E6100000010000000D00000000000000000014400000000000002440B216D0C81039FC3F2AFDE5E6DD78304000000000000000000000000000003440000000000000000095FE72F36E3C3B40000000000000000095FE72F36E3C41400000000000000000DF7D2C6DA6DA444000000000000000000000000000804640A7F4979B77E309406B018D0C914343400000000000001440000000000080414000000000000014406B018D0C91C33B400000000000001440D6021A1922873440000000000000144082084E4B66952A4000000000000014400000000000002440
+ CCCC | 0103000020E6100000010000000D0000000000000000002E400000000000001440E04E3F80D98C234020B1C07F26731E4000000000000014400000000000002440E592ACCE0E7B204058DC023696B82D40CA25599D1DF6264058DC023696B83340B0B8056C2C712D40844A0451E19438400000000000002E4000000000000039409058E03F93393440B8D30F6036633640000000000000394000000000000034408DB6A99878C23540A823FDC969472E401B6D5331F18432405047FA93D38E24405047FA93D38E2E40F1D5EEBB7AAC15400000000000002E400000000000001440
+ CCCC | 0103000020E6100000010000000D000000000000000000244000000000000000006AC0D3C611E93040A8014F1B47A4FB3FD480A78D23D23740A8014F1B47A40B400000000000003E400000000000001440A1FDD5ECC18F4240000000000000144042FBABD9831F4640000000000000144000000000008046400000000000001440CB1F961C770B43402C7F5872DC2D0A402C7F5872DC2D3F40AFFC61C971B7F83F00000000000039400000000000000000BE0454267CE031400000000000000000F9125099F0812540000000000000000000000000000024400000000000000000
+ DDDD | 0103000020E6100000010000000D00000000000000000014400000000000002E40248001141E95FC3FF9B73F5C0AA4384000000000000000000000000000003E400000000000000000B5A5AD83C514444000000000000000006A4B5B078B29494000000000000000001FF1088B503E4E4000000000000000000000000000405040EB3FFFF570B509400424E0D1FAAD4B400000000000001440000000000000494000000000000014404B5A527C3AEB434000000000000014402C6949F1E9AC3D400000000000001440C21DEEE95E83334000000000000014400000000000002E40
+ DDDD | 0103000020E6100000010000000D0000000000000000002E400000000000002440E48E98B15C6222401C71674EA39D2F4000000000000014400000000000003440DC302EC6D419204012BDB9F749A03B40B7615C8CA933264012BDB9F749A0414092928A527E4D2C409B9B96F36E7045400000000000002E4000000000008046408EB833A7D1CE3440B923662C979843400000000000003940000000000080414092E7E89C15F33540EE424608B65F3B4024CFD1392BE63240DC858C106CBF33406D6D75AD81B22F409291A531443E28400000000000002E400000000000002440
+ DDDD | 0103000020E6100000010000000D00000000000000000039400000000000001440E00EF774AF413140D696B60E16531E40000000000000244000000000000024402209496CA2873040B38D6DA273CB2D40441292D8440F3740B38D6DA273CB3340661BDB44E7963D408C54A4732DB138400000000000003E4000000000000039409078844528DF42404B5A527C3A6B3640000000000080464000000000000034406F7BDBC92E3C43404D72925D8C342E40BCED6D27BBF03F409AE424BB186924409AE424BB18693940CEAD6E314A3B154000000000000039400000000000001440
+ DDDD | 0103000020E6100000010000000D0000000000000000002E4000000000000000002554AF3F11F23840B8357E548385FA3F2554AF3F11724140B8357E5483850A4038FE86DF196B46404AA85E7F22E4134000000000008046400000000000001440877B6CF6978A4B40000000000000144000000000004050400000000000001440EE552860F7864B4024E5C0553EBD0A40DCAB50C0EE8D464092940357F9F4FA3FCA017920E694414000B757A180DD9B3F00000000008041400000000000000000F2082713D0EA384000000000000000000000000000002E400000000000000000
+(10 rows)
+
+--S6.验证函数ST_CurveToLine将一个循环/曲线转换成线/多边形
+SELECT ST_AsText(ST_CurveToLine(ST_GeomFromText('CIRCULARSTRING(220268 150415,220227 150505,220227 150406)')));
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    st_astext                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ LINESTRING(220268 150415,220269.95064912 150416.539364228,220271.823415575 150418.17258804,220273.613787707 150419.895736857,220275.317452352 150421.704659462,220276.930305234 150423.594998003,220278.448460847 150425.562198489,220279.868261823 150427.60152176,220281.186287736 150429.708054909,220282.399363347 150431.876723113,220283.50456625 150434.10230186,220284.499233914 150436.379429536,220285.380970099 150438.702620341,220286.147650624 150441.066277505,220286.797428488 150443.464706771,220287.328738321 150445.892130112,220287.740300149 150448.342699654,220288.031122486 150450.810511759,220288.200504713 150453.289621251,220288.248038775 150455.77405574,220288.173610157 150458.257830005,220287.977398166 150460.734960415,220287.659875492 150463.199479347,220287.221807076 150465.64544956,220286.664248262 150468.066978495,220285.988542259 150470.458232479,220285.196316903 150472.81345077,220284.289480732 150475.126959442,220283.270218395 150477.39318505,220282.140985384 150479.606668057,220280.90450212 150481.762075989,220279.5637474 150483.85421628,220278.12195122 150485.87804878,220276.582586992 150487.828697901,220274.949363179 150489.701464356,220273.226214362 150491.491836488,220271.417291757 150493.195501133,220269.526953216 150494.808354014,220267.559752731 150496.326509628,220265.520429459 150497.746310603,220263.41389631 150499.064336517,220261.245228106 150500.277412127,220259.019649359 150501.38261503,220256.742521683 150502.377282695,220254.419330878 150503.259018879,220252.055673714 150504.025699404,220249.657244448 150504.675477269,220247.229821107 150505.206787101,220244.779251566 150505.61834893,220242.311439461 150505.909171266,220239.832329968 150506.078553494,220237.347895479 150506.126087555,220234.864121215 150506.051658938,220232.386990804 150505.855446946,220229.922471872 150505.537924272,220227.47650166 150505.099855856,220225.054972724 150504.542297043,220222.663718741 150503.86659104,220220.308500449 150503.074365683,220217.994991777 150502.167529512,220215.72876617 150501.148267175,220213.515283163 150500.019034164,220211.35987523 150498.7825509,220209.267734939 150497.441796181,220207.243902439 150496,220205.293253319 150494.460635772,220203.420486864 150492.82741196,220201.630114732 150491.104263143,220199.926450087 150489.295340538,220198.313597205 150487.405001997,220196.795441592 150485.437801511,220195.375640616 150483.39847824,220194.057614703 150481.291945091,220192.844539092 150479.123276887,220191.739336189 150476.89769814,220190.744668525 150474.620570464,220189.86293234 150472.297379659,220189.096251815 150469.933722495,220188.446473951 150467.535293229,220187.915164118 150465.107869888,220187.50360229 150462.657300346,220187.212779953 150460.189488241,220187.043397726 150457.710378749,220186.995863664 150455.22594426,220187.070292282 150452.742169995,220187.266504273 150450.265039585,220187.584026947 150447.800520653,220188.022095363 150445.35455044,220188.579654177 150442.933021505,220189.25536018 150440.541767521,220190.047585536 150438.18654923,220190.954421707 150435.873040558,220191.973684044 150433.60681495,220193.102917055 150431.393331943,220194.339400319 150429.237924011,220195.680155039 150427.14578372,220197.12195122 150425.12195122,220198.661315447 150423.171302099,220200.29453926 150421.298535644,220202.017688077 150419.508163512,220203.826610682 150417.804498867,220205.716949223 150416.191645986,220207.684149708 150414.673490372,220209.72347298 150413.253689397,220211.830006129 150411.935663483,220213.998674333 150410.722587873,220216.22425308 150409.61738497,220218.501380756 150408.622717305,220220.824571561 150407.740981121,220223.188228725 150406.974300596,220225.586657991 150406.324522731,220227 150406)
+(1 row)
+
+--S7.验证函数ST_DelaunayTriangles返回给定输入点周围的三角部分
+SELECT ST_DelaunayTriangles(ST_Union(ST_GeomFromText('POLYGON((175 150, 20 40,50 60, 125 100, 175 150))'),ST_Buffer(ST_GeomFromText('POINT(110 170)'), 20)))As dtriag;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            dtriag                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?
+(1 row)
+
+--S8.验证函数ST_Difference返回表示与几何B不相交的几何A的部分几何
+SELECT ST_AsText(ST_Difference(ST_GeomFromText('LINESTRING(50 100, 50 200)'),ST_GeomFromText('LINESTRING(50 50, 50 150)')));
+         st_astext         
+---------------------------
+ LINESTRING(50 150,50 200)
+(1 row)
+
+--S9.验证函数ST_Dump返回组成几何的一组geometry_dump行
+SELECT ST_AsEWKT(ST_Difference(ST_GeomFromEWKT('MULTIPOINT(-118.58 38.38 5,-118.60 38.329 
+6,-118.614 38.281 7)'), ST_GeomFromEWKT('POINT(-118.614 38.281 5)')));
+                  st_asewkt                  
+---------------------------------------------
+ MULTIPOINT(-118.6 38.329 6,-118.58 38.38 5)
+(1 row)
+
+SELECT ST_AsText(ST_EndPoint('LINESTRING(1 1, 2 2, 3 3)'::geometry));
+ st_astext  
+------------
+ POINT(3 3)
+(1 row)
+
+SELECT ST_AsEWKT(ST_EndPoint('LINESTRING(1 1 2, 1 2 3, 0 0 5)'));
+  st_asewkt   
+--------------
+ POINT(0 0 5)
+(1 row)
+
+T ST_3DDistance(
+ST_Transform(ST_GeomFromEWKT('SRID=4326;POINT(-72.1235 42.3521 4)'),2163),
+ST_Transform(ST_GeomFromEWKT('SRID=4326;LINESTRING(-72.1260 42.45 15, -72.123 42.1546 
+20)'),2163)
+) As dist_3d,
+ST_Distance(
+ST_Transform(ST_GeomFromText('POINT(-72.1235 42.3521)',4326),2163),
+ST_Transform(ST_GeomFromText('LINESTRING(-72.1260 42.45, -72.123 42.1546)', 4326) 
+,2163)
+) As dist_2d;
+ERROR:  syntax error at or near "T"
+LINE 1: T ST_3DDistance(
+        ^
+SELECT ST_3DDistance(poly, mline) As dist3d,
+ST_Distance(poly, mline) As dist2d
+FROM (SELECT ST_GeomFromEWKT('POLYGON((175 150 5, 20 40 5, 35 45 5, 50 60 5, 100 
+100 5, 175 150 5))') As poly,
+ST_GeomFromEWKT('MULTILINESTRING((175 155 2, 20 40 20, 50 60 -2, 125 100 1, 
+175 155 1),
+(1 10 2, 5 20 1))') As mline ) As foo;
+ dist3d | dist2d 
+--------+--------
+      0 |      0
+(1 row)
+
+SELECT ST_GeomCollFromText('GEOMETRYCOLLECTION(POINT(1 2),LINESTRING(1 2, 3 4))');
+                                                              st_geomcollfromtext                                                               
+------------------------------------------------------------------------------------------------------------------------------------------------
+ 0107000000020000000101000000000000000000F03F0000000000000040010200000002000000000000000000F03F000000000000004000000000000008400000000000001040
+(1 row)
+
+SELECT ST_GeomCollFromText('GEOMETRYCOLLECTION(POINT(1 2),LINESTRING(1 2, 3 4))',4326);
+                                                                  st_geomcollfromtext                                                                   
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+ 0107000020E6100000020000000101000000000000000000F03F0000000000000040010200000002000000000000000000F03F000000000000004000000000000008400000000000001040
+(1 row)
+
+SELECT ST_AsText(ST_MakeLine(ST_MakePoint(1,2), ST_MakePoint(3,4)));
+      st_astext      
+---------------------
+ LINESTRING(1 2,3 4)
+(1 row)
+
+SELECT ST_AsEWKT(ST_MakeLine(ST_MakePoint(1,2,3), ST_MakePoint(3,4,5)));
+        st_asewkt        
+-------------------------
+ LINESTRING(1 2 3,3 4 5)
+(1 row)
+
+SELECT ST_AsText(ST_Envelope('POINT(1 3)'::geometry));
+ st_astext  
+------------
+ POINT(1 3)
+(1 row)
+
+SELECT ST_AsText(ST_Envelope('LINESTRING(0 0, 1 3)'::geometry));
+           st_astext            
+--------------------------------
+ POLYGON((0 0,0 3,1 3,1 0,0 0))
+(1 row)
+
+SELECT Box3D(geom), Box2D(geom), ST_AsText(ST_Envelope(geom)) As envelopewkt
+FROM (SELECT 'POLYGON((0 0, 0 1000012333334.34545678, 1.0000001 1, 1.0000001 0, 0 0))':: 
+geometry As geom) As foo;
+                   box3d                   |                box2d                |                                 envelopewkt                                  
+-------------------------------------------+-------------------------------------+------------------------------------------------------------------------------
+ BOX3D(0 0 0,1.0000001 1000012333334.35 0) | BOX(0 0,1.0000001 1000012333334.35) | POLYGON((0 0,0 1000012333334.35,1.0000001 1000012333334.35,1.0000001 0,0 0))
+(1 row)
+
+SELECT ST_Mem_Size(ST_GeomFromText('CIRCULARSTRING(220268 150415,220227 150505,220227 150406)'));
+ st_mem_size 
+-------------
+          80
+(1 row)
+
+SELECT ST_MPointFromText('MULTIPOINT(1 2, 3 4)');
+                                           st_mpointfromtext                                            
+--------------------------------------------------------------------------------------------------------
+ 0104000000020000000101000000000000000000F03F0000000000000040010100000000000000000008400000000000001040
+(1 row)
+
+SELECT ST_MPointFromText('MULTIPOINT(-70.9590 42.1180, -70.9611 42.1223)', 4326);
+                                               st_mpointfromtext                                                
+----------------------------------------------------------------------------------------------------------------
+ 0104000020E61000000200000001010000004C37894160BD51C0C976BE9F1A0F45400101000000E10B93A982BD51C08126C286A70F4540
+(1 row)
+
+SELECT tbl1.column1, tbl2.column1, tbl1.column2 |&> tbl2.column2 AS overabove
+FROM
+( VALUES 
+(1, 'LINESTRING(6 0, 6 4)'::geometry)) AS tbl1,
+( VALUES
+(2, 'LINESTRING(0 0, 3 3)'::geometry),
+(3, 'LINESTRING(0 1, 0 5)'::geometry),
+(4, 'LINESTRING(1 2, 4 6)'::geometry)) AS tbl2;
+ column1 | column1 | overabove 
+---------+---------+-----------
+       1 |       2 | t
+       1 |       3 | f
+       1 |       4 | f
+(3 rows)
+
+SELECT ST_AsText(ST_Transform(ST_GeomFromText('POLYGON((743238 2967416,743238 2967450,
+743265 2967450,743265.625 2967416,743238 2967416))',2249),4326)) As wgs_geom;
+                                                                                         wgs_geom                                                                                          
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ POLYGON((-71.1776848522251 42.3902896512902,-71.1776843766326 42.3903829478009,-71.1775844305465 42.3903826677917,-71.1775825927231 42.3902893647987,-71.1776848522251 42.3902896512902))
+(1 row)
+
+SELECT ST_AsEWKT(ST_Transform(ST_GeomFromEWKT('SRID=2249;CIRCULARSTRING(743238 2967416 
+1,743238 2967450 2,743265 2967450 3,743265.625 2967416 3,743238 2967416 4)'),4326));
+                                                                                                                                             st_asewkt                                                                                                                                             
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SRID=4326;CIRCULARSTRING(-71.1776848522251 42.3902896512902 0.304800609601219,-71.1776843766326 42.3903829478009 0.609601219202438,-71.1775844305465 42.3903826677917 0.914401828803657,-71.1775825927231 42.3902893647987 0.914401828803657,-71.1776848522251 42.3902896512902 1.21920243840488)
+(1 row)
+
+select 'LINESTRING(0 0, 1 1)'::geometry ~= 'LINESTRING(0 1, 1 0)'::geometry as equality;
+ equality 
+----------
+ t
+(1 row)
+
+SELECT '<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 3.0//EN" "http://www.web3d.org/specifications/x3d-3.0.dtd">
+<X3D>
+<Scene>
+<Transform>
+<Shape>
+<Appearance>
+<Material emissiveColor=''0 0 1''/>
+</Appearance> ' ||
+ST_AsX3D( ST_GeomFromEWKT('POLYHEDRALSURFACE( ((0 0 0, 0 0 1, 0 1 1, 0 1 0, 0 0 0)),
+((0 0 0, 0 1 0, 1 1 0, 1 0 0, 0 0 0)), ((0 0 0, 1 0 0, 1 0 1, 0 0 1, 0 0 0)),
+((1 1 0, 1 1 1, 1 0 1, 1 0 0, 1 1 0)),
+((0 1 0, 0 1 1, 1 1 1, 1 1 0, 0 1 0)), ((0 0 1, 1 0 1, 1 1 1, 0 1 1, 0 0 1)) )')) ||
+'</Shape>
+</Transform>
+</Scene>
+</X3D>' As x3ddoc;
+                                                                                                                                                                 x3ddoc                                                                                                                                                                  
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ <?xml version="1.0" encoding="UTF-8"?>                                                                                                                                                                                                                                                                                                 +
+ <!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 3.0//EN" "http://www.web3d.org/specifications/x3d-3.0.dtd">                                                                                                                                                                                                                                  +
+ <X3D>                                                                                                                                                                                                                                                                                                                                  +
+ <Scene>                                                                                                                                                                                                                                                                                                                                +
+ <Transform>                                                                                                                                                                                                                                                                                                                            +
+ <Shape>                                                                                                                                                                                                                                                                                                                                +
+ <Appearance>                                                                                                                                                                                                                                                                                                                           +
+ <Material emissiveColor='0 0 1'/>                                                                                                                                                                                                                                                                                                      +
+ </Appearance> <IndexedFaceSet convex='false'  coordIndex='0 1 2 3 -1 4 5 6 7 -1 8 9 10 11 -1 12 13 14 15 -1 16 17 18 19 -1 20 21 22 23'><Coordinate point='0 0 0 0 0 1 0 1 1 0 1 0 0 0 0 0 1 0 1 1 0 1 0 0 0 0 0 1 0 0 1 0 1 0 0 1 1 1 0 1 1 1 1 0 1 1 0 0 0 1 0 0 1 1 1 1 1 1 1 0 0 0 1 1 0 1 1 1 1 0 1 1' /></IndexedFaceSet></Shape>+
+ </Transform>                                                                                                                                                                                                                                                                                                                           +
+ </Scene>                                                                                                                                                                                                                                                                                                                               +
+ </X3D>
+(1 row)
+
+SELECT ST_AsX3D(
+ST_Translate(
+ST_Force_3d(
+ST_Buffer(ST_Point(10,10),5, 'quad_segs=2')), 0,0,
+3)
+,6) As x3dfrag;
+WARNING:  ST_Force_3d signature was deprecated in 2.1.0. Please use ST_Force3D
+CONTEXT:  referenced column: _postgis_deprecate
+SQL function "st_force_3d" during startup
+referenced column: x3dfrag
+                                                                                                         x3dfrag                                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ <IndexedFaceSet  convex='false' coordIndex='0 1 2 3 4 5 6 7'><Coordinate point='15 10 3 13.535534 6.464466 3 10 5 3 6.464466 6.464466 3 5 10 3 6.464466 13.535534 3 10 15 3 13.535534 13.535534 3 ' /></IndexedFaceSet>
+(1 row)
+
+SELECT ST_AsX3D(ST_GeomFromEWKT('TIN (((
+0 0 0,
+0 0 1,
+0 1 0,
+0 0 0
+)), ((
+0 0 0,
+0 1 0,
+1 1 0,
+0 0 0
+))
+)')) As x3dfrag;
+                                                         x3dfrag                                                         
+-------------------------------------------------------------------------------------------------------------------------
+ <IndexedTriangleSet  index='0 1 2 3 4 5'><Coordinate point='0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 1 0'/></IndexedTriangleSet>
+(1 row)
+
+SELECT ST_AsEWKT(ST_MemUnion(the_geom))
+FROM
+(SELECT ST_GeomFromEWKT('POLYGON((-7 4.2 2,-7.1 4.2 3,-7.1 4.3 2,
+-7 4.2 2))') as the_geom
+UNION ALL
+SELECT ST_GeomFromEWKT('POINT(5 5 5)') as the_geom
+UNION ALL
+SELECT ST_GeomFromEWKT('POINT(-2 3 1)') as the_geom
+UNION ALL
+SELECT ST_GeomFromEWKT('LINESTRING(5 5 5, 10 10 10)') as the_geom ) as foo;
+                                                    st_asewkt                                                    
+-----------------------------------------------------------------------------------------------------------------
+ GEOMETRYCOLLECTION(POINT(-2 3 1),LINESTRING(5 5 5,10 10 10),POLYGON((-7 4.2 2,-7.1 4.2 3,-7.1 4.3 2,-7 4.2 2)))
+(1 row)
+
+SELECT ST_AsEWKT(ST_MemUnion(the_geom))
+FROM
+(SELECT ST_GeomFromEWKT('POLYGON((-7 4.2,-7.1 4.2,-7.1 4.3,
+-7 4.2))') as the_geom
+UNION ALL
+SELECT ST_GeomFromEWKT('POINT(5 5 5)') as the_geom
+UNION ALL
+SELECT ST_GeomFromEWKT('POINT(-2 3 1)') as the_geom
+UNION ALL
+SELECT ST_GeomFromEWKT('LINESTRING(5 5 5, 10 10 10)') as the_geom ) as foo;
+ERROR:  lwcollection_construct: mixed dimension geometries: 0/2
+SELECT ST_XMax(ST_GeomFromText('LINESTRING(1 3 4, 5 6 7)'));
+ st_xmax 
+---------
+       5
+(1 row)
+
+SELECT ST_XMax(CAST('BOX(-3 2, 3 4)' As box2d));
+ st_xmax 
+---------
+       3
+(1 row)
+
+SELECT ST_AsText(ST_Line_SubString(ST_GeomFromText('LINESTRING(25 50, 100 125, 150 190)'), 
+0.333, 0.666));
+WARNING:  ST_Line_Substring signature was deprecated in 2.1.0. Please use ST_LineSubstring
+CONTEXT:  referenced column: _postgis_deprecate
+SQL function "st_line_substring" during startup
+referenced column: st_astext
+                                        st_astext                                        
+-----------------------------------------------------------------------------------------
+ LINESTRING(69.2846934853974 94.2846934853974,100 125,111.700356260683 140.210463138888)
+(1 row)
+
+SELECT ST_AsText(ST_Boundary(ST_GeomFromText('LINESTRING(1 1,0 0, -1 1)')));
+      st_astext       
+----------------------
+ MULTIPOINT(1 1,-1 1)
+(1 row)
+
+SELECT ST_AsEWKT(ST_Boundary(ST_GeomFromEWKT('POLYGON((1 1 1,0 0 1, -1 1 1, 1 1 1))')));
+              st_asewkt               
+--------------------------------------
+ LINESTRING(1 1 1,0 0 1,-1 1 1,1 1 1)
+(1 row)
+
+SELECT ST_AsEWKT(ST_Boundary(ST_GeomFromEWKT('MULTILINESTRING((1 1 1,0 0 0.5, -1 1 1),(1 1 
+0.5,0 0 0.5, -1 1 0.5, 1 1 0.5) )')));
+          st_asewkt          
+-----------------------------
+ MULTIPOINT(-1 1 1,1 1 0.75)
+(1 row)
+
+SELECT 'polygonize_garray', ST_astext(ST_polygonize('{0102000000020000000000000000000000000000000000000000000000000024400000000000000000:0102000000020000000000000000002440000000000000000000000000000000000000000000000000:0102000000020000000000000000002440000000000000244000000000000000000000000000000000:0102000000020000000000000000002440000000000000244000000000000024400000000000000000:0102000000020000000000000000002440000000000000244000000000000000000000000000002440:0102000000020000000000000000000000000000000000244000000000000000000000000000002440:0102000000020000000000000000000000000000000000244000000000000024400000000000002440:0102000000020000000000000000000000000000000000244000000000000000000000000000000000:0102000000020000000000000000000000000000000000244000000000000024400000000000000000}'::geometry[]));
+     ?column?      |        st_astext         
+-------------------+--------------------------
+ polygonize_garray | GEOMETRYCOLLECTION EMPTY
+(1 row)
+
+SELECT 'polygonize_garray', ST_astext(ST_geometryn(ST_polygonize('{LINESTRING(0 0, 10 0):LINESTRING(10 0, 10 10):LINESTRING(10 10, 0 10):LINESTRING(0 10, 0 0)}'::geometry[]), 1));
+     ?column?      |              st_astext              
+-------------------+-------------------------------------
+ polygonize_garray | POLYGON((10 0,0 0,0 10,10 10,10 0))
+(1 row)
+
+SELECT '#3470b', ST_Area(ST_Polygonize(ARRAY[NULL, 'LINESTRING (0 0, 10 0, 10 10)', NULL, 'LINESTRING (0 0, 10 10)', NULL]::geometry[]));
+ ?column? | st_area 
+----------+---------
+ #3470b   |      50
+(1 row)
+
+SELECT ST_AsText(ST_AddMeasure(
+ST_GeomFromEWKT('LINESTRING(1 0, 2 0, 4 0)'),1,4)) As ewelev;
+              ewelev              
+----------------------------------
+ LINESTRING M (1 0 1,2 0 2,4 0 4)
+(1 row)
+
+SELECT ST_AsText(ST_AddMeasure(
+ST_GeomFromEWKT('LINESTRING(1 0 4, 2 0 4, 4 0 4)'),10,40)) As ewelev;
+                   ewelev                   
+--------------------------------------------
+ LINESTRING ZM (1 0 4 10,2 0 4 20,4 0 4 40)
+(1 row)
+
+SELECT ST_AsText(ST_AddMeasure(
+ST_GeomFromEWKT('MULTILINESTRINGM((1 0 4, 2 0 4, 4 0 4),(1 0 4, 2 0 4, 4 0 4))'),10,70)) As 
+ewelev;
+                              ewelev                               
+-------------------------------------------------------------------
+ MULTILINESTRING M ((1 0 10,2 0 20,4 0 40),(1 0 40,2 0 50,4 0 70))
+(1 row)
+
+SELECT ST_YMin('BOX3D(1 2 3, 4 5 6)');
+ st_ymin 
+---------
+       2
+(1 row)
+
+SELECT ST_YMin(ST_GeomFromText('LINESTRING(1 3 4, 5 6 7)'));
+ st_ymin 
+---------
+       3
+(1 row)
+
+SELECT ST_AsText(ST_Project('POINT(0 0)'::geography, 100000, radians(45.0)));
+                 st_astext                  
+--------------------------------------------
+ POINT(0.635231029125537 0.639472334729198)
+(1 row)
+
+SELECT ST_AsText(ST_Project('POINT(0 0)'::geography, 100000, pi()/4));
+                 st_astext                  
+--------------------------------------------
+ POINT(0.635231029125537 0.639472334729198)
+(1 row)
+
+SELECT GeometryType(ST_GeomFromText('LINESTRING(77.29 29.07,77.42 29.26,77.27 29.31,77.29 
+29.07)'));
+ geometrytype 
+--------------
+ LINESTRING
+(1 row)
+
+SELECT ST_AsEWKT(ST_Rotate('LINESTRING (50 160, 50 50, 100 50)', pi()));
+               st_asewkt               
+---------------------------------------
+ LINESTRING(-50 -160,-50 -50,-100 -50)
+(1 row)
+
+SELECT ST_AsEWKT(ST_Rotate('LINESTRING (50 160, 50 50, 100 50)', pi()/6, 50, 160));
+                                 st_asewkt                                 
+---------------------------------------------------------------------------
+ LINESTRING(50 160,105 64.7372055837117,148.301270189222 89.7372055837117)
+(1 row)
+
+SELECT ST_AsEWKT(ST_Rotate(geom, -pi()/3, ST_Centroid(geom)))
+FROM (SELECT 'LINESTRING (50 160, 50 50, 100 50)'::geometry AS geom) AS foo;
+                                                    st_asewkt                                                     
+------------------------------------------------------------------------------------------------------------------
+ LINESTRING(116.422458835689 130.672073467066,21.1596644194009 75.6720734670659,46.1596644194009 32.370803277844)
+(1 row)
+
+SELECT ST_AsEWKT(ST_MakePointM(-71.1043443253471, 42.3150676015829, 10));
+                   st_asewkt                   
+-----------------------------------------------
+ POINTM(-71.1043443253471 42.3150676015829 10)
+(1 row)
+
+SELECT ST_3DPerimeter(ST_GeomFromText('POLYGON((743238 2967416,743238 2967450,743265 2967450,
+743265.625 2967416,743238 2967416))', 2249));
+  st_3dperimeter  
+------------------
+ 122.630744000095
+(1 row)
+
+SELECT tbl1.column1, tbl2.column1, tbl1.column2 &&& tbl2.column2 AS overlaps_3d,
+tbl1.column2 && tbl2.column2 AS overlaps_2d
+FROM ( VALUES
+(1, 'LINESTRING Z(0 0 1, 3 3 2)'::geometry),
+(2, 'LINESTRING Z(1 2 0, 0 5 -1)'::geometry)) AS tbl1,
+( VALUES
+(3, 'LINESTRING Z(1 2 1, 4 6 1)'::geometry)) AS tbl2;
+ column1 | column1 | overlaps_3d | overlaps_2d 
+---------+---------+-------------+-------------
+       1 |       3 | t           | t
+       2 |       3 | f           | t
+(2 rows)
+
+SELECT tbl1.column1, tbl2.column1, tbl1.column2 &&& tbl2.column2 AS overlaps_3zm,
+tbl1.column2 && tbl2.column2 AS overlaps_2d
+FROM ( VALUES
+(1, 'LINESTRING M(0 0 1, 3 3 2)'::geometry),
+(2, 'LINESTRING M(1 2 0, 0 5 -1)'::geometry)) AS tbl1,
+( VALUES
+(3, 'LINESTRING M(1 2 1, 4 6 1)'::geometry)) AS tbl2;
+ column1 | column1 | overlaps_3zm | overlaps_2d 
+---------+---------+--------------+-------------
+       1 |       3 | t            | t
+       2 |       3 | f            | t
+(2 rows)
+
+SELECT ST_AsText(the_geom)
+FROM
+(SELECT ST_LocateAlong(
+ST_GeomFromText('MULTILINESTRINGM((1 2 3, 3 4 2, 9 4 3),
+(1 2 3, 5 4 5))'),3) As the_geom) As foo;
+            st_astext             
+----------------------------------
+ MULTIPOINT M (1 2 3,9 4 3,1 2 3)
+(1 row)
+
+SELECT ST_AsText((ST_Dump(the_geom)).geom)
+FROM
+(SELECT ST_LocateAlong(
+ST_GeomFromText('MULTILINESTRINGM((1 2 3, 3 4 2, 9 4 3),
+(1 2 3, 5 4 5))'),3) As the_geom) As foo;
+    st_astext    
+-----------------
+ POINT M (1 2 3)
+ POINT M (9 4 3)
+ POINT M (1 2 3)
+(3 rows)
+
+SELECT ST_AsEWKT(
+ST_Node('LINESTRINGZ(0 0 0, 10 10 10, 0 10 5, 10 0 3)'::geometry)
+) As output;
+                                       output                                        
+-------------------------------------------------------------------------------------
+ MULTILINESTRING((0 0 0,5 5 4.5),(5 5 4.5,10 10 10,0 10 5,5 5 4.5),(5 5 4.5,10 0 3))
+(1 row)
+
+SELECT ST_Y(ST_GeomFromEWKT('POINT(1 2 3 4)'));
+ st_y 
+------
+    2
+(1 row)
+
+SELECT ST_Y(ST_Centroid(ST_GeomFromEWKT('LINESTRING(1 2 3 4, 1 1 1 1)')));
+ st_y 
+------
+  1.5
+(1 row)
+
+SELECT ST_IsRing(the_geom), ST_IsClosed(the_geom), ST_IsSimple(the_geom)
+FROM (SELECT 'LINESTRING(0 0, 0 1, 1 1, 1 0, 0 0)'::geometry AS the_geom) AS foo;
+ st_isring | st_isclosed | st_issimple 
+-----------+-------------+-------------
+ t         | t           | t
+(1 row)
+
+SELECT ST_IsRing(the_geom), ST_IsClosed(the_geom), ST_IsSimple(the_geom)
+FROM (SELECT 'LINESTRING(0 0, 0 1, 1 0, 1 1, 0 0)'::geometry AS the_geom) AS foo;
+ st_isring | st_isclosed | st_issimple 
+-----------+-------------+-------------
+ f         | t           | f
+(1 row)
+
+SELECT ST_AsBinary(ST_GeomFromText('POLYGON((0 0,0 1,1 1,1 0,0 0))',4326));
+                                                                                         st_asbinary                                                                                          
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ \x01030000000100000005000000000000000000000000000000000000000000000000000000000000000000f03f000000000000f03f000000000000f03f000000000000f03f000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT ST_AsBinary(ST_GeomFromText('POLYGON((0 0,0 1,1 1,1 0,0 0))',4326), 'XDR');
+                                                                                         st_asbinary                                                                                          
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ \x000000000300000001000000050000000000000000000000000000000000000000000000003ff00000000000003ff00000000000003ff00000000000003ff0000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT ST_AsText(ST_MakeEnvelope(10, 10, 11, 11, 4326));
+                st_astext                 
+------------------------------------------
+ POLYGON((10 10,10 11,11 11,11 10,10 10))
+(1 row)
+
+SELECT ST_AsText(ST_Snap(poly,line,  
+ST_Distance(poly,line)*1.01)) AS polysnapped
+FROM (SELECT
+ST_GeomFromText('MULTIPOLYGON(
+((26 125, 26 200, 126 200, 126 125,  
+26 125 ),
+( 51 150, 101 150, 76 175, 51 150 )  
+),
+(( 151 100, 151 200, 176 175, 151  
+100 )))') As poly,
+ST_GeomFromText('LINESTRING (5  
+107, 54 84, 101 100)') As line
+) As foo;
+                                                            polysnapped                                                            
+-----------------------------------------------------------------------------------------------------------------------------------
+ MULTIPOLYGON(((26 125,26 200,126 200,126 125,101 100,26 125),(51 150,101 150,76 175,51 150)),((151 100,151 200,176 175,151 100)))
+(1 row)
+
+SELECT ST_AsText(
+ST_Snap(poly,line, ST_Distance(poly,  
+line)*1.25)
+) AS polysnapped
+FROM (SELECT
+ST_GeomFromText('MULTIPOLYGON(
+(( 26 125, 26 200, 126 200, 126 125,  
+26 125 ),
+( 51 150, 101 150, 76 175, 51 150 )  
+),
+(( 151 100, 151 200, 176 175, 151  
+100 )))') As poly,
+ST_GeomFromText('LINESTRING (5  
+107, 54 84, 101 100)') As line
+) As foo;
+                                                              polysnapped                                                              
+---------------------------------------------------------------------------------------------------------------------------------------
+ MULTIPOLYGON(((5 107,26 200,126 200,126 125,101 100,54 84,5 107),(51 150,101 150,76 175,51 150)),((151 100,151 200,176 175,151 100)))
+(1 row)
+
+SELECT ST_AsText(
+ST_Snap(line, poly, ST_Distance(poly,  
+line)*1.01)
+) AS linesnapped
+FROM (SELECT
+ST_GeomFromText('MULTIPOLYGON(
+((26 125, 26 200, 126 200, 126 125,  
+26 125),
+(51 150, 101 150, 76 175, 51 150 ))  
+,
+((151 100, 151 200, 176 175, 151  
+100)))') As poly,
+ST_GeomFromText('LINESTRING (5  
+107, 54 84, 101 100)') As line
+) As foo;
+              linesnapped               
+----------------------------------------
+ LINESTRING(5 107,26 125,54 84,101 100)
+(1 row)
+
+SELECT ST_AsText(
+ST_Snap(line, poly, ST_Distance(poly,  
+line)*1.25)
+) AS linesnapped
+FROM (SELECT
+ST_GeomFromText('MULTIPOLYGON(
+(( 26 125, 26 200, 126 200, 126 125,  
+26 125 ),
+(51 150, 101 150, 76 175, 51 150 ))  
+,
+((151 100, 151 200, 176 175, 151  
+100 )))') As poly,
+ST_GeomFromText('LINESTRING (5  
+107, 54 84, 101 100)') As line
+) As foo;
+           linesnapped            
+----------------------------------
+ LINESTRING(26 125,54 84,101 100)
+(1 row)
+
+SELECT 'LINESTRING(0 0, 0 1, 1 0)'::geometry = 'LINESTRING(1 1, 0 0)'::geometry;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT ST_AsText(column1)
+FROM ( VALUES
+('LINESTRING(0 0, 1 1)'::geometry),
+('LINESTRING(1 1, 0 0)'::geometry)) AS foo;
+      st_astext      
+---------------------
+ LINESTRING(0 0,1 1)
+ LINESTRING(1 1,0 0)
+(2 rows)
+
+SELECT ST_AsText(column1)
+FROM ( VALUES
+('LINESTRING(0 0, 1 1)'::geometry),
+('LINESTRING(1 1, 0 0)'::geometry)) AS foo
+GROUP BY column1;
+      st_astext      
+---------------------
+ LINESTRING(0 0,1 1)
+ LINESTRING(1 1,0 0)
+(2 rows)
+
+SELECT ST_NumGeometries(ST_GeomFromText('LINESTRING(77.29 29.07,77.42 29.26,77.27 
+29.31,77.29 29.07)'));
+ st_numgeometries 
+------------------
+                1
+(1 row)
+
+SELECT ST_NumGeometries(ST_GeomFromEWKT('GEOMETRYCOLLECTION(MULTIPOINT(-2 3 , -2 2),
+LINESTRING(5 5 ,10 10),
+POLYGON((-7 4.2,-7.1 5,-7.1 4.3,-7 4.2)))'));
+ st_numgeometries 
+------------------
+                3
+(1 row)
+
+SELECT ST_IsValid(ST_GeomFromText('LINESTRING(0 0, 1 1)')) As good_line,
+ST_IsValid(ST_GeomFromText('POLYGON((0 0, 1 1, 1 2, 1 1, 0 0))')) As bad_poly;
+NOTICE:  Self-intersection at or near point 0 0
+CONTEXT:  referenced column: bad_poly
+ good_line | bad_poly 
+-----------+----------
+ t         | f
+(1 row)
+
+SELECT ST_GeomFromGML('<gml:LineString srsName="EPSG:4269"><gml:coordinates>-71.16028,42.258729 -71.160837,42.259112 -71.161143,42.25932</gml:coordinates></gml:LineString>');
+                                                       st_geomfromgml                                                       
+----------------------------------------------------------------------------------------------------------------------------
+ 0102000020AD10000003000000FC8C0B0742CA51C06EC328081E21454027BF45274BCA51C02600FF942A214540ADBEBA2A50CA51C07099D36531214540
+(1 row)
+
+SELECT ST_GeomFromGML('
+<gml:LineString xmlns:gml="http://www.opengis.net/gml"
+xmlns:xlink="http://www.w3.org/1999/xlink"
+srsName="urn:ogc:def:crs:EPSG::4269">
+<gml:pointProperty>
+<gml:Point gml:id="p1"><gml:pos>42.258729 -71.16028</gml:pos></gml:Point>
+</gml:pointProperty>
+<gml:pos>42.259112 -71.160837</gml:pos>
+<gml:pointProperty>
+<gml:Point xlink:type="simple" xlink:href="#p1"/>
+</gml:pointProperty>
+</gml:LineString>');
+                                                       st_geomfromgml                                                       
+----------------------------------------------------------------------------------------------------------------------------
+ 0102000020AD100000030000006EC328081E214540FC8C0B0742CA51C027BF45274BCA51C02600FF942A2145406EC328081E214540FC8C0B0742CA51C0
+(1 row)
+
+SELECT ST_AsEWKT(ST_Force4D(ST_GeomFromEWKT('CIRCULARSTRING(1 1 2, 2 3 2, 4 5 2, 6 7 2, 5 6 
+2)')));
+                        st_asewkt                        
+---------------------------------------------------------
+ CIRCULARSTRING(1 1 2 0,2 3 2 0,4 5 2 0,6 7 2 0,5 6 2 0)
+(1 row)
+
+SELECT ST_AsEWKT(ST_Force4D('MULTILINESTRINGM((0 0 1,0 5 2,5 0 3,0 0 4),(1 1 1,3 1 1,1 3 
+1,1 1 1))'));
+                                      st_asewkt                                       
+--------------------------------------------------------------------------------------
+ MULTILINESTRING((0 0 0 1,0 5 0 2,5 0 0 3,0 0 0 4),(1 1 0 1,3 1 0 1,1 3 0 1,1 1 0 1))
+(1 row)
+
+SELECT ST_AsText(ST_SetPoint('LINESTRING(-1 2,-1 3)', 0, 'POINT(-1 1)'));
+       st_astext       
+-----------------------
+ LINESTRING(-1 1,-1 3)
+(1 row)
+
+SELECT ST_AsEWKT(ST_SetPoint(foo.the_geom, ST_NumPoints(foo.the_geom)- 1, ST_GeomFromEWKT 
+('POINT(-1 1 3)')))
+FROM (SELECT ST_GeomFromEWKT('LINESTRING(-1 2 3,-1 3 4, 5 6 7)') As the_geom) As foo;
+            st_asewkt             
+----------------------------------
+ LINESTRING(-1 2 3,-1 3 4,-1 1 3)
+(1 row)
+
+SELECT ST_Length2D_Spheroid( the_geom, sph_m ) As tot_len,
+ST_Length2D_Spheroid(ST_GeometryN(the_geom,1), sph_m) As len_line1,
+ST_Length2D_Spheroid(ST_GeometryN(the_geom,2), sph_m) As len_line2
+FROM (SELECT ST_GeomFromText('MULTILINESTRING((-118.584 38.374,-118.583 38.5),
+(-71.05957 42.3589 , -71.061 43))') As the_geom,
+CAST('SPHEROID["GRS_1980",6378137,298.257222101]' As spheroid) As sph_m) as foo;
+     tot_len      |    len_line1     |    len_line2     
+------------------+------------------+------------------
+--? 85204.5207.* | 13986.87252.* | 71217.6482.*
+(1 row)
+
+SELECT ST_Length2D_Spheroid( the_geom, sph_m ) As tot_len,
+ST_Length2D_Spheroid(ST_GeometryN(the_geom,1), sph_m) As len_line1,
+ST_Length2D_Spheroid(ST_GeometryN(the_geom,2), sph_m) As len_line2
+FROM (SELECT ST_GeomFromEWKT('MULTILINESTRING((-118.584 38.374 20,-118.583 38.5 30) 
+,
+(-71.05957 42.3589 75, -71.061 43 90))') As the_geom,
+CAST('SPHEROID["GRS_1980",6378137,298.257222101]' As spheroid) As sph_m) as foo;
+     tot_len      |    len_line1     |    len_line2     
+------------------+------------------+------------------
+--? 85204.5259.* | 13986.8761.* | 71217.6498.*
+(1 row)
+
+SELECT ST_PointFromText('POINT(-71.064544 42.28787)');
+              st_pointfromtext              
+--------------------------------------------
+ 0101000000CB49287D21C451C0F0BF95ECD8244540
+(1 row)
+
+SELECT ST_PointFromText('POINT(-71.064544 42.28787)', 4326);
+                  st_pointfromtext                  
+----------------------------------------------------
+ 0101000020E6100000CB49287D21C451C0F0BF95ECD8244540
+(1 row)
+
+SELECT ST_CoveredBy(smallc,smallc) As smallinsmall,
+ST_CoveredBy(smallc, bigc) As smallcoveredbybig,
+ST_CoveredBy(ST_ExteriorRing(bigc), bigc) As exteriorcoveredbybig,
+ST_Within(ST_ExteriorRing(bigc),bigc) As exeriorwithinbig
+FROM (SELECT ST_Buffer(ST_GeomFromText('POINT(1 2)'), 10) As smallc,
+ST_Buffer(ST_GeomFromText('POINT(1 2)'), 20) As bigc) As foo;
+ smallinsmall | smallcoveredbybig | exteriorcoveredbybig | exeriorwithinbig 
+--------------+-------------------+----------------------+------------------
+ t            | t                 | t                    | f
+(1 row)
+
+SELECT ST_AsText(the_geom)
+FROM
+(SELECT ST_LocateAlong(
+ST_GeomFromText('MULTILINESTRINGM((1 2 3, 3 4 2, 9 4 3),(1 2 3, 5 4 5))'),3) As the_geom) As foo;
+            st_astext             
+----------------------------------
+ MULTIPOINT M (1 2 3,9 4 3,1 2 3)
+(1 row)
+
+SELECT ST_AsText((ST_Dump(the_geom)).geom)
+FROM
+(SELECT ST_LocateAlong(
+ST_GeomFromText('MULTILINESTRINGM((1 2 3, 3 4 2, 9 4 3),
+(1 2 3, 5 4 5))'),3) As the_geom) As foo;
+    st_astext    
+-----------------
+ POINT M (1 2 3)
+ POINT M (9 4 3)
+ POINT M (1 2 3)
+(3 rows)
+
+SELECT (ST_DumpPoints(ST_GeomFromText(
+'MULTIPOINT(14 14,34 14,54 14,74 14,94 
+14,114 14,134 14,
+150 14,154 14,154 6,134 6,114 6,94 6,74 
+6,54 6,34 6,
+14 6,10 6,8 6,7 7,6 8,6 10,6 30,6 50,6 
+70,6 90,6 110,6 130,
+6 150,6 170,6 190,6 194,14 194,14 174,14 
+154,14 134,14 114,
+14 94,14 74,14 54,14 34,14 14)'))).geom, 1 id
+INTO TABLE l_shape;
+SELECT ST_ConvexHull(ST_Collect(geom))
+FROM l_shape;
+                                                                                                                       st_convexhull                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 010300000001000000070000000000000000002040000000000000184000000000000018400000000000002040000000000000184000000000004068400000000000002C40000000000040684000000000004063400000000000002C400000000000406340000000000000184000000000000020400000000000001840
+(1 row)
+
+SELECT ST_ConcaveHull(ST_Collect(geom), 
+0.99)
+FROM l_shape;
+                                                                                                                                                                                                                                                                                                                       st_concavehull                                                                                                                                                                                                                                                                                                                       
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 01030000000100000013000000000000000000204000000000000018400000000000001840000000000000204000000000000018400000000000004940000000000000184000000000008056400000000000001840000000000040604000000000000018400000000000406540000000000000184000000000004068400000000000002C4000000000004068400000000000002C4000000000004063400000000000002C400000000000C060400000000000002C4000000000008057400000000000805C400000000000002C400000000000C060400000000000002C4000000000004063400000000000002C40000000000040634000000000000018400000000000805C400000000000001840000000000080524000000000000018400000000000004140000000000000184000000000000020400000000000001840
+(1 row)
+
+SELECT ST_AsText(ST_ConvexHull(
+ST_Collect(
+ST_GeomFromText('MULTILINESTRING((100 190,10 8),(150 10, 20 30))'),
+ST_GeomFromText('MULTIPOINT(50 5, 150 30, 50 10, 10 10)')
+)) );
+                       st_astext                       
+-------------------------------------------------------
+ POLYGON((50 5,10 8,10 10,100 190,150 30,150 10,50 5))
+(1 row)
+
+SELECT ST_Buffer(
+ST_GeomFromText('POINT(100 90)'),
+50, 'quad_segs=8');
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         st_buffer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?
+(1 row)
+
+SELECT ST_Buffer(
+ST_GeomFromText('POINT(100 90)'),
+50, 'quad_segs=2');
+                                                                                                                                                         st_buffer                                                                                                                                                          
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?
+(1 row)
+
+SELECT ST_Buffer(
+ST_GeomFromText(
+'LINESTRING(50 50,150 150,150 50)'
+), 10, 'endcap=round join=round');
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         st_buffer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?
+(1 row)
+
+SELECT ST_NPoints(ST_Buffer(ST_GeomFromText('POINT(100 90)'), 50)) As 
+promisingcircle_pcount,
+ST_NPoints(ST_Buffer(ST_GeomFromText('POINT(100 90)'), 50, 2)) As lamecircle_pcount;
+ promisingcircle_pcount | lamecircle_pcount 
+------------------------+-------------------
+                     33 |                 9
+(1 row)
+
+SELECT ST_AsText(ST_Buffer(
+ST_Transform(
+ST_SetSRID(ST_MakePoint(-71.063526, 42.35785),4269), 26986)
+,100,2)) As octagon;
+                                                                                                                                                         octagon                                                                                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ POLYGON((236057.59057465 900908.759918696,236028.301252769 900838.049240578,235957.59057465 900808.759918696,235886.879896532 900838.049240578,235857.59057465 900908.759918696,235886.879896532 900979.470596815,235957.59057465 901008.759918696,236028.301252769 900979.470596815,236057.59057465 900908.759918696))
+(1 row)
+
+SELECT ST_LineCrossingDirection(foo.line1 
+, foo.line2) As l1_cross_l2 ,
+ST_LineCrossingDirection(foo. 
+line2, foo.line1) As l2_cross_l1
+FROM (
+SELECT
+ST_GeomFromText('LINESTRING(25 169,89 
+114,40 70,86 43)') As line1,
+ST_GeomFromText('LINESTRING(171 154,20 
+140,71 74,161 53)') As line2
+) As foo;
+ l1_cross_l2 | l2_cross_l1 
+-------------+-------------
+          -3 |          -3
+(1 row)
+
+SELECT ST_LineCrossingDirection(foo.line1 
+, foo.line2) As l1_cross_l2 ,
+ST_LineCrossingDirection(foo. 
+line2, foo.line1) As l2_cross_l1
+FROM (
+SELECT
+ST_GeomFromText('LINESTRING(25 169,89 
+114,40 70,86 43)') As line1,
+ST_GeomFromText('LINESTRING (171 154, 
+20 140, 71 74, 2.99 90.16)') As line2
+) As foo;
+ l1_cross_l2 | l2_cross_l1 
+-------------+-------------
+           2 |          -2
+(1 row)
+
+SELECT
+ST_LineCrossingDirection(foo. 
+line1, foo.line2) As l1_cross_l2 ,
+ST_LineCrossingDirection(foo. 
+line2, foo.line1) As l2_cross_l1
+FROM (
+SELECT
+ST_GeomFromText('LINESTRING(25 169,89 
+114,40 70,86 43)') As line1,
+ST_GeomFromText('LINESTRING (20 140, 71 
+74, 161 53)') As line2
+) As foo;
+ l1_cross_l2 | l2_cross_l1 
+-------------+-------------
+          -1 |           1
+(1 row)
+
+SELECT ST_LineCrossingDirection(foo.line1 
+, foo.line2) As l1_cross_l2 ,
+ST_LineCrossingDirection(foo. 
+line2, foo.line1) As l2_cross_l1
+FROM (SELECT
+ST_GeomFromText('LINESTRING(25 
+169,89 114,40 70,86 43)') As line1,
+ST_GeomFromText('LINESTRING(2.99 
+90.16,71 74,20 140,171 154)') As line2
+) As foo;
+ l1_cross_l2 | l2_cross_l1 
+-------------+-------------
+          -2 |           2
+(1 row)
+
+SELECT ST_IsValidReason('LINESTRING(220227 150406,2220227 150407,222020 150410)');
+ st_isvalidreason 
+------------------
+ Valid Geometry
+(1 row)
+
+SELECT ST_BdPolyFromText('MULTILINESTRING((0 0, 10 0, 10 10, 0 10, 0 0),(2 2, 2 4, 4 4, 4 2, 2 2),(5 5, 5 7, 7 7, 7 5, 5 5))', 3);
+                                                                                                                                                                                                                                                                 st_bdpolyfromtext                                                                                                                                                                                                                                                                  
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 0103000020030000000300000005000000000000000000000000000000000000000000000000000000000000000000244000000000000024400000000000002440000000000000244000000000000000000000000000000000000000000000000005000000000000000000004000000000000000400000000000001040000000000000004000000000000010400000000000001040000000000000004000000000000010400000000000000040000000000000004005000000000000000000144000000000000014400000000000001C4000000000000014400000000000001C400000000000001C4000000000000014400000000000001C4000000000000014400000000000001440
+(1 row)
+
+SELECT ST_BdMPolyFromText('MULTILINESTRING( (0 0, 10 0, 10 10, 0 10, 0 0), (2 2, 2 4, 4 4, 4 2, 2 2), (5 5, 5 7, 7 7, 7 5, 5 5), (20 0,30 0,30 10,20 10,20 0), (22 2,22 4,24 4,24 2,22 2), (25 5,25 7,27 7,27 5,25 5))', 3);
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               st_bdmpolyfromtext                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 0106000020030000000200000001030000000300000005000000000000000000000000000000000000000000000000000000000000000000244000000000000024400000000000002440000000000000244000000000000000000000000000000000000000000000000005000000000000000000004000000000000000400000000000001040000000000000004000000000000010400000000000001040000000000000004000000000000010400000000000000040000000000000004005000000000000000000144000000000000014400000000000001C4000000000000014400000000000001C400000000000001C4000000000000014400000000000001C40000000000000144000000000000014400103000000030000000500000000000000000034400000000000000000000000000000344000000000000024400000000000003E4000000000000024400000000000003E4000000000000000000000000000003440000000000000000005000000000000000000364000000000000000400000000000003840000000000000004000000000000038400000000000001040000000000000364000000000000010400000000000003640000000000000004005000000000000000000394000000000000014400000000000003B4000000000000014400000000000003B400000000000001C4000000000000039400000000000001C4000000000000039400000000000001440
+(1 row)
+
+select ST_BdPolyFromText('POINT(0 0)', 3);
+ERROR:  Input is not a MultiLinestring
+CONTEXT:  referenced column: st_bdpolyfromtext
+select ST_BdMPolyFromText('POINT(0 0)', 3);
+ERROR:  Input is not a MultiLinestring
+CONTEXT:  referenced column: st_bdmpolyfromtext
+-- MultiPolygon forming input to BdPolyFromText
+select ST_BdPolyFromText('MULTILINESTRING( (0 0, 10 0, 10 10, 0 10, 0 0), (2 2, 2 4, 4 4, 4 2, 2 2), (5 5, 5 7, 7 7, 7 5, 5 5), (20 0,30 0,30 10,20 10,20 0), (22 2,22 4,24 4,24 2,22 2), (25 5,25 7,27 7,27 5,25 5))', 3);
+ERROR:  Input returns more then a single polygon, try using BdMPolyFromText instead
+CONTEXT:  referenced column: st_bdpolyfromtext
+-- SinglePolygon forming input to BdMPolyFromText
+select 'BdMPolyFromText', ST_asewkt(ST_BdMPolyFromText('MULTILINESTRING((0 0, 10 0, 10 10, 0 10, 0 0),(2 2, 2 4, 4 4, 4 2, 2 2),(5 5, 5 7, 7 7, 7 5, 5 5))', 3));
+    ?column?     |                                          st_asewkt                                           
+-----------------+----------------------------------------------------------------------------------------------
+ BdMPolyFromText | SRID=3;MULTIPOLYGON(((0 0,0 10,10 10,10 0,0 0),(2 2,4 2,4 4,2 4,2 2),(5 5,7 5,7 7,5 7,5 5)))
+(1 row)
+
+SELECT ST_OrderingEquals(ST_GeomFromText('LINESTRING(0 0, 10 10)'),
+ST_GeomFromText('LINESTRING(0 0, 5 5, 10 10)'));
+ st_orderingequals 
+-------------------
+ f
+(1 row)
+
+SELECT ST_OrderingEquals(ST_GeomFromText('LINESTRING(0 0, 10 10)'),
+ST_GeomFromText('LINESTRING(0 0, 0 0, 10 10)'));
+ st_orderingequals 
+-------------------
+ f
+(1 row)
+
+SELECT ST_OrderingEquals(ST_Reverse(ST_GeomFromText('LINESTRING(0 0, 10 10)')),
+ST_GeomFromText('LINESTRING(0 0, 0 0, 10 10)'));
+ st_orderingequals 
+-------------------
+ f
+(1 row)
+
+SELECT ST_OrderingEquals(ST_GeomFromText('LINESTRING(5 5, 10 10, 0 0, 5 5)'),
+ST_GeomFromText('LINESTRING(0 0, 5 5, 10 10, 0 0)'));
+ st_orderingequals 
+-------------------
+ f
+(1 row)
+
+SELECT ST_OrderingEquals(ST_GeomFromText('LINESTRING(0 0, 10 10)'),ST_GeomFromText('LINESTRING(0 0, 10 10)'));
+ st_orderingequals 
+-------------------
+ t
+(1 row)
+

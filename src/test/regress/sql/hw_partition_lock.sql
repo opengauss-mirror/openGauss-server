@@ -397,7 +397,7 @@ SET enable_bitmapscan = OFF;
 SET enable_tidscan = OFF;
 
 start transaction;
-explain (nodes off, costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
+explain (costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
 select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
 select c.relname, l.mode from pg_locks as l inner join pg_class as c on l.relation = c.oid
 	 where l.locktype = 'relation' and c.parttype = 'p' order by 1, 2;
@@ -413,7 +413,7 @@ SET enable_bitmapscan = OFF;
 SET enable_tidscan = OFF;
 
 start transaction;
-explain (nodes off, costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
+explain (costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
 select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
 select c.relname, l.mode from pg_locks as l inner join pg_class as c on l.relation = c.oid
 	 where l.locktype = 'relation' and c.parttype = 'p' order by 1, 2;
@@ -430,7 +430,7 @@ SET enable_bitmapscan = OFF;
 SET enable_tidscan = OFF;
 
 start transaction;
-explain (nodes off, costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
+explain (costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
 select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
 select c.relname, l.mode from pg_locks as l inner join pg_class as c on l.relation = c.oid
 	 where l.locktype = 'relation' and c.parttype = 'p' order by 1, 2;
@@ -447,7 +447,7 @@ SET enable_bitmapscan = ON;
 SET enable_tidscan = OFF;
 
 start transaction;
-explain (nodes off, costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
+explain (costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
 select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
 select c.relname, l.mode from pg_locks as l inner join pg_class as c on l.relation = c.oid
 	 where l.locktype = 'relation' and c.parttype = 'p' order by 1, 2;
@@ -464,7 +464,7 @@ SET enable_bitmapscan = OFF;
 SET enable_tidscan = ON;
 
 start transaction;
-explain (nodes off, costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
+explain (costs off) select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
 select * from columnar_storage.create_columnar_table_152 where c_smallint < 7;
 select c.relname, l.mode from pg_locks as l inner join pg_class as c on l.relation = c.oid
 	 where l.locktype = 'relation' and c.parttype = 'p' order by 1, 2;

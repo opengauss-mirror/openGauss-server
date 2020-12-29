@@ -1,0 +1,34 @@
+---do redistribute
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -r -u $USER -d regression -p $PGPORT -f 2>@abs_srcdir@/tmp_check/redis_003.log ; echo $?
+0
+update pgxc_group set in_redistribution = 'n';
+\d+ redis_status;
+                                Table "public.redis_status"
+ Column  |            Type             | Modifiers | Storage  | Stats target | Description 
+---------+-----------------------------+-----------+----------+--------------+-------------
+ status  | text                        |           | extended |              | 
+ updated | timestamp without time zone |           | plain    |              | 
+Has OIDs: no
+Distribute By: HASH(status)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no
+
+\d+ redis_progress_detail;
+                             Table "public.redis_progress_detail"
+   Column    |            Type             | Modifiers | Storage  | Stats target | Description 
+-------------+-----------------------------+-----------+----------+--------------+-------------
+ dbname      | text                        |           | extended |              | 
+ table_name  | text                        |           | extended |              | 
+ start_time  | timestamp without time zone |           | plain    |              | 
+ finish_time | timestamp without time zone |           | plain    |              | 
+ cost        | text                        |           | extended |              | 
+ size        | bigint                      |           | plain    |              | 
+Has OIDs: no
+Distribute By: HASH(dbname)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no
+
+DROP TABLE IF EXISTS redis_status CASCADE;
+DROP TABLE IF EXISTS redis_progress_detail CASCADE;
+\d+ redis_status;
+\d+ redis_progress_detail;

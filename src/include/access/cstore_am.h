@@ -12,11 +12,11 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- *
+ * 
  * cstore_am.h
  *        routines to support ColStore
- *
- *
+ * 
+ * 
  * IDENTIFICATION
  *        src/include/access/cstore_am.h
  *
@@ -42,17 +42,17 @@ class BatchCUData;
 
 // If we load all CUDesc, the memory will be huge,
 // So we define this data structure defining the load CUDesc information
-// 
+//
 struct LoadCUDescCtl : public BaseObject {
     uint32 curLoadNum;
     uint32 lastLoadNum;
     uint32 nextCUID;
-    CUDesc *cuDescArray;
+    CUDesc* cuDescArray;
 
     LoadCUDescCtl(uint32 startCUID)
     {
         Reset(startCUID);
-        cuDescArray = (CUDesc *)palloc0(sizeof(CUDesc) * u_sess->attr.attr_storage.max_loaded_cudesc);
+        cuDescArray = (CUDesc*)palloc0(sizeof(CUDesc) * u_sess->attr.attr_storage.max_loaded_cudesc);
     }
 
     virtual ~LoadCUDescCtl()
@@ -384,7 +384,7 @@ private:
 
     bool m_timing_on; /* timing CStoreScan steps */
 
-    bool m_isRangeScanInRedis; /* if it is a range scan at redistribution time */
+    RangeScanInRedis m_rangeScanInRedis; /* if it is a range scan at redistribution time */
 
     // cbtree index flag
     bool m_useBtreeIndex;

@@ -28,6 +28,7 @@
 
 #include "access/cstore_am.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/reloptions.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
@@ -49,13 +50,14 @@
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/uuid.h"
 #include "securec_check.h"
+#include "access/tupdesc.h"
 
-extern char* get_namespace_name(Oid nspid, bool report_error = false);
+extern char* get_namespace_name(Oid nspid);
 
 static bool createCUDescTableForPartitionedTable(Relation rel, Datum reloptions);
 static bool createDeltaTableForPartitionedTable(Relation rel, Datum reloptions, CreateStmt* mainTblStmt);
@@ -175,14 +177,14 @@ char* makeDeltaNameFormRel(Relation rel, bool isPartition)
     if (RelationIsDfsStore(rel)) {
         errno_t rc;
 
-        char* nameSpace = get_namespace_name(RelationGetNamespace(rel), true);
-        unsigned int deltaPartNameLen = (unsigned int)(strlen(nameSpace) + 1 + strlen(RelationGetRelationName(rel)) + 1);
+        char* nameSpace = get_namespace_name(RelationGetNamespace(rel));
+        char* deltaPartName = NULL;
+        int deltaPartNameLen = strlen(nameSpace) + 1 + strlen(RelationGetRelationName(rel)) + 1;
         if (strlen("pg_delta_") + deltaPartNameLen > NAMEDATALEN) {
             Oid mainTblOid = RelationGetRelid(rel);
             rc = snprintf_s(deltaName, NAMEDATALEN, NAMEDATALEN - 1, "pg_delta_%u", mainTblOid);
             securec_check_ss(rc, "", "");
         } else {
-            char* deltaPartName = NULL;
             deltaPartName = (char*)palloc0(sizeof(char) * deltaPartNameLen);
             rc = memcpy_s(deltaPartName, deltaPartNameLen, nameSpace, strlen(nameSpace));
             securec_check(rc, "\0", "\0");
@@ -218,11 +220,11 @@ char* makeDeltaNameFormRel(Relation rel, bool isPartition)
 static inline void GetCatalogRelIdAndIndex(bool isPartition, int* catalogRelId, int* catalogIndex)
 {
     if (!isPartition) {
-        *catalogRelId = (int)RelationRelationId;
-        *catalogIndex = (int)RELOID;
+        *catalogRelId = RelationRelationId;
+        *catalogIndex = RELOID;
     } else {
-        *catalogRelId = (int)PartitionRelationId;
-        *catalogIndex = (int)PARTRELID;
+        *catalogRelId = PartitionRelationId;
+        *catalogIndex = PARTRELID;
     }
 }
 /*
@@ -305,17 +307,11 @@ bool CreateDeltaTable(Relation rel, Datum reloptions, bool isPartition, CreateSt
      */
     if (RelationIsDfsStore(rel) &&
         (IS_PGXC_COORDINATOR || (isRestoreMode && mainTblStmt != NULL && mainTblStmt->distributeby != NULL))) {
-        DistributeBy* distributeBy = NULL;
-        PGXCSubCluster* subcluster = NULL;
-
-        if (mainTblStmt != NULL) {
-            distributeBy = mainTblStmt->distributeby;
-            subcluster = mainTblStmt->subcluster;
-        } else {
+        if (mainTblStmt == NULL) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("Failed to find the information of DFS table.")));
         }
-        AddRelationDistribution(delta_relid, distributeBy, subcluster, NIL, tupdesc, true);
+        AddRelationDistribution(deltaRelName, delta_relid, mainTblStmt->distributeby, mainTblStmt->subcluster, NIL, tupdesc, true);
         CommandCounterIncrement();
         /* Make sure locator info gets rebuilt */
         RelationCacheInvalidateEntry(delta_relid);
@@ -397,7 +393,7 @@ bool CreateCUDescTable(Relation rel, Datum reloptions, bool isPartition)
     Oid classObjectId[2];
     int16 coloptions[2];
     int catalogRelId = 0;
-    unsigned int indexOid = InvalidOid;
+    int indexOid = InvalidOid;
     int catalogIndex = 0;
     ObjectAddress baseobject, cudescobject;
     errno_t ret = 0;
@@ -775,7 +771,9 @@ static void StrategyFuncAnd(ParallelFunctionState* state)
     TupleTableSlot* slot = NULL;
     int64 result = 0;
 
-    Assert(state && state->tupstore && state->tupdesc);
+    Assert(state);
+    Assert(state->tupstore);
+    Assert(state->tupdesc);
     slot = MakeSingleTupleTableSlot(state->tupdesc);
 
     for (;;) {
@@ -784,7 +782,7 @@ static void StrategyFuncAnd(ParallelFunctionState* state)
         if (!tuplestore_gettupleslot(state->tupstore, true, false, slot))
             break;
 
-        if (DatumGetInt64(slot_getattr(slot, 1, &isnull)) < 0) {
+        if (DatumGetInt64(tableam_tslot_getattr(slot, 1, &isnull)) < 0) {
             result = -1;
             break;
         }
@@ -821,7 +819,7 @@ static bool check_tupledesc_match(Relation rel, HeapTuple tuple)
     if (RelationIsPartitioned(mainRel)) {
         /* It is a partitioned table, so find all the partitions in pg_partition */
         Relation pgpartition;
-        HeapScanDesc partScan;
+        TableScanDesc partScan;
         HeapTuple partTuple;
         ScanKeyData keys[2];
 
@@ -968,7 +966,7 @@ static void sync_cstore_delta_Internal(Relation mainRel, Datum reloptions)
             /* check the delta table of the current partition that if it has data */
             Oid deltaRelid = partition->pd_part->reldeltarelid;
             Relation deltaRel = relation_open(deltaRelid, AccessShareLock);
-            HeapScanDesc deltaScan = heap_beginscan(deltaRel, SnapshotNow, 0, NULL);
+            TableScanDesc deltaScan = heap_beginscan(deltaRel, SnapshotNow, 0, NULL);
             if (heap_getnext(deltaScan, ForwardScanDirection) != NULL) {
                 hasData = true;
             }
@@ -1005,7 +1003,7 @@ static void sync_cstore_delta_Internal(Relation mainRel, Datum reloptions)
         bool hasData = false;
         Oid deltaRelid = mainRel->rd_rel->reldeltarelid;
         Relation deltaRel = relation_open(deltaRelid, AccessShareLock);
-        HeapScanDesc deltaScan = heap_beginscan(deltaRel, SnapshotNow, 0, NULL);
+        TableScanDesc deltaScan = heap_beginscan(deltaRel, SnapshotNow, 0, NULL);
         if (heap_getnext(deltaScan, ForwardScanDirection) != NULL) {
             hasData = true;
         }
@@ -1057,7 +1055,7 @@ static int64 sync_local_and_remote(
         /* Commit the inner transaction, return to outer xact context */
         ReleaseCurrentSubTransaction();
 
-        pgxc_node_remote_savepoint("release s1", EXEC_ON_ALL_NODES, true, false);
+        pgxc_node_remote_savepoint("release s1", EXEC_ON_ALL_NODES, false, false);
 
         MemoryContextSwitchTo(oldcontext);
 
@@ -1074,7 +1072,7 @@ static int64 sync_local_and_remote(
         pgxc_node_remote_savepoint("rollback to s1", EXEC_ON_ALL_NODES, false, false);
 
         /* CN should send release savepoint command to remote nodes for savepoint name reuse */
-        pgxc_node_remote_savepoint("release s1", EXEC_ON_ALL_NODES, true, false);
+        pgxc_node_remote_savepoint("release s1", EXEC_ON_ALL_NODES, false, false);
 
         MemoryContextSwitchTo(oldcontext);
 
@@ -1174,7 +1172,7 @@ Datum pg_sync_all_cstore_delta(PG_FUNCTION_ARGS)
          * to sync all the column store table from pg_class and pg_partition if need.
          */
         Relation pgclass = NULL;
-        HeapScanDesc scan = NULL;
+        TableScanDesc scan = NULL;
         HeapTuple tuple = NULL;
         ScanKeyData key;
         TupleDesc pgclassdesc = GetDefaultPgClassDesc();

@@ -38,6 +38,8 @@
  */
 extern Datum transformPartitionBoundary(List* maxValueList, const bool* isTimestamptz);
 
+extern Datum transformListBoundary(List* maxValueList, const bool* isTimestamptz);
+
 /*
  * @@GaussDB@@
  * Brief

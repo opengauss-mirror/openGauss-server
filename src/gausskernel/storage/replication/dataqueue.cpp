@@ -37,26 +37,27 @@
 #include "replication/syncrep.h"
 #include "replication/walsender.h"
 #include "replication/walreceiver.h"
-#include "storage/lwlock.h"
+#include "storage/lock/lwlock.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "pgxc/pgxc.h"
+#include "gs_bbox.h"
 
 #define BCMElementArrayLen 8192
 #define BCMElementArrayLenHalf (BCMElementArrayLen / 2)
-#define InvalidRelFileNode ((RelFileNode){0, 0, 0, -1})
+#define InvalidRelFileNode ((RelFileNode){ 0, 0, 0, -1 })
 #define IsDataReplInterruptted()                                                                 \
     (InterruptPending && (t_thrd.int_cxt.QueryCancelPending || t_thrd.int_cxt.ProcDiePending) && \
-        !DataSndInProgress(SNDROLE_PRIMARY_STANDBY | SNDROLE_PRIMARY_DUMMYSTANDBY))
+     !DataSndInProgress(SNDROLE_PRIMARY_STANDBY | SNDROLE_PRIMARY_DUMMYSTANDBY))
 
 static void UpdateDataSendPosition(void);
 static void UpdateDataWritePosition(void);
 static void UpdateWalDataWritePosition(void);
-static void PushToBCMElementArray(const RelFileNode& rnode, BlockNumber blockNum, StorageEngine type, uint32 data_len,
-    int attid, uint64 offset, const DataQueuePtr& queueoffset);
+static void PushToBCMElementArray(const RelFileNode &rnode, BlockNumber blockNum, StorageEngine type, uint32 data_len,
+                                  int attid, uint64 offset, const DataQueuePtr &queueoffset);
 static void ClearBCMStatus(uint32 first, uint32 end);
-static void BCMArrayDropBlock(uint32 first, uint32 end, const RelFileNode& dropnode);
+static void BCMArrayDropBlock(uint32 first, uint32 end, const RelFileNode &dropnode);
 
 void PallocBCMBCMElementArray(void);
 /*
@@ -89,11 +90,11 @@ void DataSenderQueueShmemInit(void)
     /* Allocate SHM in non-single node or dummy standby mode */
     if (!IS_SINGLE_NODE || IS_DN_DUMMY_STANDYS_MODE()) {
         bool foundDataQueue = false;
-        char* allocptr = NULL;
+        char *allocptr = NULL;
         errno_t rc = 0;
 
-        t_thrd.dataqueue_cxt.DataSenderQueue =
-            (DataQueueData*)ShmemInitStruct("Data Sender Queue", DataQueueShmemSize(), &foundDataQueue);
+        t_thrd.dataqueue_cxt.DataSenderQueue = (DataQueueData *)ShmemInitStruct("Data Sender Queue",
+                                                                                DataQueueShmemSize(), &foundDataQueue);
 
         if (foundDataQueue) {
             return;
@@ -102,24 +103,23 @@ void DataSenderQueueShmemInit(void)
         rc = memset_s(t_thrd.dataqueue_cxt.DataSenderQueue, sizeof(DataQueueData), 0, sizeof(DataQueueData));
         securec_check_c(rc, "", "");
 
-        allocptr = ((char*)t_thrd.dataqueue_cxt.DataSenderQueue) + sizeof(DataQueueData);
+        allocptr = ((char *)t_thrd.dataqueue_cxt.DataSenderQueue) + sizeof(DataQueueData);
 
         /*
          * Align the start of the page buffers to an ALIGNOF_XLOG_BUFFER boundary.
          */
-        allocptr = (char*)TYPEALIGN(ALIGNOF_BUFFER, allocptr);
+        allocptr = (char *)TYPEALIGN(ALIGNOF_BUFFER, allocptr);
         t_thrd.dataqueue_cxt.DataSenderQueue->pages = allocptr;
         rc = memset_s(t_thrd.dataqueue_cxt.DataSenderQueue->pages,
-            (INT2SIZET(g_instance.attr.attr_storage.DataQueueBufSize)) * buffernum,
-            0,
-            (INT2SIZET(g_instance.attr.attr_storage.DataQueueBufSize)) * buffernum);
+                      (INT2SIZET(g_instance.attr.attr_storage.DataQueueBufSize)) * buffernum, 0,
+                      (INT2SIZET(g_instance.attr.attr_storage.DataQueueBufSize)) * buffernum);
         securec_check_c(rc, "", "");
 
         /*
          * Do basic initialization of DataQueue shared data.
          */
-        t_thrd.dataqueue_cxt.DataSenderQueue->size =
-            g_instance.attr.attr_storage.DataQueueBufSize * buffernum; /* unit: Bytes */
+        t_thrd.dataqueue_cxt.DataSenderQueue->size = g_instance.attr.attr_storage.DataQueueBufSize *
+                                                     buffernum; /* unit: Bytes */
         SpinLockInit(&t_thrd.dataqueue_cxt.DataSenderQueue->use_mutex);
     }
 }
@@ -129,37 +129,40 @@ void DataWriterQueueShmemInit(void)
     /* Allocate SHM in non-single node or dummy standby mode */
     if (!IS_SINGLE_NODE || IS_DN_DUMMY_STANDYS_MODE()) {
         bool foundDataQueue = false;
-        char* allocptr = NULL;
+        char *allocptr = NULL;
         errno_t rc = 0;
 
-        t_thrd.dataqueue_cxt.DataWriterQueue =
-            (DataQueueData*)ShmemInitStruct("Data Writer Queue", DataQueueShmemSize(), &foundDataQueue);
+        t_thrd.dataqueue_cxt.DataWriterQueue = (DataQueueData *)ShmemInitStruct("Data Writer Queue",
+                                                                                DataQueueShmemSize(), &foundDataQueue);
 
         if (foundDataQueue) {
             return;
         }
 
+        if (BBOX_BLACKLIST_DATA_WRITER_QUEUE) {
+            bbox_blacklist_add(DATA_WRITER_QUEUE, t_thrd.dataqueue_cxt.DataWriterQueue, DataQueueShmemSize());
+        }
+
         rc = memset_s(t_thrd.dataqueue_cxt.DataWriterQueue, sizeof(DataQueueData), 0, sizeof(DataQueueData));
         securec_check_c(rc, "", "");
 
-        allocptr = ((char*)t_thrd.dataqueue_cxt.DataWriterQueue) + sizeof(DataQueueData);
+        allocptr = ((char *)t_thrd.dataqueue_cxt.DataWriterQueue) + sizeof(DataQueueData);
 
         /*
          * Align the start of the page buffers to an ALIGNOF_XLOG_BUFFER boundary.
          */
-        allocptr = (char*)TYPEALIGN(ALIGNOF_BUFFER, allocptr);
+        allocptr = (char *)TYPEALIGN(ALIGNOF_BUFFER, allocptr);
         t_thrd.dataqueue_cxt.DataWriterQueue->pages = allocptr;
         rc = memset_s(t_thrd.dataqueue_cxt.DataWriterQueue->pages,
-            INT2SIZET(g_instance.attr.attr_storage.DataQueueBufSize) * 1024,
-            0,
-            INT2SIZET(g_instance.attr.attr_storage.DataQueueBufSize) * 1024);
+                      INT2SIZET(g_instance.attr.attr_storage.DataQueueBufSize) * 1024, 0,
+                      INT2SIZET(g_instance.attr.attr_storage.DataQueueBufSize) * 1024);
         securec_check_c(rc, "", "");
 
         /*
          * Do basic initialization of DataQueue shared data.
          */
-        t_thrd.dataqueue_cxt.DataWriterQueue->size =
-            g_instance.attr.attr_storage.DataQueueBufSize * 1024; /* unit: Bytes */
+        t_thrd.dataqueue_cxt.DataWriterQueue->size = g_instance.attr.attr_storage.DataQueueBufSize * 1024; /* unit:
+                                                                                                              Bytes */
         SpinLockInit(&t_thrd.dataqueue_cxt.DataWriterQueue->use_mutex);
     }
 }
@@ -167,12 +170,12 @@ void DataWriterQueueShmemInit(void)
 /*
  * Reset the given data queue data.
  */
-void ResetDataQueue(DataQueueData* data_queue)
+void ResetDataQueue(DataQueueData *data_queue)
 {
-    DataQueuePtr invalidptr = (DataQueuePtr){0, 0};
-    DataQueuePtr queue_tail1 = (DataQueuePtr){0, 0};
-    DataQueuePtr queue_head2 = (DataQueuePtr){0, 0};
-    DataQueuePtr queue_tail2 = (DataQueuePtr){0, 0};
+    DataQueuePtr invalidptr = (DataQueuePtr){ 0, 0 };
+    DataQueuePtr queue_tail1 = (DataQueuePtr){ 0, 0 };
+    DataQueuePtr queue_head2 = (DataQueuePtr){ 0, 0 };
+    DataQueuePtr queue_tail2 = (DataQueuePtr){ 0, 0 };
 
     if (data_queue == NULL)
         return; /* nothing to do */
@@ -188,24 +191,19 @@ void ResetDataQueue(DataQueueData* data_queue)
     SpinLockRelease(&data_queue->use_mutex);
 
     if (!DataQueuePtrIsInvalid(queue_tail1) || !DQByteEQ(queue_head2, queue_tail2))
-        ereport(WARNING,
-            (errmsg("data remained in reset data queue: tail1:%u/%u,head2:%u/%u,tail2:%u/%u",
-                queue_tail1.queueid,
-                queue_tail1.queueoff,
-                queue_head2.queueid,
-                queue_head2.queueoff,
-                queue_tail2.queueid,
-                queue_tail2.queueoff)));
+        ereport(WARNING, (errmsg("data remained in reset data queue: tail1:%u/%u,head2:%u/%u,tail2:%u/%u",
+                                 queue_tail1.queueid, queue_tail1.queueoff, queue_head2.queueid, queue_head2.queueoff,
+                                 queue_tail2.queueid, queue_tail2.queueoff)));
 }
 
 /*
  * Is the given data queue data already empty or not?
  */
-bool DataQueueIsEmpty(DataQueueData* data_queue)
+bool DataQueueIsEmpty(DataQueueData *data_queue)
 {
-    DataQueuePtr queue_tail1 = (DataQueuePtr){0, 0};
-    DataQueuePtr queue_head2 = (DataQueuePtr){0, 0};
-    DataQueuePtr queue_tail2 = (DataQueuePtr){0, 0};
+    DataQueuePtr queue_tail1 = (DataQueuePtr){ 0, 0 };
+    DataQueuePtr queue_head2 = (DataQueuePtr){ 0, 0 };
+    DataQueuePtr queue_tail2 = (DataQueuePtr){ 0, 0 };
     bool isEmpty = false;
 
     if (data_queue == NULL)
@@ -226,15 +224,15 @@ bool DataQueueIsEmpty(DataQueueData* data_queue)
     return isEmpty;
 }
 
-DataQueuePtr PushToSenderQueue(const RelFileNode& rnode, BlockNumber blockNum, StorageEngine type, const char* mem,
-    uint32 data_len, int attid, uint64 offset)
+DataQueuePtr PushToSenderQueue(const RelFileNode &rnode, BlockNumber blockNum, StorageEngine type, const char *mem,
+                               uint32 data_len, int attid, uint64 offset)
 {
     uint32 total_len;
     uint32 buffer_size = g_instance.attr.attr_storage.DataQueueBufSize * 1024; /* unit: Bytes */
     uint32 freespace_head = 0;
     uint32 data_header_len = sizeof(DataElementHeaderData);
     uint32 time_count = 1;
-    DataQueuePtr invalidPtr = (DataQueuePtr){0, 0};
+    DataQueuePtr invalidPtr = (DataQueuePtr){ 0, 0 };
     DataElementHeaderData data_header;
     errno_t errorno = EOK;
 
@@ -290,7 +288,7 @@ DataQueuePtr PushToSenderQueue(const RelFileNode& rnode, BlockNumber blockNum, S
             SpinLockRelease(&t_thrd.dataqueue_cxt.DataSenderQueue->use_mutex);
             break;
         } else if ((t_thrd.dataqueue_cxt.DataSenderQueue->use_head2.queueoff -
-                       t_thrd.dataqueue_cxt.DataSenderQueue->use_tail1.queueoff) > total_len) {
+                    t_thrd.dataqueue_cxt.DataSenderQueue->use_tail1.queueoff) > total_len) {
             /* update use_tail1 */
             freespace_head = t_thrd.dataqueue_cxt.DataSenderQueue->use_tail1.queueoff;
             if (DataQueuePtrIsInvalid(t_thrd.dataqueue_cxt.DataSenderQueue->use_tail1))
@@ -310,17 +308,12 @@ DataQueuePtr PushToSenderQueue(const RelFileNode& rnode, BlockNumber blockNum, S
 
         if (g_instance.attr.attr_storage.max_wal_senders > 0) {
             if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone) {
-                ereport(LOG,
+                ereport(
+                    LOG,
                     (errmsg("failed to push rnode %u/%u/%u blockno %u into data-queue becuase sync_master_standalone "
                             "is false."
                             " attid %d, pageoffset2blockno %lu, size %u",
-                        rnode.spcNode,
-                        rnode.dbNode,
-                        rnode.relNode,
-                        blockNum,
-                        attid,
-                        offset / BLCKSZ,
-                        data_len)));
+                            rnode.spcNode, rnode.dbNode, rnode.relNode, blockNum, attid, offset / BLCKSZ, data_len)));
                 return invalidPtr;
             } else
                 DataSndWakeup();
@@ -331,16 +324,11 @@ DataQueuePtr PushToSenderQueue(const RelFileNode& rnode, BlockNumber blockNum, S
          * CHECK_FOR_INTERRUPTS because we have hold the page lwlock.
          */
         if (IsDataReplInterruptted()) {
-            ereport(LOG,
+            ereport(
+                LOG,
                 (errmsg("failed to push rnode %u/%u/%u blockno %u into data-queue becuase InterruptPending is true and"
                         " datasender is not in progress. attid %d, pageoffset2blockno %lu, size %u",
-                    rnode.spcNode,
-                    rnode.dbNode,
-                    rnode.relNode,
-                    blockNum,
-                    attid,
-                    offset / BLCKSZ,
-                    data_len)));
+                        rnode.spcNode, rnode.dbNode, rnode.relNode, blockNum, attid, offset / BLCKSZ, data_len)));
             return invalidPtr;
         }
 
@@ -357,23 +345,19 @@ DataQueuePtr PushToSenderQueue(const RelFileNode& rnode, BlockNumber blockNum, S
     // 1. data header
     // 2. data
     errorno = memcpy_s(t_thrd.dataqueue_cxt.DataSenderQueue->pages + freespace_head,
-        g_instance.attr.attr_storage.DataQueueBufSize * 1024 - freespace_head,
-        &total_len,
-        sizeof(uint32));
+                       g_instance.attr.attr_storage.DataQueueBufSize * 1024 - freespace_head, &total_len,
+                       sizeof(uint32));
     securec_check(errorno, "", "");
     freespace_head += sizeof(uint32);
 
     errorno = memcpy_s(t_thrd.dataqueue_cxt.DataSenderQueue->pages + freespace_head,
-        g_instance.attr.attr_storage.DataQueueBufSize * 1024 - freespace_head,
-        &data_header,
-        data_header_len);
+                       g_instance.attr.attr_storage.DataQueueBufSize * 1024 - freespace_head, &data_header,
+                       data_header_len);
     securec_check(errorno, "", "");
     freespace_head += data_header_len;
 
     errorno = memcpy_s(t_thrd.dataqueue_cxt.DataSenderQueue->pages + freespace_head,
-        g_instance.attr.attr_storage.DataQueueBufSize * 1024 - freespace_head,
-        mem,
-        data_len);
+                       g_instance.attr.attr_storage.DataQueueBufSize * 1024 - freespace_head, mem, data_len);
     securec_check(errorno, "", "");
 
     LWLockRelease(DataSyncRepLock);
@@ -390,11 +374,11 @@ DataQueuePtr PushToSenderQueue(const RelFileNode& rnode, BlockNumber blockNum, S
     return data_header.queue_offset;
 }
 
-DataQueuePtr PushToWriterQueue(const char* mem, uint32 mem_len)
+DataQueuePtr PushToWriterQueue(const char *mem, uint32 mem_len)
 {
     uint32 buffer_size = g_instance.attr.attr_storage.DataQueueBufSize * 1024; /* unit: Bytes */
     uint32 freespace_head = 0;
-    DataQueuePtr current_offset = (DataQueuePtr){0, 0};
+    DataQueuePtr current_offset = (DataQueuePtr){ 0, 0 };
     uint32 time_count = 1;
     ThreadId writerPid = 0;
     errno_t errorno = EOK;
@@ -414,7 +398,7 @@ DataQueuePtr PushToWriterQueue(const char* mem, uint32 mem_len)
             SpinLockRelease(&t_thrd.dataqueue_cxt.DataWriterQueue->use_mutex);
             break;
         } else if ((t_thrd.dataqueue_cxt.DataWriterQueue->use_head2.queueoff -
-                       t_thrd.dataqueue_cxt.DataWriterQueue->use_tail1.queueoff) >= mem_len) {
+                    t_thrd.dataqueue_cxt.DataWriterQueue->use_tail1.queueoff) >= mem_len) {
             /* update use_tail1 */
             freespace_head = t_thrd.dataqueue_cxt.DataWriterQueue->use_tail1.queueoff;
             if (DataQueuePtrIsInvalid(t_thrd.dataqueue_cxt.DataWriterQueue->use_tail1))
@@ -434,7 +418,7 @@ DataQueuePtr PushToWriterQueue(const char* mem, uint32 mem_len)
 
         /* when datawriter and datareceiver is started, wake up DataRcvWriter */
         if (!g_instance.attr.attr_storage.enable_mix_replication) {
-            volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+            volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
             ProcessDataRcvInterrupts();
             SpinLockAcquire(&datarcv->mutex);
             writerPid = datarcv->writerPid;
@@ -449,7 +433,7 @@ DataQueuePtr PushToWriterQueue(const char* mem, uint32 mem_len)
             } else
                 DataRcvDataCleanup();
         } else { /* when there is only walrcv and walwriter, wake up WalRcvWriter */
-            volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+            volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
             ProcessWalRcvInterrupts();
             SpinLockAcquire(&walrcv->mutex);
             writerPid = walrcv->writerPid;
@@ -468,19 +452,13 @@ DataQueuePtr PushToWriterQueue(const char* mem, uint32 mem_len)
 
     /* copy data to buffer */
     errorno = memcpy_s(t_thrd.dataqueue_cxt.DataWriterQueue->pages + freespace_head,
-        g_instance.attr.attr_storage.DataQueueBufSize * 1024 - freespace_head,
-        mem,
-        mem_len);
+                       g_instance.attr.attr_storage.DataQueueBufSize * 1024 - freespace_head, mem, mem_len);
     securec_check(errorno, "", "");
     LWLockRelease(DataSyncRepLock);
 
     if (u_sess->attr.attr_storage.HaModuleDebug) {
-        ereport(LOG,
-            (errmsg("HA-PushToWriterQueue done: data size %u, from %u to %u/%u",
-                mem_len,
-                freespace_head,
-                current_offset.queueid,
-                current_offset.queueoff)));
+        ereport(LOG, (errmsg("HA-PushToWriterQueue done: data size %u, from %u to %u/%u", mem_len, freespace_head,
+                             current_offset.queueid, current_offset.queueoff)));
     }
 
     /* Return the offset of  data queue */
@@ -496,19 +474,19 @@ DataQueuePtr PushToWriterQueue(const char* mem, uint32 mem_len)
  * 3. when enable_mix_replication is on, fetch both wal log and data from DataWriterQueue
  */
 uint32 GetFromDataQueue(char *&buf, int bufsize, DataQueuePtr &startptr, DataQueuePtr &endptr, bool amIWriter,
-    DataQueueData *data_queue)
+                        DataQueueData *data_queue)
 {
     /* get the total_len of the send data */
     uint32 page_len = 0;
     uint32 mem_len = 0;
     int buf_max_len = bufsize;
     bool ChangeFromRightToLeft = false;
-    DataQueuePtr current_tail2 = {0, 0};
+    DataQueuePtr current_tail2 = { 0, 0 };
 
     /* when enable_mix_replication open, only amIWriter == true is allowed */
     if (amIWriter == false && g_instance.attr.attr_storage.enable_mix_replication) {
-        ereport(ERROR,
-            (errcode(ERRCODE_AMBIGUOUS_PARAMETER), errmsg("we should be a writer when enable_mix_replication is on")));
+        ereport(ERROR, (errcode(ERRCODE_AMBIGUOUS_PARAMETER),
+                        errmsg("we should be a writer when enable_mix_replication is on")));
     }
 
     SpinLockAcquire(&data_queue->use_mutex);
@@ -580,7 +558,7 @@ uint32 GetFromDataQueue(char *&buf, int bufsize, DataQueuePtr &startptr, DataQue
         endptr = current_tail2;
     } else {
         while (bufsize >= 0) {
-            page_len = *(uint32*)(data_queue->pages + endptr.queueoff);
+            page_len = *(uint32 *)(data_queue->pages + endptr.queueoff);
             endptr.queueoff += page_len;
             bufsize -= page_len;
         }
@@ -604,24 +582,17 @@ uint32 GetFromDataQueue(char *&buf, int bufsize, DataQueuePtr &startptr, DataQue
     LWLockRelease(DataSyncRepLock);
 
     if (u_sess->attr.attr_storage.HaModuleDebug) {
-        ereport(LOG,
-            (errmsg("HA-GetFromDataQueue: start %u/%u, end %u/%u, head2 %u/%u, tail1 %u/%u, tail2 %u/%u",
-                startptr.queueid,
-                startptr.queueoff,
-                endptr.queueid,
-                endptr.queueoff,
-                data_queue->use_head2.queueid,
-                data_queue->use_head2.queueoff,
-                data_queue->use_tail1.queueid,
-                data_queue->use_tail1.queueoff,
-                data_queue->use_tail2.queueid,
-                data_queue->use_tail2.queueoff)));
+        ereport(LOG, (errmsg("HA-GetFromDataQueue: start %u/%u, end %u/%u, head2 %u/%u, tail1 %u/%u, tail2 %u/%u",
+                             startptr.queueid, startptr.queueoff, endptr.queueid, endptr.queueoff,
+                             data_queue->use_head2.queueid, data_queue->use_head2.queueoff,
+                             data_queue->use_tail1.queueid, data_queue->use_tail1.queueoff,
+                             data_queue->use_tail2.queueid, data_queue->use_tail2.queueoff)));
     }
 
     return mem_len;
 }
 
-void PopFromDataQueue(const DataQueuePtr& position, DataQueueData* data_queue)
+void PopFromDataQueue(const DataQueuePtr &position, DataQueueData *data_queue)
 {
     SpinLockAcquire(&data_queue->use_mutex);
     if ((position.queueid == data_queue->use_tail2.queueid) && DQByteLE(position, data_queue->use_tail2)) {
@@ -638,7 +609,7 @@ static void UpdateDataSendPosition(void)
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
-        volatile DataSnd* datasnd = &t_thrd.datasender_cxt.DataSndCtl->datasnds[i];
+        volatile DataSnd *datasnd = &t_thrd.datasender_cxt.DataSndCtl->datasnds[i];
 
         SpinLockAcquire(&datasnd->mutex);
 
@@ -654,7 +625,7 @@ static void UpdateDataSendPosition(void)
 static void UpdateWalDataWritePosition(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
     SpinLockAcquire(&walrcv->mutex);
 
@@ -669,7 +640,7 @@ static void UpdateWalDataWritePosition(void)
 static void UpdateDataWritePosition(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    volatile DataRcvData* datarcv = t_thrd.datareceiver_cxt.DataRcv;
+    volatile DataRcvData *datarcv = t_thrd.datareceiver_cxt.DataRcv;
 
     SpinLockAcquire(&datarcv->mutex);
 
@@ -681,13 +652,14 @@ static void UpdateDataWritePosition(void)
     SpinLockRelease(&datarcv->mutex);
 }
 
-void PushCUToDataQueue(Relation rel, int col, const char* mem, _in_ uint64 offset, _in_ int size, bool setbcm)
+void PushCUToDataQueue(Relation rel, int col, const char *mem, _in_ uint64 offset, _in_ int size, bool setbcm)
 {
+    int align_size = CUAlignUtils::GetCuAlignSizeColumnId(col);
     Buffer bcmbuffer = InvalidBuffer;
     uint64 cuSliceOffset = offset;
     uint64 cuBlock = 0;
     int i = 0;
-    int cuUnitCount = (size / ALIGNOF_CUSIZE);
+    int cuUnitCount = (size / align_size);
 
 #define SLICE_SIZE (512 * 1024)
 
@@ -703,7 +675,8 @@ void PushCUToDataQueue(Relation rel, int col, const char* mem, _in_ uint64 offse
 
         /* read current bcm block */
         cuSliceOffset = offset;
-        curBcmBlock = (BlockNumber)CSTORE_OFFSET_TO_BCMBLOCK(cuSliceOffset);
+        uint64 cu_align_size = (uint64)(uint32)CUAlignUtils::GetCuAlignSizeColumnId(col);
+        curBcmBlock = (BlockNumber)cstore_offset_to_bcmblock(cuSliceOffset, cu_align_size);
         nextBcmBlock = curBcmBlock;
         BCM_CStore_pin(rel, col, cuSliceOffset, &bcmbuffer);
         LockBuffer(bcmbuffer, BUFFER_LOCK_EXCLUSIVE);
@@ -719,12 +692,11 @@ void PushCUToDataQueue(Relation rel, int col, const char* mem, _in_ uint64 offse
                 BCM_CStore_pin(rel, col, cuSliceOffset, &bcmbuffer);
                 LockBuffer(bcmbuffer, BUFFER_LOCK_EXCLUSIVE);
             }
-
-            cuBlock = CSTORE_OFFSET_TO_CSTOREBLOCK(cuSliceOffset);
+            cuBlock = cstore_offset_to_cstoreblock(cuSliceOffset, cu_align_size);
             BCMSetStatusBit(rel, cuBlock, bcmbuffer, NOTSYNCED, col);
 
-            cuSliceOffset += ALIGNOF_CUSIZE;
-            nextBcmBlock = (BlockNumber)CSTORE_OFFSET_TO_BCMBLOCK(cuSliceOffset);
+            cuSliceOffset += cu_align_size;
+            nextBcmBlock = (BlockNumber)cstore_offset_to_bcmblock(cuSliceOffset, cu_align_size);
         } while (cuSliceOffset < offset + size);
 
         UnlockReleaseBuffer(bcmbuffer);
@@ -743,29 +715,23 @@ void PushCUToDataQueue(Relation rel, int col, const char* mem, _in_ uint64 offse
              * For all the intermediate CU_Data slices we MUST SET the latest_ref_xlog to InvalidXLogRecPtr to prevend
              * the synchronization of the replication data on the standby node.
              */
-            t_thrd.proc->waitDataSyncPoint = PushToSenderQueue(
-                rel->rd_node, 0, COLUMN_STORE, mem + (i * SLICE_SIZE), SLICE_SIZE, col, offset + (i * SLICE_SIZE));
+            t_thrd.proc->waitDataSyncPoint = PushToSenderQueue(rel->rd_node, 0, COLUMN_STORE, mem + (i * SLICE_SIZE),
+                                                               SLICE_SIZE, col, offset + (i * SLICE_SIZE));
         }
         /* the remaining data less than 512KB */
         remain = (uint32)(size % SLICE_SIZE);
         if (remain > 0) {
-            t_thrd.proc->waitDataSyncPoint = PushToSenderQueue(
-                rel->rd_node, 0, COLUMN_STORE, mem + (i * SLICE_SIZE), remain, col, offset + (i * SLICE_SIZE));
+            t_thrd.proc->waitDataSyncPoint = PushToSenderQueue(rel->rd_node, 0, COLUMN_STORE, mem + (i * SLICE_SIZE),
+                                                               remain, col, offset + (i * SLICE_SIZE));
         }
     }
 
     if (u_sess->attr.attr_storage.HaModuleDebug) {
-        ereport(LOG,
-            (errmsg("HA-PushToSenderQueue done: rnode %u/%u/%u, blockno %lu,\
+        ereport(LOG, (errmsg("HA-PushToSenderQueue done: rnode %u/%u/%u, blockno %lu,\
 						   cuUnitCount %d, attid %d, waitpoint %u/%u",
-                rel->rd_node.spcNode,
-                rel->rd_node.dbNode,
-                rel->rd_node.relNode,
-                offset / ALIGNOF_CUSIZE,
-                cuUnitCount,
-                col,
-                t_thrd.proc->waitDataSyncPoint.queueid,
-                t_thrd.proc->waitDataSyncPoint.queueoff)));
+                             rel->rd_node.spcNode, rel->rd_node.dbNode, rel->rd_node.relNode, offset / align_size,
+                             cuUnitCount, col, t_thrd.proc->waitDataSyncPoint.queueid,
+                             t_thrd.proc->waitDataSyncPoint.queueoff)));
     }
 
     /* Wake up all datasenders to send Page if replication is enabled */
@@ -773,20 +739,20 @@ void PushCUToDataQueue(Relation rel, int col, const char* mem, _in_ uint64 offse
         DataSndWakeup();
 }
 
-static void PushToBCMElementArray(const RelFileNode& rnode, BlockNumber blockNum, StorageEngine type, uint32 data_len,
-    int attid, uint64 offset, const DataQueuePtr& queueoffset)
+static void PushToBCMElementArray(const RelFileNode &rnode, BlockNumber blockNum, StorageEngine type, uint32 data_len,
+                                  int attid, uint64 offset, const DataQueuePtr &queueoffset)
 {
     uint32 array_index = 0;
-    uint32& index1 = t_thrd.dataqueue_cxt.BCMElementArrayIndex1;
-    uint32& index2 = t_thrd.dataqueue_cxt.BCMElementArrayIndex2;
-    volatile DataSndCtlData* datasndctl = t_thrd.datasender_cxt.DataSndCtl;
+    uint32 &index1 = t_thrd.dataqueue_cxt.BCMElementArrayIndex1;
+    uint32 &index2 = t_thrd.dataqueue_cxt.BCMElementArrayIndex2;
+    volatile DataSndCtlData *datasndctl = t_thrd.datasender_cxt.DataSndCtl;
     errno_t rc = EOK;
 
     /* Initialize BCMElementArray */
     if (t_thrd.dataqueue_cxt.BCMElementArray == NULL) {
         MemoryContext oldcxt = NULL;
 
-        oldcxt = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+        oldcxt = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
         t_thrd.dataqueue_cxt.BCMElementArray = (BCMElement)palloc0(BCMElementArrayLen * sizeof(BCMElementData));
         MemoryContextSwitchTo(oldcxt);
     }
@@ -797,8 +763,8 @@ static void PushToBCMElementArray(const RelFileNode& rnode, BlockNumber blockNum
      */
     if (index1 < BCMElementArrayLenHalf) {
         array_index = index1++;
-        rc = memcpy_s(
-            t_thrd.dataqueue_cxt.BCMElementArrayOffset1, sizeof(DataQueuePtr), &queueoffset, sizeof(DataQueuePtr));
+        rc = memcpy_s(t_thrd.dataqueue_cxt.BCMElementArrayOffset1, sizeof(DataQueuePtr), &queueoffset,
+                      sizeof(DataQueuePtr));
         securec_check(rc, "", "");
 
         /*
@@ -838,8 +804,8 @@ static void PushToBCMElementArray(const RelFileNode& rnode, BlockNumber blockNum
         Assert(index1 == BCMElementArrayLenHalf);
 
         array_index = index2++;
-        rc = memcpy_s(
-            t_thrd.dataqueue_cxt.BCMElementArrayOffset2, sizeof(DataQueuePtr), &queueoffset, sizeof(DataQueuePtr));
+        rc = memcpy_s(t_thrd.dataqueue_cxt.BCMElementArrayOffset2, sizeof(DataQueuePtr), &queueoffset,
+                      sizeof(DataQueuePtr));
         securec_check(rc, "", "");
 
         /* array is full */
@@ -868,23 +834,19 @@ static void PushToBCMElementArray(const RelFileNode& rnode, BlockNumber blockNum
     Assert(array_index < BCMElementArrayLen);
 
     if ((index2 < BCMElementArrayLenHalf) || (array_index >= BCMElementArrayLen))
-        ereport(ERROR,
-            (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("The got BCM Array index is corrupt: index1 %u index2 %u array_index %u "
-                       "BCMElementArrayOffset1 %X/%X BCMElementArrayOffset2 %X/%X",
-                    index1,
-                    index2,
-                    array_index,
-                    t_thrd.dataqueue_cxt.BCMElementArrayOffset1->queueid,
-                    t_thrd.dataqueue_cxt.BCMElementArrayOffset1->queueoff,
-                    t_thrd.dataqueue_cxt.BCMElementArrayOffset2->queueid,
-                    t_thrd.dataqueue_cxt.BCMElementArrayOffset2->queueoff)));
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("The got BCM Array index is corrupt: index1 %u index2 %u array_index %u "
+                               "BCMElementArrayOffset1 %X/%X BCMElementArrayOffset2 %X/%X",
+                               index1, index2, array_index, t_thrd.dataqueue_cxt.BCMElementArrayOffset1->queueid,
+                               t_thrd.dataqueue_cxt.BCMElementArrayOffset1->queueoff,
+                               t_thrd.dataqueue_cxt.BCMElementArrayOffset2->queueid,
+                               t_thrd.dataqueue_cxt.BCMElementArrayOffset2->queueoff)));
 
     RelFileNodeRelCopy(t_thrd.dataqueue_cxt.BCMElementArray[array_index].rnode, rnode);
 
     t_thrd.dataqueue_cxt.BCMElementArray[array_index].blocknum = blockNum;
-    t_thrd.dataqueue_cxt.BCMElementArray[array_index].attid =
-        (int)((uint32)attid | ((uint32)(rnode.bucketNode + 1) << 16));
+    t_thrd.dataqueue_cxt.BCMElementArray[array_index].attid = (int)((uint32)attid |
+                                                                    ((uint32)(rnode.bucketNode + 1) << 16));
     t_thrd.dataqueue_cxt.BCMElementArray[array_index].type = type;
     t_thrd.dataqueue_cxt.BCMElementArray[array_index].offset = offset;
     t_thrd.dataqueue_cxt.BCMElementArray[array_index].data_size = data_len;
@@ -947,28 +909,16 @@ static void ClearBCMStatus(uint32 first, uint32 end)
         Assert(relation != NULL);
 
         if (relation == NULL) {
-            ereport(ERROR,
-                (errmsg("Invalid relation while clearing BCM status: rnode[%u,%u,%u], blocknum[%u], "
-                        "pageoffset[%lu], size[%u], attid[%d]",
-                    bcmhdr.rnode.spcNode,
-                    bcmhdr.rnode.dbNode,
-                    bcmhdr.rnode.relNode,
-                    bcmhdr.blocknum,
-                    bcmhdr.offset,
-                    bcmhdr.data_size,
-                    (int)GETATTID((uint32)bcmhdr.attid))));
+            ereport(ERROR, (errmsg("Invalid relation while clearing BCM status: rnode[%u,%u,%u], blocknum[%u], "
+                                   "pageoffset[%lu], size[%u], attid[%d]",
+                                   bcmhdr.rnode.spcNode, bcmhdr.rnode.dbNode, bcmhdr.rnode.relNode, bcmhdr.blocknum,
+                                   bcmhdr.offset, bcmhdr.data_size, (int)GETATTID((uint32)bcmhdr.attid))));
         }
 
-        ereport(DEBUG5,
-            (errmsg("clear BCM status: rnode[%u,%u,%u], blocknum[%u], "
-                    "pageoffset[%lu], size[%u], attid[%d]",
-                bcmhdr.rnode.spcNode,
-                bcmhdr.rnode.dbNode,
-                bcmhdr.rnode.relNode,
-                bcmhdr.blocknum,
-                bcmhdr.offset,
-                bcmhdr.data_size,
-                (int)GETATTID((uint32)bcmhdr.attid))));
+        ereport(DEBUG5, (errmsg("clear BCM status: rnode[%u,%u,%u], blocknum[%u], "
+                                "pageoffset[%lu], size[%u], attid[%d]",
+                                bcmhdr.rnode.spcNode, bcmhdr.rnode.dbNode, bcmhdr.rnode.relNode, bcmhdr.blocknum,
+                                bcmhdr.offset, bcmhdr.data_size, (int)GETATTID((uint32)bcmhdr.attid))));
 
         if (bcmhdr.type == ROW_STORE) {
             Buffer buffer;
@@ -982,7 +932,10 @@ static void ClearBCMStatus(uint32 first, uint32 end)
 
             /* clear the logical page flag */
             buffer = ReadBuffer(relation, blockNum);
-            AssertEreport(BufferIsValid(buffer), MOD_FUNCTION, "buffer should not be zero");
+            if (!BufferIsValid(buffer)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_DATA_EXCEPTION), errmsg("buffer should be valid, but now is %d", buffer)));
+            }
             LockBuffer(buffer, BUFFER_LOCK_SHARE);
             page = (Page)BufferGetPage(buffer);
             if (PageIsLogical(page)) {
@@ -995,11 +948,12 @@ static void ClearBCMStatus(uint32 first, uint32 end)
             BlockNumber nextBcmBlock = 0;
             uint64 cuSliceOffset = 0;
             uint64 cuBlock = 0;
-            int cuUnitCount = (bcmhdr.data_size / ALIGNOF_CUSIZE);
+            uint64 align_size = (uint64)(uint32)CUAlignUtils::GetCuAlignSizeColumnId(bcmhdr.attid);
+            int cuUnitCount = (bcmhdr.data_size / align_size);
 
             /* read current bcm block */
             cuSliceOffset = bcmhdr.offset;
-            curBcmBlock = CSTORE_OFFSET_TO_BCMBLOCK(cuSliceOffset);
+            curBcmBlock = cstore_offset_to_bcmblock(cuSliceOffset, align_size);
             nextBcmBlock = curBcmBlock;
             BCM_CStore_pin(relation, (int)GETATTID((uint32)bcmhdr.attid), cuSliceOffset, &bcmbuffer);
             LockBuffer(bcmbuffer, BUFFER_LOCK_EXCLUSIVE);
@@ -1016,11 +970,11 @@ static void ClearBCMStatus(uint32 first, uint32 end)
                     LockBuffer(bcmbuffer, BUFFER_LOCK_EXCLUSIVE);
                 }
 
-                cuBlock = CSTORE_OFFSET_TO_CSTOREBLOCK(cuSliceOffset);
+                cuBlock = cstore_offset_to_cstoreblock(cuSliceOffset, align_size);
                 BCMSetStatusBit(relation, cuBlock, bcmbuffer, SYNCED, (int)GETATTID((uint32)bcmhdr.attid));
 
-                cuSliceOffset += ALIGNOF_CUSIZE;
-                nextBcmBlock = CSTORE_OFFSET_TO_BCMBLOCK(cuSliceOffset);
+                cuSliceOffset += align_size;
+                nextBcmBlock = cstore_offset_to_bcmblock(cuSliceOffset, align_size);
             } while (cuSliceOffset < bcmhdr.offset + (uint64)bcmhdr.data_size);
 
             UnlockReleaseBuffer(bcmbuffer);
@@ -1029,16 +983,11 @@ static void ClearBCMStatus(uint32 first, uint32 end)
             BCMLogCU(relation, bcmhdr.offset, (int)GETATTID((uint32)bcmhdr.attid), SYNCED, cuUnitCount);
 
             if (u_sess->attr.attr_storage.HaModuleDebug) {
-                ereport(LOG,
-                    (errmsg("HA-ClearBCMStatus: rnode %u/%u/%u, col %u, blockno %lu "
-                            "cuUnitCount %u, status  %u",
-                        relation->rd_node.spcNode,
-                        relation->rd_node.dbNode,
-                        relation->rd_node.relNode,
-                        GETATTID((uint)bcmhdr.attid),
-                        bcmhdr.offset / ALIGNOF_CUSIZE,
-                        bcmhdr.data_size / ALIGNOF_CUSIZE,
-                        SYNCED)));
+                ereport(LOG, (errmsg("HA-ClearBCMStatus: rnode %u/%u/%u, col %u, blockno %lu "
+                                     "cuUnitCount %u, status  %u",
+                                     relation->rd_node.spcNode, relation->rd_node.dbNode, relation->rd_node.relNode,
+                                     GETATTID((uint)bcmhdr.attid), bcmhdr.offset / align_size,
+                                     bcmhdr.data_size / (uint32)align_size, SYNCED)));
             }
         }
         first++;
@@ -1051,7 +1000,7 @@ static void ClearBCMStatus(uint32 first, uint32 end)
 /*
  * Invaild the dropnode relfilenode block in the bcm element array
  */
-static void BCMArrayDropBlock(uint32 first, uint32 end, const RelFileNode& dropnode)
+static void BCMArrayDropBlock(uint32 first, uint32 end, const RelFileNode &dropnode)
 {
     while (first < end) {
         if (!t_thrd.dataqueue_cxt.BCMElementArray[first].is_vaild) {
@@ -1063,7 +1012,7 @@ static void BCMArrayDropBlock(uint32 first, uint32 end, const RelFileNode& dropn
         int bucket_id = GETBUCKETID(t_thrd.dataqueue_cxt.BCMElementArray[first].attid);
         RelFileNodeCopy(tmp_node, t_thrd.dataqueue_cxt.BCMElementArray[first].rnode, bucket_id);
 
-        if (RelFileNodeEquals(dropnode, tmp_node))
+        if (BucketRelFileNodeEquals(dropnode, tmp_node))
             t_thrd.dataqueue_cxt.BCMElementArray[first].is_vaild = false;
 
         first++;
@@ -1074,7 +1023,7 @@ static void BCMArrayDropBlock(uint32 first, uint32 end, const RelFileNode& dropn
  * Drop all invaild dropnode block at bcm element array.
  * First drop the first half part, then drop the end half part.
  */
-void BCMArrayDropAllBlocks(const RelFileNode& dropnode)
+void BCMArrayDropAllBlocks(const RelFileNode &dropnode)
 {
     BCMArrayDropBlock(0, t_thrd.dataqueue_cxt.BCMElementArrayIndex1, dropnode);
     BCMArrayDropBlock(BCMElementArrayLenHalf, t_thrd.dataqueue_cxt.BCMElementArrayIndex2, dropnode);
@@ -1089,18 +1038,24 @@ void BCMArrayDropAllBlocks(const RelFileNode& dropnode)
  * @Param[IN] rel: relation for CU data replication
  * @See also:
  */
-void CStoreCUReplication(
-    _in_ Relation rel, _in_ int attrId, _in_ char* cuData, _in_ int cuSize, _in_ uint64 cuFileOffset)
+void CStoreCUReplication(_in_ Relation rel, _in_ int attrId, _in_ char *cuData, _in_ int cuSize,
+                         _in_ uint64 cuFileOffset)
 {
     if (RelationNeedsWAL(rel)) {
         /* one primary muti standby and enable_mix_replication is off need reocord cu xlog. */
-        if (IS_DN_MULTI_STANDYS_MODE() && !g_instance.attr.attr_storage.enable_mix_replication) {
+        if ((IS_DN_MULTI_STANDYS_MODE() && !g_instance.attr.attr_storage.enable_mix_replication)) {
             log_logical_newcu(&rel->rd_node, MAIN_FORKNUM, attrId, cuFileOffset, cuSize, cuData);
         } else {
-            log_logical_newcu(&rel->rd_node, MAIN_FORKNUM, attrId, cuFileOffset, cuSize, NULL);
-            if (!g_instance.attr.attr_storage.enable_mix_replication)
-                /* Push CU to replicate queue */
-                PushCUToDataQueue(rel, attrId, cuData, cuFileOffset, cuSize, true);
+            if (g_instance.attr.attr_common.enable_tsdb && RelationIsTsStore(rel)) {
+                /* timeseries table use xlog to sync data */
+                log_logical_newcu(&rel->rd_node, MAIN_FORKNUM, attrId, cuFileOffset, cuSize, cuData);
+            } else {
+                log_logical_newcu(&rel->rd_node, MAIN_FORKNUM, attrId, cuFileOffset, cuSize, NULL);
+                if (!g_instance.attr.attr_storage.enable_mix_replication) {
+                    /* Push CU to replicate queue */
+                    PushCUToDataQueue(rel, attrId, cuData, cuFileOffset, cuSize, true);
+                }
+            }
         }
     }
 
@@ -1118,8 +1073,8 @@ static void HeapSyncHashCreate(void)
         ctl.keysize = sizeof(heap_sync_rel_key);
         ctl.entrysize = sizeof(heap_sync_rel);
         ctl.hash = tag_hash;
-        t_thrd.dataqueue_cxt.heap_sync_rel_tab =
-            hash_create("heap sync rel table", 100, &ctl, HASH_ELEM | HASH_FUNCTION);
+        t_thrd.dataqueue_cxt.heap_sync_rel_tab = hash_create("heap sync rel table", 100, &ctl,
+                                                             HASH_ELEM | HASH_FUNCTION);
     } else
         return;
 }
@@ -1135,18 +1090,18 @@ void HeapSyncHashSearch(Oid rd_id, HASHACTION action)
     if (t_thrd.dataqueue_cxt.heap_sync_rel_tab == NULL)
         HeapSyncHashCreate();
 
-    hash_search(t_thrd.dataqueue_cxt.heap_sync_rel_tab, (void*)&key, action, NULL);
+    hash_search(t_thrd.dataqueue_cxt.heap_sync_rel_tab, (void *)&key, action, NULL);
 }
 
 void AtAbort_RelationSync(void)
 {
     HASH_SEQ_STATUS status;
-    heap_sync_rel* hentry = NULL;
+    heap_sync_rel *hentry = NULL;
     Relation rel;
 
     if (t_thrd.dataqueue_cxt.heap_sync_rel_tab != NULL) {
         hash_seq_init(&status, t_thrd.dataqueue_cxt.heap_sync_rel_tab);
-        while ((hentry = (heap_sync_rel*)hash_seq_search(&status)) != NULL) {
+        while ((hentry = (heap_sync_rel *)hash_seq_search(&status)) != NULL) {
             rel = relation_open(hentry->key.rd_id, NoLock);
             /*
              * Here we don't try to lock related partition, partition would not be deleted during aborting
@@ -1162,7 +1117,7 @@ void AtAbort_RelationSync(void)
             heap_sync(rel, NoLock);
             relation_close(rel, NoLock);
 
-            hash_search(t_thrd.dataqueue_cxt.heap_sync_rel_tab, (void*)&hentry->key, HASH_REMOVE, NULL);
+            hash_search(t_thrd.dataqueue_cxt.heap_sync_rel_tab, (void *)&hentry->key, HASH_REMOVE, NULL);
         }
     }
 }
@@ -1172,7 +1127,7 @@ void AtCommit_RelationSync(void)
     if (t_thrd.dataqueue_cxt.heap_sync_rel_tab != NULL &&
         hash_get_num_entries(t_thrd.dataqueue_cxt.heap_sync_rel_tab) > 0) {
         ereport(PANIC, (errmsg("heap sync hash table not cleaned, num of entries:%ld",
-            hash_get_num_entries(t_thrd.dataqueue_cxt.heap_sync_rel_tab))));
+                               hash_get_num_entries(t_thrd.dataqueue_cxt.heap_sync_rel_tab))));
     }
 }
 
@@ -1181,7 +1136,7 @@ void PallocBCMBCMElementArray(void)
     if (t_thrd.dataqueue_cxt.BCMElementArray == NULL) {
         MemoryContext oldcxt = NULL;
 
-        oldcxt = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+        oldcxt = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
         t_thrd.dataqueue_cxt.BCMElementArray = (BCMElement)palloc0(BCMElementArrayLen * sizeof(BCMElementData));
         MemoryContextSwitchTo(oldcxt);
     }

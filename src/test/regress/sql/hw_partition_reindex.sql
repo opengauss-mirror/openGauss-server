@@ -65,11 +65,11 @@ insert into partition_reindex_table3 values (generate_series(1,1000), generate_s
 
 analyze partition_reindex_table3;
 select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesgtzero,i.indisunique, i.indisvalid, i.indcheckxmin, i.indisready from pg_index i, pg_class c where c.relname = 'partition_reindex_table3_ind1' and c.oid = i.indexrelid;
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998 ;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998 ;
 select * from partition_reindex_table3 where c1 = 998 order by 1;
 reindex index partition_reindex_table3_ind1;
 select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesgtzero,i.indisunique, i.indisvalid, i.indcheckxmin, i.indisready from pg_index i, pg_class c where c.relname = 'partition_reindex_table3_ind1' and c.oid = i.indexrelid;
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998;
 --the plan before reindex and after reindex should be same
 select * from partition_reindex_table3 where c1 = 998 order by 1;
 
@@ -78,11 +78,11 @@ select * from partition_reindex_table3 where c1 = 998 order by 1;
 update partition_reindex_table3 set c1 = 1000-c1 ;
 analyze partition_reindex_table3;
 select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesgtzero,i.indisunique, i.indisvalid, i.indcheckxmin, i.indisready from pg_index i, pg_class c where c.relname = 'partition_reindex_table3_ind1' and c.oid = i.indexrelid;
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998 ;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998 ;
 select * from partition_reindex_table3 where c1 = 998 order by 1;
 reindex index partition_reindex_table3_ind1;
 select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesgtzero,i.indisunique, i.indisvalid, i.indcheckxmin, i.indisready from pg_index i, pg_class c where c.relname = 'partition_reindex_table3_ind1' and c.oid = i.indexrelid;
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998;
 --the plan before reindex and after reindex should be same
 select * from partition_reindex_table3 where c1 = 998 order by 1;
 
@@ -90,11 +90,11 @@ select * from partition_reindex_table3 where c1 = 998 order by 1;
 --reindex table   cross test with update / truncate
 analyze partition_reindex_table3;
 select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesgtzero,i.indisunique, i.indisvalid, i.indcheckxmin, i.indisready from pg_index i, pg_class c where c.relname = 'partition_reindex_table3_ind1' and c.oid = i.indexrelid;
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998 ;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998 ;
 select * from partition_reindex_table3 where c1 = 998 order by 1;
 reindex table partition_reindex_table3;
 select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesgtzero,i.indisunique, i.indisvalid, i.indcheckxmin, i.indisready from pg_index i, pg_class c where c.relname = 'partition_reindex_table3_ind1' and c.oid = i.indexrelid;
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998;
 --the plan before reindex and after reindex should be same
 select * from partition_reindex_table3 where c1 = 998 order by 1;
 
@@ -103,11 +103,11 @@ truncate table partition_reindex_table3;
 insert into partition_reindex_table3 values (generate_series(1,1000), generate_series(1,1000), generate_series(1,1000));
 analyze partition_reindex_table3;
 select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesgtzero,i.indisunique, i.indisvalid, i.indcheckxmin, i.indisready from pg_index i, pg_class c where c.relname = 'partition_reindex_table3_ind1' and c.oid = i.indexrelid;
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998 ;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998 ;
 select * from partition_reindex_table3 where c1 = 998 order by 1;
 reindex table partition_reindex_table3;
 select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesgtzero,i.indisunique, i.indisvalid, i.indcheckxmin, i.indisready from pg_index i, pg_class c where c.relname = 'partition_reindex_table3_ind1' and c.oid = i.indexrelid;
-explain (costs off, nodes off) select * from partition_reindex_table3 where c1 = 998;
+explain (costs off) select * from partition_reindex_table3 where c1 = 998;
 --the plan before reindex and after reindex should be same
 select * from partition_reindex_table3 where c1 = 998 order by 1;
 

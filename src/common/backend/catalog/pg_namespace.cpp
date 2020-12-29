@@ -76,6 +76,7 @@ Oid NamespaceCreate(const char* nspName, Oid ownerId, bool isTemp)
         values[Anum_pg_namespace_nsptimeline - 1] = 0; /* the controlfile_timeline is at least 1, so 0 is invalid */
     nulls[Anum_pg_namespace_nspacl - 1] = true;
 
+    values[Anum_pg_namespace_in_redistribution - 1] = 'n';
     nspdesc = heap_open(NamespaceRelationId, RowExclusiveLock);
     tupDesc = nspdesc->rd_att;
 

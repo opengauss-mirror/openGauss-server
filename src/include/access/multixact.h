@@ -3,6 +3,7 @@
  *
  * PostgreSQL multi-transaction-log manager
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -37,7 +38,6 @@
 
 #define XLOG_MULTIXACT_MASK 0x70
 #define XLOG_MULTIXACT_INT64_PAGENO 0x80
-
 
 
 typedef struct xl_multixact_create {

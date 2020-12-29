@@ -4,7 +4,7 @@ SET CURRENT_SCHEMA TO test_insert_update_002;
 
 -- SET enable_upsert_to_merge=ON to test the upsert implemented by merge,
 -- real upsert will be tested in specialized case.
-SET enable_upsert_to_merge TO ON;
+-- SET enable_upsert_to_merge TO ON;
 
 -- test t1 with no index
 CREATE TABLE t1 (

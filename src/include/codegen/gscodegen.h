@@ -40,6 +40,8 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsX86.h"
+#include "llvm/IR/IntrinsicsAArch64.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -146,6 +148,12 @@
 /* position of elements that needed in atom structure */
 #define pos_atom_data 0
 #define pos_atom_nullflag 1
+
+const int llvm_prefetch = 217;
+const int llvm_sadd_with_overflow = 229;
+const int llvm_smul_with_overflow = 236;
+const int llvm_ssub_with_overflow = 241;
+
 
 /*
  * Declare related LLVM classes to avoid namespace pollution.
@@ -640,7 +648,8 @@ private:
 /* its function proto is: i32 @llvm.aarch64.crc32cb(i32 %cur, i32 %bits) */
 #define llvm_crc32_32_8(res, current, next)                                                              \
     do {                                                                                                 \
-        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::aarch64_crc32cb); \
+        llvm::Intrinsic::ID id = (unsigned)llvm::Intrinsic::aarch64_crc32cb;                             \
+        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, id);                               \
         if (fn_crc == NULL) {                                                                            \
             ereport(ERROR,                                                                               \
                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),                                        \
@@ -654,7 +663,8 @@ private:
 /* its function proto is: i32 @llvm.aarch64.crc32ch(i32 %cur, i32 %bits) */
 #define llvm_crc32_32_16(res, current, next)                                                             \
     do {                                                                                                 \
-        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::aarch64_crc32ch); \
+        llvm::Intrinsic::ID id = (unsigned)llvm::Intrinsic::aarch64_crc32ch;                             \
+        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, id);                               \
         if (fn_crc == NULL) {                                                                            \
             ereport(ERROR,                                                                               \
                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),                                        \
@@ -668,7 +678,8 @@ private:
 /* its function proto is: i32 @llvm.aarch64.crc32cw(i32 %cur, i32 %next) */
 #define llvm_crc32_32_32(res, current, next)                                                             \
     do {                                                                                                 \
-        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::aarch64_crc32cw); \
+        llvm::Intrinsic::ID id = (unsigned)llvm::Intrinsic::aarch64_crc32cw;                             \
+        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, id);                               \
         if (fn_crc == NULL) {                                                                            \
             ereport(ERROR,                                                                               \
                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),                                        \
@@ -681,7 +692,8 @@ private:
 /* its function proto is: i32 @llvm.aarch64.crc32cx(i32 %cur, i64 %next) */
 #define llvm_crc32_32_64(res, current, next)                                                             \
     do {                                                                                                 \
-        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::aarch64_crc32cx); \
+        llvm::Intrinsic::ID id = (unsigned)llvm::Intrinsic::aarch64_crc32cx;                             \
+        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, id);                               \
         if (fn_crc == NULL) {                                                                            \
             ereport(ERROR,                                                                               \
                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),                                        \
@@ -696,7 +708,8 @@ private:
 /* its function proto is: i32 @llvm.x86.sse42.crc32.32.8(i32 %a, i8 %b) */
 #define llvm_crc32_32_8(res, current, next)                                                                   \
     do {                                                                                                      \
-        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::x86_sse42_crc32_32_8); \
+        llvm::Intrinsic::ID id = (unsigned)llvm::Intrinsic::x86_sse42_crc32_32_8;                             \
+        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, id);                                    \
         if (fn_crc == NULL) {                                                                                 \
             ereport(ERROR,                                                                                    \
                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),                                             \
@@ -709,7 +722,8 @@ private:
 /* its function proto is: i32 @llvm.x86.sse42.crc32.32.16(i32 %a, i16 %b) */
 #define llvm_crc32_32_16(res, current, next)                                                                   \
     do {                                                                                                       \
-        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::x86_sse42_crc32_32_16); \
+        llvm::Intrinsic::ID id = (unsigned)llvm::Intrinsic::x86_sse42_crc32_32_16;                             \
+        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, id);                                     \
         if (fn_crc == NULL) {                                                                                  \
             ereport(ERROR,                                                                                     \
                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),                                              \
@@ -722,7 +736,8 @@ private:
 /* its function proto is: i32 @llvm.x86.sse42.crc32.32.32(i32 %a, i32 %b) */
 #define llvm_crc32_32_32(res, current, next)                                                                   \
     do {                                                                                                       \
-        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::x86_sse42_crc32_32_32); \
+        llvm::Intrinsic::ID id = (unsigned)llvm::Intrinsic::x86_sse42_crc32_32_32;                             \
+        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, id);                                     \
         if (fn_crc == NULL) {                                                                                  \
             ereport(ERROR,                                                                                     \
                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),                                              \
@@ -739,7 +754,8 @@ private:
  */
 #define llvm_crc32_32_64(res, current, next)                                                                   \
     do {                                                                                                       \
-        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, llvm::Intrinsic::x86_sse42_crc32_64_64); \
+        llvm::Intrinsic::ID id = (unsigned)llvm::Intrinsic::x86_sse42_crc32_64_64;                             \
+        llvm::Function* fn_crc = llvm::Intrinsic::getDeclaration(mod, id);                                     \
         if (fn_crc == NULL) {                                                                                  \
             ereport(ERROR,                                                                                     \
                 (errcode(ERRCODE_LOAD_INTRINSIC_FUNCTION_FAILED),                                              \

@@ -46,4 +46,5 @@ extern List* make_agg_var_list(PlannerInfo* root, List* tlist, List** duplicate_
 extern void get_tlist_group_vars_split(Query* parse, List* tlist, List** group_cols, List** non_group_cols);
 extern List* get_dependency_var_list(Query* parse, List* group_cols, List* non_group_vars);
 extern bool var_from_dependency_rel(Query* parse, Var* var, List* dep_oids);
+extern bool var_from_sublink_pulluped(Query *parse, Var *var);
 #endif /* TLIST_H */

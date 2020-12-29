@@ -105,19 +105,19 @@ typedef struct {
  * prototypes for functions in latch.c
  */
 extern void InitializeLatchSupport(void);
-extern void InitLatch(volatile Latch *latch);
-extern void InitSharedLatch(volatile Latch *latch);
-extern void OwnLatch(volatile Latch *latch);
-extern void DisownLatch(volatile Latch *latch);
-extern int WaitLatch(volatile Latch *latch, int wakeEvents, long timeout);
-extern int WaitLatchOrSocket(volatile Latch *latch, int wakeEvents, pgsocket sock, long timeout);
-extern void SetLatch(volatile Latch *latch);
-extern void ResetLatch(volatile Latch *latch);
+extern void InitLatch(volatile Latch* latch);
+extern void InitSharedLatch(volatile Latch* latch);
+extern void OwnLatch(volatile Latch* latch);
+extern void DisownLatch(volatile Latch* latch);
+extern int WaitLatch(volatile Latch* latch, int wakeEvents, long timeout);
+extern int WaitLatchOrSocket(volatile Latch* latch, int wakeEvents, pgsocket sock, long timeout);
+extern void SetLatch(volatile Latch* latch);
+extern void ResetLatch(volatile Latch* latch);
 
 extern void ClosePipesAtThreadExit(void);
 
 /* beware of memory ordering issues if you use this macro! */
-#define TestLatch(latch) (((volatile Latch *)(latch))->is_set)
+#define TestLatch(latch) (((volatile Latch*)(latch))->is_set)
 
 /*
  * Unix implementation uses SIGUSR1 for inter-process signaling.

@@ -4,6 +4,7 @@
  *	  prototypes for functions in backend/catalog/namespace.c
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -16,7 +17,7 @@
 
 #include "access/htup.h"
 #include "nodes/primnodes.h"
-#include "storage/lock.h"
+#include "storage/lock/lock.h"
 #include "lib/stringinfo.h"
 
 
@@ -42,6 +43,12 @@ typedef struct _FuncCandidateList
 
 #define MinSizeOfFuncCandidateList offsetof(struct _FuncCandidateList, args)
 
+typedef struct _KeyCandidateList {
+    struct _KeyCandidateList *next;
+    int pathpos;      /* for internal use of namespace lookup */
+    Oid oid;          /* the function or operator's OID */
+} *KeyCandidateList; /* VARIABLE LENGTH STRUCT */
+
 #define SEARCH_PATH_GUC_NAME "search_path"
 #define CURRENT_SCHEMA_GUC_NAME "current_schema"
 #define SCHEMA_TEMP_NAME "pg_temp"
@@ -55,6 +62,7 @@ typedef struct OverrideSearchPath
 	List	   *schemas;		/* OIDs of explicitly named schemas */
 	bool		addCatalog;		/* implicitly prepend pg_catalog? */
 	bool		addTemp;		/* implicitly prepend temp schema? */
+	bool 		addUser;		/* implicitly postfix $user */
 } OverrideSearchPath;
 
 /* Override requests are remembered in a stack of OverrideStackEntry structs */
@@ -76,8 +84,17 @@ typedef void (*RangeVarGetRelidCallback) (const RangeVar *relation, Oid relId,
 #define isTempNamespaceName(name) \
 	(strncasecmp((name), "pg_temp_", 8) == 0)
 
+#define isTempNamespaceNameWithQuote(name) \
+    (strncasecmp((name), "\"pg_temp_", 9) == 0)
+
 #define isToastTempNamespaceName(name) \
 	(strncasecmp((name), "pg_toast_temp_", 14) == 0)
+
+#define IS_TEMP_NAMESPACE(name) \
+    (strncasecmp((name), "pg_temp", 7) == 0)
+
+#define IS_CATALOG_NAMESPACE(name) \
+    (strncasecmp((name), "pg_catalog", 10) == 0)
 
 extern Oid RangeVarGetRelidExtended(const RangeVar *relation,
 						 LOCKMODE lockmode, bool missing_ok, bool nowait, bool target_is_partition, 
@@ -91,12 +108,16 @@ extern Oid RangeVarGetAndCheckCreationNamespace(RangeVar *newRelation,
 									 LOCKMODE lockmode,
 									 Oid *existing_relation_id);
 extern void RangeVarAdjustRelationPersistence(RangeVar *newRelation, Oid nspid);
-extern Oid	RelnameGetRelid(const char *relname);
-extern char* RelnameGetRelidExtended(const char *relname, Oid *relOid, Oid *refSynOid = NULL);
+extern Oid RelnameGetRelid(const char *relname, StringInfo detailInfo = NULL);
+extern char* RelnameGetRelidExtended(const char *relname, Oid *relOid, Oid *refSynOid = NULL,
+    StringInfo detailInfo = NULL);
 extern bool RelationIsVisible(Oid relid);
 
 extern Oid	TypenameGetTypid(const char *typname);
 extern bool TypeIsVisible(Oid typid);
+
+extern void SetTempFromSearchPath(List* namelist);
+
 
 extern FuncCandidateList FuncnameGetCandidates(List *names,
 					  int nargs, List *argnames,
@@ -141,8 +162,8 @@ extern void DeconstructQualifiedName(const List *names,
 extern Oid	LookupNamespaceNoError(const char *nspname);
 extern Oid	LookupExplicitNamespace(const char *nspname);
 extern Oid	get_namespace_oid(const char *nspname, bool missing_ok);
-extern Oid	SchemaNameGetSchemaOid(const char * schemaname);
-extern Oid GetOidBySchemaName();
+extern Oid	SchemaNameGetSchemaOid(const char *schemaname, bool missing_ok = false);
+extern Oid GetOidBySchemaName(bool missing_ok = false);
 extern Oid	LookupCreationNamespace(const char *nspname);
 extern void CheckSetNamespace(Oid oldNspOid, Oid nspOid, Oid classid,
 				  Oid objid);
@@ -157,8 +178,6 @@ extern bool isTempOrToastNamespace(Oid namespaceId);
 extern bool isAnyTempNamespace(Oid namespaceId);
 extern bool isOtherTempNamespace(Oid namespaceId);
 extern Oid	GetTempToastNamespace(void);
-extern void GetTempNamespaceState(Oid *tempNamespaceId, Oid *tempToastNamespaceId);
-extern void SetTempNamespaceState(Oid tempNamespaceId, Oid tempToastNamespaceId);
 extern void ResetTempTableNamespace(void);
 
 extern OverrideSearchPath *GetOverrideSearchPath(MemoryContext context);
@@ -175,7 +194,7 @@ extern Oid	FindDefaultConversionProc(int4 for_encoding, int4 to_encoding);
 
 /* initialization & transaction cleanup code */
 extern void InitializeSearchPath(void);
-extern void AtEOXact_Namespace(bool isCommit, bool parallel);
+extern void AtEOXact_Namespace(bool isCommit);
 extern void AtEOSubXact_Namespace(bool isCommit, SubTransactionId mySubid,
 					  SubTransactionId parentSubid);
 
@@ -198,4 +217,6 @@ extern bool validateTempNamespace(Oid tmepNspId);
 extern bool IsPackageFunction(List* funcname);
 
 extern void recomputeNamespacePath(StringInfo error_info = NULL);
+extern KeyCandidateList GlobalSettingGetCandidates(List *names, bool);
+extern KeyCandidateList CeknameGetCandidates(List *names, bool);
 #endif   /* NAMESPACE_H */

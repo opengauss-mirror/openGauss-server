@@ -1,4 +1,4 @@
-src/gausskernel/storage/access/gin/README
+src/backend/access/gin/README
 
 Gin for PostgreSQL
 ==================

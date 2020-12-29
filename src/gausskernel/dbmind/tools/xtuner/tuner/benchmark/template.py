@@ -20,5 +20,5 @@ path = ''
 cmd = ''
 
 
-def run(remote_server, local_host):
+def run(remote_server, local_host) -> float:
     return 0

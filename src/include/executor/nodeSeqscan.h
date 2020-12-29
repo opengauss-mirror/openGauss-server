@@ -14,7 +14,6 @@
 #ifndef NODESEQSCAN_H
 #define NODESEQSCAN_H
 
-#include "access/parallel.h"
 #include "nodes/execnodes.h"
 
 extern SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags);
@@ -23,13 +22,6 @@ extern void ExecEndSeqScan(SeqScanState* node);
 extern void ExecSeqMarkPos(SeqScanState* node);
 extern void ExecSeqRestrPos(SeqScanState* node);
 extern void ExecReScanSeqScan(SeqScanState* node);
-
 extern void InitScanRelation(SeqScanState* node, EState* estate);
-
-/* parallel scan support */
-extern void ExecSeqScanEstimate(SeqScanState *node, ParallelContext *pcxt);
-extern void ExecSeqScanInitializeDSM(SeqScanState *node, ParallelContext *pcxt, int nodeid);
-extern void ExecSeqScanReInitializeDSM(SeqScanState *node, ParallelContext *pcxt);
-extern void ExecSeqScanInitializeWorker(SeqScanState *node, void *context);
 
 #endif /* NODESEQSCAN_H */

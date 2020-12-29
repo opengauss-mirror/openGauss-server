@@ -58,9 +58,9 @@ typedef struct DomainIOData {
 /*
  * domain_state_setup - initialize the cache for a new domain type.
  */
-static void domain_state_setup(DomainIOData* my_extra, Oid domain_type, bool binary, MemoryContext mcxt)
+static void domain_state_setup(DomainIOData* my_extra, Oid domainType, bool binary, MemoryContext mcxt)
 {
-    Oid base_type;
+    Oid baseType;
     MemoryContext oldcontext;
 
     /* Mark cache invalid */
@@ -68,31 +68,29 @@ static void domain_state_setup(DomainIOData* my_extra, Oid domain_type, bool bin
 
     /* Find out the base type */
     my_extra->typtypmod = -1;
-    base_type = getBaseTypeAndTypmod(domain_type, &my_extra->typtypmod);
-    if (base_type == domain_type) {
-        ereport(ERROR,
-                (errcode(ERRCODE_DATATYPE_MISMATCH),
-                 errmsg("type %s is not a domain", format_type_be(domain_type))));
-    }
+    baseType = getBaseTypeAndTypmod(domainType, &my_extra->typtypmod);
+    if (baseType == domainType)
+        ereport(
+            ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("type %s is not a domain", format_type_be(domainType))));
+
     /* Look up underlying I/O function */
-    if (binary) {
-        getTypeBinaryInputInfo(base_type, &my_extra->typiofunc, &my_extra->typioparam);
-    } else {
-        getTypeInputInfo(base_type, &my_extra->typiofunc, &my_extra->typioparam);
-    }
+    if (binary)
+        getTypeBinaryInputInfo(baseType, &my_extra->typiofunc, &my_extra->typioparam);
+    else
+        getTypeInputInfo(baseType, &my_extra->typiofunc, &my_extra->typioparam);
     fmgr_info_cxt(my_extra->typiofunc, &my_extra->proc, mcxt);
 
     /* Look up constraints for domain */
     oldcontext = MemoryContextSwitchTo(mcxt);
-    my_extra->constraint_list = GetDomainConstraints(domain_type);
-    (void)MemoryContextSwitchTo(oldcontext);
+    my_extra->constraint_list = GetDomainConstraints(domainType);
+    MemoryContextSwitchTo(oldcontext);
 
     /* We don't make an ExprContext until needed */
     my_extra->econtext = NULL;
     my_extra->mcxt = mcxt;
 
     /* Mark cache valid */
-    my_extra->domain_type = domain_type;
+    my_extra->domain_type = domainType;
 }
 
 /*
@@ -110,15 +108,14 @@ static void domain_check_input(Datum value, bool isnull, DomainIOData* my_extra)
 
         switch (con->constrainttype) {
             case DOM_CONSTRAINT_NOTNULL:
-                if (isnull) {
+                if (isnull)
                     ereport(ERROR,
-                            (errcode(ERRCODE_NOT_NULL_VIOLATION),
-                             errmsg("domain %s does not allow null values", format_type_be(my_extra->domain_type))));
-                }
+                        (errcode(ERRCODE_NOT_NULL_VIOLATION),
+                            errmsg("domain %s does not allow null values", format_type_be(my_extra->domain_type))));
                 break;
             case DOM_CONSTRAINT_CHECK: {
-                Datum con_result;
-                bool con_is_null = false;
+                Datum conResult;
+                bool conIsNull = false;
 
                 /* Make the econtext if we didn't already */
                 if (econtext == NULL) {
@@ -138,15 +135,15 @@ static void domain_check_input(Datum value, bool isnull, DomainIOData* my_extra)
                  */
                 econtext->domainValue_datum = value;
                 econtext->domainValue_isNull = isnull;
-                con_result = ExecEvalExprSwitchContext(con->check_expr, econtext, &con_is_null, NULL);
 
-                if (!con_is_null && !DatumGetBool(con_result)) {
+                conResult = ExecEvalExprSwitchContext(con->check_expr, econtext, &conIsNull, NULL);
+
+                if (!conIsNull && !DatumGetBool(conResult))
                     ereport(ERROR,
-                            (errcode(ERRCODE_CHECK_VIOLATION),
-                             errmsg("value for domain %s violates check constraint \"%s\"",
-                                     format_type_be(my_extra->domain_type),
-                                     con->name)));
-                }
+                        (errcode(ERRCODE_CHECK_VIOLATION),
+                            errmsg("value for domain %s violates check constraint \"%s\"",
+                                format_type_be(my_extra->domain_type),
+                                con->name)));
                 break;
             }
             default:
@@ -162,9 +159,8 @@ static void domain_check_input(Datum value, bool isnull, DomainIOData* my_extra)
      * per-tuple memory.  This avoids leaking non-memory resources, if
      * anything in the expression(s) has any.
      */
-    if (econtext != NULL) {
+    if (NULL != econtext)
         ReScanExprContext(econtext);
-    }
 }
 
 /*
@@ -173,7 +169,7 @@ static void domain_check_input(Datum value, bool isnull, DomainIOData* my_extra)
 Datum domain_in(PG_FUNCTION_ARGS)
 {
     char* string = NULL;
-    Oid domain_type;
+    Oid domainType;
     DomainIOData* my_extra = NULL;
     Datum value;
 
@@ -182,15 +178,13 @@ Datum domain_in(PG_FUNCTION_ARGS)
      * typioparam argument should never be null in normal system usage, but it
      * could be null in a manual invocation --- if so, just return null.
      */
-    if (PG_ARGISNULL(0)) {
+    if (PG_ARGISNULL(0))
         string = NULL;
-    } else {
+    else
         string = PG_GETARG_CSTRING(0);
-    }
-    if (PG_ARGISNULL(1)) {
+    if (PG_ARGISNULL(1))
         PG_RETURN_NULL();
-    }
-    domain_type = PG_GETARG_OID(1);
+    domainType = PG_GETARG_OID(1);
 
     /*
      * We arrange to look up the needed info just once per series of calls,
@@ -199,11 +193,10 @@ Datum domain_in(PG_FUNCTION_ARGS)
     my_extra = (DomainIOData*)fcinfo->flinfo->fn_extra;
     if (my_extra == NULL) {
         my_extra = (DomainIOData*)MemoryContextAlloc(fcinfo->flinfo->fn_mcxt, sizeof(DomainIOData));
-        domain_state_setup(my_extra, domain_type, false, fcinfo->flinfo->fn_mcxt);
+        domain_state_setup(my_extra, domainType, false, fcinfo->flinfo->fn_mcxt);
         fcinfo->flinfo->fn_extra = (void*)my_extra;
-    } else if (my_extra->domain_type != domain_type) {
-        domain_state_setup(my_extra, domain_type, false, fcinfo->flinfo->fn_mcxt);
-    }
+    } else if (my_extra->domain_type != domainType)
+        domain_state_setup(my_extra, domainType, false, fcinfo->flinfo->fn_mcxt);
 
     /*
      * Invoke the base type's typinput procedure to convert the data.
@@ -215,11 +208,10 @@ Datum domain_in(PG_FUNCTION_ARGS)
      */
     domain_check_input(value, (string == NULL), my_extra);
 
-    if (string == NULL) {
+    if (string == NULL)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_DATUM(value);
-    }
 }
 
 /*
@@ -228,7 +220,7 @@ Datum domain_in(PG_FUNCTION_ARGS)
 Datum domain_recv(PG_FUNCTION_ARGS)
 {
     StringInfo buf;
-    Oid domain_type;
+    Oid domainType;
     DomainIOData* my_extra = NULL;
     Datum value;
 
@@ -237,15 +229,13 @@ Datum domain_recv(PG_FUNCTION_ARGS)
      * typioparam argument should never be null in normal system usage, but it
      * could be null in a manual invocation --- if so, just return null.
      */
-    if (PG_ARGISNULL(0)) {
+    if (PG_ARGISNULL(0))
         buf = NULL;
-    } else {
+    else
         buf = (StringInfo)PG_GETARG_POINTER(0);
-    }
-    if (PG_ARGISNULL(1)) {
+    if (PG_ARGISNULL(1))
         PG_RETURN_NULL();
-    }
-    domain_type = PG_GETARG_OID(1);
+    domainType = PG_GETARG_OID(1);
 
     /*
      * We arrange to look up the needed info just once per series of calls,
@@ -254,11 +244,10 @@ Datum domain_recv(PG_FUNCTION_ARGS)
     my_extra = (DomainIOData*)fcinfo->flinfo->fn_extra;
     if (my_extra == NULL) {
         my_extra = (DomainIOData*)MemoryContextAlloc(fcinfo->flinfo->fn_mcxt, sizeof(DomainIOData));
-        domain_state_setup(my_extra, domain_type, true, fcinfo->flinfo->fn_mcxt);
+        domain_state_setup(my_extra, domainType, true, fcinfo->flinfo->fn_mcxt);
         fcinfo->flinfo->fn_extra = (void*)my_extra;
-    } else if (my_extra->domain_type != domain_type) {
-        domain_state_setup(my_extra, domain_type, true, fcinfo->flinfo->fn_mcxt);
-    }
+    } else if (my_extra->domain_type != domainType)
+        domain_state_setup(my_extra, domainType, true, fcinfo->flinfo->fn_mcxt);
 
     /*
      * Invoke the base type's typreceive procedure to convert the data.
@@ -270,11 +259,10 @@ Datum domain_recv(PG_FUNCTION_ARGS)
      */
     domain_check_input(value, (buf == NULL), my_extra);
 
-    if (buf == NULL) {
+    if (buf == NULL)
         PG_RETURN_NULL();
-    } else {
+    else
         PG_RETURN_DATUM(value);
-    }
 }
 
 /*
@@ -283,32 +271,29 @@ Datum domain_recv(PG_FUNCTION_ARGS)
  * say, a FmgrInfo structure, or they can be NULL, in which case the
  * setup is repeated for each call.
  */
-void domain_check(Datum value, bool isnull, Oid domain_type, void** extra, MemoryContext mcxt)
+void domain_check(Datum value, bool isnull, Oid domainType, void** extra, MemoryContext mcxt)
 {
     DomainIOData* my_extra = NULL;
 
-    if (mcxt == NULL) {
+    if (mcxt == NULL)
         mcxt = CurrentMemoryContext;
-    }
+
     /*
      * We arrange to look up the needed info just once per series of calls,
      * assuming the domain type doesn't change underneath us.
      */
-    if (extra != NULL) {
+    if (NULL != extra)
         my_extra = (DomainIOData*)*extra;
-    }
     if (my_extra == NULL) {
         my_extra = (DomainIOData*)MemoryContextAlloc(mcxt, sizeof(DomainIOData));
-        domain_state_setup(my_extra, domain_type, true, mcxt);
-        if (extra != NULL) {
+        domain_state_setup(my_extra, domainType, true, mcxt);
+        if (NULL != extra)
             *extra = (void*)my_extra;
-        }
-    } else if (my_extra->domain_type != domain_type) {
-        domain_state_setup(my_extra, domain_type, true, mcxt);
-    }
+    } else if (my_extra->domain_type != domainType)
+        domain_state_setup(my_extra, domainType, true, mcxt);
+
     /*
      * Do the necessary checks to ensure it's a valid domain value.
      */
     domain_check_input(value, isnull, my_extra);
 }
-

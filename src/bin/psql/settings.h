@@ -92,6 +92,7 @@ typedef struct _psqlSettings {
     bool autocommit;
     bool on_error_stop;
     bool quiet;
+    bool enable_client_encryption;
     bool singleline;
     bool singlestep;
     bool maintance;

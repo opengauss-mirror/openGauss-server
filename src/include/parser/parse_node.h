@@ -94,6 +94,7 @@ struct ParseState {
                                             node's fromlist) */
     List* p_relnamespace;                /* current namespace for relations */
     List* p_varnamespace;                /* current namespace for columns */
+    bool  p_lateral_active;              /* p_lateral_only items visible? */
     List* p_ctenamespace;                /* current namespace for common table exprs */
     List* p_future_ctes;                 /* common table exprs not yet in namespace */
     CommonTableExpr* p_parent_cte;       /* this query's containing CTE */
@@ -169,11 +170,21 @@ struct ParseState {
     PlusJoinRTEInfo* p_plusjoin_rte_info; /* The RTE info while processing "(+)" */
 };
 
+/* An element of p_relnamespace or p_varnamespace */
+typedef struct ParseNamespaceItem
+{
+   RangeTblEntry *p_rte;       /* The relation's rangetable entry */
+   bool        p_lateral_only; /* Is only visible to LATERAL expressions? */
+   bool        p_lateral_ok;   /* If so, does join type allow use? */
+} ParseNamespaceItem;
+
 /* Support for parser_errposition_callback function */
 typedef struct ParseCallbackState {
     ParseState* pstate;
     int location;
+#ifndef FRONTEND
     ErrorContextCallback errcontext;
+#endif
 } ParseCallbackState;
 
 extern ParseState* make_parsestate(ParseState* parentParseState);
@@ -184,6 +195,7 @@ extern void setup_parser_errposition_callback(ParseCallbackState* pcbstate, Pars
 extern void cancel_parser_errposition_callback(ParseCallbackState* pcbstate);
 
 extern Var* make_var(ParseState* pstate, RangeTblEntry* rte, int attrno, int location);
+extern Var* ts_make_var(ParseState* pstate, RangeTblEntry* rte, int attrno, int location);
 extern Oid transformArrayType(Oid* arrayType, int32* arrayTypmod);
 extern ArrayRef* transformArraySubscripts(ParseState* pstate, Node* arrayBase, Oid arrayType, Oid elementType,
     int32 arrayTypMod, List* indirection, Node* assignFrom);

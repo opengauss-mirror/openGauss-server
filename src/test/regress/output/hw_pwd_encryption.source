@@ -1,0 +1,84 @@
+--Test CREATE/ALTER USER when password_encryption_type is 2 (sha256, default value from V3R2C00)
+create user user1 with password 'Gauss@123';
+select length(rolpassword) from pg_authid where rolname = 'user1';
+ length 
+--------
+    209
+(1 row)
+
+set role user1 password 'Gauss@123';
+alter user user1 identified by 'Gauss_123' replace 'Gauss@123';
+reset role;
+select length(rolpassword) from pg_authid where rolname = 'user1';
+ length 
+--------
+    209
+(1 row)
+
+--Test CREATE/ALTER USER when password_encryption_type is 1 (sha256 + md5)
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_encryption_type=1" >/dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+create user user2 with password 'Gauss@123';
+NOTICE:  The encrypted password contains MD5 ciphertext, which is not secure.
+select length(rolpassword) from pg_authid where rolname = 'user2';
+ length 
+--------
+    244
+(1 row)
+
+set role user2 password 'Gauss@123';
+reset role;
+select length(rolpassword) from pg_authid where rolname = 'user1';
+ length 
+--------
+    209
+(1 row)
+
+set role user1 password 'Gauss_123';
+alter user user1 identified by 'Gauss_456' replace 'Gauss_123';
+NOTICE:  The encrypted password contains MD5 ciphertext, which is not secure.
+reset role;
+select length(rolpassword) from pg_authid where rolname = 'user1';
+ length 
+--------
+    244
+(1 row)
+
+--Test ALTER USER when password_encryption_type is 2 (sha256)
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "password_encryption_type=2" >/dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select length(rolpassword) from pg_authid where rolname = 'user2';
+ length 
+--------
+    244
+(1 row)
+
+set role user2 password 'Gauss@123';
+alter user user2 identified by 'Gauss_123' replace 'Gauss@123';
+reset role;
+select length(rolpassword) from pg_authid where rolname = 'user2';
+ length 
+--------
+    209
+(1 row)
+
+set session authorization user2 password 'Gauss_123';
+select session_user,current_user;
+ session_user | current_user 
+--------------+--------------
+ user2        | user2
+(1 row)
+
+reset session authorization;
+drop user user1;
+drop user user2;

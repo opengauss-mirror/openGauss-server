@@ -1,0 +1,198 @@
+--create resource pool success.
+select count(*) from pg_total_user_resource_info;
+ count 
+-------
+     1
+(1 row)
+
+CREATE RESOURCE POOL respool_temp_error WITH(control_group='DefaultClass');
+ERROR:  cannot create resource pool with class "DefaultClass", it has been existed in the normal resource pool list
+CREATE RESOURCE POOL respool_temp_default WITH(mem_percent=101);
+ERROR:  mem_percent has to be in the range of 0-100.
+CREATE RESOURCE POOL respool_temp_default WITH(mem_percent=10, mem_percent=20);
+ERROR:  redundant options: "mem_percent"
+CREATE RESOURCE POOL respool_temp_default;
+SELECT * FROM pg_resource_pool order by respool_name;
+     respool_name     | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits | io_priority 
+----------------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+-----------+-------------
+ default_pool         |         100 |           -1 | DefaultClass:Medium |                -1 |       1 | 8GB          |        0 |         0 | None
+ respool_temp_default |           0 |           -1 | DefaultClass:Medium |                10 |       1 | 8GB          |        0 |         0 | None
+(2 rows)
+
+CREATE RESOURCE POOL respool_temp14 WITH(CONTROL_GROUP='class1'); --group resource pool
+CREATE RESOURCE POOL respool_temp15 WITH(control_group='class1:Medium'); --child resource pool
+CREATE RESOURCE POOL respool_temp16 WITH(control_group='class1:High', mem_percent=20,active_statements=5); --child resource pool
+CREATE RESOURCE POOL respool_temp17 WITH(control_group='class1:Medium', mem_percent=20,active_statements=5); --error case
+CREATE RESOURCE POOL respool_temp18 WITH(control_group='class1:Low', mem_percent=41,active_statements=5); --memory out of range
+ERROR:  memory percent value is beyond the available range.
+CREATE RESOURCE POOL respool_temp18 WITH(control_group='class2'); --another group resource pool
+CREATE RESOURCE POOL respool_temp19 WITH(control_group='class2:Medium', mem_percent=0); --memory cannot be 0
+ERROR:  mem_percent of two-layer resource pools cannot be 0
+CREATE RESOURCE POOL respool_temp19 WITH(control_group='class2:Medium');
+CREATE RESOURCE POOL respool_temp20 WITH(parent='');
+ERROR:  parent is not supported currently!
+SELECT count(*) FROM pg_resource_pool where parentid=0;
+ count 
+-------
+     4
+(1 row)
+
+SELECT count(*) FROM pg_resource_pool;
+ count 
+-------
+     8
+(1 row)
+
+CREATE RESOURCE POOL respool_temp21 with(active_statements=20, active_statements=20);
+ERROR:  redundant options: "active_statements"
+CREATE RESOURCE POOL respool_temp21 with(active_statements=-2);
+ERROR:  active_statements value can't be -2.
+CREATE RESOURCE POOL respool_temp21 with(max_dop=20, max_dop=20);
+ERROR:  redundant options: "max_dop"
+CREATE RESOURCE POOL respool_temp21 with(mem_percent=20, memory_limit='2GB', active_statements=-1);
+WARNING:  memory_limit is not available currently!
+NOTICE:  Only mem_percent is valid when specify both mem_percent and memory_limit. 
+CREATE RESOURCE POOL respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz with(control_group='class2:High');
+NOTICE:  identifier "respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz" will be truncated to "respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvw"
+--alter resource pool 
+ALTER RESOURCE POOL respool_temp_default WITH(control_group='class2'); --error case
+ERROR:  cannot alter normal resource pool to the two-layer resource pool list.
+ALTER RESOURCE POOL respool_temp14 WITH(mem_percent=90);
+ERROR:  memory percent value is beyond the available range.
+ALTER RESOURCE POOL respool_temp14 WITH(control_group='class2:Low');
+ERROR:  cannot alter control_group between different groups or alter to a different layer. 
+ALTER RESOURCE POOL respool_temp16 with(control_group='class1:Low', mem_percent=20); --success
+ALTER RESOURCE POOL respool_temp16 WITH(control_group='class1:Medium');
+ALTER RESOURCE POOL respool_temp16 WITH(mem_percent=0);
+ERROR:  mem_percent of two-layer resource pool cannot be altered to 0.
+SELECT count(*) from gs_wlm_resource_pool;
+ count 
+-------
+    10
+(1 row)
+
+--create role
+--success
+CREATE USER temp_role1 resource pool 'respool_temp14' password 'Gauss_234' perm space '2G';
+CREATE USER temp_role2 resource pool 'RESPOOL_temp16' password 'Gauss_234' USER GROUP 'TEMP_ROLE1';
+CREATE USER temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz resource pool 'respool_temp18' password 'Gauss_234';
+NOTICE:  identifier "temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz" will be truncated to "temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyza"
+create user temp_role3 resource pool 'respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz' password 'Gauss_234' user group 'temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz';
+NOTICE:  resource pool name is too long, it will be trancated to "respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvw"
+NOTICE:  parent user name is too long, it will be trancated to "temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyza"
+DROP USER temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyza;
+--?NOTICE:  all child roles of .* are dropped simultaneously.
+CREATE USER temp_role4 password 'Gauss_234';
+CREATE USER temp_role5 resource pool 'respool_temp_default' password 'Gauss_234';
+CREATE USER temp_role resource pool 'respool_temp_default' password 'Gauss_234' nologin;
+--error cases
+CREATE USER temp_role resource pool 'respool_temp14' password 'Gauss_234';
+--?ERROR:  resource pool .* cannot be used, for it is used by user .*
+CREATE USER temp_role resource pool 'respool_error' password 'Gauss_234';
+ERROR:  Resource Pool "respool_error": object not defined.
+CREATE USER temp_role resource pool 'respool_temp14' password 'Gauss_234' resource pool 'respool_temp14';
+ERROR:  conflicting or redundant option: "resource pool"
+CREATE USER temp_role user group default resource pool 'RESPOOL_temp16' password 'Gauss_234' USER GROUP 'TEMP_ROLE1';
+ERROR:  conflicting or redundant option: "user group"
+CREATE USER temp_role resource pool 'RESPOOL_temp16' password 'Gauss_234' USER GROUP 'TEMP_ROLE1' USER GROUP 'TEMP_ROLE1';
+ERROR:  conflicting or redundant option: "user group"
+CREATE USER temp_role user group 'temp_role' password 'Gauss_234';
+ERROR:  parent cannot be itself.
+CREATE USER temp_role user group 'temp_error' password 'Gauss_234';
+ERROR:  role "temp_error" does not exist
+CREATE USER temp_role user group 'temp_role4' password 'Gauss_234';
+--?ERROR:  user .* cannot be used as user group, for it uses non-parent resource pool default_pool
+CREATE USER temp_role user group 'TEMP_ROLE1' password 'Gauss_234';
+--?ERROR:  please specify resource pool when create or alter user with user group .*
+CREATE USER temp_role resource pool 'RESPOOL_temp16' password 'Gauss@123';
+--?ERROR:  please specify user group when create or alter user with child resource pool .*
+CREATE USER temp_role resource pool 'RESPOOL_temp1' password 'Gauss@123';
+ERROR:  Resource Pool "respool_temp1": object not defined.
+CREATE USER temp_role resource pool 'respool_temp18' USER GROUP 'TEMP_ROLE1' password 'Gauss_234';
+--?ERROR:  non-child resource pool .* cannot be used for child user
+CREATE USER temp_role resource pool 'respool_temp19' USER GROUP 'TEMP_ROLE1' password 'Gauss_234';
+ERROR:  parent user's resource pool(control_group is "class1") and resource pool specified(control_group is "class2:Medium") don't match
+--alter role success
+ALTER USER temp_role2 resource pool 'respool_temp15' USER GROUP 'temp_role1';
+CREATE USER temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz resource pool 'respool_temp18' password 'Gauss_234';
+NOTICE:  identifier "temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz" will be truncated to "temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyza"
+ALTER USER temp_role2 resource pool 'respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz' user group 'temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz';
+NOTICE:  resource pool name is too long, it will be trancated to "respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvw"
+NOTICE:  parent user name is too long, it will be trancated to "temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyza"
+DROP USER temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz;
+NOTICE:  identifier "temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz" will be truncated to "temp_role2abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyza"
+--?NOTICE:  all child roles of .* are dropped simultaneously.
+DROP RESOURCE POOL respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz;
+NOTICE:  identifier "respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz" will be truncated to "respool_temp22abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvw"
+ALTER USER temp_role4 user group 'temp_role1' resource pool 'respool_temp15';
+ALTER USER temp_role5 user group 'temp_role1' resource pool 'respool_temp15';
+ALTER USER temp_role5 resource pool 'respool_temp_default' user group default;
+ALTER USER temp_role5 nologin;
+ALTER USER temp_role4 nologin;
+--alter role error cases
+ALTER USER temp_role4 resource pool 'respool_temp15' USER GROUP 'temp_role1' resource pool 'respool_temp15';
+ERROR:  conflicting or redundant option: "resource pool"
+ALTER USER temp_role4 resource pool 'respool_temp15' USER GROUP 'temp_role1' USER GROUP 'temp_role1';
+ERROR:  conflicting or redundant option: "user group"
+ALTER USER temp_role4 resource pool 'respool_temp15' USER GROUP 'temp_role1' USER GROUP DEFAULT;
+ERROR:  conflicting or redundant option: "user group default"
+ALTER USER temp_role4 USER GROUP 'temp_role4';
+ERROR:  parent cannot be itself.
+ALTER USER temp_role4 USER GROUP 'role_error';
+ERROR:  role "role_error" does not exist
+ALTER USER temp_role4 resource pool 'respool_error';
+ERROR:  Resource Pool "respool_error": object not defined.
+ALTER USER temp_role4 user group default;
+ERROR:  please specify resource pool when alter user with "user group default"
+ALTER USER temp_role1 resource pool 'respool_temp_default';
+--?ERROR:  user .* has child users, cannot alter it with any operation
+ALTER USER temp_role4 resource pool 'respool_temp_default';
+--?ERROR:  please specify "user group default" when create or alter user with non-child resource pool .*.
+ALTER USER temp_role4 sysadmin;
+ERROR:  super user cannot use resource pool in the two-layer resource pool list.
+--transaction cases
+start transaction;
+ALTER USER temp_role4 resource pool 'respool_temp_default' user group default;
+ALTER USER temp_role1 resource pool 'respool_temp_default' user group default;
+ALTER USER temp_role4 resource pool 'respool_temp14';
+ALTER USER temp_role1 resource pool 'respool_temp15' user group 'temp_role4';
+COMMIT;
+select usename, respool from pg_user where parent !=0;
+  usename   |    respool     
+------------+----------------
+ temp_role1 | respool_temp15
+(1 row)
+
+--views
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_all_control_group_info;" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_respool_exception_info('respool_temp15');" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_respool_exception_info('respool_temp14');" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_control_group_info('respool_temp15');" > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from gs_control_group_info('respool_temp14');" > /dev/null 2>&1
+
+--drop process
+DROP RESOURCE POOL respool_temp14;
+ERROR:  cannot drop resource pool "respool_temp14" because other objects depend on it
+DETAIL:  role "temp_role4" depends on resource pool "respool_temp14"
+DROP USER temp_role4;
+--?NOTICE:  all child roles of .* are dropped simultaneously.
+DROP USER temp_role5;
+SELECT *from pg_user where usesysid !=10;
+ usename | usesysid | usecreatedb | usesuper | usecatupd | userepl | passwd | valbegin | valuntil | respool | parent | spacelimit | useconfig 
+---------+----------+-------------+----------+-----------+---------+--------+----------+----------+---------+--------+------------+-----------
+(0 rows)
+
+drop resource pool respool_temp14;
+--?NOTICE:  all child resource pool of .* are dropped simultaneously.
+drop resource pool respool_temp18;
+--?NOTICE:  all child resource pool of .* are dropped simultaneously.
+drop resource pool respool_temp21;
+drop user temp_role;
+drop resource pool respool_temp_default;
+select *From pg_resource_pool;
+ respool_name | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits | io_priority 
+--------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+-----------+-------------
+ default_pool |         100 |           -1 | DefaultClass:Medium |                -1 |       1 | 8GB          |        0 |         0 | None
+(1 row)
+
+\! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup --revert > /dev/null 2>&1

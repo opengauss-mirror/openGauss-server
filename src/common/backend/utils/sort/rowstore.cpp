@@ -26,7 +26,7 @@
 
 #include "pgxc/execRemote.h"
 #include "catalog/pgxc_node.h"
-#include "storage/buffile.h"
+#include "storage/buf/buffile.h"
 #include "lz4.h"
 #include "utils/memutils.h"
 #include "utils/rowstore.h"
@@ -41,6 +41,9 @@ static RESIDENCE bank_write(Bank* bank, RowStoreCell cell);
 
 /* read a data row from bank */
 static bool bank_read(Bank* bank, RowStoreCell data);
+
+/* reset resources in bank*/
+static void bank_reset(Bank* bank);
 
 /* release resources and clost a bank */
 static void bank_close(Bank* bank);
@@ -136,17 +139,52 @@ RowStoreManager RowStoreAlloc(MemoryContext context, size_t max_size)
 
     /* the rs is palloc0, so only need to fill the needed value */
     rs->context = context;
-    rs->bank_num = u_sess->pgxc_cxt.NumDataNodes;
+    rs->cn_bank_num = u_sess->pgxc_cxt.NumCoords;
+    rs->dn_bank_num = u_sess->pgxc_cxt.NumDataNodes;
 
     /* alloc mem for bank array */
-    rs->banks = (Bank**)palloc(sizeof(Bank*) * rs->bank_num);
+    rs->cn_banks = (Bank**)palloc(sizeof(Bank*) * rs->cn_bank_num);
+    rs->dn_banks = (Bank**)palloc(sizeof(Bank*) * rs->dn_bank_num);
 
     /* initialize the banks */
-    for (int i = 0; i < rs->bank_num; i++) {
-        rs->banks[i] = bank_open(max_size / rs->bank_num);
+    for (int i = 0; i < rs->cn_bank_num; i++) {
+        rs->cn_banks[i] = bank_open(max_size / rs->cn_bank_num);
+    }
+
+    /* initialize the banks */
+    for (int i = 0; i < rs->dn_bank_num; i++) {
+        rs->dn_banks[i] = bank_open(max_size / rs->dn_bank_num);
     }
 
     return rs;
+}
+
+/* reset mem/file inside rowstore */
+void RowStoreReset(RowStoreManager rs)
+{
+    /* no work to do */
+    if (rs == NULL)
+        return;
+
+    /* are we missed up the memory? */
+    CHECK_MEM(rs);
+
+    if (rs->cn_banks) {
+        /* free each bank */
+        for (int i = 0; i < rs->cn_bank_num; i++) {
+            bank_reset(rs->cn_banks[i]);
+        }
+    }
+
+    if (rs->dn_banks) {
+        /* free each bank */
+        for (int i = 0; i < rs->dn_bank_num; i++) {
+            bank_reset(rs->dn_banks[i]);
+        }
+    }
+
+    /* the caller should set rs to NULL */
+    return;
 }
 
 /*
@@ -166,18 +204,32 @@ void RowStoreDestory(RowStoreManager rs)
     /* are we missed up the memory? */
     CHECK_MEM(rs);
 
-    if (rs->banks) {
+    if (rs->cn_banks) {
         /* close each bank */
-        for (int i = 0; i < rs->bank_num; i++) {
-            bank_close(rs->banks[i]);
+        for (int i = 0; i < rs->cn_bank_num; i++) {
+            bank_close(rs->cn_banks[i]);
         }
 
         /* free the banks pointer array */
-        pfree(rs->banks);
+        pfree(rs->cn_banks);
 
         /* be tidy */
-        rs->banks = NULL;
-        rs->bank_num = 0;
+        rs->cn_banks = NULL;
+        rs->cn_bank_num = 0;
+    }
+
+    if (rs->dn_banks) {
+        /* close each bank */
+        for (int i = 0; i < rs->dn_bank_num; i++) {
+            bank_close(rs->dn_banks[i]);
+        }
+
+        /* free the banks pointer array */
+        pfree(rs->dn_banks);
+
+        /* be tidy */
+        rs->dn_banks = NULL;
+        rs->dn_bank_num = 0;
     }
 
     /* including the RowStoreManager itself */
@@ -214,19 +266,30 @@ static Bank* get_bank_for_data(RowStoreManager rs, RemoteDataRow data)
  */
 static Bank* get_bank_for_oid(RowStoreManager rs, Oid oid)
 {
-    /* from oid to 1,2,3... */
-    int node_id = PGXCNodeGetNodeId(oid, PGXC_NODE_DATANODE);
+    /* should get one of cn_node_id or dn_node_id */
+    int dn_node_id = PGXCNodeGetNodeId(oid, PGXC_NODE_DATANODE);
+    int cn_node_id = PGXCNodeGetNodeId(oid, PGXC_NODE_COORDINATOR);
+
     /* guard against array overflow */
-    if (node_id >= rs->bank_num) {
-        ereport(ERROR, (errmsg("row store : node id(%d) exceeds max bank num(%d)", node_id, rs->bank_num)));
+    if (dn_node_id >= rs->dn_bank_num) {
+        ereport(ERROR, (errmsg("row store : dn node id(%d) exceeds max bank num(%d)", dn_node_id, rs->dn_bank_num)));
+    }
+
+    if (cn_node_id >= rs->cn_bank_num) {
+        ereport(ERROR, (errmsg("row store : cn node id(%d) exceeds max bank num(%d)", cn_node_id, rs->cn_bank_num)));
     }
 
     /* guard against array overflow */
-    if (node_id < 0) {
-        ereport(ERROR, (errmsg("row store : node id(%d) 's bank num is (%d) which is invalid", node_id, rs->bank_num)));
+    if (cn_node_id < 0 && dn_node_id < 0) {
+        ereport(ERROR, (errmsg("failed to get cn/dn node id for OID %u", oid)));
     }
 
-    return rs->banks[node_id];
+    /* one of cn_node_id or dn_node_id must be valid */
+    if (cn_node_id >= 0) {
+        return rs->cn_banks[cn_node_id];
+    } else {
+        return rs->dn_banks[dn_node_id];
+    }
 }
 
 /*
@@ -283,8 +346,20 @@ bool RowStoreFetch(RowStoreManager rs, RemoteDataRow datarow)
     if (RowStoreLen(rs) > 0) {
         RowStoreCellData cell;
 
-        for (int i = 0; i < rs->bank_num; i++) {
-            if (bank_read(rs->banks[i], &cell)) {
+        /* fetch from dn bank */
+        for (int i = 0; i < rs->dn_bank_num; i++) {
+            if (bank_read(rs->dn_banks[i], &cell)) {
+                convert_cell_to_datarow(&cell, datarow);
+
+                validate_data(datarow, false);
+
+                return true;
+            }
+        }
+
+        /* fetch from cn bank */
+        for (int i = 0; i < rs->cn_bank_num; i++) {
+            if (bank_read(rs->cn_banks[i], &cell)) {
                 convert_cell_to_datarow(&cell, datarow);
 
                 validate_data(datarow, false);
@@ -361,8 +436,12 @@ int RowStoreLen(RowStoreManager rs)
 {
     int size = 0;
 
-    for (int i = 0; i < rs->bank_num; i++) {
-        size += rs->banks[i]->length;
+    for (int i = 0; i < rs->dn_bank_num; i++) {
+        size += rs->dn_banks[i]->length;
+    }
+
+    for (int i = 0; i < rs->cn_bank_num; i++) {
+        size += rs->cn_banks[i]->length;
     }
 
     return size;
@@ -388,6 +467,27 @@ static Bank* bank_open(size_t max_size)
     bank->max_size = max_size;
 
     return bank;
+}
+
+/* reset mem/disk inside bank, left bank in open state */
+static void bank_reset(Bank* bank)
+{
+    if (bank->mem) {
+        list_free_deep(bank->mem);
+        bank->mem = NIL;
+    }
+
+    if (bank->file) {
+        BufFileClose(bank->file);
+        bank->file = NULL;
+    }
+
+    bank->current_size = 0;
+    bank->write_fileno = 0;
+    bank->write_offset = 0;
+    bank->read_fileno = 0;
+    bank->read_offset = 0;
+    bank->length = 0;
 }
 
 /*
@@ -649,6 +749,12 @@ static RowStoreCell make_one_cell(RemoteDataRow data)
     cell->msgnode = data->msgnode;
     cell->clen = compress_cell(cell);
 
+    /* data now stored in cell, no longer needed, so free it */
+    pfree(data->msg);
+    data->msg = NULL;
+    data->msglen = 0;
+    data->msgnode = 0;
+
     return cell;
 }
 
@@ -744,9 +850,6 @@ static inline int compress_cell(RowStoreCell cell)
             ERROR, (errmsg("row store : LZ4_compress_default destination buffer couldn't hold all the information")));
     }
 
-    /* free the un-compressed msg */
-    pfree(cell->msg);
-
     /* assgin the compressed msg to data */
     cell->msg = pack_msg(compressed_msg, clen);
 
@@ -797,7 +900,7 @@ static inline size_t get_cell_size(RowStoreCell cell)
 
     total_size += alloc_trunk_size(sizeof(RowStoreCellData));
     total_size += alloc_trunk_size(sizeof(ListCell));
-    total_size += alloc_trunk_size(cell->clen > 0 ? cell->clen : cell->msglen);
+    total_size += alloc_trunk_size((cell->clen > 0) ? cell->clen : cell->msglen);
 
     return total_size;
 }

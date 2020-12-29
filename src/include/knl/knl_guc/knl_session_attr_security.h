@@ -46,10 +46,12 @@ typedef struct knl_session_attr_security {
     bool Audit_enabled;
     bool Audit_CleanupPolicy;
     bool Modify_initial_password;
+    bool operation_mode;
     int PostAuthDelay;
     int AuthenticationTimeout;
     int PreAuthDelay;
     int ssl_renegotiation_limit;
+    int ssl_cert_notify_time;
     int Password_policy;
     int Password_encryption_type;
     int Password_reuse_max;
@@ -83,6 +85,7 @@ typedef struct knl_session_attr_security {
     double Password_lock_time;
     char* pg_krb_server_keyfile;
     char* pg_krb_srvnam;
+    bool Enable_Security_Policy;
 } knl_session_attr_security;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SECURITY_H_ */

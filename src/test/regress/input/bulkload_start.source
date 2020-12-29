@@ -1,6 +1,47 @@
 --
 -- BULK LOAD START
 --
+---
+-- Check gds argments
+---
+\! @abs_bindir@/gds -h > /dev/null 2>&1
+\! @abs_bindir@/gds -d -2
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -t
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -t -1
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -t 100
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p :8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:9999999999999999999999999999999999999999999999999999999999999999999999999999999999999 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:12345 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -S 0
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -E aa
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/bbbbb/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:99999 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -s ./tmp_check/status -a
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -s ./tmp_check/status -work
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -work -H 0.0.0.0/0 -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/AAAA/gds.log -s ./tmp_check/status
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -E 100MB -t 2 --debug-level 100
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -E 100MB -t 2 --debug-level hahahah
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -E 100MB -t 2 --debug-level 2
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8900 -H 0.0.0.0/0
+\! @abs_bindir@/gds -V >/dev/null
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8901 -H 0.0.0.999
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8901 -H 0.0.0.0/99
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8901 -H 127.0.0.1
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8901 -r -D -H 0.0.0.0/0,0.0.0.0/0 -l @abs_bindir@/gds1.log -s ./tmp_check/status1 -E 1GB
+\! @abs_bindir@/gds -d @abs_srcdir@/data/datanode1/ -p 0.0.0.0:8902 -r -D -H 0.0.0.0/0,0.0.0.0/0 -l @abs_bindir@/gds1.log -E 1GB
+\! cp @abs_bindir@/../share/postgresql/gds.conf @abs_bindir@/
+\! python @abs_bindir@/gds_ctl.py start
+\! python @abs_bindir@/gds_ctl.py status
+\! python @abs_bindir@/gds_ctl.py stop
+\! python @abs_bindir@/gds_ctl.py start
+\! python @abs_bindir@/gds_ctl.py stop 127.0.0.1:8098
+\! rm -f @abs_bindir@/gds.conf
+\! strings @abs_bindir@/gds  | grep '18\.244\.0\.188'
+SET ENABLE_STREAM_OPERATOR=ON;
+
+
 
 ---
 -- Create Foreign Table Like Grammar Check
@@ -25,9 +66,62 @@ TABLESPACE CREATE_FOREIGN_TABLE_LIKE_tblsp1;
 
 
 
+--2. Create a foreign table with create foreign table like, and check column def
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO; 
+ CREATE FOREIGN TABLE F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO 
+(like CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO) 
+ server gsmpp_server options( 
+ location 'gsfs://127.0.0.1/BASIC_INFO.bin', 
+ encoding 'LATIN1', 
+ mode 'Normal'
+)  LOG INTO ERR_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO 
+ PER NODE REJECT LIMIT '10';
+
+\d+ F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO
 
 
 
+--3. We do not allow like_option, so check this constraint
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO1; 
+ CREATE FOREIGN TABLE F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO1 
+(like CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO INCLUDING INDEXES) 
+ server gsmpp_server options( 
+ location 'gsfs://127.0.0.1/BASIC_INFO.bin', 
+ encoding 'LATIN1', 
+ mode 'Normal'
+)  LOG INTO ERR_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO1 
+ PER NODE REJECT LIMIT '10';
+ 
+ 
+ 
+
+--4. Create another foreign table using pervious foreign table column defs and see if it works
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO2; 
+ CREATE FOREIGN TABLE F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO2 
+(like F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO) 
+ server gsmpp_server options( 
+ location 'gsfs://127.0.0.1/BASIC_INFO.bin', 
+ encoding 'LATIN1', 
+ mode 'Normal'
+)  LOG INTO ERR_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO2 
+ PER NODE REJECT LIMIT '10';
+
+\d+ F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO2
+
+
+
+
+--5. Like_clause is not compatible with fixed read, so check this constraint
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO3; 
+ CREATE FOREIGN TABLE F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO3 
+(like CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO) 
+ server gsmpp_server options( 
+ location 'gsfs://127.0.0.1/BASIC_INFO.bin', 
+ encoding 'LATIN1',
+ format 'fixed', 
+ mode 'Normal'
+)  LOG INTO ERR_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO 
+ PER NODE REJECT LIMIT '10';
 
 
  
@@ -37,5 +131,8 @@ TABLESPACE CREATE_FOREIGN_TABLE_LIKE_tblsp1;
 ---
 
 DROP TABLE IF EXISTS CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO;
-
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO;
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO1;
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO2;
+DROP FOREIGN TABLE IF EXISTS F_CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO3;
 DROP TABLESPACE CREATE_FOREIGN_TABLE_LIKE_tblsp1;

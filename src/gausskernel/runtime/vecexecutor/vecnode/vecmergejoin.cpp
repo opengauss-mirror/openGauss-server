@@ -1,19 +1,8 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2010, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * vecmergejoin.cpp
  *
@@ -231,7 +220,7 @@ static VecMergeJoinClause MJVecExamineQuals(List* mergeclauses, Oid* mergefamili
 template <int child>
 void EvaluateBatch(VecMergeJoinState* state, VectorBatch* batch)
 {
-    ExprContext* econtext = (child == INNER_VAR ? state->mj_InnerEContext : state->mj_OuterEContext);
+    ExprContext* econtext = ((child == INNER_VAR) ? state->mj_InnerEContext : state->mj_OuterEContext);
     MemoryContext oldContext;
 
     ResetExprContext(econtext);
@@ -843,7 +832,7 @@ VectorBatch* ProduceResultBatchT(VecMergeJoinState* node, bool fCheckQual)
                         /* For full joins, we always fill an empty outer tuple then an inner
                          * tuple. So have to skip the empty outer tuple.
                          */
-                        for (prev = (joinType == JOIN_LEFT) ? i - 1 : i - 2; prev >= 0 && SameOuTuple(i, prev);
+                        for (prev = (joinType == JOIN_LEFT) ? (i - 1) : (i - 2); (prev >= 0) && SameOuTuple(i, prev);
                              prev--) {
                             DBG_ASSERT(joinType == JOIN_FULL || !OuEmpty(prev));
                             if (pSelection[prev]) {
@@ -1879,8 +1868,13 @@ VecMergeJoinState* ExecInitVecMergeJoin(VecMergeJoin* node, EState* estate, int 
                     errmsg("unrecognized join type: %d", (int)node->join.jointype)));
     }
 
-    /* initialize tuple type and projection info */
-    ExecAssignResultTypeFromTL(&mergestate->js.ps);
+    /*
+     * initialize tuple type and projection info
+     * result table tuple slot for merge join contains virtual tuple, so the
+     * default tableAm type is set to HEAP.
+     */
+    ExecAssignResultTypeFromTL(&mergestate->js.ps, TAM_HEAP);
+
     PlanState* planstate = &mergestate->js.ps;
 
     planstate->ps_ProjInfo = ExecBuildVecProjectionInfo(

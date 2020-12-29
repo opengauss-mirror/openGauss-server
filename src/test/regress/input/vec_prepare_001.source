@@ -25,7 +25,7 @@ CREATE TABLE lineitem_vec
 )
 with (orientation = column)
 ;
-COPY lineitem_vec FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem.data' DELIMITER '|';
+COPY lineitem_vec FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
 
 CREATE TABLE LINEITEM_partition
 (
@@ -57,7 +57,7 @@ partition by range (L_ORDERKEY)
 	 partition CstorePartition6 values less than (6000),
 	 partition CstorePartition7 values less than (100000)
 );
-COPY LINEITEM_partition FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem.data' DELIMITER '|';
+COPY LINEITEM_partition FROM '@abs_srcdir@/data/lineitem.data' DELIMITER '|';
 
 ANALYZE lineitem_vec;
 ANALYZE LINEITEM_partition;
@@ -229,20 +229,20 @@ create table ETL_JOB
 ) with (orientation=column)
 ;
 
-copy etl_job from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ETL_JOB.data' delimiter '|';
+copy etl_job from '@abs_srcdir@/data/ETL_JOB.data' delimiter '|';
 
-copy etl_job_dependency from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ETL_JOB_DEPENDENCY.data' delimiter '|';
+copy etl_job_dependency from '@abs_srcdir@/data/ETL_JOB_DEPENDENCY.data' delimiter '|';
 
-copy etl_job_priority from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ETL_JOB_PRIORITY.data' delimiter '|';
-copy etl_job_priority from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ETL_JOB_PRIORITY.data' delimiter '|';
-copy etl_job_priority from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ETL_JOB_PRIORITY.data' delimiter '|';
-copy etl_job_priority from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ETL_JOB_PRIORITY.data' delimiter '|';
+copy etl_job_priority from '@abs_srcdir@/data/ETL_JOB_PRIORITY.data' delimiter '|';
+copy etl_job_priority from '@abs_srcdir@/data/ETL_JOB_PRIORITY.data' delimiter '|';
+copy etl_job_priority from '@abs_srcdir@/data/ETL_JOB_PRIORITY.data' delimiter '|';
+copy etl_job_priority from '@abs_srcdir@/data/ETL_JOB_PRIORITY.data' delimiter '|';
 
 analyze etl_job_priority;
 
 --test explain_dna_file
 show explain_dna_file;
 set explain_dna_file = 'data';
-set explain_dna_file = '@abs_srcdir@/tmp_check/datanode1/pg_copydir';
-set explain_dna_file = '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test.csv';
+set explain_dna_file = '@abs_srcdir@/data';
+set explain_dna_file = '@abs_srcdir@/data/test.csv';
 reset explain_dna_file;

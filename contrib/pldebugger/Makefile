@@ -25,28 +25,29 @@ all:pldebuger_target
 install:install-data
 
 top_builddir = ../../
-PLDEBUGGER_DIR=$(top_builddir)/third_party/dependency/pldebugger
+include $(top_builddir)/src/Makefile.global
+PLDEBUGGER_DIR=$(PLDBG_HOME)
 #source code
 PLDEBUGGER_PACKAGE=pldebugger_3_0
-PLDEBUGGER_PATCH=huawei_pldebugger
-PLDEBUGGER_MEGRED_SOURCES_DIR=$(PLDEBUGGER_DIR)
+PLDEBUGGER_PATCH=opengauss_pldebugger
 
 .PHONY: pldebugger_target
 pldebuger_target:
 	@$(call create_pldebugger_sources)
-	@make -C $(PLDEBUGGER_MEGRED_SOURCES_DIR)/$(PLDEBUGGER_PACKAGE)
+	@make -C output/$(PLDEBUGGER_PACKAGE)
 
 .PHONY: install-data
 install-data: pldebugger_target
-	@make -C $(PLDEBUGGER_MEGRED_SOURCES_DIR)/$(PLDEBUGGER_PACKAGE) install
+	@make -C output/$(PLDEBUGGER_PACKAGE) install
 
 uninstall distclean clean:
-	@rm -rf $(PLDEBUGGER_MEGRED_SOURCES_DIR)/$(PLDEBUGGER_PACKAGE)
+	@rm -rf $(PLDEBUGGER_DIR)/$(PLDEBUGGER_PACKAGE) ./output
 define create_pldebugger_sources
-        cd $(PLDEBUGGER_DIR); \
+        mkdir output; \
+        cp -f $(PLDEBUGGER_DIR)/* output/; \
+        cd ./output/; \
         sh patch.sh;  \
         if [ $$? -eq 1 ]; then \
             exit 1; \
-        fi; \
-        cd - ;
+        fi;
 endef

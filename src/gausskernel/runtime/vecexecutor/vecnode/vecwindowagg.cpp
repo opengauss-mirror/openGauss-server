@@ -88,7 +88,6 @@ VecWindowAggState* ExecInitVecWindowAgg(VecWindowAgg* node, EState* estate, int 
     /*
      *create state structure
      */
-     
     winstate = makeNode(VecWindowAggState);
     winstate->ss.ps.plan = (Plan*)node;
     winstate->ss.ps.state = estate;
@@ -148,8 +147,10 @@ VecWindowAggState* ExecInitVecWindowAgg(VecWindowAgg* node, EState* estate, int 
 
     /*
      * Initialize result tuple type and projection info.
+     * result Tuple Table Slot contains virtual tuple, default tableAm type is set to HEAP.
      */
-    ExecAssignResultTypeFromTL(&winstate->ss.ps);
+    ExecAssignResultTypeFromTL(&winstate->ss.ps, TAM_HEAP);
+
     {
         PlanState* planstate = &winstate->ss.ps;
 
@@ -744,9 +745,11 @@ bool VecWinAggRuntime::MatchPeer(
                 fcinfo.arg[0] = ScalarVector::Decode(val1);
                 fcinfo.arg[1] = ScalarVector::Decode(val2);
                 if (is_ord) {
+                    fcinfo.flinfo = (m_ordeqfunctions + i);
                     eqfunc = m_ordeqfunctions[i].fn_addr;
                     match = eqfunc(&fcinfo);
                 } else {
+                    fcinfo.flinfo = (m_parteqfunctions + i);
                     eqfunc = m_parteqfunctions[i].fn_addr;
                     match = eqfunc(&fcinfo);
                 }
@@ -902,27 +905,27 @@ void VecWinAggRuntime::initCellValue(hashCell* cell, hashCell* last_cell, int fr
                     }
 
                     SET_NOTNULL(cell->m_val[m_aggIdx[k]].flag);
-                } else
+                    if (is_final) {
+                        if (NOT_NULL(last_cell->m_val[m_aggIdx[k] + 1].flag)) {
+                            cell->m_val[m_aggIdx[k] + 1].val = last_cell->m_val[m_aggIdx[k] + 1].val;
+                            SET_NOTNULL(cell->m_val[m_aggIdx[k] + 1].flag);
+                        } else
+                            SET_NULL(cell->m_val[m_aggIdx[k] + 1].flag);
+
+                        /* For stddev_samp, we need copy sum(x2) */
+                        if (NOT_NULL(last_cell->m_val[m_aggIdx[k] + 2].flag)) {
+                            if (m_cellvar_encoded[k])
+                                cell->m_val[m_aggIdx[k] + 2].val =
+                                    addVariable(m_hashContext, last_cell->m_val[m_aggIdx[k] + 2].val);
+                            else
+                                cell->m_val[m_aggIdx[k] + 2].val = last_cell->m_val[m_aggIdx[k] + 2].val;
+
+                            SET_NOTNULL(cell->m_val[m_aggIdx[k] + 2].flag);
+                        } else
+                            SET_NULL(cell->m_val[m_aggIdx[k] + 2].flag);
+                    }
+                } else {
                     SET_NULL(cell->m_val[m_aggIdx[k]].flag);
-
-                if (is_final) {
-                    if (NOT_NULL(last_cell->m_val[m_aggIdx[k] + 1].flag)) {
-                        cell->m_val[m_aggIdx[k] + 1].val = last_cell->m_val[m_aggIdx[k] + 1].val;
-                        SET_NOTNULL(cell->m_val[m_aggIdx[k] + 1].flag);
-                    } else
-                        SET_NULL(cell->m_val[m_aggIdx[k] + 1].flag);
-
-                    /* For stddev_samp, we need copy sum(x2) */
-                    if (NOT_NULL(last_cell->m_val[m_aggIdx[k] + 2].flag)) {
-                        if (m_cellvar_encoded[k])
-                            cell->m_val[m_aggIdx[k] + 2].val =
-                                addVariable(m_hashContext, last_cell->m_val[m_aggIdx[k] + 2].val);
-                        else
-                            cell->m_val[m_aggIdx[k] + 2].val = last_cell->m_val[m_aggIdx[k] + 2].val;
-
-                        SET_NOTNULL(cell->m_val[m_aggIdx[k] + 2].flag);
-                    } else
-                        SET_NULL(cell->m_val[m_aggIdx[k] + 2].flag);
                 }
             }
         }
@@ -1375,15 +1378,17 @@ void VecWinAggRuntime::MatchSequence(VectorBatch* batch, int start, int end, int
             if (m_winSequence[idx] == 0) {
                 if (BOTH_NOT_NULL(flag1, flag2)) {
                     if (simple || vector->m_desc.encoded == false) {
-                        m_winSequence[idx] = key1 == key2 ? 0 : 1;
+                        m_winSequence[idx] = (key1 == key2) ? 0 : 1;
                     } else {
                         fcinfo.arg[0] = ScalarVector::Decode(key1);
                         fcinfo.arg[1] = ScalarVector::Decode(key2);
 
                         if (is_ord) {
+                            fcinfo.flinfo = (m_ordeqfunctions + i);
                             eqfunc = m_ordeqfunctions[i].fn_addr;
                             m_winSequence[idx] = eqfunc(&fcinfo) ? 0 : 1;
                         } else {
+                            fcinfo.flinfo = (m_parteqfunctions + i);
                             eqfunc = m_parteqfunctions[i].fn_addr;
                             m_winSequence[idx] = eqfunc(&fcinfo) ? 0 : 1;
                         }
@@ -1633,7 +1638,6 @@ void VecWinAggRuntime::BuildScanBatchFinal(hashCell* cell, ScalarVector* result_
 
     if (agg_idx == m_finalAggInfo[final_idx].idx) {
         /* to invoke function*/
-        
         FunctionCallInfo fcinfo = &m_finalAggInfo[final_idx].info->vec_final_function;
         fcinfo->arg[0] = (Datum)cell;
         fcinfo->arg[1] = (Datum)agg_idx;

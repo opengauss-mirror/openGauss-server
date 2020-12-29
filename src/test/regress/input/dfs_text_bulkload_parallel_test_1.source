@@ -1,0 +1,264 @@
+--
+-- BULK LOAD PARALLEL TEST 1
+--
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+distribute by hash(L_ORDERKEY);
+
+----
+--2. Load data in normal mode with TEXT format
+----
+CREATE FOREIGN TABLE EXT_LINEITEM (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/lineitem.data', delimiter '|') distribute by roundrobin;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+INSERT INTO LINEITEM SELECT * FROM EXT_LINEITEM;
+SELECT COUNT(*) FROM LINEITEM;
+
+TRUNCATE LINEITEM;
+
+----
+-- Test Bulkload and generate nextval for target table
+----
+Create sequence L_Seq_500cache increment by 1 cache 500 no maxvalue start with 1;  
+
+CREATE TABLE LINEITEM_SEQ 
+(
+	L_ID   BIGINT NOT NULL DEFAULT nextval('L_Seq_500cache')
+  , L_ID2  bigserial
+  , L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+distribute by hash(L_ID);
+
+INSERT INTO LINEITEM_SEQ(L_ORDERKEY,L_PARTKEY,L_SUPPKEY,L_LINENUMBER,L_QUANTITY,L_EXTENDEDPRICE,L_DISCOUNT,
+L_TAX,L_RETURNFLAG, L_LINESTATUS, L_SHIPDATE, L_COMMITDATE, L_RECEIPTDATE, L_SHIPINSTRUCT, L_SHIPMODE,L_COMMENT )
+SELECT * FROM EXT_LINEITEM;
+
+SELECT COUNT(*) FROM LINEITEM_SEQ;
+SELECT DISTINCT COUNT(L_ID) FROM  LINEITEM_SEQ;
+SELECT DISTINCT COUNT(L_ID2) FROM  LINEITEM_SEQ;
+SELECT MAX(L_ID2) FROM  LINEITEM_SEQ;
+
+TRUNCATE LINEITEM_SEQ;
+CREATE SEQUENCE noCacheSeq;  
+
+INSERT INTO LINEITEM_SEQ SELECT nextval('L_Seq_500cache'), nextval('noCacheSeq'),* FROM EXT_LINEITEM;
+SELECT COUNT(*) FROM LINEITEM_SEQ;
+SELECT DISTINCT COUNT(L_ID) FROM  LINEITEM_SEQ;
+SELECT DISTINCT COUNT(L_ID2) FROM  LINEITEM_SEQ;
+SELECT MAX(L_ID2) FROM  LINEITEM_SEQ;
+
+DROP FOREIGN TABLE EXT_LINEITEM;
+DROP TABLE LINEITEM_SEQ;
+DROP SEQUENCE L_Seq_500cache;
+DROP SEQUENCE noCacheSeq;
+----
+----
+---- linebuffer case test
+----
+---- (1)Load data in normal mode for overloaded buffer support
+CREATE FOREIGN TABLE OVERLOAD_TEST_FT(
+col1 text,
+col2 text)
+SERVER hdfs_server
+OPTIONS(filenames '/user/hive/warehouse/text_on_hdfs/overload.data',
+format 'text',
+delimiter '|',
+encoding 'utf8'
+) distribute by roundrobin;
+CREATE TABLE OVERLOAD_TEST(col1 text,col2 text);
+INSERT INTO OVERLOAD_TEST SELECT * FROM OVERLOAD_TEST_FT;
+SELECT char_length(col1),char_length(col2) FROM OVERLOAD_TEST ORDER BY col1;
+
+DROP FOREIGN TABLE OVERLOAD_TEST_FT;
+DROP TABLE OVERLOAD_TEST;
+---- hdfs foreign table join is allowed
+----
+CREATE FOREIGN TABLE EXT_LINEITEM (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/lineitem.data', delimiter '|', checkencoding 'low') distribute by roundrobin;
+SELECT  FT_1.L_ORDERKEY FROM EXT_LINEITEM FT_1 JOIN EXT_LINEITEM FT_2 ON FT_1.L_ORDERKEY = FT_2.L_ORDERKEY GROUP BY FT_1.L_ORDERKEY ORDER BY FT_1.L_ORDERKEY LIMIT 1;
+SELECT * FROM EXT_LINEITEM, LINEITEM;
+DROP FOREIGN TABLE EXT_LINEITEM;
+----
+---- load data to oversize row/column table
+----
+CREATE FOREIGN TABLE EXT_LINEITEM (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL,
+        L_LINENUMBER  BIGINT NOT NULL,
+        L_QUANTITY    DECIMAL(15,2) NOT NULL,
+        L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,
+        L_DISCOUNT    DECIMAL(15,2) NOT NULL,
+        L_TAX     DECIMAL(15,2) NOT NULL,
+        L_RETURNFLAG  CHAR(1) NOT NULL,
+        L_LINESTATUS  CHAR(1) NOT NULL,
+        L_SHIPDATE    DATE NOT NULL,
+        L_COMMITDATE  DATE NOT NULL,
+        L_RECEIPTDATE DATE NOT NULL,
+        L_SHIPINSTRUCT CHAR(25) NOT NULL,
+        L_SHIPMODE     CHAR(10) NOT NULL,
+        L_COMMENT      VARCHAR(44) NOT NULL
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/insert_oversize_tuple.data', delimiter '|') distribute by roundrobin;
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -f @abs_srcdir@/data/create_oversize_row_table.sql > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -f @abs_srcdir@/data/insert_select_large_row.sql > /dev/null 2>insert_err
+\! cat insert_err | awk '{split($0, a, ":");print a[4],":", a[5], a[6]}'
+\! rm -f insert_err
+DROP TABLE lineitem_large_row;
+DROP FOREIGN TABLE EXT_LINEITEM;
+---
+--- set noescaping to be 'true' for exporting
+---
+CREATE TABLE NOESCAPING_TEST(id int,name text);
+--- noescaping is allowed for normal mode
+CREATE FOREIGN TABLE FT_NOESCAPING_TEST_IMPORTING(
+	id int,
+	name text
+)
+server hdfs_server options
+(filenames '/user/hive/warehouse/text_on_hdfs/noescaping_for_exporting_test.data', format 'text', delimiter '|' , ignore_extra_data 'true', noescaping 'false') distribute by roundrobin;
+ALTER FOREIGN TABLE FT_NOESCAPING_TEST_IMPORTING OPTIONS(SET noescaping 'true');
+INSERT INTO NOESCAPING_TEST SELECT * FROM FT_NOESCAPING_TEST_IMPORTING;
+SELECT * FROM NOESCAPING_TEST;
+CREATE FOREIGN TABLE FT_NOESCAPING_TEST_EXPORTING(
+	id int position(0, 30),
+	name text position(30, 10)
+)
+server hdfs_server options
+(foldername '/user/hive/warehouse/text_on_hdfs/', format 'orc', noescaping 'false') distribute by roundrobin;
+
+DROP TABLE NOESCAPING_TEST;
+DROP FOREIGN TABLE FT_NOESCAPING_TEST_IMPORTING;
+---
+--td_compatible_truncation on varchar test (varchar, varchar2, nvarchar2)
+---
+-- prepare_working_env
+create database td_db_char_bulkload DBCOMPATIBILITY 'TD';
+\c td_db_char_bulkload
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER HDFS_FDW OPTIONS 
+(address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@', type 'hdfs');
+
+drop table if exists tdcompatibletruncatevarchar;
+CREATE TABLE tdcompatibletruncatevarchar
+(
+ L_ORDERKEY BIGINT NOT NULL
+, L_PARTKEY BIGINT NOT NULL
+, L_SUPPKEY BIGINT NOT NULL
+, L_LINENUMBER BIGINT NOT NULL
+, L_QUANTITY DECIMAL(15,2) NOT NULL
+, L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL
+, L_DISCOUNT DECIMAL(15,2) NOT NULL
+, L_TAX DECIMAL(15,2) NOT NULL
+, L_RETURNFLAG CHAR(1) NOT NULL
+, L_LINESTATUS CHAR(1) NOT NULL
+, L_SHIPDATE DATE NOT NULL
+, L_COMMITDATE DATE NOT NULL
+, L_RECEIPTDATE DATE NOT NULL
+, L_SHIPINSTRUCT CHAR(1) NOT NULL
+, L_SHIPMODE VARCHAR2(1) NOT NULL
+, L_COMMENT VARCHAR(1) NOT NULL
+--, primary key (L_ORDERKEY, L_LINENUMBER)
+)
+distribute by hash(L_ORDERKEY);
+drop table if exists testoperators;
+CREATE TABLE testoperators
+(
+ TEST_OPERATOR CHAR(3) NOT NULL
+)
+distribute by hash(TEST_OPERATOR);
+drop foreign table if exists f_tdcompatibletruncatevarchar;
+CREATE FOREIGN TABLE f_tdcompatibletruncatevarchar (
+	L_ORDERKEY    BIGINT NOT NULL,        
+	L_PARTKEY     BIGINT NOT NULL,        
+	L_SUPPKEY     BIGINT NOT NULL,        
+	L_LINENUMBER  BIGINT NOT NULL,        
+	L_QUANTITY    DECIMAL(15,2) NOT NULL,        
+	L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL,        
+	L_DISCOUNT    DECIMAL(15,2) NOT NULL,        
+	L_TAX     DECIMAL(15,2) NOT NULL,        
+	L_RETURNFLAG  CHAR(1) NOT NULL,        
+	L_LINESTATUS  CHAR(1) NOT NULL,        
+	L_SHIPDATE    DATE NOT NULL,        
+	L_COMMITDATE  DATE NOT NULL,        
+	L_RECEIPTDATE DATE NOT NULL,        
+	L_SHIPINSTRUCT VARCHAR2 NOT NULL,        
+	L_SHIPMODE     VARCHAR2 NOT NULL,        
+	L_COMMENT      VARCHAR NOT NULL
+)SERVER hdfs_server OPTIONS(format 'text', filenames '/user/hive/warehouse/text_on_hdfs/lineitem.data', delimiter '|') distribute by roundrobin;
+set td_compatible_truncation=on;
+-- Insert and also check whether required types are truncated successfully
+INSERT INTO tdcompatibletruncatevarchar SELECT * FROM f_tdcompatibletruncatevarchar where L_LINENUMBER = 1 and L_ORDERKEY = 1;
+select L_SHIPINSTRUCT, L_SHIPMODE, L_COMMENT from f_tdcompatibletruncatevarchar where L_LINENUMBER = 1 and L_ORDERKEY = 1;
+select L_SHIPINSTRUCT, L_SHIPMODE, L_COMMENT from tdcompatibletruncatevarchar where L_LINENUMBER = 1 and L_ORDERKEY = 1;
+INSERT INTO testoperators(TEST_OPERATOR) SELECT SUM(L_PARTKEY) FROM f_tdcompatibletruncatevarchar where L_ORDERKEY = 1;
+SELECT SUM(L_PARTKEY) FROM f_tdcompatibletruncatevarchar where L_ORDERKEY = 1;
+SELECT TEST_OPERATOR FROM testoperators;
+-- End. Clean up
+set td_compatible_truncation=off;
+drop table if exists tdcompatibletruncatevarchar;
+drop foreign table if exists f_tdcompatibletruncatevarchar;
+drop table if exists testoperators;
+\c regression

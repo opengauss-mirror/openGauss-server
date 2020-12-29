@@ -26,6 +26,7 @@
 /*
  * syscall lock, should not be  TLS
  */
+
 syscalllock getpwuid_lock;
 syscalllock env_lock;
 syscalllock dlerror_lock;
@@ -39,6 +40,7 @@ syscalllock read_cipher_lock;
  * @Return: old value
  * @See also:
  */
+#ifndef WIN32
 int32 gs_syscall_atomic_test_and_set(volatile int32* ptr, int32 val)
 {
     int32 oldValue = __sync_lock_test_and_set(ptr, val);
@@ -79,3 +81,4 @@ int64 gs_syscall_atomic_add_64(int64* ptr, int64 inc)
 
     return newValue;
 }
+#endif

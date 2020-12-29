@@ -38,6 +38,7 @@
 #include "optimizer/pgxcplan.h"
 #endif
 #include "optimizer/streamplan.h"
+#include "optimizer/stream_remove.h"
 
 typedef struct {
     Index varno;         /* RT index of Var */
@@ -295,17 +296,18 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
 {
     ListCell* l = NULL;
 
-    if (plan == NULL) {
+    if (plan == NULL)
         return NULL;
-    }
 
     /*
      * Plan-type-specific fixes
      */
     switch (nodeTag(plan)) {
         case T_SeqScan:
-        case T_CStoreScan:
-        case T_TsStoreScan: {
+#ifdef ENABLE_MULTIPLE_NODES
+        case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
+        case T_CStoreScan: {
             Scan* splan = (Scan*)plan;
             splan->scanrelid += rtoffset;
             splan->plan.targetlist = fix_scan_list(root, splan->plan.targetlist, rtoffset);
@@ -555,7 +557,9 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
             switch (nodeTag(splan->plan.lefttree)) {
                 case T_SeqScan:
                 case T_CStoreScan:
+#ifdef ENABLE_MULTIPLE_NODES
                 case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
                 case T_IndexScan:
                 case T_IndexOnlyScan:
                 case T_BitmapHeapScan:
@@ -572,10 +576,6 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
                     set_dummy_tlist_references(plan, rtoffset);
             }
         } break;
-
-        case T_Gather:
-            set_upper_references(root, plan, rtoffset);
-            break;
 
         case T_Hash:
         case T_Material:
@@ -800,7 +800,7 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
              * available as INNER_VAR and the target relation attributes
              * are available from the scan tuple.
              */
-            if (splan->mergeActionList != NIL && (IS_STREAM_PLAN || IS_SINGLE_NODE)) {
+            if (splan->mergeActionList != NIL && (IS_STREAM_PLAN || IS_SINGLE_NODE || IS_PGXC_DATANODE)) {
                 /*
                  * mergeSourceTargetList is already setup correctly to
                  * include all Vars coming from the source relation. So we
@@ -904,6 +904,7 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
             foreach (l, splan->appendplans) {
                 lfirst(l) = set_plan_refs(root, (Plan*)lfirst(l), rtoffset);
             }
+            delete_redundant_streams_of_append_plan(splan);
         } break;
         case T_MergeAppend: {
             MergeAppend* splan = (MergeAppend*)plan;
@@ -1093,6 +1094,10 @@ static Plan* set_subqueryscan_references(PlannerInfo* root, SubqueryScan* plan, 
      * Fallback/vectorize plan may cause the difference between rel->subplan
      * and plan->subplan. If the plan->subplan is a VecToRow or RowToVec node,
      * check the lefttree of plan->subplan instead.
+     *
+     * We can skip the check when the plan is under recursive cte, since we may
+     * copy the plan and use the original planner info, in this case the plans are
+     * definitely different
      */
     if (!IsA(plan->subplan, VecToRow) && !IsA(plan->subplan, RowToVec)) {
         /*
@@ -1101,13 +1106,15 @@ static Plan* set_subqueryscan_references(PlannerInfo* root, SubqueryScan* plan, 
          * definitely different
          */
         AssertEreport(root->is_under_recursive_cte || rel->subplan == plan->subplan ||
-                          (((RelOptInfo*)linitial(rel->alternatives))->subplan == plan->subplan),
+                    (((RelOptInfo*)linitial(rel->alternatives))->subplan == plan->subplan),
+                    MOD_OPT,
+                    "inconsistent state after fallback/vectorize plan");
+    } else {
+        AssertEreport(root->is_under_recursive_cte || rel->subplan == plan->subplan->lefttree ||
+                    (((RelOptInfo*)linitial(rel->alternatives))->subplan == plan->subplan->lefttree),
             MOD_OPT,
             "inconsistent state after fallback/vectorize plan");
-    } else
-        AssertEreport(root->is_under_recursive_cte || rel->subplan == plan->subplan->lefttree,
-            MOD_OPT,
-            "inconsistent state after fallback/vectorize plan");
+    }
 
     /* Recursively process the subplan */
     if (rel->alternatives != NIL && ((RelOptInfo*)linitial(rel->alternatives))->subplan == plan->subplan) {
@@ -1193,7 +1200,7 @@ static void set_extensibleplan_references(PlannerInfo* root, ExtensiblePlan* csc
 
     /* Adjust scanrelid if it's valid */
     if (cscan->scan.scanrelid > 0)
-        cscan->scan.scanrelid = rtoffset;
+        cscan->scan.scanrelid += (unsigned int)rtoffset;
 
     set_tlist_qual_extensible_exprs_of_extensibleplan(root, cscan, rtoffset);
     /* Adjust child plan-nodes recursively, if needed */
@@ -1566,6 +1573,27 @@ static void set_join_references(PlannerInfo* root, Join* join, int rtoffset)
     pfree_ext(inner_itlist);
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+static bool has_same_groupby(Plan* plan, Plan* subplan)
+{
+    if (!IsA(plan, Agg) || !IsA(subplan, Agg)) {
+        return true;
+    }
+
+    Agg* agg = (Agg*)plan;
+    Agg* subagg = (Agg*)subplan;
+
+    if (agg->numCols != subagg->numCols)
+        return false;
+
+    for (int16 i = 0; i < agg->numCols; i++) {
+        if (agg->grpColIdx[i] != subagg->grpColIdx[i])
+            return false;
+    }
+    return true;
+}
+#endif
+
 /*
  * set_upper_references
  *	  Update the targetlist and quals of an upper-level plan node
@@ -1590,6 +1618,9 @@ static void set_upper_references(PlannerInfo* root, Plan* plan, int rtoffset)
     indexed_tlist* subplan_itlist = NULL;
     List* output_targetlist = NIL;
     ListCell* l = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    bool groupby_same = has_same_groupby(plan, subplan);
+#endif
 
     subplan_itlist = build_tlist_index(subplan->targetlist);
 
@@ -1599,7 +1630,11 @@ static void set_upper_references(PlannerInfo* root, Plan* plan, int rtoffset)
         Node* newexpr = NULL;
 
         /* If it's a non-Var sort/group item, first try to match by sortref */
+#ifdef ENABLE_MULTIPLE_NODES
         if (tle->ressortgroupref != 0 && !IsA(tle->expr, Var)) {
+#else
+        if (tle->ressortgroupref != 0 && !IsA(tle->expr, Var) && groupby_same) {
+#endif
             newexpr = (Node*)search_indexed_tlist_for_sortgroupref(
                 (Node*)tle->expr, tle->ressortgroupref, subplan_itlist, OUTER_VAR);
             if (newexpr == NULL)
@@ -1818,13 +1853,15 @@ static Var* search_indexed_tlist_for_non_var(Node* node, indexed_tlist* itlist, 
         return NULL;
     }
 
-#ifdef STREAMPLAN
-    if (IS_PGXC_COORDINATOR && IS_STREAM)
-        tle = tlist_member_except_aggref(node, itlist->tlist, &nested_agg, &nested_relabeltype);
-    else
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && IS_STREAM) {
+#else
+    if (IS_STREAM) {
 #endif
+        tle = tlist_member_except_aggref(node, itlist->tlist, &nested_agg, &nested_relabeltype);
+    } else {
         tle = tlist_member(node, itlist->tlist);
-
+    }
     if (tle != NULL) {
         /* Found a matching subplan output expression */
         Var* newvar = NULL;

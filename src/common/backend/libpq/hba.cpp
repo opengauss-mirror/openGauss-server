@@ -39,6 +39,7 @@
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "commands/user.h"
 
 #define atooid(x) ((Oid)strtoul((x), NULL, 10))
 #define atoxid(x) ((TransactionId)strtoul((x), NULL, 10))
@@ -228,8 +229,9 @@ static List* next_field_expand(const char* filename, FILE* file)
     List* tokens = NIL;
 
     do {
-        if (!next_token(file, buf, sizeof(buf), &initial_quote, &trailing_comma))
+        if (!next_token(file, buf, sizeof(buf), &initial_quote, &trailing_comma)) {
             break;
+        }
 
         /* Is this referencing a file? */
         if (!initial_quote && buf[0] == '@' && buf[1] != '\0')
@@ -467,8 +469,9 @@ static bool hostname_match(const char* pattern, const char* actual_hostname)
     if (pattern[0] == '.') {
         size_t plen = strlen(pattern);
         size_t hlen = strlen(actual_hostname);
-        if (hlen < plen)
+        if (hlen < plen) {
             return false;
+        }
 
         return (pg_strcasecmp(pattern, actual_hostname + (hlen - plen)) == 0);
     } else {
@@ -763,9 +766,8 @@ static HbaLine* parse_hba_line(List* line, int line_num)
         {
             /* SSL support must be actually active, else complain */
 #ifdef USE_SSL
-            if (g_instance.attr.attr_security.EnableSSL)
-                parsedline->conntype = ctHostSSL;
-            else {
+            parsedline->conntype = ctHostSSL;
+            if (!g_instance.attr.attr_security.EnableSSL) {
                 ereport(LOG,
                     (errcode(ERRCODE_CONFIG_FILE_ERROR),
                         errmsg("hostssl requires SSL to be turned on"),
@@ -773,7 +775,6 @@ static HbaLine* parse_hba_line(List* line, int line_num)
                         errcontext("line %d of configuration file \"%s\"",
                             line_num,
                             g_instance.attr.attr_common.HbaFileName)));
-                return NULL;
             }
 #else
             ereport(LOG,
@@ -1334,7 +1335,6 @@ static void check_hba_replication(hbaPort* port)
     ListCell* line = NULL;
     HbaLine* hba = NULL;
     bool gotRepl = false;
-    Assert(IsDSorHaWalSender());
 
     /* we do not bother local connection with GSS authentification */
     if (IS_AF_UNIX(port->raddr.addr.ss_family)) {
@@ -1574,10 +1574,6 @@ static void check_hba(hbaPort* port)
                      */
                     hba->auth_method = uaSHA256;
                     hba->remoteTrust = false;
-                } else if (roleid != INITIAL_USER_ID && IS_SINGLE_NODE && is_node_internal_connection(port)) {
-                    /* exception 4, in single node mode */
-                    hba->auth_method = uaSHA256;
-                    hba->remoteTrust = false;
                 } else {
                     ConnAuthMethodCorrect = false;
                     ereport(FATAL,
@@ -1595,6 +1591,16 @@ static void check_hba(hbaPort* port)
             (hba->auth_method == uaSHA256 || hba->auth_method == uaMD5)) {
             hba->auth_method = uaIAM;
         }
+
+#if defined(ENABLE_GSS) || defined(ENABLE_SSPI)
+        /*
+         * for non-initial user, krb authentication is not allowed, sha256 req will be processed
+         */
+        if (hba->auth_method == uaGSS && 
+            GetRoleOid(port->user_name) != INITIAL_USER_ID && IsConnFromApp()) {
+            hba->auth_method = uaSHA256;
+        }
+#endif
 
         port->hba = hba;
         return;
@@ -1709,6 +1715,20 @@ bool load_hba(void)
 }
 
 /*
+ * Check whether the username actually matched or not 
+ */
+static void check_username_matched(bool case_insensitive, const char* regexp_pgrole, const char* pg_role, bool* found_p)
+{
+    if (case_insensitive) {
+        if (pg_strcasecmp(regexp_pgrole, pg_role) == 0)
+            *found_p = true;
+    } else {
+        if (strcmp(regexp_pgrole, pg_role) == 0)
+            *found_p = true;
+    }
+}
+
+/*
  *	Process one line from the ident config file.
  *
  *	Take the line and compare it to the needed map, pg_role and ident_user.
@@ -1727,7 +1747,7 @@ static void parse_ident_usermap(List* line, int line_number, const char* usermap
     *found_p = false;
     *error_p = false;
 
-    AssertEreport(line != NIL, MOD_OPT, "");
+    Assert(line != NIL);
     field = list_head(line);
 
     /* Get the map token (must exist) */
@@ -1863,15 +1883,8 @@ static void parse_ident_usermap(List* line, int line_number, const char* usermap
          * now check if the username actually matched what the user is trying
          * to connect as
          */
-        if (case_insensitive) {
-            if (pg_strcasecmp(regexp_pgrole, pg_role) == 0)
-                *found_p = true;
-        } else {
-            if (strcmp(regexp_pgrole, pg_role) == 0)
-                *found_p = true;
-        }
+        check_username_matched(case_insensitive, regexp_pgrole, pg_role, found_p);
         pfree_ext(regexp_pgrole);
-
         return;
     } else {
         /* Not regular expression, so make complete match */
@@ -1991,7 +2004,11 @@ void hba_getauthmethod(hbaPort* port)
      * distinguish whether this request is from a standby process or gs_basebackup...
      * In this case, we still need to use check_hba_replication for compatibility.
      */
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IsDSorHaWalSender() ) {
+#else        
     if (IsDSorHaWalSender() && is_node_internal_connection(port)) {
+#endif        
         check_hba_replication(port);
     } else {
         check_hba(port);
@@ -2155,7 +2172,7 @@ bool is_cluster_internal_IP(sockaddr peer_addr)
         hba = (HbaLine*)lfirst(line);
 
         /* check connection type */
-        if (hba->auth_method == uaTrust) {
+        if (hba->auth_method == uaTrust || hba->auth_method == uaGSS) {
             if (check_ip(raddr, (struct sockaddr*)&hba->addr, (struct sockaddr*)&hba->mask)) {
                 (void)pthread_rwlock_unlock(&hba_rwlock);
                 free(raddr);

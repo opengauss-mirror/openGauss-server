@@ -29,6 +29,7 @@
 #include "utils/guc.h"
 
 #include "access/multi_redo_settings.h"
+#include "access/multi_redo_api.h"
 
 static uint32 ComputeRecoveryParallelism(int);
 static uint32 GetCPUCount();
@@ -46,12 +47,12 @@ void ConfigRecoveryParallelism()
                                             TRXN_REDO_MANAGER_NUM + TRXN_REDO_WORKER_NUM + XLOG_READER_NUM;
         sprintf_s(buf, sizeof(buf), "%u", total_recovery_parallelism);
 
-        ereport(LOG,
-            (errmsg("ConfigRecoveryParallelism, parse workers:%d, "
-                    "redo workers per parse worker:%d, total workernums is %u",
-                g_instance.attr.attr_storage.recovery_parse_workers,
-                g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker,
-                total_recovery_parallelism)));
+        ereport(LOG, (errmsg("ConfigRecoveryParallelism, parse workers:%d, "
+                             "redo workers per parse worker:%d, total workernums is %u",
+                             g_instance.attr.attr_storage.recovery_parse_workers,
+                             g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker,
+                             total_recovery_parallelism)));
+        g_supportHotStandby = false;
         SetConfigOption("recovery_parallelism", buf, PGC_POSTMASTER, PGC_S_OVERRIDE);
     } else if (g_instance.attr.attr_storage.max_recovery_parallelism > 1) {
         g_instance.comm_cxt.predo_cxt.redoType = PARALLEL_REDO;
@@ -60,13 +61,10 @@ void ConfigRecoveryParallelism()
             true_max_recovery_parallelism = MOST_FAST_RECOVERY_LIMIT;
         }
         sprintf_s(buf, sizeof(buf), "%u", ComputeRecoveryParallelism(true_max_recovery_parallelism));
-        ereport(LOG,
-            (errmodule(MOD_REDO),
-                errcode(ERRCODE_LOG),
-                errmsg("ConfigRecoveryParallelism, true_max_recovery_parallelism:%u, "
-                       "max_recovery_parallelism:%d",
-                    true_max_recovery_parallelism,
-                    g_instance.attr.attr_storage.max_recovery_parallelism)));
+        ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                      errmsg("ConfigRecoveryParallelism, true_max_recovery_parallelism:%u, "
+                             "max_recovery_parallelism:%d",
+                             true_max_recovery_parallelism, g_instance.attr.attr_storage.max_recovery_parallelism)));
         SetConfigOption("recovery_parallelism", buf, PGC_POSTMASTER, PGC_S_OVERRIDE);
     }
 }
@@ -113,11 +111,9 @@ static uint32 ComputeRecoveryParallelism(int hint)
     if (actual_parallelism < 1)
         actual_parallelism = 1;
 
-    ereport(LOG,
-        (errmodule(MOD_REDO),
-            errcode(ERRCODE_LOG),
-            errmsg(
-                "Recovery parallelism, cpu count = %u, max = %d, actual = %u", g_cpu_count, hint, actual_parallelism)));
+    ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                  errmsg("Recovery parallelism, cpu count = %u, max = %d, actual = %u", g_cpu_count, hint,
+                         actual_parallelism)));
     return actual_parallelism;
 }
 

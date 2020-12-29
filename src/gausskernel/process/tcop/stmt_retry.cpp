@@ -296,7 +296,8 @@ bool IsStmtRetryCapable(StatementRetryController* controller, bool is_extend_que
  */
 StatementRetryController* StmtRetryInitController(void)
 {
-    u_sess->exec_cxt.RetryController = New(u_sess->top_mem_cxt) StatementRetryController(u_sess->top_mem_cxt);
+    u_sess->exec_cxt.RetryController = New(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER))
+        StatementRetryController(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     return u_sess->exec_cxt.RetryController;
 }
 

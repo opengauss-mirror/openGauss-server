@@ -139,19 +139,19 @@ void CStoreUpdate::InitUpdateMemArg(Plan* plan)
             m_delMemInfo->partitionNum = partitionNum;
             m_delMemInfo->MemSort = m_insMemInfo->MemSort;
             MEMCTL_LOG(DEBUG2,
-                "UpdateForCStorePartDelete(init plan):Insert workmem is : %dKB, sort workmem: %dKB,"
-                "parititions totalnum is(%d)can spread maxMem is %dKB.",
-                m_delMemInfo->MemInsert,
-                m_delMemInfo->MemSort,
-                m_delMemInfo->partitionNum,
-                m_delMemInfo->canSpreadmaxMem);
+                       "UpdateForCStorePartDelete(init plan):Insert workmem is : %dKB, sort workmem: %dKB,"
+                       "parititions totalnum is(%d)can spread maxMem is %dKB.",
+                       m_delMemInfo->MemInsert,
+                       m_delMemInfo->MemSort,
+                       m_delMemInfo->partitionNum,
+                       m_delMemInfo->canSpreadmaxMem);
             MEMCTL_LOG(DEBUG2,
-                "UpdateForCStorePartInsert(init plan):Insert workmem is : %dKB, sort workmem: %dKB,"
-                "parititions totalnum is(%d)can spread maxMem is %dKB.",
-                m_insMemInfo->MemInsert,
-                m_insMemInfo->MemSort,
-                m_insMemInfo->partitionNum,
-                m_insMemInfo->canSpreadmaxMem);
+                       "UpdateForCStorePartInsert(init plan):Insert workmem is : %dKB, sort workmem: %dKB,"
+                       "parititions totalnum is(%d)can spread maxMem is %dKB.",
+                       m_insMemInfo->MemInsert,
+                       m_insMemInfo->MemSort,
+                       m_insMemInfo->partitionNum,
+                       m_insMemInfo->canSpreadmaxMem);
         } else {
             m_insMemInfo->canSpreadmaxMem = plan->operatorMaxMem;
             m_insMemInfo->MemInsert =
@@ -162,19 +162,19 @@ void CStoreUpdate::InitUpdateMemArg(Plan* plan)
             m_insMemInfo->partitionNum = 1;
             m_delMemInfo->MemSort = m_insMemInfo->MemSort;
             MEMCTL_LOG(DEBUG2,
-                "UpdateForCStoreDelete(init plan):Insert workmem is : %dKB, sort workmem: %dKB,"
-                "parititions totalnum is(%d)can spread maxMem is %dKB.",
-                m_delMemInfo->MemInsert,
-                m_delMemInfo->MemSort,
-                m_delMemInfo->partitionNum,
-                m_delMemInfo->canSpreadmaxMem);
+                       "UpdateForCStoreDelete(init plan):Insert workmem is : %dKB, sort workmem: %dKB,"
+                       "parititions totalnum is(%d)can spread maxMem is %dKB.",
+                       m_delMemInfo->MemInsert,
+                       m_delMemInfo->MemSort,
+                       m_delMemInfo->partitionNum,
+                       m_delMemInfo->canSpreadmaxMem);
             MEMCTL_LOG(DEBUG2,
-                "UpdateForCStoreInsert(init plan):Insert workmem is : %dKB, sort workmem: %dKB,"
-                "parititions totalnum is(%d)can spread maxMem is %dKB.",
-                m_insMemInfo->MemInsert,
-                m_insMemInfo->MemSort,
-                m_insMemInfo->partitionNum,
-                m_insMemInfo->canSpreadmaxMem);
+                       "UpdateForCStoreInsert(init plan):Insert workmem is : %dKB, sort workmem: %dKB,"
+                       "parititions totalnum is(%d)can spread maxMem is %dKB.",
+                       m_insMemInfo->MemInsert,
+                       m_insMemInfo->MemSort,
+                       m_insMemInfo->partitionNum,
+                       m_insMemInfo->canSpreadmaxMem);
         }
     } else {
         /*

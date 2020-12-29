@@ -103,9 +103,9 @@ typedef enum tagWarnErrorCodes {
     GTERR_BUTT = 0xffffffff
 } WARNERRCODE;
 
-/* **
+/***
  * List of commands understood by Client - Server network layer.
- * **/
+ ***/
 typedef enum tagGTPacketHeadCmds {
     GT_PKT_WARNING = 0x00022001,
     GT_PKT_END_OF_WARNINGS,
@@ -116,10 +116,10 @@ typedef enum tagGTPacketHeadCmds {
     GT_PKT_BUTT = 0xffffffff
 } GT_PACKET_HEAD_CMDS;
 
-/* **
+/***
  * Packet header for Client-Server communication.
  *
- * **/
+ ***/
 typedef struct tagGtPacketHead {
     uint32 ulMagicNum;        /* Magic number used for packet validation */
     int32 packetCmd;          /* Type of command being executed */
@@ -134,9 +134,9 @@ typedef struct tagGtPacketHead {
     int32 cOptions; /* Placeholder holder for future use */
 } GT_PACKET_HEAD, *LPGT_PACKET_HEAD;
 
-/* **
+/***
  * Client Server Packet overall structure
- * **/
+ ***/
 typedef struct tagGtPacket {
     GT_PACKET_HEAD packetHeader;
     unsigned char* packetPayload;

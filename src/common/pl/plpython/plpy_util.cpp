@@ -20,7 +20,7 @@
 void* PLy_malloc(size_t bytes)
 {
     /* We need our allocations to be long-lived, so use t_thrd.top_mem_cxt */
-    return MemoryContextAlloc(t_thrd.top_mem_cxt, bytes);
+    return MemoryContextAlloc(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), bytes);
 }
 
 void* PLy_malloc0(size_t bytes)

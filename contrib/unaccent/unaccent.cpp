@@ -41,10 +41,12 @@ typedef struct SuffixChar {
 static SuffixChar* placeChar(SuffixChar* node, unsigned char* str, int lenstr, char* replaceTo, int replacelen)
 {
     SuffixChar* curnode = NULL;
+    errno_t rc;
 
     if (!node) {
         node = (SuffixChar*)palloc(sizeof(SuffixChar) * 256);
-        memset(node, 0, sizeof(SuffixChar) * 256);
+        rc = memset_s(node, sizeof(SuffixChar) * 256, 0, sizeof(SuffixChar) * 256);
+        securec_check_c(rc, "", "");
     }
 
     curnode = node + *str;
@@ -55,7 +57,8 @@ static SuffixChar* placeChar(SuffixChar* node, unsigned char* str, int lenstr, c
         else {
             curnode->replacelen = replacelen;
             curnode->replaceTo = (char*)palloc(replacelen);
-            memcpy(curnode->replaceTo, replaceTo, replacelen);
+            rc = memcpy_s(curnode->replaceTo, replacelen, replaceTo, replacelen);
+            securec_check_c(rc, "", "");
         }
     } else {
         curnode->nextChar = placeChar(curnode->nextChar, str + 1, lenstr - 1, replaceTo, replacelen);
@@ -73,7 +76,7 @@ static SuffixChar* initSuffixTree(char* filename)
     SuffixChar* volatile rootSuffixTree = NULL;
     MemoryContext ccxt = CurrentMemoryContext;
     tsearch_readline_state trst;
-    volatile bool skip;
+    volatile bool skip = false;
 
     filename = get_tsearch_config_filename(filename, "rules");
     if (!tsearch_readline_begin(&trst, filename))
@@ -163,7 +166,7 @@ static SuffixChar* initSuffixTree(char* filename)
             if (errdata->sqlerrcode == ERRCODE_UNTRANSLATABLE_CHARACTER) {
                 FlushErrorState();
             } else {
-                (void)MemoryContextSwitchTo(ecxt);
+                MemoryContextSwitchTo(ecxt);
                 PG_RE_THROW();
             }
         }
@@ -231,10 +234,13 @@ Datum unaccent_lexize(PG_FUNCTION_ARGS)
     SuffixChar* rootSuffixTree = (SuffixChar*)PG_GETARG_POINTER(0);
     char* srcchar = (char*)PG_GETARG_POINTER(1);
     int32 len = PG_GETARG_INT32(2);
-    char *srcstart, *trgchar = NULL;
+    char* srcstart = NULL;
+    char* trgchar = NULL;
     int charlen;
+    Size tarlen = 0;
     TSLexeme* res = NULL;
     SuffixChar* node = NULL;
+    errno_t rc;
 
     srcstart = srcchar;
     while (srcchar - srcstart < len) {
@@ -245,18 +251,24 @@ Datum unaccent_lexize(PG_FUNCTION_ARGS)
             if (!res) {
                 /* allocate res only if it's needed */
                 res = (TSLexeme*)palloc0(sizeof(TSLexeme) * 2);
-                res->lexeme = trgchar = (char*)palloc(len * pg_database_encoding_max_length() + 1 /* \0 */);
+                tarlen = (Size)len * pg_database_encoding_max_length() + 1; /* \0 */
+                res->lexeme = trgchar = (char*)palloc(tarlen);
                 res->flags = TSL_FILTER;
                 if (srcchar != srcstart) {
-                    memcpy(trgchar, srcstart, srcchar - srcstart);
+                    rc = memcpy_s(trgchar, tarlen, srcstart, srcchar - srcstart);
+                    securec_check_c(rc, "", "");
                     trgchar += (srcchar - srcstart);
+                    tarlen -= (srcchar - srcstart);
                 }
             }
-            memcpy(trgchar, node->replaceTo, node->replacelen);
+            rc = memcpy_s(trgchar, node->replaceTo, node->replacelen);
+            
             trgchar += node->replacelen;
         } else if (res) {
-            memcpy(trgchar, srcchar, charlen);
+            rc = memcpy_s(trgchar, charlen, srcchar, charlen);
+            securec_check_c(rc, "", "");
             trgchar += charlen;
+            tarlen -= charlen;
         }
 
         srcchar += charlen;

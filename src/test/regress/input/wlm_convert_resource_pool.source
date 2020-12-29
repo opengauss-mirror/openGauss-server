@@ -1,0 +1,38 @@
+CREATE DATABASE wlm_convert_resource_pool;
+\c wlm_convert_resource_pool
+set resource_track_duration=0;
+set query_band='wlm_convert_resource_pool_test';
+DECLARE
+sql_stmt VARCHAR2(500);
+my_cursor REFCURSOR;
+respool_name text;
+mem_percent int;
+control_group text;
+active_statements int;
+max_dop int;
+memory_limit text;
+io_limits int;
+io_priority text;
+nodegroup text;
+BEGIN
+sql_stmt := 'select respool_name,mem_percent,control_group,active_statements,max_dop,memory_limit,io_limits,io_priority,nodegroup from  pg_resource_pool';
+OPEN my_cursor FOR EXECUTE sql_stmt;
+FETCH FROM my_cursor INTO respool_name,mem_percent,control_group,active_statements,max_dop,memory_limit,io_limits,io_priority,nodegroup;
+WHILE my_cursor % FOUND LOOP
+IF respool_name != 'default_pool' THEN
+EXECUTE IMMEDIATE 'DROP RESOURCE POOL '||respool_name||';';
+EXECUTE IMMEDIATE 'CREATE RESOURCE POOL '||respool_name||' WITH(mem_percent='||mem_percent||',control_group='''||control_group||''',active_statements='||active_statements||',max_dop='||max_dop||',memory_limit='''||memory_limit||''',io_limits='||io_limits||',io_priority='''||io_priority||''',nodegroup=''$logic_cluster'');';
+END IF;
+
+FETCH FROM my_cursor INTO respool_name,mem_percent,control_group,active_statements,max_dop,memory_limit,io_limits,io_priority,nodegroup;
+
+END LOOP;
+CLOSE my_cursor;
+END;
+/
+\! @abs_bindir@/gsql -r -p @portstring@ -d wlm_convert_resource_pool -c "SELECT count(group_name) from pgxc_group;"
+--output
+\c postgres
+drop database wlm_convert_resource_pool;
+\c regression
+--end of file

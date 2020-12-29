@@ -15,7 +15,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *	Copyright (c) 2001-2012, PostgreSQL Global Development Group
  *
- * IDENTIFICATION	
+ * IDENTIFICATION
  *	  src/gausskernel/process/postmaster/pgstat.cpp
  *
  * -------------------------------------------------------------------------
@@ -33,6 +33,7 @@
 #include "access/gtm.h"
 #include "access/heapam.h"
 #include "utils/lsyscache.h"
+#include "access/tableam.h"
 #include "access/transam.h"
 #include "access/twophase_rmgr.h"
 #include "access/xact.h"
@@ -69,12 +70,13 @@
 #include "utils/atomic.h"
 #include "utils/elog.h"
 #include "utils/guc.h"
+#include "utils/hotkey.h"
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/timestamp.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "gssignal/gs_signal.h"
 #include "utils/builtins.h"
 #include "storage/proc.h"
@@ -85,6 +87,9 @@
 #include "access/multi_redo_api.h"
 #include "instruments/instr_unique_sql.h"
 #include "instruments/instr_event.h"
+#include "instruments/instr_slow_query.h"
+#include "instruments/instr_statement.h"
+#include "instruments/instr_handle_mgr.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -102,25 +107,25 @@
  * Timer definitions.
  * ----------
  */
-#define PGSTAT_STAT_INTERVAL               \
-    500 /* Minimum time between stats file \
+#define PGSTAT_STAT_INTERVAL                   \
+    500 /* Minimum time between stats file \ \ \
          * updates; in milliseconds. */
 
-#define PGSTAT_RETRY_DELAY                    \
-    10 /* How long to wait between checks for \
+#define PGSTAT_RETRY_DELAY                        \
+    10 /* How long to wait between checks for \ \ \
         * a new file; in milliseconds. */
 
-#define PGSTAT_MAX_WAIT_TIME                  \
-    10000 /* Maximum time to wait for a stats \
+#define PGSTAT_MAX_WAIT_TIME                      \
+    10000 /* Maximum time to wait for a stats \ \ \
            * file update; in milliseconds. */
 
-#define PGSTAT_INQ_INTERVAL                    \
-    640 /* How often to ping the collector for \
+#define PGSTAT_INQ_INTERVAL                        \
+    640 /* How often to ping the collector for \ \ \
          * a new file; in milliseconds. */
 
-#define PGSTAT_RESTART_INTERVAL             \
-    60 /* How often to attempt to restart a \
-        * failed statistics collector; in   \
+#define PGSTAT_RESTART_INTERVAL                 \
+    60 /* How often to attempt to restart a \ \ \
+        * failed statistics collector; in   \ \ \
         * seconds. */
 
 #define PGSTAT_POLL_LOOP_COUNT (PGSTAT_MAX_WAIT_TIME / PGSTAT_RETRY_DELAY)
@@ -191,11 +196,15 @@ typedef struct PgStat_SubXactStatus {
 
 /* Record that's written to 2PC state file when pgstat state is persisted */
 typedef struct TwoPhasePgStatRecord {
-    PgStat_Counter tuples_inserted; /* tuples inserted in xact */
-    PgStat_Counter tuples_updated;  /* tuples updated in xact */
-    PgStat_Counter tuples_deleted;  /* tuples deleted in xact */
-    Oid t_id;                       /* table's OID */
-    bool t_shared;                  /* is it a shared catalog? */
+    PgStat_Counter tuples_inserted;    /* tuples inserted in xact */
+    PgStat_Counter tuples_updated;     /* tuples updated in xact */
+    PgStat_Counter tuples_deleted;     /* tuples deleted in xact */
+    PgStat_Counter inserted_pre_trunc; /* tuples inserted prior to truncate */
+    PgStat_Counter updated_pre_trunc;  /* tuples updated prior to truncate */
+    PgStat_Counter deleted_pre_trunc;  /* tuples deleted prior to truncate */
+    Oid t_id;                          /* table's OID */
+    bool t_shared;                     /* is it a shared catalog? */
+    bool t_truncated;                  /* was the relation truncated? */
     /*
      * if t_id is a parition oid , then t_statFlag is the corresponding
      * partitioned table oid;  if t_id is a non-parition oid, then t_statFlag is InvlaidOId
@@ -347,53 +356,50 @@ static PgStat_StatTabEntry* pgstat_get_tab_entry(
 static void pgstat_write_statsfile(bool permanent);
 static HTAB* pgstat_read_statsfile(Oid onlydb, bool permanent);
 static void backend_read_statsfile(void);
-static void pgstat_read_current_status(void);
 
 static void pgstat_send_tabstat(PgStat_MsgTabstat* tsmsg);
 static void pgstat_send_funcstats(void);
 static HTAB* pgstat_collect_oids(Oid catalogid);
 static HTAB* pgstat_collect_tabkeys(void);
 static PgStat_TableStatus* get_tabstat_entry(Oid rel_id, bool isshared, uint32 statFlag);
-static void pgstat_setup_memcxt(void);
 static void pgstat_collect_thread_status_setup_memcxt(void);
 static void pgstat_collect_thread_status_clear_resource(void);
 
 const char* pgstat_get_wait_io(WaitEventIO w);
 
 static void pgstat_setheader(PgStat_MsgHdr* hdr, StatMsgType mtype);
-static void pgstat_send(void* msg, int len);
+void pgstat_send(void* msg, int len);
 
-static void pgstat_recv_inquiry(PgStat_MsgInquiry* msg);
-static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg);
-static void pgstat_recv_tabpurge(PgStat_MsgTabpurge* msg);
-static void pgstat_recv_dropdb(PgStat_MsgDropdb* msg);
-static void pgstat_recv_resetcounter(PgStat_MsgResetcounter* msg);
-static void pgstat_recv_resetsharedcounter(PgStat_MsgResetsharedcounter* msg);
-static void pgstat_recv_resetsinglecounter(PgStat_MsgResetsinglecounter* msg);
-static void pgstat_recv_autovac(PgStat_MsgAutovacStart* msg);
-static void pgstat_recv_vacuum(PgStat_MsgVacuum* msg);
-static void pgstat_recv_data_changed(PgStat_MsgDataChanged* msg);
-static void pgstat_recv_truncate(PgStat_MsgTruncate* msg);
-static void pgstat_recv_analyze(PgStat_MsgAnalyze* msg);
-static void pgstat_recv_bgwriter(PgStat_MsgBgWriter* msg);
-static void pgstat_recv_funcstat(PgStat_MsgFuncstat* msg);
-static void pgstat_recv_funcpurge(PgStat_MsgFuncpurge* msg);
-static void pgstat_recv_recoveryconflict(PgStat_MsgRecoveryConflict* msg);
-static void pgstat_recv_deadlock(PgStat_MsgDeadlock* msg);
-static void pgstat_recv_tempfile(PgStat_MsgTempFile* msg);
-static void pgstat_recv_memReserved(PgStat_MsgMemReserved* msg);
-static void pgstat_recv_autovac_stat(PgStat_MsgAutovacStat* msg);
+static void pgstat_recv_inquiry(PgStat_MsgInquiry* msg, int len);
+static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg, int len);
+static void pgstat_recv_tabpurge(PgStat_MsgTabpurge* msg, int len);
+static void pgstat_recv_dropdb(PgStat_MsgDropdb* msg, int len);
+static void pgstat_recv_resetcounter(PgStat_MsgResetcounter* msg, int len);
+static void pgstat_recv_resetsharedcounter(PgStat_MsgResetsharedcounter* msg, int len);
+static void pgstat_recv_resetsinglecounter(PgStat_MsgResetsinglecounter* msg, int len);
+static void pgstat_recv_autovac(PgStat_MsgAutovacStart* msg, int len);
+static void pgstat_recv_vacuum(PgStat_MsgVacuum* msg, int len);
+static void pgstat_recv_data_changed(PgStat_MsgDataChanged* msg, int len);
+static void pgstat_recv_truncate(PgStat_MsgTruncate* msg, int len);
+static void pgstat_recv_analyze(PgStat_MsgAnalyze* msg, int len);
+static void pgstat_recv_bgwriter(PgStat_MsgBgWriter* msg, int len);
+static void pgstat_recv_funcstat(PgStat_MsgFuncstat* msg, int len);
+static void pgstat_recv_funcpurge(PgStat_MsgFuncpurge* msg, int len);
+static void pgstat_recv_recoveryconflict(const PgStat_MsgRecoveryConflict* msg);
+static void pgstat_recv_deadlock(const PgStat_MsgDeadlock* msg);
+static void pgstat_recv_tempfile(PgStat_MsgTempFile* msg, int len);
+static void pgstat_recv_memReserved(const PgStat_MsgMemReserved* msg);
+static void pgstat_recv_autovac_stat(PgStat_MsgAutovacStat* msg, int len);
 
 static void pgstat_send_badblock_stat(void);
-static void pgstat_recv_badblock_stat(PgStat_MsgBadBlock* msg);
+static void pgstat_recv_badblock_stat(PgStat_MsgBadBlock* msg, int len);
 
 static bool checkSysFileSystem(void);
 static bool checkLogicalCpu(uint32 cpuNum);
 static uint32 parseSiblingFile(const char* path);
-static void getThreadMemoryContextDetail(ThreadMemoryDetailPad* data);
-static void pgstat_recv_filestat(PgStat_MsgFile* msg);
+static void pgstat_recv_filestat(PgStat_MsgFile* msg, int len);
 static void prepare_calculate(SqlRTInfoArray* sql_rt_info, int* counter);
-static void pgstat_recv_sql_responstime(PgStat_SqlRT* msg);
+static void pgstat_recv_sql_responstime(PgStat_SqlRT* msg, int len);
 
 void LWLockReportWaitStart(LWLock*);
 void LWLockReportWaitEnd(void);
@@ -553,6 +559,10 @@ void pgstat_init(void)
          */
         for (;;) {
             FD_ZERO(&rset);
+            if (g_instance.stat_cxt.pgStatSock + 1 > FD_SETSIZE) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("fd + 1 cannot be greater than FD_SETSIZE")));
+            }
             FD_SET(g_instance.stat_cxt.pgStatSock, &rset);
 
             tv.tv_sec = 0;
@@ -757,6 +767,7 @@ static void pgstat_free_tablist(void)
     TabStatusArray* nextItem = NULL;
 
     currItem = u_sess->stat_cxt.pgStatTabList;
+
     /* make u_sess->stat_cxt.pgStatTabList be null and then free it */
     for (; currItem != NULL; currItem = nextItem) {
         /* record the next item to free */
@@ -790,9 +801,11 @@ void pgstat_report_stat(bool force)
     errno_t rc = EOK;
 
     /* Don't expend a clock check if nothing to do */
-    if ((u_sess->stat_cxt.pgStatTabList == NULL || u_sess->stat_cxt.pgStatTabList->tsa_used == 0) &&
-        !u_sess->stat_cxt.have_function_stats && !force)
+    bool stat_no_change = ((u_sess->stat_cxt.pgStatTabList == NULL || u_sess->stat_cxt.pgStatTabList->tsa_used == 0) &&
+                           !u_sess->stat_cxt.have_function_stats && !force);
+    if (stat_no_change) {
         return;
+    }
 
     /*
      * Don't send a message unless
@@ -863,7 +876,9 @@ void pgstat_report_stat(bool force)
     }
 
     /* reset last_stat_counter as current local pgStatTabList is reset */
-    if (is_unique_sql_enabled() && IS_PGXC_DATANODE && u_sess->unique_sql_cxt.last_stat_counter != NULL) {
+    bool need_reset_counter =
+        (is_unique_sql_enabled() && IS_PGXC_DATANODE && u_sess->unique_sql_cxt.last_stat_counter != NULL);
+    if (need_reset_counter) {
         rc = memset_s(
             u_sess->unique_sql_cxt.last_stat_counter, sizeof(PgStat_TableCounts), 0, sizeof(PgStat_TableCounts));
         securec_check(rc, "\0", "\0");
@@ -1171,7 +1186,7 @@ static HTAB* pgstat_collect_oids(Oid catalogid)
     HTAB* htab = NULL;
     HASHCTL hash_ctl;
     Relation rel;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tup;
     errno_t rc = EOK;
 
@@ -1185,15 +1200,15 @@ static HTAB* pgstat_collect_oids(Oid catalogid)
         "Temporary table of OIDs", PGSTAT_TAB_HASH_SIZE, &hash_ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
     rel = heap_open(catalogid, AccessShareLock);
-    scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
-    while ((tup = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
+    while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Oid thisoid = HeapTupleGetOid(tup);
 
         CHECK_FOR_INTERRUPTS();
 
         (void)hash_search(htab, (void*)&thisoid, HASH_ENTER, NULL);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(rel, AccessShareLock);
 
     return htab;
@@ -1213,7 +1228,7 @@ static HTAB* pgstat_collect_tabkeys(void)
     HASHCTL hash_ctl;
     Relation pgRelation;
     Relation pgPartition;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     Form_pg_partition partForm;
     PgStat_StatTabKey tabkey;
@@ -1230,21 +1245,22 @@ static HTAB* pgstat_collect_tabkeys(void)
     /* deal with relation */
     tabkey.statFlag = InvalidOid;
     pgRelation = heap_open(RelationRelationId, AccessShareLock);
-    scan = heap_beginscan(pgRelation, SnapshotNow, 0, NULL);
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(pgRelation, SnapshotNow, 0, NULL);
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         tabkey.tableid = HeapTupleGetOid(tuple);
         CHECK_FOR_INTERRUPTS();
 
         (void)hash_search(htab, (void*)(&tabkey), HASH_ENTER, NULL);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pgRelation, AccessShareLock);
 
     /* deal with partition */
     pgPartition = heap_open(PartitionRelationId, AccessShareLock);
-    scan = heap_beginscan(pgPartition, SnapshotNow, 0, NULL);
-    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+    scan = tableam_scan_begin(pgPartition, SnapshotNow, 0, NULL);
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         partForm = (Form_pg_partition)GETSTRUCT(tuple);
+
         /* skip partitioned object in pg_partition */
         if (partForm->parttype == PART_OBJ_TYPE_PARTED_TABLE)
             continue;
@@ -1256,7 +1272,7 @@ static HTAB* pgstat_collect_tabkeys(void)
 
         (void)hash_search(htab, (void*)(&tabkey), HASH_ENTER, NULL);
     }
-    heap_endscan(scan);
+    tableam_scan_end(scan);
     heap_close(pgPartition, AccessShareLock);
 
     return htab;
@@ -1451,7 +1467,7 @@ void pgstat_report_vacuum(Oid tableoid, uint32 statFlag, bool shared, PgStat_Cou
     msg.m_databaseid = shared ? InvalidOid : u_sess->proc_cxt.MyDatabaseId;
     msg.m_tableoid = tableoid;
     msg.m_statFlag = statFlag;
-    msg.m_autovacuum = IsAutoVacuumWorkerProcess();
+    msg.m_autovacuum = IsAutoVacuumWorkerProcess() || IsFromAutoVacWoker();
     msg.m_vacuumtime = GetCurrentTimestamp();
     msg.m_tuples = tuples;
     pgstat_send(&msg, sizeof(msg));
@@ -1489,6 +1505,9 @@ void pgstat_report_sql_rt(uint64 UniqueSQLId, int64 start_time, int64 rt)
 {
     PgStat_SqlRT msg;
 
+    if (IS_SINGLE_NODE) {
+        return; /* disable in single node tmp for performance issue */
+    }
     if (g_instance.stat_cxt.pgStatSock == PGINVALID_SOCKET || !u_sess->attr.attr_common.enable_instr_rt_percentile ||
         strncmp(u_sess->attr.attr_common.application_name, "gs_clean", strlen("gs_clean") == 0))
         return;
@@ -1572,7 +1591,7 @@ void pgstat_report_analyze(Relation rel, PgStat_Counter livetuples, PgStat_Count
     msg.m_databaseid = rel->rd_rel->relisshared ? InvalidOid : u_sess->proc_cxt.MyDatabaseId;
     msg.m_tableoid = RelationGetRelid(rel);
     msg.m_statFlag = rel->parentId;
-    msg.m_autovacuum = IsAutoVacuumWorkerProcess();
+    msg.m_autovacuum = IsAutoVacuumWorkerProcess() || IsFromAutoVacWoker();
     msg.m_analyzetime = GetCurrentTimestamp();
     msg.m_live_tuples = livetuples;
     msg.m_dead_tuples = deadtuples;
@@ -1824,8 +1843,8 @@ void pgstat_initstats(Relation rel)
     char relkind = rel->rd_rel->relkind;
 
     /* We only count stats for things that have storage */
-    if (!(relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW || relkind == RELKIND_INDEX || 
-            relkind == RELKIND_TOASTVALUE || relkind == RELKIND_SEQUENCE || relkind == RELKIND_GLOBAL_INDEX)) {
+    if (!(relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW || relkind == RELKIND_INDEX ||
+            relkind == RELKIND_GLOBAL_INDEX || relkind == RELKIND_TOASTVALUE || relkind == RELKIND_SEQUENCE)) {
         rel->pgstat_info = NULL;
         return;
     }
@@ -1851,7 +1870,7 @@ static void make_sure_stat_tab_initialized()
     if (u_sess->stat_cxt.pgStatTabList == NULL) {
         /* This is first time procedure is called */
         u_sess->stat_cxt.pgStatTabList =
-            (TabStatusArray*)MemoryContextAllocZero(u_sess->top_mem_cxt, sizeof(TabStatusArray));
+            (TabStatusArray*)MemoryContextAllocZero(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), sizeof(TabStatusArray));
     }
 
     if (u_sess->stat_cxt.pgStatTabHash != NULL) {
@@ -1859,9 +1878,8 @@ static void make_sure_stat_tab_initialized()
     }
 
     if (u_sess->stat_cxt.pgStatTabHashContext == NULL) {
-        u_sess->stat_cxt.pgStatTabHashContext = AllocSetContextCreate(u_sess->top_mem_cxt,
-                                                                      "PGStatLookupHashTableContext",
-                                                                      ALLOCSET_DEFAULT_SIZES);
+        u_sess->stat_cxt.pgStatTabHashContext =
+            AllocSetContextCreate(u_sess->top_mem_cxt, "PGStatLookupHashTableContext", ALLOCSET_DEFAULT_SIZES);
     } else {
         MemoryContextReset(u_sess->stat_cxt.pgStatTabHashContext);
     }
@@ -1874,9 +1892,9 @@ static void make_sure_stat_tab_initialized()
     ctl.hcxt = u_sess->stat_cxt.pgStatTabHashContext;
 
     u_sess->stat_cxt.pgStatTabHash = hash_create("pgstat sessionid to tsa_entry lookup hash table",
-                                                 TABSTAT_QUANTUM,
-                                                 &ctl,
-                                                 HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        TABSTAT_QUANTUM,
+        &ctl,
+        HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
 
 /*
@@ -1907,7 +1925,8 @@ static PgStat_TableStatus* get_tabstat_entry(Oid rel_id, bool isshared, uint32 s
     tsa = u_sess->stat_cxt.pgStatTabList;
     while (tsa->tsa_used == TABSTAT_QUANTUM) {
         if (tsa->tsa_next == NULL) {
-            tsa->tsa_next = (TabStatusArray*)MemoryContextAllocZero(u_sess->top_mem_cxt, sizeof(TabStatusArray));
+            tsa->tsa_next = (TabStatusArray*)MemoryContextAllocZero(
+                SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), sizeof(TabStatusArray));
         }
         tsa = tsa->tsa_next;
     }
@@ -2001,13 +2020,14 @@ static void add_tabstat_xact_level(PgStat_TableStatus* pgstat_info, int nest_lev
 /*
  * pgstat_count_heap_insert - count a tuple insertion of n tuples
  */
-void pgstat_count_heap_insert(Relation rel, PgStat_Counter n)
+void pgstat_count_heap_insert(Relation rel, int n)
 {
     PgStat_TableStatus* pgstat_info = rel->pgstat_info;
 
     if (pgstat_info != NULL) {
         /* We have to log the effect at the proper transactional level */
         int nest_level = GetCurrentTransactionNestLevel();
+
         if (pgstat_info->trans == NULL || pgstat_info->trans->nest_level != nest_level)
             add_tabstat_xact_level(pgstat_info, nest_level);
 
@@ -2025,6 +2045,7 @@ void pgstat_count_heap_update(Relation rel, bool hot)
     if (pgstat_info != NULL) {
         /* We have to log the effect at the proper transactional level */
         int nest_level = GetCurrentTransactionNestLevel();
+
         if (pgstat_info->trans == NULL || pgstat_info->trans->nest_level != nest_level)
             add_tabstat_xact_level(pgstat_info, nest_level);
 
@@ -2046,10 +2067,62 @@ void pgstat_count_heap_delete(Relation rel)
     if (pgstat_info != NULL) {
         /* We have to log the effect at the proper transactional level */
         int nest_level = GetCurrentTransactionNestLevel();
+
         if (pgstat_info->trans == NULL || pgstat_info->trans->nest_level != nest_level)
             add_tabstat_xact_level(pgstat_info, nest_level);
 
         pgstat_info->trans->tuples_deleted++;
+    }
+}
+
+/*
+ * pgstat_truncate_save_counters
+ *
+ * Whenever a table is truncated, we save its i/u/d counters so that they can
+ * be cleared, and if the (sub)xact that executed the truncate later aborts,
+ * the counters can be restored to the saved (pre-truncate) values.  Note we do
+ * this on the first truncate in any particular subxact level only.
+ */
+static void pgstat_truncate_save_counters(PgStat_TableXactStatus* trans)
+{
+    if (!trans->truncated) {
+        trans->inserted_pre_trunc = trans->tuples_inserted;
+        trans->updated_pre_trunc = trans->tuples_updated;
+        trans->deleted_pre_trunc = trans->tuples_deleted;
+        trans->truncated = true;
+    }
+}
+
+/*
+ * pgstat_truncate_restore_counters - restore counters when a truncate aborts
+ */
+static void pgstat_truncate_restore_counters(PgStat_TableXactStatus* trans)
+{
+    if (trans->truncated) {
+        trans->tuples_inserted = trans->inserted_pre_trunc;
+        trans->tuples_updated = trans->updated_pre_trunc;
+        trans->tuples_deleted = trans->deleted_pre_trunc;
+    }
+}
+
+/*
+ * pgstat_count_truncate - update tuple counters due to truncate
+ */
+void pgstat_count_truncate(Relation rel)
+{
+    PgStat_TableStatus* pgstat_info = rel->pgstat_info;
+
+    if (pgstat_info != NULL) {
+        /* We have to log the effect at the proper transactional level */
+        int nest_level = GetCurrentTransactionNestLevel();
+
+        if (pgstat_info->trans == NULL || pgstat_info->trans->nest_level != nest_level)
+            add_tabstat_xact_level(pgstat_info, nest_level);
+
+        pgstat_truncate_save_counters(pgstat_info->trans);
+        pgstat_info->trans->tuples_inserted = 0;
+        pgstat_info->trans->tuples_updated = 0;
+        pgstat_info->trans->tuples_deleted = 0;
     }
 }
 
@@ -2079,6 +2152,7 @@ void pgstat_count_cu_update(Relation rel, int n)
     if (pgstat_info != NULL) {
         /* We have to log the effect at the proper transactional level */
         int nest_level = GetCurrentTransactionNestLevel();
+
         if (pgstat_info->trans == NULL || pgstat_info->trans->nest_level != nest_level)
             add_tabstat_xact_level(pgstat_info, nest_level);
 
@@ -2097,11 +2171,22 @@ void pgstat_count_cu_delete(Relation rel, int n)
     if (pgstat_info != NULL) {
         /* We have to log the effect at the proper transactional level */
         int nest_level = GetCurrentTransactionNestLevel();
+
         if (pgstat_info->trans == NULL || pgstat_info->trans->nest_level != nest_level)
             add_tabstat_xact_level(pgstat_info, nest_level);
 
         pgstat_info->trans->tuples_deleted += n;
     }
+}
+
+static inline void init_tuplecount_truncate(PgStat_TableStatus* tabstat)
+{
+    /* forget live/dead stats seen by backend thus far */
+    tabstat->t_counts.t_tuples_inserted_post_truncate = 0;
+    tabstat->t_counts.t_tuples_updated_post_truncate = 0;
+    tabstat->t_counts.t_tuples_deleted_post_truncate = 0;
+    tabstat->t_counts.t_delta_live_tuples = 0;
+    tabstat->t_counts.t_delta_dead_tuples = 0;
 }
 
 /* ----------
@@ -2143,11 +2228,23 @@ void AtEOXact_PgStat(bool isCommit)
             Assert(trans->upper == NULL);
             tabstat = trans->parent;
             Assert(tabstat->trans == trans);
+            /* restore pre-truncate stats (if any) in case of aborted xact */
+            if (!isCommit)
+                pgstat_truncate_restore_counters(trans);
             /* count attempted actions regardless of commit/abort */
             tabstat->t_counts.t_tuples_inserted += trans->tuples_inserted;
             tabstat->t_counts.t_tuples_updated += trans->tuples_updated;
             tabstat->t_counts.t_tuples_deleted += trans->tuples_deleted;
             if (isCommit) {
+                tabstat->t_counts.t_truncated = trans->truncated;
+                if (trans->truncated) {
+                    init_tuplecount_truncate(tabstat);
+                }
+                if (tabstat->t_counts.t_truncated) {
+                    tabstat->t_counts.t_tuples_inserted_post_truncate += trans->tuples_inserted;
+                    tabstat->t_counts.t_tuples_updated_post_truncate += trans->tuples_updated;
+                    tabstat->t_counts.t_tuples_deleted_post_truncate += trans->tuples_deleted;
+                }
                 /* insert adds a live tuple, delete removes one */
                 tabstat->t_counts.t_delta_live_tuples += trans->tuples_inserted - trans->tuples_deleted;
                 /* update and delete each create a dead tuple */
@@ -2200,9 +2297,18 @@ void AtEOSubXact_PgStat(bool isCommit, int nestDepth)
             Assert(tabstat->trans == trans);
             if (isCommit) {
                 if (trans->upper && trans->upper->nest_level == nestDepth - 1) {
-                    trans->upper->tuples_inserted += trans->tuples_inserted;
-                    trans->upper->tuples_updated += trans->tuples_updated;
-                    trans->upper->tuples_deleted += trans->tuples_deleted;
+                    if (trans->truncated) {
+                        /* propagate the truncate status one level up */
+                        pgstat_truncate_save_counters(trans->upper);
+                        /* replace upper xact stats with ours */
+                        trans->upper->tuples_inserted = trans->tuples_inserted;
+                        trans->upper->tuples_updated = trans->tuples_updated;
+                        trans->upper->tuples_deleted = trans->tuples_deleted;
+                    } else {
+                        trans->upper->tuples_inserted += trans->tuples_inserted;
+                        trans->upper->tuples_updated += trans->tuples_updated;
+                        trans->upper->tuples_deleted += trans->tuples_deleted;
+                    }
                     tabstat->trans = trans->upper;
                     pfree(trans);
                 } else {
@@ -2226,6 +2332,8 @@ void AtEOSubXact_PgStat(bool isCommit, int nestDepth)
                  * On abort, update top-level tabstat counts, then forget the
                  * subtransaction
                  */
+                /* first restore values obliterated by truncate */
+                pgstat_truncate_restore_counters(trans);
                 /* count attempted actions regardless of commit/abort */
                 tabstat->t_counts.t_tuples_inserted += trans->tuples_inserted;
                 tabstat->t_counts.t_tuples_updated += trans->tuples_updated;
@@ -2269,9 +2377,13 @@ void AtPrepare_PgStat(void)
             record.tuples_inserted = trans->tuples_inserted;
             record.tuples_updated = trans->tuples_updated;
             record.tuples_deleted = trans->tuples_deleted;
+            record.inserted_pre_trunc = trans->inserted_pre_trunc;
+            record.updated_pre_trunc = trans->updated_pre_trunc;
+            record.deleted_pre_trunc = trans->deleted_pre_trunc;
             record.t_id = tabstat->t_id;
             record.t_shared = tabstat->t_shared;
             record.t_statFlag = tabstat->t_statFlag;
+            record.t_truncated = trans->truncated;
 
             RegisterTwoPhaseRecord(TWOPHASE_RM_PGSTAT_ID, 0, &record, sizeof(TwoPhasePgStatRecord));
         }
@@ -2331,6 +2443,15 @@ void pgstat_twophase_postcommit(TransactionId xid, uint16 info, void* recdata, u
     pgstat_info->t_counts.t_tuples_inserted += rec->tuples_inserted;
     pgstat_info->t_counts.t_tuples_updated += rec->tuples_updated;
     pgstat_info->t_counts.t_tuples_deleted += rec->tuples_deleted;
+    pgstat_info->t_counts.t_truncated = rec->t_truncated;
+    if (rec->t_truncated) {
+        init_tuplecount_truncate(pgstat_info);
+    }
+    if (pgstat_info->t_counts.t_truncated) {
+        pgstat_info->t_counts.t_tuples_inserted_post_truncate += rec->tuples_inserted;
+        pgstat_info->t_counts.t_tuples_updated_post_truncate += rec->tuples_updated;
+        pgstat_info->t_counts.t_tuples_deleted_post_truncate += rec->tuples_deleted;
+    }
     pgstat_info->t_counts.t_delta_live_tuples += rec->tuples_inserted - rec->tuples_deleted;
     pgstat_info->t_counts.t_delta_dead_tuples += rec->tuples_updated + rec->tuples_deleted;
     pgstat_info->t_counts.t_changed_tuples += rec->tuples_inserted + rec->tuples_updated + rec->tuples_deleted;
@@ -2351,6 +2472,11 @@ void pgstat_twophase_postabort(TransactionId xid, uint16 info, void* recdata, ui
     pgstat_info = get_tabstat_entry(rec->t_id, rec->t_shared, rec->t_statFlag);
 
     /* Same math as in AtEOXact_PgStat, abort case */
+    if (rec->t_truncated) {
+        rec->tuples_inserted = rec->inserted_pre_trunc;
+        rec->tuples_updated = rec->updated_pre_trunc;
+        rec->tuples_deleted = rec->deleted_pre_trunc;
+    }
     pgstat_info->t_counts.t_tuples_inserted += rec->tuples_inserted;
     pgstat_info->t_counts.t_tuples_updated += rec->tuples_updated;
     pgstat_info->t_counts.t_tuples_deleted += rec->tuples_deleted;
@@ -2450,40 +2576,6 @@ PgStat_StatFuncEntry* pgstat_fetch_stat_funcentry(Oid func_id)
     return funcentry;
 }
 
-/* ----------
- * pgstat_fetch_stat_beentry() -
- *
- *	Support function for the SQL-callable pgstat* functions. Returns
- *	our local copy of the current-activity entry for one backend.
- *
- *	NB: caller is responsible for a check if the user is permitted to see
- *	this info (especially the querystring).
- * ----------
- */
-PgBackendStatus* pgstat_fetch_stat_beentry(int beid)
-{
-    pgstat_read_current_status();
-
-    if (beid < 1 || beid > u_sess->stat_cxt.localNumBackends)
-        return NULL;
-
-    return &u_sess->stat_cxt.localBackendStatusTable[beid - 1];
-}
-
-/* ----------
- * pgstat_fetch_stat_numbackends() -
- *
- *	Support function for the SQL-callable pgstat* functions. Returns
- *	the maximum current backend id.
- * ----------
- */
-int pgstat_fetch_stat_numbackends(void)
-{
-    pgstat_read_current_status();
-
-    return u_sess->stat_cxt.localNumBackends;
-}
-
 /*
  * ---------
  * pgstat_fetch_global() -
@@ -2506,30 +2598,6 @@ PgStat_GlobalStats* pgstat_fetch_global(void)
 static THR_LOCAL char* BackendNspRelnameBuffer = NULL;
 
 PgBackendStatus* PgBackendStatusArray = NULL;
-
-THR_LOCAL XLogStatCollect *g_xlog_stat_shared = NULL;
-
-Size XLogStatShmemSize(void)
-{
-    return sizeof(XLogStatCollect);
-}
-
-void XLogStatShmemInit(void)
-{
-    bool found;
-    errno_t rc;
-
-    g_xlog_stat_shared = (XLogStatCollect *)ShmemInitStruct("XLogStat", XLogStatShmemSize(), &found);
-    g_xlog_stat_shared->remoteFlushWaitCount = 0;
-
-    if (!IsUnderPostmaster) {
-        Assert(!found);
-        rc = memset_s(g_xlog_stat_shared, XLogStatShmemSize(), 0, XLogStatShmemSize());
-        securec_check(rc, "\0", "\0");
-    } else {
-        Assert(found);
-    }
-}
 
 /*
  * ---------
@@ -2568,6 +2636,25 @@ Size BackendStatusShmemSize(void)
     size = add_size(size, mul_size(NAMEDATALEN * 2, BackendStatusArray_size));
     return size;
 }
+/**
+ * init memory whose size may be large than INT_MAX by calling func memset_s many times
+ */
+static void MemsetHugeSize(char* dest, const Size size, const char c)
+{
+    Size block_size = 0x40000000;
+    errno_t rc;
+    Size remain_size = size;
+    char* ptr = dest;
+    while (remain_size > 0) {
+        if (remain_size < block_size) {
+            block_size = remain_size;
+        }
+        rc = memset_s(ptr, block_size, c, block_size);
+        securec_check(rc, "\0", "\0");
+        ptr += block_size;
+        remain_size -= block_size;
+    }
+}
 
 /*
  * Initialize the shared status array and several string buffers
@@ -2588,9 +2675,18 @@ void CreateSharedBackendStatus(void)
     if (!found) {
         /*
          * We're the first - initialize.
+         * call MemsetHugeSize because the size may be larger than INT_MAX,
+         * when memset_s can only init memory less than INT_MAX.
          */
-        rc = memset_s(t_thrd.shemem_ptr_cxt.BackendStatusArray, size, 0, size);
-        securec_check(rc, "\0", "\0");
+        MemsetHugeSize((char*)t_thrd.shemem_ptr_cxt.BackendStatusArray, size, 0);
+
+        /* init mutex for full/slow sql */
+        TimestampTz current_time = GetCurrentTimestamp();
+        for (i = 0; i < BackendStatusArray_size; i++) {
+            (void)syscalllockInit(&t_thrd.shemem_ptr_cxt.BackendStatusArray[i].statement_cxt_lock);
+            /* init last updated time for wait event */
+            InstrWaitEventInitLastUpdated(&t_thrd.shemem_ptr_cxt.BackendStatusArray[i], current_time);
+        }
     }
 
     /* Create or attach to the shared appname buffer */
@@ -2601,6 +2697,7 @@ void CreateSharedBackendStatus(void)
     if (!found) {
         rc = memset_s(t_thrd.shemem_ptr_cxt.BackendAppnameBuffer, size, 0, size);
         securec_check(rc, "\0", "\0");
+
         /* Initialize st_appname pointers. */
         buffer = t_thrd.shemem_ptr_cxt.BackendAppnameBuffer;
         for (i = 0; i < BackendStatusArray_size; i++) {
@@ -2615,8 +2712,10 @@ void CreateSharedBackendStatus(void)
         (char*)ShmemInitStruct("Backend Connection Information Buffer", size, &found);
 
     if (!found) {
-        rc = memset_s(t_thrd.shemem_ptr_cxt.BackendConninfoBuffer, size, 0, size);
-        securec_check(rc, "\0", "\0");
+        /* call MemsetHugeSize because the size may be larger than INT_MAX,
+         * when memset_s can only init memory less than INT_MAX.
+         */
+        MemsetHugeSize((char*)t_thrd.shemem_ptr_cxt.BackendConninfoBuffer, size, 0);
 
         /* Initialize st_appname pointers. */
         buffer = t_thrd.shemem_ptr_cxt.BackendConninfoBuffer;
@@ -2691,38 +2790,17 @@ void CreateSharedBackendStatus(void)
 }
 
 /* get entry index of all various stat arrays for auxiliary threads */
-static int GetAuxProcStatEntryIndex(void)
+static int GetAuxProcStatEntryIndex()
 {
-    Assert(
-        t_thrd.bootstrap_cxt.MyAuxProcType > NotAnAuxProcess && t_thrd.bootstrap_cxt.MyAuxProcType < NUM_AUXPROCTYPES);
-    int index = MAX_BACKEND_SLOT + t_thrd.bootstrap_cxt.MyAuxProcType;
-
-    if (t_thrd.bootstrap_cxt.MyAuxProcType == PageWriterProcess) {
-        index += get_pagewriter_thread_id();
-	} else if (t_thrd.bootstrap_cxt.MyAuxProcType == MultiBgWriterProcess) {
-        index += get_bgwriter_thread_id() + MAX_PAGE_WRITER_THREAD_NUM;
-    } else if (t_thrd.bootstrap_cxt.MyAuxProcType == PageRedoProcess) {
-        index += MultiRedoGetWorkerId() + MAX_PAGE_WRITER_THREAD_NUM + MAX_BG_WRITER_THREAD_NUM;
+    int index = GetAuxProcEntryIndex(MAX_BACKEND_SLOT);
+    if (t_thrd.bootstrap_cxt.MyAuxProcType == PageRedoProcess) {
         SetPageRedoWorkerIndex(index);
-    } else if (t_thrd.bootstrap_cxt.MyAuxProcType == TpoolListenerProcess) {
-        /* thread pool listerner slots follow page redo threads */
-        index += t_thrd.threadpool_cxt.listener->GetGroup()->GetGroupId() + 
-		 MAX_PAGE_WRITER_THREAD_NUM + 
-	         MAX_BG_WRITER_THREAD_NUM  +
-                 (MAX_RECOVERY_THREAD_NUM - 1);
     }
-
     return index;
 }
 
-static const char *REMOTE_CONN_TYPET[REMOTE_CONN_GTM_TOOL + 1] = {
-    "app",
-    "coordinator",
-    "datanode",
-    "gtm",
-    "gtm_proxy",
-    "inetrnal_tool",
-    "gtm_tool"};
+static const char* REMOTE_CONN_TYPET[REMOTE_CONN_GTM_TOOL + 1] = {
+    "app", "coordinator", "datanode", "gtm", "gtm_proxy", "inetrnal_tool", "gtm_tool"};
 
 const char* remote_conn_type_string(int remote_conn_type)
 {
@@ -2851,7 +2929,6 @@ void pgstat_bestart(void)
     SockAddr clientaddr;
     volatile PgBackendStatus* beentry = NULL;
     errno_t rc = 0;
-    size_t clientaddrSize = sizeof(clientaddr);
 
     /*
      * To minimize the time spent modifying the PgBackendStatus entry, fetch
@@ -2876,11 +2953,10 @@ void pgstat_bestart(void)
      * If so, use all-zeroes client address, which is dealt with specially in
      * pg_stat_get_backend_client_addr and pg_stat_get_backend_client_port.
      */
-    if (u_sess->proc_cxt.MyProcPort) {
-        rc = memcpy_s(&clientaddr, clientaddrSize, &u_sess->proc_cxt.MyProcPort->raddr, clientaddrSize);
-    } else {
-        rc = memset_s(&clientaddr, clientaddrSize, 0, clientaddrSize);
-    }
+    if (u_sess->proc_cxt.MyProcPort)
+        rc = memcpy_s(&clientaddr, sizeof(clientaddr), &u_sess->proc_cxt.MyProcPort->raddr, sizeof(clientaddr));
+    else
+        rc = memset_s(&clientaddr, sizeof(clientaddr), 0, sizeof(clientaddr));
     securec_check(rc, "\0", "\0");
 
     /*
@@ -2898,11 +2974,10 @@ void pgstat_bestart(void)
     if (!ENABLE_THREAD_POOL)
         beentry->st_sessionid = t_thrd.proc_cxt.MyProcPid;
     else {
-        if (IS_THREAD_POOL_WORKER && u_sess->session_id > 0) {
+        if (IS_THREAD_POOL_WORKER && u_sess->session_id > 0)
             beentry->st_sessionid = u_sess->session_id;
-        } else {
+        else
             beentry->st_sessionid = t_thrd.proc_cxt.MyProcPid;
-        }
     }
 
     beentry->st_proc_start_timestamp = proc_start_timestamp;
@@ -2911,7 +2986,7 @@ void pgstat_bestart(void)
     beentry->st_xact_start_timestamp = 0;
     beentry->st_databaseid = u_sess->proc_cxt.MyDatabaseId;
     beentry->st_userid = userid;
-    rc = memcpy_s((void*)&beentry->st_clientaddr, sizeof(SockAddr), &clientaddr, clientaddrSize);
+    rc = memcpy_s((void*)&beentry->st_clientaddr, sizeof(SockAddr), &clientaddr, sizeof(clientaddr));
     securec_check(rc, "\0", "\0");
     beentry->st_clienthostname[0] = '\0';
     beentry->st_state = STATE_UNDEFINED;
@@ -2948,6 +3023,8 @@ void pgstat_bestart(void)
     beentry->st_debug_info = &u_sess->wlm_cxt->wlm_debug_info;
     beentry->st_cgname = u_sess->wlm_cxt->control_group;
     beentry->st_stmtmem = 0;
+    beentry->st_block_sessionid = 0;
+    beentry->statement_cxt = bind_statement_context();
 
     beentry->st_connect_info = u_sess->pgxc_cxt.PoolerConnectionInfo;
     /*
@@ -2967,46 +3044,52 @@ void pgstat_bestart(void)
 
     pgstat_increment_changecount_after(beentry);
 
-    
     /* add remote node info */
     if (u_sess->proc_cxt.MyProcPort != NULL) {
         if (u_sess->proc_cxt.MyProcPort->is_logic_conn) {
             if (u_sess->proc_cxt.MyProcPort->libcomm_addrinfo != NULL) {
-                rc = memcpy_s((void *)&beentry->remote_info.remote_name, NAMEDATALEN,
-                    u_sess->proc_cxt.MyProcPort->libcomm_addrinfo->nodename, NAMEDATALEN);
+                rc = memcpy_s((void*)&beentry->remote_info.remote_name,
+                    NAMEDATALEN,
+                    u_sess->proc_cxt.MyProcPort->libcomm_addrinfo->nodename,
+                    NAMEDATALEN);
                 securec_check(rc, "\0", "\0");
-                rc = memcpy_s((void *)&beentry->remote_info.remote_ip, MAX_IP_STR_LEN,
+                rc = memcpy_s((void*)&beentry->remote_info.remote_ip,
+                    MAX_IP_STR_LEN,
                     u_sess->proc_cxt.MyProcPort->libcomm_addrinfo->host,
                     strlen(u_sess->proc_cxt.MyProcPort->libcomm_addrinfo->host) + 1);
                 securec_check(rc, "\0", "\0");
-                rc = memcpy_s((void *)&beentry->remote_info.remote_port, MAX_PORT_LEN,
-                    &(u_sess->proc_cxt.MyProcPort->libcomm_addrinfo->sctp_port), MAX_PORT_LEN);
+                rc = memcpy_s((void*)&beentry->remote_info.remote_port,
+                    MAX_PORT_LEN,
+                    &(u_sess->proc_cxt.MyProcPort->libcomm_addrinfo->listen_port),
+                    MAX_PORT_LEN);
                 securec_check(rc, "\0", "\0");
-                beentry->remote_info.socket =  -1;
-                beentry->remote_info.logic_id =  u_sess->proc_cxt.MyProcPort->gs_sock.sid;
+                beentry->remote_info.socket = -1;
+                beentry->remote_info.logic_id = u_sess->proc_cxt.MyProcPort->gs_sock.sid;
             }
         } else {
             if (u_sess->proc_cxt.MyProcPort->sock >= 0) {
-                const char *remote_node = remote_conn_type_string(u_sess->attr.attr_common.remoteConnType);
-                rc = memcpy_s((void *)&beentry->remote_info.remote_name, NAMEDATALEN,
-                    remote_node, strlen(remote_node) + 1);
+                const char* remote_node = remote_conn_type_string(u_sess->attr.attr_common.remoteConnType);
+                rc = memcpy_s(
+                    (void*)&beentry->remote_info.remote_name, NAMEDATALEN, remote_node, strlen(remote_node) + 1);
                 securec_check(rc, "\0", "\0");
                 if (u_sess->proc_cxt.MyProcPort->remote_host != NULL) {
-                    rc = memcpy_s((void *)&beentry->remote_info.remote_ip, MAX_IP_STR_LEN,
+                    rc = memcpy_s((void*)&beentry->remote_info.remote_ip,
+                        MAX_IP_STR_LEN,
                         u_sess->proc_cxt.MyProcPort->remote_host,
                         strlen(u_sess->proc_cxt.MyProcPort->remote_host) + 1);
                     securec_check(rc, "\0", "\0");
                 }
-                
+
                 if (u_sess->proc_cxt.MyProcPort->remote_port != NULL &&
                     u_sess->proc_cxt.MyProcPort->remote_port[0] != '\0') {
-                    rc = memcpy_s((void *)&beentry->remote_info.remote_port, MAX_PORT_LEN,
+                    rc = memcpy_s((void*)&beentry->remote_info.remote_port,
+                        MAX_PORT_LEN,
                         u_sess->proc_cxt.MyProcPort->remote_port,
                         strlen(u_sess->proc_cxt.MyProcPort->remote_port) + 1);
                     securec_check(rc, "\0", "\0");
                 }
 
-                beentry->remote_info.socket =  u_sess->proc_cxt.MyProcPort->sock;
+                beentry->remote_info.socket = u_sess->proc_cxt.MyProcPort->sock;
                 beentry->remote_info.logic_id = -1;
             }
         }
@@ -3015,16 +3098,16 @@ void pgstat_bestart(void)
     if (u_sess->proc_cxt.MyProcPort && u_sess->proc_cxt.MyProcPort->remote_hostname) {
         strlcpy(beentry->st_clienthostname, u_sess->proc_cxt.MyProcPort->remote_hostname, NAMEDATALEN);
     }
-        
+
     /* Update app name to current GUC setting */
     if (u_sess->attr.attr_common.application_name) {
         pgstat_report_appname(u_sess->attr.attr_common.application_name);
     }
-        
+
     /* Update connection info to current GUC setting */
     if (u_sess->attr.attr_sql.connection_info) {
         pgstat_report_conninfo(u_sess->attr.attr_sql.connection_info);
-    }     
+    }
 }
 
 /*
@@ -3122,6 +3205,24 @@ static void pgstat_beshutdown_hook(int code, Datum arg)
     beentry->st_procpid = 0;   /* mark pid invalid */
     beentry->st_sessionid = 0; /* mark sessionid invalid */
 
+    /*
+     * handle below cases:
+     * if thread pool worker is shuting down, this hook is called previously,
+     * we need to release thread/session statement contexts.
+     * normal backend, only need to release thread statement context.
+     */
+    if (IS_THREAD_POOL_WORKER && u_sess->session_ctr_index >= GLOBAL_RESERVE_SESSION_NUM &&
+        u_sess->session_ctr_index < MAX_BACKEND_SLOT) {
+        release_statement_context(&t_thrd.shemem_ptr_cxt.BackendStatusArray[u_sess->session_ctr_index],
+            __FUNCTION__, __LINE__);
+    }
+    if (t_thrd.proc_cxt.MyBackendId != InvalidBackendId) {
+        release_statement_context(&t_thrd.shemem_ptr_cxt.BackendStatusArray[t_thrd.proc_cxt.MyBackendId - 1],
+            __FUNCTION__, __LINE__);
+    } else {
+        release_statement_context(t_thrd.shemem_ptr_cxt.MyBEEntry, __FUNCTION__, __LINE__);
+    }
+
     pgstat_increment_changecount_after(beentry);
 
     WaitUntilLWLockInfoNeverAccess(beentry);
@@ -3164,6 +3265,16 @@ void pgstat_beshutdown_session(int ctrl_index)
 
         beentry->st_procpid = 0;   /* mark pid invalid */
         beentry->st_sessionid = 0; /* mark sessionid invalid */
+
+        /*
+         * pgstat_beshutdown_session will be called in thread pool mode:
+         * if t_thrd.proc_cxt.proc_exit_inprogress is true, thread backend entry and
+         * session backend entry can be reused by other backend(CleanupInvalidationState
+         * is called before), so backend entry cann't be accessed during this stage.
+         * when false, just case that thread pool worker is detaching or closing session, 
+         * so we need to release statemement context.
+         */
+        release_statement_context(&t_thrd.shemem_ptr_cxt.BackendStatusArray[ctrl_index], __FUNCTION__, __LINE__);
 
         pgstat_increment_changecount_after(beentry);
 
@@ -3388,6 +3499,15 @@ void pgstat_report_queryid(uint64 queryid)
      * protocol.  The update must appear atomic in any case.
      */
     beentry->st_queryid = queryid;
+    if (queryid == 0) {
+        beentry->st_unique_sql_key.unique_sql_id = 0;
+        beentry->st_unique_sql_key.cn_id = 0;
+        beentry->st_unique_sql_key.user_id = 0;
+    } else {
+        beentry->st_unique_sql_key.unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;
+        beentry->st_unique_sql_key.cn_id = u_sess->unique_sql_cxt.unique_sql_cn_id;
+        beentry->st_unique_sql_key.user_id = u_sess->unique_sql_cxt.unique_sql_user_id;
+    }
 }
 
 void pgstat_report_jobid(uint64 jobid)
@@ -3415,6 +3535,7 @@ void pgstat_report_parent_sessionid(uint64 sessionid, uint32 level)
      * may modify, there seems no need to bother with the st_changecount
      * protocol.  The update must appear atomic in any case.
      */
+    beentry->st_sessionid = sessionid;
     beentry->st_parent_sessionid = sessionid;
     beentry->st_thread_level = level;
 }
@@ -3487,6 +3608,40 @@ void pgstat_report_smpid(uint32 smpid)
      * protocol.  The update must appear atomic in any case.
      */
     beentry->st_smpid = smpid;
+}
+
+/*
+ * report blocking session into waitLockThrd's PgBackendStatus
+ */
+void pgstat_report_blocksid(void* waitLockThrd, uint64 blockSessionId)
+{
+    if (IS_PGSTATE_TRACK_UNDEFINE)
+        return;
+
+    knl_thrd_context* thrd = (knl_thrd_context*)waitLockThrd;
+    volatile PgBackendStatus* beentry = thrd->shemem_ptr_cxt.MyBEEntry;
+
+    if (beentry->st_block_sessionid != blockSessionId) {
+        /* dont print lock info while wait ends. Moreover waitLock is not access at this time. */
+        if (blockSessionId == 0) {
+            ereport(DEBUG1,
+                (errmsg("thread %lu waiting for lock ends", thrd->proc_cxt.MyProcPid)));
+        } else if (thrd->proc->waitLock != NULL) {
+            ereport(DEBUG1,
+                (errmsg("thread %lu waiting for %s on %s, blocking session %lu",
+                    thrd->proc_cxt.MyProcPid,
+                    GetLockmodeName(thrd->proc->waitLock->tag.locktag_lockmethodid, thrd->proc->waitLockMode),
+                    LocktagToString(thrd->proc->waitLock->tag),
+                    blockSessionId)));
+        }
+
+        /*
+         * NOTE: use 'volatile' to control concurrency instead of 'changecount' here since this
+         * mothod could be not only invoked by itself thread but also other thread. 'changecount'
+         * can work well only when write is done by one thread.
+         */
+        beentry->st_block_sessionid = blockSessionId;
+    }
 }
 
 /*
@@ -3917,15 +4072,14 @@ WaitInfo* read_current_instr_wait_info(void)
          */
         WaitInfo waitinfo;
         for (;;) {
-            int         before_changecount;
-            int         after_changecount;
+            int before_changecount;
+            int after_changecount;
 
             pgstat_save_changecount_before(beentry, before_changecount);
             rc = memcpy_s(&waitinfo, sizeof(WaitInfo), (WaitInfo*)&beentry->waitInfo, sizeof(WaitInfo));
             securec_check(rc, "", "");
             pgstat_save_changecount_after(beentry, after_changecount);
-            if (before_changecount == after_changecount &&
-                (before_changecount & 1) == 0)
+            if (before_changecount == after_changecount && (before_changecount & 1) == 0)
                 break;
 
             /* Make sure we can break out of loop if stuck... */
@@ -3935,115 +4089,6 @@ WaitInfo* read_current_instr_wait_info(void)
         beentry++;
     }
     return gsInstrWaitInfo;
-}
-
-/* ----------
- * pgstat_read_current_status() -
- *
- *	Copy the current contents of the PgBackendStatus array to local memory,
- *	if not already done in this transaction.
- * ----------
- */
-static void pgstat_read_current_status(void)
-{
-    volatile PgBackendStatus* beentry = NULL;
-    PgBackendStatus* localtable = NULL;
-    PgBackendStatus* localentry = NULL;
-    MemoryContext memcontext = NULL;
-    char* localappname = NULL;
-    char* localclienthostname = NULL;
-    char* localconninfo = NULL;
-    char* localactivity = NULL;
-    int i;
-    errno_t rc = EOK;
-
-    if (u_sess->stat_cxt.localBackendStatusTable)
-        return; /* already done */
-
-    pgstat_setup_memcxt();
-    memcontext = (u_sess->stat_cxt.pgStatRunningInCollector) ? u_sess->stat_cxt.pgStatCollectThdStatusContext
-                                                             : u_sess->stat_cxt.pgStatLocalContext;
-
-    localtable = (PgBackendStatus*)MemoryContextAlloc(memcontext, sizeof(PgBackendStatus) * BackendStatusArray_size);
-    localappname = (char*)MemoryContextAlloc(memcontext, NAMEDATALEN * BackendStatusArray_size);
-    localclienthostname = (char*)MemoryContextAlloc(memcontext, NAMEDATALEN * BackendStatusArray_size);
-    localconninfo = (char*)MemoryContextAlloc(memcontext, CONNECTIONINFO_LEN * BackendStatusArray_size);
-    localactivity = (char*)MemoryContextAlloc(
-        memcontext, g_instance.attr.attr_common.pgstat_track_activity_query_size * BackendStatusArray_size);
-
-    u_sess->stat_cxt.localNumBackends = 0;
-
-    beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + BackendStatusArray_size - 1;
-    localentry = localtable;
-    /*
-     * We go through BackendStatusArray from back to front, because
-     * in thread pool mode, both an active session and its thread pool worker
-     * will have the same procpid in their entry and in most cases what we want
-     * is session's entry, which will be returned first in such searching direction.
-     */
-    for (i = 1; i <= BackendStatusArray_size; i++) {
-        /*
-         * Follow the protocol of retrying if st_changecount changes while we
-         * copy the entry, or if it's odd.  (The check for odd is needed to
-         * cover the case where we are able to completely copy the entry while
-         * the source backend is between increment steps.)	We use a volatile
-         * pointer here to ensure the compiler doesn't try to get cute.
-         */
-        for (;;) {
-            int         before_changecount;
-            int         after_changecount;
-
-            pgstat_save_changecount_before(beentry, before_changecount);
-
-            localentry->st_procpid = beentry->st_procpid;
-            localentry->st_sessionid = beentry->st_sessionid;
-            if (localentry->st_procpid > 0 || localentry->st_sessionid > 0) {
-                rc = memcpy_s(localentry, sizeof(PgBackendStatus), (char*)beentry, sizeof(PgBackendStatus));
-                securec_check(rc, "", "");
-                /*
-                 * strcpy is safe even if the string is modified concurrently,
-                 * because there's always a \0 at the end of the buffer.
-                 */
-                rc = strcpy_s(localappname, NAMEDATALEN * BackendStatusArray_size, (char*)beentry->st_appname);
-                securec_check(rc, "", "");
-                localentry->st_appname = localappname;
-                rc = strcpy_s(
-                    localclienthostname, NAMEDATALEN * BackendStatusArray_size, (char*)beentry->st_clienthostname);
-                securec_check(rc, "", "");
-                localentry->st_clienthostname = localclienthostname;
-                rc = strcpy_s(localconninfo, CONNECTIONINFO_LEN * BackendStatusArray_size, (char*)beentry->st_conninfo);
-                securec_check(rc, "", "");
-                localentry->st_conninfo = localconninfo;
-                rc = strcpy_s(localactivity,
-                    g_instance.attr.attr_common.pgstat_track_activity_query_size * BackendStatusArray_size,
-                    (char*)beentry->st_activity);
-                securec_check(rc, "", "");
-                localentry->st_activity = localactivity;
-            }
-
-            pgstat_save_changecount_after(beentry, after_changecount);
-            if (before_changecount == after_changecount &&
-                (before_changecount & 1) == 0)
-                break;
-
-            /* Make sure we can break out of loop if stuck... */
-            CHECK_FOR_INTERRUPTS();
-        }
-
-        /* Only valid entries get included into the local array */
-        if (localentry->st_procpid > 0 || localentry->st_sessionid > 0) {
-            localentry++;
-            localappname += NAMEDATALEN;
-            localclienthostname += NAMEDATALEN;
-            localconninfo += CONNECTIONINFO_LEN;
-            localactivity += g_instance.attr.attr_common.pgstat_track_activity_query_size;
-            u_sess->stat_cxt.localNumBackends++;
-        }
-        beentry--;
-    }
-
-    /* Set the pointer only after completion of a valid table */
-    u_sess->stat_cxt.localBackendStatusTable = localtable;
 }
 
 /* ----------
@@ -4302,6 +4347,12 @@ const char* pgstat_get_wait_io(WaitEventIO w)
         case WAIT_EVENT_DW_WRITE:
             event_name = "DoubleWriteFileWrite";
             break;
+        case WAIT_EVENT_DW_SINGLE_POS:
+            event_name = "DWSingleFlushGetPos";
+            break;
+        case WAIT_EVENT_DW_SINGLE_WRITE:
+            event_name = "DWSingleFlushWrite";
+            break;
         case WAIT_EVENT_PREDO_PROCESS_PENDING:
             event_name = "PredoProcessPending";
             break;
@@ -4316,6 +4367,27 @@ const char* pgstat_get_wait_io(WaitEventIO w)
             break;
         case WAIT_EVENT_DISABLE_CONNECT_FILE_WRITE:
             event_name = "DisableConnectFileWrite";
+            break;
+        case WAIT_EVENT_MPFL_INIT:
+            event_name = "MPFL_INIT";
+            break;
+        case WAIT_EVENT_MPFL_READ:
+            event_name = "MPFL_READ";
+            break;
+        case WAIT_EVENT_MPFL_WRITE:
+            event_name = "MPFL_WRITE";
+            break;
+        case WAIT_EVENT_OBS_LIST:
+            event_name = "OBSList";
+            break;
+        case WAIT_EVENT_OBS_READ:
+            event_name = "OBSRead";
+            break;
+        case WAIT_EVENT_OBS_WRITE:
+            event_name = "OBSWrite";
+            break;
+        case WAIT_EVENT_LOGCTRL_SLEEP:
+            event_name = "LOGCTRL_SLEEP";
             break;
             /* no default case, so that compiler will warn */
         case IO_EVENT_NUM:
@@ -4332,29 +4404,30 @@ const char* pgstat_get_wait_io(WaitEventIO w)
  */
 int pgstat_get_current_active_numbackends(void)
 {
-    int i = 0;
     int result_counter = 0;
 
     // If BackendStatusArray is NULL, we will get it from other thread.
     if (t_thrd.shemem_ptr_cxt.BackendStatusArray == NULL) {
-        if (PgBackendStatusArray != NULL)
+        if (NULL != PgBackendStatusArray)
             t_thrd.shemem_ptr_cxt.BackendStatusArray = PgBackendStatusArray;
         else
             return result_counter;
     }
 
-    int num_backends = pgstat_fetch_stat_numbackends();
+    PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
 
-    for (; i < num_backends; ++i) {
-        PgBackendStatus* beentry = pgstat_fetch_stat_beentry(i + 1);
+    while (node != NULL) {
+        PgBackendStatus* beentry = node->data;
 
         /*
          * If the backend thread is valid and the state
          * is not idle or undefined, we treat it as a active thread.
          */
         if ((beentry != NULL) && beentry->st_sessionid > 0 &&
-            (beentry->st_state != STATE_IDLE && beentry->st_state != STATE_UNDEFINED))
+            (beentry->st_state != STATE_IDLE && beentry->st_state != STATE_UNDEFINED &&
+                beentry->st_state != STATE_DECOUPLED))
             ++result_counter;
+        node = node->next;
     }
 
     /* Make sure the active count is not beyond max connections */
@@ -4362,59 +4435,6 @@ int pgstat_get_current_active_numbackends(void)
         result_counter = g_instance.attr.attr_network.MaxConnections;
 
     return result_counter;
-}
-
-/* ----------
- * pgstat_get_backend_entries() -
- *
- *  get current active entries of backends
- * ----------
- */
-int pgstat_get_backend_entries(void)
-{
-    // If BackendStatusArray is NULL, we will get it from other thread.
-    if (t_thrd.shemem_ptr_cxt.BackendStatusArray == NULL) {
-        if (PgBackendStatusArray != NULL)
-            t_thrd.shemem_ptr_cxt.BackendStatusArray = PgBackendStatusArray;
-        else
-            return 0;
-    }
-
-    return pgstat_fetch_stat_numbackends();
-}
-
-/* ----------
- * pgstat_get_current_active_numbackends() -
- *
- *  get current active count of backends
- * ----------
- */
-PgBackendStatus* pgstat_get_backend_entry(uint64 sess_id)
-{
-    int i = 0;
-
-    // If BackendStatusArray is NULL, we will get it from other thread.
-    if (t_thrd.shemem_ptr_cxt.BackendStatusArray == NULL) {
-        if (PgBackendStatusArray != NULL)
-            t_thrd.shemem_ptr_cxt.BackendStatusArray = PgBackendStatusArray;
-        else
-            return NULL;
-    }
-
-    int num_backends = pgstat_fetch_stat_numbackends();
-
-    for (i = 0; i < num_backends; ++i) {
-        PgBackendStatus* beentry = pgstat_fetch_stat_beentry(i + 1);
-
-        /*
-         * If the backend thread is valid and the state
-         * is not idle or undefined, we treat it as a active thread.
-         */
-        if ((beentry != NULL) && beentry->st_sessionid == sess_id)
-            return beentry;
-    }
-
-    return NULL;
 }
 
 /* get the pointer to the specified backend status */
@@ -4458,12 +4478,10 @@ List* pgstat_get_user_backend_entry(Oid userid)
     }
 
     List* entry_list = NULL;
+    PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
 
-    int num_backends = pgstat_fetch_stat_numbackends();
-
-    for (int i = 0; i < num_backends; ++i) {
-        PgBackendStatus* beentry = pgstat_fetch_stat_beentry(i + 1);
-
+    while (node != NULL) {
+        PgBackendStatus* beentry = node->data;
         /*
          * If the backend thread is valid and the user id
          * matched, we treat it as a active thread.
@@ -4471,17 +4489,28 @@ List* pgstat_get_user_backend_entry(Oid userid)
         if (beentry != NULL) {
             WLMStatistics* backstat = (WLMStatistics*)&beentry->st_backstat;
 
-            if (beentry->st_procpid <= 0 && beentry->st_sessionid == 0)
+            if (beentry->st_procpid <= 0 && beentry->st_sessionid == 0) {
+                node = node->next;
                 continue;
+            }
 
-            if (((backstat->status && strcmp(backstat->status, "running") == 0) ||
-                    (backstat->enqueue && strcmp(backstat->enqueue, "Transaction") == 0) ||
-                    (backstat->enqueue && strcmp(backstat->enqueue, "StoredProc") == 0) ||
-                    (backstat->status && strcmp(backstat->status, "pending") == 0 && backstat->enqueue &&
-                        (strcmp(backstat->enqueue, "None") == 0 || strcmp(backstat->enqueue, "Respool") == 0))) &&
-                (backstat->qtype && strcmp(backstat->qtype, "Internal") != 0))
+            if (!(backstat->qtype && strcmp(backstat->qtype, "Internal") != 0)) {
+                node = node->next;
+                continue;
+            }
+
+            if ((backstat->status && strcmp(backstat->status, "running") == 0) ||
+                (backstat->enqueue && strcmp(backstat->enqueue, "Transaction") == 0) ||
+                (backstat->enqueue && strcmp(backstat->enqueue, "StoredProc") == 0) ||
+                (backstat->status && strcmp(backstat->status, "pending") == 0 && backstat->enqueue &&
+                    (strcmp(backstat->enqueue, "None") == 0 || strcmp(backstat->enqueue, "Respool") == 0)) ||
+                (backstat->status && strcmp(backstat->status, "finished") == 0 && backstat->enqueue &&
+                    strcmp(backstat->enqueue, "Respool") == 0)) {
                 entry_list = lappend(entry_list, beentry);
+            }
         }
+
+        node = node->next;
     }
 
     return entry_list;
@@ -4495,7 +4524,6 @@ List* pgstat_get_user_backend_entry(Oid userid)
  */
 ThreadId* pgstat_get_user_io_entry(Oid userid, int* num)
 {
-    int i = 0;
     int idx = 0;
 
     // If BackendStatusArray is NULL, we will get it from other thread.
@@ -4506,8 +4534,9 @@ ThreadId* pgstat_get_user_io_entry(Oid userid, int* num)
             return NULL;
     }
 
-    int num_backends = pgstat_fetch_stat_numbackends();
-    if (num_backends <= 0)
+    uint32 num_backends = 0;
+    PgBackendStatusNode* node = gs_stat_read_current_status(&num_backends);
+    if (num_backends == 0)
         return NULL;
 
     Assert(!u_sess->stat_cxt.pgStatRunningInCollector);
@@ -4519,8 +4548,8 @@ ThreadId* pgstat_get_user_io_entry(Oid userid, int* num)
         return NULL;
     }
 
-    for (i = 0; i < num_backends; ++i) {
-        PgBackendStatus* beentry = pgstat_fetch_stat_beentry(i + 1);
+    while (node != NULL) {
+        PgBackendStatus* beentry = node->data;
 
         /*
          * If the backend thread is valid and the io state
@@ -4530,6 +4559,8 @@ ThreadId* pgstat_get_user_io_entry(Oid userid, int* num)
          */
         if ((beentry != NULL) && beentry->st_userid == userid && beentry->st_io_state == IOSTATE_WRITE)
             threads[idx++] = beentry->st_procpid;
+
+        node = node->next;
     }
 
     *num = idx;
@@ -4547,7 +4578,6 @@ ThreadId* pgstat_get_user_io_entry(Oid userid, int* num)
  */
 ThreadId* pgstat_get_stmttag_write_entry(int* num)
 {
-    int i = 0;
     int idx = 0;
 
     // If BackendStatusArray is NULL, we will get it from other thread.
@@ -4558,8 +4588,9 @@ ThreadId* pgstat_get_stmttag_write_entry(int* num)
             return NULL;
     }
 
-    int num_backends = pgstat_fetch_stat_numbackends();
-    if (num_backends <= 0)
+    uint32 num_backends = 0;
+    PgBackendStatusNode* node = gs_stat_read_current_status(&num_backends);
+    if (num_backends == 0)
         return NULL;
 
     Assert(!u_sess->stat_cxt.pgStatRunningInCollector);
@@ -4572,9 +4603,9 @@ ThreadId* pgstat_get_stmttag_write_entry(int* num)
         return NULL;
     }
 
-    for (i = 0; i < num_backends; ++i) {
-        PgBackendStatus* beentry = pgstat_fetch_stat_beentry(i + 1);
-
+    while (node != NULL) {
+        PgBackendStatus* beentry = node->data;
+        node = node->next;
         /*
          * If the backend thread is valid and the stmt tag
          * is writing, we treat it as a active thread.
@@ -4641,8 +4672,8 @@ const char* pgstat_get_backend_current_activity(ThreadId pid, bool checkUser)
         bool found = false;
 
         for (;;) {
-            int         before_changecount;
-            int         after_changecount;
+            int before_changecount;
+            int after_changecount;
 
             pgstat_save_changecount_before(vbeentry, before_changecount);
 
@@ -4650,8 +4681,7 @@ const char* pgstat_get_backend_current_activity(ThreadId pid, bool checkUser)
 
             pgstat_save_changecount_after(vbeentry, after_changecount);
 
-            if (before_changecount == after_changecount &&
-                (before_changecount & 1) == 0)
+            if (before_changecount == after_changecount && (before_changecount & 1) == 0)
                 break;
 
             /* Make sure we can break out of loop if stuck... */
@@ -4797,10 +4827,10 @@ void pgstat_cancel_invalid_gtm_conn(void)
         if (hostindex != t_thrd.shemem_ptr_cxt.MyBEEntry->st_gtmhost ||
             txnTimeline != t_thrd.shemem_ptr_cxt.MyBEEntry->st_gtmtimeline) {
             if (gs_signal_send(beentry->st_procpid, SIGUSR2))
-                ereport(WARNING, (errmsg("could not send signal to process %lu: %m", beentry->st_procpid)));
+                ereport(WARNING, (errmsg("could not send signal to thread %lu: %m", beentry->st_procpid)));
             else
                 ereport(LOG,
-                    (errmsg("Success to send SIGUSR2 to postgres thread:%lu in "
+                    (errmsg("Success to send SIGUSR2 to postgres thread: %lu in "
                             "pgstat_cancel_invalid_gtm_conn",
                         beentry->st_procpid)));
         }
@@ -4838,7 +4868,7 @@ static void pgstat_setheader(PgStat_MsgHdr* hdr, StatMsgType mtype)
  *		Send out one statistics message to the collector
  * ----------
  */
-static void pgstat_send(void* msg, int len)
+void pgstat_send(void* msg, int len)
 {
     int rc;
 
@@ -4849,7 +4879,10 @@ static void pgstat_send(void* msg, int len)
 
     /* We'll retry after EINTR, but ignore all other failures */
     do {
+        PGSTAT_INIT_TIME_RECORD();
+        PGSTAT_START_TIME_RECORD();
         rc = send(g_instance.stat_cxt.pgStatSock, msg, len, 0);
+        END_NET_SEND_INFO(rc);
     } while (rc < 0 && errno == EINTR);
 
 #ifdef USE_ASSERT_CHECKING
@@ -4893,22 +4926,20 @@ void pgstat_send_bgwriter(void)
 
 static void PgstatCollectThreadStatus(void)
 {
-    int result_counter = 0;
-    int num_backends = 0;
-
     // setup a new memcontext
     pgstat_collect_thread_status_setup_memcxt();
 
-    num_backends = pgstat_fetch_stat_numbackends();
-    for (; result_counter < num_backends; result_counter++) {
-        PgBackendStatus* beentry = pgstat_fetch_stat_beentry(result_counter + 1);
+    PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
+    while (node != NULL) {
+        PgBackendStatus* beentry = node->data;
+        node = node->next;
         char* wait_status = NULL;
 
-        if (beentry == NULL)
+        if (NULL == beentry)
             continue;
 
         /* No need to print 'none' or 'wait cmd' thread status to server log */
-        if (beentry->st_waitstatus == STATE_WAIT_UNDEFINED || beentry->st_waitstatus == STATE_WAIT_COMM)
+        if (STATE_WAIT_UNDEFINED == beentry->st_waitstatus || STATE_WAIT_COMM == beentry->st_waitstatus)
             continue;
 
         wait_status = getThreadWaitStatusDesc(beentry);
@@ -4955,7 +4986,7 @@ void PgstatCollectorMain()
 
     t_thrd.proc_cxt.MyStartTime = time(NULL); /* record Start Time for logging */
 
-    knl_thread_set_name("StatCollector");
+    t_thrd.proc_cxt.MyProgName = "PgstatCollector";
 
     t_thrd.myLogicTid = noProcLogicTid + PGSTAT_LID;
 
@@ -4967,6 +4998,7 @@ void PgstatCollectorMain()
      * except SIGHUP and SIGQUIT.  Note we don't need a SIGUSR1 handler to
      * support latch operations, because g_instance.stat_cxt.pgStatLatch is local not shared.
      */
+
     (void)gspqsignal(SIGHUP, pgstat_sighup_handler);
     (void)gspqsignal(SIGINT, SIG_IGN);
     (void)gspqsignal(SIGTERM, SIG_IGN);
@@ -4987,7 +5019,7 @@ void PgstatCollectorMain()
     /*
      * Identify myself via ps
      */
-    init_ps_display("StatCollector process", "", "", "");
+    init_ps_display("stats collector process", "", "", "");
 
     /*
      * Arrange to write the initial status file right away
@@ -5038,14 +5070,14 @@ void PgstatCollectorMain()
         /*
          * Quit if we get SIGQUIT from the postmaster.
          */
-        if (g_instance.stat_cxt.need_exit)
+        if (t_thrd.stat_cxt.need_exit)
             break;
 
         /*
          * Inner loop iterates as long as we keep getting messages, or until
          * need_exit becomes set.
          */
-        while (!g_instance.stat_cxt.need_exit) {
+        while (!t_thrd.stat_cxt.need_exit) {
             /*
              * Reload configuration if we got SIGHUP from the postmaster.
              */
@@ -5061,18 +5093,19 @@ void PgstatCollectorMain()
             if (g_instance.stat_cxt.last_statwrite < g_instance.stat_cxt.last_statrequest)
                 pgstat_write_statsfile(false);
 
-                /*
-                 * Try to receive and process a message.  This will not block,
-                 * since the socket is set to non-blocking mode.
-                 *
-                 * XXX On Windows, we have to force pgwin32_recv to cooperate,
-                 * despite the previous use of pg_set_noblock() on the socket.
-                 * This is extremely broken and should be fixed someday.
-                 */
+            PgstatUpdateHotkeys();
+
+            /*
+             * Try to receive and process a message.  This will not block,
+             * since the socket is set to non-blocking mode.
+             *
+             * XXX On Windows, we have to force pgwin32_recv to cooperate,
+             * despite the previous use of pg_set_noblock() on the socket.
+             * This is extremely broken and should be fixed someday.
+             */
 #ifdef WIN32
             pgwin32_noblock = 1;
 #endif
-
             len = recv(g_instance.stat_cxt.pgStatSock, (char*)&msg, sizeof(PgStat_Msg), 0);
 
 #ifdef WIN32
@@ -5105,67 +5138,67 @@ void PgstatCollectorMain()
                     break;
 
                 case PGSTAT_MTYPE_INQUIRY:
-                    pgstat_recv_inquiry((PgStat_MsgInquiry*)&msg);
+                    pgstat_recv_inquiry((PgStat_MsgInquiry*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_TABSTAT:
-                    pgstat_recv_tabstat((PgStat_MsgTabstat*)&msg);
+                    pgstat_recv_tabstat((PgStat_MsgTabstat*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_TABPURGE:
-                    pgstat_recv_tabpurge((PgStat_MsgTabpurge*)&msg);
+                    pgstat_recv_tabpurge((PgStat_MsgTabpurge*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_DROPDB:
-                    pgstat_recv_dropdb((PgStat_MsgDropdb*)&msg);
+                    pgstat_recv_dropdb((PgStat_MsgDropdb*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_RESETCOUNTER:
-                    pgstat_recv_resetcounter((PgStat_MsgResetcounter*)&msg);
+                    pgstat_recv_resetcounter((PgStat_MsgResetcounter*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_RESETSHAREDCOUNTER:
-                    pgstat_recv_resetsharedcounter((PgStat_MsgResetsharedcounter*)&msg);
+                    pgstat_recv_resetsharedcounter((PgStat_MsgResetsharedcounter*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_RESETSINGLECOUNTER:
-                    pgstat_recv_resetsinglecounter((PgStat_MsgResetsinglecounter*)&msg);
+                    pgstat_recv_resetsinglecounter((PgStat_MsgResetsinglecounter*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_AUTOVAC_START:
-                    pgstat_recv_autovac((PgStat_MsgAutovacStart*)&msg);
+                    pgstat_recv_autovac((PgStat_MsgAutovacStart*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_VACUUM:
-                    pgstat_recv_vacuum((PgStat_MsgVacuum*)&msg);
+                    pgstat_recv_vacuum((PgStat_MsgVacuum*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_AUTOVAC_STAT:
-                    pgstat_recv_autovac_stat((PgStat_MsgAutovacStat*)&msg);
+                    pgstat_recv_autovac_stat((PgStat_MsgAutovacStat*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_DATA_CHANGED:
-                    pgstat_recv_data_changed((PgStat_MsgDataChanged*)&msg);
+                    pgstat_recv_data_changed((PgStat_MsgDataChanged*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_TRUNCATE:
-                    pgstat_recv_truncate((PgStat_MsgTruncate*)&msg);
+                    pgstat_recv_truncate((PgStat_MsgTruncate*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_ANALYZE:
-                    pgstat_recv_analyze((PgStat_MsgAnalyze*)&msg);
+                    pgstat_recv_analyze((PgStat_MsgAnalyze*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_BGWRITER:
-                    pgstat_recv_bgwriter((PgStat_MsgBgWriter*)&msg);
+                    pgstat_recv_bgwriter((PgStat_MsgBgWriter*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_FUNCSTAT:
-                    pgstat_recv_funcstat((PgStat_MsgFuncstat*)&msg);
+                    pgstat_recv_funcstat((PgStat_MsgFuncstat*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_FUNCPURGE:
-                    pgstat_recv_funcpurge((PgStat_MsgFuncpurge*)&msg);
+                    pgstat_recv_funcpurge((PgStat_MsgFuncpurge*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_RECOVERYCONFLICT:
@@ -5177,11 +5210,11 @@ void PgstatCollectorMain()
                     break;
 
                 case PGSTAT_MTYPE_FILE:
-                    pgstat_recv_filestat((PgStat_MsgFile*)&msg);
+                    pgstat_recv_filestat((PgStat_MsgFile*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_TEMPFILE:
-                    pgstat_recv_tempfile((PgStat_MsgTempFile*)&msg);
+                    pgstat_recv_tempfile((PgStat_MsgTempFile*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_MEMRESERVED:
@@ -5189,11 +5222,15 @@ void PgstatCollectorMain()
                     break;
 
                 case PGSTAT_MTYPE_BADBLOCK:
-                    pgstat_recv_badblock_stat((PgStat_MsgBadBlock*)&msg);
+                    pgstat_recv_badblock_stat((PgStat_MsgBadBlock*)&msg, len);
                     break;
 
                 case PGSTAT_MTYPE_RESPONSETIME:
-                    pgstat_recv_sql_responstime((PgStat_SqlRT*)&msg);
+                    pgstat_recv_sql_responstime((PgStat_SqlRT*)&msg, len);
+                    break;
+
+                case PGSTAT_MTYPE_CLEANUPHOTKEYS:
+                    pgstat_recv_cleanup_hotkeys((PgStat_MsgCleanupHotkeys*)&msg, len);
                     break;
 
                 default:
@@ -5247,7 +5284,7 @@ static void pgstat_exit(SIGNAL_ARGS)
 {
     int save_errno = errno;
 
-    g_instance.stat_cxt.need_exit = true;
+    t_thrd.stat_cxt.need_exit = true;
     SetLatch(&g_instance.stat_cxt.pgStatLatch);
 
     errno = save_errno;
@@ -5488,7 +5525,7 @@ static void pgstat_write_statsfile(bool permanent)
     if (ferror(fpout)) {
         ereport(
             LOG, (errcode_for_file_access(), errmsg("could not write temporary statistics file \"%s\": %m", tmpfile)));
-        (void)FreeFile(fpout);
+        FreeFile(fpout);
         unlink(tmpfile);
     } else if (FreeFile(fpout) < 0) {
         ereport(
@@ -6070,7 +6107,7 @@ done:
  *	Create u_sess->stat_cxt.pgStatLocalContext, if not already done.
  * ----------
  */
-static void pgstat_setup_memcxt(void)
+void pgstat_setup_memcxt(void)
 {
     if (!u_sess->stat_cxt.pgStatLocalContext)
         u_sess->stat_cxt.pgStatLocalContext = AllocSetContextCreate(u_sess->top_mem_cxt,
@@ -6132,10 +6169,26 @@ void pgstat_clear_snapshot(void)
  *	Process stat inquiry requests.
  * ----------
  */
-static void pgstat_recv_inquiry(PgStat_MsgInquiry* msg)
+static void pgstat_recv_inquiry(PgStat_MsgInquiry* msg, int len)
 {
     if (msg->inquiry_time > g_instance.stat_cxt.last_statrequest)
         g_instance.stat_cxt.last_statrequest = msg->inquiry_time;
+}
+
+static void inline init_tabentry_truncate(PgStat_StatTabEntry* tabentry, PgStat_TableEntry* tabmsg)
+{
+    tabentry->tuples_inserted = tabmsg->t_counts.t_tuples_inserted_post_truncate;
+    tabentry->tuples_updated = tabmsg->t_counts.t_tuples_updated_post_truncate;
+    tabentry->tuples_deleted = tabmsg->t_counts.t_tuples_deleted_post_truncate;
+    tabentry->n_live_tuples = 0;
+    tabentry->n_dead_tuples = 0;
+}
+
+static void overflow_check(int64 stat_value, int64 add_value)
+{
+    if (stat_value > LONG_LONG_MAX - add_value) {
+        ereport(ERROR, (errmsg("Integer overflow when update database-wid stats")));
+    }
 }
 
 /* ----------
@@ -6144,7 +6197,7 @@ static void pgstat_recv_inquiry(PgStat_MsgInquiry* msg)
  *	Count what the backend has done.
  * ----------
  */
-static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg)
+static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg, int len)
 {
     PgStat_StatDBEntry* dbentry = NULL;
     PgStat_StatTabEntry* tabentry = NULL;
@@ -6152,10 +6205,18 @@ static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg)
     bool found = false;
 
     dbentry = pgstat_get_db_entry(msg->m_databaseid, true);
+    if (dbentry == NULL) {
+        ereport(ERROR, (errmsg("Failed to get database-wide stats.")));
+    }
 
     /*
-     * Update database-wide stats.
+     * Check and Update database-wide stats.
      */
+    overflow_check(dbentry->n_xact_commit, (PgStat_Counter)(msg->m_xact_commit));
+    overflow_check(dbentry->n_xact_rollback, (PgStat_Counter)(msg->m_xact_rollback));
+    overflow_check(dbentry->n_block_read_time, msg->m_block_read_time);
+    overflow_check(dbentry->n_block_write_time, msg->m_block_write_time);
+
     dbentry->n_xact_commit += (PgStat_Counter)(msg->m_xact_commit);
     dbentry->n_xact_rollback += (PgStat_Counter)(msg->m_xact_rollback);
     dbentry->n_block_read_time += msg->m_block_read_time;
@@ -6181,9 +6242,13 @@ static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg)
             tabentry->numscans = tabmsg->t_counts.t_numscans;
             tabentry->tuples_returned = tabmsg->t_counts.t_tuples_returned;
             tabentry->tuples_fetched = tabmsg->t_counts.t_tuples_fetched;
-            tabentry->tuples_inserted = tabmsg->t_counts.t_tuples_inserted;
-            tabentry->tuples_updated = tabmsg->t_counts.t_tuples_updated;
-            tabentry->tuples_deleted = tabmsg->t_counts.t_tuples_deleted;
+            if (tabmsg->t_counts.t_truncated) {
+                init_tabentry_truncate(tabentry, tabmsg);
+            } else {
+                tabentry->tuples_inserted = tabmsg->t_counts.t_tuples_inserted;
+                tabentry->tuples_updated = tabmsg->t_counts.t_tuples_updated;
+                tabentry->tuples_deleted = tabmsg->t_counts.t_tuples_deleted;
+            }
             tabentry->tuples_hot_updated = tabmsg->t_counts.t_tuples_hot_updated;
             tabentry->n_live_tuples = tabmsg->t_counts.t_delta_live_tuples;
             tabentry->n_dead_tuples = tabmsg->t_counts.t_delta_dead_tuples;
@@ -6211,9 +6276,14 @@ static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg)
             tabentry->numscans += tabmsg->t_counts.t_numscans;
             tabentry->tuples_returned += tabmsg->t_counts.t_tuples_returned;
             tabentry->tuples_fetched += tabmsg->t_counts.t_tuples_fetched;
-            tabentry->tuples_inserted += tabmsg->t_counts.t_tuples_inserted;
-            tabentry->tuples_updated += tabmsg->t_counts.t_tuples_updated;
-            tabentry->tuples_deleted += tabmsg->t_counts.t_tuples_deleted;
+            /* If table was truncated, first reset the live/dead counters */
+            if (tabmsg->t_counts.t_truncated) {
+                init_tabentry_truncate(tabentry, tabmsg);
+            } else {
+                tabentry->tuples_inserted += tabmsg->t_counts.t_tuples_inserted;
+                tabentry->tuples_updated += tabmsg->t_counts.t_tuples_updated;
+                tabentry->tuples_deleted += tabmsg->t_counts.t_tuples_deleted;
+            }
             tabentry->tuples_hot_updated += tabmsg->t_counts.t_tuples_hot_updated;
             tabentry->n_live_tuples += tabmsg->t_counts.t_delta_live_tuples;
             tabentry->n_dead_tuples += tabmsg->t_counts.t_delta_dead_tuples;
@@ -6313,7 +6383,7 @@ static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg)
  *	Arrange for dead table removal.
  * ----------
  */
-static void pgstat_recv_tabpurge(PgStat_MsgTabpurge* msg)
+static void pgstat_recv_tabpurge(PgStat_MsgTabpurge* msg, int len)
 {
     PgStat_StatDBEntry* dbentry = NULL;
     PgStat_StatTabKey tabkey;
@@ -6335,7 +6405,9 @@ static void pgstat_recv_tabpurge(PgStat_MsgTabpurge* msg)
     for (i = 0; i < msg->m_nentries; i++) {
         tabkey.statFlag = msg->m_entry[i].m_statFlag;
         tabkey.tableid = msg->m_entry[i].m_tableid;
+
         tabentry = (PgStat_StatTabEntry*)hash_search(dbentry->tables, (void*)(&tabkey), HASH_FIND, NULL);
+
         /* modify parent table's stat info if it is a patition */
         if ((tabentry != NULL) && tabkey.statFlag) {
             parentkey.tableid = tabkey.statFlag;
@@ -6359,28 +6431,37 @@ static void pgstat_recv_tabpurge(PgStat_MsgTabpurge* msg)
  *	Arrange for dead database removal
  * ----------
  */
-static void pgstat_recv_dropdb(PgStat_MsgDropdb* msg)
+static void pgstat_recv_dropdb(PgStat_MsgDropdb* msg, int len)
 {
     PgStat_StatDBEntry* dbentry = NULL;
-
+    Oid db_oid = msg->m_databaseid;
     /*
      * Lookup the database in the hashtable.
      */
-    dbentry = pgstat_get_db_entry(msg->m_databaseid, false);
+    dbentry = pgstat_get_db_entry(db_oid, false);
+
     /*
      * If found, remove it.
      */
-    if (dbentry != NULL) {
+    if (NULL != dbentry) {
         if (dbentry->tables != NULL)
             hash_destroy(dbentry->tables);
         if (dbentry->functions != NULL)
             hash_destroy(dbentry->functions);
-        if (hash_search(u_sess->stat_cxt.pgStatDBHash, (void*)&(dbentry->databaseid), HASH_REMOVE, NULL) == NULL)
+
+        if (hash_search(u_sess->stat_cxt.pgStatDBHash, (void*)&(db_oid), HASH_REMOVE, NULL) == NULL) {
             ereport(ERROR,
                 (errcode(ERRCODE_DATA_CORRUPTED),
                     errmsg("database hash table corrupted "
                            "during cleanup --- abort")));
+        }
     }
+
+    /*
+     * delete database related hotkeys statistics
+     */
+    g_instance.stat_cxt.lru->DeleteHotkeysInDB(db_oid);
+
 }
 
 /* ----------
@@ -6389,7 +6470,7 @@ static void pgstat_recv_dropdb(PgStat_MsgDropdb* msg)
  *	Reset the statistics for the specified database.
  * ----------
  */
-static void pgstat_recv_resetcounter(PgStat_MsgResetcounter* msg)
+static void pgstat_recv_resetcounter(PgStat_MsgResetcounter* msg, int len)
 {
     HASHCTL hash_ctl;
     PgStat_StatDBEntry* dbentry = NULL;
@@ -6414,7 +6495,7 @@ static void pgstat_recv_resetcounter(PgStat_MsgResetcounter* msg)
     dbentry->tables = NULL;
     dbentry->functions = NULL;
 
-    gs_lock_test_and_set_64(&g_instance.stat_cxt.NodeStatResetTime, GetCurrentTimestamp());
+    (void)gs_lock_test_and_set_64(&g_instance.stat_cxt.NodeStatResetTime, GetCurrentTimestamp());
 
     /*
      * Reset database-level stats too.	This should match the initialization
@@ -6461,7 +6542,7 @@ static void pgstat_recv_resetcounter(PgStat_MsgResetcounter* msg)
  *	Reset some shared statistics of the cluster.
  * ----------
  */
-static void pgstat_recv_resetsharedcounter(PgStat_MsgResetsharedcounter* msg)
+static void pgstat_recv_resetsharedcounter(PgStat_MsgResetsharedcounter* msg, int len)
 {
     errno_t rc = EOK;
 
@@ -6485,7 +6566,7 @@ static void pgstat_recv_resetsharedcounter(PgStat_MsgResetsharedcounter* msg)
  *	Reset a statistics for a single object
  * ----------
  */
-static void pgstat_recv_resetsinglecounter(PgStat_MsgResetsinglecounter* msg)
+static void pgstat_recv_resetsinglecounter(PgStat_MsgResetsinglecounter* msg, int len)
 {
     PgStat_StatDBEntry* dbentry = NULL;
 
@@ -6516,7 +6597,7 @@ static void pgstat_recv_resetsinglecounter(PgStat_MsgResetsinglecounter* msg)
  *	Process an autovacuum signalling message.
  * ----------
  */
-static void pgstat_recv_autovac(PgStat_MsgAutovacStart* msg)
+static void pgstat_recv_autovac(PgStat_MsgAutovacStart* msg, int len)
 {
     PgStat_StatDBEntry* dbentry = NULL;
 
@@ -6534,7 +6615,7 @@ static void pgstat_recv_autovac(PgStat_MsgAutovacStart* msg)
  *	Process a VACUUM message.
  * ----------
  */
-static void pgstat_recv_vacuum(PgStat_MsgVacuum* msg)
+static void pgstat_recv_vacuum(PgStat_MsgVacuum* msg, int len)
 {
     PgStat_StatDBEntry* dbentry = NULL;
     PgStat_StatTabEntry* tabentry = NULL;
@@ -6568,7 +6649,7 @@ static void pgstat_recv_vacuum(PgStat_MsgVacuum* msg)
  *   Process a insert/delete/update/copy/[exchange/truncate/drop] partition message.
  * ----------
  */
-static void pgstat_recv_data_changed(PgStat_MsgDataChanged* msg)
+static void pgstat_recv_data_changed(PgStat_MsgDataChanged* msg, int len)
 {
     PgStat_StatDBEntry* dbentry = NULL;
     PgStat_StatTabEntry* tabentry = NULL;
@@ -6589,7 +6670,7 @@ static void pgstat_recv_data_changed(PgStat_MsgDataChanged* msg)
  *	Process a autovac stat message.
  * ----------
  */
-static void pgstat_recv_autovac_stat(PgStat_MsgAutovacStat* msg)
+static void pgstat_recv_autovac_stat(PgStat_MsgAutovacStat* msg, int len)
 {
     PgStat_StatDBEntry* dbentry = NULL;
     PgStat_StatTabEntry* tabentry = NULL;
@@ -6611,7 +6692,7 @@ static void pgstat_recv_autovac_stat(PgStat_MsgAutovacStat* msg)
  *	Process a TRUNCATE message.
  * ----------
  */
-static void pgstat_recv_truncate(PgStat_MsgTruncate* msg)
+static void pgstat_recv_truncate(PgStat_MsgTruncate* msg, int len)
 {
     PgStat_StatDBEntry* dbentry = NULL;
     PgStat_StatTabEntry* tabentry = NULL;
@@ -6626,6 +6707,7 @@ static void pgstat_recv_truncate(PgStat_MsgTruncate* msg)
     /* modify parent table's stat info(dead_tuple, live_tuple, changes_since_analyze) if it is a patition */
     if (msg->m_statFlag) {
         parent_entry = pgstat_get_tab_entry(dbentry, msg->m_statFlag, true, InvalidOid);
+
         if (NULL != parent_entry) {
             parent_entry->n_dead_tuples = Max(0, parent_entry->n_dead_tuples - tabentry->n_dead_tuples);
             parent_entry->n_live_tuples = Max(0, parent_entry->n_live_tuples - tabentry->n_live_tuples);
@@ -6644,7 +6726,7 @@ static void pgstat_recv_truncate(PgStat_MsgTruncate* msg)
  *	Process an ANALYZE message.
  * ----------
  */
-static void pgstat_recv_analyze(PgStat_MsgAnalyze* msg)
+static void pgstat_recv_analyze(PgStat_MsgAnalyze* msg, int len)
 {
     PgStat_StatDBEntry* dbentry = NULL;
     PgStat_StatTabEntry* tabentry = NULL;
@@ -6682,7 +6764,7 @@ static void pgstat_recv_analyze(PgStat_MsgAnalyze* msg)
  *	Process a BGWRITER message.
  * ----------
  */
-static void pgstat_recv_bgwriter(PgStat_MsgBgWriter* msg)
+static void pgstat_recv_bgwriter(PgStat_MsgBgWriter* msg, int len)
 {
     if (u_sess->stat_cxt.globalStats->timed_checkpoints > (INT64_MAX - msg->m_timed_checkpoints)) {
         ereport(ERROR, (errmsg("timed_checkpoints overflow")));
@@ -6741,7 +6823,7 @@ static void pgstat_recv_bgwriter(PgStat_MsgBgWriter* msg)
  *	Process a RECOVERYCONFLICT message.
  * ----------
  */
-static void pgstat_recv_recoveryconflict(PgStat_MsgRecoveryConflict* msg)
+static void pgstat_recv_recoveryconflict(const PgStat_MsgRecoveryConflict* msg)
 {
     PgStat_StatDBEntry* dbentry = NULL;
 
@@ -6773,7 +6855,7 @@ static void pgstat_recv_recoveryconflict(PgStat_MsgRecoveryConflict* msg)
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_CASE_NOT_FOUND),
-                    errmsg("unrecognized bypass recovery conflict reason: %d", (int)msg->m_reason)));
+                    errmsg("unrecognized bypass recovery conflict reason: %d", msg->m_reason)));
     }
 }
 
@@ -6783,7 +6865,7 @@ static void pgstat_recv_recoveryconflict(PgStat_MsgRecoveryConflict* msg)
  *	Process a DEADLOCK message.
  * ----------
  */
-static void pgstat_recv_deadlock(PgStat_MsgDeadlock* msg)
+static void pgstat_recv_deadlock(const PgStat_MsgDeadlock* msg)
 {
     PgStat_StatDBEntry* dbentry = NULL;
 
@@ -6798,7 +6880,7 @@ static void pgstat_recv_deadlock(PgStat_MsgDeadlock* msg)
  *	Process a TEMPFILE message.
  * ----------
  */
-static void pgstat_recv_tempfile(PgStat_MsgTempFile* msg)
+static void pgstat_recv_tempfile(PgStat_MsgTempFile* msg, int len)
 {
     PgStat_StatDBEntry* dbentry = NULL;
 
@@ -6808,41 +6890,41 @@ static void pgstat_recv_tempfile(PgStat_MsgTempFile* msg)
     dbentry->n_temp_files += 1;
 }
 
-void pgstat_init_sql_rt_info_array(knl_g_stat_context* stat_cxt)
+void pgstate_update_percentile_responsetime(void)
 {
-    errno_t ret;
-
-    if (stat_cxt->sql_rt_info_array == NULL) {
-        stat_cxt->sql_rt_info_array =
-            (SqlRTInfoArray*)MemoryContextAlloc(g_instance.instance_context, sizeof(SqlRTInfoArray));
-        stat_cxt->sql_rt_info_array->sqlRTIndex = 0;
-        ret = memset_s(stat_cxt->sql_rt_info_array, sizeof(SqlRTInfoArray), 0, sizeof(SqlRTInfoArray));
-        securec_check(ret, "\0", "\0");
-        stat_cxt->sql_rt_info_array->isFull = false;
+    if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
+        int64 elapse_start = GetCurrentStatementLocalStartTimestamp();
+        if (elapse_start != 0) {
+            int64 duration = GetCurrentTimestamp() - elapse_start;
+            if (IS_SINGLE_NODE) {
+                pgstat_update_responstime_singlenode(u_sess->unique_sql_cxt.unique_sql_id, elapse_start, duration);
+            } else {
+                pgstat_report_sql_rt(u_sess->unique_sql_cxt.unique_sql_id, elapse_start, duration);
+            }
+        }
     }
 }
 
 void pgstat_update_responstime_singlenode(uint64 UniqueSQLId, int64 start_time, int64 rt)
 {
-    uint32 sqlRTIndex;
+    int32 sqlRTIndex;
 
     if (!u_sess->attr.attr_common.enable_instr_rt_percentile ||
         strncmp(u_sess->attr.attr_common.application_name, "gs_clean", strlen("gs_clean") == 0))
         return;
 
     /* if the percentile thread is memory copying or memory is null, not record */
-    if (g_instance.stat_cxt.force_process != false ||
-        g_instance.stat_cxt.sql_rt_info_array == NULL) {
+    if (g_instance.stat_cxt.force_process != false || g_instance.stat_cxt.sql_rt_info_array == NULL) {
         return;
     }
 
     LWLockAcquire(PercentileLock, LW_SHARED);
     /* if the current is full , not record this time, set force process to true to active percentile thread */
-    sqlRTIndex = pg_atomic_fetch_add_u32(&g_instance.stat_cxt.sql_rt_info_array->sqlRTIndex, 1);
-    if (sqlRTIndex >= MAX_SQL_RT_INFO_COUNT) {
-         g_instance.stat_cxt.force_process = true;
-         LWLockRelease(PercentileLock);
-         return;
+    sqlRTIndex = gs_atomic_add_32(&g_instance.stat_cxt.sql_rt_info_array->sqlRTIndex, 1);
+    if ((sqlRTIndex >= MAX_SQL_RT_INFO_COUNT) || (sqlRTIndex < 0)) {
+        g_instance.stat_cxt.force_process = true;
+        LWLockRelease(PercentileLock);
+        return;
     }
     g_instance.stat_cxt.sql_rt_info_array->sqlRT[sqlRTIndex].UniqueSQLId = UniqueSQLId;
     g_instance.stat_cxt.sql_rt_info_array->sqlRT[sqlRTIndex].start_time = start_time;
@@ -6850,13 +6932,16 @@ void pgstat_update_responstime_singlenode(uint64 UniqueSQLId, int64 start_time, 
     LWLockRelease(PercentileLock);
 }
 
-static void pgstat_recv_sql_responstime(PgStat_SqlRT* msg)
+static void pgstat_recv_sql_responstime(PgStat_SqlRT* msg, int len)
 {
-    pgstat_init_sql_rt_info_array(&g_instance.stat_cxt);
+
+    if (g_instance.stat_cxt.sql_rt_info_array == NULL) {
+        return;
+    }
 
     LWLockAcquire(PercentileLock, LW_EXCLUSIVE);
 
-    int sqlRTIndex = g_instance.stat_cxt.sql_rt_info_array->sqlRTIndex;
+    int32 sqlRTIndex = g_instance.stat_cxt.sql_rt_info_array->sqlRTIndex;
 
     if (sqlRTIndex == MAX_SQL_RT_INFO_COUNT) {
         g_instance.stat_cxt.sql_rt_info_array->isFull = true;  // other cn will cover the value from first one
@@ -6911,8 +6996,8 @@ static void prepare_calculate(SqlRTInfoArray* sql_rt_info, int* counter)
     if (u_sess->percentile_cxt.LocalsqlRT != NULL)
         pfree(u_sess->percentile_cxt.LocalsqlRT);
 
-    u_sess->percentile_cxt.LocalsqlRT =
-        (SqlRTInfo*)MemoryContextAlloc(u_sess->top_mem_cxt, sql_rt_info_count * sizeof(SqlRTInfo));
+    u_sess->percentile_cxt.LocalsqlRT = (SqlRTInfo*)MemoryContextAlloc(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), sql_rt_info_count * sizeof(SqlRTInfo));
 
     int ss_rc = memset_s(u_sess->percentile_cxt.LocalsqlRT,
         sql_rt_info_count * sizeof(SqlRTInfo),
@@ -6932,11 +7017,9 @@ static void prepare_calculate(SqlRTInfoArray* sql_rt_info, int* counter)
     qsort(u_sess->percentile_cxt.LocalsqlRT, sql_rt_info_count, sizeof(SqlRTInfo), sqlRTComparator);
 }
 
-static void prepare_calculate_single(SqlRTInfoArray* sql_rt_info, int* counter)
+static void prepare_calculate_single(const SqlRTInfoArray* sql_rt_info, int* counter)
 {
-    int sql_rt_info_count = 0;
-
-    sql_rt_info_count = g_instance.stat_cxt.sql_rt_info_array->sqlRTIndex;
+    int32 sql_rt_info_count = g_instance.stat_cxt.sql_rt_info_array->sqlRTIndex;
 
     if (sql_rt_info_count > MAX_SQL_RT_INFO_COUNT) {
         sql_rt_info_count = MAX_SQL_RT_INFO_COUNT;
@@ -6950,19 +7033,18 @@ static void prepare_calculate_single(SqlRTInfoArray* sql_rt_info, int* counter)
     if (u_sess->percentile_cxt.LocalsqlRT != NULL)
         pfree(u_sess->percentile_cxt.LocalsqlRT);
 
-    u_sess->percentile_cxt.LocalsqlRT =
-        (SqlRTInfo*)MemoryContextAllocZero(u_sess->top_mem_cxt, sql_rt_info_count * sizeof(SqlRTInfo));
+    u_sess->percentile_cxt.LocalsqlRT = (SqlRTInfo*)MemoryContextAllocZero(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), sql_rt_info_count * sizeof(SqlRTInfo));
 
     LWLockAcquire(PercentileLock, LW_EXCLUSIVE);
     errno_t ss_rc = memcpy_s(u_sess->percentile_cxt.LocalsqlRT,
         sql_rt_info_count * sizeof(SqlRTInfo),
         sql_rt_info->sqlRT,
         sql_rt_info_count * sizeof(SqlRTInfo));
+    LWLockRelease(PercentileLock);
     securec_check(ss_rc, "\0", "\0");
     g_instance.stat_cxt.sql_rt_info_array->sqlRTIndex = 0;
     g_instance.stat_cxt.force_process = false;
-    LWLockRelease(PercentileLock);
-    
     *counter = sql_rt_info_count;
     qsort(u_sess->percentile_cxt.LocalsqlRT, sql_rt_info_count, sizeof(SqlRTInfo), sqlRTComparator);
 }
@@ -6973,7 +7055,7 @@ static void prepare_calculate_single(SqlRTInfoArray* sql_rt_info, int* counter)
  *      Process a reserving-memory message.
  * ----------
  */
-static void pgstat_recv_memReserved(PgStat_MsgMemReserved* msg)
+static void pgstat_recv_memReserved(const PgStat_MsgMemReserved* msg)
 {
     PgStat_StatDBEntry* dbentry = NULL;
 
@@ -6994,7 +7076,7 @@ static void pgstat_recv_memReserved(PgStat_MsgMemReserved* msg)
  *	Count what the backend has done.
  * ----------
  */
-static void pgstat_recv_funcstat(PgStat_MsgFuncstat* msg)
+static void pgstat_recv_funcstat(PgStat_MsgFuncstat* msg, int len)
 {
     PgStat_FunctionEntry* funcmsg = &(msg->m_entry[0]);
     PgStat_StatDBEntry* dbentry = NULL;
@@ -7035,7 +7117,7 @@ static void pgstat_recv_funcstat(PgStat_MsgFuncstat* msg)
  *	Arrange for dead function removal.
  * ----------
  */
-static void pgstat_recv_funcpurge(PgStat_MsgFuncpurge* msg)
+static void pgstat_recv_funcpurge(PgStat_MsgFuncpurge* msg, int len)
 {
     PgStat_StatDBEntry* dbentry = NULL;
     int i;
@@ -7072,8 +7154,9 @@ void pgstat_initstats_partition(Partition part)
     part->pd_pgstat_info = get_tabstat_entry(part_id, false, PartitionGetRelid(part));
 }
 
-
-// we calculate cpu numbers from sysfs, so we should make sure we can access this file system.
+/*
+ *we calculate cpu numbers from sysfs, so we should make sure we can access this file system.
+ */
 static bool checkSysFileSystem(void)
 {
     /* Read through sysfs. */
@@ -7089,7 +7172,9 @@ static bool checkSysFileSystem(void)
     return true;
 }
 
-// check whether the SysCpuPath is accessable.one accessable path represented one logical cpu.
+/*
+ *check whether the SysCpuPath is accessable.one accessable path represented one logical cpu.
+ */
 static bool checkLogicalCpu(uint32 cpuNum)
 {
     char pathbuf[ProcPathMax] = "";
@@ -7135,20 +7220,20 @@ static uint32 parseSiblingFile(const char* path)
                 result += d.b.a4;
             }
         }
-        fclose(fp);
+        (void)fclose(fp);
     }
 
     return result;
 }
 
 /*
- * This function is to get the number of logical cpus, cores and physical cpus of the system.
- * We get these infomation by analysing sysfs file system. If we failed to get the three fields,
- * we just ignore them when we report. And if we got this field, we will not analyse the files
- * when we call this function next time.
+ *This function is to get the number of logical cpus, cores and physical cpus of the system.
+ *We get these infomation by analysing sysfs file system. If we failed to get the three fields,
+ *we just ignore them when we report. And if we got this field, we will not analyse the files
+ *when we call this function next time.
  *
- * Note: This function must be called before getCpuTimes because we need logical cpu number
- * to calculate the avg cpu consumption.
+ *Note: This function must be called before getCpuTimes because we need logical cpu number
+ *to calculate the avg cpu consumption.
  */
 void getCpuNums(void)
 {
@@ -7194,11 +7279,11 @@ void getCpuNums(void)
 }
 
 /*
- * This function is to get the system cpu time consumption details. We read /proc/stat
- * file for this infomation. If we failed to get the ten fields, we just ignore them when we
- * report.
+ *This function is to get the system cpu time consumption details. We read /proc/stat
+ *file for this infomation. If we failed to get the ten fields, we just ignore them when we
+ *report.
  *
- * Note: Remember to call getCpuNums before this function.
+ *Note: Remember to call getCpuNums before this function.
  */
 void getCpuTimes(void)
 {
@@ -7275,10 +7360,10 @@ void getCpuTimes(void)
 }
 
 /*
- * This function is to get the system virtual memory paging infomation (actually it will
- * get how many bytes paged in/out due to virtual memory paging). We read /proc/vmstat
- * file for this infomation. If we failed to get the two fields, we just ignore them when
- * we report.
+ *This function is to get the system virtual memory paging infomation (actually it will
+ *get how many bytes paged in/out due to virtual memory paging). We read /proc/vmstat
+ *file for this infomation. If we failed to get the two fields, we just ignore them when
+ *we report.
  */
 void getVmStat(void)
 {
@@ -7319,6 +7404,7 @@ void getVmStat(void)
             if (NULL != temp) {
                 temp += sizeof("pswpout");
                 outPages = strtoul(temp, NULL, 10);
+
                 if (outPages < ULONG_MAX / pageSize) {
                     u_sess->stat_cxt.osStatDataArray[VM_PAGE_OUT_BYTES].int64Value = outPages * pageSize;
                     u_sess->stat_cxt.osStatDescArray[VM_PAGE_OUT_BYTES].got = true;
@@ -7331,9 +7417,9 @@ void getVmStat(void)
 }
 
 /*
- * This function is to get the total physical memory size of the system. We read /proc/meminfo
- * file for this infomation. If we failed to get this field, we just ignore it when we report. And if
- * if we got this field, we will not read the file when we call this function next time.
+ *This function is to get the total physical memory size of the system. We read /proc/meminfo
+ *file for this infomation. If we failed to get this field, we just ignore it when we report. And if
+ *if we got this field, we will not read the file when we call this function next time.
  */
 void getTotalMem(void)
 {
@@ -7354,6 +7440,7 @@ void getTotalMem(void)
         if (gs_getline(&line, &len, fd) > 0) {
             temp = line + sizeof("MemTotal:");
             ret = strtoul(temp, NULL, 10);
+
             if (ret < ULONG_MAX / 1024) {
                 u_sess->stat_cxt.osStatDataArray[PHYSICAL_MEMORY_BYTES].int64Value = ret * 1024;
                 u_sess->stat_cxt.osStatDescArray[PHYSICAL_MEMORY_BYTES].got = true;
@@ -7362,14 +7449,14 @@ void getTotalMem(void)
 
         if (NULL != line)
             pfree(line);
-        fclose(fd);
+        (void)fclose(fd);
     }
 }
 
 /*
- * This function is to get the load infomation of the system (actually it's the avg length of cpu
- * wait queue in the past one minute). We read /proc/loadavg file for this infomation. If we
- * failed to get this field, we just ignore it when we report.
+ *This function is to get the load infomation of the system (actually it's the avg length of cpu
+ *wait queue in the past one minute). We read /proc/loadavg file for this infomation. If we
+ *failed to get this field, we just ignore it when we report.
  */
 void getOSRunLoad(void)
 {
@@ -7426,6 +7513,7 @@ void getThrdID(char* thrdid, pg_time_t startTime, ThreadId Threadid)
     securec_check_ss(rc, "\0", "\0");
 }
 
+#ifdef ENABLE_MOT
 MotSessionMemoryDetail* GetMotSessionMemoryDetail(uint32* num)
 {
     MotSessionMemoryDetail* returnDetailArray = NULL;
@@ -7463,70 +7551,7 @@ MotMemoryDetail* GetMotMemoryDetail(uint32* num, bool isGlobal)
 
     return returnDetailArray;
 }
-
-static void recursiveThreadMemoryContext(volatile PGPROC* proc, const MemoryContext context,
-                                         ThreadMemoryDetailPad* data, int grpcnt, bool isShared);
-static void calculateThreadMemoryContextStats(
-    volatile PGPROC* proc, const MemoryContext context, ThreadMemoryDetailPad* data, int grpcnt);
-static void createThreadTempSmallContextGroup(volatile PGPROC* proc, ThreadMemoryDetailPad* data);
-
-/*
- * @@GaussDB@@
- * Target       : pv_thread_memory_detail view
- * Brief        :
- * Description  :
- * Notes        :
- * Author       :
- */
-ThreadMemoryDetail* getThreadMemoryDetail(uint32* num)
-{
-    ThreadMemoryDetailPad* data = NULL;
-    ThreadMemoryDetail* returnDetailArray = NULL;
-
-    data = (ThreadMemoryDetailPad*)palloc0(sizeof(ThreadMemoryDetailPad));
-    *num = 0;
-
-    /* collect all the Memory Context status,put in data */
-    getThreadMemoryContextDetail(data);
-
-    if (0 < data->nelements) {
-        *num = data->nelements;
-        returnDetailArray = data->threadMemoryDetail;
-    }
-
-    return returnDetailArray;
-}
-
-/*
- * @@GaussDB@@
- * Target		: pv_thread_memory_detail view
- * Brief		:
- * Description	:
- * Notes		:
- * Author		:
- */
-static void getThreadMemoryContextDetail(ThreadMemoryDetailPad* data)
-{
-    uint32 idx;
-
-    HOLD_INTERRUPTS();
-
-    for (idx = 0; idx < g_instance.proc_base->allProcCount - g_instance.attr.attr_storage.max_prepared_xacts; idx++) {
-        volatile PGPROC* proc = (g_instance.proc_base_all_procs[idx]);
-
-        /* lock this proc's delete MemoryContext action */
-        (void)syscalllockAcquire(&((PGPROC*)proc)->deleMemContextMutex);
-        if (NULL != proc->topmcxt)
-            getMemoryContextDetailForEachThread(proc, data);
-        (void)syscalllockRelease(&((PGPROC*)proc)->deleMemContextMutex);
-    }
-
-    /* get memory context detail from postmaster thread */
-    if (IsNormalProcessingMode())
-        recursiveThreadMemoryContext(NULL, PmTopMemoryContext, data, data->nelements - 1, false);
-
-    RESUME_INTERRUPTS();
-}
+#endif
 
 int64 getCpuTime(void)
 {
@@ -7702,8 +7727,8 @@ void timeInfoRecordStart(void)
 {
     if (u_sess->stat_cxt.localTimeInfoArray[DB_TIME] == 0) {
         u_sess->stat_cxt.localTimeInfoArray[DB_TIME] = GetCurrentTimestamp();
-	if (u_sess->attr.attr_common.enable_instr_cpu_timer)
-        	u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = getCpuTime();
+        if (u_sess->attr.attr_common.enable_instr_cpu_timer)
+            u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = getCpuTime();
     }
 }
 
@@ -7713,11 +7738,11 @@ void timeInfoRecordEnd(void)
     if (u_sess->stat_cxt.localTimeInfoArray[DB_TIME] != 0) {
         t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
 
-    if (u_sess->attr.attr_common.enable_instr_cpu_timer) {
-        int64 cur = getCpuTime();
+        if (u_sess->attr.attr_common.enable_instr_cpu_timer) {
+            int64 cur = getCpuTime();
 
-        u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = cur - u_sess->stat_cxt.localTimeInfoArray[CPU_TIME];
-    }
+            u_sess->stat_cxt.localTimeInfoArray[CPU_TIME] = cur - u_sess->stat_cxt.localTimeInfoArray[CPU_TIME];
+        }
         u_sess->stat_cxt.localTimeInfoArray[DB_TIME] =
             GetCurrentTimestamp() - u_sess->stat_cxt.localTimeInfoArray[DB_TIME];
 
@@ -7744,28 +7769,33 @@ void timeInfoRecordEnd(void)
         t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount++;
         Assert((t_thrd.shemem_ptr_cxt.mySessionTimeEntry->changeCount & 1) == 0);
 
+        UniqueSQLStat sqlStat;
+        sqlStat.timeInfo = u_sess->stat_cxt.localTimeInfoArray;
+        sqlStat.netInfo = u_sess->stat_cxt.localNetInfo;
         if (u_sess->unique_sql_cxt.unique_sql_id != 0 && is_unique_sql_enabled())
-            UpdateUniqueSQLStat(NULL, NULL, 0, NULL, u_sess->stat_cxt.localTimeInfoArray);
-
+            UpdateUniqueSQLStat(NULL, NULL, 0, NULL, &sqlStat);
         rc = memset_s(u_sess->stat_cxt.localTimeInfoArray,
             sizeof(int64) * TOTAL_TIME_INFO_TYPES,
             0,
             sizeof(int64) * TOTAL_TIME_INFO_TYPES);
         securec_check(rc, "\0", "\0");
+        rc = memset_s(u_sess->stat_cxt.localNetInfo,
+            sizeof(uint64) * TOTAL_NET_INFO_TYPES,
+            0,
+            sizeof(uint64) * TOTAL_NET_INFO_TYPES);
+        securec_check(rc, "\0", "\0");
     }
 }
 
 /* generate result of pv_session_time view */
-SessionTimeEntry* getSessionTimeStatus(uint32* num)
+void getSessionTimeStatus(Tuplestorestate *tupStore, TupleDesc tupDesc,
+    void (*insert)(Tuplestorestate *tupStore, TupleDesc tupDesc, const SessionTimeEntry *entry))
 {
-    SessionTimeEntry* localArray = NULL;
-    SessionTimeEntry* localEntry = NULL;
-    SessionTimeEntry* entry = NULL;
+    SessionTimeEntry *localEntry = NULL;
+    SessionTimeEntry *entry = NULL;
     int entryIndex;
-    uint32 count = 0;
 
-    localArray = (SessionTimeEntry*)palloc0(SessionTimeArraySize * sizeof(SessionTimeEntry));
-    localEntry = localArray;
+    localEntry = (SessionTimeEntry *)palloc0(sizeof(SessionTimeEntry));
     for (entryIndex = 0; entryIndex < SessionTimeArraySize; entryIndex++) {
         entry = &(t_thrd.shemem_ptr_cxt.sessionTimeArray[entryIndex]);
 
@@ -7774,12 +7804,9 @@ SessionTimeEntry* getSessionTimeStatus(uint32* num)
         if (!localEntry->isActive)
             continue;
 
-        localEntry++;
-        count++;
+        insert(tupStore, tupDesc, localEntry);
     }
-
-    *num = count * (uint32)TOTAL_TIME_INFO_TYPES;
-    return localArray;
+    pfree(localEntry);
 }
 
 /* generate result of pv_instance_time view */
@@ -7926,17 +7953,17 @@ void AttachMySessionStatEntry(void)
 }
 
 /* generate result of pv_session_stat view */
-SessionLevelStatistic* getSessionStatistics(uint32* num)
+void getSessionStatistics(Tuplestorestate* tupStore, TupleDesc tupDesc,
+    void (* insert)(Tuplestorestate* tupStore, TupleDesc tupDesc, const SessionLevelStatistic* entry))
 {
-    SessionLevelStatistic* localArray = NULL;
-    SessionLevelStatistic* localEntry = NULL;
     SessionLevelStatistic* entry = NULL;
+    SessionLevelStatistic* localEntry = NULL;
+
     int entryIndex;
-    uint32 count = 0;
     errno_t rc;
 
-    localArray = (SessionLevelStatistic*)palloc0(SessionStatArraySize * sizeof(SessionLevelStatistic));
-    localEntry = localArray;
+    localEntry = (SessionLevelStatistic*)palloc0(sizeof(SessionLevelStatistic));
+
     for (entryIndex = 0; entryIndex < SessionStatArraySize; entryIndex++) {
         entry = &(t_thrd.shemem_ptr_cxt.sessionStatArray[entryIndex]);
         rc = memcpy_s(localEntry, sizeof(SessionLevelStatistic), entry, sizeof(SessionLevelStatistic));
@@ -7944,13 +7971,9 @@ SessionLevelStatistic* getSessionStatistics(uint32* num)
 
         if (!localEntry->isValid)
             continue;
-
-        localEntry++;
-        count++;
+        insert(tupStore, tupDesc, localEntry);
     }
-
-    *num = count * (uint32)N_TOTAL_SESSION_STATISTICS_TYPES;
-    return localArray;
+    pfree(localEntry);
 }
 
 PgStat_FileEntry pgStatFileArray[NUM_FILES];
@@ -7962,7 +7985,7 @@ void reportFileStat(PgStat_MsgFile* msg)
     pgstat_send(msg, sizeof(PgStat_MsgFile));
 }
 
-static void pgstat_recv_filestat(PgStat_MsgFile* msg)
+static void pgstat_recv_filestat(PgStat_MsgFile* msg, int len)
 {
     PgStat_FileEntry* entry = NULL;
     int i;
@@ -8015,11 +8038,12 @@ static void pgstat_recv_filestat(PgStat_MsgFile* msg)
     }
     g_instance.stat_cxt.fileIOStat->changeCount++;
 
-    if (likely(entry->reads + entry->writes != 0)) {
-        entry->avgIOTime = (entry->readTime + entry->writeTime) / (entry->reads + entry->writes);
+    if ((entry->reads + entry->writes) <= 0) {
+        entry->avgIOTime = 0;
     } else {
-        entry->avgIOTime = -1;
+        entry->avgIOTime = (entry->readTime + entry->writeTime) / (entry->reads + entry->writes);
     }
+
     entry->lstIOTime = msg->lsttim;
     if (entry->minIOTime > msg->mintim || 0 == entry->minIOTime) {
         entry->minIOTime = msg->mintim;
@@ -8102,6 +8126,7 @@ void initMySessionMemoryEntry(void)
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->estimate_memory = 0;
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->warning = 0;
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan = NULL;
+    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size = 0;
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue = NULL;
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnStartTime = GetCurrentTimestamp();
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnEndTime = 0;
@@ -8152,6 +8177,7 @@ void AttachMySessionMemoryEntry(void)
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->estimate_memory = 0;
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->warning = 0;
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan = NULL;
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size = 0;
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue = NULL;
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnStartTime = GetCurrentTimestamp();
         t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnEndTime = 0;
@@ -8163,17 +8189,15 @@ void AttachMySessionMemoryEntry(void)
 }
 
 /* generate result of pv_session_stat view */
-SessionLevelMemory* getSessionMemory(uint32* num)
+void getSessionMemory(Tuplestorestate* tupStore, TupleDesc tupDesc,
+                      void (* insert)(Tuplestorestate* tupStore, TupleDesc tupDesc, const SessionLevelMemory* entry))
 {
-    SessionLevelMemory* localArray = NULL;
     SessionLevelMemory* localEntry = NULL;
     SessionLevelMemory* entry = NULL;
     int entryIndex;
-    uint32 count = 0;
     errno_t rc;
 
-    localArray = (SessionLevelMemory*)palloc0(SessionMemoryArraySize * sizeof(SessionLevelMemory));
-    localEntry = localArray;
+    localEntry = (SessionLevelMemory*)palloc0(sizeof(SessionLevelMemory));
     for (entryIndex = 0; entryIndex < SessionMemoryArraySize; entryIndex++) {
         entry = &(t_thrd.shemem_ptr_cxt.sessionMemoryArray[entryIndex]);
         rc = memcpy_s(localEntry, sizeof(SessionLevelMemory), entry, sizeof(SessionLevelMemory));
@@ -8182,76 +8206,83 @@ SessionLevelMemory* getSessionMemory(uint32* num)
         if (false == localEntry->isValid || 0 == (localEntry->peakChunksQuery - localEntry->initMemInChunks))
             continue;
 
-        localEntry++;
-        count++;
+        insert(tupStore, tupDesc, localEntry);
     }
 
-    *num = count;
-    return localArray;
+    pfree(localEntry);
 }
 
-/* create temp small context group */
-static void createThreadTempSmallContextGroup(volatile PGPROC* proc, ThreadMemoryDetailPad* data)
+typedef AllocSetContext* AllocSet;
+
+static void calculateThreadMemoryContextStats(const volatile PGPROC* proc, const MemoryContext context, bool isShared,
+    Tuplestorestate* tupStore, TupleDesc tupDesc)
 {
-    /* create temp context for grouping all small size memory context */
-    errno_t rc;
-    char* threadName = NULL;
-    ThreadMemoryDetail* threadMemoryDetail = (ThreadMemoryDetail*)palloc0(sizeof(ThreadMemoryDetail));
+    AllocSet set = (AllocSet)context;
 
-    if (data->threadMemoryDetail == NULL) {
-        data->threadMemoryDetail = threadMemoryDetail;
-    } else {
-        threadMemoryDetail->next = data->threadMemoryDetail;
-        data->threadMemoryDetail = threadMemoryDetail;
-    }
-    rc = strncpy_s(
-        threadMemoryDetail->contextName, MEMORY_CONTEXT_NAME_LEN, "TempSmallContextGroup", MEMORY_CONTEXT_NAME_LEN - 1);
-    securec_check(rc, "\0", "\0");
-    threadMemoryDetail->contextName[MEMORY_CONTEXT_NAME_LEN - 1] = '\0';
+    if (!isShared) {
+        char sessId[SESSION_ID_LEN] = {0};
+        ThreadId threadId;
+        char threadType[PROC_NAME_LEN] = {0};
+        errno_t rc;
 
-    if (NULL != proc) {
-        threadMemoryDetail->threadId = proc->pid;
-        threadMemoryDetail->threadStartTime = proc->myStartTime;
-        threadName = (char*)proc->myProgName;
-        if (NULL != threadName) {
-            rc = strncpy_s(threadMemoryDetail->threadType, PROC_NAME_LEN, threadName, PROC_NAME_LEN - 1);
+        if (proc != NULL) {
+            threadId = proc->pid;
+            rc = strncpy_s(threadType,
+                PROC_NAME_LEN,
+                (proc->myProgName != NULL) ? (const char*)proc->myProgName : "",
+                PROC_NAME_LEN - 1);
             securec_check(rc, "\0", "\0");
-            threadMemoryDetail->threadType[PROC_NAME_LEN - 1] = '\0';
+            getSessionID(sessId, proc->myStartTime, threadId);
+        } else {
+            threadId = PostmasterPid;
+            rc = strncpy_s(threadType, PROC_NAME_LEN, "postmaster", PROC_NAME_LEN - 1);
+            securec_check(rc, "\0", "\0");
+            getSessionID(sessId, (pg_time_t)0, threadId);
         }
+
+        Datum values[NUM_THREAD_MEMORY_DETAIL_ELEM] = {0};
+        bool nulls[NUM_THREAD_MEMORY_DETAIL_ELEM] = {false};
+
+        values[0] = CStringGetTextDatum(sessId);
+        values[1] = Int64GetDatum(threadId);
+        values[2] = CStringGetTextDatum(threadType);
+        values[3] = CStringGetTextDatum(context->name);
+        values[4] = Int16GetDatum(context->level);
+        if (context->level > 0 && context->parent != NULL)
+            values[5] = CStringGetTextDatum(context->parent->name);
+        else
+            nulls[5] = true;
+        values[6] = Int64GetDatum(set->totalSpace);
+        values[7] = Int64GetDatum(set->freeSpace);
+        values[8] = Int64GetDatum(set->totalSpace - set->freeSpace);
+
+        tuplestore_putvalues(tupStore, tupDesc, values, nulls);
     } else {
-        threadMemoryDetail->threadId = PostmasterPid;
-        threadMemoryDetail->threadStartTime = 0;
-        rc = strncpy_s(threadMemoryDetail->threadType, PROC_NAME_LEN, "postmaster", PROC_NAME_LEN - 1);
-        securec_check(rc, "\0", "\0");
-        threadMemoryDetail->threadType[PROC_NAME_LEN - 1] = '\0';
-    }
+        Datum values[NUM_SHARED_MEMORY_DETAIL_ELEM] = {0};
+        bool nulls[NUM_SHARED_MEMORY_DETAIL_ELEM] = {false};
 
-    threadMemoryDetail->level = 0;
-    threadMemoryDetail->totalSize = 0;
-    threadMemoryDetail->freeSize = 0;
-    threadMemoryDetail->usedSize = 0;
+        values[0] = CStringGetTextDatum(context->name);
+        values[1] = Int16GetDatum(context->level);
+        if (context->level > 0 && context->parent != NULL)
+            values[2] = CStringGetTextDatum(context->parent->name);
+        else
+            nulls[2] = true;
+        values[3] = Int64GetDatum(set->totalSpace);
+        values[4] = Int64GetDatum(set->freeSpace);
+        values[5] = Int64GetDatum(set->totalSpace - set->freeSpace);
 
-    data->nelements++;
-}
-
-void getMemoryContextDetailForEachThread(volatile PGPROC* proc, ThreadMemoryDetailPad* data)
-{
-    /* recursive MemoryContext tree by topmcxt */
-    if (NULL != proc) {
-        createThreadTempSmallContextGroup(proc, data);
-        recursiveThreadMemoryContext(proc, proc->topmcxt, data, data->nelements - 1, false);
+        tuplestore_putvalues(tupStore, tupDesc, values, nulls);
     }
 }
 
-static void recursiveThreadMemoryContext(volatile PGPROC* proc, const MemoryContext context,
-                                         ThreadMemoryDetailPad* data, int groupcnt, bool isShared)
+static void recursiveThreadMemoryContext(const volatile PGPROC* proc, const MemoryContext context, bool isShared,
+    Tuplestorestate* tupStore, TupleDesc tupDesc)
 {
     MemoryContext child;
 
     PG_TRY();
     {
-
-        /* check for pending interrupts before waiting. */
+        /*check for pending interrupts before waiting.*/
         CHECK_FOR_INTERRUPTS();
 
         if (isShared) {
@@ -8259,12 +8290,12 @@ static void recursiveThreadMemoryContext(volatile PGPROC* proc, const MemoryCont
         }
 
         /* calculate MemoryContext Stats */
-        calculateThreadMemoryContextStats(proc, context, data, groupcnt);
+        calculateThreadMemoryContextStats(proc, context, isShared, tupStore, tupDesc);
 
         /* recursive MemoryContext's child */
         for (child = context->firstchild; child != NULL; child = child->nextchild) {
             if (child->is_shared == isShared) {
-                recursiveThreadMemoryContext(proc, child, data, groupcnt, isShared);
+                recursiveThreadMemoryContext(proc, child, isShared, tupStore, tupDesc);
             }
         }
     }
@@ -8283,110 +8314,61 @@ static void recursiveThreadMemoryContext(volatile PGPROC* proc, const MemoryCont
     }
 }
 
-typedef AllocSetContext* AllocSet;
-
-static void calculateThreadMemoryContextStats(
-    volatile PGPROC* proc, const MemoryContext context, ThreadMemoryDetailPad* data, int groupcnt)
-{
-    AllocSet set = (AllocSet)context;
-    ThreadMemoryDetail* threadMemoryDetail = NULL;
-    char* threadName = NULL;
-    errno_t rc = 0;
-
-    /* Add it into small contxt group */
-    if (proc != NULL && groupcnt >= 0 && set->totalSpace <= ALLOCSET_DEFAULT_INITSIZE) {
-        threadMemoryDetail = data->threadMemoryDetail;
-
-        threadMemoryDetail->totalSize += set->totalSpace;
-        threadMemoryDetail->freeSize += set->freeSpace;
-
-        if (threadMemoryDetail->totalSize < threadMemoryDetail->freeSize)
-            threadMemoryDetail->totalSize = threadMemoryDetail->freeSize;
-
-        /* obviously, total space must larger than free space */
-        Assert(threadMemoryDetail->totalSize >= threadMemoryDetail->freeSize);
-
-        /* memory context number is recorded in usedSize */
-        threadMemoryDetail->usedSize++;
-
-        return;
-    }
-
-    threadMemoryDetail = (ThreadMemoryDetail*)palloc0(sizeof(ThreadMemoryDetail));
-    threadMemoryDetail->next = data->threadMemoryDetail->next;
-    data->threadMemoryDetail->next = threadMemoryDetail;
-    rc = strncpy_s(
-    threadMemoryDetail->contextName, MEMORY_CONTEXT_NAME_LEN, context->name, MEMORY_CONTEXT_NAME_LEN - 1);
-    securec_check(rc, "\0", "\0");
-    threadMemoryDetail->contextName[MEMORY_CONTEXT_NAME_LEN - 1] = '\0';
-    if (NULL != proc) {
-        threadMemoryDetail->threadId = proc->pid;
-        threadMemoryDetail->threadStartTime = proc->myStartTime;
-        threadName = (char*)proc->myProgName;
-        if (NULL != threadName) {
-            rc = strncpy_s(threadMemoryDetail->threadType, PROC_NAME_LEN, threadName, PROC_NAME_LEN - 1);
-            securec_check(rc, "\0", "\0");
-            threadMemoryDetail->threadType[PROC_NAME_LEN - 1] = '\0';
-        }
-    } else {
-        // postmaster thread
-        threadMemoryDetail->threadId = PostmasterPid;
-        rc = strncpy_s(threadMemoryDetail->threadType, PROC_NAME_LEN, "postmaster", PROC_NAME_LEN - 1);
-        securec_check(rc, "\0", "\0");
-        threadMemoryDetail->threadType[PROC_NAME_LEN - 1] = '\0';
-    }
-
-    threadMemoryDetail->level = context->level;
-    if (context->level > 0 && NULL != context->parent) {
-        rc = strncpy_s(threadMemoryDetail->parent,
-                       MEMORY_CONTEXT_NAME_LEN,
-                       context->parent->name,
-                       MEMORY_CONTEXT_NAME_LEN - 1);
-        securec_check(rc, "\0", "\0");
-        threadMemoryDetail->parent[MEMORY_CONTEXT_NAME_LEN - 1] = '\0';
-    }
-    threadMemoryDetail->totalSize = set->totalSpace;
-    threadMemoryDetail->freeSize = set->freeSpace;
-
-    if (threadMemoryDetail->totalSize < threadMemoryDetail->freeSize)
-        threadMemoryDetail->totalSize = threadMemoryDetail->freeSize;
-
-    /* obviously, total space must larger than free space */
-    Assert(threadMemoryDetail->totalSize >= threadMemoryDetail->freeSize);
-    threadMemoryDetail->usedSize = threadMemoryDetail->totalSize - threadMemoryDetail->freeSize;
-
-    data->nelements++;
-}
-
-static void getSharedMemoryContextDetail(ThreadMemoryDetailPad* data)
-{
-    recursiveThreadMemoryContext(NULL, g_instance.instance_context, data, data->nelements - 1, true);
-}
-
 /*
  * @@GaussDB@@
  * Target		: pv_shared_memory_detail view
  * Brief		:
  * Description	:
  */
-ThreadMemoryDetail* getSharedMemoryDetail(uint32* num)
+void getSharedMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc)
 {
-    ThreadMemoryDetailPad* data = NULL;
-    ThreadMemoryDetail* returnDetailArray = NULL;
+    recursiveThreadMemoryContext(NULL, g_instance.instance_context, true, tupStore, tupDesc);
+}
 
-    data = (ThreadMemoryDetailPad*)palloc0(sizeof(ThreadMemoryDetailPad));
-    *num = 0;
+/*
+ * @@GaussDB@@
+ * Target       : pv_thread_memory_detail view
+ * Brief        :
+ * Description  :
+ * Notes        :
+ * Author       :
+ */
+void getThreadMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc, uint32* procIdx)
+{
+    uint32 max_thread_count = g_instance.proc_base->allProcCount - g_instance.attr.attr_storage.max_prepared_xacts;
+    volatile PGPROC* proc = NULL;
+    uint32 idx = 0;
 
-    /* collect all the Memory Context status,put in data */
-    data->threadMemoryDetail = (ThreadMemoryDetail*)palloc0(sizeof(ThreadMemoryDetail));
-    getSharedMemoryContextDetail(data);
+    PG_TRY();
+    {
+        HOLD_INTERRUPTS();
 
-    if (0 < data->nelements) {
-        *num = data->nelements;
-        returnDetailArray = data->threadMemoryDetail->next;
+        for (idx = 0; idx < max_thread_count; idx++) {
+            proc = g_instance.proc_base_all_procs[idx];
+            *procIdx = idx;
+
+            /* lock this proc's delete MemoryContext action */
+            (void)syscalllockAcquire(&((PGPROC*)proc)->deleMemContextMutex);
+            if (proc->topmcxt != NULL)
+                recursiveThreadMemoryContext(proc, proc->topmcxt, false, tupStore, tupDesc);
+            (void)syscalllockRelease(&((PGPROC*)proc)->deleMemContextMutex);
+        }
+
+        /* get memory context detail from postmaster thread */
+        if (IsNormalProcessingMode())
+            recursiveThreadMemoryContext(NULL, PmTopMemoryContext, false, tupStore, tupDesc);
+
+        RESUME_INTERRUPTS();
     }
-
-    return returnDetailArray;
+    PG_CATCH();
+    {
+        if (*procIdx < max_thread_count) {
+            proc = g_instance.proc_base_all_procs[*procIdx];
+            (void)syscalllockRelease(&((PGPROC*)proc)->deleMemContextMutex);
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -8394,8 +8376,6 @@ ThreadMemoryDetail* getSharedMemoryDetail(uint32* num)
 
 extern void dumpAllocBlock(AllocSet set, StringInfoData* buf);
 extern void dumpAsanBlock(AsanSet set, StringInfoData* buf);
-
-static const char* dump_dir = "/tmp/dumpmem";
 
 static void recursiveMemoryContextForDump(const MemoryContext context, char* ctx_name, StringInfoData* buf)
 {
@@ -8421,9 +8401,27 @@ void DumpMemoryContext(DUMP_TYPE type)
 {
 #define DUMPFILE_BUFF_SIZE 128
     char ctx_name[MEMORY_CONTEXT_NAME_LEN] = {0};
+    char dump_dir[MAX_PATH_LEN] = {0};
+    errno_t ss_rc;
+    bool is_absolute = false;
+
+    // get the path of dump file
+    is_absolute = is_absolute_path(u_sess->attr.attr_common.Log_directory);
+    if (is_absolute) {
+        ss_rc = snprintf_s(
+            dump_dir, sizeof(dump_dir), sizeof(dump_dir) - 1, "%s/memdump", u_sess->attr.attr_common.Log_directory);
+        securec_check_ss(ss_rc, "\0", "\0");
+    } else {
+        ss_rc = snprintf_s(dump_dir,
+            sizeof(dump_dir),
+            sizeof(dump_dir) - 1,
+            "%s/pg_log/memdump",
+            g_instance.attr.attr_common.data_directory);
+        securec_check_ss(ss_rc, "\0", "\0");
+    }
 
     // 1. copy the name of memory context to thread local variable
-    errno_t ss_rc = strcpy_s(ctx_name, MEMORY_CONTEXT_NAME_LEN, dump_memory_context_name);
+    ss_rc = strcpy_s(ctx_name, MEMORY_CONTEXT_NAME_LEN, dump_memory_context_name);
     securec_check(ss_rc, "\0", "\0");
 
     // 2. create directory "/tmp/dumpmem" to save memory context log file
@@ -8445,11 +8443,11 @@ void DumpMemoryContext(DUMP_TYPE type)
 
     // 3. create file to be dump
     // file name
-    char dump_file[128] = {0};
+    char dump_file[MAX_PATH_LEN] = {0};
 #ifdef ENABLE_MEMORY_CHECK
     pid_t pid = getpid();
     int rc = sprintf_s(dump_file,
-        DUMPFILE_BUFF_SIZE,
+        MAX_PATH_LEN,
         "%s/%s_%s_%d.log",
         dump_dir,
         g_instance.attr.attr_common.PGXCNodeName,
@@ -8458,7 +8456,7 @@ void DumpMemoryContext(DUMP_TYPE type)
 #else
     ThreadId tid = gs_thread_self();
     int rc = sprintf_s(
-        dump_file, DUMPFILE_BUFF_SIZE, "%s/%s_%lu_%lu.log", dump_dir, ctx_name, (unsigned long)tid, (uint64)time(NULL));
+        dump_file, MAX_PATH_LEN, "%s/%s_%lu_%lu.log", dump_dir, ctx_name, (unsigned long)tid, (uint64)time(NULL));
 #endif
     securec_check_ss(rc, "\0", "\0");
     FILE* dump_fp = fopen(dump_file, "w");
@@ -8492,6 +8490,7 @@ void DumpMemoryContext(DUMP_TYPE type)
         recursiveMemoryContextForDump(ctx, ctx_name, &memBuf);
 
         uint64 bytes = fwrite(memBuf.data, 1, memBuf.len, dump_fp);
+
         if (bytes != (uint64)memBuf.len) {
             elog(LOG, "Could not write memory usage information. Attempted to write %d", memBuf.len);
         }
@@ -8509,7 +8508,6 @@ void DumpMemoryContext(DUMP_TYPE type)
     return;
 }
 #endif  // MEMORY_CONTEXT_CHECKING
-
 
 static void FetchLWLockInfoOfAllBackends(lwm_lwlocks** lwlockInfo, int& nBackends)
 {
@@ -8590,7 +8588,7 @@ static void OutLogLWLockInfoOfAllBackends(lwm_lwlocks* lwlockInfo, int nBackends
     for (int beIdx = 0; beIdx < nBackends; ++beIdx) {
         /* format lwlock info of each backend */
         appendStringInfo(&fmtOutLog,
-            "[LWLOCK INFO] thread %lu, required (%s), held num %d, locks(name, addr, mode):",
+            "[LWLOCK INFO] thread %lu, required (%s), held num %d, locks(name, mode):",
             info->be_tid.thread_id,
             T_NAME(info->want_lwlock.lock),
             info->lwlocks_num);
@@ -8644,8 +8642,8 @@ lwm_light_detect* pgstat_read_light_detect(void)
         lwm_light_detect ld = {0, 0};
 
         for (;;) {
-            int         before_changecount;
-            int         after_changecount;
+            int before_changecount;
+            int after_changecount;
 
             pgstat_save_changecount_before(beentry, before_changecount);
             /* the only Prerequisites is that thread is valid. */
@@ -8658,8 +8656,7 @@ lwm_light_detect* pgstat_read_light_detect(void)
 
             /* the only Prerequisites is that thread is valid. */
             pgstat_save_changecount_after(beentry, after_changecount);
-            if (before_changecount == after_changecount &&
-                (before_changecount & 1) == 0) {
+            if (before_changecount == after_changecount && (before_changecount & 1) == 0) {
                 break;
             }
         }
@@ -8692,28 +8689,16 @@ lwm_lwlocks* pgstat_read_diagnosis_data(lwm_light_detect* light_det, const int* 
     Size need_size = sizeof(lwm_lwlocks) * (uint32)num_candidates;
     /* Must all these memory be reset be 0 */
     lwm_lwlocks* lwlocks = (lwm_lwlocks*)palloc0(need_size);
-
-    need_size = get_held_lwlocks_maxnum() * sizeof(lwlock_id_mode) * (uint32)num_candidates;
-    lwlock_id_mode* lwlock_id_buf = (lwlock_id_mode*)palloc0(need_size);
-
-    lwlock_id_mode* lwlock_id = NULL;
-    lwm_lwlocks* lwlock = NULL;
+    lwm_lwlocks* cur_lwlock = NULL;
     lwm_lwlocks tmplock;
+    errno_t errval = memset_s(&tmplock, sizeof(tmplock), 0, sizeof(tmplock));
+    securec_check_errval(errval, , LOG);
 
-    /* assign valid lwm_lwlocks::hold_lwlocks */
-    lwlock = lwlocks;
-    lwlock_id = lwlock_id_buf;
-    for (int i = 0; i < num_candidates; ++i) {
-        lwlock->held_lwlocks = lwlock_id;
-        ++lwlock;
-        ++lwlock_id;
-    }
-
-    lwlock = lwlocks;
+    cur_lwlock = lwlocks;
     for (int i = 0; i < num_candidates; i++) {
         /* remember its position */
         tmplock.be_idx = candidates_pos[i];
-        tmplock.held_lwlocks = lwlock->held_lwlocks;
+        tmplock.held_lwlocks = (lwlock_id_mode*)palloc0(get_held_lwlocks_maxnum() * sizeof(lwlock_id_mode));
 
         volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + candidates_pos[i];
         lwm_light_detect* cur_det = light_det + candidates_pos[i];
@@ -8733,8 +8718,8 @@ lwm_lwlocks* pgstat_read_diagnosis_data(lwm_light_detect* light_det, const int* 
         }
 
         for (;;) {
-            int                     before_changecount;
-            int                     after_changecount;
+            int before_changecount;
+            int after_changecount;
 
             pgstat_save_changecount_before(beentry, before_changecount);
             if (cur_det->entry_id.thread_id == beentry->st_procpid) {
@@ -8757,9 +8742,8 @@ lwm_lwlocks* pgstat_read_diagnosis_data(lwm_light_detect* light_det, const int* 
 
             /* the third time to check changecount */
             pgstat_save_changecount_after(beentry, after_changecount);
-            if ((cur_det->lw_count == beentry->lw_count)
-                && (before_changecount == after_changecount)
-                && (before_changecount & 1) == 0) {
+            if ((cur_det->lw_count == beentry->lw_count) && (before_changecount == after_changecount) &&
+                (before_changecount & 1) == 0) {
                 break;
             }
         }
@@ -8771,14 +8755,16 @@ lwm_lwlocks* pgstat_read_diagnosis_data(lwm_light_detect* light_det, const int* 
 
         if (success) {
             /* remember this candidate */
-            lwlock->be_idx = tmplock.be_idx;
-            lwlock->be_tid.thread_id = tmplock.be_tid.thread_id;
-            lwlock->be_tid.st_sessionid = tmplock.be_tid.st_sessionid;
-            lwlock->want_lwlock = tmplock.want_lwlock;
-            lwlock->lwlocks_num = tmplock.lwlocks_num;
-            lwlock->held_lwlocks = tmplock.held_lwlocks;
+            cur_lwlock->be_idx = tmplock.be_idx;
+            cur_lwlock->be_tid.thread_id = tmplock.be_tid.thread_id;
+            cur_lwlock->be_tid.st_sessionid = tmplock.be_tid.st_sessionid;
+            cur_lwlock->want_lwlock = tmplock.want_lwlock;
+            cur_lwlock->lwlocks_num = tmplock.lwlocks_num;
+            cur_lwlock->held_lwlocks = tmplock.held_lwlocks;
+        } else {
+            pfree_ext(tmplock.held_lwlocks);
         }
-        ++lwlock;
+        ++cur_lwlock;
     }
     return lwlocks;
 }
@@ -8792,16 +8778,15 @@ TimestampTz pgstat_read_xact_start_tm(int be_index)
     /* read xact starting time from this backend */
     for (;;) {
         /* just make sure this thread is valid */
-        int         before_changecount;
-        int         after_changecount;
+        int before_changecount;
+        int after_changecount;
 
         pgstat_save_changecount_before(beentry, before_changecount);
         if (beentry->st_procpid > 0) {
             tmp_xact_tm = beentry->st_xact_start_timestamp;
         }
         pgstat_save_changecount_after(beentry, after_changecount);
-        if (before_changecount == after_changecount &&
-            (before_changecount & 1) == 0) {
+        if (before_changecount == after_changecount && (before_changecount & 1) == 0) {
             break;
         }
     }
@@ -8985,6 +8970,27 @@ TableDistributionInfo* get_remote_stat_bgwriter(TupleDesc tuple_desc)
     return distribuion_info;
 }
 
+TableDistributionInfo* get_remote_single_flush_dw_stat(TupleDesc tuple_desc)
+{
+    StringInfoData buf;
+    TableDistributionInfo* distribuion_info = NULL;
+
+    /* the memory palloced here should be free outside where it was called. */
+    distribuion_info = (TableDistributionInfo*)palloc0(sizeof(TableDistributionInfo));
+
+    initStringInfo(&buf);
+
+    appendStringInfo(&buf,
+        "SELECT node_name, curr_dwn, curr_start_page, total_writes, file_trunc_num, file_reset_num "
+        "FROM local_single_flush_dw_stat();");
+
+    /* send sql and parallel fetch distribution info from all data nodes */
+    distribuion_info->state = RemoteFunctionResultHandler(buf.data, NULL, NULL, true, EXEC_ON_ALL_NODES, true);
+    distribuion_info->slot = MakeSingleTupleTableSlot(tuple_desc);
+
+    return distribuion_info;
+}
+
 TableDistributionInfo* get_remote_stat_double_write(TupleDesc tuple_desc)
 {
     StringInfoData buf;
@@ -9137,6 +9143,7 @@ void initGlobalBadBlockStat()
         HASHCTL hash_ctl;
         errno_t errval = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
         securec_check_errval(errval, , LOG);
+
         hash_ctl.hcxt = global_bad_block_mcxt;
         hash_ctl.keysize = sizeof(BadBlockHashKey);
         hash_ctl.entrysize = sizeof(BadBlockHashEnt);
@@ -9303,7 +9310,7 @@ static void pgstat_send_badblock_stat(void)
  * @IN len: without use
  * @See also:
  */
-static void pgstat_recv_badblock_stat(PgStat_MsgBadBlock* msg)
+static void pgstat_recv_badblock_stat(PgStat_MsgBadBlock* msg, int /* len */)
 {
     if (global_bad_block_stat == NULL || msg == NULL) {
         return;
@@ -9384,6 +9391,14 @@ bool CalcSQLRowStatCounter(PgStat_TableCounts* last_total_counter, PgStat_TableC
     Assert(current_sql_table_counter && last_total_counter);
 
     if (u_sess->stat_cxt.pgStatTabList == NULL || u_sess->stat_cxt.pgStatTabList->tsa_used == 0)
+        return false;
+
+    /*
+     * dont calculate Counter for towphase's Prepare since tuple activity has been removed from
+     * PgStat_TableCounts in PostPrepare_PgStat. if do it, smaller number will be found in T
+     * than L's, and Prepare will has minus number for row stats.
+     */
+    if (u_sess->storage_cxt.twoPhaseCommitInProgress)
         return false;
 
     ereport(DEBUG1,

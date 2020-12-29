@@ -21,7 +21,7 @@
 subdir = src/gausskernel/runtime/vecexecutor
 top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
-
+override CPPFLAGS:=-std=c++14 $(CPPFLAGS)
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"
     ifneq "$(shell which g++ |grep hutaf_llt |wc -l)" "1"

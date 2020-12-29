@@ -57,4 +57,3 @@ typedef struct DataQueuePtr {
     } while (0)
 
 #endif /* DATAQUEU_DEFS_H */
-

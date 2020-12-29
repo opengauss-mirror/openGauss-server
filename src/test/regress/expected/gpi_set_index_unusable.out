@@ -27,10 +27,9 @@ vacuum analyze test_merge_llt;
 explain (costs false) select * from test_merge_llt where a=40;
                       QUERY PLAN                       
 -------------------------------------------------------
- [Bypass]
  Index Scan using test_merge_llt_idx on test_merge_llt
    Index Cond: (a = 40)
-(3 rows)
+(2 rows)
 
 -- 1 rows
 select * from test_merge_llt where a=40;
@@ -80,10 +79,9 @@ reindex index test_merge_llt_idx;
 explain (costs false) select * from test_merge_llt where a=40;
                       QUERY PLAN                       
 -------------------------------------------------------
- [Bypass]
  Index Scan using test_merge_llt_idx on test_merge_llt
    Index Cond: (a = 40)
-(3 rows)
+(2 rows)
 
 select * from test_merge_llt where a=40;
  a  | b  
@@ -123,10 +121,9 @@ vacuum analyze test_truncate_llt;
 explain (costs false) select * from test_truncate_llt where a=40;
                          QUERY PLAN                          
 -------------------------------------------------------------
- [Bypass]
  Index Scan using test_truncate_llt_idx on test_truncate_llt
    Index Cond: (a = 40)
-(3 rows)
+(2 rows)
 
 select * from test_truncate_llt where a=40;
  a  | b  
@@ -185,10 +182,9 @@ set enable_seqscan=on;
 explain (costs false) select * from test_truncate_llt where a=40;
                          QUERY PLAN                          
 -------------------------------------------------------------
- [Bypass]
  Index Scan using test_truncate_llt_idx on test_truncate_llt
    Index Cond: (a = 40)
-(3 rows)
+(2 rows)
 
 select * from test_truncate_llt where a=40;
  a  | b  
@@ -229,10 +225,9 @@ vacuum analyze test_exchange_llt;
 explain (costs false) select * from test_exchange_llt where a=40;
                          QUERY PLAN                          
 -------------------------------------------------------------
- [Bypass]
  Index Scan using test_exchange_llt_idx on test_exchange_llt
    Index Cond: (a = 40)
-(3 rows)
+(2 rows)
 
 select * from test_exchange_llt where a=40;
  a  |  b  
@@ -293,10 +288,9 @@ set enable_seqscan=on;
 explain (costs false) select * from test_exchange_llt where a=40;
                          QUERY PLAN                          
 -------------------------------------------------------------
- [Bypass]
  Index Scan using test_exchange_llt_idx on test_exchange_llt
    Index Cond: (a = 40)
-(3 rows)
+(2 rows)
 
 select * from test_exchange_llt where a=40;
  a  |  b  
@@ -335,10 +329,9 @@ vacuum analyze test_split_llt;
 explain (costs false) select * from test_split_llt where a=40;
                        QUERY PLAN                       
 --------------------------------------------------------
- [Bypass]
  Index Scan using test_split_llt_idx1 on test_split_llt
    Index Cond: (a = 40)
-(3 rows)
+(2 rows)
 
 select * from test_split_llt where a=40;
  a  | b  
@@ -455,10 +448,9 @@ vacuum analyze test_drop_llt;
 explain (costs false) select * from test_drop_llt where a=40;
                      QUERY PLAN                      
 -----------------------------------------------------
- [Bypass]
  Index Scan using test_drop_llt_idx on test_drop_llt
    Index Cond: (a = 40)
-(3 rows)
+(2 rows)
 
 select * from test_drop_llt where a=40;
  a  | b  

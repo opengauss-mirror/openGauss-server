@@ -4,6 +4,7 @@
  *	  postgres transaction access method support code
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
@@ -106,7 +107,7 @@
 #define FirstBootstrapObjectId 10000
 #define FirstNormalObjectId 16384
 
-#define IsBuiltinFuncOid(id) ((OidIsValid(id)) && ((id) < FirstBootstrapObjectId))
+#define IsSystemObjOid(id) ((OidIsValid(id)) && (id < FirstBootstrapObjectId))
 /*
  * VariableCache is a data structure in shared memory that is used to track
  * OID and XID assignment state.  For largely historical reasons, there is
@@ -164,9 +165,9 @@ typedef struct VariableCacheData {
     pg_atomic_uint32 CriticalCacheBuildLock; /* lock of create relcache init file */
 
     pg_atomic_uint64 cutoff_csn_min;
-    pg_atomic_uint64 cutoff_csn_min_candidate;
     TransactionId keep_xmin;            /* quickly to calculate oldestxmin */
     CommitSeqNo keep_csn;             /* quickly to calculate oldestxmin */
+    CommitSeqNo local_csn_min;
 } VariableCacheData;
 
 typedef VariableCacheData* VariableCache;
@@ -175,6 +176,7 @@ typedef VariableCacheData* VariableCache;
  *		extern declarations
  * ----------------
  */
+
 /* in transam/xact.c */
 extern bool TransactionStartedDuringRecovery(void);
 
@@ -237,6 +239,6 @@ extern void SetTransactionIdLimit(TransactionId oldest_datfrozenxid, Oid oldest_
 extern bool ForceTransactionIdLimitUpdate(void);
 extern Oid GetNewObjectId(bool IsToastRel = false);
 extern TransactionId SubTransGetTopParentXidFromProcs(TransactionId xid);
-extern TransactionIdStatus TransactionIdGetStatus(TransactionId transactionId, bool isCommit);
+extern TransactionIdStatus TransactionIdGetStatus(TransactionId transactionId);
 
 #endif /* TRAMSAM_H */

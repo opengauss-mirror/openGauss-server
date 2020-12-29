@@ -32,19 +32,19 @@
 Datum ginarrayextract(PG_FUNCTION_ARGS)
 {
     /* Make copy of array input to ensure it doesn't disappear while in use */
-    ArrayType* array = PG_GETARG_ARRAYTYPE_P_COPY(0);
-    int32* nkeys = (int32*)PG_GETARG_POINTER(1);
-    bool** nullFlags = (bool**)PG_GETARG_POINTER(2);
+    ArrayType *array = PG_GETARG_ARRAYTYPE_P_COPY(0);
+    int32 *nkeys = (int32 *)PG_GETARG_POINTER(1);
+    bool **nullFlags = (bool **)PG_GETARG_POINTER(2);
 
     if (array == NULL || nkeys == NULL || nullFlags == NULL)
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function ginarrayextract")));
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function ginarrayextract")));
 
     int16 elmlen;
     bool elmbyval = false;
     char elmalign;
-    Datum* elems = NULL;
-    bool* nulls = NULL;
+    Datum *elems = NULL;
+    bool *nulls = NULL;
     int nelems;
 
     get_typlenbyvalalign(ARR_ELEMTYPE(array), &elmlen, &elmbyval, &elmalign);
@@ -77,22 +77,22 @@ Datum ginarrayextract_2args(PG_FUNCTION_ARGS)
 Datum ginqueryarrayextract(PG_FUNCTION_ARGS)
 {
     /* Make copy of array input to ensure it doesn't disappear while in use */
-    ArrayType* array = PG_GETARG_ARRAYTYPE_P_COPY(0);
-    int32* nkeys = (int32*)PG_GETARG_POINTER(1);
+    ArrayType *array = PG_GETARG_ARRAYTYPE_P_COPY(0);
+    int32 *nkeys = (int32 *)PG_GETARG_POINTER(1);
     StrategyNumber strategy = PG_GETARG_UINT16(2);
 
-    bool** nullFlags = (bool**)PG_GETARG_POINTER(5);
-    int32* searchMode = (int32*)PG_GETARG_POINTER(6);
+    bool **nullFlags = (bool **)PG_GETARG_POINTER(5);
+    int32 *searchMode = (int32 *)PG_GETARG_POINTER(6);
 
     if (array == NULL || nkeys == NULL || nullFlags == NULL || searchMode == NULL)
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid arguments for function ginqueryarrayextract")));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("Invalid arguments for function ginqueryarrayextract")));
 
     int16 elmlen;
     bool elmbyval = false;
     char elmalign;
-    Datum* elems = NULL;
-    bool* nulls = NULL;
+    Datum *elems = NULL;
+    bool *nulls = NULL;
     int nelems;
 
     get_typlenbyvalalign(ARR_ELEMTYPE(array), &elmlen, &elmbyval, &elmalign);
@@ -123,9 +123,8 @@ Datum ginqueryarrayextract(PG_FUNCTION_ARGS)
                 *searchMode = GIN_SEARCH_MODE_INCLUDE_EMPTY;
             break;
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("ginqueryarrayextract: unknown strategy number: %d", strategy)));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("ginqueryarrayextract: unknown strategy number: %d", strategy)));
     }
 
     /* we should not free array, elems[i] points into it */
@@ -137,14 +136,14 @@ Datum ginqueryarrayextract(PG_FUNCTION_ARGS)
  */
 Datum ginarrayconsistent(PG_FUNCTION_ARGS)
 {
-    bool* check = (bool*)PG_GETARG_POINTER(0);
+    bool *check = (bool *)PG_GETARG_POINTER(0);
     StrategyNumber strategy = PG_GETARG_UINT16(1);
 
     int32 nkeys = PG_GETARG_INT32(3);
 
-    bool* recheck = (bool*)PG_GETARG_POINTER(5);
+    bool *recheck = (bool *)PG_GETARG_POINTER(5);
 
-    bool* nullFlags = (bool*)PG_GETARG_POINTER(7);
+    bool *nullFlags = (bool *)PG_GETARG_POINTER(7);
     bool res = false;
     int32 i;
 
@@ -197,9 +196,8 @@ Datum ginarrayconsistent(PG_FUNCTION_ARGS)
             }
             break;
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("ginqueryarrayextract: unknown strategy number: %d", strategy)));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("ginqueryarrayextract: unknown strategy number: %d", strategy)));
             res = false;
     }
 
@@ -211,12 +209,12 @@ Datum ginarrayconsistent(PG_FUNCTION_ARGS)
  */
 Datum ginarraytriconsistent(PG_FUNCTION_ARGS)
 {
-    GinTernaryValue* check = (GinTernaryValue*)PG_GETARG_POINTER(0);
+    GinTernaryValue *check = (GinTernaryValue *)PG_GETARG_POINTER(0);
     StrategyNumber strategy = PG_GETARG_UINT16(1);
 
     int32 nkeys = PG_GETARG_INT32(3);
 
-    bool* nullFlags = (bool*)PG_GETARG_POINTER(6);
+    bool *nullFlags = (bool *)PG_GETARG_POINTER(6);
     GinTernaryValue res;
     int32 i;
 
@@ -267,9 +265,8 @@ Datum ginarraytriconsistent(PG_FUNCTION_ARGS)
             }
             break;
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("ginqueryarrayextract: unknown strategy number: %d", strategy)));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("ginqueryarrayextract: unknown strategy number: %d", strategy)));
             res = GIN_FALSE;
     }
 

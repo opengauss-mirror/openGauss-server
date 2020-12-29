@@ -1,0 +1,17 @@
+\! mkdir -p '@abs_srcdir@/data/upgrade/test/dir'
+\! cp -f '@abs_srcdir@/data/upgrade/16386_C1.0' '@abs_srcdir@/data/upgrade/test/16386_C1.0'
+\! cp -f '@abs_srcdir@/data/upgrade/12345' '@abs_srcdir@/data/upgrade/test/12345'
+\! cp -f '@abs_srcdir@/data/upgrade/12345_C' '@abs_srcdir@/data/upgrade/test/12345_C'
+\! cp -f '@abs_srcdir@/data/upgrade/dir/16386_C1.0' '@abs_srcdir@/data/upgrade/test/dir/16386_C1.0'
+\! @abs_bindir@/pg_format_cu -a 8192 -f '@abs_srcdir@/data/upgrade/test/16386_C1.0'
+\! @abs_bindir@/pg_format_cu -a 8192 -d '@abs_srcdir@/data/upgrade/test/dir'
+\! @abs_bindir@/pg_format_cu 
+\! @abs_bindir@/pg_format_cu --help
+\! @abs_bindir@/pg_format_cu -a 8192
+\! @abs_bindir@/pg_format_cu -a -1
+\! @abs_bindir@/pg_format_cu -a 123
+\! @abs_bindir@/pg_format_cu -a 8192 -f '@abs_srcdir@/data/upgrade/test/16386_C2.0'
+\! @abs_bindir@/pg_format_cu -a 8192 -f 'abcdefg'
+\! @abs_bindir@/pg_format_cu -a 8192 -f '@abs_srcdir@/data/upgrade/test/12345'
+\! @abs_bindir@/pg_format_cu -a 8192 -f '@abs_srcdir@/data/upgrade/test/12345_C'
+\! rm -rf '@abs_srcdir@/data/upgrade/test'

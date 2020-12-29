@@ -41,6 +41,7 @@
 #include "catalog/storage.h"
 #include "commands/tablespace.h"
 #include "commands/vacuum.h"
+#include "commands/dbcommands.h"
 #include "dfsdesc.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
@@ -54,8 +55,6 @@
 #include "catalog/toasting.h"
 #include "storage/dfs/dfs_connector.h"
 #include "dfs_adaptor.h"
-
-extern char* get_database_name(Oid dbid);
 
 extern Oid bupgrade_get_next_cudesc_toast_index_oid();
 extern Oid bupgrade_get_next_cudesc_toast_pg_type_oid();
@@ -335,13 +334,6 @@ StringInfo getDfsStorePath(Relation rel)
     Oid tablespaceOid = rel->rd_rel->reltablespace;
     StringInfo storePath = getHDFSTblSpcStorePath(tablespaceOid);
 
-    char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-    if (dbname == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                    errmsg("database with OID %u does not exist",
-                        u_sess->proc_cxt.MyDatabaseId)));
-    }
-
     /*
      * Build Dfsstore path. The deirectory structure is
      * "tblespace_dir/tablespace_secondary/db_dir/table_dir/table_partition_dir".
@@ -349,8 +341,8 @@ StringInfo getDfsStorePath(Relation rel)
      */
     appendStringInfo(storePath,
         "/%s/%s",
-        dbname,
-        get_namespace_name(RelationGetNamespace(rel), true));
+        get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId),
+        get_namespace_name(RelationGetNamespace(rel)));
     appendStringInfo(storePath, ".");
     appendStringInfo(storePath, "%s", RelationGetRelationName(rel));
 
@@ -497,7 +489,7 @@ void InsertDeletedFilesForTransaction(Relation dataDestRelation)
      * Save path for relation, and this path will be used in doPendingDfsDelete().
      */
     StringInfo store_path = getDfsStorePath(dataDestRelation);
-    MemoryContext oldcontext = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    MemoryContext oldcontext = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     DFSDescHandler handler(MAX_LOADED_DFSDESC, dataDestRelation->rd_att->natts, dataDestRelation);
 
@@ -509,8 +501,8 @@ void InsertDeletedFilesForTransaction(Relation dataDestRelation)
      * Get connection object and will be used in doPendingDfsDelete().
      */
     DfsSrvOptions* options = GetDfsSrvOptions(dataDestRelation->rd_rel->reltablespace);
-    dfs::DFSConnector* conn =
-        dfs::createConnector(t_thrd.top_mem_cxt, options, dataDestRelation->rd_rel->reltablespace);
+    dfs::DFSConnector* conn = dfs::createConnector(
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), options, dataDestRelation->rd_rel->reltablespace);
     if (NULL == conn) {
         ereport(ERROR,
             (errcode(ERRCODE_FDW_INVALID_SERVER_TYPE),

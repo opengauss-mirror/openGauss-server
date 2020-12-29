@@ -1,0 +1,360 @@
+set enable_global_stats = true;
+--INT4
+CREATE TABLE vint4_test(a INT4, b INT4, c INT4) with (orientation = orc)   tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+copy vint4_test from '@abs_srcdir@/data/vint4_normal.data' delimiter '|' NULL '';
+select * from vint4_test order by a;
+ a  |  b   |      c      
+----+------+-------------
+  1 |    2 |           0
+  2 |  -23 |         100
+  3 |  200 |            
+ 10 |    1 |  2147483647
+ 11 |  200 |           3
+ 12 | -302 |        -100
+ 13 |  322 |        -200
+ 14 |    1 |            
+ 20 |    2 | -2147483647
+ 21 |  100 |           0
+ 22 | -200 |         100
+ 23 |  -23 |            
+ 30 |   -1 | -2147483648
+ 31 |  900 |         900
+ 32 |      |            
+(15 rows)
+
+--test vint4pl
+--select b+c, (b+c) is NULL from vint4_test where a <= 3 order by a;
+select b+c as result from vint4_test where a <= 3 order by a;
+ result 
+--------
+      2
+     77
+       
+(3 rows)
+
+select b+c as result from vint4_test where a <= 10 order by a; --out-of-range
+ERROR:  integer out of range
+CONTEXT:  referenced column: result
+--test vint4mul
+--select b-c, (b-c) is NULL from vint4_test  where a > 10 and a <= 14 order by a;
+select b-c as result from vint4_test  where a > 10 and a <= 14 order by a;
+ result 
+--------
+    197
+   -202
+    522
+       
+(4 rows)
+
+select b-c as result from vint4_test where a > 10 and a <= 20 order by a; --out-of-range
+ERROR:  integer out of range
+CONTEXT:  referenced column: result
+--test vint4mi
+--select b*c, (b*c) is NULL from vint4_test where a > 20 and a <= 24 order by a ;
+select b*c as result from vint4_test where a > 20 and a <= 24 order by a;
+ result 
+--------
+      0
+ -20000
+       
+(3 rows)
+
+select b*c as result from vint4_test where a > 20 and a <= 30 order by a; --out-of-range
+ERROR:  integer out of range
+CONTEXT:  referenced column: result
+--others
+select max(b),max(c) from vint4_test;
+ max |    max     
+-----+------------
+ 900 | 2147483647
+(1 row)
+
+select min(b),min(c) from vint4_test;
+ min  |     min     
+------+-------------
+ -302 | -2147483648
+(1 row)
+
+select avg(b),avg(c) from vint4_test;
+         avg         |         avg         
+---------------------+---------------------
+ 84.2142857142857143 | -195225713.18181818
+(1 row)
+
+select sum(b),sum(c) from vint4_test;
+ sum  |     sum     
+------+-------------
+ 1179 | -2147482845
+(1 row)
+
+--test vint4_sop
+select b,c from vint4_test where b=c order by a;
+  b  |  c  
+-----+-----
+ 900 | 900
+(1 row)
+
+select b,c from vint4_test where b<>c order by a;
+  b   |      c      
+------+-------------
+    2 |           0
+  -23 |         100
+    1 |  2147483647
+  200 |           3
+ -302 |        -100
+  322 |        -200
+    2 | -2147483647
+  100 |           0
+ -200 |         100
+   -1 | -2147483648
+(10 rows)
+
+select b,c from vint4_test where b>c order by a;
+  b  |      c      
+-----+-------------
+   2 |           0
+ 200 |           3
+ 322 |        -200
+   2 | -2147483647
+ 100 |           0
+  -1 | -2147483648
+(6 rows)
+
+select b,c from vint4_test where b>=c order by a;
+  b  |      c      
+-----+-------------
+   2 |           0
+ 200 |           3
+ 322 |        -200
+   2 | -2147483647
+ 100 |           0
+  -1 | -2147483648
+ 900 |         900
+(7 rows)
+
+select b,c from vint4_test where b<c order by a;
+  b   |     c      
+------+------------
+  -23 |        100
+    1 | 2147483647
+ -302 |       -100
+ -200 |        100
+(4 rows)
+
+select b,c from vint4_test where b<=c order by a;
+  b   |     c      
+------+------------
+  -23 |        100
+    1 | 2147483647
+ -302 |       -100
+ -200 |        100
+  900 |        900
+(5 rows)
+
+--INT8
+CREATE TABLE vint8_test(a INT8, b INT8, c INT8) with (orientation = orc)  tablespace hdfs_ts DISTRIBUTE BY HASH(a);
+copy vint8_test from '@abs_srcdir@/data/vint8_normal.data' delimiter '|' NULL '';
+--test vint8pl
+--select b+c, (b+c) is NULL from vint8_test where a <= 3 order by a;
+select b+c as result from vint8_test where a <= 3::int8 order by a;
+ result 
+--------
+      2
+     77
+(2 rows)
+
+select b+c as result from vint8_test where a <= 10::int8 order by a; --out-of-range
+ERROR:  bigint out of range
+CONTEXT:  referenced column: result
+--test vint8mul
+--select b-c, (b-c) is NULL from vint8_test where a > 10 and a <= 14 order by a;
+select b-c as result from vint8_test where a > 10::int8 and a <= 14::int8 order by a;
+ result 
+--------
+       
+   -202
+       
+(3 rows)
+
+select b-c as result from vint8_test where a > 10::int8 and a <= 20::int8 order by a; --out-of-range
+ERROR:  bigint out of range
+CONTEXT:  referenced column: result
+--test vint8mi
+--select b*c, (b*c) is NULL from vint8_test where a > 20 and a <= 24 order by a;
+select b*c as result from vint8_test where a > 20::int8 and a <= 24::int8 order by a;
+ result 
+--------
+      0
+ -20000
+       
+(3 rows)
+
+select b*c as result from vint8_test where a > 20::int8 and a <= 30::int8 order by a; --out-of-range
+ERROR:  bigint out of range
+CONTEXT:  referenced column: result
+--test vint8pl for int84pl/int48pl
+select b+(-2) as result from vint8_test where a <= 3::int8 order by a;
+ result 
+--------
+      0
+    -25
+(2 rows)
+
+select (-2)+b as result from vint8_test where a <= 10::int8 order by a;
+ result 
+--------
+      0
+    -25
+     -1
+(3 rows)
+
+--test vint8mul for int84mul/int48mul
+select b*(-2) as result from vint8_test where a > 20::int8 and a <= 24::int8 order by a;
+ result 
+--------
+   -200
+    400
+     46
+(3 rows)
+
+select (-2)*b as result from vint8_test where a > 20::int8 and a <= 30::int8 order by a; --out-of-range
+ result 
+--------
+   -200
+    400
+     46
+      2
+(4 rows)
+
+--test vint8mi for int48mi/int84mi
+select b-(-2) as result from vint8_test where a > 10::int8 and a <= 14::int8 order by a;
+ result 
+--------
+    202
+   -300
+    324
+(3 rows)
+
+select (-2)-b as result from vint8_test where a > 10::int8 and a <= 20::int8 order by a; --out-of-range
+ result 
+--------
+   -202
+    300
+   -324
+     -4
+(4 rows)
+
+select max(b),max(c) from vint8_test;
+ max |         max         
+-----+---------------------
+ 900 | 9223372036854775807
+(1 row)
+
+select min(b),min(c) from vint8_test;
+ min  |         min          
+------+----------------------
+ -302 | -9223372036854775808
+(1 row)
+
+select avg(b),avg(c) from vint8_test;
+         avg         |         avg          
+---------------------+----------------------
+ 81.5000000000000000 | -1024819115206086090
+(1 row)
+
+select sum(b),sum(c) from vint8_test;
+ sum |         sum          
+-----+----------------------
+ 978 | -9223372036854774808
+(1 row)
+
+--test vint8_sop
+select b,c from vint8_test where b=c order by a;
+  b  |  c  
+-----+-----
+ 900 | 900
+(1 row)
+
+select b,c from vint8_test where b<>c order by a;
+  b   |          c           
+------+----------------------
+    2 |                    0
+  -23 |                  100
+    1 |  9223372036854775807
+ -302 |                 -100
+    2 | -9223372036854775807
+  100 |                    0
+ -200 |                  100
+   -1 | -9223372036854775808
+(8 rows)
+
+select b,c from vint8_test where b>c order by a;
+  b  |          c           
+-----+----------------------
+   2 |                    0
+   2 | -9223372036854775807
+ 100 |                    0
+  -1 | -9223372036854775808
+(4 rows)
+
+select b,c from vint8_test where b>=c order by a;
+  b  |          c           
+-----+----------------------
+   2 |                    0
+   2 | -9223372036854775807
+ 100 |                    0
+  -1 | -9223372036854775808
+ 900 |                  900
+(5 rows)
+
+select b,c from vint8_test where b<c order by a;
+  b   |          c          
+------+---------------------
+  -23 |                 100
+    1 | 9223372036854775807
+ -302 |                -100
+ -200 |                 100
+(4 rows)
+
+select b,c from vint8_test where b<=c order by a;
+  b   |          c          
+------+---------------------
+  -23 |                 100
+    1 | 9223372036854775807
+ -302 |                -100
+ -200 |                 100
+  900 |                 900
+(5 rows)
+
+                      
+                      
+select abs(c) from vint4_test where  c>-2147483647 and b > 1 order by c;
+ abs 
+-----
+ 200
+   0
+   0
+   3
+ 900
+(5 rows)
+
+select abs(c) from vint4_test order by c;
+ERROR:  integer out of range
+CONTEXT:  referenced column: abs
+select abs(c) from vint4_test where a < 30 and b > 0 order by c;
+    abs     
+------------
+ 2147483647
+        200
+          0
+          0
+          3
+ 2147483647
+           
+           
+(8 rows)
+
+                      
+--clean table
+drop table vint4_test;
+drop table vint8_test;

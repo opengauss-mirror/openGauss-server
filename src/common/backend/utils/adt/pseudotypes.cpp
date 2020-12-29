@@ -75,7 +75,7 @@ Datum cstring_send(PG_FUNCTION_ARGS)
     StringInfoData buf;
 
     pq_begintypsend(&buf);
-    pq_sendtext(&buf, str, (int)(strlen(str)));
+    pq_sendtext(&buf, str, strlen(str));
     PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
 
@@ -446,4 +446,3 @@ Datum pg_node_tree_send(PG_FUNCTION_ARGS)
 {
     return textsend(fcinfo);
 }
-

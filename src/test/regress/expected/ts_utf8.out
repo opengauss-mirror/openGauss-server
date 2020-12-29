@@ -1,0 +1,776 @@
+CREATE DATABASE db_utf8 TEMPLATE template0 encoding 'UTF8';
+\c db_utf8
+------------------------------ basic synax for text search configuration -------------------------------
+--
+--- Pound
+--
+-- CREATE TEXT SEARCH CONFIGURATION
+create text search configuration pound_utf8(parser=pound) with (split_flag = '#');
+ALTER TEXT SEARCH CONFIGURATION pound_utf8 ADD MAPPING FOR zh_words, en_word, numeric, alnum, grapsymbol, multisymbol WITH simple;
+select cfgname, cfoptions from pg_ts_config where cfgname = 'pound_utf8';
+  cfgname   |   cfoptions    
+------------+----------------
+ pound_utf8 | {split_flag=#}
+(1 row)
+
+SELECT to_tsvector('pound_utf8', '京东#淘宝#滴滴#爱奇艺#芒果TV');
+                   to_tsvector                    
+--------------------------------------------------
+ '京东':1 '淘宝':2 '滴滴':3 '爱奇艺':4 '芒果tv':5
+(1 row)
+
+-- SET THE SPLIT FLAG to '@'
+alter text search configuration pound_utf8 set (split_flag = '@');
+select cfgname, cfoptions from pg_ts_config where cfgname = 'pound_utf8';
+  cfgname   |   cfoptions    
+------------+----------------
+ pound_utf8 | {split_flag=@}
+(1 row)
+
+SELECT to_tsvector('pound_utf8', '京东@淘宝@滴滴@爱奇艺@芒果TV');
+                   to_tsvector                    
+--------------------------------------------------
+ '京东':1 '淘宝':2 '滴滴':3 '爱奇艺':4 '芒果tv':5
+(1 row)
+
+-- SET THE SPLIT FLAG to '$'
+alter text search configuration pound_utf8 set (split_flag = '$');
+select cfgname, cfoptions from pg_ts_config where cfgname = 'pound_utf8';
+  cfgname   |   cfoptions    
+------------+----------------
+ pound_utf8 | {split_flag=$}
+(1 row)
+
+SELECT to_tsvector('pound_utf8', '京东$淘宝$滴滴$爱奇艺$芒果TV');
+                   to_tsvector                    
+--------------------------------------------------
+ '京东':1 '淘宝':2 '滴滴':3 '爱奇艺':4 '芒果tv':5
+(1 row)
+
+-- SET THE SPLIT FLAG to '%'
+alter text search configuration pound_utf8 set (split_flag = '%');
+select cfgname, cfoptions from pg_ts_config where cfgname = 'pound_utf8';
+  cfgname   |   cfoptions    
+------------+----------------
+ pound_utf8 | {split_flag=%}
+(1 row)
+
+SELECT to_tsvector('pound_utf8', '京东%淘宝%滴滴%爱奇艺%芒果TV');
+                   to_tsvector                    
+--------------------------------------------------
+ '京东':1 '淘宝':2 '滴滴':3 '爱奇艺':4 '芒果tv':5
+(1 row)
+
+-- SET THE SPLIT FLAG to '/'
+alter text search configuration pound_utf8 set (split_flag = '/');
+select cfgname, cfoptions from pg_ts_config where cfgname = 'pound_utf8';
+  cfgname   |   cfoptions    
+------------+----------------
+ pound_utf8 | {split_flag=/}
+(1 row)
+
+SELECT to_tsvector('pound_utf8', '京东/淘宝/滴滴/爱奇艺/芒果TV');
+                   to_tsvector                    
+--------------------------------------------------
+ '京东':1 '淘宝':2 '滴滴':3 '爱奇艺':4 '芒果tv':5
+(1 row)
+
+-- FOR UNSUPPORTED SPLPT_FLAG, REPORT ERROR
+alter text search configuration pound_utf8 set (split_flag = ',');
+ERROR:  , is not supported by pound parser.
+-- WHEN SPLIT FLAG IS NOT SINGLE CHARACTER, REPORT ERROR
+alter text search configuration pound_utf8 set (split_flag = '#@');
+ERROR:  The split flag should exactly be one character and can not be NULL.
+-- WHEN SPLIT FLAG IS NULL CHARACTER, REPORT ERROR
+alter text search configuration pound_utf8 set (split_flag = '');
+ERROR:  The split flag should exactly be one character and can not be NULL.
+-- WHEN SINGLE TOKEN EXCEED 256 CHARACTERS, SPLIT DIRECTLY EVEN NO SPLIT FLAG IS FOUND
+select to_tsvector('pound_utf8','1981年8月26日，美国宇宙飞船“旅行者2号”飞过土星，取得了一系列探测成果，其中包括发现了土星的第17颗卫星——土卫17。所以，今天我们就来说一说“旅行者2号”上的“地球之音”唱片。1977年8月和9月，人类成功发射了“旅行者1号”和“旅行者2号”探测器，再次向外星人作了更详细的自我介绍。这次，它们各自携带了一张称为“地球之音”的唱片，上面录制了丰富的地球信息。这两张唱片都是镀金铜质的，直径为30.5厘米。唱片上录有115幅照片和图表，35种各类声音，近60种语言的问候语和27首世界著名乐曲等。115幅照片中包括我国八达岭长城');
+                                                                                                                                                                                                                                                  to_tsvector                                                                                                                                                                                                                                                   
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ '1981年8月26日，美国宇宙飞船“旅行者2号”飞过土星，取得了一系列探测成果，其中包括发现了土星的第17颗卫星——土卫17。所以，今天我们就来说一说“旅行者2号”上的“地球之音”唱片。1977年8月和9月，人类成功发射了“旅行者1号”和“旅行者2号”探测器，再次向外星人作了更详细的自我介绍。这次，它们各自携带了一张称为“地球之音”的唱片，上面录制了丰富的地球信息。这两张唱片都是镀金铜质的，直径为30.5厘米。唱片上录有115幅照片和图表，35种各类声音，近60种语言的问候语和27首世界著名乐曲等。115幅':1 '照片中包括我国八达岭长城':2
+(1 row)
+
+select to_tsvector('pound_utf8','1981年8月26日，美国宇宙飞船“旅行者2号”飞过土星，取得了一系列探测成果，其中包括发现了土星的第17颗卫星——土卫17。所以，今天我们就来说一说“旅行者2号”上的“地球之音”唱片。1977年8月和9月，人类成功发射了“旅行者1号”和“旅行者2号”探测器，再次向外星人作了更详细的自我介绍。这次，它们各自携带了一张称为“地球之音”的唱片，上面录制了丰富的地球信息。这两张唱片都是镀金铜质的，直径为30.5厘米。唱片上录有115幅照片和图表，35种各类声音，近60种语言的问候语和27首世界著名乐曲等。115幅///照片中包括我国八达岭长城');
+                                                                                                                                                                                                                                                  to_tsvector                                                                                                                                                                                                                                                   
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ '1981年8月26日，美国宇宙飞船“旅行者2号”飞过土星，取得了一系列探测成果，其中包括发现了土星的第17颗卫星——土卫17。所以，今天我们就来说一说“旅行者2号”上的“地球之音”唱片。1977年8月和9月，人类成功发射了“旅行者1号”和“旅行者2号”探测器，再次向外星人作了更详细的自我介绍。这次，它们各自携带了一张称为“地球之音”的唱片，上面录制了丰富的地球信息。这两张唱片都是镀金铜质的，直径为30.5厘米。唱片上录有115幅照片和图表，35种各类声音，近60种语言的问候语和27首世界著名乐曲等。115幅':1 '照片中包括我国八达岭长城':2
+(1 row)
+
+drop text search configuration pound_utf8;
+create text search configuration pound_utf8(parser=pound) with (split_flag = '#');
+ALTER TEXT SEARCH CONFIGURATION pound_utf8 ADD MAPPING FOR zh_words, en_word, numeric, alnum, grapsymbol, multisymbol WITH simple;
+select cfgname, cfoptions from pg_ts_config where cfgname = 'pound_utf8';
+  cfgname   |   cfoptions    
+------------+----------------
+ pound_utf8 | {split_flag=#}
+(1 row)
+
+SELECT to_tsvector('pound_utf8', '京东#淘宝#滴滴#爱奇艺#芒果TV');
+                   to_tsvector                    
+--------------------------------------------------
+ '京东':1 '淘宝':2 '滴滴':3 '爱奇艺':4 '芒果tv':5
+(1 row)
+
+--
+--- N-gram
+--
+-- CREATE TEXT SEARCH CONFIGURATION
+create text search configuration ngram1(parser=ngram) with (punctuation_ignore = on, gram_size = 2, grapsymbol_ignore = on);
+alter text search configuration ngram1 ADD MAPPING FOR zh_words, en_word, numeric, alnum, grapsymbol, multisymbol with simple;
+select cfgname, cfoptions from pg_ts_config where cfgname = 'ngram1';
+ cfgname |                        cfoptions                         
+---------+----------------------------------------------------------
+ ngram1  | {punctuation_ignore=on,gram_size=2,grapsymbol_ignore=on}
+(1 row)
+
+SELECT to_tsvector('ngram1', '画,龙&点睛');
+      to_tsvector       
+------------------------
+ '点睛':3 '画':1 '龙':2
+(1 row)
+
+--punctuation_ignore
+alter text search configuration ngram1 set (punctuation_ignore = off);
+SELECT to_tsvector('ngram1', '画,龙&点睛');
+       to_tsvector        
+--------------------------
+ ',龙':2 '点睛':3 '画,':1
+(1 row)
+
+--punctuation_ignore
+alter text search configuration ngram1 set (grapsymbol_ignore = off);
+SELECT to_tsvector('ngram1', '画,龙&点睛');
+               to_tsvector                
+------------------------------------------
+ '&点':4 ',龙':2 '点睛':5 '画,':1 '龙&':3
+(1 row)
+
+--punctuation_ignore
+alter text search configuration ngram1 set (gram_size = 3);
+SELECT to_tsvector('ngram1', '画,龙&点睛');
+              to_tsvector               
+----------------------------------------
+ '&点睛':4 ',龙&':2 '画,龙':1 '龙&点':3
+(1 row)
+
+drop text search configuration ngram1;
+create text search configuration ngram1(parser=ngram);
+alter text search configuration ngram1 ADD MAPPING FOR  zh_words, en_word, numeric, alnum, grapsymbol, multisymbol with simple;
+select cfgname, cfoptions from pg_ts_config where cfgname = 'ngram1';
+ cfgname | cfoptions 
+---------+-----------
+ ngram1  | 
+(1 row)
+
+SELECT to_tsvector('ngram1', '画,龙&点睛');
+           to_tsvector           
+---------------------------------
+ '&点':3 '点睛':4 '画':1 '龙&':2
+(1 row)
+
+--------------------------- basic operation for text search parser ----------------------------------
+--
+---- N-gram parser
+--
+set ngram_gram_size = 2;
+set ngram_grapsymbol_ignore = off;
+set ngram_punctuation_ignore = off;
+select ts_parse('ngram', 'Uber提供了电脑版、手机版&平板电脑等版本');
+ ts_parse 
+----------
+ (6,Ub)
+ (6,be)
+ (6,er)
+ (6,r提)
+ (6,提供)
+ (6,供了)
+ (6,了电)
+ (6,电脑)
+ (6,脑版)
+ (6,版、)
+ (6,、手)
+ (6,手机)
+ (6,机版)
+ (6,版&)
+ (6,&平)
+ (6,平板)
+ (6,板电)
+ (6,电脑)
+ (6,脑等)
+ (6,等版)
+ (6,版本)
+(21 rows)
+
+-- configuration parameter: ngram.punctuation_ignore
+set ngram_punctuation_ignore = on;
+select ts_parse('ngram', 'Uber提供了电脑版、手机版&平板电脑等版本');
+ ts_parse 
+----------
+ (6,Ub)
+ (6,be)
+ (6,er)
+ (6,r提)
+ (6,提供)
+ (6,供了)
+ (6,了电)
+ (6,电脑)
+ (6,脑版)
+ (6,手机)
+ (6,机版)
+ (6,版&)
+ (6,&平)
+ (6,平板)
+ (6,板电)
+ (6,电脑)
+ (6,脑等)
+ (6,等版)
+ (6,版本)
+(19 rows)
+
+-- configuration parameter: ngram.grapsymbol_ignore
+set ngram_grapsymbol_ignore = on;
+select ts_parse('ngram', 'Uber提供了电脑版、手机版&平板电脑等版本');
+ ts_parse 
+----------
+ (6,Ub)
+ (6,be)
+ (6,er)
+ (6,r提)
+ (6,提供)
+ (6,供了)
+ (6,了电)
+ (6,电脑)
+ (6,脑版)
+ (6,手机)
+ (6,机版)
+ (6,平板)
+ (6,板电)
+ (6,电脑)
+ (6,脑等)
+ (6,等版)
+ (6,版本)
+(17 rows)
+
+-- configuration parameter: ngram.grapsymbol_ignore
+set ngram_gram_size = 4;
+select ts_parse('ngram', 'Uber提供了电脑版、手机版&平板电脑等版本');
+   ts_parse   
+--------------
+ (6,Uber)
+ (6,ber提)
+ (6,er提供)
+ (6,r提供了)
+ (6,提供了电)
+ (6,供了电脑)
+ (6,了电脑版)
+ (6,手机版)
+ (6,平板电脑)
+ (6,板电脑等)
+ (6,电脑等版)
+ (6,脑等版本)
+(12 rows)
+
+select ts_token_type('ngram');
+           ts_token_type           
+-----------------------------------
+ (1,zh_words,"chinese words")
+ (2,en_word,"english word")
+ (3,numeric,"numeric data")
+ (4,alnum,"alnum string")
+ (5,grapsymbol,"graphic symbol")
+ (6,multisymbol,"multiple symbol")
+(6 rows)
+
+------------------------------- basic operation for text search datatype -----------------------
+--
+--- pound
+--
+select to_tsvector('pound_utf8', 'Uber#滴滴#爱奇艺#芒果TV');
+               to_tsvector               
+-----------------------------------------
+ 'uber':1 '滴滴':2 '爱奇艺':3 '芒果tv':4
+(1 row)
+
+select to_tsquery('pound_utf8','芒果TV');
+ to_tsquery 
+------------
+ '芒果tv'
+(1 row)
+
+--
+---- N-gram
+--
+select to_tsvector('ngram1','辽GQQ360'); 
+                to_tsvector                 
+--------------------------------------------
+ '36':5 '60':6 'gq':2 'q3':4 'qq':3 '辽g':1
+(1 row)
+
+select to_tsquery('ngram1','360');
+ to_tsquery  
+-------------
+ '36' & '60'
+(1 row)
+
+------------------------------- basic operation for text search operator -----------------------
+--
+--- pound
+--
+select to_tsvector('pound_utf8','Uber#滴滴#爱奇艺#芒果TV') @@ to_tsquery('pound_utf8','芒果TV'); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsvector('pound_utf8','Uber#滴滴#爱奇艺#芒果TV') @@@ to_tsquery('pound_utf8','芒果TV'); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsvector('pound_utf8','芒果TV') @@ to_tsquery('pound_utf8','QQ'); -- false
+ ?column? 
+----------
+ f
+(1 row)
+
+select (to_tsvector('pound_utf8','滴滴') || to_tsvector('pound_utf8','爱奇艺')) @@ to_tsquery('pound_utf8','滴滴'); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsquery('pound_utf8','淘宝') && to_tsquery('pound_utf8','爱奇艺');
+     ?column?      
+-------------------
+ '淘宝' & '爱奇艺'
+(1 row)
+
+select to_tsquery('pound_utf8','淘宝') || to_tsquery('pound_utf8','爱奇艺');
+     ?column?      
+-------------------
+ '淘宝' | '爱奇艺'
+(1 row)
+
+select to_tsvector('pound_utf8','Uber#滴滴#爱奇艺#芒果TV') @@ (to_tsquery('pound_utf8','淘宝')); -- false
+ ?column? 
+----------
+ f
+(1 row)
+
+select to_tsvector('pound_utf8','Uber#滴滴#爱奇艺#芒果TV') @@ (to_tsquery('pound_utf8','爱奇艺')); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsvector('pound_utf8','Uber#滴滴#爱奇艺#芒果TV') @@ (to_tsquery('pound_utf8','淘宝') || to_tsquery('pound_utf8','爱奇艺')); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsvector('pound_utf8','Uber#滴滴#爱奇艺#芒果TV') @@ (to_tsquery('pound_utf8','淘宝') && to_tsquery('pound_utf8','爱奇艺')); --false
+ ?column? 
+----------
+ f
+(1 row)
+
+select !!to_tsquery('pound_utf8','爱奇艺');
+ ?column?  
+-----------
+ !'爱奇艺'
+(1 row)
+
+select to_tsvector('pound_utf8','Uber#滴滴#爱奇艺#芒果TV') @@ !!to_tsquery('pound_utf8','爱奇艺'); -- false
+ ?column? 
+----------
+ f
+(1 row)
+
+select to_tsvector('pound_utf8','Uber#滴滴#爱奇艺#芒果TV') @@ !!to_tsquery('pound_utf8','淘宝'); --true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsquery('pound_utf8','爱奇艺') @> to_tsquery('pound_utf8','Uber#滴滴#爱奇艺#芒果TV'); -- false
+ ?column? 
+----------
+ f
+(1 row)
+
+select to_tsquery('pound_utf8','Uber#滴滴#爱奇艺#芒果TV') @> to_tsquery('pound_utf8','爱奇艺'); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsquery('pound_utf8','爱奇艺') <@ to_tsquery('pound_utf8','Uber#滴滴#爱奇艺#芒果TV'); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsquery('pound_utf8','Uber#滴滴#爱奇艺#芒果TV') <@ to_tsquery('pound_utf8','爱奇艺'); -- false
+ ?column? 
+----------
+ f
+(1 row)
+
+--
+---- N-gram
+--
+select to_tsvector('ngram1','辽GQQ360') @@ to_tsquery('ngram1','360'); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsvector('ngram1','辽GQQ360') @@@ to_tsquery('ngram1','360'); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsvector('ngram1','360') @@ to_tsquery('ngram1','QQ'); -- false
+ ?column? 
+----------
+ f
+(1 row)
+
+select (to_tsvector('ngram1','辽GQQ') || to_tsvector('ngram1','360')) @@ to_tsquery('ngram1','QQ'); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsquery('ngram1','480') && to_tsquery('ngram1','辽GQQ');
+             ?column?              
+-----------------------------------
+ '48' & '80' & '辽g' & 'gq' & 'qq'
+(1 row)
+
+select to_tsquery('ngram1','480') || to_tsquery('ngram1','辽GQQ');
+             ?column?              
+-----------------------------------
+ '48' & '80' | '辽g' & 'gq' & 'qq'
+(1 row)
+
+select to_tsvector('ngram1','辽GQQ360') @@ (to_tsquery('ngram1','480')); -- false
+ ?column? 
+----------
+ f
+(1 row)
+
+select to_tsvector('ngram1','辽GQQ360') @@ (to_tsquery('ngram1','辽GQQ')); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsvector('ngram1','辽GQQ360') @@ (to_tsquery('ngram1','480') || to_tsquery('ngram1','辽GQQ')); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsvector('ngram1','辽GQQ360') @@ (to_tsquery('ngram1','480') && to_tsquery('ngram1','辽GQQ')); -- false
+ ?column? 
+----------
+ f
+(1 row)
+
+select !!to_tsquery('ngram1','360') ;
+     ?column?     
+------------------
+ !( '36' & '60' )
+(1 row)
+
+select to_tsvector('ngram1','辽GQQ360') @@ !!to_tsquery('ngram1','360'); -- false
+ ?column? 
+----------
+ f
+(1 row)
+
+select to_tsvector('ngram1','辽GQQ360') @@ !!to_tsquery('ngram1','480'); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsquery('ngram1','360') @> to_tsquery('ngram1','辽GQQ360'); -- false
+ ?column? 
+----------
+ f
+(1 row)
+
+select to_tsquery('ngram1','辽GQQ360') @> to_tsquery('ngram1','360'); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsquery('ngram1','360') <@ to_tsquery('ngram1','辽GQQ360'); -- true
+ ?column? 
+----------
+ t
+(1 row)
+
+select to_tsquery('ngram1','辽GQQ360') <@ to_tsquery('ngram1','360'); -- false
+ ?column? 
+----------
+ f
+(1 row)
+
+------------------------------- basic operation for text search function -----------------------
+-- pound
+select get_current_ts_config(); -- english
+ get_current_ts_config 
+-----------------------
+ english
+(1 row)
+
+select length(to_tsvector('pound_utf8','Uber#滴滴#爱奇艺#芒果TV')); -- 4
+ length 
+--------
+      4
+(1 row)
+
+select length(to_tsvector('pound_utf8','Uber#滴滴#爱奇艺#芒果TV#QQ')); -- 5
+ length 
+--------
+      5
+(1 row)
+
+select numnode(to_tsquery('pound_utf8','Uber#滴滴#爱奇艺#芒果TV')); 
+ numnode 
+---------
+       7
+(1 row)
+
+select numnode(to_tsquery('pound_utf8','芒果TV') || to_tsquery('pound_utf8','滴滴'));
+ numnode 
+---------
+       3
+(1 row)
+
+-- select plainto_tsquery('pound_utf8', 'Uber##滴滴# 爱奇艺##芒果TV');
+-- select plainto_tsquery('pound_utf8', 'Uber#滴滴#爱奇艺#芒果TV');
+select querytree(to_tsquery('pound_utf8','Uber#滴滴#爱奇艺#芒果TV'));
+               querytree               
+---------------------------------------
+ 'uber' & '滴滴' & '爱奇艺' & '芒果tv'
+(1 row)
+
+select querytree(to_tsquery('pound_utf8','滴滴') && to_tsquery('pound_utf8','爱奇艺'));
+     querytree     
+-------------------
+ '滴滴' & '爱奇艺'
+(1 row)
+
+select querytree(to_tsquery('pound_utf8','滴滴') || to_tsquery('pound_utf8','爱奇艺'));
+     querytree     
+-------------------
+ '滴滴' | '爱奇艺'
+(1 row)
+
+select strip(to_tsvector('pound_utf8','Uber#滴滴#爱奇艺#芒果TV'));
+              strip              
+---------------------------------
+ 'uber' '滴滴' '爱奇艺' '芒果tv'
+(1 row)
+
+select ts_headline('pound_utf8', 'Uber#滴滴#爱奇艺#芒果TV', to_tsquery('pound_utf8','Uber'));
+         ts_headline         
+-----------------------------
+ <b>Uber</b>滴滴爱奇艺芒果TV
+(1 row)
+
+select ts_rank(to_tsvector('pound_utf8', 'Uber#滴滴#爱奇艺#芒果TV'), to_tsquery('pound_utf8','Uber#滴滴#爱奇艺#芒果TV'));
+ ts_rank 
+---------
+ .463622
+(1 row)
+
+select ts_rank(to_tsvector('pound_utf8', 'Uber#滴滴#爱奇艺#芒果TV'), to_tsquery('pound_utf8','Uber'));
+ ts_rank  
+----------
+ .0607927
+(1 row)
+
+select ts_rank(to_tsvector('pound_utf8', 'Uber#滴滴#爱奇艺#芒果TV'), to_tsquery('pound_utf8','滴滴'));
+ ts_rank  
+----------
+ .0607927
+(1 row)
+
+select ts_rank_cd(to_tsvector('pound_utf8', 'Uber#滴滴#爱奇艺#芒果TV'), to_tsquery('pound_utf8','Uber#滴滴#爱奇艺#芒果TV'));
+ ts_rank_cd 
+------------
+         .1
+(1 row)
+
+select ts_rank_cd(to_tsvector('pound_utf8', 'Uber#滴滴#爱奇艺#芒果TV'), to_tsquery('pound_utf8','Uber'));
+ ts_rank_cd 
+------------
+         .1
+(1 row)
+
+select ts_rank_cd(to_tsvector('pound_utf8', 'Uber#滴滴#爱奇艺#芒果TV'), to_tsquery('pound_utf8','滴滴'));
+ ts_rank_cd 
+------------
+         .1
+(1 row)
+
+select ts_rewrite(to_tsquery('pound_utf8','Uber#滴滴#爱奇艺#芒果TV'), to_tsquery('pound_utf8','Uber'), to_tsquery('pound_utf8','爱奇艺'));
+               ts_rewrite                
+-----------------------------------------
+ '滴滴' & '爱奇艺' & '芒果tv' & '爱奇艺'
+(1 row)
+
+--N-gram
+select get_current_ts_config(); -- english
+ get_current_ts_config 
+-----------------------
+ english
+(1 row)
+
+select length(to_tsvector('ngram1','辽GQQ360')); -- 6
+ length 
+--------
+      6
+(1 row)
+
+select length(to_tsvector('ngram1','辽GQQ888')); -- 5
+ length 
+--------
+      5
+(1 row)
+
+select numnode(to_tsquery('ngram1','辽GQQ360')); -- 11
+ numnode 
+---------
+      11
+(1 row)
+
+select numnode(to_tsquery('ngram1','480') || to_tsquery('ngram1','辽GQQ'));  -- 9
+ numnode 
+---------
+       9
+(1 row)
+
+alter text search configuration ngram1 set (grapsymbol_ignore = off);
+alter text search configuration ngram1 set (punctuation_ignore = on);
+alter text search configuration ngram1 set (gram_size = 2);
+select cfgname, cfoptions from pg_ts_config where cfgname = 'ngram1';
+ cfgname |                         cfoptions                         
+---------+-----------------------------------------------------------
+ ngram1  | {grapsymbol_ignore=off,punctuation_ignore=on,gram_size=2}
+(1 row)
+
+select plainto_tsquery('ngram1', '车，牌，号');
+  plainto_tsquery   
+--------------------
+ '车' & '牌' & '号'
+(1 row)
+
+select plainto_tsquery('ngram1', '车,牌,号');
+  plainto_tsquery   
+--------------------
+ '车' & '牌' & '号'
+(1 row)
+
+select querytree(to_tsquery('ngram1','中国人民银行'));
+                 querytree                  
+--------------------------------------------
+ '中国' & '国人' & '人民' & '民银' & '银行'
+(1 row)
+
+select querytree(to_tsquery('ngram1','中国人') && to_tsquery('ngram1','民银行'));
+             querytree             
+-----------------------------------
+ '中国' & '国人' & '民银' & '银行'
+(1 row)
+
+select querytree(to_tsquery('ngram1','中国人') || to_tsquery('ngram1','民银行'));
+             querytree             
+-----------------------------------
+ '中国' & '国人' | '民银' & '银行'
+(1 row)
+
+select strip(to_tsvector('ngram1','中国人民银行'));
+               strip                
+------------------------------------
+ '中国' '人民' '国人' '民银' '银行'
+(1 row)
+
+select ts_headline('ngram1', '中国人民银行', to_tsquery('ngram1','中国人'));
+            ts_headline             
+------------------------------------
+ <b>中国</b><b>国人</b>人民民银银行
+(1 row)
+
+select ts_rank(to_tsvector('ngram1', '中国人民银行'), to_tsquery('ngram1','中国人民银行'));
+ ts_rank 
+---------
+ .644239
+(1 row)
+
+select ts_rank(to_tsvector('ngram1', '中国人民银行'), to_tsquery('ngram1','中国人'));
+ ts_rank  
+----------
+ .0991032
+(1 row)
+
+select ts_rank(to_tsvector('ngram1', '中国人民银行'), to_tsquery('ngram1','中人'));
+ ts_rank 
+---------
+       0
+(1 row)
+
+select ts_rank_cd(to_tsvector('ngram1', '中国人民银行'), to_tsquery('ngram1','中国人民银行'));
+ ts_rank_cd 
+------------
+         .1
+(1 row)
+
+select ts_rank_cd(to_tsvector('ngram1', '中国人民银行'), to_tsquery('ngram1','中国人'));
+ ts_rank_cd 
+------------
+         .1
+(1 row)
+
+select ts_rank_cd(to_tsvector('ngram1', '中国人民银行'), to_tsquery('ngram1','中人'));
+ ts_rank_cd 
+------------
+          0
+(1 row)
+
+select ts_rewrite(to_tsquery('ngram1','中国人民银行'), to_tsquery('ngram1','银行'), to_tsquery('ngram1','政府'));
+                 ts_rewrite                 
+--------------------------------------------
+ '中国' & '人民' & '政府' & '国人' & '民银'
+(1 row)
+
+create table t1(a int);
+drop table t1 cascade;
+drop text search configuration ngram1;
+drop text search configuration pound_utf8;
+CREATE TEXT SEARCH CONFIGURATION ntestf(parser=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA);
+NOTICE:  identifier "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" will be truncated to "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ERROR:  text search parser "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" does not exist
+CREATE TEXT SEARCH CONFIGURATION ntestf(parser=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.B);
+ERROR:  schema "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" does not exist
+CREATE TEXT SEARCH CONFIGURATION ntestf(parser=B.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA);
+NOTICE:  identifier "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" will be truncated to "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ERROR:  schema "b" does not exist
+CREATE TEXT SEARCH CONFIGURATION ntestf(parser=A.B.C);
+ERROR:  cross-database references are not implemented: a.b.c
+CREATE TEXT SEARCH CONFIGURATION ntestf(parser='A.B.C');
+ERROR:  syntax error at or near "'A.B.C'"
+LINE 1: CREATE TEXT SEARCH CONFIGURATION ntestf(parser='A.B.C');
+                                                       ^
+\c postgres
+DROP DATABASE db_utf8;

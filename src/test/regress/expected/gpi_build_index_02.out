@@ -1,9 +1,0 @@
---
----- test global index
---
-select count(*) from hw_global_index_rp;
- count 
--------
- 10000
-(1 row)
-

@@ -20,7 +20,6 @@
 #include <ctype.h>
 #include <float.h>
 #include <limits.h>
-#include <time.h>
 #include <sys/time.h>
 
 #include "libpq/pqformat.h"
@@ -41,6 +40,7 @@
  * "tinterval" is two 4-byte fields.
  * Definitions for parsing tinterval.
  */
+
 #define IsSpace(C) ((C) == ' ')
 
 #define T_INTERVAL_INVAL 0 /* data represents no valid tinterval */
@@ -56,6 +56,7 @@
 #define T_INTERVAL_LEN 80
 #define INVALID_INTERVAL_STR "Undefined Range"
 #define INVALID_INTERVAL_STR_LEN (sizeof(INVALID_INTERVAL_STR) - 1)
+
 #define ABSTIMEMIN(t1, t2) \
     (DatumGetBool(DirectFunctionCall2(abstimele, AbsoluteTimeGetDatum(t1), AbsoluteTimeGetDatum(t2))) ? (t1) : (t2))
 #define ABSTIMEMAX(t1, t2) \
@@ -64,6 +65,7 @@
 /*
  * Function prototypes -- internal to this file only
  */
+
 static AbsoluteTime tm2abstime(struct pg_tm* tm, int tz);
 static void reltime2tm(RelativeTime time, struct pg_tm* tm);
 static void parsetinterval(char* i_string, AbsoluteTime* i_start, AbsoluteTime* i_end);
@@ -71,6 +73,7 @@ static void parsetinterval(char* i_string, AbsoluteTime* i_start, AbsoluteTime* 
 extern TimestampTz GetCurrentStmtsysTimestamp(void);
 
 /*
+ * GetCurrentAbsoluteTime()
  *
  * Get the current system time (relative to Unix epoch).
  *
@@ -94,15 +97,13 @@ void abstime2tm(AbsoluteTime _time, int* tzp, struct pg_tm* tm, char** tzn)
      * ahead and rotate to the local time zone since we will later bypass any
      * calls which adjust the tm fields.
      */
-    if (u_sess->time_cxt.HasCTZSet && (tzp != NULL)) {
+    if (u_sess->time_cxt.HasCTZSet && (tzp != NULL))
         time -= u_sess->time_cxt.CTimeZone;
-    }
 
-    if (!u_sess->time_cxt.HasCTZSet && tzp != NULL) {
+    if (!u_sess->time_cxt.HasCTZSet && tzp != NULL)
         tx = pg_localtime(&time, session_timezone);
-    } else {
+    else
         tx = pg_gmtime(&time);
-    }
 
     tm->tm_year = tx->tm_year + 1900;
     tm->tm_mon = tx->tm_mon + 1;
@@ -144,11 +145,10 @@ void abstime2tm(AbsoluteTime _time, int* tzp, struct pg_tm* tm, char** tzn)
                 errno_t rc = EOK;
                 rc = strncpy_s(*tzn, MAXTZLEN + 1, tm->tm_zone, MAXTZLEN);
                 securec_check(rc, "\0", "\0");
-                if (strlen(tm->tm_zone) > MAXTZLEN) {
+                if (strlen(tm->tm_zone) > MAXTZLEN)
                     ereport(WARNING,
                         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                             errmsg("invalid time zone name: \"%s\"", tm->tm_zone)));
-                }
             }
         }
     } else {
@@ -156,7 +156,7 @@ void abstime2tm(AbsoluteTime _time, int* tzp, struct pg_tm* tm, char** tzn)
     }
 }
 
-/*
+/* tm2abstime()
  * Convert a tm structure to abstime.
  * Note that tm has full year (not 1900-based) and 1-based month.
  */
@@ -169,15 +169,14 @@ static AbsoluteTime tm2abstime(struct pg_tm* tm, int tz)
     if (tm->tm_year < 1901 || tm->tm_year > 2038 || tm->tm_mon < 1 || tm->tm_mon > MONTHS_PER_YEAR || tm->tm_mday < 1 ||
         tm->tm_mday > 31 || tm->tm_hour < 0 || tm->tm_hour > HOURS_PER_DAY || /* test for > 24:00:00 */
         (tm->tm_hour == HOURS_PER_DAY && (tm->tm_min > 0 || tm->tm_sec > 0)) || tm->tm_min < 0 ||
-        tm->tm_min > MINS_PER_HOUR - 1 || tm->tm_sec < 0 || tm->tm_sec > SECS_PER_MINUTE) {
+        tm->tm_min > MINS_PER_HOUR - 1 || tm->tm_sec < 0 || tm->tm_sec > SECS_PER_MINUTE)
         return INVALID_ABSTIME;
-    }
 
     day = date2j(tm->tm_year, tm->tm_mon, tm->tm_mday) - UNIX_EPOCH_JDATE;
+
     /* check for time out of range */
-    if (day < MIN_DAYNUM || day > MAX_DAYNUM) {
+    if (day < MIN_DAYNUM || day > MAX_DAYNUM)
         return INVALID_ABSTIME;
-    }
 
     /* convert to seconds */
     sec = tm->tm_sec + tz + (tm->tm_min + (day * HOURS_PER_DAY + tm->tm_hour) * MINS_PER_HOUR) * SECS_PER_MINUTE;
@@ -186,19 +185,17 @@ static AbsoluteTime tm2abstime(struct pg_tm* tm, int tz)
      * check for overflow.	We need a little slop here because the H/M/S plus
      * TZ offset could add up to more than 1 day.
      */
-    if ((day >= MAX_DAYNUM - 10 && sec < 0) || (day <= MIN_DAYNUM + 10 && sec > 0)) {
+    if ((day >= MAX_DAYNUM - 10 && sec < 0) || (day <= MIN_DAYNUM + 10 && sec > 0))
         return INVALID_ABSTIME;
-    }
 
     /* check for reserved values (e.g. "current" on edge of usual range */
-    if (!AbsoluteTimeIsReal(sec)) {
+    if (!AbsoluteTimeIsReal(sec))
         return INVALID_ABSTIME;
-    }
 
     return sec;
 }
 
-/*
+/* abstimein()
  * Decode date/time string and return abstime.
  */
 Datum abstimein(PG_FUNCTION_ARGS)
@@ -221,12 +218,10 @@ Datum abstimein(PG_FUNCTION_ARGS)
         nf > 1) {
         nf -= 1;
     }
-    if (dterr == 0) {
+    if (dterr == 0)
         dterr = DecodeDateTime(field, ftype, nf, &dtype, tm, &fsec, &tz);
-    }
-    if (dterr != 0) {
+    if (dterr != 0)
         DateTimeParseError(dterr, str, "abstime");
-    }
 
     switch (dtype) {
         case DTK_DATE:
@@ -234,6 +229,7 @@ Datum abstimein(PG_FUNCTION_ARGS)
             break;
 
         case DTK_EPOCH:
+
             /*
              * Don't bother retaining this as a reserved value, but instead
              * just set to the actual epoch time (1970-01-01)
@@ -264,7 +260,7 @@ Datum abstimein(PG_FUNCTION_ARGS)
     PG_RETURN_ABSOLUTETIME(result);
 }
 
-/*
+/* abstimeout()
  * Given an AbsoluteTime return the English text version of the date
  */
 Datum abstimeout(PG_FUNCTION_ARGS)
@@ -275,8 +271,7 @@ Datum abstimeout(PG_FUNCTION_ARGS)
     const double fsec = 0;
     struct pg_tm tt, *tm = &tt;
     char buf[MAXDATELEN + 1];
-    char zone[MAXDATELEN + 1];
-    char *tzn = zone;
+    char zone[MAXDATELEN + 1], *tzn = zone;
     errno_t ss_rc;
 
     switch (time) {
@@ -300,8 +295,7 @@ Datum abstimeout(PG_FUNCTION_ARGS)
             abstime2tm(time, &tz, tm, &tzn);
             EncodeDateTime(tm, fsec, true, tz, tzn, u_sess->time_cxt.DateStyle, buf);
             if (IS_PGXC_COORDINATOR &&
-                (u_sess->attr.attr_sql.single_shard_stmt == false ||
-                u_sess->attr.attr_sql.enable_light_proxy == false) &&
+                (u_sess->exec_cxt.single_shard_stmt == false || u_sess->attr.attr_sql.enable_light_proxy == false) &&
                 t_thrd.time_cxt.is_abstimeout_in == true) {
                 /* in insert transfer on CN */
                 buf[strlen(buf) - strlen(tzn)] = '\0';
@@ -319,6 +313,7 @@ Datum abstimeout(PG_FUNCTION_ARGS)
 Datum abstimerecv(PG_FUNCTION_ARGS)
 {
     StringInfo buf = (StringInfo)PG_GETARG_POINTER(0);
+
     PG_RETURN_ABSOLUTETIME((AbsoluteTime)pq_getmsgint(buf, sizeof(AbsoluteTime)));
 }
 
@@ -335,9 +330,12 @@ Datum abstimesend(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
 
+/* abstime_finite()
+ */
 Datum abstime_finite(PG_FUNCTION_ARGS)
 {
     AbsoluteTime abstime = PG_GETARG_ABSOLUTETIME(0);
+
     PG_RETURN_BOOL(abstime != INVALID_ABSTIME && abstime != NOSTART_ABSTIME && abstime != NOEND_ABSTIME);
 }
 
@@ -352,24 +350,21 @@ static int abstime_cmp_internal(AbsoluteTime a, AbsoluteTime b)
      * sort order.
      */
     if (a == INVALID_ABSTIME) {
-        if (b == INVALID_ABSTIME) {
+        if (b == INVALID_ABSTIME)
             return 0; /* INVALID = INVALID */
-        } else {
+        else
             return 1; /* INVALID > non-INVALID */
-        }
     }
 
-    if (b == INVALID_ABSTIME) {
+    if (b == INVALID_ABSTIME)
         return -1; /* non-INVALID < INVALID */
-    }
 
-    if (a > b) {
+    if (a > b)
         return 1;
-    } else if (a == b) {
+    else if (a == b)
         return 0;
-    } else {
+    else
         return -1;
-    }
 }
 
 Datum abstimeeq(PG_FUNCTION_ARGS)
@@ -428,7 +423,7 @@ Datum btabstimecmp(PG_FUNCTION_ARGS)
     PG_RETURN_INT32(abstime_cmp_internal(t1, t2));
 }
 
-/*
+/* timestamp_abstime()
  * Convert timestamp to abstime.
  */
 Datum timestamp_abstime(PG_FUNCTION_ARGS)
@@ -439,11 +434,11 @@ Datum timestamp_abstime(PG_FUNCTION_ARGS)
     int tz;
     struct pg_tm tt, *tm = &tt;
 
-    if (TIMESTAMP_IS_NOBEGIN(timestamp)) {
+    if (TIMESTAMP_IS_NOBEGIN(timestamp))
         result = NOSTART_ABSTIME;
-    } else if (TIMESTAMP_IS_NOEND(timestamp)) {
+    else if (TIMESTAMP_IS_NOEND(timestamp))
         result = NOEND_ABSTIME;
-    } else if (timestamp2tm(timestamp, NULL, tm, &fsec, NULL, NULL) == 0) {
+    else if (timestamp2tm(timestamp, NULL, tm, &fsec, NULL, NULL) == 0) {
         tz = DetermineTimeZoneOffset(tm, session_timezone);
         result = tm2abstime(tm, tz);
     } else {
@@ -454,7 +449,7 @@ Datum timestamp_abstime(PG_FUNCTION_ARGS)
     PG_RETURN_ABSOLUTETIME(result);
 }
 
-/*
+/* abstime_timestamp()
  * Convert abstime to timestamp.
  */
 Datum abstime_timestamp(PG_FUNCTION_ARGS)
@@ -463,8 +458,7 @@ Datum abstime_timestamp(PG_FUNCTION_ARGS)
     Timestamp result;
     struct pg_tm tt, *tm = &tt;
     int tz;
-    char zone[MAXDATELEN + 1];
-    char *tzn = zone;
+    char zone[MAXDATELEN + 1], *tzn = zone;
 
     switch (abstime) {
         case INVALID_ABSTIME:
@@ -483,16 +477,15 @@ Datum abstime_timestamp(PG_FUNCTION_ARGS)
 
         default:
             abstime2tm(abstime, &tz, tm, &tzn);
-            if (tm2timestamp(tm, 0, NULL, &result) != 0) {
+            if (tm2timestamp(tm, 0, NULL, &result) != 0)
                 ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
-            }
             break;
     };
 
     PG_RETURN_TIMESTAMP(result);
 }
 
-/*
+/* timestamptz_abstime()
  * Convert timestamp with time zone to abstime.
  */
 Datum timestamptz_abstime(PG_FUNCTION_ARGS)
@@ -502,13 +495,13 @@ Datum timestamptz_abstime(PG_FUNCTION_ARGS)
     fsec_t fsec;
     struct pg_tm tt, *tm = &tt;
 
-    if (TIMESTAMP_IS_NOBEGIN(timestamp)) {
+    if (TIMESTAMP_IS_NOBEGIN(timestamp))
         result = NOSTART_ABSTIME;
-    } else if (TIMESTAMP_IS_NOEND(timestamp)) {
+    else if (TIMESTAMP_IS_NOEND(timestamp))
         result = NOEND_ABSTIME;
-    } else if (timestamp2tm(timestamp, NULL, tm, &fsec, NULL, NULL) == 0) {
+    else if (timestamp2tm(timestamp, NULL, tm, &fsec, NULL, NULL) == 0)
         result = tm2abstime(tm, 0);
-    } else {
+    else {
         ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
         result = INVALID_ABSTIME;
     }
@@ -516,7 +509,7 @@ Datum timestamptz_abstime(PG_FUNCTION_ARGS)
     PG_RETURN_ABSOLUTETIME(result);
 }
 
-/*
+/* abstime_timestamptz()
  * Convert abstime to timestamp with time zone.
  */
 Datum abstime_timestamptz(PG_FUNCTION_ARGS)
@@ -525,8 +518,7 @@ Datum abstime_timestamptz(PG_FUNCTION_ARGS)
     TimestampTz result;
     struct pg_tm tt, *tm = &tt;
     int tz;
-    char zone[MAXDATELEN + 1];
-    char *tzn = zone;
+    char zone[MAXDATELEN + 1], *tzn = zone;
 
     switch (abstime) {
         case INVALID_ABSTIME:
@@ -545,14 +537,17 @@ Datum abstime_timestamptz(PG_FUNCTION_ARGS)
 
         default:
             abstime2tm(abstime, &tz, tm, &tzn);
-            if (tm2timestamp(tm, 0, &tz, &result) != 0) {
+            if (tm2timestamp(tm, 0, &tz, &result) != 0)
                 ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
-            }
             break;
     };
 
     PG_RETURN_TIMESTAMP(result);
 }
+
+/*****************************************************************************
+ *	 USER I/O ROUTINES														 *
+ *****************************************************************************/
 
 /*
  *		reltimein		- converts a reltime string in an internal format
@@ -570,19 +565,16 @@ Datum reltimein(PG_FUNCTION_ARGS)
     char workbuf[MAXDATELEN + 1];
 
     dterr = ParseDateTime(str, workbuf, sizeof(workbuf), field, ftype, MAXDATEFIELDS, &nf);
-    if (dterr == 0) {
+    if (dterr == 0)
         dterr = DecodeInterval(field, ftype, nf, INTERVAL_FULL_RANGE, &dtype, tm, &fsec);
-    }
 
     /* if those functions think it's a bad format, try ISO8601 style */
-    if (dterr == DTERR_BAD_FORMAT) {
+    if (dterr == DTERR_BAD_FORMAT)
         dterr = DecodeISO8601Interval(str, &dtype, tm, &fsec);
-    }
 
     if (dterr != 0) {
-        if (dterr == DTERR_FIELD_OVERFLOW) {
+        if (dterr == DTERR_FIELD_OVERFLOW)
             dterr = DTERR_INTERVAL_OVERFLOW;
-        }
         DateTimeParseError(dterr, str, "reltime");
     }
 
@@ -668,11 +660,10 @@ Datum tintervalin(PG_FUNCTION_ARGS)
 
     tinterval = (TimeInterval)palloc(sizeof(TimeIntervalData));
 
-    if (t1 == INVALID_ABSTIME || t2 == INVALID_ABSTIME) {
+    if (t1 == INVALID_ABSTIME || t2 == INVALID_ABSTIME)
         tinterval->status = T_INTERVAL_INVAL; /* undefined  */
-    } else {
+    else
         tinterval->status = T_INTERVAL_VALID;
-    }
 
     i_start = ABSTIMEMIN(t1, t2);
     i_end = ABSTIMEMAX(t1, t2);
@@ -688,8 +679,7 @@ Datum tintervalin(PG_FUNCTION_ARGS)
 Datum tintervalout(PG_FUNCTION_ARGS)
 {
     TimeInterval tinterval = PG_GETARG_TIMEINTERVAL(0);
-    char *i_str = NULL;
-    char *p = NULL;
+    char *i_str = NULL, *p = NULL;
     int ss_rc;
 
     i_str = (char*)palloc(T_INTERVAL_LEN); /* ["..." "..."] */
@@ -730,16 +720,14 @@ Datum tintervalrecv(PG_FUNCTION_ARGS)
     tinterval->data[0] = pq_getmsgint(buf, sizeof(tinterval->data[0]));
     tinterval->data[1] = pq_getmsgint(buf, sizeof(tinterval->data[1]));
 
-    if (tinterval->data[0] == INVALID_ABSTIME || tinterval->data[1] == INVALID_ABSTIME) {
+    if (tinterval->data[0] == INVALID_ABSTIME || tinterval->data[1] == INVALID_ABSTIME)
         status = T_INTERVAL_INVAL; /* undefined  */
-    } else {
+    else
         status = T_INTERVAL_VALID;
-    }
 
-    if (status != tinterval->status) {
+    if (status != tinterval->status)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_BINARY_REPRESENTATION), errmsg("invalid status in external \"tinterval\" value")));
-    }
 
     PG_RETURN_TIMEINTERVAL(tinterval);
 }
@@ -758,6 +746,10 @@ Datum tintervalsend(PG_FUNCTION_ARGS)
     pq_sendint32(&buf, tinterval->data[1]);
     PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
+
+/*****************************************************************************
+ *	 PUBLIC ROUTINES														 *
+ *****************************************************************************/
 
 Datum interval_reltime(PG_FUNCTION_ARGS)
 {
@@ -779,11 +771,10 @@ Datum interval_reltime(PG_FUNCTION_ARGS)
     span = (DAYS_PER_YEAR * year + (double)DAYS_PER_MONTH * month + day) * SECS_PER_DAY + interval->time;
 #endif
 
-    if (span < INT_MIN || span > INT_MAX) {
+    if (span < INT_MIN || span > INT_MAX)
         time = INVALID_RELTIME;
-    } else {
+    else
         time = span;
-    }
 
     PG_RETURN_RELATIVETIME(time);
 }
@@ -795,6 +786,7 @@ Datum reltime_interval(PG_FUNCTION_ARGS)
     int year, month, day;
 
     result = (Interval*)palloc(sizeof(Interval));
+
     switch (reltime) {
         case INVALID_RELTIME:
             ereport(ERROR,
@@ -812,11 +804,13 @@ Datum reltime_interval(PG_FUNCTION_ARGS)
             reltime -= month * (DAYS_PER_MONTH * SECS_PER_DAY);
             day = reltime / SECS_PER_DAY;
             reltime -= day * SECS_PER_DAY;
+
             result->time = (reltime * USECS_PER_SEC);
 #else
             TMODULO(reltime, year, SECS_PER_YEAR);
             TMODULO(reltime, month, DAYS_PER_MONTH * SECS_PER_DAY);
             TMODULO(reltime, day, SECS_PER_DAY);
+
             result->time = reltime;
 #endif
             result->month = MONTHS_PER_YEAR * year + month;
@@ -839,9 +833,11 @@ Datum mktinterval(PG_FUNCTION_ARGS)
     TimeInterval tinterval;
 
     tinterval = (TimeInterval)palloc(sizeof(TimeIntervalData));
-    if (t1 == INVALID_ABSTIME || t2 == INVALID_ABSTIME) {
+
+    if (t1 == INVALID_ABSTIME || t2 == INVALID_ABSTIME)
         tinterval->status = T_INTERVAL_INVAL;
-    } else {
+
+    else {
         tinterval->status = T_INTERVAL_VALID;
         tinterval->data[0] = tstart;
         tinterval->data[1] = tend;
@@ -856,6 +852,7 @@ Datum mktinterval(PG_FUNCTION_ARGS)
  *		so		abstime - reltime = abstime
  *		and		abstime - abstime = reltime
  */
+
 /*
  *		timepl			- returns the value of (abstime t1 + reltime t2)
  */
@@ -863,10 +860,10 @@ Datum timepl(PG_FUNCTION_ARGS)
 {
     AbsoluteTime t1 = PG_GETARG_ABSOLUTETIME(0);
     RelativeTime t2 = PG_GETARG_RELATIVETIME(1);
+
     if (AbsoluteTimeIsReal(t1) && RelativeTimeIsValid(t2) &&
-        ((t2 > 0 && t1 < NOEND_ABSTIME - t2) || (t2 <= 0 && t1 > NOSTART_ABSTIME - t2))) { /* prevent overflow */
+        ((t2 > 0 && t1 < NOEND_ABSTIME - t2) || (t2 <= 0 && t1 > NOSTART_ABSTIME - t2))) /* prevent overflow */
         PG_RETURN_ABSOLUTETIME(t1 + t2);
-    }
 
     PG_RETURN_ABSOLUTETIME(INVALID_ABSTIME);
 }
@@ -878,10 +875,10 @@ Datum timemi(PG_FUNCTION_ARGS)
 {
     AbsoluteTime t1 = PG_GETARG_ABSOLUTETIME(0);
     RelativeTime t2 = PG_GETARG_RELATIVETIME(1);
+
     if (AbsoluteTimeIsReal(t1) && RelativeTimeIsValid(t2) &&
-        ((t2 > 0 && t1 > NOSTART_ABSTIME + t2) || (t2 <= 0 && t1 < NOEND_ABSTIME + t2))) { /* prevent overflow */
+        ((t2 > 0 && t1 > NOSTART_ABSTIME + t2) || (t2 <= 0 && t1 < NOEND_ABSTIME + t2))) /* prevent overflow */
         PG_RETURN_ABSOLUTETIME(t1 - t2);
-    }
 
     PG_RETURN_ABSOLUTETIME(INVALID_ABSTIME);
 }
@@ -893,13 +890,13 @@ Datum intinterval(PG_FUNCTION_ARGS)
 {
     AbsoluteTime t = PG_GETARG_ABSOLUTETIME(0);
     TimeInterval tinterval = PG_GETARG_TIMEINTERVAL(1);
+
     if (tinterval->status == T_INTERVAL_VALID && t != INVALID_ABSTIME) {
         if (DatumGetBool(
                 DirectFunctionCall2(abstimege, AbsoluteTimeGetDatum(t), AbsoluteTimeGetDatum(tinterval->data[0]))) &&
             DatumGetBool(
-                DirectFunctionCall2(abstimele, AbsoluteTimeGetDatum(t), AbsoluteTimeGetDatum(tinterval->data[1])))) {
+                DirectFunctionCall2(abstimele, AbsoluteTimeGetDatum(t), AbsoluteTimeGetDatum(tinterval->data[1]))))
             PG_RETURN_BOOL(true);
-        }
     }
     PG_RETURN_BOOL(false);
 }
@@ -913,12 +910,11 @@ Datum tintervalrel(PG_FUNCTION_ARGS)
     AbsoluteTime t1 = tinterval->data[0];
     AbsoluteTime t2 = tinterval->data[1];
 
-    if (tinterval->status != T_INTERVAL_VALID) {
+    if (tinterval->status != T_INTERVAL_VALID)
         PG_RETURN_RELATIVETIME(INVALID_RELTIME);
-    }
-    if (AbsoluteTimeIsReal(t1) && AbsoluteTimeIsReal(t2)) {
+
+    if (AbsoluteTimeIsReal(t1) && AbsoluteTimeIsReal(t2))
         PG_RETURN_RELATIVETIME(t2 - t1);
-    }
 
     PG_RETURN_RELATIVETIME(INVALID_RELTIME);
 }
@@ -948,24 +944,21 @@ static int reltime_cmp_internal(RelativeTime a, RelativeTime b)
      * sort order.
      */
     if (a == INVALID_RELTIME) {
-        if (b == INVALID_RELTIME) {
+        if (b == INVALID_RELTIME)
             return 0; /* INVALID = INVALID */
-        } else {
+        else
             return 1; /* INVALID > non-INVALID */
-        }
     }
 
-    if (b == INVALID_RELTIME) {
+    if (b == INVALID_RELTIME)
         return -1; /* non-INVALID < INVALID */
-    }
 
-    if (a > b) {
+    if (a > b)
         return 1;
-    } else if (a == b) {
+    else if (a == b)
         return 0;
-    } else {
+    else
         return -1;
-    }
 }
 
 Datum reltimeeq(PG_FUNCTION_ARGS)
@@ -1032,16 +1025,15 @@ Datum tintervalsame(PG_FUNCTION_ARGS)
 {
     TimeInterval i1 = PG_GETARG_TIMEINTERVAL(0);
     TimeInterval i2 = PG_GETARG_TIMEINTERVAL(1);
-    if (i1->status == T_INTERVAL_INVAL || i2->status == T_INTERVAL_INVAL) {
+
+    if (i1->status == T_INTERVAL_INVAL || i2->status == T_INTERVAL_INVAL)
         PG_RETURN_BOOL(false);
-    }
 
     if (DatumGetBool(
             DirectFunctionCall2(abstimeeq, AbsoluteTimeGetDatum(i1->data[0]), AbsoluteTimeGetDatum(i2->data[0]))) &&
         DatumGetBool(
-            DirectFunctionCall2(abstimeeq, AbsoluteTimeGetDatum(i1->data[1]), AbsoluteTimeGetDatum(i2->data[1])))) {
+            DirectFunctionCall2(abstimeeq, AbsoluteTimeGetDatum(i1->data[1]), AbsoluteTimeGetDatum(i2->data[1]))))
         PG_RETURN_BOOL(true);
-    }
     PG_RETURN_BOOL(false);
 }
 
@@ -1079,28 +1071,26 @@ static int tinterval_cmp_internal(TimeInterval a, TimeInterval b)
      */
     a_invalid = a->status == T_INTERVAL_INVAL || a->data[0] == INVALID_ABSTIME || a->data[1] == INVALID_ABSTIME;
     b_invalid = b->status == T_INTERVAL_INVAL || b->data[0] == INVALID_ABSTIME || b->data[1] == INVALID_ABSTIME;
+
     if (a_invalid) {
-        if (b_invalid) {
+        if (b_invalid)
             return 0; /* INVALID = INVALID */
-        } else {
+        else
             return 1; /* INVALID > non-INVALID */
-        }
     }
 
-    if (b_invalid) {
+    if (b_invalid)
         return -1; /* non-INVALID < INVALID */
-    }
 
     a_len = a->data[1] - a->data[0];
     b_len = b->data[1] - b->data[0];
 
-    if (a_len > b_len) {
+    if (a_len > b_len)
         return 1;
-    } else if (a_len == b_len) {
+    else if (a_len == b_len)
         return 0;
-    } else {
+    else
         return -1;
-    }
 }
 
 Datum tintervaleq_withhead(PG_FUNCTION_ARGS)
@@ -1187,9 +1177,8 @@ Datum tintervalleneq(PG_FUNCTION_ARGS)
     RelativeTime t = PG_GETARG_RELATIVETIME(1);
     RelativeTime rt;
 
-    if (i->status == T_INTERVAL_INVAL || t == INVALID_RELTIME) {
+    if (i->status == T_INTERVAL_INVAL || t == INVALID_RELTIME)
         PG_RETURN_BOOL(false);
-    }
     rt = DatumGetRelativeTime(DirectFunctionCall1(tintervalrel, TimeIntervalGetDatum(i)));
     PG_RETURN_BOOL(rt != INVALID_RELTIME && rt == t);
 }
@@ -1200,9 +1189,8 @@ Datum tintervallenne(PG_FUNCTION_ARGS)
     RelativeTime t = PG_GETARG_RELATIVETIME(1);
     RelativeTime rt;
 
-    if (i->status == T_INTERVAL_INVAL || t == INVALID_RELTIME) {
+    if (i->status == T_INTERVAL_INVAL || t == INVALID_RELTIME)
         PG_RETURN_BOOL(false);
-    }
     rt = DatumGetRelativeTime(DirectFunctionCall1(tintervalrel, TimeIntervalGetDatum(i)));
     PG_RETURN_BOOL(rt != INVALID_RELTIME && rt != t);
 }
@@ -1213,9 +1201,8 @@ Datum tintervallenlt(PG_FUNCTION_ARGS)
     RelativeTime t = PG_GETARG_RELATIVETIME(1);
     RelativeTime rt;
 
-    if (i->status == T_INTERVAL_INVAL || t == INVALID_RELTIME) {
+    if (i->status == T_INTERVAL_INVAL || t == INVALID_RELTIME)
         PG_RETURN_BOOL(false);
-    }
     rt = DatumGetRelativeTime(DirectFunctionCall1(tintervalrel, TimeIntervalGetDatum(i)));
     PG_RETURN_BOOL(rt != INVALID_RELTIME && rt < t);
 }
@@ -1226,9 +1213,8 @@ Datum tintervallengt(PG_FUNCTION_ARGS)
     RelativeTime t = PG_GETARG_RELATIVETIME(1);
     RelativeTime rt;
 
-    if (i->status == T_INTERVAL_INVAL || t == INVALID_RELTIME) {
+    if (i->status == T_INTERVAL_INVAL || t == INVALID_RELTIME)
         PG_RETURN_BOOL(false);
-    }
     rt = DatumGetRelativeTime(DirectFunctionCall1(tintervalrel, TimeIntervalGetDatum(i)));
     PG_RETURN_BOOL(rt != INVALID_RELTIME && rt > t);
 }
@@ -1239,9 +1225,8 @@ Datum tintervallenle(PG_FUNCTION_ARGS)
     RelativeTime t = PG_GETARG_RELATIVETIME(1);
     RelativeTime rt;
 
-    if (i->status == T_INTERVAL_INVAL || t == INVALID_RELTIME) {
+    if (i->status == T_INTERVAL_INVAL || t == INVALID_RELTIME)
         PG_RETURN_BOOL(false);
-    }
     rt = DatumGetRelativeTime(DirectFunctionCall1(tintervalrel, TimeIntervalGetDatum(i)));
     PG_RETURN_BOOL(rt != INVALID_RELTIME && rt <= t);
 }
@@ -1252,9 +1237,8 @@ Datum tintervallenge(PG_FUNCTION_ARGS)
     RelativeTime t = PG_GETARG_RELATIVETIME(1);
     RelativeTime rt;
 
-    if (i->status == T_INTERVAL_INVAL || t == INVALID_RELTIME) {
+    if (i->status == T_INTERVAL_INVAL || t == INVALID_RELTIME)
         PG_RETURN_BOOL(false);
-    }
     rt = DatumGetRelativeTime(DirectFunctionCall1(tintervalrel, TimeIntervalGetDatum(i)));
     PG_RETURN_BOOL(rt != INVALID_RELTIME && rt >= t);
 }
@@ -1266,15 +1250,14 @@ Datum tintervalct(PG_FUNCTION_ARGS)
 {
     TimeInterval i1 = PG_GETARG_TIMEINTERVAL(0);
     TimeInterval i2 = PG_GETARG_TIMEINTERVAL(1);
-    if (i1->status == T_INTERVAL_INVAL || i2->status == T_INTERVAL_INVAL) {
+
+    if (i1->status == T_INTERVAL_INVAL || i2->status == T_INTERVAL_INVAL)
         PG_RETURN_BOOL(false);
-    }
     if (DatumGetBool(
             DirectFunctionCall2(abstimele, AbsoluteTimeGetDatum(i1->data[0]), AbsoluteTimeGetDatum(i2->data[0]))) &&
         DatumGetBool(
-            DirectFunctionCall2(abstimege, AbsoluteTimeGetDatum(i1->data[1]), AbsoluteTimeGetDatum(i2->data[1])))) {
+            DirectFunctionCall2(abstimege, AbsoluteTimeGetDatum(i1->data[1]), AbsoluteTimeGetDatum(i2->data[1]))))
         PG_RETURN_BOOL(true);
-    }
     PG_RETURN_BOOL(false);
 }
 
@@ -1285,15 +1268,14 @@ Datum tintervalov(PG_FUNCTION_ARGS)
 {
     TimeInterval i1 = PG_GETARG_TIMEINTERVAL(0);
     TimeInterval i2 = PG_GETARG_TIMEINTERVAL(1);
-    if (i1->status == T_INTERVAL_INVAL || i2->status == T_INTERVAL_INVAL) {
+
+    if (i1->status == T_INTERVAL_INVAL || i2->status == T_INTERVAL_INVAL)
         PG_RETURN_BOOL(false);
-    }
     if (DatumGetBool(
             DirectFunctionCall2(abstimelt, AbsoluteTimeGetDatum(i1->data[1]), AbsoluteTimeGetDatum(i2->data[0]))) ||
         DatumGetBool(
-            DirectFunctionCall2(abstimegt, AbsoluteTimeGetDatum(i1->data[0]), AbsoluteTimeGetDatum(i2->data[1])))) {
+            DirectFunctionCall2(abstimegt, AbsoluteTimeGetDatum(i1->data[0]), AbsoluteTimeGetDatum(i2->data[1]))))
         PG_RETURN_BOOL(false);
-    }
     PG_RETURN_BOOL(true);
 }
 
@@ -1303,9 +1285,9 @@ Datum tintervalov(PG_FUNCTION_ARGS)
 Datum tintervalstart(PG_FUNCTION_ARGS)
 {
     TimeInterval i = PG_GETARG_TIMEINTERVAL(0);
-    if (i->status == T_INTERVAL_INVAL) {
+
+    if (i->status == T_INTERVAL_INVAL)
         PG_RETURN_ABSOLUTETIME(INVALID_ABSTIME);
-    }
     PG_RETURN_ABSOLUTETIME(i->data[0]);
 }
 
@@ -1315,11 +1297,15 @@ Datum tintervalstart(PG_FUNCTION_ARGS)
 Datum tintervalend(PG_FUNCTION_ARGS)
 {
     TimeInterval i = PG_GETARG_TIMEINTERVAL(0);
-    if (i->status == T_INTERVAL_INVAL) {
+
+    if (i->status == T_INTERVAL_INVAL)
         PG_RETURN_ABSOLUTETIME(INVALID_ABSTIME);
-    }
     PG_RETURN_ABSOLUTETIME(i->data[1]);
 }
+
+/*****************************************************************************
+ *	 PRIVATE ROUTINES														 *
+ *****************************************************************************/
 
 /*
  *		parsetinterval -- parse a tinterval string
@@ -1338,53 +1324,45 @@ Datum tintervalend(PG_FUNCTION_ARGS)
  */
 static void parsetinterval(char* i_string, AbsoluteTime* i_start, AbsoluteTime* i_end)
 {
-    char *p = NULL;
-    char *p1 = NULL;
+    char *p = NULL, *p1 = NULL;
     char c;
 
     p = i_string;
     /* skip leading blanks up to '[' */
     while ((c = *p) != '\0') {
-        if (IsSpace(c)) {
+        if (IsSpace(c))
             p++;
-        } else if (c != '[') {
+        else if (c != '[')
             goto bogus; /* syntax error */
-        } else {
+        else
             break;
-        }
     }
-    if (c == '\0') {
+    if (c == '\0')
         goto bogus; /* syntax error */
-    }
     p++;
     /* skip leading blanks up to '"' */
     while ((c = *p) != '\0') {
-        if (IsSpace(c)) {
+        if (IsSpace(c))
             p++;
-        } else if (c != '"') {
+        else if (c != '"')
             goto bogus; /* syntax error */
-        } else {
+        else
             break;
-        }
     }
-    if (c == '\0') {
+    if (c == '\0')
         goto bogus; /* syntax error */
-    }
     p++;
-    if (strncmp(INVALID_INTERVAL_STR, p, strlen(INVALID_INTERVAL_STR)) == 0) {
+    if (strncmp(INVALID_INTERVAL_STR, p, strlen(INVALID_INTERVAL_STR)) == 0)
         goto bogus; /* undefined range, handled like a syntax err. */
-    }
     /* search for the end of the first date and change it to a \0 */
     p1 = p;
     while ((c = *p1) != '\0') {
-        if (c == '"') {
+        if (c == '"')
             break;
-        }
         p1++;
     }
-    if (c == '\0') {
+    if (c == '\0')
         goto bogus; /* syntax error */
-    }
     *p1 = '\0';
     /* get the first date */
     *i_start = DatumGetAbsoluteTime(DirectFunctionCall1(abstimein, CStringGetDatum(p)));
@@ -1393,29 +1371,25 @@ static void parsetinterval(char* i_string, AbsoluteTime* i_start, AbsoluteTime* 
     p = ++p1;
     /* skip blanks up to '"', beginning of second date */
     while ((c = *p) != '\0') {
-        if (IsSpace(c)) {
+        if (IsSpace(c))
             p++;
-        } else if (c != '"') {
+        else if (c != '"')
             goto bogus; /* syntax error */
-        } else {
+        else
             break;
-        }
     }
-    if (c == '\0') {
+    if (c == '\0')
         goto bogus; /* syntax error */
-    }
     p++;
     /* search for the end of the second date and change it to a \0 */
     p1 = p;
     while ((c = *p1) != '\0') {
-        if (c == '"') {
+        if (c == '"')
             break;
-        }
         p1++;
     }
-    if (c == '\0') {
+    if (c == '\0')
         goto bogus; /* syntax error */
-    }
     *p1 = '\0';
     /* get the second date */
     *i_end = DatumGetAbsoluteTime(DirectFunctionCall1(abstimein, CStringGetDatum(p)));
@@ -1424,22 +1398,19 @@ static void parsetinterval(char* i_string, AbsoluteTime* i_start, AbsoluteTime* 
     p = ++p1;
     /* skip blanks up to ']' */
     while ((c = *p) != '\0') {
-        if (IsSpace(c)) {
+        if (IsSpace(c))
             p++;
-        } else if (c != ']') {
+        else if (c != ']')
             goto bogus; /* syntax error */
-        } else {
+        else
             break;
-        }
     }
-    if (c == '\0') {
+    if (c == '\0')
         goto bogus; /* syntax error */
-    }
     p++;
     c = *p;
-    if (c != '\0') {
+    if (c != '\0')
         goto bogus; /* syntax error */
-    }
 
     /* it seems to be a valid tinterval */
     return;
@@ -1450,6 +1421,10 @@ bogus:
             errmsg("invalid input syntax for type tinterval: \"%s\"", i_string)));
     *i_start = *i_end = INVALID_ABSTIME; /* keep compiler quiet */
 }
+
+/*****************************************************************************
+ *
+ *****************************************************************************/
 
 /*
  * timeofday -

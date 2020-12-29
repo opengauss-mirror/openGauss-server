@@ -47,7 +47,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
 #include "libpq/libpq-int.h"
 #include "libpq/libpq-fe.h"
@@ -267,11 +267,11 @@ void DBlink::getDblinkConnect(const char* xdbname)
         sockdir = optlines[LOCK_FILE_LINE_SOCKET_DIR - 1];
         hostaddr = optlines[LOCK_FILE_LINE_LISTEN_ADDR - 1];
 
-        if (sockdir[0] == '/') {
-            rc = strncpy_s(host_str, sizeof(host_str), sockdir, sizeof(host_str) - 1);
-            securec_check(rc, "\0", "\0");
-        } else {
+        if (hostaddr != NULL && hostaddr[0] != '\0' && hostaddr[0] != '\n') {
             rc = strncpy_s(host_str, sizeof(host_str), hostaddr, sizeof(host_str) - 1);
+            securec_check(rc, "\0", "\0");
+        } else if (sockdir[0] == '/') {
+            rc = strncpy_s(host_str, sizeof(host_str), sockdir, sizeof(host_str) - 1);
             securec_check(rc, "\0", "\0");
         }
 
@@ -463,7 +463,7 @@ void DBlink::procResultSuccess(ReturnSetInfo* rsinfo, PGresult* res)
      * need a tuple descriptor representing one TEXT column to return
      * the command status string as our result tuple
      */
-    tupdesc = CreateTemplateTupleDesc(1, false);
+    tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "status", TEXTOID, -1, 0);
     attinmeta = TupleDescGetAttInMetadata(tupdesc);
 
@@ -708,9 +708,7 @@ void DBlink::storeRow(storeInfo* sinfo, PGresult* res, bool first)
     }
 
     /* Should have a single-row result if we get here */
-    if (PQntuples(res) != 1) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("Should have a single-row result.")));
-    }
+    Assert(PQntuples(res) == 1);
 
     /*
      * Do the following work in a temp context that we reset after each tuple.
@@ -820,7 +818,7 @@ int DBlink::applyRemoteGucs(PGconn* conn)
          * have the same value.
          */
         localVal = GetConfigOption(gucName, false, false);
-        AssertEreport(localVal != NULL, MOD_OPT, "");
+        Assert(localVal != NULL);
 
         if (strcmp(remoteVal, localVal) == 0) {
             continue;

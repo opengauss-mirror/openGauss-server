@@ -40,7 +40,7 @@ typedef struct dnInfoStat {
  * stable stats.
  */
 List* CNScheduling(Oid foreignTableId, Index relId, List* columnList, List* scanClauses, List*& prunningResult,
-    List*& partList, char locatorType, bool isAnalyze, int64* fileNum = NULL);
+    List*& partList, char locatorType, bool isAnalyze, List* allColumnList, int16 attrNum, int64* fileNum);
 
 /* CNSchedulingForAnalyze
  * firstly calculate the files to be analyzed,and because we just do analyze in one datanode,

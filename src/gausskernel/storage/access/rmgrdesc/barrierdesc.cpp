@@ -18,9 +18,9 @@
 
 #include "pgxc/barrier.h"
 
-void barrier_desc(StringInfo buf, XLogReaderState* record)
+void barrier_desc(StringInfo buf, XLogReaderState *record)
 {
-    char* rec = XLogRecGetData(record);
+    char *rec = XLogRecGetData(record);
 
     Assert((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == XLOG_BARRIER_CREATE);
     appendStringInfo(buf, "BARRIER %s", rec);

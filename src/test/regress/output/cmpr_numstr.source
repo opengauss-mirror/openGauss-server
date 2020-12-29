@@ -11,7 +11,7 @@ CREATE TABLE cmpr_numstr_raw (
 	R5_ID varchar(30) NOT NULL,
 	R6_ID varchar(30) NOT NULL
 );
-COPY cmpr_numstr_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+COPY cmpr_numstr_raw FROM '@abs_srcdir@/data/cmpr_numstr.data';
 CREATE TABLE cmpr_numstr_auto (
 	RS_ID int,
 	R0_ID varchar(30) NOT NULL,
@@ -21,8 +21,8 @@ CREATE TABLE cmpr_numstr_auto (
 	R4_ID varchar(30) NOT NULL,
 	R5_ID varchar(30) NOT NULL,
 	R6_ID varchar(30) NOT NULL
-) COMPRESS;
-COPY cmpr_numstr_auto FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+) ;
+COPY cmpr_numstr_auto FROM '@abs_srcdir@/data/cmpr_numstr.data';
 SELECT (SELECT COUNT(*) FROM cmpr_numstr_raw) - (SELECT COUNT(*) FROM cmpr_numstr_auto);
  ?column? 
 ----------
@@ -48,8 +48,8 @@ CREATE TABLE cmpr_numstr_dict (
 	R4_ID varchar(30) dictionary NOT NULL,
 	R5_ID varchar(30) dictionary NOT NULL,
 	R6_ID varchar(30) dictionary NOT NULL
-)  COMPRESS;
-COPY cmpr_numstr_dict FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+)  ;
+COPY cmpr_numstr_dict FROM '@abs_srcdir@/data/cmpr_numstr.data';
 SELECT (SELECT COUNT(*) FROM cmpr_numstr_raw) - (SELECT COUNT(*) FROM cmpr_numstr_dict);
  ?column? 
 ----------
@@ -75,8 +75,8 @@ CREATE TABLE cmpr_numstr_prefix (
 	R4_ID varchar(30) prefix NOT NULL,
 	R5_ID varchar(30) prefix NOT NULL,
 	R6_ID varchar(30) prefix NOT NULL
-)  COMPRESS;
-COPY cmpr_numstr_prefix FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+)  ;
+COPY cmpr_numstr_prefix FROM '@abs_srcdir@/data/cmpr_numstr.data';
 SELECT (SELECT COUNT(*) FROM cmpr_numstr_raw) - (SELECT COUNT(*) FROM cmpr_numstr_prefix);
  ?column? 
 ----------
@@ -102,8 +102,8 @@ CREATE TABLE cmpr_numstr (
 	R4_ID varchar(30) numstr NOT NULL,
 	R5_ID varchar(30) numstr NOT NULL,
 	R6_ID varchar(30) numstr NOT NULL
-)  COMPRESS;
-COPY cmpr_numstr FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+)  ;
+COPY cmpr_numstr FROM '@abs_srcdir@/data/cmpr_numstr.data';
 SELECT (SELECT COUNT(*) FROM cmpr_numstr_raw) - (SELECT COUNT(*) FROM cmpr_numstr);
  ?column? 
 ----------

@@ -21,10 +21,12 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/tableam.h"
 #include "executor/execdebug.h"
 #include "executor/nodeNestloop.h"
 #include "executor/execStream.h"
 #include "utils/memutils.h"
+#include "executor/nodeHashjoin.h"
 
 static void MaterialAll(PlanState* node)
 {
@@ -39,8 +41,13 @@ static void MaterialAll(PlanState* node)
         /* early free the left tree of Material. */
         ExecEarlyFree(outerPlanState(node));
 
-        /* early deinit consumer in left tree of Material. */
-        ExecEarlyDeinitConsumer(node);
+        /* early deinit consumer in left tree of Material.
+         * It should be noticed that we can not do early deinit 
+         * within predpush.
+         */
+        if (node != NULL && !CheckParamWalker(node)) {
+            ExecEarlyDeinitConsumer(node);
+        }
     }
 }
 
@@ -170,7 +177,9 @@ TupleTableSlot* ExecNestLoop(NestLoopState* node)
                 Assert(IsA(nlp->paramval, Var));
                 Assert(nlp->paramval->varno == OUTER_VAR);
                 Assert(nlp->paramval->varattno > 0);
-                prm->value = slot_getattr(outer_tuple_slot, nlp->paramval->varattno, &(prm->isnull));
+                Assert(outer_tuple_slot != NULL && outer_tuple_slot->tts_tupleDescriptor != NULL);
+                /* Get the Table Accessor Method*/
+                prm->value = tableam_tslot_getattr(outer_tuple_slot, nlp->paramval->varattno, &(prm->isnull));
                 /*
                  * the following two parameters are called when there exist
                  * join-operation with column table (see ExecEvalVecParamExec).
@@ -387,8 +396,10 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
 
     /*
      * initialize tuple type and projection info
+     * the result in this case would hold only virtual data.
      */
-    ExecAssignResultTypeFromTL(&nlstate->js.ps);
+    ExecAssignResultTypeFromTL(&nlstate->js.ps, TAM_HEAP);
+
     ExecAssignProjectionInfo(&nlstate->js.ps, NULL);
 
     /*

@@ -17,7 +17,7 @@
 
 #include "access/xlogdefs.h"
 #include "access/xlog_internal.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
 #include "bin/elog.h"
 
@@ -48,23 +48,20 @@ extern bool backup;
 extern pid_t process_id;
 extern const char* progname;
 extern BuildErrorCode increment_return_code;
-extern char lastxlogfileName[MAXFNAMELEN];
+extern char divergeXlogFileName[MAXFNAMELEN];
 
 /* in parsexlog.c */
 extern void extractPageMap(const char* datadir, XLogRecPtr startpoint, TimeLineID tli);
-extern void extractWalDataMap(const char* datadir, XLogRecPtr startpoint, TimeLineID tli, bool& foundWalData);
-extern BuildErrorCode findLastCheckpoint(const char* datadir, XLogRecPtr searchptr, TimeLineID tli,
-    XLogRecPtr* lastchkptrec, TimeLineID* lastchkpttli, XLogRecPtr* lastchkptredo);
 extern XLogRecPtr readOneRecord(const char* datadir, XLogRecPtr ptr, TimeLineID tli);
 extern XLogRecPtr FindMaxLSN(char* workingpath, char* returnmsg, pg_crc32 *maxLsnCrc);
-BuildErrorCode findLastCommonpoint(
-    const char* datadir, XLogRecPtr forkptr, TimeLineID tli, XLogRecPtr* lastcommonrec, uint32 term = 0);
-extern int find_gucoption(
-    const char** optlines, const char* opt_name, int* name_offset, int* name_len, int* value_offset, int* value_len);
+BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRecPtr startrec, XLogRecPtr* lastchkptrec,
+    TimeLineID* lastchkpttli, XLogRecPtr *lastchkptredo, uint32 term);
+extern int find_gucoption(const char** optlines, const char* opt_name, int* name_offset, int* name_len, 
+    int* value_offset, int* value_len);
 
 extern bool TransLsn2XlogFileName(XLogRecPtr lsn, TimeLineID lastcommontli, char* xlogName);
 extern XLogRecPtr getValidCommonLSN(XLogRecPtr checkLsn, XLogRecPtr maxLsn);
-int gs_increament_build(char* pgdata, char* connstr, uint32 term);
+int gs_increment_build(const char* pgdata, char* sysidentifier, uint32 timeline, uint32 term);
 extern BuildErrorCode targetFileStatThread(void);
 extern BuildErrorCode waitEndTargetFileStatThread(void);
 extern BuildErrorCode targetFilemapProcess(void);
@@ -81,7 +78,9 @@ void openDebugLog(void);
         do {                                            \
             if (increment_return_code != BUILD_SUCCESS) { \
                 PQclear(res);                             \
+                res = NULL;                                \
                 return increment_return_code;           \
+                                                          \
             }                                             \
         } while (0)
 
@@ -89,6 +88,15 @@ void openDebugLog(void);
     do {                              \
         if (rv != BUILD_SUCCESS)      \
             return rv;                \
+    } while (0)
+
+#define PG_CHECKRETURN_AND_FREE_PGRESULT_RETURN(rv, res) \
+    do {                              \
+        if (rv != BUILD_SUCCESS) {      \
+            PQclear(res);              \
+            res = NULL;                \
+            return rv;                 \
+        }                              \
     } while (0)
 
 #endif /* PG_REWIND_H */

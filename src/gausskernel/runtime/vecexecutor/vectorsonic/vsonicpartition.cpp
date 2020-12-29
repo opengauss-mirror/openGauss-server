@@ -26,7 +26,7 @@
  * -------------------------------------------------------------------------
  */
 #include "vectorsonic/vsonicpartition.h"
-#include "storage/buffile.h"
+#include "storage/buf/buffile.h"
 #include "storage/lz4_file.h"
 #include "vectorsonic/vsonicnumeric.h"
 #include "vectorsonic/vsonicint.h"
@@ -69,7 +69,6 @@ SonicHashMemPartition::SonicHashMemPartition(const char* cxtname, bool hasHash, 
 
     if (hasHash) {
         /* init m_hash to store the hash value */
-        
         DatumDesc* desc = (DatumDesc*)palloc0(sizeof(DatumDesc));
         getDataDesc(desc, 4, NULL, false);
         m_hash = New(m_context) SonicIntTemplateDatumArray<uint32>(m_context, INIT_DATUM_ARRAY_SIZE, false, desc);
@@ -324,9 +323,9 @@ SonicHashFilePartition::SonicHashFilePartition(const char* cxtname, bool hasHash
     : SonicHashPartition(cxtname, tupleDesc->natts, workMem), m_varSize(0)
 {
     if (u_sess->attr.attr_sql.enable_sonic_optspill)
-        m_fileNum = hasHash ? SONIC_TOTAL_TYPES + 1 : SONIC_TOTAL_TYPES;
+        m_fileNum = hasHash ? (SONIC_TOTAL_TYPES + 1) : SONIC_TOTAL_TYPES;
     else
-        m_fileNum = hasHash ? m_cols + 1 : m_cols;
+        m_fileNum = hasHash ? (m_cols + 1) : m_cols;
 
     MemoryContext old_cxt = MemoryContextSwitchTo(m_context);
     m_files = (SonicHashFileSource**)palloc0(sizeof(SonicHashFileSource*) * m_fileNum);
@@ -549,7 +548,6 @@ VectorBatch* SonicHashFilePartition::getBatch()
     m_rows -= batch_size;
 
     /* fix the row number of the batch */
-    
     m_batch->FixRowCount(batch_size);
 
     (void)MemoryContextSwitchTo(old_cxt);
@@ -565,10 +563,8 @@ void SonicHashFilePartition::putHash(uint32* hashValues, uint64 nrows)
 {
     size_t written = m_files[m_fileNum - 1]->write((void*)hashValues, sizeof(uint32) * nrows);
     /* fix row number */
-    
     m_fileRecords[m_fileNum - 1]++;
     /* record written size */
-    
     m_size += written;
     pgstat_increase_session_spill_size(written);
 }
@@ -659,16 +655,13 @@ void SonicHashFilePartition::releaseFileHandlerBuffer()
 void SonicHashFilePartition::freeResources()
 {
     /* close file handler */
-    
     ((SonicHashFilePartition*)this)->releaseFileHandlerBuffer();
     ((SonicHashFilePartition*)this)->closeFiles();
 
     if (m_context != NULL) {
         /* reset the m_context */
-        
         MemoryContextReset(m_context);
         /* Delete child context for m_hashContext */
-        
         MemoryContextDelete(m_context);
         m_context = NULL;
     }

@@ -1,0 +1,31 @@
+create table local_row_1(c1 int, c2 int, c3 int);
+create table local_col_1(c1 int, c2 int, c3 int) with(orientation=column);
+insert into local_row_1 select v, v*10, v*100 from generate_series(3, 12) as v;
+insert into local_col_1 select v, v*10, v*100 from generate_series(8, 17) as v;
+select * from local_col_1 as A, hash_col as B where A.c2 = B.c2 order by 1;
+ c1 | c2  |  c3  | c1 | c2  |  c3  
+----+-----+------+----+-----+------
+  8 |  80 |  800 |  8 |  80 |  800
+  9 |  90 |  900 |  9 |  90 |  900
+ 10 | 100 | 1000 | 10 | 100 | 1000
+ 11 | 110 | 1100 | 11 | 110 | 1100
+ 12 | 120 | 1200 | 12 | 120 | 1200
+(5 rows)
+
+select * from local_col_1 as A, rep_col as B where A.c2 = B.c2 order by 1;
+ c1 | c2  |  c3  | c1 | c2  |  c3  
+----+-----+------+----+-----+------
+  8 |  80 |  800 |  8 |  80 |  800
+  9 |  90 |  900 |  9 |  90 |  900
+ 10 | 100 | 1000 | 10 | 100 | 1000
+ 11 | 110 | 1100 | 11 | 110 | 1100
+ 12 | 120 | 1200 | 12 | 120 | 1200
+ 13 | 130 | 1300 | 13 | 130 | 1300
+ 14 | 140 | 1400 | 14 | 140 | 1400
+ 15 | 150 | 1500 | 15 | 150 | 1500
+ 16 | 160 | 1600 | 16 | 160 | 1600
+ 17 | 170 | 1700 | 17 | 170 | 1700
+(10 rows)
+
+drop table local_row_1;
+drop table local_col_1;

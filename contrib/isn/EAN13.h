@@ -9,6 +9,8 @@
  *	  contrib/isn/EAN13.h
  *
  */
+#ifndef EAN13_H
+#define EAN13_H
 
 /* where the digit set begins, and how many of them are in the table */
 const unsigned EAN13_index[10][2] = {
@@ -144,3 +146,5 @@ const char* EAN13_range[][2] = {{"000", "019"}, /* GS1 US */
     {"981", "982"},                             /* Common Currency Coupons */
     {"990", "999"},                             /* Coupons */
     {NULL, NULL}};
+
+#endif

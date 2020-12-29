@@ -50,7 +50,7 @@ typedef struct spgNodePtr {
 
 Datum spg_text_config(PG_FUNCTION_ARGS)
 {
-    spgConfigOut* cfg = (spgConfigOut*)PG_GETARG_POINTER(1);
+    spgConfigOut *cfg = (spgConfigOut *)PG_GETARG_POINTER(1);
 
     cfg->prefixType = TEXTOID;
     cfg->labelType = CHAROID;
@@ -63,12 +63,12 @@ Datum spg_text_config(PG_FUNCTION_ARGS)
  * Form a text datum from the given not-necessarily-null-terminated string,
  * using short varlena header format if possible
  */
-static Datum formTextDatum(const char* data, int datalen)
+static Datum formTextDatum(const char *data, int datalen)
 {
-    char* p = NULL;
+    char *p = NULL;
     errno_t rc;
 
-    p = (char*)palloc(datalen + VARHDRSZ);
+    p = (char *)palloc(datalen + VARHDRSZ);
 
     if (datalen + VARHDRSZ_SHORT <= VARATT_SHORT_MAX) {
         SET_VARSIZE_SHORT(p, datalen + VARHDRSZ_SHORT);
@@ -88,7 +88,7 @@ static Datum formTextDatum(const char* data, int datalen)
 /*
  * Find the length of the common prefix of a and b
  */
-static int commonPrefix(const char* a, const char* b, int lena, int lenb)
+static int commonPrefix(const char *a, const char *b, int lena, int lenb)
 {
     int i = 0;
 
@@ -106,7 +106,7 @@ static int commonPrefix(const char* a, const char* b, int lena, int lenb)
  *
  * On success, *i gets the match location; on failure, it gets where to insert
  */
-static bool searchChar(Datum* nodeLabels, int nNodes, uint8 c, int* i)
+static bool searchChar(Datum *nodeLabels, int nNodes, uint8 c, int *i)
 {
     int StopLow = 0;
     int StopHigh = nNodes;
@@ -131,10 +131,10 @@ static bool searchChar(Datum* nodeLabels, int nNodes, uint8 c, int* i)
 
 Datum spg_text_choose(PG_FUNCTION_ARGS)
 {
-    spgChooseIn* in = (spgChooseIn*)PG_GETARG_POINTER(0);
-    spgChooseOut* out = (spgChooseOut*)PG_GETARG_POINTER(1);
-    text* inText = DatumGetTextPP(in->datum);
-    char* inStr = VARDATA_ANY(inText);
+    spgChooseIn *in = (spgChooseIn *)PG_GETARG_POINTER(0);
+    spgChooseOut *out = (spgChooseOut *)PG_GETARG_POINTER(1);
+    text *inText = DatumGetTextPP(in->datum);
+    char *inStr = VARDATA_ANY(inText);
     int inSize = VARSIZE_ANY_EXHDR(inText);
     uint8 nodeChar = '\0';
     int i = 0;
@@ -142,15 +142,15 @@ Datum spg_text_choose(PG_FUNCTION_ARGS)
 
     /* Check for prefix match, set nodeChar to first byte after prefix */
     if (in->hasPrefix) {
-        text* prefixText = DatumGetTextPP(in->prefixDatum);
-        char* prefixStr = VARDATA_ANY(prefixText);
+        text *prefixText = DatumGetTextPP(in->prefixDatum);
+        char *prefixStr = VARDATA_ANY(prefixText);
         int prefixSize = VARSIZE_ANY_EXHDR(prefixText);
 
         commonLen = commonPrefix(inStr + in->level, prefixStr, inSize - in->level, prefixSize);
 
         if (commonLen == prefixSize) {
             if (inSize - in->level > commonLen)
-                nodeChar = *(uint8*)(inStr + in->level + commonLen);
+                nodeChar = *(uint8 *)(inStr + in->level + commonLen);
             else
                 nodeChar = '\0';
         } else {
@@ -169,14 +169,14 @@ Datum spg_text_choose(PG_FUNCTION_ARGS)
                 out->result.splitTuple.postfixHasPrefix = false;
             } else {
                 out->result.splitTuple.postfixHasPrefix = true;
-                out->result.splitTuple.postfixPrefixDatum =
-                    formTextDatum(prefixStr + commonLen + 1, prefixSize - commonLen - 1);
+                out->result.splitTuple.postfixPrefixDatum = formTextDatum(prefixStr + commonLen + 1,
+                                                                          prefixSize - commonLen - 1);
             }
 
             PG_RETURN_VOID();
         }
     } else if (inSize > in->level) {
-        nodeChar = *(uint8*)(inStr + in->level);
+        nodeChar = *(uint8 *)(inStr + in->level);
     } else {
         nodeChar = '\0';
     }
@@ -193,8 +193,8 @@ Datum spg_text_choose(PG_FUNCTION_ARGS)
         out->result.matchNode.nodeN = i;
         out->result.matchNode.levelAdd = commonLen + 1;
         if (inSize - in->level - commonLen - 1 > 0)
-            out->result.matchNode.restDatum =
-                formTextDatum(inStr + in->level + commonLen + 1, inSize - in->level - commonLen - 1);
+            out->result.matchNode.restDatum = formTextDatum(inStr + in->level + commonLen + 1,
+                                                            inSize - in->level - commonLen - 1);
         else
             out->result.matchNode.restDatum = formTextDatum(NULL, 0);
     } else if (in->allTheSame) {
@@ -220,10 +220,10 @@ Datum spg_text_choose(PG_FUNCTION_ARGS)
 }
 
 /* qsort comparator to sort spgNodePtr structs by "c" */
-static int cmpNodePtr(const void* a, const void* b)
+static int cmpNodePtr(const void *a, const void *b)
 {
-    const spgNodePtr* aa = (const spgNodePtr*)a;
-    const spgNodePtr* bb = (const spgNodePtr*)b;
+    const spgNodePtr *aa = (const spgNodePtr *)a;
+    const spgNodePtr *bb = (const spgNodePtr *)b;
 
     if (aa->c == bb->c)
         return 0;
@@ -235,18 +235,18 @@ static int cmpNodePtr(const void* a, const void* b)
 
 Datum spg_text_picksplit(PG_FUNCTION_ARGS)
 {
-    spgPickSplitIn* in = (spgPickSplitIn*)PG_GETARG_POINTER(0);
-    spgPickSplitOut* out = (spgPickSplitOut*)PG_GETARG_POINTER(1);
-    text* text0 = DatumGetTextPP(in->datums[0]);
+    spgPickSplitIn *in = (spgPickSplitIn *)PG_GETARG_POINTER(0);
+    spgPickSplitOut *out = (spgPickSplitOut *)PG_GETARG_POINTER(1);
+    text *text0 = DatumGetTextPP(in->datums[0]);
     int i, commonLen;
-    spgNodePtr* nodes = NULL;
+    spgNodePtr *nodes = NULL;
 
     /* Identify longest common prefix, if any */
     commonLen = VARSIZE_ANY_EXHDR(text0);
     for (i = 1; i < in->nTuples && commonLen > 0; i++) {
-        text* texti = DatumGetTextPP(in->datums[i]);
-        int tmp =
-            commonPrefix(VARDATA_ANY(text0), VARDATA_ANY(texti), VARSIZE_ANY_EXHDR(text0), VARSIZE_ANY_EXHDR(texti));
+        text *texti = DatumGetTextPP(in->datums[i]);
+        int tmp = commonPrefix(VARDATA_ANY(text0), VARDATA_ANY(texti), VARSIZE_ANY_EXHDR(text0),
+                               VARSIZE_ANY_EXHDR(texti));
 
         if (tmp < commonLen)
             commonLen = tmp;
@@ -267,13 +267,13 @@ Datum spg_text_picksplit(PG_FUNCTION_ARGS)
     }
 
     /* Extract the node label (first non-common byte) from each value */
-    nodes = (spgNodePtr*)palloc(sizeof(spgNodePtr) * in->nTuples);
+    nodes = (spgNodePtr *)palloc(sizeof(spgNodePtr) * in->nTuples);
 
     for (i = 0; i < in->nTuples; i++) {
-        text* texti = DatumGetTextPP(in->datums[i]);
+        text *texti = DatumGetTextPP(in->datums[i]);
 
         if ((uint32)commonLen < VARSIZE_ANY_EXHDR(texti))
-            nodes[i].c = *(uint8*)(VARDATA_ANY(texti) + commonLen);
+            nodes[i].c = *(uint8 *)(VARDATA_ANY(texti) + commonLen);
         else
             nodes[i].c = '\0'; /* use \0 if string is all common */
         nodes[i].i = i;
@@ -289,12 +289,12 @@ Datum spg_text_picksplit(PG_FUNCTION_ARGS)
 
     /* And emit results */
     out->nNodes = 0;
-    out->nodeLabels = (Datum*)palloc(sizeof(Datum) * in->nTuples);
-    out->mapTuplesToNodes = (int*)palloc(sizeof(int) * in->nTuples);
-    out->leafTupleDatums = (Datum*)palloc(sizeof(Datum) * in->nTuples);
+    out->nodeLabels = (Datum *)palloc(sizeof(Datum) * in->nTuples);
+    out->mapTuplesToNodes = (int *)palloc(sizeof(int) * in->nTuples);
+    out->leafTupleDatums = (Datum *)palloc(sizeof(Datum) * in->nTuples);
 
     for (i = 0; i < in->nTuples; i++) {
-        text* texti = DatumGetTextPP(nodes[i].d);
+        text *texti = DatumGetTextPP(nodes[i].d);
         Datum leafD;
 
         if (i == 0 || nodes[i].c != nodes[i - 1].c) {
@@ -316,12 +316,12 @@ Datum spg_text_picksplit(PG_FUNCTION_ARGS)
 
 Datum spg_text_inner_consistent(PG_FUNCTION_ARGS)
 {
-    spgInnerConsistentIn* in = (spgInnerConsistentIn*)PG_GETARG_POINTER(0);
-    spgInnerConsistentOut* out = (spgInnerConsistentOut*)PG_GETARG_POINTER(1);
+    spgInnerConsistentIn *in = (spgInnerConsistentIn *)PG_GETARG_POINTER(0);
+    spgInnerConsistentOut *out = (spgInnerConsistentOut *)PG_GETARG_POINTER(1);
     bool collate_is_c = lc_collate_is_c(PG_GET_COLLATION());
-    text* reconstrText = NULL;
+    text *reconstrText = NULL;
     int maxReconstrLen = 0;
-    text* prefixText = NULL;
+    text *prefixText = NULL;
     int prefixSize = 0;
     int i;
     errno_t rc;
@@ -337,8 +337,8 @@ Datum spg_text_inner_consistent(PG_FUNCTION_ARGS)
      * created by a previous invocation of this routine, and we always emit
      * long-format reconstructed values.
      */
-    Assert(in->level == 0 ? DatumGetPointer(in->reconstructedValue) == NULL :
-                            VARSIZE_ANY_EXHDR(DatumGetPointer(in->reconstructedValue)) == ((uint)in->level));
+    Assert(in->level == 0 ? DatumGetPointer(in->reconstructedValue) == NULL
+                            : VARSIZE_ANY_EXHDR(DatumGetPointer(in->reconstructedValue)) == ((uint)in->level));
 
     maxReconstrLen = in->level + 1;
     if (in->hasPrefix) {
@@ -347,7 +347,7 @@ Datum spg_text_inner_consistent(PG_FUNCTION_ARGS)
         maxReconstrLen += prefixSize;
     }
 
-    reconstrText = (text*)palloc(VARHDRSZ + maxReconstrLen);
+    reconstrText = (text *)palloc(VARHDRSZ + maxReconstrLen);
     SET_VARSIZE(reconstrText, VARHDRSZ + maxReconstrLen);
 
     if (in->level) {
@@ -356,7 +356,7 @@ Datum spg_text_inner_consistent(PG_FUNCTION_ARGS)
     }
 
     if (prefixSize) {
-        rc = memcpy_s(((char*)VARDATA(reconstrText)) + in->level, prefixSize, VARDATA_ANY(prefixText), prefixSize);
+        rc = memcpy_s(((char *)VARDATA(reconstrText)) + in->level, prefixSize, VARDATA_ANY(prefixText), prefixSize);
         securec_check(rc, "\0", "\0");
     }
     /* last byte of reconstrText will be filled in below
@@ -365,9 +365,9 @@ Datum spg_text_inner_consistent(PG_FUNCTION_ARGS)
      * and see if it's consistent with the query.  If so, emit an entry into
      * the output arrays.
      */
-    out->nodeNumbers = (int*)palloc(sizeof(int) * in->nNodes);
-    out->levelAdds = (int*)palloc(sizeof(int) * in->nNodes);
-    out->reconstructedValues = (Datum*)palloc(sizeof(Datum) * in->nNodes);
+    out->nodeNumbers = (int *)palloc(sizeof(int) * in->nNodes);
+    out->levelAdds = (int *)palloc(sizeof(int) * in->nNodes);
+    out->reconstructedValues = (Datum *)palloc(sizeof(Datum) * in->nNodes);
     out->nNodes = 0;
 
     for (i = 0; i < in->nNodes; i++) {
@@ -380,13 +380,13 @@ Datum spg_text_inner_consistent(PG_FUNCTION_ARGS)
         if (nodeChar == '\0')
             thisLen = maxReconstrLen - 1;
         else {
-            ((char*)VARDATA(reconstrText))[maxReconstrLen - 1] = nodeChar;
+            ((char *)VARDATA(reconstrText))[maxReconstrLen - 1] = nodeChar;
             thisLen = maxReconstrLen;
         }
 
         for (j = 0; j < in->nkeys; j++) {
             StrategyNumber strategy = in->scankeys[j].sk_strategy;
-            text* inText = NULL;
+            text *inText = NULL;
             int inSize;
             int r;
 
@@ -424,9 +424,8 @@ Datum spg_text_inner_consistent(PG_FUNCTION_ARGS)
                         res = false;
                     break;
                 default:
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                            errmsg("unrecognized strategy number: %d", in->scankeys[j].sk_strategy)));
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                    errmsg("unrecognized strategy number: %d", in->scankeys[j].sk_strategy)));
                     break;
             }
 
@@ -446,14 +445,43 @@ Datum spg_text_inner_consistent(PG_FUNCTION_ARGS)
     PG_RETURN_VOID();
 }
 
+bool spg_check_res(StrategyNumber strategy, int r)
+{
+    bool res = true;
+    switch (strategy) {
+        case BTLessStrategyNumber:
+            res = (r < 0);
+            break;
+        case BTLessEqualStrategyNumber:
+            res = (r <= 0);
+            break;
+        case BTEqualStrategyNumber:
+            res = (r == 0);
+            break;
+        case BTGreaterEqualStrategyNumber:
+            res = (r >= 0);
+            break;
+        case BTGreaterStrategyNumber:
+            res = (r > 0);
+            break;
+        default:
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("unrecognized strategy number: %d", strategy)));
+            res = false;
+            break;
+    }
+    return res;
+}
+
+
 Datum spg_text_leaf_consistent(PG_FUNCTION_ARGS)
 {
-    spgLeafConsistentIn* in = (spgLeafConsistentIn*)PG_GETARG_POINTER(0);
-    spgLeafConsistentOut* out = (spgLeafConsistentOut*)PG_GETARG_POINTER(1);
+    spgLeafConsistentIn *in = (spgLeafConsistentIn *)PG_GETARG_POINTER(0);
+    spgLeafConsistentOut *out = (spgLeafConsistentOut *)PG_GETARG_POINTER(1);
     int level = in->level;
-    text* leafValue = NULL;
-    text* reconstrValue = NULL;
-    char* fullValue = NULL;
+    text *leafValue = NULL;
+    text *reconstrValue = NULL;
+    char *fullValue = NULL;
     int fullLen;
     bool res = true;
     int j;
@@ -468,7 +496,7 @@ Datum spg_text_leaf_consistent(PG_FUNCTION_ARGS)
 
     if (reconstrValue == NULL && level > 0)
         ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("reconstrValue is NULL but level = %d (not zero).", level)));
+                (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("reconstrValue is NULL but level = %d (not zero).", level)));
 
     Assert(level == 0 ? reconstrValue == NULL : VARSIZE_ANY_EXHDR(reconstrValue) == (uint)level);
 
@@ -478,7 +506,7 @@ Datum spg_text_leaf_consistent(PG_FUNCTION_ARGS)
         fullValue = VARDATA(reconstrValue);
         out->leafValue = PointerGetDatum(reconstrValue);
     } else {
-        text* fullText = (text*)palloc(VARHDRSZ + fullLen);
+        text *fullText = (text *)palloc(VARHDRSZ + fullLen);
 
         SET_VARSIZE(fullText, VARHDRSZ + fullLen);
         fullValue = VARDATA(fullText);
@@ -487,8 +515,8 @@ Datum spg_text_leaf_consistent(PG_FUNCTION_ARGS)
             securec_check(rc, "\0", "\0");
         }
         if (VARSIZE_ANY_EXHDR(leafValue) > 0) {
-            errno_t rc = memcpy_s(
-                fullValue + level, VARSIZE_ANY_EXHDR(leafValue), VARDATA_ANY(leafValue), VARSIZE_ANY_EXHDR(leafValue));
+            errno_t rc = memcpy_s(fullValue + level, VARSIZE_ANY_EXHDR(leafValue), VARDATA_ANY(leafValue),
+                                  VARSIZE_ANY_EXHDR(leafValue));
             securec_check(rc, "\0", "\0");
         }
         out->leafValue = PointerGetDatum(fullText);
@@ -498,7 +526,7 @@ Datum spg_text_leaf_consistent(PG_FUNCTION_ARGS)
     res = true;
     for (j = 0; j < in->nkeys; j++) {
         StrategyNumber strategy = in->scankeys[j].sk_strategy;
-        text* query = DatumGetTextPP(in->scankeys[j].sk_argument);
+        text *query = DatumGetTextPP(in->scankeys[j].sk_argument);
         int queryLen = VARSIZE_ANY_EXHDR(query);
         int r;
 
@@ -509,8 +537,8 @@ Datum spg_text_leaf_consistent(PG_FUNCTION_ARGS)
             /* If asserts enabled, verify encoding of reconstructed string */
             Assert(pg_verifymbstr(fullValue, fullLen, false));
 
-            r = varstr_cmp(
-                fullValue, Min(queryLen, fullLen), VARDATA_ANY(query), Min(queryLen, fullLen), PG_GET_COLLATION());
+            r = varstr_cmp(fullValue, Min(queryLen, fullLen), VARDATA_ANY(query), Min(queryLen, fullLen),
+                           PG_GET_COLLATION());
         } else {
             /* Non-collation-aware comparison */
             r = memcmp(fullValue, VARDATA_ANY(query), Min(queryLen, fullLen));
@@ -523,30 +551,7 @@ Datum spg_text_leaf_consistent(PG_FUNCTION_ARGS)
                 r = 1;
         }
 
-        switch (strategy) {
-            case BTLessStrategyNumber:
-                res = (r < 0);
-                break;
-            case BTLessEqualStrategyNumber:
-                res = (r <= 0);
-                break;
-            case BTEqualStrategyNumber:
-                res = (r == 0);
-                break;
-            case BTGreaterEqualStrategyNumber:
-                res = (r >= 0);
-                break;
-            case BTGreaterStrategyNumber:
-                res = (r > 0);
-                break;
-            default:
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("unrecognized strategy number: %d", in->scankeys[j].sk_strategy)));
-                res = false;
-                break;
-        }
-
+        res = spg_check_res(strategy, r);
         if (!res)
             break; /* no need to consider remaining conditions */
     }

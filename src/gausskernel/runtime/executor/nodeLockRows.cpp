@@ -27,10 +27,11 @@
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
+#include "access/tableam.h"
 
 /* ----------------------------------------------------------------
  * ExecLockRows
@@ -95,11 +96,12 @@ lnext:
         bool isNull = false;
         HeapTupleData tuple;
         Buffer buffer;
-        ItemPointerData update_ctid;
-        TransactionId update_xmax;
+        TM_FailureData tmfd;
         LockTupleMode lock_mode;
-        HTSU_Result test;
+        TM_Result test;
         HeapTuple copy_tuple;
+
+        target_part = NULL;
 
         /* clear any leftover test tuple for this rel */
         if (node->lr_epqstate.estate != NULL)
@@ -144,12 +146,8 @@ lnext:
             /* if it is a partition */
             if (tblid != erm->relation->rd_id) {
                 searchFakeReationForPartitionOid(estate->esfRelations,
-                    estate->es_query_cxt,
-                    erm->relation,
-                    tblid,
-                    target_rel,
-                    target_part,
-                    RowExclusiveLock);
+                    estate->es_query_cxt, erm->relation, tblid, target_rel,
+                    target_part, RowExclusiveLock);
                 Assert(tblid == target_rel->rd_id);
             }
         } else {
@@ -180,32 +178,27 @@ lnext:
         else
             lock_mode = LockTupleShared;
 
-        test = heap_lock_tuple(
-            bucket_rel, &tuple, &buffer, &update_ctid, &update_xmax, estate->es_output_cid, lock_mode, erm->noWait);
+        test = tableam_tuple_lock(bucket_rel, &tuple, &buffer, 
+                                      estate->es_output_cid, lock_mode, erm->noWait, &tmfd,
+                                      false, false, false, InvalidSnapshot, NULL, false);
         ReleaseBuffer(buffer);
         switch (test) {
-            case HeapTupleSelfCreated:
+            case TM_SelfCreated:
                 ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                     errmsg("attempted to lock invisible tuple")));
                 break;
-            case HeapTupleSelfUpdated:
+            case TM_SelfModified:
                 /* treat it as deleted; do not process */
                 goto lnext;
 
-            case HeapTupleMayBeUpdated:
+            case TM_Ok:
                 /* got the lock successfully */
                 break;
 
-            case HeapTupleUpdated:
+             case TM_Updated:
                 if (IsolationUsesXactSnapshot())
-                    ereport(ERROR,
-                        (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                    ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                             errmsg("could not serialize access due to concurrent update")));
-                if (ItemPointerEquals(&update_ctid, &tuple.t_self)) {
-                    /* Tuple was deleted, so don't return it */
-                    goto lnext;
-                }
-
                 /*
                  * EvalPlanQual need to reinitialize child plan to do some recheck due to concurrent update,
                  * but we wrap the left tree of Stream node in backend thread. So the child plan cannot be
@@ -213,13 +206,12 @@ lnext:
                  */
                 if (IS_PGXC_DATANODE && u_sess->exec_cxt.under_stream_runtime &&
                     estate->es_plannedstmt->num_streams > 0) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
+                    ereport(ERROR, (errcode(ERRCODE_STREAM_CONCURRENT_UPDATE),
                             errmsg("concurrent update under Stream mode is not yet supported")));
                 }
 
                 /* updated, so fetch and lock the updated version */
-                copy_tuple = EvalPlanQualFetch(estate, bucket_rel, lock_mode, &update_ctid, update_xmax);
+                copy_tuple = tableam_tuple_lock_updated(estate->es_output_cid, bucket_rel, lock_mode, &tmfd.ctid, tmfd.xmax);
                 if (copy_tuple == NULL) {
                     /* Tuple was deleted, so don't return it */
                     goto lnext;
@@ -241,6 +233,16 @@ lnext:
 
                 /* Continue loop until we have all target tuples */
                 break;
+
+            case TM_Deleted:
+                if (IsolationUsesXactSnapshot())
+                    ereport(ERROR,
+                        (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                            errmsg("could not serialize access due to concurrent update")));
+
+                /* Tuple was deleted, so don't return it */
+                Assert(ItemPointerEquals(&tmfd.ctid, &tuple.t_self));
+                goto lnext;
 
             default:
                 ereport(ERROR,
@@ -272,6 +274,8 @@ lnext:
             ExecRowMark* erm = aerm->rowmark;
             HeapTupleData tuple;
             Buffer buffer;
+
+            target_part = NULL;
 
             /* ignore non-active child tables */
             if (!ItemPointerIsValid(&(erm->curCtid))) {
@@ -306,8 +310,7 @@ lnext:
             }
 
             if (target_rel == NULL) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                         errmsg("ExecLockRows:target relation cannot be NULL for plan qual recheck.")));
             }
 
@@ -320,12 +323,13 @@ lnext:
                 bucket_id = computeTupleBucketId(target_rel, &tuple);
                 searchHBucketFakeRelation(estate->esfRelations, estate->es_query_cxt, target_rel, bucket_id, bucket_rel);
             }
-            if (!heap_fetch(bucket_rel, SnapshotAny, &tuple, &buffer, false, NULL))
+
+            if (!tableam_tuple_fetch(bucket_rel, SnapshotAny, &tuple, &buffer, false, NULL))
                 ereport(ERROR,
                     (errcode(ERRCODE_FETCH_DATA_FAILED), errmsg("failed to fetch tuple for EvalPlanQual recheck")));
 
             /* successful, copy and store tuple */
-            EvalPlanQualSetTuple(&node->lr_epqstate, erm->rti, heap_copytuple(&tuple));
+            EvalPlanQualSetTuple(&node->lr_epqstate, erm->rti, (HeapTuple)tableam_tops_copy_tuple(&tuple));
             ReleaseBuffer(buffer);
         }
 
@@ -389,8 +393,12 @@ LockRowsState* ExecInitLockRows(LockRows* node, EState* estate, int eflags)
      * LockRows nodes do no projections, so initialize projection info for
      * this node appropriately
      */
-    ExecAssignResultTypeFromTL(&lrstate->ps);
+    TupleDesc resultDesc = ExecGetResultType(outerPlanState(lrstate));
+    ExecAssignResultTypeFromTL(&lrstate->ps, resultDesc->tdTableAmType);
+
     lrstate->ps.ps_ProjInfo = NULL;
+
+    Assert(lrstate->ps.ps_ResultTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_INVALID);
 
     /*
      * Locate the ExecRowMark(s) that this node is responsible for, and

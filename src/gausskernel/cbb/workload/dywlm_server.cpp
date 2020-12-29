@@ -34,10 +34,9 @@
 #include "utils/lsyscache.h"
 #include "utils/memprot.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "storage/lmgr.h"
-#include "utils/lsyscache.h"
-
+#include "optimizer/nodegroups.h"
 #include "workload/commgr.h"
 #include "workload/workload.h"
 
@@ -121,7 +120,7 @@ bool is_same_node(void* val1, void* val2)
 
     DynamicWorkloadRecord* qnode = (DynamicWorkloadRecord*)lfirst(cell);
 
-    bool is_same = strcmp(qnode->nodename, nodename) == 0 ? true : false;
+    bool is_same = (strcmp(qnode->nodename, nodename) == 0) ? true : false;
 
     if (is_same) {
         /*
@@ -390,11 +389,7 @@ int dywlm_server_send(ServerDynamicManager* srvmgr, const DynamicMessageInfo* ms
                  * 2. the original connection socket release
                  * 3. pool cache may be cleaned up in order to reconnect successfully
                  */
-                LWLockAcquire(PoolerLock, LW_SHARED);
-                release_connection(
-                    agent->pool, agent->coord_connections[nodeidx], agent->coord_conn_oids[nodeidx], true);
-                agent->coord_connections[nodeidx] = NULL;
-                LWLockRelease(PoolerLock);
+                release_connection(agent, &(agent->coord_connections[nodeidx]), agent->coord_conn_oids[nodeidx], true);
 
                 ereport(DEBUG1,
                     (errmsg("pooler: Failed to send dynamic workload params, node idx: %d, node oid: %u",
@@ -440,8 +435,9 @@ int dywlm_server_send(ServerDynamicManager* srvmgr, const DynamicMessageInfo* ms
                             }
 
                             ereport(DEBUG2, (errmsg("receive code for sending: %d", retcode)));
-                            Assert(retcode != -1);
-
+                            if (retcode == -1) {
+                                ereport(ERROR, (errmsg("invalid retcode [%d]", retcode)));
+                            }
                             break;
                         }
                         case 'E':
@@ -469,11 +465,8 @@ int dywlm_server_send(ServerDynamicManager* srvmgr, const DynamicMessageInfo* ms
                     }
                 } else {
                     /* release the slot of the agent */
-                    LWLockAcquire(PoolerLock, LW_SHARED);
-                    release_connection(
-                        agent->pool, agent->coord_connections[nodeidx], agent->coord_conn_oids[nodeidx], true);
-                    agent->coord_connections[nodeidx] = NULL;
-                    LWLockRelease(PoolerLock);
+                    release_connection(agent,
+                        &(agent->coord_connections[nodeidx]), agent->coord_conn_oids[nodeidx], true);
 
                     ereport(LOG,
                         (errmsg("pooler: Failed to send dynamic workload params, node idx: %d, node oid: %u",
@@ -596,7 +589,9 @@ int dywlm_server_create_record(
         record->qtype = qtype;
         record->pnode = NULL;
 
-        Assert(COMP_ACC_CLUSTER || (record->max_memsize > 0 && record->min_actpts > 0));
+        if (!(COMP_ACC_CLUSTER || (record->max_memsize > 0 && record->min_actpts > 0))) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid paras.")));
+        }
 
         errno_t errval = strncpy_s(record->rpname, sizeof(record->rpname), msginfo->rpname, sizeof(record->rpname) - 1);
         securec_check_errval(errval, , LOG);
@@ -773,7 +768,7 @@ EnqueueType dywlm_global_release(ServerDynamicManager* srvmgr, DynamicMessageInf
                 }
 
                 int global_freesize =
-                    (srvmgr->freesize_inc > 0 ? srvmgr->freesize : srvmgr->freesize + srvmgr->freesize_inc);
+                    ((srvmgr->freesize_inc > 0) ? srvmgr->freesize : (srvmgr->freesize + srvmgr->freesize_inc));
                 bool is_running = true;
 
                 if (COMP_ACC_CLUSTER) { /* acceleration cluster */
@@ -1068,7 +1063,7 @@ EnqueueType dywlm_global_reserve(ServerDynamicManager* srvmgr, DynamicMessageInf
     Assert(msginfo != NULL);
 
     /* while free memory of DNs is less than booking, use it as global freesize */
-    int global_freesize = (srvmgr->freesize_inc > 0 ? srvmgr->freesize : srvmgr->freesize + srvmgr->freesize_inc);
+    int global_freesize = ((srvmgr->freesize_inc > 0) ? srvmgr->freesize : (srvmgr->freesize + srvmgr->freesize_inc));
 
     bool found = false;
 
@@ -1118,7 +1113,9 @@ EnqueueType dywlm_global_reserve(ServerDynamicManager* srvmgr, DynamicMessageInf
         }
 
         if (is_running) {
-            Assert(msginfo->memsize <= msginfo->max_memsize && msginfo->memsize >= msginfo->min_memsize);
+            if (!(msginfo->memsize <= msginfo->max_memsize && msginfo->memsize >= msginfo->min_memsize)) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid paras.")));
+            }
         }
 
         return ENQUEUE_NONE;
@@ -1187,7 +1184,7 @@ void dywlm_group_release_internal(ServerDynamicManager* srvmgr, ResourcePool* re
             }
 
             int global_freesize =
-                (srvmgr->freesize_inc > 0 ? srvmgr->freesize : srvmgr->freesize + srvmgr->freesize_inc);
+                ((srvmgr->freesize_inc > 0) ? srvmgr->freesize : (srvmgr->freesize + srvmgr->freesize_inc));
 
             /* we should try waking up the statements in diffrent ways */
             if (qnode->min_memsize > global_freesize || respool->active_points + qnode->min_actpts > qnode->maxpts) {
@@ -1929,7 +1926,9 @@ bool dywlm_subquery_update(ServerDynamicManager* srvmgr, DynamicMessageInfo* msg
         record->qtype = PARCTL_NONE;
         record->pnode = NULL;
 
-        Assert(COMP_ACC_CLUSTER || (record->max_memsize > 0 && record->min_actpts > 0));
+        if (!(COMP_ACC_CLUSTER || (record->max_memsize > 0 && record->min_actpts > 0))) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid paras.")));
+        }
 
         errno_t errval = strncpy_s(record->rpname, sizeof(record->rpname), msginfo->rpname, sizeof(record->rpname) - 1);
         securec_check_errval(errval, , LOG);
@@ -3404,6 +3403,93 @@ void dywlm_server_update_statement_quota(ServerDynamicManager* srvmgr, int Mem_C
     return;
 }
 
+
+void dywlm_encap_node_info(DynamicNodeData* nodedata, DynamicNodeData *tmpdata)
+{
+    /* get total memory size */
+    nodedata->total_memory = tmpdata->total_memory;
+
+    /* get the foreign resource pool size */
+    nodedata->fp_memsize = tmpdata->fp_memsize;
+
+    /* get the foreign resource pool size */
+    nodedata->fp_estmsize = tmpdata->fp_estmsize;
+
+    /* get the foreign resource pool memory percent */
+    nodedata->fp_mempct = tmpdata->fp_mempct;
+
+    /*
+     * If the used memory exceeds 90% of the total memory,
+     * adjust the value of the used memory so that the new
+     * query can not be resumed
+     */
+    int freesize = (tmpdata->total_memory > tmpdata->used_memory) ? (tmpdata->total_memory - tmpdata->used_memory) : 0;
+
+    /*
+     * We use the min free memory available on all DNs
+     * to book the free memory on the server
+     */
+    if (nodedata->min_freesize > freesize) {
+        nodedata->min_freesize = (freesize >= 0) ? freesize : 0;
+    }
+
+    int memutil = 0;
+
+    if (tmpdata->total_memory > 0) {
+        memutil = tmpdata->used_memory * FULL_PERCENT / tmpdata->total_memory;
+    }
+
+    /* we get max memory util */
+    if (nodedata->max_memutil < memutil) {
+        nodedata->max_memutil = memutil;
+    }
+
+    /* we get min memory util */
+    if (nodedata->min_memutil > memutil) {
+        nodedata->min_memutil = memutil;
+    }
+
+    /* we get max CPU util */
+    if (nodedata->cpu_util < tmpdata->cpu_util) {
+        nodedata->cpu_util = tmpdata->cpu_util;
+    }
+
+    /* we get max CPU count */
+    if (nodedata->cpu_count < tmpdata->cpu_count) {
+        nodedata->cpu_count = tmpdata->cpu_count;
+    }
+
+    /* we get max IO util */
+    if (nodedata->io_util < tmpdata->io_util) {
+        nodedata->io_util = tmpdata->io_util;
+    }
+
+    /* get the max used size of foreign resource pool */
+    if (nodedata->fp_usedsize < tmpdata->fp_usedsize) {
+        nodedata->fp_usedsize = tmpdata->fp_usedsize;
+    }
+
+    /* we get max CPU util */
+    if (nodedata->max_cpuutil < tmpdata->cpu_util) {
+        nodedata->max_cpuutil = tmpdata->cpu_util;
+    }
+
+    /* we get min CPU util */
+    if (nodedata->min_cpuutil > tmpdata->cpu_util) {
+        nodedata->min_cpuutil = tmpdata->cpu_util;
+    }
+
+    /* we get min IO util */
+    if (nodedata->max_ioutil < tmpdata->io_util) {
+        nodedata->max_ioutil = tmpdata->io_util;
+    }
+
+    /* we get min CPU util */
+    if (nodedata->min_ioutil > tmpdata->io_util) {
+        nodedata->min_ioutil = tmpdata->io_util;
+    }
+}
+
 /*
  * @Description: parse node info
  * @IN msg: message received
@@ -3477,88 +3563,7 @@ void dywlm_parse_node_info(StringInfo msg, void* suminfo, int size)
         return;
     }
 
-    /* get total memory size */
-    nodedata->total_memory = tmpdata.total_memory;
-
-    /* get the foreign resource pool size */
-    nodedata->fp_memsize = tmpdata.fp_memsize;
-
-    /* get the foreign resource pool size */
-    nodedata->fp_estmsize = tmpdata.fp_estmsize;
-
-    /* get the foreign resource pool memory percent */
-    nodedata->fp_mempct = tmpdata.fp_mempct;
-
-    /*
-     * If the used memory exceeds 90% of the total memory,
-     * adjust the value of the used memory so that the new
-     * query can not be resumed
-     */
-    int freesize = (tmpdata.total_memory > tmpdata.used_memory) ? tmpdata.total_memory - tmpdata.used_memory : 0;
-
-    /*
-     * We use the min free memory available on all DNs
-     * to book the free memory on the server
-     */
-    if (nodedata->min_freesize > freesize) {
-        nodedata->min_freesize = (freesize >= 0) ? freesize : 0;
-    }
-
-    int memutil = 0;
-
-    if (tmpdata.total_memory > 0) {
-        memutil = tmpdata.used_memory * FULL_PERCENT / tmpdata.total_memory;
-    }
-
-    /* we get max memory util */
-    if (nodedata->max_memutil < memutil) {
-        nodedata->max_memutil = memutil;
-    }
-
-    /* we get min memory util */
-    if (nodedata->min_memutil > memutil) {
-        nodedata->min_memutil = memutil;
-    }
-
-    /* we get max CPU util */
-    if (nodedata->cpu_util < tmpdata.cpu_util) {
-        nodedata->cpu_util = tmpdata.cpu_util;
-    }
-
-    /* we get max CPU count */
-    if (nodedata->cpu_count < tmpdata.cpu_count) {
-        nodedata->cpu_count = tmpdata.cpu_count;
-    }
-
-    /* we get max IO util */
-    if (nodedata->io_util < tmpdata.io_util) {
-        nodedata->io_util = tmpdata.io_util;
-    }
-
-    /* get the max used size of foreign resource pool */
-    if (nodedata->fp_usedsize < tmpdata.fp_usedsize) {
-        nodedata->fp_usedsize = tmpdata.fp_usedsize;
-    }
-
-    /* we get max CPU util */
-    if (nodedata->max_cpuutil < tmpdata.cpu_util) {
-        nodedata->max_cpuutil = tmpdata.cpu_util;
-    }
-
-    /* we get min CPU util */
-    if (nodedata->min_cpuutil > tmpdata.cpu_util) {
-        nodedata->min_cpuutil = tmpdata.cpu_util;
-    }
-
-    /* we get min IO util */
-    if (nodedata->max_ioutil < tmpdata.io_util) {
-        nodedata->max_ioutil = tmpdata.io_util;
-    }
-
-    /* we get min CPU util */
-    if (nodedata->min_ioutil > tmpdata.io_util) {
-        nodedata->min_ioutil = tmpdata.io_util;
-    }
+    dywlm_encap_node_info(nodedata, &tmpdata);
 }
 
 /*
@@ -3708,17 +3713,14 @@ static void dywlm_server_sync_jobs(ClientDynamicManager* climgr, List* jobs_list
                     /* more than 3 times, wakeup jobs */
                     cn_dn_idle_times++;
                     if (cn_dn_idle_times <= 3) {
+                        hash_seq_term(&hash_seq);
                         break;
                     }
 
                     ereport(DEBUG3, (errmsg("MLW CN SYNC jobs: CN needs to wake up jobs on DNs, WAKING...")));
 
                     int ret = dywlm_client_self_wakeup_jobs(ready_for_wakeup);
-                    if (ret) {
-                        ereport(LOG, (errmsg("one job has been woken up.")));
-                    } else {
-                        ereport(LOG, (errmsg("no job has been woken up.")));
-                    }
+                    ereport(LOG, (errmsg("job has been woken up num: %d.", ret)));
 
                     hash_seq_term(&hash_seq);
                     break;
@@ -4057,6 +4059,11 @@ DynamicNodeData* dywlm_get_resource_info(ServerDynamicManager* srvmgr)
         return NULL;
     }
 
+    if (IS_PGXC_DATANODE) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("This function could not execute on datanode.")));
+    }
+
     DynamicNodeData* nodedata = (DynamicNodeData*)palloc0_noexcept(sizeof(DynamicNodeData));
 
     if (nodedata == NULL) {
@@ -4259,7 +4266,13 @@ List* dywlm_server_pull_client_active_records(ServerDynamicManager* srvmgr)
         bool isFinished = false;
 
         /* receive workload records from each node */
-        while (!pgxc_node_receive(1, &cn_handle, &timeout)) {
+        for (;;) {
+            if (pgxc_node_receive(1, &cn_handle, &timeout)) {
+                ereport(LOG,
+                    (errmsg("%s:%d recv fail", __FUNCTION__, __LINE__)));
+                break;
+            }
+
             char* msg = NULL;
             int len, retcode;
             char msg_type;
@@ -4352,8 +4365,9 @@ List* dywlm_server_pull_client_active_records(ServerDynamicManager* srvmgr)
                      */
                     break;
                 }
-                default: /* never get here */
-                    break;
+                default: {
+                    ereport(ERROR, (errmsg("Unknow message type '%c' for client records.", msg_type)));;
+                }
             }
 
             /* error occurred or finished, try next node */
@@ -4365,7 +4379,7 @@ List* dywlm_server_pull_client_active_records(ServerDynamicManager* srvmgr)
         if (!isFinished) {
             ereport(ERROR,
                 (errcode(ERRCODE_FETCH_DATA_FAILED),
-                    errmsg("%s", cn_handle->error == NULL ? "Receive Data Failed." : cn_handle->error)));
+                    errmsg("%s", (cn_handle->error == NULL) ? "Receive Data Failed." : cn_handle->error)));
         }
     }
 

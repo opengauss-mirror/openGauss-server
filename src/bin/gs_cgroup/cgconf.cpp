@@ -24,14 +24,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/types.h> /* stat */
 #include <sys/stat.h>
 #include <sys/mman.h> /* mmap */
 #include <fcntl.h>
 
 #include "securec.h"
-#include "securec_check.h"
 #include "cgutil.h"
 
 /*
@@ -527,19 +525,19 @@ void cgconf_update_backend_percent(void)
     for (i = BACKENDCG_START_ID; i <= BACKENDCG_END_ID; i++) {
         if (cgutil_vaddr[i]->used) {
             percent += cgutil_vaddr[i]->ginfo.cls.percent;
-        }
-    }
-
-    if (percent == 0) {
-        fprintf(stderr, "ERROR: the percentage value of backend group is zero.\n");
-        return;
+        }	
     }
 
     /* update the percent of each backend */
     for (i = BACKENDCG_START_ID; i <= BACKENDCG_END_ID; i++) {
         if (cgutil_vaddr[i]->used) {
+            if (percent == 0) {
+                fprintf(stderr, "ERROR: the percentage value of backend group is zero.\n");
+                continue;
+            }
             cgutil_vaddr[i]->percent =
                 cgutil_vaddr[TOPCG_BACKEND]->percent * cgutil_vaddr[i]->ginfo.cls.percent / percent;
+
         }
     }
 }
@@ -585,6 +583,9 @@ void cgconf_update_class_percent(void)
     /* update the percentage of class and workload group */
     for (i = CLASSCG_START_ID; i <= CLASSCG_END_ID; i++) {
         if (cgutil_vaddr[i]->used) {
+            if (percent == 0) {
+                continue;
+            }
             cgutil_vaddr[i]->percent =
                 cgutil_vaddr[TOPCG_CLASS]->percent * cgutil_vaddr[i]->ginfo.cls.percent / percent;
 
@@ -631,7 +632,7 @@ void cgconf_set_class_group(int gid)
 {
     errno_t sret;
     cgutil_vaddr[gid]->used = 1;
-    cgutil_vaddr[gid]->gid = (unsigned short)gid;
+    cgutil_vaddr[gid]->gid = gid;
     cgutil_vaddr[gid]->gtype = GROUP_CLASS;
     cgutil_vaddr[gid]->ginfo.cls.tgid = TOPCG_CLASS;
     cgutil_vaddr[gid]->ginfo.cls.maxlevel = 0;
@@ -708,7 +709,7 @@ void cgconf_set_top_workload_group(int wdgid, int clsgid)
     errno_t sret;
 
     cgutil_vaddr[wdgid]->used = 1;
-    cgutil_vaddr[wdgid]->gid = (unsigned short)wdgid;
+    cgutil_vaddr[wdgid]->gid = wdgid;
     cgutil_vaddr[wdgid]->gtype = GROUP_DEFWD;
     cgutil_vaddr[wdgid]->ginfo.wd.cgid = clsgid;
     cgutil_vaddr[wdgid]->ginfo.wd.wdlevel = 1;
@@ -740,7 +741,7 @@ void cgconf_set_workload_group(int wdgid, int clsgid)
     errno_t sret;
 
     cgutil_vaddr[wdgid]->used = 1;
-    cgutil_vaddr[wdgid]->gid = (unsigned short)wdgid;
+    cgutil_vaddr[wdgid]->gid = wdgid;
     cgutil_vaddr[wdgid]->gtype = GROUP_DEFWD;
     cgutil_vaddr[wdgid]->ginfo.wd.cgid = clsgid;
     cgutil_vaddr[wdgid]->ginfo.wd.wdlevel = cgutil_vaddr[clsgid]->ginfo.cls.maxlevel + 1;
@@ -767,7 +768,7 @@ void cgconf_set_workload_group(int wdgid, int clsgid)
  *
  * Note: this function is called after dropping a Workload group
  */
-void cgconf_reset_workload_group(int wdgid, int clsgid)
+void cgconf_reset_workload_group(int wdgid)
 {
     errno_t sret;
     sret = memset_s(cgutil_vaddr[wdgid], sizeof(gscgroup_grp_t), 0, sizeof(gscgroup_grp_t));
@@ -855,131 +856,16 @@ void cgconf_convert_group(gscgroup_grp_t* newgrp, gscgroup_old_grp_t* oldgrp)
 }
 
 /*
- * function name: cgconf_convert_config_file
- * description  : convert the configure file into new one
- * arguments:
- *   @in cfgpath: configure file path
- *   @in cfgpath_len: the path len
- *   @in cglen: configure file size
- *   @in version: version number
- *
- */
-int cgconf_convert_config_file(const char* cfgpath, size_t cfgpath_len, size_t cglen, int version)
-{
-    errno_t sret;
-    char suffix[5] = ".old";
-    void *oldvaddr = NULL;
-    void *vaddr = NULL;
-    gscgroup_old_grp_t* cgutil_vaddr_old1[GSCGROUP_ALLNUM_OLD] = {NULL};
-    gscgroup_grp_t* cgutil_vaddr_old2[GSCGROUP_ALLNUM_OLD] = {NULL};
-    size_t oldcglen = 0;
-
-    /* recreate the old file path */
-    char* old_cfgpath = (char*)malloc(cfgpath_len + sizeof(suffix));
-
-    if (old_cfgpath == NULL) {
-        return -1;
-    }
-
-    sret = snprintf_s(
-        old_cfgpath, cfgpath_len + sizeof(suffix), cfgpath_len + sizeof(suffix) - 1, "%s%s", cfgpath, suffix);
-    securec_check_intval(sret, free(old_cfgpath), -1);
-
-    /* rename the config path as .old */
-    int rc = rename(cfgpath, old_cfgpath);
-    if (rc != 0) {
-        free(old_cfgpath);
-        old_cfgpath = NULL;
-        return -1;
-    }
-    /* mapping the old file into memory */
-    if (version == V1R5_VERSION) {
-        oldcglen = GSCGROUP_ALLNUM_OLD * sizeof(gscgroup_old_grp_t);
-    } else if (version == V1R6_VERSION) {
-        oldcglen = GSCGROUP_ALLNUM_OLD * sizeof(gscgroup_grp_t);
-    }
-
-    oldvaddr = gsutil_filemap(old_cfgpath, oldcglen, (PROT_READ | PROT_WRITE), MAP_SHARED, cgutil_passwd_user);
-    if (NULL == oldvaddr) {
-        fprintf(stderr, "failed to create and map the configure file %s!\n", old_cfgpath);
-        free(old_cfgpath);
-        old_cfgpath = NULL;
-        return -1;
-    }
-
-    /* version 1 and version 2 have GSCGROUP_ALLNUM_OLD cgroups */
-    for (int i = 0; i < GSCGROUP_ALLNUM_OLD; i++) {
-        if (version == V1R5_VERSION) {
-            cgutil_vaddr_old1[i] = (gscgroup_old_grp_t*)oldvaddr + i;
-        } else if (version == V1R6_VERSION) {
-            cgutil_vaddr_old2[i] = (gscgroup_grp_t*)oldvaddr + i;
-        }
-    }
-
-    free(old_cfgpath);
-    old_cfgpath = NULL;
-
-    /* create the new file */
-    vaddr = gsutil_filemap(cfgpath, cglen, (PROT_READ | PROT_WRITE), MAP_SHARED, cgutil_passwd_user);
-    if (NULL == vaddr) {
-        fprintf(stderr, "failed to create and map the configure file %s!\n", cfgpath);
-        (void)munmap(oldvaddr, oldcglen);
-        return -1;
-    }
-
-    sret = memset_s(vaddr, cglen, 0, cglen);
-    securec_check_errno(sret, (void)munmap(vaddr, cglen); (void)munmap(oldvaddr, oldcglen);, -1);
-
-    for (int i = 0; i < GSCGROUP_ALLNUM; ++i) {
-        int j = -1;
-
-        cgutil_vaddr[i] = (gscgroup_grp_t*)vaddr + i;
-
-        if (version == V1R5_VERSION) {
-            if (i <= WDCG_END_ID_OLD && cgutil_vaddr_old1[i]->used) {
-                j = i;
-            }
-            else if (i >= TSCG_START_ID) {
-                j = TSCG_START_ID_OLD + i - TSCG_START_ID;
-            }
-            if (j != -1) {
-                cgconf_convert_group(cgutil_vaddr[i], cgutil_vaddr_old1[j]);
-            }
-        } else if (version == V1R6_VERSION) {
-            if (i <= WDCG_END_ID_OLD && cgutil_vaddr_old2[i]->used) {
-                j = i;
-            }
-            else if (i >= TSCG_START_ID) {
-                j = TSCG_START_ID_OLD + i - TSCG_START_ID;
-            }
-
-            if (j != -1) {
-                sret = memcpy_s(cgutil_vaddr[i], sizeof(gscgroup_grp_t), cgutil_vaddr_old2[j], sizeof(gscgroup_grp_t));
-                securec_check_errno(sret, (void)munmap(vaddr, cglen); (void)munmap(oldvaddr, oldcglen);, -1);
-            }
-        }
-
-        cgutil_vaddr[i]->gid = (unsigned short)i;
-    }
-
-    (void)munmap(oldvaddr, oldcglen);
-
-    return 0;
-}
-
-/*
  * function name: cgconf_generate_file_by_root
  * description  : generate the configuration file by root user
  *
  * Note: the configuration file must exist in the "etc" directory
  */
-int cgconf_generate_file_by_root(long fsize, char* cfgpath, size_t cfgpath_len)
+int cgconf_generate_file_by_root(long fsize, char* cfgpath)
 {
     void* vaddr = NULL;
     errno_t sret;
-    int version;
     size_t cglen = GSCGROUP_ALLNUM * sizeof(gscgroup_grp_t);
-    size_t cglen_old = GSCGROUP_ALLNUM_OLD * sizeof(gscgroup_grp_t);
 
     /* when deleting the configure file, it must exist! */
     if (cgutil_opt.dflag && (-1 == fsize)) {
@@ -1004,22 +890,6 @@ int cgconf_generate_file_by_root(long fsize, char* cfgpath, size_t cfgpath_len)
 
         /* rewrite the mapping file */
         cgconf_generate_default_config_file(vaddr);
-    }
-    /* file exists, but it is small version, recreate it */
-    else if (fsize > 0 && fsize < (long)cglen) {
-        /* v1r5 version upgrade */
-        if (fsize != (long)cglen_old) {
-            version = V1R5_VERSION;
-        } else {
-            /* v1r6 version upgrade */
-            version = V1R6_VERSION;
-        }
-
-        if (cgconf_convert_config_file(cfgpath, cfgpath_len, cglen, version) == -1) {
-            free(cfgpath);
-            cfgpath = NULL;
-            return -1;
-        }
     } else {
         fprintf(stderr, "ERROR: the file %s has been corrupted, Please remove it and recreate.\n", cfgpath);
         free(cfgpath);
@@ -1085,6 +955,14 @@ int cgconf_generate_file_by_user(long fsize, char* cfgpath)
                     GSCFG_PREFIX,
                     cgutil_passwd_user->pw_name,
                     GSCFG_SUFFIX);
+                if (sret != EOK) {
+                    fprintf(stderr, "ERROR: failed to construct old cgroup config path");
+                    free(old_cfgpath);
+                    old_cfgpath = NULL;
+                    free(cfgpath);
+                    cfgpath = NULL;
+                    return -1;
+                }
 
                 /* rename the old cfgpath to new cfgpath */
                 int ret = rename(old_cfgpath, cfgpath);
@@ -1330,7 +1208,6 @@ int cgconf_parse_config_file(void)
     int i = 0;
     int ret = -1;
     char* cfgpath = NULL;
-    const size_t cfgpath_len = 1024;
 
     /* get the configure path */
     cfgpath = cgconf_get_config_path(false);
@@ -1342,7 +1219,7 @@ int cgconf_parse_config_file(void)
     /* configure file doesn't exist or size is not the same*/
     if (-1 == fsize || fsize != (long)cglen) {
         if (geteuid() == 0) {
-            ret = cgconf_generate_file_by_root(fsize, cfgpath, cfgpath_len);
+            ret = cgconf_generate_file_by_root(fsize, cfgpath);
         } else {
             if (cgutil_opt.cflag && *cgutil_opt.nodegroup && *cgutil_opt.clsname == '\0')
                 ret = cgconf_generate_file_by_user(fsize, cfgpath);

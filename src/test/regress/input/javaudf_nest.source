@@ -1,0 +1,65 @@
+---test: nest call
+START TRANSACTION;
+CREATE FUNCTION java_addOne_Integer(int)
+	RETURNS int
+	AS 'huawei.javaudf.basic.BasicJavaUDF.addOne(java.lang.Integer)'
+	IMMUTABLE LANGUAGE java;
+
+CREATE FUNCTION nullOnEven(int)
+	RETURNS int
+	AS 'huawei.javaudf.basic.BasicJavaUDF.nullOnEven'
+	IMMUTABLE LANGUAGE java;
+
+SELECT nullOnEven(java_addOne_Integer(1));
+SELECT nullOnEven(java_addOne_Integer(2));
+SELECT nullOnEven(java_addOne_Integer(java_addOne_Integer(java_addOne_Integer(java_addOne_Integer(java_addOne_Integer(1))))));
+
+
+CREATE FUNCTION oldstyle_length(int4, text)
+	RETURNS int4
+	AS '@abs_bindir@/../lib/postgresql/java/regress.so'
+	LANGUAGE C;
+
+SELECT nullOnEven(oldstyle_length(10, 'abc'));
+SELECT nullOnEven(java_addOne_Integer(oldstyle_length(10, 'abc')));
+SELECT oldstyle_length(java_addOne_Integer(9), 'abc');
+SELECT java_addOne_Integer(oldstyle_length(java_addOne_Integer(9), 'abc'));
+
+DROP FUNCTION java_addOne_Integer;
+DROP FUNCTION nullOnEven;
+DROP FUNCTION oldstyle_length;
+
+ROLLBACK;
+
+---test: normal user can not create javaudf
+CREATE USER udf_usr PASSWORD 'GAUSS@123';
+GRANT ALL PRIVILEGES ON LANGUAGE java TO udf_usr;
+
+SET SESSION SESSION AUTHORIZATION udf_usr PASSWORD 'GAUSS@123';
+CREATE FUNCTION java_addOne_Integer(int)
+	RETURNS int
+	AS 'huawei.javaudf.basic.BasicJavaUDF.addOne(java.lang.Integer)'
+	IMMUTABLE LANGUAGE java;
+
+---test: sysadmin user can create and use javaudf */
+RESET SESSION AUTHORIZATION;
+CREATE USER udf_admin PASSWORD 'GAUSS@123' SYSADMIN;
+SET SESSION SESSION AUTHORIZATION udf_admin PASSWORD 'GAUSS@123';
+
+CREATE FUNCTION nullOnEven(int)
+	RETURNS int
+	AS 'huawei.javaudf.basic.BasicJavaUDF.nullOnEven'
+	IMMUTABLE LANGUAGE java;
+
+SELECT nullOnEven(2);
+
+---test: normal user can use granted udf */
+GRANT ALL PRIVILEGES ON SCHEMA udf_admin TO udf_usr;
+SET SESSION SESSION AUTHORIZATION udf_usr PASSWORD 'GAUSS@123';
+
+SELECT udf_admin.nullOnEven(2);
+
+RESET SESSION AUTHORIZATION;
+
+DROP USER udf_admin CASCADE;
+DROP USER udf_usr CASCADE;

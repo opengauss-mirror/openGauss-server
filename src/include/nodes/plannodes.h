@@ -35,7 +35,19 @@
  * on Datanodes (normal Remote Queries),
  * or on all Postgres-XC nodes (Utilities and DDL).
  */
-typedef enum { EXEC_ON_DATANODES, EXEC_ON_COORDS, EXEC_ON_ALL_NODES, EXEC_ON_NONE } RemoteQueryExecType;
+typedef enum
+{
+    EXEC_ON_DATANODES,
+    EXEC_ON_COORDS,
+    EXEC_ON_ALL_NODES,
+    EXEC_ON_NONE
+} RemoteQueryExecType;
+
+#define EXEC_CONTAIN_COORDINATOR(exec_type) \
+    ((exec_type) == EXEC_ON_ALL_NODES || (exec_type) == EXEC_ON_COORDS)
+
+#define EXEC_CONTAIN_DATANODE(exec_type) \
+    ((exec_type) == EXEC_ON_ALL_NODES || (exec_type) == EXEC_ON_DATANODES)
 
 /*
  * Determines the position where the RemoteQuery node will run.
@@ -85,8 +97,6 @@ typedef struct PlannedStmt {
 
     bool dependsOnRole; /* is plan specific to current role? */
 
-    bool parallelModeNeeded; /* parallel mode required to execute? */
-
     Plan* planTree; /* tree of Plan nodes */
 
     List* rtable; /* list of RangeTblEntry nodes */
@@ -96,8 +106,7 @@ typedef struct PlannedStmt {
 
     Node* utilityStmt; /* non-null if this is DECLARE CURSOR */
 
-    List* subplans; /* Plan trees for SubPlan expressions; note
-                     * that some could be NULL */
+    List* subplans; /* Plan trees for SubPlan expressions */
 
     Bitmapset* rewindPlanIDs; /* indices of subplans that require REWIND */
 
@@ -192,6 +201,9 @@ typedef struct PlannedStmt {
 
     bool isRowTriggerShippable; /* true if all row triggers are shippable. */
     bool is_stream_plan;
+    bool multi_node_hint;
+
+    uint64 uniqueSQLId;
 } PlannedStmt;
 
 typedef struct NodeGroupInfoContext {
@@ -244,12 +256,6 @@ typedef struct Plan {
     double multiple;
     int plan_width; /* average row width in bytes */
     int dop;        /* degree of parallelism of current plan */
-
-    /*
-     * information needed for parallel query
-     */
-    bool parallel_aware; /* engage parallel-aware logic? */
-    bool parallel_safe;
 
     /*
      * machine learning model estimations
@@ -423,11 +429,11 @@ typedef struct ModifyTable {
     List* mergeActionList; /* actions for MERGE */
 
     UpsertAction upsertAction; /* DUPLICATE KEY UPDATE action */
-    List* updateTlist;         /* List of UPDATE target */
-    List* exclRelTlist;        /* target list of the EXECLUDED pseudo relation */
-    Index exclRelRTIndex;      /* RTI of the EXCLUDED pseudo relation */
+    List* updateTlist;			/* List of UPDATE target */
+    List* exclRelTlist;		   /* target list of the EXECLUDED pseudo relation */
+    Index exclRelRTIndex;			 /* RTI of the EXCLUDED pseudo relation */
 
-    OpMemInfo mem_info;    /* Memory info for modify node */
+    OpMemInfo mem_info;    /*  Memory info for modify node */
 } ModifyTable;
 
 /* ----------------
@@ -438,7 +444,6 @@ typedef struct ModifyTable {
 typedef struct Append {
     Plan plan;
     List* appendplans;
-    int first_partial_plan;
 } Append;
 
 typedef struct VecAppend : public Append {
@@ -507,7 +512,6 @@ typedef struct BitmapAnd {
  */
 typedef struct BitmapOr {
     Plan plan;
-    bool isshared;
     List* bitmapplans;
 } BitmapOr;
 
@@ -586,6 +590,12 @@ typedef struct TsStoreScan: public Scan {
     List        *minMaxInfo;        /* min/max information, mark get this column min or max value.*/
     RelstoreType relStoreLocation;  /* The store position information. */
     bool        is_replica_table;   /* Is a replication table? */
+    AttrNumber   sort_by_time_colidx;  /* If is sort by tstime limit n */
+    int          limit; /* If is limit n */
+    bool         is_simple_scan; /* If is sort by tstime limit n */
+    bool         has_sort; /* If is have sort node */
+    int          series_func_calls; /* series function calls time  */
+    int          top_key_func_arg; /* second arg of top_key function */
 } TsStoreScan;
 
 /* ----------------
@@ -684,7 +694,6 @@ typedef struct IndexOnlyScan {
 typedef struct BitmapIndexScan {
     Scan scan;
     Oid indexid;         /* OID of index to scan */
-    bool isshared;
     char* indexname;     /*	name of index to scan */
     List* indexqual;     /* list of index quals (OpExprs) */
     List* indexqualorig; /* the same in original form */
@@ -1122,6 +1131,7 @@ typedef struct Agg {
     bool is_sonichash;    /* allowed to use sonic hash routine or not */
     bool is_dummy;        /* just for coop analysis, if true, agg node does nothing */
     uint32 skew_optimize; /* skew optimize method for agg */
+    bool   unique_check;  /* we will report an error when meet duplicate in unique check mode */
 } Agg;
 
 /* ----------------
@@ -1156,17 +1166,6 @@ typedef struct Unique {
     Oid* uniqOperators;     /* equality operators to compare with */
 } Unique;
 
-/* ------------
- * 		gather node
- * ------------
- */
-typedef struct Gather {
-    Plan plan;
-    int num_workers;
-    int rescan_param; /* ID of Param that signals a rescan, or -1 */
-    bool single_copy;
-} Gather;
-
 /* ----------------
  *		hash build node
  *
@@ -1181,10 +1180,9 @@ typedef struct Hash {
     Oid skewTable;         /* outer join key's table OID, or InvalidOid */
     AttrNumber skewColumn; /* outer join key's column #, or zero */
     bool skewInherit;      /* is outer join rel an inheritance tree? */
-    double rows_total;     /* estimate total rows if parallel_aware */
-    Oid skewColType;     /* datatype of the outer key column */
-    int32 skewColTypmod; /* typmod of the outer key column */
-                         /* all other info is in the parent HashJoin node */
+    Oid skewColType;       /* datatype of the outer key column */
+    int32 skewColTypmod;   /* typmod of the outer key column */
+                           /* all other info is in the parent HashJoin node */
 } Hash;
 
 /* ----------------
@@ -1390,5 +1388,12 @@ typedef struct VecForeignScan : public ForeignScan {
 
 typedef struct VecModifyTable : public ModifyTable {
 } VecModifyTable;
+
+static inline bool IsJoinPlan(Node* node)
+{
+    return IsA(node, Join) || IsA(node, NestLoop) || IsA(node, VecNestLoop) || IsA(node, MergeJoin) ||
+        IsA(node, VecMergeJoin) || IsA(node, HashJoin) || IsA(node, VecHashJoin);
+}
+
 #endif /* PLANNODES_H */
 

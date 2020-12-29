@@ -18,11 +18,11 @@ select relname, boundaries from pg_partition;
 
 select * from interval_tab1 where logdate < '2020-4-7 0:0:0';
 
-explain (costs off, verbose on, nodes off) select * from interval_tab1 where logdate < '2020-4-7 0:0:0';
+explain (costs off, verbose on) select * from interval_tab1 where logdate < '2020-4-7 0:0:0';
 
 select * from interval_tab1 where logdate > '2020-4-6';
 
-explain (costs off, verbose on, nodes off) select * from interval_tab1 where logdate > '2020-4-6';
+explain (costs off, verbose on) select * from interval_tab1 where logdate > '2020-4-6';
 
 select * from interval_tab1 where logdate = '2020-4-7 2:0:0';
 
@@ -49,6 +49,6 @@ select * from interval_tab1 where logdate >= '2020-4-7 0:0:0' and logdate <= '20
 
 select * from interval_tab1 where logdate > '2020-4-6 0:0:0' and logdate <= '2020-4-9 0:0:0';
 
-explain (costs off, verbose on, nodes off)  select * from interval_tab1 where logdate >= '2020-4-10 0:0:0';
+explain (costs off, verbose on)  select * from interval_tab1 where logdate >= '2020-4-10 0:0:0';
 
 drop table interval_tab1;

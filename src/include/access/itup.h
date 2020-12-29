@@ -16,8 +16,8 @@
 
 #include "access/tupdesc.h"
 #include "access/tupmacs.h"
-#include "storage/bufpage.h"
-#include "storage/itemptr.h"
+#include "storage/buf/bufpage.h"
+#include "storage/item/itemptr.h"
 
 /*
  * Index tuple header structure

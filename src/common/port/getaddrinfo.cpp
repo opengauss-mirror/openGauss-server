@@ -242,7 +242,7 @@ int getaddrinfo(const char* node, const char* service, const struct addrinfo* hi
     ai = malloc(sizeof(*ai));
 #endif /*WIN32*/
 #else
-    ai = MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(*ai));
+    ai = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), sizeof(*ai));
 #endif
     if (ai == NULL) {
         return EAI_MEMORY;
@@ -255,7 +255,7 @@ int getaddrinfo(const char* node, const char* service, const struct addrinfo* hi
     psin = malloc(sizeof(*psin));
 #endif /*WIN32*/
 #else
-    psin = MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(*psin));
+    psin = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), sizeof(*psin));
 #endif
     if (psin == NULL) {
 #ifdef FRONTEND

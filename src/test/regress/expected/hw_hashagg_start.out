@@ -92,7 +92,7 @@ FROM TMP_CUST_ASSET_SUM_1 T1 group by 1,2,3
 --?   ->  WindowAgg (actual time=.* rows=.* loops=.*)
 --?         ->  Sort (actual time=.* rows=.* loops=.*)
                Sort Key: t1.party_id
---?            Sort Method: external merge  Memory: .*kB
+               Sort Method: external merge  Memory: 4704kB
 --?               ->  HashAggregate (actual time=.* rows=.* loops=.*)
                      Group By Key: t1.party_id, t1.zone_num, t1.asset_max_belong_org_num
  Temp File Num: 512

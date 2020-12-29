@@ -3,6 +3,7 @@
  * gtm_utils.h
  *
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2010, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
@@ -14,7 +15,7 @@
 #ifndef GTM_UTILS_H
 #define GTM_UTILS_H
 
-#include "gtm/libpq-int.h"
+#include "gtm/utils/libpq-int.h"
 #include "gtm/gtm_msg.h"
 
 #ifndef WIN32
@@ -36,39 +37,42 @@ typedef struct timeval gtms_time;
 
 #define GTMS_TIME_SET_CURRENT(t) gettimeofday(&(t), NULL)
 
-#define GTMS_TIME_ADD(x, y) do { \
-    (x).tv_sec += (y).tv_sec;        \
-    (x).tv_usec += (y).tv_usec;      \
-    /* Normalize */                  \
-    while ((x).tv_usec >= 1000000) { \
-        (x).tv_usec -= 1000000;      \
-        (x).tv_sec++;                \
-    }                                \
-} while (0)
+#define GTMS_TIME_ADD(x, y)              \
+    do {                                 \
+        (x).tv_sec += (y).tv_sec;        \
+        (x).tv_usec += (y).tv_usec;      \
+        /* Normalize */                  \
+        while ((x).tv_usec >= 1000000) { \
+            (x).tv_usec -= 1000000;      \
+            (x).tv_sec++;                \
+        }                                \
+    } while (0)
 
-#define GTMS_TIME_SUBTRACT(x, y) do { \
-    (x).tv_sec -= (y).tv_sec;   \
-    (x).tv_usec -= (y).tv_usec; \
-    /* Normalize */             \
-    while ((x).tv_usec < 0) {   \
-        (x).tv_usec += 1000000; \
-        (x).tv_sec--;           \
-    }                           \
-} while (0)
+#define GTMS_TIME_SUBTRACT(x, y)    \
+    do {                            \
+        (x).tv_sec -= (y).tv_sec;   \
+        (x).tv_usec -= (y).tv_usec; \
+        /* Normalize */             \
+        while ((x).tv_usec < 0) {   \
+            (x).tv_usec += 1000000; \
+            (x).tv_sec--;           \
+        }                           \
+    } while (0)
 
-#define GTMS_TIME_ACCUM_DIFF(x, y, z) do { \
-    (x).tv_sec += (y).tv_sec - (z).tv_sec;                                \
-    (x).tv_usec += (y).tv_usec - (z).tv_usec;                             \
-    /* Normalize after each add to avoid overflow/underflow of tv_usec */ \
-    while ((x).tv_usec < 0) {                                             \
-        (x).tv_usec += 1000000;                                           \
-        (x).tv_sec--;                                                     \
-    }                                                                     \
-    while ((x).tv_usec >= 1000000) {                                      \
-        (x).tv_usec -= 1000000;                                           \
-        (x).tv_sec++;                                                     \
-    }                                                                     \
-} while (0)
+#define GTMS_TIME_ACCUM_DIFF(x, y, z)                                         \
+    do {                                                                      \
+        (x).tv_sec += (y).tv_sec - (z).tv_sec;                                \
+        (x).tv_usec += (y).tv_usec - (z).tv_usec;                             \
+        /* Normalize after each add to avoid overflow/underflow of tv_usec */ \
+        while ((x).tv_usec < 0) {                                             \
+            (x).tv_usec += 1000000;                                           \
+            (x).tv_sec--;                                                     \
+        }                                                                     \
+        while ((x).tv_usec >= 1000000) {                                      \
+            (x).tv_usec -= 1000000;                                           \
+            (x).tv_sec++;                                                     \
+        }                                                                     \
+    } while (0)
 
 #define GTMS_TIME_GET_DOUBLE(t) (((double)(t).tv_sec) + ((double)(t).tv_usec) / 1000000.0)
 
@@ -79,8 +83,8 @@ typedef struct timeval gtms_time;
 #endif /* WIN32 */
 
 void gtm_util_init_nametabs(void);
-char *gtm_util_message_name(GTM_MessageType type);
-char *gtm_util_result_name(GTM_ResultType type);
+char* gtm_util_message_name(GTM_MessageType type);
+char* gtm_util_result_name(GTM_ResultType type);
 
 extern void gtm_usleep(long microsec);
 #endif /* GTM_UTILS_H */

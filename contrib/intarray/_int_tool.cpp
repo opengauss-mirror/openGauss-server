@@ -112,7 +112,9 @@ ArrayType* inner_int_inter(ArrayType* a, ArrayType* b)
 {
     ArrayType* r = NULL;
     int na, nb;
-    int *da, *db, *dr;
+    int *da = NULL;
+    int *db = NULL;
+    int *dr = NULL;
     int i, j, k;
 
     if (ARRISEMPTY(a) || ARRISEMPTY(b))
@@ -154,7 +156,9 @@ void rt__int_size(ArrayType* a, float* size)
 bool isort(int4* a, int len)
 {
     int4 cur, prev;
-    int4 *pcur, *pprev, *end;
+    int4 *pcur = NULL;
+    int4 *pprev = NULL;
+    int4 *end = NULL;
     bool r = FALSE;
 
     /*
@@ -223,7 +227,8 @@ ArrayType* copy_intArrayType(ArrayType* a)
     int n = ARRNELEMS(a);
 
     r = new_intArrayType(n);
-    memcpy(ARRPTR(r), ARRPTR(a), n * sizeof(int4));
+    int rc = memcpy_s(ARRPTR(r), n * sizeof(int4), ARRPTR(a), n * sizeof(int4));
+    securec_check(rc, "\0", "\0");
     return r;
 }
 
@@ -243,7 +248,9 @@ int internal_size(int* a, int len)
 /* unique-ify elements of r in-place ... r must be sorted already */
 ArrayType* _int_unique(ArrayType* r)
 {
-    int *tmp, *dr, *data;
+    int *tmp = NULL;
+    int *dr = NULL;
+    int *data = NULL;
     int num = ARRNELEMS(r);
 
     if (num < 2)
@@ -272,7 +279,8 @@ void gensign(BITVEC sign, int* a, int len)
 
 int32 intarray_match_first(ArrayType* a, int32 elem)
 {
-    int32 *aa, c, i;
+    int32 *aa = NULL;
+    int32 c, i;
 
     CHECKARRVALID(a);
     c = ARRNELEMS(a);

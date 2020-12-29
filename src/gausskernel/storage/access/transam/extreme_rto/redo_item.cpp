@@ -44,10 +44,10 @@
 namespace extreme_rto {
 
 /* Run from the dispatcher thread. */
-RedoItem* CreateRedoItem(XLogReaderState* record, uint32 shareCount, uint32 designatedWorker, List* expectedTLIs,
-    TimestampTz recordXTime, bool buseoriginal, bool isForceAll)
+RedoItem *CreateRedoItem(XLogReaderState *record, uint32 shareCount, uint32 designatedWorker, List *expectedTLIs,
+                         TimestampTz recordXTime, bool buseoriginal, bool isForceAll)
 {
-    RedoItem* item = GetRedoItemPtr(record);
+    RedoItem *item = GetRedoItemPtr(record);
     if (t_thrd.xlog_cxt.redoItemIdx == 0) {
         /*
          * Some blocks are optional and redo functions rely on the correct
@@ -86,12 +86,12 @@ RedoItem* CreateRedoItem(XLogReaderState* record, uint32 shareCount, uint32 desi
     return item;
 }
 
-void ApplyRedoRecord(XLogReaderState* record, bool bOld)
+void ApplyRedoRecord(XLogReaderState *record, bool bOld)
 {
     t_thrd.xlog_cxt.redo_oldversion_xlog = bOld;
     ErrorContextCallback errContext;
     errContext.callback = rm_redo_error_callback;
-    errContext.arg = (void*)record;
+    errContext.arg = (void *)record;
     errContext.previous = t_thrd.log_cxt.error_context_stack;
     t_thrd.log_cxt.error_context_stack = &errContext;
     if (module_logging_is_on(MOD_REDO)) {

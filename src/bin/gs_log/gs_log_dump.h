@@ -34,7 +34,7 @@
 #include "pgtz.h"
 #include "postmaster/syslogger.h"
 
-#define GAUSS_ID "openGauss"
+#define GAUSS_ID "GaussDB Kernel"
 #define GAUSS_HOME_ENV "GAUSSHOME"
 #define GAUSS_TZ_SUBDIR "/share/postgresql/"
 

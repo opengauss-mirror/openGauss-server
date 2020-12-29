@@ -17,7 +17,7 @@
  *
  *
  * IDENTIFICATION
- *         src/gausskernel/storage/access/dfs/parquet/parquet_column_reader.cpp
+ *    src/gausskernel/storage/access/dfs/parquet/parquet_column_reader.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -27,11 +27,12 @@
 #include "utils/elog.h"
 #include "utils/memutils.h"
 #include "access/dfs/dfs_query.h"
+#include "access/dfs/dfs_query_check.h"
+#include "access/dfs/dfs_wrapper.h"
 #include "arrow/util/bit-util.h"
 
 namespace dfs {
 namespace reader {
-
 #define NOT_STRING(oid) (((oid) != VARCHAROID && (oid) != BPCHAROID) && ((oid) != TEXTOID && (oid) != CLOBOID))
 
 void convertBufferToDatum(const uint8_t *buf, int32_t length, int32_t scale, Datum &result)
@@ -74,7 +75,7 @@ void convertBufferToDatum(const uint8_t *buf, int32_t length, int32_t scale, Dat
 /* Convert a value in the Parquet column into datum. */
 template <Oid varType>
 Datum convertToDatumT(void *primitiveBatch, uint64 rowId, parquet::Type::type physicalType, int32 scale,
-                        int32_t typeLength, bool &isNull, int32 encoding, int32 checkEncodingLevel, bool &meetError)
+                      int32_t typeLength, bool &isNull, int32 encoding, int32 checkEncodingLevel, bool &meetError)
 {
     Datum result = 0;
     switch (physicalType) {
@@ -106,7 +107,7 @@ Datum convertToDatumT(void *primitiveBatch, uint64 rowId, parquet::Type::type ph
                 default:
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_PARQUET),
                                     errmsg("Unsupported var type %u from data type %s(%u).", varType,
-                                            parquet::TypeToString(physicalType).c_str(), physicalType)));
+                                           parquet::TypeToString(physicalType).c_str(), physicalType)));
             }
             break;
         }
@@ -132,7 +133,7 @@ Datum convertToDatumT(void *primitiveBatch, uint64 rowId, parquet::Type::type ph
                 default:
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_PARQUET),
                                     errmsg("Unsupported var type %u from data type %s(%u).", varType,
-                                            parquet::TypeToString(physicalType).c_str(), physicalType)));
+                                           parquet::TypeToString(physicalType).c_str(), physicalType)));
             }
             break;
         }
@@ -150,7 +151,7 @@ Datum convertToDatumT(void *primitiveBatch, uint64 rowId, parquet::Type::type ph
                 default:
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_PARQUET),
                                     errmsg("Unsupported var type %u from data type %s(%u).", varType,
-                                            parquet::TypeToString(physicalType).c_str(), physicalType)));
+                                           parquet::TypeToString(physicalType).c_str(), physicalType)));
             }
             break;
         }
@@ -169,8 +170,8 @@ Datum convertToDatumT(void *primitiveBatch, uint64 rowId, parquet::Type::type ph
             char *tmpValue = (char *)baValue.ptr;
             int64_t length = static_cast<int64_t>(baValue.len);
 
-            /* Check compatibility and convert '' into null if the db is DB_FMT_A. */
-            if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+            /* Check compatibility and convert '' into null if the db is A_FORMAT. */
+            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
                 isNull = true;
                 break;
             }
@@ -197,7 +198,7 @@ Datum convertToDatumT(void *primitiveBatch, uint64 rowId, parquet::Type::type ph
                 default: {
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_PARQUET),
                                     errmsg("Unsupported var type %u from data type %s(%u).", varType,
-                                            parquet::TypeToString(physicalType).c_str(), physicalType)));
+                                           parquet::TypeToString(physicalType).c_str(), physicalType)));
                 }
             }
 
@@ -220,7 +221,7 @@ Datum convertToDatumT(void *primitiveBatch, uint64 rowId, parquet::Type::type ph
                 default:
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_PARQUET),
                                     errmsg("Unsupported var type %u from data type %s(%u).", varType,
-                                            parquet::TypeToString(physicalType).c_str(), physicalType)));
+                                           parquet::TypeToString(physicalType).c_str(), physicalType)));
             }
             break;
         }
@@ -241,28 +242,28 @@ public:
     ParquetColumnReaderImpl(const parquet::ColumnDescriptor *desc, uint32_t columnIndex, uint32_t mppColumnIndex,
                             ReaderState *readerState, const Var *var)
         : m_desc(desc),
-            m_readerState(readerState),
-            m_lessThanExpr(NULL),
-            m_greaterThanExpr(NULL),
-            m_internalContext(NULL),
-            m_var(var),
-            predicate(NULL),
-            bloomFilter(NULL),
-            checkBloomFilterOnRow(false),
-            checkPredicateOnRow(false),
-            m_convertToDatumFunc(NULL),
-            m_checkEncodingLevel(readerState->checkEncodingLevel),
-            m_skipRowsBuffer(0),
-            m_columnIndex(columnIndex),
-            m_mppColumnIndex(mppColumnIndex),
-            m_numNullValuesRead(0),
-            m_num_rows(0),
-            m_num_row_groups(0),
-            m_currentRowGroupIndex(0),
-            m_totalRowsInCurrentRowGroup(0),
-            m_rowsReadInCurrentRowGroup(0),
-            m_rowBufferSize(0),
-            m_rowBuffer(NULL)
+          m_readerState(readerState),
+          m_lessThanExpr(NULL),
+          m_greaterThanExpr(NULL),
+          m_internalContext(NULL),
+          m_var(var),
+          predicate(NULL),
+          bloomFilter(NULL),
+          checkBloomFilterOnRow(false),
+          checkPredicateOnRow(false),
+          m_convertToDatumFunc(NULL),
+          m_checkEncodingLevel(readerState->checkEncodingLevel),
+          m_skipRowsBuffer(0),
+          m_columnIndex(columnIndex),
+          m_mppColumnIndex(mppColumnIndex),
+          m_numNullValuesRead(0),
+          m_num_rows(0),
+          m_num_row_groups(0),
+          m_currentRowGroupIndex(0),
+          m_totalRowsInCurrentRowGroup(0),
+          m_rowsReadInCurrentRowGroup(0),
+          m_rowBufferSize(0),
+          m_rowBuffer(NULL)
     {
     }
 
@@ -287,7 +288,7 @@ public:
 
         m_internalContext =
             AllocSetContextCreate(m_readerState->persistCtx, "parquet column reader context for parquet dfs reader",
-                                    ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+                                  ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
         MemoryContext oldContext = MemoryContextSwitchTo(m_internalContext);
 
@@ -321,7 +322,7 @@ public:
         }
     }
 
-    void setRowGroupIndex(uint64_t rowGroupIndex)
+    void setRowGroupIndex(const uint64_t rowGroupIndex)
     {
         DFS_TRY()
         {
@@ -333,17 +334,18 @@ public:
             m_rowsReadInCurrentRowGroup = 0;
         }
         DFS_CATCH();
-        DFS_ERRREPORT_WITHARGS("Error occurs while read row index of parquet file %s because of %s, "
-                                "detail can be found in dn log of %s.",
-                                MOD_PARQUET, m_readerState->currentSplit->filePath);
+        DFS_ERRREPORT_WITHARGS(
+            "Error occurs while read row index of parquet file %s because of %s, "
+            "detail can be found in dn log of %s.",
+            MOD_PARQUET, m_readerState->currentSplit->filePath);
     }
 
-    void skip(uint64_t numValues)
+    void skip(const uint64_t numValues)
     {
         m_skipRowsBuffer += numValues;
     }
 
-    void nextInternal(uint64_t numRowsToRead)
+    void nextInternal(const uint64_t numRowsToRead)
     {
         Assert(numRowsToRead <= (m_totalRowsInCurrentRowGroup - m_rowsReadInCurrentRowGroup));
 
@@ -376,7 +378,8 @@ public:
                 numValuesRead = 0;
 
                 auto rowsRead = (uint64_t)typedReader->ReadBatch(numRowsToRead - numRowsRead, m_defLevels, m_repLevels,
-                    m_values + numRowsRead - m_numNullValuesRead, &numValuesRead);
+                                                                 m_values + numRowsRead - m_numNullValuesRead,
+                                                                 &numValuesRead);
 
                 for (uint64_t i = 0; i < rowsRead; i++) {
                     m_notNullValues[numRowsRead + i] = m_defLevels[i] == m_desc->max_definition_level();
@@ -398,9 +401,10 @@ public:
             }
         }
         DFS_CATCH();
-        DFS_ERRREPORT_WITHARGS("Error occurs while reading parquet file %s because of %s, "
-                                "detail can be found in dn log of %s.",
-                                MOD_PARQUET, m_readerState->currentSplit->filePath);
+        DFS_ERRREPORT_WITHARGS(
+            "Error occurs while reading parquet file %s because of %s, "
+            "detail can be found in dn log of %s.",
+            MOD_PARQUET, m_readerState->currentSplit->filePath);
 
         if (errOccur) {
             ereport(WARNING,
@@ -411,12 +415,12 @@ public:
                             m_readerState->currentSplit->filePath, m_columnIndex, skipRecords, numRowsToRead)));
             ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmodule(MOD_PARQUET),
                             errmsg("Error occurs while reading parquet file %s, "
-                                    "detail can be found in dn log of %s.",
-                                    m_readerState->currentSplit->filePath, g_instance.attr.attr_common.PGXCNodeName)));
+                                   "detail can be found in dn log of %s.",
+                                   m_readerState->currentSplit->filePath, g_instance.attr.attr_common.PGXCNodeName)));
         }
     }
 
-    int32_t fillScalarVector(uint64_t numRowsToRead, bool *isSelected, ScalarVector *scalorVector)
+    int32_t fillScalarVector(uint64_t numRowsToRead, const bool *isSelected, ScalarVector *scalorVector)
     {
         ScalarDesc desc = scalorVector->m_desc;
 
@@ -447,7 +451,7 @@ public:
     }
 
     Node *buildColRestriction(RestrictionType type, parquet::ParquetFileReader *fileReader,
-                                uint64_t rowGroupIndex) const override
+                              uint64_t rowGroupIndex) const override
     {
         Datum minValue = 0;
         Datum maxValue = 0;
@@ -460,7 +464,7 @@ public:
             switch (type) {
                 case ROW_GROUP: {
                     hasStatistics = getStatistics(fileReader, rowGroupIndex, &minValue, &hasMinimum, &maxValue,
-                                                    &hasMaximum);
+                                                  &hasMaximum);
                     break;
                 }
                 default: {
@@ -475,7 +479,7 @@ public:
 
         if (hasStatistics != 0) {
             baseRestriction = MakeBaseConstraintWithExpr(m_lessThanExpr, m_greaterThanExpr, minValue, maxValue,
-                                                        hasMinimum, hasMaximum);
+                                                         hasMinimum, hasMaximum);
         }
 
         return baseRestriction;
@@ -483,12 +487,12 @@ public:
 
 private:
     void initColumnReader(std::unique_ptr<GSInputStream> gsInputStream,
-                            const std::shared_ptr<parquet::FileMetaData> &fileMetaData)
+                          const std::shared_ptr<parquet::FileMetaData> &fileMetaData)
     {
         std::unique_ptr<parquet::RandomAccessSource> source(
             new ParquetInputStreamAdapter(m_internalContext, std::move(gsInputStream)));
         m_realParquetFileReader = parquet::ParquetFileReader::Open(std::move(source),
-                                                                    parquet::default_reader_properties(), fileMetaData);
+                                                                   parquet::default_reader_properties(), fileMetaData);
 
         m_num_rows = m_realParquetFileReader->metadata()->num_rows();
         m_num_row_groups = m_realParquetFileReader->metadata()->num_row_groups();
@@ -499,12 +503,68 @@ private:
 
             ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmodule(MOD_PARQUET),
                             errmsg("Error occurred while reading column %d: PARQUET and mpp "
-                                    "types do not match, PARQUET type is %s(%s) and mpp type is %s.",
-                                    m_var->varattno, physicalTypeString.c_str(), logicalTypeString.c_str(),
-                                    format_type_with_typemod(m_var->vartype, m_var->vartypmod))));
+                                   "types do not match, PARQUET type is %s(%s) and mpp type is %s.",
+                                   m_var->varattno, physicalTypeString.c_str(), logicalTypeString.c_str(),
+                                   format_type_with_typemod(m_var->vartype, m_var->vartypmod))));
         }
 
         bindConvertFunc<true>();
+    }
+
+    bool match_data_type_with_psql_int32(const Oid varType) const
+    {
+        bool matches = false;
+        if (varType == NUMERICOID) {
+            /* no precision */
+            if (-1 == m_var->vartypmod) {
+                matches = true;
+            } else { /* Both scale and precision need to be matched when precision is defined. */
+                int32_t typemod = m_var->vartypmod - VARHDRSZ;
+                int32_t varPrecision = (int32_t)((((uint32_t)typemod) >> 16) & 0xffff);
+                int32_t varScale = typemod & 0xffff;
+                matches = ((varScale == m_desc->type_scale()) && (varPrecision == m_desc->type_precision()));
+            }
+        } else {
+            matches = (varType == INT1OID || varType == INT2OID || varType == INT4OID || varType == DATEOID ||
+                       varType == TIMESTAMPOID);
+        }
+        return matches;
+    }
+
+    bool match_data_type_with_psql_int64(const Oid varType) const
+    {
+        bool matches = false;
+        if (varType == NUMERICOID) {
+            /* no precision */
+            if (-1 == m_var->vartypmod) {
+                matches = true;
+            } else { /* Both scale and precision need to be matched when precision is defined. */
+                int32_t typemod = m_var->vartypmod - VARHDRSZ;
+                int32_t varPrecision = (int32_t)((((uint32_t)typemod) >> 16) & 0xffff);
+                int32_t varScale = typemod & 0xffff;
+                matches = ((varScale == m_desc->type_scale()) && (varPrecision == m_desc->type_precision()));
+            }
+        } else {
+            matches = (varType == INT8OID || varType == OIDOID || varType == CASHOID);
+        }
+        return matches;
+    }
+
+    bool match_data_type_with_psql_fixed_array(const Oid varType) const
+    {
+        bool matches = false;
+        if (varType == NUMERICOID) {
+            /* no precision */
+            if (-1 == m_var->vartypmod) {
+                matches = true;
+            } else { /* Both scale and precision need to be matched when precision is defined. */
+                int32_t typemod = m_var->vartypmod - VARHDRSZ;
+                int32_t varPrecision = (int32_t)((((uint32_t)typemod) >> 16) & 0xffff);
+                int32_t varScale = typemod & 0xffff;
+                matches = ((varScale == m_desc->type_scale()) && (varPrecision == m_desc->type_precision()));
+            }
+        }
+        return matches;
     }
 
     /*
@@ -523,36 +583,11 @@ private:
                 break;
             }
             case parquet::Type::INT32: {
-                if (varType == NUMERICOID) {
-                    /* no precision */
-                    if (-1 == m_var->vartypmod) {
-                        matches = true;
-                    } else { /* Both scale and precision need to be matched when precision is defined. */
-                        int32_t typemod = m_var->vartypmod - VARHDRSZ;
-                        int32_t varPrecision = (int32_t)((((uint32_t)typemod) >> 16) & 0xffff);
-                        int32_t varScale = typemod & 0xffff;
-                        matches = ((varScale == m_desc->type_scale()) && (varPrecision == m_desc->type_precision()));
-                    }
-                } else {
-                    matches = (varType == INT1OID || varType == INT2OID || varType == INT4OID || varType == DATEOID ||
-                                varType == TIMESTAMPOID);
-                }
+                matches = match_data_type_with_psql_int32(varType);
                 break;
             }
             case parquet::Type::INT64: {
-                if (varType == NUMERICOID) {
-                    /* no precision */
-                    if (-1 == m_var->vartypmod) {
-                        matches = true;
-                    } else { /* Both scale and precision need to be matched when precision is defined. */
-                        int32_t typemod = m_var->vartypmod - VARHDRSZ;
-                        int32_t varPrecision = (int32_t)((((uint32_t)typemod) >> 16) & 0xffff);
-                        int32_t varScale = typemod & 0xffff;
-                        matches = ((varScale == m_desc->type_scale()) && (varPrecision == m_desc->type_precision()));
-                    }
-                } else {
-                    matches = (varType == INT8OID || varType == OIDOID || varType == CASHOID);
-                }
+                matches = match_data_type_with_psql_int64(varType);
                 break;
             }
             case parquet::Type::INT96: {
@@ -572,17 +607,7 @@ private:
                 break;
             }
             case parquet::Type::FIXED_LEN_BYTE_ARRAY: {
-                if (varType == NUMERICOID) {
-                    /* no precision */
-                    if (-1 == m_var->vartypmod) {
-                        matches = true;
-                    } else { /* Both scale and precision need to be matched when precision is defined. */
-                        int32_t typemod = m_var->vartypmod - VARHDRSZ;
-                        int32_t varPrecision = (int32_t)((((uint32_t)typemod) >> 16) & 0xffff);
-                        int32_t varScale = typemod & 0xffff;
-                        matches = ((varScale == m_desc->type_scale()) && (varPrecision == m_desc->type_precision()));
-                    }
-                }
+                matches = match_data_type_with_psql_fixed_array(varType);
                 break;
             }
             default: {
@@ -657,14 +682,14 @@ private:
     }
 
     template <bool hasNull, bool encoded>
-    void fillScalarVectorInternal(uint64_t numRowsToRead, bool *isSelected, ScalarVector *scalorVector);
+    void fillScalarVectorInternal(uint64_t numRowsToRead, const bool *isSelected, ScalarVector *scalorVector);
 
     void predicateFilter(uint64_t numValues, bool *isSelected) override;
 
 private:
-    void fillScalarVectorInternalForChar(uint64_t numRowsToRead, bool *isSelected, ScalarVector *vec);
-    void fillScalarVectorInternalForVarchar(uint64_t numRowsToRead, bool *isSelected, ScalarVector *vec);
-    void fillScalarVectorInternalForOthers(uint64_t numRowsToRead, bool *isSelected, ScalarVector *vec);
+    void fillScalarVectorInternalForChar(uint64_t numRowsToRead, const bool *isSelected, ScalarVector *vec);
+    void fillScalarVectorInternalForVarchar(uint64_t numRowsToRead, const bool *isSelected, ScalarVector *vec);
+    void fillScalarVectorInternalForOthers(uint64_t numRowsToRead, const bool *isSelected, ScalarVector *vec);
 
     inline bool hasNullValues()
     {
@@ -723,7 +748,7 @@ private:
 
             for (int64_t i = 0; i < count; i++) {
                 errno_t rc = memcpy_s(dataBuffer + cachedSize, totalSize - cachedSize, typedValues[i].ptr,
-                                        typedValues[i].len);
+                                      typedValues[i].len);
                 securec_check(rc, "\0", "\0");
                 typedValues[i].ptr = dataBuffer + cachedSize;
                 cachedSize += typedValues[i].len;
@@ -775,7 +800,7 @@ private:
     }
 
     int32_t getStatistics(parquet::ParquetFileReader *fileReader, uint64_t currentRowGroupIndex, Datum *minDatum,
-                            bool *hasMinimum, Datum *maxDatum, bool *hasMaximum) const
+                          bool *hasMinimum, Datum *maxDatum, bool *hasMaximum) const
     {
 #define SET_SIMPLE_MIN_MAX_STATISTICS(state, func, minvalue, maxValue) do { \
     *hasMinimum = *hasMaximum = (state)->HasMinMax();              \
@@ -822,12 +847,12 @@ private:
                 switch (m_var->vartype) {
                     case INT1OID: {
                         SET_SIMPLE_MIN_MAX_STATISTICS(tmpStat, Int8GetDatum, (uint8)tmpStat->min(),
-                            (uint8)tmpStat->max());
+                                                      (uint8)tmpStat->max());
                         break;
                     }
                     case INT2OID: {
                         SET_SIMPLE_MIN_MAX_STATISTICS(tmpStat, Int16GetDatum, (uint16)tmpStat->min(),
-                            (uint16)tmpStat->max());
+                                                      (uint16)tmpStat->max());
                         break;
                     }
                     case DATEOID:
@@ -848,7 +873,7 @@ private:
                     }
                     default: {
                         SET_SIMPLE_MIN_MAX_STATISTICS(tmpStat, Int32GetDatum, (uint32)tmpStat->min(),
-                            (uint32)tmpStat->max());
+                                                      (uint32)tmpStat->max());
                         break;
                     }
                 }
@@ -881,8 +906,8 @@ private:
                 switch (m_var->vartype) {
                     case TIMESTAMPOID: {
                         SET_SIMPLE_MIN_MAX_STATISTICS(tmpStat, TimestampGetDatum,
-                            nanoSecondsToPsqlTimestamp(Int96GetNanoSeconds(tmpStat->min())),
-                            nanoSecondsToPsqlTimestamp(Int96GetNanoSeconds(tmpStat->max())));
+                                                      nanoSecondsToPsqlTimestamp(Int96GetNanoSeconds(tmpStat->min())),
+                                                      nanoSecondsToPsqlTimestamp(Int96GetNanoSeconds(tmpStat->max())));
                         ret = 1;
                         break;
                     }
@@ -896,13 +921,13 @@ private:
             case parquet::Type::FLOAT: {
                 const parquet::FloatStatistics *tmpStat = static_cast<const parquet::FloatStatistics *>(statistics);
                 SET_SIMPLE_MIN_MAX_STATISTICS(tmpStat, Float4GetDatum, static_cast<float>(tmpStat->min()),
-                                                static_cast<float>(tmpStat->max()));
+                                              static_cast<float>(tmpStat->max()));
                 break;
             }
             case parquet::Type::DOUBLE: {
                 const parquet::DoubleStatistics *tmpStat = static_cast<const parquet::DoubleStatistics *>(statistics);
                 SET_SIMPLE_MIN_MAX_STATISTICS(tmpStat, Float8GetDatum, static_cast<double>(tmpStat->min()),
-                                                static_cast<double>(tmpStat->max()));
+                                              static_cast<double>(tmpStat->max()));
                 break;
             }
             case parquet::Type::BYTE_ARRAY: {
@@ -911,7 +936,6 @@ private:
 
                 auto minValuePtr = (char *)tmpStat->min().ptr;
                 auto maxValuePtr = (char *)tmpStat->max().ptr;
-
                 if (NULL == minValuePtr || maxValuePtr == NULL) {
                     ret = 0;
                     break;
@@ -945,9 +969,9 @@ private:
                         *hasMinimum = *hasMaximum = tmpStat->HasMinMax();
                         if (tmpStat->HasMinMax()) {
                             convertBufferToDatum(tmpStat->min().ptr, m_desc->type_length(), m_desc->type_scale(),
-                                                    *minDatum);
+                                                 *minDatum);
                             convertBufferToDatum(tmpStat->max().ptr, m_desc->type_length(), m_desc->type_scale(),
-                                                    *maxDatum);
+                                                 *maxDatum);
                             ret = 1;
                         }
                         break;
@@ -1031,8 +1055,8 @@ private:
 
 template <typename ReaderType>
 template <bool hasNull, bool encoded>
-void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternal(uint64_t numRowsToRead, bool *isSelected,
-                                                                    ScalarVector *vec)
+void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternal(uint64_t numRowsToRead, 
+    const bool *isSelected, ScalarVector *vec)
 {
     fillScalarVectorInternalForOthers(numRowsToRead, isSelected, vec);
 }
@@ -1040,7 +1064,7 @@ void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternal(uint64_t numR
 template <>
 template <bool hasNull, bool encoded>
 void ParquetColumnReaderImpl<parquet::ByteArrayReader>::fillScalarVectorInternal(uint64_t numRowsToRead,
-                                                                                    bool *isSelected, ScalarVector *vec)
+    const bool *isSelected, ScalarVector *vec)
 {
     auto varType = m_var->vartype;
     switch (varType) {
@@ -1056,13 +1080,13 @@ void ParquetColumnReaderImpl<parquet::ByteArrayReader>::fillScalarVectorInternal
         default:
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_PARQUET),
                             errmsg("Unsupported var type %u from data type %s(%u).", varType,
-                                    parquet::TypeToString(m_desc->physical_type()).c_str(), m_desc->physical_type())));
+                                   parquet::TypeToString(m_desc->physical_type()).c_str(), m_desc->physical_type())));
     }
 }
 
 template <typename ReaderType>
-void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForChar(uint64_t numRowsToRead, bool *isSelected,
-                                                                            ScalarVector *vec)
+void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForChar(
+    uint64_t numRowsToRead, const bool *isSelected, ScalarVector *vec)
 {
     /* The encoding defined in foreign table, which is -1 for non-foreign table */
     int32_t encoding = m_readerState->fdwEncoding;
@@ -1092,8 +1116,8 @@ void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForChar(uint64
                 auto value = m_values[i];
                 auto length = (int32_t)value.len;
 
-                /* Check compatibility and convert '' into null if the db is DB_CMPT_A. */
-                if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+                /* Check compatibility and convert '' into null if the db is A_FORMAT. */
+                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
                     vec->SetNull(offset);
                 } else {
                     char *tmpValue = (char *)value.ptr;
@@ -1110,7 +1134,7 @@ void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForChar(uint64
 
                             /* check and convert */
                             char *cvt = pg_to_server_withfailure(tmpValue, length, encoding, m_checkEncodingLevel,
-                                                                    meetError);
+                                                                 meetError);
 
                             /* count the error number */
                             if (meetError) {
@@ -1135,7 +1159,7 @@ void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForChar(uint64
                                         if (cvt[j] != ' ')
                                             ereport(ERROR,
                                                     (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                                                    errmsg("value too long for type character(%d)", (int)maxLen)));
+                                                     errmsg("value too long for type character(%d)", (int)maxLen)));
                                     }
 
                                     /*
@@ -1169,8 +1193,8 @@ void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForChar(uint64
 }
 
 template <typename ReaderType>
-void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForVarchar(
-    uint64_t numRowsToRead, bool *isSelected, ScalarVector *vec)
+void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForVarchar(uint64_t numRowsToRead, 
+    const bool *isSelected, ScalarVector *vec)
 {
     /* The encoding defined in foreign table, which is -1 for non-foreign table */
     int32_t encoding = m_readerState->fdwEncoding;
@@ -1200,8 +1224,8 @@ void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForVarchar(
                 auto value = m_values[i];
                 auto length = (int32_t)value.len;
 
-                /* Check compatibility and convert '' into null if the db is DB_CMPT_A. */
-                if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+                /* Check compatibility and convert '' into null if the db is A_FORMAT. */
+                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
                     vec->SetNull(offset);
                 } else {
                     char *tmpValue = (char *)value.ptr;
@@ -1218,7 +1242,7 @@ void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForVarchar(
 
                             /* check and convert */
                             char *cvt = pg_to_server_withfailure(tmpValue, length, encoding, m_checkEncodingLevel,
-                                                                meetError);
+                                                                 meetError);
 
                             /* count the error number */
                             if (meetError) {
@@ -1234,7 +1258,7 @@ void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForVarchar(
                                     if (cvt[j] != ' ')
                                         ereport(ERROR,
                                                 (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
-                                                errmsg("value too long for type character varying(%d)", (int)maxLen)));
+                                                 errmsg("value too long for type character varying(%d)", (int)maxLen)));
                                 }
                                 length = mbmaxlen;
                             }
@@ -1262,8 +1286,8 @@ void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForVarchar(
 }
 
 template <typename ReaderType>
-void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForOthers(uint64_t numRowsToRead, bool *isSelected,
-                                                                            ScalarVector *vec)
+void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForOthers(uint64_t numRowsToRead, 
+    const bool *isSelected, ScalarVector *vec)
 {
     int32_t encoding = m_readerState->fdwEncoding;
     /* the offset in the current vector batch to be filled */
@@ -1455,8 +1479,8 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                             char *tmpValue = (char *)baValue.ptr;
                             int64_t length = static_cast<int64_t>(baValue.len);
 
-                            /* Check compatibility and convert '' into null if the db is DB_CMPT_A. */
-                            if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+                            /* Check compatibility and convert '' into null if the db is A_FORMAT. */
+                            if (A_FORMAT == u_sess->attr.attr_sql.sql_compatibility && length == 0) {
                                 tmpValue = NULL;
                             }
 
@@ -1469,12 +1493,12 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                                     securec_check(rc, "\0", "\0");
                                     if (length < m_rowBufferSize) {
                                         rc = memset_s(m_rowBuffer + length, m_rowBufferSize - length, 0x20,
-                                                        m_rowBufferSize - length);
+                                                      m_rowBufferSize - length);
                                         securec_check(rc, "\0", "\0");
                                     }
 
                                     isSelected[i] = HdfsPredicateCheckValue<StringWrapper, char *>(m_rowBuffer,
-                                                                                                    predicate);
+                                                                                                   predicate);
                                 }
                             }
 
@@ -1491,8 +1515,8 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                             int64_t length = static_cast<int64_t>(baValue.len);
                             char lastChar = '\0';
 
-                            /* Check compatibility and convert '' into null if the db is DB_CMPT_A. */
-                            if (DB_IS_CMPT(DB_CMPT_A) && length == 0) {
+                            /* Check compatibility and convert '' into null if the db is A_FORMAT. */
+                            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
                                 tmpValue = NULL;
                             } else {
                                 lastChar = tmpValue[length];
@@ -1529,7 +1553,6 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                     /* Only short numeric will be pushed down, so we just handle the Decimal64VectorBatch here. */
                     int32_t typmod = m_var->vartypmod - VARHDRSZ;
                     uint32_t precision = uint32_t((((uint32_t)typmod) >> 16) & 0xffff);
-
                     if (precision <= 18) {
                         for (uint64_t i = 0; i < numValues; i++) {
                             auto flbaValue = data[i];
@@ -1596,49 +1619,60 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
 }
 
 ParquetColumnReader *createParquetColumnReader(const parquet::ColumnDescriptor *desc, uint32_t columnIndex,
-                                                uint32_t mppColumnIndex, ReaderState *readerState, const Var *var)
+                                               uint32_t mppColumnIndex, ReaderState *readerState, const Var *var)
 {
     ParquetColumnReader *columnReader = NULL;
 
     switch (desc->physical_type()) {
         case parquet::Type::BOOLEAN: {
-            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::BoolReader>(
-                desc, columnIndex, mppColumnIndex, readerState, var);
+            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::BoolReader>(desc, columnIndex,
+                                                                                                     mppColumnIndex,
+                                                                                                     readerState, var);
             break;
         }
         case parquet::Type::INT32: {
-            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::Int32Reader>(
-                desc, columnIndex, mppColumnIndex, readerState, var);
+            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::Int32Reader>(desc, columnIndex,
+                                                                                                      mppColumnIndex,
+                                                                                                      readerState, var);
             break;
         }
         case parquet::Type::INT64: {
-            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::Int64Reader>(
-                desc, columnIndex, mppColumnIndex, readerState, var);
+            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::Int64Reader>(desc, columnIndex,
+                                                                                                      mppColumnIndex,
+                                                                                                      readerState, var);
             break;
         }
         case parquet::Type::INT96: {
-            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::Int96Reader>(
-                desc, columnIndex, mppColumnIndex, readerState, var);
+            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::Int96Reader>(desc, columnIndex,
+                                                                                                      mppColumnIndex,
+                                                                                                      readerState, var);
             break;
         }
         case parquet::Type::FLOAT: {
-            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::FloatReader>(
-                desc, columnIndex, mppColumnIndex, readerState, var);
+            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::FloatReader>(desc, columnIndex,
+                                                                                                      mppColumnIndex,
+                                                                                                      readerState, var);
             break;
         }
         case parquet::Type::DOUBLE: {
-            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::DoubleReader>(
-                desc, columnIndex, mppColumnIndex, readerState, var);
+            columnReader =
+                New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::DoubleReader>(desc, columnIndex,
+                                                                                            mppColumnIndex, readerState,
+                                                                                            var);
             break;
         }
         case parquet::Type::BYTE_ARRAY: {
-            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::ByteArrayReader>(
-                desc, columnIndex, mppColumnIndex, readerState, var);
+            columnReader =
+                New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::ByteArrayReader>(desc, columnIndex,
+                                                                                               mppColumnIndex,
+                                                                                               readerState, var);
             break;
         }
         case parquet::Type::FIXED_LEN_BYTE_ARRAY: {
-            columnReader = New(readerState->persistCtx) ParquetColumnReaderImpl<parquet::FixedLenByteArrayReader>(
-                desc, columnIndex, mppColumnIndex, readerState, var);
+            columnReader = New(
+                readerState->persistCtx) ParquetColumnReaderImpl<parquet::FixedLenByteArrayReader>(desc, columnIndex,
+                                                                                                   mppColumnIndex,
+                                                                                                   readerState, var);
             break;
         }
         default: {
@@ -1649,5 +1683,5 @@ ParquetColumnReader *createParquetColumnReader(const parquet::ColumnDescriptor *
     }
     return columnReader;
 }
-} // namespace reader
-} // namespace dfs
+}  // namespace reader
+}  // namespace dfs

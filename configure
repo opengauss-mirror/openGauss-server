@@ -733,6 +733,7 @@ GENHTML
 LCOV
 GCOV
 enable_debug
+enable_ccache
 enable_rpath
 enable_cassert
 enable_llt
@@ -741,7 +742,9 @@ enable_ut
 enable_qunit
 enable_jemalloc
 enable_jemalloc_debug
+enable_privategauss
 enable_multiple_nodes
+enable_mot
 enable_memory_check
 enable_mysql_fdw
 enable_oracle_fdw
@@ -820,7 +823,9 @@ enable_shared
 enable_rpath
 enable_jemalloc
 enable_jemalloc_debug
+enable_privategauss
 enable_multiple_nodes
+enable_mot
 enable_memory_check
 enable_mysql_fdw
 enable_oracle_fdw
@@ -828,6 +833,7 @@ enable_pldebugger
 enable_thread_check
 enable_spinlocks
 enable_debug
+enable_ccache
 enable_profiling
 enable_coverage
 enable_default_gcc
@@ -927,7 +933,7 @@ libdir='${exec_prefix}/lib'
 localedir='${datarootdir}/locale'
 mandir='${datarootdir}/man'
 llvmirdir='${datarootdir}/llvmir'
-gcc_version='8.2.0'
+gcc_version='7.3.0'
 
 ac_prev=
 ac_dashdash=
@@ -1331,7 +1337,7 @@ do
   case $ac_val in
     [\\/$]* | ?:[\\/]* )  continue;;
     NONE | '' )
-     case $ac_var in *prefix ) continue;; *3rdpartydir ) continue ;; esac;;
+        case $ac_var in *prefix ) continue;; *3rdpartydir ) continue ;; *3rdparty_sourcedir) continue;; esac;;
   esac
   { $as_echo "$as_me: error: expected an absolute directory name for --$ac_var: $ac_val" >&2
    { (exit 1); exit 1; }; }
@@ -1536,6 +1542,7 @@ Optional Features:
   --disable-largefile     omit support for large files
   --disable-float4-byval  disable float4 passed by value
   --disable-float8-byval  disable float8 passed by value
+  --enable-ccache         build with ccache reducing compile time
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
@@ -1543,6 +1550,7 @@ Optional Packages:
   --with-template=NAME    override operating system template
   --with-includes=DIRS    look for additional header files in DIRS
   --with-3rdpartydir=DIRS look for 3rdparty header and libraries in DIRS/include and DIRS/lib
+  --with-3rdparty_sourcedir=DIRS look for 3rdparty source code and platform in DIRS
   --with-libraries=DIRS   look for additional libraries in DIRS
   --with-libs=DIRS        alternative spelling of --with-libraries
   --with-pgport=PORTNUM   set default port number [5432]
@@ -2640,18 +2648,20 @@ $as_echo "$as_me: error: argument required for --with-gs-version option" >&2;}
   esac
 
 else
+  product=$(cat build/script/gauss.spec | grep 'PRODUCT' | awk -F "=" '{print $2}')
+  version=$(cat build/script/gauss.spec | grep 'VERSION' | awk -F "=" '{print $2}')
   gitversion=$(git log | grep commit | head -1 | awk '{print $2}' | cut -b 1-8)
   commits=$(git log | grep "See in merge request" | wc -l)
   debug_str=""
-  mrid=$(git log | grep "See in merge request" | head -1 | awk -F! '{print $2}' | grep -o '[0-9]\+')
+  mrid=$(git log | grep "See merge request" | head -1 | awk -F! '{print $2}' | grep -o '[0-9]\+')
   if test "$enable_debug" = yes; then
     debug_str="debug"
   fi
 
-  if test "$enable_multiple_nodes" = yes; then
-      default_gs_version="(GaussDB Kernel V500R001C00 build $gitversion) compiled at `date -d today +\"%Y-%m-%d %H:%M:%S\"` commit $commits last mr $mrid $debug_str"
+  if test "$enable_ccache" = yes; then
+      default_gs_version="(GaussDB Kernel V500R001C20 build 1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
   else
-      default_gs_version="(openGauss 1.0.1 build $gitversion) compiled at `date -d today +\"%Y-%m-%d %H:%M:%S\"` commit $commits last mr $mrid $debug_str"
+      default_gs_version="($product $version build $gitversion) compiled at `date -d today +\"%Y-%m-%d %H:%M:%S\"` commit $commits last mr $mrid $debug_str"
   fi
 fi
 
@@ -2778,6 +2788,40 @@ else
 
 fi
 
+# Check whether --enable-privategauss was given.
+if test "${enable_privategauss+set}" = set; then
+  enableval=$enable_privategauss;
+  case $enableval in
+    yes)
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_PRIVATEGAUSS 1
+_ACEOF
+
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-privategauss option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-privategauss option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_privategauss=no
+
+fi
+
+if test "$enable_privategauss" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_PRIVATEGAUSS 1
+_ACEOF
+
+fi
+
 # Check whether --enable-multiple-nodes was given.
 if test "${enable_multiple_nodes+set}" = set; then
   enableval=$enable_multiple_nodes;
@@ -2808,6 +2852,47 @@ if test "$enable_multiple_nodes" = yes; then
 
 cat >>confdefs.h <<\_ACEOF
 #define ENABLE_MULTIPLE_NODES 1
+_ACEOF
+
+fi
+
+# Check whether --enable-mot was given.
+if test "${enable_mot+set}" = set; then
+  enableval=$enable_mot;
+  case $enableval in
+    yes)
+      if test "$enable_multiple_nodes" = yes; then
+
+        { { $as_echo "$as_me:$LINENO: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&5
+            $as_echo "$as_me: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&2;}
+          { (exit 1); exit 1; }; }
+
+      fi
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-mot option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-mot option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_mot=no
+
+fi
+
+if test "$enable_multiple_nodes" = yes; then
+
+  enable_mot=no
+fi
+
+if test "$enable_mot" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_MOT 1
 _ACEOF
 
 fi
@@ -3002,6 +3087,33 @@ $as_echo "$as_me: error: no argument expected for --enable-debug option" >&2;}
 
 else
   enable_debug=no
+
+fi
+
+#
+# --enable-ccache to reduce compile time
+#
+
+
+# Check whether --enable-ccache was given.
+if test "${enable_ccache+set}" = set; then
+  enableval=$enable_ccache;
+  case $enableval in
+    yes)
+      :
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-ccache option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-ccache option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_ccache=no
 
 fi
 
@@ -3390,7 +3502,8 @@ fi
 
 # this expression is set up to avoid unnecessary integer overflow
 # blocksize is already guaranteed to be a factor of 1024
-RELSEG_SIZE=$[(1024 / ${blocksize}) * ${segsize} * 1024]
+RELSEG_SIZE=`expr '(' 1024 / ${blocksize} ')' '*' ${segsize} '*' 1024`
+test $? -eq 0 || exit 1
 { $as_echo "$as_me:$LINENO: result: ${segsize}GB" >&5
 $as_echo "${segsize}GB" >&6; }
 
@@ -4485,7 +4598,7 @@ fi
 # but has its own.  Also check other compiler-specific flags here.
 
 if test "$GCC" = yes -a "$ICC" = no; then
-  CFLAGS="$CFLAGS -Wall -Wpointer-arith -Wno-write-strings -fnon-call-exceptions"
+  CFLAGS="$CFLAGS -Wall -Wpointer-arith -Wno-write-strings -fnon-call-exceptions -fno-common -freg-struct-return -pipe"
   if test "$autodepend" = yes; then
 	CFLAGS="$CFLAGS -fPIC"
   fi
@@ -29485,7 +29598,7 @@ fi
 
 
 cat >>confdefs.h <<_ACEOF
-#define PG_VERSION_STR "${default_gs_version} on $host, compiled by $cc_string, `expr $ac_cv_sizeof_void_p \* 8`-bit"
+#define PG_VERSION_STR "PostgreSQL $PACKAGE_VERSION ${default_gs_version} on $host, compiled by $cc_string, `expr $ac_cv_sizeof_void_p \* 8`-bit"
 _ACEOF
 
 # Supply additional version name for Postgres-XC
@@ -29578,7 +29691,7 @@ ac_config_files="$ac_config_files GNUmakefile src/Makefile.global"
 if test "$enable_llt" = yes ; then
 	ac_config_links="$ac_config_links  src/include/dynloader.h:src/common/backend/port/dynloader/${template}.h src/include/pg_config_os.h:src/include/port/${template}.h src/Makefile.port:src/makefiles/Makefile.${template}"
 else
-	ac_config_links="$ac_config_links src/common/backend/port/dynloader.cpp:src/common/backend/port/dynloader/${template}.cpp src/common/backend/port/pg_sema.cpp:${SEMA_IMPLEMENTATION} src/common/backend/port/pg_shmem.cpp:${SHMEM_IMPLEMENTATION} src/common/backend/port/pg_latch.cpp:${LATCH_IMPLEMENTATION} src/include/dynloader.h:src/common/backend/port/dynloader/${template}.h src/include/pg_config_os.h:src/include/port/${template}.h src/Makefile.port:src/makefiles/Makefile.${template}"
+	ac_config_links="$ac_config_links src/common/backend/port/dynloader.cpp:src/common/backend/port/dynloader/${template}.cpp src/common/backend/port/pg_sema.cpp:${SEMA_IMPLEMENTATION} src/common/backend/port/pg_shmem.cpp:${SHMEM_IMPLEMENTATION} src/bin/gs_cgroup/gsconfig.cpp:src/gausskernel/cbb/workload/gsconfig.cpp src/bin/gs_cgroup/gsutil.cpp:src/gausskernel/cbb/workload/gsutil.cpp src/common/backend/port/pg_latch.cpp:${LATCH_IMPLEMENTATION} src/include/dynloader.h:src/common/backend/port/dynloader/${template}.h src/include/pg_config_os.h:src/include/port/${template}.h src/Makefile.port:src/makefiles/Makefile.${template}"
 fi
 
 if test "$PORTNAME" = "win32"; then
@@ -30203,6 +30316,8 @@ do
 	"src/common/backend/port/dynloader.cpp") CONFIG_LINKS="$CONFIG_LINKS src/common/backend/port/dynloader.cpp:src/common/backend/port/dynloader/${template}.cpp" ;;
 	"src/common/backend/port/pg_sema.cpp") CONFIG_LINKS="$CONFIG_LINKS src/common/backend/port/pg_sema.cpp:${SEMA_IMPLEMENTATION}" ;;
 	"src/common/backend/port/pg_shmem.cpp") CONFIG_LINKS="$CONFIG_LINKS src/common/backend/port/pg_shmem.cpp:${SHMEM_IMPLEMENTATION}" ;;
+	"src/bin/gs_cgroup/gsconfig.cpp") CONFIG_LINKS="$CONFIG_LINKS src/bin/gs_cgroup/gsconfig.cpp:src/gausskernel/cbb/workload/gsconfig.cpp" ;;
+	"src/bin/gs_cgroup/gsutil.cpp") CONFIG_LINKS="$CONFIG_LINKS src/bin/gs_cgroup/gsutil.cpp:src/gausskernel/cbb/workload/gsutil.cpp" ;;
 	"src/common/backend/port/pg_latch.cpp") CONFIG_LINKS="$CONFIG_LINKS src/common/backend/port/pg_latch.cpp:${LATCH_IMPLEMENTATION}" ;;
 	"src/include/dynloader.h") CONFIG_LINKS="$CONFIG_LINKS src/include/dynloader.h:src/common/backend/port/dynloader/${template}.h" ;;
     "src/include/pg_config_os.h") CONFIG_LINKS="$CONFIG_LINKS src/include/pg_config_os.h:src/include/port/${template}.h" ;;
@@ -30938,4 +31053,12 @@ if test -n "$ac_unrecognized_opts" && test "$enable_option_checking" != no; then
   { $as_echo "$as_me:$LINENO: WARNING: unrecognized options: $ac_unrecognized_opts" >&5
 $as_echo "$as_me: WARNING: unrecognized options: $ac_unrecognized_opts" >&2;}
 fi
+
+find src/common/backend -name "*.l" | sort > ./ereport.txt
+find src/gausskernel/ -name "*.l" | sort >> ./ereport.txt
+find src/common/backend -name "*.y" | sort >> ./ereport.txt
+find src/gausskernel/ -name "*.y" | sort >> ./ereport.txt
+find src/common/backend -name "*.cpp" | sort >> ./ereport.txt
+find src/gausskernel/ -name "*.cpp" | sort >> ./ereport.txt
+
 

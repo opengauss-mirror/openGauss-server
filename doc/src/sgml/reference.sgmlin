@@ -98,6 +98,7 @@
    &createGroup;
    &createIndex;
    &createLanguage;
+   &createMaterializedView;
 <!## XC>
    &createNode;
    &createNodeGroup;
@@ -140,6 +141,7 @@
    &dropGroup;
    &dropIndex;
    &dropLanguage;
+   &dropMaterializedView;
 <!## XC>
    &dropNode;
    &dropNodeGroup;
@@ -181,6 +183,7 @@
    &prepare;
    &prepareTransaction;
    &reassignOwned;
+   &refreshMaterializedView;
    &reindex;
    &releaseSavepoint;
    &reset;

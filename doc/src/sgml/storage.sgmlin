@@ -712,7 +712,7 @@ data. Empty in ordinary tables.</entry>
 
  <para>
   All the details can be found in
-  <filename>src/include/storage/bufpage.h</filename>.
+  <filename>src/include/storage/buf/bufpage.h</filename>.
  </para>
 
  <para>

@@ -21,7 +21,7 @@
 #include "access/transam.h"
 #include "access/visibilitymap.h"
 #include "commands/tablespace.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/freespace.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
@@ -106,7 +106,7 @@ static Buffer ReadBufferBI(Relation relation, BlockNumber target_block, BulkInse
  * amount which ramps up as the degree of contention ramps up, but limiting
  * the result to some sane overall value.
  */
-static void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate)
+void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate)
 {
     Page page;
     BlockNumber block_num = InvalidBlockNumber;
@@ -128,12 +128,23 @@ static void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate)
      * as 20 is too aggressive, but benchmarking revealed that smaller numbers
      * were insufficient.  512 is just an arbitrary cap to prevent pathological
      * results.
+     * Index relation tuple is smaller than the heap page, so not need expand
+     * too many page at a time.
      */
-    if (RelationIsBucket(relation)) {
-        /* bucket relation need less extra blocks */
-        extra_blocks = Min(256, lock_waiters);
+    if (RelationIsIndex(relation)) {
+        if (RelationIsBucket(relation)) {
+            /* bucket relation need less extra blocks */
+            extra_blocks = Min(4, lock_waiters);
+        } else {
+            extra_blocks = Min(8, lock_waiters);
+        }
     } else {
-        extra_blocks = Min(512, lock_waiters * 20);
+        if (RelationIsBucket(relation)) {
+               /* bucket relation need less extra blocks */
+               extra_blocks = Min(256, lock_waiters);
+           } else {
+               extra_blocks = Min(512, lock_waiters * 20);
+           }
     }
 
     while (extra_blocks-- >= 0) {
@@ -143,13 +154,20 @@ static void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate)
         /* Extend by one page. */
         LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
         page = BufferGetPage(buffer);
-        phdr = (HeapPageHeader)page;
-        PageInit(page, BufferGetPageSize(buffer), 0, true);
-        phdr->pd_xid_base = u_sess->utils_cxt.RecentXmin - FirstNormalTransactionId;
-        phdr->pd_multi_base = 0;
-        MarkBufferDirty(buffer);
+        if (!RelationIsIndex(relation)) {
+            phdr = (HeapPageHeader)page;
+            PageInit(page, BufferGetPageSize(buffer), 0, true);
+            phdr->pd_xid_base = u_sess->utils_cxt.RecentXmin - FirstNormalTransactionId;
+            phdr->pd_multi_base = 0;
+            MarkBufferDirty(buffer);
+        }
+
         block_num = BufferGetBlockNumber(buffer);
-        freespace = PageGetHeapFreeSpace(page);
+        if (!RelationIsIndex(relation)) {
+            freespace = PageGetHeapFreeSpace(page);
+        } else {
+            freespace = BLCKSZ - 1;
+        }
         UnlockReleaseBuffer(buffer);
 
         /* Remember first block number thus added. */
@@ -187,7 +205,7 @@ static void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate)
  * be less than block2.
  */
 static void GetVisibilityMapPins(Relation relation, Buffer buffer1, Buffer buffer2, BlockNumber block1,
-    BlockNumber block2, Buffer* vmbuffer1, Buffer* vmbuffer2)
+                                 BlockNumber block2, Buffer *vmbuffer1, Buffer *vmbuffer2)
 {
     bool need_to_pin_buffer1 = false;
     bool need_to_pin_buffer2 = false;
@@ -248,10 +266,8 @@ static void heap_tuple_len_verifier(Size len)
      */
     if (len > MaxHeapTupleSize) {
         ereport(ERROR,
-            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                errmsg("row is too big: size %lu, maximum size %lu",
-                    (unsigned long)len,
-                    (unsigned long)MaxHeapTupleSize)));
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("row is too big: size %lu, maximum size %lu",
+                                                                 (unsigned long)len, (unsigned long)MaxHeapTupleSize)));
     }
 }
 
@@ -312,7 +328,7 @@ static void heap_tuple_len_verifier(Size len)
  *	before any (unlogged) changes are made in buffer pool.
  */
 Buffer RelationGetBufferForTuple(Relation relation, Size len, Buffer other_buffer, int options, BulkInsertState bistate,
-    Buffer* vmbuffer, Buffer* vmbuffer_other, BlockNumber end_rel_block)
+                                 Buffer *vmbuffer, Buffer *vmbuffer_other, BlockNumber end_rel_block)
 {
     bool use_fsm = !(options & HEAP_INSERT_SKIP_FSM);
     Buffer buffer = InvalidBuffer;
@@ -524,8 +540,8 @@ loop:
          * Update FSM as to condition of this page, and ask for another page
          * to try.
          */
-        target_block =
-            RecordAndGetPageWithFreeSpace(relation, target_block, page_free_space, len + save_free_space + extralen);
+        target_block = RecordAndGetPageWithFreeSpace(relation, target_block, page_free_space,
+                                                     len + save_free_space + extralen);
     }
 
     /*
@@ -609,11 +625,9 @@ loop:
      */
     page = BufferGetPage(buffer);
     if (!PageIsNew(page)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("page %u of relation \"%s\" should be empty but is not",
-                    BufferGetBlockNumber(buffer),
-                    RelationGetRelationName(relation))));
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("page %u of relation \"%s\" should be empty but is not", BufferGetBlockNumber(buffer),
+                               RelationGetRelationName(relation))));
     }
 
     phdr = (HeapPageHeader)page;
@@ -674,11 +688,9 @@ Buffer RelationGetNewBufferForBulkInsert(Relation relation, Size len, Size dict_
 
     page = BufferGetPage(buffer);
     if (!PageIsNew(page)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("page %u of relation \"%s\" should be empty but is not",
-                    BufferGetBlockNumber(buffer),
-                    RelationGetRelationName(relation))));
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("page %u of relation \"%s\" should be empty but is not", BufferGetBlockNumber(buffer),
+                               RelationGetRelationName(relation))));
     }
 
     phdr = (HeapPageHeader)page;

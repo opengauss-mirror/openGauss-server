@@ -528,7 +528,9 @@ static int DecodeSpecial(int field, const char* lowtoken, int* val)
     if (datacache[field] != NULL && strncmp(lowtoken, datacache[field]->token, TOKMAXLEN) == 0)
         tp = datacache[field];
     else {
-        tp = datebsearch(lowtoken, datetktbl, szdatetktbl);
+        tp = NULL;
+        if (tp == NULL)
+            tp = datebsearch(lowtoken, datetktbl, szdatetktbl);
     }
     datacache[field] = tp;
     if (tp == NULL) {
@@ -570,7 +572,7 @@ int EncodeDateOnly(struct tm* tm, int style, char* str, bool EuroDates)
             break;
 
         case USE_SQL_DATES:
-            /* compatible with A/Ingres date formats */
+            /* compatible with A db/Ingres date formats */
             if (EuroDates)
                 sprintf(str, "%02d/%02d", tm->tm_mday, tm->tm_mon);
             else
@@ -691,7 +693,7 @@ int EncodeDateTime(
             break;
 
         case USE_SQL_DATES:
-            /* Compatible with A/Ingres date formats */
+            /* Compatible with A db/Ingres date formats */
 
             if (EuroDates)
                 sprintf(str, "%02d/%02d", tm->tm_mday, tm->tm_mon);

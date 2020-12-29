@@ -221,7 +221,7 @@ select distinct A.col_int1 + B.col_int2 from VECTOR_UNIQUE_TABLE_01 A, VECTOR_UN
 ----
 --- case 3: Count(distinct)
 ----
-explain (costs off, nodes off) select col_int0, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int0;
+explain (costs off) select col_int0, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int0;
                        QUERY PLAN                        
 ---------------------------------------------------------
  Row Adapter
@@ -239,7 +239,7 @@ select col_int0, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by c
        11 |     3
 (2 rows)
 
-explain (costs off, nodes off) select col_int1, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int1;
+explain (costs off) select col_int1, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by col_int1;
                        QUERY PLAN                        
 ---------------------------------------------------------
  Row Adapter
@@ -262,7 +262,7 @@ select col_int1, count(distinct col_time) from VECTOR_UNIQUE_TABLE_01 group by c
        80 |     1
 (7 rows)
 
-explain (costs off, nodes off) select count(distinct col_time) from VECTOR_UNIQUE_TABLE_01;
+explain (costs off) select count(distinct col_time) from VECTOR_UNIQUE_TABLE_01;
                     QUERY PLAN                     
 ---------------------------------------------------
  Row Adapter
@@ -276,7 +276,7 @@ select count(distinct col_time) from VECTOR_UNIQUE_TABLE_01;
      3
 (1 row)
 
-explain (costs off, nodes off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int0);
+explain (costs off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int0);
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Row Adapter
@@ -297,7 +297,7 @@ select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TAB
  3
 (1 row)
 
-explain (costs off, nodes off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int1);
+explain (costs off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01 group by col_int1);
                              QUERY PLAN                              
 ---------------------------------------------------------------------
  Row Adapter
@@ -318,7 +318,7 @@ select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TAB
  2
 (2 rows)
 
-explain (costs off, nodes off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01);
+explain (costs off) select distinct x from (select count(distinct col_time) x from VECTOR_UNIQUE_TABLE_01);
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Row Adapter

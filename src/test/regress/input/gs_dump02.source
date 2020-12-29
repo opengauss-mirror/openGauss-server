@@ -1,0 +1,20 @@
+--
+-- gs_dump02
+--
+drop database if exists testaes1;
+drop database if exists testaes2;
+drop database if exists testaes3;
+create database testaes1;
+create database testaes2;
+create database testaes3;
+\! @abs_bindir@/gsql testaes1 -p @portstring@ --with-key=abcdefghigklmnop -f @abs_bindir@/dump.sql > @abs_bindir@/gs_dump.log 2>&1 ; echo $?
+\! @abs_bindir@/gs_dump testaes1 -p @portstring@ --include-depend-objs --exclude-self > @abs_bindir@/dump2.sql 2>&1 ; echo $?
+\! @abs_bindir@/gsql testaes2 -p @portstring@ -f @abs_bindir@/dump2.sql > @abs_bindir@/gs_dump.log 2>&1 ; echo $?
+\! rm -rf bakup_dir
+\! @abs_bindir@/gs_dump testaes1 -p @portstring@ -Fd -f bakup_dir --with-encryption=AES128 --with-key=abcdefghijklmnop > @abs_bindir@/gs_dump.log 2>&1
+\! @abs_bindir@/gs_restore -d testaes3 -p @portstring@ bakup_dir --with-key=abcdefghijklmnop > @abs_bindir@/gs_dump.log 2>&1
+\! @abs_bindir@/gs_dumpall -p @portstring@ -t > @abs_bindir@/dumpall_tbs.sql 2>&1 ; echo $?
+\! @abs_bindir@/gs_dumpall -p @portstring@ --dump-nodes --include-nodes --include-buckets --dump-wrm -g > @abs_bindir@/dumpall_global.sql 2>&1 ; echo $?
+drop database if exists testaes1;
+drop database if exists testaes2;
+drop database if exists testaes3;

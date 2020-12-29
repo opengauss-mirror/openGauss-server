@@ -167,10 +167,10 @@ DROP SEQUENCE seq2;
 -- should fail
 SELECT lastval();
 
-CREATE USER seq_user PASSWORD 'ttest@123';
+CREATE USER seq_user PASSWORD 'gauss@123';
 
 START TRANSACTION;
-SET LOCAL SESSION AUTHORIZATION seq_user PASSWORD 'ttest@123';
+SET LOCAL SESSION AUTHORIZATION seq_user PASSWORD 'gauss@123';
 CREATE SEQUENCE seq3;
 SELECT nextval('seq3');
 REVOKE ALL ON seq3 FROM seq_user;
@@ -190,9 +190,9 @@ DROP USER seq_user;
 DROP SEQUENCE seq;
 
 create sequence seqllt;
---create temp table seqllt(c1 int);
+create temp table seqllt(c1 int);
 select nextval('seqllt');
---drop table seqllt;
+drop table seqllt;
 drop sequence seqllt;
 
 create schema origSchema;
@@ -244,6 +244,18 @@ select nextval('seq');
 drop sequence seq;
 
 --normal case with cache
+create sequence seq maxvalue 100 cache 5 increment 2 start 2;
+select seq.nextval;
+execute direct on(coordinator2) 'select seq.nextval';
+alter sequence seq maxvalue 15;
+alter sequence seq maxvalue 50;
+execute direct on (coordinator1) 'select seq.nextval';
+execute direct on (coordinator2) 'select seq.nextval';
+alter sequence seq maxvalue 100;
+execute direct on (coordinator1) 'select seq.nextval';
+execute direct on (coordinator2) 'select seq.nextval';
+alter sequence seq minvalue 0;
+drop sequence seq;
 
 --serial in table
 create table test_seq (a int, b serial);
@@ -266,25 +278,14 @@ create table t_nextval (a int, b int);
 create table t_serial(a int, b serial);
 begin;
 insert into t_nextval select a,nextval('seq') from test_base;
-select a.locktype, a.database, a.mode, a.granted, a.fastpath from pg_locks a,pg_class b where a.relation= b.oid and b.relname='seq';
+select a.* from pg_locks a,pg_class b where a.relation= b.oid and b.relname='seq';
 end;
 begin;
 insert into t_serial(a) select a from test_base;
-select a.locktype, a.database, a.mode, a.granted, a.fastpath from pg_locks a,pg_class b where a.relation= b.oid and b.relname='t_serial_b_seq';
+select a.* from pg_locks a,pg_class b where a.relation= b.oid and b.relname='t_serial_b_seq';
 end;
 drop sequence seq;
 drop table t_nextval;
 drop table test_base;
 drop table t_serial;
-
---alter sequence
-create sequence seq_alter start with 1 minvalue 1 maxvalue 2 increment 1 nocycle;
-select nextval('seq_alter');
-select nextval('seq_alter');
-select nextval('seq_alter');
-create sequence seq_alter start with 2 minvalue 2 maxvalue 4 restart 7 increment 1 cycle;
-create sequence seq_alter start with 2 minvalue 2 maxvalue 4 restart 3 increment 1 cycle;
-select nextval('seq_alter');
-select nextval('seq_alter');
-select nextval('seq_alter');
 

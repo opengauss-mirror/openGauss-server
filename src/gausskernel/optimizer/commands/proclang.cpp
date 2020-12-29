@@ -17,6 +17,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/objectaccess.h"
@@ -40,7 +41,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
 typedef struct {
     bool tmpltrusted;    /* trusted? */
@@ -66,7 +67,6 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
     Oid handlerOid, inlineOid, valOid;
     Oid funcrettype;
     Oid funcargtypes[1];
-    char* dbname = NULL;
 
     /*
      * If we have template information for the language, ignore the supplied
@@ -89,15 +89,8 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                 ereport(ERROR,
                     (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                         errmsg("must be system admin to create procedural language \"%s\"", stmt->plname)));
-            if (!pg_database_ownercheck(u_sess->proc_cxt.MyDatabaseId, GetUserId())) {
-                dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-                if (dbname == NULL) {
-                    ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                                errmsg("database with OID %u does not exist",
-                                    u_sess->proc_cxt.MyDatabaseId)));
-                }
-                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE, dbname);
-            }
+            if (!pg_database_ownercheck(u_sess->proc_cxt.MyDatabaseId, GetUserId()))
+                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE, get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId));
         }
 
         /*
@@ -121,7 +114,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
              */
             handlerOid = ProcedureCreate(pltemplate->tmplhandler,
                 PG_CATALOG_NAMESPACE,
-                false, /* not a db compatible */
+                false, /* not A db compatible */
                 false, /* replace */
                 false, /* returnsSet */
                 LANGUAGE_HANDLEROID,
@@ -130,7 +123,8 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                 F_FMGR_C_VALIDATOR,
                 pltemplate->tmplhandler,
                 pltemplate->tmpllibrary,
-                PROKIND_FUNCTION, /* prokind */
+                false, /* isAgg */
+                false, /* isWindowFunc */
                 false, /* security_definer */
                 false, /* isLeakProof */
                 false, /* isStrict */
@@ -144,6 +138,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                 1,
                 0,
                 NULL,
+                false,
                 false,
                 false,
                 false);
@@ -164,7 +159,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                  */
                 inlineOid = ProcedureCreate(pltemplate->tmplinline,
                     PG_CATALOG_NAMESPACE,
-                    false, /* not a db compatible */
+                    false, /* not A db compatible */
                     false, /* replace */
                     false, /* returnsSet */
                     VOIDOID,
@@ -173,7 +168,8 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                     F_FMGR_C_VALIDATOR,
                     pltemplate->tmplinline,
                     pltemplate->tmpllibrary,
-                    PROKIND_FUNCTION, /* prokind */
+                    false, /* isAgg */
+                    false, /* isWindowFunc */
                     false, /* security_definer */
                     false, /* isLeakProof */
                     true,  /* isStrict */
@@ -187,6 +183,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                     1,
                     0,
                     NULL,
+                    false,
                     false,
                     false,
                     false);
@@ -209,7 +206,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                  */
                 valOid = ProcedureCreate(pltemplate->tmplvalidator,
                     PG_CATALOG_NAMESPACE,
-                    false, /* not a db compatible */
+                    false, /* not A db compatible */
                     false, /* replace */
                     false, /* returnsSet */
                     VOIDOID,
@@ -218,7 +215,8 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                     F_FMGR_C_VALIDATOR,
                     pltemplate->tmplvalidator,
                     pltemplate->tmpllibrary,
-                    PROKIND_FUNCTION, /* prokind */
+                    false, /* isAgg */
+                    false, /* isWindowFunc */
                     false, /* security_definer */
                     false, /* isLeakProof */
                     true,  /* isStrict */
@@ -232,6 +230,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                     1,
                     0,
                     NULL,
+                    false,
                     false,
                     false,
                     false);
@@ -348,6 +347,7 @@ static void create_proc_lang(
 
     /* Check for pre-existing definition */
     oldtup = SearchSysCache1(LANGNAME, PointerGetDatum(languageName));
+
     if (HeapTupleIsValid(oldtup)) {
         /* There is one; okay to replace it? */
         if (!replace)
@@ -363,7 +363,7 @@ static void create_proc_lang(
         replaces[Anum_pg_language_lanacl - 1] = false;
 
         /* Okay, do it... */
-        tup = heap_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
+        tup = (HeapTuple) tableam_tops_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
         simple_heap_update(rel, &tup->t_self, tup);
 
         ReleaseSysCache(oldtup);
@@ -539,7 +539,7 @@ void RenameLanguage(const char* oldname, const char* newname)
     CatalogUpdateIndexes(rel, tup);
 
     heap_close(rel, NoLock);
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 }
 
 /*
@@ -592,6 +592,7 @@ static void AlterLanguageOwner_internal(HeapTuple tup, Relation rel, Oid newOwne
     Form_pg_language lanForm;
 
     lanForm = (Form_pg_language)GETSTRUCT(tup);
+
     /*
      * If the new owner is the same as the existing owner, consider the
      * command to have succeeded.  This is for dump restoration purposes.
@@ -631,12 +632,12 @@ static void AlterLanguageOwner_internal(HeapTuple tup, Relation rel, Oid newOwne
             repl_val[Anum_pg_language_lanacl - 1] = PointerGetDatum(newAcl);
         }
 
-        newtuple = heap_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
+        newtuple = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
 
         simple_heap_update(rel, &newtuple->t_self, newtuple);
         CatalogUpdateIndexes(rel, newtuple);
 
-        heap_freetuple_ext(newtuple);
+        tableam_tops_free_tuple(newtuple);
 
         /* Update owner dependency reference */
         changeDependencyOnOwner(LanguageRelationId, HeapTupleGetOid(tup), newOwnerId);

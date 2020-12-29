@@ -1,0 +1,43 @@
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't4');
+select * from t1;
+DROP FOREIGN TABLE t1;
+
+\c test
+create index i1 on t1(c1);
+\c regression
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 'i1');
+select * from t1;
+DROP FOREIGN TABLE t1;
+
+CREATE FOREIGN TABLE t1(c1 int, c2 text, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+select * from t1;
+DROP FOREIGN TABLE t1;
+
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+execute direct on (datanode1) 'select * from t1';
+DROP FOREIGN TABLE t1;
+
+CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (schema_name 'public', table_name 't1');
+create table tmp(c1 int, c2 int, c3 int);
+insert into t1 values(1, 2, 3);
+insert into t1 select * from t1;
+insert into t1 select * from tmp;
+
+delete from t1;
+update t1 set c1=2;
+truncate t1;
+
+drop table tmp;
+DROP FOREIGN TABLE t1;
+
+create foreign table t_char(c1 int, c2 char(20), c3 int) server server_remote;
+create foreign table t_varchar(c1 int, c2 varchar(20), c3 int) server server_remote;
+create foreign table t_numeric(c1 int, c2 numeric(4, 2), c3 int) server server_remote;
+
+select * from t_char;
+select * from t_varchar;
+select * from t_numeric;
+
+drop foreign table t_char;
+drop foreign table t_varchar;
+drop foreign table t_numeric;

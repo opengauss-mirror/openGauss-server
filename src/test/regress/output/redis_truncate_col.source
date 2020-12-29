@@ -14,7 +14,7 @@ create unlogged table data_redis.pg_delete_delta_12345
         block_number bigint,
         block_offset int
 )
- ;
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset);
 insert into t3 select * from source_table;
 ALTER TABLE t3 SET(append_mode=on, rel_cn_oid=12345);
 insert into data_redis.data_redis_tmp_12345 select *,xc_node_id,pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid) FROM ONLY t3 WHERE ctid BETWEEN pg_get_redis_rel_start_ctid('t3',NULL) AND pg_get_redis_rel_end_ctid('t3',NULL);
@@ -86,7 +86,7 @@ create unlogged table data_redis.pg_delete_delta_54321
         block_number bigint,
         block_offset int
 )
- ;
+distribute by hash(xcnodeid,dnrelid,block_number,block_offset);
 -- error with no new temp table is found
 truncate table t4;
 ERROR:  new table data_redis_tmp_54321 is not found when do cluster resizing table "t4"

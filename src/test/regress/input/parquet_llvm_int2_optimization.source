@@ -1,0 +1,104 @@
+drop foreign table if exists t_smallint;
+Create foreign table t_smallint (c_smallint int2) SERVER hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/t_smallint_parquet') distribute by roundrobin;
+
+--test "=" operator
+set enable_codegen = off;
+select * from t_smallint where  2 = c_smallint;
+set enable_codegen = on;
+select * from t_smallint where  2 = c_smallint;
+select * from t_smallint where  2::int2 = c_smallint;
+select * from t_smallint where  2::int8 = c_smallint;
+set enable_codegen = off;
+select * from t_smallint where  c_smallint = 2;
+set enable_codegen = on;
+select * from t_smallint where  c_smallint = 2 ;
+--test ">" operator
+set enable_codegen = off;
+select * from t_smallint where  2 > c_smallint;
+set enable_codegen = on;
+select * from t_smallint where  2 > c_smallint;
+set enable_codegen = off;
+select * from t_smallint where  c_smallint > 2;
+set enable_codegen = on;
+select * from t_smallint where  c_smallint > 2 ;
+select * from t_smallint where  c_smallint > 2::int2;
+select * from t_smallint where  c_smallint > 2::int8;
+--test ">=" operator
+set enable_codegen = off;
+select * from t_smallint where  2 >= c_smallint;
+set enable_codegen = on;
+select * from t_smallint where  2 >= c_smallint;
+set enable_codegen = off;
+select * from t_smallint where  c_smallint >= 2;
+set enable_codegen = on;
+select * from t_smallint where  c_smallint >= 2 ;
+select * from t_smallint where  c_smallint >= 2::int2;
+select * from t_smallint where  c_smallint >= 2::int8;
+--test "<" operator
+set enable_codegen = off;
+select * from t_smallint where  2 < c_smallint;
+set enable_codegen = on;
+select * from t_smallint where  2 < c_smallint;
+set enable_codegen = off;
+select * from t_smallint where  c_smallint < 2;
+set enable_codegen = on;
+select * from t_smallint where  c_smallint < 2 ;
+select * from t_smallint where  c_smallint < 2::int2 ;
+select * from t_smallint where  c_smallint < 2::int8 ;
+--test "<=" operator
+set enable_codegen = off;
+select * from t_smallint where  2 <= c_smallint;
+set enable_codegen = on;
+select * from t_smallint where  2 <= c_smallint;
+set enable_codegen = off;
+select * from t_smallint where  c_smallint <= 2;
+set enable_codegen = on;
+select * from t_smallint where  c_smallint <= 2 ;
+select * from t_smallint where  c_smallint <= 2::int2 ;
+select * from t_smallint where  c_smallint <= 2::int8 ;
+--test "<>" operator
+set enable_codegen = off;
+select * from t_smallint where  2 <> c_smallint;
+set enable_codegen = on;
+select * from t_smallint where  2 <> c_smallint;
+set enable_codegen = off;
+select * from t_smallint where  c_smallint <> 2;
+set enable_codegen = on;
+select * from t_smallint where  c_smallint <> 2 ;
+select * from t_smallint where  c_smallint <> 2::int2 ;
+select * from t_smallint where  c_smallint <> 2::int8 ;
+--test "!=" operator
+set enable_codegen = off;
+select * from t_smallint where  2 != c_smallint;
+set enable_codegen = on;
+select * from t_smallint where  2 != c_smallint;
+set enable_codegen = off;
+select * from t_smallint where  c_smallint != 2;
+set enable_codegen = on;
+select * from t_smallint where  c_smallint != 2 ;
+select * from t_smallint where  c_smallint != 2::int2 ;
+select * from t_smallint where  c_smallint != 2::int8 ;
+--
+drop foreign table append_03 ;
+create foreign table append_03 (
+  col_tinyint       int,
+  col_smallint      smallint,
+  col_int        integer,
+  col_bigint       bigint,
+  col_numeric       numeric,
+  col_double       double precision,
+  col_decimal          decimal,
+  col_varchar        varchar,
+  col_char       char(30),
+  col_nvarchar2      varchar(150),
+  col_text       text,
+  col_timestamptz   timestamp,
+  col_timestamp   timestamp,
+  col_interval      char(50),
+  col_date          timestamp
+)  server hdfs_server
+OPTIONS ( FORMAT 'parquet',FOLDERNAME '/user/hive/warehouse/setop.db/append_03_parquet')
+DISTRIBUTE BY roundrobin;
+select count(*) from append_03 t3 where t3.col_int = 5 and extract(hour from t3.col_interval) <= 19;
+--add llt
+explain performance select * from t_smallint where  c_smallint != 2;

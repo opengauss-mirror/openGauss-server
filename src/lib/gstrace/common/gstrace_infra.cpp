@@ -28,7 +28,6 @@
 #include <stdint.h>
 #include <fcntl.h>
 #include <sys/mman.h>
-#include <unistd.h>
 #include <pthread.h>
 #include <sys/time.h>
 #include <sys/syscall.h>
@@ -286,9 +285,8 @@ static trace_msg_code attachTraceSharedMemLow(void** pTrcMem, const char* sMemNa
 {
     int fd;
     if (size == 0) {
-	return TRACE_BUFFER_SIZE_ERR;
+        return TRACE_BUFFER_SIZE_ERR;
     }
-
     fd = shm_open(sMemName, O_RDWR, S_IRWXU);
     if (fd == -1) {
         // Failed to attach to shared memory
@@ -326,7 +324,6 @@ static trace_msg_code attachTraceBufferSharedMem(int key)
     rc = attachTraceSharedMemLow(&ptr, sBufMemName, sizeof(trace_infra) + bufferSize);
     if (rc == TRACE_OK) {
         pTrcCxt->pTrcInfra = (trace_infra*)ptr;
-        pTrcCxt->pTrcInfra->total_size = sizeof(trace_infra) + bufferSize;
     }
 
     return rc;
@@ -480,6 +477,7 @@ static trace_msg_code createAndAttachTraceBuffer(int key, uint64_t bufferSize)
     ret = memset_s(pTrcCxt->pTrcInfra, sizeof(trace_infra), 0, sizeof(trace_infra));
     securec_check(ret, "\0", "\0");
     pTrcCxt->pTrcInfra->g_Counter = 0;
+    pTrcCxt->pTrcInfra->g_slot_count = 0;
     pTrcCxt->pTrcInfra->total_size = bufferSize + sizeof(trace_infra);
     pTrcCxt->pTrcInfra->num_slots = bufferSize / SLOT_SIZE;
     pTrcCxt->pTrcInfra->slot_index_mask = (bufferSize / SLOT_SIZE) - 1;
@@ -628,16 +626,18 @@ static void do_memory_trace(const trace_type type, const uint32_t probe, const u
     uint64_t sequence, slotIndex;
     trace_context* pTrcCxt = getTraceContext();
 
+    sequence = __sync_fetch_and_add(&pTrcCxt->pTrcInfra->g_Counter, 1);
+
     /* Calculate how many slots for data, and one slot for header slot */
     uint32_t numSlotsNeeded = (pData == NULL) ? 1 : 1 + gsTrcCalcNeededNumOfSlots(data_len);
     if (numSlotsNeeded == 1) {
         /* Sequence will be the atomic value just before the increment */
-        sequence = __sync_fetch_and_add(&pTrcCxt->pTrcInfra->g_Counter, 1);
+        sequence = __sync_fetch_and_add(&pTrcCxt->pTrcInfra->g_slot_count, 1);
         slotIndex = sequence & pTrcCxt->pTrcInfra->slot_index_mask;
     } else {
         /* if multiple slots is required, it must be contiguous */
         for (;;) {
-            sequence = __sync_fetch_and_add(&pTrcCxt->pTrcInfra->g_Counter, numSlotsNeeded);
+            sequence = __sync_fetch_and_add(&pTrcCxt->pTrcInfra->g_slot_count, numSlotsNeeded);
             slotIndex = sequence & pTrcCxt->pTrcInfra->slot_index_mask;
 
             /*
@@ -735,8 +735,11 @@ static void do_file_trace(const trace_type type, const uint32_t probe, const uin
     /* Calculate how many slots for data, and one slot for header slot */
     numSlotsNeeded = (pData == NULL) ? 1 : 1 + gsTrcCalcNeededNumOfSlots(data_len);
 
+    /* Increase record count by 1 */
+    __sync_fetch_and_add(&pTrcCxt->pTrcInfra->g_Counter, 1);
+
     /* Sequence will be the atomic value just before the increment */
-    sequence = __sync_fetch_and_add(&pTrcCxt->pTrcInfra->g_Counter, numSlotsNeeded);
+    sequence = __sync_fetch_and_add(&pTrcCxt->pTrcInfra->g_slot_count, numSlotsNeeded);
     offset = sizeof(trace_config) + sizeof(trace_infra) + SLOT_SIZE * sequence;
 
     /*
@@ -971,10 +974,11 @@ static char* getStatusString(int status)
         case TRACE_STATUS_BEGIN_STOP:
             return "STOPPING";
         case TRACE_STATUS_END_STOP:
-            /* fall-through */
         default:
-            return "STOPPED";
+            break;
     }
+
+    return "STOPPED";
 }
 
 trace_msg_code gstrace_config(int key)

@@ -1,4 +1,4 @@
-src/gausskernel/storage/access/nbtree/README
+src/backend/access/nbtree/README
 
 Btree Indexing
 ==============

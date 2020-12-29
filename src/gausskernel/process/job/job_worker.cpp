@@ -38,6 +38,7 @@
 #include "catalog/pg_database.h"
 #include "commands/dbcommands.h"
 #include "commands/vacuum.h"
+#include "distributelayer/streamMain.h"
 #include "gssignal/gs_signal.h"
 #include "libpq/libpq.h"
 #include "libpq/pqsignal.h"
@@ -47,7 +48,7 @@
 #include "postmaster/autovacuum.h"
 #include "postmaster/fork_process.h"
 #include "postmaster/postmaster.h"
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/pmsignal.h"
@@ -56,6 +57,7 @@
 #include "storage/sinvaladt.h"
 #include "tcop/tcopprot.h"
 #include "utils/fmgroids.h"
+#include "utils/globalplancore.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/postinit.h"
@@ -65,7 +67,7 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 #include "utils/builtins.h"
 #include "catalog/pg_job.h"
 #include "catalog/pg_job_proc.h"
@@ -161,13 +163,13 @@ void JobExecuteWorkerMain()
     /* reset t_thrd.proc_cxt.MyProcPid */
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
-    knl_thread_set_name("JobExecutor");
+    t_thrd.proc_cxt.MyProgName = "JobExecuteWorker";
 
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     /* Identify myself via ps */
-    init_ps_display("JobExecutor worker process", "", "", "");
+    init_ps_display("Job worker process", "", "", "");
 
     /* set processing mode */
     SetProcessingMode(InitProcessing);
@@ -220,7 +222,7 @@ void JobExecuteWorkerMain()
         EmitErrorReport();
 
         if (job_id > 0) {
-            ereport(LOG, (errmsg("JobExecutor with job id %d shutdown abnormaly", job_id)));
+            ereport(LOG, (errmsg("job worker with job id %d shutdown abnormaly", job_id)));
         }
 
         (void)MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
@@ -228,6 +230,11 @@ void JobExecuteWorkerMain()
 
         /* Flush any leaked data in the top-level context */
         MemoryContextResetAndDeleteChildren(t_thrd.mem_cxt.msg_mem_cxt);
+
+        LWLockReleaseAll();
+        if (t_thrd.utils_cxt.CurrentResourceOwner) {
+            ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
+        }
 
         /*
          * process exit. Note that because we called InitProcess, a
@@ -269,17 +276,17 @@ void JobExecuteWorkerMain()
         /* setup shared memory hook */
         on_shmem_exit(FreeJobWorkerInfo, 0);
         on_shmem_exit(PGXCNodeCleanAndRelease, 0);
-        ereport(LOG, (errmsg("JobExecutor started with job id: %d", job_id)));
+        ereport(LOG, (errmsg("job worker started with job id: %d", job_id)));
     } else {
         LWLockRelease(JobShmemLock);
 
         /* no worker entry for me, go away */
-        ereport(WARNING, (errmsg("JobExecutor started wihtout worker entry")));
+        ereport(WARNING, (errmsg("job worker started wihtout worker entry")));
         proc_exit(0);
     }
 
     /* user_name and database_name in u_sess->proc_cxt.MyProcPort is under t_thrd.top_mem_cxt */
-    oldcontext = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+    oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
     if (u_sess->proc_cxt.MyProcPort->database_name)
         pfree_ext(u_sess->proc_cxt.MyProcPort->database_name);
     if (u_sess->proc_cxt.MyProcPort->user_name)
@@ -295,6 +302,15 @@ void JobExecuteWorkerMain()
     t_thrd.proc_cxt.PostInit->InitJobExecuteWorker();
     t_thrd.proc_cxt.PostInit->GetDatabaseName(u_sess->proc_cxt.MyProcPort->database_name);
 
+#ifdef PGXC /* PGXC_COORD */
+    /*
+     * Initialize key pair to be used as object id while using advisory lock
+     * for backup
+     */
+    t_thrd.postmaster_cxt.xc_lockForBackupKey1 = Int32GetDatum(XC_LOCK_FOR_BACKUP_KEY_1);
+    t_thrd.postmaster_cxt.xc_lockForBackupKey2 = Int32GetDatum(XC_LOCK_FOR_BACKUP_KEY_2);
+#endif
+
     /* report this backend in the PgBackendStatus array */
     pgstat_report_appname("JobWorker");
     pgstat_report_activity(STATE_IDLE, NULL);
@@ -305,6 +321,7 @@ void JobExecuteWorkerMain()
 
     /* Reset some flag related to stream. */
     ResetStreamEnv();
+
     t_thrd.role = JOB_WORKER;
 
     t_thrd.wlm_cxt.thread_node_group = &g_instance.wlm_cxt->MyDefaultNodeGroup;  // initialize the default value
@@ -315,7 +332,7 @@ void JobExecuteWorkerMain()
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Job Worker");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Job Worker", MEMORY_CONTEXT_EXECUTOR);
 
     /* Get classified list of node Oids for syschronise th job info. */
     exec_init_poolhandles();
@@ -326,7 +343,7 @@ void JobExecuteWorkerMain()
     /* execute job procedure */
     elog(LOG, "Job is running, worker: %lu, job id: %d", t_thrd.proc_cxt.MyProcPid, job_id);
     execute_job(job_id);
-    elog(LOG, "JobExecutor is shutdown normal.");
+    elog(LOG, "Job worker is shutdown normal.");
 
     MemoryContextResetAndDeleteChildren(t_thrd.mem_cxt.msg_mem_cxt);
 

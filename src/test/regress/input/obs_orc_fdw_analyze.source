@@ -1,0 +1,215 @@
+-- DDL
+
+drop server obs_server cascade;
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+
+DROP FOREIGN TABLE IF EXISTS part_1 CASCADE;
+DROP FOREIGN TABLE IF EXISTS part_2 CASCADE;
+DROP FOREIGN TABLE IF EXISTS part_3 CASCADE;
+DROP FOREIGN TABLE IF EXISTS part_4 CASCADE;
+
+CREATE SERVER obs_server FOREIGN DATA WRAPPER 	dfs_fdw OPTIONS (address '@obshostname@', type 'obs', access_key '@ak@', secret_access_key '@sk@');
+
+Create foreign table lineitem (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/lineitem_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+
+
+CREATE FOREIGN TABLE customer ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/customer_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+
+create foreign table orders (
+ O_ORDERKEY INT4, 
+ O_CUSTKEY INT4, 
+ O_ORDERSTATUS TEXT, 
+ O_TOTALPRICE FLOAT8,
+ O_ORDERDATE TEXT,
+ O_ORDERPRIORITY TEXT, 
+ O_CLERK TEXT,
+ O_SHIPPRIORITY INT4, 
+ O_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/orders_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+
+create foreign table part  (
+ P_PARTKEY INT4,
+ P_NAME TEXT, 
+ P_MFGR TEXT,
+ P_BRAND TEXT,
+ P_TYPE TEXT,
+ P_SIZE INT4,
+ P_CONTAINER TEXT,
+ P_RETAILPRICE FLOAT8,
+ P_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/part_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+
+create foreign table supplier  (
+ S_SUPPKEY INT4,
+ S_NAME TEXT,
+ S_ADDRESS TEXT,
+ S_NATIONKEY INT4,
+ S_PHONE TEXT,
+ S_ACCTBAL FLOAT8,
+ S_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/supplier_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+
+create foreign table partsupp (
+ PS_PARTKEY INT4,
+ PS_SUPPKEY INT4,
+ PS_AVAILQTY INT4,
+ PS_SUPPLYCOST FLOAT8,
+ PS_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/partsupp_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+
+create foreign table nation  (
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/nation_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+
+set log_min_messages=debug1;
+analyze nation(n_name, n_regionkey);
+select tablename,attname,null_frac,avg_width,n_distinct,n_dndistinct from pg_stats where tablename='nation' order by attname;
+
+delete from pg_statistic where exists(select 1 from pg_class where  oid=starelid and relname = 'nation');
+set default_statistics_target=-2;
+analyze nation(n_name, n_regionkey);
+select tablename,attname,null_frac,avg_width,n_distinct,n_dndistinct from pg_stats where tablename='nation' order by attname;
+reset default_statistics_target;
+reset log_min_messages;
+
+vacuum analyze nation;
+select reltuples,relpages from pg_class where relname='nation'; 
+
+create foreign table region  (
+ R_REGIONKEY INT4,
+ R_NAME TEXT,
+ R_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/mppdb.db/region_orc11_64stripe/', totalrows '5000')
+distribute by roundrobin;
+
+create foreign table part_1 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/partition.db/part_1/', totalrows '5000')
+distribute by roundrobin
+partition by (b) automapped;
+
+create foreign table part_2 (a int, b text, c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/partition.db/part_2/', totalrows '5000')
+distribute by roundrobin
+partition by (c) automapped;
+
+create foreign table part_3 (a int, b varchar(20), c date)
+SERVER obs_server OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/partition.db/part_3/', totalrows '5000')
+distribute by roundrobin
+partition by (b, c) automapped;
+
+create foreign table part_4 (p_partkey int, p_name text, p_mfgr text, p_brand text, p_type text, p_size int, p_container text, p_retailprice float8, p_comment text) 
+SERVER obs_server
+OPTIONS(encoding 'utf-8',format 'orc', foldername '/@obsbucket@/obsorccheck/partition.db/part_4/', totalrows '5000')
+distribute by roundrobin
+partition by (p_mfgr) automapped;
+
+--?unordered: start
+analyze verbose foreign tables;
+--?unordered: end
+
+
+create foreign table elk_analyze_table_002 (
+                        c_id int, 
+                        c_d_id int, 
+                        c_w_id int, 
+                        c_first text, 
+                        c_middle text, 
+                        c_last text, 
+                        c_street_1 text, 
+                        c_street_2 text, 
+                        c_city text, 
+                        c_state text, 
+                        c_zip text, 
+                        c_phone text, 
+                        c_since timestamp, 
+                        c_credit text, 
+                        c_credit_lim float8, 
+                        c_discount float8, 
+                        c_balance float8, 
+                        c_ytd_payment float8, 
+                        c_payment_cnt int, 
+                        c_delivery_cnt int, 
+                        c_data text) 
+server obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_analyze_orc_table_002/', totalrows '5000') distribute by roundrobin;
+
+analyze verbose elk_analyze_table_002;
+
+
+create foreign table elk_analyze_table_017_2 (
+                        c_id int, 
+                        c_d_id int, 
+                        c_w_id int, 
+                        c_first text, 
+                        c_middle text, 
+                        c_last text, 
+                        c_street_1 text, 
+                        c_street_2 text, 
+                        c_city text, 
+                        c_state text, 
+                        c_zip text, 
+                        c_phone text, 
+                        c_since timestamp, 
+                        c_credit text, 
+                        c_credit_lim float8, 
+                        c_discount float8, 
+                        c_balance float8, 
+                        c_ytd_payment float8, 
+                        c_payment_cnt int, 
+                        c_delivery_cnt int, 
+                        c_data text) 
+server obs_server OPTIONS(encoding 'utf-8',format 'orc',foldername '/@obsbucket@/obsorccheck/fvt_data_query_hive.db/elk_analyze_orc_table_017_2/', totalrows '5000') distribute by roundrobin;
+analyze verbose elk_analyze_table_017_2;
+--add llt
+analyze foreign tables;
+
+DROP SERVER obs_server CASCADE;

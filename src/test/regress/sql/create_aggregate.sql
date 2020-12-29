@@ -61,3 +61,12 @@ create function aggfns_trans(aggtype[],integer,integer,text) returns aggtype[]
 as 'select array_append($1,ROW($2,$3,$4)::aggtype)'
 language sql immutable;
 
+create aggregate aggfstr(integer,integer,text) (
+   sfunc = aggf_trans, stype = aggtype[],
+   initcond = '{}'
+);
+
+create aggregate aggfns(integer,integer,text) (
+   sfunc = aggfns_trans, stype = aggtype[],
+   initcond = '{}'
+);

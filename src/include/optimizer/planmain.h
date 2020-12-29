@@ -36,14 +36,10 @@ typedef enum AggOrientation {
 /* row threshold to apply having filter */
 #define HAVING_THRESHOLD 1e6
 
-/* query_planner callback to compute query_pathkeys */
-typedef void (*query_pathkeys_callback) (PlannerInfo *root, void *extra);
-
 /*
  * prototypes for plan/planmain.c
  */
 extern void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double limit_tuples,
-    query_pathkeys_callback qp_callback, void *qp_extra,
     Path** cheapest_path, Path** sorted_path, double* num_groups, List* rollup_groupclauses = NULL,
     List* rollup_lists = NULL);
 
@@ -64,7 +60,7 @@ extern void copy_plan_costsize(Plan* dest, Plan* src);
 extern SubqueryScan* make_subqueryscan(List* qptlist, List* qpqual, Index scanrelid, Plan* subplan);
 extern ForeignScan* make_foreignscan(List* qptlist, List* qpqual, Index scanrelid, List* fdw_exprs, List* fdw_private,
     RemoteQueryExecType type = EXEC_ON_ALL_NODES);
-extern Append* make_append(List* appendplans, int first_partial_plan, List* tlist);
+extern Append* make_append(List* appendplans, List* tlist);
 extern RecursiveUnion* make_recursive_union(
     List* tlist, Plan* lefttree, Plan* righttree, int wtParam, List* distinctList, long numGroups);
 extern Sort* make_sort_from_pathkeys(
@@ -77,7 +73,8 @@ extern Sort* make_sort(PlannerInfo* root, Plan* lefttree, int numCols, AttrNumbe
 extern Agg* make_agg(PlannerInfo* root, List* tlist, List* qual, AggStrategy aggstrategy,
     const AggClauseCosts* aggcosts, int numGroupCols, AttrNumber* grpColIdx, Oid* grpOperators, long numGroups,
     Plan* lefttree, WindowLists* wflists, bool need_stream, bool trans_agg, List* groupingSets = NIL,
-    Size hash_entry_size = 0, bool add_width = false, AggOrientation agg_orientation = AGG_LEVEL_1_INTENT);
+    Size hash_entry_size = 0, bool add_width = false, AggOrientation agg_orientation = AGG_LEVEL_1_INTENT,
+    bool unique_check = true);
 extern WindowAgg* make_windowagg(PlannerInfo* root, List* tlist, List* windowFuncs, Index winref, int partNumCols,
     AttrNumber* partColIdx, Oid* partOperators, int ordNumCols, AttrNumber* ordColIdx, Oid* ordOperators,
     int frameOptions, Node* startOffset, Node* endOffset, Plan* lefttree);
@@ -91,6 +88,7 @@ extern Limit* make_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, N
 extern void pick_single_node_plan_for_replication(Plan* plan);
 extern Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, Node* limitCount, int64 offset_est,
     int64 count_est, double limit_tuples, bool needs_sort);
+extern Plan* make_stream_sort(PlannerInfo* root, Plan* lefttree);
 extern SetOp* make_setop(SetOpCmd cmd, SetOpStrategy strategy, Plan* lefttree, List* distinctList,
     AttrNumber flagColIdx, int firstFlag, long numGroups, double outputRows, OpMemInfo* memInfo);
 extern Plan* create_direct_scan(
@@ -136,8 +134,12 @@ extern bool check_subplan_exec_datanode(PlannerInfo* root, Node* node);
 extern void add_base_rels_to_query(PlannerInfo* root, Node* jtnode);
 extern void build_base_rel_tlists(PlannerInfo* root, List* final_tlist);
 extern void add_vars_to_targetlist(PlannerInfo* root, List* vars, Relids where_needed, bool create_new_ph);
+extern void find_lateral_references(PlannerInfo *root);
+extern void create_lateral_join_info(PlannerInfo *root);
+extern void add_lateral_info(PlannerInfo *root, Index rhs, Relids lhs);
 extern List* deconstruct_jointree(PlannerInfo* root);
 extern void distribute_restrictinfo_to_rels(PlannerInfo* root, RestrictInfo* restrictinfo);
+extern void process_security_clause_appendrel(PlannerInfo *root);
 extern void process_implied_equality(PlannerInfo* root, Oid opno, Oid collation, Expr* item1, Expr* item2,
     Relids qualscope, Relids nullable_relids, Index security_level, bool below_outer_join, bool both_const);
 extern void process_implied_quality(PlannerInfo* root, Node* node, Relids relids, bool below_outer_join);
@@ -178,7 +180,7 @@ extern Plan* create_remotelimit_plan(PlannerInfo* root, Plan* local_plan);
 extern List* pgxc_order_qual_clauses(PlannerInfo* root, List* clauses);
 extern List* pgxc_build_relation_tlist(RelOptInfo* rel);
 extern void pgxc_copy_path_costsize(Plan* dest, Path* src);
-extern Plan* pgxc_create_gating_plan(PlannerInfo* root, Plan* plan, List* quals, bool parallel_safe);
+extern Plan* pgxc_create_gating_plan(PlannerInfo* root, Plan* plan, List* quals);
 #endif
 extern void expand_dfs_tables(PlannerInfo* root);
 extern void expand_internal_rtentry(PlannerInfo* root, RangeTblEntry* rte, Index rti);

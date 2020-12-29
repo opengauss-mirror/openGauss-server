@@ -1,0 +1,110 @@
+set enable_global_stats = true;
+set current_schema = vector_engine;
+set enable_vector_engine=on;
+set enable_nestloop=off;
+explain (costs off) select
+	l_orderkey,
+	sum(l_extendedprice * (1 - l_discount)) as revenue,
+	o_orderdate,
+	o_shippriority
+from
+	customer,
+	orders,
+	lineitem
+where
+	c_mktsegment = 'BUILDING'
+	and c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate < '1995-03-15'::date
+	and l_shipdate > '1995-03-15'::date
+group by
+	l_orderkey,
+	o_orderdate,
+	o_shippriority
+order by
+	revenue desc,
+	o_orderdate
+limit 10
+;
+                                                                                  QUERY PLAN                                                                                   
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Streaming (type: GATHER)
+               Merge Sort Key: (sum((vector_engine.lineitem.l_extendedprice * (1::numeric - vector_engine.lineitem.l_discount)))) DESC, vector_engine.orders.o_orderdate
+               Node/s: All datanodes
+               ->  Vector Limit
+                     ->  Vector Sort
+                           Sort Key: (sum((vector_engine.lineitem.l_extendedprice * (1::numeric - vector_engine.lineitem.l_discount)))) DESC, vector_engine.orders.o_orderdate
+                           ->  Vector Sonic Hash Aggregate
+                                 Group By Key: vector_engine.lineitem.l_orderkey, vector_engine.orders.o_orderdate, vector_engine.orders.o_shippriority
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       Spawn on: All datanodes
+                                       ->  Vector Sonic Hash Join
+                                             Hash Cond: (vector_engine.orders.o_custkey = vector_engine.customer.c_custkey)
+                                             ->  Vector Streaming(type: REDISTRIBUTE)
+                                                   Spawn on: All datanodes
+                                                   ->  Vector Sonic Hash Join
+                                                         Hash Cond: (vector_engine.orders.o_orderkey = vector_engine.lineitem.l_orderkey)
+                                                         Generate Bloom Filter On Expr: vector_engine.lineitem.l_orderkey
+                                                         Generate Bloom Filter On Index: 0
+                                                         ->  Vector Append
+                                                               ->  Dfs Scan on orders
+                                                                     Pushdown Predicate Filter: (o_orderdate < 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)
+                                                                     Filter By Bloom Filter On Expr: vector_engine.orders.o_orderkey
+                                                                     Filter By Bloom Filter On Index: 0
+                                                               ->  Vector Adapter
+                                                                     ->  Seq Scan on pg_delta_vector_engine_orders orders
+                                                                           Filter: (o_orderdate < 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)
+                                                         ->  Vector Append
+                                                               ->  Dfs Scan on lineitem
+                                                                     Pushdown Predicate Filter: (l_shipdate > 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)
+                                                               ->  Vector Adapter
+                                                                     ->  Seq Scan on pg_delta_vector_engine_lineitem lineitem
+                                                                           Filter: (l_shipdate > 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)
+                                             ->  Vector Append
+                                                   ->  Dfs Scan on customer
+                                                         Pushdown Predicate Filter: (c_mktsegment = 'BUILDING'::bpchar)
+                                                   ->  Vector Adapter
+                                                         ->  Seq Scan on pg_delta_vector_engine_customer customer
+                                                               Filter: (c_mktsegment = 'BUILDING'::bpchar)
+(40 rows)
+
+select
+	l_orderkey,
+	sum(l_extendedprice * (1 - l_discount)) as revenue,
+	o_orderdate,
+	o_shippriority
+from
+	customer,
+	orders,
+	lineitem
+where
+	c_mktsegment = 'BUILDING'
+	and c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate < '1995-03-15'::date
+	and l_shipdate > '1995-03-15'::date
+group by
+	l_orderkey,
+	o_orderdate,
+	o_shippriority
+order by
+	revenue desc,
+	o_orderdate
+limit 10
+;
+ l_orderkey |   revenue   |       o_orderdate        | o_shippriority 
+------------+-------------+--------------------------+----------------
+      47714 | 267010.5894 | Sat Mar 11 00:00:00 1995 |              0
+      22276 | 266351.5562 | Sun Jan 29 00:00:00 1995 |              0
+      32965 | 263768.3414 | Sat Feb 25 00:00:00 1995 |              0
+      21956 | 254541.1285 | Thu Feb 02 00:00:00 1995 |              0
+       1637 | 243512.7981 | Wed Feb 08 00:00:00 1995 |              0
+      10916 | 241320.0814 | Sat Mar 11 00:00:00 1995 |              0
+      30497 | 208566.6969 | Tue Feb 07 00:00:00 1995 |              0
+        450 | 205447.4232 | Sun Mar 05 00:00:00 1995 |              0
+      47204 | 204478.5213 | Mon Mar 13 00:00:00 1995 |              0
+       9696 | 201502.2188 | Mon Feb 20 00:00:00 1995 |              0
+(10 rows)
+

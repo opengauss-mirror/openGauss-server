@@ -2,17 +2,6 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 2010-2011, PostgreSQL Global Development Group
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * ---------------------------------------------------------------------------------------
  *
  *  foreignroutine.cpp
  *
@@ -90,6 +79,7 @@ extern bool TrySaveImportError(DistImportExecutionState *importState, ForeignSca
 extern void SyncBulkloadStates(CopyState cstate);
 extern void CleanBulkloadStates();
 extern char *TrimStr(const char *str);
+extern Oid GetUserId(void);
 
 void checkGSOBSPrefixNoAllowRegionOption(bool hasRegion, List *LocationOPt);
 
@@ -498,7 +488,7 @@ void checkGSOBSPrefixNoAllowRegionOption(bool hasRegion, List *LocationOPt)
 }
 
 void processOBSNoAllowOptions(bool specifyMode, const char *fileheader,
-    const char *OutputFilenamePrefix, const char *OutputFixAlignment, bool doLogRemote)
+                              const char *OutputFilenamePrefix, const char *OutputFixAlignment, bool doLogRemote)
 {
     if (specifyMode) {
         ereport(ERROR, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
@@ -518,8 +508,8 @@ void processOBSNoAllowOptions(bool specifyMode, const char *fileheader,
     }
 }
 
-void processOBSHaveToOptions(const char *accessKeyStr, const char *secretAccessKeyStr, 
-    FileFormat format, const char *encryptStr, const char *chunksizeStr, bool writeOnly)
+void processOBSHaveToOptions(const char *accessKeyStr, const char *secretAccessKeyStr,
+                             FileFormat format, const char *encryptStr, const char *chunksizeStr, bool writeOnly)
 {
     // default FORMAT_UNKNOWN  value is TEXT
     if (format == FORMAT_UNKNOWN) {
@@ -616,7 +606,7 @@ void processOBSLocationOptions(bool writeOnly, List *source)
             temp_location_list = lappend(temp_location_list, makeString(temp_location));
         }
 
-    DesErr:
+DesErr:
         foreach (temp_location_cell, temp_location_list) {
             char *tempstr = strVal(lfirst(temp_location_cell));
             pfree(tempstr);
@@ -628,7 +618,7 @@ void processOBSLocationOptions(bool writeOnly, List *source)
 }
 
 void processNoneOBSOptions(const char *chunksizeStr, const char *encryptStr,
-    const char *accessKeyStr, const char *secretAccessKeyStr, bool hasRegion)
+                           const char *accessKeyStr, const char *secretAccessKeyStr, bool hasRegion)
 {
     if (chunksizeStr != NULL) {
         ereport(ERROR, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
@@ -1027,6 +1017,13 @@ void ProcessDistImportOptions(DistImportPlanState *planstate, List *options, boo
                      errmsg("The above Read-Only foreign table is using FIXED mode without specifying 'fix' option."),
                      errhint("Please use 'fix' option to specify expected fixed record length in order to parser the "
                              "data file correctly.")));
+
+        if (((IS_SHARED_MODE(planstate->mode) || IS_PRIVATE_MODE(planstate->mode)) && !initialuser())
+            && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                     errmsg("Shared mode and private mode are only available for the supper user and Operatoradmin")));
+        }
     }
 
     // Remove the options that only available in foreign table
@@ -1040,6 +1037,11 @@ void ProcessDistImportOptions(DistImportPlanState *planstate, List *options, boo
 
 void decryptKeyString(const char *keyStr, char destplainStr[], uint32 destplainLength, const char *obskey)
 {
+#define ENCRYPT_STR_PREFIX "encryptstr"
+
+    if (unlikely(keyStr == NULL)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid key string")));
+    }
     if (strncmp(keyStr, ENCRYPT_STR_PREFIX, strlen(ENCRYPT_STR_PREFIX)) == 0) {
         keyStr = keyStr + strlen(ENCRYPT_STR_PREFIX);
     } else {
@@ -1051,9 +1053,6 @@ void decryptKeyString(const char *keyStr, char destplainStr[], uint32 destplainL
      * step 2: use cipher key to decrypt option and store
      * results into decryptAccessKeyStr/decryptSecretAccessKeyStr
      */
-    if (unlikely(keyStr == NULL)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid key string")));
-    }
     decryptOBS(keyStr, destplainStr, destplainLength, obskey);
 }
 
@@ -1349,13 +1348,13 @@ void getOBSOptions(ObsCopyOptions *obs_copy_options, List *options)
     foreach (lc, options) {
         DefElem *def = (DefElem *)lfirst(lc);
         if (pg_strcasecmp(def->defname, optChunkSize) == 0) {
-            Size temp = mul_size((Size)((uint32)atoi(defGetString(def))), (Size)(1024 * 1024));
-            if (temp > PG_UINT32_MAX) {
-                ereport(ERROR, 
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
-                        errmsg("chunksize is too large")));  
+            uint32_t chunksize = atoi(defGetString(def));
+            if (chunksize > (PG_UINT32_MAX / (1024 * 1024))) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                         errmsg("obs option chunksize is too large")));
             }
-            obs_copy_options->chunksize = (uint32)temp;                                                 
+            obs_copy_options->chunksize = chunksize * 1024 * 1024;
         } else if (pg_strcasecmp(def->defname, optEncrypt) == 0) {
             obs_copy_options->encrypt = defGetBoolean(def);
         } else if (pg_strcasecmp(def->defname, optAccessKey) == 0) {
@@ -1507,8 +1506,8 @@ void distImportBegin(ForeignScanState *node, int eflags)
             logger = New(CurrentMemoryContext) GDSErrorLogger;
             importState->elogger = lappend(importState->elogger, logger);
             if (strlen(planstate.remoteName) == 0)
-                remoteName = const_cast<char*>(importState->cur_relname);
-            logger->Initialize((void *)importState->io_stream, (TupleDesc)remoteName, err_info);
+                remoteName = (char*)importState->cur_relname;
+            logger->Initialize((void*)importState->io_stream, (TupleDesc)remoteName, err_info);
         }
 
         if (scan->errCache != NULL) {

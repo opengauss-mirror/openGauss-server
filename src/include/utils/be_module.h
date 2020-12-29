@@ -43,12 +43,12 @@ enum ModuleId {
     MOD_SLRU,         /* Simple LRU buffering manager */
     MOD_MEM,          /* Memory Manager */
     MOD_AUTOVAC,      /* auto-vacuum */
-    MOD_CACHE,        /* cache manager  include data cache(cu , dfs) ,index cache(dfs) */
+    MOD_CACHE,        /* cache manager  include data cache(cu , dfs) ,index cache(dfs)*/
     MOD_ADIO,         /* ADIO  feature */
     MOD_SSL,          /* SSL */
     MOD_GDS,          /* GDS */
     MOD_TBLSPC,       /* Tablespace */
-    MOD_WLM,          /* workload manager */
+    MOD_WLM,          /* workload manager*/
     MOD_OBS,          /* OBS */
     MOD_EXECUTOR,     /* Row Executor */
     MOD_OPFUSION,     /* Bypass Opfusion */
@@ -70,8 +70,9 @@ enum ModuleId {
     MOD_MOT,          /* MOT */
     MOD_PLANHINT,     /* plan hint */
     MOD_PARQUET,      /* Parquet storage format */
+    MOD_CARBONDATA,   /* Carbondata storage format */
 
-    /* MODULE FOR TRANSACTION LOG CONTROL , USE LOG LEVEL */
+    /* MODULE FOR TRANSACTION LOG CONTROL , USE LOG LEVEL*/
     MOD_TRANS_SNAPSHOT, /* Snapshot */
     MOD_TRANS_XACT,     /* Xact Finite-State-Machine(FSM) */
     MOD_TRANS_HANDLE,   /* Handle for Transaction */
@@ -85,16 +86,21 @@ enum ModuleId {
     MOD_SEQ,        /* sequence */
     MOD_REDO,       /* redo log */
     MOD_FUNCTION,   /* internal function */
-    MOD_PARSER,     /* parser module */
+    MOD_PARSER,     /* parser module*/
     MOD_INSTR,      /* Instrumentation */
     MOD_INCRE_CKPT, /* incremental checkpoint */
     MOD_INCRE_BG,   /* incremental checkpoint bgwriter */
     MOD_DW,         /* double write */
-    MOD_RTO,        /* log control */
+    MOD_RTO_RPO,    /* log control */
     MOD_HEARTBEAT,  /* heartbeat */
-    MOD_OPT_AI,     /* ai optimizer */
     MOD_COMM_IPC,   /* comm ipc performance */
     MOD_COMM_PARAM, /* comm session params */
+    MOD_TIMESERIES, /* timeseries feature */
+    MOD_SCHEMA,     /* schema search */
+    MOD_LIGHTPROXY, /* lightProxy */
+    MOD_HOTKEY,     /* hotkey */
+    MOD_THREAD_POOL,  /* thread_pool */
+    MOD_OPT_AI,     /* ai optimizer */
 
     /* add your module id above */
     MOD_MAX

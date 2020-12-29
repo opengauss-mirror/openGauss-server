@@ -1,0 +1,701 @@
+--测试导入外表的原有接口
+--------------------------------------------------------
+drop foreign table if exists    t1_rescan;;
+create foreign table t1_rescan(
+a int,
+b int
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/test_rescan',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+compatible_illegal_chars 'true'
+) read only;
+
+select * from t1_rescan order by 1, 2;
+--测试新接口使用obs:// prefix
+drop foreign table if exists    t1_rescan;;
+create foreign table t1_rescan(
+a int,
+b int
+)
+SERVER gsmpp_server OPTIONS (
+    location 'obs://@obsbucket@/obscheck/test_rescan',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+compatible_illegal_chars 'true'
+) read only;
+
+select * from t1_rescan order by 1, 2;
+
+drop foreign table if exists    t1_rescan;
+create foreign table t1_rescan(
+a int,
+b int
+)
+SERVER gsmpp_server OPTIONS (
+    location '                obs://@obsbucket@/obscheck/test_rescan | obs://@obsbucket@/test_computing_pool/txt_obs_test/',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+compatible_illegal_chars 'true'
+) read only;
+
+select count(*) from t1_rescan;
+
+
+Alter foreign table t1_rescan options (drop region );
+Alter foreign table t1_rescan options (add region 'south' );
+select count(*) from t1_rescan;
+Alter foreign table t1_rescan options (set region 'defaultRegion' );
+select count(*) from t1_rescan;
+
+analyze t1_rescan;
+
+------------------------计算资源池
+drop foreign table if exists txt_obs_ft001;
+create foreign table txt_obs_ft001
+( a int, b int )
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/test_computing_pool/txt_obs_test/',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+) read only;
+set acceleration_with_compute_pool=on;
+explain (verbose, costs off, nodes off) select * from txt_obs_ft001 order by a;
+
+drop foreign table txt_obs_ft001;
+create foreign table txt_obs_ft001
+( a int, b int )
+SERVER gsmpp_server OPTIONS (
+    location 'obs://@obsbucket@/test_computing_pool/txt_obs_test/',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+) read only;
+explain (verbose, costs off, nodes off) select * from txt_obs_ft001 order by a;
+
+set acceleration_with_compute_pool=off;
+
+---   导出测试
+drop table if exists normal_tbl_001;
+create table normal_tbl_001(a int, b int);
+insert into normal_tbl_001 values(1, 3);
+insert into normal_tbl_001 values(2, 4);
+
+drop FOREIGN table if exists test_export;
+CREATE FOREIGN TABLE test_export
+(
+    R_REGIONKEY  INT,
+	b int
+)
+SERVER gsmpp_server
+OPTIONS(location 'obs://@obsbucket@/check_export',
+format 'text',
+delimiter '|',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+)write only;
+
+\! ./s3bin/s3 delete  @obsbucket@/check_export/ address=@obshostname@ ak=@ak@ sk=@sk@
+
+insert into test_export select * from normal_tbl_001;
+
+
+drop FOREIGN table if exists test_export;
+CREATE FOREIGN TABLE test_export
+(
+    R_REGIONKEY  INT,
+	b int
+)
+SERVER gsmpp_server
+OPTIONS(location 'gsobs://@obshostname@/@obsbucket@/check_export',
+format 'text',
+delimiter '|',
+    access_key '@ak@',
+    secret_access_key '@sk@'
+)write only;
+\! ./s3bin/s3 delete  @obsbucket@/check_export/ address=@obshostname@ ak=@ak@ sk=@sk@
+insert into test_export select * from normal_tbl_001;
+
+
+--负向用例测试
+--Gsobs开头的location与region参数不能同时使用
+drop foreign table if exists    t1_rescan;;
+create foreign table t1_rescan(
+a int,
+b int
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsobs://@obshostname@/@obsbucket@/obscheck/test_rescan',
+	region 'south',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+compatible_illegal_chars 'true'
+) read only;
+--不允许在location中同时存在不同的prefix
+drop foreign table if exists    t1_rescan;;
+create foreign table t1_rescan(
+a int,
+b int
+)
+SERVER gsmpp_server OPTIONS (
+    location 'obs://@obshostname@/@obsbucket@/obscheck/test_rescan|gsobs://@obshostname@/@obsbucket@/obscheck/test_rescan',
+    format 'text',
+    encoding 'utf8',
+    chunksize '32',
+    encrypt 'off',
+    access_key '@ak@',
+    secret_access_key '@sk@',
+compatible_illegal_chars 'true'
+) read only;
+
+--Gds外表不允许指定region参数
+drop foreign table if exists    t1_rescan;
+create foreign table t1_rescan(
+a int,
+b int
+)
+SERVER gsmpp_server OPTIONS (
+    location 'gsfs://@obshostname@/@obsbucket@/obscheck/test_rescan',
+	region 'south',
+    format 'text',
+compatible_illegal_chars 'true'
+) read only;
+
+--测试查询外表以及obs server
+--显示写region参数
+drop server if exists obs_server cascade;
+create server obs_server foreign data wrapper dfs_fdw options (
+region 'defaultregion',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+--不写region参数
+drop server obs_server cascade;
+create server obs_server foreign data wrapper dfs_fdw options (
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+
+--兼容以前的address参数
+drop server obs_server cascade;
+create server obs_server foreign data wrapper dfs_fdw options (
+address '@obshostname@',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+
+--负向 server测试
+--region address参数不能同时存在
+drop server obs_server cascade;
+create server obs_server foreign data wrapper dfs_fdw options (
+encrypt 'off',
+region 'defaultregion',
+address '@obshostname@',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+
+--错误显示哪些参数支持,共6个参数
+drop server obs_server cascade;
+create server obs_server foreign data wrapper dfs_fdw options (
+hdfscfgpath '/opt/',
+region 'defaultregion',
+address '@obshostname@',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+
+--使用在regmap中不存在的regioncode
+drop server obs_server cascade;
+create server obs_server foreign data wrapper dfs_fdw options (
+region 'noexistregoincode',
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+--hdfs server 错误使用 region ，
+drop server hdfs_server_test_001 cascade;
+create server hdfs_server_test_001 foreign data wrapper dfs_fdw options (
+hdfscfgpath '/opt/',
+region 'defaultregion',
+address '@obshostname@',
+type 'hdfs'
+);
+
+--测试obs外表
+drop server obs_server cascade;
+create server obs_server foreign data wrapper dfs_fdw options (
+encrypt 'off',
+access_key '@ak@',
+secret_access_key '@sk@',
+type 'obs'
+);
+--text格式支持参数,foldername
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'text',
+delimiter '|',
+null 'e',
+noescaping 'on',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+--date_format  'date',
+--time_format 'time',
+--timestamp_format 'timestamp',
+--smalldatetime_format 'smalldatetime',
+chunksize '20',
+foldername '/dws/hanfeng/',
+checkencoding 'high'
+)
+distribute by roundrobin;
+--text格式支持参数,location
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'text',
+delimiter '|',
+null 'e',
+noescaping 'on',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+--date_format  'date',
+--time_format 'time',
+--timestamp_format 'timestamp',
+--smalldatetime_format 'smalldatetime',
+chunksize '20',
+location 'obs://dws/hanfeng/',
+checkencoding 'high'
+)
+distribute by roundrobin;
+
+--text格式支持参数,location格式必须是OBS://bucket/object1/
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'text',
+delimiter '|',
+null 'e',
+noescaping 'on',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+--date_format  'date',
+--time_format 'time',
+--timestamp_format 'timestamp',
+--smalldatetime_format 'smalldatetime',
+chunksize '20',
+location 'obs:///dws/hanfeng/ | obs:///bucket/object1',
+checkencoding 'high'
+)
+distribute by roundrobin;
+
+--location中的空格自动去掉
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+header 'true',
+delimiter '|',
+null 'e',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+--date_format  'date',
+--time_format 'time',
+--timestamp_format 'timestamp',
+--smalldatetime_format 'smalldatetime',
+chunksize '20',
+location 'obs://@obsbucket@/csv_test/  | obs://@obsbucket@/csv_test/ |',
+checkencoding 'high',
+totalrows '200'
+)
+distribute by roundrobin;
+
+\d+ obs_option_test
+
+select count(*) from obs_option_test;
+Alter foreign table obs_option_test options (add foldername 'obs://@obsbucket@/csv_test/ ' );
+Alter foreign table obs_option_test options (drop location );
+Alter foreign table obs_option_test options (set location 'obs://@obsbucket@/csv_test/  ');
+select count(*) from obs_option_test;
+Alter foreign table obs_option_test options (add header 'true' );
+select count(*) from obs_option_test;
+
+--校验option值的正确性
+--delimiter分隔符校验, 不能大于10
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+delimiter '&&&&&&&&&&&',
+null 'e',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+chunksize '20',
+location 'obs://dws/hanfeng/ | obs://bucket/object1/|',
+checkencoding 'high',
+totalrows '200'
+)
+distribute by roundrobin;
+
+--多桶测试
+--测试location 多桶测试
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+header 'true',
+delimiter '|',
+location 'obs://@obsbucket@/csv_test/ | obs://@obsbucket@/csv_test/ ',
+--location 'obs://',
+--foldername '//',
+checkencoding 'high',
+totalrows '200',
+encoding 'utf-8'
+)
+distribute by roundrobin;
+select * from obs_option_test order by a, b;
+
+--测试foldername多桶
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+header 'true',
+delimiter '|',
+--location 'obs://@obsbucket@/csv_test/ | obs://@obsbucket@/csv_test/ ',
+--location 'obs://',
+foldername '/@obsbucket@/csv_test/,/@obsbucket@/csv_test/',
+checkencoding 'high',
+totalrows '200',
+encoding 'utf-8'
+)
+distribute by roundrobin;
+select * from obs_option_test order by a, b;
+
+
+--负向用例
+--对象路径location参数值必须以OBS://开头
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'text',
+delimiter '|',
+null 'e',
+noescaping 'on',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+--date_format  'date',
+--time_format 'time',
+--timestamp_format 'timestamp',
+--smalldatetime_format 'smalldatetime',
+chunksize '20',
+location 'obs://dws/hanfeng/ |  /hanefng/fe',
+checkencoding 'high'
+)
+distribute by roundrobin;
+
+--text格式不支持option, header,quote,escape,filenames
+--不支持header
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+header 'on',
+format 'text',
+delimiter '|',
+null 'e',
+noescaping 'on',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+--date_format  'date',
+--time_format 'time',
+--timestamp_format 'timestamp',
+--smalldatetime_format 'smalldatetime',
+chunksize '20',
+foldername '/dws/hanfeng/',
+checkencoding 'high'
+)
+distribute by roundrobin;
+--不支持quote 
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+quote '"',
+format 'text',
+delimiter '|',
+null 'e',
+noescaping 'on',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+--date_format  'date',
+--time_format 'time',
+--timestamp_format 'timestamp',
+--smalldatetime_format 'smalldatetime',
+chunksize '20',
+foldername '/dws/hanfeng/',
+checkencoding 'high'
+)
+distribute by roundrobin;
+--不支持escape
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'text',
+delimiter '|',
+null 'e',
+escape '\',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+--date_format  'date',
+--time_format 'time',
+--timestamp_format 'timestamp',
+--smalldatetime_format 'smalldatetime',
+chunksize '20',
+foldername '/dws/hanfeng/',
+checkencoding 'high'
+)
+distribute by roundrobin;
+--不支持filenames
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+filenames '/hanfeng/df',
+format 'text',
+delimiter '|',
+null 'e',
+noescaping 'on',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+--date_format  'date',
+--time_format 'time',
+--timestamp_format 'timestamp',
+--smalldatetime_format 'smalldatetime',
+chunksize '20',
+foldername '/dws/hanfeng/',
+checkencoding 'high'
+)
+distribute by roundrobin;
+---csv格式不支持的参数, noescaping, 
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+delimiter '|',
+null 'e',
+noescaping 'on',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+--date_format  'date',
+--time_format 'time',
+--timestamp_format 'timestamp',
+--smalldatetime_format 'smalldatetime',
+chunksize '20',
+foldername '/@obsbucket@/csv_test/',
+checkencoding 'high'
+)
+distribute by roundrobin;
+---csv格式不支持的参数, filenames
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+delimiter '|',
+null 'e',
+filenames '/on',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+--date_format  'date',
+--time_format 'time',
+--timestamp_format 'timestamp',
+--smalldatetime_format 'smalldatetime',
+chunksize '20',
+foldername '/dws/hanfeng/',
+checkencoding 'high'
+)
+distribute by roundrobin;
+
+--OBS 外表支持的文件格式,仅仅支持orc、text、only格式
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'paquate',
+delimiter '|',
+null 'e',
+filenames '/on',
+encoding 'utf-8',
+fill_missing_fields 'false',
+ignore_extra_data 'false',
+--date_format  'date',
+--time_format 'time',
+--timestamp_format 'timestamp',
+--smalldatetime_format 'smalldatetime',
+chunksize '20',
+foldername '/dws/hanfeng/',
+checkencoding 'high'
+)
+distribute by roundrobin;
+
+--delimiter分隔符校验, 不能超过10个字符, 
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+delimiter '&&&&&&&&&&&', 
+location 'obs://dws/hanfeng/ | obs://bucket/object1/|',
+checkencoding 'high',
+totalrows '200',
+encoding 'utf-8'
+)
+distribute by roundrobin;
+
+
+--分隔符delimiter不能是\r \n
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+delimiter E'\r', 
+location 'obs://dws/hanfeng/ | obs://bucket/object1/|',
+checkencoding 'high',
+totalrows '200',
+encoding 'utf-8'
+)
+distribute by roundrobin;
+
+--csv格式下, delimiter 不能和quote, null 包含
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+delimiter '|',
+quote '"' ,
+null '|',
+location 'obs://dws/hanfeng/ | obs://bucket/object1/|',
+checkencoding 'high',
+totalrows '200',
+encoding 'utf-8'
+)
+distribute by roundrobin;
+--delimiter不能和quote包含
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+delimiter '|',
+quote '|' ,
+location 'obs://dws/hanfeng/ | obs://bucket/object1/|',
+checkencoding 'high',
+totalrows '200',
+encoding 'utf-8'
+)
+distribute by roundrobin;
+
+--quote只能是单字符
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+delimiter '|',
+quote '**' ,
+null '|',
+location 'obs://dws/hanfeng/ | obs://bucket/object1/|',
+checkencoding 'high',
+totalrows '200',
+encoding 'utf-8'
+)
+distribute by roundrobin;
+
+--escape只能是单字符
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+escape '\0',
+location 'obs://dws/hanfeng/ | obs://bucket/object1/|',
+checkencoding 'high',
+totalrows '200',
+encoding 'utf-8'
+)
+distribute by roundrobin;
+--当escape和quote相同时会被替换为\0,在表定义中显示为空字符串
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+escape '"',
+quote '"',
+delimiter '|',
+foldername '/@obsbucket@/csv_test/',
+checkencoding 'high',
+totalrows '200',
+encoding 'utf-8'
+)
+distribute by roundrobin;
+\d+ obs_option_test
+
+--obs外表不支持复制表
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+header 'true',
+delimiter '|',
+foldername '/@obsbucket@/csv_test/',
+checkencoding 'high',
+--totalrows '200',
+encoding 'utf-8'
+) with err_table 
+distribute by replication;
+
+--OBS的text、csv不支持分区表
+drop foreign table if exists obs_option_test;
+create foreign table obs_option_test(a int, b int) server obs_server
+options(
+format 'csv',
+header 'true',
+delimiter '|',
+foldername '/@obsbucket@/csv_test/',
+checkencoding 'high',
+--totalrows '200',
+encoding 'utf-8'
+) with err_table 
+distribute by roundrobin
+partition by (a);

@@ -17,8 +17,7 @@
  *    common function for xlog read
  *
  * IDENTIFICATION
- *
- * src/gausskernel/storage/access/redo/xlogreader_common.cpp
+ *    src/gausskernel/storage/access/redo/xlogreader_common.cpp
  *
  *-------------------------------------------------------------------------
  */
@@ -27,7 +26,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/xlogreader.h"
-#include "storage/bufpage.h"
+#include "storage/buf/bufpage.h"
 #include "access/redo_common.h"
 
 /*
@@ -37,10 +36,10 @@
  * *forknum, and *blknum are filled in (if not NULL), and returns TRUE.
  * Otherwise returns FALSE.
  */
-bool XLogRecGetBlockTag(
-    XLogReaderState* record, uint8 block_id, RelFileNode* rnode, ForkNumber* forknum, BlockNumber* blknum)
+bool XLogRecGetBlockTag(XLogReaderState *record, uint8 block_id, RelFileNode *rnode, ForkNumber *forknum,
+                        BlockNumber *blknum)
 {
-    DecodedBkpBlock* bkpb = NULL;
+    DecodedBkpBlock *bkpb = NULL;
 
     if (!record->blocks[block_id].in_use)
         return false;
@@ -60,9 +59,9 @@ bool XLogRecGetBlockTag(
  * no data (e.g. because a full-page image was taken instead). The returned
  * pointer points to a MAXALIGNed buffer.
  */
-char* XLogRecGetBlockData(XLogReaderState* record, uint8 block_id, Size* len)
+char *XLogRecGetBlockData(XLogReaderState *record, uint8 block_id, Size *len)
 {
-    DecodedBkpBlock* bkpb = NULL;
+    DecodedBkpBlock *bkpb = NULL;
 
     if (!record->blocks[block_id].in_use)
         return NULL;
@@ -87,7 +86,7 @@ char* XLogRecGetBlockData(XLogReaderState* record, uint8 block_id, Size* len)
  *
  * Reconstruct for batchredo
  */
-void RestoreBlockImage(char* bkp_image, uint16 hole_offset, uint16 hole_length, char* page)
+void RestoreBlockImage(const char *bkp_image, uint16 hole_offset, uint16 hole_length, char *page)
 {
     errno_t rc = EOK;
 
@@ -105,10 +104,8 @@ void RestoreBlockImage(char* bkp_image, uint16 hole_offset, uint16 hole_length, 
         if (hole_offset + hole_length == BLCKSZ)
             return;
 
-        rc = memcpy_s(page + (hole_offset + hole_length),
-            BLCKSZ - (hole_offset + hole_length),
-            bkp_image + hole_offset,
-            BLCKSZ - (hole_offset + hole_length));
+        rc = memcpy_s(page + (hole_offset + hole_length), BLCKSZ - (hole_offset + hole_length), bkp_image + hole_offset,
+                      BLCKSZ - (hole_offset + hole_length));
         securec_check(rc, "", "");
     }
 }

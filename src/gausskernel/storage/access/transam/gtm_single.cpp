@@ -1,18 +1,7 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 2000-2016, PostgreSQL Global Development Group
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * gtm_single.cpp
  *
@@ -26,8 +15,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "gtm/libpq-fe.h"
-#include "gtm/libpq-int.h"
+#include "gtm/utils/libpq-fe.h"
+#include "gtm/utils/libpq-int.h"
 #include "gtm/gtm_client.h"
 #include "access/gtm.h"
 #include "access/transam.h"
@@ -62,26 +51,21 @@ volatile GtmHostIndex LastInuseHostIndex = GTM_HOST_INVAILD;
 THR_LOCAL bool need_reset_xmin = true;
 extern THR_LOCAL volatile sig_atomic_t catchupInterruptPending;
 
-extern char* get_database_name(Oid dbid);
+extern char *get_database_name(Oid dbid);
 
 bool DataInstConnToGTMSucceed = true;
 
-AlarmCheckResult DataInstConnToGTMChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
+AlarmCheckResult DataInstConnToGTMChecker(Alarm *alarm, AlarmAdditionalParam *additionalParam)
 {
     if (true == DataInstConnToGTMSucceed) {
         /* fill the resume message */
-        WriteAlarmAdditionalInfo(
-            additionalParam, g_instance.attr.attr_common.PGXCNodeName, "", "", alarm, ALM_AT_Resume);
+        WriteAlarmAdditionalInfo(additionalParam, g_instance.attr.attr_common.PGXCNodeName, "", "", alarm,
+                                 ALM_AT_Resume);
         return ALM_ACR_Normal;
     } else {
         /* fill the alarm message */
-        WriteAlarmAdditionalInfo(additionalParam,
-            g_instance.attr.attr_common.PGXCNodeName,
-            "",
-            "",
-            alarm,
-            ALM_AT_Fault,
-            g_instance.attr.attr_common.PGXCNodeName);
+        WriteAlarmAdditionalInfo(additionalParam, g_instance.attr.attr_common.PGXCNodeName, "", "", alarm, ALM_AT_Fault,
+                                 g_instance.attr.attr_common.PGXCNodeName);
         return ALM_ACR_Abnormal;
     }
 }
@@ -101,7 +85,7 @@ GtmHostIndex InitGTM(void)
 
 void CloseGTM(void)
 {
-    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    volatile PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
     /* Clear GTM connection information in MyBEEntry */
     if (NULL != beentry) {
         SpinLockAcquire(&beentry->use_mutex);
@@ -124,7 +108,7 @@ int SetGTMVacuumFlag(GTM_TransactionKey txnKey, bool is_vacuum)
     return GTM_RESULT_ERROR;
 }
 
-GTM_TransactionKey BeginTranGTM(GTM_Timestamp* timestamp)
+GTM_TransactionKey BeginTranGTM(GTM_Timestamp *timestamp)
 {
     GTM_TransactionKey txn;
     txn.txnHandle = InvalidTransactionHandle;
@@ -173,14 +157,14 @@ GlobalTransactionId BeginTranAutovacuumGTM(void)
     return InvalidGlobalTransactionId;
 }
 
-int CommitTranGTM(GlobalTransactionId gxid, TransactionId* childXids, int nChildXids)
+int CommitTranGTM(GlobalTransactionId gxid, TransactionId *childXids, int nChildXids)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return GTM_RESULT_ERROR;
 }
 
 /* commit transaction with handle */
-int CommitTranHandleGTM(GTM_TransactionKey txnKey, GlobalTransactionId transactionId, GlobalTransactionId& outgxid)
+int CommitTranHandleGTM(GTM_TransactionKey txnKey, GlobalTransactionId transactionId, GlobalTransactionId &outgxid)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return GTM_RESULT_ERROR;
@@ -196,19 +180,19 @@ int CommitPreparedTranGTM(GlobalTransactionId gxid, GlobalTransactionId prepared
     return GTM_RESULT_ERROR;
 }
 
-int RollbackTranGTM(GlobalTransactionId gxid, TransactionId* childXids, int nChildXids)
+int RollbackTranGTM(GlobalTransactionId gxid, TransactionId *childXids, int nChildXids)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return GTM_RESULT_ERROR;
 }
 
-int RollbackTranHandleGTM(GTM_TransactionKey txnKey, GlobalTransactionId& outgxid)
+int RollbackTranHandleGTM(GTM_TransactionKey txnKey, GlobalTransactionId &outgxid)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return GTM_RESULT_ERROR;
 }
 
-int StartPreparedTranGTM(GlobalTransactionId gxid, const char* gid, const char* nodestring)
+int StartPreparedTranGTM(GlobalTransactionId gxid, const char *gid, const char *nodestring)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return GTM_RESULT_ERROR;
@@ -220,7 +204,7 @@ int PrepareTranGTM(GlobalTransactionId gxid)
     return GTM_RESULT_ERROR;
 }
 
-int GetGIDDataGTM(const char* gid, GlobalTransactionId* gxid, GlobalTransactionId* prepared_gxid, char** nodestring)
+int GetGIDDataGTM(const char *gid, GlobalTransactionId *gxid, GlobalTransactionId *prepared_gxid, char **nodestring)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return GTM_RESULT_ERROR;
@@ -251,7 +235,7 @@ int CreateSequenceWithUUIDGTM(FormData_pg_sequence seq, GTM_UUID uuid)
  * Alter a sequence on the GTM
  */
 int AlterSequenceGTM(GTM_UUID seq_uuid, GTM_Sequence increment, GTM_Sequence minval, GTM_Sequence maxval,
-    GTM_Sequence startval, GTM_Sequence lastval, bool cycle, bool is_restart)
+                     GTM_Sequence startval, GTM_Sequence lastval, bool cycle, bool is_restart)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return GTM_RESULT_ERROR;
@@ -269,7 +253,7 @@ GTM_UUID GetSeqUUIDGTM()
 /*
  * Get the next sequence value
  */
-GTM_Sequence GetNextValGTM(Form_pg_sequence seq, GTM_Sequence range, GTM_Sequence* rangemax, GTM_UUID uuid)
+GTM_Sequence GetNextValGTM(Form_pg_sequence seq, GTM_Sequence range, GTM_Sequence *rangemax, GTM_UUID uuid)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return GTM_RESULT_ERROR;
@@ -291,7 +275,7 @@ int SetValGTM(GTM_UUID seq_uuid, GTM_Sequence nextval, bool iscalled)
  *		GTM_SEQ_FULL_NAME, full name of sequence
  *		GTM_SEQ_DB_NAME, DB name part of sequence key
  */
-int DropSequenceGTM(GTM_UUID seq_uuid, const char* dbname)
+int DropSequenceGTM(GTM_UUID seq_uuid, const char *dbname)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return GTM_RESULT_ERROR;
@@ -300,7 +284,7 @@ int DropSequenceGTM(GTM_UUID seq_uuid, const char* dbname)
 /*
  * Rename the sequence
  */
-int RenameSequenceGTM(char* oldname, char* newname, GTM_SequenceKeyType keytype)
+int RenameSequenceGTM(char *oldname, char *newname, GTM_SequenceKeyType keytype)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return GTM_RESULT_ERROR;
@@ -309,7 +293,7 @@ int RenameSequenceGTM(char* oldname, char* newname, GTM_SequenceKeyType keytype)
 /*
  * Report BARRIER
  */
-int ReportBarrierGTM(const char* barrier_id)
+int ReportBarrierGTM(const char *barrier_id)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return GTM_RESULT_ERROR;
@@ -350,13 +334,8 @@ void InitGTM(void)
         else if (IS_PGXC_DATANODE)
             remote_type = GTM_NODE_DATANODE;
 
-        rc = sprintf_s(conn_str,
-            sizeof(conn_str),
-            "host=%s port=%d node_name=%s remote_type=%d postmaster=1",
-            GtmHost,
-            GtmPort,
-            PGXCNodeName,
-            remote_type);
+        rc = sprintf_s(conn_str, sizeof(conn_str), "host=%s port=%d node_name=%s remote_type=%d postmaster=1", GtmHost,
+                       GtmPort, PGXCNodeName, remote_type);
         securec_check_ss(rc, "", "");
 
         /* Log activity of GTM connections */
@@ -402,7 +381,7 @@ void CloseGTM(void)
         elog(DEBUG1, "Postmaster child: connection to GTM closed");
 }
 
-GlobalTransactionId BeginTranGTM(GTM_Timestamp* timestamp)
+GlobalTransactionId BeginTranGTM(GTM_Timestamp *timestamp)
 {
     GlobalTransactionId xid = InvalidGlobalTransactionId;
 
@@ -521,7 +500,7 @@ int RollbackTranGTM(GlobalTransactionId gxid)
     return ret;
 }
 
-int StartPreparedTranGTM(GlobalTransactionId gxid, char* gid, char* nodestring)
+int StartPreparedTranGTM(GlobalTransactionId gxid, char *gid, char *nodestring)
 {
     int ret = 0;
 
@@ -564,7 +543,7 @@ int PrepareTranGTM(GlobalTransactionId gxid)
     return ret;
 }
 
-int GetGIDDataGTM(char* gid, GlobalTransactionId* gxid, GlobalTransactionId* prepared_gxid, char** nodestring)
+int GetGIDDataGTM(char *gid, GlobalTransactionId *gxid, GlobalTransactionId *prepared_gxid, char **nodestring)
 {
     int ret = 0;
 
@@ -599,8 +578,8 @@ GTM_Snapshot GetSnapshotGTM(GlobalTransactionId gxid, bool canbe_grouped)
 /*
  * Create a sequence on the GTM.
  */
-int CreateSequenceGTM(
-    char* seqname, GTM_Sequence increment, GTM_Sequence minval, GTM_Sequence maxval, GTM_Sequence startval, bool cycle)
+int CreateSequenceGTM(char *seqname, GTM_Sequence increment, GTM_Sequence minval, GTM_Sequence maxval,
+                      GTM_Sequence startval, bool cycle)
 {
     GTM_SequenceKeyData seqkey;
     CheckConnection();
@@ -613,8 +592,8 @@ int CreateSequenceGTM(
 /*
  * Alter a sequence on the GTM
  */
-int AlterSequenceGTM(char* seqname, GTM_Sequence increment, GTM_Sequence minval, GTM_Sequence maxval,
-    GTM_Sequence startval, GTM_Sequence lastval, bool cycle, bool is_restart)
+int AlterSequenceGTM(char *seqname, GTM_Sequence increment, GTM_Sequence minval, GTM_Sequence maxval,
+                     GTM_Sequence startval, GTM_Sequence lastval, bool cycle, bool is_restart)
 {
     GTM_SequenceKeyData seqkey;
     CheckConnection();
@@ -627,7 +606,7 @@ int AlterSequenceGTM(char* seqname, GTM_Sequence increment, GTM_Sequence minval,
 /*
  * Get the next sequence value
  */
-GTM_Sequence GetNextValGTM(char* seqname)
+GTM_Sequence GetNextValGTM(char *seqname)
 {
     GTM_Sequence ret = -1;
     GTM_SequenceKeyData seqkey;
@@ -650,7 +629,7 @@ GTM_Sequence GetNextValGTM(char* seqname)
 /*
  * Set values for sequence
  */
-int SetValGTM(char* seqname, GTM_Sequence nextval, bool iscalled)
+int SetValGTM(char *seqname, GTM_Sequence nextval, bool iscalled)
 {
     GTM_SequenceKeyData seqkey;
     CheckConnection();
@@ -667,7 +646,7 @@ int SetValGTM(char* seqname, GTM_Sequence nextval, bool iscalled)
  *		GTM_SEQ_FULL_NAME, full name of sequence
  *		GTM_SEQ_DB_NAME, DB name part of sequence key
  */
-int DropSequenceGTM(char* name, GTM_SequenceKeyType type)
+int DropSequenceGTM(char *name, GTM_SequenceKeyType type)
 {
     GTM_SequenceKeyData seqkey;
     CheckConnection();
@@ -681,14 +660,14 @@ int DropSequenceGTM(char* name, GTM_SequenceKeyType type)
 /*
  * Rename the sequence
  */
-int RenameSequenceGTM(char* seqname, const char* newseqname)
+int RenameSequenceGTM(char *seqname, const char *newseqname)
 {
     GTM_SequenceKeyData seqkey, newseqkey;
     CheckConnection();
     seqkey.gsk_keylen = strlen(seqname) + 1;
     seqkey.gsk_key = seqname;
     newseqkey.gsk_keylen = strlen(newseqname) + 1;
-    newseqkey.gsk_key = (char*)newseqname;
+    newseqkey.gsk_key = (char *)newseqname;
 
     return conn ? rename_sequence(conn, &seqkey, &newseqkey) : -1;
 }
@@ -696,7 +675,7 @@ int RenameSequenceGTM(char* seqname, const char* newseqname)
 /*
  * Report BARRIER
  */
-int ReportBarrierGTM(char* barrier_id)
+int ReportBarrierGTM(char *barrier_id)
 {
     if (!gtm_backup_barrier)
         return GTM_RESULT_OK;

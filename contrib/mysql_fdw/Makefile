@@ -25,37 +25,36 @@ all:mysql_fdw_target
 install:install-data
 
 top_builddir ?= ../../
-MYSQL_FDW_DIR=$(top_builddir)/third_party/dependency/mysql_fdw
-MYSQL_FDW_PACKAGE=mysql_fdw-REL-2_5_3
-MYSQL_FDW_PATCH=openGauss_mysql_fdw-2.5.3_patch
+include $(top_builddir)/src/Makefile.global
+MYSQL_FDW_DIR=output
+MYSQL_FDW_PACKAGE=mysql_fdw-REL-2_5_5
+MYSQL_FDW_PATCH=opengauss_mysql_fdw-2.5.5_patch
 MYSQL_FDW_MEGRED_SOURCES_DIR=$(MYSQL_FDW_DIR)/code
 
 .PHONY: mysql_fdw_target
-mysql_fdw_target:
+mysql_fdw_target: prep_checked
 	@$(call create_mysql_fdw_sources)
 	@make -C $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE)
+
+prep_checked:
+	@test -f $(MYFDW_HOME)/$(MYSQL_FDW_PACKAGE).tar.gz || ( echo "ERROR: You need fetch and copy mysql_fdw from 'third_party' repo to 'third_party_binarylibs' repo and keep directory strucutre unchanged" && exit 1 )
+	@test -f $(MYFDW_HOME)/$(MYSQL_FDW_PACKAGE).tar.gz && date > prep_checked
 
 .PHONY: install-data
 install-data: mysql_fdw_target
 	@make -C $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE) install
 
 uninstall distclean clean:
-	@rm -rf $(MYSQL_FDW_MEGRED_SOURCES_DIR)
+	@rm -rf $(MYSQL_FDW_DIR)
+	@rm -f prep_checked
 
 MYSQL_FDW_RELEVANT_SOURCES = connection.c deparse.c mysql_fdw.c mysql_query.c option.c
 
 define create_mysql_fdw_sources
-	rm -rf $(MYSQL_FDW_MEGRED_SOURCES_DIR); \
+	rm -rf $(MYSQL_FDW_DIR);\
+	mkdir $(MYSQL_FDW_DIR);\
+	cp -r $(MYFDW_HOME)/. $(MYSQL_FDW_DIR);\
 	mkdir $(MYSQL_FDW_MEGRED_SOURCES_DIR); \
-	tar xfzv $(MYSQL_FDW_DIR)/$(MYSQL_FDW_PACKAGE).tar.gz -C $(MYSQL_FDW_MEGRED_SOURCES_DIR) &> /dev/null; \
-	for ((i=1;i<=99;i++)); \
-	do \
-        	file_name="$(MYSQL_FDW_DIR)/$$i-mysql_fdw-2.5.3_patch.patch"; \
-        	if [ ! -f "$$file_name" ]; then \
-                	exit 0; \
-        	fi; \
-		patch -p0 -d $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE) < $$file_name &> /dev/null; \
-	done
-	rename ".c" ".cpp" $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE)/*.c; \
+	tar xfzv $(MYSQL_FDW_DIR)/$(MYSQL_FDW_PACKAGE).tar.gz -C $(MYSQL_FDW_MEGRED_SOURCES_DIR) &> /dev/null; 
 	patch -p0 -d $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE) < $(MYSQL_FDW_DIR)/$(MYSQL_FDW_PATCH).patch &> /dev/null;
 endef

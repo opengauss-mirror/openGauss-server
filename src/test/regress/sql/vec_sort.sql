@@ -24,7 +24,7 @@ create table vector_sort_engine.VECTOR_SORT_TABLE_01
   ,col_interval	interval
   ,col_timetz	timetz
   ,col_tv		tinterval
-) with(orientation = column) ;
+) with(orientation = column) distribute by hash(col_int);
 
 COPY VECTOR_SORT_TABLE_01(col_int, col_bint, col_real, col_float, col_dp, col_num, col_decimal, col_char, col_char2, col_vchar, col_time, col_date, col_interval, col_timetz, col_tv) FROM stdin;
 1	155894	2.28	2.5	3.65	3.24	0.02	N	TOMO	DELIVER IN PERSON	17:00:05	1996-03-22	2 day 13:34:56	1984-2-6 01:00:30+8	["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]
@@ -57,7 +57,7 @@ create table vector_sort_engine.VECTOR_SORT_TABLE_02
   , L_SHIPINSTRUCT CHAR(25) NOT NULL
   , L_SHIPMODE     CHAR(10) NOT NULL
   , L_COMMENT      VARCHAR(44) NOT NULL
-) with (orientation = column) ;
+) with (orientation = column) distribute by hash(L_ORDERKEY);
 
 insert into vector_sort_table_02 select * from vector_engine.lineitem_vec;
 insert into vector_sort_table_02 select * from vector_sort_table_02 where L_ORDERKEY < 4962;

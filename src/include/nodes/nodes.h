@@ -14,7 +14,9 @@
  */
 #ifndef NODES_H
 #define NODES_H
-
+#ifdef FRONTEND_PARSER
+#include "feparser_memutils.h"
+#endif
 /*
  * The first field of every node is NodeTag. Each node created (with makeNode)
  * will have one of the following tags as the value of its first field.
@@ -74,7 +76,6 @@ typedef enum NodeTag {
     T_Agg,
     T_WindowAgg,
     T_Unique,
-    T_Gather,
     T_Hash,
     T_SetOp,
     T_LockRows,
@@ -86,6 +87,8 @@ typedef enum NodeTag {
      * (planner.h, locator.h, nodemgr.h, groupmgr.h)
      */
     T_ExecNodes,
+    T_SliceBoundary,
+    T_ExecBoundary,
     T_SimpleSort,
     T_RemoteQuery,
     T_PGXCNodeHandle,
@@ -111,7 +114,22 @@ typedef enum NodeTag {
     T_PartIteratorParam,
     T_PlanRowMark,
     T_PlanInvalItem,
-
+    /* TAGS FOR POLICY LABEL */
+    T_PolicyFilterNode,
+    T_CreatePolicyLabelStmt,
+    T_AlterPolicyLabelStmt,
+    T_DropPolicyLabelStmt,
+    T_CreateAuditPolicyStmt,
+    T_AlterAuditPolicyStmt,
+    T_DropAuditPolicyStmt,
+    T_MaskingPolicyCondition,
+    T_CreateMaskingPolicyStmt,
+    T_AlterMaskingPolicyStmt,
+    T_DropMaskingPolicyStmt,
+    T_CreateSecurityPolicyStmt,
+	T_AlterSecurityPolicyStmt,
+	T_DropSecurityPolicyStmt,
+    
     /*
      * TAGS FOR PLAN STATE NODES (execnodes.h)
      *
@@ -152,7 +170,6 @@ typedef enum NodeTag {
     T_AggState,
     T_WindowAggState,
     T_UniqueState,
-    T_GatherState,
     T_HashState,
     T_SetOpState,
     T_LockRowsState,
@@ -218,6 +235,8 @@ typedef enum NodeTag {
 #ifdef PGXC
     T_DistributeBy,
     T_PGXCSubCluster,
+    T_DistState,
+    T_ListSliceDefState,
 #endif
     T_HashFilter,
     T_EstSPNode,
@@ -266,6 +285,8 @@ typedef enum NodeTag {
     T_AddPartitionState,
     T_RangePartitionStartEndDefState,
     T_RownumState,
+    T_ListPartitionDefState,
+    T_HashPartitionDefState,
 
     /*
      * TAGS FOR PLANNER NODES (relation.h)
@@ -291,7 +312,6 @@ typedef enum NodeTag {
     T_ResultPath,
     T_MaterialPath,
     T_UniquePath,
-    T_GatherPath,
     T_PartIteratorPath,
     T_EquivalenceClass,
     T_EquivalenceMember,
@@ -299,6 +319,7 @@ typedef enum NodeTag {
     T_RestrictInfo,
     T_PlaceHolderVar,
     T_SpecialJoinInfo,
+    T_LateralJoinInfo,
     T_AppendRelInfo,
     T_PlaceHolderInfo,
     T_MinMaxAggInfo,
@@ -309,6 +330,8 @@ typedef enum NodeTag {
     T_StreamPath,
     T_MergeAction,
 	T_UpsertState,
+    T_SubqueryScanPath,
+
     /*
      * TAGS FOR MEMORY NODES (memnodes.h)
      */
@@ -369,7 +392,9 @@ typedef enum NodeTag {
     T_CreateStmt,
     T_DefineStmt,
     T_DropStmt,
+#ifdef ENABLE_MOT
     T_DropForeignStmt,
+#endif
     T_TruncateStmt,
     T_CommentStmt,
     T_FetchStmt,
@@ -457,7 +482,11 @@ typedef enum NodeTag {
     T_CreateRlsPolicyStmt,
     T_AlterRlsPolicyStmt,
     T_RefreshMatViewStmt,
+#ifndef ENABLE_MULTIPLE_NODES
     T_AlterSystemStmt,
+#endif
+    T_CreateWeakPasswordDictionaryStmt,
+    T_DropWeakPasswordDictionaryStmt,
 
     /*
      * TAGS FOR PARSE TREE NODES (parsenodes.h)
@@ -513,9 +542,7 @@ typedef enum NodeTag {
     T_IdentifyMaxLsnCmd,
     T_IdentifyConsistenceCmd,
     T_IdentifyChannelCmd,
-#ifndef ENABLE_MULTIPLE_NODES
     T_IdentifyAZCmd,
-#endif
     T_BaseBackupCmd,
     T_CreateReplicationSlotCmd,
     T_DropReplicationSlotCmd,
@@ -531,7 +558,7 @@ typedef enum NodeTag {
      * purposes (usually because they are involved in APIs where we want to
      * pass multiple object types through the same pointer).
      */
-    T_TriggerData = 970, /* in commands/trigger.h */
+    T_TriggerData = 960, /* in commands/trigger.h */
     T_ReturnSetInfo,     /* in nodes/execnodes.h */
     T_WindowObjectData,  /* private in nodeWindowAgg.c */
     T_TIDBitmap,         /* in nodes/tidbitmap.h */
@@ -559,8 +586,10 @@ typedef enum NodeTag {
     T_VecRecursiveUnion,
     T_VecScan,
     T_CStoreScan,
-    T_TsStoreScan,
     T_DfsScan,
+#ifdef ENABLE_MULTIPLE_NODES
+    T_TsStoreScan,
+#endif   /* ENABLE_MULTIPLE_NODES */
     T_VecIndexScan,
     T_VecIndexOnlyScan,
     T_VecBitmapIndexScan,
@@ -609,8 +638,10 @@ typedef enum NodeTag {
     T_VecSortState,
     T_VecForeignScanState,
     T_CStoreScanState,
-    T_TsStoreScanState,
     T_DfsScanState,
+#ifdef ENABLE_MULTIPLE_NODES
+    T_TsStoreScanState,
+#endif   /* ENABLE_MULTIPLE_NODES */
     T_DfsIndexScanState,
     T_CStoreIndexScanState,
     T_CStoreIndexCtidScanState,
@@ -659,6 +690,9 @@ typedef enum NodeTag {
     T_StreamHint,
     T_BlockNameHint,
     T_ScanMethodHint,
+    T_MultiNodeHint,
+    T_PredpushHint,
+    T_RewriteHint,
 
     /*
      * pgfdw
@@ -684,14 +718,13 @@ typedef enum NodeTag {
 
     T_BucketInfo,
 
-    /* ScanDesc Type */
-    T_ScanDesc_None,
-    T_ScanDesc_Heap,
-    T_ScanDesc_HBucket,
-    T_ScanDesc_HBucketBm,  /* Heap bitmap scan for HBucket table */
-    T_ScanDesc_Index,
-    T_ScanDesc_HBucketIndex,
-    T_ScanDesc_HBucketIdxBm  /* Index bitmap can for HBucket index  */
+    /* Encrypted Column */
+    T_ClientLogicGlobalParam,
+    T_CreateClientLogicGlobal,
+    T_ClientLogicColumnParam,
+    T_CreateClientLogicColumn,
+    T_ClientLogicColumnRef,
+    T_ExprWithComma
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */
@@ -723,6 +756,7 @@ typedef struct Node {
 #ifdef __GNUC__
 
 /* With GCC, we can use a compound statement within an expression */
+#ifndef FRONTEND_PARSER
 #define newNode(size, tag)                                                \
     ({                                                                    \
         Node* _result;                                                    \
@@ -731,6 +765,16 @@ typedef struct Node {
         _result->type = (tag);                                            \
         _result;                                                          \
     })
+#else // !FRONTEND_PARSER
+#define newNode(size, tag)                                                \
+    ({                                                                    \
+        Node *_result;                                                    \
+        AssertMacro((size) >= sizeof(Node)); /* need the tag, at least */ \
+        _result = (Node *)feparser_malloc0(size);                         \
+        _result->type = (tag);                                            \
+        _result;                                                          \
+    })
+#endif // !FRONTEND_PARSER
 #else
 
 #define newNode(size, tag)                                              \
@@ -822,7 +866,12 @@ typedef enum CmdType {
     CMD_MERGE,   /* merge stmt */
     CMD_UTILITY, /* cmds like create, destroy, copy, vacuum,
                   * etc. */
-    CMD_NOTHING, /* dummy command for instead nothing rules
+    CMD_PREPARE,  /* prepare stmt */
+    CMD_DEALLOCATE,  /* deallocate stmt*/
+    CMD_EXECUTE,  /* execure stmt*/
+    CMD_TRUNCATE,  /* truncate table*/
+    CMD_REINDEX,  /* reindex table/index*/
+    CMD_NOTHING,  /* dummy command for instead nothing rules
                   * with qual */
     CMD_DDL,
     CMD_DCL,
@@ -901,7 +950,8 @@ typedef enum JoinType {
                               (1 << JOIN_RIGHT_ANTI) | (1 << JOIN_LEFT_ANTI_FULL) | (1 << JOIN_RIGHT_ANTI_FULL))) != \
         0)
 
-typedef enum UpsertAction {
+typedef enum UpsertAction
+{
     UPSERT_NONE,            /* No "DUPLICATE KEY UPDATE" clause */
     UPSERT_NOTHING,         /* DUPLICATE KEY UPDATE NOTHING */
     UPSERT_UPDATE           /* DUPLICATE KEY UPDATE ... */

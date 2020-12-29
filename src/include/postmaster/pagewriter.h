@@ -24,7 +24,7 @@
  */
 #ifndef _PAGEWRITER_H
 #define _PAGEWRITER_H
-#include "storage/buf.h"
+#include "storage/buf/buf.h"
 
 typedef struct PGPROC PGPROC;
 typedef struct BufferDesc BufferDesc;
@@ -88,6 +88,7 @@ extern int get_dirty_page_queue_head_buffer();
 extern void ckpt_shutdown_pagewriter();
 extern uint64 get_dirty_page_queue_rec_lsn();
 extern XLogRecPtr ckpt_get_min_rec_lsn(void);
+extern uint32 calculate_thread_max_flush_num(bool is_pagewriter);
 
 const int PAGEWRITER_VIEW_COL_NUM = 8;
 const int INCRE_CKPT_VIEW_COL_NUM = 7;

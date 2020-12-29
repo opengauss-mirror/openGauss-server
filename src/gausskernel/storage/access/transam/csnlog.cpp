@@ -82,8 +82,8 @@
 #define CSN_LWLOCK_RELEASE(pageno) (LWLockRelease(CSNBufMappingPartitionLock(pageno)))
 
 static int ZeroCSNLOGPage(int64 pageno);
-static void CSNLogSetPageStatus(
-    TransactionId xid, int nsubxids, TransactionId* subxids, CommitSeqNo csn, int64 pageno, TransactionId topxid);
+static void CSNLogSetPageStatus(TransactionId xid, int nsubxids, TransactionId *subxids, CommitSeqNo csn, int64 pageno,
+                                TransactionId topxid);
 static bool CSNLogSetCSN(SlruCtl ctl, TransactionId xid, CommitSeqNo csn, int slotno);
 
 static CommitSeqNo RecursiveGetCommitSeqNo(TransactionId xid);
@@ -108,7 +108,7 @@ static CommitSeqNo RecursiveGetCommitSeqNo(TransactionId xid);
  * Note: This doesn't guarantee atomicity. The caller can use the
  * COMMITSEQNO_COMMITTING special value for that.
  */
-void CSNLogSetCommitSeqNo(TransactionId xid, int nsubxids, TransactionId* subxids, CommitSeqNo csn)
+void CSNLogSetCommitSeqNo(TransactionId xid, int nsubxids, TransactionId *subxids, CommitSeqNo csn)
 {
     int64 pageno;
     int i = 0;
@@ -116,8 +116,11 @@ void CSNLogSetCommitSeqNo(TransactionId xid, int nsubxids, TransactionId* subxid
     TransactionId topxid = xid;
 
     /* for standby node, don't set invalid or abort csn mark. */
-    if ((t_thrd.xact_cxt.useLocalSnapshot || RecoveryInProgress() ||
-            g_instance.attr.attr_storage.IsRoachStandbyCluster) &&
+    if ((t_thrd.xact_cxt.useLocalSnapshot ||
+#ifdef ENABLE_MULTIPLE_NODES
+         RecoveryInProgress() ||
+#endif
+         g_instance.attr.attr_storage.IsRoachStandbyCluster) &&
         csn <= COMMITSEQNO_ABORTED) {
         return;
     }
@@ -126,8 +129,8 @@ void CSNLogSetCommitSeqNo(TransactionId xid, int nsubxids, TransactionId* subxid
         if (IsBootstrapProcessingMode())
             csn = COMMITSEQNO_FROZEN;
         else
-            ereport(ERROR,
-                (errcode(ERRCODE_IO_ERROR), errmsg("cannot mark transaction %lu committed without CSN %lu", xid, csn)));
+            ereport(ERROR, (errcode(ERRCODE_IO_ERROR),
+                            errmsg("cannot mark transaction %lu committed without CSN %lu", xid, csn)));
     }
 
     /*
@@ -169,8 +172,8 @@ void CSNLogSetCommitSeqNo(TransactionId xid, int nsubxids, TransactionId* subxid
  * @in topxid - the top transaction id
  * @return -  no return
  */
-static void CSNLogSetPageStatus(
-    TransactionId xid, int nsubxids, TransactionId* subxids, CommitSeqNo csn, int64 pageno, TransactionId topxid)
+static void CSNLogSetPageStatus(TransactionId xid, int nsubxids, TransactionId *subxids, CommitSeqNo csn, int64 pageno,
+                                TransactionId topxid)
 {
     int slotno;
     int i;
@@ -192,10 +195,8 @@ restart:
          * since redo will not concurrently happen, so no lock here.
          */
         if (!retry && RecoveryInProgress()) {
-            ereport(LOG,
-                (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
-                    errmsg("while build or rewind, page to access"
-                           " may cleaned before, reinit here.")));
+            ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("while build or rewind, page to access"
+                                                                         " may cleaned before, reinit here.")));
             (void)ZeroCSNLOGPage(pageno);
             retry = true;
             need_restart = true;
@@ -251,7 +252,7 @@ void SubTransSetParent(TransactionId xid, TransactionId parent)
     int64 pageno = TransactionIdToCSNPage(xid);
     int entryno = TransactionIdToCSNPgIndex(xid);
     int slotno;
-    CommitSeqNo* ptr = NULL;
+    CommitSeqNo *ptr = NULL;
     CommitSeqNo newcsn;
 
     Assert(TransactionIdIsValid(parent));
@@ -266,7 +267,7 @@ void SubTransSetParent(TransactionId xid, TransactionId parent)
      * some tuples.
      */
     slotno = SimpleLruReadPage_ReadOnly(CsnlogCtl(pageno), pageno, xid);
-    ptr = (CommitSeqNo*)CsnlogCtl(pageno)->shared->page_buffer[slotno];
+    ptr = (CommitSeqNo *)CsnlogCtl(pageno)->shared->page_buffer[slotno];
     ptr += entryno;
 
     /*
@@ -288,7 +289,7 @@ void SubTransSetParent(TransactionId xid, TransactionId parent)
  * @out status - return commit/abort if csnlog has been set by top tx
  * @return - the parent xid of the input transaction
  */
-TransactionId SubTransGetParent(TransactionId xid, CLogXidStatus* status, bool force_wait_parent)
+TransactionId SubTransGetParent(TransactionId xid, CLogXidStatus *status, bool force_wait_parent)
 {
     CommitSeqNo csn;
 
@@ -349,12 +350,9 @@ TransactionId SubTransGetTopmostTransaction(TransactionId xid)
          * data structure that could lead to an infinite loop, so exit.
          */
         if (!TransactionIdPrecedes(parentXid, previousXid))
-            ereport(ERROR,
-                (errcode(ERRCODE_IO_ERROR),
-                    errmsg("pg_csnlog contains invalid entry: xid %lu "
-                           "points to parent xid %lu",
-                        previousXid,
-                        parentXid)));
+            ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("pg_csnlog contains invalid entry: xid %lu "
+                                                              "points to parent xid %lu",
+                                                              previousXid, parentXid)));
     }
 
     Assert(TransactionIdIsValid(previousXid));
@@ -376,10 +374,10 @@ TransactionId SubTransGetTopmostTransaction(TransactionId xid)
 static bool CSNLogSetCSN(SlruCtl ctl, TransactionId xid, CommitSeqNo csn, int slotno)
 {
     int entryno = TransactionIdToCSNPgIndex(xid);
-    CommitSeqNo* ptr = NULL;
+    CommitSeqNo *ptr = NULL;
     CommitSeqNo value = 0;
 
-    ptr = (CommitSeqNo*)(ctl->shared->page_buffer[slotno] + entryno * sizeof(CommitSeqNo));
+    ptr = (CommitSeqNo *)(ctl->shared->page_buffer[slotno] + entryno * sizeof(CommitSeqNo));
     value = *ptr;
 
     /*
@@ -389,7 +387,7 @@ static bool CSNLogSetCSN(SlruCtl ctl, TransactionId xid, CommitSeqNo csn, int sl
      * (Allow setting again to same value.)
      */
     if (((COMMITSEQNO_IS_COMMITTED(value) && COMMITSEQNO_IS_ABORTED(csn)) ||
-            (COMMITSEQNO_IS_ABORTED(value) && COMMITSEQNO_IS_COMMITTED(csn)))) {
+         (COMMITSEQNO_IS_ABORTED(value) && COMMITSEQNO_IS_COMMITTED(csn)))) {
         elog(PANIC, "csn log state change from %lu to %lu is not allowed!", value, csn);
     }
 
@@ -421,7 +419,7 @@ static CommitSeqNo InternalGetCommitSeqNo(TransactionId xid)
     }
 
     slotno = SimpleLruReadPage_ReadOnly_Locked(CsnlogCtl(pageno), pageno, xid);
-    csn = *(CommitSeqNo*)(CsnlogCtl(pageno)->shared->page_buffer[slotno] + entryno * sizeof(CommitSeqNo));
+    csn = *(CommitSeqNo *)(CsnlogCtl(pageno)->shared->page_buffer[slotno] + entryno * sizeof(CommitSeqNo));
 
     return csn;
 }
@@ -524,7 +522,7 @@ TransactionId CSNLogGetNextInProgressXid(TransactionId xid, TransactionId end)
                 CSN_LWLOCK_RELEASE(pageno);
                 goto end;
             }
-            csn = *(CommitSeqNo*)(CsnlogCtl(pageno)->shared->page_buffer[slotno] + entryno * sizeof(CommitSeqNo));
+            csn = *(CommitSeqNo *)(CsnlogCtl(pageno)->shared->page_buffer[slotno] + entryno * sizeof(CommitSeqNo));
             if (COMMITSEQNO_IS_INPROGRESS(csn) || COMMITSEQNO_IS_COMMITTING(csn)) {
                 CSN_LWLOCK_RELEASE(pageno);
                 goto end;
@@ -576,14 +574,8 @@ void CSNLOGShmemInit(void)
     for (i = 0; i < NUM_CSNLOG_PARTITIONS; i++) {
         rc = sprintf_s(name, SLRU_MAX_NAME_LENGTH, "%s%d", "CSNLOG Ctl", i);
         securec_check_ss(rc, "\0", "\0");
-        SimpleLruInit(CsnlogCtl(i),
-            name,
-            LWTRANCHE_CSNLOG_CTL,
-            CSNLOGShmemBuffers(),
-            0,
-            CSNBufMappingPartitionLockByIndex(i),
-            "pg_csnlog",
-            i);
+        SimpleLruInit(CsnlogCtl(i), name, LWTRANCHE_CSNLOG_CTL, CSNLOGShmemBuffers(), 0,
+                      CSNBufMappingPartitionLockByIndex(i), "pg_csnlog", i);
     }
 }
 
@@ -651,18 +643,14 @@ void StartupCSNLOG(bool isUpgrade)
         CSN_LWLOCK_RELEASE(endPage);
 
         t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage = endPage;
-        elog(LOG,
-            "startup csnlog at xid:%lu, pageno:%ld",
-            t_thrd.xact_cxt.ShmemVariableCache->nextXid,
-            t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage);
+        elog(LOG, "startup csnlog at xid:%lu, pageno:%ld", t_thrd.xact_cxt.ShmemVariableCache->nextXid,
+             t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage);
     } else {
         /* for non-shutdown condition, we jsut set the last extend page */
         int64 lastExtendPage = TransactionIdToCSNPage(t_thrd.xact_cxt.ShmemVariableCache->nextXid - 1);
         t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage = lastExtendPage;
-        elog(LOG,
-            "startup csnlog without extend at xid:%lu, pageno:%ld",
-            t_thrd.xact_cxt.ShmemVariableCache->nextXid - 1,
-            t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage);
+        elog(LOG, "startup csnlog without extend at xid:%lu, pageno:%ld",
+             t_thrd.xact_cxt.ShmemVariableCache->nextXid - 1, t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage);
     }
     t_thrd.xact_cxt.ShmemVariableCache->startExtendCSNLogpage = 0;
 }
@@ -722,7 +710,7 @@ void TrimCSNLOG(void)
         int byteno = entryno * sizeof(CommitSeqNo);
         int slotno;
         errno_t rc = EOK;
-        char* byteptr = NULL;
+        char *byteptr = NULL;
 
         slotno = SimpleLruReadPage(CsnlogCtl(pageno), pageno, false, xid);
 
@@ -794,14 +782,11 @@ void ExtendCSNLOG(TransactionId newestXact)
      *  the current transaction must be abortand no need to go on.
      */
     if (pageno < t_thrd.xact_cxt.ShmemVariableCache->startExtendCSNLogpage) {
-        ereport(ERROR,
-            (errcode(ERRCODE_SNAPSHOT_INVALID),
-                (errmsg("the current transaction %lu is smaller than gtm "
-                        "recent global xmin, so no need to set csn log. pageno: %ld,"
-                        " startExtendCSNLogPage: %ld",
-                    newestXact,
-                    pageno,
-                    t_thrd.xact_cxt.ShmemVariableCache->startExtendCSNLogpage))));
+        ereport(ERROR, (errcode(ERRCODE_SNAPSHOT_INVALID),
+                        (errmsg("the current transaction %lu is smaller than gtm "
+                                "recent global xmin, so no need to set csn log. pageno: %ld,"
+                                " startExtendCSNLogPage: %ld",
+                                newestXact, pageno, t_thrd.xact_cxt.ShmemVariableCache->startExtendCSNLogpage))));
     }
 
     lastExtendPage = t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage;
@@ -817,10 +802,9 @@ void ExtendCSNLOG(TransactionId newestXact)
             OldestUsedPage = TransactionIdToCSNPage(u_sess->utils_cxt.g_GTM_Snapshot->sn_recent_global_xmin);
             if (OldestUsedPage > lastExtendPage) {
                 elog(LOG,
-                    "extend csnlog from page no %ld according"
-                    " to recent gloabl xmin %lu",
-                    OldestUsedPage,
-                    u_sess->utils_cxt.g_GTM_Snapshot->sn_recent_global_xmin);
+                     "extend csnlog from page no %ld according"
+                     " to recent gloabl xmin %lu",
+                     OldestUsedPage, u_sess->utils_cxt.g_GTM_Snapshot->sn_recent_global_xmin);
                 CSN_LWLOCK_ACQUIRE(OldestUsedPage, LW_EXCLUSIVE);
                 (void)ZeroCSNLOGPage(OldestUsedPage);
                 t_thrd.xact_cxt.ShmemVariableCache->startExtendCSNLogpage = OldestUsedPage;
@@ -838,14 +822,11 @@ void ExtendCSNLOG(TransactionId newestXact)
          * by OldestUsedPage in the code above
          */
         if (lastExtendPage >= newExtendPage) {
-            ereport(ERROR,
-                (errcode(ERRCODE_SNAPSHOT_INVALID),
-                    (errmsg("The lastExtenPage %ld is larger than newExtendPage %ld,"
-                            "and the newestXact is %lu, the recent global xmin %lu",
-                        lastExtendPage,
-                        newExtendPage,
-                        newestXact,
-                        u_sess->utils_cxt.g_GTM_Snapshot->sn_recent_global_xmin))));
+            ereport(ERROR, (errcode(ERRCODE_SNAPSHOT_INVALID),
+                            (errmsg("The lastExtenPage %ld is larger than newExtendPage %ld,"
+                                    "and the newestXact is %lu, the recent global xmin %lu",
+                                    lastExtendPage, newExtendPage, newestXact,
+                                    u_sess->utils_cxt.g_GTM_Snapshot->sn_recent_global_xmin))));
         }
 
         while (++lastExtendPage != newExtendPage) {
@@ -856,10 +837,8 @@ void ExtendCSNLOG(TransactionId newestXact)
 
         t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage = newExtendPage - 1;
 
-        elog(DEBUG1,
-            "extend csnlog to xid:%lu, pageno:%ld",
-            newestXact,
-            t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage);
+        elog(DEBUG1, "extend csnlog to xid:%lu, pageno:%ld", newestXact,
+             t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage);
     }
 #else
     /*

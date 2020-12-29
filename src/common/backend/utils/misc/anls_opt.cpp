@@ -25,6 +25,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "gs_threadlocal.h"
 #include "port.h"
 #include "utils/anls_opt.h"
 

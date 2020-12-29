@@ -35,4 +35,3 @@ extern void libpqrcv_send(const char* buffer, int nbytes);
 extern void libpqrcv_disconnect(void);
 
 #endif
-

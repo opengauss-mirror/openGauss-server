@@ -1,0 +1,8 @@
+set explain_perf_mode=normal;
+
+-- aggregate functions with group by clause
+select avg(c1), avg(c2), avg(c3), avg(c4), avg(c5), avg(c6), avg(c7) from aggtable1 group by c8 order by c8;
+select max(c1), max(c2), max(c3), max(c4), max(c5), max(c6), max(c7) from aggtable1 group by c8 order by c8;
+select count(c1), count(c2), count(c3), count(c4), count(c5), count(c6), count(c7) from aggtable1 group by c8 order by c8;
+
+explain (verbose on, costs off) select avg(c1), sum(c2), min(c3), max(c4), count(c5), count(*) from aggtable1 group by c8 order by c8;

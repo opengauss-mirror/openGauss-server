@@ -184,7 +184,7 @@ typedef struct {
 #define GUC_UNIT_S 0x2000    /* value is in seconds */
 #define GUC_UNIT_MIN 0x4000  /* value is in minutes */
 #define GUC_UNIT_HOUR 0x5000 /* value is in hour */
-#define GUC_UNIT_DAY 0x6000    /* value is in day */
+#define GUC_UNIT_DAY 0x6000  /* value is in day */
 #define GUC_UNIT_TIME 0x7000 /* mask for MS, S, MIN */
 
 #define GUC_NOT_WHILE_SEC_REST 0x8000 /* can't set if security restricted */
@@ -239,6 +239,7 @@ extern void ResetAllOptions(void);
 extern void AtStart_GUC(void);
 extern int NewGUCNestLevel(void);
 extern void AtEOXact_GUC(bool isCommit, int nestLevel);
+extern char* GetGucName(const char *command, char *target_guc_name);
 extern void BeginReportingGUCOptions(void);
 extern void ParseLongOption(const char* string, char** name, char** value);
 extern bool parse_int(const char* value, int* result, int flags, const char** hintmsg);
@@ -248,13 +249,15 @@ double time_unit_convert(char** endptr, double value, int flags, const char** hi
 double memory_unit_convert(char** endptr, double value, int flags, const char** hintmsg);
 extern int set_config_option(const char* name, const char* value, GucContext context, GucSource source,
     GucAction action, bool changeVal, int elevel, bool isReload = false);
-extern void AlterSystemSetConfigFile(AlterSystemStmt * setstmt);
+#ifndef ENABLE_MULTIPLE_NODES
+extern void AlterSystemSetConfigFile(AlterSystemStmt* setstmt);
+#endif
 extern char* GetConfigOptionByName(const char* name, const char** varname);
 extern void GetConfigOptionByNum(int varnum, const char** values, bool* noshow);
 extern int GetNumConfigOptions(void);
 
 extern void SetPGVariable(const char* name, List* args, bool is_local);
-extern void GetPGVariable(const char* name, const char* likename, DestReceiver* dest);
+extern void GetPGVariable(const char* name, DestReceiver* dest);
 extern TupleDesc GetPGVariableResultDesc(const char* name);
 
 #ifdef PGXC
@@ -268,10 +271,6 @@ extern void ProcessGUCArray(ArrayType* array, GucContext context, GucSource sour
 extern ArrayType* GUCArrayAdd(ArrayType* array, const char* name, const char* value);
 extern ArrayType* GUCArrayDelete(ArrayType* array, const char* name);
 extern ArrayType* GUCArrayReset(ArrayType* array);
-
-extern Size EstimateGUCStateSpace(void);
-extern void SerializeGUCState(Size maxsize, char *start_address);
-extern void RestoreGUCState(char *gucstate);
 
 #ifdef EXEC_BACKEND
 extern void write_nondefault_variables(GucContext context);
@@ -313,6 +312,7 @@ extern bool check_search_path(char** newval, void** extra, GucSource source);
 extern void assign_search_path(const char* newval, void* extra);
 extern bool check_percentile(char** newval, void** extra, GucSource source);
 extern bool check_numa_distribute_mode(char** newval, void** extra, GucSource source);
+extern bool check_asp_flush_mode(char** newval, void** extra, GucSource source);
 
 /* in access/transam/xlog.c */
 extern bool check_wal_buffers(int* newval, void** extra, GucSource source);
@@ -320,7 +320,6 @@ extern void assign_xlog_sync_method(int new_sync_method, void* extra);
 
 /* in tcop/stmt_retry.cpp */
 extern bool check_errcode_list(char** newval, void** extra, GucSource source);
-#define RESERVE_SIZE 32
 
 /*
  * Error code for config file
@@ -340,8 +339,40 @@ typedef enum {
 typedef enum {
     NO_REWRITE = 0, /* not allow lazy agg and magic set rewrite*/
     LAZY_AGG = 1,   /* allow lazy agg */
-    MAGIC_SET = 2   /* allow query qual push */
+    MAGIC_SET = 2,   /* allow query qual push */
+    PARTIAL_PUSH = 4, /* allow partial push */
+    SUBLINK_PULLUP_WITH_UNIQUE_CHECK = 8, /* allow pull sublink with unqiue check */
+    SUBLINK_PULLUP_DISABLE_REPLICATED = 16, /* disable pull up sublink with replicated table */
+    SUBLINK_PULLUP_IN_TARGETLIST = 32, /* allow pull sublink in targetlist */
+    PRED_PUSH = 64, /* push predicate into subquery block */
+    PRED_PUSH_NORMAL = 128,
+    PRED_PUSH_FORCE = 256,
 } rewrite_param;
+
+typedef enum {
+    NO_BETA_FEATURE = 0,
+    SEL_SEMI_POISSON = 1, /* use poisson distribution model to calibrate semi join selectivity */
+    SEL_EXPR_INSTR = 2, /* use pattern sel to calibrate instr() related base rel selectivity */
+    PARAM_PATH_GEN = 4, /* Parametrized Path Generation */
+    RAND_COST_OPT = 8,  /* Optimizing sc_random_page_cost */
+    PARAM_PATH_OPT = 16, /* Parametrized Path Optimization. */
+    PAGE_EST_OPT = 32   /* More accurate (rowstored) index pages estimation */
+} sql_beta_param;
+
+#define ENABLE_PRED_PUSH(root) \
+    ((PRED_PUSH & (uint)u_sess->attr.attr_sql.rewrite_rule) && permit_predpush(root))
+
+#define ENABLE_PRED_PUSH_NORMAL(root) \
+    ((PRED_PUSH_NORMAL & (uint)u_sess->attr.attr_sql.rewrite_rule) && permit_predpush(root))
+
+#define ENABLE_PRED_PUSH_FORCE(root) \
+    ((PRED_PUSH_FORCE & (uint)u_sess->attr.attr_sql.rewrite_rule) && permit_predpush(root))
+
+#define ENABLE_PRED_PUSH_ALL(root) \
+    ((ENABLE_PRED_PUSH(root) || ENABLE_PRED_PUSH_NORMAL(root) || ENABLE_PRED_PUSH_FORCE(root)) && permit_predpush(root))
+
+#define ENABLE_SQL_BETA_FEATURE(feature) \
+    ((bool)((uint)u_sess->attr.attr_sql.sql_beta_feature & feature))
 
 typedef enum {
     SUMMARY = 0, /* not collect multi column statistics info */
@@ -362,7 +393,7 @@ extern ErrCode write_guc_file(const char* path, char** lines);
 extern int find_guc_option(
     char** optlines, const char* opt_name, int* name_offset, int* name_len, int* value_offset, int* value_len);
 
-extern void modify_guc_lines(char** optlines, const char** opt_name, char** copy_from_line);
+extern void modify_guc_lines(char*** optlines, const char** opt_name, char** copy_from_line);
 extern ErrCode copy_guc_lines(char** copy_to_line, char** optlines, const char** opt_name);
 extern ErrCode copy_asyn_lines(char* path, char** copy_to_line, const char** opt_name);
 
@@ -370,6 +401,9 @@ extern ErrCode generate_temp_file(char* buf, char* temppath, size_t size);
 extern ErrCode update_temp_file(char* tempfilepath, char** copy_to_line, const char** opt_name);
 extern ErrCode get_file_lock(const char* path, ConfFileLock* filelock);
 extern void release_file_lock(ConfFileLock* filelock);
+
+extern void comment_guc_lines(char** optlines, const char** opt_name);
+extern int add_guc_optlines_to_buffer(char** optlines, char** buffer);
 
 /*Add for set command in transaction*/
 extern char* get_set_string();
@@ -389,13 +423,14 @@ extern int check_set_message_to_send(const VariableSetStmt* stmt, const char* qu
 extern THR_LOCAL char* transparent_encrypted_string;
 extern THR_LOCAL char* transparent_encrypt_kms_url;
 extern THR_LOCAL char* transparent_encrypt_kms_region;
-extern bool check_bbox_corepath(char** newval, void** extra, GucSource source);
-extern void assign_bbox_corepath(const char* newval, void* extra);
+
 extern void release_opt_lines(char** opt_lines);
 extern char** alloc_opt_lines(int opt_lines_num);
 
 #ifdef ENABLE_QUNIT
 extern void set_qunit_case_number_hook(int newval, void* extra);
 #endif
+
+extern GucContext get_guc_context();
 
 #endif /* GUC_H */

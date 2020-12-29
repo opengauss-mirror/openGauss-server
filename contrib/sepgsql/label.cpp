@@ -34,7 +34,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "access/heapam.h"
 
 #include "sepgsql.h"
 
@@ -157,7 +157,8 @@ static void sepgsql_xact_callback(XactEvent event, void* arg)
             char* new_label = NULL;
 
             if (plabel->label)
-                new_label = MemoryContextStrdup(t_thrd.top_mem_cxt, plabel->label);
+                new_label = MemoryContextStrdup(
+                    THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), plabel->label);
             else
                 new_label = NULL;
 
@@ -681,7 +682,7 @@ static void exec_object_restorecon(struct selabel_handle* sehnd, Oid catalogId)
                     objtype = SELABEL_DB_TABLE;
                 else if (relForm->relkind == RELKIND_SEQUENCE)
                     objtype = SELABEL_DB_SEQUENCE;
-                else if (relForm->relkind == RELKIND_VIEW)
+                else if (relForm->relkind == RELKIND_VIEW || (relForm->relkind == RELKIND_CONTQUERY)
                     objtype = SELABEL_DB_VIEW;
                 else
                     continue; /* no need to assign security label */

@@ -137,4 +137,3 @@ extern CmdBase* DeserializeCmd(StringInfo buf);
 extern void PackData(StringInfo data, StringInfo dst);
 
 #endif
-

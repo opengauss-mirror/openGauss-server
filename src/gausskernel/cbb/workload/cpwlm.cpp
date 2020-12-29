@@ -149,7 +149,7 @@ void process_request(StringInfo input_message)
             break;
 
         case 'I':  // cp CN => DWS CN
-            t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "cpwlm");
+            t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "cpwlm", MEMORY_CONTEXT_CBB);
             exec_init_poolhandles();
             send_cpinfo();
             break;
@@ -377,7 +377,7 @@ char* get_version()
 
     char* result = (char*)palloc0(strlen(v) + 1);
 
-    ss_rc = memcpy_s(result, strlen(v), v, strlen(v));
+    ss_rc = memcpy_s(result, strlen(v) + 1, v, strlen(v));
 
     securec_check(ss_rc, "\0", "\0");
 
@@ -454,7 +454,13 @@ static void receive_cp_runtime_info(PGXCNodeHandle* handle)
 
     struct timeval timeout = {30, 0};
 
-    while (!pgxc_node_receive(1, &handle, &timeout)) {
+    for (;;) {
+        if (pgxc_node_receive(1, &handle, &timeout)) {
+            ereport(LOG,
+                (errmsg("%s:%d recv fail", __FUNCTION__, __LINE__)));
+            break;
+        }
+
         int len;
         char* msg = NULL;
 
@@ -727,7 +733,13 @@ static List* receive_dnlist(PGXCNodeHandle* handle)
 
     struct timeval timeout = {30, 0};
 
-    while (!pgxc_node_receive(1, &handle, &timeout)) {
+    for (;;) {
+        if (pgxc_node_receive(1, &handle, &timeout)) {
+            ereport(LOG,
+                (errmsg("%s:%d recv fail", __FUNCTION__, __LINE__)));
+            break;
+        }
+
         int len;
         char* msg = NULL;
 
@@ -943,12 +955,11 @@ static ComputePoolState* get_computepool_state(const char* msg, int len)
 
     /* parse message to get record */
     int dn_num = pq_getmsgint(&input_msg, sizeof(int));
-    if (unlikely(dn_num <= 0 || (uint)dn_num > SIZE_MAX / sizeof(DNState))) {
-        ereport(DEBUG1, (errmodule(MOD_WLM_CP), errmsg("invalid dn num:%d", dn_num)));
-        return NULL;
-    }
 
     size_t size = sizeof(DNState) * dn_num;
+    if (size > MaxAllocSize) {
+        ereport(ERROR, (errmodule(MOD_WLM_CP), errmsg("invalid size [%lu]", size)));
+    }
 
     DNState* dnstate = (DNState*)palloc0(size);
     errno_t ss_rc = memcpy_s(dnstate, size, msg + sizeof(int), size);
@@ -979,7 +990,13 @@ static ComputePoolState* receive_cluster_state(PGXCNodeHandle* handle)
 
     struct timeval timeout = {30, 0};
 
-    while (!pgxc_node_receive(1, &handle, &timeout)) {
+    for (;;) {
+        if (pgxc_node_receive(1, &handle, &timeout)) {
+            ereport(LOG,
+                (errmsg("%s:%d recv fail", __FUNCTION__, __LINE__)));
+            break;
+        }
+
         int len;
         char* msg = NULL;
 
@@ -1282,11 +1299,9 @@ static void collect_rpnumber_from_DNs()
  */
 static bool update_cluster_state(PGXCNodeHandle** handles, List* connlist)
 {
-    Assert(IS_PGXC_COORDINATOR);
+    Assert(IS_PGXC_COORDINATOR && handles);
 
     ereport(DEBUG5, (errmodule(MOD_WLM_CP), errmsg("in %s", __FUNCTION__)));
-
-    Assert(handles);
 
     /*
      * receive response from all DNs, and save the number of rp in use to
@@ -1310,7 +1325,12 @@ static bool update_cluster_state(PGXCNodeHandle** handles, List* connlist)
         struct timeval timeout = {30, 0};
 
         /* receive workload records from each node */
-        while (!pgxc_node_receive(1, &handle, &timeout)) {
+        for (;;) {
+            if (pgxc_node_receive(1, &handle, &timeout)) {
+                ereport(LOG, (errmsg("%s:%d recv fail", __FUNCTION__, __LINE__)));
+                break;
+            }
+
             handle->state = DN_CONNECTION_STATE_IDLE;
 
             char msg_type = get_message(handle, &len, &msg);
@@ -1340,9 +1360,8 @@ static bool update_cluster_state(PGXCNodeHandle** handles, List* connlist)
             if (hasError) {
                 set_rpnumber(dn, g_instance.attr.attr_sql.max_resource_package, false);
 
-                ereport(LOG,
-                    (errmodule(MOD_WLM_CP),
-                        errmsg("Failed to get rp number from DN: %s, cause: %s", handle->connInfo.host.data, err)));
+                ereport(LOG, (errmodule(MOD_WLM_CP),
+                    errmsg("Failed to get rp number from DN: %s, cause: %s", handle->connInfo.host.data, err)));
             }
         }
     }
@@ -1367,21 +1386,23 @@ static char* get_conn_data()
     gausshome = gs_getenv_r("GAUSSHOME");
     LWLockRelease(OBSGetPathLock);
     if (NULL == gausshome) {
-        ereport(ERROR,
-            (errmodule(MOD_ACCELERATE),
-                errcode(ERRCODE_UNDEFINED_OBJECT),
+        ereport(ERROR, (errmodule(MOD_ACCELERATE), errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("Failed to get the values of $GAUSSHOME")));
     }
 
-    check_backend_env(gausshome);
+    if (backend_env_valid(gausshome, "GAUSSHOME") == false) {
+        ereport(ERROR, (errmodule(MOD_ACCELERATE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("Incorrect backend environment variable $GAUSSHOME"),
+            errdetail("Please refer to the backend instance log for the detail")));
+    }
     rc = sprintf_s(abs_path, MAXPGPATH, "%s/bin/%s", gausshome, "cp_client.conf");
     securec_check_ss(rc, "", "");
 
+    gausshome = NULL;
 
     int fd = open(abs_path, O_RDONLY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
-        ereport(ERROR,
-            (errmodule(MOD_ACCELERATE),
+        ereport(ERROR, (errmodule(MOD_ACCELERATE),
                 errcode(ERRCODE_FILE_READ_FAILED),
                 errmsg("Failed to open config file to connect compute pool. file path: %s", abs_path)));
     }
@@ -1390,8 +1411,7 @@ static char* get_conn_data()
     /* cp_clent.conf is only conf file, it should not be so large, the size INT_MAX/2 is 1GB */
     if (size == -1 || size > (INT_MAX / 2)) {
         close(fd);
-        ereport(ERROR,
-            (errmodule(MOD_ACCELERATE),
+        ereport(ERROR, (errmodule(MOD_ACCELERATE),
                 errcode(ERRCODE_FILE_READ_FAILED),
                 errmsg("Failed to get the size of the config file to connect compute pool. file path: %s", abs_path)));
     }
@@ -1402,8 +1422,7 @@ static char* get_conn_data()
     int rs = read(fd, data, size);
     if (rs != size) {
         close(fd);
-        ereport(ERROR,
-            (errmodule(MOD_ACCELERATE),
+        ereport(ERROR, (errmodule(MOD_ACCELERATE),
                 errcode(ERRCODE_FILE_READ_FAILED),
                 errmsg("Failed to get the data of the config file to connect compute pool. file path: %s", abs_path)));
     }
@@ -1413,6 +1432,18 @@ static char* get_conn_data()
     data[size] = '\n';
 
     return data;
+}
+
+static void check_compute_pool_config(ComputePoolConfig* config)
+{
+    if (!config->cpip || !config->cpport || !config->username || !config->password || !config->version ||
+        0 == config->dnnum || 0 == config->pl) {
+        ereport(ERROR,
+            (errmodule(MOD_ACCELERATE),
+                errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("\"cpip\", \"cpport\", \"username\", \"password\", \"version\", \"dnnum\", \"pl\""
+                       " are needed to connect to the compute pool.")));
+    }
 }
 
 static ComputePoolConfig* parse_segment_info(char* conn)
@@ -1477,14 +1508,7 @@ static ComputePoolConfig* parse_segment_info(char* conn)
         line = tail + 1;
     }
 
-    if (!config->cpip || !config->cpport || !config->username || !config->password || !config->version ||
-        0 == config->dnnum || 0 == config->pl) {
-        ereport(ERROR,
-            (errmodule(MOD_ACCELERATE),
-                errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                errmsg("\"cpip\", \"cpport\", \"username\", \"password\", \"version\", \"dnnum\", \"pl\""
-                       " are needed to connect to the compute pool.")));
-    }
+    check_compute_pool_config(config);
 
     return config;
 }
@@ -1591,7 +1615,7 @@ static void CPmonitor_MainLoop(int dn_num)
 
     Assert(IS_PGXC_COORDINATOR);
 
-    AssertEreport(g_instance.attr.attr_sql.max_resource_package, MOD_OPT, "");
+    Assert(g_instance.attr.attr_sql.max_resource_package);
 
     ereport(DEBUG5, (errmodule(MOD_WLM_CP), errmsg("in %s", __FUNCTION__)));
 
@@ -1612,7 +1636,7 @@ static void CPmonitor_MainLoop(int dn_num)
     g_instance.wlm_cxt->dnnum_in_cluster_state = dn_num;
 
     if (NULL == g_instance.wlm_cxt->cluster_state) {
-        old_context = MemoryContextSwitchTo(g_instance.instance_context);
+        old_context = MemoryContextSwitchTo(g_instance.wlm_cxt->workload_manager_mcxt);
 
         g_instance.wlm_cxt->cluster_state =
             (DNState*)palloc0(sizeof(DNState) * g_instance.wlm_cxt->dnnum_in_cluster_state);
@@ -1795,7 +1819,7 @@ static void NormalBackendInit()
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    knl_thread_set_name("CpMonitor");
+    t_thrd.proc_cxt.MyProgName = "CPmonitor";
 
     if (u_sess->proc_cxt.MyProcPort->remote_host) {
         pfree(u_sess->proc_cxt.MyProcPort->remote_host);
@@ -1804,7 +1828,7 @@ static void NormalBackendInit()
     u_sess->proc_cxt.MyProcPort->remote_host = pstrdup("localhost");
 
     /* Identify myself via ps */
-    init_ps_display("CpMonitor process", "", "", "");
+    init_ps_display("compute pool monitor process", "", "", "");
 
     /* release all connections on exit. */
     if (IS_PGXC_COORDINATOR && IsPostmasterEnvironment) {
@@ -1827,9 +1851,7 @@ static void NormalBackendInit()
         on_shmem_exit(PGXCNodeCleanAndRelease, 0);
     }
 
-    if (!StringIsValid(u_sess->attr.attr_common.application_name)) {
-        u_sess->attr.attr_common.application_name = pstrdup("ComputePoolMonitor");
-    }
+    u_sess->attr.attr_common.application_name = pstrdup("ComputePoolMonitor");
 
     t_thrd.wlm_cxt.collect_info->sdetail.statement = "CP monitor fetch IO collect info from data nodes";
 }
@@ -1878,6 +1900,8 @@ NON_EXEC_STATIC void CPmonitorMain(void)
 
     /* Early initialization */
     BaseInit();
+
+    WLMInitPostgres();
 
     SetProcessingMode(NormalProcessing);
 
@@ -1937,7 +1961,7 @@ NON_EXEC_STATIC void CPmonitorMain(void)
          * Now return to normal top-level context and clear ErrorContext for
          * next time.
          */
-        MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+        MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
         FlushErrorState();
 
         /* Now we can allow interrupts again */
@@ -2028,7 +2052,7 @@ bool check_version_compatibility(const char* remote_version)
     }
 
     char* localver = get_version();
-    // here to avoid to modify the comparation algorigthm,
+    // Gauss200 -> GaussDB Kernel, so here to avoid to modify the comparation algorigthm,
     // modify the version string to keep compatibility.
     localver = localver + strlen("GaussDB ");
     remote_version = remote_version + strlen("GaussDB ");

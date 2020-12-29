@@ -56,26 +56,31 @@ static const Delta2KeyMap g_keyMap[DELTA2_KEY_MAX + 1] = {{0, 0, 0x1, 0x0},
     {0xFFFFFFFF, 0xFFFFFFFFFF, 0x5, 0x5},
     {0xFFFFFFFFFF, 0xFFFFFFFFFFFF, 0x6, 0x6},
     {0xFFFFFFFFFFFF, 0xFFFFFFFFFFFFFF, 0x7, 0x7},
-    {0xFFFFFFFFFFFFFF, 0x7FFFFFFFFFFFFFFF, 0x8, 0x8}};
+    {0xFFFFFFFFFFFFFF, 0x7FFFFFFFFFFFFFFF, 0x8, 0x8}
+};
 
 static const int8 g_compresslevel_tables[COMPRESS_HIGH + 1][MAX_COMPRESSLEVEL + 1] = {
     /* COMPRESS_NO */
     {0, 0, 0, 0},
     /* COMPRESS_LOW :: LZ4 */
-    {LZ4Wrapper::lz4_min_level,
+    {   LZ4Wrapper::lz4_min_level,
         LZ4Wrapper::lz4hc_min_level,
         LZ4Wrapper::lz4hc_min_level + LZ4Wrapper::lz4hc_level_step,
-        LZ4Wrapper::lz4hc_min_level + LZ4Wrapper::lz4hc_level_step * LZ4_STEP},
+        LZ4Wrapper::lz4hc_min_level + LZ4Wrapper::lz4hc_level_step * LZ4_STEP
+    },
     /* COMPRESS_MIDDLE :: LZ4 */
-    {LZ4Wrapper::lz4hc_recommend_level - LZ4Wrapper::lz4hc_level_step,
+    {   LZ4Wrapper::lz4hc_recommend_level - LZ4Wrapper::lz4hc_level_step,
         LZ4Wrapper::lz4hc_recommend_level,
         LZ4Wrapper::lz4hc_recommend_level + LZ4Wrapper::lz4hc_level_step,
-        LZ4Wrapper::lz4hc_recommend_level + LZ4Wrapper::lz4hc_level_step * LZ4_STEP},
+        LZ4Wrapper::lz4hc_recommend_level + LZ4Wrapper::lz4hc_level_step * LZ4_STEP
+    },
     /* COMPRESS_HIGH :: ZLIB */
-    {ZlibEncoder::zlib_recommend_level,
+    {   ZlibEncoder::zlib_recommend_level,
         ZlibEncoder::zlib_recommend_level + ZlibEncoder::zlib_level_step,
         ZlibEncoder::zlib_recommend_level + ZlibEncoder::zlib_level_step * LZ4_STEP,
-        ZlibEncoder::zlib_max_level}};
+        ZlibEncoder::zlib_max_level
+    }
+};
 
 static FORCE_INLINE void prepare_swap_buf(
     char*& buf1, char*& buf2, int& sz1, int& sz2, char* newbuf2, int newsz2, bool& prepared)
@@ -103,7 +108,7 @@ static FORCE_INLINE unsigned short find_key(int64 value)
 {
     unsigned short key_sign = (value <= 0) ? 0x0 : DELTA2_KEY_MAX;
     for (unsigned short index = DELTA2_KEY_MAX / 2;
-        index < sizeof(g_keyMap) / sizeof(Delta2KeyMap) - 1;) {
+         index < sizeof(g_keyMap) / sizeof(Delta2KeyMap) - 1;) {
         if (((value <= (int64)g_keyMap[index].max) && (value > (int64)g_keyMap[index].min)) ||
             ((-value <= (int64)g_keyMap[index].max) && (-value > (int64)g_keyMap[index].min))) {
             return (index + key_sign);
@@ -146,9 +151,7 @@ void Delta2Codec::write_value(int64 value, unsigned int buf_len, char* outbuf, u
 {
     int64 write_data = value;
 
-    Assert(outbuf != nullptr);
-    Assert(pos != nullptr);
-    Assert(*pos <= buf_len);
+    Assert(outbuf != NULL && pos != NULL && *pos <= buf_len);
     if (value == 0) {
         *(char*)(outbuf + *pos) = *(char*)&value;
         *pos = *pos + DELTA2_KEY_LEN;
@@ -178,8 +181,7 @@ int64 Delta2Codec::read_value(_in_ char* inbuf, unsigned int* pos, unsigned int 
     int sign;
     int64 tmp;
 
-    Assert(inbuf != nullptr);
-    Assert(pos != nullptr);
+    Assert(inbuf != NULL && pos != NULL);
     Assert(*pos + DELTA2_KEY_LEN <= buf_len);
 
     tmp = read_data_by_size(inbuf, pos, sizeof(char));
@@ -211,7 +213,7 @@ int64 Delta2Codec::read_value(_in_ char* inbuf, unsigned int* pos, unsigned int 
  * @return -  total size of compressed buffer
  */
 int64 Delta2Codec::compress(_in_ char* inbuf, _out_ char* outbuf, _in_ unsigned int insize, _in_ unsigned int outsize,
-    _in_ unsigned short data_size)
+                            _in_ unsigned short data_size)
 {
     int64 read_data;
     int64 write_data;
@@ -221,9 +223,7 @@ int64 Delta2Codec::compress(_in_ char* inbuf, _out_ char* outbuf, _in_ unsigned 
     unsigned int in_pos = 0;
     unsigned int out_pos = 0;
 
-    Assert(insize > 0);
-    Assert(inbuf != nullptr);
-    Assert(outbuf != nullptr);
+    Assert(insize > 0 && inbuf != NULL && outbuf != NULL);
 
     do {
         read_data = read_data_by_size(inbuf, &in_pos, data_size);
@@ -259,7 +259,7 @@ int64 Delta2Codec::compress(_in_ char* inbuf, _out_ char* outbuf, _in_ unsigned 
  * @return -  total size of de-compressed buffer
  */
 int64 Delta2Codec::decompress(_in_ char* inbuf, _out_ char* outbuf, _in_ unsigned int insize, _in_ unsigned int outsize,
-    _in_ unsigned short data_size) const
+                              _in_ unsigned short data_size) const
 {
     int count = 0;
     unsigned int in_pos = 0;
@@ -269,9 +269,7 @@ int64 Delta2Codec::decompress(_in_ char* inbuf, _out_ char* outbuf, _in_ unsigne
     int64 pre_delta;
     short next_read_Len = data_size;
 
-    Assert(insize > 0);
-    Assert(inbuf != nullptr);
-    Assert(outbuf != nullptr);
+    Assert(insize > 0 && inbuf != NULL && outbuf != NULL);
 
     do {
         if (count == 0) {
@@ -344,18 +342,15 @@ int SequenceCodec::compress(_in_ const CompressionArg1& in, _out_ CompressionArg
     Size bound_size = 0;
     int8 compression = heaprel_get_compression_from_modes(in.mode);
     int8 compress_level = heaprel_get_compresslevel_from_modes(in.mode);
-    if (unlikely(this->value_size == 0)) {
-        ereport(WARNING, (ERRCODE_DATA_CORRUPTED, errmsg("Invalid value size: 0")));
-        return -1;
-    }
     Assert(compression >= COMPRESS_LOW);
     Assert(compression <= COMPRESS_HIGH);
+    Assert(value_size > 0);
     Assert((in.sz % this->value_size) == 0);
 
     ereport(DEBUG1,
-        (ERRCODE_DATA_CORRUPTED,
-            errmsg(
-                "Seq codec: size= %d, compression = %d, level = %d", this->value_size, compression, compress_level)));
+            (ERRCODE_DATA_CORRUPTED,
+             errmsg(
+                 "Seq codec: size= %d, compression = %d, level = %d", this->value_size, compression, compress_level)));
     BufferHelper tmpOutBuf = {NULL, 0, Unknown};
     BufferHelperMalloc(&tmpOutBuf, (in.sz / this->value_size) * (this->value_size + 1));
 
@@ -373,7 +368,7 @@ int SequenceCodec::compress(_in_ const CompressionArg1& in, _out_ CompressionArg
         ereport(DEBUG1, (ERRCODE_DATA_CORRUPTED, errmsg("SeqCodex err, out_sz= %d, in.sz = %d", compress_size, in.sz)));
         return -1;
     }
-    errno_t rc = memcpy_s(out.buf, out.sz, tmpOutBuf.buf, compress_size);
+    error_t rc = memcpy_s(out.buf, out.sz, tmpOutBuf.buf, compress_size);
     securec_check(rc, "", "");
     out.sz = compress_size;
     if (ATT_IS_TIMESTAMP(data_type)) {
@@ -490,7 +485,7 @@ XORCodec::XORCodec()
  * @return -  total size of compressed buffer
  */
 int64 XORCodec::compress(_in_ char* inbuf, _out_ char* outbuf, _in_ unsigned int insize, _in_ unsigned int outsize,
-    _in_ unsigned short data_size)
+                         _in_ unsigned short data_size)
 {
     int64 read_data;
     int64 write_data;
@@ -498,9 +493,7 @@ int64 XORCodec::compress(_in_ char* inbuf, _out_ char* outbuf, _in_ unsigned int
     unsigned int in_pos = 0;
     unsigned int out_pos = 0;
 
-    Assert(insize > 0);
-    Assert(inbuf != nullptr);
-    Assert(outbuf != nullptr);
+    Assert(insize > 0 && inbuf != NULL && outbuf != NULL);
 
     do {
         read_data = read_data_by_size(inbuf, &in_pos, data_size);
@@ -539,8 +532,8 @@ void XORCodec::appendValue(int64 value, char* outbuf, unsigned int& out_pos)
         leadingZeros = kMaxLeadingZerosLength;
     }
 
-    uint32_t const floatSize = 64;
-    uint32_t blockSize = floatSize - leadingZeros - trailingZeros;
+    int const floatSize = 64;
+    int blockSize = floatSize - leadingZeros - trailingZeros;
     uint32_t expectedSize = kLeadingZerosLengthBits + kBlockSizeLengthBits + blockSize;
     uint32_t previousBlockInformationSize = floatSize - previousValueTrailingZeros_ - previousValueLeadingZeros_;
 
@@ -667,7 +660,7 @@ void XORCodec::flushLastBitString(char* outbuf, unsigned int& out_pos)
  * @return -  total size of decompressed buffer
  */
 int64 XORCodec::decompress(_in_ char* inbuf, _out_ char* outbuf, _in_ unsigned int insize, _in_ unsigned int outsize,
-    _in_ unsigned short data_size)
+                           _in_ unsigned short data_size)
 {
     uint64_t previousValue = 0;
     uint64_t previousLeadingZeros = 0;
@@ -681,9 +674,7 @@ int64 XORCodec::decompress(_in_ char* inbuf, _out_ char* outbuf, _in_ unsigned i
     unsigned int out_pos = 0;
     unsigned short data_size_byte = 1;
     Assert(data_size != 0);
-    Assert(insize > 0);
-    Assert(inbuf != nullptr);
-    Assert(outbuf != nullptr);
+    Assert(insize > 0 && inbuf != NULL && outbuf != NULL);
 
     unsigned int loop_count = (outsize / data_size);
     read_data = read_data_by_size(inbuf, &in_pos, data_size_byte);
@@ -710,7 +701,7 @@ int64 XORCodec::decompress(_in_ char* inbuf, _out_ char* outbuf, _in_ unsigned i
  * @return -  decompress value
  */
 int64 XORCodec::readNextValue(uint64_t& bitPos, uint64_t& previousValue, uint64_t& previousLeadingZeros,
-    uint64_t& previousTrailingZeros, char* inbuf, unsigned int& in_pos)
+                              uint64_t& previousTrailingZeros, char* inbuf, unsigned int& in_pos)
 {
     uint64_t nonZeroValue = readValueFromBitString(bitPos, 1, inbuf, in_pos);
     if (!nonZeroValue) {

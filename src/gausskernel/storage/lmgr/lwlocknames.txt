@@ -96,4 +96,12 @@ GPCCommitLock 88
 GPCClearLock 89
 GPCTimelineLock 90
 TsTagsCacheLock  91
-BackgroundWorkerLock	92
+MaxPageFlushLsnFileLock  92
+CaptureViewFileHashLock 93
+StreamingEngineConnLock 94
+StreamingEngineExecLock 95
+PartIdCacheLock 96
+PartOidCacheLock 97
+DeleteCompactionLock 98
+DeleteConsumerLock 99
+ConsumerStateLock 100

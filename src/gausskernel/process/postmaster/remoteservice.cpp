@@ -93,9 +93,7 @@ void RemoteServiceMain(void)
     MemoryContext remote_service_context;
     long cur_timeout_ms = 0;
 
-    knl_thread_set_name("RemoteSrv");
-
-    ereport(LOG, (errmsg("RemoteSrv is starting...")));
+    ereport(LOG, (errmsg("remote service is starting...")));
 
     /*
      * Properly accept or ignore signals the postmaster might send us.
@@ -128,7 +126,7 @@ void RemoteServiceMain(void)
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Remote Service");
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Remote Service", MEMORY_CONTEXT_STORAGE);
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -194,7 +192,7 @@ void RemoteServiceMain(void)
     int i = 0;
 
     for (i = 1; i < MAX_REPLNODE_NUM; i++) {
-        if (t_thrd.postmaster_cxt.ReplConnArray[i] && 0 != t_thrd.postmaster_cxt.ReplConnArray[i]->localservice) {
+        if (t_thrd.postmaster_cxt.ReplConnArray[i] && t_thrd.postmaster_cxt.ReplConnArray[i]->localservice != 0) {
             break;
         }
     }
@@ -231,7 +229,7 @@ void RemoteServiceMain(void)
 
         /* Exit before call RunServer() */
         if (t_thrd.rs_cxt.shutdown_requested) {
-            ereport(LOG, (errmodule(MOD_REMOTE), errmsg("RemoteSrv is closing...")));
+            ereport(LOG, (errmodule(MOD_REMOTE), errmsg("remote service is closing...")));
             GRPC_TRY() {
                 ShutdownAndReleaseServer(t_thrd.rs_cxt.server_context);
                 t_thrd.rs_cxt.server_context = NULL;

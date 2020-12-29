@@ -38,7 +38,7 @@
 
 static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nblocks);
 static void _hash_splitbucket(Relation rel, Buffer metabuf, Bucket obucket, Bucket nbucket, BlockNumber start_oblkno,
-    BlockNumber start_nblkno, uint32 maxbucket, uint32 highmask, uint32 lowmask);
+                              BlockNumber start_nblkno, uint32 maxbucket, uint32 highmask, uint32 lowmask);
 
 /*
  * We use high-concurrency locking on hash indexes (see README for an overview
@@ -145,7 +145,7 @@ Buffer _hash_getinitbuf(Relation rel, BlockNumber blkno)
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hash AM does not use P_NEW")));
     buf = ReadBufferExtended(rel, MAIN_FORKNUM, blkno, RBM_ZERO_AND_LOCK, NULL);
 
-    /* 
+    /*
      * ref count and lock type are correct
      *
      * initialize the page
@@ -175,17 +175,15 @@ Buffer _hash_getnewbuf(Relation rel, BlockNumber blkno, ForkNumber forkNum)
     if (blkno == P_NEW)
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hash AM does not use P_NEW")));
     if (blkno > nblocks)
-        ereport(ERROR,
-            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                errmsg("access to noncontiguous page in hash index \"%s\"", RelationGetRelationName(rel))));
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("access to noncontiguous page in hash index \"%s\"", RelationGetRelationName(rel))));
 
     /* smgr insists we use P_NEW to extend the relation */
     if (blkno == nblocks) {
         buf = ReadBufferExtended(rel, forkNum, P_NEW, RBM_NORMAL, NULL);
         if (BufferGetBlockNumber(buf) != blkno)
-            ereport(ERROR,
-                (errcode(ERRCODE_DATA_CORRUPTED),
-                    errmsg("unexpected hash relation size: %u, should be %u", BufferGetBlockNumber(buf), blkno)));
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("unexpected hash relation size: %u, should be %u",
+                                                                    BufferGetBlockNumber(buf), blkno)));
         LockBuffer(buf, HASH_WRITE);
     } else {
         buf = ReadBufferExtended(rel, forkNum, blkno, RBM_ZERO_AND_LOCK, NULL);
@@ -193,7 +191,7 @@ Buffer _hash_getnewbuf(Relation rel, BlockNumber blkno, ForkNumber forkNum)
 
     /*
      * ref count and lock type are correct
-     * 
+     *
      * initialize the page
      */
     _hash_pageinit(BufferGetPage(buf), BufferGetPageSize(buf));
@@ -207,8 +205,8 @@ Buffer _hash_getnewbuf(Relation rel, BlockNumber blkno, ForkNumber forkNum)
  *		This is identical to _hash_getbuf() but also allows a buffer access
  *		strategy to be specified.  We use this for VACUUM operations.
  */
-Buffer _hash_getbuf_with_strategy(
-    Relation rel, BlockNumber blkno, int access, int flags, BufferAccessStrategy bstrategy)
+Buffer _hash_getbuf_with_strategy(Relation rel, BlockNumber blkno, int access, int flags,
+                                  BufferAccessStrategy bstrategy)
 {
     Buffer buf;
 
@@ -315,9 +313,8 @@ uint32 _hash_metapinit(Relation rel, double num_tuples, ForkNumber forkNum)
 
     /* safety check */
     if (RelationGetNumberOfBlocksInFork(rel, forkNum) != 0)
-        ereport(ERROR,
-            (errcode(ERRCODE_DATA_EXCEPTION),
-                errmsg("cannot initialize non-empty hash index \"%s\"", RelationGetRelationName(rel))));
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                        errmsg("cannot initialize non-empty hash index \"%s\"", RelationGetRelationName(rel))));
 
     /*
      * Determine the target fill factor (in tuples per bucket) for this index.
@@ -679,7 +676,7 @@ fail:
 static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nblocks)
 {
     BlockNumber lastblock;
-    char* zerobuf = NULL;
+    char *zerobuf = NULL;
 
     lastblock = firstblock + nblocks - 1;
     /*
@@ -689,7 +686,7 @@ static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nbl
     if (lastblock < firstblock || lastblock == InvalidBlockNumber)
         return false;
 
-    zerobuf = (char*)adio_align_alloc(BLCKSZ);
+    zerobuf = (char *)adio_align_alloc(BLCKSZ);
     if (zerobuf != NULL) {
         MemSet(zerobuf, 0, BLCKSZ);
     }
@@ -719,7 +716,7 @@ static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nbl
  * touched if it becomes necessary to add or remove overflow pages.)
  */
 static void _hash_splitbucket(Relation rel, Buffer metabuf, Bucket obucket, Bucket nbucket, BlockNumber start_oblkno,
-    BlockNumber start_nblkno, uint32 maxbucket, uint32 highmask, uint32 lowmask)
+                              BlockNumber start_nblkno, uint32 maxbucket, uint32 highmask, uint32 lowmask)
 {
     BlockNumber oblkno;
     BlockNumber nblkno;

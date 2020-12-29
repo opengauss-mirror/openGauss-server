@@ -3,6 +3,7 @@
  *
  * PostgreSQL transaction-commit-log manager
  *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -38,8 +39,6 @@
 #define TransactionIdToBIndex(xid) ((xid) % (TransactionId)CLOG_XACTS_PER_BYTE)
 
 #define CLogPageNoToStartXactId(pageno) ((pageno > 0)?((pageno -1) * CLOG_XACTS_PER_PAGE): 0)
-
-
 /* CLog lwlock partition*/
 #define CBufHashPartition(hashcode) \
     ((hashcode) % NUM_CLOG_PARTITIONS)

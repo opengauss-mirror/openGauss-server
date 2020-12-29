@@ -11,7 +11,7 @@ check_instance
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_slot1; CREATE TABLE mpp_slot1(id INT,name VARCHAR(15) NOT NULL);"
 
 #set wal_keep_segments to 2
-gs_guc reload -D $data_dir/datanode1 -c "wal_keep_segments=2"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "wal_keep_segments=2"
 
 #kill standby, so data will replicate to dummystandby
 kill_standby
@@ -64,7 +64,7 @@ check_instance
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_slot2; CREATE TABLE mpp_slot2(id INT,name VARCHAR(15) NOT NULL);"
 
 #set wal_keep_segments to 2
-gs_guc reload -D $data_dir/datanode1 -c "wal_keep_segments=2"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "wal_keep_segments=2"
 
 #kill standby, so data will replicate to dummystandby
 kill_standby
@@ -106,7 +106,7 @@ start_standby
 check_walkeepsegment
 if [ $? -eq 0 ]; then
 	#build the standby
-	gs_ctl build -D $data_dir/datanode1_standby
+	gs_ctl build -D $data_dir/datanode1_standby -Z single_node -b full
 	echo "all of success"
 else
 	echo "$failed_keyword: no replication slot failed."
@@ -119,7 +119,7 @@ check_standby_startup
 function tear_down()
 {
 #set wal_keep_segments back to 16
-gs_guc reload -D $data_dir/datanode1 -c "wal_keep_segments=16"
+gs_guc reload -Z datanode -D $data_dir/datanode1 -c "wal_keep_segments=16"
 sleep 1
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_slot1;"
 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists mpp_slot2;"

@@ -66,7 +66,7 @@ VectorBatch* ExecCstoreIndexScanT<BTREE_INDEX>(CStoreIndexScanState* state)
 {
     VectorBatch* tids = NULL;
     IndexSortState* sort = NULL;
-    AbsIdxScanDesc scandesc = NULL;
+    IndexScanDesc scandesc = NULL;
     List* indexTList = NIL;
 
     CBTreeScanState* btreeIndexScanState = state->m_btreeIndexScan;
@@ -114,7 +114,7 @@ VectorBatch* ExecCstoreIndexScanT<BTREE_INDEX_ONLY>(CStoreIndexScanState* state)
 {
     VectorBatch* tids = NULL;
     IndexSortState* sort = NULL;
-    AbsIdxScanDesc scandesc = NULL;
+    IndexScanDesc scandesc = NULL;
     List* indexTList = NIL;
 
     CBTreeOnlyScanState* btreeIndexOnlyScanState = state->m_btreeIndexOnlyScan;
@@ -616,7 +616,7 @@ void BuildCBtreeIndexScan(CBTreeScanState* btreeIndexScan, ScanState* scanstate,
     Relation indexRel, List* indexqual, List* indexorderby)
 {
     int sortMem = SET_NODEMEM(node->plan.operatorMemKB[0], node->plan.dop);
-    int maxMem = node->plan.operatorMaxMem > 0 ? node->plan.operatorMaxMem / SET_DOP(node->plan.dop) : 0;
+    int maxMem = (node->plan.operatorMaxMem > 0) ? (node->plan.operatorMaxMem / SET_DOP(node->plan.dop)) : 0;
 
     errno_t rc;
     /* Copy ScanState */
@@ -724,7 +724,7 @@ void BuildCBtreeIndexScan(CBTreeScanState* btreeIndexScan, ScanState* scanstate,
                 partitionGetRelation(btreeIndexScan->iss_RelationDesc, currentindex);
 
             /* Initialize scan descriptor for partitioned table */
-            btreeIndexScan->iss_ScanDesc = (AbsIdxScanDesc)index_beginscan(btreeIndexScan->ss.ss_currentPartition,
+            btreeIndexScan->iss_ScanDesc = index_beginscan(btreeIndexScan->ss.ss_currentPartition,
                 btreeIndexScan->iss_CurrentIndexPartition,
                 estate->es_snapshot,
                 btreeIndexScan->iss_NumScanKeys,
@@ -732,7 +732,7 @@ void BuildCBtreeIndexScan(CBTreeScanState* btreeIndexScan, ScanState* scanstate,
             Assert(PointerIsValid(btreeIndexScan->iss_ScanDesc));
         }
     } else {
-        btreeIndexScan->iss_ScanDesc = (AbsIdxScanDesc)index_beginscan(btreeIndexScan->ss.ss_currentPartition,
+        btreeIndexScan->iss_ScanDesc = index_beginscan(btreeIndexScan->ss.ss_currentPartition,
             btreeIndexScan->iss_RelationDesc,
             estate->es_snapshot,
             btreeIndexScan->iss_NumScanKeys,
@@ -746,7 +746,7 @@ void BuildCBtreeIndexScan(CBTreeScanState* btreeIndexScan, ScanState* scanstate,
      * index AM.
      */
     if (btreeIndexScan->iss_NumRuntimeKeys == 0 && PointerIsValid(btreeIndexScan->iss_ScanDesc))
-        abs_idx_rescan(btreeIndexScan->iss_ScanDesc,
+        scan_handler_idx_rescan(btreeIndexScan->iss_ScanDesc,
             btreeIndexScan->iss_ScanKeys,
             btreeIndexScan->iss_NumScanKeys,
             btreeIndexScan->iss_OrderByKeys,
@@ -884,7 +884,7 @@ void BuildCBtreeIndexOnlyScan(CBTreeOnlyScanState* btreeIndexOnlyScan, ScanState
 
             /* Initialize scan descriptor for partitioned table */
             btreeIndexOnlyScan->ioss_ScanDesc =
-                (AbsIdxScanDesc)index_beginscan(btreeIndexOnlyScan->ss.ss_currentPartition,
+                index_beginscan(btreeIndexOnlyScan->ss.ss_currentPartition,
                     btreeIndexOnlyScan->ioss_CurrentIndexPartition,
                     estate->es_snapshot,
                     btreeIndexOnlyScan->ioss_NumScanKeys,
@@ -892,7 +892,7 @@ void BuildCBtreeIndexOnlyScan(CBTreeOnlyScanState* btreeIndexOnlyScan, ScanState
             Assert(PointerIsValid(btreeIndexOnlyScan->ioss_ScanDesc));
         }
     } else {
-        btreeIndexOnlyScan->ioss_ScanDesc = (AbsIdxScanDesc)index_beginscan(btreeIndexOnlyScan->ss.ss_currentPartition,
+        btreeIndexOnlyScan->ioss_ScanDesc = index_beginscan(btreeIndexOnlyScan->ss.ss_currentPartition,
             btreeIndexOnlyScan->ioss_RelationDesc,
             estate->es_snapshot,
             btreeIndexOnlyScan->ioss_NumScanKeys,
@@ -912,7 +912,7 @@ void BuildCBtreeIndexOnlyScan(CBTreeOnlyScanState* btreeIndexOnlyScan, ScanState
          * index AM.
          */
         if (btreeIndexOnlyScan->ioss_NumRuntimeKeys == 0)
-            abs_idx_rescan(btreeIndexOnlyScan->ioss_ScanDesc,
+            scan_handler_idx_rescan(btreeIndexOnlyScan->ioss_ScanDesc,
                 btreeIndexOnlyScan->ioss_ScanKeys,
                 btreeIndexOnlyScan->ioss_NumScanKeys,
                 btreeIndexOnlyScan->ioss_OrderByKeys,
@@ -1019,7 +1019,7 @@ void FetchBatchFromSorter(IndexSortState* sort, VectorBatch* tids)
     }
 }
 
-void FetchTids(AbsIdxScanDesc scandesc, List* indexScanTargetList, PlanState* ps, IndexSortState* sort,
+void FetchTids(IndexScanDesc scandesc, List* indexScanTargetList, PlanState* ps, IndexSortState* sort,
     VectorBatch* tids, bool indexOnly)
 {
     ScanDirection direction = ps->state->es_direction;
@@ -1029,7 +1029,7 @@ void FetchTids(AbsIdxScanDesc scandesc, List* indexScanTargetList, PlanState* ps
     ItemPointer tid;
     int offset = 0;
 
-    while ((tid = abs_idx_getnext_tid(scandesc, direction)) != NULL) {
+    while ((tid = scan_handler_idx_getnext_tid(scandesc, direction)) != NULL) {
         IndexScanDesc indexScan = GetIndexScanDesc(scandesc);
         if (indexOnly) {
             int colId = 0;

@@ -1,0 +1,1340 @@
+--
+--@@GaussDB@@
+--plsql_packages test
+--
+--test utl_raw
+SELECT UTL_RAW.CAST_FROM_BINARY_INTEGER(643778,1);
+ cast_from_binary_integer 
+--------------------------
+ 0009D2C2
+(1 row)
+
+SELECT UTL_RAW.CAST_FROM_BINARY_INTEGER(643778,2);
+ cast_from_binary_integer 
+--------------------------
+ C2D20900
+(1 row)
+
+SELECT UTL_RAW.CAST_FROM_BINARY_INTEGER(2147483647,1);
+ cast_from_binary_integer 
+--------------------------
+ 7FFFFFFF
+(1 row)
+
+SELECT UTL_RAW.CAST_FROM_BINARY_INTEGER(-2147483648,2);
+ cast_from_binary_integer 
+--------------------------
+ 00000080
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('12',1);
+ cast_to_binary_integer 
+------------------------
+                     18
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123',2);
+ cast_to_binary_integer 
+------------------------
+                   8961
+(1 row)
+
+CREATE SCHEMA FVT_GAUSSDB_ADAPT;
+create table FVT_GAUSSDB_ADAPT.UTL_RAW_TO_BININT_004(NUM raw, ID integer);
+insert into FVT_GAUSSDB_ADAPT.UTL_RAW_TO_BININT_004 values('1234567890', 1);
+insert into FVT_GAUSSDB_ADAPT.UTL_RAW_TO_BININT_004 values('001230000', 2);
+insert into FVT_GAUSSDB_ADAPT.UTL_RAW_TO_BININT_004 values('0000000000', 3);
+insert into FVT_GAUSSDB_ADAPT.UTL_RAW_TO_BININT_004 values('abcdef0ABCDEF', 4);
+select UTL_RAW.CAST_TO_BINARY_INTEGER(NUM, 1) as RESULT from FVT_GAUSSDB_ADAPT.UTL_RAW_TO_BININT_004 order by ID;
+ result 
+--------
+     18
+      0
+      0
+     10
+(4 rows)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789',1) FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                      1
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789',2) FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                      1
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789A',1)FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                     18
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789A',2) FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                     18
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789AB',1)FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                      1
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789AB',2)FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                      1
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789ABC',1)FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                     18
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789ABC',2) FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                     18
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789ABCD',1) FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                      1
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789ABCD',2) FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                      1
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789ABCDE',1) FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                     18
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789ABCDE',2) FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                     18
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789ABCDEF',1) FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                      1
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789ABCDEF',2) FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                      1
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('123456789') FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                      1
+(1 row)
+
+select UTL_RAW.CAST_TO_BINARY_INTEGER(UTL_RAW.CAST_FROM_BINARY_INTEGER('1073741824',1), '1') as RESULT from dual;
+   result   
+------------
+ 1073741824
+(1 row)
+
+select UTL_RAW.CAST_TO_BINARY_INTEGER(UTL_RAW.CAST_FROM_BINARY_INTEGER('-1073741824',2), '2') as RESULT from dual;
+   result    
+-------------
+ -1073741824
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('1234') FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                   4660
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('1234',1) FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                   4660
+(1 row)
+
+SELECT UTL_RAW.CAST_TO_BINARY_INTEGER('1234',2) FROM DUAL;
+ cast_to_binary_integer 
+------------------------
+                  13330
+(1 row)
+
+SELECT UTL_RAW.CAST_FROM_BINARY_INTEGER(12) FROM DUAL;
+ cast_from_binary_integer 
+--------------------------
+ 0000000C
+(1 row)
+
+SELECT UTL_RAW.CAST_FROM_BINARY_INTEGER(1234,1) FROM DUAL;
+ cast_from_binary_integer 
+--------------------------
+ 000004D2
+(1 row)
+
+SELECT UTL_RAW.CAST_FROM_BINARY_INTEGER(1234,2) FROM DUAL;
+ cast_from_binary_integer 
+--------------------------
+ D2040000
+(1 row)
+
+create table FVT_GAUSSDB_ADAPT.UTL_RAW_TO_BININT_002(NUM raw);
+insert into FVT_GAUSSDB_ADAPT.UTL_RAW_TO_BININT_002 values('0001');
+select UTL_RAW.CAST_TO_BINARY_INTEGER(NUM) as RESULT from FVT_GAUSSDB_ADAPT.UTL_RAW_TO_BININT_002;
+ result 
+--------
+      1
+(1 row)
+
+create table FVT_GAUSSDB_ADAPT.UTL_RAW_FROM_BININT_002(NUM BINARY_INTEGER);
+insert into FVT_GAUSSDB_ADAPT.UTL_RAW_FROM_BININT_002 values(1);
+select UTL_RAW.CAST_FROM_BINARY_INTEGER(NUM) as RESULT from FVT_GAUSSDB_ADAPT.UTL_RAW_FROM_BININT_002;
+  result  
+----------
+ 00000001
+(1 row)
+
+select UTL_RAW.CAST_FROM_BINARY_INTEGER(2147483647) from dual;
+ cast_from_binary_integer 
+--------------------------
+ 7FFFFFFF
+(1 row)
+
+select UTL_RAW.CAST_FROM_BINARY_INTEGER(2147483647+1) from dual;
+ERROR:  integer out of range
+DROP TABLE FVT_GAUSSDB_ADAPT.UTL_RAW_TO_BININT_002 CASCADE;
+DROP TABLE FVT_GAUSSDB_ADAPT.UTL_RAW_FROM_BININT_002 CASCADE;
+DROP TABLE FVT_GAUSSDB_ADAPT.UTL_RAW_TO_BININT_004 CASCADE;
+DROP SCHEMA FVT_GAUSSDB_ADAPT CASCADE;
+--test dbms_random
+SELECT DBMS_RANDOM.SEED(3999);
+ seed 
+------
+    0
+(1 row)
+
+SELECT DBMS_RANDOM.SEED(-2147483648);
+ seed 
+------
+    0
+(1 row)
+
+SELECT DBMS_RANDOM.SEED(2147483647);
+ seed 
+------
+    0
+(1 row)
+
+SELECT DBMS_RANDOM.VALUE(2,5);
+      value       
+------------------
+ 4.40007718252022
+(1 row)
+
+SELECT DBMS_RANDOM.VALUE(5,2);
+      value       
+------------------
+ 3.36406545078571
+(1 row)
+
+SELECT DBMS_RANDOM.VALUE(7,7);
+ value 
+-------
+     7
+(1 row)
+
+SELECT DBMS_RANDOM.VALUE(-1.1,2.1);
+      value       
+------------------
+ 1.79582215682409
+(1 row)
+
+--test dbms_lob
+SELECT DBMS_LOB.GETLENGTH('1236633778799');
+ getlength 
+-----------
+        13
+(1 row)
+
+SELECT DBMS_LOB.GETLENGTH('gdfgsdfgjskejhjj');
+ getlength 
+-----------
+        16
+(1 row)
+
+SELECT DBMS_LOB.GETLENGTH('gdfgsdfgjske\\jhjj');
+ getlength 
+-----------
+        18
+(1 row)
+
+SELECT DBMS_LOB.READ('1234456',3,1);
+  read  
+--------
+ 012344
+(1 row)
+
+SELECT DBMS_LOB.READ('123456789012345',2,1);
+ read 
+------
+ 0123
+(1 row)
+
+--test dbms_ouput
+0123456789~!@#$%^&*()_+":?></.,;[]}{
+ put_line 
+----------
+ 
+(1 row)
+
+dbms_output.pu_line test ok!
+ put_line 
+----------
+ 
+(1 row)
+
+--test utl_file
+--touch /opt/svn_ljf/GaussDB_BASE/postgres/src/test/regress/expected/sql.txt
+--CREATE dba_directories
+--SELECT create_directory('TEST_DIR','/opt/svn_ljf/GaussDB_BASE/postgres/src/test/regress/expected');
+--SELECT * from dba_directories;
+--
+--CREATE or REPLACE FUNCTION sp_hw_putfile_INNER()
+--RETURNS INTEGER AS $$
+--DECLARE  
+--FILE_WRITE_FILE  UTL_FILE.FILE_TYPE;
+--AAA INTEGER;
+--BEGIN
+--  FILE_WRITE_FILE:=UTL_FILE.fopen('TEST_DIR','sql.txt', 'a', 10);
+--  AAA:=UTL_FILE.PUT(FILE_WRITE_FILE, '12345');
+--  RETURN AAA;
+--END;
+--$$  LANGUAGE plpgsql;
+--SELECT sp_hw_putfile_INNER();
+--
+--CREATE or REPLACE FUNCTION sp_hw_seekfile_INNER()
+--RETURNS INTEGER AS $$
+--DECLARE  
+--FILE_WRITE_FILE  UTL_FILE.FILE_TYPE;
+--AAA INTEGER;
+--BEGIN
+--  FILE_WRITE_FILE:=UTL_FILE.fopen('TEST_DIR','sql.txt', 'r', 10);
+--  AAA:= UTL_FILE.FSEEK (FILE_WRITE_FILE,4,5);
+--  RETURN 0;
+--END;
+--$$  LANGUAGE plpgsql;
+--SELECT sp_hw_seekfile_INNER();
+--
+--CREATE or REPLACE FUNCTION sp_hw_getposfile_INNER()
+--RETURNS INTEGER AS $$
+--DECLARE  
+--FILE_WRITE_FILE  UTL_FILE.FILE_TYPE;
+--AAA INTEGER;
+--BEGIN
+--  FILE_WRITE_FILE:=UTL_FILE.fopen('TEST_DIR','sql.txt', 'r', 10);
+--  AAA:= UTL_FILE.FGETPOS(FILE_WRITE_FILE);
+--  RETURN AAA;
+--END;
+--$$  LANGUAGE plpgsql;
+--SELECT sp_hw_getposfile_INNER();
+--
+--CREATE or REPLACE FUNCTION sp_hw_flushfile_INNER()
+--RETURNS INTEGER AS $$
+--DECLARE  
+--FILE_WRITE_FILE  UTL_FILE.FILE_TYPE;
+--AAA INTEGER;
+--BEGIN
+--  FILE_WRITE_FILE:=UTL_FILE.fopen('TEST_DIR','sql.txt', 'r', 10);
+--  AAA:= UTL_FILE.FFLUSH(FILE_WRITE_FILE);
+--  RETURN AAA;
+--END;
+--$$  LANGUAGE plpgsql;
+--SELECT sp_hw_flushfile_INNER();
+--
+--
+--CREATE or REPLACE FUNCTION sp_hw_closefile_INNER()
+-- RETURNS INTEGER AS $$
+--DECLARE  
+--FILE_WRITE_FILE  UTL_FILE.FILE_TYPE;
+--AAA INTEGER;
+--BEGIN
+--  FILE_WRITE_FILE:=UTL_FILE.fopen('TEST_DIR','sql.txt', 'r', 10);
+--  AAA:= UTL_FILE.FCLOSE(FILE_WRITE_FILE);
+--  RETURN AAA;
+--END;
+--$$  LANGUAGE plpgsql;
+--SELECT sp_hw_closefile_INNER();
+--
+--
+--CREATE or REPLACE FUNCTION sp_hw_putlinefile_INNER()
+--RETURNS INTEGER AS $$
+--DECLARE
+--FILE_WRITE_FILE  UTL_FILE.FILE_TYPE;
+--AAA text;
+--BEGIN
+--  FILE_WRITE_FILE:=UTL_FILE.fopen('TEST_DIR','sql.txt','w', 10);
+--  AAA:=UTL_FILE.PUT_LINE(FILE_WRITE_FILE,'aghjgj');
+--   RETURN 0;
+--END;
+--$$  LANGUAGE plpgsql;
+--SELECT sp_hw_putlinefile_INNER();
+--
+--
+--CREATE or REPLACE FUNCTION sp_hw_isopenfile_INNER()
+--RETURNS INTEGER AS $$
+--DECLARE  
+--FILE_WRITE_FILE  UTL_FILE.FILE_TYPE;
+--AAA BOOL;
+--BEGIN
+--  FILE_WRITE_FILE:=UTL_FILE.fopen('TEST_DIR','sql.txt', 'r', 10);
+--  AAA:=UTL_FILE.IS_OPEN(FILE_WRITE_FILE);
+--  RETURN 0;
+--END;
+--$$  LANGUAGE plpgsql;
+--SELECT sp_hw_isopenfile_INNER();
+--
+--CREATE or REPLACE FUNCTION sp_hw_getllinefile_INNER()
+--RETURNS INTEGER AS $$
+--DECLARE  
+--FILE_WRITE_FILE  UTL_FILE.FILE_TYPE;
+--AAA INTEGER;
+--BEGIN
+--  FILE_WRITE_FILE:=UTL_FILE.fopen('TEST_DIR','sql.txt', 'r', 10);
+--  AAA:=UTL_FILE.GET_LINE(FILE_WRITE_FILE,10);
+--  RETURN 0 ;
+--END;
+--$$  LANGUAGE plpgsql;
+--SELECT sp_hw_getllinefile_INNER();
+--
+--SELECT UTL_FILE.FCOPY('TEST_DIR','sql.txt','TEST_DIR','liyy.txt');
+--SELECT UTL_FILE.FGETATTR('TEST_DIR','sql.txt');
+----SELECT UTL_FILE.FREMOVE('TEST_DIR','sql.txt');
+--SELECT UTL_FILE.FREMOVE('TEST_DIR','liyy.txt');
+--
+--SELECT drop_directory('TEST_DIR');
+--SELECT * from dba_directories;
+--DBMS_OUTPUT
+--DBMS_OUTPUT.ENABLE()
+CREATE OR REPLACE PROCEDURE test_dbms_output_enable
+AS
+		str varchar2(100) := 'abc';
+	BEGIN
+		RETURN;
+	END;
+/
+abc
+ test_dbms_output_enable 
+-------------------------
+ 
+(1 row)
+
+--DBMS_OUTPUT.PUT()
+CREATE OR REPLACE PROCEDURE test_put
+AS
+		str varchar2(100) := 'abc';
+	BEGIN
+		RETURN;
+	END;
+/
+call test_put();
+ test_put 
+----------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_put1
+AS
+	i int := 1;
+	BEGIN
+		RETURN;
+	END;
+/
+call test_put1();
+abcabc1
+ test_put1 
+-----------
+ 
+(1 row)
+
+CREATE OR REPLACE FUNCTION test_put2
+RETURN void
+AS
+	i int := 1;
+	BEGIN
+		raise notice '%', i;
+		RETURN;
+	END;
+/
+call test_put2();
+NOTICE:  1
+abc1
+ test_put2 
+-----------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_put3
+AS
+	i int := 1;
+	BEGIN
+		raise notice '%', i;
+		RETURN;
+	END;
+/
+call test_put3();
+NOTICE:  1
+abcabc1
+ test_put3 
+-----------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_put4
+AS
+	i int := 1;
+	BEGIN
+		RETURN;
+	END;
+/
+call test_put4();
+1
+abcabc1
+ test_put4 
+-----------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_put5
+AS
+	i int := 1;
+	BEGIN
+		raise exception no_data_found;
+		RETURN;	
+	EXCEPTION	
+		WHEN NO_DATA_FOUND THEN
+	END;
+/
+call test_put5();
+ test_put5 
+-----------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_put6
+AS
+	i int := 1;
+	BEGIN
+		raise exception no_data_found;
+		RETURN;
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+	END;
+/
+call test_put6();
+abcno_data_foundno_data_found\n
+ test_put6 
+-----------
+ 
+(1 row)
+
+SELECT test_put6() from dual;
+no_data_found\n
+ test_put6 
+-----------
+ 
+(1 row)
+
+declare
+a int := 1;
+b int;
+c int;
+begin
+	test_put6();
+end;
+/
+no_data_found\n
+CREATE OR REPLACE PROCEDURE test_put7
+AS
+	i int := 1;
+	str text;
+	BEGIN
+		str = rpad('1', 1024*1024, '1');
+		RETURN;
+	END;
+/
+CALL test_put7();
+ERROR:  The length of incoming msg exceeds the max line size 32767
+CONTEXT:  SQL statement "CALL dbms_output.put(str)"
+PL/pgSQL function test_put7() line 5 at PERFORM
+CREATE OR REPLACE PROCEDURE test_put8
+AS
+	i int := 1;
+	str text;
+	BEGIN
+		str = rpad('1', 1024*1024, '1');
+		RETURN;
+	END;
+/
+CALL test_put8();
+ERROR:  The length of incoming msg exceeds the max line size 32767
+CONTEXT:  SQL statement "CALL dbms_output.put_line(str)"
+PL/pgSQL function test_put8() line 5 at PERFORM
+DROP PROCEDURE test_put;
+DROP PROCEDURE test_put1;
+DROP PROCEDURE test_put2;
+DROP PROCEDURE test_put3;
+DROP PROCEDURE test_put4;
+DROP PROCEDURE test_put5;
+DROP PROCEDURE test_put6;
+DROP PROCEDURE test_put7;
+DROP PROCEDURE test_put8;
+--TEST DBMS_LOB--
+CREATE TABLE test_blob (data blob);
+INSERT INTO test_blob values ('abc');
+create table test_blob_copy ( data blob);
+insert into test_blob_copy values ('def');
+CREATE OR REPLACE PROCEDURE test_lob
+AS
+		str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		copyto blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		PSV_SQL1 varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+
+		PSV_SQL :='select * from test_blob for update';
+		PSV_SQL1 := 'select * from test_blob_copy for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		EXECUTE IMMEDIATE PSV_SQL1 into copyto;
+		DBMS_LOB.OPEN(dest, DBMS_LOB.LOB_READWRITE);
+		DBMS_LOB.OPEN(copyto, DBMS_LOB.LOB_READWRITE);
+		DBMS_LOB.WRITE(dest, amount, 1, source);
+		DBMS_LOB.WRITEAPPEND(dest, amount, source);
+
+		DBMS_LOB.ERASE(dest, a, 1);
+		DBMS_LOB.COPY(copyto, dest, amount, 10, 1);
+
+		UPDATE test_blob SET data = dest;
+		UPDATE test_blob_copy SET data = copyto;
+		DBMS_LOB.CLOSE(dest);
+		DBMS_LOB.CLOSE(copyto);
+		RETURN;
+    END;
+/
+CALL test_lob();
+1
+ test_lob 
+----------
+ 
+(1 row)
+
+SELECT * FROM test_blob;
+           data           
+--------------------------
+ 006263646566616263646566
+(1 row)
+
+SELECT * FROM test_blob_copy;
+              data              
+--------------------------------
+ 0DEF00000000000000006263646566
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_lob_open()
+AS
+		str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		DBMS_LOB.OPEN(dest);
+		RETURN;
+	END;
+/
+ERROR:  syntax error at or near ")"
+LINE 14:   DBMS_LOB.OPEN(dest);
+                             ^
+QUERY:   DECLARE 	str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		DBMS_LOB.OPEN(dest);
+		RETURN;
+	END
+CREATE OR REPLACE PROCEDURE test_lob_open1()
+AS
+		str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		DBMS_LOB.OPEN(dest, a);
+		RETURN;
+	END;
+/
+ERROR:  syntax error at or near "a"
+LINE 14:   DBMS_LOB.OPEN(dest, a);
+                               ^
+QUERY:   DECLARE 	str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		DBMS_LOB.OPEN(dest, a);
+		RETURN;
+	END
+CREATE OR REPLACE PROCEDURE test_lob_open2()
+AS
+		str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		DBMS_LOB.OPEN(dest, DBMS_LOB.LOB_READWRITE, a);
+
+		RETURN;
+	END;
+/
+ERROR:  syntax error at or near ","
+LINE 14:   DBMS_LOB.OPEN(dest, DBMS_LOB.LOB_READWRITE, a);
+                                                     ^
+QUERY:   DECLARE 	str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		DBMS_LOB.OPEN(dest, DBMS_LOB.LOB_READWRITE, a);
+
+		RETURN;
+	END
+CREATE OR REPLACE PROCEDURE test_lob_open3()
+AS
+		str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		
+		PSV_SQL :='select * from test_blob for update';
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+
+		DBMS_LOB.OPEN(dest, DBMS_LOB.LOB_READWRITE);
+
+		RETURN;
+	END;
+/
+CALL test_lob_open3();
+ test_lob_open3 
+----------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_lob_close()
+AS
+		str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		DBMS_LOB.OPEN(dest, DBMS_LOB.LOB_READWRITE);
+		DBMS_LOB.CLOSE(dest);
+
+		RETURN;
+	END;
+/
+CALL test_lob_close();
+ test_lob_close 
+----------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_lob_close1()
+AS
+		str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		DBMS_LOB.OPEN(dest, DBMS_LOB.LOB_READWRITE);
+		DBMS_LOB.CLOSE(dest, a);
+
+		RETURN;
+	END;
+/
+ERROR:  syntax error at or near ","
+LINE 15:   DBMS_LOB.CLOSE(dest, a);
+                              ^
+QUERY:   DECLARE 	str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		DBMS_LOB.OPEN(dest, DBMS_LOB.LOB_READWRITE);
+		DBMS_LOB.CLOSE(dest, a);
+
+		RETURN;
+	END
+CREATE OR REPLACE PROCEDURE test_lob_close2()
+AS
+		str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		DBMS_LOB.OPEN(dest, DBMS_LOB.LOB_READWRITE);
+		DBMS_LOB.CLOSE();
+
+		RETURN;
+	END;
+/
+ERROR:  syntax error at or near ")"
+LINE 15:   DBMS_LOB.CLOSE();
+                          ^
+QUERY:   DECLARE 	str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		DBMS_LOB.OPEN(dest, DBMS_LOB.LOB_READWRITE);
+		DBMS_LOB.CLOSE();
+
+		RETURN;
+	END
+CREATE OR REPLACE PROCEDURE test_lob_write(flag int)
+AS
+		str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		amount int;
+		PSV_SQL varchar2(100);
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+
+		IF flag = 1 THEN
+			DBMS_LOB.WRITE(dest, 0, 1, source);
+		ELSIF flag = 2 THEN
+			DBMS_LOB.WRITE(dest, 1000, 1, source);
+		ELSIF flag = 3 THEN
+			DBMS_LOB.WRITE(dest, 1, 0, source);
+		ELSIF flag = 4 THEN
+			DBMS_LOB.WRITE(dest, 1, 1024 * 1024 * 1024 + 1, source);
+		ELSIF flag = 5 THEN
+			DBMS_LOB.WRITE(dest, 1, 50, source);
+			UPDATE test_blob SET data = dest;
+		END IF;
+		RETURN;
+	END;
+/
+CALL test_lob_write(1);
+ERROR:  argument 2 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.write(dest,0,1,source)"
+PL/pgSQL function test_lob_write(integer) line 15 at SQL statement
+CALL test_lob_write(2);
+ERROR:  argument 2 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.write(dest,1000,1,source)"
+PL/pgSQL function test_lob_write(integer) line 17 at SQL statement
+CALL test_lob_write(3);
+ERROR:  argument 3 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.write(dest,1,0,source)"
+PL/pgSQL function test_lob_write(integer) line 19 at SQL statement
+CALL test_lob_write(4);
+ERROR:  argument 3 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.write(dest,1,1024 * 1024 * 1024 + 1,source)"
+PL/pgSQL function test_lob_write(integer) line 21 at SQL statement
+CALL test_lob_write(5);
+ test_lob_write 
+----------------
+ 
+(1 row)
+
+SELECT * from test_blob;
+                                                 data                                                 
+------------------------------------------------------------------------------------------------------
+ 0062636465666162636465660000000000000000000000000000000000000000000000000000000000000000000000000061
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_lob_writeappend(flag int)
+AS
+		str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		copyto blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		PSV_SQL1 varchar2(100);
+		a int :=1;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+
+		PSV_SQL :='select * from test_blob for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+
+		IF flag = 1 THEN
+			DBMS_LOB.WRITEAPPEND(dest, 0, source);
+		ELSIF flag = 2 THEN
+			DBMS_LOB.WRITEAPPEND(dest, 1000, source);
+		END IF;
+		RETURN;
+	END;
+/
+CALL test_lob_writeappend(1);
+ERROR:  argument 2 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.writeappend(dest,0,source)"
+PL/pgSQL function test_lob_writeappend(integer) line 18 at SQL statement
+CALL test_lob_writeappend(2);
+ERROR:  argument 2 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.writeappend(dest,1000,source)"
+PL/pgSQL function test_lob_writeappend(integer) line 20 at SQL statement
+SELECT * from test_blob;
+                                                 data                                                 
+------------------------------------------------------------------------------------------------------
+ 0062636465666162636465660000000000000000000000000000000000000000000000000000000000000000000000000061
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_lob_erase(flag int)
+AS
+		str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		copyto blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		PSV_SQL1 varchar2(100);
+		a int :=0;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+
+		PSV_SQL :='select * from test_blob for update';
+		PSV_SQL1 := 'select * from test_blob_copy for update';
+
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		EXECUTE IMMEDIATE PSV_SQL1 into copyto;
+		IF flag = 1 THEN
+			DBMS_LOB.ERASE(dest, a, 1);
+		ELSIF flag = 2 THEN
+			a := 1024 * 1024 * 1024 + 1; 
+			DBMS_LOB.ERASE(dest, a, 1);
+		ELSIF flag = 3 THEN
+			a := 1;
+			DBMS_LOB.ERASE(dest, a, 0);
+		ELSIF flag = 4 THEN
+			DBMS_LOB.ERASE(dest, a, 1024 * 1024 * 1024);
+		ELSIF flag = 5 THEN
+			a := 100;
+			DBMS_LOB.ERASE(dest, a, 1);
+		ELSIF flag = 6 THEN
+			a := 100;
+			DBMS_LOB.ERASE(dest, a, 1000);
+		END IF;
+		UPDATE test_blob SET data = dest;
+		RETURN;
+	END;
+/
+CALL test_lob_erase(1);
+ERROR:  argument 2 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.erase(dest,a,1)"
+PL/pgSQL function test_lob_erase(integer) line 19 at SQL statement
+CALL test_lob_erase(2);
+ERROR:  argument 2 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.erase(dest,a,1)"
+PL/pgSQL function test_lob_erase(integer) line 22 at SQL statement
+CALL test_lob_erase(3);
+ERROR:  argument 3 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.erase(dest,a,0)"
+PL/pgSQL function test_lob_erase(integer) line 25 at SQL statement
+CALL test_lob_erase(4);
+ERROR:  argument 2 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.erase(dest,a,1024 * 1024 * 1024)"
+PL/pgSQL function test_lob_erase(integer) line 27 at SQL statement
+CALL test_lob_erase(5);
+50
+ test_lob_erase 
+----------------
+ 
+(1 row)
+
+CALL test_lob_erase(6);
+0
+ test_lob_erase 
+----------------
+ 
+(1 row)
+
+SELECT * FROM test_blob;
+                                                 data                                                 
+------------------------------------------------------------------------------------------------------
+ 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_lob_copy(flag int)
+AS
+		str varchar2(100) := 'abcdef';
+		source raw(100);
+		dest blob;
+		copyto blob;
+		amount int;
+		PSV_SQL varchar2(100);
+		PSV_SQL1 varchar2(100);
+		a int :=1000;
+	BEGIN
+		source := utl_raw.cast_to_raw(str);
+		amount := utl_raw.length(source);
+		PSV_SQL :='select * from test_blob for update';
+		PSV_SQL1 := 'select * from test_blob_copy for update';
+		EXECUTE IMMEDIATE PSV_SQL into dest;
+		EXECUTE IMMEDIATE PSV_SQL1 into copyto;
+
+		DBMS_LOB.WRITEAPPEND(dest, amount, source);
+		
+		IF flag = 1 THEN
+			DBMS_LOB.COPY(copyto, dest, 0, 20, 1);
+		ELSIF flag = 2 THEN
+			DBMS_LOB.COPY(copyto, dest, 1, 0, 1);
+		ELSIF flag = 3 THEN
+			DBMS_LOB.COPY(copyto, dest, 1, 1, 0);
+		ELSIF flag = 4 THEN
+			DBMS_LOB.COPY(copyto, dest, 1, 1, 1000);
+		ELSIF flag = 5 THEN
+			DBMS_LOB.COPY(copyto, dest, 500, 1, 1);
+		ELSIF flag = 6 THEN
+			DBMS_LOB.COPY(copyto, dest, 500, 50, 1);
+		END IF;
+		UPDATE test_blob SET data = dest;
+		UPDATE test_blob_copy SET data = copyto;
+		RETURN;
+	END;
+/
+CALL test_lob_copy(1);
+ERROR:  argument 3 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.copy(copyto,dest,0,20,1)"
+PL/pgSQL function test_lob_copy(integer) line 20 at SQL statement
+CALL test_lob_copy(2);
+ERROR:  argument 4 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.copy(copyto,dest,1,0,1)"
+PL/pgSQL function test_lob_copy(integer) line 22 at SQL statement
+CALL test_lob_copy(3);
+ERROR:  argument 5 is null, invalid, or out of range
+CONTEXT:  SQL statement "CALL dbms_lob.copy(copyto,dest,1,1,0)"
+PL/pgSQL function test_lob_copy(integer) line 24 at SQL statement
+CALL test_lob_copy(4);
+ERROR:  len_srcsource offset is beyond the end of the source
+CONTEXT:  SQL statement "CALL dbms_lob.copy(copyto,dest,1,1,1000)"
+PL/pgSQL function test_lob_copy(integer) line 26 at SQL statement
+SELECT * FROM test_blob;
+                                                 data                                                 
+------------------------------------------------------------------------------------------------------
+ 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+(1 row)
+
+SELECT * FROM test_blob_copy; 
+              data              
+--------------------------------
+ 0DEF00000000000000006263646566
+(1 row)
+
+CALL test_lob_copy(5);
+ test_lob_copy 
+---------------
+ 
+(1 row)
+
+SELECT * FROM test_blob;
+                                                       data                                                       
+------------------------------------------------------------------------------------------------------------------
+ 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000616263646566
+(1 row)
+
+SELECT * FROM test_blob_copy;
+                                                       data                                                       
+------------------------------------------------------------------------------------------------------------------
+ 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000616263646566
+(1 row)
+
+CALL test_lob_copy(6);
+ test_lob_copy 
+---------------
+ 
+(1 row)
+
+SELECT * FROM test_blob;
+                                                             data                                                             
+------------------------------------------------------------------------------------------------------------------------------
+ 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000616263646566616263646566
+(1 row)
+
+SELECT * FROM test_blob_copy;
+                                                                                                              data                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000616263646566616263646566
+(1 row)
+
+DROP PROCEDURE test_lob;
+DROP PROCEDURE test_lob_open3;
+DROP PROCEDURE test_lob_close;
+DROP PROCEDURE test_lob_write;
+DROP PROCEDURE test_lob_writeappend;
+DROP PROCEDURE test_lob_erase;
+DROP PROCEDURE test_lob_copy;
+DROP TABLE test_blob;
+DROP TABLE test_blob_copy;
+CREATE TABLE test_blob(blob_data BLOB, text_data varchar2(10), char_data char, sn int);
+INSERT INTO test_blob VALUES('6162','6162','a',1);
+INSERT INTO test_blob VALUES ('616','616','a',2);
+SELECT DBMS_LOB.GETLENGTH(blob_data) FROM test_blob WHERE sn = 1;--2
+ getlength 
+-----------
+         2
+(1 row)
+
+SELECT DBMS_LOB.GETLENGTH(text_data) FROM test_blob WHERE sn = 1;--4
+ getlength 
+-----------
+         4
+(1 row)
+
+SELECT DBMS_LOB.GETLENGTH(char_data) FROM test_blob WHERE sn = 1;--1
+ getlength 
+-----------
+         1
+(1 row)
+
+SELECT DBMS_LOB.GETLENGTH(blob_data) FROM test_blob WHERE sn = 2;--2
+ getlength 
+-----------
+         2
+(1 row)
+
+SELECT DBMS_LOB.GETLENGTH(text_data) FROM test_blob WHERE sn = 2;--3
+ getlength 
+-----------
+         3
+(1 row)
+
+SELECT DBMS_LOB.GETLENGTH(char_data) FROM test_blob WHERE sn = 2;--1
+ getlength 
+-----------
+         1
+(1 row)
+
+SELECT DBMS_LOB.GETLENGTH('123456789') FROM DUAL;--9
+ getlength 
+-----------
+         9
+(1 row)
+
+SELECT DBMS_LOB.GETLENGTH('12345678') FROM DUAL;--8
+ getlength 
+-----------
+         8
+(1 row)
+
+SELECT DBMS_LOB.GETLENGTH('双面人') FROM DUAL;--3
+ERROR:  invalid byte sequence for encoding "GBK": 0xba 0x27
+SELECT DBMS_LOB.GETLENGTH(' 双 面%4人A ') FROM DUAL;--9
+ERROR:  invalid byte sequence for encoding "GBK": 0x8c 0x20
+SELECT DBMS_LOB.GETLENGTH('') FROM DUAL;--null
+ getlength 
+-----------
+          
+(1 row)
+
+DELETE FROM test_blob;
+INSERT INTO test_blob VALUES ('616263646566676869','616','a',3);
+CREATE OR REPLACE PROCEDURE test_lob_erase(amt int, pos int)
+AS
+	lob BLOB;
+	PSV_SQL varchar2(100);
+BEGIN
+	PSV_SQL :='select * from test_blob for update';
+	EXECUTE IMMEDIATE PSV_SQL INTO lob;
+	IF (pos = 0) THEN
+		DBMS_LOB.ERASE(lob, amt);
+	ELSE
+		DBMS_LOB.ERASE(lob, amt, pos);
+	END IF;
+	UPDATE test_blob SET blob_data=lob;
+	RETURN;
+END;
+/
+SELECT blob_data FROM test_blob;--616263646566676869
+     blob_data      
+--------------------
+ 616263646566676869
+(1 row)
+
+CALL test_lob_erase(1,0);
+ test_lob_erase 
+----------------
+ 
+(1 row)
+
+SELECT blob_data FROM test_blob;--006263646566676869
+     blob_data      
+--------------------
+ 006263646566676869
+(1 row)
+
+CALL test_lob_erase(3,0);
+ test_lob_erase 
+----------------
+ 
+(1 row)
+
+SELECT blob_data FROM test_blob;--000000646566676869
+     blob_data      
+--------------------
+ 000000646566676869
+(1 row)
+
+CALL test_lob_erase(2,5);
+ test_lob_erase 
+----------------
+ 
+(1 row)
+
+SELECT blob_data FROM test_blob;--000000640000676869
+     blob_data      
+--------------------
+ 000000640000676869
+(1 row)
+
+DROP PROCEDURE test_lob_erase;
+DROP TABLE test_blob;
+--test DBMS_LOB.READ
+--test the third parameter is bigger than the length of object,failed
+CREATE SCHEMA FVT_GAUSSDB_ADAPT;
+CREATE OR REPLACE PROCEDURE FVT_GAUSSDB_ADAPT.READ_006
+AS 
+       TEMP RAW;  
+BEGIN 
+       DBMS_LOB.READ('ABCDEF012345',2,16,TEMP);
+       DBMS_OUTPUT.PUT_LINE(TEMP); 
+END;  
+/
+CALL FVT_GAUSSDB_ADAPT.READ_006();
+ERROR:  read offset 16 > data length 6, no data to read
+CONTEXT:  SQL statement "CALL dbms_lob.read('ABCDEF012345',2,16,temp)"
+PL/pgSQL function fvt_gaussdb_adapt.read_006() line 3 at SQL statement
+DROP SCHEMA FVT_GAUSSDB_ADAPT CASCADE;
+NOTICE:  drop cascades to function fvt_gaussdb_adapt.read_006()

@@ -35,8 +35,9 @@
 #include "datatype/timestamp.h"
 #include "gs_thread.h"
 #include "knl/knl_guc.h"
+#include "lib/circularqueue.h"
 #include "nodes/pg_list.h"
-#include "storage/s_lock.h"
+#include "storage/lock/s_lock.h"
 #include "access/double_write_basic.h"
 #include "utils/palloc.h"
 #include "replication/replicainternal.h"
@@ -52,11 +53,22 @@
 #include "access/multi_redo_settings.h"
 #include "access/redo_statistic_msg.h"
 #include "portability/instr_time.h"
+#include "streaming/init.h"
 #include "replication/rto_statistic.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/utils/constant_def.h"
+#endif
+#include "streaming/init.h"
+#include "storage/lock/lwlock.h"
+#include "utils/memgroup.h"
+#include "replication/walprotocol.h"
+#ifdef ENABLE_MOT
 #include "storage/mot/jit_def.h"
+#endif
 
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
+const int HOTKEY_ABANDON_LENGTH = 100;
 
 enum knl_virtual_role {
     VUNKNOWN = 0,
@@ -81,6 +93,7 @@ enum knl_parallel_redo_state {
 
 /* all process level attribute which expose to user */
 typedef struct knl_instance_attr {
+
     knl_instance_attr_sql attr_sql;
     knl_instance_attr_storage attr_storage;
     knl_instance_attr_security attr_security;
@@ -88,9 +101,11 @@ typedef struct knl_instance_attr {
     knl_instance_attr_memory attr_memory;
     knl_instance_attr_resource attr_resource;
     knl_instance_attr_common attr_common;
+
 } knl_instance_attr_t;
 
-typedef struct knl_g_cache_context{
+typedef struct knl_g_cache_context
+{
     MemoryContext global_cache_mem;
 } knl_g_cache_context;
 
@@ -104,6 +119,7 @@ typedef struct knl_g_cost_context {
     Cost disable_cost;
 
     Cost disable_cost_enlarge_factor;
+
 } knl_g_cost_context;
 
 typedef struct knl_g_pid_context {
@@ -115,7 +131,6 @@ typedef struct knl_g_pid_context {
     ThreadId* PageWriterPID;
     ThreadId CheckpointerPID;
     ThreadId WalWriterPID;
-    ThreadId WalWriterAuxiliaryPID;
     ThreadId WalReceiverPID;
     ThreadId WalRcvWriterPID;
     ThreadId DataReceiverPID;
@@ -138,13 +153,19 @@ typedef struct knl_g_pid_context {
     ThreadId RemoteServicePID;
     ThreadId AioCompleterStarted;
     ThreadId HeartbeatPID;
+    ThreadId CsnminSyncPID;
+    ThreadId BarrierCreatorPID;
     volatile ThreadId ReaperBackendPID;
     volatile ThreadId SnapshotPID;
+    ThreadId AshPID;
+    ThreadId StatementPID;
     ThreadId CommSenderFlowPID;
     ThreadId CommReceiverFlowPID;
     ThreadId CommAuxiliaryPID;
     ThreadId CommPoolerCleanPID;
     ThreadId* CommReceiverPIDS;
+    ThreadId TsCompactionPID;
+    ThreadId TsCompactionAuxiliaryPID;
 } knl_g_pid_context;
 
 typedef struct knl_g_stat_context {
@@ -166,13 +187,11 @@ typedef struct knl_g_stat_context {
     /* Latest statistics request time from backends */
     TimestampTz last_statrequest;
 
-    volatile bool need_exit;
-
     volatile bool got_SIGHUP;
 
     /* unique sql */
     MemoryContext UniqueSqlContext;
-    HTAB* UniqueSQLHashtbl;
+    HTAB* volatile UniqueSQLHashtbl;
 
     /* hypothetical index */
     MemoryContext HypopgContext;
@@ -189,6 +208,7 @@ typedef struct knl_g_stat_context {
     volatile bool force_process;
     int64 RTPERCENTILE[NUM_PERCENTILE_COUNT];
     struct SqlRTInfoArray* sql_rt_info_array;
+    MemoryContext InstrPercentileContext;
 
     /* Set at the following cases:
      1. the cluster occures ha action
@@ -203,10 +223,39 @@ typedef struct knl_g_stat_context {
     volatile uint32 snapshot_thread_counter;
     /* Record the sum of file io stat */
     struct FileIOStat* fileIOStat;
+
+    /* Active session history */
+    MemoryContext AshContext;
+    struct ActiveSessHistArrary *active_sess_hist_arrary;
+    char *ash_appname;
+    char *ash_clienthostname;
+    bool instr_stmt_is_cleaning;
+    char *ashRelname;
+    HTAB* ASHUniqueSQLHashtbl;
+    /* used for capture view to json file */
+    HTAB* capture_view_file_hashtbl;
+
+    /* used for track memory alloc info */
+    MemoryContext track_context;
+    HTAB* track_context_hash;
+    HTAB* track_memory_info_hash;
+    bool track_memory_inited;
+#ifndef WIN32
+    pthread_rwlock_t track_memory_lock;
+
+    /* A g_instance lock-free queue to collect keys */
+    CircularQueue* hotkeysCollectList;
+
+    /* memorycontext for managing hotkeys */
+    MemoryContext hotkeysCxt;
+
+    struct LRUCache* lru;
+    List* fifo;
+#endif
 } knl_g_stat_context;
 
 /*
- * quota related
+ *quota related
  */
 typedef struct knl_g_quota_context {
     /* quota for each stream */
@@ -239,23 +288,34 @@ typedef struct knl_g_disconn_node_context {
 } knl_g_disconn_node_context;
 
 /*
- * local basic connection info
+ *local basic connection info
  */
 typedef struct knl_g_localinfo_context {
     char* g_local_host;
     char* g_self_nodename;
     int g_local_ctrl_tcp_sock;
     int sock_to_server_loop;
-    /* The start time of receiving the ready message */ 
+    /* The start time of receiving the ready message */
     uint64 g_r_first_recv_time;
     /* record CPU utilization, gs_receivers_flow_controller ,gs_sender_flow_controller, gs_reveiver_loop, postmaster */
     int *g_libcomm_used_rate;
     /* GSS kerberos authentication */
     char* gs_krb_keyfile;
-    volatile uint32 term = 1;
+#ifndef WIN32
+    volatile uint32 term_from_file = 1;
+    volatile uint32 term_from_xlog = 1;
     bool set_term = true;
     knl_g_disconn_node_context disable_conn_node;
+    volatile uint32 is_finish_redo = 0;
     volatile bool need_disable_connection_node = false;
+#else
+    volatile uint32 term_from_file;
+    volatile uint32 term_from_xlog;
+    bool set_term;
+    knl_g_disconn_node_context disable_conn_node;
+    volatile uint32 is_finish_redo;
+    volatile bool need_disable_connection_node;
+#endif
 } knl_g_localinfo_context;
 
 typedef struct knl_g_counters_context {
@@ -318,13 +378,15 @@ typedef struct knl_g_commutil_context {
     volatile bool g_timer_mode;
     volatile bool g_stat_mode;
     volatile bool g_no_delay;
+
+    int g_comm_sender_buffer_size;
     long g_total_usable_memory;
     long g_memory_pool_size;
     bool ut_libcomm_test;
 } knl_g_commutil_context;
 
 const int TWO_UINT64_SLOT = 2;
-/* checkpoint */
+/*checkpoint*/
 typedef struct knl_g_ckpt_context {
     uint64 dirty_page_queue_reclsn;
     uint64 dirty_page_queue_tail;
@@ -336,23 +398,23 @@ typedef struct knl_g_ckpt_context {
     uint64 dirty_page_queue_size;
     pg_atomic_uint64 dirty_page_queue_head;
     pg_atomic_uint32 actual_dirty_page_num;
+    slock_t queue_lock;
 
     /* pagewriter thread */
     PageWriterProcs page_writer_procs;
     uint64 page_writer_actual_flush;
-    volatile uint64 page_writer_last_flush;
+    volatile uint32 page_writer_last_flush;
 
     /* full checkpoint infomation */
     volatile bool flush_all_dirty_page;
     volatile uint64 full_ckpt_expected_flush_loc;
-    volatile XLogRecPtr full_ckpt_redo_ptr;
+    volatile uint64 full_ckpt_redo_ptr;
     volatile uint32 current_page_writer_count;
     volatile XLogRecPtr page_writer_xlog_flush_loc;
     volatile LWLock *backend_wait_lock;
 
     /* Pagewriter thread need wait shutdown checkpoint finish */
     volatile bool page_writer_can_exit;
-    volatile bool ckpt_need_fast_flush;
 
     /* checkpoint flush page num except buffers */
     int64 ckpt_clog_flush_num;
@@ -362,16 +424,40 @@ typedef struct knl_g_ckpt_context {
     int64 ckpt_twophase_flush_num;
     volatile XLogRecPtr ckpt_current_redo_point;
 
+#ifdef ENABLE_MOT
     struct CheckpointCallbackItem* ckptCallback;
+#endif
 
     uint64 pad[TWO_UINT64_SLOT];
 } knl_g_ckpt_context;
+
+typedef struct knl_g_dw_context {
+    int fd;
+    volatile uint32 closed;
+
+    struct LWLock* flush_lock;
+    volatile uint16 write_pos;  /* the copied pages in buffer, updated when mark page */
+    uint16 flush_page;          /* total number of flushed pages before truncate or reset */
+    MemoryContext mem_cxt;
+    char* unaligned_buf;
+    char* buf;
+    dw_file_head_t* file_head;
+    bool contain_hashbucket;
+
+    /* single flush dw extras information */
+    single_slot_pos *single_flush_pos;     /* dw single flush slot */
+    single_slot_state *single_flush_state; /* dw single flush slot state */
+
+    /* dw view information */
+    dw_stat_info_batch batch_stat_info;
+    dw_stat_info_single single_stat_info;
+} knl_g_dw_context;
 
 typedef struct knl_g_bgwriter_context {
     BgWriterProc *bgwriter_procs;
     int bgwriter_num;                   /* bgwriter thread num*/
     pg_atomic_uint32 curr_bgwriter_num; 
-    int *candidate_buffers;
+    Buffer *candidate_buffers;
     bool *candidate_free_map;
 
     /* bgwriter view information*/
@@ -394,12 +480,13 @@ typedef struct {
     int64 current_time;
     XLogRecPtr min_recovery_point;
     XLogRecPtr read_ptr;
-    XLogRecPtr last_replayed_read_ptr;
+    XLogRecPtr last_replayed_end_ptr;
     XLogRecPtr recovery_done_ptr;
     XLogRecPtr primary_flush_ptr;
     RedoWaitInfo wait_info[WAIT_REDO_NUM];
     uint32 speed_according_seg;
     XLogRecPtr local_max_lsn;
+    uint64    oldest_segment;
 } RedoPerf;
 
 
@@ -418,19 +505,33 @@ typedef struct knl_g_parallel_redo_context {
     uint32 totalNum;
     volatile PageRedoWorkerStatus pageRedoThreadStatusList[MAX_RECOVERY_THREAD_NUM];
     RedoPerf redoPf; /* redo Performance statistics */
-    pg_atomic_uint32 isLocalRedoFinish;
+    pg_atomic_uint32 isRedoFinish;
+    int pre_enable_switch;
     slock_t destroy_lock; /* redo worker destroy lock */
-    pg_atomic_uint64 endRecPtr;
+    pg_atomic_uint64 max_page_flush_lsn[NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS];
+    pg_atomic_uint32 permitFinishRedo;
+    pg_atomic_uint32 hotStdby;
+    char* unali_buf; /* unaligned_buf */
+    char* ali_buf;
 } knl_g_parallel_redo_context;
 
 typedef struct knl_g_heartbeat_context {
     volatile bool heartbeat_running;
 } knl_g_heartbeat_context;
 
+typedef struct knl_g_csnminsync_context {
+    bool stop;
+    bool is_fcn_ccn; /* whether this instance is center cn or the first cn while without ccn */
+} knl_g_csnminsync_context;
+
+typedef struct knl_g_barrier_creator_context {
+    bool stop;
+    bool is_barrier_creator;
+} knl_g_barrier_creator_context;
+
 typedef struct knl_g_comm_context {
     /* function point, for wake up consumer in executor */
     wakeup_hook_type gs_wakeup_consumer;
-    bool g_comm_tcp_mode;
     /* connection handles at receivers, for listening and receiving data through logic connection */
     struct local_receivers* g_receivers;
     /* connection handles at senders, for sending data through logic connection */
@@ -483,8 +584,7 @@ typedef struct knl_g_comm_context {
     bool cal_all_space_info_in_progress;
 
     HTAB* usedDnSpace;
-    HTAB* account_table;
-    LWLock* account_table_lock;
+    uint32 current_gsrewind_count;
 } knl_g_comm_context;
 
 typedef struct knl_g_libpq_context {
@@ -502,15 +602,14 @@ typedef struct knl_g_libpq_context {
     krb5_keytab pg_krb5_keytab;
     krb5_principal pg_krb5_server;
 #endif
-    /* check internal IP, to avoid port injection */
+    /* check internal IP, to avoid port injection*/
     List* comm_parsed_hba_lines;
 } knl_g_libpq_context;
 
 #define MIN_CONNECTIONS 1024
 
-typedef struct knl_g_shmem_context {   
+typedef struct knl_g_shmem_context {
     int MaxConnections;
-    int max_parallel_workers;
     int MaxBackends;
     int MaxReserveBackendId;
     int ThreadPoolGroupNum;
@@ -519,11 +618,16 @@ typedef struct knl_g_shmem_context {
 
 typedef struct knl_g_executor_context {
     HTAB* function_id_hashtbl;
+#ifndef ENABLE_MULTIPLE_NODES
+    char* nodeName;
+#endif
 } knl_g_executor_context;
 
 typedef struct knl_g_xlog_context {
     int num_locks_in_group;
+#ifdef ENABLE_MOT
     struct RedoCommitCallbackItem* redoCommitCallback;
+#endif
 } knl_g_xlog_context;
 
 struct NumaMemAllocInfo {
@@ -538,41 +642,69 @@ typedef struct knl_g_numa_context {
     size_t allocIndex;
 } knl_g_numa_context;
 
-typedef struct knl_g_bgworker_context {
-    /* set when there's a worker that needs to be started up */
-    volatile bool start_worker_needed;
-    volatile bool have_crashed_worker;
-} knl_g_bgworker_context;
+typedef struct knl_g_ts_compaction_context {
+#ifdef ENABLE_MULTIPLE_NODES
+    volatile Compaction::knl_compaction_state state;
+    volatile TsCompactionWorkerStatus compaction_worker_status_list[Compaction::MAX_TSCOMPATION_NUM];
+#endif
+    int totalNum;
+    int* origin_id;
+    volatile uint32 drop_db_count;
+    volatile bool compaction_rest;
+    Oid dropdb_id;
+    MemoryContext compaction_instance_cxt;
+} knl_g_ts_compaction_context;
 
+typedef struct knl_g_security_policy_context {
+    MemoryContext policy_instance_cxt;
+    HTAB* account_table;
+    LWLock* account_table_lock;
+} knl_g_security_policy_context;
+
+typedef struct knl_g_oid_nodename_mapping_cache
+{
+    HTAB           *s_mapping_hash;
+    volatile bool   s_valid;
+    pthread_mutex_t s_mutex;
+} knl_g_oid_nodename_mapping_cache;
+
+typedef struct knl_g_conn_context {
+    volatile int CurConnCount;
+    volatile int CurCMAConnCount;
+    slock_t ConnCountLock;
+} knl_g_conn_context;
+
+typedef struct GlobalSeqInfoHashBucket {
+    DList* shb_list;
+    int lock_id;
+} GlobalSeqInfoHashBucket;
+
+
+typedef struct knl_g_archive_obs_context {
+    /* communicate between archive and walreceiver */
+    /* archive thread set when archive done*/
+    bool pitr_finish_result;
+    /*
+    * walreceiver set when get task from walsender
+    * 0 for no task
+    * 1 walreceive get task from walsender and set it for archive thread
+    * 2 archive thread set when task is done
+    */
+    volatile unsigned int pitr_task_status;
+    /* for standby */
+    ArchiveXlogMessage archive_task;
+    XLogRecPtr barrierLsn;
+    slock_t mutex;
+    volatile int obs_slot_idx;
+    struct ReplicationSlot* archive_slot;
+    volatile int obs_slot_num;
+} knl_g_archive_obs_context;
+
+#ifdef ENABLE_MOT
 typedef struct knl_g_mot_context {
     JitExec::JitExecMode jitExecMode;
 } knl_g_mot_context;
-
-typedef struct WalInsertStatusEntry WALInsertStatusEntry;
-typedef struct WALFlushWaitLockPadded WALFlushWaitLockPadded;
-typedef struct WALBufferInitWaitLockPadded WALBufferInitWaitLockPadded;
-typedef struct WALInitSegLockPadded WALInitSegLockPadded;
-
-typedef struct knl_g_wal_context {
-    /* Start address of WAL insert status table that contains WAL_INSERT_STATUS_ENTRIES entries */
-    WALInsertStatusEntry* walInsertStatusTable;
-    WALFlushWaitLockPadded* walFlushWaitLock;
-    WALBufferInitWaitLockPadded* walBufferInitWaitLock;
-    WALInitSegLockPadded* walInitSegLock;
-    volatile bool isWalWriterUp;
-    XLogRecPtr  flushResult;
-    XLogRecPtr  sentResult;
-    pthread_mutex_t flushResultMutex;
-    pthread_cond_t flushResultCV;
-    int XLogFlusherCPU;
-    volatile bool isWalWriterSleeping;
-    pthread_mutex_t criticalEntryMutex;
-    pthread_cond_t criticalEntryCV;
-    volatile uint32 walWaitFlushCount; /* only for xlog statistics use */
-    volatile XLogSegNo globalEndPosSegNo; /* Global variable for init xlog segment files. */
-    int lastWalStatusEntryFlushed;
-    volatile int lastLRCScanned;
-} knl_g_wal_context;
+#endif
 
 typedef struct knl_instance_context {
     knl_virtual_role role;
@@ -593,16 +725,22 @@ typedef struct knl_instance_context {
 
     /* True if WAL recovery failed */
     bool recover_error;
-
+    pthread_mutex_t gpc_reset_lock;
     struct Dllist* backend_list;
     struct Backend* backend_array;
 
+    void* t_thrd;
     char* prog_name;
     int64 start_time;
 
     bool binaryupgrade;
 
     bool dummy_standby;
+
+    struct GlobalSeqInfoHashBucket global_seq[NUM_GS_PARTITIONS];
+
+    struct GlobalPlanCache*   plan_cache;
+    struct GlobalPrepareStmt* prepare_cache;
 
     struct PROC_HDR* proc_base;
     slock_t proc_base_lock;
@@ -626,8 +764,8 @@ typedef struct knl_instance_context {
     MemoryContext error_context;
     MemoryContext signal_context;
     MemoryContext increCheckPoint_context;
-    MemoryContext wal_context;
     MemoryContext account_context;
+    MemoryContextGroup* mcxt_group;
 
     knl_instance_attr_t attr;
     knl_g_stat_context stat_cxt;
@@ -635,30 +773,42 @@ typedef struct knl_instance_context {
     knl_g_cache_context cache_cxt;
     knl_g_cost_context cost_cxt;
     knl_g_comm_context comm_cxt;
+    knl_g_conn_context conn_cxt;
     knl_g_libpq_context libpq_cxt;
     struct knl_g_wlm_context* wlm_cxt;
     knl_g_ckpt_context ckpt_cxt;
     knl_g_ckpt_context* ckpt_cxt_ctl;
     knl_g_bgwriter_context bgwriter_cxt;
-    struct knl_g_dw_context dw_cxt;
+    struct knl_g_dw_context dw_batch_cxt;
+    struct knl_g_dw_context dw_single_cxt;
     knl_g_shmem_context shmem_cxt;
-    knl_g_wal_context wal_cxt;
     knl_g_executor_context exec_cxt;
     knl_g_heartbeat_context heartbeat_cxt;
     knl_g_rto_context rto_cxt;
     knl_g_xlog_context xlog_cxt;
     knl_g_numa_context numa_cxt;
+
+#ifdef ENABLE_MOT
     knl_g_mot_context mot_cxt;
-    knl_g_bgworker_context bgworker_cxt;
+#endif
+
+    knl_g_ts_compaction_context ts_compaction_cxt;
+    knl_g_security_policy_context policy_cxt;
+    knl_g_streaming_context streaming_cxt;
+    knl_g_csnminsync_context csnminsync_cxt;
+    knl_g_barrier_creator_context barrier_creator_cxt;
+    knl_g_oid_nodename_mapping_cache oid_nodename_cache;
+    knl_g_archive_obs_context archive_obs_cxt;
+    struct HTAB* ngroup_hash_table;
 } knl_instance_context;
 
 extern void knl_instance_init();
+extern void knl_g_set_redo_finish_status(uint32 status);
+extern bool knl_g_get_local_redo_finish_status();
+extern bool knl_g_get_redo_finish_status();
 extern knl_instance_context g_instance;
 
 extern void add_numa_alloc_info(void* numaAddr, size_t length);
-extern void knl_g_set_is_local_redo_finish(bool status);
-extern bool knl_g_get_is_local_redo();
-
 
 #define GTM_FREE_MODE (g_instance.attr.attr_storage.enable_gtm_free || \
                         g_instance.attr.attr_storage.gtm_option == GTMOPTION_GTMFREE)
@@ -666,6 +816,12 @@ extern bool knl_g_get_is_local_redo();
                     (g_instance.attr.attr_storage.gtm_option == GTMOPTION_GTM))
 #define GTM_LITE_MODE (!g_instance.attr.attr_storage.enable_gtm_free && \
                         g_instance.attr.attr_storage.gtm_option == GTMOPTION_GTMLITE)
+
+#define REDO_FINISH_STATUS_LOCAL		0x00000001
+#define REDO_FINISH_STATUS_CM	    	0x00000002
+
+#define ATOMIC_TRUE                     1
+#define ATOMIC_FALSE                    0
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_H_ */
 

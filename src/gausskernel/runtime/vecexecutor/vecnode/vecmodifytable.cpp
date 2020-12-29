@@ -43,7 +43,12 @@
 #include "vecexecutor/vecmergeinto.h"
 #include "vecexecutor/vecmodifytable.h"
 #include "utils/memutils.h"
-#include "tsdb/ts_store_insert.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/storage/ts_store_insert.h"
+#include "tsdb/storage/ts_store_delete.h"
+#include "tsdb/cache/tags_cachemgr.h"
+#include "tsdb/cache/queryid_cachemgr.h"
+#endif   /* ENABLE_MULTIPLE_NODES */
 
 extern void ExecVecConstraints(ResultRelInfo* result_rel_info, VectorBatch* batch, EState* estate);
 extern void FlushErrorInfo(Relation rel, EState* estate, ErrorCacheEntry* cache);
@@ -266,6 +271,9 @@ bool checkPlanAndFindScanRelId(Plan* plan, Index* rel_id_idx)
         }
 
         case T_SeqScan:
+#ifdef ENABLE_MULTIPLE_NODES
+        case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
         case T_CStoreScan: {
             /* get scan relation index of ragne table */
             Scan* scan = (Scan*)plan;
@@ -420,6 +428,30 @@ static void RecordDataForDeleteDelta(
     }
 }
 
+void CheckTsOperation(const Relation relation, const VecModifyTableState* node) 
+{
+    /* only check timeseries table */
+    if (!RelationIsTsStore(relation)) {
+        return;
+    }
+    /* only support insert and delete for timeseries table */
+    if (!(node->operation == CMD_INSERT || node->operation == CMD_DELETE)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("TIMESERIES store dose not support this operation")));
+    }
+
+#ifdef ENABLE_MULTIPLE_NODES
+    /* If operation is DELETE, get LWLOCK in datanode to block compaction producer and consumer workers */
+    if (node->operation == CMD_DELETE) {
+        ereport(LOG, (errmodule(MOD_TIMESERIES), errcode(ERRCODE_LOG), 
+                errmsg("Set delete query id(%lu)", u_sess->debug_query_id)));           
+        Tsdb::TableStatus::GetInstance().add_query(u_sess->debug_query_id);
+    }
+#endif   /* ENABLE_MULTIPLE_NODES */    
+    return;  
+}
+
 /* ----------------------------------------------------------------
  *	   ExecVecModifyTable
  *
@@ -500,7 +532,8 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
 
     result_rel_desc = result_rel_info->ri_RelationDesc;
     is_partitioned = RELATION_IS_PARTITIONED(result_rel_desc);
-
+    /* only support insert for timeseries table */
+	CheckTsOperation(result_rel_desc, node);
     /*
      * es_result_relation_info must point to the currently active result
      * relation while we are within this ModifyTable node.	Even though
@@ -579,8 +612,8 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
                 if (is_partitioned) {
 #ifdef ENABLE_MULTIPLE_NODES
                     if (RelationIsTsStore(result_rel_desc))
-                        batch = ExecVecInsert<TsStoreInsert>(
-                            node, (TsStoreInsert*)batch_opt, batch, plan_batch, estate, node->canSetTag, hi_options);
+                        batch = ExecVecInsert<Tsdb::TsStoreInsert>(node, (Tsdb::TsStoreInsert*)batch_opt, batch,
+                                                                plan_batch, estate, node->canSetTag, hi_options);
                     else
 #endif
                         batch = ExecVecInsert<CStorePartitionInsert>(node, (CStorePartitionInsert*)batch_opt,
@@ -610,6 +643,10 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
                     ((CStoreDelete*)batch_opt)->PutDeleteBatch(batch, junk_filter);
                 } else if (RelationIsPAXFormat(result_rel_desc)) {
                     ((DfsDelete*)batch_opt)->PutDeleteBatch(batch, junk_filter);
+#ifdef ENABLE_MULTIPLE_NODES
+                } else if (RelationIsTsStore(result_rel_desc)) {
+                    (reinterpret_cast<Tsdb::TsStoreDelete*>(batch_opt))->put_delete_batch(batch, junk_filter);
+#endif   /* ENABLE_MULTIPLE_NODES */                    
                 } else {
                     Assert(false);
                     ereport(ERROR,
@@ -670,6 +707,12 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
     switch (operation) {
         case CMD_INSERT: {
             if (is_partitioned) {
+                
+#ifdef ENABLE_MULTIPLE_NODES
+            if (RelationIsTsStore(result_rel_desc))
+                FLUSH_DATA_TSDB(batch_opt, Tsdb::TsStoreInsert);
+            else
+#endif   /* ENABLE_MULTIPLE_NODES */
                 FLUSH_DATA(batch_opt, CStorePartitionInsert);
             } else {
                 if (RelationIsCUFormat(result_rel_desc)) {
@@ -701,6 +744,11 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
             } else if (RelationIsPAXFormat(result_rel_desc)) {
                 ExecVecDelete<DfsDelete>(node, (DfsDelete*)batch_opt, estate, node->canSetTag);
                 DELETE_EX_TYPE(batch_opt, DfsDelete);
+#ifdef ENABLE_MULTIPLE_NODES
+            } else if (RelationIsTsStore(result_rel_desc)) {
+                ExecVecDelete<Tsdb::TsStoreDelete>(node, reinterpret_cast<Tsdb::TsStoreDelete*>(batch_opt), estate, node->canSetTag);
+                DELETE_EX_TYPE(batch_opt, Tsdb::TsStoreDelete);
+#endif   /* ENABLE_MULTIPLE_NODES */                  
             } else {
                 Assert(false);
                 ereport(ERROR,
@@ -773,7 +821,10 @@ static void* insert_partiton_table(Relation result_rel_desc, VecModifyTableState
 {
     if (RelationIsTsStore(result_rel_desc)) {
 #ifdef ENABLE_MULTIPLE_NODES
-        TsStoreInsert *part_insert = New(CurrentMemoryContext) TsStoreInsert(result_rel_desc);
+        if (!g_instance.attr.attr_common.enable_tsdb) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("Please enable timeseries first!")));
+        }
+        Tsdb::TsStoreInsert *part_insert = New(CurrentMemoryContext) Tsdb::TsStoreInsert(result_rel_desc);
         return (void*)part_insert;
 #else
         return NULL;
@@ -845,6 +896,12 @@ void* CreateOperatorObject(CmdType operation, bool is_partitioned, Relation resu
             } else if (RelationIsPAXFormat(result_rel_desc)) {
                 batch_opt = New(CurrentMemoryContext) DfsDelete(result_rel_desc, estate, false, node->ps.plan, NULL);
                 ((DfsDelete*)batch_opt)->InitSortState();
+#ifdef ENABLE_MULTIPLE_NODES
+            } else if (RelationIsTsStore(result_rel_desc)) {
+                batch_opt = New(CurrentMemoryContext) Tsdb::TsStoreDelete(result_rel_desc, estate, false, node->ps.plan, NULL);
+                (reinterpret_cast<Tsdb::TsStoreDelete *>(batch_opt))->init_mem_arg(node->ps.plan, NULL);
+                (reinterpret_cast<Tsdb::TsStoreDelete *>(batch_opt))->init_sort_state();
+#endif   /* ENABLE_MULTIPLE_NODES */                  
             } else {
                 Assert(false);
                 ereport(ERROR,

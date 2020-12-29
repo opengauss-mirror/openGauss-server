@@ -1,0 +1,25 @@
+create user kerberos_user_test password 'gauss@123';
+\! chmod 755 @abs_srcdir@/krbclient/bin/kinit
+\! chmod 755 @abs_srcdir@/krbclient/bin/kdestroy
+\! echo $PGKRBSRVNAME
+\! echo $KRBHOSTNAME
+\! kinit -k -t /opt/config/hdfs.keytab hdfs/hadoop.hadoop.com@HADOOP.COM
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "krb_server_keyfile = '/opt/config/hdfs.keytab'" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator2 -c "krb_server_keyfile = '/opt/config/hdfs.keytab'" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/datanode1 -c "krb_server_keyfile = '/opt/config/hdfs.keytab'" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/datanode2 -c "krb_server_keyfile = '/opt/config/hdfs.keytab'" >/dev/null 2>&1
+\! sed -i 's#host.*all.*all.*127.0.0.1/32.*#host    all    all     127.0.0.1/32 gss  include_realm=1  krb_realm=HADOOP.COM#g' @abs_srcdir@/tmp_check/coordinator1/pg_hba.conf
+\! sed -i 's#host.*all.*all.*127.0.0.1/32.*#host    all    all     127.0.0.1/32 gss  include_realm=1  krb_realm=HADOOP.COM#g' @abs_srcdir@/tmp_check/coordinator2/pg_hba.conf
+\! sed -i 's#host.*all.*all.*127.0.0.1/32.*#host    all    all     127.0.0.1/32 gss  include_realm=1  krb_realm=HADOOP.COM#g' @abs_srcdir@/tmp_check/datanode1/pg_hba.conf
+\! sed -i 's#host.*all.*all.*127.0.0.1/32.*#host    all    all     127.0.0.1/32 gss  include_realm=1  krb_realm=HADOOP.COM#g' @abs_srcdir@/tmp_check/datanode2/pg_hba.conf
+\! @abs_bindir@/gsql -U kerberos_user_test -W gauss@123 -d postgres -r -p @portstring@  -c "create table krb_table_01(c1 int, c2 int, b1 char(1000), b2 char(7000)) distribute by hash(c1);create table krb_table_02(c1 int, c2 int, b1 char(1000),b2 char(7000)) distribute by hash(c2);insert into krb_table_01 select generate_series(1,1000), generate_series(1,1000), repeat('a',900), repeat('b',6888);insert into krb_table_02 select generate_series(1000, 2000,200), generate_series(1,1000,200), repeat('c',900), repeat('d',6888);select krb_table_01.c1, krb_table_01.c1,krb_table_01.c2 from krb_table_01, krb_table_02 where krb_table_01.c2 = krb_table_02.c2 order by c1;drop table krb_table_01;drop table krb_table_02;"
+\! sleep 5
+\! sed -i 's/^krb_server_keyfile/#&/' @abs_srcdir@/tmp_check/coordinator1/postgresql.conf
+\! sed -i 's/^krb_server_keyfile/#&/' @abs_srcdir@/tmp_check/coordinator2/postgresql.conf
+\! sed -i 's/^krb_server_keyfile/#&/' @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! sed -i 's/^krb_server_keyfile/#&/' @abs_srcdir@/tmp_check/datanode2/postgresql.conf
+\! sed -i 's#host.*all.*all.*127.0.0.1/32.*gss.*include_realm=1.*krb_realm=HADOOP.COM#host    all    all    127.0.0.1/32    trust#g' @abs_srcdir@/tmp_check/coordinator1/pg_hba.conf
+\! sed -i 's#host.*all.*all.*127.0.0.1/32.*gss.*include_realm=1.*krb_realm=HADOOP.COM#host    all    all    127.0.0.1/32    trust#g' @abs_srcdir@/tmp_check/coordinator2/pg_hba.conf
+\! sed -i 's#host.*all.*all.*127.0.0.1/32.*gss.*include_realm=1.*krb_realm=HADOOP.COM#host    all    all    127.0.0.1/32    trust#g' @abs_srcdir@/tmp_check/datanode1/pg_hba.conf
+\! sed -i 's#host.*all.*all.*127.0.0.1/32.*gss.*include_realm=1.*krb_realm=HADOOP.COM#host    all    all    127.0.0.1/32    trust#g' @abs_srcdir@/tmp_check/datanode2/pg_hba.conf
+\! kdestroy

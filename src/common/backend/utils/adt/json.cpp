@@ -29,16 +29,14 @@
 #include "utils/typcache.h"
 
 typedef enum          /* types of JSON values */
-{
-    JSON_VALUE_INVALID, /* non-value tokens are reported as this */
+{ JSON_VALUE_INVALID, /* non-value tokens are reported as this */
     JSON_VALUE_STRING,
     JSON_VALUE_NUMBER,
     JSON_VALUE_OBJECT,
     JSON_VALUE_ARRAY,
     JSON_VALUE_TRUE,
     JSON_VALUE_FALSE,
-    JSON_VALUE_NULL
-} JsonValueType;
+    JSON_VALUE_NULL } JsonValueType;
 
 typedef struct /* state of JSON lexer */
 {
@@ -49,8 +47,7 @@ typedef struct /* state of JSON lexer */
 } JsonLexContext;
 
 typedef enum                 /* states of JSON parser */
-{
-    JSON_PARSE_VALUE,          /* expecting a value */
+{ JSON_PARSE_VALUE,          /* expecting a value */
     JSON_PARSE_ARRAY_START,  /* saw '[', expecting value or ']' */
     JSON_PARSE_ARRAY_NEXT,   /* saw array element, expecting ',' or ']' */
     JSON_PARSE_OBJECT_START, /* saw '{', expecting label or '}' */
@@ -66,8 +63,7 @@ typedef struct JsonParseStack /* the parser state has to be stackable */
 } JsonParseStack;
 
 typedef enum                         /* required operations on state stack */
-{
-    JSON_STACKOP_NONE,                 /* no-op */
+{ JSON_STACKOP_NONE,                 /* no-op */
     JSON_STACKOP_PUSH,               /* push new JSON_PARSE_VALUE stack item */
     JSON_STACKOP_PUSH_WITH_PUSHBACK, /* push, then rescan current token */
     JSON_STACKOP_POP                 /* pop, or expect end of input if no stack */
@@ -77,9 +73,9 @@ static void json_validate_cstring(char* input);
 static void json_lex(JsonLexContext* lex);
 static void json_lex_string(JsonLexContext* lex);
 static void json_lex_number(JsonLexContext* lex, char* s);
-static void report_parse_error(const JsonParseStack* stack, JsonLexContext* lex);
+static void report_parse_error(JsonParseStack* stack, JsonLexContext* lex);
 static void report_invalid_token(JsonLexContext* lex);
-static int report_json_context(const JsonLexContext* lex);
+static int report_json_context(JsonLexContext* lex);
 static char* extract_mb_char(const char* s);
 static void composite_to_json(Datum composite, StringInfo result, bool use_line_feeds);
 static void array_dim_to_json(StringInfo result, int dim, int ndims, int* dims, Datum* vals, bool* nulls, int* valcount,
@@ -168,9 +164,8 @@ Datum json_recv(PG_FUNCTION_ARGS)
 static void json_validate_cstring(char* input)
 {
     JsonLexContext lex;
-    JsonParseStack *stack = NULL;
-    JsonParseStack *stacktop = NULL;
-    uint stacksize;
+    JsonParseStack *stack = NULL, *stacktop = NULL;
+    int stacksize;
 
     /* Set up lexing context. */
     lex.input = input;
@@ -190,81 +185,74 @@ static void json_validate_cstring(char* input)
         json_lex(&lex);
 
         /* Check for unexpected end of input. */
-        if (lex.token_start == NULL) {
+        if (lex.token_start == NULL)
             report_parse_error(stack, &lex);
-        }
+
     redo:
         /* Figure out what to do with this token. */
         op = JSON_STACKOP_NONE;
         switch (stack->state) {
             case JSON_PARSE_VALUE:
-                if (lex.token_type != JSON_VALUE_INVALID) {
+                if (lex.token_type != JSON_VALUE_INVALID)
                     op = JSON_STACKOP_POP;
-                } else if (lex.token_start[0] == '[') {
+                else if (lex.token_start[0] == '[')
                     stack->state = JSON_PARSE_ARRAY_START;
-                } else if (lex.token_start[0] == '{') {
+                else if (lex.token_start[0] == '{')
                     stack->state = JSON_PARSE_OBJECT_START;
-                } else {
+                else
                     report_parse_error(stack, &lex);
-                }
                 break;
             case JSON_PARSE_ARRAY_START:
-                if (lex.token_type != JSON_VALUE_INVALID) {
+                if (lex.token_type != JSON_VALUE_INVALID)
                     stack->state = JSON_PARSE_ARRAY_NEXT;
-                } else if (lex.token_start[0] == ']') {
+                else if (lex.token_start[0] == ']')
                     op = JSON_STACKOP_POP;
-                } else if (lex.token_start[0] == '[' || lex.token_start[0] == '{') {
+                else if (lex.token_start[0] == '[' || lex.token_start[0] == '{') {
                     stack->state = JSON_PARSE_ARRAY_NEXT;
                     op = JSON_STACKOP_PUSH_WITH_PUSHBACK;
-                } else {
+                } else
                     report_parse_error(stack, &lex);
-                }
                 break;
             case JSON_PARSE_ARRAY_NEXT:
-                if (lex.token_type != JSON_VALUE_INVALID) {
+                if (lex.token_type != JSON_VALUE_INVALID)
                     report_parse_error(stack, &lex);
-                } else if (lex.token_start[0] == ']') {
+                else if (lex.token_start[0] == ']')
                     op = JSON_STACKOP_POP;
-                } else if (lex.token_start[0] == ',') {
+                else if (lex.token_start[0] == ',')
                     op = JSON_STACKOP_PUSH;
-                } else {
+                else
                     report_parse_error(stack, &lex);
-                }
                 break;
             case JSON_PARSE_OBJECT_START:
-                if (lex.token_type == JSON_VALUE_STRING) {
+                if (lex.token_type == JSON_VALUE_STRING)
                     stack->state = JSON_PARSE_OBJECT_LABEL;
-                } else if (lex.token_type == JSON_VALUE_INVALID && lex.token_start[0] == '}') {
+                else if (lex.token_type == JSON_VALUE_INVALID && lex.token_start[0] == '}')
                     op = JSON_STACKOP_POP;
-                } else {
+                else
                     report_parse_error(stack, &lex);
-                }
                 break;
             case JSON_PARSE_OBJECT_LABEL:
                 if (lex.token_type == JSON_VALUE_INVALID && lex.token_start[0] == ':') {
                     stack->state = JSON_PARSE_OBJECT_NEXT;
                     op = JSON_STACKOP_PUSH;
-                } else {
+                } else
                     report_parse_error(stack, &lex);
-                }
                 break;
             case JSON_PARSE_OBJECT_NEXT:
-                if (lex.token_type != JSON_VALUE_INVALID) {
+                if (lex.token_type != JSON_VALUE_INVALID)
                     report_parse_error(stack, &lex);
-                } else if (lex.token_start[0] == '}') {
+                else if (lex.token_start[0] == '}')
                     op = JSON_STACKOP_POP;
-                } else if (lex.token_start[0] == ',') {
+                else if (lex.token_start[0] == ',')
                     stack->state = JSON_PARSE_OBJECT_COMMA;
-                } else {
+                else
                     report_parse_error(stack, &lex);
-                }
                 break;
             case JSON_PARSE_OBJECT_COMMA:
-                if (lex.token_type == JSON_VALUE_STRING) {
+                if (lex.token_type == JSON_VALUE_STRING)
                     stack->state = JSON_PARSE_OBJECT_LABEL;
-                } else {
+                else
                     report_parse_error(stack, &lex);
-                }
                 break;
             default:
                 ereport(ERROR,
@@ -286,17 +274,15 @@ static void json_validate_cstring(char* input)
                     stack = stacktop + stackoffset;
                 }
                 stack->state = JSON_PARSE_VALUE;
-                if (op == JSON_STACKOP_PUSH_WITH_PUSHBACK) {
+                if (op == JSON_STACKOP_PUSH_WITH_PUSHBACK)
                     goto redo;
-                }
                 break;
             case JSON_STACKOP_POP:
                 if (stack == stacktop) {
                     /* Expect end of input. */
                     json_lex(&lex);
-                    if (lex.token_start != NULL) {
+                    if (lex.token_start != NULL)
                         report_parse_error(NULL, &lex);
-                    }
                     return;
                 }
                 stack--;
@@ -319,9 +305,8 @@ static void json_lex(JsonLexContext* lex)
 
     /* Skip leading whitespace. */
     s = lex->token_terminator;
-    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') {
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r')
         s++;
-    }
     lex->token_start = s;
 
     /* Determine token type. */
@@ -359,9 +344,9 @@ static void json_lex(JsonLexContext* lex)
          * whole word as an unexpected token, rather than just some
          * unintuitive prefix thereof.
          */
-        for (p = s; JSON_ALPHANUMERIC_CHAR(*p); p++) {
+        for (p = s; JSON_ALPHANUMERIC_CHAR(*p); p++)
             /* skip */;
-        }
+
         if (p == s) {
             /*
              * We got some sort of unexpected punctuation or an otherwise
@@ -379,18 +364,16 @@ static void json_lex(JsonLexContext* lex)
          */
         lex->token_terminator = p;
         if (p - s == 4) {
-            if (memcmp(s, "true", 4) == 0) {
+            if (memcmp(s, "true", 4) == 0)
                 lex->token_type = JSON_VALUE_TRUE;
-            } else if (memcmp(s, "null", 4) == 0) {
+            else if (memcmp(s, "null", 4) == 0)
                 lex->token_type = JSON_VALUE_NULL;
-            } else {
+            else
                 report_invalid_token(lex);
-            }
-        } else if (p - s == 5 && memcmp(s, "false", 5) == 0) {
+        } else if (p - s == 5 && memcmp(s, "false", 5) == 0)
             lex->token_type = JSON_VALUE_FALSE;
-        } else {
+        else
             report_invalid_token(lex);
-        }
     }
 }
 
@@ -432,13 +415,13 @@ static void json_lex_string(JsonLexContext* lex)
                     if (*s == '\0') {
                         lex->token_terminator = s;
                         report_invalid_token(lex);
-                    } else if (*s >= '0' && *s <= '9') {
+                    } else if (*s >= '0' && *s <= '9')
                         ch = (ch * 16) + (*s - '0');
-                    } else if (*s >= 'a' && *s <= 'f') {
+                    else if (*s >= 'a' && *s <= 'f')
                         ch = (ch * 16) + (*s - 'a') + 10;
-                    } else if (*s >= 'A' && *s <= 'F') {
+                    else if (*s >= 'A' && *s <= 'F')
                         ch = (ch * 16) + (*s - 'A') + 10;
-                    } else {
+                    else {
                         lex->token_terminator = s + pg_mblen(s);
                         ereport(ERROR,
                             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
@@ -501,21 +484,21 @@ static void json_lex_number(JsonLexContext* lex, char* s)
     /* Caller already did this for us; so do nothing. */
 
     /* Part (2): parse main digit string. */
-    if (*s == '0') {
+    if (*s == '0')
         s++;
-    } else if (*s >= '1' && *s <= '9') {
+    else if (*s >= '1' && *s <= '9') {
         do {
             s++;
         } while (*s >= '0' && *s <= '9');
-    } else {
+    } else
         error = true;
-    }
+
     /* Part (3): parse optional decimal portion. */
     if (*s == '.') {
         s++;
-        if (*s < '0' || *s > '9') {
+        if (*s < '0' || *s > '9')
             error = true;
-        } else {
+        else {
             do {
                 s++;
             } while (*s >= '0' && *s <= '9');
@@ -525,12 +508,11 @@ static void json_lex_number(JsonLexContext* lex, char* s)
     /* Part (4): parse optional exponent. */
     if (*s == 'e' || *s == 'E') {
         s++;
-        if (*s == '+' || *s == '-') {
+        if (*s == '+' || *s == '-')
             s++;
-        }
-        if (*s < '0' || *s > '9') {
+        if (*s < '0' || *s > '9')
             error = true;
-        } else {
+        else {
             do {
                 s++;
             } while (*s >= '0' && *s <= '9');
@@ -542,13 +524,11 @@ static void json_lex_number(JsonLexContext* lex, char* s)
      * here should be considered part of the token for error-reporting
      * purposes.
      */
-    for (p = s; JSON_ALPHANUMERIC_CHAR(*p); p++) {
+    for (p = s; JSON_ALPHANUMERIC_CHAR(*p); p++)
         error = true;
-    }
     lex->token_terminator = p;
-    if (error) {
+    if (error)
         report_invalid_token(lex);
-    }
 }
 
 /*
@@ -556,19 +536,19 @@ static void json_lex_number(JsonLexContext* lex, char* s)
  *
  * lex->token_start and lex->token_terminator must identify the current token.
  */
-static void report_parse_error(const JsonParseStack* stack, JsonLexContext* lex)
+static void report_parse_error(JsonParseStack* stack, JsonLexContext* lex)
 {
     char* token = NULL;
-    uint toklen;
+    int toklen;
 
     /* Handle case where the input ended prematurely. */
-    if (lex->token_start == NULL) {
+    if (lex->token_start == NULL)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("invalid input syntax for type json"),
                 errdetail("The input string ended unexpectedly."),
                 report_json_context(lex)));
-    }
+
     /* Separate out the current token. */
     toklen = lex->token_terminator - lex->token_start;
     token = (char*)palloc(toklen + 1);
@@ -577,13 +557,13 @@ static void report_parse_error(const JsonParseStack* stack, JsonLexContext* lex)
     token[toklen] = '\0';
 
     /* Complain, with the appropriate detail message. */
-    if (stack == NULL) {
+    if (stack == NULL)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("invalid input syntax for type json"),
                 errdetail("Expected end of input, but found \"%s\".", token),
                 report_json_context(lex)));
-    } else {
+    else {
         switch (stack->state) {
             case JSON_PARSE_VALUE:
                 ereport(ERROR,
@@ -650,7 +630,7 @@ static void report_parse_error(const JsonParseStack* stack, JsonLexContext* lex)
 static void report_invalid_token(JsonLexContext* lex)
 {
     char* token = NULL;
-    uint toklen;
+    int toklen;
 
     /* Separate out the offending token. */
     toklen = lex->token_terminator - lex->token_start;
@@ -676,14 +656,14 @@ static void report_invalid_token(JsonLexContext* lex)
  * The return value isn't meaningful, but we make it non-void so that this
  * can be invoked inside ereport().
  */
-static int report_json_context(const JsonLexContext* lex)
+static int report_json_context(JsonLexContext* lex)
 {
     const char* context_start = NULL;
     const char* context_end = NULL;
     const char* line_start = NULL;
     int line_number;
     char* ctxt = NULL;
-    uint ctxtlen;
+    int ctxtlen;
     const char* prefix = NULL;
     const char* suffix = NULL;
 
@@ -701,15 +681,13 @@ static int report_json_context(const JsonLexContext* lex)
             continue;
         }
         /* Otherwise, done as soon as we are close enough to context_end */
-        if (context_end - context_start < 50) {
+        if (context_end - context_start < 50)
             break;
-        }
         /* Advance to next multibyte character */
-        if (IS_HIGHBIT_SET(*context_start)) {
+        if (IS_HIGHBIT_SET(*context_start))
             context_start += pg_mblen(context_start);
-        } else {
+        else
             context_start++;
-        }
     }
 
     /*
@@ -717,9 +695,9 @@ static int report_json_context(const JsonLexContext* lex)
      * beginning of the line ... but if we're within 3 characters of the
      * beginning of the line, we might as well just show the whole line.
      */
-    if (context_start - line_start <= 3) {
+    if (context_start - line_start <= 3)
         context_start = line_start;
-    }
+
     /* Get a null-terminated copy of the data to present */
     ctxtlen = context_end - context_start;
     ctxt = (char*)palloc(ctxtlen + 1);
@@ -779,25 +757,24 @@ static void datum_to_json(Datum val, bool is_null, StringInfo result, TYPCATEGOR
             composite_to_json(val, result, false);
             break;
         case TYPCATEGORY_BOOLEAN:
-            if (DatumGetBool(val)) {
+            if (DatumGetBool(val))
                 appendStringInfoString(result, "true");
-            } else {
+            else
                 appendStringInfoString(result, "false");
-            }
             break;
         case TYPCATEGORY_NUMERIC:
             outputstr = OidOutputFunctionCall(typoutputfunc, val);
+
             /*
              * Don't call escape_json here if it's a valid JSON number.
              * Numeric output should usually be a valid JSON number and JSON
              * numbers shouldn't be quoted. Quote cases like "Nan" and
              * "Infinity", however.
              */
-            if (strpbrk(outputstr, NON_NUMERIC_LETTER) == NULL) {
+            if (strpbrk(outputstr, NON_NUMERIC_LETTER) == NULL)
                 appendStringInfoString(result, outputstr);
-            } else {
+            else
                 escape_json(result, outputstr);
-            }
             pfree_ext(outputstr);
             break;
         case TYPCATEGORY_JSON:
@@ -826,13 +803,15 @@ static void array_dim_to_json(StringInfo result, int dim, int ndims, int* dims, 
     const char* sep = NULL;
 
     Assert(dim < ndims);
+
     sep = use_line_feeds ? ",\n " : ",";
+
     appendStringInfoChar(result, '[');
 
     for (i = 1; i <= dims[dim]; i++) {
-        if (i > 1) {
+        if (i > 1)
             appendStringInfoString(result, sep);
-        }
+
         if (dim + 1 == ndims) {
             datum_to_json(vals[*valcount], nulls[*valcount], result, tcategory, typoutputfunc);
             (*valcount)++;
@@ -882,13 +861,13 @@ static void array_to_json_internal(Datum array, StringInfo result, bool use_line
 
     deconstruct_array(v, element_type, typlen, typbyval, typalign, &elements, &nulls, &nitems);
 
-    if (element_type == RECORDOID) {
+    if (element_type == RECORDOID)
         tcategory = TYPCATEGORY_COMPOSITE;
-    } else if (element_type == JSONOID) {
+    else if (element_type == JSONOID)
         tcategory = TYPCATEGORY_JSON;
-    } else {
+    else
         tcategory = TypeCategory(element_type);
-    }
+
     array_dim_to_json(result, 0, ndim, dim, elements, nulls, &count, tcategory, typoutputfunc, use_line_feeds);
 
     pfree_ext(elements);
@@ -904,8 +883,7 @@ static void composite_to_json(Datum composite, StringInfo result, bool use_line_
     Oid tupType;
     int32 tupTypmod;
     TupleDesc tupdesc;
-    HeapTupleData tmptup;
-    HeapTupleData *tuple = NULL;
+    HeapTupleData tmptup, *tuple = NULL;
     int i;
     bool needsep = false;
     const char* sep = NULL;
@@ -934,12 +912,11 @@ static void composite_to_json(Datum composite, StringInfo result, bool use_line_
         Oid typoutput;
         bool typisvarlena = false;
 
-        if (tupdesc->attrs[i]->attisdropped) {
+        if (tupdesc->attrs[i]->attisdropped)
             continue;
-        }
-        if (needsep) {
+
+        if (needsep)
             appendStringInfoString(result, sep);
-        }
         needsep = true;
 
         attname = NameStr(tupdesc->attrs[i]->attname);
@@ -948,32 +925,31 @@ static void composite_to_json(Datum composite, StringInfo result, bool use_line_
 
         origval = heap_getattr(tuple, i + 1, tupdesc, &isnull);
 
-        if (tupdesc->attrs[i]->atttypid == RECORDARRAYOID) {
+        if (tupdesc->attrs[i]->atttypid == RECORDARRAYOID)
             tcategory = TYPCATEGORY_ARRAY;
-        } else if (tupdesc->attrs[i]->atttypid == RECORDOID) {
+        else if (tupdesc->attrs[i]->atttypid == RECORDOID)
             tcategory = TYPCATEGORY_COMPOSITE;
-        } else if (tupdesc->attrs[i]->atttypid == JSONOID) {
+        else if (tupdesc->attrs[i]->atttypid == JSONOID)
             tcategory = TYPCATEGORY_JSON;
-        } else {
+        else
             tcategory = TypeCategory(tupdesc->attrs[i]->atttypid);
-        }
+
         getTypeOutputInfo(tupdesc->attrs[i]->atttypid, &typoutput, &typisvarlena);
 
         /*
          * If we have a toasted datum, forcibly detoast it here to avoid
          * memory leakage inside the type's output routine.
          */
-        if (typisvarlena && !isnull) {
+        if (typisvarlena && !isnull)
             val = PointerGetDatum(PG_DETOAST_DATUM(origval));
-        } else {
+        else
             val = origval;
-        }
+
         datum_to_json(val, isnull, result, tcategory, typoutput);
 
         /* Clean up detoasted copy, if any */
-        if (val != origval) {
+        if (val != origval)
             pfree(DatumGetPointer(val));
-        }
     }
 
     appendStringInfoChar(result, '}');
@@ -1080,9 +1056,8 @@ void escape_json(StringInfo buf, const char* str)
                 if ((unsigned char)*p < ' ') {
                     appendStringInfo(buf, "\\u%04x", (int)*p);
                 } else {
-                    for (int i = 0; i < charlen; i++) {
+                    for (int i = 0; i < charlen; i++)
                         appendStringInfoCharMacro(buf, p[i]);
-                    }
                 }
                 break;
         }
@@ -1090,4 +1065,3 @@ void escape_json(StringInfo buf, const char* str)
     }
     appendStringInfoCharMacro(buf, '\"');
 }
-

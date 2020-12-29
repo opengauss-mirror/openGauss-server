@@ -106,7 +106,7 @@ else
 fi
 # waiting for dummystandby connect to primary
 check_standby_setup
-gs_ctl build -D $data_dir/datanode1
+gs_ctl build -Z single_node -D $data_dir/datanode1
 
 stop_standby
 

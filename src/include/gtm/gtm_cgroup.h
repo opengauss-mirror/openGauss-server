@@ -12,11 +12,11 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- *
+ * 
  * gtm_cgroup.h
  *        get the gaussdb cgroup relpath and initialize cgroup.
  *        Please note,caller should free the return value.
- *
+ * 
  * IDENTIFICATION
  *        src/include/gtm/gtm_cgroup.h
  *
@@ -24,11 +24,11 @@
  */
 #ifndef SRC_INCLUDE_GTM_GTM_CGROUP_H
 #define SRC_INCLUDE_GTM_GTM_CGROUP_H
-extern char *gscgroup_gtm_init();
+extern char* gscgroup_gtm_init();
 
 /* make the current thread attach to gaussdb cgroup */
-extern void gscgroup_gtm_attach_task(const char *relpath);
+extern void gscgroup_gtm_attach_task(const char* relpath);
 /* just an unused function, reserving this function for future. */
-extern void gscgroup_gtm_attach_task_pid(const char *relpath, pid_t tid);
+extern void gscgroup_gtm_attach_task_pid(const char* relpath, pid_t tid);
 
 #endif  // SRC_INCLUDE_GTM_GTM_CGROUP_H

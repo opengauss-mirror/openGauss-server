@@ -190,14 +190,14 @@ set enable_seqscan = off;
 set enable_indexscan = on;
 set enable_bitmapscan = off;
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
  SELECT * FROM
  (SELECT a || b AS ab FROM union_t1
   UNION ALL
   SELECT * FROM union_t2) t
  WHERE ab = 'ab';
 
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
  SELECT * FROM
  (SELECT a || b AS ab FROM union_t1
   UNION
@@ -214,7 +214,7 @@ DROP TABLE union_t2 CASCADE;
 -- doesn't pull down for intersect all query
 create table reg_t1(r1 int, r2 regproc, r3 regproc);
 insert into reg_t1 values(1, 'sin', 'cos'), (2, 'cos', 'tan'), (3, 'tan', 'cot');
-explain (nodes off, costs off, verbose on)
+explain (costs off, verbose on)
  SELECT * FROM
  (SELECT r2 FROM reg_t1
   INTERSECT ALL
@@ -226,7 +226,7 @@ SELECT * FROM
 drop table reg_t1;
 
 -- Test constraint exclusion of UNION ALL subqueries
-explain (num_nodes off, nodes off, costs off)
+explain (num_costs off)
  SELECT * FROM
   (SELECT 1 AS t, * FROM tenk1 a
    UNION ALL

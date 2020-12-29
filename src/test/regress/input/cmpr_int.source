@@ -14,7 +14,7 @@ CREATE TABLE cmpr_int_raw (
 	R8_ID int NOT NULL,
 	R9_ID int NOT NULL
 );
-COPY cmpr_int_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+COPY cmpr_int_raw FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 
 CREATE TABLE cmpr_int_auto (
 	RS_ID int,
@@ -28,8 +28,8 @@ CREATE TABLE cmpr_int_auto (
 	R7_ID int NOT NULL,
 	R8_ID int NOT NULL,
 	R9_ID int NOT NULL
-)  COMPRESS;
-COPY cmpr_int_auto FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+)  ;
+COPY cmpr_int_auto FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 SELECT (SELECT COUNT(*) FROM cmpr_int_raw) - (SELECT COUNT(*) FROM cmpr_int_auto);
 (SELECT * FROM cmpr_int_raw) MINUS ALL (SELECT * FROM cmpr_int_auto);
 (SELECT * FROM cmpr_int_auto) MINUS ALL (SELECT * FROM cmpr_int_raw);
@@ -47,8 +47,8 @@ CREATE TABLE cmpr_int_dict (
 	R7_ID int dictionary NOT NULL,
 	R8_ID int dictionary NOT NULL,
 	R9_ID int dictionary NOT NULL
-)  COMPRESS;
-COPY cmpr_int_dict FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+)  ;
+COPY cmpr_int_dict FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 SELECT (SELECT COUNT(*) FROM cmpr_int_raw) - (SELECT COUNT(*) FROM cmpr_int_dict);
 (SELECT * FROM cmpr_int_raw) MINUS ALL (SELECT * FROM cmpr_int_dict);
 (SELECT * FROM cmpr_int_dict) MINUS ALL (SELECT * FROM cmpr_int_raw);
@@ -66,8 +66,8 @@ CREATE TABLE cmpr_int_delta (
 	R7_ID int delta NOT NULL,
 	R8_ID int delta NOT NULL,
 	R9_ID int delta NOT NULL
-)  COMPRESS;
-COPY cmpr_int_delta FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+)  ;
+COPY cmpr_int_delta FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 SELECT (SELECT COUNT(*) FROM cmpr_int_raw) - (SELECT COUNT(*) FROM cmpr_int_delta);
 (SELECT * FROM cmpr_int_raw) MINUS ALL (SELECT * FROM cmpr_int_delta);
 (SELECT * FROM cmpr_int_delta) MINUS ALL (SELECT * FROM cmpr_int_raw);

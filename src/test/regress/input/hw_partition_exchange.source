@@ -1,0 +1,1011 @@
+-- ALTER TABLE EXCHANGE WITH
+
+-- 0. function
+-- 1. table, partition not exist
+-- 2. table type check
+-- 3. column(name, number, type)
+-- 4. constraint check
+-- 5. distribute check
+-- 6. index check
+-- 7. validation check
+-- 8. table relfilenode
+-- 9. toast table relfilenode
+-- 10. index relfilenode
+-- 11. index is available after exchange
+-- 12. tablespace(table,index)
+-- 13. verbose
+
+
+
+-- 0. function
+--a.partition name
+create table test_exchange_function_ord (a int);
+create table test_exchange_function_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+insert into test_exchange_function_ord values (1);
+insert into test_exchange_function_rt values (2);
+select * from test_exchange_function_ord;
+select * from test_exchange_function_rt;
+
+alter table test_exchange_function_rt exchange partition (p1) with table test_exchange_function_ord;
+
+select * from test_exchange_function_ord;
+select * from test_exchange_function_rt;
+
+insert into test_exchange_function_ord values (4);
+insert into test_exchange_function_rt values (3);
+select * from test_exchange_function_ord order by 1;
+select * from test_exchange_function_rt order by 1;
+
+drop table test_exchange_function_ord;
+drop table test_exchange_function_rt;
+
+--b.partition for
+create table test_exchange_function_ord (a int);
+create table test_exchange_function_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+insert into test_exchange_function_ord values (1);
+insert into test_exchange_function_rt values (2);
+select * from test_exchange_function_ord;
+select * from test_exchange_function_rt;
+
+alter table test_exchange_function_rt exchange partition for (5) with table test_exchange_function_ord;
+
+select * from test_exchange_function_ord;
+select * from test_exchange_function_rt;
+
+drop table test_exchange_function_ord;
+drop table test_exchange_function_rt;
+
+
+
+-- 1. table, partition not exist
+--a.ordinary table does not exist
+create table test_exchange_exist_ord (a int);
+create table test_exchange_exist_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_exist_rt exchange partition (p1) with table test_exchange_exist;
+
+drop table test_exchange_exist_ord;
+drop table test_exchange_exist_rt;
+
+
+--b.partitioned table does not exist
+create table test_exchange_exist_ord (a int);
+create table test_exchange_exist_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_exist exchange partition (p1) with table test_exchange_exist_ord;
+
+drop table test_exchange_exist_ord;
+drop table test_exchange_exist_rt;
+
+
+--c.partition does not exist
+create table test_exchange_exist_ord (a int);
+create table test_exchange_exist_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_exist_rt exchange partition (p2) with table test_exchange_exist_ord;
+
+--ERROR
+alter table test_exchange_exist_rt exchange partition for (11) with table test_exchange_exist_ord;
+
+drop table test_exchange_exist_ord;
+drop table test_exchange_exist_rt;
+
+
+
+
+
+-- 2. table type check
+--a
+create table test_exchange_table_type_ord (a int);
+create table test_exchange_table_type_rt (a int);
+
+--ERROR
+alter table test_exchange_table_type_rt exchange partition (p1) with table test_exchange_table_type_ord;
+
+drop table test_exchange_table_type_ord;
+drop table test_exchange_table_type_rt;
+
+
+--b
+create table test_exchange_table_type_ord (a int) partition by range(a) (partition p1 values less than (10));
+create table test_exchange_table_type_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_table_type_rt exchange partition (p1) with table test_exchange_table_type_ord;
+
+drop table test_exchange_table_type_ord;
+drop table test_exchange_table_type_rt;
+
+
+--c
+create table test_exchange_table_type_ord (a int) partition by range(a) (partition p1 values less than (10));
+create table test_exchange_table_type_rt (a int);
+
+--ERROR
+alter table test_exchange_table_type_rt exchange partition (p1) with table test_exchange_table_type_ord;
+
+drop table test_exchange_table_type_ord;
+drop table test_exchange_table_type_rt;
+
+
+
+-- 3. column(name, number, type)
+--a.column name
+create table test_exchange_column_name_ord (b int);
+create table test_exchange_column_name_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_column_name_rt exchange partition (p1) with table test_exchange_column_name_ord;
+
+drop table test_exchange_column_name_ord;
+drop table test_exchange_column_name_rt;
+
+
+--b.column number
+create table test_exchange_column_number_ord (a int, b int);
+create table test_exchange_column_number_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_column_number_rt exchange partition (p1) with table test_exchange_column_number_ord;
+
+drop table test_exchange_column_number_ord;
+drop table test_exchange_column_number_rt;
+
+
+--c.column type: int and float
+create table test_exchange_column_type_ord (a float);
+create table test_exchange_column_type_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_column_type_rt exchange partition (p1) with table test_exchange_column_type_ord;
+
+drop table test_exchange_column_type_ord;
+drop table test_exchange_column_type_rt;
+
+
+--d.column type: int and char
+create table test_exchange_column_type_ord (a char);
+create table test_exchange_column_type_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_column_type_rt exchange partition (p1) with table test_exchange_column_type_ord;
+
+drop table test_exchange_column_type_ord;
+drop table test_exchange_column_type_rt;
+
+
+--e.column type: char(4) and char(8)
+create table test_exchange_column_type_ord (a char(4));
+create table test_exchange_column_type_rt (a char(8)) partition by range(a) (partition p1 values less than ('B'));
+
+--ERROR
+alter table test_exchange_column_type_rt exchange partition (p1) with table test_exchange_column_type_ord;
+
+drop table test_exchange_column_type_ord;
+drop table test_exchange_column_type_rt;
+
+
+--f.column type: char(8) and text
+create table test_exchange_column_type_ord (a text);
+create table test_exchange_column_type_rt (a char(8)) partition by range(a) (partition p1 values less than ('B'));
+
+--ERROR
+alter table test_exchange_column_type_rt exchange partition (p1) with table test_exchange_column_type_ord;
+
+drop table test_exchange_column_type_ord;
+drop table test_exchange_column_type_rt;
+
+
+--g.column type: int4 and int8
+create table test_exchange_column_type_ord (a int4);
+create table test_exchange_column_type_rt (a int8) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_column_type_rt exchange partition (p1) with table test_exchange_column_type_ord;
+
+drop table test_exchange_column_type_ord;
+drop table test_exchange_column_type_rt;
+
+
+--h.column type: float4 and float8
+create table test_exchange_column_type_ord (a float4);
+create table test_exchange_column_type_rt (a float8) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_column_type_rt exchange partition (p1) with table test_exchange_column_type_ord;
+
+drop table test_exchange_column_type_ord;
+drop table test_exchange_column_type_rt;
+
+
+
+-- 4. constraint check
+--a.check
+--a-1
+create table test_exchange_constraint_ord (a int check (a>0));
+create table test_exchange_constraint_rt (a int check (a>0)) partition by range(a) (partition p1 values less than (10));
+
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+--a-2
+create table test_exchange_constraint_ord (a int check (a>0));
+create table test_exchange_constraint_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+--a-3
+create table test_exchange_constraint_ord (a int check (a>0)) distribute by hash (a);
+create table test_exchange_constraint_rt (a int check (a>1)) distribute by hash (a) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+--a-4-1
+create table test_exchange_constraint_ord (a int, check (a>0), check (a<3));
+create table test_exchange_constraint_rt (a int, check (a<3), check (a>0)) partition by range(a) (partition p1 values less than (10));
+
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+--a-4-2
+create table test_exchange_constraint_ord (a int, check (a>0), check (a<3));
+create table test_exchange_constraint_rt (a int, check (a>0), check (a<2)) partition by range(a) (partition p1 values less than (10));
+
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+
+--b.not null
+--b-1
+create table test_exchange_constraint_ord (a int not null);
+create table test_exchange_constraint_rt (a int not null) partition by range(a) (partition p1 values less than (10));
+
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+--b-2
+create table test_exchange_constraint_ord (a int not null);
+create table test_exchange_constraint_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+
+--c.unique
+--c-1
+create table test_exchange_constraint_ord (a int unique);
+create table test_exchange_constraint_rt (a int unique) partition by range(a) (partition p1 values less than (10));
+
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+--c-2
+create table test_exchange_constraint_ord (a int unique);
+create table test_exchange_constraint_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+
+--d.primary key
+--d-1
+create table test_exchange_constraint_ord (a int primary key);
+create table test_exchange_constraint_rt (a int primary key) partition by range(a) (partition p1 values less than (10));
+
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+--d-2
+create table test_exchange_constraint_ord (a int primary key);
+create table test_exchange_constraint_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+
+
+--e.deferrable
+--e-1
+create table test_exchange_constraint_ref (a int primary key);
+create table test_exchange_constraint_ord (a int, foreign key (a) references test_exchange_constraint_ref (a));
+create table test_exchange_constraint_rt (a int, foreign key (a) references test_exchange_constraint_ref (a)) partition by range(a) (partition p1 values less than (10));
+
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+drop table test_exchange_constraint_ref;
+
+
+--e-2
+create table test_exchange_constraint_ref (a int primary key);
+create table test_exchange_constraint_ord (a int, foreign key (a) references test_exchange_constraint_ref (a));
+create table test_exchange_constraint_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+drop table test_exchange_constraint_ref;
+
+
+--e-3
+create table test_exchange_constraint_ref (a int primary key);
+create table test_exchange_constraint_ord (a int, foreign key (a) references test_exchange_constraint_ref (a));
+create table test_exchange_constraint_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+--ERROR
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ref;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+drop table test_exchange_constraint_ref;
+
+
+--f.default
+--f-1
+create table test_exchange_constraint_ord (a int default 1);
+create table test_exchange_constraint_rt (a int default 1) partition by range(a) (partition p1 values less than (10));
+
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+--f-2
+create table test_exchange_constraint_ord (a int default 1);
+create table test_exchange_constraint_rt (a int default 2) partition by range(a) (partition p1 values less than (10));
+
+alter table test_exchange_constraint_rt exchange partition (p1) with table test_exchange_constraint_ord;
+
+drop table test_exchange_constraint_ord;
+drop table test_exchange_constraint_rt;
+
+
+-- 5. distribute check
+--a.distribute is same
+create table test_exchange_distirbute_ord (a int) distribute by hash (a);
+create table test_exchange_distirbute_rt (a int) distribute by hash (a) partition by range(a) (partition p1 values less than (10));
+
+insert into test_exchange_distirbute_ord values(1);
+insert into test_exchange_distirbute_rt values(2);
+
+alter table test_exchange_distirbute_rt exchange partition (p1) with table test_exchange_distirbute_ord;
+
+drop table test_exchange_distirbute_ord;
+drop table test_exchange_distirbute_rt;
+
+
+--b.distribute is different
+create table test_exchange_distirbute_ord (a int, b int) distribute by hash (b);
+create table test_exchange_distirbute_rt (a int, b int) distribute by hash (a) partition by range(a) (partition p1 values less than (10));
+
+insert into test_exchange_distirbute_ord values(1, 1);
+insert into test_exchange_distirbute_rt values(2, 2);
+
+--ERROE
+alter table test_exchange_distirbute_rt exchange partition (p1) with table test_exchange_distirbute_ord;
+
+drop table test_exchange_distirbute_ord;
+drop table test_exchange_distirbute_rt;
+
+
+--c
+create table test_exchange_distirbute_ord (a int) distribute by replication;
+create table test_exchange_distirbute_rt (a int) distribute by roundrobin partition by range(a) (partition p1 values less than (10));
+
+insert into test_exchange_distirbute_ord values(1);
+insert into test_exchange_distirbute_rt values(2);
+
+--ERROE
+alter table test_exchange_distirbute_rt exchange partition (p1) with table test_exchange_distirbute_ord;
+
+drop table test_exchange_distirbute_ord;
+drop table test_exchange_distirbute_rt;
+
+
+
+-- 6. index check
+--a.index number
+create table test_exchange_index_ord (a int, b int, c int);
+create table test_exchange_index_rt (a int, b int, c int) partition by range(a) (partition p1 values less than (10));
+create index test_exchange_index_ord_a on test_exchange_index_ord (a);
+create index test_exchange_index_ord_b on test_exchange_index_ord (b);
+create index test_exchange_index_rt_a on test_exchange_index_rt (a) local;
+
+--ERROE
+alter table test_exchange_index_rt exchange partition (p1) with table test_exchange_index_ord;
+
+drop table test_exchange_index_ord;
+drop table test_exchange_index_rt;
+
+
+--b-1.index column
+create table test_exchange_index_ord (a int, b int, c int);
+create table test_exchange_index_rt (a int, b int, c int) partition by range(a) (partition p1 values less than (10));
+create index test_exchange_index_ord_b on test_exchange_index_ord (b);
+create index test_exchange_index_rt_a on test_exchange_index_rt (a) local;
+
+--ERROE
+alter table test_exchange_index_rt exchange partition (p1) with table test_exchange_index_ord;
+
+drop table test_exchange_index_ord;
+drop table test_exchange_index_rt;
+
+--b-2.index column
+create table test_exchange_index_ord (a int, b int, c int);
+create table test_exchange_index_rt (a int, b int, c int) partition by range(a) (partition p1 values less than (10));
+create index test_exchange_index_ord_a_b on test_exchange_index_ord (a, b);
+create index test_exchange_index_rt_a_c on test_exchange_index_rt (a, c) local;
+
+--ERROE
+alter table test_exchange_index_rt exchange partition (p1) with table test_exchange_index_ord;
+
+drop table test_exchange_index_ord;
+drop table test_exchange_index_rt;
+
+
+--c.index type
+create table test_exchange_index_ord (a int, b int, c int);
+create table test_exchange_index_rt (a int, b int, c int) partition by range(a) (partition p1 values less than (10));
+create unique index test_exchange_index_ord_a on test_exchange_index_ord (a);
+create index test_exchange_index_rt_a on test_exchange_index_rt (a) local;
+
+--ERROE
+alter table test_exchange_index_rt exchange partition (p1) with table test_exchange_index_ord;
+
+drop table test_exchange_index_ord;
+drop table test_exchange_index_rt;
+
+
+--d.index using method
+create table test_exchange_index_ord (a int, b int, c int);
+create table test_exchange_index_rt (a int, b int, c int) partition by range(a) (partition p1 values less than (10));
+create index test_exchange_index_ord_a on test_exchange_index_ord using hash (a);
+create index test_exchange_index_rt_a on test_exchange_index_rt (a) local;
+
+--ERROE
+alter table test_exchange_index_rt exchange partition (p1) with table test_exchange_index_ord;
+
+drop table test_exchange_index_ord;
+drop table test_exchange_index_rt;
+
+
+--e.index on the same column, but name not same
+create table test_exchange_index_ord (a int, b int, c int);
+create table test_exchange_index_rt (a int, b int, c int) partition by range(a) (partition p1 values less than (10));
+create index test_exchange_index_ord_a_1 on test_exchange_index_ord (a);
+create index test_exchange_index_ord_b on test_exchange_index_ord (b);
+create index test_exchange_index_ord_a_2 on test_exchange_index_ord (a);
+create index test_exchange_index_rt_b on test_exchange_index_rt (b) local;
+create index test_exchange_index_rt_a_1 on test_exchange_index_rt (a) local;
+create index test_exchange_index_rt_a_2 on test_exchange_index_rt (a) local;
+
+alter table test_exchange_index_rt exchange partition (p1) with table test_exchange_index_ord;
+
+drop table test_exchange_index_ord;
+drop table test_exchange_index_rt;
+
+
+
+-- 7. validation check
+--a.default validation
+create table test_exchange_validation_ord (a int);
+create table test_exchange_validation_rt (a int) partition by range(a) (partition p1 values less than (10), partition p2 values less than (20));
+
+insert into test_exchange_validation_ord values (1), (10);
+
+--ERROE
+alter table test_exchange_validation_rt exchange partition (p1) with table test_exchange_validation_ord;
+
+drop table test_exchange_validation_ord;
+drop table test_exchange_validation_rt;
+
+
+--b.with validation
+create table test_exchange_validation_ord (a int);
+create table test_exchange_validation_rt (a int) partition by range(a) (partition p1 values less than (10), partition p2 values less than (20));
+
+insert into test_exchange_validation_ord values (1), (10);
+
+--ERROE
+alter table test_exchange_validation_rt exchange partition (p1) with table test_exchange_validation_ord with validation;
+
+drop table test_exchange_validation_ord;
+drop table test_exchange_validation_rt;
+
+
+--c.without validation
+create table test_exchange_validation_ord (a int);
+create table test_exchange_validation_rt (a int) partition by range(a) (partition p1 values less than (10), partition p2 values less than (20));
+
+insert into test_exchange_validation_ord values (1), (10);
+
+--SUCCESS
+alter table test_exchange_validation_rt exchange partition (p1) with table test_exchange_validation_ord without validation;
+
+drop table test_exchange_validation_ord;
+drop table test_exchange_validation_rt;
+
+
+--the oid is variable in make check
+/*
+-- 8. table relfilenode
+create table test_exchange_table_relfilenode_ord (a int);
+create table test_exchange_table_relfilenode_rt (a int) partition by range(a) (partition p1 values less than (10));
+
+insert into test_exchange_table_relfilenode_ord values (1);
+insert into test_exchange_table_relfilenode_rt values (2);
+
+select relname, relfilenode from pg_class where relname = 'test_exchange_table_relfilenode_ord';
+select relname, relfilenode from pg_partition where relname = 'p1';
+
+alter table test_exchange_table_relfilenode_rt exchange partition (p1) with table test_exchange_table_relfilenode_ord;
+
+select relname, relfilenode from pg_class where relname = 'test_exchange_table_relfilenode_ord';
+select relname, relfilenode from pg_partition where relname = 'p1';
+
+drop table test_exchange_table_relfilenode_ord;
+drop table test_exchange_table_relfilenode_rt;
+
+
+
+-- 9. toast table relfilenode
+create table test_exchange_table_toast_ord (a text);
+create table test_exchange_table_toast_rt (a text) partition by range(a) (partition p1 values less than ('C'));
+
+insert into test_exchange_table_toast_ord values ('A');
+insert into test_exchange_table_toast_rt values ('B');
+
+select c1.relname, c1.oid, c1.relfilenode, c1.reltoastrelid, c2.relname, c2.relfilenode from pg_class c1, pg_class c2 where c1.relname = 'test_exchange_table_toast_ord' and c1.reltoastrelid=c2.oid;
+select p.relname, p.oid, p.relfilenode, p.reltoastrelid, c.relname, c.relfilenode from pg_class c, pg_partition p where p.relname = 'p1' and p.reltoastrelid=c.oid;
+
+alter table test_exchange_table_toast_rt exchange partition (p1) with table test_exchange_table_toast_ord;
+
+select c1.relname, c1.oid, c1.relfilenode, c1.reltoastrelid, c2.relname, c2.relfilenode from pg_class c1, pg_class c2 where c1.relname = 'test_exchange_table_toast_ord' and c1.reltoastrelid=c2.oid;
+select p.relname, p.oid, p.relfilenode, p.reltoastrelid, c.relname, c.relfilenode from pg_class c, pg_partition p where p.relname = 'p1' and p.reltoastrelid=c.oid;
+
+insert into test_exchange_table_toast_ord values ('B');
+insert into test_exchange_table_toast_rt values ('A');
+
+select * from test_exchange_table_toast_ord;
+select * from test_exchange_table_toast_rt;
+
+drop table test_exchange_table_toast_ord;
+drop table test_exchange_table_toast_rt;
+
+
+
+-- 10. index relfilenode
+create table test_exchange_index_ord (a int, b int, c int);
+create table test_exchange_index_rt (a int, b int, c int) partition by range(a) (partition p1 values less than (10));
+create index test_exchange_index_ord_a on test_exchange_index_ord(a);
+create index test_exchange_index_ord_a_c on test_exchange_index_ord(a, c);
+create index test_exchange_index_rt_a on test_exchange_index_rt(a) local (partition p1_index_a);
+create index test_exchange_index_rt_a_c on test_exchange_index_rt(a, c) local (partition p1_index_a_c);
+
+select relname, relfilenode from pg_class where relname='test_exchange_index_ord_a';
+select relname, relfilenode from pg_partition where relname='p1_index_a';
+select relname, relfilenode from pg_class where relname='test_exchange_index_ord_a';
+select relname, relfilenode from pg_partition where relname='p1_index_a_c';
+
+alter table test_exchange_index_rt exchange partition (p1) with table test_exchange_index_ord;
+
+select relname, relfilenode from pg_class where relname='test_exchange_index_ord_a';
+select relname, relfilenode from pg_partition where relname='p1_index_a';
+select relname, relfilenode from pg_class where relname='test_exchange_index_ord_a_c';
+select relname, relfilenode from pg_partition where relname='p1_index_a_c';
+
+drop table test_exchange_index_ord;
+drop table test_exchange_index_rt;
+*/
+
+
+-- 11. index is available after exchange
+create table test_exchange_index_ord (a int, b int, c int);
+create table test_exchange_index_rt (a int, b int, c int) partition by range(a) (partition p1 values less than (100));
+create index test_exchange_index_ord_a on test_exchange_index_ord(a);
+create index test_exchange_index_rt_a on test_exchange_index_rt(a) local;
+
+insert into test_exchange_index_ord select generate_series(1,10);
+insert into test_exchange_index_rt select generate_series(11,20);
+
+--in data node
+set enable_seqscan = off;
+explain(verbose on, costs off, nodes off) select a from test_exchange_index_ord where a=1;
+select a from test_exchange_index_ord where a=1;
+
+alter table test_exchange_index_rt exchange partition (p1) with table test_exchange_index_ord;
+
+--in data node
+explain(verbose on, costs off, nodes off) select a from test_exchange_index_ord where a=11;
+select a from test_exchange_index_ord where a=11;
+
+drop table test_exchange_index_ord;
+drop table test_exchange_index_rt;
+
+
+
+-- 12. tablespace
+\! rm -fr '@testtablespace@/partition_exchange_ts1'
+\! mkdir '@testtablespace@/partition_exchange_ts1'
+\! rm -fr '@testtablespace@/partition_exchange_ts2'
+\! mkdir '@testtablespace@/partition_exchange_ts2'
+create tablespace partition_exchange_ts1 location '@testtablespace@/partition_exchange_ts1';
+create tablespace partition_exchange_ts2 location '@testtablespace@/partition_exchange_ts2';
+
+--a. table tablespace
+create table test_exchange_tablespace_ord (a int) tablespace partition_exchange_ts1;
+create table test_exchange_tablespace_rt (a int) partition by range(a) (partition p1 values less than (10) tablespace partition_exchange_ts2);
+
+insert into test_exchange_tablespace_ord values (1);
+insert into test_exchange_tablespace_rt values (2);
+select * from test_exchange_tablespace_ord;
+select * from test_exchange_tablespace_rt;
+
+--look tablespace
+select c.relname, t.spcname from pg_class c, pg_tablespace t where c.reltablespace=t.oid and c.relname='test_exchange_tablespace_ord';
+with partitioned_objs_oids as
+(
+	select oid from pg_class where relname = 'test_exchange_tablespace_rt'
+)
+select p.relname, t.spcname from pg_partition p, pg_tablespace t where p.reltablespace=t.oid and p.relname='p1'
+ and p.parentid in (select oid from partitioned_objs_oids);
+
+alter table test_exchange_tablespace_rt exchange partition (p1) with table test_exchange_tablespace_ord;
+
+--check tablespace has exchanged
+select c.relname, t.spcname from pg_class c, pg_tablespace t where c.reltablespace=t.oid and c.relname='test_exchange_tablespace_ord';
+with partitioned_objs_oids as
+(
+	select oid from pg_class where relname = 'test_exchange_tablespace_rt'
+)
+select p.relname, t.spcname from pg_partition p, pg_tablespace t where p.reltablespace=t.oid and p.relname='p1'
+ and p.parentid in (select oid from partitioned_objs_oids);
+
+insert into test_exchange_tablespace_ord values (4);
+insert into test_exchange_tablespace_rt values (3);
+select * from test_exchange_tablespace_ord order by 1;
+select * from test_exchange_tablespace_rt order by 1;
+
+drop table test_exchange_tablespace_ord;
+drop table test_exchange_tablespace_rt;
+
+
+--a. index tablespace
+create table test_exchange_tablespace_ord (a int);
+create table test_exchange_tablespace_rt (a int) partition by range(a) (partition p1 values less than (10));
+create index test_exchange_tablespace_ord_a on test_exchange_tablespace_ord (a) tablespace partition_exchange_ts1;
+create index test_exchange_tablespace_rt_a on test_exchange_tablespace_rt (a) local (partition p1_index_a tablespace partition_exchange_ts2);
+
+--look tablespace
+select c.relname, t.spcname from pg_class c, pg_tablespace t where c.reltablespace=t.oid and c.relname='test_exchange_tablespace_ord_a';
+select p.relname, t.spcname from pg_partition p, pg_tablespace t where p.reltablespace=t.oid and p.relname='p1_index_a';
+
+alter table test_exchange_tablespace_rt exchange partition (p1) with table test_exchange_tablespace_ord;
+
+--check tablespace has exchanged
+select c.relname, t.spcname from pg_class c, pg_tablespace t where c.reltablespace=t.oid and c.relname='test_exchange_tablespace_ord_a';
+select p.relname, t.spcname from pg_partition p, pg_tablespace t where p.reltablespace=t.oid and p.relname='p1_index_a';
+
+drop table test_exchange_tablespace_ord;
+drop table test_exchange_tablespace_rt;
+
+--combine
+create table test_exchange_tablespace_1(id int,info varchar(200)) distribute by replication
+partition by range(id)
+(partition p1 values less than(3000),
+partition p2 values less than(6000));
+
+create table test_exchange_tablespace_dst_1(id int,info varchar(200)) tablespace partition_exchange_ts1 distribute by replication;
+create table test_exchange_tablespace_dst_2(id int,info varchar(200)) tablespace partition_exchange_ts2 distribute by replication;
+
+alter table test_exchange_tablespace_1 exchange partition(p1) with table test_exchange_tablespace_dst_1, exchange partition(p2) with table test_exchange_tablespace_dst_2 with validation verbose;
+alter table test_exchange_tablespace_1 move partition p2 tablespace partition_exchange_ts1, exchange partition(p2) with table test_exchange_tablespace_dst_2 with validation verbose;
+
+drop table test_exchange_tablespace_1;
+drop table test_exchange_tablespace_dst_1;
+drop table test_exchange_tablespace_dst_2;
+
+drop tablespace partition_exchange_ts1;
+drop tablespace partition_exchange_ts2;
+\! rm -fr '@testtablespace@/partition_exchange_ts1'
+\! rm -fr '@testtablespace@/partition_exchange_ts2'
+
+
+
+-- 13. verbose
+-- a.syntax
+create table test_exchange_verbose_ord (a int);
+create table test_exchange_verbose_rt (a int)
+partition by range (a)
+(
+	partition test_exchange_verbose_rt_p1 values less than (10),
+	partition test_exchange_verbose_rt_p2 values less than (20),
+	partition test_exchange_verbose_rt_p3 values less than (30)
+);
+
+alter table test_exchange_verbose_rt exchange partition (test_exchange_verbose_rt_p1) with table test_exchange_verbose_ord verbose;
+alter table test_exchange_verbose_rt exchange partition (test_exchange_verbose_rt_p1) with table test_exchange_verbose_ord with validation verbose;
+--ERROR
+alter table test_exchange_verbose_rt exchange partition (test_exchange_verbose_rt_p1) with table test_exchange_verbose_ord without validation verbose;
+alter table test_exchange_verbose_rt exchange partition for (5) with table test_exchange_verbose_ord verbose;
+alter table test_exchange_verbose_rt exchange partition for (5) with table test_exchange_verbose_ord with validation verbose;
+--ERROR
+alter table test_exchange_verbose_rt exchange partition for (5) with table test_exchange_verbose_ord without validation verbose;
+
+drop table test_exchange_verbose_ord;
+drop table test_exchange_verbose_rt;
+
+
+-- b.function
+create table test_exchange_verbose_ord (a int);
+create table test_exchange_verbose_rt (a int)
+partition by range (a)
+(
+	partition test_exchange_verbose_rt_p1 values less than (10),
+	partition test_exchange_verbose_rt_p2 values less than (20),
+	partition test_exchange_verbose_rt_p3 values less than (30)
+);
+
+insert into test_exchange_verbose_ord values(generate_series(0, 29));
+
+alter table test_exchange_verbose_rt exchange partition (test_exchange_verbose_rt_p1) with table test_exchange_verbose_ord verbose;
+
+select * from test_exchange_verbose_ord order by 1;
+select * from test_exchange_verbose_rt order by 1;
+select * from test_exchange_verbose_rt partition (test_exchange_verbose_rt_p1) order by 1;
+select * from test_exchange_verbose_rt partition (test_exchange_verbose_rt_p2) order by 1;
+
+truncate test_exchange_verbose_ord;
+truncate test_exchange_verbose_rt;
+
+insert into test_exchange_verbose_ord values(generate_series(0, 29));
+insert into test_exchange_verbose_ord values(30);
+
+--ERROE
+alter table test_exchange_verbose_rt exchange partition (test_exchange_verbose_rt_p1) with table test_exchange_verbose_ord verbose;
+
+
+drop table test_exchange_verbose_ord;
+drop table test_exchange_verbose_rt;
+
+
+-- c.index
+create table test_exchange_verbose_ord (a int, b int);
+create table test_exchange_verbose_rt (a int, b int)
+partition by range (b)
+(
+	partition test_exchange_verbose_rt_p1 values less than (10),
+	partition test_exchange_verbose_rt_p2 values less than (20),
+	partition test_exchange_verbose_rt_p3 values less than (30)
+);
+
+create index test_exchange_verbose_ord_index on test_exchange_verbose_ord (b);
+create index test_exchange_verbose_rt_index on test_exchange_verbose_rt (b) local;
+
+insert into test_exchange_verbose_ord values (-1, generate_series(0, 29));
+
+alter table test_exchange_verbose_rt exchange partition (test_exchange_verbose_rt_p1) with table test_exchange_verbose_ord verbose;
+
+set enable_seqscan=off;
+
+explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false, NODES off) select b from test_exchange_verbose_rt where b=5;
+select b from test_exchange_verbose_rt where b=5 order by 1;
+explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false, NODES off) select b from test_exchange_verbose_rt where b=15;
+select b from test_exchange_verbose_rt where b=15 order by 1;
+
+
+truncate test_exchange_verbose_ord;
+truncate test_exchange_verbose_rt;
+
+insert into test_exchange_verbose_ord values (-1, generate_series(0, 29));
+update test_exchange_verbose_ord set b=-1 where b=5;
+update test_exchange_verbose_ord set b=-2 where b=6;
+update test_exchange_verbose_ord set b=-1 where b=15;
+update test_exchange_verbose_ord set b=15 where b=16;
+delete from test_exchange_verbose_ord where b=-2;
+delete from test_exchange_verbose_ord where b=15;
+
+alter table test_exchange_verbose_rt exchange partition (test_exchange_verbose_rt_p1) with table test_exchange_verbose_ord verbose;
+
+explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false, NODES off) select b from test_exchange_verbose_rt where b=-1;
+select b from test_exchange_verbose_rt where b=-1 order by 1;
+explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false, NODES off) select b from test_exchange_verbose_rt where b=-2;
+select b from test_exchange_verbose_rt where b=-2 order by 1;
+explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false, NODES off) select b from test_exchange_verbose_rt where b=5;
+select b from test_exchange_verbose_rt where b=5 order by 1;
+explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false, NODES off) select b from test_exchange_verbose_rt where b=6;
+select b from test_exchange_verbose_rt where b=6 order by 1;
+explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false, NODES off) select b from test_exchange_verbose_rt where b=15;
+select b from test_exchange_verbose_rt where b=15 order by 1;
+explain(ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false, NODES off) select b from test_exchange_verbose_rt where b=16;
+select b from test_exchange_verbose_rt where b=16 order by 1;
+
+
+drop table test_exchange_verbose_ord;
+drop table test_exchange_verbose_rt;
+
+
+
+create schema fvt_data_partition_exchange;
+create table fvt_data_partition_exchange.PARTITION_EXCHANGE_TABLE_005_1
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(100), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp without time zone ,
+c_timestamp_2 timestamp with time zone,
+c_date date
+)compress 
+partition by range (c_varchar)
+(
+partition PARTITION_EXCHANGE_TABLE_005_1_1  values less than ('AAAA') ,
+partition PARTITION_EXCHANGE_TABLE_005_1_2  values less than ('ZZZZ') 
+);
+create index index_PARTITION_PARTITION_EXCHANGE_TABLE_005_1 on fvt_data_partition_exchange.PARTITION_EXCHANGE_TABLE_005_1(c_smallint) local
+(
+partition PARTITION_EXCHANGE_TABLE_005_1_1   ,
+partition PARTITION_EXCHANGE_TABLE_005_1_2   
+);
+
+create table fvt_data_partition_exchange.PARTITION_EXCHANGE_TABLE_005_2
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(100), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp without time zone ,
+c_timestamp_2 timestamp with time zone,
+c_date date
+);
+create index index_PARTITION_EXCHANGE_TABLE_005_2 on fvt_data_partition_exchange.PARTITION_EXCHANGE_TABLE_005_2(c_smallint);
+
+alter table fvt_data_partition_exchange.PARTITION_EXCHANGE_TABLE_005_1 exchange partition (PARTITION_EXCHANGE_TABLE_005_1_2) with table fvt_data_partition_exchange.PARTITION_EXCHANGE_TABLE_005_2 with validation;
+
+
+--I1.创建分区表
+create table fvt_data_partition_exchange.EXCHANGE_TABLE_023_1
+(
+c_smallint smallint,
+c_integer integer default 0,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(100), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp without time zone,
+c_timestamp_2 timestamp with time zone,
+c_date date
+)
+partition by range (c_smallint,c_integer,c_bigint,c_decimal)
+(
+partition PARTITION_EXCHANGE_TABLE_023_1_1  values less than (0,0,0,0) ,
+partition PARTITION_EXCHANGE_TABLE_023_1_2  values less than (3,30,300,400.3) ,
+partition PARTITION_EXCHANGE_TABLE_023_1_3  values less than (6,60,600,800.6) ,
+partition PARTITION_EXCHANGE_TABLE_023_1_4  values less than (10,100,1000,1100.2) 
+);
+create index index_EXCHANGE_TABLE_023_1 on fvt_data_partition_exchange.EXCHANGE_TABLE_023_1(c_smallint) local;
+--I2.创建普通表
+create table fvt_data_partition_exchange.EXCHANGE_TABLE_023_2
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(100), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp without time zone ,
+c_timestamp_2 timestamp with time zone,
+c_date date
+);
+create index index_EXCHANGE_TABLE_023_2 on fvt_data_partition_exchange.EXCHANGE_TABLE_023_2(c_smallint);
+--I4.exchange表
+alter table fvt_data_partition_exchange.EXCHANGE_TABLE_023_1 exchange partition (PARTITION_EXCHANGE_TABLE_023_1_1) with table fvt_data_partition_exchange.EXCHANGE_TABLE_023_2 without validation;
+
+drop schema fvt_data_partition_exchange cascade;
+
+drop schema columnar_storage cascade;
+create schema columnar_storage;
+create table columnar_storage.create_columnar_table_012 ( c_smallint smallint null,c_double_precision double precision,c_time_without_time_zone time without time zone null,c_time_with_time_zone time with time zone,c_integer integer default 23423,c_bigint bigint default 923423432,c_decimal decimal(19) default 923423423,c_real real,c_numeric numeric(18,12) null,c_varchar varchar(19),c_char char(57) null,c_timestamp_with_timezone timestamp with time zone,c_char2 char default '0',c_text text null,c_varchar2 varchar2(20),c_timestamp_without_timezone timestamp without time zone,c_date date,c_varchar22 varchar2(11621),c_numeric2 numeric null ) distribute by hash(c_date)
+partition by range(c_smallint)(
+partition create_columnar_table_partition_p1 values less than(1),
+partition create_columnar_table_partition_p2 values less than(3),
+partition create_columnar_table_partition_p3 values less than(7),
+partition create_columnar_table_partition_p4 values less than(2341),
+partition create_columnar_table_partition_p5 values less than(11121),
+partition create_columnar_table_partition_p6 values less than(22222)) ;
+alter table columnar_storage.create_columnar_table_012 add partition partition_create_columnar_table_012_07 values less than(maxvalue);
+copy columnar_storage.create_columnar_table_012 from '@abs_srcdir@/data/exchange.data'; 
+
+select count(*) from columnar_storage.create_columnar_table_012 partition(create_columnar_table_partition_p5);
+select avg((length(upper(trim(both 'y' from c_varchar22))))) 
+from columnar_storage.create_columnar_table_012 partition(create_columnar_table_partition_p5) where  
+ mod(abs(hashint4(c_integer)),1024) in (0,1,6,7,12,13,18,19,24,25,30,31,36,37,42,43,48,49,54,55,60,61,66,67,72,73,78,79,84,85,90,91,96,97,102,103,108,109,114,115,120,121,126,127,132,133,138,139,144,145,150,151,156,157,162,163,168,169,174,175,180,181,186,187,192,193,198,199,204,205,210,211,216,217,222,223,228,229,234,235,240,241,246,247,252,253,258,259,264,265,270,271,276,277,282,283,288,289,294,295,300,301,306,307,312,313,318,319,324,325,330,331,336,337,342,343,348,349,354,355,360,361,366,367,372,373,378,379,384,385,390,391,396,397,402,403,408,409,414,415,420,421,426,427,432,433,438,439,444,445,450,451,456,457,462,463,468,469,474,475,480,481,486,487,492,493,498,499,504,505,510,511,8,649,654,655,660,661,666,667,672,672673,678,679,684,685,690,691,696,697,702,703,708,709,714,715,720,721,726,727,732,733,738,739,744,745,750,751,756,757,762,763,768,769,774,775,780,781,786,787,792,793,798,799,804,805,810,811,816,817,822,823,828,829,834,835,840,841,846,847,852,853,858,859,864,865,870,871,876,877,882,883,888,889,894,895,900,901,906,907,912,913,918,919,924,925,930,931,936,937,942,943,948,949,954,955,960,961,966,967,972,973,978,979,984,985,990,991,996,997,1002,1003,1008,1009,1014,1015,1020,0,1,34,6,5,787,434,345);
+
+create table columnar_storage.create_columnar_normal_table_012(like columnar_storage.create_columnar_table_012 including defaults) distribute by hash(c_date);
+
+alter table columnar_storage.create_columnar_table_012 exchange partition(create_columnar_table_partition_p5) with table columnar_storage.create_columnar_normal_table_012;
+
+select count(*) from columnar_storage.create_columnar_normal_table_012;
+select avg((length(upper(trim(both 'y' from c_varchar22))))) from columnar_storage.create_columnar_normal_table_012 where mod(abs(hashint4(c_integer)),1024) in (0,1,6,7,12,13,18,19,24,25,30,31,36,37,42,43,48,49,54,55,60,61,66,67,72,73,78,79,84,85,90,91,96,97,102,103,108,109,114,115,120,121,126,127,132,133,138,139,144,145,150,151,156,157,162,163,168,169,174,175,180,181,186,187,192,193,198,199,204,205,210,211,216,217,222,223,228,229,234,235,240,241,246,247,252,253,258,259,264,265,270,271,276,277,282,283,288,289,294,295,300,301,306,307,312,313,318,319,324,325,330,331,336,337,342,343,348,349,354,355,360,361,366,367,372,373,378,379,384,385,390,391,396,397,402,403,408,409,414,415,420,421,426,427,432,433,438,439,444,445,450,451,456,457,462,463,468,469,474,475,480,481,486,487,492,493,498,499,504,505,510,511,8,649,654,655,660,661,666,667,672,672673,678,679,684,685,690,691,696,697,702,703,708,709,714,715,720,721,726,727,732,733,738,739,744,745,750,751,756,757,762,763,768,769,774,775,780,781,786,787,792,793,798,799,804,805,810,811,816,817,822,823,828,829,834,835,840,841,846,847,852,853,858,859,864,865,870,871,876,877,882,883,888,889,894,895,900,901,906,907,912,913,918,919,924,925,930,931,936,937,942,943,948,949,954,955,960,961,966,967,972,973,978,979,984,985,990,991,996,997,1002,1003,1008,1009,1014,1015,1020,0,1,34,6,5,787,434,345);
+drop schema columnar_storage cascade;

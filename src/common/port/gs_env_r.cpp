@@ -44,9 +44,8 @@ int gs_putenv_r(char* envvar)
 
 char* gs_getenv_r(const char* name)
 {
-    char* ret = NULL;
     (void)syscalllockAcquire(&env_lock);
-    ret = getenv(name);
+    char* ret = getenv(name);
     (void)syscalllockRelease(&env_lock);
     return ret;
 }

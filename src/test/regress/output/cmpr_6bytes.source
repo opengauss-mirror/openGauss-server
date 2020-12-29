@@ -20,7 +20,7 @@ CREATE TABLE cmpr_6bytes_00 (
 INSERT INTO cmpr_6bytes_00 SELECT generate_series(1, 5000), 
 	'12:34:56:78:90:ab', '12:34:56:78:90:ab', '12:34:56:78:90:ab', '12:34:56:78:90:ab', '12:34:56:78:90:ab', '12:34:56:78:90:ab', '12:34:56:78:90:ab',
 	'12:34:56:78:90:ab', '12:34:56:78:90:ab', '12:34:56:78:90:ab', '12:34:56:78:90:ab', '12:34:56:78:90:ab', '12:34:56:78:90:ab';
-COPY cmpr_6bytes_00 TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_6bytes.data';
+COPY cmpr_6bytes_00 TO '@abs_srcdir@/data/cmpr_6bytes.data';
 CREATE TABLE cmpr_6bytes_01 (
 	RR_ID int,
 	R0_ID MACADDR,
@@ -36,8 +36,8 @@ CREATE TABLE cmpr_6bytes_01 (
 	R10_ID MACADDR,
 	R11_ID MACADDR,
 	R12_ID MACADDR
-) COMPRESS;
-COPY cmpr_6bytes_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_6bytes.data';
+) ;
+COPY cmpr_6bytes_01 FROM '@abs_srcdir@/data/cmpr_6bytes.data';
 SELECT (SELECT COUNT(*) FROM cmpr_6bytes_00) - (SELECT COUNT(*) FROM cmpr_6bytes_01);
  ?column? 
 ----------
@@ -56,4 +56,4 @@ SELECT (SELECT COUNT(*) FROM cmpr_6bytes_00) - (SELECT COUNT(*) FROM cmpr_6bytes
 
 DROP TABLE cmpr_6bytes_00;
 DROP TABLE cmpr_6bytes_01;
-\! rm @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_6bytes.data
+\! rm @abs_srcdir@/data/cmpr_6bytes.data

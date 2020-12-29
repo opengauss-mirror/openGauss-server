@@ -1,0 +1,937 @@
+-- Nov 13, succeeded queries:
+-- Q1,Q2,Q3,Q4,Q5,Q6,Q10,Q11,Q12,Q13,Q14,Q15,Q16,Q17,Q18,Q19,Q20,Q22
+-- DDL
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+NOTICE:  foreign table "lineitem" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+NOTICE:  foreign table "customer" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+NOTICE:  foreign table "orders" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+NOTICE:  foreign table "part" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+NOTICE:  foreign table "partsupp" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+NOTICE:  foreign table "supplier" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+NOTICE:  foreign table "nation" does not exist, skipping
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+NOTICE:  foreign table "region" does not exist, skipping
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER 	HDFS_FDW OPTIONS (type 'hdfs', address '@hdfshostname@:@hdfsport@',hdfscfgpath '@hdfscfgpath@');
+Create foreign table lineitem (
+ L_ORDERKEY    INT,
+ L_PARTKEY     INT,
+ L_SUPPKEY     INT,
+ L_LINENUMBER  INT,
+ L_QUANTITY    DECIMAL(15,2),
+ L_EXTENDEDPRICE  DECIMAL(15,2),
+ L_DISCOUNT    DECIMAL(15,2),
+ L_TAX         DECIMAL(15,2),
+ L_RETURNFLAG  CHAR(1),
+ L_LINESTATUS  CHAR(1),
+ L_SHIPDATE    DATE,
+ L_COMMITDATE  DATE,
+ L_RECEIPTDATE DATE,
+ L_SHIPINSTRUCT CHAR(25),
+ L_SHIPMODE     CHAR(10),
+ L_COMMENT      VARCHAR(44)
+)
+SERVER hdfs_server OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb_small.db/tpch_lineitem_small_parquet_compressed/')
+distribute by roundrobin;
+CREATE FOREIGN TABLE customer ( 
+ C_CUSTKEY     INT,
+ C_NAME        VARCHAR(25),
+ C_ADDRESS     VARCHAR(40),
+ C_NATIONKEY   INT,
+ C_PHONE       CHAR(15),
+ C_ACCTBAL     DECIMAL(15,2)  ,
+ C_MKTSEGMENT  CHAR(10),
+ C_COMMENT     VARCHAR(117)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb_small.db/tpch_customer_small_parquet_compressed/')
+distribute by roundrobin;
+create foreign table orders (
+ O_ORDERKEY       INT,
+ O_CUSTKEY        INT,
+ O_ORDERSTATUS    CHAR(1),
+ O_TOTALPRICE     DECIMAL(15,2),
+ O_ORDERDATE      DATE,
+ O_ORDERPRIORITY  CHAR(15),  
+ O_CLERK          CHAR(15), 
+ O_SHIPPRIORITY   INT,
+ O_COMMENT        VARCHAR(79)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb_small.db/tpch_orders_small_parquet_compressed/')
+distribute by roundrobin;
+create foreign table part  (
+ P_PARTKEY     INT,
+ P_NAME        VARCHAR(55),
+ P_MFGR        CHAR(25),
+ P_BRAND       CHAR(10),
+ P_TYPE        VARCHAR(25),
+ P_SIZE        INT,
+ P_CONTAINER   CHAR(10),
+ P_RETAILPRICE DECIMAL(15,2),
+ P_COMMENT     VARCHAR(23)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb_small.db/tpch_part_small_parquet_compressed/')
+distribute by roundrobin;
+create foreign table supplier  (
+ S_SUPPKEY     INT,
+ S_NAME        CHAR(25),
+ S_ADDRESS     VARCHAR(40),
+ S_NATIONKEY   INT,
+ S_PHONE       CHAR(15),
+ S_ACCTBAL     DECIMAL(15,2),
+ S_COMMENT     VARCHAR(101)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb_small.db/tpch_supplier_small_parquet_compressed/')
+distribute by roundrobin;
+create foreign table partsupp (
+ PS_PARTKEY     INT,
+ PS_SUPPKEY     INT,
+ PS_AVAILQTY    INT,
+ PS_SUPPLYCOST  DECIMAL(15,2) ,
+ PS_COMMENT     VARCHAR(199)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb_small.db/tpch_partsupp_small_parquet_compressed/')
+distribute by roundrobin;
+create foreign table nation  (
+ N_NATIONKEY  INT,
+ N_NAME       CHAR(25),
+ N_REGIONKEY  INT,
+ N_COMMENT    VARCHAR(152)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb_small.db/tpch_nation_small_parquet_compressed/')
+distribute by roundrobin;
+create foreign table region  (
+ R_REGIONKEY  INT,
+ R_NAME       CHAR(25),
+ R_COMMENT    VARCHAR(152)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb_small.db/tpch_region_small_parquet_compressed/')
+distribute by roundrobin;
+set enable_nestloop=off;
+set enable_mergejoin=off;
+-- Q1
+-- q1_pricing_summary_report
+-- single query (original)
+SELECT 
+  L_RETURNFLAG, L_LINESTATUS, CAST(SUM(L_QUANTITY) AS INT8), CAST(SUM(L_EXTENDEDPRICE) AS INT8) , CAST(SUM(L_EXTENDEDPRICE*(1-L_DISCOUNT)) AS INT8), CAST(SUM(L_EXTENDEDPRICE*(1-L_DISCOUNT)*(1+L_TAX)) AS INT8), CAST(AVG(L_QUANTITY) AS INT8), CAST(AVG(L_EXTENDEDPRICE) as INT8), CAST(AVG(L_DISCOUNT) AS INT8), COUNT(1) 
+FROM 
+  lineitem 
+WHERE 
+  L_SHIPDATE<='1998-09-02' 
+GROUP BY L_RETURNFLAG, L_LINESTATUS 
+ORDER BY L_RETURNFLAG, L_LINESTATUS;
+ l_returnflag | l_linestatus | sum |  sum   |  sum   |  sum   | avg |  avg  | avg | count 
+--------------+--------------+-----+--------+--------+--------+-----+-------+-----+-------
+ A            | F            |  40 |  51568 |  47958 |  48438 |  40 | 51568 |   0 |     1
+ N            | O            | 209 | 306900 | 288283 | 304953 |  26 | 38362 |   0 |     8
+ R            | F            |   1 |   1575 |   1433 |   1462 |   1 |  1575 |   0 |     1
+(3 rows)
+
+-- Q2
+-- come from Hive, which rewrite out subqueries
+create table q2_minimum_cost_supplier_tmp1 as (select
+  (s.s_acctbal ), s.s_name, n.n_name, p.p_partkey, (ps.ps_supplycost), p.p_mfgr, s.s_address, s.s_phone, s.s_comment
+from
+  nation n join region r
+  on
+    n.n_regionkey = r.r_regionkey and r.r_name = 'EUROPE'
+  join supplier s
+  on
+s.s_nationkey = n.n_nationkey
+  join partsupp ps
+  on
+s.s_suppkey = ps.ps_suppkey
+  join part p
+  on
+    p.p_partkey = ps.ps_partkey and p.p_size = 15 and p.p_type like '%BRASS');
+create table q2_minimum_cost_supplier_tmp2 as (
+select
+  p_partkey, (min(ps_supplycost) )
+from
+  q2_minimum_cost_supplier_tmp1
+group by p_partkey);
+select
+  CAST(t1.s_acctbal AS INT8), t1.s_name, t1.n_name, t1.p_partkey, t1.p_mfgr, t1.s_address, t1.s_phone, t1.s_comment
+from
+  q2_minimum_cost_supplier_tmp1 t1 join q2_minimum_cost_supplier_tmp2 t2
+on
+  t1.p_partkey = t2.p_partkey and t1.ps_supplycost=t2.min
+order by s_acctbal desc, n_name, s_name, p_partkey
+limit 100; 
+ s_acctbal | s_name | n_name | p_partkey | p_mfgr | s_address | s_phone | s_comment 
+-----------+--------+--------+-----------+--------+-----------+---------+-----------
+(0 rows)
+
+DROP TABLE IF EXISTS q2_minimum_cost_supplier_tmp2;
+DROP TABLE IF EXISTS q2_minimum_cost_supplier_tmp1;
+-- Q3
+-- TPC-H/TPC-R Shipping Priority Query (Q3)
+select 
+  l_orderkey, CAST(sum(l_extendedprice*(1-l_discount)) AS INT8) as revenue, o_orderdate, o_shippriority 
+from 
+  customer c join orders o 
+    on c.c_mktsegment = 'BUILDING' and c.c_custkey = o.o_custkey 
+  join lineitem l 
+    on l.l_orderkey = o.o_orderkey
+where 
+  o_orderdate < '1995-03-15' and l_shipdate > '1995-03-15' 
+group by l_orderkey, o_orderdate, o_shippriority 
+order by revenue desc, o_orderdate 
+limit 10;
+ l_orderkey | revenue | o_orderdate | o_shippriority 
+------------+---------+-------------+----------------
+(0 rows)
+
+--Q4:
+--Same as impala
+select
+	o_orderpriority,
+	count(*) as order_count
+from
+	orders
+where
+	o_orderdate >= '1993-07-01'
+	and o_orderdate < '1993-10-01'
+	and exists (
+		select
+			*
+		from
+			lineitem
+		where
+			l_orderkey = o_orderkey
+			and l_commitdate < l_receiptdate
+	)
+group by
+	o_orderpriority
+order by
+	o_orderpriority;
+ o_orderpriority | order_count 
+-----------------+-------------
+(0 rows)
+
+-- Q5
+-- TPC-H/TPC-R Local Supplier Volume Query (Q5)
+-- Functional Query Definition
+-- Approved February 1998
+select
+        n_name,
+        CAST(sum(l_extendedprice * (1 - l_discount)) AS INT8) as revenue
+from
+        customer,
+        orders,
+        lineitem,
+        supplier,
+        nation,
+        region
+where
+        c_custkey = o_custkey
+        and l_orderkey = o_orderkey
+        and l_suppkey = s_suppkey
+        and c_nationkey = s_nationkey
+        and s_nationkey = n_nationkey
+        and n_regionkey = r_regionkey
+        and r_name = 'ASIA'
+        and o_orderdate >= '1994-01-01'
+        and o_orderdate < '1995-01-01'
+group by
+        n_name
+order by
+        revenue desc;
+ n_name | revenue 
+--------+---------
+(0 rows)
+
+-- Q6
+-- TPC-H/TPC-R Forecasting Revenue Change Query (Q6)
+-- Functional Query Definition
+-- Approved February 1998
+select
+	CAST(sum(l_extendedprice * l_discount) AS INT8) as revenue
+from
+	lineitem
+where
+	l_shipdate >= '1994-01-01'
+	and l_shipdate < '1995-01-01'
+	and l_discount >= 0.06 - 0.01
+    and l_discount <= 0.06 + 0.01
+	and l_quantity < 24;
+ revenue 
+---------
+        
+(1 row)
+
+-- Q10
+-- TPC-H/TPC-R Returned Item Reporting Query (Q10)
+-- Functional Query Definition
+-- Approved February 1998
+select
+	c_custkey,
+	c_name,
+	CAST(sum(l_extendedprice * (1 - l_discount)) AS INT8) as revenue,
+	CAST(c_acctbal AS INT8),
+	n_name,
+	c_address,
+	c_phone,
+	c_comment
+from
+	customer,
+	orders,
+	lineitem,
+	nation
+where
+	c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate >= '1993-10-01'
+	and o_orderdate < '1994-01-01'
+	and l_returnflag = 'R'
+	and c_nationkey = n_nationkey
+group by
+	c_custkey,
+	c_name,
+	c_acctbal,
+	c_phone,
+	n_name,
+	c_address,
+	c_comment
+order by
+	revenue desc
+limit 20;
+ c_custkey | c_name | revenue | c_acctbal | n_name | c_address | c_phone | c_comment 
+-----------+--------+---------+-----------+--------+-----------+---------+-----------
+(0 rows)
+
+-- q11_important_stock
+-- used intermediate table
+create table q11_part_tmp(ps_partkey, part_value) as (
+select 
+  ps_partkey, (sum(ps_supplycost * ps_availqty) ) as part_value 
+from
+  nation n join supplier s 
+  on 
+    s.s_nationkey = n.n_nationkey and n.n_name = 'GERMANY'
+  join partsupp ps 
+  on 
+    ps.ps_suppkey = s.s_suppkey
+group by ps_partkey);
+create table q11_sum_tmp(total_value) distribute by roundrobin as (
+select 
+  (sum(part_value)) as total_value
+from 
+  q11_part_tmp);
+  
+select 
+  ps_partkey, CAST(part_value AS INT8) as value
+from (select ps_partkey, part_value, total_value from q11_part_tmp, q11_sum_tmp) a
+where part_value > total_value * 0.0001
+order by value desc limit 100;
+ ps_partkey | value 
+------------+-------
+(0 rows)
+
+DROP TABLE IF EXISTS q11_part_tmp;
+DROP TABLE IF EXISTS q11_sum_tmp;
+-- q12_shipping
+-- HIVE query
+select 
+  l_shipmode,
+  sum(case
+    when o_orderpriority ='1-URGENT'
+         or o_orderpriority ='2-HIGH'
+    then 1
+    else 0
+end
+  ) as high_line_count,
+  sum(case
+    when o_orderpriority <> '1-URGENT'
+         and o_orderpriority <> '2-HIGH'
+    then 1
+    else 0
+end
+  ) as low_line_count
+from
+  orders o join lineitem l 
+  on 
+    o.o_orderkey = l.l_orderkey and l.l_commitdate < l.l_receiptdate
+and l.l_shipdate < l.l_commitdate and l.l_receiptdate >= '1994-01-01' 
+and l.l_receiptdate < '1995-01-01'
+where 
+  l.l_shipmode = 'MAIL' or l.l_shipmode = 'SHIP'
+group by l_shipmode
+order by l_shipmode;
+ l_shipmode | high_line_count | low_line_count 
+------------+-----------------+----------------
+(0 rows)
+
+--q13_customer_distribution
+--HIVE query
+select 
+  c_count, count(1) as custdist
+from 
+  (select 
+     c_custkey, count(o_orderkey) as c_count
+   from 
+     customer c left outer join orders o 
+     on 
+       c.c_custkey = o.o_custkey and not o.o_comment like '%special%requests%'
+   group by c_custkey
+   ) c_orders
+group by c_count
+order by custdist desc, c_count desc;
+ c_count | custdist 
+---------+----------
+       0 |       10
+(1 row)
+
+-- Q14
+-- TPC-H/TPC-R Promotion Effect Query (Q14)
+-- Functional Query Definition
+-- Approved February 1998
+select
+	CAST(100.00 * sum(case
+		when p_type like 'PROMO%'
+			then l_extendedprice * (1 - l_discount)
+		else 0
+	end) / sum(l_extendedprice * (1 - l_discount)) AS INT8) as promo_revenue
+from
+	lineitem,
+	part
+where
+	l_partkey = p_partkey
+	and l_shipdate >= '1995-09-01'
+	and l_shipdate < '1995-10-01';
+ promo_revenue 
+---------------
+              
+(1 row)
+
+	
+-- Q15_top_supplier
+-- using intermediate table as temp storage
+-- have to change '=' to 'in' on "TOTAL_REVENUE = (SELECT MAX(TOTAL_REVENUE) FROM REVENUE0)"  
+CREATE TABLE REVENUE0 (SUPPLIER_NO, TOTAL_REVENUE) AS 
+		(select 
+		  l_suppkey as supplier_no, CAST(sum(l_extendedprice * (1 - l_discount)) AS INT8) as total_revenue
+		from 
+		  lineitem
+		where 
+		  l_shipdate >= '1996-01-01' and l_shipdate < '1996-04-01'
+		group by l_suppkey);
+SELECT S_SUPPKEY, S_NAME, S_ADDRESS, S_PHONE, CAST(TOTAL_REVENUE AS INT8)
+FROM SUPPLIER,  REVENUE0
+WHERE S_SUPPKEY = SUPPLIER_NO AND TOTAL_REVENUE in (SELECT MAX(TOTAL_REVENUE) FROM REVENUE0)
+ORDER BY S_SUPPKEY;
+ s_suppkey | s_name | s_address | s_phone | total_revenue 
+-----------+--------+-----------+---------+---------------
+(0 rows)
+
+DROP TABLE IF EXISTS REVENUE0;
+-- Q16
+-- TPC-H/TPC-R Parts/Supplier Relationship Query (Q16)
+-- Functional Query Definition
+-- Approved February 1998
+-- ATTN: maybe an issue of output
+select
+	p_brand,
+	p_type,
+	p_size,
+	count(ps_suppkey) as supplier_cnt
+from
+	partsupp,
+	part
+where
+	p_partkey = ps_partkey
+	and p_brand <> 'Brand#45'
+	and p_type not like 'MEDIUM POLISHED%'
+	and p_size in (49, 14, 23, 45, 19, 3, 36, 9)
+	and ps_suppkey not in (
+		select
+			s_suppkey
+		from
+			supplier
+		where s_comment like '%Customer%Complaints%'
+	)
+group by
+	p_brand,
+	p_type,
+	p_size
+order by
+	supplier_cnt desc,
+	p_brand,
+	p_type,
+	p_size
+limit 100
+;
+ p_brand | p_type | p_size | supplier_cnt 
+---------+--------+--------+--------------
+(0 rows)
+
+-- q17_small_quantity_order_revenue
+create table lineitem_tmp (t_partkey, t_avg_quantity ) AS(
+select 
+  l_partkey as t_partkey, CAST(0.2 * avg(l_quantity) AS INT8) as t_avg_quantity
+from 
+  lineitem
+group by l_partkey);
+select
+  CAST(sum(l_extendedprice) / 7.0 AS INT8)as avg_yearly
+from
+  (select l_quantity, l_extendedprice, t_avg_quantity from
+   lineitem_tmp t join
+     (select
+        l_quantity, l_partkey, l_extendedprice
+      from
+        part p join lineitem l
+        on
+          p.p_partkey = l.l_partkey
+          and p.p_brand = 'Brand#23'
+          and p.p_container = 'MED BOX'
+      ) l1 on l1.l_partkey = t.t_partkey
+   ) a
+where l_quantity < t_avg_quantity;
+ avg_yearly 
+------------
+           
+(1 row)
+
+DROP TABLE IF EXISTS lineitem_tmp;
+-- Q18
+-- TPC-H/TPC-R Large Volume Customer Query (Q18)
+-- Function Query Definition
+-- Approved February 1998
+select
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	CAST(o_totalprice AS INT8),
+	sum(l_quantity)
+from
+	customer,
+	orders,
+	lineitem
+where
+	o_orderkey in (
+		select
+			l_orderkey
+		from
+			lineitem
+		group by
+			l_orderkey having
+				sum(l_quantity) > 300
+	)
+	and c_custkey = o_custkey
+	and o_orderkey = l_orderkey
+group by
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice
+order by
+	o_totalprice desc,
+	o_orderdate
+limit 100;
+ c_name | c_custkey | o_orderkey | o_orderdate | o_totalprice | sum 
+--------+-----------+------------+-------------+--------------+-----
+(0 rows)
+
+--Q19
+--This query has different result compare to hive.
+--Once we tested this on real cluster, we can
+--compare the result directly against PG single node
+select
+  CAST(sum(l_extendedprice * (1 - l_discount) ) AS INT8) as revenue
+from
+  lineitem l join part p
+  on 
+    p.p_partkey = l.l_partkey    
+where
+  (
+    p_brand = 'Brand#12'
+	and p_container in ('SM CASE','SM BOX','SM PACK','SM PKG')
+	and l_quantity >= 1 and l_quantity <= 11
+	and p_size >= 1 and p_size <= 5
+	and l_shipmode in ('AIR','AIR REG')
+	and l_shipinstruct = 'DELIVER IN PERSON'
+  ) 
+  or 
+  (
+    p_brand = 'Brand#23'
+	and p_container in ('MED BAG','MED BOX','MED PKG','MED PACK')
+	and l_quantity >= 10 and l_quantity <= 20
+	and p_size >= 1 and p_size <= 10
+	and l_shipmode in ('AIR','AIR REG')
+	and l_shipinstruct = 'DELIVER IN PERSON'
+  )
+  or
+  (
+	p_brand = 'Brand#34'
+	and p_container in ('LG CASE','LG BOX','LG PACK','LG PKG')
+	and l_quantity >= 20 and l_quantity <= 30
+	and p_size >= 1 and p_size <= 15
+	and l_shipmode in ('AIR','AIR REG')
+	and l_shipinstruct = 'DELIVER IN PERSON'
+  );
+ revenue 
+---------
+        
+(1 row)
+
+--Q20
+--Potential_partial_promotion
+CREATE TABLE q20_tmp1 (p_partkey) as
+select distinct p_partkey
+from
+  part 
+where 
+  p_name like 'forest%';
+  
+CREATE TABLE q20_tmp2(l_partkey, l_suppkey, sum_quantity) AS
+(select 
+  l_partkey, l_suppkey, 0.5 * sum(l_quantity)
+from
+  lineitem
+where
+  l_shipdate >= '1994-01-01'
+  and l_shipdate < '1995-01-01'
+group by l_partkey, l_suppkey);
+CREATE TABLE q20_tmp3(ps_suppkey, ps_availqty, sum_quantity) AS
+(select 
+  ps_suppkey, ps_availqty, sum_quantity
+from  
+  partsupp ps join q20_tmp1 t1 
+  on 
+    ps.ps_partkey = t1.p_partkey
+  join q20_tmp2 t2 
+  on 
+    ps.ps_partkey = t2.l_partkey and ps.ps_suppkey = t2.l_suppkey);
+CREATE TABLE q20_tmp4(ps_suppkey) AS 
+(select 
+  ps_suppkey
+from 
+  q20_tmp3
+where 
+  ps_availqty > sum_quantity
+group by ps_suppkey);
+select 
+  s_name, s_address
+from 
+  supplier s join nation n
+  on
+    s.s_nationkey = n.n_nationkey
+    and n.n_name = 'CANADA'
+  join q20_tmp4 t4
+  on 
+    s.s_suppkey = t4.ps_suppkey
+order by s_name;
+ s_name | s_address 
+--------+-----------
+(0 rows)
+
+DROP TABLE IF EXISTS q20_tmp4;
+DROP TABLE IF EXISTS q20_tmp3;
+DROP TABLE IF EXISTS q20_tmp2;
+DROP TABLE IF EXISTS q20_tmp1;
+--q22
+--Hive query, used intermediate table
+create table q22_customer_tmp(c_acctbal, c_custkey, cntrycode) as (
+select 
+ CAST((c_acctbal) AS INT8), c_custkey, substr(c_phone, 1, 2) as cntrycode
+from 
+  customer
+where 
+  substr(c_phone, 1, 2) = '13' or
+  substr(c_phone, 1, 2) = '31' or
+  substr(c_phone, 1, 2) = '23' or
+  substr(c_phone, 1, 2) = '29' or
+  substr(c_phone, 1, 2) = '30' or
+  substr(c_phone, 1, 2) = '18' or
+  substr(c_phone, 1, 2) = '17');
+  
+create table q22_customer_tmp1(avg_acctbal) distribute by roundrobin as (
+select
+  (avg(c_acctbal))
+from
+  q22_customer_tmp
+where
+  c_acctbal > 0.00);
+create table q22_orders_tmp as (
+select 
+  o_custkey 
+from 
+  orders
+group by 
+  o_custkey);
+  
+select
+  cntrycode, count(1) as numcust, CAST(sum(c_acctbal) AS INT8) as totacctbal
+from
+( select cntrycode, c_acctbal, avg_acctbal from q22_customer_tmp1 ct1,
+  (
+    select cntrycode, c_acctbal from
+      q22_orders_tmp ot 
+      right outer join q22_customer_tmp ct 
+      on
+        ct.c_custkey = ot.o_custkey
+    where
+      o_custkey is null
+  ) ct2
+) a
+where
+  c_acctbal > avg_acctbal
+group by cntrycode
+order by cntrycode;
+ cntrycode | numcust | totacctbal 
+-----------+---------+------------
+ 30        |       1 |       6385
+(1 row)
+
+DROP TABLE IF EXISTS q22_customer_tmp;
+DROP TABLE IF EXISTS q22_customer_tmp1;
+DROP TABLE IF EXISTS q22_orders_tmp;
+DROP FOREIGN TABLE IF EXISTS orders;
+create foreign table orders (
+O_ORDERKEY BIGINT
+, O_CUSTKEY BIGINT
+, O_ORDERSTATUS CHAR(1)
+, O_TOTALPRICE DECIMAL(15,2)
+, O_ORDERDATE DATE
+, O_ORDERPRIORITY CHAR(15)
+, O_CLERK CHAR(15)
+, O_SHIPPRIORITY BIGINT
+, O_COMMENT VARCHAR(79)
+)
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/mppdb.db/orders_parquet')
+distribute by roundrobin;
+analyze orders;
+select O_CLERK,O_COMMENT from orders where O_ORDERKEY>115000 and O_ORDERKEY<115400 and O_CUSTKEY>100000 order by 1,2;
+     o_clerk     |                                   o_comment                                    
+-----------------+--------------------------------------------------------------------------------
+ Clerk#000000148 | usual deposits boost quick
+ Clerk#000000354 | s the slyly regular requests. stealthily s
+ Clerk#000000373 | eodolites are unusual, express foxes. fluffil
+ Clerk#000000397 | uffily. furiously final pinto beans dazzle carefully ab
+ Clerk#000000479 | among the regular asymptot
+ Clerk#000000534 | ts must have to sleep. special accounts affix bold Tiresias. carefully ironi
+ Clerk#000000650 | posits. even accounts ab
+ Clerk#000000735 | ly ironic notornis. instructions are careful
+ Clerk#000000858 | al requests haggle blithely even p
+ Clerk#000001016 | the furiously regular theodolites. accounts wake slyl
+ Clerk#000001062 |  ironic packages. ir
+ Clerk#000001227 | . foxes nag. regular, bold sheaves are quickly slyly express d
+ Clerk#000001230 | c packages. furiously unusual requests lose. fluffily sp
+ Clerk#000001266 | usual pinto beans. quickly even pint
+ Clerk#000001342 |  furiously regular packages around the regular ac
+ Clerk#000001384 | ly busy courts about the carefully regular requests cajole furious
+ Clerk#000001649 | he unusual foxes boost q
+ Clerk#000001705 | ven foxes use furiously ideas. carefull
+ Clerk#000001766 | out the bold deposits. slyly bold asymptotes solve
+ Clerk#000001986 | y. regularly pending accounts sleep quickly ironic requests-- deposi
+ Clerk#000002017 | uickly even foxes nag according to the ironic notorn
+ Clerk#000002154 | tions along the regular, pending as
+ Clerk#000002211 | ironic theodolites haggle always furiously ironic packages. theod
+ Clerk#000002253 | its. final deposits wake quickly along the deposits. fluffily iron
+ Clerk#000002363 | al packages: fluffily b
+ Clerk#000002475 | theodolites sleep among the closely regular ac
+ Clerk#000002560 |  furiously final packages along the furiously unusual requests detect a
+ Clerk#000002700 | thily ironic notornis detect at the slyly slow deposits. ironic foxes ab
+ Clerk#000002781 | elets alongside of the
+ Clerk#000002870 | uickly pending deposits. carefully unusual theodolites x-ray carefully above t
+ Clerk#000003022 | blithely final theo
+ Clerk#000003291 | r ideas. furiously final braids sleep against the sil
+ Clerk#000003408 | ckly even packages wake carefully among the excuses. carefu
+ Clerk#000003435 | osits. slyly final braids are. carefully bold ideas w
+ Clerk#000003516 | nal, ironic theodolites. even, ironic 
+ Clerk#000003524 | arefully final packages boost carefully ironic accounts. theodolites wake 
+ Clerk#000003536 | r ideas across the instructions haggle care
+ Clerk#000003558 | unts. ironic, even escapades boost alongside of the final,
+ Clerk#000003603 | pitaphs cajole according to the instructions. carefully ironic instructions a
+ Clerk#000004010 | onic pains haggle. instructions along
+ Clerk#000004098 | ar asymptotes use quickly. carefully special deposits 
+ Clerk#000004228 | nto beans integrate blithely requests. quickly express deposits dete
+ Clerk#000004331 | eans hinder quickly among the regular foxes. fluffily fi
+ Clerk#000004343 | s. ironic accounts around the unusual, pending accounts haggle furiously acco
+ Clerk#000004382 |  carefully even asymptotes? caref
+ Clerk#000004663 | the furiously unusual asy
+ Clerk#000004996 | to the regular platelets use slyly unusual patterns. unusu
+ Clerk#000005042 | ly special accounts need to boost furiously bold packages. ca
+ Clerk#000005130 | y blithely express deposits. carefully sil
+ Clerk#000005199 | e regular pinto beans breach pac
+ Clerk#000005281 | d the express ideas. final 
+ Clerk#000005439 | inos use about the furiously special foxes. regular ideas about the b
+ Clerk#000005463 | ending theodolites 
+ Clerk#000005502 | se against the carefully even asymptotes. fluffily pending grouch
+ Clerk#000005639 | accounts are about the final requests. unusual packages nag. express, ironic
+ Clerk#000005774 | nstructions sleep carefully after the regular foxes. slowly regular accounts
+ Clerk#000005802 | ly. regular accounts solve. dolphins cajole fluffily foxes. furiously
+ Clerk#000005809 | ve the pinto beans integrate across the blithely 
+ Clerk#000005923 | grate blithely bold accounts. furiously silent accounts use a
+ Clerk#000005946 | final asymptotes nag blithely above the final, final deposits. ironic, reg
+ Clerk#000006181 | ding requests. blithe sheaves cajole al
+ Clerk#000006324 |  use blithely. carefully pending deposit
+ Clerk#000006446 | l theodolites. requests promise
+ Clerk#000006594 | ecial accounts cajole quickly. unusual theodo
+ Clerk#000006744 |  beans kindle carefully? furiously un
+ Clerk#000006765 | ions are according to the ironic accounts. accounts wak
+ Clerk#000006840 | ncies at the special foxes sleep pending, regular f
+ Clerk#000006849 | d accounts use slyly furiously unusual requests. furiousl
+ Clerk#000006863 |  according to the slyly pending requests wake alongside of the brave, s
+ Clerk#000006923 | ess requests sleep slyly quickly ironic pa
+ Clerk#000007152 | ose. silent, unusual dependencies haggle slyly q
+ Clerk#000007269 | lly silent instructions cajole carefully ironic, final braids. plate
+ Clerk#000007281 | ideas haggle carefully furiously ironic packages. blithely ironic ins
+ Clerk#000007647 | detect according to the slyly p
+ Clerk#000007701 | gular ideas haggle furiously along the quickly even a
+ Clerk#000007958 | ges was slyly. ironically pending requests haggle furiou
+ Clerk#000007982 | counts haggle carefully bold accou
+ Clerk#000008113 | es promise fluffily ironi
+ Clerk#000008167 | heodolites wake slyly along the regular packages. fu
+ Clerk#000008246 | deposits boost silently. final, ironic
+ Clerk#000008559 | yly along the carefully pending
+ Clerk#000008695 | ithely ironic requests. furiously unusual ideas along
+ Clerk#000008710 | ly bold packages wake slowly. quickly bold platelets 
+ Clerk#000008831 | int carefully according to the blithely bo
+ Clerk#000008872 | the furiously express accou
+ Clerk#000008947 |  regular accounts haggle furiously slyly bold de
+ Clerk#000009116 | d excuses. ironic, final orbits haggle blithely
+ Clerk#000009123 | s affix slyly around the ironic pinto beans. reg
+ Clerk#000009206 | . fluffily regular packages boost quickly. fluffily final deposits a
+ Clerk#000009362 | uriously final accounts. regular, regular ideas cajole r
+ Clerk#000009480 | s. regular, regular theodolites are about the furiously slow 
+ Clerk#000009491 | y regular foxes. quic
+ Clerk#000009516 | onic, even platelets cajole careful deposits.
+ Clerk#000009711 | equests detect. express, regular deposits haggle silentl
+ Clerk#000009756 | s use. blithely express requests across the furiously silent pearls ru
+ Clerk#000009767 | lly bold deposits. ironic tithes are furi
+ Clerk#000009852 | en platelets haggle blithely among the carefully even accounts. fluff
+ Clerk#000009876 | kages serve blithely special requests? slyly special dolphin
+(98 rows)
+
+select O_CLERK,O_COMMENT from orders where O_CUSTKEY < 100100 and O_CUSTKEY>100000 and o_orderstatus = 'P' order by 1,2;
+     o_clerk     |                                   o_comment                                    
+-----------------+--------------------------------------------------------------------------------
+ Clerk#000001072 | se carefully above the unusual deposits. regular 
+ Clerk#000001526 | e regular requests. regular accounts sleep car
+ Clerk#000001626 |  furiously furiously final instructions. sometimes pending foxes haggle un
+ Clerk#000001828 | ironic courts detect slyly blithely regular ideas.
+ Clerk#000001949 | latelets. regular requests serve above the final requests. silent packages 
+ Clerk#000003293 | quickly ironic platelet
+ Clerk#000003579 | ckey players boost slyly regularly pending requ
+ Clerk#000003648 | . fluffily silent dolphins might integrate ev
+ Clerk#000004628 | al, express ideas cajole car
+ Clerk#000004740 |  slyly regular instruc
+ Clerk#000004758 |  the carefully regular requests nag about the slyly ironic packages. ruthless,
+ Clerk#000004855 | ironic theodolites. final depths integrate quickly. carefully regular pinto 
+ Clerk#000005113 | en accounts cajole. blithely bold she
+ Clerk#000005197 | deposits sleep fluffily. patterns sleep furiously. furiously pendi
+ Clerk#000006023 | nusual instructions? deposits hinder furiously alongside of t
+ Clerk#000006179 | ges. regular ideas thrash blithely. slyly unusual
+ Clerk#000006264 | to beans. ironic frays against the pearls are blithel
+ Clerk#000006294 | ts about the instructions are furio
+ Clerk#000006351 | detect about the furiously bold pinto beans. slyly final request
+ Clerk#000007060 | against the slyly special ideas affix furiously 
+ Clerk#000007203 | ithely special theodolites according to the doggedly regular f
+ Clerk#000007310 | riously unusual ideas use fluffily against the special foxes. regular idea
+ Clerk#000007431 |  special pinto beans use carefully among t
+ Clerk#000007525 | foxes are furiously. furiously ironic accounts run thinly. careful
+(24 rows)
+
+create foreign table TABLE_EXP_FROM_SUBQUERY_T1(
+D_ID int, D_W_ID int, 
+D_NAME varchar(10), 
+D_STREET_1 varchar(20))SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/subquery.db/table_exp_from_subquery_t1_parquet')
+distribute by roundrobin;
+create foreign table TABLE_EXP_FROM_SUBQUERY_T2(
+W_ID int, 
+W_NAME varchar(10), 
+W_STREET_1 varchar(20))SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/subquery.db/table_exp_from_subquery_t2_parquet')
+distribute by roundrobin;
+set enable_hashjoin=false;
+set enable_mergejoin=false;
+set enable_nestloop=true;
+SELECT * FROM TABLE_EXP_FROM_SUBQUERY_T1 T1 WHERE D_ID IN (SELECT MAX(W_ID) FROM TABLE_EXP_FROM_SUBQUERY_T2) AND D_W_ID < 2 ORDER BY 1,2,3;
+ d_id | d_w_id |   d_name   |     d_street_1     
+------+--------+------------+--------------------
+   10 |      1 | osmgkxgssu | qjrlstdsqgwbirqefi
+(1 row)
+
+set enable_hashjoin=true;
+set enable_mergejoin=false;
+set enable_nestloop=false;
+drop foreign table TABLE_EXP_FROM_SUBQUERY_T1;
+drop foreign table TABLE_EXP_FROM_SUBQUERY_T2;
+CREATE FOREIGN TABLE customer_snappy ( 
+ c_custkey BIGINT, 
+ c_name TEXT, 
+ c_address TEXT, 
+ c_nationkey INT4, 
+ c_phone TEXT, 
+ c_acctbal FLOAT4, 
+ c_mktsegment TEXT, 
+ c_comment TEXT) 
+SERVER hdfs_server
+OPTIONS(format 'parquet', foldername '/user/hive/warehouse/snappy/customer_snappy_parquet/')
+distribute by roundrobin;
+select * from customer_snappy;
+ c_custkey |       c_name       |               c_address                | c_nationkey |     c_phone     | c_acctbal | c_mktsegment |                                                     c_comment                                                     
+-----------+--------------------+----------------------------------------+-------------+-----------------+-----------+--------------+-------------------------------------------------------------------------------------------------------------------
+        20 | Customer#000000020 | JrPk8Pqplj4Ne                          |          22 | 32-957-234-8742 |    7603.4 | FURNITURE    | g alongside of the special excuses-- fluffily enticing packages wake 
+        19 | Customer#000000019 | uc,3bHIx84H,wdrmLOjVsiqXCq2tr          |          18 | 28-396-526-5053 |   8914.71 | HOUSEHOLD    |  nag. furiously careful packages are slyly at the accounts. furiously regular in
+        18 | Customer#000000018 | 3txGO AiuFux3zT0Z9NYaFRnZt             |           6 | 16-155-215-1315 |   5494.43 | BUILDING     | s sleep. carefully even instructions nag furiously alongside of t
+        17 | Customer#000000017 | izrh 6jdqtp2eqdtbkswDD8SG4SzXruMfIXyR7 |           2 | 12-970-682-3487 |      6.34 | AUTOMOBILE   | packages wake! blithely even pint
+        16 | Customer#000000016 | cYiaeMLZSMAOQ2 d0W,                    |          10 | 20-781-609-3107 |   4681.03 | FURNITURE    | kly silent courts. thinly regular theodolites sleep fluffily after 
+        15 | Customer#000000015 | YtWggXoOLdwdo7b0y,BZaGUQMLJMX1Y,EC,6Dn |          23 | 33-687-542-7601 |   2788.52 | HOUSEHOLD    |  platelets. regular deposits detect asymptotes. blithely unusual packages nag slyly at the fluf
+        14 | Customer#000000014 | KXkletMlL2JQEA                         |           1 | 11-845-129-3851 |    5266.3 | FURNITURE    | , ironic packages across the unus
+        13 | Customer#000000013 | nsXQu0oVjD7PM659uC3SRSp                |           3 | 13-761-547-5974 |   3857.34 | BUILDING     | ounts sleep carefully after the close frays. carefully bold notornis use ironic requests. blithely
+        12 | Customer#000000012 | 9PWKuhzT4Zr1Q                          |          13 | 23-791-276-1263 |   3396.49 | HOUSEHOLD    |  to the carefully final braids. blithely regular requests nag. ironic theodolites boost quickly along
+        11 | Customer#000000011 | PkWS 3HlXqwTuzrKg633BEi                |          23 | 33-464-151-3439 |    -272.6 | BUILDING     | ckages. requests sleep slyly. quickly even pinto beans promise above the slyly regular pinto beans. 
+        10 | Customer#000000010 | 6LrEaV6KR6PLVcgl2ArL Q3rqzLzcT1 v2     |           5 | 15-741-346-9870 |   2753.54 | HOUSEHOLD    | es regular deposits haggle. fur
+         9 | Customer#000000009 | xKiAFTjUsCuxfeleNqefumTrjS             |           8 | 18-338-906-3675 |   8324.07 | FURNITURE    | r theodolites according to the requests wake thinly excuses: pending requests haggle furiousl
+         8 | Customer#000000008 | I0B10bB0AymmC, 0PrRYBCP1yGJ8xcBPmWhl5  |          17 | 27-147-574-9335 |   6819.74 | BUILDING     | among the slyly regular theodolites kindle blithely courts. carefully even theodolites haggle slyly along the ide
+         7 | Customer#000000007 | TcGe5gaZNgVePxU5kRrvXBfkasDTea         |          18 | 28-190-982-9759 |   9561.95 | AUTOMOBILE   | ainst the ironic, express theodolites. express, even pinto beans among the exp
+         6 | Customer#000000006 | sKZz0CsnMD7mp4Xd0YrBvx,LREYKUWAh yVn   |          20 | 30-114-968-4951 |   7638.57 | AUTOMOBILE   | tions. even deposits boost according to the slyly bold packages. final accounts cajole requests. furious
+         5 | Customer#000000005 | KvpyuHCplrB84WgAiGV6sYpZq7Tj           |           3 | 13-750-942-6364 |    794.47 | HOUSEHOLD    | n accounts will have to unwind. foxes cajole accor
+         4 | Customer#000000004 | XxVSJsLAGtn                            |           4 | 14-128-190-5944 |   2866.83 | MACHINERY    |  requests. final, regular ideas sleep final accou
+         3 | Customer#000000003 | MG9kdTD2WBHm                           |           1 | 11-719-748-3364 |   7498.12 | AUTOMOBILE   |  deposits eat slyly ironic, even instructions. express foxes detect slyly. blithely even accounts abov
+         2 | Customer#000000002 | XSTf4,NCwDVaWNe6tEgvwfmRchLXak         |          13 | 23-768-687-3665 |    121.65 | AUTOMOBILE   | l accounts. blithely ironic theodolites integrate boldly: caref
+         1 | Customer#000000001 | IVhzIApeRb ot,c,E                      |          15 | 25-989-741-2988 |    711.56 | BUILDING     | to the even, regular platelets. regular, ironic epitaphs nag e
+(20 rows)
+
+DROP FOREIGN TABLE IF EXISTS customer_snappy CASCADE;
+create foreign table null_test (
+a text, 
+b text) 
+server hdfs_server 
+options(format 'parquet', foldername '/user/hive/warehouse/null_2_parquet') 
+distribute by roundrobin;
+select * from null_test order by 1,2;
+ a |  b   
+---+------
+   | NULL
+   | NULL
+(2 rows)
+
+DROP FOREIGN TABLE IF EXISTS null_test CASCADE;
+DROP FOREIGN TABLE IF EXISTS lineitem CASCADE;
+DROP FOREIGN TABLE IF EXISTS customer CASCADE;
+DROP FOREIGN TABLE IF EXISTS orders CASCADE;
+DROP FOREIGN TABLE IF EXISTS part CASCADE;
+DROP FOREIGN TABLE IF EXISTS partsupp CASCADE;
+DROP FOREIGN TABLE IF EXISTS supplier CASCADE;
+DROP FOREIGN TABLE IF EXISTS nation CASCADE;
+DROP FOREIGN TABLE IF EXISTS region CASCADE;
+DROP SERVER hdfs_server CASCADE;

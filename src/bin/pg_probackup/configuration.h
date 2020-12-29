@@ -81,7 +81,7 @@ extern int config_get_opt(int argc, char **argv, ConfigOption cmd_options[],
 extern int config_read_opt(const char *path, ConfigOption options[], int elevel,
 						   bool strict, bool missing_ok);
 extern void config_get_opt_env(ConfigOption options[]);
-extern void config_set_opt(ConfigOption options[], void *var,
+extern void config_set_opt(ConfigOption options[], const void *var,
 						   OptionSource source);
 
 extern char *option_get_value(ConfigOption *opt);

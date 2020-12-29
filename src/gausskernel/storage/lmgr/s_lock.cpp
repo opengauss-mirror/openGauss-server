@@ -49,7 +49,10 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "storage/s_lock.h"
+#include <time.h>
+#include <unistd.h>
+
+#include "storage/lock/s_lock.h"
 #include "utils/atomic.h"
 
 #define MIN_SPINS_PER_DELAY 10
@@ -59,13 +62,13 @@
 #define MAX_DELAY_USEC 1000000L
 
 #ifdef __aarch64__
-int (*arm_tas_spin)(volatile slock_t *lock);
+    int (*arm_tas_spin)(volatile slock_t *lock);
 #endif
 
 /*
  * s_lock_stuck() - complain about a stuck spinlock
  */
-static void s_lock_stuck(const char *file, int line)
+static void s_lock_stuck(void* p, const char* file, int line)
 {
 #if defined(S_LOCK_TEST)
     fprintf(stderr, "\nStuck spinlock detected at %s:%d.\n", file, line);
@@ -78,20 +81,21 @@ static void s_lock_stuck(const char *file, int line)
 /*
  * s_lock(lock) - platform-independent portion of waiting for a spinlock.
  */
-int s_lock(volatile slock_t *lock, const char *file, int line)
+int s_lock(volatile slock_t* lock, const char* file, int line)
 {
-    SpinDelayStatus delayStatus = init_spin_delay((void *)lock);
+    SpinDelayStatus delayStatus = init_spin_delay((void*)lock);
 
     while (TAS_SPIN(lock)) {
         perform_spin_delay(&delayStatus);
     }
+
     finish_spin_delay(&delayStatus);
 
     return delayStatus.delays;
 }
 
 #ifdef USE_DEFAULT_S_UNLOCK
-void s_unlock(volatile slock_t *lock)
+void s_unlock(volatile slock_t* lock)
 {
 #ifdef TAS_ACTIVE_WORD
     /* HP's PA-RISC */
@@ -105,7 +109,7 @@ void s_unlock(volatile slock_t *lock)
 /*
  * Wait while spinning on a contended spinlock.
  */
-void perform_spin_delay(SpinDelayStatus *status)
+void perform_spin_delay(SpinDelayStatus* status)
 {
     /* CPU-specific delay each time through the loop */
     SPIN_DELAY();
@@ -113,7 +117,7 @@ void perform_spin_delay(SpinDelayStatus *status)
     /* Block the process every spins_per_delay tries */
     if (++(status->spins) >= t_thrd.storage_cxt.spins_per_delay) {
         if (++(status->delays) > NUM_DELAYS)
-            s_lock_stuck(status->file, status->line);
+            s_lock_stuck(status->ptr, status->file, status->line);
 
         if (status->cur_delay == 0) /* first time to delay? */
             status->cur_delay = MIN_DELAY_USEC;
@@ -152,7 +156,7 @@ void perform_spin_delay(SpinDelayStatus *status)
  * backend might not live long enough to converge on a good value.  That
  * is handled by the two routines below.
  */
-void finish_spin_delay(SpinDelayStatus *status)
+void finish_spin_delay(SpinDelayStatus* status)
 {
     if (status->cur_delay == 0) {
         /* we never had to delay */

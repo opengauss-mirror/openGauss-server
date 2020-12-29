@@ -36,7 +36,7 @@
 #define AmDataSenderOnDummyStandby() (t_thrd.datasender_cxt.MyDataSnd->sendRole == SNDROLE_DUMMYSTANDBY_STANDBY)
 
 typedef struct {
-    char* receivedFileList; /* Buffer where we store the file list */
+    char* receivedFileList; /* Buffer where we store the file list*/
     int msgLength;          /* File list length we got from dummy */
     slock_t mutex;
 } GlobalIncrementalBcmDefinition;
@@ -60,4 +60,3 @@ void ReplaceOrFreeBcmFileListBuffer(char* file_list, int msglength);
 void InitGlobalBcm(void);
 
 #endif /* _DATASENDER_H */
-

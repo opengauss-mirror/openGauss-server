@@ -74,9 +74,9 @@ static void LZ4FileFlush(LZ4File* lz4File)
      *	lz4File->compressBuf + 8,  compressed data
      */
     int outSize = LZ4_compress_default(lz4File->srcBuf,
-        lz4File->compressBuf + COMPRESS_DATA_SIZE,
-        lz4File->srcDataSize,
-        LZ4_compressBound(lz4File->srcDataSize));
+                                       lz4File->compressBuf + COMPRESS_DATA_SIZE,
+                                       lz4File->srcDataSize,
+                                       LZ4_compressBound(lz4File->srcDataSize));
 
     *(int*)lz4File->compressBuf = outSize;
 
@@ -85,9 +85,9 @@ static void LZ4FileFlush(LZ4File* lz4File)
     /* If the file size exceeds the max size, do not write file any more and return an error */
     if (lz4File->curOffset > COMPRESS_FILESIZE - outSize - COMPRESS_DATA_SIZE) {
         ereport(ERROR,
-            (errcode_for_file_access(),
-                errmsg("could not write to temporary file: the file size exceeds the max size: %ldBYTE",
-                    COMPRESS_FILESIZE)));
+                (errcode_for_file_access(),
+                 errmsg("could not write to temporary file: the file size exceeds the max size: %ldBYTE",
+                        COMPRESS_FILESIZE)));
     }
 
     int bytestowrite =
@@ -176,12 +176,10 @@ size_t LZ4FileRead(LZ4File* lz4File, char* buffer, size_t size)
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not read from temporary file: %m")));
             }
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#pragma GCC diagnostic ignored "-Wunused-variable"
             int decompressedSize = LZ4_decompress_safe(lz4File->compressBuf, lz4File->srcBuf, compressSize, srcSize);
-            Assert(decompressedSize == srcSize);
-#pragma GCC diagnostic pop
+            if (decompressedSize != srcSize) {
+                Assert(false);
+            }
 
             lz4File->readOffset = 0;
             lz4File->srcDataSize = srcSize;

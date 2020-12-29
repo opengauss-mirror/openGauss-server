@@ -1,0 +1,33 @@
+create table heap_copy_minimal_tuple_1(id int, name varchar2(20));
+insert into heap_copy_minimal_tuple_1 values(1,'x');
+insert into heap_copy_minimal_tuple_1 values(11,'xx');
+insert into heap_copy_minimal_tuple_1 values(111,'xxx');
+create table my_table(i int);
+insert into heap_copy_minimal_tuple_1 values(1);
+begin;
+declare foo cursor with hold for select * from heap_copy_minimal_tuple_1 where id > 1;
+declare foo1 cursor with hold for select * from heap_copy_minimal_tuple_1, my_table where id != i;
+end;
+fetch from foo;
+fetch from foo1;
+close foo;
+close foo1;
+
+drop table heap_copy_minimal_tuple_1 cascade;
+drop table my_table cascade;
+
+
+
+create table heap_copy_minimal_tuple_2(a int, b int);
+insert into heap_copy_minimal_tuple_2 select generate_series(1,5), generate_series(1,5);
+analyze heap_copy_minimal_tuple_2;
+with x as
+(select a, b from heap_copy_minimal_tuple_2)
+select 1 from heap_copy_minimal_tuple_2 s 
+where s.a not in 
+(select a from x)
+or exists
+(select 1 from x where x.a=s.a)
+or s.a >     
+(select avg(a) from x where x.b=s.b);
+drop table heap_copy_minimal_tuple_2 cascade;

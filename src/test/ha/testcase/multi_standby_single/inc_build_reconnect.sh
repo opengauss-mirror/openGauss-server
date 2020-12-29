@@ -12,7 +12,7 @@ function test_1()
   inc_build_pattern="dn incremental build completed"
   kill_standby
   echo "standy killed"
-  build_result=`gs_ctl build -D ${standby_data_dir}`
+  build_result=`gs_ctl build -Z single_node -D ${standby_data_dir}`
   if [[ $build_result =~ $inc_build_pattern ]]
   then
     echo "inc build success"

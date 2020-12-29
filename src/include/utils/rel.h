@@ -19,6 +19,8 @@
 #include "catalog/pg_am.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_index.h"
+
+
 #include "fmgr.h"
 #include "nodes/bitmapset.h"
 #include "nodes/nodes.h"
@@ -26,13 +28,15 @@
 #include "pgxc/locator.h"
 #endif
 #include "rewrite/prs2lock.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
 #include "tcop/stmt_retry.h"
 #include "utils/relcache.h"
 #include "utils/partcache.h"
 #include "utils/reltrigger.h"
 #include "utils/partitionmap.h"
+#include "catalog/pg_hashbucket_fn.h"
+
 
 #ifndef HDFS
 #define HDFS "hdfs"
@@ -95,13 +99,14 @@ typedef  struct  RelationBucketKey
  */
 
 typedef struct RelationData {
+
     RelFileNode rd_node; /* relation physical identifier */
     /* use "struct" here to avoid needing to include smgr.h: */
     struct SMgrRelationData* rd_smgr; /* cached file handle, or NULL */
     int rd_refcnt;                    /* reference count */
     BackendId rd_backend;             /* owning backend id, if temporary relation */
+    bool rd_isscannable;              /* rel can be scanned */
     bool rd_isnailed;                 /* rel is nailed in cache */
-    bool        relispopulated; /* matview has query results */
     bool rd_isvalid;                  /* relcache entry is valid */
     char rd_indexvalid;               /* state of rd_indexlist: 0 = not valid, 1 =
                                        * valid, 2 = temporarily forced */
@@ -160,6 +165,7 @@ typedef struct RelationData {
     struct HeapTupleData* rd_indextuple; /* all of pg_index tuple */
     Form_pg_am rd_am;                    /* pg_am tuple for index's AM */
     int rd_indnkeyatts;     /* index relation's indexkey nums */
+	TableAmType rd_tam_type; /*Table accessor method type*/
 
     /*
      * index access support info (used only for an index relation)
@@ -227,11 +233,14 @@ typedef struct RelationData {
     struct PgStat_TableStatus* pgstat_info; /* statistics collection area */
 #ifdef PGXC
     RelationLocInfo* rd_locator_info;
+    PartitionMap* sliceMap;
 #endif
     Relation   parent;
 
     /* double linked list node, partition and bucket relation would be stored in fakerels list of resource owner */
     dlist_node node;
+
+    Oid rd_mlogoid;
 } RelationData;
 
 /*
@@ -276,7 +285,11 @@ typedef struct StdRdOptions {
     bool security_barrier;   /* for views */
     bool enable_rowsecurity; /* enable row level security or not */
     bool force_rowsecurity;  /* force row level security or not */
+    bool enable_tsdb_delta; /* enable delta table for timeseries relations */
 
+    int tsdb_deltamerge_interval;   /* interval for tsdb delta merge job */
+    int tsdb_deltamerge_threshold;   /* data threshold for tsdb delta merge job */
+    int tsdb_deltainsert_threshold;   /* data threshold for tsdb delta insert */
     int max_batch_rows;            /* the upmost rows at each batch inserting */
     int delta_rows_threshold;      /* the upmost rows delta table holds */
     int partial_cluster_rows;      /* row numbers of partial cluster feature */
@@ -285,7 +298,7 @@ typedef struct StdRdOptions {
     bool ignore_enable_hadoop_env; /* ignore enable_hadoop_env */
     bool user_catalog_table;       /* use as an additional catalog relation */
     bool hashbucket;        /* enable hash bucket for this relation */
-
+    bool primarynode;       /* enable primarynode mode for replication table */
     /* info for redistribution */
     Oid rel_cn_oid;
     RedisHtlAction append_mode_internal;
@@ -300,9 +313,15 @@ typedef struct StdRdOptions {
     // StdRdOptionsGetStringData macro must be used for accessing CHAR* type member.
     //
     char* compression; /* compress or not compress */
+    char* table_access_method; /*table access method kind */
     char* orientation; /* row-store or column-store */
     char* ttl; /* time to live for tsdb data management */
     char* period; /* partition range for tsdb data management */
+    char* partition_interval; /* partition interval for streaming contquery table */
+    char* time_column; /* time column for streaming contquery table */
+    char* ttl_interval; /* ttl interval for streaming contquery table */
+    char* gather_interval; /* gather interval for streaming contquery table */
+    char* string_optimize; /* string optimize for streaming contquery table */
     char* version;
     char* wait_clean_gpi; /* pg_partition system catalog wait gpi-clean or not */
     /* item for online expand */
@@ -311,8 +330,6 @@ typedef struct StdRdOptions {
     char* end_ctid_internal;
     char        *merge_list;
     bool on_commit_delete_rows; /* global temp table */
-
-    int parallel_workers; /* max number of parallel workers */
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR 10
@@ -324,18 +341,7 @@ typedef struct StdRdOptions {
  *      from the pov of logical decoding.
  */
 #define RelationIsUsedAsCatalogTable(relation) \
-    ((relation)->rd_options && \
-     ((relation)->rd_rel->relkind == RELKIND_RELATION || (relation)->rd_rel->relkind == RELKIND_MATVIEW) ? \
-        ((StdRdOptions*)(relation)->rd_options)->user_catalog_table : false)
-
-/*
- * RelationGetParallelWorkers
- *		Returns the relation's parallel_workers reloption setting.
- *		Note multiple eval of argument!
- */
-#define RelationGetParallelWorkers(relation, defaultpw) \
-    ((relation)->rd_options ? \
-     ((StdRdOptions *) (relation)->rd_options)->parallel_workers : (defaultpw))
+    ((relation)->rd_options ? ((StdRdOptions*)(relation)->rd_options)->user_catalog_table : false)
 
 #define RelationIsInternal(relation) (RelationGetInternalMask(relation) != INTERNAL_MASK_DISABLE)
 
@@ -419,6 +425,7 @@ typedef struct StdRdOptions {
 #define IndexRelationGetNumberOfKeyAttributes(relation) \
     (AssertMacro((relation)->rd_indnkeyatts != 0), ((relation)->rd_indnkeyatts))
 
+
 /*
  * RelationGetDescr
  *		Returns tuple descriptor for a relation.
@@ -427,7 +434,7 @@ typedef struct StdRdOptions {
 
 /*
  * RelationGetRelationName
- *		Returns the rel's name.
+ *      Returns the rel's name.
  *
  * Note that the name is only unique within the containing namespace.
  */
@@ -458,8 +465,13 @@ typedef struct StdRdOptions {
  */
 #define RelationOpenSmgr(relation)                                                                       \
     do {                                                                                                 \
-        if ((relation)->rd_smgr == NULL)                                                                 \
-            smgrsetowner(&((relation)->rd_smgr), smgropen((relation)->rd_node, (relation)->rd_backend)); \
+        if ((relation)->rd_smgr == NULL) {                                                               \
+            oidvector* bucketlist = NULL;                                                                \
+            if (RELATION_CREATE_BUCKET(relation)) {                                                      \
+                bucketlist = searchHashBucketByOid(relation->rd_bucketoid);                        \
+            }                                                                                            \
+            smgrsetowner(&((relation)->rd_smgr), smgropen((relation)->rd_node, (relation)->rd_backend, 0, bucketlist)); \
+            }                                                                                             \
     } while (0)
 
 /*
@@ -472,7 +484,7 @@ typedef struct StdRdOptions {
     do {                                         \
         if ((relation)->rd_smgr != NULL) {       \
             smgrclose((relation)->rd_smgr);      \
-            Assert((relation)->rd_smgr == NULL); \
+            Assert(RelationIsBucket(relation) || (relation)->rd_smgr == NULL); \
         }                                        \
     } while (0)
 
@@ -503,23 +515,6 @@ typedef struct StdRdOptions {
 #define RelationNeedsWAL(relation)                                     \
     ((relation)->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT || \
         (((relation)->rd_rel->relpersistence == RELPERSISTENCE_TEMP) && STMT_RETRY_ENABLED))
-
-
-/*
- * RelationIsScannable
- *             Currently can only be false for a materialized view which has not been
- *             populated by its query.  This is likely to get more complicated later,
- *             so use a macro which looks like a function.
- */
-#define RelationIsScannable(relation) ((relation)->relispopulated)
-
-/*
- * RelationIsPopulated
- *             Currently, we don't physically distinguish the "populated" and
- *             "scannable" properties of matviews, but that may change later.
- *             Hence, use the appropriate one of these macros in code tests.
- */
-#define RelationIsPopulated(relation) ((relation)->relispopulated)
 
 /*
  * RelationUsesLocalBuffers
@@ -591,6 +586,8 @@ typedef struct StdRdOptions {
 /* routines in utils/cache/relcache.c */
 extern void RelationIncrementReferenceCount(Relation rel);
 extern void RelationDecrementReferenceCount(Relation rel);
+extern void RelationIncrementReferenceCount(Oid relationId);
+extern void RelationDecrementReferenceCount(Oid relationId);
 
 /*
  * RelationIsAccessibleInLogicalDecoding

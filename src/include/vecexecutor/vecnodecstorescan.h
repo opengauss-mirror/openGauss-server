@@ -40,7 +40,6 @@ extern DfsScanState* ExecInitDfsScan(
     DfsScan* node, Relation parentHeapRel, EState* estate, int eflags, bool indexFlag = false);
 extern VectorBatch* ExecCStoreScan(CStoreScanState* node);
 extern VectorBatch* ExecDfsScan(DfsScanState* node);
-extern VectorBatch* ExecTsStoreScan(TsStoreScanState* node);
 extern void ExecReScanDfsScan(DfsScanState* node);
 extern void ExecEndCStoreScan(CStoreScanState* node, bool indexFlag);
 extern void ExecEndDfsScan(DfsScanState* node);
@@ -65,7 +64,7 @@ extern bool IsSorterEmpty(IndexSortState* sort);
 extern void ResetSorter(IndexSortState* sort);
 extern void RunSorter(IndexSortState* sort);
 extern void FetchBatchFromSorter(IndexSortState* sort, VectorBatch* tids);
-extern void FetchTids(AbsIdxScanDesc scandesc, List* indexScanTargetList, PlanState* ps, IndexSortState* sort,
+extern void FetchTids(IndexScanDesc scandesc, List* indexScanTargetList, PlanState* ps, IndexSortState* sort,
     VectorBatch* tids, bool indexOnly);
 
 #endif /* NODECSTORESCAN_H */

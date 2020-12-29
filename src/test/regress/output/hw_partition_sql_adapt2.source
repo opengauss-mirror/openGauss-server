@@ -616,7 +616,7 @@ partition by range(a)
 	partition test_alter_range_owner_p2 values less than (4),
 	partition test_alter_range_owner_p3 values less than (7)
 );
-create user temp_user_range password 'Ttest@123';
+create user temp_user_range password 'Gauss@123';
 -- success: alter owner of range partitioned table
 alter table test_alter_range_owner owner to temp_user_range;
 -- check
@@ -639,7 +639,7 @@ drop user temp_user_range;
 --	partition p3 values less than (7)
 --);
 --
---create user temp_user_interval password 'Ttest@123';
+--create user temp_user_interval password 'Gauss@123';
 --
 ---- success: alter owner of range partitioned table
 --alter table test_alter_interval_owner owner to temp_user_interval;
@@ -974,8 +974,8 @@ drop table test_comment;
 -- 1. test function
 -- 2. test foreign key constraint
 -- 1. test function
-create user temp_user password 'Ttest@123';
-set role temp_user password 'Ttest@123';
+create user temp_user password 'Gauss@123';
+set role temp_user password 'Gauss@123';
 create table test_drop_owned (a int)
 partition by range(a) 
 (
@@ -1016,8 +1016,8 @@ select relname, rolname from pg_class, pg_roles where relname='test_drop_owned_i
 -- success
 drop user temp_user;
 -- 2. test foreign key constraint
-create user temp_user password 'Ttest@123';
-set role temp_user password 'Ttest@123';
+create user temp_user password 'Gauss@123';
+set role temp_user password 'Gauss@123';
 create table test_ordinary_reftable (a int, b text, unique (a, b));
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_ordinary_reftable_a_b_key" for table "test_ordinary_reftable"
 reset role;

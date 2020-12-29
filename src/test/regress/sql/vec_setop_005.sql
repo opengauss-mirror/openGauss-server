@@ -8,22 +8,22 @@ set current_schema=vector_setop_engine;
 ----
 set enable_hashagg=off;
 
-explain (verbose, costs off, nodes off) select * from vector_setop_table_01 intersect all select * from vector_setop_table_02 order by 1, 2, 3;
+explain (verbose, costs off) select * from vector_setop_table_01 intersect all select * from vector_setop_table_02 order by 1, 2, 3;
 select * from vector_setop_table_01 intersect all select * from vector_setop_table_02 order by 1, 2, 3;
 
-explain (verbose, costs off, nodes off) select * from vector_setop_table_01 intersect select * from vector_setop_table_02 order by 1, 2, 3;
+explain (verbose, costs off) select * from vector_setop_table_01 intersect select * from vector_setop_table_02 order by 1, 2, 3;
 select * from vector_setop_table_01 intersect select * from vector_setop_table_02 order by 1, 2, 3;
 
-explain (verbose, costs off, nodes off) select * from vector_setop_table_01 except all select * from vector_setop_table_02 order by 1, 2, 3;
+explain (verbose, costs off) select * from vector_setop_table_01 except all select * from vector_setop_table_02 order by 1, 2, 3;
 select * from vector_setop_table_01 except all select * from vector_setop_table_02 order by 1, 2, 3;
 
-explain (verbose, costs off, nodes off) select * from vector_setop_table_01 except select * from vector_setop_table_02 order by 1, 2, 3;
+explain (verbose, costs off) select * from vector_setop_table_01 except select * from vector_setop_table_02 order by 1, 2, 3;
 select * from vector_setop_table_01 except select * from vector_setop_table_02 order by 1, 2, 3;
 
-explain (verbose, costs off, nodes off) select col_interval from vector_setop_table_01 intersect select col_interval from vector_setop_table_02 order by 1;
+explain (verbose, costs off) select col_interval from vector_setop_table_01 intersect select col_interval from vector_setop_table_02 order by 1;
 select col_interval from vector_setop_table_01 intersect select col_interval from vector_setop_table_02 order by 1;
 
-explain (verbose, costs off, nodes off) select 1 from (select * from vector_setop_table_01 union all select * from vector_setop_table_01) order by 1;
+explain (verbose, costs off) select 1 from (select * from vector_setop_table_01 union all select * from vector_setop_table_01) order by 1;
 select 1 from (select * from vector_setop_table_01 union all select * from vector_setop_table_01) order by 1;
 
 reset enable_hashagg;
@@ -45,5 +45,5 @@ select * from vector_setop_table_05 intersect all select * from vector_setop_tab
 ----
 --- test 7: Test append_merge_exec_nodes of SetOp
 ----
-explain (verbose, costs off, nodes off) select * from vector_setop_table_05 where col_inta = 2 union all select * from vector_setop_table_03 where col_intb = 5 order by 1, 2, 4;
+explain (verbose, costs off) select * from vector_setop_table_05 where col_inta = 2 union all select * from vector_setop_table_03 where col_intb = 5 order by 1, 2, 4;
 select * from vector_setop_table_05 where col_inta = 2 union all select * from vector_setop_table_03 where col_intb = 5 order by 1, 2, 4;

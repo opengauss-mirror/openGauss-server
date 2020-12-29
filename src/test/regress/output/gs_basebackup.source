@@ -1,6 +1,8 @@
 --restart_node
 \! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_incremental_checkpoint=off"
---?expected instance path: [.*/postgresql.conf]
+--?.*
+--?.*
+--?.*
 --?gs_guc set: enable_incremental_checkpoint=off: .*postgresql.conf.*
 
 Total instances: 1. Failed instances: 0.
@@ -14,11 +16,11 @@ CREATE DATABASE
 CREATE TABLESPACE
 CREATE TABLE
 INSERT 0 1
---?total time: .*  ms
+--?total time: .*
 \! @abs_bindir@/gsql -dgs_basebackup -p @portstring@ -f "@abs_srcdir@/sql/gs_basebackup/init/mot.sql";
 CREATE FOREIGN TABLE
 INSERT 0 1
---?total time: .*  ms
+--?total time: .*
 --pre
 \! mkdir @abs_bindir@/../gs_basebackup_node_nstream_np
 \! chmod 700 @abs_bindir@/../gs_basebackup_node_nstream_np
@@ -29,12 +31,12 @@ INSERT 0 1
 --run
 \! chmod +x  @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh
 \! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_nstream_np
---?! [.*][.*][][gs_ctl]: gs_ctl status,datadir is -D ".*/gs_basebackup_node_nstream_np"
---?! gs_ctl: server is running (PID: .*)
---?!.*
+--?.*
+--?.*
+--?.*
 --?.*List of tablespaces.*
 --?.*Name.*|.*Owner.*|.*Location.*
---?--------------------------+.*+-------------------------------------------------------------------------------------------------
+--?.*
 --? gs_basebackup_tablespace |.*| .*/gs_basebackup_tablespace
 (1 row)
 
@@ -54,15 +56,15 @@ INSERT 0 1
  1
 (1 row)
 
---?total time: *  ms
+--?total time: .*
 SHUTDOWN
 \! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_stream_p  stream p
---?! [.*][.*][][gs_ctl]: gs_ctl status,datadir is -D ".*/gs_basebackup_node_stream_p"
---?! gs_ctl: server is running (PID: .*)
---?!.*
+--?.*
+--?.*
+--?.*
 --?.*List of tablespaces.*
 --?.*Name.*|.*Owner.*|.*Location.*  
---?--------------------------+.*+--------------------------
+--?.*
 --? gs_basebackup_tablespace |.*| gs_basebackup_tablespace
 (1 row)
 
@@ -76,7 +78,7 @@ SHUTDOWN
  1
 (1 row)
 
---?total time: .*  ms
+--?total time: .*
  a 
 ---
  1
@@ -85,12 +87,12 @@ SHUTDOWN
 --?total time: .*  ms
 SHUTDOWN
 \! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_fetch_t  fetch t
---?! [.*][.*][][gs_ctl]: gs_ctl status,datadir is -D ".*/gs_basebackup_node_fetch_t"
---?! gs_ctl: server is running (PID: .*)
---?!.*
+--?.*
+--?.*
+--?.*
 --?.*List of tablespaces.*
 --?.*Name.*|.*Owner.*|.*Location.*
---?--------------------------+.*+-------------------------------------------------------------------------------------------------
+--?.*
 --? gs_basebackup_tablespace |.*| .*/gs_basebackup_tablespace
 (1 row)
 
@@ -104,11 +106,11 @@ SHUTDOWN
  1
 (1 row)
 
---?total time: .*  ms
+--?total time: .*
  a 
 ---
  1
 (1 row)
 
---?total time: *  ms
+--?total time: .*  ms
 SHUTDOWN

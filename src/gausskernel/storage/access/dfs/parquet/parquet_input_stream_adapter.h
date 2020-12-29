@@ -21,7 +21,6 @@
  * -------------------------------------------------------------------------
  */
 
-
 #ifndef PARQUET_INPUT_STREAM_ADAPTER_H
 #define PARQUET_INPUT_STREAM_ADAPTER_H
 
@@ -32,7 +31,6 @@
 
 namespace dfs {
 namespace reader {
-
 using Buffer = ::arrow::Buffer;
 
 constexpr size_t MAX_ALLOC_SIZE = MaxAllocSize;
@@ -69,7 +67,6 @@ private:
     uint8_t *m_buffer;
     size_t m_bufferSize;
 };
-
 }  // namespace reader
 }  // namespace dfs
 

@@ -1,0 +1,12 @@
+---do redistribute
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis --help
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -V -m read-only > /dev/null 2>&1
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -m wrongmode > /dev/null 2>&1
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -r -u $USER -d regression -p $PGPORT -j -1 -t 8 -c 2 >/dev/null 2>&1
+\! source @abs_srcdir@/tmp_check/redis_envir_opt && gs_redis -r -u $USER -d regression -p $PGPORT -j 1025 -t 8 -c 2 >/dev/null 2>&1
+\d+ redis_status;
+\d+ redis_progress_detail;
+DROP TABLE IF EXISTS redis_status CASCADE;
+DROP TABLE IF EXISTS redis_progress_detail CASCADE;
+\d+ redis_status;
+\d+ redis_progress_detail;

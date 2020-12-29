@@ -1,15 +1,56 @@
+#test distributed framework
 #show plan
 test: plan_hint
+#test: distribute_joinplan_1 distribute_joinplan_2 distribute_joinplan_new
+#show new distributed framework results
+#test: distribute_joinnew distribute_joinnew2
+#test: distribute_timeout
+#test: distribute_dml
+#test: random_plan
+#test: hashfilter
+#test: reduce_orderby
+#test: backtrace_log
+# ----------
+# test for set operations
+# ----------
+#test: distribute_setop distribute_limit 
+#test: distribute_distinct distribute_prepare 
+#test: distribute_statistic distribute_unsupported_features 
+#test: distribute_function 
+#test: distribute_aggregates distribute_count_distinct 
+#test: distribute_other
+#test: global_stats
+#test: bulkload_start
+#test: bulkload_parallel_test_1 bulkload_parallel_test_2 bulkload_parallel_test_3 bulkload_parallel_test_4
+#test: bulkload_end
+#test: bulkload_error_tbl
+
 
 ###split from parallel_schedule4###
+
+# all pass
+# run tablespace by itself, and first, because it forces a checkpoint;
+# we'd prefer not to have checkpoints later in the tests because that
+# interferes with crash-recovery testing.
+#test: hw_alter_session
+#test: tablespace
+
+#test: hw_account_lock
 
 # ----------
 # Another group of parallel tests
 # ----------
-# plsql_packages tests
-
+# plsql_packages tests, include utl_raw dbms_random dbms_lob dbms_ouput
+#test: hw_packages hw_user
+#test: hw_interval_format hw_function hw_current_schema 
+#test: hw_dba_enable_partition hw_tablespace 
+#test: hw_procedure_define hw_anonymous_block hw_procedure
+#ignore: hw_alter_system
+#test: hw_grant_all hw_dynamic_sql hw_func_return_out 
+#test: hw_function_default_value hw_empty_str_to_null 
 test: hw_empty_str_to_null
 #test: hw_varray hw_cursor hw_schema
+#test: hw_varray hw_schema
 test: hw_schema
 
 test: tpchrush
@@ -19,24 +60,33 @@ test: tpch09 tpch10 tpch11 tpch12
 test: tpch13 tpch14 tpch15 tpch16 
 test: tpch17 tpch18 tpch19 tpch20 tpch18_querymem
 test: tpch21 tpch22 tpch11_pretty_performance
+#test: query_mem_prepare
+#test: query_mem_tpch
 
 #test export
 test: temp__2
+#test: hw_export_unsupport
+#test: hw_export_invalid_options
+#test: hw_export_replication_tbl
+#test: hw_export_normal_tbl
+#test: hw_export_headline_tbl
+#test: hw_to_timestamp
 
-#test: vec_prepare -- original test
-test: vec_prepare_001 vec_prepare_002
-test: vec_prepare_003
+#test readline
+#test: readline
+#test: hw_change_passwd
+#test: hw_view_privilege
+#test: hw_identifier
+#test: hw_hashint1 hw_smalldatetime_hash hw_rawtype_hash 
+#test: hw_nvarchar2_hash cmpr_smallint cmpr_prefix_150left cmpr_uint32_oid
 
-#test sort optimize
-test: sort_optimize_row sort_optimize_column sort_optimize_001
-#test early free
-test: early_free
-#test for col tpch with vector engine disabled
-test: tpch_disablevec01 tpch_disablevec03 tpch_disablevec04
-test: tpch_disablevec05 tpch_disablevec06 tpch_disablevec07
-test: tpch_disablevec08 tpch_disablevec09 tpch_disablevec12
-test: tpch_disablevec13 tpch_disablevec14 tpch_disablevec16
-test: tpch_disablevec18 tpch_disablevec19 tpch_disablevec21
+#test: oidjoins opr_sanity regex
+
+#test pmk
+#test: pmk
+
+#test mppdb encrypt/decrypt function
+#test: hw_cipherfuncs
 
 # This test case is used to monitor CATALOG_VERSION_NO, GUC parameter information and gs_upgrade llt coverage.
 # If CATALOG_VERSION_NO is changed, please inform the OM tools team, the OM tools scripts need to be modified together.

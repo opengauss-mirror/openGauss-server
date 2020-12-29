@@ -1,0 +1,1426 @@
+--
+-- MERGE INTO 
+--
+-- initial
+CREATE SCHEMA xc_mergeinto_col;
+SET current_schema = xc_mergeinto_col;
+CREATE TABLE products_base
+(
+product_id INTEGER DEFAULT 0,
+product_name VARCHAR(60) DEFAULT 'null',
+category VARCHAR(60) DEFAULT 'unknown',
+total INTEGER DEFAULT '0'
+);
+INSERT INTO products_base VALUES (1501, 'vivitar 35mm', 'electrncs', 100);
+INSERT INTO products_base VALUES (1502, 'olympus is50', 'electrncs', 100);
+INSERT INTO products_base VALUES (1600, 'play gym', 'toys', 100);
+INSERT INTO products_base VALUES (1601, 'lamaze', 'toys', 100);
+INSERT INTO products_base VALUES (1666, 'harry potter', 'dvd', 100);
+CREATE TABLE newproducts_base
+(
+product_id INTEGER DEFAULT 0,
+product_name VARCHAR(60) DEFAULT 'null',
+category VARCHAR(60) DEFAULT 'unknown',
+total INTEGER DEFAULT '0'
+);
+INSERT INTO newproducts_base VALUES (1502, 'olympus camera', 'electrncs', 200);
+INSERT INTO newproducts_base VALUES (1601, 'lamaze', 'toys', 200);
+INSERT INTO newproducts_base VALUES (1666, 'harry potter', 'toys', 200);
+INSERT INTO newproducts_base VALUES (1700, 'wait interface', 'books', 200);
+ANALYZE products_base;
+ANALYZE newproducts_base;
+--
+-- PGXC mode(MERGE cannot be pushed down), column table
+--
+CREATE TABLE products_col
+(
+product_id INTEGER DEFAULT 0,
+product_name VARCHAR(60) DEFAULT 'null',
+category VARCHAR(60) DEFAULT 'unknown',
+total INTEGER DEFAULT '0'
+)
+WITH (ORIENTATION=column);
+CREATE TABLE newproducts_col
+(
+product_id INTEGER DEFAULT 0,
+product_name VARCHAR(60) DEFAULT 'null',
+category VARCHAR(60) DEFAULT 'unknown',
+total INTEGER DEFAULT '0'
+)
+WITH (ORIENTATION=column);
+INSERT INTO products_col SELECT * FROM products_base;
+INSERT INTO newproducts_col SELECT * FROM newproducts_base;
+ANALYZE products_col;
+ANALYZE newproducts_col;
+-- explain verbose
+EXPLAIN (VERBOSE on, COSTS off)
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+                                                                                                                                                                                                                                        QUERY PLAN                                                                                                                                                                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Merge on xc_mergeinto_col.products_col p
+   WHEN MATCHED
+     Node/s: All datanodes
+     Remote query: UPDATE ONLY xc_mergeinto_col.products_col p SET product_id = $12, product_name = $13, category = $14, total = $15 WHERE p.ctid = $9 AND p.xc_node_id = $10 AND p.tableoid = $11
+   WHEN NOT MATCHED
+     Node/s: All datanodes
+     Node expr: $16
+     Remote query: INSERT INTO xc_mergeinto_col.products_col (product_id, product_name, category, total) VALUES ($16, $17, $18, $19)
+   ->  Data Node Scan on "_REMOTE_TABLE_QUERY_"
+         Output: np.product_id, np.product_name, np.category, np.total, p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id, p.tableoid, p.product_id, np.product_name, np.category, np.total, np.product_id, np.product_name, np.category, np.total
+         Node/s: All datanodes
+         Remote query: SELECT l.a_1, l.a_2, l.a_3, l.a_4, r.a_1, r.a_2, r.a_3, r.a_4, r.a_5, r.a_6, r.a_7 FROM (SELECT np.product_id, np.product_name, np.category, np.total FROM ONLY xc_mergeinto_col.newproducts_col np WHERE true) l(a_1, a_2, a_3, a_4) LEFT JOIN (SELECT p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id, p.tableoid FROM ONLY xc_mergeinto_col.products_col p WHERE true) r(a_1, a_2, a_3, a_4, a_5, a_6, a_7) ON r.a_1 = l.a_1 WHERE true
+(12 rows)
+
+-- only MATCHED clause
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total;
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | toys      |   200
+(5 rows)
+
+-- only MATCHED clause, has expressions
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category || 'ABC', total = np.total + 100;
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  |   category   | total 
+------------+----------------+--------------+-------
+       1501 | vivitar 35mm   | electrncs    |   100
+       1502 | olympus camera | electrncsABC |   300
+       1600 | play gym       | toys         |   100
+       1601 | lamaze         | toysABC      |   300
+       1666 | harry potter   | toysABC      |   300
+(5 rows)
+
+-- only NOT MATCHED clause
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus is50   | electrncs |   100
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   100
+       1666 | harry potter   | dvd       |   100
+       1700 | wait interface | books     |   200
+(6 rows)
+
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category);
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus is50   | electrncs |   100
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   100
+       1666 | harry potter   | dvd       |   100
+       1700 | wait interface | books     |     0
+(6 rows)
+
+-- only NOT MATCHED clause has insert targetlist
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN 
+  INSERT (product_id, total) VALUES (np.product_id, np.total); --notice: we have 2 fields missing
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+       1700 | null         | unknown   |   200
+(6 rows)
+
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN  
+  INSERT (product_id, total) VALUES (np.product_id, np.total); --notice: we have 2 fields missing
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+       1700 | null         | unknown   |   200
+(6 rows)
+
+-- only NOT MATCHED clause has insert targetlist
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN 
+  INSERT (total, product_id) VALUES (np.total, np.product_id); --notice: 2 fields missing and reversed
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+       1700 | null         | unknown   |   200
+(6 rows)
+
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN  
+  INSERT (total, product_id) VALUES (np.total, np.product_id); --notice: 2 fields missing and reversed
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+       1700 | null         | unknown   |   200
+(6 rows)
+
+-- only NOT MATCHED clause, has expressions
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category || 'ABC', np.total + 100);
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus is50   | electrncs |   100
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   100
+       1666 | harry potter   | dvd       |   100
+       1700 | wait interface | booksABC  |   300
+(6 rows)
+
+-- both MATCHED and NOT MATCHED clause
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(6 rows)
+
+-- both MATCHED and NOT MATCHED clause has constant qual
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id AND 1=1
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+SELECT * FROM products_col ORDER BY 1,2,3,4;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(6 rows)
+
+-- both MATCHED and NOT MATCHED clause has constant qual with subquery
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id AND 1=(select total from products_col order by 1 limit 1)
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+SELECT * FROM products_col ORDER BY 1,2,3,4;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1502 | olympus is50   | electrncs |   100
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   100
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | dvd       |   100
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(9 rows)
+
+-- both MATCHED and NOT MATCHED clause, has expressions
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category || 'ABC', total = np.total + 100
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category || 'ABC', np.total + 100);
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  |   category   | total 
+------------+----------------+--------------+-------
+       1501 | vivitar 35mm   | electrncs    |   100
+       1502 | olympus camera | electrncsABC |   300
+       1600 | play gym       | toys         |   100
+       1601 | lamaze         | toysABC      |   300
+       1666 | harry potter   | toysABC      |   300
+       1700 | wait interface | booksABC     |   300
+(6 rows)
+
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = p.product_name, category = p.category || 'ABC', total = p.total + 100
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category || 'ABC', np.total + 100);
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  |    category     | total 
+------------+----------------+-----------------+-------
+       1501 | vivitar 35mm   | electrncs       |   100
+       1502 | olympus camera | electrncsABCABC |   400
+       1600 | play gym       | toys            |   100
+       1601 | lamaze         | toysABCABC      |   400
+       1666 | harry potter   | toysABCABC      |   400
+       1700 | wait interface | booksABCABC     |   400
+(6 rows)
+
+-- both MATCHED and NOT MATCHED clause, has expressions, has WHERE conditions
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category || 'ABC', total = np.total + 100 WHERE p.category = 'dvd'
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category || 'ABC', np.total + 100) WHERE np.category != 'books';
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | toysABC   |   300
+(5 rows)
+
+-- both MATCHED and NOT MATCHED clause, has expressions, which WHERE conditions is constant
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category || 'ABC', total = np.total + 100 WHERE true
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category || 'ABC', np.total + 100) WHERE false;
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  |   category   | total 
+------------+----------------+--------------+-------
+       1501 | vivitar 35mm   | electrncs    |   100
+       1502 | olympus camera | electrncsABC |   300
+       1600 | play gym       | toys         |   100
+       1601 | lamaze         | toysABC      |   300
+       1666 | harry potter   | toysABC      |   300
+(5 rows)
+
+-- both MATCHED and NOT MATCHED clause, has expressions, has WHERE conditions
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category || 'ABC', total = np.total + 100
+  WHERE p.category = 'dvd' AND np.category = 'toys'
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category || 'DEF', np.total + 100)
+  WHERE np.category != 'books' AND np.total > 100;
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | toysABC   |   300
+(5 rows)
+
+-- partitioned table
+CREATE TABLE products_part_col
+(
+product_id INTEGER,
+product_name VARCHAR2(60),
+category VARCHAR2(60),
+total INTEGER
+)
+WITH (ORIENTATION=column)
+PARTITION BY RANGE (product_id)
+(
+  PARTITION P1 VALUES LESS THAN (1600),
+  PARTITION P2 VALUES LESS THAN (1700),
+  PARTITION P3 VALUES LESS THAN (1800)
+) ENABLE ROW MOVEMENT;
+INSERT INTO products_part_col SELECT * FROM products_base;
+ANALYZE products_part_col;
+MERGE INTO products_part_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category || 'ABC', total = np.total + 100 WHERE p.category = 'dvd'
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category || 'ABC', np.total + 100) WHERE np.category != 'books';
+SELECT * FROM products_part_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | toysABC   |   300
+(5 rows)
+
+-- do a simple equivalent of an INSERT SELECT
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+(5 rows)
+
+SELECT * FROM newproducts_col ORDER BY 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1502 | olympus camera | electrncs |   200
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(4 rows)
+
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN
+    INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus is50   | electrncs |   100
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   100
+       1666 | harry potter   | dvd       |   100
+       1700 | wait interface | books     |   200
+(6 rows)
+
+-- the classic merge
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+(5 rows)
+
+SELECT * FROM newproducts_col ORDER BY 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1502 | olympus camera | electrncs |   200
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(4 rows)
+
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN
+    INSERT VALUES (np.product_id, np.product_name, np.category, np.total)
+WHEN MATCHED THEN
+    UPDATE SET product_name = p.product_name ||' + '|| np.product_name,
+	           category     = p.category ||' + ' || np.category,
+			   total        = p.total + np.total;
+SELECT * FROM products_col ORDER BY 1;
+ product_id |         product_name          |       category        | total 
+------------+-------------------------------+-----------------------+-------
+       1501 | vivitar 35mm                  | electrncs             |   100
+       1502 | olympus is50 + olympus camera | electrncs + electrncs |   300
+       1600 | play gym                      | toys                  |   100
+       1601 | lamaze + lamaze               | toys + toys           |   300
+       1666 | harry potter + harry potter   | dvd + toys            |   300
+       1700 | wait interface                | books                 |   200
+(6 rows)
+
+-- do a simple equivalent of an INSERT SELECT with targetlist
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+(5 rows)
+
+SELECT * FROM newproducts_col ORDER BY 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1502 | olympus camera | electrncs |   200
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(4 rows)
+
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN
+    INSERT (product_id, product_name, total) 
+	VALUES (np.product_id, np.product_name, np.total);
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus is50   | electrncs |   100
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   100
+       1666 | harry potter   | dvd       |   100
+       1700 | wait interface | unknown   |   200
+(6 rows)
+
+-- the on clause is true
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+(5 rows)
+
+SELECT * FROM newproducts_col ORDER BY 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1502 | olympus camera | electrncs |   200
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(4 rows)
+
+MERGE INTO products_col p
+USING newproducts_col np
+ON (select true)
+WHEN NOT MATCHED THEN
+    INSERT (product_id, product_name, total) 
+	VALUES (np.product_id, np.product_name, np.total);
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+(5 rows)
+
+--subquery
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING (select * from newproducts_col ) np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN 
+	UPDATE SET product_name = p.product_name, category = p.category || 'ABC', total = p.total + 100
+WHEN NOT MATCHED THEN
+	INSERT VALUES (np.product_id, np.product_name, np.category || 'DEF', np.total + 200);
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  |   category   | total 
+------------+----------------+--------------+-------
+       1501 | vivitar 35mm   | electrncs    |   100
+       1502 | olympus is50   | electrncsABC |   200
+       1600 | play gym       | toys         |   100
+       1601 | lamaze         | toysABC      |   200
+       1666 | harry potter   | dvdABC       |   200
+       1700 | wait interface | booksDEF     |   400
+(6 rows)
+
+--subquery with expression
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING (select * from newproducts_col ) np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN 
+	UPDATE SET product_name = p.product_name, category = p.category || 'ABC', total = p.total + 100 WHERE np.product_name ='lamaze'
+WHEN NOT MATCHED THEN
+	INSERT VALUES (np.product_id, np.product_name, np.category || 'DEF', np.total + 200) WHERE np.product_name = 'wait interface';
+SELECT * FROM products_col order by 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus is50   | electrncs |   100
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toysABC   |   200
+       1666 | harry potter   | dvd       |   100
+       1700 | wait interface | booksDEF  |   400
+(6 rows)
+
+--subquery with expression
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING (select sp.product_id, sp.product_name, snp.category, snp.total from newproducts_col snp, products_col sp where sp.product_id = snp.product_id) np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN 
+	UPDATE SET product_name = p.product_name, category = p.category || 'ABC', total = p.total + 100 WHERE product_name ='lamaze'
+WHEN NOT MATCHED THEN
+	INSERT VALUES (np.product_id, np.product_name, np.category || 'DEF', np.total + 200) WHERE np.product_name = 'wait interface';
+SELECT * FROM products_col order by 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toysABC   |   200
+       1666 | harry potter | dvd       |   100
+(5 rows)
+
+--subquery has constant
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING (
+select 1501 as product_id, 'vivitar 35mm' as product_name, 'electrncs' as category, 100 as total union all
+select 1502 as product_id, 'olympus is50' as product_name, 'electrncs' as category, 100 as total union all
+select 1600 as product_id, 'play gym' as product_name, 'toys' as category, 100 as total union all
+select 1601 as product_id, 'lamaze' as product_name, 'toys' as category, 100 as total union all
+select 1666 as product_id, 'harry potter' as product_name, 'dvd' as category, 100 as total
+ ) np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN 
+	UPDATE SET product_name = p.product_name, category = p.category || 'ABC', total = p.total + 100
+WHEN NOT MATCHED THEN
+	INSERT VALUES (np.product_id, np.product_name, np.category || 'DEF', np.total + 200);
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name |   category   | total 
+------------+--------------+--------------+-------
+       1501 | vivitar 35mm | electrncsABC |   200
+       1502 | olympus is50 | electrncsABC |   200
+       1600 | play gym     | toysABC      |   200
+       1601 | lamaze       | toysABC      |   200
+       1666 | harry potter | dvdABC       |   200
+(5 rows)
+
+--subquery has aggeration
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING (
+select product_id, product_name, category, sum(total) as total from newproducts_col group by product_id, product_name, category
+ ) np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN 
+	UPDATE SET product_name = p.product_name, category = p.category || 'ABC', total = p.total + 100
+WHEN NOT MATCHED THEN
+	INSERT VALUES (np.product_id, np.product_name, np.category || 'DEF', np.total + 200);
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  |   category   | total 
+------------+----------------+--------------+-------
+       1501 | vivitar 35mm   | electrncs    |   100
+       1502 | olympus is50   | electrncsABC |   200
+       1600 | play gym       | toys         |   100
+       1601 | lamaze         | toysABC      |   200
+       1666 | harry potter   | dvdABC       |   200
+       1700 | wait interface | booksDEF     |   400
+(6 rows)
+
+--subquery has aggeration
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+MERGE INTO products_col p
+USING (
+select product_id, product_name, category, sum(total) as total
+from newproducts_col
+group by product_id, product_name, category
+having sum(total)>100
+order by total
+ ) np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN 
+	UPDATE SET product_name = p.product_name, category = p.category || 'ABC', total = p.total + 100
+WHEN NOT MATCHED THEN
+	INSERT VALUES (np.product_id, np.product_name, np.category || 'DEF', np.total + 200);
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  |   category   | total 
+------------+----------------+--------------+-------
+       1501 | vivitar 35mm   | electrncs    |   100
+       1502 | olympus is50   | electrncsABC |   200
+       1600 | play gym       | toys         |   100
+       1601 | lamaze         | toysABC      |   200
+       1666 | harry potter   | dvdABC       |   200
+       1700 | wait interface | booksDEF     |   400
+(6 rows)
+
+--source table have a view
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+CREATE VIEW v AS (SELECT * FROM newproducts_col WHERE total > 100);
+MERGE INTO products_col p
+USING v np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN 
+	UPDATE SET product_name = p.product_name, category = p.category || 'ABC', total = p.total + 100
+WHEN NOT MATCHED THEN
+	INSERT VALUES (np.product_id, np.product_name, np.category || 'DEF', np.total + 200);
+SELECT * FROM products_col ORDER BY 1;
+ product_id |  product_name  |   category   | total 
+------------+----------------+--------------+-------
+       1501 | vivitar 35mm   | electrncs    |   100
+       1502 | olympus is50   | electrncsABC |   200
+       1600 | play gym       | toys         |   100
+       1601 | lamaze         | toysABC      |   200
+       1666 | harry potter   | dvdABC       |   200
+       1700 | wait interface | booksDEF     |   400
+(6 rows)
+
+--self merge
+TRUNCATE products_col;
+INSERT INTO products_col SELECT * FROM products_base;
+BEGIN;
+MERGE INTO products_col p
+USING products_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN 
+	UPDATE SET product_name = p.product_name, category = p.category || 'ABC', total = p.total + 100
+WHEN NOT MATCHED THEN
+	INSERT VALUES (np.product_id, np.product_name, np.category || 'DEF', np.total + 200);
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name |   category   | total 
+------------+--------------+--------------+-------
+       1501 | vivitar 35mm | electrncsABC |   200
+       1502 | olympus is50 | electrncsABC |   200
+       1600 | play gym     | toysABC      |   200
+       1601 | lamaze       | toysABC      |   200
+       1666 | harry potter | dvdABC       |   200
+(5 rows)
+
+ROLLBACK;
+-- Function scans
+CREATE TABLE fs_target (a int, b int, c text);
+MERGE INTO fs_target t
+USING generate_series(1,100,1) AS id
+ON t.a = id
+WHEN MATCHED THEN
+    UPDATE SET b = b + id
+WHEN NOT MATCHED THEN
+    INSERT VALUES (id, -1);
+MERGE INTO fs_target t
+USING generate_series(1,100,2) AS id
+ON t.a = id
+WHEN MATCHED THEN
+    UPDATE SET b = b + id, c = 'updated '|| id.*::text
+WHEN NOT MATCHED THEN
+    INSERT VALUES (id, -1, 'inserted ' || id.*::text);
+SELECT count(*) FROM fs_target;
+ count 
+-------
+   100
+(1 row)
+
+DROP TABLE fs_target;
+--default values for insert values
+BEGIN;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN
+  INSERT VALUES (DEFAULT);
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN
+  INSERT VALUES (DEFAULT, np.product_name, np.category, DEFAULT);
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN
+  INSERT DEFAULT VALUES;
+select * from  products_col order by 1,2,3,4;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+          0 | null           | unknown   |     0
+          0 | null           | unknown   |     0
+          0 | wait interface | books     |     0
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus is50   | electrncs |   100
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   100
+       1666 | harry potter   | dvd       |   100
+(8 rows)
+
+ROLLBACK;
+--default values for update values
+BEGIN;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = DEFAULT, category = DEFAULT, total = DEFAULT 
+WHEN NOT MATCHED THEN
+  INSERT VALUES (DEFAULT);
+select * from  products_col order by 1;  
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+          0 | null         | unknown   |     0
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | null         | unknown   |     0
+       1600 | play gym     | toys      |   100
+       1601 | null         | unknown   |     0
+       1666 | null         | unknown   |     0
+(6 rows)
+
+ROLLBACK;
+--plpgsql
+BEGIN;
+DO LANGUAGE plpgsql $$
+BEGIN
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category , total = np.total
+WHEN NOT MATCHED THEN
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+END;
+$$;
+SELECT * FROM products_col order by 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(6 rows)
+
+ROLLBACK;
+--NON ANOYBLOCK 
+BEGIN;
+BEGIN
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category , total = np.total
+WHEN NOT MATCHED THEN
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+END;
+/
+SELECT * FROM products_col order by 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(6 rows)
+
+ROLLBACK;
+--stored procedure
+create or replace procedure p1()
+AS
+BEGIN
+	MERGE INTO products_col p
+	USING newproducts_col np
+	ON p.product_id = np.product_id
+	WHEN MATCHED THEN
+	  UPDATE SET product_name = np.product_name, category = np.category , total = np.total
+	WHEN NOT MATCHED THEN
+	  INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+END;
+/
+BEGIN;
+select p1();
+ p1 
+----
+ 
+(1 row)
+
+SELECT * FROM products_col order by 1;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(6 rows)
+
+ROLLBACK;
+--stored procedure with params
+create or replace procedure p2( param1 IN text)
+AS
+BEGIN
+	MERGE INTO products_col p
+	USING newproducts_col np
+	ON p.product_id = np.product_id
+	WHEN MATCHED THEN
+	  UPDATE SET product_name = np.product_name, category = np.category , total = np.total
+	WHEN NOT MATCHED THEN
+	  INSERT VALUES (np.product_id, 'inserted by proc', param1, np.total);
+END;
+/
+BEGIN;
+select p2('param1');
+ p2 
+----
+ 
+(1 row)
+
+SELECT * FROM products_col order by 1;
+ product_id |   product_name   | category  | total 
+------------+------------------+-----------+-------
+       1501 | vivitar 35mm     | electrncs |   100
+       1502 | olympus camera   | electrncs |   200
+       1600 | play gym         | toys      |   100
+       1601 | lamaze           | toys      |   200
+       1666 | harry potter     | toys      |   200
+       1700 | inserted by proc | param1    |   200
+(6 rows)
+
+ROLLBACK;
+BEGIN;
+select p2('param2');
+ p2 
+----
+ 
+(1 row)
+
+SELECT * FROM products_col order by 1;
+ product_id |   product_name   | category  | total 
+------------+------------------+-----------+-------
+       1501 | vivitar 35mm     | electrncs |   100
+       1502 | olympus camera   | electrncs |   200
+       1600 | play gym         | toys      |   100
+       1601 | lamaze           | toys      |   200
+       1666 | harry potter     | toys      |   200
+       1700 | inserted by proc | param2    |   200
+(6 rows)
+
+ROLLBACK;
+--stored procedure with params in update targetlist
+create or replace procedure p3( param1 IN text)
+AS
+BEGIN
+	MERGE INTO products_col p
+	USING newproducts_col np
+	ON p.product_id = np.product_id
+	WHEN MATCHED THEN
+	  UPDATE SET product_name = np.product_name, category = param1 , total = np.total
+	WHEN NOT MATCHED THEN
+	  INSERT VALUES (np.product_id, 'inserted by proc', np.category, np.total);
+END;
+/
+BEGIN;
+select p3('param1');
+ p3 
+----
+ 
+(1 row)
+
+SELECT * FROM products_col order by 1;
+ product_id |   product_name   | category  | total 
+------------+------------------+-----------+-------
+       1501 | vivitar 35mm     | electrncs |   100
+       1502 | olympus camera   | param1    |   200
+       1600 | play gym         | toys      |   100
+       1601 | lamaze           | param1    |   200
+       1666 | harry potter     | param1    |   200
+       1700 | inserted by proc | books     |   200
+(6 rows)
+
+ROLLBACK;
+BEGIN;
+select p3('param2');
+ p3 
+----
+ 
+(1 row)
+
+SELECT * FROM products_col order by 1;
+ product_id |   product_name   | category  | total 
+------------+------------------+-----------+-------
+       1501 | vivitar 35mm     | electrncs |   100
+       1502 | olympus camera   | param2    |   200
+       1600 | play gym         | toys      |   100
+       1601 | lamaze           | param2    |   200
+       1666 | harry potter     | param2    |   200
+       1700 | inserted by proc | books     |   200
+(6 rows)
+
+ROLLBACK;
+--stored procedure with params in where conditions
+create or replace procedure p4( param1 IN text)
+AS
+BEGIN
+	MERGE INTO products_col p
+	USING newproducts_col np
+	ON p.product_id = np.product_id
+	WHEN MATCHED THEN
+	  UPDATE SET product_name = np.product_name, category = np.category || 'DEF' , total = np.total
+	  WHERE category = param1
+	WHEN NOT MATCHED THEN
+	  INSERT VALUES (np.product_id, 'inserted by proc', np.category, np.total);
+END;
+/
+BEGIN;
+select p4('toys'); --only update toys
+ p4 
+----
+ 
+(1 row)
+
+SELECT * FROM products_col order by 1;
+ product_id |   product_name   | category  | total 
+------------+------------------+-----------+-------
+       1501 | vivitar 35mm     | electrncs |   100
+       1502 | olympus is50     | electrncs |   100
+       1600 | play gym         | toys      |   100
+       1601 | lamaze           | toysDEF   |   200
+       1666 | harry potter     | dvd       |   100
+       1700 | inserted by proc | books     |   200
+(6 rows)
+
+ROLLBACK;
+BEGIN;
+select p4('dvd'); --only update dvd
+ p4 
+----
+ 
+(1 row)
+
+SELECT * FROM products_col order by 1;
+ product_id |   product_name   | category  | total 
+------------+------------------+-----------+-------
+       1501 | vivitar 35mm     | electrncs |   100
+       1502 | olympus is50     | electrncs |   100
+       1600 | play gym         | toys      |   100
+       1601 | lamaze           | toys      |   100
+       1666 | harry potter     | toysDEF   |   200
+       1700 | inserted by proc | books     |   200
+(6 rows)
+
+ROLLBACK;
+BEGIN;
+select p4('electrncs'); --only update electrncs
+ p4 
+----
+ 
+(1 row)
+
+SELECT * FROM products_col order by 1;
+ product_id |   product_name   |   category   | total 
+------------+------------------+--------------+-------
+       1501 | vivitar 35mm     | electrncs    |   100
+       1502 | olympus camera   | electrncsDEF |   200
+       1600 | play gym         | toys         |   100
+       1601 | lamaze           | toys         |   100
+       1666 | harry potter     | dvd          |   100
+       1700 | inserted by proc | books        |   200
+(6 rows)
+
+ROLLBACK;
+--dropped column and add column
+BEGIN;
+ALTER TABLE products_col DROP COLUMN category;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN
+    INSERT VALUES (np.product_id, np.product_name, np.total)
+WHEN MATCHED THEN
+    UPDATE SET product_name = p.product_name ||' + '|| np.product_name,
+			   total        = p.total + np.total;
+SELECT * FROM products_col ORDER BY 1;
+ product_id |         product_name          | total 
+------------+-------------------------------+-------
+       1501 | vivitar 35mm                  |   100
+       1502 | olympus is50 + olympus camera |   300
+       1600 | play gym                      |   100
+       1601 | lamaze + lamaze               |   300
+       1666 | harry potter + harry potter   |   300
+       1700 | wait interface                |   200
+(6 rows)
+
+TRUNCATE products_col;
+ALTER TABLE products_col ADD COLUMN category VARCHAR;
+INSERT INTO products_col SELECT product_id,product_name,total,category FROM products_base;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN
+    INSERT VALUES (np.product_id, np.product_name, np.total)
+WHEN MATCHED THEN
+    UPDATE SET product_name = p.product_name ||' + '|| np.product_name,
+			   total        = p.total + np.total;
+SELECT * FROM products_col ORDER BY 1;
+ product_id |         product_name          | total | category  
+------------+-------------------------------+-------+-----------
+       1501 | vivitar 35mm                  |   100 | electrncs
+       1502 | olympus is50 + olympus camera |   300 | electrncs
+       1600 | play gym                      |   100 | toys
+       1601 | lamaze + lamaze               |   300 | toys
+       1666 | harry potter + harry potter   |   300 | dvd
+       1700 | wait interface                |   200 | 
+(6 rows)
+
+ROLLBACK;
+--join key diffs from distribute key
+BEGIN;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.total = np.product_id
+WHEN NOT MATCHED THEN
+    INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+SELECT * FROM products_col ORDER BY 1,2,3,4;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1502 | olympus is50   | electrncs |   100
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   100
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | dvd       |   100
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(9 rows)
+
+ROLLBACK;
+BEGIN;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.total = np.product_id
+WHEN MATCHED THEN
+    UPDATE SET product_name = p.product_name ||' + '|| np.product_name;
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+(5 rows)
+
+ROLLBACK;
+BEGIN;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.total = np.product_id
+WHEN NOT MATCHED THEN
+    INSERT VALUES (np.product_id, np.product_name, np.category, np.total)
+WHEN MATCHED THEN
+    UPDATE SET product_name = p.product_name ||' + '|| np.product_name;
+SELECT * FROM products_col ORDER BY 1,2,3,4;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1502 | olympus is50   | electrncs |   100
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   100
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | dvd       |   100
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(9 rows)
+
+ROLLBACK;
+BEGIN;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.total = np.total
+WHEN NOT MATCHED THEN
+    INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
+SELECT * FROM products_col ORDER BY 1,2,3,4;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1502 | olympus is50   | electrncs |   100
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   100
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | dvd       |   100
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(9 rows)
+
+ROLLBACK;
+BEGIN;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.total = np.total
+WHEN MATCHED THEN
+    UPDATE SET product_name = p.product_name ||' + '|| np.product_name;
+SELECT * FROM products_col ORDER BY 1;
+ product_id | product_name | category  | total 
+------------+--------------+-----------+-------
+       1501 | vivitar 35mm | electrncs |   100
+       1502 | olympus is50 | electrncs |   100
+       1600 | play gym     | toys      |   100
+       1601 | lamaze       | toys      |   100
+       1666 | harry potter | dvd       |   100
+(5 rows)
+
+ROLLBACK;
+BEGIN;
+MERGE INTO products_col p
+USING newproducts_col np
+ON p.total = np.total
+WHEN NOT MATCHED THEN
+    INSERT VALUES (np.product_id, np.product_name, np.category, np.total)
+WHEN MATCHED THEN
+    UPDATE SET product_name = p.product_name ||' + '|| np.product_name;
+SELECT * FROM products_col ORDER BY 1,2,3,4;
+ product_id |  product_name  | category  | total 
+------------+----------------+-----------+-------
+       1501 | vivitar 35mm   | electrncs |   100
+       1502 | olympus camera | electrncs |   200
+       1502 | olympus is50   | electrncs |   100
+       1600 | play gym       | toys      |   100
+       1601 | lamaze         | toys      |   100
+       1601 | lamaze         | toys      |   200
+       1666 | harry potter   | dvd       |   100
+       1666 | harry potter   | toys      |   200
+       1700 | wait interface | books     |   200
+(9 rows)
+
+ROLLBACK;
+--target table distributed by multiple columns, and then test dropped column and added column
+CREATE TABLE products_col_multi
+(
+product_id INTEGER,
+product_name VARCHAR(60),
+category VARCHAR(60),
+total INTEGER
+)
+WITH (ORIENTATION=column)
+DISTRIBUTE BY HASH(product_id, category);
+INSERT INTO products_col_multi SELECT * FROM products_base;
+ANALYZE products_col_multi;
+BEGIN;
+MERGE INTO products_col_multi p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = p.product_name || 'ABC', total = p.total + 100
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category || 'ABC', np.total + 100);
+SELECT * FROM products_col_multi ORDER BY 1;
+ product_id |  product_name   | category  | total 
+------------+-----------------+-----------+-------
+       1501 | vivitar 35mm    | electrncs |   100
+       1502 | olympus is50ABC | electrncs |   200
+       1600 | play gym        | toys      |   100
+       1601 | lamazeABC       | toys      |   200
+       1666 | harry potterABC | dvd       |   200
+       1700 | wait interface  | booksABC  |   300
+(6 rows)
+
+ROLLBACK;
+BEGIN;
+UPDATE products_col_multi SET total = 100; --generate some dead rows
+MERGE INTO products_col_multi p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = p.product_name || 'ABC', total = p.total + 100
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.product_name, np.category || 'ABC', np.total + 100);
+SELECT * FROM products_col_multi ORDER BY 1;
+ product_id |  product_name   | category  | total 
+------------+-----------------+-----------+-------
+       1501 | vivitar 35mm    | electrncs |   100
+       1502 | olympus is50ABC | electrncs |   200
+       1600 | play gym        | toys      |   100
+       1601 | lamazeABC       | toys      |   200
+       1666 | harry potterABC | dvd       |   200
+       1700 | wait interface  | booksABC  |   300
+(6 rows)
+
+ROLLBACK;
+ALTER TABLE products_col_multi DROP COLUMN product_name; --dropped column
+BEGIN;
+MERGE INTO products_col_multi p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET total = p.total + 100
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.category || 'ABC', np.total + 100);
+SELECT * FROM products_col_multi ORDER BY 1;
+ product_id | category  | total 
+------------+-----------+-------
+       1501 | electrncs |   100
+       1502 | electrncs |   200
+       1600 | toys      |   100
+       1601 | toys      |   200
+       1666 | dvd       |   200
+       1700 | booksABC  |   300
+(6 rows)
+
+ROLLBACK;
+ALTER TABLE products_col_multi ADD COLUMN product_name VARCHAR;  --added column
+TRUNCATE products_col_multi;
+INSERT INTO products_col_multi SELECT product_id,category,total,product_name FROM products_base;
+BEGIN;
+MERGE INTO products_col_multi p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = p.product_name || 'ABC', total = p.total + 100;
+SELECT * FROM products_col_multi ORDER BY 1;
+ product_id | category  | total |  product_name   
+------------+-----------+-------+-----------------
+       1501 | electrncs |   100 | vivitar 35mm
+       1502 | electrncs |   200 | olympus is50ABC
+       1600 | toys      |   100 | play gym
+       1601 | toys      |   200 | lamazeABC
+       1666 | dvd       |   200 | harry potterABC
+(5 rows)
+
+ROLLBACK;
+BEGIN;
+MERGE INTO products_col_multi p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.category || 'ABC', np.total + 100, np.product_name);
+SELECT * FROM products_col_multi ORDER BY 1;
+ product_id | category  | total |  product_name  
+------------+-----------+-------+----------------
+       1501 | electrncs |   100 | vivitar 35mm
+       1502 | electrncs |   100 | olympus is50
+       1600 | toys      |   100 | play gym
+       1601 | toys      |   100 | lamaze
+       1666 | dvd       |   100 | harry potter
+       1700 | booksABC  |   300 | wait interface
+(6 rows)
+
+ROLLBACK;
+BEGIN;
+MERGE INTO products_col_multi p
+USING newproducts_col np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = p.product_name || 'ABC', total = p.total + 100
+WHEN NOT MATCHED THEN  
+  INSERT VALUES (np.product_id, np.category || 'ABC', np.total + 100, np.product_name);
+SELECT * FROM products_col_multi ORDER BY 1;
+ product_id | category  | total |  product_name   
+------------+-----------+-------+-----------------
+       1501 | electrncs |   100 | vivitar 35mm
+       1502 | electrncs |   200 | olympus is50ABC
+       1600 | toys      |   100 | play gym
+       1601 | toys      |   200 | lamazeABC
+       1666 | dvd       |   200 | harry potterABC
+       1700 | booksABC  |   300 | wait interface
+(6 rows)
+
+ROLLBACK;
+-- clean up
+DROP SCHEMA xc_mergeinto_col CASCADE;
+NOTICE:  drop cascades to 11 other objects
+DETAIL:  drop cascades to table products_base
+drop cascades to table newproducts_base
+drop cascades to table products_col
+drop cascades to table newproducts_col
+drop cascades to table products_part_col
+drop cascades to view v
+drop cascades to function p1()
+drop cascades to function p2(text)
+drop cascades to function p3(text)
+drop cascades to function p4(text)
+drop cascades to table products_col_multi

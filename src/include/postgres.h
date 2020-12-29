@@ -114,15 +114,7 @@
 /* the maximum number of autovacuum launcher thread */
 #define AV_LAUNCHER_PROCS 2
 
-/* the number of Job Schedule Lancher thread */
-#define JOB_SCHEDULE_LAUNCHER_PROCS 1
-
-#ifdef ENABLE_MULTIPLE_NODES
 #define STREAM_RESERVE_PROC_TIMES (16)
-#else
-#define STREAM_RESERVE_PROC_TIMES (1)
-#endif
-
 /* this struct is used to store connection info got from pool */
 typedef struct {
     /* hostname of the connection */
@@ -137,7 +129,6 @@ typedef enum { OM_ONLINE_EXPANSION, OM_ONLINE_NODE_REPLACE } OM_ONLINE_STATE;
 extern void reload_configfile(void);
 extern void reload_online_pooler(void);
 extern OM_ONLINE_STATE get_om_online_state(void);
-extern bool CheckCompArgs(const char *cmptFmt);
 
 /* ----------------------------------------------------------------
  *				Section 1:	variable-length datatypes (TOAST support)
@@ -181,10 +172,10 @@ typedef struct varatt_indirect {
 typedef enum vartag_external { VARTAG_INDIRECT = 1, VARTAG_BUCKET = 8, VARTAG_ONDISK = 18 } vartag_external;
 
 #define VARTAG_SIZE(tag) \
-    ((tag) == VARTAG_INDIRECT ? sizeof(varatt_indirect) : \
-     (tag) == VARTAG_ONDISK ? sizeof(varatt_external) : \
-     (tag) == VARTAG_BUCKET ? sizeof(varatt_external) + sizeof(int2) : \
-     TrapMacro(true, "unknown vartag"))
+   ((tag) == VARTAG_INDIRECT ? sizeof(varatt_indirect) :       \
+    (tag) == VARTAG_ONDISK ? sizeof(varatt_external) : \
+    (tag) == VARTAG_BUCKET ? sizeof(varatt_external) + sizeof(int2) : \
+    TrapMacro(true, "unknown vartag"))
 
 /*
  * These structs describe the header of a varlena object that may have been
@@ -196,11 +187,13 @@ typedef enum vartag_external { VARTAG_INDIRECT = 1, VARTAG_BUCKET = 8, VARTAG_ON
  * alignment while touching fields of a 1-byte-header varlena.
  */
 typedef union {
-    struct { /* Normal varlena (4-byte length) */
+    struct /* Normal varlena (4-byte length) */
+    {
         uint32 va_header;
         char va_data[FLEXIBLE_ARRAY_MEMBER];
     } va_4byte;
-    struct { /* Compressed-in-line format */
+    struct /* Compressed-in-line format */
+    {
         uint32 va_header;
         uint32 va_rawsize;                   /* Original data size (excludes header) */
         char va_data[FLEXIBLE_ARRAY_MEMBER]; /* Compressed data */
@@ -227,24 +220,25 @@ typedef struct {
     char va_data[FLEXIBLE_ARRAY_MEMBER]; /* Type-specific data */
 } varattrib_1b_e;
 
-/* Type of database; increase for sql compatibility */
+#ifndef HAVE_DATABASE_TYPE
+#define HAVE_DATABASE_TYPE
+/*Type of database; increase for sql compatibility*/
 typedef enum { 
-    DB_CMPT_A = 0x0001, 
-    DB_CMPT_B = 0x0002,
-    DB_CMPT_C = 0x0004,
-    DB_CMPT_PG = 0x0008  /* be compatible with Postgre SQL syntax */
-} DB_Compatibility;
+    A_FORMAT = 0x0001,
+    B_FORMAT = 0x0002,
+    C_FORMAT = 0x0004,
+    PG_FORMAT = 0x0008
+} DatabaseType;
 
 #define IS_CMPT(cmpt, flag) (((uint32)cmpt & (uint32)(flag)) != 0)
 #define DB_IS_CMPT(flag) IS_CMPT(u_sess->attr.attr_sql.sql_compatibility, (flag))
+#endif /* HAVE_DATABASE_TYPE */
 
 typedef enum { EXPLAIN_NORMAL, EXPLAIN_PRETTY, EXPLAIN_SUMMARY, EXPLAIN_RUN } ExplainStyle;
 
 typedef enum { SKEW_OPT_OFF, SKEW_OPT_NORMAL, SKEW_OPT_LAZY } SkewStrategy;
 
 typedef enum { RESOURCE_TRACK_NONE, RESOURCE_TRACK_QUERY, RESOURCE_TRACK_OPERATOR } ResourceTrackOption;
-
-typedef enum { QUERY_MESSAGE = 0, HYBRID_MESSAGE } MessageType;
 
 typedef enum {
     CODEGEN_PARTIAL, /* allow to call c-function in codegen */
@@ -392,7 +386,7 @@ typedef enum {
 
 #define VARSIZE_ANY_EXHDR(PTR)                                       \
     (VARATT_IS_1B_E(PTR) ? VARSIZE_EXTERNAL(PTR) - VARHDRSZ_EXTERNAL \
-     : (VARATT_IS_1B(PTR) ? VARSIZE_1B(PTR) - VARHDRSZ_SHORT : VARSIZE_4B(PTR) - VARHDRSZ))
+                         : (VARATT_IS_1B(PTR) ? VARSIZE_1B(PTR) - VARHDRSZ_SHORT : VARSIZE_4B(PTR) - VARHDRSZ))
 
 /* caution: this will not work on an external or compressed-in-line Datum */
 /* caution: this will return a possibly unaligned pointer */
@@ -454,9 +448,9 @@ typedef Datum* DatumPtr;
  *
  * Note: any nonzero value will be considered TRUE.
  */
-
+#ifndef BoolGetDatum
 #define BoolGetDatum(X) ((Datum)((X) ? 1 : 0))
-
+#endif
 /*
  * DatumGetChar
  *		Returns character value of a datum.
@@ -607,9 +601,9 @@ typedef Datum* DatumPtr;
  * PointerGetDatum
  *		Returns datum representation for a pointer.
  */
-
+#ifndef PointerGetDatum
 #define PointerGetDatum(X) ((Datum)(X))
-
+#endif 
 /*
  * DatumGetCString
  *		Returns C string (null-terminated string) value of a datum.
@@ -833,8 +827,9 @@ extern THR_LOCAL PGDLLIMPORT bool assert_enabled;
         if (!(bool)(condition)) \
             exit(1);            \
     } while (0)
-
+#ifndef AssertMacro
 #define AssertMacro Assert
+#endif
 #define AssertArg Assert
 #define DBG_ASSERT Assert
 #define AssertState Assert
@@ -842,7 +837,9 @@ extern THR_LOCAL PGDLLIMPORT bool assert_enabled;
 #else
 #ifndef USE_ASSERT_CHECKING
 #define Assert(condition)
+#ifndef AssertMacro
 #define AssertMacro(condition) ((void)true)
+#endif /* AssertMacro */
 #define AssertArg(condition)
 #define DBG_ASSERT(condition)
 #define AssertState(condition)
@@ -851,7 +848,9 @@ extern THR_LOCAL PGDLLIMPORT bool assert_enabled;
 
 #include <assert.h>
 #define Assert(p) assert(p)
+#ifndef AssertMacro
 #define AssertMacro(p) ((void)assert(p))
+#endif
 #define AssertArg(condition) assert(condition)
 #define DBG_ASSERT(condition)
 #define AssertState(condition) assert(condition)
@@ -860,7 +859,9 @@ extern THR_LOCAL PGDLLIMPORT bool assert_enabled;
 
 #define Assert(condition) Trap(!(condition), "FailedAssertion")
 
+#ifndef AssertMacro
 #define AssertMacro(condition) ((void)TrapMacro(!(condition), "FailedAssertion"))
+#endif /* AssertMacro */
 
 #define AssertArg(condition) Trap(!(condition), "BadArgument")
 
@@ -892,19 +893,22 @@ extern void InitVecFuncMap(void);
 /* load ir file count for each process */
 extern long codegenIRloadProcessCount;
 
+extern pthread_mutex_t nodeDefCopyLock;
+
 /* Job worker Process, execute procedure */
 extern void execute_simple_query(const char* query_string);
-extern void ResetStreamEnv();
 
 /* check the value from environment variablethe to prevent command injection. */
 extern void check_backend_env(const char* input_env_value);
+extern bool backend_env_valid(const char* input_env_value, const char* stamp);
 
 extern void CleanSystemCaches(bool is_in_read_command);
 
-/* Audit user logout */
+/*Audit user logout*/
+extern void audit_processlogout_unified();
 extern void audit_processlogout(int code, Datum arg);
 
-/* free the pointer malloced by cJSON_internal_malloc. */
+/* free the pointer malloced by cJSON_internal_malloc.*/
 extern void cJSON_internal_free(void* pointer);
 
 extern void InitThreadLocalWhenSessionExit();
@@ -915,4 +919,8 @@ extern void RemoveTempNamespace();
 #define IsBootingPgProc(rel) IsProcRelation(rel)
 #define BootUsingBuiltinFunc true
 
+extern int errdetail_abort(void);
+
+#define MSG_A_REPEAT_NUM_MAX 1024
+#define OVERRIDE_STACK_LENGTH_MAX 1024
 #endif /* POSTGRES_H */

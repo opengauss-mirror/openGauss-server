@@ -1,0 +1,164 @@
+DROP SCHEMA bicoredata_007 CASCADE;
+ERROR:  schema "bicoredata_007" does not exist
+CREATE SCHEMA bicoredata_007;
+SET CURRENT_SCHEMA = bicoredata_007;
+--FUNC_096
+CREATE FUNCTION DateUtil(integer)
+	RETURNS text
+	AS 'com.huawei.platform.bi.udf.common.DateUtilUDF.evaluate(java.lang.Integer)'
+	LANGUAGE java;
+SELECT DateUtil (666);
+ dateutil 
+----------
+ 00:11:06
+(1 row)
+
+CREATE FUNCTION DateUtil(int8, integer, text)
+	RETURNS text
+	AS 'com.huawei.platform.bi.udf.common.DateUtilUDF.evaluate(java.lang.Long, java.lang.Integer, java.lang.String)'
+	LANGUAGE java;
+SELECT DateUtil (1111111111111 ,222222222, 'YYYYMM');
+ dateutil 
+----------
+ 200503
+(1 row)
+
+CREATE FUNCTION DateUtil(text, text, integer)
+	RETURNS int8
+	AS 'com.huawei.platform.bi.udf.common.DateUtilUDF.evaluate(java.lang.String, java.lang.String, java.lang.Integer)'
+	LANGUAGE java;
+SELECT DateUtil ('201712' ,'yyyyMM',2);
+   dateutil    
+---------------
+ 1512057600000
+(1 row)
+
+CREATE FUNCTION DateUtil(text, text, text)
+	RETURNS text
+	AS 'com.huawei.platform.bi.udf.common.DateUtilUDF.evaluate'
+	LANGUAGE java;
+SELECT DateUtil ('201712' ,'yyyyMM','yyyy-MM');
+ dateutil 
+----------
+ 2017-12
+(1 row)
+
+--FUNC_097
+CREATE FUNCTION SHA256(varchar)
+	RETURNS varchar
+	AS 'com.huawei.udf.SHA256.evaluate'
+	LANGUAGE java;
+SELECT SHA256 ('aad');
+                              sha256                              
+------------------------------------------------------------------
+ d0128e296de3da59e3848674f0699d139fa9eafa654b8bdac7c388e10aca33ba
+(1 row)
+
+--FUNC_099
+CREATE FUNCTION UpDecryption(text)
+	RETURNS text
+	AS 'com.huawei.udf.UpDecryptionUDF.evaluate'
+	LANGUAGE java;
+SELECT UpDecryption('CC8185CABC7982A15270677A83758AB6');
+ updecryption 
+--------------
+ aa
+(1 row)
+
+CREATE FUNCTION UpDecryption(text, text)
+	RETURNS text
+	AS 'com.huawei.udf.UpDecryptionUDF.evaluate'
+	LANGUAGE java;
+SELECT UpDecryption('CC8185CABC7982A15270677A83758AB6','up');
+ updecryption 
+--------------
+ aa
+(1 row)
+
+--FUNC_100
+CREATE FUNCTION RepeatGroupCid(int4, text)
+	RETURNS text
+	AS'com.huawei.platform.bi.udf.service.vmall.RepeatGroupCidUDF.evaluate(java.lang.Integer, java.lang.String)'
+	LANGUAGE java;
+SELECT RepeatGroupCid (1,'abc');
+ repeatgroupcid 
+----------------
+ abc
+(1 row)
+
+--!FUNC_101.	DbankNpDownload returns Map
+--!FUNC_102.	groupByLogin input Object, can not change to static 
+--!FUNC_103.	dbankDnUpload  returns map
+--FUNC_104
+CREATE FUNCTION SlideAndScreen(text, text)
+	RETURNS text
+	AS'com.huawei.platform.bi.udf.service.hota.SlideAndScreenUDF.evaluate'
+	LANGUAGE java;
+SELECT SlideAndScreen('000000000000000000000000000000000000000000000000000000000000000000000000000101010100000000000000000000000000000000020300010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020201000000000000000000000000000000000202000200020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000', '2016-11-24 08:12:54');
+ slideandscreen 
+----------------
+ 10|13
+(1 row)
+
+--!FUNC_105.	UUID   DeferredObject
+--!FUNC_106.	UrlDecoder  can not change to static
+--!FUNC_107.	IsCustomCommit  dependent file
+--FUNC_108
+CREATE FUNCTION GetAdPushReportMsg(text, int4)
+	RETURNS text
+	AS'com.huawei.udf.GetAdPushReportMsg.evaluate(java.lang.String, java.lang.Integer)'
+	LANGUAGE java;
+SELECT GetAdPushReportMsg ('timeStamp|PS|deviceid|msgId|eventid|agent version|msg cmd',1);
+ getadpushreportmsg 
+--------------------
+ timeStamp
+(1 row)
+
+--FUNC_109
+CREATE FUNCTION GetFileId(text)
+	RETURNS text
+	AS'com.huawei.udf.DbankGetFileId.evaluate'
+	LANGUAGE java;
+SELECT getFileId('/file/x/xxx.sql');
+ getfileid 
+-----------
+ xxx.sql
+(1 row)
+
+--FUNC_110
+CREATE FUNCTION GetFileName(text)
+	RETURNS text
+	AS'com.huawei.udf.DbankGetFileName.evaluate'
+	LANGUAGE java;
+SELECT getFileName('/file/x/y/xxx.sql');
+ getfilename 
+-------------
+ xxx.sql
+(1 row)
+
+--FUNC_111
+CREATE FUNCTION GetHonorVersion(text)
+	RETURNS text
+	AS'com.huawei.udf.GetHonorVersion.evaluate'
+	LANGUAGE java;
+SELECT GetHonorVersion('EMUI2.0_G750-T00_4.4.16') ;
+ gethonorversion 
+-----------------
+ 4.4.16
+(1 row)
+
+DROP SCHEMA bicoredata_007 CASCADE;
+NOTICE:  drop cascades to 13 other objects
+DETAIL:  drop cascades to function dateutil(integer)
+drop cascades to function dateutil(bigint,integer,text)
+drop cascades to function dateutil(text,text,integer)
+drop cascades to function dateutil(text,text,text)
+drop cascades to function sha256(character varying)
+drop cascades to function updecryption(text)
+drop cascades to function updecryption(text,text)
+drop cascades to function repeatgroupcid(integer,text)
+drop cascades to function slideandscreen(text,text)
+drop cascades to function getadpushreportmsg(text,integer)
+drop cascades to function getfileid(text)
+drop cascades to function getfilename(text)
+drop cascades to function gethonorversion(text)

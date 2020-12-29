@@ -7,13 +7,14 @@ create table dcs_cpu(
 	server_ip text not null,
 	iowait real,
 	time_string timestamp
-)
+)distribute by hash(server_ip)
 PARTITION BY RANGE(time_string)
 (
 partition p2 values less than('2020-06-28 00:00:00'),
 partition p3 values less than('2020-06-28 01:00:00'),
 partition p4 values less than('2020-06-28 02:00:00')
 );
+
 create table dcs_cpu2(
 	idle real check(idle > 0),
 	vcpu_num int,
@@ -22,75 +23,81 @@ create table dcs_cpu2(
 	server_ip text not null,
 	iowait real,
 	time_string timestamptz
-)
+)distribute by hash(server_ip)
 PARTITION BY RANGE(time_string)
 (
 partition p2 values less than('2020-06-28 00:00:00'),
 partition p3 values less than('2020-06-28 01:00:00'),
 partition p4 values less than('2020-06-28 02:00:00')
 );
+
 with s as 
 (select add_create_partition_policy('dcs_cpu' , '1 hour', '1 hour'))
 select count(*) from s;
-ERROR:  function add_create_partition_policy(unknown, unknown, unknown) does not exist
-LINE 2: (select add_create_partition_policy('dcs_cpu' , '1 hour', '1...
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: add_create_partition_policy
+ count 
+-------
+     1
+(1 row)
+
 DO $$ BEGIN PERFORM pg_sleep(3); END $$;
 with s as 
 (select add_create_partition_policy('dcs_cpu2' , '1 hour', '1 hour'))
 select count(*) from s;
-ERROR:  function add_create_partition_policy(unknown, unknown, unknown) does not exist
-LINE 2: (select add_create_partition_policy('dcs_cpu2' , '1 hour', '...
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: add_create_partition_policy
+ count 
+-------
+     1
+(1 row)
+
 DO $$ BEGIN PERFORM pg_sleep(3); END $$;
+
 select count(*) from user_jobs where what like '%proc_add_partition(''dcs_cpu''%';
  count 
 -------
-     0
+     1
 (1 row)
 
 select status from user_jobs where what like '%proc_add_partition(''dcs_cpu''%';
  status 
 --------
-(0 rows)
+ s
+(1 row)
+
 
 select count(*) from user_jobs where what like '%proc_add_partition(''dcs_cpu2''%';
  count 
 -------
-     0
+     1
 (1 row)
 
 select status from user_jobs where what like '%proc_add_partition(''dcs_cpu2''%';
  status 
 --------
-(0 rows)
+ s
+(1 row)
+
 
 select remove_create_partition_policy('dcs_cpu1');
-ERROR:  function remove_create_partition_policy(unknown) does not exist
-LINE 1: select remove_create_partition_policy('dcs_cpu1');
-               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+ERROR:  please input the correct relation name!
 CONTEXT:  referenced column: remove_create_partition_policy
+
 with s as 
 (select remove_create_partition_policy('dcs_cpu'))
 select count(*) from s;
-ERROR:  function remove_create_partition_policy(unknown) does not exist
-LINE 2: (select remove_create_partition_policy('dcs_cpu'))
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: remove_create_partition_policy
+ count 
+-------
+     1
+(1 row)
+
+
 with s as 
 (select remove_create_partition_policy('dcs_cpu2'))
 select count(*) from s;
-ERROR:  function remove_create_partition_policy(unknown) does not exist
-LINE 2: (select remove_create_partition_policy('dcs_cpu2'))
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: remove_create_partition_policy
+ count 
+-------
+     1
+(1 row)
+
+
 select count(*) from user_jobs where what like '%proc_add_partition(''dcs_cpu''%';
  count 
 -------
@@ -103,68 +110,74 @@ select count(*) from user_jobs where what like '%proc_add_partition(''dcs_cpu2''
      0
 (1 row)
 
+
 with s as 
 (select add_drop_partition_policy('dcs_cpu' , '1 day'))
 select count(*) from s;
-ERROR:  function add_drop_partition_policy(unknown, unknown) does not exist
-LINE 2: (select add_drop_partition_policy('dcs_cpu' , '1 day'))
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: add_drop_partition_policy
+ count 
+-------
+     1
+(1 row)
+
 DO $$ BEGIN PERFORM pg_sleep(3); END $$;
+
 with s as 
 (select add_drop_partition_policy('dcs_cpu2' , '1 day'))
 select count(*) from s;
-ERROR:  function add_drop_partition_policy(unknown, unknown) does not exist
-LINE 2: (select add_drop_partition_policy('dcs_cpu2' , '1 day'))
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: add_drop_partition_policy
+ count 
+-------
+     1
+(1 row)
+
 DO $$ BEGIN PERFORM pg_sleep(3); END $$;
+
 select count(*) from user_jobs where what like '%proc_drop_partition(''dcs_cpu''%';
  count 
 -------
-     0
+     1
 (1 row)
 
 select status from user_jobs where what like '%proc_drop_partition(''dcs_cpu''%';
  status 
 --------
-(0 rows)
+ s
+(1 row)
+
 
 select count(*) from user_jobs where what like '%proc_drop_partition(''dcs_cpu2''%';
  count 
 -------
-     0
+     1
 (1 row)
 
 select status from user_jobs where what like '%proc_drop_partition(''dcs_cpu2''%';
  status 
 --------
-(0 rows)
+ s
+(1 row)
+
 
 select remove_drop_partition_policy('dcs_cpu1');
-ERROR:  function remove_drop_partition_policy(unknown) does not exist
-LINE 1: select remove_drop_partition_policy('dcs_cpu1');
-               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+ERROR:  please input the correct relation name!
 CONTEXT:  referenced column: remove_drop_partition_policy
 with s as 
 (select remove_drop_partition_policy('dcs_cpu'))
 select count(*) from s;
-ERROR:  function remove_drop_partition_policy(unknown) does not exist
-LINE 2: (select remove_drop_partition_policy('dcs_cpu'))
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: remove_drop_partition_policy
+ count 
+-------
+     1
+(1 row)
+
+
 with s as 
 (select remove_drop_partition_policy('dcs_cpu2'))
 select count(*) from s;
-ERROR:  function remove_drop_partition_policy(unknown) does not exist
-LINE 2: (select remove_drop_partition_policy('dcs_cpu2'))
-                ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: remove_drop_partition_policy
+ count 
+-------
+     1
+(1 row)
+
+
 select count(*) from user_jobs where what like '%proc_drop_partition(''dcs_cpu''%';
  count 
 -------
@@ -176,6 +189,7 @@ select count(*) from user_jobs where what like '%proc_drop_partition(''dcs_cpu2'
 -------
      0
 (1 row)
+
 
 drop table dcs_cpu;
 drop table dcs_cpu2;

@@ -75,7 +75,5 @@
 <func> end_tup_output
 <func> InitPlan
 <func> ExecCheckRTEPerms
-<func> IndexNext
-<func> ExecIndexScan
 <func> ExecInitIndexScan
 <func> BypassExecutor

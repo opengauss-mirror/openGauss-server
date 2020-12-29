@@ -28,8 +28,11 @@
 
 #include "access/printtup.h"
 #include "access/transam.h"
+#include "access/tableam.h"
+#include "access/tupdesc.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/storage_gtt.h"
+#include "catalog/heap.h"
 #include "commands/copy.h"
 #include "executor/nodeIndexscan.h"
 #include "gstrace/executer_gstrace.h"
@@ -41,17 +44,20 @@
 #include "parser/parsetree.h"
 #include "utils/lsyscache.h"
 #include "utils/snapmgr.h"
+#include "tcop/tcopprot.h"
+#include "commands/matview.h"
+#ifdef ENABLE_MOT
 #include "storage/mot/jit_exec.h"
+#endif
+
+extern void opfusion_executeEnd(PlannedStmt* plannedstmt, const char *queryString, Snapshot snapshot);
 
 OpFusion::OpFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list)
 {
-    bool is_share = (ENABLE_DN_GPC && psrc != NULL && psrc->gpc.is_insert == true);
-
     m_context = AllocSetContextCreate(
-        context, "OpfusionContext", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE,
-        is_share ? SHARED_CONTEXT : STANDARD_CONTEXT);
+        context, "OpfusionContext", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     m_tmpContext = AllocSetContextCreate(context,
-                                        "FusionTemporaryContext",
+                                        "OpfusionTemporaryContext",
                                         ALLOCSET_DEFAULT_MINSIZE,
                                         ALLOCSET_DEFAULT_INITSIZE,
                                         ALLOCSET_DEFAULT_MAXSIZE);
@@ -65,6 +71,7 @@ OpFusion::OpFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree
         m_is_pbe_query = true;
         m_psrc = psrc;
         m_cacheplan = psrc->cplan ? psrc->cplan : psrc->gplan;
+        m_cacheplan->refcount++;
         m_planstmt = (PlannedStmt*)linitial(m_cacheplan->stmt_list);
     } else {
         Assert(0);
@@ -73,24 +80,28 @@ OpFusion::OpFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree
 
     m_outParams = NULL;
     m_params = NULL;
-    m_isFirst = true;
+	m_isFirst = true;
     m_rformats = NULL;
     m_isCompleted = false;
     m_position = 0;
     m_isInsideRec = false;
     m_tmpvals = NULL;
-    m_reloid = 0;
+	m_reloid = 0;
     m_isnull = NULL;
     m_attrno = NULL;
     m_reslot = NULL;
     m_receiver = NULL;
-    m_tupDesc = NULL;
+	m_tupDesc = NULL;
     m_values = NULL;
     m_paramNum = 0;
     m_paramLoc = NULL;
-    m_tmpisnull = NULL;
+	m_tmpisnull = NULL;
+    m_portalName = NULL;
+    m_snapshot = NULL;
+    m_scan = NULL;
 }
 
+#ifdef ENABLE_MOT
 FusionType OpFusion::GetMotFusionType(PlannedStmt* plannedStmt)
 {
     FusionType result;
@@ -109,10 +120,15 @@ FusionType OpFusion::GetMotFusionType(PlannedStmt* plannedStmt)
     }
     return result;
 }
+#endif
 
 FusionType OpFusion::getFusionType(CachedPlan* plan, ParamListInfo params, List* plantree_list)
 {
     if (IsInitdb == true) {
+        return NONE_FUSION;
+    }
+
+    if (ENABLE_GPC) {
         return NONE_FUSION;
     }
 
@@ -148,9 +164,11 @@ FusionType OpFusion::getFusionType(CachedPlan* plan, ParamListInfo params, List*
     }
 
     FusionType result = NONE_FUSION;
+#ifdef ENABLE_MOT
     if (plan && plan->mot_jit_context && JitExec::IsMotCodegenEnabled()) {
         result = GetMotFusionType(planned_stmt);
     } else {
+#endif
         if (planned_stmt->subplans != NULL || planned_stmt->initPlan != NULL) {
             return NOBYPASS_NO_SIMPLE_PLAN;
         }
@@ -167,10 +185,9 @@ FusionType OpFusion::getFusionType(CachedPlan* plan, ParamListInfo params, List*
             result = NOBYPASS_NO_QUERY_TYPE;
         }
 
-        if (result == NESTLOOP_INDEX_FUSION) {
-            return NONE_FUSION;
-        }
+#ifdef ENABLE_MOT
     }
+#endif
     return result;
 }
 
@@ -214,10 +231,17 @@ void OpFusion::executeInit()
         ExecCheckXactReadOnly(m_planstmt);
     }
 
+#ifdef ENABLE_MOT
     if (!(u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan &&
             u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan->storageEngineType == SE_TYPE_MOT)) {
-        PushActiveSnapshot(GetTransactionSnapshot());
+#endif
+        if (m_snapshot == NULL) {
+            m_snapshot = RegisterSnapshot(GetTransactionSnapshot());
+        }
+        PushActiveSnapshot(m_snapshot);
+#ifdef ENABLE_MOT
     }
+#endif
 }
 
 void OpFusion::auditRecord()
@@ -233,17 +257,13 @@ void OpFusion::auditRecord()
             case CMD_UPDATE:
                 if (u_sess->attr.attr_security.Audit_DML != 0) {
                     object_name = pgaudit_get_relation_name(m_planstmt->rtable);
-                    const char* cmdtext = m_is_pbe_query ? m_psrc->query_string : 
-                                          t_thrd.postgres_cxt.debug_query_string;
-                    pgaudit_dml_table(object_name, cmdtext);
+                    pgaudit_dml_table(object_name, m_is_pbe_query ? m_psrc->query_string : t_thrd.postgres_cxt.debug_query_string);
                 }
                 break;
             case CMD_SELECT:
                 if (u_sess->attr.attr_security.Audit_DML_SELECT != 0) {
                     object_name = pgaudit_get_relation_name(m_planstmt->rtable);
-                    const char* cmdtext = m_is_pbe_query ? m_psrc->query_string : 
-                                          t_thrd.postgres_cxt.debug_query_string;
-                    pgaudit_dml_table_select(object_name, cmdtext);
+                    pgaudit_dml_table_select(object_name, m_is_pbe_query ? m_psrc->query_string : t_thrd.postgres_cxt.debug_query_string);
                 }
                 break;
             /* Not support others */
@@ -253,12 +273,18 @@ void OpFusion::auditRecord()
     }
 }
 
-void OpFusion::executeEnd()
+void OpFusion::executeEnd(const char* portal_name)
 {
+#ifdef ENABLE_MOT
     if (!(u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan &&
-            u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan->storageEngineType == SE_TYPE_MOT)) {
+          u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan->storageEngineType == SE_TYPE_MOT)) {
+#endif
+        opfusion_executeEnd(m_planstmt, ((m_psrc == NULL)?(NULL):(m_psrc->query_string)), GetActiveSnapshot());
+
         PopActiveSnapshot();
+#ifdef ENABLE_MOT
     }
+#endif
 
 #ifdef MEMORY_CONTEXT_CHECKING
     /* Check all memory contexts when executor starts */
@@ -267,15 +293,21 @@ void OpFusion::executeEnd()
     /* Check per-query memory context before Opfusion temp memory */
     MemoryContextCheck(m_tmpContext, true);
 #endif
+
+    /* reset the context. */
     if (m_isCompleted) {
+        UnregisterSnapshot(m_snapshot);
         MemoryContextDeleteChildren(m_tmpContext);
         /* reset the context. */
         MemoryContextReset(m_tmpContext);
-
+        /* clear hash table */
+        removeFusionFromHtab(portal_name);
         u_sess->exec_cxt.CurrentOpFusionObj = NULL;
         m_outParams = NULL;
         m_isCompleted = false;
+        m_snapshot = NULL;
     }
+
     m_isFirst = false;
     auditRecord();
     if (u_sess->attr.attr_common.pgstat_track_activities && u_sess->attr.attr_common.pgstat_track_sql_count) {
@@ -286,14 +318,18 @@ void OpFusion::executeEnd()
 
 bool OpFusion::process(int op, StringInfo msg, char* completionTag, bool isTopLevel)
 {
+    if (op == FUSION_EXECUTE && msg != NULL)
+        refreshCurFusion(msg);
+
+    bool res = false;
     if (u_sess->exec_cxt.CurrentOpFusionObj != NULL) {
         switch (op) {
             case FUSION_EXECUTE: {
                 long max_rows = FETCH_ALL;
-
+                const char* portal_name = NULL;
                 /* msg is null means 'U' message, need fetch all. */
                 if (msg != NULL) {
-                    (void)pq_getmsgstring(msg);
+                    portal_name = pq_getmsgstring(msg);
                     max_rows = (long)pq_getmsgint(msg, 4);
                     if (max_rows <= 0)
                         max_rows = FETCH_ALL;
@@ -301,9 +337,17 @@ bool OpFusion::process(int op, StringInfo msg, char* completionTag, bool isTopLe
 
                 u_sess->exec_cxt.CurrentOpFusionObj->executeInit();
                 gstrace_entry(GS_TRC_ID_BypassExecutor);
+                bool old_status = u_sess->exec_cxt.need_track_resource;
+                if (u_sess->attr.attr_resource.resource_track_cost == 0 &&
+                    u_sess->attr.attr_resource.enable_resource_track &&
+                    u_sess->attr.attr_resource.resource_track_level != RESOURCE_TRACK_NONE) {
+                    u_sess->exec_cxt.need_track_resource = true;
+                    WLMSetCollectInfoStatus(WLM_STATUS_RUNNING);
+                }
                 u_sess->exec_cxt.CurrentOpFusionObj->execute(max_rows, completionTag);
+                u_sess->exec_cxt.need_track_resource = old_status;
                 gstrace_exit(GS_TRC_ID_BypassExecutor);
-                u_sess->exec_cxt.CurrentOpFusionObj->executeEnd();
+                u_sess->exec_cxt.CurrentOpFusionObj->executeEnd(portal_name);
                 UpdateSingleNodeByPassUniqueSQLStat(isTopLevel);
                 break;
             }
@@ -320,10 +364,29 @@ bool OpFusion::process(int op, StringInfo msg, char* completionTag, bool isTopLe
                         errmsg("unrecognized bypass support process option: %d", (int)op)));
             }
         }
-        return true;
-    } else {
-        return false;
+        res = true;
     }
+
+   /*
+    * Emit duration logging if appropriate.
+    */
+
+    char msec_str[32];
+    switch (check_log_duration(msec_str, false)) {
+        case 1:
+            ereport(DEBUG1, (errmsg("duration: %s ms, queryid %lu, unique id %lu", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            break;
+        case 2: {
+            ereport(DEBUG1,
+                (errmsg("duration: %s ms queryid %lu unique id %lu", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id),
+                    errhidestmt(true)));
+            break;
+        }
+        default:
+            break;
+    }
+
+    return res;
 }
 
 void OpFusion::CopyFormats(int16* formats, int numRFormats)
@@ -365,6 +428,12 @@ void OpFusion::CopyFormats(int16* formats, int numRFormats)
     MemoryContextSwitchTo(old_context);
 }
 
+void OpFusion::useOuterParameter(ParamListInfo params)
+{
+    m_outParams = params;
+}
+
+
 void* OpFusion::FusionFactory(
     FusionType ftype, MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
 {
@@ -392,11 +461,13 @@ void* OpFusion::FusionFactory(
         case SELECT_FOR_UPDATE_FUSION:
             return New(context) SelectForUpdateFusion(context, psrc, plantree_list, params);
 
+#ifdef ENABLE_MOT
         case MOT_JIT_SELECT_FUSION:
             return New(context) MotJitSelectFusion(context, psrc, plantree_list, params);
 
         case MOT_JIT_MODIFY_FUSION:
             return New(context) MotJitModifyFusion(context, psrc, plantree_list, params);
+#endif
 
         case AGG_INDEX_FUSION:
             return New(context) AggFusion(context, psrc, plantree_list, params);
@@ -412,11 +483,6 @@ void* OpFusion::FusionFactory(
     }
 
     return NULL;
-}
-
-void OpFusion::useOuterParameter(ParamListInfo params)
-{
-    m_outParams = params;
 }
 
 void OpFusion::updatePreAllocParamter(StringInfo input_message)
@@ -460,7 +526,7 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
             /* add null value process for date type */
             if ((VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
                     TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
-                plength == 0 && DB_IS_CMPT(DB_CMPT_A)) {
+                plength == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
                 isNull = true;
             }
 
@@ -580,7 +646,6 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
 
     int16* rformats = NULL;
     MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
-
     /* Get the result format codes */
     num_rformats = pq_getmsgint(input_message, 2);
     if (num_rformats > 0) {
@@ -592,7 +657,7 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
     }
     CopyFormats(rformats, num_rformats);
     pq_getmsgend(input_message);
-
+    pfree_ext(rformats);
     MemoryContextSwitchTo(old_context);
 }
 
@@ -718,6 +783,13 @@ void OpFusion::tearDown(OpFusion* opfusion)
     if (opfusion == NULL) {
         return;
     }
+
+    removeFusionFromHtab(opfusion->m_portalName);
+
+    if (opfusion->m_cacheplan != NULL) {
+        ReleaseCachedPlan(opfusion->m_cacheplan, false);
+    }
+
     if (opfusion->m_psrc != NULL) {
         opfusion->m_psrc->is_checked_opfusion = false;
         opfusion->m_psrc->opFusionObj = NULL;
@@ -729,6 +801,15 @@ void OpFusion::tearDown(OpFusion* opfusion)
     delete opfusion;
 
     OpFusion::setCurrentOpFusionObj(NULL);
+}
+
+void OpFusion::clearForCplan(OpFusion* opfusion, CachedPlanSource* psrc)
+{
+    if (opfusion == NULL)
+        return;
+    if (psrc->cplan != NULL) {
+        tearDown(opfusion);
+    }
 }
 
 /* just for select and select for */
@@ -781,18 +862,121 @@ void OpFusion::bindClearPosition()
     m_isCompleted = false;
     m_position = 0;
     m_outParams = NULL;
+    m_snapshot = NULL;
 
     MemoryContextDeleteChildren(m_tmpContext);
     /* reset the context. */
     MemoryContextReset(m_tmpContext);
 }
 
-void OpFusion::clearForCplan(OpFusion* opfusion, CachedPlanSource* psrc)
+void OpFusion::initFusionHtab()
 {
-    if (opfusion == NULL)
-        return;
-    if (psrc->cplan != NULL)
-        tearDown(opfusion);
+    HASHCTL hash_ctl;
+    errno_t rc = 0;
+    rc = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
+    securec_check(rc, "\0", "\0");
+
+    hash_ctl.keysize = NAMEDATALEN;
+    hash_ctl.entrysize = sizeof(pnFusionObj);
+    hash_ctl.hcxt = u_sess->cache_mem_cxt;
+    u_sess->pcache_cxt.pn_fusion_htab = hash_create("OpFusion_hashtable",
+        HASH_TBL_LEN, &hash_ctl, HASH_ELEM | HASH_CONTEXT);
+}
+
+void OpFusion::ClearInUnexpectSituation()
+{
+    if (u_sess->pcache_cxt.pn_fusion_htab != NULL) {
+        HASH_SEQ_STATUS seq;
+        pnFusionObj *entry = NULL;
+        hash_seq_init(&seq, u_sess->pcache_cxt.pn_fusion_htab);
+        while ((entry = (pnFusionObj *)hash_seq_search(&seq)) != NULL) {
+            OpFusion* curr = entry->opfusion;
+            if (curr->m_portalName == NULL || strcmp(curr->m_portalName, entry->portalname) == 0) {
+                    curr->clean();
+                    /* only opfusion has reference on cachedplan, no need any more */
+                    if (curr->m_cacheplan && curr->m_cacheplan->refcount == 1) {
+                        ReleaseCachedPlan(curr->m_cacheplan, false);
+                        MemoryContextDelete(curr->m_tmpContext);
+                        MemoryContextDelete(curr->m_context);
+                        delete curr;
+                    }
+            }
+            hash_search(u_sess->pcache_cxt.pn_fusion_htab, entry->portalname, HASH_REMOVE, NULL);
+        }
+    }
+    u_sess->exec_cxt.CurrentOpFusionObj = NULL;
+}
+
+void OpFusion::clean()
+{
+    UnregisterSnapshot(m_snapshot);
+    m_snapshot = NULL;
+    m_outParams = NULL;
+    m_scan->End(true);
+    m_isCompleted = false;
+    MemoryContextDeleteChildren(m_tmpContext);
+    /* reset the context. */
+    MemoryContextReset(m_tmpContext);
+}
+
+void OpFusion::storeFusion(const char *portalname)
+{
+    pnFusionObj *entry = NULL;
+    if (!u_sess->pcache_cxt.pn_fusion_htab)
+        initFusionHtab();
+
+    entry = (pnFusionObj *)(hash_search(u_sess->pcache_cxt.pn_fusion_htab, portalname, HASH_ENTER, NULL));
+    entry->opfusion = this;
+
+    MemoryContext old_cxt = MemoryContextSwitchTo(m_context);
+    pfree_ext(m_portalName);
+    m_portalName = pstrdup(portalname);
+    MemoryContextSwitchTo(old_cxt);
+}
+
+OpFusion *OpFusion::locateFusion(const char *portalname)
+{
+    pnFusionObj *entry = NULL;
+    if (u_sess->pcache_cxt.pn_fusion_htab) {
+        entry = (pnFusionObj *)(hash_search(u_sess->pcache_cxt.pn_fusion_htab, portalname, HASH_FIND, NULL));
+    }
+
+    if (entry) {
+        return entry->opfusion;
+    } else {
+        return NULL;
+    }
+}
+
+void OpFusion::removeFusionFromHtab(const char *portalname)
+{
+    if (u_sess->pcache_cxt.pn_fusion_htab && portalname != NULL && portalname[0] != '\0') {
+        hash_search(u_sess->pcache_cxt.pn_fusion_htab, portalname, HASH_REMOVE, NULL);
+    }
+}
+
+void OpFusion::refreshCurFusion(StringInfo msg)
+{
+    OpFusion *opfusion = NULL;
+    int oldCursor = msg->cursor;
+    const char *portal_name = pq_getmsgstring(msg);
+    if (portal_name[0] != '\0') {
+        opfusion = OpFusion::locateFusion(portal_name);
+        OpFusion::setCurrentOpFusionObj(opfusion);
+    }
+    msg->cursor = oldCursor;
+}
+
+/* judge plan node is partiterator */
+Node* JudgePlanIsPartIterator(Plan* plan)
+{
+    Node* node = NULL;
+    if (IsA(plan, PartIterator)) {
+        node = (Node*)plan->lefttree;
+    } else {
+        node = (Node*)plan;
+    }
+    return node;
 }
 
 SelectFusion::SelectFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
@@ -815,7 +999,7 @@ SelectFusion::SelectFusion(MemoryContext context, CachedPlanSource* psrc, List* 
     /* get limit num */
     if (IsA(m_planstmt->planTree, Limit)) {
         Limit* limit = (Limit*)m_planstmt->planTree;
-        node = (Node*)m_planstmt->planTree->lefttree;
+        node = JudgePlanIsPartIterator(m_planstmt->planTree->lefttree);
         if (limit->limitCount != NULL && IsA(limit->limitCount, Const) && !((Const*)limit->limitCount)->constisnull) {
             m_limitCount = DatumGetInt64(((Const*)limit->limitCount)->constvalue);
         }
@@ -824,7 +1008,7 @@ SelectFusion::SelectFusion(MemoryContext context, CachedPlanSource* psrc, List* 
             m_limitOffset = DatumGetInt64(((Const*)limit->limitOffset)->constvalue);
         }
     } else {
-        node = (Node*)m_planstmt->planTree;
+        node = JudgePlanIsPartIterator(m_planstmt->planTree);
     }
 
     initParams(params);
@@ -855,7 +1039,6 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
      **********************/
     if (m_position == 0) {
         m_scan->refreshParameter(m_outParams == NULL ? m_params : m_outParams);
-
         m_scan->Init(max_rows);
     }
     setReceiver();
@@ -864,12 +1047,14 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
     /* put selected tuple into receiver */
     TupleTableSlot* offset_reslot = NULL;
     while (nprocessed < (unsigned long)start_row && (offset_reslot = m_scan->getTupleSlot()) != NULL) {
+        tpslot_free_heaptuple(offset_reslot);
         nprocessed++;
     }
     while (nprocessed < (unsigned long)get_rows && (m_reslot = m_scan->getTupleSlot()) != NULL) {
         CHECK_FOR_INTERRUPTS();
         nprocessed++;
         (*m_receiver->receiveSlot)(m_reslot, m_receiver);
+        tpslot_free_heaptuple(m_reslot);
     }
     if (!ScanDirectionIsNoMovement(*(m_scan->m_direction))) {
         if (max_rows == 0 || nprocessed < (unsigned long)max_rows) {
@@ -889,7 +1074,7 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
     }
     m_scan->End(m_isCompleted);
     if (m_isCompleted) {
-        m_position= 0;
+        m_position = 0;
     }
     errno_t errorno =
         snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "SELECT %lu", nprocessed);
@@ -904,10 +1089,11 @@ void SelectFusion::close()
     if (m_isCompleted == false) {
         m_scan->End(true);
         m_isCompleted = true;
-        m_position= 0;
+        m_position = 0;
     }
 }
 
+#ifdef ENABLE_MOT
 MotJitSelectFusion::MotJitSelectFusion(
     MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
@@ -973,6 +1159,43 @@ bool MotJitSelectFusion::execute(long max_rows, char* completionTag)
 
     return success;
 }
+#endif
+
+/* init partition by the ScanFusion */
+void InitPartitionByScanFusion(Relation rel, Relation* fakRel, Partition* part, EState* estate,
+                               const ScanFusion* scan)
+{
+    if (RELATION_IS_PARTITIONED(rel)) {
+        estate->esfRelations = NULL;
+        *fakRel = scan->m_rel;
+        *part = scan->m_partRel;
+    }
+}
+/* init bucket relation */
+Relation InitBucketRelation(int2 bucketid, Relation rel, Partition part)
+{
+    Relation bucketRel = NULL;
+    if (bucketid != InvalidBktId) {
+        bucketRel = bucketGetRelation(rel, part, bucketid);
+    } else {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("Invaild Oid when open hash bucket relation.")));
+    }
+    return bucketRel;
+}
+
+/* execute the process of done in the Fusion */
+void ExecDoneStepInFusion(Relation bucketRel, EState* estate)
+{
+    if (estate->esfRelations) {
+        FakeRelationCacheDestroy(estate->esfRelations);
+    }
+
+    if (bucketRel != NULL) {
+        bucketCloseRelation(bucketRel);
+    }
+}
 
 InsertFusion::InsertFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
@@ -992,7 +1215,7 @@ InsertFusion::InsertFusion(MemoryContext context, CachedPlanSource* psrc, List* 
 
     BaseResult* baseresult = (BaseResult*)linitial(node->plans);
     List* targetList = baseresult->plan.targetlist;
-    m_tupDesc = ExecTypeFromTL(targetList, false);
+    m_tupDesc = ExecTypeFromTL(targetList, false, false, rel->rd_tam_type);
     m_reslot = MakeSingleTupleTableSlot(m_tupDesc);
     m_values = (Datum*)palloc0(RelationGetDescr(rel)->natts * sizeof(Datum));
     m_isnull = (bool*)palloc0(RelationGetDescr(rel)->natts * sizeof(bool));
@@ -1064,15 +1287,17 @@ InsertFusion::InsertFusion(MemoryContext context, CachedPlanSource* psrc, List* 
 void InsertFusion::refreshParameterIfNecessary()
 {
     ParamListInfo parms = m_outParams != NULL ? m_outParams : m_params;
+    bool func_isnull = false;
     /* save cur var value */
     for (int i = 0; i < m_tupDesc->natts; i++) {
         m_curVarValue[i] = m_values[i];
         m_curVarIsnull[i] = m_isnull[i];
     }
+
     /* calculate func result */
     for (int i = 0; i < m_targetFuncNum; ++i) {
         if (m_targetFuncNodes[i].funcid != InvalidOid) {
-            bool func_isnull = false;
+            func_isnull = false;
             m_values[m_targetFuncNodes[i].resno - 1] = CalFuncNodeVal(
                 m_targetFuncNodes[i].funcid, m_targetFuncNodes[i].args, &func_isnull, m_curVarValue, m_curVarIsnull);
             m_isnull[m_targetFuncNodes[i].resno - 1] = func_isnull;
@@ -1090,6 +1315,9 @@ void InsertFusion::refreshParameterIfNecessary()
 bool InsertFusion::execute(long max_rows, char* completionTag)
 {
     bool success = false;
+    Oid partOid = InvalidOid;
+    Partition part = NULL;
+    Relation partRel = NULL;
 
     /*******************
      * step 1: prepare *
@@ -1102,6 +1330,7 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     InitResultRelInfo(result_rel_info, rel, 1, 0);
     m_estate->es_result_relation_info = result_rel_info;
 
+
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
         ExecOpenIndices(result_rel_info, false);
     }
@@ -1113,17 +1342,18 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     /************************
      * step 2: begin insert *
      ************************/
-    HeapTuple tuple = heap_form_tuple(m_tupDesc, m_values, m_isnull);
+    HeapTuple tuple = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, m_values, m_isnull, HEAP_TUPLE);
     Assert(tuple != NULL);
+    if (RELATION_IS_PARTITIONED(rel)) {
+        m_estate->esfRelations = NULL;
+        partOid = heapTupleGetPartitionId(rel, tuple);
+        part = partitionOpen(rel, partOid, RowExclusiveLock);
+        partRel = partitionGetRelation(rel, part);
+    }
+
     if (m_is_bucket_rel) {
         bucketid = computeTupleBucketId(result_rel_info->ri_RelationDesc, tuple);
-        if (bucketid != InvalidBktId) {
-            bucket_rel = bucketGetRelation(rel, NULL, bucketid);
-        } else {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                     errmsg("Invaild Oid when open hash bucket relation.")));
-        }
+        bucket_rel = InitBucketRelation(bucketid, rel, part);
     }
 
     (void)ExecStoreTuple(tuple, m_reslot, InvalidBuffer, false);
@@ -1131,17 +1361,31 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     if (rel->rd_att->constr) {
         ExecConstraints(result_rel_info, m_reslot, m_estate);
     }
+    Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
+    (void)tableam_tuple_insert(bucket_rel == NULL ? destRel : bucket_rel, tuple, mycid, 0, NULL);
 
-    (void)heap_insert(bucket_rel == NULL ? rel : bucket_rel, tuple, mycid, 0, NULL);
+    if (!RELATION_IS_PARTITIONED(rel)) {
+        /* try to insert tuple into mlog-table. */
+        if (rel != NULL && rel->rd_mlogoid != InvalidOid) {
+            /* judge whether need to insert into mlog-table */
+            insert_into_mlog_table(rel, rel->rd_mlogoid, tuple, &tuple->t_self,
+                                   GetCurrentTransactionId(), 'I');
+        }
+    }
 
     /* insert index entries for tuple */
     List* recheck_indexes = NIL;
     if (result_rel_info->ri_NumIndices > 0) {
-        recheck_indexes = ExecInsertIndexTuples(m_reslot, &(tuple->t_self), m_estate, NULL, NULL, bucketid, NULL);
+        recheck_indexes = ExecInsertIndexTuples(m_reslot,
+                                                &(tuple->t_self),
+                                                m_estate,
+                                                RELATION_IS_PARTITIONED(rel) ? partRel : NULL,
+                                                RELATION_IS_PARTITIONED(rel) ? part : NULL,
+                                                bucketid, NULL);
     }
     list_free_ext(recheck_indexes);
 
-    heap_freetuple_ext(tuple);
+    tableam_tops_free_tuple(tuple);
 
     (void)ExecClearTuple(m_reslot);
     success = true;
@@ -1153,12 +1397,11 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
 
     heap_close(rel, RowExclusiveLock);
 
-    if (m_estate->esfRelations) {
-        FakeRelationCacheDestroy(m_estate->esfRelations);
-    }
+    ExecDoneStepInFusion(bucket_rel, m_estate);
 
-    if (bucket_rel != NULL) {
-        bucketCloseRelation(bucket_rel);
+    if (RELATION_IS_PARTITIONED(rel)) {
+        partitionClose(rel, part, RowExclusiveLock);
+        releaseDummyRelation(&partRel);
     }
 
     errno_t errorno = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "INSERT 0 1");
@@ -1167,6 +1410,7 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     return success;
 }
 
+#ifdef ENABLE_MOT
 MotJitModifyFusion::MotJitModifyFusion(
     MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
@@ -1231,19 +1475,20 @@ bool MotJitModifyFusion::execute(long max_rows, char* completionTag)
 
     return success;
 }
+#endif
 
 HeapTuple UpdateFusion::heapModifyTuple(HeapTuple tuple)
 {
     HeapTuple new_tuple;
 
-    heap_deform_tuple(tuple, m_tupDesc, m_values, m_isnull);
+    tableam_tops_deform_tuple(tuple, m_tupDesc, m_values, m_isnull);
 
     refreshTargetParameterIfNecessary();
 
     /*
      * create a new tuple from the values and isnull arrays
      */
-    new_tuple = heap_form_tuple(m_tupDesc, m_values, m_isnull);
+    new_tuple = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, m_values, m_isnull, HEAP_TUPLE);
 
     /*
      * copy the identification info of the old tuple: t_ctid, t_self, and OID
@@ -1273,6 +1518,8 @@ UpdateFusion::UpdateFusion(MemoryContext context, CachedPlanSource* psrc, List* 
 
     MemoryContext old_context = MemoryContextSwitchTo(m_context);
     ModifyTable* node = (ModifyTable*)m_planstmt->planTree;
+    Plan *updatePlan = (Plan *)linitial(node->plans);
+    IndexScan* indexscan = (IndexScan *)JudgePlanIsPartIterator(updatePlan);
 
     m_reloid = getrelid(linitial_int(m_planstmt->resultRelations), m_planstmt->rtable);
     Relation rel = heap_open(m_reloid, AccessShareLock);
@@ -1288,13 +1535,16 @@ UpdateFusion::UpdateFusion(MemoryContext context, CachedPlanSource* psrc, List* 
 
     heap_close(rel, AccessShareLock);
 
-    IndexScan* indexscan = (IndexScan*)linitial(node->plans);
     if (m_is_bucket_rel) {
         // ctid + tablebucketid
         Assert(RelationGetDescr(rel)->natts + 2 == list_length(indexscan->scan.plan.targetlist));
     } else {
         // ctid
-        Assert(RelationGetDescr(rel)->natts + 1 == list_length(indexscan->scan.plan.targetlist));
+        if (indexscan->scan.isPartTbl) {
+            Assert(RelationGetDescr(rel)->natts + 2 == list_length(indexscan->scan.plan.targetlist));
+        } else {
+            Assert(RelationGetDescr(rel)->natts + 1 == list_length(indexscan->scan.plan.targetlist));
+        }
     }
     m_outParams = params;
 
@@ -1368,8 +1618,7 @@ UpdateFusion::UpdateFusion(MemoryContext context, CachedPlanSource* psrc, List* 
 
     m_receiver = NULL;
     m_isInsideRec = true;
-
-    m_scan = ScanFusion::getScanFusion((Node*)linitial(node->plans), m_planstmt, m_outParams);
+    m_scan = ScanFusion::getScanFusion((Node*)indexscan, m_planstmt, m_outParams);
 
     MemoryContextSwitchTo(old_context);
 }
@@ -1418,6 +1667,7 @@ void UpdateFusion::refreshTargetParameterIfNecessary()
 bool UpdateFusion::execute(long max_rows, char* completionTag)
 {
     bool success = false;
+    bool execMatview = false;
 
     /*******************
      * step 1: prepare *
@@ -1426,7 +1676,9 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
 
     m_scan->Init(max_rows);
 
-    Relation rel = m_scan->m_rel;
+    Relation rel = ((m_scan->m_parentRel) == NULL ? m_scan->m_rel : m_scan->m_parentRel);
+    Relation partRel = NULL;
+    Partition part = NULL;
     Relation bucket_rel = NULL;
     int2 bucketid = InvalidBktId;
 
@@ -1439,6 +1691,8 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
         ExecOpenIndices(result_rel_info, false);
     }
 
+    InitPartitionByScanFusion(rel, &partRel, &part, m_estate, m_scan);
+
     /*********************************
      * step 2: begin scan and update *
      *********************************/
@@ -1448,106 +1702,134 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
     List* recheck_indexes = NIL;
     m_tupDesc = RelationGetDescr(rel);
 
-
     while ((oldtup = m_scan->getTuple()) != NULL) {
-        if (RelationIsPartitioned(m_scan->m_rel)) {
-            rel = m_scan->getCurrentRel();
-        }
-
         CHECK_FOR_INTERRUPTS();
-        HTSU_Result result;
-        ItemPointerData update_ctid;
-        TransactionId update_xmax;
+        TM_Result result;
+        TM_FailureData tmfd;
 
     lreplace:
+        Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
+        Relation parentRel = RELATION_IS_PARTITIONED(rel) ? rel : NULL;
         tup = heapModifyTuple(oldtup);
+
+        m_scan->UpdateCurrentRel(&rel);
         if (m_is_bucket_rel) {
             Assert(tup->t_bucketId == computeTupleBucketId(result_rel_info->ri_RelationDesc, tup));
             bucketid = tup->t_bucketId;
-            if (bucketid != InvalidBktId) {
-                bucket_rel = bucketGetRelation(rel, NULL, bucketid);
-            } else {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                         errmsg("Invaild hash bucket oid from current tuple for update.")));
-            }
+            bucket_rel = InitBucketRelation(bucketid, rel, part);
         }
 
         (void)ExecStoreTuple(tup, m_reslot, InvalidBuffer, false);
         if (rel->rd_att->constr)
             ExecConstraints(result_rel_info, m_reslot, m_estate);
 
-        result = heap_update(bucket_rel == NULL ? rel : bucket_rel,
-            bucket_rel == NULL ? NULL : rel,
-            &oldtup->t_self,
-            tup,
-            &update_ctid,
-            &update_xmax,
-            m_estate->es_output_cid,
-            InvalidSnapshot,
-            true);
+        bool update_indexes = false;
+        result = tableam_tuple_update(bucket_rel == NULL ? destRel : bucket_rel,
+                                      bucket_rel == NULL ? parentRel : rel,
+                                      &oldtup->t_self,
+                                      tup,
+                                      m_estate->es_output_cid,
+                                      InvalidSnapshot,
+                                      m_estate->es_snapshot,
+                                      true,
+                                      &tmfd,
+                                      &update_indexes,
+                                      false);
+
         switch (result) {
-            case HeapTupleSelfUpdated:
+            case TM_SelfModified:
+                if (tmfd.cmax != m_estate->es_output_cid)
+                    ereport(ERROR,
+                            (errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
+                             errmsg("tuple to be updated was already modified by an operation triggered by the current command"),
+                             errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes to other rows.")));
                 /* already deleted by self; nothing to do */
                 break;
 
-            case HeapTupleMayBeUpdated:
-                /* done successfully */
+            case TM_Ok:
+                if (!RELATION_IS_PARTITIONED(rel)) {
+                    /* handle with matview. */
+                    execMatview = (rel != NULL && rel->rd_mlogoid != InvalidOid);
+                    if (execMatview) {
+                        /* judge whether need to insert into mlog-table */
+                        /* 1. delete one tuple. */
+                        insert_into_mlog_table(rel, rel->rd_mlogoid, NULL, &oldtup->t_self,
+                                               tmfd.xmin, 'D');
+                        /* 2. insert new tuple */
+                        insert_into_mlog_table(rel, rel->rd_mlogoid, tup, &(tup->t_self),
+                                               GetCurrentTransactionId(), 'I');
+                    }
+                    /* done successfully */
+                }
                 nprocessed++;
-                if (result_rel_info->ri_NumIndices > 0 && !HeapTupleIsHeapOnly(tup)) {
-                    recheck_indexes = ExecInsertIndexTuples(m_reslot, &(tup->t_self), m_estate,
-                        NULL, NULL, bucketid, NULL);
+                if (result_rel_info->ri_NumIndices > 0 && update_indexes) {
+                    recheck_indexes = ExecInsertIndexTuples(m_reslot,
+                                                            &(tup->t_self),
+                                                            m_estate,
+                                                            RELATION_IS_PARTITIONED(rel) ? partRel : NULL,
+                                                            RELATION_IS_PARTITIONED(rel) ? part : NULL,
+                                                            bucketid, NULL);
                     list_free_ext(recheck_indexes);
                 }
                 break;
 
-            case HeapTupleUpdated:
+            case TM_Updated: {
                 if (IsolationUsesXactSnapshot()) {
                     ereport(ERROR,
                         (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                             errmsg("could not serialize access due to concurrent update")));
                 }
-                if (!ItemPointerEquals(&tup->t_self, &update_ctid)) {
-                    bool* isnullfornew = NULL;
-                    Datum* valuesfornew = NULL;
-                    HeapTuple copyTuple;
-                    copyTuple = EvalPlanQualFetch(m_estate,
-                                                  bucket_rel == NULL ? rel : bucket_rel,
-                                                  LockTupleExclusive,
-                                                  &update_ctid,
-                                                  update_xmax);
-                    if (copyTuple == NULL) {
-                        pfree_ext(valuesfornew);
-                        pfree_ext(isnullfornew);
-                        break;
-                    }
+                Assert(!ItemPointerEquals(&tup->t_self, &tmfd.ctid));
 
-                    valuesfornew = (Datum*)palloc0(m_tupDesc->natts * sizeof(Datum));
-                    isnullfornew = (bool*)palloc0(m_tupDesc->natts * sizeof(bool));
-
-                    heap_deform_tuple(copyTuple, RelationGetDescr(rel), valuesfornew, isnullfornew);
-
-                    if (m_scan->EpqCheck(valuesfornew, isnullfornew) == false) {
-                        pfree_ext(valuesfornew);
-                        pfree_ext(isnullfornew);
-                        break;
-                    }
-                    oldtup->t_self = update_ctid;
-                    oldtup = copyTuple;
-                    pfree(valuesfornew);
-                    pfree(isnullfornew);
-
-                    goto lreplace;
+                bool* isnullfornew = NULL;
+                Datum* valuesfornew = NULL;
+                HeapTuple copyTuple;
+                copyTuple = heap_lock_updated(m_estate->es_output_cid,
+                                              bucket_rel == NULL ? destRel : bucket_rel,
+                                              LockTupleExclusive,
+                                              &tmfd.ctid,
+                                              tmfd.xmax);
+                if (copyTuple == NULL) {
+                    pfree_ext(valuesfornew);
+                    pfree_ext(isnullfornew);
+                    break;
                 }
+
+                valuesfornew = (Datum*)palloc0(m_tupDesc->natts * sizeof(Datum));
+                isnullfornew = (bool*)palloc0(m_tupDesc->natts * sizeof(bool));
+
+                tableam_tops_deform_tuple(copyTuple, RelationGetDescr(rel), valuesfornew, isnullfornew);
+
+                if (m_scan->EpqCheck(valuesfornew, isnullfornew) == false) {
+                    pfree_ext(valuesfornew);
+                    pfree_ext(isnullfornew);
+                    break;
+                }
+                oldtup->t_self = tmfd.ctid;
+                oldtup = copyTuple;
+                pfree(valuesfornew);
+                pfree(isnullfornew);
+
+                goto lreplace;
+                break;
+            }
+
+            case TM_Deleted:
+                if (IsolationUsesXactSnapshot()) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                            errmsg("could not serialize access due to concurrent update")));
+                }
+                Assert (ItemPointerEquals(&tup->t_self, &tmfd.ctid));
                 break;
 
             default:
-                elog(ERROR, "unrecognized heap_update status: %d", result);
+                elog(ERROR, "unrecognized heap_update status: %u", result);
                 break;
         }
     }
 
-    heap_freetuple_ext(tup);
+    tableam_tops_free_tuple(tup);
 
     (void)ExecClearTuple(m_reslot);
     success = true;
@@ -1558,12 +1840,7 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
     ExecCloseIndices(result_rel_info);
     m_isCompleted = true;
     m_scan->End(true);
-    if (m_estate->esfRelations) {
-        FakeRelationCacheDestroy(m_estate->esfRelations);
-    }
-    if (bucket_rel != NULL) {
-        bucketCloseRelation(bucket_rel);
-    }
+    ExecDoneStepInFusion(bucket_rel, m_estate);
     errno_t errorno =
         snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "UPDATE %lu", nprocessed);
     securec_check_ss(errorno, "\0", "\0");
@@ -1582,6 +1859,10 @@ DeleteFusion::DeleteFusion(MemoryContext context, CachedPlanSource* psrc, List* 
     MemoryContext old_context = MemoryContextSwitchTo(m_context);
     ModifyTable* node = (ModifyTable*)m_planstmt->planTree;
 
+    Plan *deletePlan = (Plan *)linitial(node->plans);
+
+    IndexScan* indexscan = (IndexScan *)JudgePlanIsPartIterator(deletePlan);
+
     m_reloid = getrelid(linitial_int(m_planstmt->resultRelations), m_planstmt->rtable);
     Relation rel = heap_open(m_reloid, AccessShareLock);
 
@@ -1595,20 +1876,18 @@ DeleteFusion::DeleteFusion(MemoryContext context, CachedPlanSource* psrc, List* 
     m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
 
     heap_close(rel, AccessShareLock);
-
     initParams(params);
 
     m_receiver = NULL;
     m_isInsideRec = true;
-
-    m_scan = ScanFusion::getScanFusion((Node*)linitial(node->plans), m_planstmt, m_outParams);
-
+    m_scan = ScanFusion::getScanFusion((Node*)indexscan, m_planstmt, m_outParams);
     MemoryContextSwitchTo(old_context);
 }
 
 bool DeleteFusion::execute(long max_rows, char* completionTag)
 {
     bool success = false;
+    bool execMatview = false;
 
     /*******************
      * step 1: prepare *
@@ -1617,9 +1896,12 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
 
     m_scan->Init(max_rows);
 
-    Relation rel = m_scan->m_rel;
+    Relation rel = ((m_scan->m_parentRel) == NULL ? m_scan->m_rel : m_scan->m_parentRel);
     Relation bucket_rel = NULL;
     int2 bucketid = InvalidBktId;
+
+    Relation partRel = NULL;
+    Partition part = NULL;
 
     ResultRelInfo* result_rel_info = makeNode(ResultRelInfo);
     InitResultRelInfo(result_rel_info, rel, 1, 0);
@@ -1630,6 +1912,8 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
         ExecOpenIndices(result_rel_info, false);
     }
 
+    InitPartitionByScanFusion(rel, &partRel, &part, m_estate, m_scan);
+
     /********************************
      * step 2: begin scan and delete*
      ********************************/
@@ -1638,78 +1922,95 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
     m_tupDesc = RelationGetDescr(rel);
 
     while ((oldtup = m_scan->getTuple()) != NULL) {
-        if (RelationIsPartitioned(m_scan->m_rel)) {
-            rel = m_scan->getCurrentRel();
-        }
-
-        HTSU_Result result;
-        ItemPointerData update_ctid;
-        TransactionId update_xmax;
+        TM_Result result;
+        TM_FailureData tmfd;
+        m_scan->UpdateCurrentRel(&rel);
         if (m_is_bucket_rel) {
             Assert(oldtup->t_bucketId == computeTupleBucketId(result_rel_info->ri_RelationDesc, oldtup));
             bucketid = oldtup->t_bucketId;
-            if (bucketid != InvalidBktId) {
-                bucket_rel = bucketGetRelation(rel, NULL, bucketid);
-            } else {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                         errmsg("Invaild hash bucket oid from current tuple for delete.")));
-            }
+            bucket_rel = InitBucketRelation(bucketid, rel, part);
         }
 
     ldelete:
-        result = heap_delete(bucket_rel == NULL ? rel : bucket_rel,
+        Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
+        result = tableam_tuple_delete(bucket_rel == NULL ? destRel : bucket_rel,
                              &oldtup->t_self,
-                             &update_ctid,
-                             &update_xmax,
                              m_estate->es_output_cid,
+                             //m_estate->es_snapshot,
                              InvalidSnapshot,
-                             true);
+                             NULL,
+                             true,
+                             &tmfd,
+                             false);
+
         switch (result) {
-            case HeapTupleSelfUpdated:
+            case TM_SelfModified:
+                if (tmfd.cmax != m_estate->es_output_cid)
+                    ereport(ERROR,
+                            (errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
+                             errmsg("tuple to be updated was already modified by an operation triggered by the current command"),
+                             errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes to other rows.")));
                 /* already deleted by self; nothing to do */
                 break;
 
-            case HeapTupleMayBeUpdated:
+            case TM_Ok:
+                if (!RELATION_IS_PARTITIONED(rel)) {
+                    /* Here Do the thing for Matview. */
+                    execMatview = (rel != NULL && rel->rd_mlogoid != InvalidOid);
+                    if (execMatview) {
+                        /* judge whether need to insert into mlog-table */
+                        insert_into_mlog_table(rel, rel->rd_mlogoid, NULL,
+                                            &oldtup->t_self, tmfd.xmin, 'D');
+                    }
+                }
                 /* done successfully */
                 nprocessed++;
                 break;
 
-            case HeapTupleUpdated:
+            case TM_Updated: {
                 if (IsolationUsesXactSnapshot()) {
                     ereport(ERROR,
                         (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                             errmsg("could not serialize access due to concurrent update")));
                 }
-                if (!ItemPointerEquals(&oldtup->t_self, &update_ctid)) {
-                    bool* isnullfornew = NULL;
-                    Datum* valuesfornew = NULL;
-                    HeapTuple copyTuple;
+                Assert(!ItemPointerEquals(&oldtup->t_self, &tmfd.ctid));
 
-                    copyTuple = EvalPlanQualFetch(m_estate,
-                                                  bucket_rel == NULL ? rel : bucket_rel,
-                                                  LockTupleExclusive,
-                                                  &update_ctid,
-                                                  update_xmax);
-                    if (copyTuple == NULL) {
-                        break;
-                    }
-                    valuesfornew = (Datum*)palloc0(m_tupDesc->natts * sizeof(Datum));
-                    isnullfornew = (bool*)palloc0(m_tupDesc->natts * sizeof(bool));
-                    heap_deform_tuple(copyTuple, RelationGetDescr(rel), valuesfornew, isnullfornew);
-                    if (m_scan->EpqCheck(valuesfornew, isnullfornew) == false) {
-                        break;
-                    }
-                    oldtup->t_self = update_ctid;
-                    oldtup = copyTuple;
-                    pfree(valuesfornew);
-                    pfree(isnullfornew);
-                    goto ldelete;
+                bool* isnullfornew = NULL;
+                Datum* valuesfornew = NULL;
+                HeapTuple copyTuple;
+                copyTuple = heap_lock_updated(m_estate->es_output_cid,
+                                              bucket_rel == NULL ? destRel : bucket_rel,
+                                              LockTupleExclusive,
+                                              &tmfd.ctid,
+                                              tmfd.xmax);
+                if (copyTuple == NULL) {
+                    break;
                 }
+                valuesfornew = (Datum*)palloc0(m_tupDesc->natts * sizeof(Datum));
+                isnullfornew = (bool*)palloc0(m_tupDesc->natts * sizeof(bool));
+                tableam_tops_deform_tuple(copyTuple, RelationGetDescr(rel), valuesfornew, isnullfornew);
+                if (m_scan->EpqCheck(valuesfornew, isnullfornew) == false) {
+                    break;
+                }
+                oldtup->t_self = tmfd.ctid;
+                oldtup = copyTuple;
+                pfree(valuesfornew);
+                pfree(isnullfornew);
+                goto ldelete;
+                break;
+            }
+
+            case TM_Deleted:
+                if (IsolationUsesXactSnapshot()) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                            errmsg("could not serialize access due to concurrent update")));
+                }
+                Assert(ItemPointerEquals(&oldtup->t_self, &tmfd.ctid));
                 break;
 
             default:
-                elog(ERROR, "unrecognized heap_delete status: %d", result);
+                elog(ERROR, "unrecognized heap_delete status: %u", result);
                 break;
         }
     }
@@ -1721,13 +2022,9 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
      * step 3: done *
      ****************/
     ExecCloseIndices(result_rel_info);
-
     m_isCompleted = true;
     m_scan->End(true);
-
-    if (bucket_rel != NULL) {
-        bucketCloseRelation(bucket_rel);
-    }
+    ExecDoneStepInFusion(bucket_rel, m_estate);
 
     errno_t errorno =
         snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "DELETE %lu", nprocessed);
@@ -1750,7 +2047,7 @@ SelectForUpdateFusion::SelectForUpdateFusion(
     /* get limit num */
     if (IsA(m_planstmt->planTree, Limit)) {
         Limit* limit = (Limit*)m_planstmt->planTree;
-        node = (IndexScan*)m_planstmt->planTree->lefttree->lefttree;
+        node = (IndexScan *)JudgePlanIsPartIterator(m_planstmt->planTree->lefttree->lefttree);
         if (limit->limitOffset != NULL && IsA(limit->limitOffset, Const) &&
             !((Const*)limit->limitOffset)->constisnull) {
             m_limitOffset = DatumGetInt64(((Const*)limit->limitOffset)->constvalue);
@@ -1759,7 +2056,7 @@ SelectForUpdateFusion::SelectForUpdateFusion(
             m_limitCount = DatumGetInt64(((Const*)limit->limitCount)->constvalue);
         }
     } else {
-        node = (IndexScan*)m_planstmt->planTree->lefttree;
+        node = (IndexScan *)JudgePlanIsPartIterator(m_planstmt->planTree->lefttree);
     }
 
     List* targetList = node->scan.plan.targetlist;
@@ -1767,11 +2064,7 @@ SelectForUpdateFusion::SelectForUpdateFusion(
     Relation rel = heap_open(m_reloid, AccessShareLock);
 
     Assert(list_length(targetList) >= 2);
-    void* last_list = list_nth(targetList, list_length(targetList) - 1);
-    list_delete_ptr(targetList, last_list);
-
-    m_tupDesc = ExecCleanTypeFromTL(targetList, false);
-
+    m_tupDesc = ExecCleanTypeFromTL(targetList, false, rel->rd_tam_type);
     m_reslot = MakeSingleTupleTableSlot(m_tupDesc);
 
     m_estate = CreateExecutorState();
@@ -1808,7 +2101,6 @@ SelectForUpdateFusion::SelectForUpdateFusion(
 bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
 {
     bool success = false;
-
     int64 start_row = 0;
     int64 get_rows = 0;
 
@@ -1828,8 +2120,10 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
         m_scan->refreshParameter(m_outParams == NULL ? m_params : m_outParams);
         m_scan->Init(max_rows);
     }
-    Relation rel = m_scan->m_rel;
+    Relation rel = ((m_scan->m_parentRel == NULL) ? m_scan->m_rel : m_scan->m_parentRel);
+    Relation partRel = NULL;
     Relation bucket_rel = NULL;
+    Partition part = NULL;
     int2 bucketid = InvalidBktId;
 
     ResultRelInfo* result_rel_info = makeNode(ResultRelInfo);
@@ -1837,10 +2131,12 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
     m_estate->es_result_relation_info = result_rel_info;
     m_estate->es_output_cid = GetCurrentCommandId(true);
 
+
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
         ExecOpenIndices(result_rel_info, false);
     }
 
+    InitPartitionByScanFusion(rel, &partRel, &part, m_estate, m_scan);
     /**************************************
      * step 2: begin scan and update xmax *
      **************************************/
@@ -1850,21 +2146,17 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
     HeapTuple tmptup = NULL;
     unsigned long nprocessed = 0;
 
-    HTSU_Result result;
-    ItemPointerData update_ctid;
-    TransactionId update_xmax;
+    TM_Result result;
+    TM_FailureData tmfd;
     Buffer buffer;
     while (nprocessed < (unsigned long)start_row && (tuple = m_scan->getTuple()) != NULL) {
         nprocessed++;
     }
 
     while (nprocessed < (unsigned long)get_rows && (tuple = m_scan->getTuple()) != NULL) {
-        if (RelationIsPartitioned(m_scan->m_rel)) {
-            rel = m_scan->getCurrentRel();
-        }
-
+        m_scan->UpdateCurrentRel(&rel);
         CHECK_FOR_INTERRUPTS();
-        heap_deform_tuple(tuple, RelationGetDescr(rel), m_values, m_isnull);
+        tableam_tops_deform_tuple(tuple, RelationGetDescr(rel), m_values, m_isnull);
 
         for (int i = 0; i < m_tupDesc->natts; i++) {
             Assert(m_attrno[i] > 0);
@@ -1872,7 +2164,7 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
             m_tmpisnull[i] = m_isnull[m_attrno[i] - 1];
         }
 
-        tmptup = heap_form_tuple(m_tupDesc, m_tmpvals, m_tmpisnull);
+        tmptup = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, m_tmpvals, m_tmpisnull, HEAP_TUPLE);
 
         Assert(tmptup != NULL);
 
@@ -1880,13 +2172,7 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
             if (m_is_bucket_rel) {
                 Assert(tuple->t_bucketId == computeTupleBucketId(result_rel_info->ri_RelationDesc, tuple));
                 bucketid = tuple->t_bucketId;
-                if (bucketid != InvalidBktId) {
-                    bucket_rel = bucketGetRelation(rel, NULL, bucketid);
-                } else {
-                    ereport(ERROR,
-                            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                             errmsg("Invaild hash bucket oid from current tuple for lock.")));
-                }
+                bucket_rel = InitBucketRelation(bucketid, rel, part);
             }
 
             (void)ExecStoreTuple(tmptup, /* tuple to store */
@@ -1894,95 +2180,116 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
                 InvalidBuffer,           /* TO DO: survey */
                 false);                  /* don't pfree this pointer */
 
-            slot_getsomeattrs(m_reslot, m_tupDesc->natts);
-
-            result = heap_lock_tuple(bucket_rel == NULL ? rel : bucket_rel,
-                                     tuple,
-                                     &buffer,
-                                     &update_ctid,
-                                     &update_xmax,
-                                     m_estate->es_output_cid,
-                                     LockTupleExclusive,
-                                     false);
+            Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
+            tableam_tslot_getsomeattrs(m_reslot, m_tupDesc->natts);
+            result = tableam_tuple_lock(bucket_rel == NULL ? destRel : bucket_rel,
+                                        tuple,
+                                        &buffer,
+                                        m_estate->es_output_cid,
+                                        LockTupleExclusive,
+                                        false,
+                                        &tmfd, false, false, false, InvalidSnapshot, NULL, false);
             ReleaseBuffer(buffer);
 
-            if (result == HeapTupleSelfUpdated) {
-                heap_freetuple_ext(tmptup);
+            if (result == TM_SelfModified) {
                 continue;
             }
 
             switch (result) {
-                case HeapTupleSelfCreated:
+                case TM_SelfCreated:
                     ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                         errmsg("attempted to lock invisible tuple")));
                     break;
-                case HeapTupleSelfUpdated:
-                    heap_freetuple_ext(tmptup);
+                case TM_SelfModified:
+
+                    /*
+                     * The target tuple was already updated or deleted by the
+                     * current command, or by a later command in the current
+                     * transaction.  We *must* ignore the tuple in the former
+                     * case, so as to avoid the "Halloween problem" of repeated
+                     * update attempts.  In the latter case it might be sensible
+                     * to fetch the updated tuple instead, but doing so would
+                     * require changing heap_update and heap_delete to not
+                     * complain about updating "invisible" tuples, which seems
+                     * pretty scary (heap_lock_tuple will not complain, but few
+                     * callers expect HeapTupleInvisible, and we're not one of
+                     * them).  So for now, treat the tuple as deleted and do not
+                     * process.
+                     */
+
                     /* already deleted by self; nothing to do */
                     break;
 
-                case HeapTupleMayBeUpdated:
+                case TM_Ok:
                     /* done successfully */
                     nprocessed++;
                     (*m_receiver->receiveSlot)(m_reslot, m_receiver);
-                    heap_freetuple_ext(tmptup);
+                    tpslot_free_heaptuple(m_reslot);
                     break;
 
-                case HeapTupleUpdated:
+                case TM_Updated: {
                     if (IsolationUsesXactSnapshot()) {
                         ereport(ERROR,
                             (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                                 errmsg("could not serialize access due to concurrent update")));
                     }
-                    if (!ItemPointerEquals(&tuple->t_self, &update_ctid)) {
-                        bool* isnullfornew = NULL;
-                        Datum* valuesfornew = NULL;
-                        HeapTuple copyTuple;
-                        copyTuple = EvalPlanQualFetch(m_estate,
-                                                      bucket_rel == NULL ? rel : bucket_rel,
-                                                      LockTupleExclusive,
-                                                      &update_ctid,
-                                                      update_xmax);
-                        if (copyTuple == NULL) {
-                            break;
-                        }
-                        valuesfornew = (Datum*)palloc0(RelationGetDescr(rel)->natts * sizeof(Datum));
-                        isnullfornew = (bool*)palloc0(RelationGetDescr(rel)->natts * sizeof(bool));
+                    Assert(!ItemPointerEquals(&tuple->t_self, &tmfd.ctid));
 
-                        heap_deform_tuple(copyTuple, RelationGetDescr(rel), valuesfornew, isnullfornew);
-
-                        if (m_scan->EpqCheck(valuesfornew, isnullfornew) == false) {
-                            pfree_ext(valuesfornew);
-                            pfree_ext(isnullfornew);
-                            break;
-                        }
-
-                        for (int i = 0; i < m_tupDesc->natts; i++) {
-                            m_tmpvals[i] = valuesfornew[m_attrno[i] - 1];
-                            m_tmpisnull[i] = isnullfornew[m_attrno[i] - 1];
-                        }
-                        heap_freetuple_ext(tmptup);
-
-                        tmptup = heap_form_tuple(m_tupDesc, m_tmpvals, m_tmpisnull);
-                        Assert(tmptup != NULL);
-
-                        (void)ExecStoreTuple(tmptup, /* tuple to store */
-                            m_reslot,                /* slot to store in */
-                            InvalidBuffer,           /* TO DO: survey */
-                            false);                  /* don't pfree this pointer */
-
-                        slot_getsomeattrs(m_reslot, m_tupDesc->natts);
-                        nprocessed++;
-                        (*m_receiver->receiveSlot)(m_reslot, m_receiver);
-                        tuple->t_self = update_ctid;
-                        tuple = copyTuple;
-                        heap_freetuple_ext(tmptup);
-                        pfree(valuesfornew);
-                        pfree(isnullfornew);
+                    bool* isnullfornew = NULL;
+                    Datum* valuesfornew = NULL;
+                    HeapTuple copyTuple;
+                    copyTuple = heap_lock_updated(m_estate->es_output_cid,
+                                                  bucket_rel == NULL ? destRel : bucket_rel,
+                                                  LockTupleExclusive,
+                                                  &tmfd.ctid,
+                                                  tmfd.xmax);
+                    if (copyTuple == NULL) {
+                        break;
                     }
+                    valuesfornew = (Datum*)palloc0(RelationGetDescr(rel)->natts * sizeof(Datum));
+                    isnullfornew = (bool*)palloc0(RelationGetDescr(rel)->natts * sizeof(bool));
+
+                    tableam_tops_deform_tuple(copyTuple, RelationGetDescr(rel), valuesfornew, isnullfornew);
+
+                    if (m_scan->EpqCheck(valuesfornew, isnullfornew) == false) {
+                        pfree_ext(valuesfornew);
+                        pfree_ext(isnullfornew);
+                        break;
+                    }
+
+                    for (int i = 0; i < m_tupDesc->natts; i++) {
+                        m_tmpvals[i] = valuesfornew[m_attrno[i] - 1];
+                        m_tmpisnull[i] = isnullfornew[m_attrno[i] - 1];
+                    }
+
+                    tmptup = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, m_tmpvals, m_tmpisnull, HEAP_TUPLE);
+                    Assert(tmptup != NULL);
+
+                    (void)ExecStoreTuple(tmptup, /* tuple to store */
+                        m_reslot,                /* slot to store in */
+                        InvalidBuffer,           /* TO DO: survey */
+                        false);                  /* don't pfree this pointer */
+
+                    tableam_tslot_getsomeattrs(m_reslot, m_tupDesc->natts);
+                                nprocessed++;
+                                (*m_receiver->receiveSlot)(m_reslot, m_receiver);
+                                tuple->t_self = tmfd.ctid;
+                                tuple = copyTuple;
+                                pfree(valuesfornew);
+                                pfree(isnullfornew);
+                            break;
+                        }
+                    
+                case TM_Deleted:
+                    if (IsolationUsesXactSnapshot()) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                                errmsg("could not serialize access due to concurrent update")));
+                    }
+                    Assert(ItemPointerEquals(&tuple->t_self, &tmfd.ctid));
                     break;
                 default:
-                    elog(ERROR, "unrecognized heap_lock_tuple status: %d", result);
+                    elog(ERROR, "unrecognized heap_lock_tuple status: %u", result);
                     break;
             }
         }
@@ -2009,13 +2316,7 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
 	if (m_isCompleted) {
         m_position = 0;
     }
-    if (m_estate->esfRelations) {
-        FakeRelationCacheDestroy(m_estate->esfRelations);
-    }
-
-    if (bucket_rel != NULL) {
-        bucketCloseRelation(bucket_rel);
-    }
+    ExecDoneStepInFusion(bucket_rel, m_estate);
 
     if (m_isInsideRec) {
         (*m_receiver->rDestroy)(m_receiver);
@@ -2032,10 +2333,9 @@ void SelectForUpdateFusion::close()
     if (m_isCompleted == false) {
         m_scan->End(true);
         m_isCompleted = true;
-        m_position= 0;
+        m_position = 0;
     }
 }
-
 AggFusion::AggFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
 {
@@ -2051,11 +2351,12 @@ AggFusion::AggFusion(MemoryContext context, CachedPlanSource* psrc, List* plantr
     MemoryContext oldContext = MemoryContextSwitchTo(m_context);
 
     Agg *aggnode = (Agg *)m_planstmt->planTree;
+    Node* scan = JudgePlanIsPartIterator(aggnode->plan.lefttree);
 
     initParams(params);
     m_receiver = NULL;
     m_isInsideRec = true;
-    m_scan = ScanFusion::getScanFusion((Node*)aggnode->plan.lefttree, m_planstmt, m_outParams);
+    m_scan = ScanFusion::getScanFusion(scan, m_planstmt, m_outParams);
     m_reslot = NULL;
 
     /* agg init */
@@ -2147,12 +2448,14 @@ bool AggFusion::execute(long max_rows, char *completionTag)
         }
     }
 
-    HeapTuple tmptup = heap_form_tuple(m_tupDesc, values, isnull);
+    HeapTuple tmptup = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, values, isnull, HEAP_TUPLE);
     (void)ExecStoreTuple(tmptup, reslot, InvalidBuffer, false);
-    slot_getsomeattrs(reslot, m_tupDesc->natts);
+
+    tableam_tslot_getsomeattrs(reslot, m_tupDesc->natts);
 
     (*m_receiver->receiveSlot)(reslot, m_receiver);
-    heap_freetuple_ext(tmptup);
+
+    tpslot_free_heaptuple(m_reslot);
 
     success = true;
 
@@ -2349,10 +2652,12 @@ SortFusion::SortFusion(MemoryContext context, CachedPlanSource* psrc, List* plan
     m_receiver = NULL;
     m_isInsideRec = true;
     m_scan = ScanFusion::getScanFusion((Node*)sortnode->plan.lefttree, m_planstmt, m_outParams);
+    m_tupDesc->tdTableAmType = m_scan->m_tupDesc->tdTableAmType;
+    m_scanDesc->tdTableAmType = m_scan->m_tupDesc->tdTableAmType;
     m_reslot = NULL;
     m_isCompleted = true;
 
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc);
+    m_reslot = MakeSingleTupleTableSlot(m_tupDesc, false, m_scan->m_tupDesc->tdTableAmType);
     m_values = (Datum*)palloc0(m_tupDesc->natts * sizeof(Datum));
     m_isnull = (bool*)palloc0(m_tupDesc->natts * sizeof(bool));
 
@@ -2393,7 +2698,6 @@ bool SortFusion::execute(long max_rows, char *completionTag)
                 sortnode->collations,
                 sortnode->nullsFirst,
                 sortMem,
-                NULL,
                 false,
                 maxMem,
                 sortnode->plan.plan_node_id,
@@ -2413,16 +2717,16 @@ bool SortFusion::execute(long max_rows, char *completionTag)
     /* send sorted data to client */
     slot = MakeSingleTupleTableSlot(m_scanDesc);
     while (tuplesort_gettupleslot(tuplesortstate, true, slot, NULL)) {
-        slot_getsomeattrs(slot, m_scanDesc->natts);
+        tableam_tslot_getsomeattrs(slot, m_scanDesc->natts);
         for (int i = 0; i < m_tupDesc->natts; i++) {
             values[i] = slot->tts_values[m_attrno[i] - 1];
             isnull[i] = slot->tts_isnull[m_attrno[i] - 1];
         }
 
-        HeapTuple tmptup = heap_form_tuple(m_tupDesc, values, isnull);
+        HeapTuple tmptup = (HeapTuple) tableam_tops_form_tuple(m_tupDesc, values, isnull,  TableAMGetTupleType(m_tupDesc->tdTableAmType));
         (void)ExecStoreTuple(tmptup, reslot, InvalidBuffer, false);
         (*m_receiver->receiveSlot)(reslot, m_receiver);
-        heap_freetuple_ext(tmptup);
+        tableam_tops_free_tuple(tmptup);
 
         CHECK_FOR_INTERRUPTS();
         nprocessed++;
@@ -2447,124 +2751,3 @@ bool SortFusion::execute(long max_rows, char *completionTag)
 
     return success;
 }
-
-#if 0
-NestLoopFusion::NestLoopFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
-    : OpFusion(context, psrc, plantree_list)
-{
-    m_tmpvals = NULL;
-    m_values = NULL;
-    m_isnull = NULL;
-    m_tmpisnull = NULL;
-
-    m_paramLoc = NULL;
-    m_attrno = NULL;
-    m_reloid = 0;
-
-    MemoryContext oldContext = MemoryContextSwitchTo(m_context);
-
-    NestLoop *nlplan = (NestLoop*)m_planstmt->planTree;
-    List *targetList = nlplan->join.plan.targetlist;
-    m_tupDesc = ExecTypeFromTL(targetList, false);
-    m_attrno = (int16 *) palloc(m_tupDesc->natts * sizeof(int16));
-
-    int lattnum = list_length(nlplan->join.plan.lefttree->targetlist);
-
-    int cur_resno = 1;
-    ListCell *lc = NULL;
-    foreach(lc, targetList)
-    {
-        TargetEntry *res = (TargetEntry *)lfirst(lc);
-        Var *var = (Var *)res->expr;
-        Assert(var->varoattno > 0);
-        if (var->varno == OUTER_VAR) {
-            m_attrno[cur_resno - 1] = var->varoattno;
-        } else {
-            Assert(var->varno == INNER_VAR);
-            m_attrno[cur_resno - 1] = var->varoattno + lattnum;
-        }
-        cur_resno++;
-    }
-
-    initParams(params);
-    m_receiver = NULL;
-    m_isInsideRec = true;
-    m_lscan = ScanFusion::getScanFusion ((Node*)nlplan->join.plan.lefttree,  m_planstmt, m_outParams);
-    m_rscan = RScanFusion::getScanFusion((Node*)nlplan->join.plan.righttree, m_planstmt, m_outParams);
-    m_reslot = NULL;
-
-    MemoryContextSwitchTo(oldContext);
-}
-
-bool NestLoopFusion::execute(long max_rows, char *completionTag)
-{
-    bool success = false;
-
-    NestLoop *nlplan = (NestLoop*)m_planstmt->planTree;
-    int attnum  = list_length(m_planstmt->planTree->targetlist);
-    int lattnum = list_length(nlplan->join.plan.lefttree->targetlist);
-
-    TupleTableSlot *reslot = m_reslot;
-    Datum *values = m_values;
-    bool  *isnull = m_isnull;
-    for (int i = 0; i < m_tupDesc->natts; i++) {
-        isnull[i] = true;
-    }
-
-    /* prepare */
-    m_lscan->refreshParameter(t_thrd.opfusion_cxt.m_params);
-    m_lscan->Init(max_rows);
-
-    setReceiver();
-
-    long nprocessed1 = 0;
-    long nprocessed2 = 0;
-    TupleTableSlot* lslot = NULL;
-    TupleTableSlot* rslot = NULL;
-    while ((lslot = m_lscan->getTupleSlot()) != NULL) {
-
-        m_rscan->refreshParameter(t_thrd.opfusion_cxt.m_params);
-        m_rscan->Init(max_rows);
-
-        /* fetch tuple from inner relation */
-        while ((rslot = m_rscan->getTupleSlot()) != NULL) {
-            CHECK_FOR_INTERRUPTS();
-            nprocessed2++;
-
-            /* make nestloop targetlist */
-            for (int i = 0; i < attnum; i++) {
-                int16 attno = m_attrno[i];
-                if (attno <= lattnum) {
-                    values[i] = lslot->tts_values[attno - 1];
-                    isnull[i] = lslot->tts_isnull[attno - 1];
-                } else {
-                    values[i] = rslot->tts_values[attno - lattnum - 1];
-                    isnull[i] = rslot->tts_isnull[attno - lattnum - 1];
-                }
-            }
-
-            HeapTuple tmptup = heap_form_tuple(m_tupDesc, values, isnull);
-            (void)ExecStoreTuple(tmptup, reslot, InvalidBuffer, false);
-            heap_freetuple_ext(tmptup);
-            (*t_thrd.opfusion_cxt.m_receiver->receiveSlot)(reslot, t_thrd.opfusion_cxt.m_receiver);
-            if (nprocessed2 >= max_rows)
-                break;
-        }
-        m_rscan->End();
-
-        nprocessed1++;
-        if (nprocessed1 >= max_rows || nprocessed2 >= max_rows)
-            break;
-    }
-    m_lscan->End();
-
-    success = true;
-
-    /* step 3: done */
-    if (t_thrd.opfusion_cxt.m_isInsideRec == true) {
-        (*t_thrd.opfusion_cxt.m_receiver->rDestroy)(t_thrd.opfusion_cxt.m_receiver);
-    }
-
-    return success;
-}
-#endif

@@ -24,7 +24,6 @@
  * -------------------------------------------------------------------------
  */
 
-#include <time.h>
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "postmaster/postmaster.h"
@@ -37,6 +36,10 @@
 #include "pgstat.h"
 #include "pgxc/pgxc.h"
 #include "libcomm/libcomm.h"
+#include "replication/dataprotocol.h"
+#include "replication/walprotocol.h"
+#include "replication/walreceiver.h"
+#include "replication/walsender.h"
 
 /* Track memory usage by all shared memory context */
 int32 shareTrackedMemChunks = 0;
@@ -59,6 +62,8 @@ int32 processMemInChunks = 200;  // track the memory used by process --dynamic_u
 int32 peakChunksPerProcess = 0;  // the peak memory of process --dynamic_peak_memory
 int32 comm_original_memory = 0;  // original comm memory
 int32 maxSharedMemory = 0;       // original shared memory
+int32 backendReservedMemInChunk = 0;  // reserved memory for backend threads
+int32 backendUsedMemInChunk = 0;      // the memory usage for backend threads
 
 /* Track memory usage by all dynamic memory context */
 int32 dynmicTrackedMemChunks = 200;
@@ -97,7 +102,7 @@ void gs_output_memory_info(void);
 bool gs_memory_enjection(void)
 {
     if (MEMORY_FAULT_PERCENT && !t_thrd.xact_cxt.bInAbortTransaction && !t_thrd.int_cxt.CritSectionCount &&
-        !(AmPostmasterProcess()) && IsNormalProcessingMode() &&
+        !(AmPostmasterProcess()) && IsNormalProcessingMode() && t_thrd.utils_cxt.memNeedProtect &&
         (gs_random() % MAX_MEMORY_FAULT_PERCENT <= MEMORY_FAULT_PERCENT)) {
         return true;
     }
@@ -181,15 +186,39 @@ void gs_find_abnormal_memctx(MemoryContext context)
 }
 
 /* recursive to verify the size of memory context and find the abnormal */
-void gs_recursive_verify_memctx(MemoryContext context)
+void gs_recursive_verify_memctx(MemoryContext context, bool is_shared)
 {
     MemoryContext child;
 
-    gs_find_abnormal_memctx(context);
+    PG_TRY();
+    {
+        CHECK_FOR_INTERRUPTS();
 
-    /* recursive MemoryContext's child */
-    for (child = context->firstchild; child != NULL; child = child->nextchild) {
-        gs_recursive_verify_memctx(child);
+        if (is_shared) {
+            MemoryContextLock(context);
+        }
+
+        gs_find_abnormal_memctx(context);
+
+        /*recursive MemoryContext's child*/
+        for (child = context->firstchild; child != NULL; child = child->nextchild) {
+            if (child->is_shared == is_shared) {
+                gs_recursive_verify_memctx(child, is_shared);
+            }
+        }
+    }
+    PG_CATCH();
+    {
+        if (is_shared) {
+            MemoryContextUnlock(context);
+        }
+
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    if (is_shared) {
+        MemoryContextUnlock(context);
     }
 }
 
@@ -330,7 +359,7 @@ void gs_display_query_by_sessionentry(uint64* saveThreadid, uint64* maxThreadid)
 }
 
 /* display the information of uncontrolled query in some user */
-void gs_display_uncontrolled_query(void)
+void gs_display_uncontrolled_query(int* procIdx)
 {
     /* libcomm permanent thread don't need to display query info */
     if (t_thrd.comm_cxt.LibcommThreadType != LIBCOMM_NONE || t_thrd.shemem_ptr_cxt.sessionMemoryArray == NULL)
@@ -343,22 +372,37 @@ void gs_display_uncontrolled_query(void)
 
     /* search the thread and print its memory usage */
     if (saveSessionid || maxSessionid) {
-        /* Print the top used memory */
-        HOLD_INTERRUPTS();
+        volatile PGPROC* proc = NULL;
+        int idx = 0;
+        PG_TRY();
+        {
+            /* Print the top used memory */
+            HOLD_INTERRUPTS();
 
-        for (int idx = 0; idx < (int)g_instance.proc_base->allProcCount; idx++) {
-            volatile PGPROC* proc = (g_instance.proc_base_all_procs[idx]);
+            for (idx = 0; idx < (int)g_instance.proc_base->allProcCount; idx++) {
+                proc = g_instance.proc_base_all_procs[idx];
+                *procIdx = idx;
 
-            if (proc->sessMemorySessionid == saveSessionid || proc->sessMemorySessionid == maxSessionid) {
-                /* lock this proc's delete MemoryContext action */
-                (void)syscalllockAcquire(&((PGPROC*)proc)->deleMemContextMutex);
-                if (NULL != proc->topmcxt)
-                    gs_recursive_verify_memctx(proc->topmcxt);
+                if (proc->sessMemorySessionid == saveSessionid || proc->sessMemorySessionid == maxSessionid) {
+                    /*lock this proc's delete MemoryContext action*/
+                    (void)syscalllockAcquire(&((PGPROC*)proc)->deleMemContextMutex);
+                    if (NULL != proc->topmcxt)
+                        gs_recursive_verify_memctx(proc->topmcxt, false);
+                    (void)syscalllockRelease(&((PGPROC*)proc)->deleMemContextMutex);
+                }
+            }
+
+            RESUME_INTERRUPTS();
+        }
+        PG_CATCH();
+        {
+            if (*procIdx < (int)g_instance.proc_base->allProcCount) {
+                proc = g_instance.proc_base_all_procs[*procIdx];
                 (void)syscalllockRelease(&((PGPROC*)proc)->deleMemContextMutex);
             }
+            PG_RE_THROW();
         }
-
-        RESUME_INTERRUPTS();
+        PG_END_TRY();
     }
 }
 
@@ -378,6 +422,7 @@ void gs_output_memory_info(void)
     int gpu_dynamic_used_memory = 0;
     int gpu_dynamic_peak_memory = 0;
     int large_storage_memory = (int)(storageTrackedBytes >> BITS_IN_MB);
+    int procIdx = 0;
 
 #ifdef ENABLE_MULTIPLE_NODES
     /* get the memory used by gpu */
@@ -421,9 +466,9 @@ void gs_output_memory_info(void)
             u_sess->debug_query_id,
             real_shrctx_size,
             MAX_SHARED_MEMCTX_LIMITATION);
-        gs_recursive_verify_memctx(g_instance.instance_context);
+        gs_recursive_verify_memctx(g_instance.instance_context, true);
 
-        if ((real_shrctx_size > MAX_SHARED_MEMCTX_SIZE) &&  // 10G
+        if (max_dynamic_memory != 0 && (real_shrctx_size > MAX_SHARED_MEMCTX_SIZE) &&  // 10G
             (real_shrctx_size * 100 / max_dynamic_memory) > 60) {
             write_stderr(
                 "----debug_query_id=%lu, FATAL: share memory context is out of control!\n", u_sess->debug_query_id);
@@ -437,7 +482,7 @@ void gs_output_memory_info(void)
             u_sess->debug_query_id,
             MAX_COMM_USED_SIZE);
 
-        if ((sctpcomm_used_memory > max_sctpcomm_memory) &&  // 4G
+        if (max_dynamic_memory != 0 && (sctpcomm_used_memory > max_sctpcomm_memory) &&  // 4G
             ((sctpcomm_used_memory * 100 / max_dynamic_memory) > 60)) {
             write_stderr(
                 "----debug_query_id=%lu, FATAL: communication memory is out of control!\n", u_sess->debug_query_id);
@@ -445,7 +490,7 @@ void gs_output_memory_info(void)
     }
 
     /* display the information of uncontrolled query */
-    gs_display_uncontrolled_query();
+    gs_display_uncontrolled_query(&procIdx);
 }
 
 /* the failure interface when allocating memory */
@@ -489,9 +534,33 @@ void gs_memprot_failed(int64 sz, MemType type)
                      "g_instance.attr.attr_memory.max_process_memory.\n",
             u_sess->debug_query_id);
     }
+}
 
-    /* cancel the query or thread who uses the maximum memory */
-    gs_output_memory_info();
+static bool MemoryIsNotEnough(int32 currentMem, int32 maxMem, bool needProtect)
+{
+    if (currentMem < maxMem) {
+        return false;
+    }
+
+    /* this memory limit check already be mask off */
+    if ((u_sess && u_sess->attr.attr_memory.disable_memory_protect) ||
+        !t_thrd.utils_cxt.memNeedProtect || !needProtect) {
+        return false;
+    }
+
+    /* this malloc could not be prevented */
+    if ((t_thrd.int_cxt.CritSectionCount != 0) ||
+        (AmPostmasterProcess()) || t_thrd.xact_cxt.bInAbortTransaction) {
+        return false;
+    }
+
+    if (currentMem >= (maxMem + t_thrd.utils_cxt.beyondChunk)) {
+        write_stderr("ERROR: memory alloc failed. Current role is: %d, maxMem is: %d, currMem is: %d.\n",
+            t_thrd.role, maxMem, currentMem);
+        return true;
+    }
+
+    return false;
 }
 
 /*
@@ -499,17 +568,15 @@ void gs_memprot_failed(int64 sz, MemType type)
  * valid against query level memory quota.
  */
 template <MemType type>
-static bool gs_memprot_reserve_memory_chunks(int32 numChunksToReserve)
+static bool memTracker_ReserveMemChunks(int32 numChunksToReserve, bool needProtect)
 {
-    bool beyondUsed = false;
     int32 total = 0;
-    uint64 debug_query_id;
+    int32 *currSize = NULL;
+    int32 *maxSize = NULL;
 
-    Assert(numChunksToReserve > 0);
+    Assert(0 < numChunksToReserve);
 
-    /*
-     *  query level memory verification
-     */
+    /* query level memory verification */
     if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry && type != MEM_SHRD) {
         /* 1. increase memory in chunk at query level */
         total = gs_atomic_add_32(&(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->queryMemInChunks), numChunksToReserve);
@@ -519,57 +586,48 @@ static bool gs_memprot_reserve_memory_chunks(int32 numChunksToReserve)
             gs_lock_test_and_set(&(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery), total);
     }
 
-    /*
-     * increase chunk quota at global gaussdb process level
-     */
-    total = gs_atomic_add_32(&processMemInChunks, numChunksToReserve);
+    /* increase chunk quota at global gaussdb process level */
+    if (t_thrd.utils_cxt.backend_reserved) {
+        currSize = &backendUsedMemInChunk;
+        maxSize = &backendReservedMemInChunk;
+    } else {
+        currSize = &processMemInChunks;
+        maxSize = &maxChunksPerProcess;
+    }
+    total = gs_atomic_add_32(currSize, numChunksToReserve);
 
-    /*
-     * Normal u_sess is valid, in communicator layer u_sess sometimes is null, we replace by comm thrad debug query id
-     * and we hope condition with disable_memory_protect can enter in communicator if usess is null
-     */
-    debug_query_id = likely(u_sess == NULL) ? t_thrd.comm_cxt.debug_query_id : u_sess->debug_query_id;
-
-    /*
-     * Query memory quota is exhausted. Reset the counter then return false.
-     */
-    if (maxChunksPerProcess && (total > maxChunksPerProcess) && debug_query_id &&
-        (!u_sess || !u_sess->attr.attr_memory.disable_memory_protect)) {
-        if ((total > (maxChunksPerProcess + t_thrd.utils_cxt.beyondChunk)) && (t_thrd.int_cxt.CritSectionCount == 0) &&
-            !(AmPostmasterProcess()) && !t_thrd.xact_cxt.bInAbortTransaction) {
-            gs_atomic_add_32(&processMemInChunks, -numChunksToReserve);
-            return false;
-        }
-        beyondUsed = true;
+    /* Query memory quota is exhausted. Reset the counter then return false. */
+    if (MemoryIsNotEnough(total, *maxSize, needProtect)) {
+        gs_atomic_add_32(currSize, -numChunksToReserve);
+        return false;
     }
 
-    if (peakChunksPerProcess < processMemInChunks) {
-        peakChunksPerProcess = processMemInChunks;
+    /* no longer to use the beyond chunk, so reset it */
+    if (total < *maxSize) {
+        t_thrd.utils_cxt.beyondChunk = 0;
+    }
 
-        /* Print memory alarm information every 1 minute. */
+    if (peakChunksPerProcess < processMemInChunks + backendUsedMemInChunk) {
+        peakChunksPerProcess = processMemInChunks + backendUsedMemInChunk;
+
+        /*Print memory alarm information every 1 minute.*/
         int threshold = PROCMEM_HIGHWATER_THRESHOLD >> (chunkSizeInBits - BITS_IN_MB);
-        if (maxChunksPerProcess && (processMemInChunks > maxChunksPerProcess + threshold)) {
+        if ((backendUsedMemInChunk + processMemInChunks) >
+            (backendReservedMemInChunk + maxChunksPerProcess + threshold)) {
             TimestampTz current = GetCurrentTimestamp();
             if (u_sess != NULL && TimestampDifferenceExceeds(last_print_timestamp, current, 60000)) {
-                uint32 processMemMB = (uint32)processMemInChunks << (chunkSizeInBits - BITS_IN_MB);
+                uint32 processMemMB =
+                    (uint32)(backendUsedMemInChunk + processMemInChunks) << (chunkSizeInBits - BITS_IN_MB);
                 uint32 reserveMemMB = (uint32)numChunksToReserve << (chunkSizeInBits - BITS_IN_MB);
-                write_stderr("WARNING: process memory allocation %u MB,debug_query_id %lu,"
-                             "pid %lu, thread self memory %ld bytes, new %u bytes allocated, statement(%s).\n",
-                    processMemMB,
-                    u_sess->debug_query_id,
-                    t_thrd.proc_cxt.MyProcPid,
-                    t_thrd.utils_cxt.trackedBytes,
-                    reserveMemMB,
+                write_stderr("WARNING: process memory allocation %u MB, pid %lu, "
+                             "thread self memory %ld bytes, new %u bytes allocated, statement(%s).\n",
+                    processMemMB, t_thrd.proc_cxt.MyProcPid, t_thrd.utils_cxt.trackedBytes, reserveMemMB,
                     (t_thrd.postgres_cxt.debug_query_string != NULL) ? t_thrd.postgres_cxt.debug_query_string : "NULL");
 
                 last_print_timestamp = current;
             }
         }
     }
-
-    /* no longer to use the beyond chunk, so reset it */
-    if (t_thrd.utils_cxt.beyondChunk > 0 && !beyondUsed)
-        t_thrd.utils_cxt.beyondChunk = 0;
 
     return true;
 }
@@ -583,7 +641,7 @@ static bool gs_memprot_reserve_memory_chunks(int32 numChunksToReserve)
  * reserved chunk, it does not reserve a new chunk.
  */
 template <MemType type>
-bool gs_memprot_reserve_memory(int64 requestedBytes)
+bool memTracker_ReserveMem(int64 requestedBytes, bool needProtect)
 {
     bool status = true;
     int64 tb = 0;
@@ -610,7 +668,7 @@ bool gs_memprot_reserve_memory(int64 requestedBytes)
     if (newszChunk > tc) {
         needChunk = newszChunk - tc;
 
-        status = gs_memprot_reserve_memory_chunks<type>(needChunk);
+        status = memTracker_ReserveMemChunks<type>(needChunk, needProtect);
     }
 
     if (status == false) {
@@ -641,15 +699,17 @@ bool gs_memprot_reserve_memory(int64 requestedBytes)
  * Releases "reduction" number of chunks to the query.
  */
 template <MemType type>
-static void gs_memprot_release_memory_chunks(int reduction)
+static void memTracker_ReleaseMemChunks(int reduction)
 {
     int total = 0;
-    Assert(reduction >= 0);
+    Assert(0 <= reduction);
 
-    /*
-     * reduce chunk quota at global gaussdb process level
-     */
-    total = gs_atomic_add_32(&processMemInChunks, -reduction);
+    /* reduce chunk quota at global gaussdb process level */
+    if (t_thrd.utils_cxt.backend_reserved) {
+        total = gs_atomic_add_32(&backendUsedMemInChunk, -reduction);
+    } else {
+        total = gs_atomic_add_32(&processMemInChunks, -reduction);
+    }
 
     if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry && type != MEM_SHRD) {
         total = gs_atomic_add_32(&(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->queryMemInChunks), -reduction);
@@ -663,7 +723,7 @@ static void gs_memprot_release_memory_chunks(int reduction)
  * enough bytes to free a whole chunk.
  */
 template <MemType type>
-void gs_memprot_release_memory(int64 toBeFreedRequested)
+void memTracker_ReleaseMem(int64 toBeFreedRequested)
 {
     int32 tc = 0;
     int64 tb = 0;
@@ -704,7 +764,7 @@ void gs_memprot_release_memory(int64 toBeFreedRequested)
     if (newszChunk < tc) {
         int reduction = tc - newszChunk;
 
-        gs_memprot_release_memory_chunks<type>(reduction);
+        memTracker_ReleaseMemChunks<type>(reduction);
 
         if (type == MEM_SHRD)
             gs_atomic_add_32(&shareTrackedMemChunks, -reduction);
@@ -731,7 +791,7 @@ int getSessionMemoryUsageMB()
     if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry) {
         used = (unsigned int)(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->queryMemInChunks -
                               t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->initMemInChunks)
-                              << (chunkSizeInBits - BITS_IN_MB);
+               << (chunkSizeInBits - BITS_IN_MB);
     }
 
     return used;
@@ -742,18 +802,18 @@ int getSessionMemoryUsageMB()
  * reserve the chunk and allocate memory.
  */
 template <MemType mem_type>
-void* MemoryProtectFunctions::gs_memprot_malloc(Size sz)
+void* MemoryProtectFunctions::gs_memprot_malloc(Size sz, bool needProtect)
 {
     if (!t_thrd.utils_cxt.gs_mp_inited)
         return malloc(sz);
 
     void* ptr = NULL;
-    bool status = gs_memprot_reserve_memory<mem_type>(sz);
+    bool status = memTracker_ReserveMem<mem_type>(sz, needProtect);
 
     if (status == true) {
         ptr = malloc(sz);
         if (ptr == NULL) {
-            gs_memprot_release_memory<mem_type>(sz);
+            memTracker_ReleaseMem<mem_type>(sz);
             gs_memprot_failed<false>(sz, mem_type);
 
             return NULL;
@@ -774,27 +834,28 @@ void MemoryProtectFunctions::gs_memprot_free(void* ptr, Size sz)
     ptr = NULL;
 
     if (t_thrd.utils_cxt.gs_mp_inited)
-        gs_memprot_release_memory<mem_type>(sz);
+        memTracker_ReleaseMem<mem_type>(sz);
 }
 
 /* Reallocates memory, respecting memory quota, if enabled */
 template <MemType mem_type>
-void* MemoryProtectFunctions::gs_memprot_realloc(void* ptr, Size sz, Size newsz)
+void* MemoryProtectFunctions::gs_memprot_realloc(void* ptr, Size sz, Size newsz, bool needProtect)
 {
-    Assert(t_thrd.utils_cxt.gs_mp_inited);  // Must be used when memory protect feature is avaiable
+    Assert(GS_MP_INITED);  // Must be used when memory protect feature is avaiable
 
     void* ret = NULL;
-    int64 size_diff = (newsz - sz);
 
-    if ((newsz > 0 && newsz <= sz) || gs_memprot_reserve_memory<mem_type>(size_diff)) {
+    if ((newsz > 0) && memTracker_ReserveMem<mem_type>(newsz, needProtect)) {
+        memTracker_ReleaseMem<mem_type>(sz);
         ret = realloc(ptr, newsz);
         if (ret == NULL) {
-            gs_memprot_release_memory<mem_type>(size_diff);
+            memTracker_ReleaseMem<mem_type>(newsz);
 
             gs_memprot_failed<false>(newsz, mem_type);
 
             return NULL;
         }
+
         return ret;
     }
 
@@ -804,18 +865,18 @@ void* MemoryProtectFunctions::gs_memprot_realloc(void* ptr, Size sz, Size newsz)
 
 /* posix_memalign interface */
 template <MemType mem_type>
-int MemoryProtectFunctions::gs_posix_memalign(void** memptr, Size alignment, Size sz)
+int MemoryProtectFunctions::gs_posix_memalign(void** memptr, Size alignment, Size sz, bool needProtect)
 {
     if (!t_thrd.utils_cxt.gs_mp_inited)
         return posix_memalign(memptr, alignment, sz);
 
     int ret = 0;
-    bool status = gs_memprot_reserve_memory<mem_type>(sz);
+    bool status = memTracker_ReserveMem<mem_type>(sz, needProtect);
 
     if (status == true) {
         ret = posix_memalign(memptr, alignment, sz);
         if (ret) {
-            gs_memprot_release_memory<mem_type>(sz);
+            memTracker_ReleaseMem<mem_type>(sz);
             gs_memprot_failed<false>(sz, mem_type);
 
             return ret;
@@ -838,6 +899,37 @@ void gs_memprot_thread_init(void)
     }
 }
 
+void gs_memprot_reserved_backend(int avail_mem)
+{
+    int reserved_mem = 0;
+
+    /* wal threads contains WALWRITER, WALRECEIVER, WALRECWRITE, DATARECIVER, DATARECWRITER */
+    const int wal_thread_count = 5;
+    int reserved_thread_count = g_instance.attr.attr_network.ReservedBackends +
+                                NUM_CMAGENT_PROCS + wal_thread_count +
+                                g_instance.attr.attr_storage.max_wal_senders;
+    /* reserve 10MB per-thread for sysadmin user */
+    reserved_mem += reserved_thread_count * 10;
+    ereport(LOG, (errmsg("reserved memory for backend threads is: %d MB", reserved_mem)));
+
+    /* reserve memory for WAL sender and WAL receiver buffer */
+    int64 wal_mem = 0;
+    int64 data_sender_size = 1 + sizeof(DataPageMessageHeader) + WS_MAX_SEND_SIZE;
+    wal_mem += data_sender_size * g_instance.attr.attr_storage.max_wal_senders;
+    int64 wal_sender_size = 1 + sizeof(WalDataMessageHeader) + (int)WS_MAX_SEND_SIZE;
+    wal_mem += wal_sender_size * g_instance.attr.attr_storage.max_wal_senders;
+    int64 wal_receiver_size = g_instance.attr.attr_storage.WalReceiverBufSize * 1024;
+    wal_mem += offsetof(WalRcvCtlBlock, walReceiverBuffer) + wal_receiver_size;
+    ereport(LOG, (errmsg("reserved memory for WAL buffers is: %ld MB", wal_mem >> BITS_IN_MB)));
+
+    reserved_mem += (uint64)wal_mem >> BITS_IN_MB;
+
+    backendReservedMemInChunk = reserved_mem;
+    maxChunksPerProcess = ((unsigned int)avail_mem >> BITS_IN_KB) - reserved_mem;
+    ereport(LOG, (errmsg("Set max backend reserve memory is: %d MB, max dynamic memory is: %d MB",
+        backendReservedMemInChunk, maxChunksPerProcess)));
+}
+
 /* process level initialization only called in postmaster main thread */
 void gs_memprot_init(Size size)
 {
@@ -856,34 +948,31 @@ void gs_memprot_init(Size size)
                     "g_instance.attr.attr_storage.cstore_buffers (%d Mbytes) or shared memory (%lu Mbytes) is larger.",
                     g_instance.attr.attr_storage.cstore_buffers >> BITS_IN_KB,
                     size >> BITS_IN_MB)));
+            backendReservedMemInChunk = 0;
+            maxChunksPerProcess = 0;
             return;
         }
+
+        gs_memprot_reserved_backend(avail_mem);
 
         /* Convert to MB unit */
         comm_original_memory = (g_instance.attr.attr_network.comm_usable_memory >> BITS_IN_KB);
 
-        maxChunksPerProcess = avail_mem >> BITS_IN_KB;
-
-        if (maxChunksPerProcess < (MIN_PROCESS_LIMIT >> BITS_IN_KB)) {
-            ereport(WARNING,
-                (errmsg("Failed to initialize the memory protect for "
-                        "communication buffer value is larger.")));
-            return;
-        }
-
         ereport(LOG,
             (errmsg("shared memory %lu Mbytes, memory context %d Mbytes, max process memory %d Mbytes",
                 (size >> BITS_IN_MB),
-                maxChunksPerProcess,
+                (maxChunksPerProcess + backendReservedMemInChunk),
                 (g_instance.attr.attr_memory.max_process_memory >> BITS_IN_KB))));
 
-        /* The following memoryContext from Postmaster can be protected */
-        t_thrd.utils_cxt.gs_mp_inited = true;
-
-        ereport(LOG,
-            (errmsg("Initilize the memory protect with Process Chunks number %d, change bits %u",
-                maxChunksPerProcess,
-                chunkSizeInBits)));
+        /* while dynamic memory is less than 2GB, set memory protect on may cause instance cannot run */
+        if (maxChunksPerProcess < (MIN_PROCESS_LIMIT >> BITS_IN_KB)) {
+            backendReservedMemInChunk = 0;
+            maxChunksPerProcess = 0;
+            t_thrd.utils_cxt.gs_mp_inited = false;
+        } else {
+            /* The following memoryContext from Postmaster can be protected */
+            t_thrd.utils_cxt.gs_mp_inited = true;
+        }
     }
 }
 

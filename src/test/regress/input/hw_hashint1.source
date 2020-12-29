@@ -13,6 +13,6 @@ CREATE TABLE hw_hashint1_test
 	a10 int,
 	a11 int
 );
-COPY hw_hashint1_test FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+COPY hw_hashint1_test FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 SELECT a, b FROM hw_hashint1_test ORDER BY 1, 2;
 DROP TABLE hw_hashint1_test;

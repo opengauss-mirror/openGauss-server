@@ -106,7 +106,7 @@ s32 bbox_put_dox(BBOX_vnprintCallBack pCallback, void* ptr, s32* piCount, u32 iS
         i--;
     }
 
-    return 0;
+    return iRet;
 }
 /*
  * simple signal-safe function vsnprintf
@@ -227,7 +227,9 @@ s32 bbox_vsnprintf(BBOX_vnprintCallBack pCallback, void* ptr, s32 iSize, const c
         iCheckFmt = 0;
     }
 
-    pCallback(0, ptr, &iCount, iSize);
+    if (iRet != RET_OK || pCallback(0, ptr, &iCount, iSize) != RET_OK) {
+        return RET_ERR;
+    }
 
     return iCount;
 }
@@ -265,7 +267,7 @@ s32 bbox_SnprintCallback(char c, void* pPtr, s32* piCount, s32 iSize)
  *           pFmt - string format
  * return  : string length
  */
-s32 bbox_snprintf(char* pszBuff, s32 iSize, char* pFmt, ...)
+s32 bbox_snprintf(char* pszBuff, s32 iSize, const char* pFmt, ...)
 {
     va_list ap;
     s32 iRet = 0;
@@ -318,7 +320,7 @@ s32 bbox_PrintCallback(char c, void* pPtr, s32* piCount, s32 iSize)
 /*
  * simple signal-safe function printf
  */
-void bbox_printf(char* pFmt, ...)
+void bbox_printf(const char* pFmt, ...)
 {
     s32 fd = 1;
     va_list ap;
@@ -331,7 +333,7 @@ void bbox_printf(char* pFmt, ...)
 /*
  * simple signal-safe function print
  */
-void bbox_print(EN_PRINT_TYPE enType, char* pFmt, ...)
+void bbox_print(EN_PRINT_TYPE enType, const char* pFmt, ...)
 {
     s32 fd = 1;
     va_list ap;

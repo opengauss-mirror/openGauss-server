@@ -1,0 +1,22 @@
+<refentry id="SQL-ALTER_RESOURCE_LABEL">
+<refmeta>
+<refentrytitle>ALTER RESOURCE LABEL</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER RESOURCE LABEL</refname>
+<refpurpose>change a resource label</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER RESOURCE LABEL label_name { ADD | REMOVE } label_item_list [, ... ];
+
+where label_item_list can be:
+resource_type(resource_path[, ... ])
+
+where resource_type can be:
+{ TABLE | COLUMN | SCHEMA | VIEW | FUNCTION }
+</synopsis>
+</refsynopsisdiv>
+</refentry>

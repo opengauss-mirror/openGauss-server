@@ -23,6 +23,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 OBJS = be-fsstubs.o be-secure.o auth.o crypt.o hba.o ip.o md5.o sha2.o pqcomm.o \
-       pqformat.o pqsignal.o pqmq.o
+       pqformat.o pqsignal.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

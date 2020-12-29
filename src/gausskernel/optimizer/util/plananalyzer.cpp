@@ -327,7 +327,7 @@ static inline QueryPlanIssueDesc* CheckQueryNotPlanShipping(void)
 
     errno_t errorno = memset_s(
         u_sess->opt_cxt.not_shipping_info->not_shipping_reason, NOTPLANSHIPPING_LENGTH, '\0', NOTPLANSHIPPING_LENGTH);
-    securec_check(errorno, "\0", "\0");
+    securec_check_c(errorno, "\0", "\0");
 
     return plan_issue;
 }
@@ -488,7 +488,7 @@ static inline QueryPlanIssueDesc* CheckMultiColumnStatsNotCollect(QueryDesc* que
                     /* attid ==0 means the whole table has no statistics, so sikp the colunm info */
                     appendStringInfo(plan_issue->issue_suggestion,
                         "    %s.%s\n",
-                        quote_identifier(get_namespace_name(RelationGetNamespace(rel), true)),
+                        quote_identifier(get_namespace_name(RelationGetNamespace(rel))),
                         quote_identifier(get_rel_name(relid)));
                     break;
                 } else {
@@ -501,7 +501,7 @@ static inline QueryPlanIssueDesc* CheckMultiColumnStatsNotCollect(QueryDesc* que
                 ListCell* lc3 = NULL;
                 appendStringInfo(multi_col_msg,
                     "    %s.%s((",
-                    quote_identifier(get_namespace_name(RelationGetNamespace(rel), true)),
+                    quote_identifier(get_namespace_name(RelationGetNamespace(rel))),
                     quote_identifier(get_rel_name(relid)));
                 foreach (lc3, tmp_record_list) {
                     int multi_col_attid = lfirst_int(lc3);
@@ -519,7 +519,7 @@ static inline QueryPlanIssueDesc* CheckMultiColumnStatsNotCollect(QueryDesc* que
                 if (single_col_total->len) {
                     appendStringInfo(plan_issue->issue_suggestion,
                         "    %s.%s(",
-                        quote_identifier(get_namespace_name(RelationGetNamespace(rel), true)),
+                        quote_identifier(get_namespace_name(RelationGetNamespace(rel))),
                         quote_identifier(get_rel_name(relid)));
 
                     appendStringInfo(plan_issue->issue_suggestion, "%s)", single_col_total->data);
@@ -532,7 +532,7 @@ static inline QueryPlanIssueDesc* CheckMultiColumnStatsNotCollect(QueryDesc* que
                 if (!single_col_total->len && !multi_col_total->len) {
                     appendStringInfo(plan_issue->issue_suggestion,
                         "    %s.%s",
-                        quote_identifier(get_namespace_name(RelationGetNamespace(rel), true)),
+                        quote_identifier(get_namespace_name(RelationGetNamespace(rel))),
                         quote_identifier(get_rel_name(relid)));
                 }
                 appendStringInfo(plan_issue->issue_suggestion, "\n");
@@ -569,7 +569,7 @@ static inline QueryPlanIssueDesc* CheckInaccurateEstimatedRows(PlanState* node, 
      * Determine if E-Rows over-estimated OR under-estimated beyond pre-defined
      * threshold(10 times).
      */
-    if (Max(estimated_rows, actual_rows) >= (double)(dn_num * EstimationRows_Threshold) &&
+    if (Max(estimated_rows, actual_rows) >= dn_num * EstimationRows_Threshold &&
         (estimated_rows / actual_rows >= EstimationRows_Scale_Threshold ||
             actual_rows / estimated_rows >= EstimationRows_Scale_Threshold)) {
         plan_issue = CreateQueryPlanIssue(node, InaccurateEstimationRowNum);
@@ -1037,7 +1037,7 @@ void RecordQueryPlanIssues(const List* results)
 
         rc = sprintf_s((char*)max_issue_desc, MAX_OPTIMIZER_WARNING_LEN, "%s\n", 
             t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
-        securec_check_ss(rc, "\0", "\0");
+        securec_check_ss_c(rc, "\0", "\0");
 
         current += strlen(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue) + 1;
 
@@ -1049,6 +1049,7 @@ void RecordQueryPlanIssues(const List* results)
     foreach (lc, results) {
         QueryPlanIssueDesc* issue = (QueryPlanIssueDesc*)lfirst(lc);
         int issue_str_len = strlen(issue->issue_suggestion->data);
+
         /* Check if we hit max allowed planner issue buffer length */
         if (MAX_OPTIMIZER_WARNING_LEN - current <= issue_str_len + 1) {
             ereport(LOG,
@@ -1059,7 +1060,7 @@ void RecordQueryPlanIssues(const List* results)
 
         rc = sprintf_s((char*)max_issue_desc + current, MAX_OPTIMIZER_WARNING_LEN - current, "%s\n",
             issue->issue_suggestion->data);
-        securec_check_ss(rc, "\0", "\0");
+        securec_check_ss_c(rc, "\0", "\0");
 
         current += strlen(issue->issue_suggestion->data) + 1;
         DeleteQueryPlanIssue(issue);
@@ -1088,4 +1089,3 @@ static char* OperatorName(const Plan* plan)
 
     return sname;
 }
-

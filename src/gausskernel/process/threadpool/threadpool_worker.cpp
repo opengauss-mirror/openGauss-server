@@ -36,6 +36,7 @@
 #include "threadpool/threadpool.h"
 
 #include "access/xact.h"
+#include "commands/prepare.h"
 #include "commands/tablespace.h"
 #include "commands/vacuum.h"
 #include "gssignal/gs_signal.h"
@@ -58,20 +59,20 @@
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/pg_locale.h"
+#include "utils/plpgsql.h"
 #include "utils/postinit.h"
 #include "utils/ps_status.h"
 #include "utils/syscache.h"
 #include "utils/xml.h"
 #include "executor/executor.h"
+#include "utils/globalpreparestmt.h"
 
 /* ===================== Static functions to init session ===================== */
-static bool init_session(knl_session_context* sscxt);
-static bool init_port(Port* port);
-static void send_session_idx_to_client();
-static void free_session(knl_session_context* session);
-static void reset_signal_handle();
-static void session_set_backend_options();
-static void use_fake_session();
+static bool InitSession(knl_session_context* sscxt);
+static bool InitPort(Port* port);
+static void SendSessionIdxToClient();
+static void ResetSignalHandle();
+static void SessionSetBackendOptions();
 
 ThreadPoolWorker::ThreadPoolWorker(uint idx, ThreadPoolGroup* group, pthread_mutex_t* mutex, pthread_cond_t* cond)
 {
@@ -124,6 +125,9 @@ int ThreadPoolWorker::StartUp()
     /* Calculate cancel key which will be assigned to backend. */
     GenerateCancelKey(false);
     t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+    if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+        return STATUS_ERROR;
+    }
     Backend* bn = CreateBackend();
     m_tid = initialize_worker_thread(THREADPOOL_WORKER, &port, (void*)this);
     if (m_tid == InvalidTid) {
@@ -139,7 +143,7 @@ int ThreadPoolWorker::StartUp()
     return STATUS_OK;
 }
 
-FORCE_INLINE static void PreventSignal()
+void PreventSignal()
 {
     gs_signal_block_sigusr2();
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
@@ -147,7 +151,7 @@ FORCE_INLINE static void PreventSignal()
     disable_sig_alarm(true);
 }
 
-FORCE_INLINE static void AllowSignal()
+void AllowSignal()
 {
     /* now we can accept signal. out of this, we rely on signal handle. */
     gs_signal_unblock_sigusr2();
@@ -161,7 +165,8 @@ void ThreadPoolWorker::WaitMission()
         return;
     }
 
-    bool is_raw_session = false;
+    (void)enable_session_sig_alarm(u_sess->attr.attr_common.SessionTimeout * 1000);
+    bool isRawSession = false;
 
     Assert(t_thrd.int_cxt.InterruptHoldoffCount == 0);
     /*
@@ -176,13 +181,19 @@ void ThreadPoolWorker::WaitMission()
         /* Get next session. */
         WaitNextSession();
         Assert(m_currentSession != NULL);
-        is_raw_session = (m_currentSession->status == KNL_SESS_UNINIT);
+        isRawSession = (m_currentSession->status == KNL_SESS_UNINIT);
         /* do the binding process ,binding the connection and thread */
         /* return to worker pool if binding fail. */
         if (AttachSessionToThread()) {
-            if (is_raw_session) {
-                Assert(t_thrd.libpq_cxt.PqRecvPointer == t_thrd.libpq_cxt.PqRecvLength);
-                continue;
+            if (isRawSession) {
+                if (t_thrd.libpq_cxt.PqRecvPointer == t_thrd.libpq_cxt.PqRecvLength) {
+                    continue;
+                } else {
+                    ereport(ERROR, 
+                        (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                            errmsg("receive more connection message %d than expect %d",
+                                t_thrd.libpq_cxt.PqRecvLength, t_thrd.libpq_cxt.PqRecvPointer)));
+                }
             }
             Assert(m_currentSession != NULL);
             Assert(u_sess != NULL);
@@ -190,6 +201,7 @@ void ThreadPoolWorker::WaitMission()
         }
     }
 
+    (void)disable_session_sig_alarm();
     /* now we can accept signal. out of this, we rely on signal handle. */
     AllowSignal();
     ShutDownIfNecessary();
@@ -352,7 +364,7 @@ void ThreadPoolWorker::WaitNextSession()
             pthread_mutex_unlock(m_mutex);
             m_group->GetListener()->RemoveWorkerFromList(this);
             pg_atomic_fetch_sub_u32((volatile uint32*)&m_group->m_idleWorkerNum, 1);
-            (void)pgstat_report_waitstatus(oldStatus);
+            pgstat_report_waitstatus(oldStatus);
         }
     }
 }
@@ -390,6 +402,17 @@ void ThreadPoolWorker::ShutDownIfNecessary()
 void ThreadPoolWorker::CleanThread()
 {
     /*
+     * In thread pool mode, ensure that packet transmission must be completed before thread switchover.
+     * Otherwise, packet format disorder may occurs.
+     */
+    if (m_currentSession != NULL && t_thrd.libpq_cxt.PqSendPointer > 0) {
+        int res = pq_flush();
+        if (res != 0) {
+            ereport(WARNING, (errmsg("[cleanup thread] failed to flush the remaining content. detail: %d", res)));
+        }
+    }
+    
+    /*
      * Clean up Allocated descs incase long jump happend
      * and they are not cleaned up in AtEOXact_Files.
      */
@@ -415,11 +438,6 @@ void ThreadPoolWorker::CleanThread()
     thread_proc->sessionid = t_thrd.fake_session->session_id;
     thread_proc->workingVersionNum = pg_atomic_read_u32(&WorkingGrandVersionNum);
 
-    if (ENABLE_DN_GPC) {
-        u_sess->pcache_cxt.gpc_in_ddl = false;
-        u_sess->global_sess_id = 0;
-    }
-
     if (m_currentSession != NULL) {
         DetachSessionFromThread();
     }
@@ -443,6 +461,12 @@ void ThreadPoolWorker::DetachSessionFromThread()
         LWLockRelease(ProcArrayLock);
     }
 
+    if (ENABLE_DN_GPC) {
+        g_instance.prepare_cache->CleanSessionGPC(m_currentSession);
+    }
+    if (ENABLE_CN_GPC) {
+        m_currentSession->pcache_cxt.gpc_in_ddl = false;
+    }
     RestoreSessionVariable();
     pgstat_couple_decouple_session(false);
     pgstat_deinitialize_session();
@@ -480,7 +504,7 @@ bool ThreadPoolWorker::AttachSessionToThread()
 
     switch (m_currentSession->status) {
         case KNL_SESS_UNINIT: {
-            if (init_session(m_currentSession)) {
+            if (InitSession(m_currentSession)) {
                 m_currentSession->status = KNL_SESS_ATTACH;
             } else {
                 m_currentSession->status = KNL_SESS_CLOSE;
@@ -490,7 +514,7 @@ bool ThreadPoolWorker::AttachSessionToThread()
                 u_sess = NULL;
             }
             /* init port will change the signal handle */
-            reset_signal_handle();
+            ResetSignalHandle();
         } break;
 
         case KNL_SESS_DETACH: {
@@ -501,6 +525,9 @@ bool ThreadPoolWorker::AttachSessionToThread()
 
         case KNL_SESS_CLOSERAW:
         case KNL_SESS_CLOSE: {
+            /* unified auditing logout */
+            audit_processlogout_unified();
+
             /* clean up tmp schema */
             RemoveTempNamespace();
 
@@ -537,9 +564,6 @@ void ThreadPoolWorker::CleanUpSessionWithLock()
         t_thrd.pgxact->vacuumFlags &= ~PROC_IS_REDIST;
         LWLockRelease(ProcArrayLock);
     }
-
-    /* clear invalid msg */
-    CleanupWorkSessionInvalidation();
 }
 
 void ThreadPoolWorker::CleanUpSession(bool threadexit)
@@ -563,6 +587,13 @@ void ThreadPoolWorker::CleanUpSession(bool threadexit)
         /* Close Session. */
         m_group->GetListener()->DelSessionFromEpoll(m_currentSession);
 
+        if (m_currentSession->proc_cxt.PassConnLimit) {
+            SpinLockAcquire(&g_instance.conn_cxt.ConnCountLock);
+            g_instance.conn_cxt.CurConnCount--;
+            Assert(g_instance.conn_cxt.ConnCountLock >= 0);
+            SpinLockRelease(&g_instance.conn_cxt.ConnCountLock);
+        }
+
         /*
          * Record this state in case we reenter this function because
          * ERROR/FATAL occurs in sess_exit().
@@ -578,13 +609,29 @@ void ThreadPoolWorker::CleanUpSession(bool threadexit)
         sess_exit(0);
     }
 
+    /* clear pgstat slot */
     pgstat_deinitialize_session();
     pgstat_beshutdown_session(m_currentSession->session_ctr_index);
     localeconv_deinitialize_session();
 
-    g_threadPoolControler->GetSessionCtrl()->FreeSlot(m_currentSession->session_ctr_index);
+    /* clean gpc cn refcount and plancache in shared memory */
+    if (!t_thrd.proc_cxt.proc_exit_inprogress) {
+        CNGPCCleanUpSession();
+    }
 
-    free_session(m_currentSession);
+    /*
+     * clear invalid msg slot
+     * If called during pool worker thread exit, session's invalid msg slot has already
+     * been cleared along with that of pool worker in shmem_exit.
+     */
+    if (!t_thrd.proc_cxt.proc_exit_inprogress) {
+        CleanupWorkSessionInvalidation();
+    }
+
+    g_threadPoolControler->GetSessionCtrl()->FreeSlot(m_currentSession->session_ctr_index);
+    m_currentSession->session_ctr_index = -1;
+
+    free_session_context(m_currentSession);
     m_currentSession = NULL;
 }
 
@@ -609,10 +656,10 @@ static void init_session_share_memory()
     TableSpaceUsageManager::Init();
 }
 
-static bool init_session(knl_session_context* session)
+static bool InitSession(knl_session_context* session)
 {
     /* Switch context to Session context. */
-    AutoContextSwitch memSwitch(session->top_mem_cxt);
+    AutoContextSwitch memSwitch(session->mcxt_group->GetMemCxtGroup(MEMORY_CONTEXT_DEFAULT));
 
     /*
      * Set thread version to the latest working version number for
@@ -621,21 +668,20 @@ static bool init_session(knl_session_context* session)
      */
     t_thrd.proc->workingVersionNum = pg_atomic_read_u32(&WorkingGrandVersionNum);
 
+    if(unlikely(u_sess->proc_cxt.clientIsGsrewind == true 
+        && u_sess->proc_cxt.gsRewindAddCount == false)) {
+        u_sess->proc_cxt.gsRewindAddCount = true;
+        (void)pg_atomic_add_fetch_u32(&g_instance.comm_cxt.current_gsrewind_count, 1);
+    }
+
     /* Init GUC option for this session. */
     InitializeGUCOptions();
 
     /* Read in remaining GUC variables */
     read_nondefault_variables();
 
-    /* Initialize SSL context, must init before ClientConnInitilize which in InitPort. */
-#ifdef USE_SSL
-    if (g_instance.attr.attr_security.EnableSSL) {
-        secure_initialize();
-    }
-#endif
-
     /* Init port and connection. */
-    if (!init_port(session->proc_cxt.MyProcPort)) {
+    if (!InitPort(session->proc_cxt.MyProcPort)) {
         /* reset some status below */
         if (!disable_sig_alarm(false)) {
             ereport(FATAL, (errmsg("could not disable timer for startup packet timeout")));
@@ -651,7 +697,7 @@ static bool init_session(knl_session_context* session)
 
     SetProcessingMode(InitProcessing);
 
-    session_set_backend_options();
+    SessionSetBackendOptions();
 
     /* initialize guc variables which need to be sended to stream threads */
 #ifdef PGXC
@@ -663,9 +709,10 @@ static bool init_session(knl_session_context* session)
     /* We need to allow SIGINT, etc during the initial transaction */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
 
-    /* shared invalid msg */
+    /* init invalid msg slot */
     SharedInvalBackendInit(false, true);
 
+    /* init pgstat slot */
     pgstat_initialize_session();
 
     /* Do local initialization of file, storage and buffer managers */
@@ -673,20 +720,18 @@ static bool init_session(knl_session_context* session)
     smgrinit();
 
     /* Postgres init. */
-    char* db_name = session->proc_cxt.MyProcPort->database_name;
-    char* user_name = session->proc_cxt.MyProcPort->user_name;
-    t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(db_name, InvalidOid, user_name);
+    char* dbname = session->proc_cxt.MyProcPort->database_name;
+    char* username = session->proc_cxt.MyProcPort->user_name;
+    t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(dbname, InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitSession();
 
     SetProcessingMode(NormalProcessing);
 
     init_session_share_memory();
 
-    SetProcessingMode(NormalProcessing);
-
     BeginReportingGUCOptions();
 
-    send_session_idx_to_client();
+    SendSessionIdxToClient();
 
     /* init param hash table for sending set message */
     if (IS_PGXC_COORDINATOR) {
@@ -708,7 +753,7 @@ static bool init_session(knl_session_context* session)
     return true;
 }
 
-static bool init_port(Port* port)
+static bool InitPort(Port* port)
 {
     /* session version number is initialized to process version number */
     port->SessionVersionNum = pg_atomic_read_u32(&WorkingGrandVersionNum);
@@ -720,6 +765,7 @@ static bool init_port(Port* port)
     PreClientAuthorize();
 
     int status = ClientConnInitilize(port);
+
     if (status != STATUS_OK) {
         return false;
     }
@@ -727,7 +773,7 @@ static bool init_port(Port* port)
     return true;
 }
 
-static void send_session_idx_to_client()
+static void SendSessionIdxToClient()
 {
     GenerateCancelKey(true);
 
@@ -741,33 +787,7 @@ static void send_session_idx_to_client()
     }
 }
 
-static void free_session(knl_session_context* session)
-{
-    Assert(u_sess == session);
-
-    /* discard all the data in the channel. */
-    t_thrd.libpq_cxt.PqSendPointer = 0;
-    t_thrd.libpq_cxt.PqSendStart = 0;
-    t_thrd.libpq_cxt.PqRecvPointer = 0;
-    t_thrd.libpq_cxt.PqRecvLength = 0;
-    t_thrd.libpq_cxt.PqCommBusy = false;
-    t_thrd.libpq_cxt.DoingCopyOut = false;
-
-    t_thrd.xact_cxt.next_xid = InvalidTransactionId;
-
-    /* Release session related memory. */
-    SelfMemoryContext = NULL;
-    if (CurrentMemoryContext == u_sess->top_transaction_mem_cxt) {
-        /* abnormal cleanup */
-        (void)MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
-    }
-
-    MemoryContextDelete(session->top_mem_cxt);
-    pfree_ext(session);
-    use_fake_session();
-}
-
-static void reset_signal_handle()
+static void ResetSignalHandle()
 {
     // may change during thread init port(accept new connection)
     (void)gspqsignal(SIGALRM, handle_sig_alarm);
@@ -775,7 +795,7 @@ static void reset_signal_handle()
     (void)gspqsignal(SIGTERM, die);      /* cancel current query and exit */
 }
 
-static void session_set_backend_options()
+static void SessionSetBackendOptions()
 {
     char** av = NULL;
     int maxac = 0;
@@ -790,17 +810,12 @@ static void session_set_backend_options()
      */
     maxac = (strlen(g_instance.ExtraOptions) + 1) / 2 + 2;
 
-    av = (char**)MemoryContextAlloc(u_sess->top_mem_cxt, maxac * sizeof(char*));
+    av = (char**)MemoryContextAlloc(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), maxac * sizeof(char*));
     av[ac++] = "gaussdb";
     pg_split_opts(av, &ac, g_instance.ExtraOptions);
     av[ac] = NULL;
 
     /* Parse command-line options. */
     process_postgres_switches(ac, av, PGC_POSTMASTER, NULL);
-}
-
-static void use_fake_session()
-{
-    u_sess = t_thrd.fake_session;
-    SetThreadLocalGUC(u_sess);
 }

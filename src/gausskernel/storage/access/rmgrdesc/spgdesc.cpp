@@ -19,9 +19,9 @@
 #include "access/spgist_private.h"
 #include "utils/rel_gs.h"
 
-void spg_desc(StringInfo buf, XLogReaderState* record)
+void spg_desc(StringInfo buf, XLogReaderState *record)
 {
-    char* rec = XLogRecGetData(record);
+    char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
 
     switch (info) {
@@ -30,35 +30,30 @@ void spg_desc(StringInfo buf, XLogReaderState* record)
             /* no further information */
             break;
         case XLOG_SPGIST_ADD_LEAF: {
-            spgxlogAddLeaf* xlrec = (spgxlogAddLeaf*)rec;
+            spgxlogAddLeaf *xlrec = (spgxlogAddLeaf *)rec;
 
             appendStringInfo(buf, "add leaf to page");
-            appendStringInfo(buf,
-                "; off %u; headoff %u; parentoff %u",
-                (uint32)xlrec->offnumLeaf,
-                (uint32)xlrec->offnumHeadLeaf,
-                (uint32)xlrec->offnumParent);
+            appendStringInfo(buf, "; off %u; headoff %u; parentoff %u", (uint32)xlrec->offnumLeaf,
+                             (uint32)xlrec->offnumHeadLeaf, (uint32)xlrec->offnumParent);
             if (xlrec->newPage)
                 appendStringInfo(buf, " (newpage)");
             if (xlrec->storesNulls)
                 appendStringInfo(buf, " (nulls)");
         } break;
         case XLOG_SPGIST_MOVE_LEAFS:
-            appendStringInfo(buf, "%u leafs", (uint32)((spgxlogMoveLeafs*)rec)->nMoves);
+            appendStringInfo(buf, "%u leafs", (uint32)((spgxlogMoveLeafs *)rec)->nMoves);
             break;
         case XLOG_SPGIST_ADD_NODE:
-            appendStringInfo(buf, "off %u", (uint32)((spgxlogAddNode*)rec)->offnum);
+            appendStringInfo(buf, "off %u", (uint32)((spgxlogAddNode *)rec)->offnum);
             break;
         case XLOG_SPGIST_SPLIT_TUPLE:
-            appendStringInfo(buf,
-                "prefix off: %u, postfix off: %u (same %d, new %d)",
-                (uint32)((spgxlogSplitTuple*)rec)->offnumPrefix,
-                (uint32)((spgxlogSplitTuple*)rec)->offnumPostfix,
-                ((spgxlogSplitTuple*)rec)->postfixBlkSame,
-                ((spgxlogSplitTuple*)rec)->newPage);
+            appendStringInfo(buf, "prefix off: %u, postfix off: %u (same %d, new %d)",
+                             (uint32)((spgxlogSplitTuple *)rec)->offnumPrefix,
+                             (uint32)((spgxlogSplitTuple *)rec)->offnumPostfix,
+                             ((spgxlogSplitTuple *)rec)->postfixBlkSame, ((spgxlogSplitTuple *)rec)->newPage);
             break;
         case XLOG_SPGIST_PICKSPLIT: {
-            spgxlogPickSplit* xlrec = (spgxlogPickSplit*)rec;
+            spgxlogPickSplit *xlrec = (spgxlogPickSplit *)rec;
 
             appendStringInfo(buf, "ndel %u; nins %u", (uint32)xlrec->nDelete, (uint32)xlrec->nInsert);
             if (xlrec->innerIsParent)
@@ -75,11 +70,10 @@ void spg_desc(StringInfo buf, XLogReaderState* record)
             /* no further information */
             break;
         case XLOG_SPGIST_VACUUM_REDIRECT:
-            appendStringInfo(buf, "newest XID " XID_FMT, ((spgxlogVacuumRedirect*)rec)->newestRedirectXid);
+            appendStringInfo(buf, "newest XID " XID_FMT, ((spgxlogVacuumRedirect *)rec)->newestRedirectXid);
             break;
         default:
             appendStringInfo(buf, "unknown spgist op code %u", (uint32)info);
             break;
     }
 }
-

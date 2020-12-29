@@ -43,10 +43,10 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 
-static void InsertToBtree(VectorBatch *vecScanBatch, BTBuildState &buildstate, const IndexInfo *indexInfo, double &reltuples,
-                          Datum *values, bool *isnulls, const ScalarToDatum *transferFuncs);
+static void InsertToBtree(VectorBatch *vecScanBatch, BTBuildState &buildstate, IndexInfo *indexInfo, double &reltuples,
+                          Datum *values, bool *isnulls, ScalarToDatum *transferFuncs);
 
 Datum cbtreebuild(PG_FUNCTION_ARGS)
 {
@@ -75,6 +75,11 @@ Datum cbtreebuild(PG_FUNCTION_ARGS)
     AttrNumber *heapScanAttrNumbers = (AttrNumber *)palloc(sizeof(AttrNumber) * heapScanNumIndexAttrs);
     for (int i = 0; i < indexInfo->ii_NumIndexAttrs; i++) {
         heapScanAttrNumbers[i] = indexInfo->ii_KeyAttrNumbers[i];
+        if (heapScanAttrNumbers[i] < 1) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
+                     errmsg("Invalid index column, attribute column index is %d", heapScanAttrNumbers[i])));
+        }
         transferFuncs[i] = GetTransferFuncByTypeOid(heapRel->rd_att->attrs[heapScanAttrNumbers[i] - 1]->atttypid);
     }
 
@@ -88,7 +93,7 @@ Datum cbtreebuild(PG_FUNCTION_ARGS)
     buildstate.spool = NULL;
     buildstate.spool2 = NULL;
     buildstate.indtuples = 0;
-    buildstate.spool = _bt_spoolinit(heapRel, indexRel, indexInfo->ii_Unique, false, &indexInfo->ii_desc);
+    buildstate.spool = _bt_spoolinit(indexRel, indexInfo->ii_Unique, false, &indexInfo->ii_desc);
 
     /* 3. scan heap table and insert tuple into btree */
     if (RelationIsDfsStore(heapRel)) {
@@ -177,8 +182,8 @@ Datum cbtreegettuple(PG_FUNCTION_ARGS)
  * @IN param isnulls: the container to use temprarily
  * @IN param transferFuncs: the transfer functions array
  */
-static void InsertToBtree(VectorBatch *vecScanBatch, BTBuildState &buildstate, const IndexInfo *indexInfo, double &reltuples,
-                          Datum *values, bool *isnulls, const ScalarToDatum *transferFuncs)
+static void InsertToBtree(VectorBatch *vecScanBatch, BTBuildState &buildstate, IndexInfo *indexInfo, double &reltuples,
+                          Datum *values, bool *isnulls, ScalarToDatum *transferFuncs)
 {
     int rows = vecScanBatch->m_rows;
     ScalarVector *vec = vecScanBatch->m_arr;

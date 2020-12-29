@@ -20,11 +20,12 @@ CREATE TABLE [ IF NOT EXISTS ] partition_table_name
 [ WITH ( {storage_parameter = value} [, ... ] ) ]
 [ COMPRESS | NOCOMPRESS ]
 [ TABLESPACE tablespace_name ]
+[ DISTRIBUTE BY { REPLICATION | { [ HASH ] ( column_name ) } } ]
 [ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ]
 PARTITION BY { 
 	{VALUES (partition_key)} | 
-	{RANGE (partition_key) ( partition_less_than_item [, ... ] )} |
-	{RANGE (partition_key) ( partition_start_end_item [, ... ] )}
+	{RANGE (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ... ] ) ] ] ( partition_less_than_item [, ... ] )} |
+	{RANGE (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ... ] ) ] ] ( partition_start_end_item [, ... ] )}
 } [ { ENABLE | DISABLE } ROW MOVEMENT ];
 
 where column_constraint can be:

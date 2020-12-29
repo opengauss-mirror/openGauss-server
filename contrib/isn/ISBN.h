@@ -27,6 +27,8 @@
  * => 978-0-393-04002-9
  *
  */
+#ifndef ISBN_H
+#define ISBN_H
 
 /*
  * For ISBN with prefix 978
@@ -988,3 +990,5 @@ const char* ISBN_range_new[][2] = {
     {"10-976000", "10-999999"},
     {NULL, NULL},
 };
+
+#endif

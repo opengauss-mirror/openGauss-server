@@ -25,9 +25,9 @@
 #ifndef _AIOCOMPLETER_H
 #define _AIOCOMPLETER_H
 
-#include "storage/block.h"
-#include "storage/bufmgr.h"
-#include "storage/buf_internals.h"
+#include "storage/buf/block.h"
+#include "storage/buf/bufmgr.h"
+#include "storage/buf/buf_internals.h"
 #include "storage/relfilenode.h"
 #include "storage/smgr.h"
 #include <libaio.h>

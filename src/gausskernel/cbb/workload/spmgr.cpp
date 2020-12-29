@@ -68,7 +68,7 @@ inline bool enable_space_limit()
             u_sess->wlm_cxt->wlm_params.iostate == IOSTATE_WRITE);
 }
 
-inline void check_space_reach_limit(uint64 size, uint64 limit, uint64 cursize, char* type, bool group)
+inline void check_space_reach_limit(int64 limit, int64 cursize, char* type, bool group)
 {
     if (!enable_space_limit()) {
         return;
@@ -84,14 +84,14 @@ inline void check_space_reach_limit(uint64 size, uint64 limit, uint64 cursize, c
     }
 }
 
-inline void do_space_atomic_add(Oid userid, uint64* globalsize, uint64* totalsize, uint64 size, char* type)
+inline void do_space_atomic_add(Oid userid, int64* globalsize, int64* totalsize, uint64 size, char* type)
 {
-    uint64 origin = *totalsize;
-    (void)gs_atomic_add_64((int64*)totalsize, size);
-    (void)gs_atomic_add_64((int64*)globalsize, size);
+    int64 origin = *totalsize;
+    gs_atomic_add_64(totalsize, size);
+    gs_atomic_add_64(globalsize, size);
     ereport(DEBUG2,
         (errmodule(MOD_WLM),
-            errmsg("increase owerid = %u, %s space = %lu, %s orign = %lu, result = %lu",
+            errmsg("increase owerid = %u, %s space = %lu, %s orign = %ld, result = %ld",
                 userid,
                 type,
                 size,
@@ -114,20 +114,20 @@ void perm_space_increase_internal(UserData* userdata, uint64 size, DataSpaceType
 {
     switch (type) {
         case SP_PERM: {
-            check_space_reach_limit(size, userdata->spacelimit, userdata->global_totalspace, "perm", false);
+            check_space_reach_limit(userdata->spacelimit, userdata->global_totalspace, "perm", false);
             if (userdata->parent) {
                 check_space_reach_limit(
-                    size, userdata->parent->spacelimit, userdata->parent->global_totalspace, "perm", true);
+                    userdata->parent->spacelimit, userdata->parent->global_totalspace, "perm", true);
             }
             do_space_atomic_add(userdata->userid, &userdata->global_totalspace, &userdata->totalspace, size, "perm");
             userdata->spaceUpdate = true;
             break;
         }
         case SP_TEMP: {
-            check_space_reach_limit(size, userdata->tmpSpaceLimit, userdata->globalTmpSpace, "temp", false);
+            check_space_reach_limit(userdata->tmpSpaceLimit, userdata->globalTmpSpace, "temp", false);
             if (userdata->parent) {
                 check_space_reach_limit(
-                    size, userdata->parent->tmpSpaceLimit, userdata->parent->globalTmpSpace, "temp", true);
+                    userdata->parent->tmpSpaceLimit, userdata->parent->globalTmpSpace, "temp", true);
             }
             do_space_atomic_add(userdata->userid, &userdata->globalTmpSpace, &userdata->tmpSpace, size, "temp");
             userdata->spaceUpdate = true;
@@ -137,10 +137,10 @@ void perm_space_increase_internal(UserData* userdata, uint64 size, DataSpaceType
             if (u_sess->wlm_cxt->spill_limit_error) {
                 return;
             }
-            check_space_reach_limit(size, userdata->spillSpaceLimit, userdata->globalSpillSpace, "spill", false);
+            check_space_reach_limit(userdata->spillSpaceLimit, userdata->globalSpillSpace, "spill", false);
             if (userdata->parent) {
                 check_space_reach_limit(
-                    size, userdata->parent->spillSpaceLimit, userdata->parent->globalSpillSpace, "spill", true);
+                    userdata->parent->spillSpaceLimit, userdata->parent->globalSpillSpace, "spill", true);
             }
             do_space_atomic_add(userdata->userid, &userdata->globalSpillSpace, &userdata->spillSpace, size, "spill");
             break;
@@ -176,12 +176,10 @@ void perm_space_increase(Oid ownerID, uint64 size, DataSpaceType type)
     }
 
     /* we need to update the according dn used space in the hash table according to the debug query id */
-
     if (NeedComputeDnUsedSize()) {
-        uint64 space = (uint64)size >> BITS_IN_KB;
+        uint64 space = size >> BITS_IN_KB;
         bool found = false;
         DnUsedSpaceHashEntry* dnUsedEntry = NULL;
-
         (void)LWLockAcquire(DnUsedSpaceHashLock, LW_EXCLUSIVE);
 
         dnUsedEntry = (DnUsedSpaceHashEntry*)hash_search(
@@ -208,9 +206,9 @@ void perm_space_increase(Oid ownerID, uint64 size, DataSpaceType type)
 
 bool find_tmptable_cache_key(Oid relNode)
 {
-    TmptableCacheKey key;
+    TmptableCacheKey key = {0};
     TmptableCacheEntry* tmptable_entry = NULL;
-    MemoryContext old_mem = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+    MemoryContext old_mem = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
     if (u_sess->wlm_cxt->TmptableCacheHash == NULL) {
         return false;
     }
@@ -229,7 +227,7 @@ bool find_tmptable_cache_key(Oid relNode)
 
 void make_tmptable_cache_key(Oid relNode)
 {
-    TmptableCacheKey key;
+    TmptableCacheKey key = {0};
     TmptableCacheEntry* tmptable_entry = NULL;
     MemoryContext old_mem = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
     if (u_sess->wlm_cxt->TmptableCacheHash == NULL) {
@@ -258,9 +256,9 @@ void make_tmptable_cache_key(Oid relNode)
 inline void update_user_space(UserData* userdata, uint64 size, DataSpaceType type)
 {
     /* update user space data in the hash table */
-    uint64 origin = 0;
-    uint64* target = NULL;
-    uint64 result = 0;
+    int64 origin = 0;
+    int64* target = NULL;
+    int64 result = 0;
     switch (type) {
         case SP_PERM: {
             origin = userdata->totalspace;
@@ -278,9 +276,9 @@ inline void update_user_space(UserData* userdata, uint64 size, DataSpaceType typ
             break;
         }
     }
-    result = origin >= size ? origin - size : 0;
+    result = (uint64)origin >= size ? origin - size : 0;
     while (true) {
-        if (gs_compare_and_swap_64((int64*)target, origin, result)) {
+        if (gs_compare_and_swap_64(target, origin, result)) {
             break;
         }
         origin = *target;
@@ -291,7 +289,7 @@ inline void update_user_space(UserData* userdata, uint64 size, DataSpaceType typ
     if (type == SP_PERM) {
         ereport(DEBUG2,
             (errmodule(MOD_WLM),
-                errmsg("decrease owerid = %u, perm space = %lu, perm orign = %lu, result = %lu",
+                errmsg("decrease owerid = %u, perm space = %lu, perm orign = %ld, result = %ld",
                     userdata->userid,
                     size,
                     origin,
@@ -299,7 +297,7 @@ inline void update_user_space(UserData* userdata, uint64 size, DataSpaceType typ
     } else if (type == SP_TEMP) {
         ereport(DEBUG2,
             (errmodule(MOD_WLM),
-                errmsg("decrease owerid = %u, temp space = %lu, temp orign = %lu, result = %lu",
+                errmsg("decrease owerid = %u, temp space = %lu, temp orign = %ld, result = %ld",
                     userdata->userid,
                     size,
                     origin,
@@ -307,7 +305,7 @@ inline void update_user_space(UserData* userdata, uint64 size, DataSpaceType typ
     } else {
         ereport(DEBUG2,
             (errmodule(MOD_WLM),
-                errmsg("decrease owerid = %u, spill space = %lu, spill orign = %lu, result = %lu",
+                errmsg("decrease owerid = %u, spill space = %lu, spill orign = %ld, result = %ld",
                     userdata->userid,
                     size,
                     origin,

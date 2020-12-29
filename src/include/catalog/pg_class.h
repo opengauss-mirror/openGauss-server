@@ -51,7 +51,7 @@ CATALOG(pg_class,1259) BKI_BOOTSTRAP BKI_ROWTYPE_OID(83) BKI_SCHEMA_MACRO
     Oid reltoastidxid;   /* if toast table, OID of chunk_id index */
     Oid reldeltarelid;   /* if ColStore table, it is not 0 */
     Oid reldeltaidx;
-    Oid relcudescrelid;  /* if ColStore table, it is not 0 */
+    Oid relcudescrelid;  /* if ColStore table, it is not 0, if TsStore, it is partition oid */
     Oid relcudescidx;
     bool relhasindex;    /* T if has (or has had) any indexes */
     bool relisshared;    /* T if shared across databases */
@@ -156,7 +156,7 @@ DATA(insert OID = 1247 (  pg_type       PGNSP 71 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0
 DESCR("");
 DATA(insert OID = 1249 (  pg_attribute  PGNSP 75 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0 f f p r 24 0 f f f f f 0 f f n 3 _null_ _null_ n 3 _null_ _null_));
 DESCR("");
-DATA(insert OID = 1255 (  pg_proc       PGNSP 81 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0 f f p r 30 0 t f f f f 0 f f n 3 _null_ _null_ n 3 _null_ _null_));
+DATA(insert OID = 1255 (  pg_proc       PGNSP 81 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0 f f p r 32 0 t f f f f 0 f f n 3 _null_ _null_ n 3 _null_ _null_));
 DESCR("");
 DATA(insert OID = 1259 (  pg_class      PGNSP 83 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0 f f p r 39 0 t f f f f 0 f f n 3 _null_ _null_ n 3 _null_ _null_));
 DESCR("");
@@ -167,9 +167,11 @@ DESCR("");
 #define RELKIND_SEQUENCE 'S'                    /* sequence object */
 #define RELKIND_TOASTVALUE 't'                  /* for out-of-line values */
 #define RELKIND_VIEW 'v'                        /* view */
+#define RELKIND_MATVIEW 'm'                     /* materialized view */
 #define RELKIND_COMPOSITE_TYPE 'c'              /* composite type */
 #define RELKIND_FOREIGN_TABLE 'f'               /* foreign table */
-#define RELKIND_MATVIEW 'm'                     /* materialized view */
+#define RELKIND_STREAM 'e'                      /* stream */
+#define RELKIND_CONTQUERY 'o'                   /* contview */
 #define PARTTYPE_PARTITIONED_RELATION 'p'       /* partitioned relation */
 #define PARTTYPE_VALUE_PARTITIONED_RELATION 'v' /* value partitioned relation */
 #define PARTTYPE_NON_PARTITIONED_RELATION 'n'   /* non-partitioned relation */
@@ -203,4 +205,3 @@ DESCR("");
  */
 #define REPLICA_IDENTITY_INDEX 'i'
 #endif /* PG_CLASS_H */
-

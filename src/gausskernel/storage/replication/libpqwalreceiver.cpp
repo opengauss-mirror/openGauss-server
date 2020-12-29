@@ -46,7 +46,7 @@
 
 /* Prototypes for private functions */
 static bool libpq_select(int timeout_ms);
-static PGresult* libpqrcv_PQexec(const char* query);
+static PGresult *libpqrcv_PQexec(const char *query);
 
 static void ha_set_rebuild_reason(HaRebuildReason reason);
 static void ha_set_conn_channel(void);
@@ -107,11 +107,11 @@ static void IdentifyRemoteAvailableZone(void)
 /*
  * Establish the connection to the primary server for XLOG streaming
  */
-bool libpqrcv_connect_for_TLI(TimeLineID* timeLineID, char* conninfo)
+bool libpqrcv_connect_for_TLI(TimeLineID *timeLineID, char *conninfo)
 {
     char conninfoRepl[MAXCONNINFO + 75] = {0};
     TimeLineID remoteTli;
-    PGresult* res = NULL;
+    PGresult *res = NULL;
     int nRet = 0;
 
     /*
@@ -119,14 +119,13 @@ bool libpqrcv_connect_for_TLI(TimeLineID* timeLineID, char* conninfo)
      * database name is ignored by the server in replication mode, but specify
      * "replication" for .pgpass lookup.
      */
-    AssertEreport(dummyStandbyMode, MOD_FUNCTION, "dummyStandbyMode should be true");
-    nRet = snprintf_s(conninfoRepl,
-        sizeof(conninfoRepl),
-        sizeof(conninfoRepl) - 1,
-        "%s dbname=replication replication=true "
-        "fallback_application_name=dummystandby connect_timeout=%d",
-        conninfo,
-        u_sess->attr.attr_storage.wal_receiver_connect_timeout);
+    if (!dummyStandbyMode) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("dummyStandbyMode should be true")));
+    }
+    nRet = snprintf_s(conninfoRepl, sizeof(conninfoRepl), sizeof(conninfoRepl) - 1,
+                      "%s dbname=replication replication=true "
+                      "fallback_application_name=dummystandby connect_timeout=%d enable_ce=1",
+                      conninfo, u_sess->attr.attr_storage.wal_receiver_connect_timeout);
     securec_check_ss(nRet, "", "");
 
     ereport(LOG, (errmsg("Connecting to primary :%s", conninfo)));
@@ -136,9 +135,8 @@ bool libpqrcv_connect_for_TLI(TimeLineID* timeLineID, char* conninfo)
         char *errMsg = PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn);
         char *subErrMsg = "can not accept connection in standby mode";
 
-        ereport(LOG,
-            (errmsg("wal receiver could not connect to the primary server,the connection info :%s : %s",
-                conninfo, PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+        ereport(LOG, (errmsg("wal receiver could not connect to the primary server,the connection info :%s : %s",
+                             conninfo, PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
 
         if (errMsg != NULL && strstr(errMsg, subErrMsg) != NULL) {
             clean_failover_host_conninfo_for_dummy();
@@ -159,10 +157,9 @@ bool libpqrcv_connect_for_TLI(TimeLineID* timeLineID, char* conninfo)
     res = libpqrcv_PQexec("IDENTIFY_SYSTEM");
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQclear(res);
-        ereport(LOG,
-            (errmsg("could not receive database system identifier and timeline ID from "
-                    "the primary server: %s",
-                PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+        ereport(LOG, (errmsg("could not receive database system identifier and timeline ID from "
+                             "the primary server: %s",
+                             PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
         PQfinish(t_thrd.libwalreceiver_cxt.streamConn);
         t_thrd.libwalreceiver_cxt.streamConn = NULL;
 
@@ -173,14 +170,11 @@ bool libpqrcv_connect_for_TLI(TimeLineID* timeLineID, char* conninfo)
         int nfields = PQnfields(res);
 
         PQclear(res);
-        ereport(LOG,
+        ereport(
+            LOG,
             (errmsg("invalid response from primary server"),
-                errdetail(
-                    "Could not identify system: Got %d rows and %d fields, expected %d rows and %d or more fields.",
-                    ntuples,
-                    nfields,
-                    1,
-                    3)));
+             errdetail("Could not identify system: Got %d rows and %d fields, expected %d rows and %d or more fields.",
+                       ntuples, nfields, 1, 3)));
         PQfinish(t_thrd.libwalreceiver_cxt.streamConn);
         t_thrd.libwalreceiver_cxt.streamConn = NULL;
 
@@ -204,28 +198,28 @@ bool libpqrcv_connect_for_TLI(TimeLineID* timeLineID, char* conninfo)
 /*
  * Establish the connection to the primary server for XLOG streaming
  */
-bool libpqrcv_connect(char* conninfo, XLogRecPtr* startpoint, char* slotname, int channel_identifier)
+bool libpqrcv_connect(char *conninfo, XLogRecPtr *startpoint, char *slotname, int channel_identifier)
 {
     char conninfoRepl[MAXCONNINFO + 75];
-    char* remoteSysid = NULL;
+    char *remoteSysid = NULL;
     char localSysid[32];
     TimeLineID remoteTli;
     TimeLineID localTli;
-    PGresult* res = NULL;
+    PGresult *res = NULL;
     char cmd[1024];
-    char* remoteRecCrc = NULL;
+    char *remoteRecCrc = NULL;
     pg_crc32 recCrc = 0;
     XLogRecPtr localRec;
     pg_crc32 localRecCrc = 0;
     uint32 remoteSversion;
     uint32 localSversion;
-    char* remotePversion = NULL;
-    char* localPversion = NULL;
+    char *remotePversion = NULL;
+    char *localPversion = NULL;
     uint32 remoteTerm;
     uint32 localTerm;
     ServerMode remoteMode = UNKNOWN_MODE;
     int haveXlog = 0;
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     int count = 0;
     int nRet = 0;
     errno_t rc = EOK;
@@ -242,30 +236,26 @@ bool libpqrcv_connect(char* conninfo, XLogRecPtr* startpoint, char* slotname, in
      * "replication" for .pgpass lookup.
      */
     if (dummyStandbyMode)
-        nRet = snprintf_s(conninfoRepl,
-            sizeof(conninfoRepl),
-            sizeof(conninfoRepl) - 1,
-            "%s dbname=replication replication=true "
-            "fallback_application_name=dummystandby "
-            "connect_timeout=%d",
-            conninfo,
-            u_sess->attr.attr_storage.wal_receiver_connect_timeout);
+        nRet = snprintf_s(conninfoRepl, sizeof(conninfoRepl), sizeof(conninfoRepl) - 1,
+                          "%s dbname=replication replication=true "
+                          "fallback_application_name=dummystandby "
+                          "connect_timeout=%d",
+                          conninfo, u_sess->attr.attr_storage.wal_receiver_connect_timeout);
     else {
         char hostname[255];
 
         (void)gethostname(hostname, 255);
 
-        nRet = snprintf_s(conninfoRepl,
-            sizeof(conninfoRepl),
-            sizeof(conninfoRepl) - 1,
-            "%s dbname=replication replication=true "
-            "fallback_application_name=%s "
-            "connect_timeout=%d",
-            conninfo,
-            (u_sess->attr.attr_common.application_name && strlen(u_sess->attr.attr_common.application_name) > 0)
-                ? u_sess->attr.attr_common.application_name
-                : "walreceiver",
-            u_sess->attr.attr_storage.wal_receiver_connect_timeout);
+        nRet = snprintf_s(conninfoRepl, sizeof(conninfoRepl), sizeof(conninfoRepl) - 1,
+                          "%s dbname=replication replication=true "
+                          "fallback_application_name=%s "
+                          "connect_timeout=%d",
+                          conninfo,
+                          (u_sess->attr.attr_common.application_name &&
+                           strlen(u_sess->attr.attr_common.application_name) > 0)
+                                ? u_sess->attr.attr_common.application_name
+                                : "walreceiver",
+                          u_sess->attr.attr_storage.wal_receiver_connect_timeout);
     }
 
     securec_check_ss(nRet, "", "");
@@ -278,28 +268,24 @@ retry:
     if (PQstatus(t_thrd.libwalreceiver_cxt.streamConn) != CONNECTION_OK) {
         /* If startupxlog shut down walreceiver, we need not to retry. */
         if (++count < u_sess->attr.attr_storage.wal_receiver_connect_retries && !WalRcvIsShutdown()) {
-            ereport(LOG,
+            ereport(
+                LOG,
                 (errmsg("retry: %d, walreceiver could not connect to the remote server,the connection info :%s : %s",
-                    count,
-                    conninfo,
-                    PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+                        count, conninfo, PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
             libpqrcv_disconnect();
             goto retry;
         }
 
-        SpinLockAcquire(&walrcv->mutex);
-        walrcv->conn_errno = CHANNEL_ERROR;
+        ha_set_rebuild_connerror(CONNECT_REBUILD, CHANNEL_ERROR);
         if (AmWalReceiverForDummyStandby()) {
+            SpinLockAcquire(&walrcv->mutex);
             walrcv->dummyStandbyConnectFailed = true;
+            SpinLockRelease(&walrcv->mutex);
         }
-        SpinLockRelease(&walrcv->mutex);
         ha_add_disconnect_count();
-        ha_set_rebuild_reason(CONNECT_REBUILD);
-        ereport(ERROR,
-            (errcode(ERRCODE_CONNECTION_TIMED_OUT),
-                errmsg("walreceiver could not connect to the remote server,the connection info :%s : %s",
-                    conninfo,
-                    PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+        ereport(ERROR, (errcode(ERRCODE_CONNECTION_TIMED_OUT),
+                        errmsg("walreceiver could not connect to the remote server,the connection info :%s : %s",
+                               conninfo, PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
     }
 
     ereport(LOG, (errmsg("Connected to remote server :%s success.", conninfo)));
@@ -308,11 +294,10 @@ retry:
     res = libpqrcv_PQexec("IDENTIFY_VERSION");
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQclear(res);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("could not receive database system version and protocol version from "
-                       "the remote server: %s",
-                    PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("could not receive database system version and protocol version from "
+                               "the remote server: %s",
+                               PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
         return false;
     }
     if (PQnfields(res) != versionFields || PQntuples(res) != 1) {
@@ -320,10 +305,8 @@ retry:
         int nfields = PQnfields(res);
 
         PQclear(res);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("invalid response from remote server"),
-                errdetail("Expected 1 tuple with 3 fields, got %d tuples with %d fields.", ntuples, nfields)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("invalid response from remote server"),
+                        errdetail("Expected 1 tuple with 3 fields, got %d tuples with %d fields.", ntuples, nfields)));
         return false;
     }
     remoteSversion = pg_strtoint32(PQgetvalue(res, 0, 0));
@@ -331,23 +314,21 @@ retry:
     remotePversion = PQgetvalue(res, 0, 1);
     localPversion = pstrdup(PG_PROTOCOL_VERSION);
     remoteTerm = pg_strtoint32(PQgetvalue(res, 0, 2));
-    localTerm = g_instance.comm_cxt.localinfo_cxt.term;
+    localTerm = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file, g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
     ereport(LOG, (errmsg("remote term[%u], local term[%u]", remoteTerm, localTerm)));
     if (localPversion == NULL) {
         PQclear(res);
         ha_set_rebuild_connerror(VERSION_REBUILD, REPL_INFO_ERROR);
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("could not get the local protocal version, make sure the PG_PROTOCOL_VERSION is defined")));
+                (errcode(ERRCODE_INVALID_STATUS),
+                 errmsg("could not get the local protocal version, make sure the PG_PROTOCOL_VERSION is defined")));
         return false;
     }
     if (walrcv->conn_target != REPCONNTARGET_DUMMYSTANDBY && (localTerm == 0 || localTerm > remoteTerm)) {
         PQclear(res);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("invalid local term or remote term smaller than local. remote term[%u], local term[%u]",
-                    remoteTerm,
-                    localTerm)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("invalid local term or remote term smaller than local. remote term[%u], local term[%u]",
+                               remoteTerm, localTerm)));
         return false;
     }
 
@@ -355,24 +336,19 @@ retry:
      * If the version of the remote server is not the same as the local's, then set error
      * message in WalRcv and rebuild reason in HaShmData
      */
-    if (remoteSversion != localSversion ||
-        strncmp(remotePversion, localPversion, strlen(PG_PROTOCOL_VERSION)) != 0) {
+    if (remoteSversion != localSversion || strncmp(remotePversion, localPversion, strlen(PG_PROTOCOL_VERSION)) != 0) {
         PQclear(res);
         ha_set_rebuild_connerror(VERSION_REBUILD, REPL_INFO_ERROR);
 
         if (remoteSversion != localSversion) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("database system version is different between the remote and local"),
-                    errdetail("The remote's system version is %u, the local's system version is %u.",
-                        remoteSversion,
-                        localSversion)));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("database system version is different between the remote and local"),
+                            errdetail("The remote's system version is %u, the local's system version is %u.",
+                                      remoteSversion, localSversion)));
         } else {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("the remote protocal version %s is not the same as the local protocal version %s.",
-                        remotePversion,
-                        localPversion)));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("the remote protocal version %s is not the same as the local protocal version %s.",
+                                   remotePversion, localPversion)));
         }
 
         if (localPversion != NULL) {
@@ -391,10 +367,9 @@ retry:
         if (PQresultStatus(res) != PGRES_TUPLES_OK) {
             PQclear(res);
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("could not receive the ongoing mode infomation from "
-                           "the remote server: %s",
-                        PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+                    (errcode(ERRCODE_INVALID_STATUS), errmsg("could not receive the ongoing mode infomation from "
+                                                             "the remote server: %s",
+                                                             PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
             return false;
         }
         if (PQnfields(res) != 1 || PQntuples(res) != 1) {
@@ -402,11 +377,9 @@ retry:
             int num_fields = PQnfields(res);
 
             PQclear(res);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("invalid response from remote server"),
-                    errdetail(
-                        "Expected 1 tuple with 1 fields, got %d tuples with %d fields.", num_tuples, num_fields)));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("invalid response from remote server"),
+                            errdetail("Expected 1 tuple with 1 fields, got %d tuples with %d fields.", num_tuples,
+                                      num_fields)));
             return false;
         }
         remoteMode = (ServerMode)pg_strtoint32(PQgetvalue(res, 0, 0));
@@ -419,23 +392,21 @@ retry:
                 clean_failover_host_conninfo_for_dummy();
             }
 
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("the mode of the remote server must be primary, current is %s",
-                        wal_get_role_string(remoteMode))));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("the mode of the remote server must be primary, current is %s",
+                                   wal_get_role_string(remoteMode))));
             return false;
         }
 
-        if (t_thrd.walreceiver_cxt.AmWalReceiverForStandby && remoteMode != STANDBY_MODE) {
+        if (t_thrd.postmaster_cxt.HaShmData->is_cascade_standby && remoteMode != STANDBY_MODE) {
             PQclear(res);
 
             SpinLockAcquire(&walrcv->mutex);
             walrcv->conn_errno = REPL_INFO_ERROR;
             SpinLockRelease(&walrcv->mutex);
 
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("the mode of the remote server must be standby, current is %s",
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                            errmsg("the mode of the remote server must be standby, current is %s",
                             wal_get_role_string(remoteMode, true))));
             return false;
         }
@@ -456,11 +427,10 @@ retry:
     res = libpqrcv_PQexec("IDENTIFY_SYSTEM");
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQclear(res);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("could not receive database system identifier and timeline ID from "
-                       "the remote server: %s",
-                    PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("could not receive database system identifier and timeline ID from "
+                               "the remote server: %s",
+                               PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
         return false;
     }
     if (PQnfields(res) != 4 || PQntuples(res) != 1) {
@@ -468,15 +438,11 @@ retry:
         int num_fields = PQnfields(res);
 
         PQclear(res);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("invalid response from remote server"),
-                errdetail(
-                    "Could not identify system: Got %d rows and %d fields, expected %d rows and %d or more fields.",
-                    num_tuples,
-                    num_fields,
-                    1,
-                    4)));
+        ereport(
+            ERROR,
+            (errcode(ERRCODE_INVALID_STATUS), errmsg("invalid response from remote server"),
+             errdetail("Could not identify system: Got %d rows and %d fields, expected %d rows and %d or more fields.",
+                       num_tuples, num_fields, 1, 4)));
 
         return false;
     }
@@ -486,8 +452,7 @@ retry:
     /*
      * Confirm that the system identifier of the primary is the same as ours.
      */
-    nRet = snprintf_s(
-        localSysid, sizeof(localSysid), sizeof(localSysid) - 1, UINT64_FORMAT, GetSystemIdentifier());
+    nRet = snprintf_s(localSysid, sizeof(localSysid), sizeof(localSysid) - 1, UINT64_FORMAT, GetSystemIdentifier());
     securec_check_ss(nRet, "", "");
 
     if (strcmp(remoteSysid, localSysid) != 0) {
@@ -512,13 +477,11 @@ retry:
 
             sync_system_identifier = strtoul(remoteSysid, 0, 10);
 
-            ereport(LOG,
+            ereport(
+                LOG,
                 (errmsg("DummyStandby system identifier differs between the primary"),
-                    errdetail(
-                        "The primary's identifier is %s, the standby's identifier is %s.sync_system_identifier=%lu",
-                        remoteSysid,
-                        localSysid,
-                        sync_system_identifier)));
+                 errdetail("The primary's identifier is %s, the standby's identifier is %s.sync_system_identifier=%lu",
+                           remoteSysid, localSysid, sync_system_identifier)));
         } else {
             remoteSysid = pstrdup(remoteSysid);
             PQclear(res);
@@ -571,56 +534,53 @@ retry:
              * then set error message in WalRcv and rebuild reason in HaShmData.
              */
             ha_set_rebuild_connerror(TIMELINE_REBUILD, REPL_INFO_ERROR);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("timeline %u of the primary does not match recovery target timeline %u",
-                        remoteTli,
-                        localTli)));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("timeline %u of the primary does not match recovery target timeline %u", remoteTli,
+                                   localTli)));
         }
         t_thrd.xlog_cxt.ThisTimeLineID = remoteTli;
     }
 
     if (dummyStandbyMode) {
-        char        msgBuf[XLOG_READER_MAX_MSGLENTH] = {0};
+        char msgBuf[XLOG_READER_MAX_MSGLENTH] = {0};
         /* find the max lsn by xlog file, if i'm dummystandby or standby for failover */
         localRec = FindMaxLSN(t_thrd.proc_cxt.DataDir, msgBuf, XLOG_READER_MAX_MSGLENTH, &localRecCrc);
     } else {
-        /* for last record should be lastreplayed xlog in StartupXLOG, no un-replay or un-flush one */
         SpinLockAcquire(&walrcv->mutex);
         localRecCrc = walrcv->latestRecordCrc;
         localRec = walrcv->latestValidRecord;
         SpinLockRelease(&walrcv->mutex);
 
-        ereport(LOG, (errmsg("local request lsn/crc [%X/%X, %u]",
-            (uint32)(localRec >> 32), (uint32)localRec, localRecCrc)));
+        ereport(LOG,
+                (errmsg("local request lsn/crc [%X/%X, %u]", (uint32)(localRec >> 32), (uint32)localRec, localRecCrc)));
 
         if (!XRecOffIsValid(localRec)) {
             ereport(PANIC,
-                (errmsg("Invalid xlog offset at %X/%X. Please check xlog files or rebuild the primary/standby "
-                        "relationship.",
-                    (uint32)(localRec >> 32),
-                    (uint32)localRec)));
+                    (errmsg("Invalid xlog offset at %X/%X. Please check xlog files or rebuild the primary/standby "
+                            "relationship.",
+                            (uint32)(localRec >> 32), (uint32)localRec)));
         }
     }
 
     /* if dummystandby has no xlog, dont check crc */
     if (!(dummyStandbyMode && XLogRecPtrIsInvalid(localRec))) {
-        nRet = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "IDENTIFY_CONSISTENCE %X/%X",
-            (uint32) (localRec >> 32), (uint32) localRec);
+        nRet = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "IDENTIFY_CONSISTENCE %X/%X", (uint32)(localRec >> 32),
+                          (uint32)localRec);
         securec_check_ss(nRet, "", "");
 
         res = libpqrcv_PQexec(cmd);
         if (PQresultStatus(res) != PGRES_TUPLES_OK) {
             PQclear(res);
             ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
-            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("failed to identify consistence at %X/%X: %s",
-                (uint32)(localRec >> 32), (uint32)localRec, PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("failed to identify consistence at %X/%X: %s", (uint32)(localRec >> 32),
+                                   (uint32)localRec, PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
             return false;
         }
 
         /*
          * Indentify consistence is motified when importing cm-ha enhancement code.
-         * To support greyupgrade, msg with 1 row of 2 and 3 cols is handled to 
+         * To support greyupgrade, msg with 1 row of 2 and 3 cols is handled to
          * go through two different logics. Will remove later.
          */
         if ((PQnfields(res) != 3 && PQnfields(res) != 2) || PQntuples(res) != 1) {
@@ -630,8 +590,7 @@ retry:
             PQclear(res);
             ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
             ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("invalid response from primary server"),
+                    (errcode(ERRCODE_INVALID_STATUS), errmsg("invalid response from primary server"),
                      errdetail("Could not identify system: Got %d rows and %d fields, expected 1 row and 2 or 3 fields",
                                ntuples, nfields)));
             return false;
@@ -643,10 +602,9 @@ retry:
             if (remoteRecCrc && sscanf_s(remoteRecCrc, "%8X", &recCrc) != 1) {
                 PQclear(res);
                 ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
-                ereport(ERROR, 
-                    (errcode(ERRCODE_INVALID_STATUS),
-                     errmsg("could not parse remote record's crc, remoteRecCrc=%s recCrc=%u",
-                         (remoteRecCrc[0] != 0) ? remoteRecCrc : "NULL", (uint32)recCrc)));
+                ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                                errmsg("could not parse remote record's crc, remoteRecCrc=%s recCrc=%u",
+                                       (remoteRecCrc[0] != 0) ? remoteRecCrc : "NULL", (uint32)recCrc)));
                 return false;
             }
 
@@ -655,12 +613,10 @@ retry:
             if (sscanf_s(remoteMaxLsnStr, "%X/%X", &hi, &lo) != 2) {
                 PQclear(res);
                 ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_STATUS),
-                     errmsg("could not parse remoteMaxLsn")));
+                ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("could not parse remoteMaxLsn")));
                 return false;
             }
-            remoteMaxLsn = ((uint64) hi << 32) | lo;
+            remoteMaxLsn = ((uint64)hi << 32) | lo;
 
             /* col3: crc of max lsn of dummy standby. */
             remoteMaxLsnCrcStr = PQgetvalue(res, 0, 2);
@@ -668,9 +624,9 @@ retry:
                 PQclear(res);
                 ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
                 ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_STATUS),
-                     errmsg("could not parse remote max record's crc, remoteMaxLsnCrc=%s maxLsnCrc=%u",
-                         (remoteMaxLsnCrcStr[0] != 0) ? remoteMaxLsnCrcStr : "NULL", (uint32)remoteMaxLsnCrc)));
+                        (errcode(ERRCODE_INVALID_STATUS),
+                         errmsg("could not parse remote max record's crc, remoteMaxLsnCrc=%s maxLsnCrc=%u",
+                                (remoteMaxLsnCrcStr[0] != 0) ? remoteMaxLsnCrcStr : "NULL", (uint32)remoteMaxLsnCrc)));
                 return false;
             }
 
@@ -682,39 +638,34 @@ retry:
                     /* dummy standby connect to primary */
                     if (dummyStandbyMode) {
                         if (recCrc == IGNORE_REC_CRC) {
-                            ereport(LOG,
-                                (errmsg("receive ignore reccrc, rm xlog.")));
+                            ereport(LOG, (errmsg("receive ignore reccrc, rm xlog.")));
                             ProcessWSRmXLog();
                         } else {
-                            ereport(ERROR,
-                                (errcode(ERRCODE_INVALID_STATUS),
-                                 errmsg("dummystandby's local request lsn[%X/%X] 's crc "
-                                        "mismatched with remote server"
-                                        "crc(local, remote):[%u,%u].",
-                                        (uint32)(localRec >> 32), (uint32)localRec, localRecCrc, recCrc)));
+                            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                                            errmsg("dummystandby's local request lsn[%X/%X] 's crc "
+                                                   "mismatched with remote server"
+                                                   "crc(local, remote):[%u,%u].",
+                                                   (uint32)(localRec >> 32), (uint32)localRec, localRecCrc, recCrc)));
                         }
                     } else {
-                        /* 
-                         * standby connect to primary 
-                         * Direct check Primary and Standby, trigger build. 
+                        /*
+                         * standby connect to primary
+                         * Direct check Primary and Standby, trigger build.
                          */
                         ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
-                        ereport(ERROR,
-                            (errcode(ERRCODE_INVALID_STATUS),
-                             errmsg("standby's local request lsn[%X/%X] 's crc mismatched with remote server"
-                            "crc(local, remote):[%u,%u].",
-                                (uint32)(localRec >> 32), (uint32)localRec, localRecCrc, recCrc)));
+                        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                                        errmsg("standby's local request lsn[%X/%X] 's crc mismatched with remote server"
+                                               "crc(local, remote):[%u,%u].",
+                                               (uint32)(localRec >> 32), (uint32)localRec, localRecCrc, recCrc)));
                     }
                 }
             } else if (t_thrd.walreceiver_cxt.AmWalReceiverForStandby) {
                 /* standby connect to standby */
-                bool        crcvalid = false;
+                bool crcvalid = false;
                 /* local xlog must be more than(or equal to) remote, and last crc must be matched */
-                if (XLByteLE(remoteMaxLsn, localRec) && 
-                    remoteMaxLsnCrc == GetXlogRecordCrc(remoteMaxLsn, crcvalid)) {
-                    ereport(LOG,
-                        (errmsg("crc check on remote standby success, local standby " 
-                                "will promote to primary")));   
+                if (XLByteLE(remoteMaxLsn, localRec) && remoteMaxLsnCrc == GetXlogRecordCrc(remoteMaxLsn, crcvalid)) {
+                    ereport(LOG, (errmsg("crc check on remote standby success, local standby "
+                                         "will promote to primary")));
                     SetWalRcvDummyStandbySyncPercent(SYNC_DUMMY_STANDBY_END);
                     /* also set datareceiver to continue failover */
                     SetDataRcvDummyStandbySyncPercent(SYNC_DUMMY_STANDBY_END);
@@ -724,17 +675,17 @@ retry:
                     walrcv->conn_errno = REPL_INFO_ERROR;
                     SpinLockRelease(&walrcv->mutex);
                     ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("crc of %X/%X is different across remote and local standby, "
-                        "standby promote failed",
-                            (uint32)(remoteMaxLsn >> 32), (uint32)remoteMaxLsn)));
+                                    errmsg("crc of %X/%X is different across remote and local standby, "
+                                           "standby promote failed",
+                                           (uint32)(remoteMaxLsn >> 32), (uint32)remoteMaxLsn)));
                 }
             } else {
                 /* standby connect to dummystandby */
                 if (recCrc != 0 && recCrc != localRecCrc) {
                     /* FUTURE CASE::
-                     * When standby failover, its xlog is not the same with secondary 
-                     * standby, walreceiver will ereport ERROR, or the standby 
-                     * promoting will hang, and if the primary is pending, cm server 
+                     * When standby failover, its xlog is not the same with secondary
+                     * standby, walreceiver will ereport ERROR, or the standby
+                     * promoting will hang, and if the primary is pending, cm server
                      * will not arbitrate the primary.
                      */
                     SpinLockAcquire(&walrcv->mutex);
@@ -742,14 +693,13 @@ retry:
                         walrcv->dummyStandbyConnectFailed = true;
                     }
                     SpinLockRelease(&walrcv->mutex);
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_STATUS),
-                         errmsg("invalid crc on secondary standby, has xlog, standby promote failed, "
-                                "(local, remote) = (%u, %u) on %X/%X",
-                                    localRecCrc, recCrc, (uint32)(localRec >> 32), (uint32)localRec)));
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                                    errmsg("invalid crc on secondary standby, has xlog, standby promote failed, "
+                                           "(local, remote) = (%u, %u) on %X/%X",
+                                           localRecCrc, recCrc, (uint32)(localRec >> 32), (uint32)localRec)));
                 } else if (recCrc == 0) {
                     bool crcvalid = false;
-    
+
                     /*
                      *  Standby      ------>(lsn is 10)
                      *  DummyStandby --->(lsn is 5)
@@ -759,9 +709,8 @@ retry:
                     if (XLByteEQ(remoteMaxLsn, InvalidXLogRecPtr) ||
                         (XLByteLT(remoteMaxLsn, localRec) &&
                          remoteMaxLsnCrc == GetXlogRecordCrc(remoteMaxLsn, crcvalid))) {
-                        ereport(LOG,
-                            (errmsg("invalid crc on secondary standby, no xlog, standby " 
-                                "will promote primary")));  
+                        ereport(LOG, (errmsg("invalid crc on secondary standby, no xlog, standby "
+                                             "will promote primary")));
                         SetWalRcvDummyStandbySyncPercent(SYNC_DUMMY_STANDBY_END);
                         haveXlog = false;
                     } else {
@@ -771,24 +720,22 @@ retry:
                         }
                         SpinLockRelease(&walrcv->mutex);
                         ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                            errmsg("crc of %X/%X is different across dummy and standby, "
-                                   "standby promote failed",
-                                       (uint32)(remoteMaxLsn >> 32), (uint32)remoteMaxLsn)));
+                                        errmsg("crc of %X/%X is different across dummy and standby, "
+                                               "standby promote failed",
+                                               (uint32)(remoteMaxLsn >> 32), (uint32)remoteMaxLsn)));
                     }
                 }
             }
         } else {
-            char* primary_reccrc = PQgetvalue(res, 0, 0);
+            char *primary_reccrc = PQgetvalue(res, 0, 0);
             bool havexlog = pg_strtoint32(PQgetvalue(res, 0, 1));
 
             if (primary_reccrc && sscanf_s(primary_reccrc, "%8X", &recCrc) != 1) {
                 PQclear(res);
                 ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("could not parse primary record's crc,primary_reccrc=%s reccrc=%u",
-                            (primary_reccrc[0] != 0) ? primary_reccrc : "NULL",
-                            (uint32)recCrc)));
+                ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                                errmsg("could not parse primary record's crc,primary_reccrc=%s reccrc=%u",
+                                       (primary_reccrc[0] != 0) ? primary_reccrc : "NULL", (uint32)recCrc)));
                 return false;
             }
 
@@ -796,9 +743,8 @@ retry:
 
             if (0 == recCrc && t_thrd.walreceiver_cxt.AmWalReceiverForFailover) {
                 if (0 == havexlog) {
-                    ereport(LOG,
-                        (errmsg("invalid crc on secondary standby, no xlog, standby "
-                                "will promoting primary")));
+                    ereport(LOG, (errmsg("invalid crc on secondary standby, no xlog, standby "
+                                         "will promoting primary")));
                     SetWalRcvDummyStandbySyncPercent(SYNC_DUMMY_STANDBY_END);
                     return true;
                 } else {
@@ -809,20 +755,17 @@ retry:
                      * will not arbitrate the primary.
                      */
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_STATUS),
-                            errmsg("invalid crc on secondary standby, has xlog, "
-                                   "standby promote failed")));
+                            (errcode(ERRCODE_INVALID_STATUS), errmsg("invalid crc on secondary standby, has xlog, "
+                                                                     "standby promote failed")));
                 }
             } else if (recCrc != walrcv->latestRecordCrc) {
                 ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
                 ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("standby_rec=%x/%x "
-                               "standby latest record's crc %u and primary corresponding record's crc %u not matched",
-                            (uint32)(walrcv->latestValidRecord >> 32),
-                            (uint32)walrcv->latestValidRecord,
-                            walrcv->latestRecordCrc,
-                            recCrc)));
+                        (errcode(ERRCODE_INVALID_STATUS),
+                         errmsg("standby_rec=%x/%x "
+                                "standby latest record's crc %u and primary corresponding record's crc %u not matched",
+                                (uint32)(walrcv->latestValidRecord >> 32), (uint32)walrcv->latestValidRecord,
+                                walrcv->latestRecordCrc, recCrc)));
             }
         }
     }
@@ -836,7 +779,7 @@ retry:
         } else {
             /* failover to dummy */
             ha_set_port_to_remote(t_thrd.libwalreceiver_cxt.streamConn, channel_identifier);
-            if  (recCrc == 0 && !haveXlog) {
+            if (recCrc == 0 && !haveXlog) {
                 return true;
             }
         }
@@ -846,59 +789,40 @@ retry:
 
     /* Create replication slot if need */
     if (!t_thrd.walreceiver_cxt.AmWalReceiverForFailover && slotname != NULL) {
-        nRet = snprintf_s(cmd,
-            sizeof(cmd),
-            sizeof(cmd) - 1,
-            "CREATE_REPLICATION_SLOT \"%s\" PHYSICAL %X/%X",
-            slotname,
-            (uint32)(*startpoint >> 32),
-            (uint32)(*startpoint));
+        nRet = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "CREATE_REPLICATION_SLOT \"%s\" PHYSICAL %X/%X", slotname,
+                          (uint32)(*startpoint >> 32), (uint32)(*startpoint));
         securec_check_ss(nRet, "", "");
 
         res = libpqrcv_PQexec(cmd);
         if (PQresultStatus(res) != PGRES_TUPLES_OK) {
             PQclear(res);
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("could not create replication slot %s : %s",
-                        slotname,
-                        PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+                    (errcode(ERRCODE_INVALID_STATUS), errmsg("could not create replication slot %s : %s", slotname,
+                                                             PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
         }
         PQclear(res);
     }
 
     /* Start streaming from the point requested by startup process */
     if (!t_thrd.walreceiver_cxt.AmWalReceiverForFailover && slotname != NULL)
-        nRet = snprintf_s(cmd,
-            sizeof(cmd),
-            sizeof(cmd) - 1,
-            "START_REPLICATION SLOT \"%s\" %X/%X",
-            slotname,
-            (uint32)(*startpoint >> 32),
-            (uint32)(*startpoint));
+        nRet = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "START_REPLICATION SLOT \"%s\" %X/%X", slotname,
+                          (uint32)(*startpoint >> 32), (uint32)(*startpoint));
     else
-        nRet = snprintf_s(cmd,
-            sizeof(cmd),
-            sizeof(cmd) - 1,
-            "START_REPLICATION %X/%X",
-            (uint32)(*startpoint >> 32),
-            (uint32)(*startpoint));
+        nRet = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "START_REPLICATION %X/%X", (uint32)(*startpoint >> 32),
+                          (uint32)(*startpoint));
     securec_check_ss(nRet, "", "");
 
     res = libpqrcv_PQexec(cmd);
     if (PQresultStatus(res) != PGRES_COPY_BOTH) {
         PQclear(res);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("could not start WAL streaming: %s", PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("could not start WAL streaming: %s",
+                                                                PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
     }
     PQclear(res);
 
     ereport(LOG,
-        (errmsg("streaming replication successfully connected to primary, the connection is %s, start from %X/%X ",
-            conninfo,
-            (uint32)(*startpoint >> 32),
-            (uint32)(*startpoint))));
+            (errmsg("streaming replication successfully connected to primary, the connection is %s, start from %X/%X ",
+                    conninfo, (uint32)(*startpoint >> 32), (uint32)(*startpoint))));
 
     if (!t_thrd.walreceiver_cxt.AmWalReceiverForFailover) {
         SpinLockAcquire(&walrcv->mutex);
@@ -948,8 +872,8 @@ static bool libpq_select(int timeout_ms)
 #else  /* !HAVE_POLL */
 
         fd_set input_mask;
-        struct timeval timeout = {0, 0};
-        struct timeval* ptr_timeout = NULL;
+        struct timeval timeout = { 0, 0 };
+        struct timeval *ptr_timeout = NULL;
 
         FD_ZERO(&input_mask);
         FD_SET(PQsocket(t_thrd.libwalreceiver_cxt.streamConn), &input_mask);
@@ -991,10 +915,10 @@ static bool libpq_select(int timeout_ms)
  *
  * Queries are always executed on the connection in streamConn.
  */
-static PGresult* libpqrcv_PQexec(const char* query)
+static PGresult *libpqrcv_PQexec(const char *query)
 {
-    PGresult* result = NULL;
-    PGresult* lastResult = NULL;
+    PGresult *result = NULL;
+    PGresult *lastResult = NULL;
 
     /*
      * PQexec() silently discards any prior query results on the connection.
@@ -1083,10 +1007,10 @@ void libpqrcv_disconnect(void)
  *
  * ereports on error.
  */
-bool libpqrcv_receive(int timeout, unsigned char* type, char** buffer, int* len)
+bool libpqrcv_receive(int timeout, unsigned char *type, char **buffer, int *len)
 {
     int rawlen;
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
     if (t_thrd.libwalreceiver_cxt.recvBuf != NULL) {
         PQfreemem(t_thrd.libwalreceiver_cxt.recvBuf);
@@ -1108,9 +1032,8 @@ bool libpqrcv_receive(int timeout, unsigned char* type, char** buffer, int* len)
 
         if (PQconsumeInput(t_thrd.libwalreceiver_cxt.streamConn) == 0) {
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("could not receive data from WAL streaming: %s",
-                        PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+                    (errcode(ERRCODE_INVALID_STATUS), errmsg("could not receive data from WAL streaming: %s",
+                                                             PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
         }
 
         /* Now that we've consumed some input, try again */
@@ -1120,18 +1043,16 @@ bool libpqrcv_receive(int timeout, unsigned char* type, char** buffer, int* len)
         }
     }
     if (rawlen == -1) { /* end-of-streaming or error */
-        PGresult* res = NULL;
-        const char* sqlstate = NULL;
+        PGresult *res = NULL;
+        const char *sqlstate = NULL;
         int retcode = 0;
 
         res = PQgetResult(t_thrd.libwalreceiver_cxt.streamConn);
         if (PQresultStatus(res) == PGRES_COMMAND_OK) {
             PQclear(res);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("replication terminated by primary server at %X/%X",
-                        (uint32)(walrcv->receivedUpto >> 32),
-                        (uint32)walrcv->receivedUpto)));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("replication terminated by primary server at %X/%X",
+                                   (uint32)(walrcv->receivedUpto >> 32), (uint32)walrcv->receivedUpto)));
             return false;
         }
 
@@ -1140,28 +1061,23 @@ bool libpqrcv_receive(int timeout, unsigned char* type, char** buffer, int* len)
             retcode = MAKE_SQLSTATE(sqlstate[0], sqlstate[1], sqlstate[2], sqlstate[3], sqlstate[4]);
         }
         if (retcode == ERRCODE_UNDEFINED_FILE) {
-            ha_set_rebuild_reason(WALSEGMENT_REBUILD);
+            ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
             SpinLockAcquire(&walrcv->mutex);
-            walrcv->conn_errno = REPL_INFO_ERROR;
             walrcv->ntries++;
             SpinLockRelease(&walrcv->mutex);
         }
 
         PQclear(res);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("could not receive data from WAL stream: %s",
-                    PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("could not receive data from WAL stream: %s",
+                                                                PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
     }
     if (rawlen < -1) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("could not receive data from WAL stream: %s",
-                    PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("could not receive data from WAL stream: %s",
+                                                                PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
     }
 
     /* Return received messages to caller */
-    *type = *((unsigned char*)t_thrd.libwalreceiver_cxt.recvBuf);
+    *type = *((unsigned char *)t_thrd.libwalreceiver_cxt.recvBuf);
     *buffer = t_thrd.libwalreceiver_cxt.recvBuf + sizeof(*type);
     *len = rawlen - sizeof(*type);
 
@@ -1173,13 +1089,12 @@ bool libpqrcv_receive(int timeout, unsigned char* type, char** buffer, int* len)
  *
  * ereports on error.
  */
-void libpqrcv_send(const char* buffer, int nbytes)
+void libpqrcv_send(const char *buffer, int nbytes)
 {
     if (PQputCopyData(t_thrd.libwalreceiver_cxt.streamConn, buffer, nbytes) <= 0 ||
         PQflush(t_thrd.libwalreceiver_cxt.streamConn))
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("could not send data to WAL stream: %s", PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("could not send data to WAL stream: %s",
+                                                                PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
 }
 
 /*
@@ -1189,7 +1104,7 @@ void libpqrcv_send(const char* buffer, int nbytes)
  */
 static void ha_set_rebuild_reason(HaRebuildReason reason)
 {
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     SpinLockAcquire(&hashmdata->mutex);
     hashmdata->repl_reason[hashmdata->current_repl] = reason;
     SpinLockRelease(&hashmdata->mutex);
@@ -1200,61 +1115,62 @@ static void ha_set_rebuild_reason(HaRebuildReason reason)
  */
 static void ha_set_conn_channel()
 {
-    struct sockaddr* laddr = (struct sockaddr*)PQLocalSockaddr(t_thrd.libwalreceiver_cxt.streamConn);
-    struct sockaddr* raddr = (struct sockaddr*)PQRemoteSockaddr(t_thrd.libwalreceiver_cxt.streamConn);
+    struct sockaddr *laddr = (struct sockaddr *)PQLocalSockaddr(t_thrd.libwalreceiver_cxt.streamConn);
+    struct sockaddr *raddr = (struct sockaddr *)PQRemoteSockaddr(t_thrd.libwalreceiver_cxt.streamConn);
     char local_ip[IP_LEN] = {0};
     char remote_ip[IP_LEN] = {0};
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     errno_t rc = 0;
 
-    char* result = NULL;
+    char *result = NULL;
 
     if (laddr == NULL || raddr == NULL) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_STATUS), errmsg("sockaddr is NULL, because there is no connection to primary")));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("sockaddr is NULL, because there is no connection to primary")));
         return;
     }
     if (laddr->sa_family == AF_INET6) {
-        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in*)laddr)->sin_addr, 128, local_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in *)laddr)->sin_addr, 128, local_ip, IP_LEN);
         if (result == NULL) {
             ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
         }
     } else if (laddr->sa_family == AF_INET) {
-        result = inet_net_ntop(AF_INET, &((struct sockaddr_in*)laddr)->sin_addr, 32, local_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET, &((struct sockaddr_in *)laddr)->sin_addr, 32, local_ip, IP_LEN);
         if (result == NULL) {
             ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
         }
     }
 
     if (raddr->sa_family == AF_INET6) {
-        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in*)raddr)->sin_addr, 128, remote_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in *)raddr)->sin_addr, 128, remote_ip, IP_LEN);
         if (result == NULL) {
             ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
         }
     } else if (raddr->sa_family == AF_INET) {
-        result = inet_net_ntop(AF_INET, &((struct sockaddr_in*)raddr)->sin_addr, 32, remote_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET, &((struct sockaddr_in *)raddr)->sin_addr, 32, remote_ip, IP_LEN);
         if (result == NULL) {
             ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
         }
     }
 
     SpinLockAcquire(&walrcv->mutex);
-    rc = strncpy_s((char*)walrcv->conn_channel.localhost, sizeof(walrcv->conn_channel.localhost), local_ip, IP_LEN - 1);
+    rc = strncpy_s((char *)walrcv->conn_channel.localhost, sizeof(walrcv->conn_channel.localhost), local_ip,
+                   IP_LEN - 1);
     securec_check(rc, "", "");
     walrcv->conn_channel.localhost[IP_LEN - 1] = '\0';
-    walrcv->conn_channel.localport = ntohs(((struct sockaddr_in*)laddr)->sin_port);
-    rc = strncpy_s(
-        (char*)walrcv->conn_channel.remotehost, sizeof(walrcv->conn_channel.remotehost), remote_ip, IP_LEN - 1);
+    walrcv->conn_channel.localport = ntohs(((struct sockaddr_in *)laddr)->sin_port);
+    rc = strncpy_s((char *)walrcv->conn_channel.remotehost, sizeof(walrcv->conn_channel.remotehost), remote_ip,
+                   IP_LEN - 1);
     securec_check(rc, "", "");
     walrcv->conn_channel.remotehost[IP_LEN - 1] = '\0';
-    walrcv->conn_channel.remoteport = ntohs(((struct sockaddr_in*)raddr)->sin_port);
+    walrcv->conn_channel.remoteport = ntohs(((struct sockaddr_in *)raddr)->sin_port);
     SpinLockRelease(&walrcv->mutex);
 }
 
 /* Add disconnect_count of the current repl */
 static void ha_add_disconnect_count()
 {
-    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
 
     SpinLockAcquire(&hashmdata->mutex);
     hashmdata->disconnect_count[hashmdata->current_repl] += 1;
@@ -1264,7 +1180,7 @@ static void ha_add_disconnect_count()
 /* set the rebuild reason and walreceiver connerror. */
 static void ha_set_rebuild_connerror(HaRebuildReason reason, WalRcvConnError connerror)
 {
-    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
     ha_set_rebuild_reason(reason);
     SpinLockAcquire(&walrcv->mutex);
@@ -1284,9 +1200,8 @@ static void ha_set_port_to_remote(PGconn *dummy_conn, int ha_port)
     PGresult *res = NULL;
 
     if (ha_port == 0 || dummy_conn == NULL) {
-        ereport(WARNING, (errcode(ERRCODE_INVALID_STATUS),
-                errmsg("could not set channel identifier, "
-                        "local port or connection is invalid")));
+        ereport(WARNING, (errcode(ERRCODE_INVALID_STATUS), errmsg("could not set channel identifier, "
+                                                                  "local port or connection is invalid")));
         return;
     }
 
@@ -1294,15 +1209,15 @@ static void ha_set_port_to_remote(PGconn *dummy_conn, int ha_port)
      * using localport for channel identifier,
      * make primary can using ip and port to find out the channel
      */
-    nRet = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "IDENTIFY_CHANNEL %d",	ha_port);
+    nRet = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "IDENTIFY_CHANNEL %d", ha_port);
     securec_check_ss(nRet, "", "");
 
     res = libpqrcv_PQexec(cmd);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQclear(res);
-        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-            errmsg("could not set channel identifier, localport %d : %s", ha_port, PQerrorMessage(dummy_conn))));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("could not set channel identifier, localport %d : %s",
+                                                                ha_port, PQerrorMessage(dummy_conn))));
     }
     PQclear(res);
-    return ;
+    return;
 }

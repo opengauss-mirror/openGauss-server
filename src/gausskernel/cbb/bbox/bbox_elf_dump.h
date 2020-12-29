@@ -76,8 +76,8 @@ extern "C" {
 
 #define RET_BBOX_VDSO_INVALID (1)
 
-#define GZIP_CMD "gzip -%u > %s"
-#define GZIP_CMD_WITH_FILENAME "gzip -%u > core.%d.gz"
+#define COMPRESSION_CMD "lz4 -%u > \"%s\""
+#define COMPRESSION_CMD_WITH_FILENAME "lz4 -%u > core.%d.lz4"
 
 #define BBOX_FALSE (0)
 #define BBOX_TRUE (1)
@@ -354,14 +354,10 @@ typedef struct Frame {
     } while (0)
 #elif defined(__aarch64__)
 
-#if defined(__GNUC__) && ((__GNUC__ > 5 || (__GNUC__ == 5 && __GNUC_MINOR__ > 4 /*above 5.4*/ ))  ) 
-#define CPURegs user_regs_struct
-#else
 #define CPURegs user_pt_regs
-#endif
 
 typedef struct Frame {
-    CPURegs arm;
+    struct user_pt_regs arm;
     int errno_;
     pid_t tid;
 } Frame;

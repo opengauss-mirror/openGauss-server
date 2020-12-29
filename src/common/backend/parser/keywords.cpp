@@ -16,6 +16,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "nodes/parsenodes.h"
 #include "parser/gramparse.h"
 
 #define PG_KEYWORD(a, b, c) {a, b, c},

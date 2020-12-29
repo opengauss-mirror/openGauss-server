@@ -119,12 +119,12 @@ NON_EXEC_STATIC void AlarmCheckerMain()
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     /* reord my name */
-    knl_thread_set_name("AlarmChecker");
+    t_thrd.proc_cxt.MyProgName = "AlarmChecker";
 
     /* Identify myself via ps */
     init_ps_display("AlarmChecker", "", "", "");
 
-    AlarmLog(ALM_LOG, "AlarmChecker started.");
+    AlarmLog(ALM_LOG, "alarm checker started.");
 
     InitializeLatchSupport(); /* needed for latch waits */
 
@@ -161,7 +161,7 @@ NON_EXEC_STATIC void AlarmCheckerMain()
     (void)gs_signal_unblock_sigusr2();
 
     /* all is done info top memory context. */
-    (void)MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    (void)MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
 
     DataInstAlarmItemInitialize();
 
@@ -189,7 +189,7 @@ NON_EXEC_STATIC void AlarmCheckerMain()
         (void)WaitLatch(&t_thrd.alarm_cxt.AlarmCheckerLatch, WL_LATCH_SET | WL_TIMEOUT, AlarmCheckInterval * 1000);
     }
 
-    AlarmLog(ALM_LOG, "AlarmChecker shutting down...");
+    AlarmLog(ALM_LOG, "alarm checker shutting down...");
 
     proc_exit(0);
 }
@@ -299,9 +299,6 @@ void AlarmLogImplementation(int level, const char* prefix, const char* logtext)
             break;
         case ALM_LOG:
             ereport(LOG, (errmsg("%s%s", prefix, logtext)));
-            break;
-        case ALM_INFO:
-            ereport(INFO, (errmsg("%s%s", prefix, logtext)));
             break;
         default:
             break;

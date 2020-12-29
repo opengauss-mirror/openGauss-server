@@ -59,7 +59,7 @@ void datapagemap_add(datapagemap_t* map, BlockNumber blkno)
         map->bitmap = (unsigned char*)pg_realloc(map->bitmap, newsize);
 
         /* zero out the newly allocated region */
-        errorno = memset_s(&map->bitmap[oldsize], newsize - oldsize, 0, newsize - oldsize);
+        errorno = memset_s(&map->bitmap[oldsize], newsize, 0, newsize - oldsize);
         securec_check_c(errorno, "\0", "\0");
         map->bitmapsize = newsize;
     }
@@ -125,4 +125,3 @@ void datapagemap_print(datapagemap_t* map)
 
     pg_free(iter);
 }
-

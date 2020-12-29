@@ -3,7 +3,7 @@ set enable_vector_engine=on;
 select * from LINEITEM_partition where L_ORDERKEY = 1::int8;
 select L_ORDERKEY from LINEITEM_partition where L_ORDERKEY > 2000::int8 and L_ORDERKEY < 2017::int8;
 select L_ORDERKEY from LINEITEM_partition where L_ORDERKEY = 8001::int8;
-explain (verbose on, costs off, nodes off) select L_ORDERKEY from LINEITEM_partition where L_ORDERKEY > 8000::int8 ;
+explain (verbose on, costs off) select L_ORDERKEY from LINEITEM_partition where L_ORDERKEY > 8000::int8 ;
 
 reset enable_vector_engine;
 
@@ -33,6 +33,6 @@ insert into test_vec_sortinfo_row values('a',1,2);
 insert into test_vec_sortinfo_row values('a',1,2);
 insert into test_vec_sortinfo select * from test_vec_sortinfo_row;
 
-explain (verbose, costs off, nodes off) select distinct b2 from test_vec_sortinfo order by 1;
+explain (verbose, costs off) select distinct b2 from test_vec_sortinfo order by 1;
 
 drop table test_vec_sortinfo;

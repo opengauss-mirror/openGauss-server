@@ -46,7 +46,7 @@ select count(*) from test_tablesample_row tablesample bernoulli (100);
 select count(*) from test_tablesample_row tablesample bernoulli (100) repeatable (0);
 select count(*) from test_tablesample_row tablesample bernoulli (100) repeatable (2.3);
 select count(*) from test_tablesample_row tablesample hybrid (50, 50) repeatable (5);
-explain (verbose on, costs off, nodes off) 
+explain (verbose on, costs off) 
   select id from test_tablesample_row tablesample system (50) repeatable (2);
 
 
@@ -63,7 +63,7 @@ select count(*) from test_tablesample_row_rep tablesample bernoulli (100);
 select count(*) from test_tablesample_row_rep tablesample bernoulli (100) repeatable (0);
 select count(*) from test_tablesample_row_rep tablesample bernoulli (100) repeatable (2.3);
 select count(*) from test_tablesample_row_rep tablesample hybrid (100, 50) repeatable (5);
-explain (verbose on, costs off, nodes off) 
+explain (verbose on, costs off) 
   select id from test_tablesample_row_rep tablesample bernoulli (50) repeatable (2);
 
 
@@ -80,7 +80,7 @@ select count(*) from test_tablesample_row_part tablesample bernoulli (100);
 select count(*) from test_tablesample_row_part tablesample bernoulli (100) repeatable (0);
 select count(*) from test_tablesample_row_part tablesample bernoulli (100) repeatable (2.3);
 select count(*) from test_tablesample_row_part tablesample hybrid (100, 100) repeatable (5);
-explain (verbose on, costs off, nodes off) 
+explain (verbose on, costs off) 
   select id from test_tablesample_row_part tablesample hybrid (100, 100) repeatable (5) where id > 300;
 
 -- create view for tablesample

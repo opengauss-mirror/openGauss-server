@@ -28,7 +28,7 @@ gs_rewind -D $data_dir/datanode1_standby  -P
 #run real gs_rewind 
 #gs_rewind -D $data_dir/datanode1_standby --source-server='hostaddr=127.0.0.1 port='$dn1_primary_port' dbname=postgres application_name=gs_rewind user='$username'' -P
 
-gs_ctl build -D $data_dir/datanode1_standby
+gs_ctl build -D $data_dir/datanode1_standby -Z single_node -b incremental
 #check if rewind is ok.
 start_standby
 }

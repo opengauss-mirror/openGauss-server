@@ -15,8 +15,9 @@
 #define TUPTABLE_H
 
 #include "access/htup.h"
-#include "storage/buf.h"
+#include "storage/buf/buf.h"
 
+#ifndef FRONTEND_PARSER
 /* ----------
  * The executor stores tuples in a "tuple table" which is a List of
  * independent TupleTableSlots.  There are several cases we need to handle:
@@ -115,7 +116,9 @@ typedef struct TupleTableSlot {
     bool tts_shouldFree;    /* should pfree tts_tuple? */
     bool tts_shouldFreeMin; /* should pfree tts_mintuple? */
     bool tts_slow;          /* saved state for slot_deform_tuple */
-    HeapTuple tts_tuple;    /* physical tuple, or NULL if virtual */
+
+    Tuple tts_tuple;    /* physical tuple, or NULL if virtual */
+
 #ifdef PGXC
     /*
      * PGXC extension to support tuples sent from remote Datanode.
@@ -137,6 +140,7 @@ typedef struct TupleTableSlot {
     HeapTupleData tts_minhdr;      /* workspace for minimal-tuple-only case */
     long tts_off;                  /* saved state for slot_deform_tuple */
     long tts_meta_off;             /* saved state for slot_deform_cmpr_tuple */
+    TableAmType tts_tupslotTableAm;    /* slots's tuple table type */
 } TupleTableSlot;
 
 #define TTS_HAS_PHYSICAL_TUPLE(slot) ((slot)->tts_tuple != NULL && (slot)->tts_tuple != &((slot)->tts_minhdr))
@@ -147,13 +151,13 @@ typedef struct TupleTableSlot {
 #define TupIsNull(slot) ((slot) == NULL || (slot)->tts_isempty)
 
 /* in executor/execTuples.c */
-extern TupleTableSlot* MakeTupleTableSlot(bool has_tuple_mcxt = true);
-extern TupleTableSlot* ExecAllocTableSlot(List** tupleTable);
+extern TupleTableSlot* MakeTupleTableSlot(bool has_tuple_mcxt = true, TableAmType tupslotTableAm = TAM_HEAP);
+extern TupleTableSlot* ExecAllocTableSlot(List** tupleTable, TableAmType tupslotTableAm = TAM_HEAP);
 extern void ExecResetTupleTable(List* tupleTable, bool shouldFree);
-extern TupleTableSlot* MakeSingleTupleTableSlot(TupleDesc tupdesc);
+extern TupleTableSlot* MakeSingleTupleTableSlot(TupleDesc tupdesc, bool allocSlotCxt = false, TableAmType tupslotTableAm = TAM_HEAP);
 extern void ExecDropSingleTupleTableSlot(TupleTableSlot* slot);
 extern void ExecSetSlotDescriptor(TupleTableSlot* slot, TupleDesc tupdesc);
-extern TupleTableSlot* ExecStoreTuple(HeapTuple tuple, TupleTableSlot* slot, Buffer buffer, bool shouldFree);
+extern TupleTableSlot* ExecStoreTuple(Tuple tuple, TupleTableSlot* slot, Buffer buffer, bool shouldFree);
 extern TupleTableSlot* ExecStoreMinimalTuple(MinimalTuple mtup, TupleTableSlot* slot, bool shouldFree);
 #ifdef PGXC
 extern TupleTableSlot* ExecStoreDataRowTuple(
@@ -163,17 +167,27 @@ extern TupleTableSlot* ExecClearTuple(TupleTableSlot* slot);
 extern TupleTableSlot* ExecStoreVirtualTuple(TupleTableSlot* slot);
 extern TupleTableSlot* ExecStoreAllNullTuple(TupleTableSlot* slot);
 extern HeapTuple ExecCopySlotTuple(TupleTableSlot* slot);
-extern MinimalTuple ExecCopySlotMinimalTuple(TupleTableSlot* slot);
+extern MinimalTuple ExecCopySlotMinimalTuple(TupleTableSlot* slot, bool need_transform_anyarray = false);
 extern HeapTuple ExecFetchSlotTuple(TupleTableSlot* slot);
 extern MinimalTuple ExecFetchSlotMinimalTuple(TupleTableSlot* slot);
 extern Datum ExecFetchSlotTupleDatum(TupleTableSlot* slot);
 extern HeapTuple ExecMaterializeSlot(TupleTableSlot* slot);
 extern TupleTableSlot* ExecCopySlot(TupleTableSlot* dstslot, TupleTableSlot* srcslot);
 
-/* in access/common/heaptuple.c */
-extern Datum slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull);
-extern void slot_getallattrs(TupleTableSlot* slot);
-extern void slot_getsomeattrs(TupleTableSlot* slot, int attnum);
-extern bool slot_attisnull(TupleTableSlot* slot, int attnum);
+/* heap table specific slot/tuple operations*/
+/* definitions are found in access/common/heaptuple.c */
+extern void heap_slot_clear(TupleTableSlot* slot);
+extern void heap_slot_materialize(TupleTableSlot* slot);
+extern MinimalTuple heap_slot_get_minimal_tuple(TupleTableSlot *slot);
+extern MinimalTuple heap_slot_copy_minimal_tuple(TupleTableSlot *slot);
+extern void heap_slot_store_minimal_tuple(MinimalTuple mtup, TupleTableSlot *slot, bool shouldFree);
+extern HeapTuple heap_slot_get_heap_tuple (TupleTableSlot* slot);
+extern HeapTuple heap_slot_copy_heap_tuple (TupleTableSlot *slot);
+extern void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer buffer, bool should_free);
+extern Datum heap_slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull, bool need_transform_anyarray = false);
+extern void heap_slot_getallattrs(TupleTableSlot* slot, bool need_transform_anyarray = false);
+extern void heap_slot_getsomeattrs(TupleTableSlot* slot, int attnum);
+extern bool heap_slot_attisnull(TupleTableSlot* slot, int attnum);
 
+#endif /* !FRONTEND_PARSER */
 #endif /* TUPTABLE_H */

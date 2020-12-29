@@ -1,0 +1,226 @@
+CREATE SCHEMA with_hold_cursor_1;
+SET current_schema=with_hold_cursor_1; 
+CREATE TABLE catalog_page
+(
+    cp_catalog_page_sk        integer               not null,
+    cp_catalog_page_id        char(16)              not null,
+    cp_start_date_sk          integer                       ,
+    cp_end_date_sk            integer                       ,
+    cp_department             varchar(50)                   ,
+    cp_catalog_number         integer                       ,
+    cp_catalog_page_number    integer                       ,
+    cp_description            varchar(100)                  ,
+    cp_type                   varchar(100)                 
+) 
+DISTRIBUTE BY HASH (cp_catalog_page_sk,cp_department);
+COPY catalog_page FROM '@abs_srcdir@/data/catalog_page.txt' DELIMITER as ',' NULL as '' ;
+CREATE TABLE promotion
+(
+    p_promo_sk                integer               not null,
+    p_promo_id                char(16)              not null,
+    p_start_date_sk           integer                       ,
+    p_end_date_sk             integer                       ,
+    p_item_sk                 integer                       ,
+    p_cost                    decimal(15,2)                 ,
+    p_response_target         integer                       ,
+    p_promo_name              char(50)                      ,
+    p_channel_dmail           char(1)                       ,
+    p_channel_email           char(1)                       ,
+    p_channel_catalog         char(1)                       ,
+    p_channel_tv              char(1)                       ,
+    p_channel_radio           char(1)                       ,
+    p_channel_press           char(1)                       ,
+    p_channel_event           char(1)                       ,
+    p_channel_demo            char(1)                       ,
+    p_channel_details         varchar(100)                  ,
+    p_purpose                 char(15)                      ,
+    p_discount_active         char(1)                       
+) 
+DISTRIBUTE BY REPLICATION;
+COPY promotion FROM '@abs_srcdir@/data/promotion.txt' DELIMITER as ',' NULL as '' ;
+ 
+ANALYZE catalog_page;
+ANALYZE promotion;
+START TRANSACTION;
+DECLARE declare_cur_b_ns_wh_015 CURSOR WITH HOLD FOR SELECT cp_end_date_sk FROM catalog_page ORDER BY 1;
+DECLARE declare_cur_b_ns_wh_016 CURSOR WITH HOLD FOR SELECT cp_end_date_sk FROM catalog_page ORDER BY 1;
+DECLARE declare_cur_b_ns_wh_061 CURSOR WITH HOLD FOR SELECT p_promo_sk, p_promo_id, p_cost FROM promotion ORDER BY 1,2,3;
+FETCH NEXT FROM declare_cur_b_ns_wh_015;
+ cp_end_date_sk 
+----------------
+        2450844
+(1 row)
+
+FETCH NEXT FROM declare_cur_b_ns_wh_016;
+ cp_end_date_sk 
+----------------
+        2450844
+(1 row)
+
+FETCH NEXT FROM declare_cur_b_ns_wh_061;
+ p_promo_sk |    p_promo_id    | p_cost  
+------------+------------------+---------
+          1 | AAAAAAAABAAAAAAA | 1000.00
+(1 row)
+
+COMMIT;
+MOVE 1 IN declare_cur_b_ns_wh_015;
+MOVE 1 IN declare_cur_b_ns_wh_016;
+MOVE 1 IN declare_cur_b_ns_wh_061;
+FETCH 3 FROM declare_cur_b_ns_wh_015;
+ cp_end_date_sk 
+----------------
+        2450844
+        2450844
+        2450844
+(3 rows)
+
+FETCH 3 FROM declare_cur_b_ns_wh_016;
+ cp_end_date_sk 
+----------------
+        2450844
+        2450844
+        2450844
+(3 rows)
+
+FETCH 3 FROM declare_cur_b_ns_wh_061;
+ p_promo_sk |    p_promo_id    | p_cost  
+------------+------------------+---------
+          3 | AAAAAAAADAAAAAAA | 1000.00
+          4 | AAAAAAAAEAAAAAAA | 1000.00
+          5 | AAAAAAAAFAAAAAAA | 1000.00
+(3 rows)
+
+CLOSE declare_cur_b_ns_wh_015;
+CLOSE declare_cur_b_ns_wh_016;
+CLOSE declare_cur_b_ns_wh_061;
+START TRANSACTION;
+DECLARE declare_cur_b_ns_wh_007 CURSOR WITH HOLD FOR SELECT cp_end_date_sk FROM catalog_page ORDER BY 1 LIMIT 200;
+DECLARE declare_cur_b_ns_wh_061 CURSOR WITH HOLD FOR SELECT p_promo_sk, p_promo_id, p_cost FROM promotion ORDER BY 1,2,3;
+FETCH NEXT FROM declare_cur_b_ns_wh_007;
+ cp_end_date_sk 
+----------------
+        2450844
+(1 row)
+
+FETCH NEXT FROM declare_cur_b_ns_wh_061;
+ p_promo_sk |    p_promo_id    | p_cost  
+------------+------------------+---------
+          1 | AAAAAAAABAAAAAAA | 1000.00
+(1 row)
+
+COMMIT;
+MOVE 1 IN declare_cur_b_ns_wh_007;
+MOVE 1 IN declare_cur_b_ns_wh_061;
+FETCH 3 FROM declare_cur_b_ns_wh_007;
+ cp_end_date_sk 
+----------------
+        2450844
+        2450844
+        2450844
+(3 rows)
+
+FETCH 3 FROM declare_cur_b_ns_wh_061;
+ p_promo_sk |    p_promo_id    | p_cost  
+------------+------------------+---------
+          3 | AAAAAAAADAAAAAAA | 1000.00
+          4 | AAAAAAAAEAAAAAAA | 1000.00
+          5 | AAAAAAAAFAAAAAAA | 1000.00
+(3 rows)
+
+CLOSE declare_cur_b_ns_wh_007;
+CLOSE declare_cur_b_ns_wh_061;
+--test bufferconnection and mergesort
+create table hdfs_pro_cursor_002_tmp
+(
+i_item_sk integer not null,
+i_item_a char(16) not null,
+i_rec_start_date date ,
+i_rec_end_date date ,
+i_item_desc varchar(200) ,
+i_current_price decimal(7,2) ,
+i_wholesale_cost decimal(7,2) ,
+i_brand_a integer ,
+i_brand char(50) ,
+i_class_a integer ,
+i_class char(50) ,
+i_category_a integer ,
+i_category char(50) ,
+i_manufact_a integer ,
+i_manufact char(50) ,
+i_size char(20) ,
+i_formulation char(20) ,
+i_color char(20) ,
+i_units char(10) ,
+i_container char(10) ,
+i_manager_a integer ,
+i_product_b char(50)
+)with(orientation='column')
+distribute by hash (i_rec_end_date,i_brand);
+copy hdfs_pro_cursor_002_tmp from '@abs_srcdir@/data/item2.data' DELIMITER as ',' NULL as '' ;
+create node  group gp_9 with (datanode9);
+set default_storage_nodegroup = gp_9;
+create table hdfs_pro_cursor_002_1 (like hdfs_pro_cursor_002_tmp);
+reset default_storage_nodegroup;
+create or replace function hdfs_fun_ref_cur_001_tmp()returns nvarchar2
+as $$
+declare
+v_item_sk  integer;
+v_item_a  char(16);
+v_rec_start_date  date ;
+v_rec_end_date  date ;
+v_item_desc  varchar(200) ;
+v_current_price  decimal(7,2) ;
+v_wholesale_cost  decimal(7,2) ;
+v_brand_a  integer ;
+v_brand  char(50) ;
+v_class_a  integer ;
+v_class  char(50) ;
+v_category_a  integer ;
+v_category  char(50) ;
+v_manufact_a  integer ;
+v_manufact  char(50) ;
+v_size  char(20) ;
+v_formulation  char(20) ;
+v_color  char(20) ;
+v_units  char(10) ;
+v_container  char(10);
+v_manager_a  integer;
+v_product_b  char(50);
+type cursor_type is ref cursor;
+cursor_1 cursor_type;
+sql_str text;
+begin
+sql_str :='select i_item_sk,i_item_a,i_rec_start_date,i_rec_end_date,i_item_desc,i_current_price,i_wholesale_cost,i_brand_a,i_brand,i_class_a ,i_class,i_category_a,i_category,i_manufact_a,
+i_manufact,i_size,i_formulation,i_color,i_units,i_container,i_manager_a,i_product_b from hdfs_pro_cursor_002_tmp order by 1;';
+open cursor_1 for sql_str;
+loop
+fetch cursor_1 into v_item_sk,v_item_a,v_rec_start_date,v_rec_end_date,v_item_desc,v_current_price,v_wholesale_cost,v_brand_a,v_brand,v_class_a,v_class,v_category_a,v_category,v_manufact_a,
+v_manufact,v_size,v_formulation,v_color,v_units,v_container,v_manager_a,v_product_b;
+if (cursor_1%found) then
+insert into hdfs_pro_cursor_002_1 values(v_item_sk,v_item_a,v_rec_start_date,v_rec_end_date,v_item_desc,v_current_price,v_wholesale_cost,v_brand_a,v_brand,v_class_a,v_class,v_category_a,v_category,v_manufact_a,v_manufact,v_size,v_formulation,v_color,v_units,v_container,v_manager_a,v_product_b);
+end if;
+exit when cursor_1%notfound;
+end loop;
+close cursor_1;
+return 'ref cursor';
+end;$$
+language 'plpgsql';
+--I3.call func
+call hdfs_fun_ref_cur_001_tmp();
+1000
+ hdfs_fun_ref_cur_001_tmp 
+--------------------------
+ ref cursor
+(1 row)
+
+select count(*) from hdfs_pro_cursor_002_1;
+ count 
+-------
+  1000
+(1 row)
+
+drop table hdfs_pro_cursor_002_tmp;
+drop table hdfs_pro_cursor_002_1;
+drop node group gp_9;
+drop function hdfs_fun_ref_cur_001_tmp;

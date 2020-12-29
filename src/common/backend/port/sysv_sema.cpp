@@ -16,7 +16,6 @@
 #include "knl/knl_variable.h"
 
 #include <signal.h>
-#include <unistd.h>
 #include <sys/file.h>
 #ifdef HAVE_SYS_IPC_H
 #include <sys/ipc.h>
@@ -27,7 +26,7 @@
 
 #include "miscadmin.h"
 #include "storage/ipc.h"
-#include "storage/pg_sema.h"
+#include "storage/lock/pg_sema.h"
 #include "gssignal/gs_signal.h"
 #include "tsan_annotation.h"
 
@@ -280,7 +279,8 @@ void PGReserveSemaphores(int maxSemas, int port)
 #ifdef FRONTEND
     mySemaSets = (IpcSemaphoreId*)malloc(maxSemaSets * sizeof(IpcSemaphoreId));
 #else
-    mySemaSets = (IpcSemaphoreId*)MemoryContextAlloc(u_sess->top_mem_cxt, maxSemaSets * sizeof(IpcSemaphoreId));
+    mySemaSets = (IpcSemaphoreId*)MemoryContextAlloc(
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), maxSemaSets * sizeof(IpcSemaphoreId));
 #endif
     if (mySemaSets == NULL) {
         ereport(PANIC, (errmsg("out of memory")));

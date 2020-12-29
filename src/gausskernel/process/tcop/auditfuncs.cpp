@@ -57,6 +57,7 @@ static void pgaudit_ddl_tablespace(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_trigger(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_user(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_view(const char* objectname, const char* cmdtext);
+static void pgaudit_ddl_matview(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_function(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_resourcepool(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_workload(const char* objectname, const char* cmdtext);
@@ -68,7 +69,8 @@ static void pgaudit_process_reindex(Node* node, const char* querystring);
 static void pgaudit_process_rename_object(Node* node, const char* querystring);
 static void pgaudit_process_grant_or_revoke_roles(List* grantee_name_list, bool isgrant, const char* querystring);
 static void pgaudit_delete_files(const char* objectname, const char* cmdtext);
-
+static void pgaudit_ddl_weak_password(const char* cmdtext);
+static void pgaudit_ddl_full_encryption_key(const char* cmdtext);
 /*
  * Brief		    : perfstat_agent_init()
  * Description	: Module load callback.
@@ -192,6 +194,7 @@ void pgaudit_user_logout()
  */
 void pgaudit_system_stop_ok(int shutdown)
 {
+
     AuditType audit_type;
     AuditResult audit_result;
     const char* shutdowmothods[] = {"smart", "fast", "immediate"};
@@ -304,6 +307,8 @@ static void pgaudit_ddl_database_object(
         case AUDIT_DDL_SYNONYM:
         case AUDIT_DDL_TYPE:
         case AUDIT_DDL_TEXTSEARCH:
+        case AUDIT_DDL_SEQUENCE:
+        case AUDIT_DDL_KEY:
             pgaudit_store_auditstat(audit_type, audit_result, objectname, mask_string);
             break;
         default:
@@ -433,6 +438,24 @@ static void pgaudit_ddl_user(const char* objectname, const char* cmdtext)
  * Description	: Audit the operations of view
  */
 static void pgaudit_ddl_view(const char* objectname, const char* cmdtext)
+{
+    AuditType audit_type = AUDIT_DDL_VIEW;
+    AuditResult audit_result = AUDIT_OK;
+
+    Assert(cmdtext != NULL);
+    if (!CHECK_AUDIT_DDL(DDL_VIEW)) {
+        return;
+    }
+
+    pgaudit_ddl_database_object(audit_type, audit_result, objectname, cmdtext);
+    return;
+}
+
+/*
+ * Brief		    : pgaudit_ddl_matview(char* objectname, const char* cmdtext)
+ * Description	: Audit the operations of matview
+ */
+static void pgaudit_ddl_matview(const char* objectname, const char* cmdtext)
 {
     AuditType audit_type = AUDIT_DDL_VIEW;
     AuditResult audit_result = AUDIT_OK;
@@ -581,6 +604,24 @@ static void pgaudit_ddl_trigger(const char* objectname, const char* cmdtext)
 }
 
 /*
+ * Brief		    : pgaudit_ddl_sequence(const char* objectname, const char* cmdtext)
+ * Description	: Audit the operations of sequence
+ */
+static void pgaudit_ddl_sequence(const char* objectname, const char* cmdtext)
+{
+    AuditType audit_type = AUDIT_DDL_SEQUENCE;
+    AuditResult audit_result = AUDIT_OK;
+
+    Assert(cmdtext != NULL);
+    if (!CHECK_AUDIT_DDL(DDL_SEQUENCE)) {
+        return;
+    }
+
+    pgaudit_ddl_database_object(audit_type, audit_result, objectname, cmdtext);
+    return;
+}
+
+/*
  * Brief		    : pgaudit_ddl_function(const char* objectname, const char* cmdtext)
  * Description	: Audit the operations of function
  */
@@ -649,6 +690,45 @@ static void pgaudit_ddl_serverforhardoop(const char* objectname, const char* cmd
     }
 
     pgaudit_ddl_database_object(audit_type, audit_result, objectname, cmdtext);
+    return;
+}
+
+/*
+ * pgaudit_ddl_weak_password:
+ *             AUDIT FOR WEAK PASSWORD DICTIONARY
+ * 	
+ * @RETURN: void
+ */
+static void pgaudit_ddl_weak_password(const char* cmdtext)
+{
+    AuditType audit_type = AUDIT_DDL_TABLE;
+    AuditResult audit_result = AUDIT_OK;
+
+    Assert(cmdtext != NULL);
+    if (!CHECK_AUDIT_DDL(DDL_TABLE)) {
+        return;
+    }
+
+    pgaudit_ddl_database_object(audit_type, audit_result, "weak_password", cmdtext);
+    return;
+}
+/*
+ * pgaudit_ddl_full_encryption_key:
+ *             AUDIT FOR security client key create
+ * 	
+ * @RETURN: void
+ */
+static void pgaudit_ddl_full_encryption_key(const char* cmdtext)
+{
+    AuditType audit_type = AUDIT_DDL_KEY;
+    AuditResult audit_result = AUDIT_OK;
+
+    Assert(cmdtext != NULL);
+    if (!CHECK_AUDIT_DDL(DDL_KEY)) {
+        return;
+    }
+
+    pgaudit_ddl_database_object(audit_type, audit_result, "full_encryption_key", cmdtext);
     return;
 }
 
@@ -802,15 +882,22 @@ static void pgaudit_process_drop_objects(Node* node, const char* querystring)
 
         switch (stmt->removeType) {
             case OBJECT_TABLE:
+            case OBJECT_STREAM:
             case OBJECT_FOREIGN_TABLE: {
                 rel = makeRangeVarFromNameList(names);
                 objectname = rel->relname;
                 pgaudit_ddl_table(objectname, querystring);
             } break;
+            case OBJECT_CONTQUERY:
             case OBJECT_VIEW: {
                 rel = makeRangeVarFromNameList(names);
                 objectname = rel->relname;
                 pgaudit_ddl_view(objectname, querystring);
+            } break;
+            case OBJECT_MATVIEW: {
+                rel = makeRangeVarFromNameList(names);
+                objectname = rel->relname;
+                pgaudit_ddl_matview(objectname, querystring);
             } break;
             case OBJECT_INDEX: {
                 rel = makeRangeVarFromNameList(names);
@@ -850,6 +937,14 @@ static void pgaudit_process_drop_objects(Node* node, const char* querystring)
                 objectname = NameListToString(names);
                 pgaudit_ddl_textsearch(objectname, querystring);
             } break;
+            case OBJECT_SEQUENCE: {
+                objectname = strVal(lfirst(list_tail(names)));
+                pgaudit_ddl_sequence(objectname, querystring);
+            } break;
+            case OBJECT_GLOBAL_SETTING:
+            case OBJECT_COLUMN_SETTING: {
+                pgaudit_ddl_full_encryption_key(querystring);
+            } break;
             default:
                 break;
         }
@@ -869,6 +964,7 @@ static void pgaudit_audit_object(const char* objname, int ObjectType, const char
             break;
         case OBJECT_TABLE:
         case OBJECT_FOREIGN_TABLE: /* Execute ALTER FOREIGN TABLE RENAME */
+        case OBJECT_STREAM:
         case OBJECT_INTERNAL:
             pgaudit_ddl_table(objname, cmdtext);
             break;
@@ -882,8 +978,12 @@ static void pgaudit_audit_object(const char* objname, int ObjectType, const char
         case OBJECT_TRIGGER:
             pgaudit_ddl_trigger(objname, cmdtext);
             break;
+        case OBJECT_CONTQUERY:
         case OBJECT_VIEW:
             pgaudit_ddl_view(objname, cmdtext);
+            break;
+        case OBJECT_MATVIEW:
+            pgaudit_ddl_matview(objname, cmdtext);
             break;
         case OBJECT_INDEX:
             pgaudit_ddl_index(objname, cmdtext);
@@ -1010,9 +1110,12 @@ static void pgaudit_process_rename_object(Node* node, const char* querystring)
             objectname = NameListToString(stmt->object);
             break;
         case OBJECT_TABLE:
+        case OBJECT_CONTQUERY:
         case OBJECT_VIEW:
+        case OBJECT_MATVIEW:
         case OBJECT_INDEX:
         case OBJECT_FOREIGN_TABLE:
+        case OBJECT_STREAM:
             objectname = stmt->relation->relname;
             break;
         default:
@@ -1033,6 +1136,8 @@ static void pgaudit_process_alter_object(Node* node, const char* querystring)
     switch (alterstmt->objectType) {
         case OBJECT_TABLE:
         case OBJECT_FOREIGN_TABLE:
+        case OBJECT_STREAM:
+        case OBJECT_CONTQUERY:
         case OBJECT_VIEW:
             objectname = alterstmt->relation->relname;
             break;
@@ -1107,7 +1212,11 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
         } break;
         case T_AlterTableStmt: {
             AlterTableStmt* altertablestmt = (AlterTableStmt*)(parsetree); /* Audit alter table */
-            pgaudit_ddl_table(altertablestmt->relation->relname, queryString);
+            if (altertablestmt->relkind == OBJECT_SEQUENCE) {
+                pgaudit_ddl_sequence(altertablestmt->relation->relname, queryString);
+            } else {
+                pgaudit_ddl_table(altertablestmt->relation->relname, queryString);
+            }
         } break;
         case T_CreateTableAsStmt: {
             CreateTableAsStmt* createtablestmt = (CreateTableAsStmt*)(parsetree);
@@ -1314,10 +1423,12 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
             VariableSetStmt* variablesetstmt = (VariableSetStmt*)(parsetree);
             pgaudit_process_set_parameter(variablesetstmt->name, queryString);
         } break;
+#ifndef ENABLE_MULTIPLE_NODES
         case T_AlterSystemStmt: {
             AlterSystemStmt* altersystemstmt = (AlterSystemStmt*)(parsetree);
             pgaudit_process_set_parameter(altersystemstmt->setstmt->name, queryString);
         } break;
+#endif
         case T_CreateDataSourceStmt: {
             CreateDataSourceStmt* createdatasourcestmt = (CreateDataSourceStmt*)(parsetree);
             pgaudit_ddl_datasource(createdatasourcestmt->srcname, queryString);
@@ -1395,6 +1506,24 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
             object_name_pointer = NameListToString(stmt->cfgname);
             pgaudit_ddl_textsearch(object_name_pointer, queryString);
         } break;
+        case T_CreateSeqStmt: {
+            CreateSeqStmt* stmt = (CreateSeqStmt*)parsetree;
+            pgaudit_ddl_sequence(stmt->sequence->relname, queryString);
+        } break;
+        case T_AlterSeqStmt: {
+            AlterSeqStmt* stmt = (AlterSeqStmt*)parsetree;
+            pgaudit_ddl_sequence(stmt->sequence->relname, queryString);
+        } break;
+        case T_CreateWeakPasswordDictionaryStmt: {
+            pgaudit_ddl_weak_password(queryString);
+        } break;               
+        case T_DropWeakPasswordDictionaryStmt: {
+            pgaudit_ddl_weak_password(queryString);
+        } break;       
+        case T_CreateClientLogicGlobal:
+        case T_CreateClientLogicColumn: {
+            pgaudit_ddl_full_encryption_key(queryString);
+        } break;
         default:
             break;
     }
@@ -1423,8 +1552,11 @@ char* pgaudit_get_relation_name(List* relation_name_list)
 
     foreach (lc, relation_name_list) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
-        object_name = rte->relname ? rte->relname : rte->eref->aliasname;
-        if (object_name != NULL) {
+        if (rte->relname != NULL) {
+            object_name = rte->relname;
+            break;
+        } else if (rte->eref != NULL && rte->eref->aliasname != NULL) {
+            object_name = rte->eref->aliasname;
             break;
         }
     }

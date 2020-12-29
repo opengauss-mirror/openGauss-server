@@ -11,7 +11,7 @@ CREATE TABLE colcmpr_time_with_timezone
 	e time with time zone,
 	f time with time zone
 ) with (orientation = column)  ;
-COPY colcmpr_time_with_timezone FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_timestamp_with_timezone.data' delimiter ',';
+COPY colcmpr_time_with_timezone FROM '@abs_srcdir@/data/colcmpr_timestamp_with_timezone.data' delimiter ',';
 SET DATESTYLE='SQL, DMY';
 SELECT * FROM colcmpr_time_with_timezone;
 DROP TABLE colcmpr_time_with_timezone;

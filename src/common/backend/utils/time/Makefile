@@ -19,6 +19,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = combocid.o tqual.o snapmgr.o
+OBJS = combocid.o snapmgr.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

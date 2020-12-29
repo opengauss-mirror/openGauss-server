@@ -1,0 +1,405 @@
+set enable_opfusion = on;
+SELECT DISTINCT typtype, typinput
+FROM pg_type AS p1
+WHERE p1.typtype not in ('b', 'p')
+ORDER BY 1;
+ typtype | typinput  
+---------+-----------
+ c       | record_in
+ d       | domain_in
+ r       | range_in
+(3 rows)
+
+SET enforce_two_phase_commit TO off;
+--test COMMENT ON view's column
+create table ExecStoreTuple_normal_view_column_t(id1 int,id2 int);
+create or replace view ExecStoreTuple_normal_view_column_v as select * from ExecStoreTuple_normal_view_column_t;
+create temp table ExecStoreTuple_commentl_view_column_t(id1 int,id2 int);
+create or replace temp view ExecStoreTuple_commentl_view_column_v as select * from ExecStoreTuple_commentl_view_column_t;
+comment on column ExecStoreTuple_normal_view_column_t.id1 is 'this is normal table';
+comment on column ExecStoreTuple_normal_view_column_v.id1 is 'this is normal view';
+comment on column ExecStoreTuple_commentl_view_column_t.id1 is 'this is temp table';
+comment on column ExecStoreTuple_commentl_view_column_v.id1 is 'this is temp view';
+\d+ ExecStoreTuple_normal_view_column_t
+              Table "public.execstoretuple_normal_view_column_t"
+ Column |  Type   | Modifiers | Storage | Stats target |     Description      
+--------+---------+-----------+---------+--------------+----------------------
+ id1    | integer |           | plain   |              | this is normal table
+ id2    | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ ExecStoreTuple_normal_view_column_v
+      View "public.execstoretuple_normal_view_column_v"
+ Column |  Type   | Modifiers | Storage |     Description     
+--------+---------+-----------+---------+---------------------
+ id1    | integer |           | plain   | this is normal view
+ id2    | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM execstoretuple_normal_view_column_t;
+
+drop view ExecStoreTuple_normal_view_column_v cascade;
+drop table ExecStoreTuple_normal_view_column_t cascade;
+drop view ExecStoreTuple_commentl_view_column_v cascade;
+drop table ExecStoreTuple_commentl_view_column_t cascade;
+-- Verify that clustering all tables does in fact cluster the right ones
+CREATE USER clstr_user PASSWORD 'gauss@123';
+CREATE TABLE ExecStoreTuple_1 (a INT PRIMARY KEY);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "execstoretuple_1_pkey" for table "execstoretuple_1"
+CREATE TABLE ExecStoreTuple_2 (a INT PRIMARY KEY);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "execstoretuple_2_pkey" for table "execstoretuple_2"
+CREATE TABLE ExecStoreTuple_3 (a INT PRIMARY KEY);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "execstoretuple_3_pkey" for table "execstoretuple_3"
+ALTER TABLE ExecStoreTuple_1 OWNER TO clstr_user;
+ALTER TABLE ExecStoreTuple_3 OWNER TO clstr_user;
+GRANT SELECT ON ExecStoreTuple_2 TO clstr_user;
+INSERT INTO ExecStoreTuple_1 VALUES (2);
+INSERT INTO ExecStoreTuple_1 VALUES (1);
+INSERT INTO ExecStoreTuple_2 VALUES (2);
+INSERT INTO ExecStoreTuple_2 VALUES (1);
+INSERT INTO ExecStoreTuple_3 VALUES (2);
+INSERT INTO ExecStoreTuple_3 VALUES (1);
+-- "CLUSTER <tablename>" on a table that hasn't been clustered
+CLUSTER ExecStoreTuple_1_pkey ON ExecStoreTuple_1;
+CLUSTER ExecStoreTuple_2 USING ExecStoreTuple_2_pkey;
+SELECT * FROM ExecStoreTuple_1 UNION ALL
+  SELECT * FROM ExecStoreTuple_2 UNION ALL
+  SELECT * FROM ExecStoreTuple_3
+  ORDER BY 1;
+ a 
+---
+ 1
+ 1
+ 1
+ 2
+ 2
+ 2
+(6 rows)
+
+drop table ExecStoreTuple_1;
+drop table ExecStoreTuple_2;
+drop table ExecStoreTuple_3;
+drop user clstr_user cascade;
+create table ExecStoreTuple_4(a int, b int);
+insert into ExecStoreTuple_4 select generate_series(1,5), generate_series(1,5);
+analyze ExecStoreTuple_4;
+with x as
+(select a, b from ExecStoreTuple_4)
+select 1 from ExecStoreTuple_4 s 
+where s.a not in 
+(select a from x)
+or exists
+(select 1 from x where x.a=s.a)
+or s.a >     
+(select avg(a) from x where x.b=s.b);
+ ?column? 
+----------
+        1
+        1
+        1
+        1
+        1
+(5 rows)
+
+drop table ExecStoreTuple_4 cascade;
+set enable_opfusion = off;
+create schema sche1_ExecStoreTuple;
+set current_schema = sche1_ExecStoreTuple;
+create table function_table_01(f1 int, f2 float, f3 text);
+insert into function_table_01 values(1,2.0,'abcde'),(2,4.0,'abcde'),(3,5.0,'affde');
+insert into function_table_01 values(4,7.0,'aeede'),(5,1.0,'facde'),(6,3.0,'affde');
+analyze function_table_01;
+CREATE OR REPLACE FUNCTION test_function_immutable RETURNS BIGINT AS
+$body$ 
+BEGIN
+RETURN 3;
+END;
+$body$
+LANGUAGE 'plpgsql'
+IMMUTABLE
+CALLED ON NULL INPUT
+SECURITY INVOKER
+COST 100;
+select f1,f3 from function_table_01 order by left(f3,test_function_immutable()::INT), f1 limit 3;
+ f1 |  f3   
+----+-------
+  1 | abcde
+  2 | abcde
+  4 | aeede
+(3 rows)
+
+-- test the table with the same name with a pg_catalog table 
+create schema sche2_ExecStoreTuple;
+create table sche2_ExecStoreTuple.pg_class(id int);
+set search_path=sche2_ExecStoreTuple;
+insert into pg_class values(1);
+ERROR:  null value in column "relnamespace" violates not-null constraint
+DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
+select * from sche2_ExecStoreTuple.pg_class;
+ id 
+----
+(0 rows)
+
+insert into sche2_ExecStoreTuple.pg_class values(1);
+select * from sche2_ExecStoreTuple.pg_class;
+ id 
+----
+  1
+(1 row)
+
+delete from sche2_ExecStoreTuple.pg_class;
+drop schema sche1_ExecStoreTuple cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table sche1_execstoretuple.function_table_01
+drop cascades to function sche1_execstoretuple.test_function_immutable()
+drop schema sche2_ExecStoreTuple cascade;
+NOTICE:  drop cascades to table sche2_execstoretuple.pg_class
+SET search_path TO DEFAULT ;
+CREATE TABLE ExecStoreTuple_5 (col1 int PRIMARY KEY, col2 INT, col3 smallserial)  ;
+NOTICE:  CREATE TABLE will create implicit sequence "execstoretuple_5_col3_seq" for serial column "execstoretuple_5.col3"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "execstoretuple_5_pkey" for table "execstoretuple_5"
+PREPARE p1 AS INSERT INTO ExecStoreTuple_5 VALUES($1, $2) ON DUPLICATE KEY UPDATE col2 = $1*100;
+EXECUTE p1(5, 50);
+SELECT * FROM ExecStoreTuple_5 WHERE col1 = 5;
+ col1 | col2 | col3 
+------+------+------
+    5 |   50 |    1
+(1 row)
+
+EXECUTE p1(5, 50);
+SELECT * FROM ExecStoreTuple_5 WHERE col1 = 5;
+ col1 | col2 | col3 
+------+------+------
+    5 |  500 |    1
+(1 row)
+
+DELETE ExecStoreTuple_5 WHERE col1 = 5;
+DEALLOCATE p1;
+DROP TABLE ExecStoreTuple_5 CASCADE;
+set enable_opfusion=on;
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+set opfusion_debug_mode = 'log';
+set log_min_messages=debug;
+set logging_module = 'on(OPFUSION)';
+create table ExecStoreTuple_6(col1 int, col2 int, col3 text);
+create index iExecStoreTuple_6 on ExecStoreTuple_6(col1,col2);
+-- bypass insert data
+explain insert into ExecStoreTuple_6 values (0,0,'test_insert');
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on execstoretuple_6  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+insert into ExecStoreTuple_6 values (0,0,'test_insert');
+explain insert into ExecStoreTuple_6 values (0,1,'test_insert');
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on execstoretuple_6  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+insert into ExecStoreTuple_6 values (0,1,'test_insert');
+explain insert into ExecStoreTuple_6 values (1,1,'test_insert');
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on execstoretuple_6  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+insert into ExecStoreTuple_6 values (1,1,'test_insert');
+explain insert into ExecStoreTuple_6 values (1,2,'test_insert');
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on execstoretuple_6  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+insert into ExecStoreTuple_6 values (1,2,'test_insert');
+explain insert into ExecStoreTuple_6 values (0,0,'test_insert2');
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on execstoretuple_6  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+insert into ExecStoreTuple_6 values (0,0,'test_insert2');
+explain insert into ExecStoreTuple_6 values (2,2,'test_insert2');
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on execstoretuple_6  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+insert into ExecStoreTuple_6 values (2,2,'test_insert2');
+explain insert into ExecStoreTuple_6 values (0,0,'test_insert3');
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on execstoretuple_6  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+insert into ExecStoreTuple_6 values (0,0,'test_insert3');
+explain insert into ExecStoreTuple_6 values (3,3,'test_insert3');
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on execstoretuple_6  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+insert into ExecStoreTuple_6 values (3,3,'test_insert3');
+explain insert into ExecStoreTuple_6(col1,col2) values (1,1);
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on execstoretuple_6  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+insert into ExecStoreTuple_6(col1,col2) values (1,1);
+explain insert into ExecStoreTuple_6(col1,col2) values (2,2);
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on execstoretuple_6  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+insert into ExecStoreTuple_6(col1,col2) values (2,2);
+explain insert into ExecStoreTuple_6(col1,col2) values (3,3);
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on execstoretuple_6  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+insert into ExecStoreTuple_6(col1,col2) values (3,3);
+explain insert into ExecStoreTuple_6 values (null,null,null);
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Insert on execstoretuple_6  (cost=0.00..0.01 rows=1 width=0)
+   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(3 rows)
+
+insert into ExecStoreTuple_6 values (null,null,null);
+set enable_indexonlyscan=off;
+explain select * from ExecStoreTuple_6 where col1=0 and col2=0;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ [Bypass]
+ Index Scan using iexecstoretuple_6 on execstoretuple_6  (cost=0.00..8.27 rows=1 width=40)
+   Index Cond: ((col1 = 0) AND (col2 = 0))
+(3 rows)
+
+select * from ExecStoreTuple_6 where col1=0 and col2=0;
+ col1 | col2 |     col3     
+------+------+--------------
+    0 |    0 | test_insert3
+    0 |    0 | test_insert2
+    0 |    0 | test_insert
+(3 rows)
+
+explain select col1,col2 from ExecStoreTuple_6 where col1>0 and col2>0 order by col1,col2;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ [Bypass]
+ Index Scan using iexecstoretuple_6 on execstoretuple_6  (cost=0.00..49.44 rows=130 width=8)
+   Index Cond: ((col1 > 0) AND (col2 > 0))
+(3 rows)
+
+select col1,col2 from ExecStoreTuple_6 where col1>0 and col2>0 order by col1,col2;
+ col1 | col2 
+------+------
+    1 |    1
+    1 |    1
+    1 |    2
+    2 |    2
+    2 |    2
+    3 |    3
+    3 |    3
+(7 rows)
+
+explain select col1,col2 from ExecStoreTuple_6 where col1>0 and col2>0 order by col1,col2 limit 1;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit  (cost=0.00..0.38 rows=1 width=8)
+   ->  Index Scan using iexecstoretuple_6 on execstoretuple_6  (cost=0.00..49.44 rows=130 width=8)
+         Index Cond: ((col1 > 0) AND (col2 > 0))
+(4 rows)
+
+select col1,col2 from ExecStoreTuple_6 where col1>0 and col2>0 order by col1,col2 limit 1;
+ col1 | col2 
+------+------
+    1 |    1
+(1 row)
+
+explain select col1,col2 from ExecStoreTuple_6 where col1=0 and col2=0 order by col1,col2 for update limit 1;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit  (cost=0.00..8.28 rows=1 width=14)
+   ->  LockRows  (cost=0.00..8.28 rows=1 width=14)
+         ->  Index Scan using iexecstoretuple_6 on execstoretuple_6  (cost=0.00..8.27 rows=1 width=14)
+               Index Cond: ((col1 = 0) AND (col2 = 0))
+(5 rows)
+
+select col1,col2 from ExecStoreTuple_6 where col1=0 and col2=0 order by col1,col2 for update limit 1;
+ col1 | col2 
+------+------
+    0 |    0
+(1 row)
+
+explain select col1,col2 from ExecStoreTuple_6 where col1=0 and col2=0 order by col1,col2 limit 0;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit  (cost=0.00..8.27 rows=1 width=8)
+   ->  Index Scan using iexecstoretuple_6 on execstoretuple_6  (cost=0.00..8.27 rows=1 width=8)
+         Index Cond: ((col1 = 0) AND (col2 = 0))
+(4 rows)
+
+select col1,col2 from ExecStoreTuple_6 where col1=0 and col2=0 order by col1,col2 limit 0;
+ col1 | col2 
+------+------
+(0 rows)
+
+explain select col1,col2 from ExecStoreTuple_6 where col1=0 and col2=0 order by col1,col2 for update limit 0;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit  (cost=0.00..8.28 rows=1 width=14)
+   ->  LockRows  (cost=0.00..8.28 rows=1 width=14)
+         ->  Index Scan using iexecstoretuple_6 on execstoretuple_6  (cost=0.00..8.27 rows=1 width=14)
+               Index Cond: ((col1 = 0) AND (col2 = 0))
+(5 rows)
+
+select col1,col2 from ExecStoreTuple_6 where col1=0 and col2=0 order by col1,col2 for update limit 0;
+ col1 | col2 
+------+------
+(0 rows)
+
+explain update  ExecStoreTuple_6 set col3='test_null' where col1 is null and col2 is null;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ [Bypass]
+ Update on execstoretuple_6  (cost=0.00..8.27 rows=1 width=14)
+   ->  Index Scan using iexecstoretuple_6 on execstoretuple_6  (cost=0.00..8.27 rows=1 width=14)
+         Index Cond: ((col1 IS NULL) AND (col2 IS NULL))
+(4 rows)
+
+update  ExecStoreTuple_6 set col3='test_null' where col1 is null and col2 is null;
+drop table ExecStoreTuple_6 cascade;
+reset enable_indexonlyscan;

@@ -385,7 +385,7 @@ select pg_get_functiondef(f.oid) from (select oid , pronargs from pg_proc where 
    t1 := 'abc1';                                                                                             +
    return t1;                                                                                                +
  END;                                                                                                        +
- $function$                                                                                                  +
+ $function$;                                                                                                 +
  ")
  (4,"CREATE OR REPLACE FUNCTION package_nps.read_file(arg1 integer, arg3 integer DEFAULT 1, OUT arg2 text)   +
   RETURNS text                                                                                               +
@@ -398,7 +398,7 @@ select pg_get_functiondef(f.oid) from (select oid , pronargs from pg_proc where 
    t1 := 'abc1';                                                                                             +
    return t1;                                                                                                +
  END;                                                                                                        +
- $function$                                                                                                  +
+ $function$;                                                                                                 +
  ")
 (2 rows)
 

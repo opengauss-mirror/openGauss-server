@@ -138,7 +138,7 @@ List* preprocess_targetlist(PlannerInfo* root, List* tlist)
             }
         }
 
-        if (!IS_STREAM_PLAN && !IS_SINGLE_NODE) {
+        if (!IS_PGXC_DATANODE && !IS_STREAM_PLAN && !IS_SINGLE_NODE) {
             /* add action's targetlist in the query targetlist */
             parse->targetList = expandActionTL(parse->targetList, parse);
         }
@@ -155,7 +155,7 @@ List* preprocess_targetlist(PlannerInfo* root, List* tlist)
         char resname[32]; /* 32 is the max length unique identifier for resjunk columns */
         TargetEntry* tle = NULL;
         RangeTblEntry* rte = NULL;
-        int ret;
+        int ret = 0;
 
         /* child rels use the same junk attrs as their parents */
         if (rc->rti != rc->prti)
@@ -198,7 +198,7 @@ List* preprocess_targetlist(PlannerInfo* root, List* tlist)
         } else {
             bool is_hdfs_ftbl = false;
             List* sub_tlist = NIL;
-            if (rte->relkind == RELKIND_FOREIGN_TABLE) {
+            if (rte->relkind == RELKIND_FOREIGN_TABLE || rte->relkind == RELKIND_STREAM) {
                 if (isObsOrHdfsTableFormTblOid(rte->relid) || IS_OBS_CSV_TXT_FOREIGN_TABLE(rte->relid)) {
                     is_hdfs_ftbl = true;
                 }
@@ -222,7 +222,7 @@ List* preprocess_targetlist(PlannerInfo* root, List* tlist)
                 tlist = lappend(tlist, tle);
             } else {
                 /* Convert wholerow(table.*) to table.col1, table.col2, ...., table.coln. */
-                int varattno;
+                int varattno = 0;
                 Relation rel = NULL;
                 int maxattrs;
                 TupleDesc tupdesc = NULL;
@@ -238,9 +238,9 @@ List* preprocess_targetlist(PlannerInfo* root, List* tlist)
                 }
 
                 for (varattno = 0; varattno < maxattrs; varattno++) {
-                    Oid vartype;
-                    int32 vartypmod;
-                    Oid varCollid;
+                    Oid vartype = InvalidOid;
+                    int32 vartypmod = -1;
+                    Oid varCollid = InvalidOid;
                     if (is_hdfs_ftbl) {
                         Form_pg_attribute attr = tupdesc->attrs[varattno];
                         vartype = attr->atttypid;
@@ -521,7 +521,7 @@ static List* add_distribute_column(List* tlist, Index result_relation, List* ran
         return tlist;
     }
 
-    int no;
+    int no = 0;
     int len = disattrno->dim1;
     bool* isExist = (bool*)palloc0(len * sizeof(bool));
 
@@ -555,7 +555,6 @@ static List* add_distribute_column(List* tlist, Index result_relation, List* ran
 
     return tlist;
 }
-
 List* preprocess_upsert_targetlist(List* tlist, int result_relation, List* range_table)
 {
     return expand_targetlist(tlist, CMD_UPDATE, result_relation, range_table);

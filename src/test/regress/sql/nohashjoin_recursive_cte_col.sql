@@ -1,7 +1,7 @@
 set current_schema=rq_cstore;
 set enable_hashjoin=off;
 /* 测试不下推场景下计划显示正确 */
-explain (costs false, nodes off) with recursive rq as
+explain (costs false) with recursive rq as
 (
   select id, name from  chinamap where id = 11
   union all
@@ -19,7 +19,7 @@ with recursive rq as
 select id, name from rq order by 1;
 
 set explain_perf_mode=pretty;
-explain (costs false, nodes off) with recursive rq as
+explain (costs false) with recursive rq as
 (
   select id, name from  chinamap where id = 11
   union all
@@ -37,7 +37,7 @@ with recursive rq as
 )
 select id, name from rq order by 1;
 
-explain (costs false, nodes off) 
+explain (costs false) 
 with recursive rq as
 (
   select id, name from  chinamap2 where id = 11
@@ -56,7 +56,7 @@ with recursive rq as
 )
 select id, name from rq order by 1;
 
-explain (costs false, nodes off) 
+explain (costs false) 
 with recursive rq as
 (
   select id, name from  chinamap join t1 on id = t1.c2 where id = 11
@@ -75,7 +75,7 @@ with recursive rq as
 )
 select id, name from rq order by 1;
 
-explain (costs false, nodes off) 
+explain (costs false) 
 with recursive cte as (  
 	select  ID,  PID,  NAME 
 	from a
@@ -98,7 +98,7 @@ with recursive cte as (
 )
 select * from cte order by ID;
 
-explain (costs false, nodes off) 
+explain (costs false) 
 with recursive cte as (  
 	select ID,PID,NAME
 	from a
@@ -121,7 +121,7 @@ with recursive cte as (
 )
 select * from cte order by ID;
 
-explain (costs false, nodes off) 
+explain (costs false) 
 with recursive cte as (  
 	select 
 		ID,
@@ -173,7 +173,7 @@ with recursive cte as (
 select * from cte order by ID;
 
 -----------
-explain (costs false, nodes off) 
+explain (costs false) 
 with recursive cte as (  
 select
 	ID,
@@ -224,7 +224,7 @@ on
 )
 select * from cte order by ID;
 --------------
-explain (costs false, nodes off) 
+explain (costs false) 
 select
 	b.NAME
 from 
@@ -288,7 +288,7 @@ where
     ) order by 1;
 
 ------------
-explain (costs false, nodes off) 
+explain (costs false) 
 WITH RECURSIVE  TABLE_COLUMN(T,B,C,D)
 AS
 (
@@ -314,7 +314,7 @@ SELECT  T,B,C FROM  Table_Column
 ORDER BY 1,2,3;
 
 /* recursive-cte关联外层 */
-explain (costs false, nodes off) select  a.ID,a.Name,
+explain (costs false) select  a.ID,a.Name,
 (
     with recursive cte as (
         select ID, PID, NAME
@@ -364,7 +364,7 @@ order by 1,2;
  *                  ->WorkTableScan
  * --------------------------------------------------------
  */
-explain (costs false, nodes off) with recursive rq as
+explain (costs false) with recursive rq as
 (
     select id, name from  chinamap where id = 11
     union all
@@ -384,7 +384,7 @@ with recursive rq as
 )
 select * from rq order by 1;
 
-explain (costs false, nodes off) select * from chinamap where pid = 11
+explain (costs false) select * from chinamap where pid = 11
 union
 select * from chinamap where id in
 (
@@ -410,7 +410,7 @@ select * from chinamap where id in
      select id from rq
 ) order by id; 
 
-explain (costs false, nodes off) select * from 
+explain (costs false) select * from 
 (
     with recursive cte1 as
     (
@@ -471,7 +471,7 @@ union all
  * 测试复制表replicate-plan场景
  */
 /* a:b H:H */
-explain (costs false, nodes off)
+explain (costs false)
 with recursive cte as (
         select  ID,  PID,  NAME from a where a.NAME = 'm'
         union all
@@ -488,7 +488,7 @@ select * from cte order by ID;
 
 
 /* a:b R:H */
-explain (costs false, nodes off)
+explain (costs false)
 with recursive cte as (
         select  ID,  PID,  NAME from a_rep where a_rep.NAME = 'm'
         union all
@@ -503,7 +503,7 @@ with recursive cte as (
 select * from cte order by ID;
 
 /* a:b H:R */
-explain (costs false, nodes off)
+explain (costs false)
 with recursive cte as (
         select  ID,  PID,  NAME from a where a.NAME = 'm'
         union all
@@ -519,7 +519,7 @@ with recursive cte as (
 select * from cte order by ID;
 
 /* a:b R:R */
-explain (costs false, nodes off)
+explain (costs false)
 with recursive cte as (
         select  ID,  PID,  NAME from a_rep where a_rep.NAME = 'm'
         union all
@@ -534,7 +534,7 @@ with recursive cte as (
 )
 select * from cte order by ID;
 
-explain (costs false, nodes off)
+explain (costs false)
 with recursive rq as
 (
     select a.name address, b.name, a.id,a.pid
@@ -575,7 +575,7 @@ with recursive rq as
     where rq.pid=chinamap.id
 )select address,name from rq order by address,name;
 
-explain (costs false, nodes off)
+explain (costs false)
 with recursive rq as
 (
     select a.name address, b.name, a.id,a.pid
@@ -617,7 +617,7 @@ with recursive rq as
 )select address,name from rq order by address,name;
 
 /* correlated subquery */
-explain (costs false, nodes off)
+explain (costs false)
 select  a.ID,a.Name,
 (
     with recursive cte as (
@@ -650,7 +650,7 @@ from
     from a group by id,name
 ) a order by 1,2;
 
-explain (costs false, nodes off)
+explain (costs false)
 select  a.ID,a.Name,
 (
     with recursive cte as (
@@ -687,7 +687,7 @@ from
 
 /* verify conflict dop lead to unshippable recursive plan */
 /* correlated subquery */
-explain (costs false, nodes off)
+explain (costs false)
 select  a.ID,a.Name,
 (
     with recursive cte as (
@@ -720,24 +720,7 @@ from
     from a group by id,name
 ) a order by 1,2;
 
-explain (costs false, nodes off)
-select  a.ID,a.Name,
-(
-    with recursive cte as (
-        select ID, PID, NAME from b where b.ID = a.ID
-        union all
-        select parent.ID,parent.PID,parent.NAME
-        from cte as child join b as parent on child.pid=parent.id
-        where parent.id = a.id
-    )
-    select NAME from cte limit 1
-) cName
-from
-(
-    select id, name, count(*) as cnt
-    from a group by id,name
-) a order by 1,2;
-
+explain (costs false)
 select  a.ID,a.Name,
 (
     with recursive cte as (
@@ -755,7 +738,24 @@ from
     from a group by id,name
 ) a order by 1,2;
 
-explain (costs false, nodes off)
+select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME from b where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent on child.pid=parent.id
+        where parent.id = a.id
+    )
+    select NAME from cte limit 1
+) cName
+from
+(
+    select id, name, count(*) as cnt
+    from a group by id,name
+) a order by 1,2;
+
+explain (costs false)
 select  a.ID,a.Name,
 (
     with recursive cte as (

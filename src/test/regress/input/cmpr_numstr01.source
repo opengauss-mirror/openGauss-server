@@ -20,8 +20,8 @@ CREATE TABLE cmpr_numstr_02
 	a12 varchar(2000) NUMSTR,
 	a13 varchar(2000) NUMSTR,
 	a15 varchar(2000) NUMSTR
-) COMPRESS;
-COPY cmpr_numstr_02 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr_01.data';
+) ;
+COPY cmpr_numstr_02 FROM '@abs_srcdir@/data/cmpr_numstr_01.data';
 
 CREATE TABLE cmpr_numstr_01 (
 	a00 varchar(2000) NUMSTR,
@@ -42,7 +42,7 @@ CREATE TABLE cmpr_numstr_01 (
 	a13 varchar(2000) NUMSTR,
 	a15 varchar(2000) NUMSTR
 );
-COPY cmpr_numstr_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr_01.data';
+COPY cmpr_numstr_01 FROM '@abs_srcdir@/data/cmpr_numstr_01.data';
 
 SELECT (SELECT COUNT(*) FROM cmpr_numstr_02) - (SELECT COUNT(*) FROM cmpr_numstr_01);
 (SELECT * FROM cmpr_numstr_02) MINUS ALL (SELECT * FROM cmpr_numstr_01);

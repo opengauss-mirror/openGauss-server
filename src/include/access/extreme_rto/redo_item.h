@@ -30,7 +30,7 @@
 #include "datatype/timestamp.h"
 #include "nodes/pg_list.h"
 #include "utils/atomic.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/relfilenode.h"
 
 #include "access/extreme_rto/posix_semaphore.h"
@@ -60,7 +60,7 @@ typedef struct RedoItem_s {
     /* A "deep" copy of the log record. */
     XLogReaderState record;
     /* Used for really free */
-    struct RedoItem_s* allocatedNext;
+    struct RedoItem_s *allocatedNext;
     TimestampTz syncXLogReceiptTime;
     int syncXLogReceiptSource;
     TransactionId RecentXmin;
@@ -78,9 +78,9 @@ static const uint32 ANY_WORKER = (uint32)-1;
 static const uint32 TRXN_WORKER = (uint32)-2;
 static const uint32 ALL_WORKER = (uint32)-3;
 
-static inline RedoItem* GetRedoItemPtr(XLogReaderState* record)
+static inline RedoItem *GetRedoItemPtr(XLogReaderState *record)
 {
-    return (RedoItem*)(((char*)record) - offsetof(RedoItem, record));
+    return (RedoItem *)(((char *)record) - offsetof(RedoItem, record));
 }
 
 RedoItem *CreateRedoItem(XLogReaderState *record, uint32 shareCount, uint32 designatedWorker, List *expectedTLIs,

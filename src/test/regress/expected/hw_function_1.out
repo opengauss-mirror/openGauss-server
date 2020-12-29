@@ -1,0 +1,2673 @@
+/*
+ * instr
+ */
+-- instr(text,text)
+select instr(null,null) ;
+ instr 
+-------
+      
+(1 row)
+
+select instr(null,'bc') ;
+ instr 
+-------
+      
+(1 row)
+
+select instr('abcd12abc',null) ;
+ instr 
+-------
+      
+(1 row)
+
+select instr('abcd12abc','bc') ;
+ instr 
+-------
+     2
+(1 row)
+
+select instr('abcd12abc','ff') ;
+ instr 
+-------
+     0
+(1 row)
+
+-- instr(text,text,integer)
+select instr(null,null,1) ;
+ instr 
+-------
+      
+(1 row)
+
+select instr(null,'bc',1) ;
+ instr 
+-------
+      
+(1 row)
+
+select instr('abcd12abc',null,-9) ;
+ instr 
+-------
+      
+(1 row)
+
+select instr('abcd12abc','bc',0) ;
+ instr 
+-------
+     0
+(1 row)
+
+select instr('abcd12abc','bc',1) ;
+ instr 
+-------
+     2
+(1 row)
+
+select instr('abcd12abc','bc',9) ;
+ instr 
+-------
+     0
+(1 row)
+
+select instr('abcd12abc','bc',10) ;
+ instr 
+-------
+     0
+(1 row)
+
+select instr('abcd12abc','bc',-1) ;
+ instr 
+-------
+     8
+(1 row)
+
+select instr('abcd12abc','bc',5) ;
+ instr 
+-------
+     8
+(1 row)
+
+-- instr(text,text,integer,integer)
+select instr('abcd12abc','bc',1,-1) ;
+ instr 
+-------
+     0
+(1 row)
+
+select instr('abcd12abc','bc',1,0) ;
+ instr 
+-------
+     0
+(1 row)
+
+select instr('abcd12abc','bc',1,1) ;
+ instr 
+-------
+     2
+(1 row)
+
+select instr('abcd12abc','bc',1,2) ;
+ instr 
+-------
+     8
+(1 row)
+
+select instr('abcd12abc','bc',1,3) ;
+ instr 
+-------
+     0
+(1 row)
+
+select instr('abcd12abc','bc',-1,0) ;
+ instr 
+-------
+     8
+(1 row)
+
+select instr('abcd12abc','bc',-1,1) ;
+ instr 
+-------
+     8
+(1 row)
+
+select instr('abcd12abc','bc',-1,2) ;
+ instr 
+-------
+     2
+(1 row)
+
+select instr('abcd12abc','bc',-1,3) ;
+ instr 
+-------
+     0
+(1 row)
+
+select instr('abcd12abc','bc',2,1) ;
+ instr 
+-------
+     2
+(1 row)
+
+select instr('abcd12abc','bc',2,2) ;
+ instr 
+-------
+     8
+(1 row)
+
+select instr('abcd12abc','bc',2,3) ;
+ instr 
+-------
+     0
+(1 row)
+
+SELECT INSTR('corporate floor','or', 3);
+ instr 
+-------
+     5
+(1 row)
+
+SELECT INSTR('corporate floor','or',-3,2);
+ instr 
+-------
+     2
+(1 row)
+
+/*
+ * multiply
+ */
+--multiply(text,float8)
+select multiply('abcd',45123.12134::float8);
+ERROR:  invalid input syntax for type double precision: "abcd"
+select multiply(null,45123.12134::float8);
+ multiply 
+----------
+         
+(1 row)
+
+select multiply('1E-307',1E-307::float8);
+ERROR:  value out of range: underflow
+select multiply('1E+308',1E+308::float8);
+ERROR:  value out of range: overflow
+select multiply('5678.1234',1234.5678::float8);
+     multiply     
+------------------
+ 7010028.31406652
+(1 row)
+
+--multiply(float8,text)
+select multiply(45123.12134::float8,'abcd');
+ERROR:  invalid input syntax for type double precision: "abcd"
+select multiply(45123.12134::float8,null);
+ multiply 
+----------
+         
+(1 row)
+
+select multiply(1E-307::float8,'1E-307');
+ERROR:  value out of range: underflow
+select multiply(1E+308::float8,'1E+308');
+ERROR:  value out of range: overflow
+select multiply(1234.5678::float8,'5678.1234');
+     multiply     
+------------------
+ 7010028.31406652
+(1 row)
+
+/*
+ * texteq
+ */
+--texteq(numeric,text)
+select texteq(null,null);
+ texteq 
+--------
+ 
+(1 row)
+
+select texteq(922337.999999::numeric,null);
+ texteq 
+--------
+ 
+(1 row)
+
+select texteq(922337.999999::numeric,'123');
+ texteq 
+--------
+ f
+(1 row)
+
+select texteq(922337.999999::numeric,'922337.999999');
+ texteq 
+--------
+ t
+(1 row)
+
+--texteq(text,numeric)
+select texteq(null,922337.999999::numeric);
+ texteq 
+--------
+ 
+(1 row)
+
+select texteq('123',922337.999999::numeric);
+ texteq 
+--------
+ f
+(1 row)
+
+select texteq('922337.999999',922337.999999::numeric);
+ texteq 
+--------
+ t
+(1 row)
+
+/*
+ * numtodsinterval
+ */
+select numtodsinterval(240,'SECOND');
+ numtodsinterval 
+-----------------
+ @ 4 mins
+(1 row)
+
+select numtodsinterval(2,'hour');
+ numtodsinterval 
+-----------------
+ @ 2 hours
+(1 row)
+
+select numtodsinterval(2,'day');
+ numtodsinterval 
+-----------------
+ @ 2 days
+(1 row)
+
+select numtodsinterval(240.5623,'SECOND');
+   numtodsinterval    
+----------------------
+ @ 4 mins 0.5623 secs
+(1 row)
+
+select numtodsinterval(2.5623,'hour');
+       numtodsinterval        
+------------------------------
+ @ 2 hours 33 mins 44.28 secs
+(1 row)
+
+select numtodsinterval(2.5623,'day');
+           numtodsinterval            
+--------------------------------------
+ @ 2 days 13 hours 29 mins 42.72 secs
+(1 row)
+
+/*
+ * numtoday
+ */
+--Numtoday(numeric)
+select Numtoday(0::numeric) ;
+ numtoday 
+----------
+ @ 0
+(1 row)
+
+select Numtoday(123.23456::numeric) ;
+                numtoday                
+----------------------------------------
+ @ 123 days 5 hours 37 mins 45.984 secs
+(1 row)
+
+--Numtoday(int2)
+select Numtoday(23::int2) ;
+ numtoday  
+-----------
+ @ 23 days
+(1 row)
+
+--Numtoday(int4)
+select Numtoday(123::int4) ;
+  numtoday  
+------------
+ @ 123 days
+(1 row)
+
+/*
+ * raise_application_error
+ */
+select raise_application_error(-20000,'the errorcode is -20000') ;
+ERROR:  ORA -20000: the errorcode is -20000
+select raise_application_error(-20999,'the errorcode is -20999') ;
+ERROR:  ORA -20999: the errorcode is -20999
+select raise_application_error(-19999,'the errorcode is -19999') ;
+ERROR:  custom error code must be between -20000 and -20999
+select raise_application_error(-21000,'the errorcode is -21000') ;
+ERROR:  custom error code must be between -20000 and -20999
+select raise_application_error(-20536,'the errorcode is -20536') ;
+ERROR:  ORA -20536: the errorcode is -20536
+--with 3 args
+select raise_application_error(-20000,'the errorcode is -20000',true) ;
+ERROR:  ORA -20000: the errorcode is -20000
+select raise_application_error(-20000,'the errorcode is -20000',false) ;
+ERROR:  ORA -20000: the errorcode is -20000
+select raise_application_error(-20999,'the errorcode is -20999',true) ;
+ERROR:  ORA -20999: the errorcode is -20999
+select raise_application_error(-20999,'the errorcode is -20999',false) ;
+ERROR:  ORA -20999: the errorcode is -20999
+select raise_application_error(-19999,'the errorcode is -19999',true) ;
+ERROR:  custom error code must be between -20000 and -20999
+select raise_application_error(-19999,'the errorcode is -19999',false) ;
+ERROR:  custom error code must be between -20000 and -20999
+select raise_application_error(-21000,'the errorcode is -21000',true) ;
+ERROR:  custom error code must be between -20000 and -20999
+select raise_application_error(-21000,'the errorcode is -21000',false) ;
+ERROR:  custom error code must be between -20000 and -20999
+select raise_application_error(-20536,'the errorcode is -20536',true) ;
+ERROR:  ORA -20536: the errorcode is -20536
+select raise_application_error(-20536,'the errorcode is -20536',false) ;
+ERROR:  ORA -20536: the errorcode is -20536
+select 1/3;
+     ?column?     
+------------------
+ .333333333333333
+(1 row)
+
+select 4/3;
+     ?column?     
+------------------
+ 1.33333333333333
+(1 row)
+
+/*
+ * mod
+ */
+--mod zero
+select mod(3,0) from dual;
+ mod 
+-----
+   3
+(1 row)
+
+ 
+--mod(float8,numeric)
+select mod(0.0::float8,0.0::numeric) from dual;
+ mod 
+-----
+   0
+(1 row)
+
+select mod(0.0::float8,1234.5678::numeric) from dual;
+  mod   
+--------
+ 0.0000
+(1 row)
+
+select mod(1234.5678::float8,0.0::numeric) from dual;
+    mod    
+-----------
+ 1234.5678
+(1 row)
+
+select mod(1234.5678::float8,0.0::numeric) from dual;
+    mod    
+-----------
+ 1234.5678
+(1 row)
+
+select mod(11234.5678::float8,9638.5632::numeric) from dual;
+    mod    
+-----------
+ 1596.0046
+(1 row)
+
+--mod(numeric,float8)
+select mod(0.0::numeric,0.0::float8) from dual;
+ mod 
+-----
+ 0.0
+(1 row)
+
+select mod(1234.5678::numeric,0.0::float8) from dual;
+    mod    
+-----------
+ 1234.5678
+(1 row)
+
+select mod(0.0::numeric,1234.5678::float8) from dual;
+  mod   
+--------
+ 0.0000
+(1 row)
+
+select mod(0.0::numeric,1234.5678::float8) from dual;
+  mod   
+--------
+ 0.0000
+(1 row)
+
+select mod(11234.5678::numeric,9638.5632::float8) from dual;
+    mod    
+-----------
+ 1596.0046
+(1 row)
+
+/*
+ * to_char
+ */
+select to_char('2012-08-02 20:38:40.2365'::timestamp without time zone) from dual;
+           to_char            
+------------------------------
+ 02-AUG-12 08:38:40.236500 PM
+(1 row)
+
+select to_char('2012-08-02 20:38:40.2365'::timestamp with time zone) from dual;
+             to_char              
+----------------------------------
+ 02-AUG-12 08:38:40.236500 PM PDT
+(1 row)
+
+select to_char(1234::int2) from dual;
+ to_char 
+---------
+ 1234
+(1 row)
+
+select to_char(1234::int4) from dual;
+ to_char 
+---------
+ 1234
+(1 row)
+
+select to_char(1234::int8) from dual;
+ to_char 
+---------
+ 1234
+(1 row)
+
+select to_char(1234::float4) from dual;
+ to_char 
+---------
+ 1234
+(1 row)
+
+select to_char(1234::float8) from dual;
+ to_char 
+---------
+ 1234
+(1 row)
+
+select to_char(1234::numeric) from dual;
+ to_char 
+---------
+ 1234
+(1 row)
+
+select to_char(null) from dual;
+ to_char 
+---------
+ 
+(1 row)
+
+select to_char('hello') from dual;
+ to_char 
+---------
+ hello
+(1 row)
+
+select to_char(1234::int2,'xxxx') from dual;
+ to_char 
+---------
+   4d2
+(1 row)
+
+select to_char(1234::int2,'XXXX') from dual;
+ to_char 
+---------
+   4D2
+(1 row)
+
+select to_char(1234::int4,'xxxx') from dual;
+ to_char 
+---------
+   4d2
+(1 row)
+
+select to_char(1234::int4,'XXXX') from dual;
+ to_char 
+---------
+   4D2
+(1 row)
+
+select to_char(1234::int8,'xxxx') from dual;
+ to_char 
+---------
+   4d2
+(1 row)
+
+select to_char(1234::int8,'XXXX') from dual;
+ to_char 
+---------
+   4D2
+(1 row)
+
+select to_char(1234.234::float4,'xxxx') from dual;
+ to_char 
+---------
+   4d2
+(1 row)
+
+select to_char(1234.534::float4,'xxxx') from dual;
+ to_char 
+---------
+   4d3
+(1 row)
+
+select to_char(1234.234::float4,'XXXX') from dual;
+ to_char 
+---------
+   4D2
+(1 row)
+
+select to_char(1234.534::float4,'XXXX') from dual;
+ to_char 
+---------
+   4D3
+(1 row)
+
+select to_char(1234.234::float8,'xxxx') from dual;
+ to_char 
+---------
+   4d2
+(1 row)
+
+select to_char(1234.534::float8,'xxxx') from dual;
+ to_char 
+---------
+   4d3
+(1 row)
+
+select to_char(1234.234::float8,'XXXX') from dual;
+ to_char 
+---------
+   4D2
+(1 row)
+
+select to_char(1234.534::float8,'XXXX') from dual;
+ to_char 
+---------
+   4D3
+(1 row)
+
+select to_char(1234.234::numeric,'xxxx') from dual;
+ to_char 
+---------
+   4d2
+(1 row)
+
+select to_char(1234.534::numeric,'XXXX') from dual;
+ to_char 
+---------
+   4D3
+(1 row)
+
+select to_char(3, 'RN') as result from dual;
+     result      
+-----------------
+             III
+(1 row)
+
+select to_char(3, 'FMRN') as result from dual;
+ result 
+--------
+ III
+(1 row)
+
+select to_char(5, 'RN') as result from dual;
+     result      
+-----------------
+               V
+(1 row)
+
+select to_char(5, 'FMRN') as result from dual;
+ result 
+--------
+ V
+(1 row)
+
+select to_char(485, 'RN') as result from dual;
+     result      
+-----------------
+         CDLXXXV
+(1 row)
+
+select to_char(485, 'FMRN') as result from dual;
+ result  
+---------
+ CDLXXXV
+(1 row)
+
+/* adapt A db's date/time format 'FF'/'ff' */
+select to_char('2012-08-10 15:09:40.123456789'::timestamp without time zone,'HH24:MI:SS.FF') from dual;
+     to_char     
+-----------------
+ 15:09:40.123457
+(1 row)
+
+select to_char('2012-08-10 15:09:40.123456789'::timestamp without time zone,'HH24:MI:SS.ff') from dual;
+     to_char     
+-----------------
+ 15:09:40.123457
+(1 row)
+
+select to_char('2012-08-10 15:09:40.123456789'::timestamp with time zone,'HH24:MI:SS.FF') from dual;
+     to_char     
+-----------------
+ 15:09:40.123457
+(1 row)
+
+select to_char('2012-08-10 15:09:40.123456789'::timestamp with time zone,'HH24:MI:SS.ff') from dual;
+     to_char     
+-----------------
+ 15:09:40.123457
+(1 row)
+
+/*
+ * to_number
+ */
+select to_number(null,'XXXX') from dual;
+ to_number 
+-----------
+          
+(1 row)
+
+select to_number('127.532','XXXX') from dual;
+ERROR:  invalid number
+select to_number('1234567890abcdefABCDEF','XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX') from dual;
+         to_number          
+----------------------------
+ 22007822917795467892608495
+(1 row)
+
+--to_number only support 16 bytes hex to decimal conversion or plen less than 0
+select to_number('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX') from dual;
+                to_number                
+-----------------------------------------
+ 340282366920938463463374607431768211455
+(1 row)
+
+select to_number('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx') from dual;
+                to_number                
+-----------------------------------------
+ 340282366920938463463374607431768211455
+(1 row)
+
+select to_number('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX') from dual;
+ERROR:  invalid number
+create table TONUM_006(COL_NUM numeric);
+insert into TONUM_006 values(to_number('A0', 'X'));
+ERROR:  invalid number
+insert into TONUM_006 values(to_number('A0', 'XX'));
+insert into TONUM_006 values(to_number('A0', 'XXX'));
+select COL_NUM as RESULT from TONUM_006;
+ result 
+--------
+    160
+    160
+(2 rows)
+
+drop table TONUM_006;
+select to_number('-ABF1','-xxxx')from dual;
+ERROR:  invalid number format model
+select to_number('AA','XXXZ') from dual;
+ERROR:  invalid number format model
+select to_number('-AA','-XX') from dual;
+ERROR:  invalid number format model
+select to_number('AA','-XX') from dual;
+ERROR:  invalid number format model
+select to_number('-AA','XX') from dual;
+ERROR:  invalid number
+select to_number('+AA','XX') from dual;
+ERROR:  invalid number
+select to_number('+AA','XX') from dual;
+ERROR:  invalid number
+select to_number('AA','X') from dual;
+ERROR:  invalid number
+select to_number('aa','x') from dual;
+ERROR:  invalid number
+select to_number('AA.A','XXX.X') from dual;
+ERROR:  invalid number format model
+select to_number('A0','XX X') from dual;
+ERROR:  invalid number format model
+select to_number('A0','XX.X') from dual;
+ERROR:  invalid number format model
+select to_number('A0','+xxx') from dual;
+ERROR:  invalid number format model
+select to_number('A0','-xxx') from dual;
+ERROR:  invalid number format model
+/*
+ * nvl 
+ */
+select nvl(null, null) from dual;
+ nvl 
+-----
+ 
+(1 row)
+
+select nvl(null, 'other') from dual;
+  nvl  
+-------
+ other
+(1 row)
+
+select nvl('something','other') from dual;
+    nvl    
+-----------
+ something
+(1 row)
+
+select nvl(null,321) from dual;
+ nvl 
+-----
+ 321
+(1 row)
+
+select nvl(123,'321') from dual;
+ nvl 
+-----
+ 123
+(1 row)
+
+select nvl(123::int2,321::int2) from dual;
+ nvl 
+-----
+ 123
+(1 row)
+
+select nvl(123::int4,321::int4) from dual;
+ nvl 
+-----
+ 123
+(1 row)
+
+select nvl(123::int8,321::int8) from dual;
+ nvl 
+-----
+ 123
+(1 row)
+
+select nvl(123::float4,321::float4) from dual;
+ nvl 
+-----
+ 123
+(1 row)
+
+select nvl(123::float8,321::float8) from dual;
+ nvl 
+-----
+ 123
+(1 row)
+
+select nvl('2001-01-01 01:01:01.3654'::date,'2012-08-02 15:57:54.6365'::date) from dual;
+           nvl            
+--------------------------
+ Mon Jan 01 01:01:01 2001
+(1 row)
+
+select nvl('2001-01-01 01:01:01.3654'::timestamp,'2012-08-02 15:57:54.6365'::timestamp) from dual;
+              nvl              
+-------------------------------
+ Mon Jan 01 01:01:01.3654 2001
+(1 row)
+
+-- modify NVL display to A db's style "NVL" instead of "coalesce"
+CREATE TABLE NVL_01(COL_INTEGER1 INTEGER,COL_INTEGER2 INTEGER);
+INSERT INTO NVL_01 VALUES(1,2);
+SELECT NVL(COL_INTEGER1,COL_INTEGER2) FROM NVL_01;
+ nvl 
+-----
+   1
+(1 row)
+
+DROP TABLE NVL_01;
+SELECT COALESCE('1234',5678) FROM DUAL;
+ coalesce 
+----------
+     1234
+(1 row)
+
+--nvl(unknown, int)
+SELECT NVL('j', 1) FROM DUAL;
+ nvl 
+-----
+ j
+(1 row)
+
+--nvl(int, unknown)
+SELECT NVL(1, 'k') FROM DUAL;
+ERROR:  invalid input syntax for integer: "k"
+LINE 1: SELECT NVL(1, 'k') FROM DUAL;
+                      ^
+SELECT NVL(1, '6') FROM DUAL;
+ nvl 
+-----
+   1
+(1 row)
+
+--nvl(char, int)
+SELECT NVL('o'::char, 1) FROM DUAL;
+ nvl 
+-----
+ o
+(1 row)
+
+--nvl(int, char)
+SELECT NVL(1, 'o'::char) FROM DUAL;
+ nvl 
+-----
+   1
+(1 row)
+
+--nvl(text, int2)
+SELECT NVL('hello!'::text, '100'::int2) FROM DUAL;
+  nvl   
+--------
+ hello!
+(1 row)
+
+SELECT NVL('100'::int2, 'hello!'::text) FROM DUAL;
+ nvl 
+-----
+ 100
+(1 row)
+
+--nvl(text, int4)
+SELECT NVL('hello!'::text, '100'::int4) FROM DUAL;
+  nvl   
+--------
+ hello!
+(1 row)
+
+SELECT NVL('100'::int4, 'hello!'::text) FROM DUAL;
+ nvl 
+-----
+ 100
+(1 row)
+
+--nvl(text, int8)
+SELECT NVL('hello!'::text, '100'::int8) FROM DUAL;
+  nvl   
+--------
+ hello!
+(1 row)
+
+SELECT NVL('100'::int8, 'hello!'::text) FROM DUAL;
+ nvl 
+-----
+ 100
+(1 row)
+
+--nvl(text, float4)
+SELECT NVL('hello!'::text, '100.001'::float4) FROM DUAL;
+  nvl   
+--------
+ hello!
+(1 row)
+
+SELECT NVL('100.001'::float4, 'hello!'::text) FROM DUAL;
+   nvl   
+---------
+ 100.001
+(1 row)
+
+--nvl(text, float8)
+SELECT NVL('hello!'::text, '100.001'::float8) FROM DUAL;
+  nvl   
+--------
+ hello!
+(1 row)
+
+SELECT NVL('100.001'::float8, 'hello!'::text) FROM DUAL;
+   nvl   
+---------
+ 100.001
+(1 row)
+
+--nvl(text, number)
+SELECT NVL('hello!'::text, '100.001'::number) FROM DUAL;
+  nvl   
+--------
+ hello!
+(1 row)
+
+SELECT NVL('100.001'::number, 'hello!'::text) FROM DUAL;
+   nvl   
+---------
+ 100.001
+(1 row)
+
+--null
+SELECT NVL('j', '') FROM DUAL;
+ nvl 
+-----
+ j
+(1 row)
+
+SELECT NVL('j', null) FROM DUAL;
+ nvl 
+-----
+ j
+(1 row)
+
+SELECT NVL('', 'k') FROM DUAL;
+ nvl 
+-----
+ k
+(1 row)
+
+SELECT NVL(null, 'k') FROM DUAL;
+ nvl 
+-----
+ k
+(1 row)
+
+SELECT NVL(''::text, '100'::int2) FROM DUAL;
+ nvl 
+-----
+ 100
+(1 row)
+
+SELECT NVL(''::int2, 'hello!'::text) FROM DUAL;
+ERROR:  invalid input syntax for integer: "hello!"
+SELECT NVL('hello!'::text, ''::int2) FROM DUAL;
+  nvl   
+--------
+ hello!
+(1 row)
+
+SELECT NVL('100'::int2, ''::text) FROM DUAL;
+ nvl 
+-----
+ 100
+(1 row)
+
+SELECT NVL(''::text, '100.001'::float8) FROM DUAL;
+   nvl   
+---------
+ 100.001
+(1 row)
+
+SELECT NVL(''::float8, 'hello!'::text) FROM DUAL;
+ERROR:  invalid input syntax for type double precision: "hello!"
+SELECT NVL('hello!'::text, ''::float8) FROM DUAL;
+  nvl   
+--------
+ hello!
+(1 row)
+
+SELECT NVL('100.001'::float8, ''::text) FROM DUAL;
+   nvl   
+---------
+ 100.001
+(1 row)
+
+SELECT NVL(''::text, '100.001'::number) FROM DUAL;
+   nvl   
+---------
+ 100.001
+(1 row)
+
+SELECT NVL(''::number, 'hello!'::text) FROM DUAL;
+ERROR:  invalid input syntax for type numeric: "hello!"
+SELECT NVL('hello!'::text, ''::number) FROM DUAL;
+  nvl   
+--------
+ hello!
+(1 row)
+
+SELECT NVL('100.001'::number, ''::text) FROM DUAL;
+   nvl   
+---------
+ 100.001
+(1 row)
+
+--NVL(char, int)
+CREATE OR REPLACE PROCEDURE SP_HW_CM_INS_TBL_TRUNKGROUP(psoutnoclir IN CHAR)
+AS
+	SUN CHAR:= psoutnoclir;
+BEGIN
+	--RAISE INFO 'PSOUTNOCLIR is %', PSOUTNOCLIR;
+END;
+/
+CREATE OR REPLACE PROCEDURE SP_HW_ADDNO7TRUNKGROUP(iv_psOutNoClir IN CHAR)
+AS
+	v_OutNoClir    CHAR := iv_psOutNoClir;
+BEGIN
+	--RAISE INFO 'function start!';
+	SP_HW_CM_INS_TBL_TRUNKGROUP(NVL(v_OutNoClir, 0));
+	--RAISE INFO 'function end!';
+END;
+/
+CALL SP_HW_ADDNO7TRUNKGROUP('');
+function start!
+0
+function end!
+ sp_hw_addno7trunkgroup 
+------------------------
+ 
+(1 row)
+
+CALL SP_HW_ADDNO7TRUNKGROUP(null);
+function start!
+0
+function end!
+ sp_hw_addno7trunkgroup 
+------------------------
+ 
+(1 row)
+
+CALL SP_HW_ADDNO7TRUNKGROUP('0');
+function start!
+0
+function end!
+ sp_hw_addno7trunkgroup 
+------------------------
+ 
+(1 row)
+
+CALL SP_HW_ADDNO7TRUNKGROUP('Y');
+function start!
+Y
+function end!
+ sp_hw_addno7trunkgroup 
+------------------------
+ 
+(1 row)
+
+DROP PROCEDURE SP_HW_ADDNO7TRUNKGROUP;
+DROP PROCEDURE  SP_HW_CM_INS_TBL_TRUNKGROUP;
+--NVL(number, int)
+CREATE OR REPLACE PROCEDURE SP_HW_CM_INS_TBL_TRUNKGROUP(psoutnoclir IN number DEFAULT 0)
+AS
+	SUN number := psoutnoclir;
+BEGIN
+	--RAISE INFO 'PSOUTNOCLIR is %', PSOUTNOCLIR;
+END;
+/
+CREATE OR REPLACE PROCEDURE SP_HW_ADDNO7TRUNKGROUP(iv_psOutNoClir IN number DEFAULT 0)
+AS
+	v_OutNoClir    number := iv_psOutNoClir;
+BEGIN
+	--RAISE INFO 'function start!';
+	SP_HW_CM_INS_TBL_TRUNKGROUP(NVL(v_OutNoClir, 0));
+	--RAISE INFO 'function end!';
+END;
+/
+CALL SP_HW_ADDNO7TRUNKGROUP();
+function start!
+0
+function end!
+ sp_hw_addno7trunkgroup 
+------------------------
+ 
+(1 row)
+
+CALL SP_HW_ADDNO7TRUNKGROUP(null);
+function start!
+0
+function end!
+ sp_hw_addno7trunkgroup 
+------------------------
+ 
+(1 row)
+
+CALL SP_HW_ADDNO7TRUNKGROUP('0');
+function start!
+0
+function end!
+ sp_hw_addno7trunkgroup 
+------------------------
+ 
+(1 row)
+
+CALL SP_HW_ADDNO7TRUNKGROUP(10000);
+function start!
+10000
+function end!
+ sp_hw_addno7trunkgroup 
+------------------------
+ 
+(1 row)
+
+DROP PROCEDURE SP_HW_ADDNO7TRUNKGROUP;
+DROP PROCEDURE SP_HW_CM_INS_TBL_TRUNKGROUP;
+--NVL(text, int)
+CREATE OR REPLACE PROCEDURE SP_HW_CM_INS_TBL_TRUNKGROUP(psoutnoclir IN text DEFAULT '000')
+AS
+	SUN text := psoutnoclir;
+BEGIN
+	--RAISE INFO 'PSOUTNOCLIR is %', PSOUTNOCLIR;
+END;
+/
+CREATE OR REPLACE PROCEDURE SP_HW_ADDNO7TRUNKGROUP(iv_psOutNoClir IN text DEFAULT '000')
+AS
+	v_OutNoClir    text := iv_psOutNoClir;
+BEGIN
+	--RAISE INFO 'function start!';
+	SP_HW_CM_INS_TBL_TRUNKGROUP(NVL(v_OutNoClir, 0));
+	--RAISE INFO 'function end!';
+END;
+/
+CALL SP_HW_ADDNO7TRUNKGROUP();
+function start!
+000
+function end!
+ sp_hw_addno7trunkgroup 
+------------------------
+ 
+(1 row)
+
+CALL SP_HW_ADDNO7TRUNKGROUP(null);
+function start!
+0
+function end!
+ sp_hw_addno7trunkgroup 
+------------------------
+ 
+(1 row)
+
+CALL SP_HW_ADDNO7TRUNKGROUP('0');
+function start!
+0
+function end!
+ sp_hw_addno7trunkgroup 
+------------------------
+ 
+(1 row)
+
+CALL SP_HW_ADDNO7TRUNKGROUP('zhangyangeng');
+function start!
+zhangyangeng
+function end!
+ sp_hw_addno7trunkgroup 
+------------------------
+ 
+(1 row)
+
+DROP PROCEDURE SP_HW_ADDNO7TRUNKGROUP;
+DROP PROCEDURE SP_HW_CM_INS_TBL_TRUNKGROUP;
+/*
+ * sys_context
+ */
+select sys_context(null, null) from dual;
+ sys_context 
+-------------
+ 
+(1 row)
+
+select sys_context(null, 'CURRENT_SCHEMA') from dual;
+ sys_context 
+-------------
+ 
+(1 row)
+
+select sys_context('USERENV', null) from dual;
+ sys_context 
+-------------
+ 
+(1 row)
+
+select sys_context('USERENV', 'CURRENT_SCHEMA') from dual;
+ sys_context 
+-------------
+ public
+(1 row)
+
+/*
+ * substr
+ */
+--substr(text, integer)
+--boundary test
+select substr(null,1) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+select substr('12345',0) from dual;
+ substr 
+--------
+ 12345
+(1 row)
+
+select substr('12345',1) from dual;
+ substr 
+--------
+ 12345
+(1 row)
+
+select substr('12345',5) from dual;
+ substr 
+--------
+ 5
+(1 row)
+
+select substr('12345',6) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+select substr('12345',-1) from dual;
+ substr 
+--------
+ 5
+(1 row)
+
+select substr('12345',-5) from dual;
+ substr 
+--------
+ 12345
+(1 row)
+
+select substr('12345',-6) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+--normal
+select substr('12345',2) from dual;
+ substr 
+--------
+ 2345
+(1 row)
+
+select substr('12345',-2) from dual;
+ substr 
+--------
+ 45
+(1 row)
+
+--substr(text,integer,integer)
+--boundary test
+select substr(null,1,1) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+select substr('12345',0,4) from dual;
+ substr 
+--------
+ 1234
+(1 row)
+
+select substr('12345',1,4) from dual;
+ substr 
+--------
+ 1234
+(1 row)
+
+select substr('12345',5,4) from dual;
+ substr 
+--------
+ 5
+(1 row)
+
+select substr('12345',6,4) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+select substr('12345',-1,4) from dual;
+ substr 
+--------
+ 5
+(1 row)
+
+select substr('12345',-5,4) from dual;
+ substr 
+--------
+ 1234
+(1 row)
+
+select substr('12345',-6,4) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+select substr('12345',1,-1) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+select substr('12345',1,5) from dual;
+ substr 
+--------
+ 12345
+(1 row)
+
+select substr('12345',1,6) from dual;
+ substr 
+--------
+ 12345
+(1 row)
+
+--normal
+select substr('12345',2,3) from dual;
+ substr 
+--------
+ 234
+(1 row)
+
+select substr('12345',-4,3) from dual;
+ substr 
+--------
+ 234
+(1 row)
+
+--substr(bytea, integer)
+--boundary test
+select substr(null::bytea,1) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+select substr('12345'::bytea,0) from dual;
+    substr    
+--------------
+ \x3132333435
+(1 row)
+
+select substr('12345'::bytea,1) from dual;
+    substr    
+--------------
+ \x3132333435
+(1 row)
+
+select substr('12345'::bytea,5) from dual;
+ substr 
+--------
+ \x35
+(1 row)
+
+select substr('12345'::bytea,6) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+select substr('12345'::bytea,-1) from dual;
+ substr 
+--------
+ \x35
+(1 row)
+
+select substr('12345'::bytea,-5) from dual;
+    substr    
+--------------
+ \x3132333435
+(1 row)
+
+select substr('12345'::bytea,-6) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+--normal
+select substr('12345'::bytea,2) from dual;
+   substr   
+------------
+ \x32333435
+(1 row)
+
+select substr('12345'::bytea,-2) from dual;
+ substr 
+--------
+ \x3435
+(1 row)
+
+--substr(bytea,integer,integer)
+--boundary test
+select substr(null,1,1) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+select substr('12345'::bytea,0,4) from dual;
+   substr   
+------------
+ \x31323334
+(1 row)
+
+select substr('12345'::bytea,1,4) from dual;
+   substr   
+------------
+ \x31323334
+(1 row)
+
+select substr('12345'::bytea,5,4) from dual;
+ substr 
+--------
+ \x35
+(1 row)
+
+select substr('12345'::bytea,6,4) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+select substr('12345'::bytea,-1,4) from dual;
+ substr 
+--------
+ \x35
+(1 row)
+
+select substr('12345'::bytea,-5,4) from dual;
+   substr   
+------------
+ \x31323334
+(1 row)
+
+select substr('12345'::bytea,-6,4) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+select substr('12345'::bytea,1,-1) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+select substr('12345'::bytea,1,5) from dual;
+    substr    
+--------------
+ \x3132333435
+(1 row)
+
+select substr('12345'::bytea,1,6) from dual;
+    substr    
+--------------
+ \x3132333435
+(1 row)
+
+select substr('abcd'::bytea,2,0) from dual;
+ substr 
+--------
+ 
+(1 row)
+
+--normal
+select substr('12345'::bytea,2,3) from dual;
+  substr  
+----------
+ \x323334
+(1 row)
+
+select substr('12345'::bytea,-4,3) from dual;
+  substr  
+----------
+ \x323334
+(1 row)
+
+--select more than one parameter in update
+create table test_update_more (a int, b int);
+insert into test_update_more values(1, 2);
+create table tbl (col1 int, col2 int) distribute by replication;
+insert into tbl values(10, 20);
+insert into tbl values(100, 200);
+update tbl set(col1, col2) = (select a, b from test_update_more) where col1 = 10;
+select * from tbl;
+ col1 | col2 
+------+------
+  100 |  200
+    1 |    2
+(2 rows)
+
+drop table test_update_more;
+drop table tbl;
+create table test_reg(mc varchar(60));
+insert into test_reg values('112233445566778899');
+insert into test_reg values('22113344 5566778899');
+insert into test_reg values('33112244 5566778899');
+insert into test_reg values('44112233 5566 778899');
+insert into test_reg values('5511 2233 4466778899');
+insert into test_reg values('661122334455778899');
+insert into test_reg values('771122334455668899');
+insert into test_reg values('881122334455667799');
+insert into test_reg values('991122334455667788');
+insert into test_reg values('aabbccddee');
+insert into test_reg values('bbaaaccddee');
+insert into test_reg values('ccabbddee');
+insert into test_reg values('ddaabbccee');
+insert into test_reg values('eeaabbccdd');
+insert into test_reg values('ab123');
+insert into test_reg values('123xy');
+insert into test_reg values('007ab');
+insert into test_reg values('abcxy');
+insert into test_reg values('The final test_reg is is is how to find duplicate words.');
+select * from test_reg where regexp_like(mc,'^a{1,3}') order by mc ;
+     mc     
+------------
+ aabbccddee
+ ab123
+ abcxy
+(3 rows)
+
+select * from test_reg where regexp_like(mc,'a{1,3}') order by mc ;
+                            mc                            
+----------------------------------------------------------
+ 007ab
+ The final test_reg is is is how to find duplicate words.
+ aabbccddee
+ ab123
+ abcxy
+ bbaaaccddee
+ ccabbddee
+ ddaabbccee
+ eeaabbccdd
+(9 rows)
+
+select * from test_reg where regexp_like(mc,'^a.*e$') order by mc ;
+     mc     
+------------
+ aabbccddee
+(1 row)
+
+select * from test_reg where regexp_like(mc,'^[[:lower:]]|[[:digit:]]') order by mc ;
+          mc          
+----------------------
+ 007ab
+ 112233445566778899
+ 123xy
+ 22113344 5566778899
+ 33112244 5566778899
+ 44112233 5566 778899
+ 5511 2233 4466778899
+ 661122334455778899
+ 771122334455668899
+ 881122334455667799
+ 991122334455667788
+ aabbccddee
+ ab123
+ abcxy
+ bbaaaccddee
+ ccabbddee
+ ddaabbccee
+ eeaabbccdd
+(18 rows)
+
+select * from test_reg where regexp_like(mc,'^[[:lower:]]') order by mc ;
+     mc      
+-------------
+ aabbccddee
+ ab123
+ abcxy
+ bbaaaccddee
+ ccabbddee
+ ddaabbccee
+ eeaabbccdd
+(7 rows)
+
+Select mc FROM test_reg Where REGEXP_LIKE(mc,'[^[:digit:]]') order by mc ;
+                            mc                            
+----------------------------------------------------------
+ 007ab
+ 123xy
+ 22113344 5566778899
+ 33112244 5566778899
+ 44112233 5566 778899
+ 5511 2233 4466778899
+ The final test_reg is is is how to find duplicate words.
+ aabbccddee
+ ab123
+ abcxy
+ bbaaaccddee
+ ccabbddee
+ ddaabbccee
+ eeaabbccdd
+(14 rows)
+
+Select mc FROM test_reg Where REGEXP_LIKE(mc,'^[^[:digit:]]') order by mc ;
+                            mc                            
+----------------------------------------------------------
+ The final test_reg is is is how to find duplicate words.
+ aabbccddee
+ ab123
+ abcxy
+ bbaaaccddee
+ ccabbddee
+ ddaabbccee
+ eeaabbccdd
+(8 rows)
+
+select * from test_reg where regexp_like(mc,'B') order by mc ;
+ mc 
+----
+(0 rows)
+
+select * from test_reg where regexp_like(mc,'B','i') order by mc ;
+     mc      
+-------------
+ 007ab
+ aabbccddee
+ ab123
+ abcxy
+ bbaaaccddee
+ ccabbddee
+ ddaabbccee
+ eeaabbccdd
+(8 rows)
+
+create table TESTREGEXP_LIKE(COL_STR1 varchar2(100));
+insert into TESTREGEXP_LIKE values('you
+are
+so
+beautiful');
+insert into TESTREGEXP_LIKE values('hello\ngauss');
+insert into TESTREGEXP_LIKE values('
+my
+world
+');
+insert into TESTREGEXP_LIKE values('
+
+can
+you
+feel
+
+');
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^s','m') order by COL_STR1;
+ col_str1  
+-----------
+ you      +
+ are      +
+ so       +
+ beautiful
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'l$','m') order by COL_STR1;
+ col_str1  
+-----------
+          +
+          +
+ can      +
+ you      +
+ feel     +
+          +
+ 
+ you      +
+ are      +
+ so       +
+ beautiful
+(2 rows)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^so$','m') order by COL_STR1;
+ col_str1  
+-----------
+ you      +
+ are      +
+ so       +
+ beautiful
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^so
+b','m') order by COL_STR1 ;
+ col_str1  
+-----------
+ you      +
+ are      +
+ so       +
+ beautiful
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^so
+beautiful$','m') order by COL_STR1;
+ col_str1  
+-----------
+ you      +
+ are      +
+ so       +
+ beautiful
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^are
+so
+beautiful$','m') order by COL_STR1;
+ col_str1  
+-----------
+ you      +
+ are      +
+ so       +
+ beautiful
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'so','m') order by COL_STR1;
+ col_str1  
+-----------
+ you      +
+ are      +
+ so       +
+ beautiful
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'eau','m') order by COL_STR1;
+ col_str1  
+-----------
+ you      +
+ are      +
+ so       +
+ beautiful
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'are
+so','m') order by COL_STR1;
+ col_str1  
+-----------
+ you      +
+ are      +
+ so       +
+ beautiful
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^e','m') order by COL_STR1;
+ col_str1 
+----------
+(0 rows)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'k$','m') order by COL_STR1;
+ col_str1 
+----------
+(0 rows)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^g','m') order by COL_STR1;
+ col_str1 
+----------
+(0 rows)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'o$','m') order by COL_STR1;
+ col_str1  
+-----------
+ you      +
+ are      +
+ so       +
+ beautiful
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^eau$','m') order by COL_STR1;
+ col_str1 
+----------
+(0 rows)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^o
+beautiful$','m') order by COL_STR1;
+ col_str1 
+----------
+(0 rows)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'o
+beau$','m') order by COL_STR1;
+ col_str1 
+----------
+(0 rows)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^are
+o
+beau$','m') order by COL_STR1;
+ col_str1 
+----------
+(0 rows)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^feel$','m') order by COL_STR1;
+ col_str1 
+----------
+         +
+         +
+ can     +
+ you     +
+ feel    +
+         +
+ 
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^m','m') order by COL_STR1;
+ col_str1 
+----------
+         +
+ my      +
+ world   +
+ 
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'y$','m') order by COL_STR1;
+ col_str1 
+----------
+         +
+ my      +
+ world   +
+ 
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'orl','m') order by COL_STR1;
+ col_str1 
+----------
+         +
+ my      +
+ world   +
+ 
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^my
+world$','m') order by COL_STR1;
+ col_str1 
+----------
+         +
+ my      +
+ world   +
+ 
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^m
+w','m') order by COL_STR1;
+ col_str1 
+----------
+(0 rows)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^
+my
+','m') order by COL_STR1;
+ col_str1 
+----------
+         +
+ my      +
+ world   +
+ 
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^world
+','m') order by COL_STR1;
+ col_str1 
+----------
+         +
+ my      +
+ world   +
+ 
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^
+my
+world$','m')order by COL_STR1;
+ col_str1 
+----------
+         +
+ my      +
+ world   +
+ 
+(1 row)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^
+world
+','m')order by COL_STR1;
+ col_str1 
+----------
+(0 rows)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^
+w
+','m') order by COL_STR1;
+ col_str1 
+----------
+(0 rows)
+
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'
+^my
+world$
+','m')order by COL_STR1;
+ col_str1 
+----------
+(0 rows)
+
+--other parameter,return error information.
+select * from TESTREGEXP_LIKE where regexp_like(COL_STR1,'^s','k') order by COL_STR1;
+illegal argument for function
+ERROR:  control reached end of function without RETURN
+CONTEXT:  PL/pgSQL function regexp_like(text,text,text)
+drop table TESTREGEXP_LIKE;
+/*
+ * regexp_substr
+ */
+SELECT REGEXP_SUBSTR(mc,'[a-z]+') FROM test_reg order by mc;
+ regexp_substr 
+---------------
+ ab
+ 
+ xy
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ he
+ aabbccddee
+ ab
+ abcxy
+ bbaaaccddee
+ ccabbddee
+ ddaabbccee
+ eeaabbccdd
+(19 rows)
+
+SELECT REGEXP_SUBSTR(mc,'[0-9]+') FROM test_reg order by mc;
+   regexp_substr    
+--------------------
+ 007
+ 112233445566778899
+ 123
+ 22113344
+ 33112244
+ 44112233
+ 5511
+ 661122334455778899
+ 771122334455668899
+ 881122334455667799
+ 991122334455667788
+ 
+ 
+ 123
+ 
+ 
+ 
+ 
+ 
+(19 rows)
+
+SELECT REGEXP_SUBSTR('aababcde','^a.*b') order by mc;
+ERROR:  column "mc" does not exist
+LINE 1: SELECT REGEXP_SUBSTR('aababcde','^a.*b') order by mc;
+                                                          ^
+drop table test_reg;
+show enforce_a_behavior;
+ enforce_a_behavior 
+--------------------
+ on
+(1 row)
+
+select regexp_substr('week', '(a|e)');
+ regexp_substr 
+---------------
+ e
+(1 row)
+
+select regexp_substr('week', '((a)|(e))');
+ regexp_substr 
+---------------
+ e
+(1 row)
+
+select regexp_substr('week', '(a)|(e)');
+ regexp_substr 
+---------------
+ e
+(1 row)
+
+set enforce_a_behavior=false;
+show enforce_a_behavior;
+ enforce_a_behavior 
+--------------------
+ off
+(1 row)
+
+select regexp_substr('week', '((a)|(e))');
+ regexp_substr 
+---------------
+ e
+(1 row)
+
+select regexp_substr('week', '(a)|(e)');
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+--length and lengthb test. Assume that the database encoding is utf-8. 
+SELECT length('a'), length('a '), length(' a ');
+ length | length | length 
+--------+--------+--------
+      1 |      2 |      3
+(1 row)
+
+select lengthb('abc'), length('abc '), lengthb('高斯');
+ lengthb | length | lengthb 
+---------+--------+---------
+       3 |      4 |       6
+(1 row)
+
+--test parameters of function 
+create function test_fun_0() returns integer
+as $$
+begin
+    raise '%', 'test para is 0';
+    return 0;
+end;
+$$language plpgsql;
+select test_fun_0();
+ERROR:  test para is 0
+drop function test_fun_0;
+create function test_fun_1(a varchar) returns integer
+as $$
+begin
+    raise info '%', a;
+    return 1;
+end;
+$$language plpgsql;
+select test_fun_1('test para is 1');
+INFO:  test para is 1
+ test_fun_1 
+------------
+          1
+(1 row)
+
+drop function test_fun_1;
+create function test_fun_2(a integer[]) returns integer
+as $$
+begin
+    raise info '%', a;
+    return 3;
+end;
+$$language plpgsql;
+select test_fun_2('{1,2,3}');
+INFO:  {1,2,3}
+ test_fun_2 
+------------
+          3
+(1 row)
+
+drop function test_fun_2;
+create function test_fun_3(a int, b varchar(10), c integer[], d integer[][], e text[][], f int, g int, h int, i int, j int)returns integer
+as $$
+begin
+    raise info '%', a;
+    raise info '%', b;
+    raise info '%', c;
+    raise info '%', d;
+    raise info '%', e;
+    return 3;
+end;
+$$language plpgsql;
+select test_fun_3 (10, 'test_10', '{1,2,3}', '{{1,2,3},{4,5,6}}', '{{"breakfast", "consulting"}, {"meeting", "lunch"}}', 1,1,1,1,1);
+INFO:  10
+INFO:  test_10
+INFO:  {1,2,3}
+INFO:  {{1,2,3},{4,5,6}}
+INFO:  {{breakfast,consulting},{meeting,lunch}}
+ test_fun_3 
+------------
+          3
+(1 row)
+
+drop function test_fun_3;
+create function test_fun_4(a int, b varchar(10), c integer[], d integer[][], e text[][], f int, g int, h int, i int, j int, k int) returns integer
+as $$
+begin
+    raise info '%', a;
+    raise info '%', b;
+    raise info '%', c;
+    raise info '%', d;
+    raise info '%', e;
+    return 4;
+end;
+$$language plpgsql;
+select test_fun_4 (10, 'test_11', '{1,2,3}', '{{1,2,3},{4,5,6}}', '{{"breakfast", "consulting"}, {"meeting", "lunch"}}', 1,1,1,1,1,1);
+INFO:  10
+INFO:  test_11
+INFO:  {1,2,3}
+INFO:  {{1,2,3},{4,5,6}}
+INFO:  {{breakfast,consulting},{meeting,lunch}}
+ test_fun_4 
+------------
+          4
+(1 row)
+
+drop function test_fun_4;
+create function test_fun_5(a0 varchar, b0 int, c0 int, d0 int, e0 int, f0 int, g0 int, h0 int, i0 int, j0 int,
+ a1 int, b1 int, c1 int, d1 int, e1 int, f1 int, g1 int, h1 int, i1 int, j1 int,
+a2 int, b2 int, c2 int, d2 int, e2 int, f2 int, g2 int, h2 int, i2 int, j2 int,
+a3 int, b3 int, c3 int, d3 int, e3 int, f3 int, g3 int, h3 int, i3 int, j3 int,
+a4 int, b4 int, c4 int, d4 int, e4 int, f4 int, g4 int, h4 int, i4 int, j4 int,
+a5 int, b5 int, c5 int, d5 int, e5 int, f5 int, g5 int, h5 int, i5 int, j5 int,
+a6 int, b6 int, c6 int, d6 int, e6 int, f6 int, g6 int, h6 int, i6 int, j6 int,
+a7 int, b7 int, c7 int, d7 int, e7 int, f7 int, g7 int, h7 int, i7 int, j7 int,
+a8 int, b8 int, c8 int, d8 int, e8 int, f8 int, g8 int, h8 int, i8 int, j8 int,
+a9 int, b9 int, c9 int, d9 int, e9 int, f9 int, g9 int, h9 int, i9 int, j9 int) returns integer
+as $$
+begin
+        raise info '%', a0;
+	return 0;
+end;
+$$language plpgsql;
+select test_fun_5('test_100',2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100);
+INFO:  test_100
+ test_fun_5 
+------------
+          0
+(1 row)
+
+drop function test_fun_5;
+create function test_fun_6(a0 varchar, b0 int, c0 int, d0 int, e0 int, f0 int, g0 int, h0 int, i0 int, j0 int,
+ a1 int, b1 int, c1 int, d1 int, e1 int, f1 int, g1 int, h1 int, i1 int, j1 int,
+a2 int, b2 int, c2 int, d2 int, e2 int, f2 int, g2 int, h2 int, i2 int, j2 int,
+a3 int, b3 int, c3 int, d3 int, e3 int, f3 int, g3 int, h3 int, i3 int, j3 int,
+a4 int, b4 int, c4 int, d4 int, e4 int, f4 int, g4 int, h4 int, i4 int, j4 int,
+a5 int, b5 int, c5 int, d5 int, e5 int, f5 int, g5 int, h5 int, i5 int, j5 int,
+a6 int, b6 int, c6 int, d6 int, e6 int, f6 int, g6 int, h6 int, i6 int, j6 int,
+a7 int, b7 int, c7 int, d7 int, e7 int, f7 int, g7 int, h7 int, i7 int, j7 int,
+a8 int, b8 int, c8 int, d8 int, e8 int, f8 int, g8 int, h8 int, i8 int, j8 int,
+a9 int, b9 int, c9 int, d9 int, e9 int, f9 int, g9 int, h9 int, i9 int, j9 int,
+a10 varchar) returns integer
+as $$
+begin
+        raise info '%', a0;
+	return 0;
+end;
+$$language plpgsql;
+select test_fun_6('test_101',2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100, 'test_para_101');
+INFO:  test_101
+ test_fun_6 
+------------
+          0
+(1 row)
+
+drop function test_fun_6;
+create function test_fun_7(
+a0 varchar, b0 int, c0 int, d0 int, e0 int, f0 int, g0 int, h0 int, i0 int, j0 int,
+a1 int, b1 int, c1 int, d1 int, e1 int, f1 int, g1 int, h1 int, i1 int, j1 int,
+a2 int, b2 int, c2 int, d2 int, e2 int, f2 int, g2 int, h2 int, i2 int, j2 int,
+a3 int, b3 int, c3 int, d3 int, e3 int, f3 int, g3 int, h3 int, i3 int, j3 int,
+a4 int, b4 int, c4 int, d4 int, e4 int, f4 int, g4 int, h4 int, i4 int, j4 int,
+a5 int, b5 int, c5 int, d5 int, e5 int, f5 int, g5 int, h5 int, i5 int, j5 int,
+a6 int, b6 int, c6 int, d6 int, e6 int, f6 int, g6 int, h6 int, i6 int, j6 int,
+a7 int, b7 int, c7 int, d7 int, e7 int, f7 int, g7 int, h7 int, i7 int, j7 int,
+a8 int, b8 int, c8 int, d8 int, e8 int, f8 int, g8 int, h8 int, i8 int, j8 int,
+a9 int, b9 int, c9 int, d9 int, e9 int, f9 int, g9 int, h9 int, i9 int, j9 int,
+a0_1 int, b0_1 int, c0_1 int, d0_1 int, e0_1 int, f0_1 int, g0_1 int, h0_1 int, i0_1 int, j0_1 int,
+a1_1 int, b1_1 int, c1_1 int, d1_1 int, e1_1 int, f1_1 int, g1_1 int, h1_1 int, i1_1 int, j1_1 int,
+a2_1 int, b2_1 int, c2_1 int, d2_1 int, e2_1 int, f2_1 int, g2_1 int, h2_1 int, i2_1 int, j2_1 int,
+a3_1 int, b3_1 int, c3_1 int, d3_1 int, e3_1 int, f3_1 int, g3_1 int, h3_1 int, i3_1 int, j3_1 int,
+a4_1 int, b4_1 int, c4_1 int, d4_1 int, e4_1 int, f4_1 int, g4_1 int, h4_1 int, i4_1 int, j4_1 int,
+a5_1 int, b5_1 int, c5_1 int, d5_1 int, e5_1 int, f5_1 int, g5_1 int, h5_1 int, i5_1 int, j5_1 int,
+a6_1 int, b6_1 int, c6_1 int, d6_1 int, e6_1 int, f6_1 int, g6_1 int, h6_1 int, i6_1 int, j6_1 int,
+a7_1 int, b7_1 int, c7_1 int, d7_1 int, e7_1 int, f7_1 int, g7_1 int, h7_1 int, i7_1 int, j7_1 int,
+a8_1 int, b8_1 int, c8_1 int, d8_1 int, e8_1 int, f8_1 int, g8_1 int, h8_1 int, i8_1 int, j8_1 int,
+a9_1 int, b9_1 int, c9_1 int, d9_1 int, e9_1 int, f9_1 int, g9_1 int, h9_1 int, i9_1 int, j9_1 int,
+a0_2 int, b0_2 int, c0_2 int, d0_2 int, e0_2 int, f0_2 int, g0_2 int, h0_2 int, i0_2 int, j0_2 int,
+a1_2 int, b1_2 int, c1_2 int, d1_2 int, e1_2 int, f1_2 int, g1_2 int, h1_2 int, i1_2 int, j1_2 int,
+a2_2 int, b2_2 int, c2_2 int, d2_2 int, e2_2 int, f2_2 int, g2_2 int, h2_2 int, i2_2 int, j2_2 int,
+a3_2 int, b3_2 int, c3_2 int, d3_2 int, e3_2 int, f3_2 int, g3_2 int, h3_2 int, i3_2 int, j3_2 int,
+a4_2 int, b4_2 int, c4_2 int, d4_2 int, e4_2 int, f4_2 int, g4_2 int, h4_2 int, i4_2 int, j4_2 int,
+a5_2 int, b5_2 int, c5_2 int, d5_2 int, e5_2 int, f5_2 int, g5_2 int, h5_2 int, i5_2 int, j5_2 int,
+a6_2 int, b6_2 int, c6_2 int, d6_2 int, e6_2 int, f6_2 int, g6_2 int, h6_2 int, i6_2 int, j6_2 int,
+a7_2 int, b7_2 int, c7_2 int, d7_2 int, e7_2 int, f7_2 int, g7_2 int, h7_2 int, i7_2 int, j7_2 int,
+a8_2 int, b8_2 int, c8_2 int, d8_2 int, e8_2 int, f8_2 int, g8_2 int, h8_2 int, i8_2 int, j8_2 int,
+a9_2 int, b9_2 int, c9_2 int, d9_2 int, e9_2 int, f9_2 int, g9_2 int, h9_2 int, i9_2 int, j9_2 int,
+a0_3 int, b0_3 int, c0_3 int, d0_3 int, e0_3 int, f0_3 int, g0_3 int, h0_3 int, i0_3 int, j0_3 int,
+a1_3 int, b1_3 int, c1_3 int, d1_3 int, e1_3 int, f1_3 int, g1_3 int, h1_3 int, i1_3 int, j1_3 int,
+a2_3 int, b2_3 int, c2_3 int, d2_3 int, e2_3 int, f2_3 int, g2_3 int, h2_3 int, i2_3 int, j2_3 int,
+a3_3 int, b3_3 int, c3_3 int, d3_3 int, e3_3 int, f3_3 int, g3_3 int, h3_3 int, i3_3 int, j3_3 int,
+a4_3 int, b4_3 int, c4_3 int, d4_3 int, e4_3 int, f4_3 int, g4_3 int, h4_3 int, i4_3 int, j4_3 int,
+a5_3 int, b5_3 int, c5_3 int, d5_3 int, e5_3 int, f5_3 int, g5_3 int, h5_3 int, i5_3 int, j5_3 int,
+a6_3 int, b6_3 int, c6_3 int, d6_3 int, e6_3 int, f6_3 int, g6_3 int, h6_3 int, i6_3 int, j6_3 int,
+a7_3 int, b7_3 int, c7_3 int, d7_3 int, e7_3 int, f7_3 int, g7_3 int, h7_3 int, i7_3 int, j7_3 int,
+a8_3 int, b8_3 int, c8_3 int, d8_3 int, e8_3 int, f8_3 int, g8_3 int, h8_3 int, i8_3 int, j8_3 int,
+a9_3 int, b9_3 int, c9_3 int, d9_3 int, e9_3 int, f9_3 int, g9_3 int, h9_3 int, i9_3 int, j9_3 int,
+a0_4 int, b0_4 int, c0_4 int, d0_4 int, e0_4 int, f0_4 int, g0_4 int, h0_4 int, i0_4 int, j0_4 int,
+a1_4 int, b1_4 int, c1_4 int, d1_4 int, e1_4 int, f1_4 int, g1_4 int, h1_4 int, i1_4 int, j1_4 int,
+a2_4 int, b2_4 int, c2_4 int, d2_4 int, e2_4 int, f2_4 int, g2_4 int, h2_4 int, i2_4 int, j2_4 int,
+a3_4 int, b3_4 int, c3_4 int, d3_4 int, e3_4 int, f3_4 int, g3_4 int, h3_4 int, i3_4 int, j3_4 int,
+a4_4 int, b4_4 int, c4_4 int, d4_4 int, e4_4 int, f4_4 int, g4_4 int, h4_4 int, i4_4 int, j4_4 int,
+a5_4 int, b5_4 int, c5_4 int, d5_4 int, e5_4 int, f5_4 int, g5_4 int, h5_4 int, i5_4 int, j5_4 int,
+a6_4 int, b6_4 int, c6_4 int, d6_4 int, e6_4 int, f6_4 int, g6_4 int, h6_4 int, i6_4 int, j6_4 int,
+a7_4 int, b7_4 int, c7_4 int, d7_4 int, e7_4 int, f7_4 int, g7_4 int, h7_4 int, i7_4 int, j7_4 int,
+a8_4 int, b8_4 int, c8_4 int, d8_4 int, e8_4 int, f8_4 int, g8_4 int, h8_4 int, i8_4 int, j8_4 int,
+a9_4 int, b9_4 int, c9_4 int, d9_4 int, e9_4 int, f9_4 int, g9_4 int, h9_4 int, i9_4 int, j9_4 int,
+a0_5 int, b0_5 int, c0_5 int, d0_5 int, e0_5 int, f0_5 int, g0_5 int, h0_5 int, i0_5 int, j0_5 int,
+a1_5 int, b1_5 int, c1_5 int, d1_5 int, e1_5 int, f1_5 int, g1_5 int, h1_5 int, i1_5 int, j1_5 int,
+a2_5 int, b2_5 int, c2_5 int, d2_5 int, e2_5 int, f2_5 int, g2_5 int, h2_5 int, i2_5 int, j2_5 int,
+a3_5 int, b3_5 int, c3_5 int, d3_5 int, e3_5 int, f3_5 int, g3_5 int, h3_5 int, i3_5 int, j3_5 int,
+a4_5 int, b4_5 int, c4_5 int, d4_5 int, e4_5 int, f4_5 int, g4_5 int, h4_5 int, i4_5 int, j4_5 int,
+a5_5 int, b5_5 int, c5_5 int, d5_5 int, e5_5 int, f5_5 int, g5_5 int, h5_5 int, i5_5 int, j5_5 int,
+a6_5 int, b6_5 int, c6_5 int, d6_5 int, e6_5 int, f6_5 int, g6_5 int, h6_5 int, i6_5 int, j6_5 int,
+a7_5 int, b7_5 int, c7_5 int, d7_5 int, e7_5 int, f7_5 int, g7_5 int, h7_5 int, i7_5 int, j7_5 int,
+a8_5 int, b8_5 int, c8_5 int, d8_5 int, e8_5 int, f8_5 int, g8_5 int, h8_5 int, i8_5 int, j8_5 int,
+a9_5 int, b9_5 int, c9_5 int, d9_5 int, e9_5 int, f9_5 int, g9_5 int, h9_5 int, i9_5 int, j9_5 int,
+a0_6 int, b0_6 int, c0_6 int, d0_6 int, e0_6 int, f0_6 int, g0_6 int, h0_6 int, i0_6 int, j0_6 int,
+a1_6 int, b1_6 int, c1_6 int, d1_6 int, e1_6 int, f1_6 int, g1_6 int, h1_6 int, i1_6 int, j1_6 int,
+a2_6 int, b2_6 int, c2_6 int, d2_6 int, e2_6 int, f2_6 int, g2_6 int, h2_6 int, i2_6 int, j2_6 int,
+a3_6 int, b3_6 int, c3_6 int, d3_6 int, e3_6 int, f3_6 int, g3_6 int, h3_6 int, i3_6 int, j3_6 int,
+a4_6 int, b4_6 int, c4_6 int, d4_6 int, e4_6 int, f4_6 int, g4_6 int, h4_6 int, i4_6 int, j4_6 int,
+a5_6 int, b5_6 int, c5_6 int, d5_6 int, e5_6 int, f5_6 int, g5_6 int, h5_6 int, i5_6 int, j5_6 int,
+a0_7 int, b0_7 int, c0_7 int, d0_7 int, e0_7 int, f0_7 int) returns integer
+as $$
+begin
+        raise info '%', a0;
+	return 0;
+end;
+$$language plpgsql;
+select test_fun_7('test para is 666',
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
+3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
+4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,
+5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,
+6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
+6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
+7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7);
+INFO:  test para is 666
+ test_fun_7 
+------------
+          0
+(1 row)
+
+drop function test_fun_7;
+create function test_fun_8(
+a0 varchar, b0 int, c0 int, d0 int, e0 int, f0 int, g0 int, h0 int, i0 int, j0 int,
+a1 int, b1 int, c1 int, d1 int, e1 int, f1 int, g1 int, h1 int, i1 int, j1 int,
+a2 int, b2 int, c2 int, d2 int, e2 int, f2 int, g2 int, h2 int, i2 int, j2 int,
+a3 int, b3 int, c3 int, d3 int, e3 int, f3 int, g3 int, h3 int, i3 int, j3 int,
+a4 int, b4 int, c4 int, d4 int, e4 int, f4 int, g4 int, h4 int, i4 int, j4 int,
+a5 int, b5 int, c5 int, d5 int, e5 int, f5 int, g5 int, h5 int, i5 int, j5 int,
+a6 int, b6 int, c6 int, d6 int, e6 int, f6 int, g6 int, h6 int, i6 int, j6 int,
+a7 int, b7 int, c7 int, d7 int, e7 int, f7 int, g7 int, h7 int, i7 int, j7 int,
+a8 int, b8 int, c8 int, d8 int, e8 int, f8 int, g8 int, h8 int, i8 int, j8 int,
+a9 int, b9 int, c9 int, d9 int, e9 int, f9 int, g9 int, h9 int, i9 int, j9 int,
+a0_1 int, b0_1 int, c0_1 int, d0_1 int, e0_1 int, f0_1 int, g0_1 int, h0_1 int, i0_1 int, j0_1 int,
+a1_1 int, b1_1 int, c1_1 int, d1_1 int, e1_1 int, f1_1 int, g1_1 int, h1_1 int, i1_1 int, j1_1 int,
+a2_1 int, b2_1 int, c2_1 int, d2_1 int, e2_1 int, f2_1 int, g2_1 int, h2_1 int, i2_1 int, j2_1 int,
+a3_1 int, b3_1 int, c3_1 int, d3_1 int, e3_1 int, f3_1 int, g3_1 int, h3_1 int, i3_1 int, j3_1 int,
+a4_1 int, b4_1 int, c4_1 int, d4_1 int, e4_1 int, f4_1 int, g4_1 int, h4_1 int, i4_1 int, j4_1 int,
+a5_1 int, b5_1 int, c5_1 int, d5_1 int, e5_1 int, f5_1 int, g5_1 int, h5_1 int, i5_1 int, j5_1 int,
+a6_1 int, b6_1 int, c6_1 int, d6_1 int, e6_1 int, f6_1 int, g6_1 int, h6_1 int, i6_1 int, j6_1 int,
+a7_1 int, b7_1 int, c7_1 int, d7_1 int, e7_1 int, f7_1 int, g7_1 int, h7_1 int, i7_1 int, j7_1 int,
+a8_1 int, b8_1 int, c8_1 int, d8_1 int, e8_1 int, f8_1 int, g8_1 int, h8_1 int, i8_1 int, j8_1 int,
+a9_1 int, b9_1 int, c9_1 int, d9_1 int, e9_1 int, f9_1 int, g9_1 int, h9_1 int, i9_1 int, j9_1 int,
+a0_2 int, b0_2 int, c0_2 int, d0_2 int, e0_2 int, f0_2 int, g0_2 int, h0_2 int, i0_2 int, j0_2 int,
+a1_2 int, b1_2 int, c1_2 int, d1_2 int, e1_2 int, f1_2 int, g1_2 int, h1_2 int, i1_2 int, j1_2 int,
+a2_2 int, b2_2 int, c2_2 int, d2_2 int, e2_2 int, f2_2 int, g2_2 int, h2_2 int, i2_2 int, j2_2 int,
+a3_2 int, b3_2 int, c3_2 int, d3_2 int, e3_2 int, f3_2 int, g3_2 int, h3_2 int, i3_2 int, j3_2 int,
+a4_2 int, b4_2 int, c4_2 int, d4_2 int, e4_2 int, f4_2 int, g4_2 int, h4_2 int, i4_2 int, j4_2 int,
+a5_2 int, b5_2 int, c5_2 int, d5_2 int, e5_2 int, f5_2 int, g5_2 int, h5_2 int, i5_2 int, j5_2 int,
+a6_2 int, b6_2 int, c6_2 int, d6_2 int, e6_2 int, f6_2 int, g6_2 int, h6_2 int, i6_2 int, j6_2 int,
+a7_2 int, b7_2 int, c7_2 int, d7_2 int, e7_2 int, f7_2 int, g7_2 int, h7_2 int, i7_2 int, j7_2 int,
+a8_2 int, b8_2 int, c8_2 int, d8_2 int, e8_2 int, f8_2 int, g8_2 int, h8_2 int, i8_2 int, j8_2 int,
+a9_2 int, b9_2 int, c9_2 int, d9_2 int, e9_2 int, f9_2 int, g9_2 int, h9_2 int, i9_2 int, j9_2 int,
+a0_3 int, b0_3 int, c0_3 int, d0_3 int, e0_3 int, f0_3 int, g0_3 int, h0_3 int, i0_3 int, j0_3 int,
+a1_3 int, b1_3 int, c1_3 int, d1_3 int, e1_3 int, f1_3 int, g1_3 int, h1_3 int, i1_3 int, j1_3 int,
+a2_3 int, b2_3 int, c2_3 int, d2_3 int, e2_3 int, f2_3 int, g2_3 int, h2_3 int, i2_3 int, j2_3 int,
+a3_3 int, b3_3 int, c3_3 int, d3_3 int, e3_3 int, f3_3 int, g3_3 int, h3_3 int, i3_3 int, j3_3 int,
+a4_3 int, b4_3 int, c4_3 int, d4_3 int, e4_3 int, f4_3 int, g4_3 int, h4_3 int, i4_3 int, j4_3 int,
+a5_3 int, b5_3 int, c5_3 int, d5_3 int, e5_3 int, f5_3 int, g5_3 int, h5_3 int, i5_3 int, j5_3 int,
+a6_3 int, b6_3 int, c6_3 int, d6_3 int, e6_3 int, f6_3 int, g6_3 int, h6_3 int, i6_3 int, j6_3 int,
+a7_3 int, b7_3 int, c7_3 int, d7_3 int, e7_3 int, f7_3 int, g7_3 int, h7_3 int, i7_3 int, j7_3 int,
+a8_3 int, b8_3 int, c8_3 int, d8_3 int, e8_3 int, f8_3 int, g8_3 int, h8_3 int, i8_3 int, j8_3 int,
+a9_3 int, b9_3 int, c9_3 int, d9_3 int, e9_3 int, f9_3 int, g9_3 int, h9_3 int, i9_3 int, j9_3 int,
+a0_4 int, b0_4 int, c0_4 int, d0_4 int, e0_4 int, f0_4 int, g0_4 int, h0_4 int, i0_4 int, j0_4 int,
+a1_4 int, b1_4 int, c1_4 int, d1_4 int, e1_4 int, f1_4 int, g1_4 int, h1_4 int, i1_4 int, j1_4 int,
+a2_4 int, b2_4 int, c2_4 int, d2_4 int, e2_4 int, f2_4 int, g2_4 int, h2_4 int, i2_4 int, j2_4 int,
+a3_4 int, b3_4 int, c3_4 int, d3_4 int, e3_4 int, f3_4 int, g3_4 int, h3_4 int, i3_4 int, j3_4 int,
+a4_4 int, b4_4 int, c4_4 int, d4_4 int, e4_4 int, f4_4 int, g4_4 int, h4_4 int, i4_4 int, j4_4 int,
+a5_4 int, b5_4 int, c5_4 int, d5_4 int, e5_4 int, f5_4 int, g5_4 int, h5_4 int, i5_4 int, j5_4 int,
+a6_4 int, b6_4 int, c6_4 int, d6_4 int, e6_4 int, f6_4 int, g6_4 int, h6_4 int, i6_4 int, j6_4 int,
+a7_4 int, b7_4 int, c7_4 int, d7_4 int, e7_4 int, f7_4 int, g7_4 int, h7_4 int, i7_4 int, j7_4 int,
+a8_4 int, b8_4 int, c8_4 int, d8_4 int, e8_4 int, f8_4 int, g8_4 int, h8_4 int, i8_4 int, j8_4 int,
+a9_4 int, b9_4 int, c9_4 int, d9_4 int, e9_4 int, f9_4 int, g9_4 int, h9_4 int, i9_4 int, j9_4 int,
+a0_5 int, b0_5 int, c0_5 int, d0_5 int, e0_5 int, f0_5 int, g0_5 int, h0_5 int, i0_5 int, j0_5 int,
+a1_5 int, b1_5 int, c1_5 int, d1_5 int, e1_5 int, f1_5 int, g1_5 int, h1_5 int, i1_5 int, j1_5 int,
+a2_5 int, b2_5 int, c2_5 int, d2_5 int, e2_5 int, f2_5 int, g2_5 int, h2_5 int, i2_5 int, j2_5 int,
+a3_5 int, b3_5 int, c3_5 int, d3_5 int, e3_5 int, f3_5 int, g3_5 int, h3_5 int, i3_5 int, j3_5 int,
+a4_5 int, b4_5 int, c4_5 int, d4_5 int, e4_5 int, f4_5 int, g4_5 int, h4_5 int, i4_5 int, j4_5 int,
+a5_5 int, b5_5 int, c5_5 int, d5_5 int, e5_5 int, f5_5 int, g5_5 int, h5_5 int, i5_5 int, j5_5 int,
+a6_5 int, b6_5 int, c6_5 int, d6_5 int, e6_5 int, f6_5 int, g6_5 int, h6_5 int, i6_5 int, j6_5 int,
+a7_5 int, b7_5 int, c7_5 int, d7_5 int, e7_5 int, f7_5 int, g7_5 int, h7_5 int, i7_5 int, j7_5 int,
+a8_5 int, b8_5 int, c8_5 int, d8_5 int, e8_5 int, f8_5 int, g8_5 int, h8_5 int, i8_5 int, j8_5 int,
+a9_5 int, b9_5 int, c9_5 int, d9_5 int, e9_5 int, f9_5 int, g9_5 int, h9_5 int, i9_5 int, j9_5 int,
+a0_6 int, b0_6 int, c0_6 int, d0_6 int, e0_6 int, f0_6 int, g0_6 int, h0_6 int, i0_6 int, j0_6 int,
+a1_6 int, b1_6 int, c1_6 int, d1_6 int, e1_6 int, f1_6 int, g1_6 int, h1_6 int, i1_6 int, j1_6 int,
+a2_6 int, b2_6 int, c2_6 int, d2_6 int, e2_6 int, f2_6 int, g2_6 int, h2_6 int, i2_6 int, j2_6 int,
+a3_6 int, b3_6 int, c3_6 int, d3_6 int, e3_6 int, f3_6 int, g3_6 int, h3_6 int, i3_6 int, j3_6 int,
+a4_6 int, b4_6 int, c4_6 int, d4_6 int, e4_6 int, f4_6 int, g4_6 int, h4_6 int, i4_6 int, j4_6 int,
+a5_6 int, b5_6 int, c5_6 int, d5_6 int, e5_6 int, f5_6 int, g5_6 int, h5_6 int, i5_6 int, j5_6 int,
+a0_7 int, b0_7 int, c0_7 int, d0_7 int, e0_7 int, f0_7 int, g0_7 int) returns integer
+as $$
+begin
+        raise info '%', a0;
+	return 0;
+end;
+$$language plpgsql;
+ERROR:  functions cannot have more than 666 arguments
+/*
+ * substrb
+ */
+--substrb(text, integer)
+--边界测试
+select substrb(null,1) from dual;
+ substrb 
+---------
+ 
+(1 row)
+
+select substrb('高斯Gauss开发部',0) from dual;
+     substrb     
+-----------------
+ 高斯Gauss开发部
+(1 row)
+
+select substrb('高斯Gauss开发部',1) from dual;
+     substrb     
+-----------------
+ 高斯Gauss开发部
+(1 row)
+
+select rawtohex(substrb('高斯Gauss开发部',20)) from dual;
+ rawtohex 
+----------
+ 20
+(1 row)
+
+select rawtohex(substrb('高斯Gauss开发部',21)) from dual;
+ rawtohex 
+----------
+ 
+(1 row)
+
+select rawtohex(substrb('高斯Gauss开发部',-1)) from dual;
+ rawtohex 
+----------
+ 20
+(1 row)
+
+select substrb('高斯Gauss开发部',-20) from dual;
+     substrb     
+-----------------
+ 高斯Gauss开发部
+(1 row)
+
+select substrb('高斯Gauss开发部',-21) from dual;
+ substrb 
+---------
+ 
+(1 row)
+
+--正常情况
+select rawtohex(substrb('高斯Gauss开发部',2)) from dual;
+                rawtohex                
+----------------------------------------
+ 2020e696af4761757373e5bc80e58f91e983a8
+(1 row)
+
+select substrb('高斯Gauss开发部',7) from dual;
+   substrb   
+-------------
+ Gauss开发部
+(1 row)
+
+select rawtohex(substrb('高斯Gauss开发部',-2)) from dual;
+ rawtohex 
+----------
+ 2020
+(1 row)
+
+select substrb('高斯Gauss开发部',-14) from dual;
+   substrb   
+-------------
+ Gauss开发部
+(1 row)
+
+--substrb(text,integer,integer)
+--边界测试
+select substrb(null,1,1) from dual;
+ substrb 
+---------
+ 
+(1 row)
+
+select substrb('高斯Gauss开发部',0,3) from dual;
+ substrb 
+---------
+ 高
+(1 row)
+
+select substrb('高斯Gauss开发部',1,3) from dual;
+ substrb 
+---------
+ 高
+(1 row)
+
+select rawtohex(substrb('高斯Gauss开发部',20,3)) from dual;
+ rawtohex 
+----------
+ 20
+(1 row)
+
+select substrb('高斯Gauss开发部',21,3) from dual;
+ substrb 
+---------
+ 
+(1 row)
+
+select rawtohex(substrb('高斯Gauss开发部',-1,3)) from dual;
+ rawtohex 
+----------
+ 20
+(1 row)
+
+select substrb('高斯Gauss开发部',-20,3) from dual;
+ substrb 
+---------
+ 高
+(1 row)
+
+select substrb('高斯Gauss开发部',-21,3) from dual;
+ substrb 
+---------
+ 
+(1 row)
+
+select substrb('高斯Gauss开发部',1,-1) from dual;
+ substrb 
+---------
+ 
+(1 row)
+
+select substrb('高斯Gauss开发部',1,20) from dual;
+     substrb     
+-----------------
+ 高斯Gauss开发部
+(1 row)
+
+select substrb('高斯Gauss开发部',1,21) from dual;
+     substrb     
+-----------------
+ 高斯Gauss开发部
+(1 row)
+
+--正常情况
+select rawtohex(substrb('高斯Gauss开发部',1,1)) from dual;
+ rawtohex 
+----------
+ 20
+(1 row)
+
+select rawtohex(substrb('高斯Gauss开发部',2,2)) from dual;
+ rawtohex 
+----------
+ 2020
+(1 row)
+
+select rawtohex(substrb('高斯Gauss开发部',2,5)) from dual;
+  rawtohex  
+------------
+ 2020e696af
+(1 row)
+
+select rawtohex(substrb('高斯Gauss开发部',2,10)) from dual;
+       rawtohex       
+----------------------
+ 2020e696af4761757373
+(1 row)
+
+select substrb('高斯Gauss开发部',7,5) from dual;
+ substrb 
+---------
+ Gauss
+(1 row)
+
+select rawtohex(substrb('高斯Gauss开发部',-1,1)) from dual;
+ rawtohex 
+----------
+ 20
+(1 row)
+
+select rawtohex(substrb('高斯Gauss开发部',-3,1)) from dual;
+ rawtohex 
+----------
+ 20
+(1 row)
+
+select rawtohex(substrb('高斯Gauss开发部',-3,2)) from dual;
+ rawtohex 
+----------
+ 2020
+(1 row)
+
+select substrb('高斯Gauss开发部',-3,3) from dual;
+ substrb 
+---------
+ 部
+(1 row)
+
+select substrb('高斯Gauss开发部',-14,5) from dual;
+ substrb 
+---------
+ Gauss
+(1 row)
+
+select substrb('高斯Gauss开发部',-14,8) from dual;
+ substrb 
+---------
+ Gauss开
+(1 row)
+
+select rawtohex(null) from dual;
+ rawtohex 
+----------
+ 
+(1 row)
+
+select rawtohex('') from dual;
+ rawtohex 
+----------
+ 
+(1 row)
+
+select rawtohex('1234567890abcdefABCDEF') from dual;
+                   rawtohex                   
+----------------------------------------------
+ 31323334353637383930616263646566414243444546
+(1 row)
+
+select rawtohex('hello,world,2012!') from dual;
+              rawtohex              
+------------------------------------
+ 68656c6c6f2c776f726c642c3230313221
+(1 row)
+
+select to_date('2009-8-1 19:01:01');
+         to_date          
+--------------------------
+ Sat Aug 01 19:01:01 2009
+(1 row)
+
+select to_date('2012-12-21');
+         to_date          
+--------------------------
+ Fri Dec 21 00:00:00 2012
+(1 row)
+
+select to_date('2012 - 12 - 16');
+ERROR:  the format of is not correct
+select to_date('2012:12: 16');
+ERROR:  the format is not correct
+
+select to_date('2012:12:16 10:10:11');
+         to_date          
+--------------------------
+ Sun Dec 16 10:10:11 2012
+(1 row)
+
+select to_date('2012:12:16 10:10: 11');
+ERROR:  the format of is not correct
+select to_date('2012:12:16 10:10:11:123456');
+ERROR:  the format is not correct
+
+select to_date('2012:12');
+ERROR:  the format is not correct
+select to_date('2012: 12');
+ERROR:  the format is not correct!
+select to_date('2012:13:11');
+ERROR:  the month = 13 is illegal
+select to_date('2012:12:35');
+ERROR:  the day = 35 for big month is illegal
+select to_date('2012:12:11 10:11:65');
+ERROR:  the second = 65  is illegal
+select to_date('2012:12:11 13:61:20');
+ERROR:  the minute = 61  is illegal
+SELECT PG_SIZE_PRETTY(-9223372036854775808);
+ERROR:  Parameter value should not be negative.
+SELECT PG_SIZE_PRETTY(-1);
+ERROR:  Parameter value should not be negative.
+--quotes in function name
+create schema "Schema""quote";
+create or replace function "Schema""quote"."Func""1"()
+returns integer
+as $$
+begin
+return 10;
+end $$
+language plpgsql;
+create or replace function func3_RT()
+returns integer
+as $$
+declare
+m int;
+begin 
+m := 5;
+m := m + 1;
+m := "Schema""quote"."Func""1"();
+return m;
+end 
+$$language plpgsql;
+select func3_RT();
+ func3_rt 
+----------
+       10
+(1 row)
+
+drop function "Schema""quote"."Func""1"();
+drop function func3_RT();
+drop schema "Schema""quote";
+\o /dev/null
+select * from pg_get_xidlimit();
+\o

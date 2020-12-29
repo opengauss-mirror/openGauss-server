@@ -30,7 +30,6 @@
 #include "access/transam.h"
 #include "utils/fmgroids.h"
 #include "../utils/pg_builtin_proc.h"
-#include "utils/builtins.h"
 
 static_assert(sizeof(true) == sizeof(char), "illegal bool size");
 static_assert(sizeof(false) == sizeof(char), "illegal bool size");
@@ -92,9 +91,7 @@ const Builtin_func* g_sorted_funcs[nBuiltinFuncs];
 
 void initBuiltinFuncs()
 {
-#ifdef ENABLE_MULTIPLE_NODES
     SortBuiltinFuncGroups(g_func_groups);
-#endif
 
     int nfunc = 0;
     for (int i = 0; i < g_nfuncgroups; i++) {
@@ -119,7 +116,7 @@ void initBuiltinFuncs()
 const Builtin_func* SearchBuiltinFuncByOid(Oid id)
 {
     /* Roughly check  */
-    if (!IsBuiltinFuncOid(id)) {
+    if (!IsSystemObjOid(id)) {
         return NULL;
     }
 

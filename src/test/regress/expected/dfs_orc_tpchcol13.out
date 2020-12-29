@@ -1,0 +1,112 @@
+set enable_global_stats = true;
+set current_schema=vector_engine;
+set enable_vector_engine=on;
+set enable_nestloop=off;
+explain (costs off) select
+	c_count,
+	count(*) as custdist
+from
+	(
+		select
+			c_custkey,
+			count(o_orderkey)
+		from
+			customer left outer join orders on
+				c_custkey = o_custkey
+				and o_comment not like '%special%request%'
+		group by
+			c_custkey
+	) as c_orders (c_custkey, c_count)
+group by
+	c_count
+order by
+	custdist desc,
+	c_count desc;
+                                                          QUERY PLAN                                                           
+-------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: (count(*)) DESC, c_orders.c_count DESC
+         Node/s: All datanodes
+         ->  Vector Sort
+               Sort Key: (count(*)) DESC, c_orders.c_count DESC
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: c_orders.c_count
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Spawn on: All datanodes
+                           ->  Vector Subquery Scan on c_orders
+                                 ->  Vector Sonic Hash Aggregate
+                                       Group By Key: vector_engine.customer.c_custkey
+                                       ->  Vector Hash Right Join
+                                             Hash Cond: (vector_engine.orders.o_custkey = vector_engine.customer.c_custkey)
+                                             ->  Vector Streaming(type: REDISTRIBUTE)
+                                                   Spawn on: All datanodes
+                                                   ->  Vector Append
+                                                         ->  Dfs Scan on orders
+                                                               Filter: ((o_comment)::text !~~ '%special%request%'::text)
+                                                         ->  Vector Adapter
+                                                               ->  Seq Scan on pg_delta_vector_engine_orders orders
+                                                                     Filter: ((o_comment)::text !~~ '%special%request%'::text)
+                                             ->  Vector Append
+                                                   ->  Dfs Scan on customer
+                                                   ->  Vector Adapter
+                                                         ->  Seq Scan on pg_delta_vector_engine_customer customer
+(27 rows)
+
+select
+	c_count,
+	count(*) as custdist
+from
+	(
+		select
+			c_custkey,
+			count(o_orderkey)
+		from
+			customer left outer join orders on
+				c_custkey = o_custkey
+				and o_comment not like '%special%request%'
+		group by
+			c_custkey
+	) as c_orders (c_custkey, c_count)
+group by
+	c_count
+order by
+	custdist desc,
+	c_count desc;
+ c_count | custdist 
+---------+----------
+       0 |      500
+      11 |       68
+      10 |       64
+      12 |       62
+       9 |       62
+       8 |       61
+      14 |       53
+      13 |       53
+      20 |       48
+       7 |       48
+      21 |       47
+      16 |       46
+      15 |       45
+      19 |       43
+      17 |       41
+      18 |       39
+       6 |       34
+      22 |       33
+      24 |       29
+      23 |       28
+      25 |       21
+      27 |       17
+      26 |       15
+       5 |       14
+      28 |        6
+       4 |        6
+      32 |        5
+      29 |        5
+      30 |        2
+       3 |        2
+      31 |        1
+       2 |        1
+       1 |        1
+(33 rows)
+

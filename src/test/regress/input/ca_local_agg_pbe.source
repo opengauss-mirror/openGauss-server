@@ -1,0 +1,6 @@
+set explain_perf_mode=normal;
+
+select avg(c5), avg(c7) from aggtable1 where c8=100 or c8=200 group by c8 order by c8;
+prepare p1(int) as select avg(c5), avg(c7) from aggtable1 where c8=$1 group by c8 order by c8;                                                                                                              execute p1(100);
+execute p1(200);
+explain (verbose on, costs off) execute p1(100);

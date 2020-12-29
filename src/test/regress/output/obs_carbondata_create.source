@@ -1,0 +1,353 @@
+--create database, obs server
+\c postgres
+DROP DATABASE IF EXISTS carbondata;
+NOTICE:  database "carbondata" does not exist, skipping
+CREATE DATABASE carbondata WITH DBCOMPATIBILITY 'ORA' ENCODING 'SQL_ASCII' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+\c carbondata
+CREATE SERVER obs_server FOREIGN DATA WRAPPER DFS_FDW OPTIONS (address 'obs.cn-north-7.ulanqab.huawei.com', type 'obs', access_key '19D772JBCACXX3KWS51D', secret_access_key 'I1gXxq3wZ2eSwkEOLZBickxdOMkhF45UZLfTUPYl');
+SET DATESTYLE='ISO, MDY';
+--create foreign table, format carbondata
+CREATE FOREIGN TABLE IF NOT EXISTS table_attribute
+(
+c_byte SMALLINT, 
+c_short SMALLINT, 
+c_int INT, 
+c_long BIGINT, 
+c_float REAL, 
+c_double DOUBLE PRECISION, 
+c_decimal1 DECIMAL(8, 2), 
+c_decimal2 DECIMAL(18, 8), 
+c_decimal3 DECIMAL(20, 9), 
+c_decimal4 DECIMAL(38, 30), 
+c_bool BOOLEAN, 
+c_binary1 bytea, 
+c_binary2 bytea, 
+c_date DATE, 
+c_timestamp TIMESTAMP, 
+c_string1 TEXT, 
+c_string2 TEXT, 
+c_varchar1 VARCHAR(30), 
+c_varchar2 VARCHAR(80), 
+c_varchar3 VARCHAR(500)
+) SERVER obs_server
+OPTIONS (
+	foldername '/gaussdbcheck/carbondatacheck/table_attribute/',
+	format 'CARBONDATA',
+	encoding 'UTF8',
+	totalrows '100000000'
+)distribute by roundrobin;
+--create foreign table, format carbondata, with partition
+CREATE FOREIGN TABLE IF NOT EXISTS table_attribute_2
+(
+c_byte SMALLINT, 
+c_short SMALLINT, 
+c_int INT, 
+c_long BIGINT, 
+c_float REAL, 
+c_double DOUBLE PRECISION, 
+c_decimal1 DECIMAL(8, 5), 
+c_decimal2 DECIMAL(18, 8), 
+c_decimal3 DECIMAL(20, 9), 
+c_decimal4 DECIMAL(38, 30), 
+c_bool BOOLEAN, 
+c_binary1 bytea, 
+c_binary2 bytea, 
+c_date DATE, 
+c_timestamp TIMESTAMP, 
+c_string1 TEXT, 
+c_string2 TEXT, 
+c_varchar1 VARCHAR(80), 
+c_varchar2 VARCHAR(80), 
+c_varchar3 VARCHAR(500)
+) SERVER obs_server
+OPTIONS (
+	foldername '/gaussdbcheck/carbondatacheck/table_attribute/',
+	format 'CARBONDATA',
+	encoding 'UTF8',
+	totalrows '100000000'
+)distribute by roundrobin  partition by (c_int, c_bool) automapped;
+ERROR:  The obs partition foreign table is not supported on text, csv, carbondata format.
+\parallel on
+--create foreign table, format carbondata
+CREATE FOREIGN TABLE IF NOT EXISTS data_filter
+(
+c_byte SMALLINT, 
+c_short SMALLINT, 
+c_int INT, 
+c_long BIGINT, 
+c_float REAL, 
+c_double DOUBLE PRECISION, 
+c_decimal1 DECIMAL(7, 2), 
+c_decimal2 DECIMAL(8, 5), 
+c_decimal3 DECIMAL(18, 9), 
+c_decimal4 DECIMAL(38, 5), 
+c_bool BOOLEAN, 
+c_binary1 bytea, 
+c_binary2 bytea, 
+c_date DATE, 
+c_timestamp TIMESTAMP, 
+c_string1 TEXT, 
+c_string2 TEXT, 
+c_varchar1 VARCHAR(80), 
+c_varchar2 VARCHAR(80), 
+c_varchar3 VARCHAR(500)
+) SERVER obs_server
+OPTIONS (
+	foldername '/gaussdbcheck/carbondatacheck/data_filter/',
+	format 'CARBONDATA',
+	encoding 'UTF8',
+	totalrows '100000000'
+)distribute by roundrobin;
+CREATE FOREIGN TABLE IF NOT EXISTS big_data
+(
+c_byte SMALLINT, 
+c_short SMALLINT, 
+c_int INT, 
+c_long BIGINT, 
+c_float REAL, 
+c_double DOUBLE PRECISION, 
+c_decimal1 DECIMAL(10, 5), 
+c_decimal2 DECIMAL(18, 8), 
+c_decimal3 DECIMAL(20, 9), 
+c_decimal4 DECIMAL(38, 30), 
+c_bool BOOLEAN, 
+c_binary1 bytea, 
+c_binary2 bytea, 
+c_date DATE, 
+c_timestamp TIMESTAMP, 
+c_string1 TEXT, 
+c_string2 TEXT, 
+c_varchar1 VARCHAR(80), 
+c_varchar2 VARCHAR(80), 
+c_varchar3 VARCHAR(500)
+) SERVER obs_server
+OPTIONS (
+	foldername '/gaussdbcheck/carbondatacheck/data_bigdata/',
+	format 'CARBONDATA',
+	encoding 'UTF8',
+	totalrows '100000000'
+)distribute by roundrobin;
+CREATE FOREIGN TABLE IF NOT EXISTS data_filter_gzip
+(
+c_byte SMALLINT, 
+c_short SMALLINT, 
+c_int INT, 
+c_long BIGINT, 
+c_float REAL, 
+c_double DOUBLE PRECISION, 
+c_decimal1 DECIMAL(7, 2), 
+c_decimal2 DECIMAL(8, 5), 
+c_decimal3 DECIMAL(18, 9), 
+c_decimal4 DECIMAL(38, 5), 
+c_bool BOOLEAN, 
+c_binary1 bytea, 
+c_binary2 bytea, 
+c_date DATE, 
+c_timestamp TIMESTAMP, 
+c_string1 TEXT, 
+c_string2 TEXT, 
+c_varchar1 VARCHAR(80), 
+c_varchar2 VARCHAR(80), 
+c_varchar3 VARCHAR(500)
+) SERVER obs_server
+OPTIONS (
+	foldername '/gaussdbcheck/carbondatacheck/data_filter_gzip/',
+	format 'CARBONDATA',
+	encoding 'UTF8',
+	totalrows '100000000'
+)distribute by roundrobin;
+CREATE FOREIGN TABLE IF NOT EXISTS data_filter_gzip_sort_invert
+(
+c_byte SMALLINT, 
+c_short SMALLINT, 
+c_int INT, 
+c_long BIGINT, 
+c_float REAL, 
+c_double DOUBLE PRECISION, 
+c_decimal1 DECIMAL(7, 2), 
+c_decimal2 DECIMAL(8, 5), 
+c_decimal3 DECIMAL(18, 9), 
+c_decimal4 DECIMAL(38, 5), 
+c_bool BOOLEAN, 
+c_binary1 bytea, 
+c_binary2 bytea, 
+c_date DATE, 
+c_timestamp TIMESTAMP, 
+c_string1 TEXT, 
+c_string2 TEXT, 
+c_varchar1 VARCHAR(80), 
+c_varchar2 VARCHAR(80), 
+c_varchar3 VARCHAR(500)
+) SERVER obs_server
+OPTIONS (
+	foldername '/gaussdbcheck/carbondatacheck/data_filter_gzip_sort_invert/',
+	format 'CARBONDATA',
+	encoding 'UTF8',
+	totalrows '100000000'
+)distribute by roundrobin;
+CREATE FOREIGN TABLE IF NOT EXISTS data_filter_snappy
+(
+c_byte SMALLINT, 
+c_short SMALLINT, 
+c_int INT, 
+c_long BIGINT, 
+c_float REAL, 
+c_double DOUBLE PRECISION, 
+c_decimal1 DECIMAL(7, 2), 
+c_decimal2 DECIMAL(8, 5), 
+c_decimal3 DECIMAL(18, 9), 
+c_decimal4 DECIMAL(38, 5), 
+c_bool BOOLEAN, 
+c_binary1 bytea, 
+c_binary2 bytea, 
+c_date DATE, 
+c_timestamp TIMESTAMP, 
+c_string1 TEXT, 
+c_string2 TEXT, 
+c_varchar1 VARCHAR(80), 
+c_varchar2 VARCHAR(80), 
+c_varchar3 VARCHAR(500)
+) SERVER obs_server
+OPTIONS (
+	foldername '/gaussdbcheck/carbondatacheck/data_filter_snappy/',
+	format 'CARBONDATA',
+	encoding 'UTF8',
+	totalrows '100000000'
+)distribute by roundrobin;
+CREATE FOREIGN TABLE IF NOT EXISTS data_filter_snappy_sort_invert
+(
+c_byte SMALLINT, 
+c_short SMALLINT, 
+c_int INT, 
+c_long BIGINT, 
+c_float REAL, 
+c_double DOUBLE PRECISION, 
+c_decimal1 DECIMAL(7, 2), 
+c_decimal2 DECIMAL(8, 5), 
+c_decimal3 DECIMAL(18, 9), 
+c_decimal4 DECIMAL(38, 5), 
+c_bool BOOLEAN, 
+c_binary1 bytea, 
+c_binary2 bytea, 
+c_date DATE, 
+c_timestamp TIMESTAMP, 
+c_string1 TEXT, 
+c_string2 TEXT, 
+c_varchar1 VARCHAR(80), 
+c_varchar2 VARCHAR(80), 
+c_varchar3 VARCHAR(500)
+) SERVER obs_server
+OPTIONS (
+	foldername '/gaussdbcheck/carbondatacheck/data_filter_snappy_sort_invert/',
+	format 'CARBONDATA',
+	encoding 'UTF8',
+	totalrows '100000000'
+)distribute by roundrobin;
+CREATE FOREIGN TABLE IF NOT EXISTS data_filter_zstd
+(
+c_byte SMALLINT, 
+c_short SMALLINT, 
+c_int INT, 
+c_long BIGINT, 
+c_float REAL, 
+c_double DOUBLE PRECISION, 
+c_decimal1 DECIMAL(7, 2), 
+c_decimal2 DECIMAL(8, 5), 
+c_decimal3 DECIMAL(18, 9), 
+c_decimal4 DECIMAL(38, 5), 
+c_bool BOOLEAN, 
+c_binary1 bytea, 
+c_binary2 bytea, 
+c_date DATE, 
+c_timestamp TIMESTAMP, 
+c_string1 TEXT, 
+c_string2 TEXT, 
+c_varchar1 VARCHAR(80), 
+c_varchar2 VARCHAR(80), 
+c_varchar3 VARCHAR(500)
+) SERVER obs_server
+OPTIONS (
+	foldername '/gaussdbcheck/carbondatacheck/data_filter_zstd/',
+	format 'CARBONDATA',
+	encoding 'UTF8',
+	totalrows '100000000'
+)distribute by roundrobin;
+CREATE FOREIGN TABLE IF NOT EXISTS data_filter_zstd_sort_invert
+(
+c_byte SMALLINT, 
+c_short SMALLINT, 
+c_int INT, 
+c_long BIGINT, 
+c_float REAL, 
+c_double DOUBLE PRECISION, 
+c_decimal1 DECIMAL(7, 2), 
+c_decimal2 DECIMAL(8, 5), 
+c_decimal3 DECIMAL(18, 9), 
+c_decimal4 DECIMAL(38, 5), 
+c_bool BOOLEAN, 
+c_binary1 bytea, 
+c_binary2 bytea, 
+c_date DATE, 
+c_timestamp TIMESTAMP, 
+c_string1 TEXT, 
+c_string2 TEXT, 
+c_varchar1 VARCHAR(80), 
+c_varchar2 VARCHAR(80), 
+c_varchar3 VARCHAR(500)
+) SERVER obs_server
+OPTIONS (
+	foldername '/gaussdbcheck/carbondatacheck/data_filter_zstd_sort_invert/',
+	format 'CARBONDATA',
+	encoding 'UTF8',
+	totalrows '100000000'
+)distribute by roundrobin;
+--create foreign table, format orc
+CREATE FOREIGN TABLE IF NOT EXISTS orc_tbl(
+ N_NATIONKEY INT4,
+ N_NAME TEXT,
+ N_REGIONKEY INT4,
+ N_COMMENT TEXT)
+SERVER obs_server
+OPTIONS(
+	foldername '/gaussdbcheck/obsorccheck/mppdb.db/nation_orc11_64stripe/',
+	format 'orc', 
+	encoding 'UTF8',
+	totalrows '100000000'
+)
+distribute by roundrobin;
+\parallel off
+\c postgres
+DROP DATABASE IF EXISTS carbondata_td;
+NOTICE:  database "carbondata_td" does not exist, skipping
+CREATE DATABASE carbondata_td WITH DBCOMPATIBILITY 'TD' ENCODING 'SQL_ASCII' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0;
+\c carbondata_td
+CREATE SERVER obs_server FOREIGN DATA WRAPPER DFS_FDW OPTIONS (address 'obs.cn-north-7.ulanqab.huawei.com', type 'obs', access_key '19D772JBCACXX3KWS51D', secret_access_key 'I1gXxq3wZ2eSwkEOLZBickxdOMkhF45UZLfTUPYl');
+CREATE FOREIGN TABLE IF NOT EXISTS data_filter
+(
+c_byte SMALLINT, 
+c_short SMALLINT, 
+c_int INT, 
+c_long BIGINT, 
+c_float REAL, 
+c_double DOUBLE PRECISION, 
+c_decimal1 DECIMAL(8, 5), 
+c_decimal2 DECIMAL(18, 8), 
+c_decimal3 DECIMAL(20, 9), 
+c_decimal4 DECIMAL(38, 30), 
+c_bool BOOLEAN, 
+c_binary1 bytea, 
+c_binary2 bytea, 
+c_date TIMESTAMP, 
+c_timestamp TIMESTAMP, 
+c_string1 TEXT, 
+c_string2 TEXT, 
+c_varchar1 VARCHAR(80), 
+c_varchar2 VARCHAR(80), 
+c_varchar3 VARCHAR(500)
+) SERVER obs_server
+OPTIONS (
+	foldername '/gaussdbcheck/carbondatacheck/data_filter/',
+	format 'CARBONDATA',
+	encoding 'UTF8',
+	totalrows '100000000'
+)distribute by roundrobin;

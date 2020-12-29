@@ -271,7 +271,7 @@ static avc_cache* sepgsql_avc_compute(const char* scontext, const char* tcontext
 
     avc_slots[index] = lcons(cache, avc_slots[index]);
 
-    (void)MemoryContextSwitchTo(oldctx);
+    MemoryContextSwitchTo(oldctx);
 
     return cache;
 }

@@ -1,7 +1,7 @@
 -- OWNER TO
 CREATE TABLE hw_cstore_alter_t1(a int, b text) WITH(orientation=column);
 CREATE INDEX ON hw_cstore_alter_t1(a);
-CREATE ROLE cstore_role PASSWORD 'ttest@123';
+CREATE ROLE cstore_role PASSWORD 'gauss@123';
 ALTER TABLE hw_cstore_alter_t1 OWNER TO cstore_role;
 DROP TABLE hw_cstore_alter_t1;
 --  unsupported feature
@@ -128,11 +128,11 @@ NOTICE:  identifier "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghi
 ERROR:  column "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123" of relation "hw_cstore_alter_t10" already exists
 CREATE INDEX idx1_hw_cstore_alter_t10 ON hw_cstore_alter_t10(b);
 \d+ idx1_hw_cstore_alter_t10
---?Index "pg_temp_datanod_.*"
+--?.*
  Column |  Type   | Definition | Storage 
 --------+---------+------------+---------
  b      | integer | b          | plain
---?psort, for table "pg_temp_datanod.*"
+--?.*
 
 ALTER INDEX idx1_hw_cstore_alter_t10 RENAME TO idx2_hw_cstore_alter_t10; -- ok
 DROP TABLE hw_cstore_alter_t10;
@@ -309,17 +309,17 @@ ERROR:  Un-support feature
 DETAIL:  Forbid to set or change inner option "internal_mask"
 ALTER TABLE hw_cstore_alter_t16 SET (FILLFACTOR = 70); -- failed
 ERROR:  Un-support feature
-DETAIL:  Forbid to set option "fillfactor" for column/timeseries relation
+DETAIL:  Forbid to set option "fillfactor" for column relation
 ALTER TABLE hw_cstore_alter_t16 RESET (FILLFACTOR); -- failed
 ERROR:  Un-support feature
-DETAIL:  Forbid to set option "fillfactor" for column/timeseries relation
+DETAIL:  Forbid to set option "fillfactor" for column relation
 ALTER TABLE hw_cstore_alter_t16 SET (autovacuum_enabled = true); -- ok
 ALTER TABLE hw_cstore_alter_t16 RESET (autovacuum_enabled); -- ok
 ALTER TABLE hw_cstore_alter_t16 SET (security_barrier); -- failed
 ERROR:  unrecognized parameter "security_barrier"
 ALTER TABLE hw_cstore_alter_t16 RESET (security_barrier); -- failed
 ERROR:  Un-support feature
-DETAIL:  Forbid to set option "security_barrier" for column/timeseries relation
+DETAIL:  Forbid to set option "security_barrier" for column relation
 \d+ hw_cstore_alter_t16
 --?.*
  Column |  Type   | Modifiers | Storage | Stats target | Description 
@@ -328,6 +328,8 @@ DETAIL:  Forbid to set option "security_barrier" for column/timeseries relation
  b      | integer |           | plain   |              | 
  c      | integer |           | plain   |              | 
 Has OIDs: no
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
 Options: orientation=column, compression=low
 
 -- 6.4.4.1.2 psort table
@@ -385,8 +387,8 @@ DETAIL:  Forbid to set option "autovacuum_enabled" for psort index
 DROP INDEX idx1_hw_cstore_alter_t16;
 DROP TABLE hw_cstore_alter_t16;
 -- 6.5 alter cstore partition table owner
-CREATE USER hw_user_u1 password 'TTEST@123';
-CREATE TABLE hw_cstore_alter_t17 (a int, b int, c int) with (orientation = column) 
+CREATE USER hw_user_u1 password 'GAUSS@123';
+CREATE TABLE hw_cstore_alter_t17 (a int, b int, c int) with (orientation = column) distribute by hash(a)
 partition by range (a)
 (
     partition p1  values less than (1000),
@@ -397,8 +399,8 @@ CREATE INDEX idx1_hw_cstore_alter_t17 on hw_cstore_alter_t17 using PSORT (a) loc
 ALTER TABLE hw_cstore_alter_t17 owner to hw_user_u1;
 DROP TABLE hw_cstore_alter_t17;
 DROP USER hw_user_u1;
-CREATE USER hw_user_u2 password 'TTEST@123';
-CREATE TABLE hw_cstore_alter_t18 (a int, b int, c int) with (orientation = column) 
+CREATE USER hw_user_u2 password 'GAUSS@123';
+CREATE TABLE hw_cstore_alter_t18 (a int, b int, c int) with (orientation = column) distribute by hash(a)
 partition by range (a)
 (
     partition p1  values less than (1000),

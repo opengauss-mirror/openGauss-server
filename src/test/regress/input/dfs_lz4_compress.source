@@ -1,0 +1,181 @@
+create schema lz4_test;
+set current_schema=lz4_test;
+
+-- prepare the table
+create table lz4_int_1(a int) tablespace hdfs_ts; --snappy+speed
+create table lz4_int_2(a int) with(compression=middle) tablespace hdfs_ts; --snappy+high
+create table lz4_int_3(a int) with(compression=lz4) tablespace hdfs_ts; --lz4
+
+create table lz4_string_1(a int, b varchar(200)) tablespace hdfs_ts; --snappy+speed
+create table lz4_string_2(a int, b varchar(200)) with(compression=middle) tablespace hdfs_ts; --snappy+high
+create table lz4_string_3(a int, b varchar(200)) with(compression=lz4) tablespace hdfs_ts; --lz4
+create foreign table lz4_string_3_f( a int, b varchar(200))
+server hdfs_server
+OPTIONS (format 'orc', foldername '/@hdfsstoreplus@/dfs_init_004/tablespace_secondary/regression/lz4_test.lz4_string_3')
+distribute by roundrobin;
+
+create table lz4_decimal_1(a int, b decimal(7,2)) tablespace hdfs_ts; --snappy+speed
+create table lz4_decimal_2(a int, b decimal(7,2)) with(compression=middle) tablespace hdfs_ts; --snappy+high
+create table lz4_decimal_3(a int, b decimal(7,2)) with(compression=lz4) tablespace hdfs_ts; --lz4
+
+create table lz4_double_1(a int, b float8) tablespace hdfs_ts; --snappy+speed
+create table lz4_double_2(a int, b float8) with(compression=middle) tablespace hdfs_ts; --snappy+high
+create table lz4_double_3(a int, b float8) with(compression=lz4) tablespace hdfs_ts; --lz4
+
+create table lz4_string_4(a int, b varchar(200)) with(compression=yes)tablespace hdfs_ts;
+create table lz4_string_5(a int, b varchar(200)) with(compression=low)tablespace hdfs_ts;
+create table lz4_string_6(a int, b varchar(200)) with(compression=high)tablespace hdfs_ts;
+
+create table pck_test_1(a int, b varchar(200), partial cluster key(b)) tablespace hdfs_ts;
+create table lineitem_1 (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT) with(compression=low) tablespace hdfs_ts;
+
+create table lineitem_2 (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT) with(compression=middle) tablespace hdfs_ts;
+ 
+create table lineitem_3 (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT) with(compression=lz4) tablespace hdfs_ts;
+
+create foreign table  customer_f ( 
+       c_customer_sk           int         ,
+       c_customer_id           char(16)    ,
+       c_current_cdemo_sk      int         ,
+       c_current_hdemo_sk      int         ,
+       c_current_addr_sk       int         ,
+       c_first_shipto_date_sk  int         ,
+       c_first_sales_date_sk   int         ,
+       c_salutation            char(10)    ,
+       c_first_name            char(20)    ,
+       c_last_name             char(30)    ,
+       c_preferred_cust_flag   char(1)     ,
+       c_birth_day             int         ,
+       c_birth_month           int         ,
+       c_birth_year            int         ,
+       c_birth_country         varchar(20) ,
+       c_login                 char(13)    ,
+       c_email_address         char(50)    ,
+       c_last_review_date      char(10)    ) 
+server hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/tpcds_10x.db/customer')
+distribute by roundrobin;
+
+Create foreign table lineitem_f (
+ L_ORDERKEY INT4,
+ L_PARTKEY INT4,
+ L_SUPPKEY INT4,
+ L_LINENUMBER INT4,
+ L_QUANTITY FLOAT8,
+ L_EXTENDEDPRICE FLOAT8,
+ L_DISCOUNT FLOAT8,
+ L_TAX FLOAT8,
+ L_RETURNFLAG TEXT,
+ L_LINESTATUS TEXT,
+ L_SHIPDATE TEXT,
+ L_COMMITDATE TEXT,
+ L_RECEIPTDATE TEXT,
+ L_SHIPINSTRUCT TEXT,
+ L_SHIPMODE TEXT,
+ L_COMMENT TEXT)
+SERVER hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/mppdb.db/lineitem_orc11_64stripe/')
+distribute by roundrobin;
+
+-- load the data
+insert into lineitem_1 (select * from lineitem_f limit 100000);
+insert into lineitem_2 (select * from lineitem_f limit 100000);
+insert into lineitem_3 (select * from lineitem_f limit 100000);
+
+insert into lz4_int_1 (select c_customer_sk from customer_f limit 100000);
+insert into lz4_int_2 (select c_customer_sk from customer_f limit 100000);
+insert into lz4_int_3 (select c_customer_sk from customer_f limit 100000);
+
+insert into lz4_string_1 (select c_customer_sk, c_email_address from customer_f limit 100000);
+insert into lz4_string_2 (select c_customer_sk, c_email_address from customer_f limit 100000);
+insert into lz4_string_3 (select c_customer_sk, c_email_address from customer_f limit 100000);
+insert into lz4_string_4 (select c_customer_sk, c_email_address from customer_f limit 100000);
+insert into lz4_string_5 (select c_customer_sk, c_email_address from customer_f limit 100000);
+insert into lz4_string_6 (select c_customer_sk, c_email_address from customer_f limit 100000);
+insert into pck_test_1 (select c_customer_sk, c_email_address from customer_f limit 100000);
+
+insert into lz4_decimal_1 (select L_ORDERKEY, L_DISCOUNT from lineitem_f limit 100000);
+insert into lz4_decimal_2 (select L_ORDERKEY, L_DISCOUNT from lineitem_f limit 100000);
+insert into lz4_decimal_3 (select L_ORDERKEY, L_DISCOUNT from lineitem_f limit 100000);
+
+insert into lz4_double_1 (select L_ORDERKEY, L_DISCOUNT from lineitem_f limit 100000);
+insert into lz4_double_2 (select L_ORDERKEY, L_DISCOUNT from lineitem_f limit 100000);
+insert into lz4_double_3 (select L_ORDERKEY, L_DISCOUNT from lineitem_f limit 100000);
+
+-- test lz4 select, update, delete
+select * from lz4_string_3 order by 1 limit 5;
+update lz4_string_3 set b ='hoholy' where a = (select a from lz4_string_3 order by 1 offset 10000 limit 1);
+select count(*) from lz4_string_3 where b ='hoholy';
+delete from lz4_string_3 where b ='hoholy';
+
+-- test lz4 foreign table
+select * from (select * from lz4_string_3 minus all select * from lz4_string_3_f) order by 1,2 limit 5;
+
+-- test lz4 compression ratio vs snappy compression ratio
+select ((b - a)/b)::float8 from (select pg_table_size('lz4_int_3') as a, pg_table_size('lz4_int_1') as b);
+select ((b - a)/b)::float8 from (select pg_table_size('lz4_string_3') as a, pg_table_size('lz4_string_1') as b);
+select ((b - a)/b)::float8 from (select pg_table_size('lz4_decimal_3') as a, pg_table_size('lz4_decimal_1') as b);
+select ((b - a)/b)::float8 from (select pg_table_size('lz4_double_3') as a, pg_table_size('lz4_double_1') as b);
+select ((b - a)/b)::float8 from (select pg_table_size('lineitem_3') as a, pg_table_size('lineitem_1') as b);
+
+-- test speed vs compression
+select ((b - a)/b)::float8 from (select pg_table_size('lz4_int_2') as a, pg_table_size('lz4_int_1') as b);
+select ((b - a)/b)::float8 from (select pg_table_size('lz4_string_2') as a, pg_table_size('lz4_string_1') as b);
+select ((b - a)/b)::float8 from (select pg_table_size('lz4_decimal_2') as a, pg_table_size('lz4_decimal_1') as b);
+select ((b - a)/b)::float8 from (select pg_table_size('lz4_double_2') as a, pg_table_size('lz4_double_1') as b);
+select ((b - a)/b)::float8 from (select pg_table_size('lineitem_2') as a, pg_table_size('lineitem_1') as b);
+
+-- test pck
+select * from pck_test_1 where b is NULL order by 1,2 limit 5;
+select * from pck_test_1 where b = 'hoholy' order by 1,2 limit 5;
+select * from pck_test_1 where b is NOT NULL order by 1,2 limit 5;
+select * from pck_test_1 where a is NOT NULL order by 1,2 limit 5;
+
+-- clean
+drop schema lz4_test CASCADE;

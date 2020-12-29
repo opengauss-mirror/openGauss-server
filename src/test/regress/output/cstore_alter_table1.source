@@ -318,12 +318,6 @@ ALTER TABLE alter_addcols_55 ADD COLUMN hh box;
 ERROR:  type "box" is not supported in column store
 ALTER TABLE alter_addcols_55 ADD COLUMN ii polygon;
 ERROR:  type "polygon" is not supported in column store
-ALTER TABLE alter_addcols_55 ADD COLUMN ll float8[];
-ERROR:  type "double precision[]" is not supported in column store
-ALTER TABLE alter_addcols_55 ADD COLUMN mm float4[];
-ERROR:  type "real[]" is not supported in column store
-ALTER TABLE alter_addcols_55 ADD COLUMN nn int2[];
-ERROR:  type "smallint[]" is not supported in column store
 INSERT INTO alter_addcols_55 (initial, a, b, c, d, e, f, g, h, i, j, k, l, m, o, p, q, r, s, u,
 	v, w, x, y)
    VALUES (1, 2, 3, 4, 5, 6.1, 7.2, 8.3, 9.4, 'a', 'b', 'c', 'd', 'e', '2015-04-10 09:00:00 PST', '2015-04-10 09:00:00', 

@@ -12,7 +12,7 @@ INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
 INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
 INSERT INTO alter_addcols_91 SELECT * FROM alter_addcols_91;
 CREATE TABLE alter_addcols_92 ( a int , c int, b varchar(50) not null);
-INSERT INTO alter_addcols_92 VALUES (generate_series(1,10), 2, 'zzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzzxuefuzzzzz');
+INSERT INTO alter_addcols_92 VALUES (generate_series(1,10), 2, 'zhangxuefuzhangxuefuzhangxuefuzhangxuefuzhang');
 INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
 INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;
 INSERT INTO alter_addcols_92 SELECT * FROM alter_addcols_92;

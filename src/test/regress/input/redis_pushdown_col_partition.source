@@ -1,4 +1,4 @@
-create table t1(c1 int, c2 int) with(orientation = column)  
+create table t1(c1 int, c2 int) with(orientation = column) distribute by hash (c1)
 PARTITION BY RANGE (c2)
 (
         partition p0 values less than (10),

@@ -9,7 +9,7 @@ truncate table results.result_tables,results.result_objects;
 \! rm -rf @testtablespace@/new_tablespace_1
 drop tablespace if exists new_tablespace_1;
 CREATE TABLESPACE new_tablespace_1 LOGGING DATAFILE '@testtablespace@/new_tablespace_1';
-create user user1 WITH ENCRYPTED PASSWORD 'ttest@123';
+create user user1 WITH ENCRYPTED PASSWORD 'gauss@123';
 
 CREATE OR REPLACE PROCEDURE save_time(object_type_in IN text, object_name_in IN text)
 AS

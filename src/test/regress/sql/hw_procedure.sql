@@ -1596,14 +1596,14 @@ DROP FUNCTION IF EXISTS f_add;
 
 CREATE FUNCTION func_add_sql_arg2(num1 integer, num2 integer) RETURN integer
 AS
-BEGIN
+BEGIN 
 RETURN num1 + num2;
 END;
 /
 
 CREATE FUNCTION func_add_sql_no_arg() RETURN integer
 AS
-BEGIN
+BEGIN 
 RETURN 1;
 END;
 /
@@ -1611,14 +1611,14 @@ END;
 create or replace procedure f_add_no_arg
 as
 begin
-	func_add_sql_arg2;
+    func_add_sql2;
 end;
 /
 
 create or replace procedure f_add
 as
 begin
-	func_add_sql_arg2(3,4);
+    func_add_sql2(3,4);
 end;
 /
 
@@ -1632,7 +1632,7 @@ DROP FUNCTION IF EXISTS f_add;
 create or replace procedure func_proc_no_arg
 as
 begin
-	func_add_sql_no_arg;
+    func_add_sql_no_arg;
 end;
 /
 

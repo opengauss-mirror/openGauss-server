@@ -82,7 +82,7 @@ struct BBOX_READ_FILE_IO {
 typedef struct BBOX_BLACKLIST {
     void* pBlackStartAddr; /* start address of blacklist */
     void* pBlackEndAddr;   /* end address of blacklist */
-    unsigned int uiLength; /* length of blacklist */
+    unsigned long long uiLength; /* length of blacklist */
 } BBOX_BLACKLIST_STRU;
 
 extern BBOX_ATOMIC_STRU g_stLockBlackList; /* it will be locked when core dump */
@@ -93,14 +93,11 @@ extern int BBOX_GetCharFromFile(struct BBOX_READ_FILE_IO* pstIO);
 extern int BBOX_StringSwitchInt(struct BBOX_READ_FILE_IO* pstIO, size_t* pAddress);
 extern int BBOX_SkipToLineEnd(struct BBOX_READ_FILE_IO* pstReadIO);
 
-/* show blacklist */
-extern void _BBOX_ShowBlackList(void);
-
 /* find if a memory segment overlaps with the memory segment in the blacklist */
-extern BBOX_BLACKLIST_STRU* _BBOX_FindAddrInBlackList(void* pStartAddress, void* pEndAddress);
+extern BBOX_BLACKLIST_STRU* _BBOX_FindAddrInBlackList(const void* pStartAddress, const void* pEndAddress);
 
 /* add blacklist address */
-extern int _BBOX_AddBlackListAddress(void* pAddress, unsigned int uiLen);
+extern int _BBOX_AddBlackListAddress(void* pAddress, unsigned long long uiLen);
 
 /* remove blacklist address */
 extern int _BBOX_RmvBlackListAddress(void* pAddress);

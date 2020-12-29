@@ -1,0 +1,150 @@
+set current_schema='shipping_schema';
+----row store table----
+--case1: shipping--
+explain (analyze off ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off)
+select concat(t1,t1.c) from shipping_test_row t1, shipping_test_row t2 where t1.b=t1.b;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Nested Loop
+   ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+   ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+(3 rows)
+
+--case2: function and cast nested shipping--
+explain (analyze off ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off)
+select concat(t2.a,'--',min((t1.b::numeric))) from shipping_test_row t1, shipping_test_row t2 where t1.b=t1.b group by t2.a;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  HashAggregate
+         Group By Key: t2.a
+         ->  Nested Loop
+               ->  Streaming(type: BROADCAST)
+                     ->  Seq Scan on shipping_test_row t1
+                           Filter: (b IS NOT NULL)
+               ->  Materialize
+                     ->  Seq Scan on shipping_test_row t2
+(9 rows)
+
+--ArrayExpr--
+explain (analyze off ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off)
+select concat(array[t1.a,t1.b],t2.a) from shipping_test_row t1, shipping_test_row t2 where t1.a=t1.a;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Nested Loop
+   ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+   ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+(3 rows)
+
+--function nested--
+explain (analyze off ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off)
+select concat(t2.a,'--',min(array[t1.a,t1.b])) from shipping_test_row t1, shipping_test_row t2 where t1.b=t1.b group by t2.a;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ HashAggregate
+   Group By Key: t2.a
+   ->  Nested Loop
+         ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+         ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+(5 rows)
+
+explain (analyze off ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off)
+select concat(t2.a,'--','t2.b',concat(concat((array[t1.a,t1.b]),t1.a),'XXX'),'t2.b') from shipping_test_row t1, shipping_test_row t2 where t1.b=t1.b group by t1.a,t1.b,t2.a;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ HashAggregate
+   Group By Key: t1.a, t1.b, t2.a
+   ->  Nested Loop
+         ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+         ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+(5 rows)
+
+--function nested and ArrayCoerExpr--
+explain (analyze off ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off)
+select concat(t2.a,'--',min(t1.d::float[])) from shipping_test_row t1, shipping_test_row t2 where t1.b=t1.b group by t2.a;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ HashAggregate
+   Group By Key: t2.a
+   ->  Nested Loop
+         ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+         ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+(5 rows)
+
+explain (analyze off ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off)
+select concat(t2.a,'--',min(array[t1.a,t1.b])) from shipping_test_row t1, shipping_test_row t2 where t1.b=t1.b group by t2.a;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ HashAggregate
+   Group By Key: t2.a
+   ->  Nested Loop
+         ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+         ->  Data Node Scan on shipping_test_row "_REMOTE_TABLE_QUERY_"
+(5 rows)
+
+--col store table--
+--case1: shipping--
+explain (analyze off ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off)
+select concat(t2.a,'--',min((t1.b::numeric))) from shipping_test_col t1, shipping_test_col t2 where t1.b=t1.b group by t2.a;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Hash Aggregate
+               Group By Key: t2.a
+               ->  Vector Nest Loop
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  CStore Scan on shipping_test_col t1
+                                 Filter: (b IS NOT NULL)
+                     ->  Vector Materialize
+                           ->  CStore Scan on shipping_test_col t2
+(10 rows)
+
+--RowExpr--
+explain (analyze off ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off)
+select concat(t1,t1.c) from shipping_test_col t1, shipping_test_col t2 where t1.b=t1.b;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Nested Loop
+   ->  Data Node Scan on shipping_test_col "_REMOTE_TABLE_QUERY_"
+   ->  Data Node Scan on shipping_test_col "_REMOTE_TABLE_QUERY_"
+(3 rows)
+
+--function nested and ArrayCoerExpr--
+explain (analyze off ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off)
+select concat(t2.a,'--',min(array[t1.a,t1.b])) from shipping_test_col t1, shipping_test_col t2 where t1.b=t1.b group by t2.a;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ HashAggregate
+   Group By Key: t2.a
+   ->  Nested Loop
+         ->  Data Node Scan on shipping_test_col "_REMOTE_TABLE_QUERY_"
+         ->  Data Node Scan on shipping_test_col "_REMOTE_TABLE_QUERY_"
+(5 rows)
+
+explain (analyze off ,verbose off ,costs off ,cpu off, detail off, num_buffers off, timing off)
+select * from (select concat(t1.acct_id,t2.acct_id)as acct_id from  t1
+full outer join t2 on t1.acct_id=t2.acct_id ) A full join t3 on a.acct_id=t3.acct_id
+full join t1 on concat(a.acct_id,t3.acct_id)=t1.acct_id;
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Hash Full Join
+         Hash Cond: (concat((concat(shipping_schema.t1.acct_id, t2.acct_id)), t3.acct_id) = (shipping_schema.t1.acct_id)::text)
+         ->  Streaming(type: REDISTRIBUTE)
+               ->  Hash Full Join
+                     Hash Cond: ((t3.acct_id)::text = concat(shipping_schema.t1.acct_id, t2.acct_id))
+                     ->  Streaming(type: REDISTRIBUTE)
+                           ->  Seq Scan on t3
+                     ->  Hash
+                           ->  Streaming(type: REDISTRIBUTE)
+                                 ->  Hash Full Join
+                                       Hash Cond: (shipping_schema.t1.acct_id = t2.acct_id)
+                                       ->  Seq Scan on t1
+                                       ->  Hash
+                                             ->  Seq Scan on t2
+         ->  Hash
+               ->  Streaming(type: REDISTRIBUTE)
+                     ->  Seq Scan on t1
+(18 rows)
+

@@ -24,7 +24,7 @@
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #ifdef PGXC
-#include "pgxc/pgxc.h"
+    #include "pgxc/pgxc.h"
 #endif
 
 static void ResetUnloggedRelationsInTablespaceDir(const char* tsdirname, int op);
@@ -54,19 +54,19 @@ void ResetUnloggedRelations(int op)
 
     /* Log it. */
     ereport(DEBUG1,
-        (errmsg("resetting unlogged relations: cleanup %d init %d",
-            (op & UNLOGGED_RELATION_CLEANUP) != 0,
-            (op & UNLOGGED_RELATION_INIT) != 0)));
+            (errmsg("resetting unlogged relations: cleanup %d init %d",
+                    (op & UNLOGGED_RELATION_CLEANUP) != 0,
+                    (op & UNLOGGED_RELATION_INIT) != 0)));
 
     /*
      * Just to be sure we don't leak any memory, let's create a temporary
      * memory context for this operation.
      */
     tmpctx = AllocSetContextCreate(CurrentMemoryContext,
-        "ResetUnloggedRelations",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+                                   "ResetUnloggedRelations",
+                                   ALLOCSET_DEFAULT_MINSIZE,
+                                   ALLOCSET_DEFAULT_INITSIZE,
+                                   ALLOCSET_DEFAULT_MAXSIZE);
     oldctx = MemoryContextSwitchTo(tmpctx);
 
     /*
@@ -87,19 +87,19 @@ void ResetUnloggedRelations(int op)
 #ifdef PGXC
         /* Postgres-XC tablespaces include the node name in path */
         rc = snprintf_s(temp_path,
-            sizeof(temp_path),
-            sizeof(temp_path) - 1,
-            "pg_tblspc/%s/%s_%s",
-            spc_de->d_name,
-            TABLESPACE_VERSION_DIRECTORY,
-            g_instance.attr.attr_common.PGXCNodeName);
+                        sizeof(temp_path),
+                        sizeof(temp_path) - 1,
+                        "pg_tblspc/%s/%s_%s",
+                        spc_de->d_name,
+                        TABLESPACE_VERSION_DIRECTORY,
+                        g_instance.attr.attr_common.PGXCNodeName);
 #else
         rc = snprintf_s(temp_path,
-            sizeof(temp_path),
-            sizeof(temp_path) - 1,
-            "pg_tblspc/%s/%s",
-            spc_de->d_name,
-            TABLESPACE_VERSION_DIRECTORY);
+                        sizeof(temp_path),
+                        sizeof(temp_path) - 1,
+                        "pg_tblspc/%s/%s",
+                        spc_de->d_name,
+                        TABLESPACE_VERSION_DIRECTORY);
 #endif
         securec_check_ss(rc, "", "");
         ResetUnloggedRelationsInTablespaceDir(temp_path, op);
@@ -335,12 +335,12 @@ static void ResetUnloggedRelationsInDbspaceDir(const char* dbspacedirname, int o
 
             oidbuf[oidchars] = '\0';
             rc = snprintf_s(dstpath,
-                sizeof(dstpath),
-                sizeof(dstpath) - 1,
-                "%s/%s%s",
-                dbspacedirname,
-                oidbuf,
-                de->d_name + oidchars + 1 + strlen(forkNames[INIT_FORKNUM]));
+                            sizeof(dstpath),
+                            sizeof(dstpath) - 1,
+                            "%s/%s%s",
+                            dbspacedirname,
+                            oidbuf,
+                            de->d_name + oidchars + 1 + strlen(forkNames[INIT_FORKNUM]));
             securec_check_ss(rc, "", "");
 
             /* OK, we're ready to perform the actual copy. */
@@ -349,7 +349,7 @@ static void ResetUnloggedRelationsInDbspaceDir(const char* dbspacedirname, int o
         }
 
         /* Done with the first pass. */
-       (void)FreeDir(dbspace_dir);
+        (void)FreeDir(dbspace_dir);
     }
 }
 

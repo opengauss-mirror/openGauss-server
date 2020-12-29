@@ -31,9 +31,9 @@
 #include "nodes/primnodes.h"
 #include "parser/scansup.h"
 #include "rewrite/prs2lock.h"
-#include "storage/block.h"
+#include "storage/buf/block.h"
 #include "storage/fd.h"
-#include "storage/itemptr.h"
+#include "storage/item/itemptr.h"
 #include "storage/off.h"
 #include "utils/rel.h"
 

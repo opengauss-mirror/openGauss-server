@@ -1,0 +1,257 @@
+--
+-- MERGE INTO: test various restrictions of merge into 
+--
+-- initial
+CREATE SCHEMA mergeinto_restriction;
+SET current_schema = mergeinto_restriction;
+CREATE TABLE products_base
+(
+product_id INTEGER,
+product_name VARCHAR2(60),
+category VARCHAR2(60),
+total INTEGER
+);
+INSERT INTO products_base VALUES (1501, 'vivitar 35mm', 'electrncs', 100);
+INSERT INTO products_base VALUES (1502, 'olympus is50', 'electrncs', 100);
+INSERT INTO products_base VALUES (1600, 'play gym', 'toys', 100);
+INSERT INTO products_base VALUES (1601, 'lamaze', 'toys', 100);
+INSERT INTO products_base VALUES (1666, 'harry potter', 'dvd', 100);
+CREATE TABLE newproducts_base
+(
+product_id INTEGER,
+product_name VARCHAR2(60),
+category VARCHAR2(60),
+total INTEGER
+);
+INSERT INTO newproducts_base VALUES (1502, 'olympus camera', 'electrncs', 200);
+INSERT INTO newproducts_base VALUES (1601, 'lamaze', 'toys', 200);
+INSERT INTO newproducts_base VALUES (1666, 'harry potter', 'toys', 200);
+INSERT INTO newproducts_base VALUES (1700, 'wait interface', 'books', 200);
+ANALYZE products_base;
+ANALYZE newproducts_base;
+CREATE TABLE products_row
+(
+product_id INTEGER,
+product_name VARCHAR2(60),
+category VARCHAR2(60),
+total INTEGER
+);
+CREATE TABLE newproducts_row
+(
+product_id INTEGER,
+product_name VARCHAR2(60),
+category VARCHAR2(60),
+total INTEGER
+);
+INSERT INTO products_row SELECT * FROM products_base;
+INSERT INTO newproducts_row SELECT * FROM newproducts_base;
+ANALYZE products_row;
+ANALYZE newproducts_row;
+--error: system catalog cannot support for merge into
+MERGE INTO pg_class p
+USING pg_class  np
+ON p.oid = np.oid
+WHEN MATCHED THEN
+  UPDATE SET p.relname = 'dummy';
+ERROR:  permission denied: "pg_class" is a system catalog
+--error: on clause refence system column
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.xc_node_id = np.xc_node_id
+WHEN MATCHED THEN
+  UPDATE SET p.total = 1;
+ERROR:  System Column reference are not yet supported for MERGE INTO
+--error: where clause refence system column
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET p.total = 1 WHERE p.xc_node_id=1;
+ERROR:  System Column reference are not yet supported for MERGE INTO
+--error: try to update a system column
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET p.xc_node_id = 1;
+ERROR:  cannot assign to system column "xc_node_id"
+LINE 5:   UPDATE SET p.xc_node_id = 1;
+                     ^
+--error: try to use system column as lvalue 
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN
+	INSERT (p.xc_node_id) VALUES(1);
+ERROR:  column "xc_node_id" of relation "products_row" does not exist
+LINE 5:  INSERT (p.xc_node_id) VALUES(1);
+                 ^
+--error: try to use system column as rvalue 
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN
+	INSERT VALUES (np.xc_node_id);
+ERROR:  System Column reference are not yet supported for MERGE INTO
+--error: missing actions
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id;
+ERROR:  syntax error at or near ";"
+LINE 3: ON p.product_id = np.product_id;
+                                       ^
+--error: update distribute key
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET p.product_id = 1;
+ERROR:  Distributed key column can't be updated in current version
+--error: update ON caluse
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_name = np.product_name
+WHEN MATCHED THEN
+  UPDATE SET p.product_name = 1;
+ERROR:  Columns referenced in the ON Clause cannot be updated: "products_row"."product_name"
+--error: insert cannot reference to target rel
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_name = np.product_name
+WHEN NOT MATCHED THEN
+  INSERT VALUES (p.product_id, p.product_name, p.category, p.total);
+ERROR:  invalid reference to FROM-clause entry for table "p"
+LINE 5:   INSERT VALUES (p.product_id, p.product_name, p.category, p...
+                         ^
+HINT:  There is an entry for table "p", but it cannot be referenced from this part of the query.
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_name = np.product_name
+WHEN NOT MATCHED THEN
+  INSERT VALUES (np.product_id, np.product_name, np.category, np.total) WHERE p.total > 100;
+ERROR:  invalid reference to FROM-clause entry for table "p"
+LINE 5: ...id, np.product_name, np.category, np.total) WHERE p.total > ...
+                                                             ^
+HINT:  There is an entry for table "p", but it cannot be referenced from this part of the query.
+--error: cannot insert twice
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_name = np.product_name
+WHEN NOT MATCHED THEN
+  INSERT VALUES  (np.product_id, np.product_name, np.category, np.total) 
+WHEN NOT MATCHED THEN
+  INSERT VALUES  (np.product_id, np.product_name, np.category, np.total);
+ERROR:  Two WHEN NOT MATCHED clauses are not supported for MERGE INTO
+--error: cannot update twice
+MERGE INTO products_row p
+USING (select product_id,product_name,  category, sum(total) as total from newproducts_row  group by product_id,product_name,  category ) np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total;
+ERROR:  Two WHEN MATCHED clauses are not supported for MERGE INTO
+ 
+--error: cannot insert/update twice
+MERGE INTO products_row p
+USING (select product_id,product_name,  category, sum(total) as total from newproducts_row  group by product_id,product_name,  category ) np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total
+WHEN NOT MATCHED THEN
+  INSERT VALUES  (np.product_id, np.product_name, np.category, np.total) 
+WHEN NOT MATCHED THEN
+  INSERT VALUES  (np.product_id, np.product_name, np.category, np.total);
+ERROR:  More than two MERGE WHEN clauses are specified
+--error: subquery in qual
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category , total = np.total
+  WHERE product_id = (select 1); 
+ERROR:  Subquery in WHERE clauses are not yet supported for MERGE INTO
+--error: subquery in insert
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN
+  INSERT (total) VALUES ((select 1));
+ERROR:  Subquery in INSERT/UPDATE clauses are not yet supported for MERGE INTO
+--error: insert cannot refer to target columns
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN NOT MATCHED THEN
+  INSERT VALUES (product_id, product_name, category, total);
+ERROR:  Invalid column reference in the INSERT VALUES Clause
+HINT:  You may have referenced target table's column
+--error: subquery in update  
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+  UPDATE SET  total = (select 1); 
+ERROR:  Subquery in INSERT/UPDATE clauses are not yet supported for MERGE INTO
+--error: replicate table
+create table rep( a int) distribute by replication;
+merge into rep a using rep b on a.a=b.a when not  matched then insert values(default);
+ERROR:  Replicate table is not yet supported for MERGE INTO
+drop table rep;
+--error: PBE
+PREPARE prepared_merge_into
+AS
+MERGE INTO products_row p
+	USING newproducts_row np
+	ON p.product_id = np.product_id
+WHEN MATCHED THEN
+	  UPDATE SET product_name = np.product_name, category = np.category , total = np.total;
+ERROR:  syntax error at or near "MERGE"
+LINE 3: MERGE INTO products_row p
+        ^
+-- test stream_walker, fall back to xc plan
+EXPLAIN (VERBOSE ON, COSTS OFF)
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+UPDATE SET product_name = np.product_name, category = np.category || pg_backend_pid()::text, total = np.total + 100 WHERE p.category = 'dvd';
+                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                               
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Merge on mergeinto_restriction.products_row p
+   WHEN MATCHED
+     Node/s: All datanodes
+     Remote query: UPDATE ONLY mergeinto_restriction.products_row p SET product_id = $12, product_name = $13, category = $14, total = $15 WHERE p.ctid = $9 AND p.xc_node_id = $10
+   ->  Data Node Scan on "_REMOTE_TABLE_QUERY_"
+         Output: np.product_id, np.product_name, np.category, np.total, p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id, p.category, p.product_id, np.product_name, ((np.category)::text || (pg_backend_pid())::text), (np.total + 100)
+         Node/s: All datanodes
+         Remote query: SELECT l.a_1, l.a_2, l.a_3, l.a_4, l.a_5, l.a_6, r.a_1, r.a_2, r.a_3, r.a_4 FROM (SELECT p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id FROM ONLY mergeinto_restriction.products_row p WHERE true) l(a_1, a_2, a_3, a_4, a_5, a_6) JOIN (SELECT np.product_id, np.product_name, np.category, np.total FROM ONLY mergeinto_restriction.newproducts_row np WHERE true) r(a_1, a_2, a_3, a_4) ON true WHERE l.a_1 = r.a_1
+(8 rows)
+
+EXPLAIN (VERBOSE ON, COSTS OFF)
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
+UPDATE SET product_name = np.product_name, category = np.category || 'ABC', total = np.total + 100 WHERE p.category = pg_backend_pid()::text;
+                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                               
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Merge on mergeinto_restriction.products_row p
+   WHEN MATCHED
+     Node/s: All datanodes
+     Remote query: UPDATE ONLY mergeinto_restriction.products_row p SET product_id = $12, product_name = $13, category = $14, total = $15 WHERE p.ctid = $9 AND p.xc_node_id = $10
+   ->  Data Node Scan on "_REMOTE_TABLE_QUERY_"
+         Output: np.product_id, np.product_name, np.category, np.total, p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id, p.category, p.product_id, np.product_name, ((np.category)::text || 'ABC'::text), (np.total + 100)
+         Node/s: All datanodes
+         Remote query: SELECT l.a_1, l.a_2, l.a_3, l.a_4, l.a_5, l.a_6, r.a_1, r.a_2, r.a_3, r.a_4 FROM (SELECT p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id FROM ONLY mergeinto_restriction.products_row p WHERE true) l(a_1, a_2, a_3, a_4, a_5, a_6) JOIN (SELECT np.product_id, np.product_name, np.category, np.total FROM ONLY mergeinto_restriction.newproducts_row np WHERE true) r(a_1, a_2, a_3, a_4) ON true WHERE l.a_1 = r.a_1
+(8 rows)
+
+-- clean up
+DROP SCHEMA mergeinto_restriction CASCADE;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table products_base
+drop cascades to table newproducts_base
+drop cascades to table products_row
+drop cascades to table newproducts_row

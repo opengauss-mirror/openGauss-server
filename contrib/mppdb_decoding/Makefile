@@ -1,12 +1,5 @@
-# ---------------------------------------------------------------------------------------
-# 
-# Makefile
-#        Makefile mppdb decoding
-# 
-# IDENTIFICATION
-#        contrib/mppdb_decoding/Makefile
-# 
-# ---------------------------------------------------------------------------------------
+# contrib/mppdb_decoding/Makefile
+
 MODULES = mppdb_decoding
 OBJS = mppdb_decoding.o
 

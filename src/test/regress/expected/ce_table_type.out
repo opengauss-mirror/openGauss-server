@@ -1,0 +1,242 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS MyCMK CASCADE;
+NOTICE:  global setting "mycmk" does not exist
+CREATE CLIENT MASTER KEY MyCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY MyCEK WITH VALUES (CLIENT_MASTER_KEY = MyCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+--行存
+--类型
+CREATE TABLE test_type_row (id int, 
+tinyint_col tinyint  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+smallint_col smallint  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+bigint_col bigint  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+binary_col binary_integer  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+integer_col integer  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+num_col numeric(10,4) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+ft_col1 float4 ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+ft_col2 float8 ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+ft_col3 float(3) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+ft_col4 BINARY_DOUBLE ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+ft_col5 integer(6,3) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col1 char(19)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col2 char  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col3 character(16)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col4 character  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col5 nchar(16)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col6 nchar  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col7 varchar(17)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col8 varchar ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col9 varchar2(10)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col10 varchar2  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col11 nvarchar2(8),
+char_col12 nvarchar2 ,
+text_col text  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+bt_col1 BLOB ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+bt_col2 BYTEA ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC)
+) with (orientation=row);
+insert into test_type_row values (1, 10, 256, 7894595564, 2147483647, 89, 123456.1223,
+ 123456.12354, 10.365456, 123456.1234, 10.3214, 321.321, 'ok', 't', 'ok', 'o', 'ok', 'k', 'good', 'ok', 'ok', 'ok', 'ok', 'g', 'text', 'name', 'desdfk');
+--列存---待验证
+CREATE TABLE test_type_column (id int, 
+tinyint_col tinyint  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+smallint_col smallint  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+bigint_col bigint  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+binary_col binary_integer  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+integer_col integer  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+num_col numeric(10,4) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+ft_col1 float4 ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+ft_col2 float8 ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+ft_col3 float(3) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+ft_col4 BINARY_DOUBLE ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col1 char(19)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col2 character(16)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col3 nchar(16)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col4 varchar(17)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col5 character  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+char_col6 varchar2(10),
+char_col7 nvarchar2(8),
+char_col8 char  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+clob_col clob  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+text_col text  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+bt_col1 BLOB ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+bt_col3 BYTEA ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC)
+)with (orientation=column);
+insert into test_type_column values (1, 10, 256, 7894595564, 2147483647, 89, 123456.1223,
+ 123456.12354, 10.365456, 123456.1234, 10.3214, 'ok', 'thank', 'ok', 'ok', 'o', 'ok', 'ok', 'g', 'text', 'good', 'name', 'desdfk');
+SELECT * FROM test_type_row order by id;
+ id | tinyint_col | smallint_col | bigint_col | binary_col | integer_col |   num_col   | ft_col1 |  ft_col2  | ft_col3 | ft_col4 | ft_col5 |      char_col1      | char_col2 |    char_col3     | char_col4 |    char_col5     | char_col6 | char_col7 | char_col8 | char_col9 | char_col10 | char_col11 | char_col12 | text_col | bt_col1 |    bt_col2     
+----+-------------+--------------+------------+------------+-------------+-------------+---------+-----------+---------+---------+---------+---------------------+-----------+------------------+-----------+------------------+-----------+-----------+-----------+-----------+------------+------------+------------+----------+---------+----------------
+  1 | 10          |          256 | 7894595564 | 2147483647 |          89 | 123456.1223 |  123456 | 10.365456 |  123456 | 10.3214 | 321.321 | ok                  | t         | ok               | o         | ok               | k         | good      | ok        | ok        | ok         | ok         | g          | text     | name    | \x64657364666b
+(1 row)
+
+\d test_type_row
+         Table "public.test_type_row"
+    Column    |       Type        | Modifiers  
+--------------+-------------------+------------
+ id           | integer           | 
+ tinyint_col  | tinyint           |  encrypted
+ smallint_col | smallint          |  encrypted
+ bigint_col   | bigint            |  encrypted
+ binary_col   | integer           |  encrypted
+ integer_col  | integer           |  encrypted
+ num_col      | numeric           |  encrypted
+ ft_col1      | real              |  encrypted
+ ft_col2      | double precision  |  encrypted
+ ft_col3      | real              |  encrypted
+ ft_col4      | double precision  |  encrypted
+ ft_col5      | numeric           |  encrypted
+ char_col1    | character(19)     |  encrypted
+ char_col2    | character(1)      |  encrypted
+ char_col3    | character(16)     |  encrypted
+ char_col4    | character(1)      |  encrypted
+ char_col5    | character(16)     |  encrypted
+ char_col6    | character(1)      |  encrypted
+ char_col7    | character varying |  encrypted
+ char_col8    | character varying |  encrypted
+ char_col9    | character varying |  encrypted
+ char_col10   | character varying |  encrypted
+ char_col11   | nvarchar2(8)      | 
+ char_col12   | nvarchar2         | 
+ text_col     | text              |  encrypted
+ bt_col1      | blob              |  encrypted
+ bt_col2      | bytea             |  encrypted
+
+SELECT * FROM test_type_column order by id;
+ id | tinyint_col | smallint_col | bigint_col | binary_col | integer_col |   num_col   | ft_col1 |  ft_col2  | ft_col3 | ft_col4 |      char_col1      |    char_col2     |    char_col3     | char_col4 | char_col5 | char_col6 | char_col7 | char_col8 | clob_col | text_col | bt_col1 |    bt_col3     
+----+-------------+--------------+------------+------------+-------------+-------------+---------+-----------+---------+---------+---------------------+------------------+------------------+-----------+-----------+-----------+-----------+-----------+----------+----------+---------+----------------
+  1 | 10          |          256 | 7894595564 | 2147483647 |          89 | 123456.1223 |  123456 | 10.365456 |  123456 | 10.3214 | ok                  | thank            | ok               | ok        | o         | ok        | ok        | g         | text     | good     | name    | \x64657364666b
+(1 row)
+
+\d test_type_column
+          Table "public.test_type_column"
+    Column    |         Type          | Modifiers  
+--------------+-----------------------+------------
+ id           | integer               | 
+ tinyint_col  | tinyint               |  encrypted
+ smallint_col | smallint              |  encrypted
+ bigint_col   | bigint                |  encrypted
+ binary_col   | integer               |  encrypted
+ integer_col  | integer               |  encrypted
+ num_col      | numeric               |  encrypted
+ ft_col1      | real                  |  encrypted
+ ft_col2      | double precision      |  encrypted
+ ft_col3      | real                  |  encrypted
+ ft_col4      | double precision      |  encrypted
+ char_col1    | character(19)         |  encrypted
+ char_col2    | character(16)         |  encrypted
+ char_col3    | character(16)         |  encrypted
+ char_col4    | character varying     |  encrypted
+ char_col5    | character(1)          |  encrypted
+ char_col6    | character varying(10) | 
+ char_col7    | nvarchar2(8)          | 
+ char_col8    | character(1)          |  encrypted
+ clob_col     | clob                  |  encrypted
+ text_col     | text                  |  encrypted
+ bt_col1      | blob                  |  encrypted
+ bt_col3      | bytea                 |  encrypted
+
+DROP TABLE test_type_row;
+DROP TABLE test_type_column;
+--fail 
+CREATE TABLE unsupport_money(id int,
+money_col money ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC) );
+ERROR(CLIENT): encrypted money column is not implemented
+CREATE TABLE unsupport_bool(id int,
+bool_col boolean ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC) );
+ERROR(CLIENT): encrypted bool column is not implemented
+CREATE TABLE unsupport_raw(id int,
+raw_col RAW ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC));
+ERROR(CLIENT): encrypted raw column is not implemented
+CREATE TABLE unsupport_name(id int,
+name_col name ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC) );
+ERROR(CLIENT): encrypted name column is not implemented
+CREATE TABLE unsupport_char(id int,
+char_col "char"  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC));
+CREATE TABLE unsupport_clob(id int,
+clob_col clob ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC) );
+CREATE TABLE unsupport_decimal(id int,
+dec_col decimal(10,4) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC));
+CREATE TABLE unsupport_date(id int,
+date_col date ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC) );
+ERROR(CLIENT): encrypted date column is not implemented
+CREATE TABLE unsupport_date1(id int,
+da_col time without time zone ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC));
+ERROR(CLIENT): encrypted time column is not implemented
+CREATE TABLE unsupport_data2(id int,
+data_col time with time zone ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC));
+ERROR(CLIENT): encrypted timetz column is not implemented
+CREATE TABLE unsupport_data3(id int,
+data_col timestamp without time zone ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC) );
+ERROR(CLIENT): encrypted timestamp column is not implemented
+CREATE TABLE unsupport_data4(id int,
+data_col timestamp with time zone ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC));
+ERROR(CLIENT): encrypted timestamptz column is not implemented
+CREATE TABLE unsupport_data5(id int,
+data_col smalldatetime ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC));
+ERROR(CLIENT): encrypted smalldatetime column is not implemented
+DROP table IF EXISTS unsupport_money;
+NOTICE:  table "unsupport_money" does not exist, skipping
+DROP table IF EXISTS unsupport_bool;
+NOTICE:  table "unsupport_bool" does not exist, skipping
+DROP table IF EXISTS unsupport_raw;
+NOTICE:  table "unsupport_raw" does not exist, skipping
+DROP table IF EXISTS unsupport_name;
+NOTICE:  table "unsupport_name" does not exist, skipping
+DROP table IF EXISTS unsupport_char;
+DROP table IF EXISTS unsupport_clob;
+DROP table IF EXISTS unsupport_decimal;
+DROP table IF EXISTS unsupport_date;
+NOTICE:  table "unsupport_date" does not exist, skipping
+DROP table IF EXISTS unsupport_date1;
+NOTICE:  table "unsupport_date1" does not exist, skipping
+DROP table IF EXISTS unsupport_data2;
+NOTICE:  table "unsupport_data2" does not exist, skipping
+DROP table IF EXISTS unsupport_data3;
+NOTICE:  table "unsupport_data3" does not exist, skipping
+DROP table IF EXISTS unsupport_date5;
+NOTICE:  table "unsupport_date5" does not exist, skipping
+DROP COLUMN ENCRYPTION KEY MyCEK;
+DROP CLIENT MASTER KEY MyCMK;
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS distributeby_cmk CASCADE;
+NOTICE:  global setting "distributeby_cmk" does not exist
+CREATE CLIENT MASTER KEY distributeby_cmk WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY distributeby_cek WITH VALUES (CLIENT_MASTER_KEY = distributeby_cmk, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_distributeby1(
+    id_number int,
+    name text encrypted with(column_encryption_key = distributeby_cek,encryption_type = DETERMINISTIC),
+    data text) distribute by list(name)(slice s1 values (('China'),('Germary')),slice s2 values (('Japan')), slice s3 values (('USA')), slice s4 values (default));
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+CREATE TABLE t_distributeby2(
+    id_number int,
+    name text encrypted with(column_encryption_key = distributeby_cek,encryption_type = DETERMINISTIC),
+    data text) distribute by hash(name);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+CREATE TABLE t_distributeby3(
+    id_number int,
+    name text,
+    data text) distribute by list(name)(slice s1 values (('China'),('Germary')),slice s2 values (('Japan')), slice s3 values (('USA')), slice s4 values (default));
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+DROP table IF EXISTS t_distributeby1;
+NOTICE:  table "t_distributeby1" does not exist, skipping
+DROP table IF EXISTS t_distributeby2;
+NOTICE:  table "t_distributeby2" does not exist, skipping
+DROP table IF EXISTS t_distributeby3;
+NOTICE:  table "t_distributeby3" does not exist, skipping
+DROP COLUMN ENCRYPTION KEY IF EXISTS distributeby_cek;
+DROP CLIENT MASTER KEY IF EXISTS distributeby_cmk;
+\! gs_ktool -d all
+DELETE ALL
+ 1

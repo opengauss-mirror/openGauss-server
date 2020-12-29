@@ -21,7 +21,6 @@
  * -------------------------------------------------------------------------
  */
 
-
 #ifndef PQRQUET_FILE_READER_H
 #define PQRQUET_FILE_READER_H
 
@@ -54,7 +53,7 @@ public:
     bool isCurrentRowGroupValid() const;
 
     int64_t readRows(VectorBatch *batch, uint64_t maxRowsReadOnce, uint64_t curRowsInFile, uint64_t &rowsInFile,
-                    uint64_t &rowsSkip, uint64_t &rowsCross, FileOffset *fileOffset);
+                     uint64_t &rowsSkip, uint64_t &rowsCross, FileOffset *fileOffset);
     void initializeColumnReaders(GSInputStream *gsInputStream);
     void setColBloomFilter(filter::BloomFilter **bloomFilters);
 

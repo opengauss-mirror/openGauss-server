@@ -20,7 +20,6 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "access/parallel.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #ifdef PGXC
@@ -29,6 +28,8 @@
 #include "pgxc/poolmgr.h"
 #include "pgxc/redistrib.h"
 #endif
+#include "catalog/gs_client_global_keys.h"
+#include "catalog/gs_column_keys.h"
 #include "catalog/dependency.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_collation.h"
@@ -66,9 +67,15 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
-#include "utils/tqual.h"
+#include "utils/snapmgr.h"
 #include "tcop/utility.h"
 #include "nodes/nodes.h"
+#include "c.h"
+#include "pgstat.h"
+
+#ifdef ENABLE_MULTIPLE_NODES
+#include "streaming/planner.h"
+#endif
 
 /*
  * The namespace search path is a possibly-empty list of namespace OIDs.
@@ -210,14 +217,15 @@ Oid RangeVarGetRelidExtended(const RangeVar* relation, LOCKMODE lockmode, bool m
      * We check the catalog name and then ignore it.
      */
     if (relation->catalogname) {
-        const char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-        if (!dbname || strcmp(relation->catalogname, dbname) != 0)
+        char* database_name = get_database_name(u_sess->proc_cxt.MyDatabaseId);
+        if ((database_name == NULL) || (strcmp(relation->catalogname, database_name) != 0)) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("cross-database references are not implemented: \"%s.%s.%s\"",
                         relation->catalogname,
                         relation->schemaname,
                         relation->relname)));
+        }
     }
 
     /*
@@ -280,9 +288,9 @@ Oid RangeVarGetRelidExtended(const RangeVar* relation, LOCKMODE lockmode, bool m
         } else {
             /* search the namespace path */
             if (isSupportSynonym) {
-                errDetail = RelnameGetRelidExtended(relation->relname, &relId, refSynOid);
+                errDetail = RelnameGetRelidExtended(relation->relname, &relId, refSynOid, detailInfo);
             } else {
-                relId = RelnameGetRelid(relation->relname);
+                relId = RelnameGetRelid(relation->relname, detailInfo);
             }
         }
 
@@ -423,8 +431,7 @@ Oid RangeVarGetCreationNamespace(const RangeVar* newRelation)
      * We check the catalog name and then ignore it.
      */
     if (newRelation->catalogname) {
-        const char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-        if (!dbname || strcmp(newRelation->catalogname, dbname) != 0)
+        if (strcmp(newRelation->catalogname, get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true)) != 0)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("cross-database references are not implemented: \"%s.%s.%s\"",
@@ -493,8 +500,7 @@ Oid RangeVarGetAndCheckCreationNamespace(RangeVar* relation, LOCKMODE lockmode, 
      * We check the catalog name and then ignore it.
      */
     if (relation->catalogname) {
-        const char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-        if (!dbname || strcmp(relation->catalogname, dbname) != 0)
+        if (strcmp(relation->catalogname, get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true)) != 0)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("cross-database references are not implemented: \"%s.%s.%s\"",
@@ -533,7 +539,7 @@ Oid RangeVarGetAndCheckCreationNamespace(RangeVar* relation, LOCKMODE lockmode, 
         /* Check namespace permissions. */
         aclresult = pg_namespace_aclcheck(nspid, GetUserId(), ACL_CREATE);
         if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(nspid, true));
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(nspid));
 
         if (retry) {
             /* If nothing changed, we're done. */
@@ -617,12 +623,28 @@ void RangeVarAdjustRelationPersistence(RangeVar* newRelation, Oid nspid)
     }
 }
 
+static void AddSchemaSearchPathInfo(List* activeSearchPath, StringInfo detailInfo)
+{
+    if (detailInfo == NULL) {
+        return;
+    }
+    appendStringInfo(detailInfo, "search path oid: ");
+    ListCell* l = NULL;
+    foreach (l, activeSearchPath) {
+        Oid namespaceId = lfirst_oid(l);
+        appendStringInfo(detailInfo, "%u ", namespaceId);
+    }
+    if (u_sess->attr.attr_common.namespace_search_path != NULL) {
+        appendStringInfo(detailInfo, "namespace_search_path: %s", u_sess->attr.attr_common.namespace_search_path);
+    }
+    return;
+}
 /*
  * RelnameGetRelid
  *		Try to resolve an unqualified relation name.
  *		Returns OID if relation found in search path, else InvalidOid.
  */
-Oid RelnameGetRelid(const char* relname)
+Oid RelnameGetRelid(const char* relname, StringInfo detailInfo)
 {
     Oid relid;
     ListCell* l = NULL;
@@ -644,7 +666,10 @@ Oid RelnameGetRelid(const char* relname)
             return relid;
         }
     }
-
+    /* log detail info of searching path if MOD_SCHEMA is on */
+    if (!OidIsValid(relid) && module_logging_is_on(MOD_SCHEMA)) {
+        AddSchemaSearchPathInfo(tempActiveSearchPath, detailInfo);
+    }
     list_free_ext(tempActiveSearchPath);
 
     /* Not found in path */
@@ -658,7 +683,7 @@ Oid RelnameGetRelid(const char* relname)
  *      Store OID if relation found in search path, else InvalidOid.
  *      Returns the details info of supported cases checking.
  */
-char* RelnameGetRelidExtended(const char* relname, Oid* relOid, Oid* refSynOid)
+char* RelnameGetRelidExtended(const char* relname, Oid* relOid, Oid* refSynOid, StringInfo detailInfo)
 {
     ListCell* l = NULL;
     List* tempActiveSearchPath = NIL;
@@ -681,6 +706,10 @@ char* RelnameGetRelidExtended(const char* relname, Oid* relOid, Oid* refSynOid)
             break;
         }
     }
+    /* log detail info of searching path if MOD_SCHEMA is on */
+    if (relOid != NULL && !OidIsValid(*relOid) && module_logging_is_on(MOD_SCHEMA)) {
+        AddSchemaSearchPathInfo(tempActiveSearchPath, detailInfo);
+    }    
     list_free_ext(tempActiveSearchPath);
 
     /* return checking details. */
@@ -1224,7 +1253,7 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
     DeconstructQualifiedName(names, &schemaname, &funcname);
 
     if (schemaname != NULL) {
-        // if this function called by ProcedureCreate(a style), ignore usage right.
+        // if this function called by ProcedureCreate(A db style), ignore usage right.
         if (func_create)
             namespaceId = LookupNamespaceNoError(schemaname);
         else
@@ -1300,10 +1329,148 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
     return resultList;
 }
 
+KeyCandidateList CeknameGetCandidates(List *names, bool key_create)
+{
+    KeyCandidateList resultList = NULL;
+    char *schemaname = NULL;
+    char *keyname = NULL;
+    Oid namespaceId;
+    CatCList *catlist = NULL;
+    int i;
+    int pathpos = 0;
+    /* deconstruct the name list */
+    DeconstructQualifiedName(names, &schemaname, &keyname);
+
+    if (schemaname != NULL) {
+        /* if this key called by ProcedureCreate(A db style), ignore usage right. */
+        if (key_create)
+            namespaceId = LookupNamespaceNoError(schemaname);
+        else
+            /* use exact schema given */
+            namespaceId = LookupExplicitNamespace(schemaname);
+    } else {
+        /* flag to indicate we need namespace search */
+        namespaceId = InvalidOid;
+        recomputeNamespacePath();
+    }
+
+    /* Search syscache by name only */
+    catlist = SearchSysCacheList1(COLUMNSETTINGNAME, CStringGetDatum(keyname));
+
+    for (i = 0; i < catlist->n_members; i++) {
+        HeapTuple keytup = &catlist->members[i]->tuple;
+        Form_gs_column_keys keyform = (Form_gs_column_keys)GETSTRUCT(keytup);
+        KeyCandidateList newResult;
+
+        if (OidIsValid(namespaceId)) {
+            /* Consider only procs in specified namespace */
+            if (keyform->key_namespace != namespaceId)
+                continue;
+        } else {
+            /*
+             * Consider only procs that are in the search path and are not in
+             * the temp namespace.
+             */
+            ListCell *nsp = NULL;
+
+            foreach (nsp, u_sess->catalog_cxt.activeSearchPath) {
+                if (keyform->key_namespace == lfirst_oid(nsp) &&
+                    keyform->key_namespace != u_sess->catalog_cxt.myTempNamespace)
+                    break;
+                pathpos++;
+            }
+            if (nsp == NULL)
+                continue; /* proc is not in search path */
+        }
+
+        newResult = (KeyCandidateList)palloc(sizeof(struct _FuncCandidateList) - sizeof(Oid));
+        newResult->oid = HeapTupleGetOid(keytup);
+        newResult->pathpos = pathpos;
+
+        /*
+         * Okay to add it to result list
+         */
+        newResult->next = resultList;
+        resultList = newResult;
+    }
+    ReleaseSysCacheList(catlist);
+    return resultList;
+}
+KeyCandidateList GlobalSettingGetCandidates(List *names, bool key_create)
+{
+    KeyCandidateList resultList = NULL;
+    char *schemaname = NULL;
+    char *keyname = NULL;
+    Oid namespaceId;
+    CatCList *catlist = NULL;
+    int i;
+
+    int pathpos = 0;
+    /* deconstruct the name list */
+    DeconstructQualifiedName(names, &schemaname, &keyname);
+
+    if (schemaname != NULL) {
+        /* if this key called by ProcedureCreate(A db style), ignore usage right. */
+        if (key_create)
+            namespaceId = LookupNamespaceNoError(schemaname);
+        else
+            /* use exact schema given */
+            namespaceId = LookupExplicitNamespace(schemaname);
+    } else {
+        /* flag to indicate we need namespace search */
+        namespaceId = InvalidOid;
+        recomputeNamespacePath();
+    }
+
+    /* Search syscache by name only */
+    catlist = SearchSysCacheList1(GLOBALSETTINGNAME, CStringGetDatum(keyname));
+
+    for (i = 0; i < catlist->n_members; i++) {
+        HeapTuple keytup = &catlist->members[i]->tuple;
+        Form_gs_client_global_keys keyform = (Form_gs_client_global_keys)GETSTRUCT(keytup);
+        KeyCandidateList newResult;
+
+        if (OidIsValid(namespaceId)) {
+            /* Consider only procs in specified namespace */
+            if (keyform->key_namespace != namespaceId)
+                continue;
+        } else {
+            /*
+             * Consider only procs that are in the search path and are not in
+             * the temp namespace.
+             */
+            ListCell *nsp = NULL;
+
+            foreach (nsp, u_sess->catalog_cxt.activeSearchPath) {
+                if (keyform->key_namespace == lfirst_oid(nsp) &&
+                    keyform->key_namespace != u_sess->catalog_cxt.myTempNamespace)
+                    break;
+                pathpos++;
+            }
+            if (nsp == NULL)
+                continue; /* proc is not in search path */
+        }
+
+        newResult = (KeyCandidateList)palloc(sizeof(struct _FuncCandidateList) - sizeof(Oid));
+        newResult->oid = HeapTupleGetOid(keytup);
+        newResult->pathpos = pathpos;
+
+        /*
+         * Okay to add it to result list
+         */
+        newResult->next = resultList;
+        resultList = newResult;
+    }
+
+    ReleaseSysCacheList(catlist);
+
+    return resultList;
+}
+
 /*
  * MatchNamedCall
- *		Given a pg_proc heap tuple and a call's list of argument names,
- *		check whether the function could match the call.
+ * 		Given a pg_proc heap tuple and a call's list of argument names,
+ * 		check whether the function could match the call.
  *
  * The call could match if all supplied argument names are accepted by
  * the function, in positions after the last positional argument, and there
@@ -1454,7 +1621,7 @@ static bool MatchNamedCall(HeapTuple proctup, int nargs, List* argnames, int** a
         pfree_ext(defaultpos);
     }
 
-    // a compatibility: overload function
+    // A compatibility: overload function
     if (ap != pronargs) /* processed all function parameters */
         return false;
 
@@ -2460,7 +2627,6 @@ void DeconstructQualifiedName(const List* names, char** nspname_p, char** objnam
     char* catalogname = NULL;
     char* schemaname = NULL;
     char* objname = NULL;
-    char* dbname = NULL;
 
     switch (list_length(names)) {
         case 1:
@@ -2478,8 +2644,7 @@ void DeconstructQualifiedName(const List* names, char** nspname_p, char** objnam
             /*
              * We check the catalog name and then ignore it.
              */
-            dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-            if (!dbname || strcmp(catalogname, dbname) != 0)
+            if (strcmp(catalogname, get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true)) != 0)
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("cross-database references are not implemented: %s", NameListToString(names))));
@@ -2627,7 +2792,8 @@ Oid LookupExplicitNamespace(const char* nspname)
 
     namespaceId = get_namespace_oid(nspname, false);
 
-    if (!(u_sess->analyze_cxt.is_under_analyze || (IS_PGXC_DATANODE && IsConnFromCoord()))) {
+    if (!(u_sess->analyze_cxt.is_under_analyze || (IS_PGXC_DATANODE && IsConnFromCoord())) ||
+        u_sess->exec_cxt.is_exec_trigger_func) {
         aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_USAGE);
         if (aclresult != ACLCHECK_OK)
             aclcheck_error(aclresult, ACL_KIND_NAMESPACE, nspname);
@@ -2682,7 +2848,7 @@ void CheckSetNamespace(Oid oldNspOid, Oid nspOid, Oid classid, Oid objid)
                                                                             : errcode(ERRCODE_DUPLICATE_OBJECT),
                 errmsg("%s is already in schema \"%s\"",
                     getObjectDescriptionOids(classid, objid),
-                    get_namespace_name(nspOid, true))));
+                    get_namespace_name(nspOid))));
 
     /* disallow renaming into or out of temp schemas */
     if (isAnyTempNamespace(nspOid) || isAnyTempNamespace(oldNspOid))
@@ -2700,14 +2866,6 @@ void CheckSetNamespace(Oid oldNspOid, Oid nspOid, Oid classid, Oid objid)
 
     if (nspOid == PG_CATALOG_NAMESPACE)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into system schema")));
-    
-    /* disallow set into dbe_perf schema */
-    if (nspOid == PG_DBMSPERF_NAMESPACE)
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into dbe_perf schema")));
-    
-    /* disallow set into snapshot schema */
-    if (nspOid == PG_SNAPSHOT_NAMESPACE)
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot move objects into snapshot schema")));
 }
 
 /*
@@ -2775,7 +2933,7 @@ Oid QualifiedNameGetCreationNamespace(const List* names, char** objname_p)
     return nspid;
 }
 
-Oid SchemaNameGetSchemaOid(const char* schemaname)
+Oid SchemaNameGetSchemaOid(const char* schemaname, bool missing_ok)
 {
     Oid namespaceId;
 
@@ -2786,10 +2944,10 @@ Oid SchemaNameGetSchemaOid(const char* schemaname)
             return u_sess->catalog_cxt.myTempNamespace;
         }
         /* use exact schema given */
-        namespaceId = get_namespace_oid(schemaname, false);
+        namespaceId = get_namespace_oid(schemaname, missing_ok);
         /* we do not check for USAGE rights here! */
     } else {
-        namespaceId = GetOidBySchemaName();
+        namespaceId = GetOidBySchemaName(missing_ok);
     }
 
     return namespaceId;
@@ -2987,45 +3145,32 @@ Oid GetTempToastNamespace(void)
     return u_sess->catalog_cxt.myTempToastNamespace;
 }
 
-/*
- * GetTempNamespaceState - fetch status of session's temporary namespace
- *
- * This is used for conveying state to a parallel worker, and is not meant
- * for general-purpose access.
- */
-void GetTempNamespaceState(Oid *tempNamespaceId, Oid *tempToastNamespaceId)
+static void ValidateNamespace(Oid namespaceOid)
 {
-    /* Return namespace OIDs, or 0 if session has not created temp namespace */
-    *tempNamespaceId = u_sess->catalog_cxt.myTempNamespace;
-    *tempToastNamespaceId = u_sess->catalog_cxt.myTempToastNamespace;
-}
-
-/*
- * SetTempNamespaceState - set status of session's temporary namespace
- *
- * This is used for conveying state to a parallel worker, and is not meant for
- * general-purpose access.  By transferring these namespace OIDs to workers,
- * we ensure they will have the same notion of the search path as their leader
- * does.
- */
-void SetTempNamespaceState(Oid tempNamespaceId, Oid tempToastNamespaceId)
-{
-    /* Worker should not have created its own namespaces ... */
-    Assert(u_sess->catalog_cxt.myTempNamespace == InvalidOid);
-    Assert(u_sess->catalog_cxt.myTempToastNamespace == InvalidOid);
-    Assert(u_sess->catalog_cxt.myTempNamespaceSubID == InvalidSubTransactionId);
-
-    /* Assign same namespace OIDs that leader has */
-    u_sess->catalog_cxt.myTempNamespace = tempNamespaceId;
-    u_sess->catalog_cxt.myTempToastNamespace = tempToastNamespaceId;
-
-    /*
-     * It's fine to leave myTempNamespaceSubID == InvalidSubTransactionId.
-     * Even if the namespace is new so far as the leader is concerned, it's
-     * not new to the worker, and we certainly wouldn't want the worker trying
-     * to destroy it.
-     */
-    u_sess->catalog_cxt.baseSearchPathValid = false; /* may need to rebuild list */
+    if (!OidIsValid(namespaceOid)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_SCHEMA_NAME), errmsg("Namespace oid is invalid.")));
+    } else {
+        char* namespaceName = get_namespace_name(namespaceOid);
+        if (namespaceName == NULL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_SCHEMA_NAME), errmsg("Namespace %u is not found.", namespaceOid)));
+        } else {
+            if (strncmp(namespaceName, "pg_temp", strlen("pg_temp")) == 0) {
+                /* 
+                 * In this case, most likely, there is a datanode restarted and 
+                 * the u_sess->catalog_cxt.myTempNamespace is set invalid.
+                 */
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_SCHEMA_NAME), 
+                    errmsg("Current temp namespace %s is invalid.", namespaceName)));
+            } else {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_SCHEMA_NAME), 
+                    errmsg("Unexpected namespace %s, should be pg_catalog.", namespaceName)));
+            }
+        }
+    }
 }
 
 /*
@@ -3052,7 +3197,9 @@ OverrideSearchPath* GetOverrideSearchPath(MemoryContext context)
         if (linitial_oid(schemas) == u_sess->catalog_cxt.myTempNamespace)
             result->addTemp = true;
         else {
-            Assert(linitial_oid(schemas) == PG_CATALOG_NAMESPACE);
+            if (linitial_oid(schemas) != PG_CATALOG_NAMESPACE) {
+                ValidateNamespace(linitial_oid(schemas));
+            }
             result->addCatalog = true;
         }
         schemas = list_delete_first(schemas);
@@ -3150,7 +3297,7 @@ void PushOverrideSearchPath(OverrideSearchPath* newpath, bool inProcedure)
      * Copy the list for safekeeping, and insert implicitly-searched
      * namespaces as needed.  This code should track recomputeNamespacePath.
      */
-    oldcxt = MemoryContextSwitchTo(u_sess->top_mem_cxt);
+    oldcxt = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
 
     oidlist = list_copy(newpath->schemas);
 
@@ -3172,6 +3319,46 @@ void PushOverrideSearchPath(OverrideSearchPath* newpath, bool inProcedure)
 
     if (newpath->addTemp && OidIsValid(u_sess->catalog_cxt.myTempNamespace))
         oidlist = lcons_oid(u_sess->catalog_cxt.myTempNamespace, oidlist);
+
+    if (newpath->addUser) {
+        Oid roleid = GetUserId();
+        char* rawname = NULL;
+        List* namelist = NIL;
+        ListCell* l = NULL;
+
+        rawname = pstrdup(u_sess->attr.attr_common.namespace_search_path);
+
+        /* Parse string into list of identifiers */
+        if (!SplitIdentifierString(rawname, ',', &namelist)) {
+            /* syntax error in name list */
+            /* this should not happen if GUC checked check_search_path */
+            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg("invalid list syntax")));
+        }
+
+        foreach (l, namelist) {
+            char* curname = (char*)lfirst(l);
+
+            if (strcmp(curname, "$user") == 0) {
+                /* $user --- substitute namespace matching user name, if any */
+                HeapTuple tuple;
+                Oid namespaceId;
+
+                tuple = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleid));
+                if (HeapTupleIsValid(tuple)) {
+                    char* rname = NULL;
+
+                    rname = NameStr(((Form_pg_authid)GETSTRUCT(tuple))->rolname);
+                    namespaceId = get_namespace_oid(rname, true);
+                    ReleaseSysCache(tuple);
+                    if (OidIsValid(namespaceId) && !list_member_oid(oidlist, namespaceId) &&
+                        pg_namespace_aclcheck(namespaceId, roleid, ACL_USAGE, false) == ACLCHECK_OK) {
+                        oidlist = lappend_oid(oidlist, namespaceId);
+                    }
+                }
+                break;
+            }
+        }
+    }
 
     /*
      * Build the new stack entry, then insert it at the head of the list.
@@ -3207,7 +3394,8 @@ void PopOverrideSearchPath(void)
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg("bogus PopOverrideSearchPath call")));
     entry = (OverrideStackEntry*)linitial(u_sess->catalog_cxt.overrideStack);
     if (entry->nestLevel != GetCurrentTransactionNestLevel())
-        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg("bogus PopOverrideSearchPath call")));
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg("bogus PopOverrideSearchPath call, stack level %d, xact level %d",
+            entry->nestLevel, GetCurrentTransactionNestLevel())));
 
     /* Pop the stack and free storage. */
     u_sess->catalog_cxt.overrideStack = list_delete_first(u_sess->catalog_cxt.overrideStack);
@@ -3244,7 +3432,7 @@ void AddTmpNspToOverrideSearchPath(Oid tmpnspId)
         return;
     }
 
-    MemoryContext oldcxt = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    MemoryContext oldcxt = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
     ListCell* lc = NULL;
     foreach (lc, u_sess->catalog_cxt.overrideStack) {
         OverrideStackEntry* entry = (OverrideStackEntry*)lfirst(lc);
@@ -3272,7 +3460,7 @@ void RemoveTmpNspFromSearchPath(Oid tmpnspId)
 {
     /* Sanity checks. */
 
-    MemoryContext oldcxt = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+    MemoryContext oldcxt = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
 
     ListCell* lc = NULL;
     foreach (lc, u_sess->catalog_cxt.overrideStack) {
@@ -3351,11 +3539,9 @@ Oid get_collation_oid(List* name, bool missing_ok)
 
     /* Not found in path */
     if (!missing_ok)
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_OBJECT),
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("collation \"%s\" for encoding \"%s\" does not exist",
-                    NameListToString(name),
-                    GetDatabaseEncodingName())));
+                      NameListToString(name), GetDatabaseEncodingName())));
     return InvalidOid;
 }
 
@@ -3619,7 +3805,6 @@ static void InitTempTableNamespace(void)
     char namespaceName[NAMEDATALEN];
     char toastNamespaceName[NAMEDATALEN];
     char PGXCNodeNameSimplified[NAMEDATALEN];
-    char* dbname;
     Oid namespaceId;
     Oid toastspaceId;
     uint32 timeLineId = 0;
@@ -3643,18 +3828,11 @@ static void InitTempTableNamespace(void)
      * But there's no need to make the namespace in the first place until a
      * temp table creation request is made by someone with appropriate rights.
      */
-    dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-    if (dbname == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE),
-                    errmsg("database with OID %u does not exist",
-                        u_sess->proc_cxt.MyDatabaseId)));
-    }
-
     if (pg_database_aclcheck(u_sess->proc_cxt.MyDatabaseId, GetUserId(), ACL_CREATE_TEMP) != ACLCHECK_OK)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied to create temporary tables in database \"%s\"",
-                    dbname)));
+                    get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId))));
 
     check_nodegroup_privilege(GetUserId(), GetUserId(), ACL_CREATE);
 
@@ -3671,12 +3849,6 @@ static void InitTempTableNamespace(void)
     if (RecoveryInProgress())
         ereport(ERROR,
             (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION), errmsg("cannot create temporary tables during recovery")));
-
-    /* Parallel workers can't create temporary tables, either. */
-    if (IsParallelWorker()) {
-        ereport(ERROR, (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
-            errmsg("cannot create temporary tables during a parallel operation")));
-    }
 
     timeLineId = get_controlfile_timeline();
     tempID = __sync_add_and_fetch(&gt_tempID_seed, 1);
@@ -3818,7 +3990,7 @@ static void InitTempTableNamespace(void)
 /*
  * End-of-transaction cleanup for namespaces.
  */
-void AtEOXact_Namespace(bool isCommit, bool parallel)
+void AtEOXact_Namespace(bool isCommit)
 {
     /*
      * If we abort the transaction in which a temp namespace was selected,
@@ -3828,7 +4000,7 @@ void AtEOXact_Namespace(bool isCommit, bool parallel)
      * at backend shutdown.  (We only want to register the callback once per
      * session, so this is a good place to do it.)
      */
-    if (u_sess->catalog_cxt.myTempNamespaceSubID != InvalidSubTransactionId && !parallel) {
+    if (u_sess->catalog_cxt.myTempNamespaceSubID != InvalidSubTransactionId) {
         //@Temp table. No need to register RemoveTempRelationsCallback here,
         // because we don't drop temp objects by porc_exit();
         if (!isCommit) {
@@ -4016,7 +4188,7 @@ void InitializeSearchPath(void)
          */
         MemoryContext oldcxt;
 
-        oldcxt = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+        oldcxt = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
         u_sess->catalog_cxt.baseSearchPath = list_make1_oid(PG_CATALOG_NAMESPACE);
         MemoryContextSwitchTo(oldcxt);
         u_sess->catalog_cxt.baseCreationNamespace = PG_CATALOG_NAMESPACE;
@@ -4140,6 +4312,12 @@ Datum pg_table_is_visible(PG_FUNCTION_ARGS)
 
     if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(oid)))
         PG_RETURN_NULL();
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (is_streaming_invisible_obj(oid)) {
+        PG_RETURN_NULL();
+    }
+#endif
 
     PG_RETURN_BOOL(RelationIsVisible(oid));
 }
@@ -4335,7 +4513,8 @@ Oid GetUserIdFromNspId(Oid nspid, bool is_securityadmin)
              * return the owner's oid
              */
             if (!strcmp(NameStr(nsptup->nspname), rolname)) {
-                if (!is_securityadmin && (!superuser_arg(GetUserId()) && !has_privs_of_role(GetUserId(), nspowner))) {
+                if (!is_securityadmin && (!superuser_arg(GetUserId()) && !has_privs_of_role(GetUserId(), nspowner) &&
+                    !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))) {
                     ReleaseSysCache(tuple);
                     ereport(ERROR,
                         (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
@@ -4411,6 +4590,53 @@ void setTempToastNspName()
 
     pfree_ext(tempNspName);
     pfree_ext(tempToastNspName);
+}
+
+/*
+ * Called by set_config_option when setting search_path/current_schema
+ * Setting myTempNamespace, myTempToastNamespace, baseSearchPathValid
+ * if namelist contains temp namespace.
+ * Only use first valid temp namespace.
+ */
+void SetTempFromSearchPath(List* namelist)
+{
+    ListCell *item = NULL;
+    foreach(item, namelist) {
+        char *searchPathName = (char *)lfirst(item);
+        if (!isTempNamespaceName(searchPathName)) {
+            continue;
+        }
+
+        Oid nspid = get_namespace_oid(searchPathName, true);
+        if (!OidIsValid(nspid)) {
+            continue;
+        }
+
+        /*
+         * If is not our own created temp namespace, we should not
+         * delete it when quitting, just leave it behind and it will
+         * be deleted by it's owner.
+         */
+        if (!(OidIsValid(u_sess->catalog_cxt.myTempNamespace) && 
+                nspid == u_sess->catalog_cxt.myTempNamespace)) {
+            u_sess->catalog_cxt.deleteTempOnQuiting = false;
+        }
+
+        u_sess->catalog_cxt.myTempNamespace = nspid;
+        setTempToastNspName();
+        u_sess->catalog_cxt.baseSearchPathValid = false;
+
+        /*
+         * @Temp Table. Coordinator should send the set temp schema command to each dn too.
+         * Add retry query error code ERRCODE_SET_QUERY for error "ERROR SET query".
+         */
+        if (IS_PGXC_COORDINATOR && PoolManagerSetCommand(POOL_CMD_TEMP, searchPathName) < 0) {
+            ereport(ERROR, (errcode(ERRCODE_SET_QUERY), errmsg("Failed to set temp namespace.")));
+        }
+
+        /* Only use first valid pg_temp_xxx in search_path. */
+        break;
+    }
 }
 
 /*
@@ -4509,12 +4735,6 @@ bool checkGroup(Oid relid, bool missing_ok)
             if (!isOtherTempNamespace(pgClassForm->relnamespace)) {
                 char* tempNamespaceName = get_namespace_name(u_sess->catalog_cxt.myTempNamespace);
                 char tempToastNamespaceName[NAMEDATALEN] = {0};
-
-                if (tempNamespaceName == NULL) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                            errmsg("cache lookup failed for namespace %u", u_sess->catalog_cxt.myTempNamespace)));
-                }
 
                 int rc = snprintf_s(
                     tempToastNamespaceName, NAMEDATALEN, NAMEDATALEN - 1, "pg_toast_temp_%s", &tempNamespaceName[8]);
@@ -4697,7 +4917,7 @@ static void CheckTempTblAlias()
     }
 }
 
-Oid GetOidBySchemaName()
+Oid GetOidBySchemaName(bool missing_ok)
 {
     StringInfo error_info;
     error_info = makeStringInfo();
@@ -4716,7 +4936,7 @@ Oid GetOidBySchemaName()
 
     Oid namespaceId = u_sess->catalog_cxt.activeCreationNamespace;
 
-    if (!OidIsValid(namespaceId))
+    if (!OidIsValid(namespaceId) && !missing_ok)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("%s", error_info->data)));
 
     pfree_ext(error_info->data);

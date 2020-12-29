@@ -1,19 +1,8 @@
-/*
+/* -------------------------------------------------------------------------
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * -------------------------------------------------------------------------
  *
  * veccstore.cpp
  *    Support routines for sequential scans of column stores.
@@ -38,12 +27,13 @@
 #include "knl/knl_variable.h"
 
 #include "access/relscan.h"
+#include "access/tableam.h"
 #include "executor/execdebug.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "vecexecutor/vecnoderowtovector.h"
 #include "executor/nodeModifyTable.h"
 #include "executor/nodeSeqscan.h"
-#include "storage/cstore_compress.h"
+#include "storage/cstore/cstore_compress.h"
 #include "access/cstore_am.h"
 #include "optimizer/clauses.h"
 #include "nodes/params.h"
@@ -62,22 +52,23 @@
 #include "access/heapam.h"
 #include "access/sysattr.h"
 #include "catalog/indexing.h"
-#include "utils/tqual.h"
-#include "funcapi.h"
+#include "access/heapam.h"
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
 #include "catalog/pg_partition_fn.h"
 #include "pgxc/redistrib.h"
+#include "optimizer/pruning.h"
+
 
 extern bool CodeGenThreadObjectReady();
 extern bool CodeGenPassThreshold(double rows, int dn_num, int dop);
 
-static CStoreStrategyNumber get_cstore_scan_strategy_num(Oid opno);
-static Datum get_param_extern_const_value(Oid left_type, Expr* expr, PlanState* ps, uint16* flag);
-static void exec_init_next_part4cstore_scan(CStoreScanState* node);
-static void exec_cstore_build_scan_keys(CStoreScanState* scan_stat, List* quals, CStoreScanKey* scan_keys, int* num_scan_keys,
+static CStoreStrategyNumber GetCStoreScanStrategyNumber(Oid opno);
+static Datum GetParamExternConstValue(Oid left_type, Expr* expr, PlanState* ps, uint16* flag);
+static void ExecInitNextPartitionForCStoreScan(CStoreScanState* node);
+static void ExecCStoreBuildScanKeys(CStoreScanState* scan_stat, List* quals, CStoreScanKey* scan_keys, int* num_scan_keys,
     CStoreScanRunTimeKeyInfo** runtime_key_info, int* runtime_keys_num);
-static void exec_cstore_scan_eval_runtime_keys(
+static void ExecCStoreScanEvalRuntimeKeys(
     ExprContext* expr_ctx, CStoreScanRunTimeKeyInfo* runtime_keys, int num_runtime_keys);
 
 /* the same to CStore::SetTiming() */
@@ -327,7 +318,7 @@ VectorBatch* ExecCStoreScan(CStoreScanState* node)
     //
     // evaluate the runtime key
     if (node->m_ScanRunTimeKeysNum && !node->m_ScanRunTimeKeysReady) {
-        exec_cstore_scan_eval_runtime_keys(node->ps.ps_ExprContext, node->m_pScanRunTimeKeys, node->m_ScanRunTimeKeysNum);
+        ExecCStoreScanEvalRuntimeKeys(node->ps.ps_ExprContext, node->m_pScanRunTimeKeys, node->m_ScanRunTimeKeysNum);
         node->m_ScanRunTimeKeysReady = true;
     }
 
@@ -398,23 +389,10 @@ restart:
     return p_out_batch;
 }
 
-/* ----------------------------------------------------------------
- *      ExecTsStoreScan(node)
- *
- *      Scans the relation sequentially and returns the next qualifying
- *      tuple.
- *      We call the ExecScan() routine and pass it the appropriate
- *      access method functions.
- * ----------------------------------------------------------------
- */
-VectorBatch* ExecTsStoreScan(TsStoreScanState* node)
-{
-    return ExecCStoreScan((CStoreScanState*) node);
-}
 void ReScanDeltaRelation(CStoreScanState* node)
 {
     if (node->ss_currentDeltaScanDesc) {
-        heap_rescan(node->ss_currentDeltaScanDesc, NULL);
+        tableam_scan_rescan((TableScanDesc)(node->ss_currentDeltaScanDesc), NULL);
     }
     node->ss_deltaScan = false;
     node->ss_deltaScanEnd = false;
@@ -427,7 +405,7 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
     CStoreScan* plan = (CStoreScan*)node->ps.plan;
     bool is_target_rel = false;
     LOCKMODE lock_mode = AccessShareLock;
-    HeapScanDesc curr_scan_desc = NULL;
+    TableScanDesc curr_scan_desc = NULL;
 
     is_target_rel = ExecRelationIsTargetRelation(estate, plan->scanrelid);
 
@@ -449,7 +427,7 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
         if (u_sess->attr.attr_sql.enable_cluster_resize && RelationInRedistribute(curr_rel)) {
             List* new_qual = NIL;
 
-            new_qual = eval_ctid_funcs(curr_rel, node->ps.plan->qual, &node->isRangeScanInRedis);
+            new_qual = eval_ctid_funcs(curr_rel, node->ps.plan->qual, &node->rangeScanInRedis);
             node->ps.qual = (List*)ExecInitVecExpr((Expr*)new_qual, (PlanState*)&node->ps);
         } else {
             node->ps.qual = (List*)ExecInitVecExpr((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
@@ -490,10 +468,16 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
         if (plan->itrs > 0) {
             Partition part = NULL;
             Partition curr_part = NULL;
-            ListCell* cell = NULL;
-            List* part_seqs = plan->pruningInfo->ls_rangeSelectedPartitions;
+            
+            PruningResult* resultPlan = NULL;
+            if (plan->pruningInfo->expr != NULL) {
+                resultPlan = GetPartitionInfo(plan->pruningInfo, estate, curr_rel);
+            } else {
+                resultPlan = plan->pruningInfo;
+            }
 
-            Assert(plan->itrs == plan->pruningInfo->ls_rangeSelectedPartitions->length);
+            ListCell* cell = NULL;
+            List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
 
             if (!idx_flag) {
                 foreach (cell, part_seqs) {
@@ -504,7 +488,11 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
                     part = partitionOpen(curr_rel, tbl_part_id, lock_mode);
                     node->partitions = lappend(node->partitions, part);
                 }
-
+                if (resultPlan->ls_rangeSelectedPartitions != NULL) {
+                    node->part_id = resultPlan->ls_rangeSelectedPartitions->length;
+                } else {
+                    node->part_id = 0;
+                }
                 if (node->partitions == NULL)
                     ereport(ERROR,
                         (errmodule(MOD_VEC_EXECUTOR),
@@ -520,16 +508,16 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
                 if (u_sess->attr.attr_sql.enable_cluster_resize && RelationInRedistribute(curr_part_rel)) {
                     List* new_qual = NIL;
 
-                    new_qual = eval_ctid_funcs(curr_part_rel, node->ps.plan->qual, &node->isRangeScanInRedis);
+                    new_qual = eval_ctid_funcs(curr_part_rel, node->ps.plan->qual, &node->rangeScanInRedis);
                     node->ps.qual = (List*)ExecInitVecExpr((Expr*)new_qual, (PlanState*)&node->ps);
                 } else {
                     node->ps.qual = (List*)ExecInitVecExpr((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
                 }
 
                 if (!node->isSampleScan) {
-                    curr_scan_desc = heap_beginscan(curr_part_rel, estate->es_snapshot, 0, NULL);
+                    curr_scan_desc = tableam_scan_begin(curr_part_rel, estate->es_snapshot, 0, NULL);
                 } else {
-                    curr_scan_desc = (HeapScanDesc)InitSampleScanDesc((ScanState*)node, curr_part_rel);
+                    curr_scan_desc = (TableScanDesc)InitSampleScanDesc((ScanState*)node, curr_part_rel);
                 }
             } else {
                 Assert(parent_rel);
@@ -555,12 +543,17 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
                     node->partitions = lappend(node->partitions, idx_rel);
                 }
 
+                if (resultPlan->ls_rangeSelectedPartitions != NULL) {
+                    node->part_id = resultPlan->ls_rangeSelectedPartitions->length;
+                } else {
+                    node->part_id = 0;
+                }
                 curr_part_rel = (Relation)list_nth(node->partitions, 0);
                 /* add qual for redis */
                 if (u_sess->attr.attr_sql.enable_cluster_resize && RelationInRedistribute(curr_part_rel)) {
                     List* new_qual = NIL;
 
-                    new_qual = eval_ctid_funcs(curr_part_rel, node->ps.plan->qual, &node->isRangeScanInRedis);
+                    new_qual = eval_ctid_funcs(curr_part_rel, node->ps.plan->qual, &node->rangeScanInRedis);
                     node->ps.qual = (List*)ExecInitVecExpr((Expr*)new_qual, (PlanState*)&node->ps);
                 } else {
                     node->ps.qual = (List*)ExecInitVecExpr((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
@@ -583,21 +576,21 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
         node->ss_partition_parent = NULL;
     }
 
-    node->ss_currentScanDesc = (AbsTblScanDesc)curr_scan_desc;
+    node->ss_currentScanDesc = curr_scan_desc;
     ExecAssignScanType(node, RelationGetDescr(curr_rel));
 }
 
 void InitScanDeltaRelation(CStoreScanState* node, EState* estate)
 {
     Relation delta_rel;
-    HeapScanDesc delta_scan_desc;
+    TableScanDesc delta_scan_desc;
     Relation cstore_rel = node->ss_currentRelation;
 
     if (node->ss_currentRelation == NULL)
         return;
 
     delta_rel = heap_open(cstore_rel->rd_rel->reldeltarelid, AccessShareLock);
-    delta_scan_desc = heap_beginscan(delta_rel, estate->es_snapshot, 0, NULL);
+    delta_scan_desc = tableam_scan_begin(delta_rel, estate->es_snapshot, 0, NULL);
 
     node->ss_currentDeltaRelation = delta_rel;
     node->ss_currentDeltaScanDesc = delta_scan_desc;
@@ -635,7 +628,7 @@ CStoreScanState* ExecInitCStoreScan(
     plan_stat = &scan_stat->ps;
     scan_stat->partScanDirection = node->partScanDirection;
     scan_stat->m_isReplicaTable = node->is_replica_table;
-    scan_stat->isRangeScanInRedis = false;
+    scan_stat->rangeScanInRedis = {false,0,0};
     if (!node->tablesample) {
         scan_stat->isSampleScan = false;
     } else {
@@ -713,7 +706,9 @@ CStoreScanState* ExecInitCStoreScan(
     /*
      * Initialize result tuple type and projection info.
      */
-    ExecAssignResultTypeFromTL(&scan_stat->ps);
+    ExecAssignResultTypeFromTL(
+            &scan_stat->ps,
+            scan_stat->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType);
 
     if (node->isPartTbl && scan_stat->ss_currentRelation == NULL) {
         // no data ,just return;
@@ -788,7 +783,7 @@ CStoreScanState* ExecInitCStoreScan(
     scan_stat->csss_ScanKeys = NULL;
     scan_stat->csss_NumScanKeys = 0;
 
-    exec_cstore_build_scan_keys(scan_stat,
+    ExecCStoreBuildScanKeys(scan_stat,
         node->cstorequal,
         &scan_stat->csss_ScanKeys,
         &scan_stat->csss_NumScanKeys,
@@ -816,7 +811,7 @@ CStoreScanState* ExecInitCStoreScan(
 void ExecEndCStoreScan(CStoreScanState* node, bool idx_flag)
 {
     Relation relation;
-    HeapScanDesc scan_desc;
+    TableScanDesc scan_desc;
 
     /*
      * get information from node
@@ -826,7 +821,7 @@ void ExecEndCStoreScan(CStoreScanState* node, bool idx_flag)
     }
 
     relation = node->ss_currentRelation;
-    scan_desc = (HeapScanDesc)node->ss_currentScanDesc;
+    scan_desc = (TableScanDesc)(node->ss_currentScanDesc);
     /*
      * Free the exprcontext
      */
@@ -852,7 +847,7 @@ void ExecEndCStoreScan(CStoreScanState* node, bool idx_flag)
         if (PointerIsValid(node->partitions)) {
             if (!idx_flag) {
                 Assert(scan_desc);
-                heap_endscan(scan_desc);
+                tableam_scan_end(scan_desc);
                 Assert(node->ss_currentPartition);
                 releaseDummyRelation(&(node->ss_currentPartition));
                 releasePartitionList(node->ss_currentRelation, &(node->partitions), node->lockMode);
@@ -881,7 +876,7 @@ void ExecEndCStoreScan(CStoreScanState* node, bool idx_flag)
 }
 
 /* Build the cstore scan keys from the qual. */
-static void exec_cstore_build_scan_keys(CStoreScanState* scan_stat, List* quals, CStoreScanKey* scan_keys, int* num_scan_keys,
+static void ExecCStoreBuildScanKeys(CStoreScanState* scan_stat, List* quals, CStoreScanKey* scan_keys, int* num_scan_keys,
     CStoreScanRunTimeKeyInfo** runtime_key_info, int* runtime_keys_num)
 {
     ListCell* lc = NULL;
@@ -972,7 +967,7 @@ static void exec_cstore_build_scan_keys(CStoreScanState* scan_stat, List* quals,
                     convert_scan_key_int64_if_need(left_type, ((Const*)rightop)->consttype, ((Const*)rightop)->constvalue);
                 flags = ((Const*)rightop)->constisnull;
             } else if (nodeTag(rightop) == T_Param && ((Param*)rightop)->paramkind == PARAM_EXTERN) {
-                scan_val = get_param_extern_const_value(left_type, rightop, &(scan_stat->ps), &flags);
+                scan_val = GetParamExternConstValue(left_type, rightop, &(scan_stat->ps), &flags);
             } else if (nodeTag(rightop) == T_Param) {
                 // when the rightop is T_Param, the scan_val will be filled until rescan happens.
                 //
@@ -996,7 +991,7 @@ static void exec_cstore_build_scan_keys(CStoreScanState* scan_stat, List* quals,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("Not support pushing  predicate with none-const external param")));
             /* Get strategy number. */
-            strategy = get_cstore_scan_strategy_num(opno);
+            strategy = GetCStoreScanStrategyNumber(opno);
             /* initialize the scan key's fields appropriately */
             CStoreScanKeyInit(this_scan_key,
                 flags,
@@ -1023,7 +1018,7 @@ static void exec_cstore_build_scan_keys(CStoreScanState* scan_stat, List* quals,
 
 /* No metadata for the operator strategy. The followings are temporary codes.
  */
-static CStoreStrategyNumber get_cstore_scan_strategy_num(Oid opno)
+static CStoreStrategyNumber GetCStoreScanStrategyNumber(Oid opno)
 {
     CStoreStrategyNumber strategy_number = InvalidCStoreStrategy;
     Relation hdesc;
@@ -1064,7 +1059,7 @@ static CStoreStrategyNumber get_cstore_scan_strategy_num(Oid opno)
     return strategy_number;
 }
 
-static Datum get_param_extern_const_value(Oid left_type, Expr* expr, PlanState* ps, uint16* flag)
+static Datum GetParamExternConstValue(Oid left_type, Expr* expr, PlanState* ps, uint16* flag)
 {
     Param* expression = (Param*)expr;
     int param_id = expression->paramid;
@@ -1092,7 +1087,7 @@ void ExecReCStoreSeqScan(CStoreScanState* node)
     node->m_CStore->InitReScan();
 }
 
-void exec_cstore_scan_eval_runtime_keys(ExprContext* expr_ctx, CStoreScanRunTimeKeyInfo* runtime_keys, int num_runtime_keys)
+void ExecCStoreScanEvalRuntimeKeys(ExprContext* expr_ctx, CStoreScanRunTimeKeyInfo* runtime_keys, int num_runtime_keys)
 {
     int j;
     MemoryContext old_ctx;
@@ -1139,12 +1134,12 @@ void exec_cstore_scan_eval_runtime_keys(ExprContext* expr_ctx, CStoreScanRunTime
 void ExecReSetRuntimeKeys(CStoreScanState* node)
 {
     ExprContext* expr_ctx = node->ps.ps_ExprContext;
-    exec_cstore_scan_eval_runtime_keys(expr_ctx, node->m_pScanRunTimeKeys, node->m_ScanRunTimeKeysNum);
+    ExecCStoreScanEvalRuntimeKeys(expr_ctx, node->m_pScanRunTimeKeys, node->m_ScanRunTimeKeysNum);
 }
 
 void ExecReScanCStoreScan(CStoreScanState* node)
 {
-    HeapScanDesc scan;
+    TableScanDesc scan;
 
     if (node->isSampleScan) {
         /* Remember we need to do BeginSampleScan again (if we did it at all) */
@@ -1156,15 +1151,15 @@ void ExecReScanCStoreScan(CStoreScanState* node)
     }
     node->m_ScanRunTimeKeysReady = true;
 
-    scan = (HeapScanDesc)node->ss_currentScanDesc;
+    scan = (TableScanDesc)(node->ss_currentScanDesc);
     if (node->isPartTbl) {
         if (PointerIsValid(node->partitions)) {
             /* end scan the prev partition first, */
-            heap_endscan(scan);
+            tableam_scan_end(scan);
             EndScanDeltaRelation(node);
 
             /* finally init Scan for the next partition */
-            exec_init_next_part4cstore_scan(node);
+            ExecInitNextPartitionForCStoreScan(node);
         }
     }
 
@@ -1172,11 +1167,11 @@ void ExecReScanCStoreScan(CStoreScanState* node)
     ReScanDeltaRelation(node);
 }
 
-static void exec_init_next_part4cstore_scan(CStoreScanState* node)
+static void ExecInitNextPartitionForCStoreScan(CStoreScanState* node)
 {
     Partition curr_part = NULL;
     Relation curr_part_rel = NULL;
-    AbsTblScanDesc curr_scan_desc = NULL;
+    TableScanDesc curr_scan_desc = NULL;
     int param_no = -1;
     ParamExecData* param = NULL;
     CStoreScan* plan = NULL;
@@ -1200,12 +1195,12 @@ static void exec_init_next_part4cstore_scan(CStoreScanState* node)
     if (u_sess->attr.attr_sql.enable_cluster_resize && RelationInRedistribute(curr_part_rel)) {
         List* new_qual = NIL;
 
-        new_qual = eval_ctid_funcs(curr_part_rel, node->ps.plan->qual, &node->isRangeScanInRedis);
+        new_qual = eval_ctid_funcs(curr_part_rel, node->ps.plan->qual, &node->rangeScanInRedis);
         node->ps.qual = (List*)ExecInitVecExpr((Expr*)new_qual, (PlanState*)&node->ps);
     }
 
     if (!node->isSampleScan) {
-        curr_scan_desc = (AbsTblScanDesc)heap_beginscan(curr_part_rel, node->ps.state->es_snapshot, 0, NULL);
+        curr_scan_desc = tableam_scan_begin(curr_part_rel, node->ps.state->es_snapshot, 0, NULL);
     } else {
         curr_scan_desc = InitSampleScanDesc((ScanState*)node, curr_part_rel);
     }

@@ -14,7 +14,7 @@ CREATE TABLE cmpr_smallint_raw (
 	R8_ID smallint NOT NULL,
 	R9_ID smallint NOT NULL
 );
-COPY cmpr_smallint_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+COPY cmpr_smallint_raw FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 
 CREATE TABLE cmpr_smallint_auto (
 	RS_ID smallint,
@@ -28,8 +28,8 @@ CREATE TABLE cmpr_smallint_auto (
 	R7_ID smallint NOT NULL,
 	R8_ID smallint NOT NULL,
 	R9_ID smallint NOT NULL
-)  COMPRESS;
-COPY cmpr_smallint_auto FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+)  ;
+COPY cmpr_smallint_auto FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 SELECT (SELECT COUNT(*) FROM cmpr_smallint_raw) - (SELECT COUNT(*) FROM cmpr_smallint_auto);
 (SELECT * FROM cmpr_smallint_raw) MINUS ALL (SELECT * FROM cmpr_smallint_auto);
 (SELECT * FROM cmpr_smallint_auto) MINUS ALL (SELECT * FROM cmpr_smallint_raw);
@@ -47,8 +47,8 @@ CREATE TABLE cmpr_smallint_dict (
 	R7_ID smallint dictionary NOT NULL,
 	R8_ID smallint dictionary NOT NULL,
 	R9_ID smallint dictionary NOT NULL
-)  COMPRESS;
-COPY cmpr_smallint_dict FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+)  ;
+COPY cmpr_smallint_dict FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 SELECT (SELECT COUNT(*) FROM cmpr_smallint_raw) - (SELECT COUNT(*) FROM cmpr_smallint_dict);
 (SELECT * FROM cmpr_smallint_raw) MINUS ALL (SELECT * FROM cmpr_smallint_dict);
 (SELECT * FROM cmpr_smallint_dict) MINUS ALL (SELECT * FROM cmpr_smallint_raw);
@@ -66,8 +66,8 @@ CREATE TABLE cmpr_smallint_delta (
 	R7_ID smallint delta NOT NULL,
 	R8_ID smallint delta NOT NULL,
 	R9_ID smallint delta NOT NULL
-)  COMPRESS;
-COPY cmpr_smallint_delta FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+)  ;
+COPY cmpr_smallint_delta FROM '@abs_srcdir@/data/cmpr_int_raw.data';
 SELECT (SELECT COUNT(*) FROM cmpr_smallint_raw) - (SELECT COUNT(*) FROM cmpr_smallint_delta);
 (SELECT * FROM cmpr_smallint_raw) MINUS ALL (SELECT * FROM cmpr_smallint_delta);
 (SELECT * FROM cmpr_smallint_delta) MINUS ALL (SELECT * FROM cmpr_smallint_raw);

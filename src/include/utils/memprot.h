@@ -74,6 +74,8 @@ extern int32 comm_original_memory;
 extern int32 maxSharedMemory;
 extern int32 dynmicTrackedMemChunks;
 extern int64 storageTrackedBytes;
+extern int32 backendReservedMemInChunk;
+extern int32 backendUsedMemInChunk;
 
 /* functions from memprot.cpp */
 #ifdef MEMORY_CONTEXT_CHECKING
@@ -92,10 +94,10 @@ extern void gs_memprot_process_gpu_memory(uint32 size);
 
 extern void gs_memprot_reset_beyondchunk(void);
 
-#define GS_MEMPROT_MALLOC(sz) MemoryProtectFunctions::gs_memprot_malloc<MEM_THRD>(sz)
+#define GS_MEMPROT_MALLOC(sz, needProtect) MemoryProtectFunctions::gs_memprot_malloc<MEM_THRD>(sz, needProtect)
 #define GS_MEMPROT_FREE(ptr, sz) MemoryProtectFunctions::gs_memprot_free<MEM_THRD>(ptr, sz)
-#define GS_MEMPROT_REALLOC(ptr, sz, newsz) MemoryProtectFunctions::gs_memprot_realloc<MEM_THRD>(ptr, sz, newsz)
-#define GS_MEMPROT_MEMALIGN(ptr, align, sz) MemoryProtectFunctions::gs_posix_memalign<MEM_THRD>(ptr, align, sz)
+#define GS_MEMPROT_REALLOC(ptr, sz, newsz, needProtect) MemoryProtectFunctions::gs_memprot_realloc<MEM_THRD>(ptr, sz, newsz, needProtect)
+#define GS_MEMPROT_MEMALIGN(ptr, align, sz, needProtect) MemoryProtectFunctions::gs_posix_memalign<MEM_THRD>(ptr, align, sz, needProtect)
 #define GS_MEMPROT_SHARED_MALLOC(sz) MemoryProtectFunctions::gs_memprot_malloc<MEM_SHRD>(sz)
 #define GS_MEMPROT_SHARED_FREE(ptr, sz) MemoryProtectFunctions::gs_memprot_free<MEM_SHRD>(ptr, sz)
 

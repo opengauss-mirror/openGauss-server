@@ -58,13 +58,15 @@ static int unique_array(trgm* a, int len)
     trgm *curend, *tmp;
 
     curend = tmp = a;
-    while (tmp - a < len)
+    while (tmp - a < len) {
         if (CMPTRGM(tmp, curend)) {
             curend++;
             CPTRGM(curend, tmp);
             tmp++;
-        } else
+        } else {
             tmp++;
+        }
+    }
 
     return curend + 1 - a;
 }
@@ -126,8 +128,9 @@ static trgm* make_trigrams(trgm* tptr, char* str, int bytelen, int charlen)
 {
     char* ptr = str;
 
-    if (charlen < 3)
+    if (charlen < 3) {
         return tptr;
+    }
 
 #ifdef USE_WIDE_UPPER_LOWER
     if (pg_database_encoding_max_length() > 1) {
@@ -165,14 +168,16 @@ TRGM* generate_trgm(char* str, int slen)
     char* buf = NULL;
     trgm* tptr = NULL;
     int len, charlen, bytelen;
-    char *bword, *eword;
+    char *bword = NULL;
+    char *eword = NULL;
 
     trg = (TRGM*)palloc(TRGMHDRSIZE + sizeof(trgm) * (slen / 2 + 1) * 3);
     trg->flag = ARRKEY;
     SET_VARSIZE(trg, TRGMHDRSIZE);
 
-    if (slen + LPADDING + RPADDING < 3 || slen == 0)
+    if (slen + LPADDING + RPADDING < 3 || slen == 0) {
         return trg;
+    }
 
     tptr = GETARR(trg);
 
@@ -180,8 +185,9 @@ TRGM* generate_trgm(char* str, int slen)
 
     if (LPADDING > 0) {
         *buf = ' ';
-        if (LPADDING > 1)
+        if (LPADDING > 1) {
             *(buf + 1) = ' ';
+        }
     }
 
     eword = str;
@@ -260,14 +266,15 @@ static const char* get_wildcard_part(const char* str, int lenstr, char* buf, int
             in_escape = false;
             in_leading_wildcard_meta = false;
         } else {
-            if (ISESCAPECHAR(beginword))
+            if (ISESCAPECHAR(beginword)) {
                 in_escape = true;
-            else if (ISWILDCARDCHAR(beginword))
+            } else if (ISWILDCARDCHAR(beginword)) {
                 in_leading_wildcard_meta = true;
-            else if (iswordchr(beginword))
+            } else if (iswordchr(beginword)) {
                 break;
-            else
+            } else {
                 in_leading_wildcard_meta = false;
+            }
         }
         beginword += pg_mblen(beginword);
     }
@@ -318,17 +325,18 @@ static const char* get_wildcard_part(const char* str, int lenstr, char* buf, int
             }
             in_escape = false;
         } else {
-            if (ISESCAPECHAR(endword))
+            if (ISESCAPECHAR(endword)) {
                 in_escape = true;
-            else if (ISWILDCARDCHAR(endword)) {
+            } else if (ISWILDCARDCHAR(endword)) {
                 in_trailing_wildcard_meta = true;
                 break;
             } else if (iswordchr(endword)) {
                 memcpy(s, endword, clen);
                 (*charlen)++;
                 s += clen;
-            } else
+            } else {
                 break;
+            }
         }
         endword += clen;
     }
@@ -362,7 +370,8 @@ static const char* get_wildcard_part(const char* str, int lenstr, char* buf, int
 TRGM* generate_wildcard_trgm(const char* str, int slen)
 {
     TRGM* trg = NULL;
-    char *buf, *buf2;
+    char *buf = NULL;
+    char *buf2 = NULL;
     trgm* tptr = NULL;
     int len, charlen, bytelen;
     const char* eword = NULL;
@@ -371,8 +380,9 @@ TRGM* generate_wildcard_trgm(const char* str, int slen)
     trg->flag = ARRKEY;
     SET_VARSIZE(trg, TRGMHDRSIZE);
 
-    if (slen + LPADDING + RPADDING < 3 || slen == 0)
+    if (slen + LPADDING + RPADDING < 3 || slen == 0) {
         return trg;
+    }
 
     tptr = GETARR(trg);
 
@@ -438,15 +448,17 @@ Datum show_trgm(PG_FUNCTION_ARGS)
     ArrayType* a = NULL;
     trgm* ptr = NULL;
     int i;
+    const int bufsize = 12;
 
     trg = generate_trgm(VARDATA(in), VARSIZE(in) - VARHDRSZ);
     d = (Datum*)palloc(sizeof(Datum) * (1 + ARRNELEM(trg)));
 
     for (i = 0, ptr = GETARR(trg); i < ARRNELEM(trg); i++, ptr++) {
-        text* item = (text*)palloc(VARHDRSZ + Max(12, pg_database_encoding_max_length() * 3));
+        text* item = (text*)palloc(VARHDRSZ + Max(bufsize, pg_database_encoding_max_length() * 3));
 
         if (pg_database_encoding_max_length() > 1 && !ISPRINTABLETRGM(ptr)) {
-            snprintf(VARDATA(item), 12, "0x%06x", trgm2int(ptr));
+            int rc = snprintf_s(VARDATA(item), bufsize, bufsize - 1, "0x%06x", trgm2int(ptr));
+            securec_check_ss(rc, "", "");
             SET_VARSIZE(item, VARHDRSZ + strlen(VARDATA(item)));
         } else {
             SET_VARSIZE(item, VARHDRSZ + 3);

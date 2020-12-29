@@ -32,10 +32,12 @@
 #include "commands/tablecmds.h"
 #include "catalog/objectaccess.h"
 #include "access/cstore_insert.h"
+#include "access/tableam.h"
 #include "catalog/dependency.h"
 #include "utils/lsyscache.h"
 #include "catalog/index.h"
 #include "storage/remote_read.h"
+#include "utils/snapmgr.h"
 
 #define IsBitmapSet(_bitmap, _i) (((_bitmap)[(_i) >> 3] & (1 << ((_i) % 8))) != 0)
 
@@ -98,15 +100,15 @@ HeapBulkInsert::HeapBulkInsert(Relation heapRel)
     m_HeapRel = heapRel;
 
     /*
-     * the default value is HEAP_INSERT_FROZEN; it means don't set (HEAP_INSERT_SKIP_FSM | HEAP_INSERT_SKIP_WAL).
-     * HEAP_INSERT_FROZEN means ,after modify table , other sessions can always see it.
+     * the default value is HEAP_INSERT_FROZEN; it means don't set (TABLE_INSERT_SKIP_FSM | TABLE_INSERT_SKIP_WAL).
+     * TABLE_INSERT_FROZEN means ,after modify table , other sessions can always see it.
      */
-    m_InsertOpt = HEAP_INSERT_FROZEN;
+    m_InsertOpt = TABLE_INSERT_FROZEN;
     if (heapRel->rd_createSubid != InvalidSubTransactionId ||
         heapRel->rd_newRelfilenodeSubid != InvalidSubTransactionId) {
-        m_InsertOpt |= HEAP_INSERT_SKIP_FSM;
+        m_InsertOpt |= TABLE_INSERT_SKIP_FSM;
         if (!XLogIsNeeded()) {
-            m_InsertOpt |= HEAP_INSERT_SKIP_WAL;
+            m_InsertOpt |= TABLE_INSERT_SKIP_WAL;
         }
     }
 
@@ -115,10 +117,10 @@ HeapBulkInsert::HeapBulkInsert(Relation heapRel)
     m_CmdId = GetCurrentCommandId(true);
     m_OldMemCnxt = NULL;
     m_MemCnxt = AllocSetContextCreate(CurrentMemoryContext,
-        "HeapBulkInsert Memmory",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+                                      "HeapBulkInsert Memmory",
+                                      ALLOCSET_DEFAULT_MINSIZE,
+                                      ALLOCSET_DEFAULT_INITSIZE,
+                                      ALLOCSET_DEFAULT_MAXSIZE);
 
     m_BufferedTupsSize = 0;
     m_BufferedTupsNum = 0;
@@ -174,7 +176,7 @@ FORCE_INLINE void HeapBulkInsert::Flush()
      */
     HeapMultiInsertExtraArgs args = {NULL, 0, true};
 
-    (void)heap_multi_insert(m_HeapRel, m_HeapRel, m_BufferedTups, m_BufferedTupsNum, m_CmdId,
+    (void)tableam_tuple_multi_insert(m_HeapRel, m_HeapRel, (Tuple*)m_BufferedTups, m_BufferedTupsNum, m_CmdId,
         m_InsertOpt, m_BIState, &args);
 
     MemoryContextReset(m_MemCnxt);
@@ -273,7 +275,7 @@ void CStoreRewriter::ChangeTableSpace(Relation CUReplicationRel)
 }
 
 void CStoreRewriter::BeginRewriteCols(_in_ int nRewriteCols, _in_ CStoreRewriteColumn** pRewriteCols,
-    _in_ const int* rewriteColsNum, _in_ bool* rewriteFlags)
+                                      _in_ const int* rewriteColsNum, _in_ bool* rewriteFlags)
 {
     Assert(nRewriteCols == m_NewTupDesc->natts);
     m_AddColsNum = rewriteColsNum[CSRT_ADD_COL];
@@ -404,10 +406,10 @@ void CStoreRewriter::RewriteColsData()
     // only used during the data rewriting.
     // we will reset and free it periodically in the loop.
     MemoryContext oneLoopMemCnxt = AllocSetContextCreate(CurrentMemoryContext,
-        "Cstore Rewriting Memmory",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+                                                         "Cstore Rewriting Memmory",
+                                                         ALLOCSET_DEFAULT_MINSIZE,
+                                                         ALLOCSET_DEFAULT_INITSIZE,
+                                                         ALLOCSET_DEFAULT_MAXSIZE);
 
     while (nextCuId <= maxCuId) {
         // If we got a cancel signal during rewriting data, quit
@@ -494,10 +496,10 @@ void CStoreRewriter::RewriteColsData()
         if (virtualDelTup == NULL) {
             Assert(false);
             ereport(ERROR,
-                (errcode(ERRCODE_NO_DATA),
-                    errmsg("Relation \'%s\' virtual cudesc tuple(cuid %u) not found",
-                        RelationGetRelationName(m_OldHeapRel),
-                        nextCuId)));
+                    (errcode(ERRCODE_NO_DATA),
+                     errmsg("Relation \'%s\' virtual cudesc tuple(cuid %u) not found",
+                            RelationGetRelationName(m_OldHeapRel),
+                            nextCuId)));
         }
 
         // get rows number within this cu.
@@ -513,7 +515,7 @@ void CStoreRewriter::RewriteColsData()
             // notice: if the left is not equal to input argument *delMaskVarDatum*
             //    in the right, we must free this memory at end of this loop.
             //    but in fact at the begin we reset the memory *delMaskVarDatum*
-            //    belonged to, so it's fine. please don't care memroy leak.
+            //    belonged to, so i's fine. please don'tt care memroy leak.
             delMaskVarDatum = (char*)PG_DETOAST_DATUM(delMaskVarDatum);
             Assert(VARSIZE_ANY_EXHDR(delMaskVarDatum) == bitmap_size(rowCount));
             delMaskDataPtr = VARDATA_ANY(delMaskVarDatum);
@@ -549,7 +551,7 @@ void CStoreRewriter::RewriteColsData()
          */
         m_NewCudescBulkInsert->EnterBulkMemCnxt();
         m_NewCudescBulkInsert->BulkInsert(CStore::FormVCCUDescTup(
-            oldCudescTupDesc, delMaskDataPtr, nextCuId, rowCount, GetCurrentTransactionIdIfAny()));
+                                              oldCudescTupDesc, delMaskDataPtr, nextCuId, rowCount, GetCurrentTransactionIdIfAny()));
         m_NewCudescBulkInsert->LeaveBulkMemCnxt();
 
         /* ok, all the tuples are inserted into cudesc table.
@@ -570,15 +572,15 @@ void CStoreRewriter::RewriteColsData()
 
     if (m_TblspcChanged) {
         ereport(LOG,
-            (errmsg("Row [Rewrite]: %s(%u) tblspc %u/%u/%u => %u/%u/%u",
-                RelationGetRelationName(oldCudescHeap),
-                RelationGetRelid(oldCudescHeap),
-                oldCudescHeap->rd_node.spcNode,
-                oldCudescHeap->rd_node.dbNode,
-                oldCudescHeap->rd_node.relNode,
-                m_NewCudescRel->rd_node.spcNode,
-                m_NewCudescRel->rd_node.dbNode,
-                m_NewCudescRel->rd_node.relNode)));
+                (errmsg("Row [Rewrite]: %s(%u) tblspc %u/%u/%u => %u/%u/%u",
+                        RelationGetRelationName(oldCudescHeap),
+                        RelationGetRelid(oldCudescHeap),
+                        oldCudescHeap->rd_node.spcNode,
+                        oldCudescHeap->rd_node.dbNode,
+                        oldCudescHeap->rd_node.relNode,
+                        m_NewCudescRel->rd_node.spcNode,
+                        m_NewCudescRel->rd_node.dbNode,
+                        m_NewCudescRel->rd_node.relNode)));
     }
 
     // Reset rd_toastoid just to be tidy before relation is closed.
@@ -648,16 +650,16 @@ void CStoreRewriter::AddColumnInitPhrase2(_in_ CStoreRewriteColumn* addColInfo, 
 
     if (m_TblspcChanged) {
         ereport(LOG,
-            (errmsg("Column [ADD COLUMN]: %s(%u C%d) tblspc %u/%u/%u => %u/%u/%u",
-                RelationGetRelationName(m_OldHeapRel),
-                RelationGetRelid(m_OldHeapRel),
-                (addColInfo->attrno - 1),
-                m_OldHeapRel->rd_node.spcNode,
-                m_OldHeapRel->rd_node.dbNode,
-                m_OldHeapRel->rd_node.relNode,
-                m_TargetTblspc,
-                m_OldHeapRel->rd_node.dbNode,
-                m_TargetRelFileNode)));
+                (errmsg("Column [ADD COLUMN]: %s(%u C%d) tblspc %u/%u/%u => %u/%u/%u",
+                        RelationGetRelationName(m_OldHeapRel),
+                        RelationGetRelid(m_OldHeapRel),
+                        (addColInfo->attrno - 1),
+                        m_OldHeapRel->rd_node.spcNode,
+                        m_OldHeapRel->rd_node.dbNode,
+                        m_OldHeapRel->rd_node.relNode,
+                        m_TargetTblspc,
+                        m_OldHeapRel->rd_node.dbNode,
+                        m_TargetRelFileNode)));
     }
 
     /* IF (relation's tablespace is not changed)
@@ -742,22 +744,22 @@ void CStoreRewriter::AddColumns(_in_ uint32 cuId, _in_ int rowsCntInCu, _in_ boo
             // the table is not empty now.
             //
             ereport(ERROR,
-                (errcode(ERRCODE_NOT_NULL_VIOLATION),
-                    errmsg("column \"%s\" contains null values", NameStr(newColAttr->attname)),
-                    errdetail("existing data violate the NOT NULL constraint of new column."),
-                    errhint("define DEFAULT constraint also.")));
+                    (errcode(ERRCODE_NOT_NULL_VIOLATION),
+                     errmsg("column \"%s\" contains null values", NameStr(newColAttr->attname)),
+                     errdetail("existing data violate the NOT NULL constraint of new column."),
+                     errhint("define DEFAULT constraint also.")));
         }
 
         newColCudesc.magic = GetCurrentTransactionIdIfAny();
 
         HandleCuWithSameValue<true>(m_OldHeapRel,
-            newColAttr,
-            newColVal,
-            newColValIsNull,
-            m_AddColsMinMaxFunc[i],
-            m_AddColsStorage[i],
-            &newColCudesc,
-            m_AddColsAppendOffset + i);
+                                    newColAttr,
+                                    newColVal,
+                                    newColValIsNull,
+                                    m_AddColsMinMaxFunc[i],
+                                    m_AddColsStorage[i],
+                                    &newColCudesc,
+                                    m_AddColsAppendOffset + i);
 
         InsertNewCudescTup(&newColCudesc, RelationGetDescr(m_NewCudescRel), newColAttr);
 
@@ -782,8 +784,8 @@ void CStoreRewriter::AddColumns(_in_ uint32 cuId, _in_ int rowsCntInCu, _in_ boo
 //   it's the caller's responsibility that pass in the right *rel*.
 template <bool append>
 void CStoreRewriter::HandleCuWithSameValue(_in_ Relation rel, _in_ Form_pg_attribute pColAttr, _in_ Datum colValue,
-    _in_ bool colIsNull, _in_ FuncSetMinMax MinMaxFunc, _in_ CUStorage* colStorage, __inout CUDesc* pColCudescData,
-    __inout CUPointer* pOffset)
+                                           _in_ bool colIsNull, _in_ FuncSetMinMax MinMaxFunc, _in_ CUStorage* colStorage, __inout CUDesc* pColCudescData,
+                                           __inout CUPointer* pOffset)
 {
     // step 1: set Cudesc mode. if true is returned, we must write new data into cu file.
     if (CStore::SetCudescModeForTheSameVal(colIsNull, MinMaxFunc, pColAttr->attlen, colValue, pColCudescData)) {
@@ -812,10 +814,10 @@ void CStoreRewriter::HandleCuWithSameValue(_in_ Relation rel, _in_ Form_pg_attri
 
         // step 6: about HA, push CU data into replicate queue
         CStoreCUReplication((this->m_TblspcChanged ? this->m_CUReplicationRel : rel),
-            pColAttr->attnum,
-            cuPtr->m_compressedBuf,
-            pColCudescData->cu_size,
-            pColCudescData->cu_pointer);
+                            pColAttr->attnum,
+                            cuPtr->m_compressedBuf,
+                            pColCudescData->cu_size,
+                            pColCudescData->cu_pointer);
 
         DELETE_EX(cuPtr);
     } else {
@@ -840,9 +842,9 @@ void CStoreRewriter::FormCuDataForTheSameVal(CU* cuPtr, int rowsCntInCu, Datum n
     }
 
     ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("column \"%s\" needs too many memory", NameStr(newColAttr->attname)),
-            errdetail("its size of default value is too big.")));
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("column \"%s\" needs too many memory", NameStr(newColAttr->attname)),
+             errdetail("its size of default value is too big.")));
 }
 
 /*
@@ -869,7 +871,7 @@ void CStoreRewriter::CompressCuData(CU* cuPtr, CUDesc* cuDesc, Form_pg_attribute
     cuPtr->m_tmpinfo = &cu_temp_info;
 
     cuPtr->SetMagic(cuDesc->magic);
-    cuPtr->Compress(cuDesc->row_count, compressing_modes);
+    cuPtr->Compress(cuDesc->row_count, compressing_modes, ALIGNOF_CUSIZE);
     cuDesc->cu_size = cuPtr->GetCUSize();
     Assert(cuDesc->cu_size > 0);
 }
@@ -903,8 +905,8 @@ void CStoreRewriter::FetchCudescFrozenXid(Relation oldCudescHeap)
     HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(RelationGetRelid(oldCudescHeap)));
     if (!HeapTupleIsValid(tuple)) {
         ereport(ERROR,
-            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                errmsg("cache lookup failed for relation %u", RelationGetRelid(oldCudescHeap))));
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                 errmsg("cache lookup failed for relation %u", RelationGetRelid(oldCudescHeap))));
     }
     Datum xid64datum = heap_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
     heap_close(rel, AccessShareLock);
@@ -970,24 +972,24 @@ void CStoreRewriter::SetDataTypeInitPhase2(_in_ CStoreRewriteColumn* sdtColInfo,
          */
         m_SDTColsWriter[idx]->CreateStorage(0, false);
         CStoreRelCreateStorage(&wrtCFileNode.m_rnode,
-            sdtColInfo->attrno,
-            m_OldHeapRel->rd_rel->relpersistence,
-            m_OldHeapRel->rd_rel->relowner);
+                               sdtColInfo->attrno,
+                               m_OldHeapRel->rd_rel->relpersistence,
+                               m_OldHeapRel->rd_rel->relowner);
 
         /* APPEND_ONLY strategy will be used. */
         m_SDTColAppendOffset[idx] = 0;
 
         ereport(LOG,
-            (errmsg("Column [SET TYPE]: %s(%u C%d) tblspc %u/%u/%u => %u/%u/%u",
-                RelationGetRelationName(m_OldHeapRel),
-                RelationGetRelid(m_OldHeapRel),
-                (sdtColInfo->attrno - 1),
-                m_OldHeapRel->rd_node.spcNode,
-                m_OldHeapRel->rd_node.dbNode,
-                m_OldHeapRel->rd_node.relNode,
-                m_TargetTblspc,
-                m_OldHeapRel->rd_node.dbNode,
-                m_TargetRelFileNode)));
+                (errmsg("Column [SET TYPE]: %s(%u C%d) tblspc %u/%u/%u => %u/%u/%u",
+                        RelationGetRelationName(m_OldHeapRel),
+                        RelationGetRelid(m_OldHeapRel),
+                        (sdtColInfo->attrno - 1),
+                        m_OldHeapRel->rd_node.spcNode,
+                        m_OldHeapRel->rd_node.dbNode,
+                        m_OldHeapRel->rd_node.relNode,
+                        m_TargetTblspc,
+                        m_OldHeapRel->rd_node.dbNode,
+                        m_TargetRelFileNode)));
     } else {
         /* at first, set column allocate strategy. */
         m_SDTColsWriter[idx]->SetAllocateStrategy(APPEND_ONLY);
@@ -1043,7 +1045,7 @@ void CStoreRewriter::HandleWholeDeletedCu(
 
 // main body of ALTER COLUMN SET DATA TYPE clause.
 void CStoreRewriter::SetDataType(_in_ uint32 cuId, _in_ HeapTuple* cudescTup, _in_ TupleDesc cudescTupDesc,
-    _in_ const char* delMaskDataPtr, _in_ int rowsCntInCu, _in_ bool wholeCuIsDeleted)
+                                 _in_ const char* delMaskDataPtr, _in_ int rowsCntInCu, _in_ bool wholeCuIsDeleted)
 {
     /* description: future plan-remove this branch after WHOLE DELETED CU data can be resued. */
     if (wholeCuIsDeleted) {
@@ -1086,7 +1088,7 @@ void CStoreRewriter::SetDataType(_in_ uint32 cuId, _in_ HeapTuple* cudescTup, _i
         // until here this cu data will never be used, so invalid its cache data.
         cucache->InvalidateCU(
             (RelFileNodeOld *)&(m_OldHeapRel->rd_node), setDataTypeColInfo->attrno - 1,
-             oldColCudesc.cu_id, oldColCudesc.cu_pointer);
+            oldColCudesc.cu_id, oldColCudesc.cu_pointer);
     }
 
     // *econtext* is under control of *estate*.
@@ -1141,29 +1143,29 @@ void CStoreRewriter::SetDataTypeHandleSameValCu(
     Datum attNewValue = ExecEvalExpr(setDataTypeColInfo->newValue->exprstate, m_econtext, &attNewIsNull, NULL);
     if (attNewIsNull && setDataTypeColInfo->notNull) {
         ereport(ERROR,
-            (errcode(ERRCODE_NOT_NULL_VIOLATION),
-                errmsg("column \"%s\" contains null values", NameStr(pColOldAttr->attname)),
-                errdetail("existing data violate the NOT NULL constraint.")));
+                (errcode(ERRCODE_NOT_NULL_VIOLATION),
+                 errmsg("column \"%s\" contains null values", NameStr(pColOldAttr->attname)),
+                 errdetail("existing data violate the NOT NULL constraint.")));
     }
 
     if (m_TblspcChanged) {
         HandleCuWithSameValue<true>(m_OldHeapRel,
-            pColNewAttr,
-            attNewValue,
-            attNewIsNull,
-            m_SDTColsMinMaxFunc[sdtIndex],
-            m_SDTColsWriter[sdtIndex],
-            newColCudesc,
-            m_SDTColAppendOffset + sdtIndex);
+                                    pColNewAttr,
+                                    attNewValue,
+                                    attNewIsNull,
+                                    m_SDTColsMinMaxFunc[sdtIndex],
+                                    m_SDTColsWriter[sdtIndex],
+                                    newColCudesc,
+                                    m_SDTColAppendOffset + sdtIndex);
     } else {
         HandleCuWithSameValue<false>(m_OldHeapRel,
-            pColNewAttr,
-            attNewValue,
-            attNewIsNull,
-            m_SDTColsMinMaxFunc[sdtIndex],
-            m_SDTColsWriter[sdtIndex],
-            newColCudesc,
-            NULL);
+                                     pColNewAttr,
+                                     attNewValue,
+                                     attNewIsNull,
+                                     m_SDTColsMinMaxFunc[sdtIndex],
+                                     m_SDTColsWriter[sdtIndex],
+                                     newColCudesc,
+                                     NULL);
     }
 
     if (shouldFree) {
@@ -1206,12 +1208,12 @@ void CStoreRewriter::SetDataTypeHandleNormalCu(
 
     /* load all values of the old cu. */
     CU* oldCu = LoadSingleCu::LoadSingleCuData(oldColCudesc,
-        attrIndex,
-        pColOldAttr->attlen,
-        pColOldAttr->atttypmod,
-        pColOldAttr->atttypid,
-        m_OldHeapRel,
-        m_SDTColsReader[sdtIndex]);
+                                               attrIndex,
+                                               pColOldAttr->attlen,
+                                               pColOldAttr->atttypmod,
+                                               pColOldAttr->atttypid,
+                                               m_OldHeapRel,
+                                               m_SDTColsReader[sdtIndex]);
 
     GetValFunc getValFuncPtr[1];
     InitGetValFunc(pColOldAttr->attlen, getValFuncPtr, 0);
@@ -1261,15 +1263,15 @@ void CStoreRewriter::SetDataTypeHandleNormalCu(
                 /* we don't care *maxVarStrLen* if the new data type is without vary length. */
                 if (pColNewAttr->attlen < 0) {
                     maxVarStrLen = Max(maxVarStrLen,
-                        (int)datumGetSize(m_SDTColValues[cnt], pColNewAttr->attbyval, pColNewAttr->attlen));
+                                       (int)datumGetSize(m_SDTColValues[cnt], pColNewAttr->attbyval, pColNewAttr->attlen));
                 }
             }
         } else {
             if (setDataTypeColInfo->notNull) {
                 ereport(ERROR,
-                    (errcode(ERRCODE_NOT_NULL_VIOLATION),
-                        errmsg("column \"%s\" contains null values", NameStr(pColOldAttr->attname)),
-                        errdetail("existing data violate the NOT NULL constraint.")));
+                        (errcode(ERRCODE_NOT_NULL_VIOLATION),
+                         errmsg("column \"%s\" contains null values", NameStr(pColOldAttr->attname)),
+                         errdetail("existing data violate the NOT NULL constraint.")));
             }
 
             m_SDTColValues[cnt] = (Datum)0;
@@ -1313,11 +1315,11 @@ void CStoreRewriter::SetDataTypeHandleNormalCu(
 
     /* set cudesc mode and write data into cu file if needed. */
     if (CStore::SetCudescModeForMinMaxVal(fullNull,
-            m_SDTColsMinMaxFunc[sdtIndex] != NULL,
-            hasNull,
-            maxVarStrLen,
-            pColNewAttr->attlen,
-            newColCudesc)) {
+                                          m_SDTColsMinMaxFunc[sdtIndex] != NULL,
+                                          hasNull,
+                                          maxVarStrLen,
+                                          pColNewAttr->attlen,
+                                          newColCudesc)) {
         int16 compressing_modes = 0;
         /* set compressing modes */
         heaprel_set_compressing_modes(m_OldHeapRel, &compressing_modes);
@@ -1340,10 +1342,10 @@ void CStoreRewriter::SetDataTypeHandleNormalCu(
 
         /* push CU data into replicate queue */
         CStoreCUReplication((this->m_TblspcChanged ? this->m_CUReplicationRel : m_OldHeapRel),
-            setDataTypeColInfo->attrno,
-            newCu->m_compressedBuf,
-            newColCudesc->cu_size,
-            newColCudesc->cu_pointer);
+                            setDataTypeColInfo->attrno,
+                            newCu->m_compressedBuf,
+                            newColCudesc->cu_size,
+                            newColCudesc->cu_pointer);
     }
 
     DELETE_EX(oldCu);
@@ -1366,7 +1368,7 @@ void CStoreRewriter::InsertNewCudescTup(
 }
 
 CU* LoadSingleCu::LoadSingleCuData(_in_ CUDesc* pCuDesc, _in_ int colIdx, _in_ int colAttrLen, _in_ int colTypeMode,
-    _in_ uint32 colAtttyPid, _in_ Relation rel, __inout CUStorage* pCuStorage)
+                                   _in_ uint32 colAtttyPid, _in_ Relation rel, __inout CUStorage* pCuStorage)
 {
     CU* cu = New(CurrentMemoryContext) CU(colAttrLen, colTypeMode, colAtttyPid);
 
@@ -1377,13 +1379,13 @@ CU* LoadSingleCu::LoadSingleCuData(_in_ CUDesc* pCuDesc, _in_ int colIdx, _in_ i
 
         if (RelationNeedsWAL(rel) && CanRemoteRead()) {
             ereport(WARNING,
-                (errcode(ERRCODE_DATA_CORRUPTED),
-                    (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu, try to remote read",
-                         pCuDesc->cu_id,
-                         RelationGetRelationName(rel),
-                         relcolpath(pCuStorage),
-                         pCuDesc->cu_pointer),
-                        handle_in_client(true))));
+                    (errcode(ERRCODE_DATA_CORRUPTED),
+                     (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu, try to remote read",
+                             pCuDesc->cu_id,
+                             RelationGetRelationName(rel),
+                             relcolpath(pCuStorage),
+                             pCuDesc->cu_pointer),
+                      handle_in_client(true))));
 
             pCuStorage->RemoteLoadCU(
                 cu, pCuDesc->cu_pointer, pCuDesc->cu_size, g_instance.attr.attr_storage.enable_adio_function, false);
@@ -1392,21 +1394,21 @@ CU* LoadSingleCu::LoadSingleCuData(_in_ CUDesc* pCuDesc, _in_ int colIdx, _in_ i
                 pCuStorage->OverwriteCU(cu->m_compressedBuf, pCuDesc->cu_pointer, pCuDesc->cu_size, false);
             } else {
                 ereport(ERROR,
-                    (errcode(ERRCODE_DATA_CORRUPTED),
-                        (errmsg("failed to remotely read CU, data corrupted in network"))));
+                        (errcode(ERRCODE_DATA_CORRUPTED),
+                         (errmsg("failed to remotely read CU, data corrupted in network"))));
             }
         } else {
             ereport(ERROR,
-                (errcode(ERRCODE_DATA_CORRUPTED),
-                    (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu",
-                        pCuDesc->cu_id,
-                        RelationGetRelationName(rel),
-                        relcolpath(pCuStorage),
-                        pCuDesc->cu_pointer))));
+                    (errcode(ERRCODE_DATA_CORRUPTED),
+                     (errmsg("invalid CU in cu_id %u of relation %s file %s offset %lu",
+                             pCuDesc->cu_id,
+                             RelationGetRelationName(rel),
+                             relcolpath(pCuStorage),
+                             pCuDesc->cu_pointer))));
         }
     }
 
-    cu->UnCompress(pCuDesc->row_count, pCuDesc->magic);
+    cu->UnCompress(pCuDesc->row_count, pCuDesc->magic, ALIGNOF_CUSIZE);
     return cu;
 }
 
@@ -1415,7 +1417,8 @@ CU* LoadSingleCu::LoadSingleCuData(_in_ CUDesc* pCuDesc, _in_ int colIdx, _in_ i
 CStoreAlterRegister* GetCstoreAlterReg()
 {
     if (t_thrd.cstore_cxt.gCStoreAlterReg == NULL)
-        t_thrd.cstore_cxt.gCStoreAlterReg = New(t_thrd.top_mem_cxt) CStoreAlterRegister;
+        t_thrd.cstore_cxt.gCStoreAlterReg =
+            New(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE)) CStoreAlterRegister;
 
     return t_thrd.cstore_cxt.gCStoreAlterReg;
 }
@@ -1443,7 +1446,7 @@ void CStoreAlterRegister::Add(Oid relid)
 {
     // verify the free slot.
     if (m_used == m_maxs) {
-        AutoContextSwitch topMemCnxt(t_thrd.top_mem_cxt);
+        AutoContextSwitch topMemCnxt(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
         if (m_maxs > 0) {
             m_maxs += ALTER_REG_INIT_OIDS;
@@ -1466,7 +1469,7 @@ void CStoreAlterRegister::Add(Oid relid)
     if (pos < m_used) {
         // insert and make the list ordered.
         errno_t rc = memmove_s(
-            (m_Oids + (pos + 1)), sizeof(Oid) * (m_maxs - (pos + 1)), (m_Oids + pos), sizeof(Oid) * (m_used - pos));
+                         (m_Oids + (pos + 1)), sizeof(Oid) * (m_maxs - (pos + 1)), (m_Oids + pos), sizeof(Oid) * (m_used - pos));
         securec_check(rc, "", "");
 
         m_Oids[pos] = relid;
@@ -1564,18 +1567,18 @@ void CStoreCopyColumnData(Relation CUReplicationRel, Relation rel, AttrNumber at
     /* notify wal writer to flush xlog */
     XLogSetAsyncXactLSN(t_thrd.xlog_cxt.XactLastRecEnd);
     ereport(LOG,
-        (errmsg("Begin to copy column data: %s(%u C%d) tblspc %u/%u/%u => %u/%u/%u,  maxOffset(%lu), fileSize(%lu)",
-            RelationGetRelationName(rel),
-            RelationGetRelid(rel),
-            (attr - 1),
-            rel->rd_node.spcNode,
-            rel->rd_node.dbNode,
-            rel->rd_node.relNode,
-            targetTableSpace,
-            rel->rd_node.dbNode,
-            targetRelFileNode,
-            maxOffset,
-            fileSize)));
+            (errmsg("Begin to copy column data: %s(%u C%d) tblspc %u/%u/%u => %u/%u/%u,  maxOffset(%lu), fileSize(%lu)",
+                    RelationGetRelationName(rel),
+                    RelationGetRelid(rel),
+                    (attr - 1),
+                    rel->rd_node.spcNode,
+                    rel->rd_node.dbNode,
+                    rel->rd_node.relNode,
+                    targetTableSpace,
+                    rel->rd_node.dbNode,
+                    targetRelFileNode,
+                    maxOffset,
+                    fileSize)));
 
     /* copy all the column data to a new file under target tablespace */
     const int tempBufSize = 4 * 1024 * 1024;
@@ -1624,16 +1627,16 @@ void CStoreCopyColumnData(Relation CUReplicationRel, Relation rel, AttrNumber at
     destCUStorage->FlushDataFile();
 
     ereport(LOG,
-        (errmsg("End to copy column data: %s(%u C%d) tblspc %u/%u/%u => %u/%u/%u",
-            RelationGetRelationName(rel),
-            RelationGetRelid(rel),
-            (attr - 1),
-            rel->rd_node.spcNode,
-            rel->rd_node.dbNode,
-            rel->rd_node.relNode,
-            targetTableSpace,
-            rel->rd_node.dbNode,
-            targetRelFileNode)));
+            (errmsg("End to copy column data: %s(%u C%d) tblspc %u/%u/%u => %u/%u/%u",
+                    RelationGetRelationName(rel),
+                    RelationGetRelid(rel),
+                    (attr - 1),
+                    rel->rd_node.spcNode,
+                    rel->rd_node.dbNode,
+                    rel->rd_node.relNode,
+                    targetTableSpace,
+                    rel->rd_node.dbNode,
+                    targetRelFileNode)));
 
     /* release the memory */
     ADIO_RUN()
@@ -1687,15 +1690,15 @@ void CStoreCopyColumnDataEnd(Relation colRel, Oid targetTableSpace, Oid newrelfi
     RelationCreateStorage(destRelFileNode, colRel->rd_rel->relpersistence, colRel->rd_rel->relowner);
 
     ereport(LOG,
-        (errmsg("Column Data End: %s(%u) tblspc %u/%u/%u => %u/%u/%u",
-            RelationGetRelationName(colRel),
-            RelationGetRelid(colRel),
-            colRel->rd_node.spcNode,
-            colRel->rd_node.dbNode,
-            colRel->rd_node.relNode,
-            targetTableSpace,
-            colRel->rd_node.dbNode,
-            newrelfilenode)));
+            (errmsg("Column Data End: %s(%u) tblspc %u/%u/%u => %u/%u/%u",
+                    RelationGetRelationName(colRel),
+                    RelationGetRelid(colRel),
+                    colRel->rd_node.spcNode,
+                    colRel->rd_node.dbNode,
+                    colRel->rd_node.relNode,
+                    targetTableSpace,
+                    colRel->rd_node.dbNode,
+                    newrelfilenode)));
 
     /* Ok, will drop this column table */
     RelationDropStorage(colRel);
@@ -1719,9 +1722,10 @@ Oid CStoreSetTableSpaceForColumnData(Relation colRel, Oid targetTableSpace)
 
     /* create CU replication relation */
     RelFileNode CUReplicationFile = {
-        ConvertToRelfilenodeTblspcOid(targetTableSpace), colRel->rd_node.dbNode, newrelfilenode, InvalidBktId};
+        ConvertToRelfilenodeTblspcOid(targetTableSpace), colRel->rd_node.dbNode, newrelfilenode, InvalidBktId
+    };
     Relation CUReplicationRel = CreateCUReplicationRelation(
-        CUReplicationFile, colRel->rd_backend, colRel->rd_rel->relpersistence, RelationGetRelationName(colRel));
+                                    CUReplicationFile, colRel->rd_backend, colRel->rd_rel->relpersistence, RelationGetRelationName(colRel));
 
     int nattrs = RelationGetDescr(colRel)->natts;
     for (int i = 0; i < nattrs; ++i) {
@@ -1750,14 +1754,14 @@ void ATCheckPartitionNum(Relation partTableRel, int partNum)
 {
     if (partNum < ARRAY_2_LEN) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("source partitions must be at least two partitions")));
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("source partitions must be at least two partitions")));
     }
     if (partNum > MAX_CSTORE_MERGE_PARTITIONS) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("merge partitions of relation \"%s\", source partitions must be no more than %d partitions",
-                    RelationGetRelationName(partTableRel),
-                    MAX_CSTORE_MERGE_PARTITIONS)));
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("merge partitions of relation \"%s\", source partitions must be no more than %d partitions",
+                        RelationGetRelationName(partTableRel),
+                        MAX_CSTORE_MERGE_PARTITIONS)));
     }
 }
 
@@ -1780,9 +1784,9 @@ void ATCheckIndexUsability(Relation relation)
         currentIndex = index_open(indexId, AccessShareLock);
         if (!IndexIsUsable(currentIndex->rd_index)) {
             ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("merge partitions cannot process inusable index relation \''%s\''",
-                        RelationGetRelationName(currentIndex))));
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("merge partitions cannot process inusable index relation \''%s\''",
+                            RelationGetRelationName(currentIndex))));
         }
 
         index_close(currentIndex, NoLock);
@@ -1806,10 +1810,10 @@ bool ATCheckIfRenameNeeded(Relation relation, const char* oldPartName, char* des
     if (strcmp(oldPartName, destPartName) != 0) {
         /*  check partition new name does not exist. */
         if (InvalidOid != GetSysCacheOid3(PARTPARTOID, NameGetDatum(destPartName),
-            CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION), ObjectIdGetDatum(relation->rd_id))) {
+                                          CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION), ObjectIdGetDatum(relation->rd_id))) {
             ereport(ERROR,
-                (errcode(ERRCODE_DUPLICATE_OBJECT),
-                    errmsg("target partition's name \"%s\" already exists", destPartName)));
+                    (errcode(ERRCODE_DUPLICATE_OBJECT),
+                     errmsg("target partition's name \"%s\" already exists", destPartName)));
         }
 
         return true;
@@ -1828,7 +1832,7 @@ bool ATCheckIfRenameNeeded(Relation relation, const char* oldPartName, char* des
  * @See also: ATExecCStoreMergePartition
  */
 bool ATTraverseSrcPartitions(Relation relation, List* srcPartitions, char* destPartName, int partNum,
-    _out_ List** srcPartOidsPPtr, _out_ Oid& destPartOid)
+                             _out_ List** srcPartOidsPPtr, _out_ Oid& destPartOid)
 {
     ListCell* cell = NULL;
     int curPartSeq = 0;
@@ -1845,19 +1849,19 @@ bool ATTraverseSrcPartitions(Relation relation, List* srcPartitions, char* destP
 
         /* from name to partition oid */
         srcPartOid = partitionNameGetPartitionOid(relation->rd_id,
-            partName,
-            PART_OBJ_TYPE_TABLE_PARTITION,
-            ExclusiveLock,  // get ExclusiveLock lock on src partitions
-            false,          // no missing
-            false,          // wait
-            NULL,
-            NULL,
-            NoLock);
+                                                partName,
+                                                PART_OBJ_TYPE_TABLE_PARTITION,
+                                                ExclusiveLock,  // get ExclusiveLock lock on src partitions
+                                                false,          // no missing
+                                                false,          // wait
+                                                NULL,
+                                                NULL,
+                                                NoLock);
         /* check local index 'usable' state */
         if (!checkPartitionLocalIndexesUsable(srcPartOid)) {
             ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("cannot merge partition bacause partition %s has unusable local index", partName)));
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("cannot merge partition bacause partition %s has unusable local index", partName)));
         }
 
         /* from partitionoid to partition sequence */
@@ -1866,8 +1870,8 @@ bool ATTraverseSrcPartitions(Relation relation, List* srcPartitions, char* destP
         /* check the continuity of sequence, not the first round loop */
         if (iterator != 1 && (curPartSeq - prevPartSeq != 1)) {
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("source partitions must be continuous and in ascending order of boundary")));
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("source partitions must be continuous and in ascending order of boundary")));
         }
         prevPartSeq = curPartSeq;
 
@@ -1909,8 +1913,8 @@ void ATCreateTempTableForMerge(
     tuple = SearchSysCache1WithLogLevel(RELOID, ObjectIdGetDatum(RelationGetRelid(partTableRel)), LOG);
     if (!HeapTupleIsValid(tuple)) {
         ereport(ERROR,
-            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                errmsg("cache lookup failed for relation: %u", RelationGetRelid(partTableRel))));
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                 errmsg("cache lookup failed for relation: %u", RelationGetRelid(partTableRel))));
     }
     partedTableRelOptions = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_reloptions, &isNull);
     if (isNull) {
@@ -1930,12 +1934,12 @@ void ATCreateTempTableForMerge(
 
     /* create temp table and open it */
     tempTableOid = makePartitionNewHeap(partTableRel,
-        partedTableHeapDesc,
-        partedTableRelOptions,
-        destPartRel->rd_id,
-        destPartRel->rd_rel->reltoastrelid,
-        targetPartTablespaceOid,
-        true);
+                                        partedTableHeapDesc,
+                                        partedTableRelOptions,
+                                        destPartRel->rd_id,
+                                        destPartRel->rd_rel->reltoastrelid,
+                                        targetPartTablespaceOid,
+                                        true);
     object.classId = RelationRelationId;
     object.objectId = tempTableOid;
     object.objectSubId = 0;
@@ -2016,10 +2020,10 @@ void ATExecCStoreMergePartition(Relation partTableRel, AlterTableCmd* cmd)
 
     // create partition memory context
     MemoryContext partitionMemContext = AllocSetContextCreate(CurrentMemoryContext,
-        "partition merge memory context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+                                                              "partition merge memory context",
+                                                              ALLOCSET_DEFAULT_MINSIZE,
+                                                              ALLOCSET_DEFAULT_INITSIZE,
+                                                              ALLOCSET_DEFAULT_MAXSIZE);
 
     // switch to partition memory context
     MemoryContext oldMemContext = MemoryContextSwitchTo(partitionMemContext);
@@ -2051,7 +2055,7 @@ void ATExecCStoreMergePartition(Relation partTableRel, AlterTableCmd* cmd)
             CStoreScanNextTrunkOfCU(scan, batchCU);
 
             if (!batchCU->batchCUIsNULL())
-                cstoreOpt->CUInsert(batchCU, HEAP_INSERT_FROZEN);
+                cstoreOpt->CUInsert(batchCU, TABLE_INSERT_FROZEN);
 
             /* In here we don't need to free CUptrs and CUDescs in batchCU
              * since we are moving all CUs in the same row direction.
@@ -2072,7 +2076,7 @@ void ATExecCStoreMergePartition(Relation partTableRel, AlterTableCmd* cmd)
             ScanDeltaStore(scan, vecBatch, NULL);
             vecBatch->FixRowCount();
             if (!BatchIsNull(vecBatch))
-                cstoreOpt->BatchInsert(vecBatch, HEAP_INSERT_FROZEN);
+                cstoreOpt->BatchInsert(vecBatch, TABLE_INSERT_FROZEN);
         }
 
         CStoreEndScan(scan);
@@ -2094,7 +2098,7 @@ void ATExecCStoreMergePartition(Relation partTableRel, AlterTableCmd* cmd)
     MemoryContextDelete(partitionMemContext);
 
     cstoreOpt->SetEndFlag();
-    cstoreOpt->BatchInsert((VectorBatch*)NULL, HEAP_INSERT_FROZEN);
+    cstoreOpt->BatchInsert((VectorBatch*)NULL, TABLE_INSERT_FROZEN);
     DELETE_EX(cstoreOpt);
     CStoreInsert::DeInitInsertArg(args);
 
@@ -2104,14 +2108,13 @@ void ATExecCStoreMergePartition(Relation partTableRel, AlterTableCmd* cmd)
 
     /* before swap refilenode, promote lock on heap partition from ExclusiveLock to AccessExclusiveLock */
     destPart = partitionOpenWithRetry(partTableRel, destPartOid, AccessExclusiveLock, "MERGE PARTITIONS");
-
     /* step 4: swap relfilenode and delete temp table */
     if (!destPart) {
         performDeletion(&object, DROP_CASCADE, PERFORM_DELETION_INTERNAL);
         ereport(ERROR,
-            (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
-                errmsg("could not acquire AccessExclusiveLock on dest table partition \"%s\", MERGE PARTITIONS failed",
-                    getPartitionName(destPartOid, false))));
+                (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+                 errmsg("could not acquire AccessExclusiveLock on dest table partition \"%s\", MERGE PARTITIONS failed",
+                        getPartitionName(destPartOid, false))));
     }
 
     finishPartitionHeapSwap(destPartOid, tempTableOid, true, u_sess->utils_cxt.RecentXmin);

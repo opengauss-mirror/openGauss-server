@@ -24,7 +24,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "storage/bufmgr.h"
+#include "storage/buf/bufmgr.h"
 #include "storage/fsm_internals.h"
 
 /* Macros to navigate the tree within a page. Root has index zero. */
@@ -260,11 +260,11 @@ restart:
 
             BufferGetTag(buf, &rnode, &forknum, &blknum);
             ereport(DEBUG1,
-                (errmsg("fixing corrupt FSM block %u, relation %u/%u/%u",
-                    blknum,
-                    rnode.spcNode,
-                    rnode.dbNode,
-                    rnode.relNode)));
+                    (errmsg("fixing corrupt FSM block %u, relation %u/%u/%u",
+                            blknum,
+                            rnode.spcNode,
+                            rnode.dbNode,
+                            rnode.relNode)));
 
             /* make sure we hold an exclusive lock */
             if (!exclusive_lock_held) {
